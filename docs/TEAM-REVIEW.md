@@ -386,7 +386,8 @@ sequenceDiagram
   clock. The verdict is
   the one Limn's hidden marker says it posted; a review from an older Limn without it reads
   "Withdrawn". Your own row reads "Comment" when your newest run went to GitHub as a Comment (on
-  your own pull request GitHub takes nothing else), whatever the run decided. A pull request with more
+  your own pull request GitHub takes nothing else), whatever the run decided; "Reviews on this PR"
+  keeps the decision and says so: "Approve (posted as Comment)". A pull request with more
   than 50 reviews is read to its end (the reviews tail is paged like the threads), so the newest
   verdict is never lost to the cap.
 - **A replies check's Approve or Request changes shows** in "Reviews on this PR" ("Approve · 9 Nov

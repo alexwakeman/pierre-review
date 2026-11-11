@@ -413,6 +413,9 @@ export interface ReviewListItem {
   withdrawn?: { byLimn: boolean | null } | null;
   // A decision-only row's GitHub review.
   githubUrl?: string | null;
+  // The reader's run on the reader's OWN PR that went to GitHub: GitHub takes only a Comment from a
+  // PR's author, so an Approve / Request changes reads "Approve (posted as Comment)".
+  postedAsComment?: boolean;
 }
 
 const inFlight = (s: ClaudeReviewStatus): boolean => s === 'queued' || s === 'running';
@@ -435,7 +438,10 @@ export function reviewsOnPr(
   history: readonly ClaudeReviewSummary[],
   teammateReviews: readonly ClaudeTeammateReview[],
   decisions: readonly ClaudeTeamDecision[] = [],
+  // The reader wrote this PR: their posted runs went to GitHub as a Comment (`postedAsComment`).
+  opts: { ownPr?: boolean } = {},
 ): ReviewListItem[] {
+  const ownPr = opts.ownPr === true;
   const out: ReviewListItem[] = [];
   const pairs = new Map<number, ClaudeReviewSummary[]>();
   for (const h of history) {
@@ -464,6 +470,7 @@ export function reviewsOnPr(
         at: latest.finishedAt ?? latest.createdAt,
         what: PAIR_RUN_LABEL,
         auto: latest.trigger === 'auto',
+        postedAsComment: ownPr && halves.some((x) => x.postedAt != null),
       });
       continue;
     }
@@ -480,6 +487,7 @@ export function reviewsOnPr(
       at: h.finishedAt ?? h.createdAt,
       what: h.kind === 'replies' ? REPLIES_WORD : h.reviewMode === 'skip' ? 'Skipped' : aiRunProviderName(h),
       auto: h.trigger === 'auto',
+      postedAsComment: ownPr && h.postedAt != null,
     });
   }
   for (const t of teammateReviews) {
@@ -511,6 +519,8 @@ export function reviewsOnPr(
       // The row's own verdict stays (a pair's, a teammate's); a replies pass has none of its own.
       if (row.verdict == null && row.status === 'succeeded') row.verdict = d.verdict;
       if (d.withdrawn != null) row.withdrawn = { byLimn: d.withdrawn.byLimn };
+      // A decision is a review ON GitHub: the reader's, on their own PR, went as a Comment.
+      if (ownPr && row.you) row.postedAsComment = true;
       continue;
     }
     // No row: a teammate's replies pass (or a run this list does not hold). Decisive or withdrawn only.
@@ -530,18 +540,22 @@ export function reviewsOnPr(
       auto: d.run === 'auto',
       withdrawn: d.withdrawn != null ? { byLimn: d.withdrawn.byLimn } : null,
       githubUrl: d.githubUrl,
+      postedAsComment: ownPr && d.you,
     });
   }
   // Stable: equal times keep the reader's order (newest first), then teammates'.
   return out.map((x, i) => ({ x, i })).sort((a, b) => b.x.at.localeCompare(a.x.at) || a.i - b.i).map(({ x }) => x);
 }
 
-/** "Approve", "Approve (withdrawn)", "Request changes (dismissed)"; "Withdrawn" with no verdict. */
-export function reviewOutcomeWord(item: Pick<ReviewListItem, 'verdict' | 'withdrawn'>): string | null {
+/** "Approve", "Approve (withdrawn)", "Request changes (dismissed)"; "Withdrawn" with no verdict;
+ *  "Approve (posted as Comment)" for the reader's posted run on their own PR (`postedAsComment`). */
+export function reviewOutcomeWord(item: Pick<ReviewListItem, 'verdict' | 'withdrawn' | 'postedAsComment'>): string | null {
   const w = item.withdrawn != null ? withdrawnWord(item.withdrawn.byLimn) : null;
   if (item.verdict == null) return w != null ? `${w[0]!.toUpperCase()}${w.slice(1)}` : null;
   const v = CLAUDE_VERDICT_LABEL[item.verdict];
-  return w != null ? `${v} (${w})` : v;
+  if (w != null) return `${v} (${w})`;
+  // What the run decided, then what GitHub holds ("Where this PR stands" reads Comment).
+  return item.postedAsComment === true && item.verdict !== 'COMMENT' ? `${v} (posted as Comment)` : v;
 }
 
 const STATUS_WORD: Record<ClaudeReviewStatus, string> = {

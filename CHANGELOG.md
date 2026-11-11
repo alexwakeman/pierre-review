@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- AI Review tab → Reviews on this PR: on your own pull request, a review of yours that approved or requested
+  changes reads "Approve (posted as Comment)" or "Request changes (posted as Comment)", matching "Where this
+  PR stands".
+
 ## [1.0.23] - 2026-11-11
 
 ### Added

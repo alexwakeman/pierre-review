@@ -60,7 +60,8 @@ export default function Page(): JSX.Element {
             <Ui>Reviews on this PR</Ui>
           </b>
           : every review, newest first, in columns: who, the date and time (24-hour clock), the commit it reviewed, the
-          outcome, and what ran it.
+          outcome, and what ran it. On your own pull request GitHub takes only a Comment from you, so a review of
+          yours that approved reads <Ui>Approve (posted as Comment)</Ui>.
           Match a review's commit against the latest commit above. The newest 10 show; <Ui>Show all</Ui> opens the
           rest. Click a review to open it read-only. A run's cost is behind the ⓘ beside its summary.
         </li>

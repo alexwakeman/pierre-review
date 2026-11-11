@@ -354,6 +354,40 @@ describe('reviews on this PR', () => {
     expect(itemShows(withDecisions[0]!, { kind: 'teammate', reviewId: 20 })).toBe(false);
   });
 
+  it("the reader's posted run on their OWN PR reads what it decided AND that GitHub holds a Comment", () => {
+    const posted = '2026-11-03T10:06:00Z';
+    const own = [
+      run(31, { verdict: 'APPROVE', postedAt: posted, createdAt: '2026-11-06T10:00:00Z', finishedAt: '2026-11-06T10:05:00Z' }),
+      run(30, { verdict: 'REQUEST_CHANGES', postedAt: posted }),
+      // Not posted: nothing on GitHub, the decision alone.
+      run(29, { verdict: 'APPROVE', postedAt: null, createdAt: '2026-11-02T10:00:00Z', finishedAt: '2026-11-02T10:01:00Z' }),
+      // A Comment stays "Comment".
+      run(28, { verdict: 'COMMENT', postedAt: posted, createdAt: '2026-11-01T10:00:00Z', finishedAt: '2026-11-01T10:01:00Z' }),
+    ];
+    const mine = reviewsOnPr(own, [mateReview({ verdict: 'APPROVE' })], [], { ownPr: true });
+    expect(mine.map((i) => reviewListCells(i).outcome)).toEqual([
+      'Approve (posted as Comment)',
+      'Approve', // Robin's: a teammate's row is unchanged
+      'Request changes (posted as Comment)',
+      'Approve',
+      'Comment',
+    ]);
+    // Someone else's PR: GitHub holds the verdict itself.
+    expect(reviewsOnPr(own, [], []).map((i) => reviewListCells(i).outcome)).toEqual(['Approve', 'Request changes', 'Approve', 'Comment']);
+    // A pair: either half posted; a replies pass's decision is a posted review.
+    const pairMine = reviewsOnPr(
+      [
+        run(41, { kind: 'replies', verdict: null, createdAt: '2026-11-05T10:00:00Z', finishedAt: '2026-11-05T10:01:00Z' }),
+        run(40, { pair: { pairId: 7, role: 'second' } as never, provider: 'codex', verdict: 'APPROVE', postedAt: posted }),
+        run(39, { pair: { pairId: 7, role: 'first' } as never, verdict: 'APPROVE' }),
+      ],
+      [],
+      [{ key: 'RV_1', you: true, poster: null, verdict: 'APPROVE', run: 'replies', at: '2026-11-05T10:01:00Z', headSha: null, githubUrl: null, ref: { kind: 'own', id: 41 }, withdrawn: null }],
+      { ownPr: true },
+    );
+    expect(pairMine.map((i) => reviewListCells(i).outcome)).toEqual(['Approve (posted as Comment)', 'Approve (posted as Comment)']);
+  });
+
   it('splits each row into its columns; no trigger, depth or cost', () => {
     expect(reviewListCells(items[2]!)).toEqual({ outcome: 'Failed', day: dt(items[2]!.at), sha: '8a8ec14', what: 'Claude' });
     expect(reviewListCells(items[2]!).day).toMatch(/^2 Nov \d{2}:\d{2}$/);

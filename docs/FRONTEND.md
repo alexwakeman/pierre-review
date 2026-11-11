@@ -2115,7 +2115,9 @@ reappears.
     once) and teammates', newest first, IN COLUMNS (2026-11-10, one fixed grid template per row,
     `REVIEW_ROW_GRID`, shared with Where this PR stands): avatar · who · day and time, 24-hour
     ("10 Nov 14:04", `shortDayTime`, tabular) · commit (7-character mono, the same form as
-    "Latest commit") · outcome (verdict, or the status; failed in the danger ink) · what ran it
+    "Latest commit") · outcome (verdict, or the status; failed in the danger ink; the reader's POSTED run
+    on their OWN PR reads "Approve (posted as Comment)" — `postedAsComment`, from `postedAt` or a
+    decision, since GitHub takes only a Comment from the author) · what ran it
     (`reviewListCells`; each cell truncates with a title, the row's title is the whole line + time).
     No trigger, depth or cost. Only the newest `REVIEWS_LIST_MAX` (10) show; a ChevronIcon button
     "Show all n" / "Show fewer" below the list opens the rest (`visibleReviewItems`, state local to the
