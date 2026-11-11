@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.24] - 2026-11-11
+
 ### Fixed
 
 - AI Review tab → Reviews on this PR: on your own pull request, a review of yours that approved or requested
