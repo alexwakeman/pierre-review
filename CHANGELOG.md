@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.26] - 2026-11-11
+
 ### Changed
 
 - When Claude or Codex is at its usage limit, Limn uses the other one until the limit resets: replies to that
