@@ -15,6 +15,7 @@ import {
   type MeResponse,
 } from '@pierre-review/shared';
 import { aiProviderReadyFor, aiRunnableProviders } from './aiCapabilities.js';
+import { usageLockLine } from './usageLockout.js';
 import { PAIR_RUN_LABEL, aiRunProvider, pairChatProvider, type ClaudeReview } from '@pierre-review/shared';
 
 export interface ModelPickState {
@@ -66,6 +67,7 @@ export function resolveReviewModelPick(
   me: MeResponse | undefined,
   usualModel: ClaudeReviewModel,
   picked: string | null,
+  nowMs: number = Date.now(),
 ): ModelPickState {
   const base = resolveModelPick(me, 'review', usualModel, picked === PAIR_PICK_VALUE ? null : picked);
   const ready = aiRunnableProviders(me, 'review');
@@ -79,7 +81,13 @@ export function resolveReviewModelPick(
   };
   const picks = [...base.picks, pairPick];
   // Claude + Codex is the DEFAULT pick while both can review (2026-11-01): one of each, merged, found
-  // the most in the review eval (docs/CLAUDE-REVIEW.md § Measuring reviews).
+  // the most in the review eval (docs/CLAUDE-REVIEW.md § Measuring reviews). ⚠ Not while either is
+  // over its usage limit (2026-11-11): the default is then the provider with capacity (the server
+  // moves `me.ai.provider` to it); the pair stays in the menu, and the server drops its locked half.
+  const locked = (['claude', 'codex'] as const).some(
+    (p) => usageLockLine(p, me?.ai?.providers?.[p]?.usageLockedUntil ?? null, nowMs) != null,
+  );
+  if (picked == null && locked) return { ...base, picks, pairOffered: true, pair: false };
   return picked === PAIR_PICK_VALUE || picked == null
     ? { picks, chosen: pairPick, mixed: true, pairOffered: true, pair: true }
     : { ...base, picks, pairOffered: true, pair: false };

@@ -4,12 +4,16 @@
 //   • a claimed run stores its record on the row, and when it ENDS (here: fails) its final line is
 //     posted ("didn't finish · free to claim") on every exit path.
 //   • a MANUAL run never claims.
+//   • ⚠ ON THE READER'S OWN PR a teammate holding the pair's first half (Claude) stands the whole pair
+//     down (no Codex half alone); on a teammate's PR the second half runs alone.
+//   • ⚠ A MANUAL pair drops a half over its usage limit while the other can run.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '../agent-context.js';
 
 process.env.PRO_REVIEW_CONCURRENCY = '1';
 
 const inserted: number[] = [];
+const insertedRuns: Array<{ prId: number; provider: string; pair: unknown }> = [];
 let nextId = 1;
 vi.mock('./persist.js', () => ({
   getReviewPrContext: async (_ctx: unknown, prId: number) => ({
@@ -22,8 +26,10 @@ vi.mock('./persist.js', () => ({
     baseRefName: 'main',
     repoFullName: 'acme/api',
   }),
-  insertQueuedReview: async (_ctx: unknown, prId: number) => {
+  insertQueuedReview: async (...args: unknown[]) => {
+    const prId = args[1] as number;
     inserted.push(prId);
+    insertedRuns.push({ prId, provider: args[7] as string, pair: args[9] ?? null });
     return nextId++;
   },
   getLatestClaudeReview: async () => null,
@@ -35,13 +41,25 @@ vi.mock('./persist.js', () => ({
   saveReviewSuccess: async () => {},
 }));
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+// PRs whose workspace asks for Claude + Codex; PRs the reader authored; PRs a teammate holds on Claude.
+const pairPrs = new Set<number>();
+const ownPrs = new Set<number>();
+const claudeHeld = new Set<number>();
+vi.mock('./pair.js', async (orig) => ({
+  ...(await orig<typeof import('./pair.js')>()),
+  readAutoReviewProvidersForPr: async (_ctx: unknown, _a: number, prId: number) => (pairPrs.has(prId) ? 'both' : 'default'),
+}));
 
 const claimCalls: number[] = [];
 const saved: Array<{ reviewId: number }> = [];
 const finished: Array<{ reviewId: number | null; kind: string }> = [];
 vi.mock('./team-claim.js', () => ({
-  claimBeforeAutoRun: async (_ctx: unknown, t: { prId: number }) => {
+  readerIsPrAuthor: async (_ctx: unknown, _a: number, prId: number) => ownPrs.has(prId),
+  claimBeforeAutoRun: async (_ctx: unknown, t: { prId: number; provider: string }) => {
     claimCalls.push(t.prId);
+    if (t.provider === 'claude' && claudeHeld.has(t.prId)) {
+      return { kind: 'skip', skip: { provider: 'claude', kind: 'reviewed', login: 'robin', headSha: `h${t.prId}`, at: '' } };
+    }
     if (t.prId === 40) {
       return { kind: 'skip', skip: { provider: 'claude', kind: 'reviewing', login: 'bob', headSha: 'h40', at: '' } };
     }
@@ -87,6 +105,10 @@ const flush = async (): Promise<void> => {
 beforeEach(async () => {
   vi.resetModules();
   inserted.length = 0;
+  insertedRuns.length = 0;
+  pairPrs.clear();
+  ownPrs.clear();
+  claudeHeld.clear();
   claimCalls.length = 0;
   saved.length = 0;
   finished.length = 0;
@@ -179,5 +201,50 @@ describe('the skipped line (an item the lane drops before its row)', () => {
     await flush();
     expect(inserted).toEqual([]);
     expect(skipLater).toEqual([]);
+  });
+});
+
+describe('a teammate holds Claude on a Claude + Codex pair', () => {
+  it("⚠ the reader's own PR: the pair stands down — no Codex half alone, no row", async () => {
+    pairPrs.add(42);
+    ownPrs.add(42);
+    claudeHeld.add(42);
+    m.enqueueAutoReview(ctx, 1, 42);
+    await flush();
+    expect(claimCalls).toEqual([42]);
+    expect(inserted).toEqual([]);
+  });
+
+  it("a teammate's PR: the Codex half runs alone, as before", async () => {
+    pairPrs.add(43);
+    claudeHeld.add(43);
+    m.enqueueAutoReview(ctx, 1, 43);
+    await flush();
+    expect(claimCalls).toEqual([43, 43]);
+    expect(insertedRuns).toEqual([{ prId: 43, provider: 'codex', pair: null }]);
+    runs.shift()!.release();
+    await flush();
+  });
+});
+
+describe('a manual Claude + Codex review with one provider over its usage limit', () => {
+  it('⚠ runs the provider with capacity alone; every provider locked ⇒ the pair as asked', async () => {
+    const ul = await import('../../ai/usage-lockout.js');
+    ul.noteProviderFailure('codex', "You've hit your usage limit. Try again in 3 hours.", Date.now());
+    try {
+      await m.startReview(ctx, 1, 70, 'claude-opus-5-5', 'claude', { pair: true });
+      await flush();
+      expect(insertedRuns).toEqual([{ prId: 70, provider: 'claude', pair: null }]);
+      runs.shift()!.release();
+      await flush();
+      ul.noteProviderFailure('claude', 'usage limit reached', Date.now());
+      await m.startReview(ctx, 1, 71, 'claude-opus-5-5', 'claude', { pair: true });
+      await flush();
+      expect(insertedRuns[1]).toEqual({ prId: 71, provider: 'claude', pair: { role: 'first' } });
+      for (const r of runs.splice(0)) r.release();
+      await flush();
+    } finally {
+      ul.clearUsageLockout();
+    }
   });
 });

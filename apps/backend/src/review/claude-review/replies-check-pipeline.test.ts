@@ -643,6 +643,27 @@ describe('the provider of the run that owns each thread', () => {
     const rows = await passRows(pr);
     expect(rows[0]).toMatchObject({ provider: 'codex', model: 'gpt-6.1-terra' });
   });
+
+  it('⚠ Codex OVER ITS USAGE LIMIT: the thread Codex posted is judged by Claude instead, manual and auto alike', async () => {
+    await settings.setWorkspaceAutoReview(ctx, 1, wsId, { autoPost: { enabled: false } as any });
+    const ul = await import('../../ai/usage-lockout.js');
+    ul.noteProviderFailure('codex', "You've hit your usage limit. Try again in 3 hours.", Date.now());
+    try {
+      for (const trigger of ['manual', 'auto'] as const) {
+        const pr = await makePr();
+        await reviewed(pr, [{ title: 'Unchecked input', severity: 'warning', replies: [{ by: 'alice', body: EXPLAIN }] }], { provider: 'codex', trigger: 'manual' });
+        script = () => ({ replies: [{ ref: 'T1', status: 'reply_accepted', acceptKind: 'not_valid', reply: 'Fair.' }] });
+        agentCalls.length = 0;
+        const r = await rc.startRepliesCheck(ctx, { accountId: 1, prId: pr, trigger });
+        expect(r.outcome).toBe('queued');
+        await settleFor(pr);
+        expect(agentCalls.map((a) => a.provider)).toEqual(['claude']);
+        expect((await passRows(pr))[0]).toMatchObject({ provider: 'claude' });
+      }
+    } finally {
+      ul.clearUsageLockout();
+    }
+  });
 });
 
 describe('review fixes: pair coverage, the outcome anchor, the daily cap', () => {

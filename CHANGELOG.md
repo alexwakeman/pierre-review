@@ -13,6 +13,20 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- When Claude or Codex is at its usage limit, Limn uses the other one until the limit resets: replies to that
+  model's findings, Check threads, CI and ticket reviews and the review chat run on the model with capacity
+  instead of failing. A Claude + Codex review you start runs the other model alone, and the AI Review menu
+  does not pick the pair first.
+- On your own pull request, when a teammate's Limn has reviewed the commit with Claude, your Limn no longer
+  runs Codex alone on it. Their findings show in the AI Review tab, and your replies are still judged.
+
+### Fixed
+
+- Replies to a Codex finding were sent to Codex even while it was at its usage limit, so every replies check
+  on them failed. They are now judged by Claude.
+
 ## [1.0.25] - 2026-11-11
 
 ### Changed

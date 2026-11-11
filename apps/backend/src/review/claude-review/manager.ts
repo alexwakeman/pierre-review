@@ -96,6 +96,7 @@ import type { AutoPostOutcome } from './auto-post.js';
 import { coverHoldCounts, type PairCoverHold } from './auto-verdict.js';
 import {
   claimBeforeAutoRun,
+  readerIsPrAuthor,
   finishTeamClaim,
   postedReviewUrl,
   reviewedLineSummary,
@@ -415,7 +416,11 @@ export async function startReview(
   // THE PAIR'S PROVIDERS, resolved ONCE (pair.ts): both ⇒ a pair; one ⇒ that one alone.
   let pair: PairState | undefined;
   if (opts.pair) {
-    const ready = pairProvidersReady(preflightFor(ctx));
+    // ⚠ A half OVER ITS USAGE LIMIT is dropped while the other can run: it would fail at once
+    // (2026-11-11; the same rule as a pressed auto pair). Every provider locked ⇒ the pair as asked.
+    const signedIn = pairProvidersReady(preflightFor(ctx));
+    const open = signedIn.filter((p) => !isLockedOut(p));
+    const ready = open.length > 0 ? open : signedIn;
     if (ready.length > 0) provider = ready[0]!;
     if (ready.length === 2) pair = { role: 'first', pairId: 0, secondProvider: ready[1]! };
   }
@@ -698,6 +703,15 @@ async function startAutoItem(a: AutoItem): Promise<void> {
         { pressed: a.pressed === true },
       );
     let claim = await claimFor(provider);
+    // ⚠ ON THE READER'S OWN PR a teammate's Limn holding the first half (Claude) IS the review
+    // (2026-11-11, the owner: "my teammate has already run Claude, so I don't need to … if it's my PR,
+    // do nothing and flag the issues"): the pair stands down — no Codex half alone. Their findings show
+    // on the AI Review tab, and the reader's replies are judged by a replies pass (auto.ts, the held
+    // head). On a teammate's PR the second half runs alone as before.
+    if (claim.kind === 'skip' && pair?.secondProvider && (await ownPrSafe(ctx, accountId, prId))) {
+      ctx.log.info(`auto claude review pr ${prId}: own PR, a teammate's Limn has ${provider}: standing down`);
+      return;
+    }
     if (claim.kind === 'skip' && pair?.secondProvider) {
       provider = pair.secondProvider;
       pair = undefined;
@@ -754,6 +768,15 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       pump();
       pumpPeers();
     }
+  }
+}
+
+/** `readerIsPrAuthor`, never throwing (a test's partial mock of team-claim.js has no such export). */
+async function ownPrSafe(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
+  try {
+    return await readerIsPrAuthor(ctx, accountId, prId);
+  } catch {
+    return false;
   }
 }
 

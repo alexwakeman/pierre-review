@@ -18,6 +18,7 @@ import {
   type ClaudeReviewModel,
 } from '@pierre-review/shared';
 import { activeProviderId } from './provider-setting.js';
+import { isLockedOut } from './usage-lockout.js';
 
 export type ManualRunChoice =
   | { ok: true; provider: AiProviderId; model: ClaudeReviewModel }
@@ -78,16 +79,26 @@ export function resolveManualRunChoice(
 }
 
 /**
- * A FOLLOW-UP on a stored run (the review chat on its review, another plan pass or the build of a
- * plan): the stored run's provider when it is signed in and can run the kind, else the default.
+ * A FOLLOW-UP on a stored run (the review chat on its review, the replies check on a finding's thread):
+ * the stored run's provider when it is signed in, can run the kind and is NOT over its usage limit,
+ * else the default. A stored provider at its limit moves to the default only when that one has
+ * capacity (docs/CLAUDE-REVIEW.md § Usage limits move the default).
  */
 export function followUpProvider(
   stored: AiProviderId,
   kind: AiRunKind,
   detect: ManualRunChoiceOptions['detect'],
   defaultProvider: () => AiProviderId = activeProviderId,
+  // A provider over its usage limit (ai/usage-lockout.ts). Injectable for tests.
+  locked: (p: AiProviderId) => boolean = isLockedOut,
 ): AiProviderId {
-  return detect(stored, kind).status === 'ok' ? stored : defaultProvider();
+  const ok = detect(stored, kind).status === 'ok';
+  if (ok && !locked(stored)) return stored;
+  // The stored provider is signed out — or OVER ITS USAGE LIMIT: the default (which itself moves to
+  // the provider with capacity), when that one can run and is not locked; else the stored one.
+  const d = defaultProvider();
+  if (!ok) return d;
+  return d !== stored && detect(d, kind).status === 'ok' && !locked(d) ? d : stored;
 }
 
 /** A context's pre-flight, structurally (review/agent-context.ts `AgentContext['llm']`; no import: that

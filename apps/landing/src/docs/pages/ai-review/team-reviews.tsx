@@ -45,6 +45,12 @@ export default function Page(): JSX.Element {
         "alex is reviewing with Claude", then "alex reviewed · 3 comments". Another teammate's Limn reads the line and
         skips that model on that commit. A different model still reviews it. This is always on; there is no setting.
       </p>
+      <p>
+        On your own pull request, a teammate's Limn reviewing it with Claude is enough: your Limn runs nothing at that
+        commit, not even Codex. Their findings show in your <Ui>AI Review</Ui> tab, and your replies are still judged.
+        On a teammate's own pull request, their Limn never holds the commit, so your Claude still reviews it and does
+        not post again what they already posted.
+      </p>
       <ul>
         <li>If two Limns claim at nearly the same moment, the earlier claim wins and the other stands down.</li>
         <li>A review that does not finish frees its line, so another Limn can take the commit.</li>

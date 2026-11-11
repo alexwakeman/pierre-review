@@ -99,7 +99,8 @@ import { withWorktreeOwner } from '../worktree-owner.js';
 // judges the replies itself), never on a closed PR, never with nothing to judge (no row, no model).
 //
 // THE RUN: per thread, the PROVIDER of the run that OWNS the thread (the first inline-posted finding
-// up the re-raise chain) when it can still run, else the default (`followUpProvider`); one agent run —
+// up the re-raise chain) when it can still run and is not over its usage limit, else the default
+// (`followUpProvider`, which moves off a locked provider too); one agent run —
 // one `claude_reviews` row, `kind = 'replies'` — per provider, one after the other in the ONE shared
 // review slot (`registerReviewSlotPeer`). Standard depth, the Effort setting, read-only: Read / Glob /
 // Grep in the PR's read-only worktree behind the path guard, Bash denied (replies-check-agent.ts).
@@ -479,10 +480,6 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
         claimed.delete(key);
         return { outcome: 'not_ready' };
       }
-      if (!a.pressed && !(await automaticRunAllowed(ctx, a.accountId, 'replies check'))) {
-        claimed.delete(key);
-        return { outcome: 'over_budget' };
-      }
     }
     const planned = await planRepliesCheck(ctx, a.accountId, a.prId);
     if ('refused' in planned) {
@@ -497,9 +494,23 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
     const owners = await ownerProviders(ctx, planned.findings);
     const detect = preflightFor(ctx);
     // The OWNER's provider when it can still run the kind, else the default (`followUpProvider`).
+    // ⚠ A provider OVER ITS USAGE LIMIT is passed over for one with capacity (`followUpProvider`): a
+    // thread Codex raised is judged by Claude while Codex is locked out, as the OTHER provider's
+    // (never disputed). Before 2026-11-11 the owner was used whenever it was signed in, so every pass on
+    // Codex's threads failed until its limit reset.
     const groups = groupByProvider(planned.findings, owners, (owner) =>
       followUpProvider(owner ?? activeProviderId(), 'thread_check', detect),
     );
+    // Over the spend budget, or every provider it would use is locked out: skipped, never queued. The
+    // gate is asked about the providers the pass RUNS on, not the default.
+    if (auto && !a.pressed) {
+      for (const p of new Set(groups.map((g) => g.provider))) {
+        if (!(await automaticRunAllowed(ctx, a.accountId, 'replies check', p))) {
+          claimed.delete(key);
+          return { outcome: 'over_budget' };
+        }
+      }
+    }
     const rows: Group[] = [];
     for (const g of groups) {
       const reviewId = await insertQueuedReview(

@@ -755,11 +755,30 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     failure — the sweeper re-derives it). ⚠ The SWEEP asks the gate with `provider: null` (the budget
     only): asking for the default would stop the whole sweep while the default is locked, and its items
     could never move to Claude. The pair's second half and Codex's specialists ask for THEIR provider;
-  - every other automatic run on it is skipped by the ONE gate (`review/budget-gate.ts`
+  - ⚠ **THE DEFAULT MOVES** (2026-11-11; the owner: "if my Codex usage has run out … Limn should
+    revert to the AI service that does have capacity — especially for reply checks"):
+    `activeProviderId()` is the chosen provider (`chosenProviderId`: the setting / `auto` rule) unless
+    it is locked out and the other is signed in, can run and is not locked (`withCapacity`, pure) —
+    then the other. So every run that takes the DEFAULT (Check threads, the CI and ticket reviews,
+    diagrams, the docs library, auto fix, a Claude model picked with no provider named) runs on the
+    provider with capacity, and `MeResponse.ai.provider` says so. A model picked from a menu is NOT
+    moved. Both locked ⇒ the chosen one, which the gate below skips;
+  - ⚠ **A FOLLOW-UP ON A STORED RUN MOVES TOO** (`ai/run-choice.ts` `followUpProvider`): the stored
+    run's provider unless it is locked out and the default has capacity. THE REPLIES PASS routes each
+    thread through it, so a thread Codex raised is judged by Claude while Codex is locked out — as the
+    OTHER provider's (never disputed, no pushback; § Cross-provider follow-up). Before, the owner was
+    used whenever it was SIGNED IN, and the gate asked about the default, so every automatic pass on
+    Codex's threads failed until its reset. The pass now asks the gate about each provider it RUNS on.
+    The review chat follows the same rule;
+  - every other automatic run on a locked provider is skipped by the ONE gate (`review/budget-gate.ts`
     `automaticRunAllowed(ctx, account, what, provider?)` refuses a locked provider, the default when
-    none is named) — it does not move to the other provider;
+    none is named — which, above, is locked only when both are);
   - the retry rule does not retry a usage-limit failure of that provider (`AutoRetryInput.lockedUntilMs`,
     checked BEFORE "the default provider changed");
+  - ⚠ **A MANUAL CLAUDE + CODEX REVIEW DROPS A LOCKED HALF** (2026-11-11, `startReview`), like a pressed
+    auto pair: the provider with capacity runs alone (an ordinary run). Every provider locked ⇒ the pair
+    as asked. The AI Review menu's DEFAULT is not the pair while either is locked (`resolveReviewModelPick`:
+    the default provider's model; the pair stays in the menu).
   - ⚠ A READER'S PRESS IS NEVER BLOCKED (manual runs and a pressed auto item ignore the lock). The Run
     area (`AiRunGate`) shows one line per locked provider the run may use — "Codex is over its usage
     limit until 8:54 PM." (`lib/usageLockout.ts`, from `MeResponse.ai.providers.<p>.usageLockedUntil`).
@@ -774,7 +793,15 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
 - **With team claims** (§ Team claims): each half of an AUTO pair claims ITS OWN provider's context
   (`limn/review-claude`, `limn/review-codex`) when that half starts. A half a teammate's Limn holds is a
   half that never started — no row: a held first half ⇒ Codex runs ALONE (an ordinary run, which
-  claims its own context); a held second half ⇒ the pair ends on its first half. The combined post uses
+  claims its own context); a held second half ⇒ the pair ends on its first half. ⚠ **ON THE READER'S OWN
+  PR a held first half stands the WHOLE pair down** (2026-11-11, `startAutoItem` → team-claim.ts
+  `readerIsPrAuthor`; the owner: "my teammate has already run Claude, so I don't need to … if it's my PR,
+  do nothing and flag the issues, plus do a replies check"): no Codex half alone, no row. The teammate's
+  findings show on the AI Review tab (§ Teammates' reviews), the remembered skip holds the PR in the
+  sweeper, and the reader's replies on their own Limn findings get a replies pass at the held head
+  (auto.ts) — on Claude while Codex is locked out (above). On a teammate's PR nothing changes: the
+  author's own Limn never holds a head, so the reader's Claude half runs and follows up the author's
+  review (§ The author's own review), and auto-post's dedupe skips any point the author already posted. The combined post uses
   what ran. The first half's line is renewed until the PAIR ends, then each half's final line counts
   only its own findings in the one post (`finishAutoRunClaim`).
 - **With the replies pass** (§ The replies pass): a pair is ONE review in two runs — the pass plans

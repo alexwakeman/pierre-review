@@ -660,6 +660,26 @@ export async function prAuthorLogin(ctx: AgentContext, accountId: number, prId: 
 }
 
 /**
+ * Is the reader the PR's author (the person behind it)? ON THE READER'S OWN PR a teammate's Limn review
+ * of the commit is the review (docs/TEAM-REVIEW.md § Pairs and usage limits): the auto pair stands down
+ * when a teammate holds its first half, instead of running the other half alone. false when either
+ * login is unknown. Never throws.
+ */
+export async function readerIsPrAuthor(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  gh: TeamClaimGithub = defaultTeamClaimGithub,
+): Promise<boolean> {
+  try {
+    const [login, author] = await Promise.all([gh.login(accountId), prAuthorLogin(ctx, accountId, prId)]);
+    return login != null && author != null && sameGithubLogin(login, author);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Teammates' Limn reviews ALREADY ON GITHUB at `headSha` for `provider` (DB only — the sync import,
  * db/teammate-reviews-import.ts; `claude_reviews.kind = 'teammate'`): the poster's login and when it
  * was posted. Only a review whose marker named the head (`h=`, never an inferred head) and whose run(s)

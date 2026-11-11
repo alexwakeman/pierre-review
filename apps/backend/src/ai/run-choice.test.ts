@@ -90,6 +90,18 @@ describe('followUpProvider (the chat on its review, another pass of a plan)', ()
     expect(followUpProvider('codex', 'review_chat', detectWith({ claude: true }), () => 'claude')).toBe('claude');
     expect(followUpProvider('claude', 'plan', detectWith({ claude: true, codex: true }), () => 'codex')).toBe('claude');
   });
+
+  it('⚠ a stored provider OVER ITS USAGE LIMIT moves to the default when that one has capacity', () => {
+    const both = detectWith({ claude: true, codex: true });
+    const codexLocked = (p: AiProviderId) => p === 'codex';
+    expect(followUpProvider('codex', 'thread_check', both, () => 'claude', codexLocked)).toBe('claude');
+    // The default is the locked one too, or not signed in: the stored provider stays.
+    expect(followUpProvider('codex', 'thread_check', both, () => 'codex', codexLocked)).toBe('codex');
+    expect(followUpProvider('codex', 'thread_check', detectWith({ codex: true }), () => 'claude', codexLocked)).toBe('codex');
+    expect(followUpProvider('codex', 'thread_check', both, () => 'claude', () => true)).toBe('codex');
+    // Not locked: unchanged.
+    expect(followUpProvider('codex', 'thread_check', both, () => 'claude', () => false)).toBe('codex');
+  });
 });
 
 describe('anyProviderPreflight (a picker surface is ready when any provider is)', () => {

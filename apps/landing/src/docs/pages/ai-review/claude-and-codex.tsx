@@ -127,6 +127,13 @@ export default function Page(): JSX.Element {
         The model that failed is not run again straight away, because usage limits last hours. When it next reviews,
         it takes its own findings back.
       </Note>
+      <H2 id="usage-limits">When a model is at its usage limit</H2>
+      <p>
+        Until the limit resets, Limn uses the other model wherever it can. Replies to the locked model's findings are
+        judged by the other model. Check threads, CI and ticket reviews and the review chat run on the other model. A
+        Claude + Codex review you start runs the other model alone, and the menu does not offer the pair as its first
+        choice. A model you pick by name still runs on that model.
+      </p>
 
       <H2 id="usage">Usage and stopping</H2>
       <ul>

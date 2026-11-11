@@ -12,6 +12,7 @@ import { CODEX_REVIEW_KINDS } from './codex/kinds/review.js';
 import { CODEX_STORY_BUILD_KINDS } from './codex/kinds/story-build.js';
 import { CODEX_TICKETS_KINDS } from './codex/kinds/tickets.js';
 import type { AgentKind } from './provider.js';
+import { isLockedOut } from './usage-lockout.js';
 
 export const AI_PROVIDER_ENV = 'LIMN_AI_PROVIDER';
 
@@ -168,8 +169,32 @@ export function autoReadiness(env: NodeJS.ProcessEnv = process.env): { claudeRea
  * registry (`ai/provider.ts getActiveProvider`) and the pre-flight (`review/auth.ts`) both ask this.
  */
 export function activeProviderId(env: NodeJS.ProcessEnv = process.env): 'claude' | 'codex' {
+  return withCapacity(chosenProviderId(env), autoReadiness(env), isLockedOut);
+}
+
+/** The provider the setting alone chooses (no usage lockout applied). */
+export function chosenProviderId(env: NodeJS.ProcessEnv = process.env): 'claude' | 'codex' {
   const setting = aiProviderSetting(env);
   if (setting === 'codex') return 'codex';
   if (setting === 'claude' || !codexRunnable()) return 'claude';
   return pickAutoProvider(autoReadiness(env));
+}
+
+/**
+ * THE DEFAULT MOVES WHILE IT IS OVER ITS USAGE LIMIT (ai/usage-lockout.ts; docs/CLAUDE-REVIEW.md §
+ * Usage limits move the default). The chosen provider, unless it is locked out and the other one is
+ * signed in, can run and is not locked out: then the other one. Every run that takes the default —
+ * automatic or a surface without a model menu — then goes to the provider with capacity instead of
+ * failing on the locked one (or being skipped by the budget gate). A model picked from a menu is not
+ * moved. Both locked ⇒ the chosen one (the gate skips automatic runs). Pure.
+ */
+export function withCapacity(
+  chosen: 'claude' | 'codex',
+  r: { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean },
+  locked: (p: 'claude' | 'codex') => boolean,
+): 'claude' | 'codex' {
+  if (!locked(chosen)) return chosen;
+  const other = chosen === 'claude' ? 'codex' : 'claude';
+  const otherReady = other === 'claude' ? r.claudeReady : r.codexReady && r.codexRunnable;
+  return otherReady && !locked(other) ? other : chosen;
 }

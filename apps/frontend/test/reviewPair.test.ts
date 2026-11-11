@@ -74,6 +74,20 @@ describe('the AI Review menu', () => {
     }
   });
 
+  it('⚠ while either provider is over its usage limit, the default is a single model; the pair stays offered', () => {
+    const now = Date.parse('2026-11-11T12:00:00Z');
+    const locked = me({ claude: true, codex: true });
+    (locked.ai as any).providers.codex.usageLockedUntil = '2026-11-11T15:00:00Z';
+    const s = resolveReviewModelPick(locked, 'claude-opus-5-5', null, now);
+    expect(s.pair).toBe(false);
+    expect(s.pairOffered).toBe(true);
+    expect(s.chosen.provider).toBe('claude');
+    // Picked explicitly, it is still the pair (the server drops the locked half).
+    expect(resolveReviewModelPick(locked, 'claude-opus-5-5', PAIR_PICK_VALUE, now).pair).toBe(true);
+    // The lock is over: the pair is the default again.
+    expect(resolveReviewModelPick(locked, 'claude-opus-5-5', null, Date.parse('2026-11-11T16:00:00Z')).pair).toBe(true);
+  });
+
   it('picked, it is a pair on Claude’s default model; a sign-out falls back to the opening choice', () => {
     const s = resolveReviewModelPick(me({ claude: true, codex: true }), 'claude-opus-5-5', PAIR_PICK_VALUE);
     expect(s.pair).toBe(true);

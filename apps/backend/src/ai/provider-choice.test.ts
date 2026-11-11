@@ -82,6 +82,36 @@ describe('the provider choice: LIMN_AI_PROVIDER, else Settings, else auto', () =
   });
 });
 
+describe('⚠ the default moves while it is over its usage limit (withCapacity)', () => {
+  const both = { claudeReady: true, codexReady: true, codexRunnable: true };
+  it('the chosen provider, unless it is locked and the other has capacity', async () => {
+    const { withCapacity } = await import('./provider-setting.js');
+    const codexLocked = (p: string) => p === 'codex';
+    expect(withCapacity('codex', both, codexLocked)).toBe('claude');
+    expect(withCapacity('claude', both, codexLocked)).toBe('claude');
+    expect(withCapacity('claude', both, (p) => p === 'claude')).toBe('codex');
+    // The other is not signed in, or locked too: the chosen one stays.
+    expect(withCapacity('codex', { ...both, claudeReady: false }, codexLocked)).toBe('codex');
+    expect(withCapacity('claude', { ...both, codexReady: false }, (p) => p === 'claude')).toBe('claude');
+    expect(withCapacity('codex', both, () => true)).toBe('codex');
+  });
+
+  it('activeProviderId reads the lockout: a locked Codex setting runs on a signed-in Claude', async () => {
+    const ul = await import('./usage-lockout.js');
+    P.setStoredAiProviderSetting('codex');
+    // Claude is signed in through the environment's key in this test.
+    const env = { ANTHROPIC_API_KEY: 'sk-ant-test' };
+    expect(P.activeProviderId(env)).toBe('codex');
+    ul.noteProviderFailure('codex', 'usage limit reached', Date.now());
+    try {
+      expect(P.activeProviderId(env)).toBe('claude');
+    } finally {
+      ul.clearUsageLockout();
+    }
+    expect(P.activeProviderId(env)).toBe('codex');
+  });
+});
+
 describe('what a run ran on', () => {
   it('ranOn names the provider and ITS model for the asked Claude model', () => {
     const opus = P.claudeModelChoice('claude-opus-5-5');

@@ -179,10 +179,12 @@ stateDiagram-v2
 
 | Situation | What your Limn does |
 |---|---|
-| Robin has Claude on this commit | Runs Codex alone and claims Codex. |
+| Robin has Claude on this commit (Robin's PR, or anyone else's) | Runs Codex alone and claims Codex. On Robin's own PR his Limn never holds the commit, so your Claude runs too. |
+| Robin has Claude on this commit, and it is **your** PR | Runs nothing (2026-11-11): Robin's review is the review. His findings show in your AI Review tab, and your replies on your own Limn's findings still get a replies pass. |
 | Robin has Codex | Runs Claude alone; your review says "Codex didn't finish: a teammate's Limn is reviewing with Codex". |
 | Robin has both | Runs nothing: "Robin Dunn reviewed this commit with Claude · posted on GitHub". |
 | Robin has Claude, and your Codex is at its usage limit | Runs nothing. A model at its limit is dropped before any claim. |
+| A model is at its usage limit (any case) | Every run that would use it moves to the other model when that one has capacity: replies passes on its threads, Check threads, CI and ticket reviews, the chat. A manual Claude + Codex review runs the other model alone. |
 | Your Claude is at its limit, nobody has the commit | Runs Codex alone. With a pair, "Run auto reviews now" runs a locked model only when every model is locked; with one model, a press runs it anyway. |
 
 ### What you see when your Limn steps aside
@@ -633,8 +635,9 @@ All names and times are illustrative; every step follows the current rules.
 
 ### 9.5 Your PR, a teammate on Claude, your Codex at its limit
 1. Robin's Limn reviews your commit with Claude and posts.
-2. Your Limn would run Codex, but Codex is at its usage limit until Monday. It runs nothing.
-3. You see Robin's review in your AI Review tab. When the limit lifts, your Limn looks again within 30 minutes and runs Codex on the current commit, since Claude still reads as reviewed by Robin.
+2. It is your PR, so your Limn runs nothing at that commit: Robin's review is the review (and Codex is at its usage limit until Monday anyway).
+3. You see Robin's review in your AI Review tab. You reply on one of your own earlier Limn findings that Codex raised; your Limn judges the reply with Claude, since Codex is at its limit.
+4. When the limit lifts, nothing more runs at that commit. Your next push starts the race again.
 
 ### 9.6 Approval, push, and GitHub's rule
 1. Robin's Limn approves your PR at commit A.
