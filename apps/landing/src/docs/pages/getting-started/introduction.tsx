@@ -36,8 +36,8 @@ export default function Page(): JSX.Element {
         <li>
           <b>Reviews and fixes with AI, under your control.</b> <DocLink to="ai-review/overview">AI
           review</DocLink> and <DocLink to="ai-fix/overview">AI Fix</DocLink> run on your own Claude or Codex
-          subscription. Nothing is pushed until you press the button, and nothing is posted to GitHub
-          except by your press or by an automatic setting you can switch off.
+          subscription. Nothing is pushed or posted to GitHub except by your press or by an automatic
+          setting you switch on or off.
         </li>
         <li>
           <b>Connects the ticket and the docs.</b> With an issue tracker connected, a review checks the

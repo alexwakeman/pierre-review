@@ -868,6 +868,15 @@ composite FKs onto `story_builds (id, account_id)` (+ `repos` and `story_build_p
 cascade; both are in `accountScopedTables()`, erased before `story_build_repos`, and exported (the PR
 patch cut like a repository's); `deleteRepo` deletes a repository's PR rows explicitly.
 
+**PUSH AUTOMATICALLY + THE RENAME** (migration `0184`; [STORY-BUILD.md](STORY-BUILD.md) § Push automatically,
+§ Push): `story_builds.auto_push` (the reader's opt-in, default 0 = off), `auto_push_claimed_at` (THE
+CLAIM — compare-and-set `WHERE auto_push = 1 AND status = 'ready' AND … IS NULL` before any GitHub write;
+NEVER cleared, so once per build) and `auto_push_error` (one sentence; NULL otherwise; the boot reconcile
+writes it for a claim a restart cut off) — wire `autoPush` / `autoPushAt` / `autoPushError`, plus the
+NEVER-stored `autoPushRunning` (the in-process flag). `story_build_repos.push_error_code` + `story_build_prs.push_error_code`: the code beside
+`push_error` (`BRANCH_EXISTS` ⇒ the tab offers a new branch name), wire `pushErrorCode`; cleared with
+`push_error` on a landed push.
+
 ## `ai_fixes` — AI Fix runs (CORE)
 
 ONE row per fix run (history kept; a re-run is a new row), account-scoped, in `accountScopedTables()` and

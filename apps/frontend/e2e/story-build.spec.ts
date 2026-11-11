@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtures, installMockApi, prDetailFor, SANDBOX_RUNTIME_NONE, STORY_SESSION_CLOSED, STORY_SESSION_READY } from './mock-api.js';
+import { fixtures, installMockApi, prDetailFor, SANDBOX_RUNTIME_NONE, STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS, STORY_SESSION_CLOSED, STORY_SESSION_READY } from './mock-api.js';
 import type { PrDetail, SandboxNetworkAllowBody, SandboxRuntimeStatus, StoryBuild, TicketPrsResponse, TicketReviewStatesResponse, WorkspaceTrackerSettings } from '@pierre-review/shared';
 
 // "Implement story" as a WORKSPACE SESSION (docs/SANDBOX.md § Sessions) against the mocked API (mock-api.ts
@@ -156,7 +156,11 @@ test.describe('Implement story', () => {
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
     expect((await start).postDataJSON()).not.toHaveProperty('docs');
+    // "Push and open the pull request" is off unless ticked, so it is not sent.
+    expect((await start).postDataJSON()).not.toHaveProperty('autoPush');
     await expect(view.getByTestId('story-session')).toHaveAttribute('data-phase', 'plan_ready');
+    // The option stays changeable in the tab until the build pushed.
+    await expect(view.getByTestId('story-build-auto-push')).toHaveAttribute('data-state', 'off');
     await expect(view.getByTestId('story-plan')).toBeVisible();
     // A plan-first session never offers Start build: the plan panel's Approve starts it.
     await expect(view.getByRole('button', { name: 'Start build' })).toHaveCount(0);
@@ -205,6 +209,44 @@ test.describe('Implement story', () => {
     await api.getByRole('button', { name: 'Push as draft' }).click();
     await expect(api).toHaveAttribute('data-status', 'pushed');
     await expect(api.getByTestId('story-build-pushed-pr')).toContainText('#77');
+  });
+
+  test('push automatically: ticked at Start, changeable in the tab until it pushes', async ({ page }) => {
+    await gotoSprint(page);
+    const tray = await openTray(page, 'ACME-1');
+    await tray.getByRole('button', { name: 'Implement ACME-1' }).click();
+    const view = page.getByTestId('story-build-overlay');
+    const box = view.getByTestId('story-build-start-auto-push');
+    await expect(box).toContainText('Push and open the pull request when the build finishes');
+    await box.getByRole('checkbox').check();
+    const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
+    await view.getByTestId('story-build-start-button').click();
+    expect((await start).postDataJSON()).toMatchObject({ autoPush: true });
+    const line = view.getByTestId('story-build-auto-push');
+    await expect(line).toHaveAttribute('data-state', 'on');
+    const off = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/auto-push'));
+    await line.getByRole('checkbox').click(); // a controlled box: the state is asserted below, once the write answers
+    expect((await off).postDataJSON()).toEqual({ on: false });
+    await expect(line).toHaveAttribute('data-state', 'off');
+  });
+
+  test('the automatic push hit an existing branch: the tab says so and pushes to a new name', async ({ page }) => {
+    await withAi(page, STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
+    await expect(view.getByTestId('story-build-auto-push')).toHaveAttribute('data-state', 'failed');
+    await expect(view.getByTestId('story-build-auto-push')).toContainText('Automatic push failed: A branch named limn/ACME-1 already exists');
+    const api = view.locator('[data-testid="story-build-repo"][data-repo="acme/api"]');
+    // Push would only be refused again: a new name in its place, prefilled with a free one.
+    await expect(api.getByTestId('story-build-rename-input')).toHaveValue('limn/ACME-1-v2');
+    const push = page.waitForRequest((r) => r.method() === 'POST' && /\/repos\/11\/push$/.test(r.url()));
+    await api.getByRole('button', { name: 'Push as draft' }).click();
+    expect((await push).postDataJSON()).toEqual({ draft: true, branch: 'limn/ACME-1-v2' });
+    await expect(api).toHaveAttribute('data-status', 'pushed');
+    await expect(api).toContainText('limn/ACME-1-v2');
+    // The other repository was not refused: its Push is the plain one.
+    const web = view.locator('[data-testid="story-build-repo"][data-repo="acme/web"]');
+    await expect(web.getByTestId('story-build-rename')).toHaveCount(0);
   });
 
   test('with no container runtime, the tab says so and how to set one up', async ({ page }) => {

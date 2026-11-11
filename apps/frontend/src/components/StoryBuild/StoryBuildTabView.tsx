@@ -26,6 +26,7 @@ import { PlanPanel } from './PlanPanel.js';
 import { StackView } from './StackView.js';
 import { SessionView } from './SessionView.js';
 import { StartPanel } from './StartPanel.js';
+import { AutoPushLine } from './AutoPushOption.js';
 import { StoryBuildHeader } from './StoryBuildHeader.js';
 import { StoryBuildSection } from './StoryBuildSection.js';
 
@@ -37,7 +38,9 @@ import { StoryBuildSection } from './StoryBuildSection.js';
 // header (steps, status, cost; Draft, Push all, Stop, Discard), then the start state OR the session —
 // the boot, then (plan first) the PLAN PANEL, the conversation beside the rail — and the changes with
 // Push: per planned pull request (StackView) once a plan was approved, else per repository. Nothing
-// changes before the plan is approved (Start build on an older session) and nothing is pushed before Push.
+// changes before the plan is approved (Start build on an older session) and nothing is pushed before Push —
+// unless the reader ticked "Push and open the pull request when the build finishes" (`AutoPushLine`, under
+// the header: the switch until the build pushed, then the automatic push's outcome).
 
 export function StoryBuildTabView(): JSX.Element | null {
   const activeTab = usePinnedTabs((s) => s.activeTab);
@@ -113,6 +116,7 @@ function StoryBuildBody({
       />
       {q.isLoading && <p className="mt-5 text-meta text-ui-mute">Loading…</p>}
       {q.isError && <p className="mt-5 text-body text-ui-danger">Could not load this session.</p>}
+      {open != null && <AutoPushLine build={open.build} />}
       {q.isSuccess && open == null && <StartPanel workspaceId={workspaceId} ident={ident} last={closed ? build : null} offer={offer ?? null} />}
       {open != null && open.session.plan != null && open.session.phase !== 'booting' && <PlanPanel build={open.build} session={open.session} />}
       {open != null && <SessionView build={open.build} session={open.session} partials={stream.partials} />}

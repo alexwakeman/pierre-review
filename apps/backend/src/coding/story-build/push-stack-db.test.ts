@@ -419,3 +419,71 @@ describe('the routes', () => {
     await app.close();
   });
 });
+
+describe('the rename after BRANCH_EXISTS (a stack)', () => {
+  it('PR 1 pushed under a new name: the code is stored, PR 2 stacks on the renamed branch', async () => {
+    const s = await builtStack(THREE.slice(0, 2));
+    const bare = join(G.root, 'bare-api.git');
+    // An earlier session already pushed PR 1's branch.
+    git(bare, 'update-ref', `refs/heads/${BRANCH}-${s.id}`, BASE.api!);
+    const p1 = s.prs.get('P1')!;
+    const refused = await S.pushPlannedPr(ctx, { accountId: 1, buildId: s.id, prId: p1, draft: true });
+    expect(refused).toMatchObject({ outcome: 'failed', code: 'BRANCH_EXISTS', error: `A branch named ${BRANCH}-${s.id} already exists on acme/api. Pick another branch name.` });
+    expect(await PP.getStoryBuildPrRow(ctx, 1, s.id, p1)).toMatchObject({ status: 'ready', pushErrorCode: 'BRANCH_EXISTS' });
+    // A sibling's planned branch is protected: never the rename.
+    expect(await S.pushPlannedPr(ctx, { accountId: 1, buildId: s.id, prId: p1, draft: true, branch: `${BRANCH}-${s.id}-2` })).toMatchObject({ outcome: 'failed', code: 'PUSH_DENIED' });
+    const renamed = `${BRANCH}-${s.id}-v2`;
+    const ok = await S.pushPlannedPr(ctx, { accountId: 1, buildId: s.id, prId: p1, draft: true, branch: renamed });
+    expect(ok.outcome).toBe('pushed');
+    expect(await PP.getStoryBuildPrRow(ctx, 1, s.id, p1)).toMatchObject({ status: 'pushed', branch: renamed, pushedBranch: renamed, pushError: null, pushErrorCode: null });
+    const p2 = await S.pushPlannedPr(ctx, { accountId: 1, buildId: s.id, prId: s.prs.get('P2')!, draft: true });
+    expect(p2.outcome).toBe('pushed');
+    expect(G.pushes.at(-1)).toMatchObject({ branch: `${BRANCH}-${s.id}-2`, prBase: renamed, baseRef: renamed });
+    expect(git(bare, 'rev-parse', `refs/heads/${BRANCH}-${s.id}-2^`)).toBe(git(bare, 'rev-parse', `refs/heads/${renamed}`));
+  });
+
+  it('the routes: `branch` on one PR reaches the push; a planned build\'s per-repository push refuses it', async () => {
+    const s = await builtStack(THREE.slice(0, 1));
+    const app = Fastify({ logger: false });
+    routes.registerStoryBuildBuildRoutes(app, ctx);
+    await app.ready();
+    try {
+      const repoPush = await app.inject({ method: 'POST', url: `/api/story-builds/${s.id}/repos/${repo[1]!.api}/push`, payload: { branch: 'x' } });
+      expect(repoPush.statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url: `/api/story-builds/${s.id}/prs/${s.prs.get('P1')!}/push`, payload: { branch: 7 } })).statusCode).toBe(400);
+      const one = await app.inject({ method: 'POST', url: `/api/story-builds/${s.id}/prs/${s.prs.get('P1')!}/push`, payload: { branch: `${BRANCH}-${s.id}-v2` } });
+      expect(one.json().prs[0]).toMatchObject({ outcome: 'pushed' });
+      expect(G.pushes[0].branch).toBe(`${BRANCH}-${s.id}-v2`);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('the automatic push of a stack', () => {
+  it('pushes every planned PR once, ready for review, as an automatic run', async () => {
+    const s = await builtStack(THREE);
+    await P.updateStoryBuild(ctx, 1, s.id, { autoPush: true });
+    const { maybeAutoPushBuild } = await import('./auto-push.js');
+    expect(await maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'pushed', opened: 3 });
+    expect(G.pushes.map((p) => [p.branch, p.draft, p.limnRun.origin])).toEqual([
+      [`${BRANCH}-${s.id}`, false, 'auto'],
+      [`${BRANCH}-${s.id}-2`, false, 'auto'],
+      [`${BRANCH}-${s.id}`, false, 'auto'],
+    ]);
+    expect(await maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id })).toEqual({ status: 'skipped', reason: 'claimed' });
+    expect(G.pushes).toHaveLength(3);
+  });
+
+  it('a failure stops its repository; the build records one sentence and the item its code', async () => {
+    const s = await builtStack(THREE.slice(0, 2));
+    git(join(G.root, 'bare-api.git'), 'update-ref', `refs/heads/${BRANCH}-${s.id}`, BASE.api!);
+    await P.updateStoryBuild(ctx, 1, s.id, { autoPush: true });
+    const { maybeAutoPushBuild } = await import('./auto-push.js');
+    const d = await maybeAutoPushBuild(ctx, { accountId: 1, buildId: s.id });
+    expect(d).toEqual({ status: 'failed', message: `A branch named ${BRANCH}-${s.id} already exists on acme/api. Pick another branch name.` });
+    expect((await P.getStoryBuildRow(ctx, 1, s.id))!.autoPushError).toBe(d.status === 'failed' ? d.message : null);
+    expect(await PP.getStoryBuildPrRow(ctx, 1, s.id, s.prs.get('P1')!)).toMatchObject({ pushErrorCode: 'BRANCH_EXISTS' });
+    expect(G.pushes).toHaveLength(1);
+  });
+});

@@ -80,6 +80,9 @@ import type {
   ReviewerCandidateResponse,
   StoryBuildForTicketResponse,
   StoryBuildPushResponse,
+  StoryBuildPushBody,
+  StoryBuildAutoPushBody,
+  StoryBuildAutoPushResponse,
   StoryBuildRepo,
   StoryBuildSession,
   StoryBuildStartResponse,
@@ -1030,6 +1033,23 @@ export function builtFrom(b: StoryBuild): StoryBuild {
 
 export const STORY_SESSION_BUILT: StoryBuild = builtFrom(STORY_SESSION_READY);
 
+/**
+ * "Push and open the pull request when the build finishes" was ticked and the automatic push ran: the
+ * branch `limn/ACME-1` already exists on acme/api, so it failed there (the code is stored on the row) and
+ * the tab offers a new branch name. acme/web was not reached in this fixture (still ready).
+ */
+export const STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS: StoryBuild = {
+  ...STORY_SESSION_BUILT,
+  autoPush: true,
+  autoPushAt: iso(0),
+  autoPushError: 'A branch named limn/ACME-1 already exists on acme/api. Pick another branch name.',
+  repos: STORY_SESSION_BUILT.repos.map((r) =>
+    r.repoId === 11
+      ? { ...r, pushError: 'A branch named limn/ACME-1 already exists on acme/api. Pick another branch name.', pushErrorCode: 'BRANCH_EXISTS' }
+      : r,
+  ),
+};
+
 /** A session closed by the idle teardown, with its changes kept: Resume and Push. */
 export const STORY_SESSION_CLOSED: StoryBuild = {
   ...STORY_SESSION_BUILT,
@@ -1871,7 +1891,7 @@ export async function installMockApi(
           // its checked plan waits for the reader ("with docs" only when the start asked for them).
           const body = route.request().postDataJSON() as SandboxSessionStartBody;
           const plan = { ...STORY_PLAN_VIEW, withDocs: body.docs === true, fillGaps: body.action === 'fill_gaps' };
-          storyBuild = { ...STORY_SESSION_PLAN_READY, session: { ...STORY_SESSION_PLAN_READY.session!, plan } };
+          storyBuild = { ...STORY_SESSION_PLAN_READY, autoPush: body.autoPush === true, session: { ...STORY_SESSION_PLAN_READY.session!, plan } };
           return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
         }
         if (at('messages')) {
@@ -1950,13 +1970,37 @@ export async function installMockApi(
         }
         const prDiff = /\/prs\/(\d+)\/diff$/.exec(path);
         if (prDiff != null) return json(route, STORY_PR_DIFF(Number(prDiff[1])));
+        if (/\/auto-push$/.test(path)) {
+          const body = (route.request().postDataJSON() ?? {}) as StoryBuildAutoPushBody;
+          if (storyBuild == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          if (storyBuild.autoPushAt != null || storyBuild.repos.some((r) => r.status === 'pushed')) return json(route, { error: 'NotReady', message: 'This build has already pushed.' }, 409);
+          storyBuild = { ...storyBuild, autoPush: body.on };
+          return json(route, { autoPush: body.on } satisfies StoryBuildAutoPushResponse);
+        }
         if (/\/repos\/\d+\/push$/.test(path)) {
           const repoId = Number(path.split('/').at(-2));
           const prNumber = 77;
+          const body = (route.request().postDataJSON() ?? {}) as StoryBuildPushBody;
+          const row = storyBuild?.repos.find((r) => r.repoId === repoId);
+          // The branch exists on GitHub (the fixture's stored code): only a NEW name pushes.
+          if (row?.pushErrorCode === 'BRANCH_EXISTS' && body.branch == null) {
+            const error = `A branch named ${row.branch} already exists on ${row.fullName}. Pick another branch name.`;
+            return json(route, { results: [{ repoId, outcome: 'failed', prNumber: null, prUrl: null, code: 'BRANCH_EXISTS', error }] } satisfies StoryBuildPushResponse);
+          }
           if (storyBuild != null) {
             const repos = storyBuild.repos.map((r) =>
               r.repoId === repoId
-                ? { ...r, status: 'pushed' as const, pushedPrNumber: prNumber, pushedPrUrl: `https://github.com/${r.fullName}/pull/${prNumber}`, pushedAt: iso(0) }
+                ? {
+                    ...r,
+                    status: 'pushed' as const,
+                    branch: body.branch ?? r.branch,
+                    pushedBranch: body.branch ?? r.branch,
+                    pushError: null,
+                    pushErrorCode: null,
+                    pushedPrNumber: prNumber,
+                    pushedPrUrl: `https://github.com/${r.fullName}/pull/${prNumber}`,
+                    pushedAt: iso(0),
+                  }
                 : r,
             );
             storyBuild = { ...storyBuild, repos, pushedAll: repos.filter((r) => r.include).every((r) => r.status === 'pushed' || !r.hasPatch) };

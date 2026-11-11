@@ -9,8 +9,8 @@ export const meta: DocMeta = {
 function StartPicture(): JSX.Element {
   return (
     <Illustration
-      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A box to give the agent the reference documents is ticked. A Start with docs button."
-      caption="A new build tab: what the session gets, the docs box, the model and Start."
+      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A box to give the agent the reference documents is ticked. A box to push and open the pull request when the build finishes is not ticked. A Start with docs button."
+      caption="A new build tab: what the session gets, the docs and push boxes, the model and Start."
       title="PAY-142 Partial refunds"
       meta="Implement"
     >
@@ -23,6 +23,9 @@ function StartPicture(): JSX.Element {
       </p>
       <p>
         <Chip>☑ Give the agent the reference documents</Chip>
+      </p>
+      <p>
+        <Chip>☐ Push and open the pull request when the build finishes</Chip>
       </p>
       <p className="muted">Runs in Colima on this computer.</p>
       <p>
@@ -90,11 +93,13 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>Push.</b> You review one diff per pull request and press <Ui>Push</Ui>. Limn pushes a new branch and opens a
-          new pull request, a draft by default. See <DocLink to="implement-story/push">Push the result</DocLink>.
+          new pull request, a draft by default. Or tick <Ui>Push and open the pull request when the build finishes</Ui> and
+          Limn does it for you, ready for review. See <DocLink to="implement-story/push">Push the result</DocLink>.
         </li>
       </Steps>
       <Warning>
-        Nothing is pushed, posted or written to your tracker before you press a button. The one tracker write is{' '}
+        Nothing is pushed, posted or written to your tracker before you press a button, except the push you chose with{' '}
+        <Ui>Push and open the pull request when the build finishes</Ui>. The one tracker write is{' '}
         <Ui>Update ticket</Ui> on a Jira ticket, which you press yourself.
       </Warning>
 

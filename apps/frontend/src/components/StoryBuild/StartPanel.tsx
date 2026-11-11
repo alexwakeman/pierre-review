@@ -19,11 +19,13 @@ import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { InfoButton } from '../InfoModal.js';
 import { SandboxRuntimeLine } from './SandboxSetupHelp.js';
+import { AUTO_PUSH_LABEL, AutoPushInfo } from './AutoPushOption.js';
 
 // THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences
 // (it PLANS FIRST: docs/STORY-BUILD.md § Plan first), the docs box ("Give the agent the reference
 // documents", ticked when the story view's "… with docs" opened the tab; shown only while the library has
-// a built document),
+// a built document), the push box ("Push and open the pull request when the build finishes", OFF by
+// default, the same for Implement and Fill gaps; docs/STORY-BUILD.md § Push automatically),
 // the container runtime's ONE line (`GET /api/sandbox/runtime`; with none, what is wrong + "How to set
 // up" — the button stays, owner decision Q2: there is no other path), the model menu (kind
 // `story_build`, opening on the deep model) and Start inside the ONE `AiRunGate`. A failed / discarded
@@ -66,8 +68,15 @@ export function StartPanel({
   const [docsPicked, setDocsPicked] = useState(offer?.docs === true);
   useEffect(() => setDocsPicked(offer?.docs === true), [offer?.docs]);
   const docs = docsAvailable && docsPicked;
+  const [autoPush, setAutoPush] = useState(false);
   const go = (): void => {
-    start.mutate({ action: fill ? 'fill_gaps' : 'implement', provider: pick.chosen.provider, model: pick.chosen.model, ...(docs ? { docs: true } : {}) });
+    start.mutate({
+      action: fill ? 'fill_gaps' : 'implement',
+      provider: pick.chosen.provider,
+      model: pick.chosen.model,
+      ...(docs ? { docs: true } : {}),
+      ...(autoPush ? { autoPush: true } : {}),
+    });
   };
   const err = start.error instanceof ApiError ? start.error : start.error != null ? { message: (start.error as Error).message } : null;
   const lastLine = last == null ? null : last.session != null ? sessionStatusLine(last.session, last.error) : storyBuildStatusLine(last);
@@ -82,14 +91,15 @@ export function StartPanel({
         <>
           <p className="text-body text-ui-ink">
             The AI gets a sandbox with every repository in this workspace, the ticket and what the story check found missing. It
-            plans first. Nothing is built until you approve the plan, and nothing is pushed until you press Push.
+            plans first. Nothing is built until you approve the plan, and nothing is pushed until you press Push or tick the
+            push box below.
           </p>
           <StartGaps reviewId={node?.check?.reviewId ?? offer?.reviewId ?? null} />
         </>
       ) : (
         <p className="text-body text-ui-ink">
           The AI gets a sandbox with every repository in this workspace and the ticket. It plans first. Nothing is built until you
-          approve the plan, and nothing is pushed until you press Push.
+          approve the plan, and nothing is pushed until you press Push or tick the push box below.
         </p>
       )}
       <div className="mt-3">
@@ -103,6 +113,13 @@ export function StartPanel({
             <p>Limn copies the parts of this workspace's reference library that match the story into the sandbox, read only.</p>
             <p className="mt-2">The agent can then cite a document where the story does not match it.</p>
           </InfoButton>
+        </label>
+      )}
+      {offered != null && (
+        <label data-testid="story-build-start-auto-push" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
+          <CheckboxBox checked={autoPush} disabled={busy} onChange={(e) => setAutoPush(e.target.checked)} />
+          {AUTO_PUSH_LABEL}
+          <AutoPushInfo />
         </label>
       )}
       <div className="mt-4 flex flex-wrap items-center gap-2">

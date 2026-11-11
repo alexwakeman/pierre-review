@@ -199,6 +199,50 @@ export function pushAllOffered(b: Pick<StoryBuild, 'repos'>): boolean {
   return pushableRepos(b).length >= 2;
 }
 
+// ── rename after BRANCH_EXISTS (docs/STORY-BUILD.md § Push) ────────────────────────────────────
+
+/** The push code that offers a new branch name (from the press's result, or stored on the row). */
+export const BRANCH_EXISTS_CODE = 'BRANCH_EXISTS';
+
+/** The last push of this item said the branch already exists: the answer's code wins, else the row's. */
+export function branchExistsFor(resultCode: string | null | undefined, storedCode: string | null | undefined): boolean {
+  if (resultCode != null) return resultCode === BRANCH_EXISTS_CODE;
+  return storedCode === BRANCH_EXISTS_CODE;
+}
+
+/** Every branch this build names (repositories and planned PRs, planned and pushed): the new name avoids them. */
+export function buildBranchNames(b: Pick<StoryBuild, 'repos' | 'prs'>): string[] {
+  const out: string[] = [];
+  for (const r of b.repos) for (const n of [r.branch, r.pushedBranch]) if (n != null && n !== '') out.push(n);
+  for (const p of b.prs ?? []) for (const n of [p.branch, p.pushedBranch]) if (n != null && n !== '') out.push(n);
+  return out;
+}
+
+// ── push automatically (docs/STORY-BUILD.md § Push automatically) ──────────────────────────────
+
+function anyPushed(b: Pick<StoryBuild, 'repos' | 'prs'>): boolean {
+  return b.repos.some((r) => r.status === 'pushed') || (b.prs ?? []).some((p) => p.status === 'pushed');
+}
+
+/** The reader may still switch "Push and open the pull request" on or off: nothing pushed, not started. */
+export function autoPushEditable(b: Pick<StoryBuild, 'repos' | 'prs' | 'autoPushAt'>): boolean {
+  return b.autoPushAt == null && !anyPushed(b);
+}
+
+/** The automatic push is running on the host right now (its in-process flag, never stored: a restart or
+ *  an answer ends it) and has neither pushed nor recorded a failure. */
+export function autoPushRunning(b: Pick<StoryBuild, 'repos' | 'prs' | 'autoPush' | 'autoPushRunning' | 'autoPushError'>): boolean {
+  return b.autoPush === true && b.autoPushRunning === true && b.autoPushError == null && !anyPushed(b);
+}
+
+/** The option is on but the build already settled without it firing (ticked after the build, or a restart
+ *  cut in): it applies when the NEXT build finishes, and the tab says so. */
+export function autoPushWaitsForNextBuild(
+  b: Pick<StoryBuild, 'repos' | 'prs' | 'autoPush' | 'autoPushAt' | 'autoPushRunning'> & { session?: { phase: string } | null },
+): boolean {
+  return b.autoPush === true && b.autoPushAt == null && b.autoPushRunning !== true && b.session?.phase === 'built' && !anyPushed(b);
+}
+
 // ── errors ─────────────────────────────────────────────────────────────────────────────────────
 
 /** Our sentence per code. `BadRequest` has none: the server's own sentence says what to fix. */

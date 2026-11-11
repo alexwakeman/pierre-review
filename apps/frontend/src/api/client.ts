@@ -315,6 +315,8 @@ import type {
   StoryBuildDiscardResponse,
   StoryBuildForTicketResponse,
   StoryBuildPushBody,
+  StoryBuildAutoPushBody,
+  StoryBuildAutoPushResponse,
   StoryBuildPushResponse,
   StoryBuildStartResponse,
   SandboxSessionStartBody,
@@ -1866,6 +1868,9 @@ export const api = {
   storyBuildPrDiff: (id: number, prId: number) => get<StoryBuildPrDiffResponse>(storyBuildPath('prDiff', { id, prId })),
   pushStoryBuildPr: (id: number, prId: number, body: StoryBuildPushBody) =>
     fetch(storyBuildPath('prPush', { id, prId }), jsonBody('POST', body)).then((r) => handle<StoryBuildPushResponse>(r)),
+  // "Push and open the pull request when the build finishes": on or off until the build pushed (409 NotReady after).
+  setStoryBuildAutoPush: (id: number, body: StoryBuildAutoPushBody) =>
+    fetch(storyBuildPath('autoPush', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildAutoPushResponse>(r)),
   discardStoryBuild: (id: number) =>
     fetch(storyBuildPath('discard', { id }), jsonBody('POST')).then((r) => handle<StoryBuildDiscardResponse>(r)),
 

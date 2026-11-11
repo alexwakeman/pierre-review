@@ -77,7 +77,8 @@ export function StoryBuildHeader({
         )}
         <p>
           Start build lets it change the code and run the tests. When it stops, each repository’s changes are shown here. Nothing
-          is pushed until you press Push. Each push opens a new pull request, as a draft unless you untick Draft.
+          is pushed until you press Push, unless you ticked “Push and open the pull request”. Each push opens a new pull
+          request, as a draft unless you untick Draft.
         </p>
       </InfoButton>
       }

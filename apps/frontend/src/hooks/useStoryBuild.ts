@@ -10,6 +10,7 @@ import {
   type StoryBuild,
   type StoryBuildDiffResponse,
   type StoryBuildForTicketResponse,
+  type StoryBuildPushBody,
   type StoryBuildPushResponse,
   type SandboxComposeFiles,
   type SandboxFolderCheck,
@@ -25,6 +26,7 @@ import { useSandboxSessionStream } from './useSandboxSessionStream.js';
 import { workspaceKey } from './useActivity.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import type { SessionStreamState } from '../lib/sandboxSession.js';
+import { autoPushRunning } from '../lib/storyBuild.js';
 
 // "IMPLEMENT STORY" — the build tab's server state (docs/STORY-BUILD.md; docs/FRONTEND.md § The build
 // tab). ONE query per ticket (`storyBuildForKey`) holds the latest session; the session's SSE stream
@@ -59,6 +61,8 @@ export function useStoryBuildFor(workspaceId: number | null, ident: string | nul
       const b = q.state.data?.build;
       // A session: only while something moves (the stream carries the rest; a waiting agent needs no poll).
       if (b?.session == null) return false;
+      // The automatic push runs on the host after the turn: follow it until it answers (a push or a failure).
+      if (b.session.live && autoPushRunning(b)) return SESSION_POLL_MS;
       return b.session.live && b.session.phase !== 'ready' && b.session.phase !== 'plan_ready' && b.session.phase !== 'built' ? SESSION_POLL_MS : false;
     },
   });
@@ -87,16 +91,22 @@ export function useStoryBuildDiscard(workspaceId: number | null, ident: string) 
   return useBuildAction(workspaceId, ident, (id: number) => api.discardStoryBuild(id));
 }
 
+/** The push body: `branch` ONLY when the reader named one (the rename after BRANCH_EXISTS). */
+export function storyBuildPushBody(draft: boolean, branch?: string): StoryBuildPushBody {
+  return { draft, ...(branch != null && branch.trim() !== '' ? { branch: branch.trim() } : {}) };
+}
+
 /**
  * Push one repository, or every unpushed ready one (`repoId` null). A push opens new pull requests:
  * THE ONE WRITE SET (`invalidateAfterPrWrite`, no one PR id yet) + the ticket's PR list + the sprint.
+ * `branch` (one repository only): the new name after BRANCH_EXISTS.
  */
 export function useStoryBuildPush(workspaceId: number | null, ident: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationKey: storyBuildMutationKey(ident),
-    mutationFn: (v: { id: number; repoId: number | null; draft: boolean }): Promise<StoryBuildPushResponse> =>
-      v.repoId == null ? api.pushStoryBuildAll(v.id, { draft: v.draft }) : api.pushStoryBuildRepo(v.id, v.repoId, { draft: v.draft }),
+    mutationFn: (v: { id: number; repoId: number | null; draft: boolean; branch?: string }): Promise<StoryBuildPushResponse> =>
+      v.repoId == null ? api.pushStoryBuildAll(v.id, { draft: v.draft }) : api.pushStoryBuildRepo(v.id, v.repoId, storyBuildPushBody(v.draft, v.branch)),
     onSuccess: () =>
       Promise.all([
         invalidateBuild(qc, workspaceId, ident),
@@ -178,14 +188,34 @@ export function useStoryBuildPrPush(workspaceId: number | null, ident: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationKey: storyBuildMutationKey(ident),
-    mutationFn: (v: { id: number; prId: number | null; draft: boolean }): Promise<StoryBuildPushResponse> =>
-      v.prId == null ? api.pushStoryBuildAll(v.id, { draft: v.draft }) : api.pushStoryBuildPr(v.id, v.prId, { draft: v.draft }),
+    mutationFn: (v: { id: number; prId: number | null; draft: boolean; branch?: string }): Promise<StoryBuildPushResponse> =>
+      v.prId == null ? api.pushStoryBuildAll(v.id, { draft: v.draft }) : api.pushStoryBuildPr(v.id, v.prId, storyBuildPushBody(v.draft, v.branch)),
     onSettled: () =>
       Promise.all([
         invalidateBuild(qc, workspaceId, ident),
         qc.invalidateQueries({ queryKey: ['ticket-prs'] }),
         invalidateAfterPrWrite(qc, null),
       ]),
+  });
+}
+
+/**
+ * "Push and open the pull request when the build finishes" on or off (`POST …/auto-push`). Its OWN key:
+ * a DB write with no model turn, so a running turn never blocks it. 409 once the build pushed: re-read.
+ */
+export function useStoryBuildAutoPush(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  const setAutoPush = (on: boolean): void => {
+    qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) =>
+      old?.build == null ? old : { ...old, build: { ...old.build, autoPush: on } },
+    );
+  };
+  return useMutation({
+    mutationFn: (v: { id: number; on: boolean }) => api.setStoryBuildAutoPush(v.id, { on: v.on }),
+    // Optimistic: the box flips on the click; an error re-reads the stored value.
+    onMutate: (v) => setAutoPush(v.on),
+    onSuccess: (r) => setAutoPush(r.autoPush),
+    onError: () => void qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
   });
 }
 

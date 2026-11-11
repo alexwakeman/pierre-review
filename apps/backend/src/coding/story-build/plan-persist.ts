@@ -310,5 +310,6 @@ export function toStoryBuildPr(row: StoryBuildPrRow, fullName: string): StoryBui
     pushedPrNumber: row.pushedPrNumber ?? null,
     pushedPrUrl: row.pushedPrUrl ?? null,
     pushError: row.pushError ?? null,
+    pushErrorCode: row.pushErrorCode ?? null,
   };
 }

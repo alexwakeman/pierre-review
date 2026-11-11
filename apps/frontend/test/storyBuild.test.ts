@@ -12,7 +12,13 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { SprintGraphNode, StoryBuild, StoryBuildRepo, TicketReview, TicketReviewState } from '@pierre-review/shared';
+import { storyBuildFreeBranch } from '@pierre-review/shared';
 import {
+  autoPushEditable,
+  autoPushRunning,
+  autoPushWaitsForNextBuild,
+  branchExistsFor,
+  buildBranchNames,
   canPushRepo,
   pushAllOffered,
   storyBuildErrorText,
@@ -24,6 +30,7 @@ import {
   storyViewCheck,
 } from '../src/lib/storyBuild.js';
 import { TicketCard } from '../src/components/TicketCard.js';
+import { storyBuildPushBody } from '../src/hooks/useStoryBuild.js';
 
 const repo = (repoId: number, o: Partial<StoryBuildRepo> = {}): StoryBuildRepo => ({
   id: repoId * 10,
@@ -294,5 +301,54 @@ describe('the action words and the build tab\'s action', () => {
     // No node in memory: what the story view offered when it opened the tab.
     expect(storyBuildActionOf(null, null, 'fill_gaps')).toBe('fill_gaps');
     expect(storyBuildActionOf(null, node(), 'fill_gaps')).toBe('implement');
+  });
+});
+
+describe('rename after BRANCH_EXISTS, and push automatically', () => {
+  it('the press answer decides; without one, the stored code', () => {
+    expect(branchExistsFor('BRANCH_EXISTS', null)).toBe(true);
+    expect(branchExistsFor(null, 'BRANCH_EXISTS')).toBe(true);
+    expect(branchExistsFor(undefined, 'BRANCH_EXISTS')).toBe(true);
+    // A newer answer with another code wins over the stored one.
+    expect(branchExistsFor('PUSH_DENIED', 'BRANCH_EXISTS')).toBe(false);
+    expect(branchExistsFor(null, null)).toBe(false);
+  });
+
+  it('suggests a free -vN name that avoids the build branches, planned PR-2 names included', () => {
+    const b = { repos: [repo(1, { branch: 'limn/acme-1', pushedBranch: null })], prs: [] };
+    const taken = buildBranchNames(b);
+    expect(taken).toEqual(['limn/acme-1']);
+    expect(storyBuildFreeBranch('limn/acme-1', taken)).toBe('limn/acme-1-v2');
+    expect(storyBuildFreeBranch('limn/acme-1', [...taken, 'limn/acme-1-v2'])).toBe('limn/acme-1-v3');
+  });
+
+  it('sends branch only when the reader named one', () => {
+    expect(storyBuildPushBody(true)).toEqual({ draft: true });
+    expect(storyBuildPushBody(false, '  ')).toEqual({ draft: false });
+    expect(storyBuildPushBody(true, ' limn/x-v2 ')).toEqual({ draft: true, branch: 'limn/x-v2' });
+  });
+
+  it('the option changes until something pushed or the automatic push started', () => {
+    const ready = { repos: [repo(1, { status: 'ready' })], prs: [], autoPush: true, autoPushAt: null, autoPushError: null, autoPushRunning: false };
+    expect(autoPushEditable(ready)).toBe(true);
+    expect(autoPushRunning(ready)).toBe(false);
+    const claimed = { ...ready, autoPushAt: '2026-11-11T00:00:00Z', autoPushRunning: true };
+    expect(autoPushEditable(claimed)).toBe(false);
+    expect(autoPushRunning(claimed)).toBe(true);
+    // Claimed but no longer running in the process (a restart; the reader's own press took over): never "Pushing…".
+    expect(autoPushRunning({ ...claimed, autoPushRunning: false })).toBe(false);
+    expect(autoPushRunning({ ...claimed, autoPushError: 'A branch named x already exists on a/b.' })).toBe(false);
+    const pushed = { ...ready, repos: [repo(1, { status: 'pushed' })] };
+    expect(autoPushEditable(pushed)).toBe(false);
+    expect(autoPushRunning({ ...pushed, autoPushAt: '2026-11-11T00:00:00Z', autoPushRunning: true })).toBe(false);
+  });
+
+  it('says the option waits for the next build when the build already settled', () => {
+    const built = { repos: [repo(1, { status: 'ready' })], prs: [], autoPush: true, autoPushAt: null, autoPushRunning: false, session: { phase: 'built' } };
+    expect(autoPushWaitsForNextBuild(built)).toBe(true);
+    expect(autoPushWaitsForNextBuild({ ...built, session: { phase: 'building' } })).toBe(false);
+    expect(autoPushWaitsForNextBuild({ ...built, autoPush: false })).toBe(false);
+    expect(autoPushWaitsForNextBuild({ ...built, autoPushRunning: true })).toBe(false);
+    expect(autoPushWaitsForNextBuild({ ...built, autoPushAt: '2026-11-11T00:00:00Z' })).toBe(false);
   });
 });

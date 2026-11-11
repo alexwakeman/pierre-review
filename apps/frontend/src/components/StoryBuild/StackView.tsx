@@ -16,7 +16,7 @@ import {
 import { parseGitPatch } from '../../lib/diff.js';
 import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionTurnRunning } from '../../lib/sandboxSession.js';
-import { storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
+import { branchExistsFor, buildBranchNames, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { PrCardChips, PrCardFrame, PrCardMeta, PrCardTitle, CARD_NEUTRAL_CHIP, CARD_RED_CHIP, CARD_TONE_CHIP } from '../Activity/PrCardShell.js';
@@ -26,6 +26,7 @@ import { ChevronIcon, ExternalLinkIcon, PullRequestIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
+import { RenameBranch } from './RenameBranch.js';
 
 // THE STACK VIEW ("Implement, plan first"; docs/STORY-BUILD.md § Push, docs/FRONTEND.md § The build tab):
 // after Approve the build follows the approved PR stack, so the changes are shown PER PLANNED PULL
@@ -34,6 +35,8 @@ import { CheckboxBox } from '../ui/FormControls.js';
 // opened — and Push. Push shows only once the PRs it builds on are pushed (lib/buildPlan.ts
 // `prPushState`; the server checks again). "Push all" pushes every ready one in plan order. Draft by
 // default. A session without planned PRs (before plan first) keeps BuildSection's per-repository cards.
+// After BRANCH_EXISTS, that PR's Push becomes a new branch name + Push (`RenameBranch`); the PRs stacked
+// on it then build on the new branch (the host reads the pushed branch).
 
 function errorOf(err: unknown): string | null {
   if (err == null) return null;
@@ -55,6 +58,8 @@ export function StackView({ build, session, draft, setDraft }: { build: StoryBui
   const groups = prsByRepo(prs);
   const anyReady = ready > 0;
   const allErr = push.variables?.prId == null ? errorOf(push.error) : null;
+  const tried = push.variables?.branch;
+  const taken = [...buildBranchNames(build), ...(tried != null ? [tried] : [])];
   return (
     <div data-testid="story-build-stack">
       <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -101,7 +106,13 @@ export function StackView({ build, session, draft, setDraft }: { build: StoryBui
                   total={prs.length}
                   draft={draft}
                   disabled={busy || running}
-                  onPush={() => push.mutate({ id: build.id, prId: p.id, draft })}
+                  taken={taken}
+                  branchExists={
+                    // A refused NEW name keeps the field: Push would retry the old one.
+                    (tried != null && push.variables?.prId === p.id && results.get(p.id)?.outcome !== 'pushed') ||
+                    branchExistsFor(results.get(p.id)?.code, p.pushErrorCode)
+                  }
+                  onPush={(branch) => push.mutate({ id: build.id, prId: p.id, draft, ...(branch != null ? { branch } : {}) })}
                   pushError={resultLine(results.get(p.id)) ?? (push.variables?.prId === p.id ? errorOf(push.error) : null)}
                 />
               ))}
@@ -120,6 +131,8 @@ function PrCard({
   total,
   draft,
   disabled,
+  taken,
+  branchExists,
   onPush,
   pushError,
 }: {
@@ -129,7 +142,11 @@ function PrCard({
   total: number;
   draft: boolean;
   disabled: boolean;
-  onPush: () => void;
+  taken: readonly string[];
+  /** The last push said the branch exists on GitHub: offer a new name instead of Push. */
+  branchExists: boolean;
+  /** `branch`: the new name (the rename); absent, the planned branch. */
+  onPush: (branch?: string) => void;
   pushError: string | null;
 }): JSX.Element {
   const titleId = useId();
@@ -189,10 +206,13 @@ function PrCard({
             {diffOpen && <PrDiff build={build} pr={pr} />}
           </div>
         )}
-        {pr.status === 'ready' && (
+        {pr.status === 'ready' && state.canPush && branchExists && (
+          <RenameBranch branch={pr.branch} taken={taken} draft={draft} disabled={disabled} actionId={`push-pr-renamed-${pr.id}`} onPush={(b) => onPush(b)} />
+        )}
+        {pr.status === 'ready' && !(state.canPush && branchExists) && (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-noactivate>
             {state.canPush ? (
-              <Button variant="primary" size="sm" icon={<PullRequestIcon size={12} />} disabled={disabled} data-story-build-action={`push-pr-${pr.id}`} onClick={onPush}>
+              <Button variant="primary" size="sm" icon={<PullRequestIcon size={12} />} disabled={disabled} data-story-build-action={`push-pr-${pr.id}`} onClick={() => onPush()}>
                 {draft ? 'Push as draft' : 'Push'}
               </Button>
             ) : (

@@ -137,6 +137,8 @@ describe('tierFor — implement story', () => {
     expect(tiers('GET', '/api/story-builds/7/stream')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/7/repos/3/diff')).toEqual(['read']);
     expect(tiers('POST', '/api/story-builds/7/discard')).toEqual(['read']);
+    // The automatic push's switch is DB only (the push it arms runs on the host after a build turn).
+    expect(tiers('POST', '/api/story-builds/7/auto-push')).toEqual(['read']);
   });
   it('bills a workspace session turn, Start build and Resume as AI; Stop, Allow and the diff are read', async () => {
     expect(tiers('POST', '/api/story-builds/7/messages')).toEqual(['ai', 'ai_hourly']);

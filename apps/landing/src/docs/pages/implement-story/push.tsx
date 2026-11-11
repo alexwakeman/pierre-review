@@ -37,7 +37,8 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        When the build ends, each planned pull request has its own diff, ready to review. Nothing has left your computer.{' '}
+        When the build ends, each planned pull request has its own diff, ready to review. Nothing has left your computer,
+        unless you chose <DocLink to="implement-story/push#push-automatically">Push automatically</DocLink>.{' '}
         <Ui>Push</Ui> sends one pull request's changes to a new branch on GitHub and opens the pull request, from your
         computer, under your GitHub account.
       </p>
@@ -73,6 +74,29 @@ export default function Page(): JSX.Element {
         Push writes to GitHub under your name: a new branch, one commit by you, and a new pull request. It never pushes to
         your default branch and never forces. If the branch already exists on GitHub, Push refuses and says so.
       </Warning>
+
+      <H2 id="branch-exists">When the branch already exists</H2>
+      <p>
+        An earlier session may have pushed the same branch, for example <b>limn/PAY-142</b>. Push then says so, and the
+        pull request shows a <Ui>New branch</Ui> field in place of the button, filled in with a free name such as{' '}
+        <b>limn/PAY-142-v2</b>. Change it if you like and press <Ui>Push</Ui>. Limn checks the name and still never
+        overwrites a branch. In a stack, the pull requests after it build on the new branch.
+      </p>
+
+      <H2 id="push-automatically">Push automatically</H2>
+      <p>
+        Tick <Ui>Push and open the pull request when the build finishes</Ui> before you start, or later in the tab until
+        anything is pushed. It is off by default. When a build finishes, Limn then does what <Ui>Push all</Ui> does, once,
+        and opens each pull request ready for review, not as a draft. It uses your GitHub login, as Push does.
+      </p>
+      <ul>
+        <li>A build you stopped, or one that failed, is not pushed. Press Push yourself.</li>
+        <li>If the push fails, the tab says why. A branch that already exists gets the New branch field above.</li>
+        <li>
+          Limn's own auto review skips pull requests Limn opened. Start a review on it yourself: see{' '}
+          <DocLink to="ai-review/run-a-review">Run a review</DocLink>.
+        </li>
+      </ul>
 
       <H2 id="what-is-pushed">What is pushed</H2>
       <ul>

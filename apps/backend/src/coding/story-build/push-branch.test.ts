@@ -182,6 +182,20 @@ describe('applyAndPushBranch — the no-PR push', () => {
     T.branchExists = false;
   });
 
+  it('a READER-TYPED rename (after BRANCH_EXISTS) gets the same checks first: refused names never reach GitHub', async () => {
+    T.refReads.length = 0;
+    for (const branch of ['-x', '/x', 'x/', 'a b', 'x.lock', 'MAIN', 'a//b', 'HEAD']) {
+      await expect(applyAndPushBranch(args({ branch })), branch).rejects.toMatchObject({ code: 'PUSH_DENIED' });
+    }
+    expect(T.refReads).toEqual([]);
+    expect(T.prepped).toEqual([]);
+    // A good new name pushes as any branch does: new, never forced, the PR opened on it (ready when asked).
+    const r = await applyAndPushBranch(args({ branch: 'limn/acme-214-v2', draft: false }));
+    expect(r.pushedBranch).toBe('limn/acme-214-v2');
+    expect(T.refReads).toEqual(['/repos/acme/web/git/ref/heads/limn/acme-214-v2']);
+    expect(T.prs[0]).toMatchObject({ head: 'limn/acme-214-v2', draft: false });
+  });
+
   it('a patch that does not apply is APPLY_FAILED, nothing pushed', async () => {
     await expect(applyAndPushBranch(args({ patch: 'diff --git a/nope b/nope\n--- a/nope\n+++ b/nope\n@@ -1 +1 @@\n-a\n+b\n' }))).rejects.toMatchObject({ code: 'APPLY_FAILED' });
     expect(T.pushed).toEqual([]);

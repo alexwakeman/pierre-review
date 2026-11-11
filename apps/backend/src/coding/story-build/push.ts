@@ -4,10 +4,12 @@ import {
   isTrackerIdent,
   parseTicketIdent,
   trackerTicketRow,
+  type LimnActionOrigin,
   type StoryBuildRepoPushResult,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { applyAndPushBranch } from '../git-ops.js';
+import { assertPushTarget } from '../git.js';
 import { getViewerCanPush } from '../ai-fix/pr-context.js';
 import { dropSessionBaseRefs } from './base-refs.js';
 import { releaseStoryBuildWorktree } from './kept-worktree.js';
@@ -22,8 +24,9 @@ import {
 } from './persist.js';
 import type { PushRepoArgs, PushRepoFn } from './seams.js';
 
-// PUSH ONE REPOSITORY — WORK PACKAGE 2 (docs/STORY-BUILD.md § Push). Only ever on the reader's press
-// (routes-build.ts: Push, Push all). Stateless like AI Fix's push: a FRESH worktree at the stored base,
+// PUSH ONE REPOSITORY — WORK PACKAGE 2 (docs/STORY-BUILD.md § Push). On the reader's press (routes-build.ts:
+// Push, Push all), or — when the reader ticked "Push and open the pull request when the build finishes" —
+// once by the host after the build (auto-push.ts, origin 'auto'). Stateless like AI Fix's push: a FRESH worktree at the stored base,
 // the stored patch applied, ONE commit, a NEW branch (never forced; `BRANCH_EXISTS` refused with a
 // sentence; the default branch and a stacked PR's head are protected), then a NEW pull request —
 // a DRAFT unless the reader asked otherwise (owner decision 2):
@@ -284,7 +287,24 @@ export async function linkTicket(ctx: AgentContext, accountId: number, repoId: n
   }
 }
 
+/**
+ * A RENAME (`branch` on the push body) is judged by git's rules FIRST, before any lookup (the protected
+ * names of this push are checked again inside applyAndPushBranch). The refusal's sentence, or null.
+ * Never recorded on the row: a refused rename must not hide the stored BRANCH_EXISTS (and its field).
+ */
+export async function renameRefusal(branch: string | undefined): Promise<string | null> {
+  if (branch === undefined) return null;
+  try {
+    await assertPushTarget(branch, []);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 export const pushRepo: PushRepoFn = async (ctx, a: PushRepoArgs) => {
+  const refused = await renameRefusal(a.branch);
+  if (refused != null) return result(a.repoId, 'failed', 'PUSH_DENIED', refused);
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
   if (!build) return result(a.repoId, 'failed', 'NotFound', 'Build not found.');
   const repo = await getStoryBuildRepoRow(ctx, a.accountId, a.buildId, a.repoId);
@@ -310,14 +330,19 @@ export const pushRepo: PushRepoFn = async (ctx, a: PushRepoArgs) => {
 
 async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuildRow, repo: StoryBuildRepoRow): Promise<StoryBuildRepoPushResult> {
   const recordError = async (code: string, message: string): Promise<StoryBuildRepoPushResult> => {
-    await updateStoryBuildRepo(ctx, a.accountId, repo.id, { pushError: message }).catch(() => {});
+    // A failed RENAME keeps the stored code: the row's own branch still exists, so the field stays.
+    const keepCode = a.branch !== undefined && code !== 'BRANCH_EXISTS';
+    await updateStoryBuildRepo(ctx, a.accountId, repo.id, { pushError: message, ...(keepCode ? {} : { pushErrorCode: code }) }).catch(() => {});
     return result(a.repoId, 'failed', code, message);
   };
 
   if (!(await getViewerCanPush(ctx, a.accountId, repo.repoId))) {
     return recordError('NO_PUSH_PERMISSION', 'You cannot push to this repository.');
   }
-  const branch = (repo.branch ?? '').trim();
+  // THE BRANCH: the reader's rename for this push (after BRANCH_EXISTS), else the row's. A rename passed
+  // git's rules in `renameRefusal` before any lookup; the protected names are checked in applyAndPushBranch.
+  // Stored on the row only once it lands.
+  const branch = (a.branch ?? repo.branch ?? '').trim();
   if (!branch) return recordError('BRANCH_REQUIRED', 'Name the branch to push.');
 
   const names = await storyBuildRepoNames(ctx, a.accountId, [repo.repoId]);
@@ -367,12 +392,13 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
       draft: a.draft,
       protect,
       afterSync: (prNumber) => linkTicket(ctx, a.accountId, repo.repoId, prNumber, build.ident),
-      // Implement's work is Limn's: the reader pressed Push on what Limn built.
-      limnRun: { origin: 'reader_pressed', source: { table: 'story_builds', id: build.id } },
+      // Implement's work is Limn's: the reader pressed Push on what Limn built (or ticked the automatic push).
+      limnRun: { origin: a.origin ?? 'reader_pressed', source: { table: 'story_builds', id: build.id } },
     });
     // ── The PR exists: record it, release the kept worktree. Nothing below may fail the push. ──
     await updateStoryBuildRepo(ctx, a.accountId, repo.id, {
       status: 'pushed',
+      branch,
       pushedBranch: pushed.pushedBranch,
       pushedPrNumber: pushed.prNumber,
       pushedPrUrl: pushed.prUrl,
@@ -381,6 +407,7 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
       prTitle: title,
       prBody: body,
       pushError: null,
+      pushErrorCode: null,
     }).catch((err: unknown) => ctx.log.warn({ err }, 'story build: recording a push failed'));
     void releaseStoryBuildWorktree(fullName, repo.worktreePath);
     // Every included repository pushed: the session's pinned base commits are needed no more.
@@ -397,9 +424,11 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
     }
     if (code === 'PR_NOT_OPENED') {
       await updateStoryBuildRepo(ctx, a.accountId, repo.id, {
+        branch,
         pushedBranch: branch,
         pushedCommitSha: (err as { commitSha?: string }).commitSha ?? null,
         pushError: message,
+        pushErrorCode: code,
       }).catch(() => {});
       return result(a.repoId, 'failed', code, message);
     }
@@ -415,7 +444,7 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
  */
 export async function pushAllRepos(
   ctx: AgentContext,
-  a: { accountId: number; buildId: number; draft: boolean; push?: PushRepoFn },
+  a: { accountId: number; buildId: number; draft: boolean; push?: PushRepoFn; origin?: LimnActionOrigin },
 ): Promise<StoryBuildRepoPushResult[] | null> {
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
   if (!build) return null;
@@ -424,7 +453,7 @@ export async function pushAllRepos(
   const out: StoryBuildRepoPushResult[] = [];
   for (const r of rows) {
     if (!r.include || r.status !== 'ready') continue;
-    out.push(await push(ctx, { accountId: a.accountId, buildId: a.buildId, repoId: r.repoId, draft: a.draft }));
+    out.push(await push(ctx, { accountId: a.accountId, buildId: a.buildId, repoId: r.repoId, draft: a.draft, ...(a.origin ? { origin: a.origin } : {}) }));
   }
   return out;
 }

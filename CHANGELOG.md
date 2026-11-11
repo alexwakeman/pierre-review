@@ -13,6 +13,18 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Implement story and Fill gaps: a new box, "Push and open the pull request when the build finishes". Off by
+  default. When ticked, Limn pushes the build once it finishes and opens the pull request ready for review, with your
+  GitHub login. You can change it in the tab until anything is pushed. Limn's own auto review skips pull requests
+  Limn opened, so start a review on it yourself.
+
+### Fixed
+
+- Implement story: when the branch already exists on GitHub, Push now offers a new branch name (such as
+  limn/PAY-142-v2) and pushes to it. Before, there was no way past it.
+
 ## [1.0.26] - 2026-11-11
 
 ### Changed

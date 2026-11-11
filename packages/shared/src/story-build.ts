@@ -398,6 +398,8 @@ export interface StoryBuildRepo {
   /** ISO. */
   pushedAt: string | null;
   pushError: string | null;
+  /** The code beside `pushError` (`BRANCH_EXISTS` ⇒ the tab offers a new branch name); null otherwise. */
+  pushErrorCode?: string | null;
   provider?: AiProviderId;
   model: string | null;
   effort: string | null;
@@ -454,6 +456,14 @@ export interface StoryBuild {
   sessionBudgetUsd: number;
   /** Derived: every ready repository is pushed (status stays `ready`). */
   pushedAll: boolean;
+  /** "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically). */
+  autoPush?: boolean;
+  /** ISO: when the automatic push was claimed (it runs once per build); null before. */
+  autoPushAt?: string | null;
+  /** Why the automatic push did not land (one sentence; the item's own `pushError`/`pushErrorCode` say more). */
+  autoPushError?: string | null;
+  /** The automatic push is running in this process right now (never stored: a restart ends it). */
+  autoPushRunning?: boolean;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
@@ -499,6 +509,38 @@ export interface StoryBuildDiscardResponse {
 /** `POST …/repos/:repoId/push` and `POST …/push`. Draft unless `draft === false` (owner decision 2). */
 export interface StoryBuildPushBody {
   draft?: boolean;
+  /**
+   * A NEW branch name for this one push (the recovery from `BRANCH_EXISTS`). Only on the single-item
+   * routes: `…/repos/:repoId/push` of a build without planned PRs, and `…/prs/:prId/push`; Push all and a
+   * planned build's per-repository push refuse it (400). At most STORY_BUILD_BRANCH_MAX characters; the
+   * host checks it like every push target (git's rules, never a protected or planned branch) and still
+   * refuses a branch that already exists. Never forced.
+   */
+  branch?: string;
+}
+
+/** `POST …/auto-push`: switch "Push and open the pull request when the build finishes" on or off. */
+export interface StoryBuildAutoPushBody {
+  on: boolean;
+}
+
+/** 200 — the option as stored. 409 `NotReady` once the build pushed or the automatic push started. */
+export interface StoryBuildAutoPushResponse {
+  autoPush: boolean;
+}
+
+/**
+ * A branch name to suggest after `BRANCH_EXISTS`: `<branch>-v2`, `-v3`, … — the first not in `taken`
+ * (the build's own branches; a plan's PR branches are `<branch>-2`, `-3`, so `-vN` never collides).
+ */
+export function storyBuildFreeBranch(branch: string, taken: readonly string[] = []): string {
+  const base = branch.replace(/-v\d+$/, '');
+  const used = new Set([branch, ...taken].map((b) => b.toLowerCase()));
+  for (let n = 2; n < 1000; n++) {
+    const cand = `${base}-v${n}`.slice(0, STORY_BUILD_BRANCH_MAX);
+    if (!used.has(cand.toLowerCase())) return cand;
+  }
+  return `${base}-v${Date.now().toString(36)}`.slice(0, STORY_BUILD_BRANCH_MAX);
 }
 
 /** The default for `StoryBuildPushBody.draft`. */
@@ -547,6 +589,8 @@ export const STORY_BUILD_API = {
   /** Plan first: one planned PR's patch, and its push (a stacked PR: the previous one first). */
   prDiff: '/api/story-builds/:id/prs/:prId/diff',
   prPush: '/api/story-builds/:id/prs/:prId/push',
+  /** "Push and open the pull request when the build finishes" — on or off, until the build pushed. */
+  autoPush: '/api/story-builds/:id/auto-push',
 } as const;
 
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;
