@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.29] - 2026-11-12
+
 ### Added
 
 - AI Fix: up to three fixes now run at once. When every sandbox is busy, a fix (yours or an auto fix) waits in
