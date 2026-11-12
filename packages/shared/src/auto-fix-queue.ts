@@ -23,6 +23,7 @@ export type AutoFixQueueReason =
   | 'review_running'
   | 'review_due'
   | 'fix_running'
+  | 'push_settling'
   | 'sandbox_busy'
   | 'over_budget'
   | 'no_sandbox'
@@ -58,6 +59,7 @@ export const AUTO_FIX_QUEUE_LINE: Record<AutoFixQueueReason, string> = {
   review_running: 'Waiting for the AI review of this commit, so one fix covers both.',
   review_due: 'Waiting for the AI review of this commit, so one fix covers both.',
   fix_running: 'A fix is running. The next one starts when it ends, from what is still open then.',
+  push_settling: 'Waiting for the pushed fix to reach the pull request.',
   sandbox_busy: 'Waiting for a free sandbox.',
   over_budget: 'Paused: the AI spend limit is reached.',
   no_sandbox: 'Paused: no container runtime is running on this computer.',

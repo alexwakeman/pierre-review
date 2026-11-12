@@ -188,7 +188,7 @@ describe.skipIf(!daemon)('the mirror in a real sandbox', () => {
     for (const r of repos) {
       const dir = `${FOLDER}/${r.name}`;
       expect(await sh('git rev-parse HEAD; git branch --show-current; git remote; git rev-parse refs/limn/base; git status --porcelain | wc -l', dir)).toBe(
-        [caches.get(r.name)!.sha, 'limn/bmd-1', caches.get(r.name)!.sha, '0'].join('\n'),
+        [caches.get(r.name)!.sha, 'BMD-1', caches.get(r.name)!.sha, '0'].join('\n'),
       );
     }
     expect(await sh(`cat ${FOLDER}/bng-metric-harness/README.md`)).toBe('# Harness second');
@@ -205,6 +205,6 @@ describe.skipIf(!daemon)('the mirror in a real sandbox', () => {
   }, 60_000);
 
   it('gives a commit back as a patch against the base', async () => {
-    await sh('echo "new" > NEW.md && git add NEW.md && git commit -qm "Add NEW" && git format-patch --stdout refs/limn/base..limn/bmd-1 | grep -c "^+new$"', harness);
+    await sh('echo "new" > NEW.md && git add NEW.md && git commit -qm "Add NEW" && git format-patch --stdout refs/limn/base..BMD-1 | grep -c "^+new$"', harness);
   }, 60_000);
 });

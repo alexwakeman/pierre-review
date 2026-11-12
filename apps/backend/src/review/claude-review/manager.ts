@@ -109,6 +109,7 @@ import { ensureSonarSnapshot } from '../../sonar/snapshot.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
 import { openPointsForPrompt, reconcileOpenPoints, type OpenPointsPlan } from './open-points.js';
 import { cleanPushSummary, planPushes, previousFullReviewHead } from './push-summary.js';
+import { bindAutoFixQueueFacts } from '../../coding/ai-fix/auto-fix-queue.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -513,6 +514,9 @@ function readManualSeen(ctx: AgentContext, item: QueueItem, providers: AgentProv
 export function reviewHeldForPr(prId: number): boolean {
   return claimed.has(prId) || startingAuto.has(prId) || autoPending.some((a) => a.prId === prId);
 }
+
+// THE AUTO FIX QUEUE: a review of the PR queued or running (coding/ai-fix/auto-fix-queue.ts).
+bindAutoFixQueueFacts({ reviewHeld: reviewHeldForPr });
 
 /**
  * TEAM CLAIMS — may a GitHub line for `provider` at `headSha` on this PR still be held by a run of

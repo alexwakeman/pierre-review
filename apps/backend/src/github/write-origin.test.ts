@@ -57,6 +57,7 @@ const MUTATIONS_READS = new Set([
   'fetchCommitParents',
   'isCommitContainedInRef',
   'fetchPrHeadCheckRollup',
+  'fetchPrHeadCheckCounts',
   'fetchRepoMergeConfig',
   'fetchPrUnifiedDiff',
   'filesToUnifiedDiff',

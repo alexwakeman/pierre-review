@@ -158,7 +158,7 @@ describe.skipIf(!daemon)('a workspace session, live', () => {
     const id = start.json().buildId as number;
     const ready = await until(id, (b) => b.session?.phase === 'ready', 'ready', 10 * 60_000);
     const tReady = Date.now();
-    expect(ready.session!.repos).toEqual([{ repoId, fullName: 'limn-test/tiny', path: '/workspace/limn-test/tiny', branch: 'limn/tiny-1', baseSha: expect.stringMatching(/^[0-9a-f]{40}$/) }]);
+    expect(ready.session!.repos).toEqual([{ repoId, fullName: 'limn-test/tiny', path: '/workspace/limn-test/tiny', branch: 'TINY-1', baseSha: expect.stringMatching(/^[0-9a-f]{40}$/) }]);
 
     expect((await post(`/api/story-builds/${id}/messages`, { text: 'In one short sentence: which files are in the repository?' })).statusCode).toBe(202);
     const chatted = await until(id, (b) => b.session?.phase === 'ready' && b.session.conversation.some((c) => c.kind === 'turn'), 'the chat turn', 5 * 60_000);

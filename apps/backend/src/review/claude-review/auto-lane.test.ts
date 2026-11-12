@@ -81,12 +81,13 @@ vi.mock('../../tracker/ticket-source.js', () => ({
 }));
 let aiReady = true;
 vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
-// AUTO FIX: the manager hands every SUCCEEDED auto run to auto-fix.ts (which owns the gate).
-const autoFixCalls: Array<{ accountId: number; prId: number; reviewId: number }> = [];
-vi.mock('../../coding/ai-fix/auto-fix.js', () => ({
-  maybeStartAutoFix: async (_ctx: unknown, input: { accountId: number; prId: number; reviewId: number }) => {
+// AUTO FIX: the manager hands every SUCCEEDED auto run to THE AUTO FIX QUEUE (which owns the decision).
+const autoFixCalls: Array<{ accountId: number; prId: number; cause: string }> = [];
+vi.mock('../../coding/ai-fix/auto-fix-queue.js', () => ({
+  bindAutoFixQueueFacts: () => {},
+  evaluateAutoFix: async (_ctx: unknown, input: { accountId: number; prId: number; cause: string }) => {
     autoFixCalls.push(input);
-    return { status: 'not_own' };
+    return null;
   },
 }));
 
@@ -271,7 +272,8 @@ describe('the auto-fix hook', () => {
     expect(m.enqueueAutoReview(ctx, 1, 81)).toBe('queued');
     await flush();
     const row = inserted.find((r) => r.prId === 81)!;
-    expect(autoFixCalls).toEqual([{ accountId: 1, prId: 81, reviewId: row.id }]);
+    expect(autoFixCalls).toEqual([{ accountId: 1, prId: 81, cause: 'review' }]);
+    void row;
     // A run that fails (prepare throws) never reaches auto fix.
     (ctx as any).review.prepareReview = async () => {
       throw new Error('boom');

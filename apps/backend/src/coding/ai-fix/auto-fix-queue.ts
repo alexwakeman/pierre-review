@@ -88,23 +88,24 @@ const defaultDeps: AutoFixQueueDeps = {
   },
 };
 
-// The in-process facts the managers hold (loaded lazily: the managers import this module's callers).
+// The in-process facts the managers hold. ⚠ REGISTERED BY THE MANAGERS when they load
+// (`bindAutoFixQueueFacts`): the queue never imports a manager, which would make its fire-and-forget import
+// chain wait on the managers' own (a fix's close then never reached its automatic push).
 let fixRunningNow: (prId: number) => boolean = () => false;
 let reviewHeldNow: (prId: number) => boolean = () => false;
 let reviewWaitingNow: (prId: number, accountId: number) => boolean = () => false;
 let ciHeldNow: (accountId: number, prId: number) => boolean = () => false;
 
-async function bindManagers(): Promise<void> {
-  const [fix, review, auto, ci] = await Promise.all([
-    import('./manager.js'),
-    import('../../review/claude-review/manager.js'),
-    import('../../review/claude-review/auto.js'),
-    import('../../review/ci-review/manager.js'),
-  ]);
-  fixRunningNow = fix.isFixRunning;
-  reviewHeldNow = review.reviewHeldForPr;
-  reviewWaitingNow = (p, a) => auto.autoReviewWaiting(p, a) != null;
-  ciHeldNow = ci.ciReviewHeld;
+export function bindAutoFixQueueFacts(f: {
+  fixRunning?: (prId: number) => boolean;
+  reviewHeld?: (prId: number) => boolean;
+  reviewWaiting?: (prId: number, accountId: number) => boolean;
+  ciReviewHeld?: (accountId: number, prId: number) => boolean;
+}): void {
+  if (f.fixRunning) fixRunningNow = f.fixRunning;
+  if (f.reviewHeld) reviewHeldNow = f.reviewHeld;
+  if (f.reviewWaiting) reviewWaitingNow = f.reviewWaiting;
+  if (f.ciReviewHeld) ciHeldNow = f.ciReviewHeld;
 }
 
 // ---- the state (in memory; the sweep re-derives it) --------------------------------------------------------
@@ -135,7 +136,7 @@ export function _resetAutoFixQueueForTest(): void {
   inFlight.clear();
 }
 
-const TRANSIENT: ReadonlySet<AutoFixQueueReason> = new Set(['sandbox_busy', 'over_budget', 'no_sandbox', 'fix_running', 'ci_running', 'ci_review', 'review_running', 'review_due']);
+const TRANSIENT: ReadonlySet<AutoFixQueueReason> = new Set(['push_settling', 'sandbox_busy', 'over_budget', 'no_sandbox', 'fix_running', 'ci_running', 'ci_review', 'review_running', 'review_due']);
 const SKIP_REASON: Partial<Record<ClaudeAutoFixSkipReason, AutoFixQueueReason>> = {
   fix_in_progress: 'fix_running',
   fix_waiting: 'fix_waiting',
@@ -199,17 +200,18 @@ async function ciReviewAtHead(ctx: AgentContext, accountId: number, prId: number
   return rows[0] ? { id: rows[0].id, status: rows[0].status } : { id: null, status: 'none' };
 }
 
-async function latestFixSig(ctx: AgentContext, accountId: number, prId: number): Promise<string> {
+async function latestFix(ctx: AgentContext, accountId: number, prId: number): Promise<{ sig: string; pushedFrom: string | null }> {
   const { aiFixes: af } = ctx.schema;
   const rows = (await ctx.db
-    .select({ id: af.id, status: af.status, pushedAt: af.pushedAt })
+    .select({ id: af.id, status: af.status, pushedAt: af.pushedAt, baseSha: af.baseSha })
     .from(af)
     .where(and(eq(af.accountId, accountId), eq(af.prId, prId)))
     .orderBy(desc(af.id))
     .limit(1)
-    .execute()) as Array<{ id: number; status: string; pushedAt: unknown }>;
+    .execute()) as Array<{ id: number; status: string; pushedAt: unknown; baseSha: string }>;
   const r = rows[0];
-  return r ? `${r.id}:${r.status}:${r.pushedAt == null ? 0 : 1}` : '-';
+  if (!r) return { sig: '-', pushedFrom: null };
+  return { sig: `${r.id}:${r.status}:${r.pushedAt == null ? 0 : 1}`, pushedFrom: r.pushedAt != null ? r.baseSha : null };
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -231,7 +233,6 @@ export async function evaluateAutoFix(
   if (inFlight.has(key)) return entries.get(key)?.state ?? null;
   inFlight.add(key);
   try {
-    if (deps === defaultDeps) await bindManagers();
     if (!(await deps.isOwn(ctx, accountId, prId))) {
       entries.delete(key);
       return null;
@@ -246,7 +247,8 @@ export async function evaluateAutoFix(
     const prev = entries.get(key);
     const e: Entry = prev && prev.head === head ? prev : { state: prev?.state as AutoFixQueueState, head, ciWaitFrom: null, ciReviewWaitFrom: null, readyAt: null, sig: '' };
 
-    const [rev, ci, fixSig] = await Promise.all([reviewAtHead(ctx, accountId, prId, head), ciReviewAtHead(ctx, accountId, prId, head), latestFixSig(ctx, accountId, prId)]);
+    const [rev, ci, last] = await Promise.all([reviewAtHead(ctx, accountId, prId, head), ciReviewAtHead(ctx, accountId, prId, head), latestFix(ctx, accountId, prId)]);
+    const fixSig = last.sig;
     const running = deps.fixRunning(prId);
     const sig = [head, pr.ciStatus ?? '', rev.anyId ?? '', rev.autoSucceededId ?? '', ci.id ?? '', ci.status, fixSig, running ? 1 : 0].join('|');
 
@@ -274,6 +276,9 @@ export async function evaluateAutoFix(
 
     // 1. A fix runs: the next one waits for it (and is read again at the head it leaves).
     if (running) return wait('fix_running', null);
+    // 1½. The last fix was PUSHED from this very head: the synced head has not caught up with the push yet.
+    // Deciding now would read that head's review and CI causes again and fix them twice.
+    if (last.pushedFrom === head) return wait('push_settling', null);
 
     // 2. The head's CI jobs, live (only when the synced rollup is not a final green / absent).
     const ciSynced = pr.ciStatus ?? '';

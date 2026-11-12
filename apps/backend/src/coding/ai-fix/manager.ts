@@ -54,6 +54,7 @@ import {
   type FixDiscardResult,
 } from '../../sandbox/session/fix.js';
 import type { SessionKey } from '../../sandbox/session/subject.js';
+import { bindAutoFixQueueFacts } from './auto-fix-queue.js';
 
 export { subscribeFixStream } from './stream.js';
 
@@ -562,6 +563,9 @@ export function requestFixCancel(ctx: AgentContext, accountId: number, prId: num
 export function isFixRunning(prId: number): boolean {
   return fixHoldsPr(prId);
 }
+
+// THE AUTO FIX QUEUE reads this manager's claim through its registration (it never imports a manager).
+bindAutoFixQueueFacts({ fixRunning: isFixRunning });
 
 export async function getFixStatus(ctx: AgentContext, accountId: number, prId: number): Promise<AiFixStatusResponse> {
   // The DB lookup goes FIRST, and it is what establishes ownership: the in-memory claims are keyed by

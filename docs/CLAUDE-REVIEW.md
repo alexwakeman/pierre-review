@@ -4690,6 +4690,8 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
 
 1. a fix RUNS on the PR ⇒ `fix_running` (the queue). The next decision is made at the PR's CURRENT head: what
    the fix fixed and pushed is no longer in the review or CI review of that head — the re-validation;
+   1½. the latest fix was PUSHED from the synced head ⇒ `push_settling` until the sync sees the new head
+   (else that head's review and CI causes would be fixed a second time);
 2. the head's CI jobs STILL RUN ⇒ `ci_running`, at most `AUTO_FIX_CI_WAIT_MAX_MS` (45 min). A LIVE read
    (`github/mutations.ts fetchPrHeadCheckCounts`, the rollup query counted per context, Limn's lines out),
    asked only when the synced `ci_status` is pending / expected / failure / error: the synced rollup reads
@@ -4705,7 +4707,9 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
    `fix_in_progress`) are WAITS the sweep retries; the rest (`fix_waiting`, `cap`, `already_tried`,
    `nothing_to_fix`) end until the PR's facts change.
 
-The state is IN MEMORY (a restart restarts the wait clocks; the sweep re-derives the rest within a minute).
+The managers REGISTER their in-process facts (`bindAutoFixQueueFacts`: a fix running, a review queued or
+settling, a CI review held) when they load; ⚠ the queue never imports a manager — its fire-and-forget import
+chain then waited on theirs, and a fix's close never reached its automatic push. The state is IN MEMORY (a restart restarts the wait clocks; the sweep re-derives the rest within a minute).
 The sweep skips a PR whose signature (head, synced CI, the head's review and CI review rows, the latest fix,
 a fix running) did not change since a FINAL decision, so it never starts the same fix twice. Each fix is its
 own run, commit and — under Push automatically — push. **Shown**: the AI Review tab's "Auto fix" section

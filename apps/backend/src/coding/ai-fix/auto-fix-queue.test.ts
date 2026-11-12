@@ -142,6 +142,17 @@ describe('the auto fix queue', () => {
     expect(starts).toEqual([]);
   });
 
+  it('a fix pushed from this head waits for the push to reach the PR (never fixes the same head twice)', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    await aiReview(id);
+    await db
+      .insert(schema.aiFixes)
+      .values({ accountId: 1, repoId, prId: id, baseSha: 'h1', status: 'succeeded', model: 'm', seed: 'review', trigger: 'auto', pushedAt: new Date(NOW - 60_000), createdAt: new Date(NOW - 120_000) })
+      .execute();
+    expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'push_settling' });
+    expect(starts).toEqual([]);
+  });
+
   it('waits for the head’s CI jobs to finish (bounded), then goes on', async () => {
     const id = await pr({ ciStatus: 'failure' });
     await aiReview(id);

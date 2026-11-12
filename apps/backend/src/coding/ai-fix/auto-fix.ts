@@ -64,7 +64,8 @@ import {
   type ClaudeAutoFixSkipReason,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
-import { isFixRunning, loadCiOnlySeed, loadReviewSeed, startFix, startReviewFix } from './manager.js';
+import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
+import type { loadCiOnlySeed, startFix } from './manager.js';
 import { fixSandboxReadiness, type FixSandboxReadiness } from '../../sandbox/session/fix.js';
 import { fixRowHasWork } from '../../sandbox/session/fix-merge.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
@@ -184,7 +185,11 @@ async function liveHeadSha(ctx: AgentContext, accountId: number, prId: number): 
   }
 }
 
-const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, loadCiOnlySeed, startFix, isFixRunning, liveHeadSha, sandbox: fixSandboxReadiness };
+// The CI-ONLY source's two calls, loaded when used (a test that mocks manager.js need not name them).
+const lazyCiOnlySeed: typeof loadCiOnlySeed = async (...a) => (await import('./manager.js')).loadCiOnlySeed(...a);
+const lazyStartFix: typeof startFix = async (...a) => (await import('./manager.js')).startFix(...a);
+
+const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, loadCiOnlySeed: lazyCiOnlySeed, startFix: lazyStartFix, isFixRunning, liveHeadSha, sandbox: fixSandboxReadiness };
 
 // `not_auto`: the review was one a person started — an auto fix (which may then be pushed
 // automatically) follows AUTO reviews only. The manager already calls this for auto runs alone;
@@ -229,7 +234,7 @@ export async function maybeStartAutoFix(
       reviewId != null
         ? await deps.loadReviewSeed(ctx, { accountId, prId, reviewId, selection: { kind: 'sections', include } })
         : include.ciFailures
-          ? { review: null, seed: await (deps.loadCiOnlySeed ?? loadCiOnlySeed)(ctx, { accountId, prId, selection: { kind: 'sections', include } }) }
+          ? { review: null, seed: await (deps.loadCiOnlySeed ?? lazyCiOnlySeed)(ctx, { accountId, prId, selection: { kind: 'sections', include } }) }
           : { review: null, seed: { items: [], sentRefs: [], text: '' } };
     if (!loaded) return skip('not_started');
     if (loaded.review != null && loaded.review.trigger !== 'auto') return { status: 'not_auto' };
@@ -320,7 +325,7 @@ export async function maybeStartAutoFix(
     const r =
       reviewId != null
         ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include })
-        : await (deps.startFix ?? startFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include } });
+        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include } });
     if (r.status === 'queued') {
       const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'started', fixId: r.fixId };
       if (reviewId != null) record(accountId, outcome);

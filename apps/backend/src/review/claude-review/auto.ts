@@ -144,6 +144,7 @@ import {
   dropAutoReviews,
   enqueueAutoReview,
 } from './manager.js';
+import { bindAutoFixQueueFacts } from '../../coding/ai-fix/auto-fix-queue.js';
 
 export const AUTO_REVIEW_CRON = '* * * * *';
 
@@ -212,6 +213,9 @@ export function _resetAutoReReviewForTest(): void {
 export function autoReviewWaiting(prId: number, accountId: number): ClaudeAutoReviewWaiting | null {
   return waitingNow.get(`${accountId}:${prId}`) ?? null;
 }
+
+// THE AUTO FIX QUEUE: an auto review settling before it runs (coding/ai-fix/auto-fix-queue.ts).
+bindAutoFixQueueFacts({ reviewWaiting: (prId, accountId) => autoReviewWaiting(prId, accountId) != null });
 
 /** What `autoReviewDue` says while a PR is not due: a settle wait (shown in the Claude Review
  *  header), or one of the RETRY holds (a failed auto run at this head; not shown as a wait). */

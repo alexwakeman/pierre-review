@@ -50,11 +50,11 @@ vi.mock('../../platform/event-hooks.js', () => ({
   emitClaudeReviewCompleted: (e: Record<string, unknown>) => rec.signals.push(e),
 }));
 vi.mock('../../sonar/post.js', () => ({ maybeAutoPostSonar: async (_c: unknown, a: any) => void rec.sonar.push(a) }));
-vi.mock('../../coding/ai-fix/auto-fix.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../coding/ai-fix/auto-fix.js')>()),
-  maybeStartAutoFix: async (_c: unknown, a: any) => {
+vi.mock('../../coding/ai-fix/auto-fix-queue.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../coding/ai-fix/auto-fix-queue.js')>()),
+  evaluateAutoFix: async (_c: unknown, a: any) => {
     rec.fix.push(a);
-    return { status: 'not_own' };
+    return null;
   },
 }));
 vi.mock('../diagrams/trigger.js', () => ({
@@ -190,7 +190,8 @@ describe('a pair a restart interrupted', () => {
     expect(postReview).toHaveBeenCalledTimes(1);
     expect((await rowOf(first)).autoPost).toMatchObject({ status: 'posted', githubReviewId: 'R1' });
     expect(rec.sonar).toEqual([{ accountId: 1, prId, headSha: 'HEAD' }]);
-    expect(rec.fix).toEqual([{ accountId: 1, prId, reviewId: first }]);
+    expect(rec.fix).toEqual([{ accountId: 1, prId, cause: 'review' }]);
+    void first;
     await vi.waitFor(() => expect(rec.diagrams).toHaveLength(1));
     expect(rec.signals).toEqual([]);
 

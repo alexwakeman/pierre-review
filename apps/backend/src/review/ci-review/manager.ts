@@ -42,6 +42,7 @@ import { promptTools } from '../../ai/prompt-tools.js';
 import { reconcileCiReview, reconcileWithoutModel } from './reconcile.js';
 import type { SubmitCiReviewPayload } from './schema.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
+import { bindAutoFixQueueFacts } from '../../coding/ai-fix/auto-fix-queue.js';
 
 // THE CI REVIEW QUEUE — one run per PR at a time, beside the PR review's queue
 // (claude-review/manager.ts) and the ticket review's (ticket-review/manager.ts), and SEPARATE from
@@ -201,6 +202,9 @@ export function ciAutoLaneRoom(): number {
 export function ciReviewHeld(accountId: number, prId: number): boolean {
   return claimed.has(keyOf(accountId, prId));
 }
+
+// THE AUTO FIX QUEUE: a CI review of the PR queued or running (coding/ai-fix/auto-fix-queue.ts).
+bindAutoFixQueueFacts({ ciReviewHeld });
 
 // Fill free shared slots. A CI item yields to a waiting PR-review click; an automatic CI item yields
 // to anything waiting in the PR-review lanes.
