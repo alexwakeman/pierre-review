@@ -19,18 +19,21 @@ import {
   listWorkspaces,
   rehomeReposToDefault,
   renameWorkspace,
-  setWorkspaceRepoMode,
+  setRepoMembership,
 } from '../../db/queries.js';
 import { setWorkspacePendingMute } from '../../db/pending-mute.js';
+import { extraExternalRepoIdsIn } from '../../db/external-repos.js';
 import { getRelatedRepoPairs, setRelatedRepos } from '../../db/related-repos.js';
 import { setWorkspaceFlowSettings, setWorkspaceFlowView } from '../../db/flow-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { kickGithubIssuesCheck } from '../../tracker/index.js';
 import { refreshExternalRepoCadence } from '../../sync/sync-manager.js';
 
-// Workspaces (CORE): the ONE scope this app has. A workspace groups an account's repos, and a repo
-// belongs to EXACTLY ONE workspace — a database fact (`workspace_repos`, UNIQUE (account_id,
-// repo_id)). Every handler is accountId-scoped; id-addressed routes verify ownership (→ 404).
+// Workspaces (CORE): the ONE scope this app has. A workspace groups an account's repos. A repo has
+// EXACTLY ONE HOME workspace — a database fact (`workspace_repos`, UNIQUE (account_id, repo_id)) —
+// where it is Maintained or External, and may be External in any number of OTHER workspaces
+// (`workspace_external_repos`, migration 0191; docs/DATA-MODEL.md § External repos). Every handler
+// is accountId-scoped; id-addressed routes verify ownership (→ 404).
 //
 // ⚠ ASSIGNMENT IS A MOVE, NOT AN ADD, AND THERE IS NO "UNASSIGN". The old `DELETE
 // /api/teams/:id/repos/:repoId` route is GONE and must not come back: there is no "belongs to no
@@ -139,6 +142,14 @@ const pendingMuteSchema = {
   },
 };
 
+const repoParamsSchema = {
+  params: {
+    type: 'object',
+    required: ['id', 'repoId'],
+    properties: { id: { type: 'integer' }, repoId: { type: 'integer' } },
+  },
+};
+
 const repoModeSchema = {
   params: {
     type: 'object',
@@ -244,7 +255,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     if (repoIds !== undefined) {
       const target = new Set(repoIds);
       const toAdd = repoIds.filter((r) => !current.repoIds.includes(r));
-      const toRemove = current.repoIds.filter((r) => !target.has(r));
+      const dropped = current.repoIds.filter((r) => !target.has(r));
+      // A repo held here only through an EXTRA External row just leaves this workspace; its home
+      // is elsewhere and stays put. Only a HOME member is re-homed to Default.
+      const extraHere = new Set(await extraExternalRepoIdsIn(accountId, id));
+      const toRemove = dropped.filter((r) => !extraHere.has(r));
+      for (const r of dropped) if (extraHere.has(r)) await setRepoMembership(accountId, id, r, null);
       if (toAdd.length > 0) await assignReposToWorkspace(id, accountId, toAdd);
       if (toRemove.length > 0) await rehomeReposToDefault(accountId, toRemove);
       // Each repo joined a workspace (this one, or Default): check GitHub Issues use once, now.
@@ -312,10 +328,12 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     return { workspace };
   });
 
-  // EXTERNAL REPOS (docs/DATA-MODEL.md § External repos): how this workspace treats ONE member —
-  // 'watched' (the default) or 'external' (cloned for Implement and AI Fix, linked to tickets, only
-  // its project PRs on the boards, never in Reports, no automatic action). DB only, no GitHub call.
-  // 404 for a foreign workspace or a repo that is not a member of it. Echoes the refreshed workspace.
+  // ONE REPO IN THIS WORKSPACE (docs/DATA-MODEL.md § External repos): 'watched' (Maintained — at most
+  // one workspace per repo; making it Maintained here turns its old home External) or 'external'
+  // (cloned for Implement and AI Fix, linked to tickets, only its project PRs on the boards, never in
+  // Reports, no automatic action). A repo not yet in this workspace is ADDED with that mode; its
+  // other memberships stay. DB only, no GitHub call. 404 for a foreign workspace or repo. Echoes the
+  // refreshed workspace.
   app.put(
     '/api/workspaces/:id/repos/:repoId/mode',
     { schema: repoModeSchema },
@@ -323,11 +341,41 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       const accountId = accountIdOf(req);
       const { id, repoId } = req.params as { id: number; repoId: number };
       const { mode } = req.body as SetWorkspaceRepoModeBody;
-      if (!(await setWorkspaceRepoMode(accountId, id, repoId, mode))) {
+      if ((await setRepoMembership(accountId, id, repoId, mode)) === 'not_found') {
         reply.status(404);
-        return { error: 'NotFound', message: `Repository ${repoId} is not in workspace ${id}` };
+        return { error: 'NotFound', message: `Repository ${repoId} or workspace ${id} not found` };
       }
       // Sync's in-memory external set (cold cadence, light sync) follows at once.
+      await refreshExternalRepoCadence(req.log);
+      kickGithubIssuesCheck(accountId, [repoId]);
+      const workspace = await findWorkspace(accountId, id);
+      if (!workspace) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return { workspace };
+    },
+  );
+
+  // TAKE ONE REPO OUT OF THIS WORKSPACE, keeping its other memberships. When this was its home, the
+  // oldest other membership becomes the home (External). **409 `{error:'LastMembership'}`** when this
+  // is the repo's only workspace: a repo belongs to at least one, so the client removes it from Limn
+  // instead (`DELETE /api/repos/:id`). 404 for a foreign workspace or repo.
+  app.delete(
+    '/api/workspaces/:id/repos/:repoId',
+    { schema: repoParamsSchema },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id, repoId } = req.params as { id: number; repoId: number };
+      const outcome = await setRepoMembership(accountId, id, repoId, null);
+      if (outcome === 'not_found') {
+        reply.status(404);
+        return { error: 'NotFound', message: `Repository ${repoId} or workspace ${id} not found` };
+      }
+      if (outcome === 'last_membership') {
+        reply.status(409);
+        return { error: 'LastMembership', message: 'This is the repository\'s only workspace. Remove it from Limn instead.' };
+      }
       await refreshExternalRepoCadence(req.log);
       const workspace = await findWorkspace(accountId, id);
       if (!workspace) {

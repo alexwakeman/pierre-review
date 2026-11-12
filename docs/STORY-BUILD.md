@@ -583,9 +583,11 @@ round the PR opens ready anyway, naming what is still open), and then THE TICKET
   1. The approved plan's `ticketUpdate`, through the SAME diff rule (shared `ticketUpdateBody`) and the SAME
      writer (`tracker/ticket-update.ts writeTicketUpdate`) as the tab's "Update ticket": only the fields
      that differ from the ticket as Limn holds it.
-  2. ONE comment (`postTicketComment`, Jira wiki markup, under the reader's own Jira login): the pull
-     requests (links), what changed in the ticket and why (the plan's `why` and the points it settled), and
-     the review rounds. "The earlier text is in this ticket's history" — Jira keeps it.
+  2. ONE comment (`postTicketComment`, Jira wiki markup, under the reader's own Jira login), in PLAIN
+     ENGLISH for every reader of the ticket, technical or not: the pull requests (links + titles, the plan's
+     internal references such as `AC1`/`C2` stripped by `plainTitle`) and what changed on the ticket. ⚠ NEVER
+     the tool's name, the review rounds, the plan's `why` or its contention text (the reader asked for "what
+     changed, not why"). PR titles are agent text: `wikiLabel` escapes mention/macro characters.
   ⚠ The status is never changed. ⚠ Jira only: another tracker records `skipped: 'not_jira'` and writes
   nothing. A failed update is recorded, still commented on, and leaves the tab's ticket step OPEN (Update
   ticket is still there); otherwise the step closes (`ticket_review_done_at`). The tab leads the step with

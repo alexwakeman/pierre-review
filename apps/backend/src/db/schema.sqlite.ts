@@ -2502,6 +2502,43 @@ export const workspaceRepos = sqliteTable(
   }),
 );
 
+// ---- EXTRA External memberships (migration 0191; docs/DATA-MODEL.md § External repos) ----
+//
+// A repo has ONE home row in `workspace_repos` (Maintained or External there — every per-repo
+// "which workspace is this repo in" join keeps reading that one row) and may be EXTERNAL in any
+// number of OTHER workspaces through this table: listed under that workspace's repos, usable by its
+// builds and fixes, and its PROJECT PRs on that workspace's boards. ⚠ Never a row for the home
+// workspace (every writer in queries.ts deletes it on a move). ⚠ READ ONLY THROUGH
+// db/external-repos.ts (`externalRepoIds`, `extraExternalMemberships`) — never a raw join.
+export const workspaceExternalRepos = sqliteTable(
+  'workspace_external_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWsRepoUx: uniqueIndex('workspace_external_repos_account_ws_repo').on(t.accountId, t.workspaceId, t.repoId),
+    accountRepoIdx: index('workspace_external_repos_account_repo_idx').on(t.accountId, t.repoId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_external_repos_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'workspace_external_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- The REPO half of the Pending mute (CORE, free) — migration 0058 / pg 0045 ----
 //
 // PRESENCE IS THE FACT: one row per (account, repo) the reader has muted for Pending, no

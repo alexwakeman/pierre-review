@@ -1338,6 +1338,13 @@
       "when": 1793174400000,
       "tag": "0190_ai_fix_push_when_done",
       "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "6",
+      "when": 1793260800000,
+      "tag": "0191_workspace_external_repos",
+      "breakpoints": true
     }
   ]
 }

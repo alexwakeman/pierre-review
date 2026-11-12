@@ -31,7 +31,7 @@ import { parseProjectKeys } from '../tracker/detect.js';
 //      excluded. The reader always counts. ⚠ The external repo's OWN mergers never count, or the
 //      platform team would be "your maintainers" and every PR there would show.
 
-const { workspaceRepos, workspaceTrackers, pullRequests, repos, trackerTickets } = schema;
+const { workspaceRepos, workspaceExternalRepos, workspaceTrackers, pullRequests, repos, trackerTickets } = schema;
 
 export const EXTERNAL: WorkspaceRepoMode = 'external';
 
@@ -40,7 +40,12 @@ export function repoModeOf(raw: string | null | undefined): WorkspaceRepoMode {
   return raw === 'external' ? 'external' : 'watched';
 }
 
-/** The external member repo ids of one workspace, or of the whole account when `workspaceId` is null. */
+/**
+ * The external member repo ids of one workspace — its home rows marked External PLUS its EXTRA
+ * External memberships (`workspace_external_repos`: a repo whose home is another workspace). With
+ * `workspaceId` null: the account's repos whose HOME row is External — the automation gate's
+ * population (a repo Maintained anywhere is never in it).
+ */
 export async function externalRepoIds(accountId: number, workspaceId: number | null = null): Promise<Set<number>> {
   const rows = await db
     .select({ repoId: workspaceRepos.repoId })
@@ -53,7 +58,35 @@ export async function externalRepoIds(accountId: number, workspaceId: number | n
       ),
     )
     .execute();
-  return new Set(rows.map((r) => r.repoId));
+  const out = new Set(rows.map((r) => r.repoId));
+  if (workspaceId != null) {
+    for (const r of await db
+      .select({ repoId: workspaceExternalRepos.repoId })
+      .from(workspaceExternalRepos)
+      .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, workspaceId)))
+      .execute())
+      out.add(r.repoId);
+  }
+  return out;
+}
+
+/** The repo ids one workspace holds through an EXTRA External row (their home is another workspace). */
+export async function extraExternalRepoIdsIn(accountId: number, workspaceId: number): Promise<number[]> {
+  const rows = await db
+    .select({ repoId: workspaceExternalRepos.repoId })
+    .from(workspaceExternalRepos)
+    .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, workspaceId)))
+    .execute();
+  return rows.map((r) => r.repoId);
+}
+
+/** Every EXTRA External membership of the account: (workspace, repo) pairs off the repo's home. */
+export async function extraExternalMemberships(accountId: number): Promise<Array<{ workspaceId: number; repoId: number }>> {
+  return db
+    .select({ workspaceId: workspaceExternalRepos.workspaceId, repoId: workspaceExternalRepos.repoId })
+    .from(workspaceExternalRepos)
+    .where(eq(workspaceExternalRepos.accountId, accountId))
+    .execute();
 }
 
 /** The WATCHED member repo ids of one workspace. */
@@ -230,13 +263,16 @@ export async function accountBoardScope(
     .execute();
   const external = rows.filter((r) => repoModeOf(r.mode) === 'external');
   if (external.length === 0) return null;
-  const prIds: number[] = [];
-  for (const ws of new Set(external.map((r) => r.workspaceId))) {
-    prIds.push(...(await projectPrIds(accountId, ws, { openOnly: true })));
+  // A repo whose HOME is External may be External in other workspaces too: each one's project-PR
+  // rule counts (a PR is a project PR of ANY workspace the repo sits in).
+  const extras = await extraExternalMemberships(accountId);
+  const prIds = new Set<number>();
+  for (const ws of new Set([...external, ...extras].map((r) => r.workspaceId))) {
+    for (const id of await projectPrIds(accountId, ws, { openOnly: true })) prIds.add(id);
   }
   return {
     watchedRepoIds: rows.filter((r) => repoModeOf(r.mode) === 'watched').map((r) => r.repoId),
-    projectPrIds: prIds,
+    projectPrIds: [...prIds],
     externalRepoIds: external.map((r) => r.repoId),
   };
 }

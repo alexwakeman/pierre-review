@@ -571,6 +571,8 @@ function ResizeHandle(): JSX.Element {
 // Repo sort: attention desc → unread → alphabetical (the old rail's order).
 function sortRepos(repos: readonly ActivityRepo[]): ActivityRepo[] {
   return [...repos].sort((a, b) => {
+    // EXTERNAL members last: listed to be explored, never ranked by work.
+    if ((a.external === true) !== (b.external === true)) return a.external === true ? 1 : -1;
     if (b.attentionCount !== a.attentionCount) return b.attentionCount - a.attentionCount;
     if (a.hasUnread !== b.hasUnread) return a.hasUnread ? -1 : 1;
     return a.repoFullName.localeCompare(b.repoFullName);
@@ -587,6 +589,8 @@ interface RepoItem {
   /** The red and blue dots (shared `repoStatusSummary`), null before the aggregate lands. */
   status: RepoStatusSummary | null;
   branchFacts: { name: string; ci: string; lastCommitAt: string | null } | null;
+  /** An EXTERNAL member (docs/DATA-MODEL.md § External repos): labelled, never counted. */
+  external?: boolean;
 }
 
 /**
@@ -604,7 +608,8 @@ function RepoRow({ r, current }: { r: RepoItem; current: boolean }): JSX.Element
   const facts: string[] = [];
   if (st?.attentionWords != null) facts.push(st.attentionWords);
   if (st?.newWords != null) facts.push(st.newWords);
-  if (r.openPrs != null) facts.push(`${r.openPrs} open pull request${r.openPrs === 1 ? '' : 's'}`);
+  if (r.external === true) facts.push('external');
+  else if (r.openPrs != null) facts.push(`${r.openPrs} open pull request${r.openPrs === 1 ? '' : 's'}`);
   if (r.maintainerCount > 0) facts.push('you have merged here');
   if (r.threadTotals != null) {
     const t = r.threadTotals;
@@ -652,9 +657,15 @@ function RepoRow({ r, current }: { r: RepoItem; current: boolean }): JSX.Element
         {short}
         {owner !== '' && short !== r.fullName && <span className="sr-only"> in {owner}</span>}
       </span>
-      <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-mute">
-        {r.openPrs == null ? '' : r.openPrs > 0 ? r.openPrs : '—'}
-      </span>
+      {r.external === true ? (
+        <span className="shrink-0 text-meta text-ui-mute" data-testid="sidebar-repo-external">
+          External
+        </span>
+      ) : (
+        <span className="w-6 shrink-0 text-right text-meta tabular-nums text-ui-mute">
+          {r.openPrs == null ? '' : r.openPrs > 0 ? r.openPrs : '—'}
+        </span>
+      )}
     </button>
   );
 }
@@ -738,6 +749,7 @@ function Repositories({ location }: { location: ReturnType<typeof currentLocatio
           threadTotals: r.threadTotals,
           status: statusByRepo.get(r.repoId) ?? null,
           branchFacts: branchFactsOf(branchByRepo.get(r.repoId)),
+          external: r.external === true,
         }))
       : (allRepos ?? [])
           .filter((r) => r.workspaceId === workspaceId)

@@ -66,7 +66,7 @@ function OwnerAvatar({
 // Small inline spinner (matches the convention used in the Claude Review tab).
 function Spinner(): JSX.Element {
   return (
-    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-line" />
+    <span className="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-ui-line border-t-ui-accent" />
   );
 }
 
@@ -87,10 +87,13 @@ export function RepoSearch({
   // reader's own click or keystroke, so a first-run modal is not covered by a dropdown nobody asked
   // for.
   autoFocus = false,
+  fullWidth = false,
 }: {
   onAdded?: (repo: Repo) => void;
   placeholder?: string;
   autoFocus?: boolean;
+  /** Fill the host's width (the repo manager) instead of the compact toolbar box. */
+  fullWidth?: boolean;
 } = {}): JSX.Element {
   const qc = useQueryClient();
   const requestSyncModal = useFilters((s) => s.requestSyncModal);
@@ -125,17 +128,22 @@ export function RepoSearch({
   // page i (page 0 = null/first page). pageIdx indexes into it.
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const [pageIdx, setPageIdx] = useState(0);
+  // Which pager button was pressed, until that page lands: the list dims under a spinner (a GitHub
+  // search page takes a moment, and the old rows stayed on screen looking current).
+  const [paging, setPaging] = useState<'next' | 'prev' | null>(null);
 
   const trimmed = value.trim();
   const debounced = useDebouncedValue(trimmed, 300);
   const showPanel = open && debounced.length >= MIN_QUERY;
-  // Focusing the box with an empty (or <2-char) query shows curated suggestions.
-  const showSuggestions = open && debounced.length < MIN_QUERY;
+  // The curated suggestions are a FIRST-RUN aid only: an account with no repos yet sees them when
+  // it focuses the box. Once it has a repo, focusing or clicking the box shows nothing until the
+  // reader types.
+  const { data: repos } = useRepos();
+  const showSuggestions = open && debounced.length < MIN_QUERY && repos != null && repos.length === 0;
   const panelOpen = showPanel || showSuggestions;
   const cursor = cursors[pageIdx] ?? null;
 
   // Curated suggestions for the empty-query state, minus repos already added.
-  const { data: repos } = useRepos();
   // Per-account repo cap (backend enforces it; we disable adds + explain here).
   const atRepoLimit = (repos?.length ?? 0) >= MAX_REPOS_PER_ACCOUNT;
   const added = useMemo(
@@ -167,6 +175,7 @@ export function RepoSearch({
     setCursors([null]);
     setPageIdx(0);
     setActive(0);
+    setPaging(null);
   }, [debounced]);
 
   const query = useQuery<RepoSearchResponse>({
@@ -212,6 +221,10 @@ export function RepoSearch({
     (r) => !justAdded.has(`${r.owner}/${r.name}`.toLowerCase()),
   );
   const hasNextPage = query.data?.hasNextPage ?? false;
+  const pageLoading = paging != null && (query.isFetching || query.isPlaceholderData);
+  useEffect(() => {
+    if (paging != null && !query.isFetching && !query.isPlaceholderData) setPaging(null);
+  }, [paging, query.isFetching, query.isPlaceholderData]);
 
   // Show a spinner as soon as a search is in flight, through the fetch, while
   // placeholderData keeps the previous term's rows on screen. For a REFINEMENT (an
@@ -252,16 +265,18 @@ export function RepoSearch({
 
   function gotoNext(): void {
     const next = query.data?.cursor;
-    if (!hasNextPage || next == null) return;
+    if (!hasNextPage || next == null || pageLoading) return;
     setCursors((cs) => [...cs.slice(0, pageIdx + 1), next]);
     setPageIdx((p) => p + 1);
     setActive(0);
+    setPaging('next');
   }
 
   function gotoPrev(): void {
-    if (pageIdx === 0) return;
+    if (pageIdx === 0 || pageLoading) return;
     setPageIdx((p) => p - 1);
     setActive(0);
+    setPaging('prev');
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
@@ -389,7 +404,7 @@ export function RepoSearch({
             ? `${listboxId}-opt-${active}`
             : undefined
         }
-        className="w-44 rounded-ui border border-ui-line bg-transparent px-2 py-0.5 text-meta focus:border-ui-accent/50 focus:outline-none"
+        className={`${fullWidth ? 'w-full py-1.5' : 'w-44 py-0.5'} rounded-ui border border-ui-line bg-transparent px-2 text-meta focus:border-ui-accent/50 focus:outline-none`}
       />
 
       {panelOpen && (
@@ -397,7 +412,8 @@ export function RepoSearch({
           id={listboxId}
           role="listbox"
           aria-label="Repository search results"
-          className="absolute left-0 top-full z-[60] mt-1 max-h-96 w-96 overflow-y-auto rounded-ui bg-ui-surface shadow-lg"
+          aria-busy={pageLoading || undefined}
+          className={`absolute left-0 top-full z-[60] mt-1 max-h-96 ${fullWidth ? 'w-full min-w-[24rem]' : 'w-96'} overflow-y-auto rounded-ui bg-ui-surface shadow-lg`}
         >
           {atRepoLimit && (
             <div className="sticky top-0 z-20 border-b border-ui-line bg-ui-raise px-3 py-1.5 text-meta text-ui-warn">
@@ -466,8 +482,19 @@ export function RepoSearch({
               No matching repositories.
             </div>
           ) : (
-            <div ref={listRef}>
-              {searching && (
+            <div ref={listRef} className="relative">
+              {pageLoading && (
+                <div
+                  className="absolute inset-0 z-20 flex items-start justify-center bg-ui-surface/60 pt-10"
+                  data-testid="repo-search-paging"
+                >
+                  <span className="flex items-center gap-2 rounded-ui bg-ui-surface px-3 py-1.5 text-meta text-ui-ink shadow">
+                    <Spinner />
+                    Loading page {pageIdx + 1}…
+                  </span>
+                </div>
+              )}
+              {searching && !pageLoading && (
                 <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-ui-line bg-ui-surface/95 px-3 py-1.5 text-meta text-ui-mute backdrop-blur">
                   <Spinner />
                   <span>Searching…</span>
@@ -569,21 +596,21 @@ export function RepoSearch({
               <button
                 type="button"
                 onClick={gotoPrev}
-                disabled={pageIdx === 0}
-                className="hit flex items-center gap-1 text-ui-mute hover:text-ui-ink disabled:opacity-30"
+                disabled={pageIdx === 0 || pageLoading}
+                className={`hit flex items-center gap-1 text-ui-mute hover:text-ui-ink ${paging === 'prev' && pageLoading ? 'text-ui-ink' : 'disabled:opacity-30'}`}
               >
-                <ChevronIcon dir="left" size={11} />
+                {paging === 'prev' && pageLoading ? <Spinner /> : <ChevronIcon dir="left" size={11} />}
                 Prev
               </button>
               <span className="text-ui-faint">Page {pageIdx + 1}</span>
               <button
                 type="button"
                 onClick={gotoNext}
-                disabled={!hasNextPage}
-                className="hit flex items-center gap-1 text-ui-mute hover:text-ui-ink disabled:opacity-30"
+                disabled={!hasNextPage || pageLoading}
+                className={`hit flex items-center gap-1 text-ui-mute hover:text-ui-ink ${paging === 'next' && pageLoading ? 'text-ui-ink' : 'disabled:opacity-30'}`}
               >
                 Next
-                <ChevronIcon dir="right" size={11} />
+                {paging === 'next' && pageLoading ? <Spinner /> : <ChevronIcon dir="right" size={11} />}
               </button>
             </div>
           )}

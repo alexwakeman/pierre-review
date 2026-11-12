@@ -33,6 +33,7 @@ const {
   events,
   workspaces,
   workspaceRepos,
+  workspaceExternalRepos,
   workspaceReviewers,
   aiUsage,
   benchmarkContributions,
@@ -630,6 +631,11 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       .execute(),
   ]);
 
+  const extraExternalRows = await db
+    .select({ workspaceId: workspaceExternalRepos.workspaceId, repoId: workspaceExternalRepos.repoId })
+    .from(workspaceExternalRepos)
+    .where(eq(workspaceExternalRepos.accountId, accountId))
+    .execute();
   return {
     meta: {
       generatedAt: new Date().toISOString(),
@@ -654,6 +660,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     workspaces: workspaceRows.map((w) => ({
       ...w,
       repoIds: workspaceRepoRows.filter((wr) => wr.workspaceId === w.id).map((wr) => wr.repoId),
+      // The EXTRA External memberships (migration 0191): repos whose home is another workspace.
+      extraExternalRepoIds: extraExternalRows.filter((wr) => wr.workspaceId === w.id).map((wr) => wr.repoId),
     })),
     pullRequests: prRows,
     reviews: capped('reviews', reviewRows),

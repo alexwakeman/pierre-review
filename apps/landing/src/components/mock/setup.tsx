@@ -93,46 +93,76 @@ export function AddReposMock(): JSX.Element {
 // ---- Repos & workspaces ------------------------------------------------------------
 
 const MODE_OPTIONS = [
-  { id: 'watched', label: 'Watched' },
+  { id: 'watched', label: 'Maintained' },
   { id: 'external', label: 'External' },
 ];
 
+type Mode = 'watched' | 'external';
+
 export function WorkspacesMock(): JSX.Element {
   const ws = SETUP_WORKSPACES.workspaces;
-  const initialHome = (): Record<string, string> =>
-    Object.fromEntries(SETUP_WORKSPACES.repos.map((r) => [r.name, r.home]));
+  // Every (repo → workspace → mode) membership: one Maintained at most, External anywhere else.
+  const initial = (): Record<string, Record<string, Mode>> =>
+    Object.fromEntries(
+      SETUP_WORKSPACES.repos.map((r) => [
+        r.name,
+        {
+          [r.home]: (r.external === true ? 'external' : 'watched') as Mode,
+          ...Object.fromEntries((r.alsoExternalIn ?? []).map((w) => [w, 'external' as Mode])),
+        },
+      ]),
+    );
   const [selected, setSelected] = useState(ws[0]?.id ?? '');
-  const [home, setHome] = useState<Record<string, string>>(initialHome);
-  const initialExternal = (): Record<string, boolean> =>
-    Object.fromEntries(SETUP_WORKSPACES.repos.map((r) => [r.name, r.external === true]));
-  const [external, setExternal] = useState<Record<string, boolean>>(initialExternal);
+  const [mem, setMem] = useState<Record<string, Record<string, Mode>>>(initial);
   const sel = ws.find((w) => w.id === selected) ?? ws[0];
-  const count = (id: string): number => Object.values(home).filter((h) => h === id).length;
-  const inSel = SETUP_WORKSPACES.repos.filter((r) => home[r.name] === selected);
-  const elsewhere = SETUP_WORKSPACES.repos.filter((r) => home[r.name] !== selected);
-  const moved = SETUP_WORKSPACES.repos.some(
-    (r) => r.home !== home[r.name] || (r.external === true) !== external[r.name],
-  );
+  const nameOf = (id: string): string => ws.find((w) => w.id === id)?.name ?? id;
+  const count = (id: string): number => Object.values(mem).filter((m) => m[id] != null).length;
+  const inSel = (mode: Mode) => SETUP_WORKSPACES.repos.filter((r) => mem[r.name]?.[selected] === mode);
+  const changed = JSON.stringify(mem) !== JSON.stringify(initial());
   const options = ws.map((w) => ({ id: w.id, label: w.name }));
 
-  const row = (r: { name: string }): JSX.Element => {
+  const setMode = (repo: string, wsId: string, mode: Mode): void =>
+    setMem((all) => {
+      const next = { ...(all[repo] ?? {}) };
+      // Maintained here turns any other Maintained membership External.
+      if (mode === 'watched') for (const k of Object.keys(next)) if (next[k] === 'watched') next[k] = 'external';
+      next[wsId] = mode;
+      return { ...all, [repo]: next };
+    });
+  const move = (repo: string, from: string, to: string): void =>
+    setMem((all) => {
+      const next = { ...(all[repo] ?? {}) };
+      const mode = next[from] ?? 'watched';
+      delete next[from];
+      next[to] = mode;
+      return { ...all, [repo]: next };
+    });
+
+  const row = (r: { name: string }, mode: Mode): JSX.Element => {
     const [owner, repo] = r.name.split('/');
+    const others = Object.entries(mem[r.name] ?? {}).filter(([w]) => w !== selected);
     return (
       <div key={r.name} className="mk-wsrow">
         <span>
           {owner}/<b>{repo}</b>
+          {others.length > 0 ? (
+            <small className="mk-muted">
+              {' '}
+              · {others.map(([w, m]) => `${m === 'watched' ? 'Maintained' : 'External'} in ${nameOf(w)}`).join(', ')}
+            </small>
+          ) : null}
         </span>
         <SelectBox
           label={`Workspace for ${r.name}`}
-          value={home[r.name] ?? ''}
+          value={selected}
           options={options}
-          onChange={(v) => setHome((h) => ({ ...h, [r.name]: v }))}
+          onChange={(v) => v !== selected && move(r.name, selected, v)}
         />
         <SelectBox
-          label={`Watched or external: ${r.name}`}
-          value={external[r.name] ? 'external' : 'watched'}
+          label={`Maintained or external: ${r.name}`}
+          value={mode}
           options={MODE_OPTIONS}
-          onChange={(v) => setExternal((e) => ({ ...e, [r.name]: v === 'external' }))}
+          onChange={(v) => setMode(r.name, selected, v as Mode)}
         />
       </div>
     );
@@ -143,15 +173,14 @@ export function WorkspacesMock(): JSX.Element {
       live
       title={SETUP_WORKSPACES.title}
       onReset={
-        moved || selected !== ws[0]?.id
+        changed || selected !== ws[0]?.id
           ? () => {
-              setHome(initialHome());
-              setExternal(initialExternal());
+              setMem(initial());
               setSelected(ws[0]?.id ?? '');
             }
           : null
       }
-      label="The Repos and workspaces dialog: two workspaces, Acme payments (the default) and Web, and each repository with a workspace picker that moves it and a Watched or External picker"
+      label="The Repos and workspaces dialog: two workspaces, Acme payments (the default) and Web. The selected workspace lists its Maintained and its External repositories, each with a workspace picker that moves it and a Maintained or External picker"
     >
       <div className="mk-ws">
         <div className="mk-wslist" role="group" aria-label="Workspaces">
@@ -172,15 +201,13 @@ export function WorkspacesMock(): JSX.Element {
         </div>
         <div>
           <div className="mk-sec-h">
-            <b>Repos</b>
+            <b>{sel?.name}</b>
             <p>{SETUP_WORKSPACES.rule}</p>
           </div>
-          <div className="mk-grp first">
-            In “{sel?.name}” · {inSel.length}
-          </div>
-          {inSel.map(row)}
-          <div className="mk-grp">In other workspaces · {elsewhere.length}</div>
-          {elsewhere.map(row)}
+          <div className="mk-grp first">Maintained · {inSel('watched').length}</div>
+          {inSel('watched').map((r) => row(r, 'watched'))}
+          <div className="mk-grp">External · {inSel('external').length}</div>
+          {inSel('external').map((r) => row(r, 'external'))}
         </div>
       </div>
     </MockFrame>

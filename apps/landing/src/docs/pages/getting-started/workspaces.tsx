@@ -13,7 +13,8 @@ export default function Page(): JSX.Element {
       <p>
         A workspace is a named group of repositories, for example one per team or one per product. Every page
         in Limn shows one workspace: its pull requests, its Pending board, its Feed, its Reports and its bots.
-        Switching the workspace changes all of them together. Each repository is in exactly one workspace.
+        Switching the workspace changes all of them together. A repository is <Ui>Maintained</Ui> in one
+        workspace at most, and can be <Ui>External</Ui> in any number of others.
       </p>
 
 
@@ -51,11 +52,30 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
 
-      <H2 id="move-a-repository">Move a repository</H2>
+      <H2 id="move-a-repository">Add, move and remove repositories</H2>
       <p>
-        In the same dialog, each repository has a workspace picker. Choose another workspace to move it there.
-        A move takes the repository out of the workspace it was in. The dialog lists the repositories{' '}
-        <Ui>In "…"</Ui> (the selected workspace) and <Ui>In other workspaces</Ui>.
+        In the same dialog, choose a workspace on the left. The right side lists its <Ui>Maintained</Ui> and its{' '}
+        <Ui>External</Ui> repositories, one per line, with the other workspaces each one is in beside its name.
+      </p>
+      <ul>
+        <li>
+          To add a repository from GitHub, type its name in the search box and pick it. <Ui>Add as</Ui> chooses
+          Maintained or External. Nothing is listed until you type.
+        </li>
+        <li>
+          To add a repository you already have, use <Ui>Add one of your repos…</Ui>. It keeps its other
+          workspaces.
+        </li>
+        <li>To move one, choose another workspace in its workspace picker.</li>
+        <li>
+          To take one out of the workspace, choose <Ui>Remove</Ui> (×) on its line. When it is in no other
+          workspace, Limn asks first and then removes it and its synced data. Each line shows its own progress,
+          so you can remove several at once.
+        </li>
+      </ul>
+      <p>
+        <Ui>Grid</Ui>, at the top of the dialog, shows every repository against every workspace. Click a cell to
+        change it: not in the workspace, then External, then Maintained.
       </p>
 
       <figure className="dx-fig">
@@ -70,10 +90,13 @@ export default function Page(): JSX.Element {
       <p>
         Mark a repository <Ui>External</Ui> when your team changes it but does not maintain it, for example
         a shared infrastructure repository where you update your services' configuration. In{' '}
-        <Ui>Manage repos &amp; workspaces</Ui>, change its picker from <Ui>Watched</Ui> to <Ui>External</Ui>.
+        <Ui>Manage repos &amp; workspaces</Ui>, change its picker from <Ui>Maintained</Ui> to <Ui>External</Ui>.
+        The same repository can be External in several workspaces, and Maintained in one of them. Making it
+        Maintained in a workspace turns it External where it was Maintained before.
       </p>
       <p>An external repository:</p>
       <ul>
+        <li>Is listed under <Ui>Repositories</Ui> in the sidebar, marked External, and its page opens as usual.</li>
         <li>
           Is part of <DocLink to="implement-story/overview">Implement story</DocLink> and{' '}
           <DocLink to="ai-fix/overview">AI Fix</DocLink>, like any other repository in the workspace.
@@ -82,7 +105,7 @@ export default function Page(): JSX.Element {
         <li>
           Shows on Open PRs and Pending only the pull requests that are your team's: a pull request whose
           title or branch has one of your tracker's project keys, or one opened by a person who maintains
-          (has merged into) one of your watched repositories. Your own pull requests always count. Pull
+          (has merged into) one of your Maintained repositories. Your own pull requests always count. Pull
           requests from other teams stay hidden.
         </li>
         <li>Is left out of Reports, the Timeline, the Feed and Bots Monitoring.</li>
@@ -127,8 +150,9 @@ export default function Page(): JSX.Element {
       </Note>
 
       <Warning>
-        Deleting a workspace does not delete its repositories or their data. They move to Default, with the
-        workspace's bot settings. Where Default already has a verdict or a price for the same bot, Default's
+        Deleting a workspace does not delete its repositories or their data. Its Maintained repositories move to
+        Default, and repositories that were only External there leave it. Its bot settings move to Default
+        too. Where Default already has a verdict or a price for the same bot, Default's
         is kept.
       </Warning>
     </>

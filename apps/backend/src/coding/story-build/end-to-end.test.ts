@@ -1,14 +1,15 @@
 // BUILD END TO END — THE TICKET STEP (end-to-end.ts) over the REAL core client (a scratch SQLite, migrations
 // applied), with the Jira writes faked. Pinned:
 //   • the update sends ONLY what the approved plan changes (the shared `ticketUpdateBody` rule);
-//   • ONE comment: the PR link, what changed and why (the plan's `why` and settled points), the rounds;
+//   • ONE comment, plain English for every reader: the PR links and what changed on the ticket — never
+//     the tool's name, the review rounds, the plan's reasoning or its internal references;
 //   • the claim: a second call writes nothing; an ordinary (not end-to-end) build is never touched;
 //   • a failed update is recorded, still commented on, and leaves the tab's ticket step OPEN;
 //   • a tracker that is not Jira: nothing written, `skipped: 'not_jira'`, the step left open.
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BuildPlanRevision } from '@pierre-review/shared';
-import { endToEndCommentWiki, wikiLabel, type EndToEndDeps } from './end-to-end.js';
+import { endToEndCommentWiki, plainTitle, wikiLabel, type EndToEndDeps } from './end-to-end.js';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-storybuild.end-to-end.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
@@ -32,10 +33,13 @@ describe('the comment (pure)', () => {
     expect(wikiLabel('a [b] | c')).toBe('a \\[b\\] \\| c');
   });
   it('says there was nothing to change when the plan kept the story', () => {
-    const w = endToEndCommentWiki({ prs: [], ticket: { updated: [] }, whyWiki: null, pointsWiki: [], rounds: 1 });
-    expect(w).toContain('None opened.');
-    expect(w).toContain('None. The plan found the story right as written.');
-    expect(w).toContain('over 1 review round before');
+    const w = endToEndCommentWiki({ prs: [], ticket: { updated: [] } });
+    expect(w).toContain('None yet.');
+    expect(w).toContain('Nothing. The ticket stays as written.');
+  });
+  it('drops the plan\'s internal references from a title', () => {
+    expect(plainTitle('Queue refunds (AC1, AC2)')).toBe('Queue refunds');
+    expect(plainTitle('ACME-9: Queue refunds [C1]')).toBe('ACME-9: Queue refunds');
   });
 });
 
@@ -107,7 +111,6 @@ function fakeDeps(o: { jira?: boolean; writeFails?: string } = {}) {
       comments.push(a);
       return { ok: true };
     },
-    toWiki: async (md) => md,
   };
   return { deps, writes, comments, notices };
 }
@@ -122,10 +125,9 @@ describe('the ticket step', () => {
     expect(f.comments).toHaveLength(1);
     const wiki: string = f.comments[0].wiki;
     expect(wiki).toContain('[acme/api#77|https://github.com/acme/api/pull/77]');
-    expect(wiki).toContain('Limn updated the acceptance criteria to match the approved plan.');
-    expect(wiki).toContain('Why: The code queues refunds.');
-    expect(wiki).toContain('* The code queues refunds. Say they are queued.');
-    expect(wiki).toContain('over 3 review rounds');
+    expect(wiki).toContain('The acceptance criteria were updated to match the work.');
+    // Plain English for every reader: no tool name, no reasoning, no review rounds, no internal codes.
+    expect(wiki).not.toMatch(/Limn|Why|review round|\bC1\b|\bAC1\b/);
     const row = await P.getStoryBuildRow(ctx, 1, id);
     expect(row?.e2eTicketJson).toMatchObject({ updated: ['acceptanceCriteria'], commented: true });
     expect(row?.ticketReviewDoneAt).not.toBeNull();
@@ -136,16 +138,13 @@ describe('the ticket step', () => {
     expect(f.comments).toHaveLength(1);
   });
 
-  it("⚠ the agent's words cannot mention anyone or run a macro in the comment", async () => {
-    const id = await openedBuild({
-      endToEnd: true,
-      ticketUpdate: { description: null, acceptanceCriteria: '- Refunds are queued', why: 'Ask [~accountid:123] and {html}<b>x</b>{html}.', contentions: ['C1'] },
+  it("⚠ the agent's words cannot mention anyone or run a macro in the comment", () => {
+    const wiki = endToEndCommentWiki({
+      prs: [{ repo: 'acme/api', number: 1, url: 'https://github.com/acme/api/pull/1', title: 'Ask [~accountid:123] and {html}<b>x</b>{html}' }],
+      ticket: null,
     });
-    const f = fakeDeps();
-    await E.runEndToEndTicketStep(ctx, 1, id, f.deps);
-    const wiki: string = f.comments[0].wiki;
-    expect(wiki).toContain('\\[~accountid:123]');
-    expect(wiki).toContain('\\{html}');
+    expect(wiki).toContain('\\[\\~accountid:123\\]');
+    expect(wiki).toContain('\\{html\\}');
     expect(wiki).not.toMatch(/(^|[^\\])\[~accountid:123\]/);
   });
 
@@ -162,7 +161,7 @@ describe('the ticket step', () => {
     const f = fakeDeps({ writeFails: 'Jira refused the change.' });
     const r = await E.runEndToEndTicketStep(ctx, 1, id, f.deps);
     expect(r).toMatchObject({ updated: [], commented: true, error: 'Jira refused the change.' });
-    expect(f.comments[0].wiki).toContain('Limn could not update the ticket text: Jira refused the change.');
+    expect(f.comments[0].wiki).toContain('Nothing. The ticket text could not be updated.');
     expect((await P.getStoryBuildRow(ctx, 1, id))?.ticketReviewDoneAt).toBeNull();
   });
 
@@ -172,7 +171,7 @@ describe('the ticket step', () => {
     const r = await E.runEndToEndTicketStep(ctx, 1, id, f.deps);
     expect(r).toMatchObject({ updated: [], commented: true, error: null });
     expect(f.writes).toHaveLength(0);
-    expect(f.comments[0].wiki).toContain('None. The plan found the story right as written.');
+    expect(f.comments[0].wiki).toContain('Nothing. The ticket stays as written.');
     expect((await P.getStoryBuildRow(ctx, 1, id))?.ticketReviewDoneAt).not.toBeNull();
   });
 

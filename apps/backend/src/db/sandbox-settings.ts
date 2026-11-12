@@ -4,7 +4,7 @@
 // ⚠ `local_folder` and `start_dir` are DORMANT (the settings were removed 2026-11-10: the reader's clones
 // are found through their Claude projects, and the agent starts where the default rule says). They are
 // never read and never written here; a stored value stays, untouched.
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import {
   SANDBOX_MEMORY_PROJECTS_MAX,
   SANDBOX_SERVICE_FILE_MAX,
@@ -18,6 +18,7 @@ import {
 } from '@pierre-review/shared';
 import { isAbsolute, normalize } from 'node:path';
 import { db, schema } from './client.js';
+import { getWorkspaceRepoIds } from './queries.js';
 import { listSandboxAllowedHosts } from './sandbox-allowed-hosts.js';
 
 const { sandboxWorkspaceSettings: t, workspaces, workspaceRepos, repos } = schema;
@@ -175,11 +176,13 @@ export async function sandboxWorkspaceRepos(
   workspaceId: number,
 ): Promise<Array<{ repoId: number; owner: string; name: string }> | null> {
   if (!(await ownsWorkspace(accountId, workspaceId))) return null;
+  // Every member, EXTRA External memberships included (migration 0191; the 'all' reading).
+  const ids = await getWorkspaceRepoIds(workspaceId, accountId, 'all');
+  if (ids.length === 0) return [];
   return db
     .select({ repoId: repos.id, owner: repos.owner, name: repos.name })
-    .from(workspaceRepos)
-    .innerJoin(repos, and(eq(repos.id, workspaceRepos.repoId), eq(repos.accountId, workspaceRepos.accountId)))
-    .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.workspaceId, workspaceId)))
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, ids)))
     .orderBy(asc(repos.owner), asc(repos.name))
     .execute();
 }

@@ -368,6 +368,8 @@ const {
   // parse and no "belongs to nothing" state.
   workspaces,
   workspaceRepos,
+  workspaceExternalRepos,
+  repoRelations,
   // The REPO half of the Pending mute (migration 0058 / pg 0045). Read through
   // db/pending-mute.ts everywhere except `deleteRepo`, which deletes the row directly.
   pendingMutedRepos,
@@ -507,7 +509,8 @@ function mapWorkspace(
   // (db/pending-mute.ts) — never folded together here, which would hand the settings screen one
   // merged number it could not un-mix into the two switches it has to render.
   mutedRepoIds: ReadonlySet<number>,
-  // The account's EXTERNAL member ids (db/external-repos.ts), intersected with this membership.
+  // THIS workspace's EXTERNAL member ids (db/external-repos.ts): its home rows marked External plus
+  // its extra External memberships. Per workspace: a repo Maintained in A may be External in B.
   externalIds: ReadonlySet<number> = new Set(),
 ): Workspace {
   return {
@@ -632,7 +635,7 @@ export async function ensureRepoMemberships(accountId: number): Promise<void> {
 export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
   await ensureDefaultWorkspace(accountId);
   await ensureRepoMemberships(accountId);
-  const [wsRows, memberRows, mutedRepoIds] = await Promise.all([
+  const [wsRows, homeRows, extraRows, mutedRepoIds] = await Promise.all([
     db.select().from(workspaces).where(eq(workspaces.accountId, accountId)).execute(),
     db
       .select({ workspaceId: workspaceRepos.workspaceId, repoId: workspaceRepos.repoId, mode: workspaceRepos.mode })
@@ -641,25 +644,42 @@ export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
       .where(eq(workspaceRepos.accountId, accountId))
       .orderBy(asc(repos.owner), asc(repos.name))
       .execute(),
+    // EXTRA External memberships (migration 0191): a repo External here whose home is elsewhere.
+    db
+      .select({ workspaceId: workspaceExternalRepos.workspaceId, repoId: workspaceExternalRepos.repoId })
+      .from(workspaceExternalRepos)
+      .where(eq(workspaceExternalRepos.accountId, accountId))
+      .execute(),
     // The REPO half of the Pending mute (one indexed select over a table with one row per muted
     // repo). The WORKSPACE half rides on `wsRows` as a column, so both switches the settings
     // screen renders arrive on this one listing and neither needs a route of its own.
     repoGrainedPendingMutes(accountId),
   ]);
+  // The home rows arrive in owner/name order; an extra External row is placed at its repo's rank in
+  // that order, so every workspace's `repoIds` stays in render order.
+  const rank = new Map(homeRows.map((m, i) => [m.repoId, i]));
+  const memberRows = [
+    ...homeRows.map((m) => ({ workspaceId: m.workspaceId, repoId: m.repoId, external: repoModeOf(m.mode) === 'external' })),
+    ...extraRows.map((m) => ({ workspaceId: m.workspaceId, repoId: m.repoId, external: true })),
+  ].sort((a, b) => (rank.get(a.repoId) ?? 0) - (rank.get(b.repoId) ?? 0));
   const byWorkspace = new Map<number, number[]>();
-  const externalIds = new Set<number>();
+  const externalByWorkspace = new Map<number, Set<number>>();
   for (const m of memberRows) {
     const arr = byWorkspace.get(m.workspaceId) ?? [];
     arr.push(m.repoId);
     byWorkspace.set(m.workspaceId, arr);
-    if (repoModeOf(m.mode) === 'external') externalIds.add(m.repoId);
+    if (m.external) {
+      const set = externalByWorkspace.get(m.workspaceId) ?? new Set<number>();
+      set.add(m.repoId);
+      externalByWorkspace.set(m.workspaceId, set);
+    }
   }
   return wsRows
     .slice()
     .sort(
       (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name),
     )
-    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? [], mutedRepoIds, externalIds));
+    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? [], mutedRepoIds, externalByWorkspace.get(w.id)));
 }
 
 // Create a workspace (unique per (accountId, name)). ALWAYS `isDefault: false` —
@@ -799,6 +819,25 @@ export async function deleteWorkspace(
         and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, id)),
       )
       .execute();
+    // 1b. EXTRA External memberships (migration 0191). The deleted workspace's own rows go (the
+    //     FK cascades too); a repo re-homed to Default by step 1 loses any extra row it had THERE,
+    //     because a repo is never External in its own home.
+    await tx
+      .delete(workspaceExternalRepos)
+      .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, id)))
+      .execute();
+    if (memberRows.length > 0) {
+      await tx
+        .delete(workspaceExternalRepos)
+        .where(
+          and(
+            eq(workspaceExternalRepos.accountId, accountId),
+            eq(workspaceExternalRepos.workspaceId, defaultId),
+            inArray(workspaceExternalRepos.repoId, memberRows.map((m) => m.repoId)),
+          ),
+        )
+        .execute();
+    }
     // 2b. Related repos (db/related-repos.ts) are a WORKSPACE's pairing: they do not follow the repos
     //     to Default. The workspace FK cascades too; explicit for the same dialect reason as below.
     await dropRepoRelations(
@@ -846,7 +885,22 @@ export async function getWorkspaceRepoIds(
     )
     .orderBy(asc(repos.owner), asc(repos.name))
     .execute();
-  return rows.map((r) => r.repoId);
+  if (members !== 'all') return rows.map((r) => r.repoId);
+  // 'all' adds the EXTRA External memberships (migration 0191): repos whose home is elsewhere.
+  const extra = await db
+    .select({ repoId: workspaceExternalRepos.repoId, owner: repos.owner, name: repos.name })
+    .from(workspaceExternalRepos)
+    .innerJoin(repos, eq(repos.id, workspaceExternalRepos.repoId))
+    .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, workspaceId)))
+    .execute();
+  if (extra.length === 0) return rows.map((r) => r.repoId);
+  const all = await db
+    .select({ repoId: repos.id })
+    .from(repos)
+    .where(and(eq(repos.accountId, accountId), inArray(repos.id, [...rows.map((r) => r.repoId), ...extra.map((r) => r.repoId)])))
+    .orderBy(asc(repos.owner), asc(repos.name))
+    .execute();
+  return [...new Set(all.map((r) => r.repoId))];
 }
 
 // MOVE repos into a workspace — not "add". The UNIQUE (account_id, repo_id) makes that structural:
@@ -911,6 +965,17 @@ export async function assignReposToWorkspace(
         })
         .execute();
     }
+    // A repo is never External in its own home: an extra row for the target goes (migration 0191).
+    await tx
+      .delete(workspaceExternalRepos)
+      .where(
+        and(
+          eq(workspaceExternalRepos.accountId, accountId),
+          eq(workspaceExternalRepos.workspaceId, workspaceId),
+          inArray(workspaceExternalRepos.repoId, validIds),
+        ),
+      )
+      .execute();
     // A repo that LEFT another workspace leaves its related repos there (db/related-repos.ts).
     await dropRepoRelations(tx, accountId, validIds, workspaceId);
   });
@@ -948,6 +1013,17 @@ export async function rehomeReposToDefault(
           workspaceRepos.repoId,
           ownedRepos.map((r) => r.id),
         ),
+      ),
+    )
+    .execute();
+  // A repo is never External in its own home (migration 0191).
+  await db
+    .delete(workspaceExternalRepos)
+    .where(
+      and(
+        eq(workspaceExternalRepos.accountId, accountId),
+        eq(workspaceExternalRepos.workspaceId, defaultId),
+        inArray(workspaceExternalRepos.repoId, ownedRepos.map((r) => r.id)),
       ),
     )
     .execute();
@@ -1043,27 +1119,137 @@ export async function resolveWorkspaceScope(
   return { workspaceId, repoIds, projectPrIds: projectPrIdList };
 }
 
-// Set how this workspace treats one member (`workspace_repos.mode`). false ⇒ not this account's
-// workspace, or the repo is not a member of it (the route answers 404). The ONE writer of the column.
+// ONE REPO, ONE WORKSPACE: how this workspace holds the repo — 'watched' (Maintained), 'external',
+// or null (not a member). THE ONE WRITER of `workspace_repos.mode` and of `workspace_external_repos`
+// (docs/DATA-MODEL.md § External repos). The model:
+//   • the repo's HOME row (`workspace_repos`, one per repo) is Maintained or External there;
+//   • any OTHER workspace may hold it External through an extra row; never the home workspace.
+// The moves, by target:
+//   'watched'  here = home: set the mode. Elsewhere: the home MOVES here, Maintained, and the old
+//              home keeps the repo as an extra External row (Maintained in at most one workspace).
+//   'external' here = home: set the mode. Elsewhere: add an extra row (idempotent).
+//   null       an extra row: delete it. The home: the oldest extra row becomes the home, External
+//              (it was External there); with no other membership: 'last_membership' — the repo would
+//              belong to nothing, so the caller removes it from Limn or refuses (409).
+// 'not_found': not this account's workspace or repo. Related repos (db/related-repos.ts) are a
+// workspace's pairing: a repo that leaves a workspace leaves its pairs there.
+export type RepoMembershipOutcome = 'ok' | 'not_found' | 'last_membership';
+
+export async function setRepoMembership(
+  accountId: number,
+  workspaceId: number,
+  repoId: number,
+  mode: WorkspaceRepoMode | null,
+): Promise<RepoMembershipOutcome> {
+  const [ws, repo] = await Promise.all([
+    db
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+      .limit(1)
+      .execute(),
+    db
+      .select({ id: repos.id })
+      .from(repos)
+      .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
+      .limit(1)
+      .execute(),
+  ]);
+  if (ws.length === 0 || repo.length === 0) return 'not_found';
+  await ensureRepoMemberships(accountId);
+  const home = (
+    await db
+      .select({ workspaceId: workspaceRepos.workspaceId, mode: workspaceRepos.mode })
+      .from(workspaceRepos)
+      .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId)))
+      .limit(1)
+      .execute()
+  )[0];
+  if (home == null) return 'not_found';
+  const extras = await db
+    .select({ id: workspaceExternalRepos.id, workspaceId: workspaceExternalRepos.workspaceId })
+    .from(workspaceExternalRepos)
+    .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.repoId, repoId)))
+    .orderBy(asc(workspaceExternalRepos.createdAt), asc(workspaceExternalRepos.id))
+    .execute();
+  const homeHere = home.workspaceId === workspaceId;
+  const extraHere = extras.find((e) => e.workspaceId === workspaceId);
+  const homeWhere = and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.repoId, repoId));
+  const dropRelationsIn = async (tx: Parameters<Parameters<typeof runTransaction>[0]>[0], wsId: number) => {
+    await tx
+      .delete(repoRelations)
+      .where(
+        and(
+          eq(repoRelations.accountId, accountId),
+          eq(repoRelations.workspaceId, wsId),
+          or(eq(repoRelations.repoId, repoId), eq(repoRelations.relatedRepoId, repoId)),
+        ),
+      )
+      .execute();
+  };
+
+  if (mode != null && homeHere) {
+    await db.update(workspaceRepos).set({ mode }).where(homeWhere).execute();
+    return 'ok';
+  }
+  if (mode === 'external') {
+    if (extraHere == null) {
+      await db
+        .insert(workspaceExternalRepos)
+        .values({ accountId, workspaceId, repoId })
+        .onConflictDoNothing({
+          target: [workspaceExternalRepos.accountId, workspaceExternalRepos.workspaceId, workspaceExternalRepos.repoId],
+        })
+        .execute();
+    }
+    return 'ok';
+  }
+  if (mode === 'watched') {
+    const joinedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
+    await runTransaction(async (tx) => {
+      if (extraHere != null) await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.id, extraHere.id)).execute();
+      await tx.update(workspaceRepos).set({ workspaceId, mode: 'watched', createdAt: joinedAt }).where(homeWhere).execute();
+      // The old home keeps the repo, External.
+      await tx
+        .insert(workspaceExternalRepos)
+        .values({ accountId, workspaceId: home.workspaceId, repoId })
+        .onConflictDoNothing({
+          target: [workspaceExternalRepos.accountId, workspaceExternalRepos.workspaceId, workspaceExternalRepos.repoId],
+        })
+        .execute();
+    });
+    return 'ok';
+  }
+  // mode === null: leave this workspace.
+  if (extraHere != null) {
+    await runTransaction(async (tx) => {
+      await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.id, extraHere.id)).execute();
+      await dropRelationsIn(tx, workspaceId);
+    });
+    return 'ok';
+  }
+  if (!homeHere) return 'ok';
+  const heir = extras[0];
+  if (heir == null) return 'last_membership';
+  await runTransaction(async (tx) => {
+    await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.id, heir.id)).execute();
+    await tx.update(workspaceRepos).set({ workspaceId: heir.workspaceId, mode: 'external' }).where(homeWhere).execute();
+    await dropRelationsIn(tx, workspaceId);
+  });
+  return 'ok';
+}
+
+// The mode of a repo ALREADY in this workspace (home or extra). false ⇒ not this account's
+// workspace, or the repo is not a member of it.
 export async function setWorkspaceRepoMode(
   accountId: number,
   workspaceId: number,
   repoId: number,
   mode: WorkspaceRepoMode,
 ): Promise<boolean> {
-  const updated = await db
-    .update(workspaceRepos)
-    .set({ mode })
-    .where(
-      and(
-        eq(workspaceRepos.accountId, accountId),
-        eq(workspaceRepos.workspaceId, workspaceId),
-        eq(workspaceRepos.repoId, repoId),
-      ),
-    )
-    .returning({ id: workspaceRepos.id })
-    .execute();
-  return updated.length > 0;
+  const ws = (await listWorkspaces(accountId)).find((w) => w.id === workspaceId);
+  if (ws == null || !ws.repoIds.includes(repoId)) return false;
+  return (await setRepoMembership(accountId, workspaceId, repoId, mode)) === 'ok';
 }
 
 // The repo → workspace direction, as a ready-made scope. Needed by the two plugin call sites that
@@ -9945,6 +10131,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // reviewer that may still cover the workspace's other repos — and a stored row whose
     // footprint has gone must stay visible and editable (its counts simply read zero).
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.repoId, id)).execute();
+    // Its EXTRA External memberships (migration 0191) — same composite FK, same reason.
+    await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.repoId, id)).execute();
     // The Pending-mute row for this repo (migration 0058 / pg 0045). Its composite FK
     // `(repo_id, account_id) → repos(id, account_id)` DOES cascade, and it is deleted explicitly
     // anyway for the same dialect-agnostic reason as the three above: SQLite enforces FKs only

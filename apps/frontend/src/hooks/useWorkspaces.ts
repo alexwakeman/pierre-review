@@ -130,16 +130,26 @@ export function useWorkspaceMutations() {
       ]),
   });
 
-  // EXTERNAL REPOS: a mode change moves which PRs every board lists (Open PRs, Pending, My Turn,
-  // Timeline, Reports), so it sweeps the same key set as a membership move.
+  // EXTERNAL REPOS: how a workspace holds a repo — Maintained or External. A repo not yet in the
+  // workspace is ADDED with that mode (its other memberships stay); making it Maintained here turns
+  // its old home External. It moves which PRs every board lists, so it sweeps the same key set as a
+  // membership move.
   const setWorkspaceRepoMode = useMutation({
     mutationFn: (v: { workspaceId: number; repoId: number; mode: WorkspaceRepoMode }) =>
       api.setWorkspaceRepoMode(v.workspaceId, v.repoId, v.mode),
     onSettled: invalidate,
   });
 
+  // A repo in MORE THAN ONE workspace (docs/DATA-MODEL.md § External repos): take it out of one,
+  // keeping the others. The same sweep as a move.
+  const removeRepoFromWorkspace = useMutation({
+    mutationFn: (v: { workspaceId: number; repoId: number }) => api.removeRepoFromWorkspace(v.workspaceId, v.repoId),
+    onSettled: invalidate,
+  });
+
   return {
     createWorkspace,
+    removeRepoFromWorkspace,
     renameWorkspace,
     deleteWorkspace,
     assignRepoToWorkspace,

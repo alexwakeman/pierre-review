@@ -53,6 +53,11 @@ function RepoConsole({ repo }: { repo: ActivityRepo }): JSX.Element {
           ]}
         />
         </div>
+        {repo.external === true && (
+          <p className="mt-2 text-body text-ui-mute" data-testid="repo-console-external">
+            External repo. Only its project PRs show on Open PRs and Pending, and it is left out of Reports.
+          </p>
+        )}
       </PageHeader>
       {tab === 'activity' ? (
         <>

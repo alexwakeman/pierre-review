@@ -1,3 +1,4 @@
+import { externalRepoIds } from '../../db/external-repos.js';
 import type { FastifyInstance } from 'fastify';
 import type {
   ActivityResponse,
@@ -56,8 +57,19 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/activity', async (req): Promise<ActivityResponse> => {
     const q = req.query as { workspace?: string; repoIds?: string; userIds?: string };
     const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
-    return getActivity(accountId, scope, parseIntList(q.userIds));
+    // EVERY member, EXTERNAL ones included (docs/DATA-MODEL.md § External repos): the sidebar lists
+    // them and their console opens. An external repo is marked and never counted — no attention
+    // count, no unread dot.
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds), { members: 'all' });
+    const externals = await externalRepoIds(accountId, scope.workspaceId);
+    const out = await getActivity(accountId, scope, parseIntList(q.userIds));
+    if (externals.size === 0) return out;
+    return {
+      ...out,
+      repos: out.repos.map((r) =>
+        externals.has(r.repoId) ? { ...r, external: true, attentionCount: 0, hasUnread: false, unreadPrs: [] } : r,
+      ),
+    };
   });
 
   // The consolidated Feed (the Activity "Feed" entry): one flat, chronological stream of real
@@ -81,7 +93,10 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       includeAllCommits?: string;
     };
     const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    // A NARROWED read is one repo's console, which an EXTERNAL member has too (to explore it); the
+    // workspace stream itself (no `repoIds`) stays on Maintained repos.
+    const narrow = parseIntList(q.repoIds);
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, narrow, narrow != null ? { members: 'all' } : {});
     const limit = q.limit != null ? Number(q.limit) : null;
     const offset = q.offset != null ? Number(q.offset) : 0;
     const prId = q.prId != null ? Number(q.prId) : null;

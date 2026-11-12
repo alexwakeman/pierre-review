@@ -823,7 +823,7 @@ NULL = nothing or an older row).
 How a workspace treats one member: `'watched'` (the default, every pre-existing row) or `'external'`
 (shared `WorkspaceRepoMode`) — a repo the team CHANGES but does not MAINTAIN (an infrastructure
 platform's config repo). Set in Manage repos & workspaces (`PUT /api/workspaces/:id/repos/:repoId/mode`,
-the ONE writer `setWorkspaceRepoMode`). ⚠ **READ ONLY THROUGH `db/external-repos.ts` and
+the ONE writer `setRepoMembership`). ⚠ **READ ONLY THROUGH `db/external-repos.ts` and
 `resolveWorkspaceScope`** — a second spelling of "is this repo external" is the second visibility axis
 0046 removed (`repos.inbox_watch`).
 
@@ -850,6 +850,31 @@ the ONE writer `setWorkspaceRepoMode`). ⚠ **READ ONLY THROUGH `db/external-rep
   keys from WATCHED repos only.
 - A MOVE (and a workspace delete's re-home) KEEPS the mode: no mover writes it, so a repo marked external
   never starts getting automatic actions as a side effect.
+
+### A repo in more than one workspace — `workspace_external_repos` (CORE; migration `0191`)
+
+A repo has ONE HOME row in `workspace_repos` (UNIQUE `(account_id, repo_id)`, unchanged): Maintained
+(stored `'watched'`) or External there. It may ALSO be External in any number of OTHER workspaces: one
+`workspace_external_repos` row per `(account_id, workspace_id, repo_id)` (unique), composite FKs to
+`workspaces` and `repos`, cascading. ⚠ Never a row for the home workspace (every writer deletes it on a
+move). ⚠ READ ONLY THROUGH `db/external-repos.ts` (`externalRepoIds(account, ws)`,
+`extraExternalRepoIdsIn`, `extraExternalMemberships`) plus `listWorkspaces` and `getWorkspaceRepoIds(…,
+'all')`.
+
+- **Why a second table and not a wider unique.** Every per-repo "which workspace is this repo in" read
+  (auto-settings, trackers, related repos, `workspaceScopeForRepo`, the automation gate, sync's pinned-cold
+  set) keeps reading the ONE home row, unchanged. So a repo's automation follows its HOME: Maintained
+  anywhere ⇒ automation as that workspace sets it; External at home ⇒ none. An extra row only adds the repo
+  to a workspace's External members: listed (`Workspace.repoIds` + `externalRepoIds`), cloned by the build
+  paths (`members: 'all'`, `sandboxWorkspaceRepos`), its project PRs on that workspace's boards (by THAT
+  workspace's rule), never in its Reports.
+- **THE ONE WRITER, `setRepoMembership(account, ws, repo, mode | null)`** (queries.ts):
+  `'watched'` here = home: set the mode; elsewhere: the home MOVES here Maintained and the old home keeps
+  the repo as an extra External row (Maintained in one workspace at most). `'external'` elsewhere: add an
+  extra row. `null`: an extra row goes; the home: the OLDEST extra row becomes the home (External); no other
+  membership ⇒ `'last_membership'` (the route 409s; the client removes the repo from Limn instead).
+  `assignReposToWorkspace` (a move of the home), `rehomeReposToDefault` and `deleteWorkspace` delete the
+  target's extra row for the repos they move; `deleteWorkspace` drops the deleted workspace's extra rows.
 
 ## `worktree_ledger` — which run a checkout on disk belongs to (CORE; migration `0146`)
 

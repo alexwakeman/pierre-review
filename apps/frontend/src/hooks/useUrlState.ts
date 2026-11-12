@@ -1164,6 +1164,12 @@ export function useUrlState(): void {
       // write.)
       markUrlCorrection();
       writeToUrl(useFilters.getState());
+      // ⚠ REMEMBER THE WORKSPACE THE URL NAMED, NOW. The subscription below only persists LATER
+      // changes, so a tab opened on `?workspace=5` that the reader never switched left the stored
+      // scope at whatever an older session wrote (or nothing) — and the next BARE load (the CLI
+      // opens `/app` on every restart) came up on that stale workspace or on Default. A dead id
+      // is harmless here: the sync effect corrects it, and that correction persists in turn.
+      persistScope(useFilters.getState());
       hydrated.current = true;
     }
     // Reflect every subsequent change back into the URL and localStorage.

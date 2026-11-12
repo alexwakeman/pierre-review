@@ -536,7 +536,7 @@ export const SETUP_REPOS = {
 /** Repos & workspaces (Activity/WorkspaceManager.tsx). */
 export const SETUP_WORKSPACES = {
   title: 'Repos & workspaces',
-  rule: 'Every repo lives in exactly one workspace. Changing a repo’s workspace MOVES it — it leaves the one it’s in now.',
+  rule: 'A repo is Maintained in one workspace at most, and can be External in any number of others.',
   workspaces: [
     { id: 'pay', name: 'Acme payments', isDefault: true },
     { id: 'web', name: 'Web', isDefault: false },
@@ -547,10 +547,10 @@ export const SETUP_WORKSPACES = {
     { name: REPOS.ledger, home: 'pay' },
     { name: 'acme/docs-site', home: 'pay' },
     // An EXTERNAL repo (docs/DATA-MODEL.md § External repos): the platform team's, changed by Acme.
-    { name: 'acme/platform-config', home: 'pay', external: true },
+    { name: 'acme/platform-config', home: 'pay', external: true, alsoExternalIn: ['web'] },
     { name: REPOS.web, home: 'web' },
     { name: 'acme/design-system', home: 'web' },
-  ] as Array<{ name: string; home: string; external?: boolean }>,
+  ] as Array<{ name: string; home: string; external?: boolean; alsoExternalIn?: string[] }>,
 };
 
 export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';

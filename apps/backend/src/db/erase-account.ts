@@ -43,6 +43,7 @@ const {
   aiUsage,
   workspaces,
   workspaceRepos,
+  workspaceExternalRepos,
   workspaceReviewers,
   benchmarkContributions,
   searchIndex,
@@ -133,6 +134,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // the composite FK cascades), but a workspace whose repos were all deleted, and any row the
     // repo loop above could not reach, still carries this account's id.
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.accountId, accountId)).execute();
+    // The EXTRA External memberships (migration 0191) — same shape, same reason.
+    await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.accountId, accountId)).execute();
     // The REPO half of the Pending mute (migration 0058 / pg 0045). Deleted BEFORE `workspaces`
     // only for tidiness — it has no FK to a workspace at all (a repo belongs to exactly one
     // workspace already, so copying that fact onto the mute row would give the account two
@@ -528,6 +531,8 @@ export function accountScopedTables(): {
     // workspaceRepos carries its OWN accountId (not only workspaceId/repoId) — it must be on the
     // checklist, or a membership row could survive an erasure carrying this account's id.
     { name: 'workspaceRepos', col: workspaceRepos.accountId, table: workspaceRepos },
+    // The EXTRA External memberships (migration 0191): a repo External in more than one workspace.
+    { name: 'workspaceExternalRepos', col: workspaceExternalRepos.accountId, table: workspaceExternalRepos },
     // The bot object, now one grain. It holds the human judgements, the human-set vendor names
     // and `monthly_cents` — the one column no classifier can regenerate — so this is the entry
     // whose omission would cost the user data they entered by hand.

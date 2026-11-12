@@ -673,6 +673,12 @@ export const api = {
     fetch(`/api/workspaces/${workspaceId}/repos/${repoId}/mode`, jsonBody('PUT', { mode })).then((r) =>
       handle<{ workspace: Workspace }>(r),
     ),
+  // Take one repo out of one workspace, keeping its other memberships. 409 `LastMembership` when it
+  // is the repo's only workspace (remove it from Limn with `deleteRepo` instead).
+  removeRepoFromWorkspace: (workspaceId: number, repoId: number) =>
+    fetch(`/api/workspaces/${workspaceId}/repos/${repoId}`, jsonBody('DELETE')).then((r) =>
+      handle<{ workspace: Workspace }>(r),
+    ),
   assignRepoToWorkspace: (workspaceId: number, repoId: number) =>
     fetch(`/api/workspaces/${workspaceId}/repos`, jsonBody('POST', { repoId })).then((r) =>
       handle<{ workspace: Workspace }>(r),

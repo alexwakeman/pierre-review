@@ -224,4 +224,33 @@ describe('external repos on the database', () => {
     expect(await q.setWorkspaceRepoMode(1, workspaceId + 999, infraRepo, 'external')).toBe(false);
     await q.setWorkspaceRepoMode(1, workspaceId, infraRepo, 'external');
   });
+
+  it('a repo lives in more than one workspace: one home, any number of External memberships', async () => {
+    const ws2 = (await q.createWorkspace(1, 'Payments')).id;
+    const byId = async (id: number) => (await q.listWorkspaces(1)).find((w: any) => w.id === id);
+    // External in a second workspace: listed there as External, still Maintained at home.
+    expect(await q.setRepoMembership(1, ws2, teamRepo, 'external')).toBe('ok');
+    expect((await byId(ws2)).externalRepoIds).toEqual([teamRepo]);
+    expect((await byId(workspaceId)).externalRepoIds).not.toContain(teamRepo);
+    expect((await q.resolveWorkspaceScope(1, ws2)).repoIds).toEqual([]);
+    expect((await q.resolveWorkspaceScope(1, ws2, null, { members: 'all' })).repoIds).toEqual([teamRepo]);
+    expect(await ext.automationAllowedForRepo(1, teamRepo)).toBe(true);
+    // Maintained in the second: the home MOVES, and the old home keeps it External.
+    expect(await q.setRepoMembership(1, ws2, teamRepo, 'watched')).toBe('ok');
+    expect((await q.resolveWorkspaceScope(1, ws2)).repoIds).toEqual([teamRepo]);
+    expect((await byId(workspaceId)).externalRepoIds).toContain(teamRepo);
+    expect((await q.resolveWorkspaceScope(1, workspaceId)).repoIds).not.toContain(teamRepo);
+    // Leaving the home: the other membership becomes the home, External.
+    expect(await q.setRepoMembership(1, ws2, teamRepo, null)).toBe('ok');
+    expect((await byId(ws2)).repoIds).toEqual([]);
+    expect((await byId(workspaceId)).externalRepoIds).toContain(teamRepo);
+    // Its only workspace: refused.
+    expect(await q.setRepoMembership(1, workspaceId, teamRepo, null)).toBe('last_membership');
+    // Back to Maintained at home; a deleted workspace takes its extra rows with it.
+    expect(await q.setRepoMembership(1, workspaceId, teamRepo, 'watched')).toBe('ok');
+    expect(await q.setRepoMembership(1, ws2, infraRepo, 'external')).toBe('ok');
+    expect(await q.deleteWorkspace(ws2, 1)).toBe('deleted');
+    expect((await db.select().from(schema.workspaceExternalRepos).execute()).length).toBe(0);
+    expect(await q.setRepoMembership(1, workspaceId + 999, teamRepo, 'external')).toBe('not_found');
+  });
 });

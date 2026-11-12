@@ -145,12 +145,25 @@ expired SAML authorisation shows the reconnect banner, which now says `gh auth r
 
 ### External repos in the client
 
-`Workspace.externalRepoIds` ([DATA-MODEL.md](DATA-MODEL.md) § External repos) is the only client-side
-fact. Manage repos & workspaces (`Activity/WorkspaceManager.tsx`) shows a Watched/External picker per repo
-(`useWorkspaceMutations().setWorkspaceRepoMode`, which sweeps the membership key set), with the ⓘ beside
-"Repos". The Timeline picker (`FilterBar`) omits external repos. Nothing else filters client-side: the
-server decides which of an external repo's PRs a scoped response carries, and `repoIds` narrowing sent
-with an external id is harmless (the server intersects it).
+`Workspace.repoIds` (every member) and `Workspace.externalRepoIds` (its External members, home or extra —
+[DATA-MODEL.md](DATA-MODEL.md) § External repos) are the only client-side facts; a repo may be in several
+workspaces' lists (`Activity/workspaceMembership.ts` `membershipsOf` reads them). Manage repos & workspaces
+(`Activity/WorkspaceManager.tsx`) has TWO views of the same facts, the choice remembered per browser
+(`limn.repoManager.view`): **Workspaces** (one workspace: Maintained and External sections, one line per
+repo — workspace picker (moves THIS membership: the target takes it first, then this one lets go), the
+Maintained/External picker, the other memberships beside the name) and **Grid** (repos × workspaces; a cell
+cycles none → External → Maintained → none, `nextGridState`; a repo's ONLY membership never cycles to none).
+⚠ Every write is pending PER ROW / PER CELL (`busy`, keyed by repo or `repo:workspace`) — never one
+mutation's `isPending` across rows (that blocked every other ✕ during a slow `DELETE /api/repos/:id`).
+Taking a repo out of its last workspace removes it from Limn, after a confirm. The repo search
+(`RepoSearch`) shows its curated suggestions ONLY to an account with no repos yet; otherwise nothing until
+the reader types. Its pager dims the list under a spinner until the page lands (`paging`).
+
+The sidebar's Repositories list reads `GET /api/activity`, which carries EVERY member with `external: true`
+on the External ones (attention and unread zeroed): they sort last and say "External" instead of a PR
+count, and their console opens (its feed asks `?repoIds=<id>`, which the server reads over every member).
+The Timeline picker (`FilterBar`) omits external repos. Nothing else filters client-side: the server decides
+which of an external repo's PRs a scoped response carries.
 
 ### UI regions (`App.tsx`) — THE SHELL (redesign, 2026-10)
 

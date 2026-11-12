@@ -10242,6 +10242,9 @@ export interface ActivityRepo {
   // Read from the DB in the same request — the repo status panel never fetches. ABSENT on an older answer.
   docsUnreadable?: RepoDocsUnreadableReason | null;
   prs: TimelinePr[]; // caller groups by authorId
+  // An EXTERNAL member of the workspace (docs/DATA-MODEL.md § External repos): listed so it can be
+  // explored, never counted. Its `attentionCount` is 0 and `hasUnread` false. ABSENT = Maintained.
+  external?: boolean;
 }
 
 export interface ActivityUnreadPr {

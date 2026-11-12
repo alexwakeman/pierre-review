@@ -13,6 +13,32 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Manage repos & workspaces: a repository can be in more than one workspace. It is Maintained in one at most and
+  External in any number of others. Making it Maintained in a workspace turns it External where it was before.
+- Manage repos & workspaces: a Grid view shows every repository against every workspace. Click a cell to change it.
+- Manage repos & workspaces: "Add one of your repos…" adds a repository you already have to the workspace, and
+  "Add as" picks Maintained or External for new ones.
+- The sidebar's Repositories list shows the workspace's External repositories too, marked External, and their
+  pages open.
+
+### Changed
+
+- Manage repos & workspaces: "Watched" is now "Maintained". The dialog is wider, each repository fits on one line,
+  and the workspace you pick lists its Maintained and External repositories. "In other workspaces" is gone.
+- Manage repos & workspaces: the repository search lists nothing until you type, except before your first
+  repository.
+- Build end to end: the Jira comment lists the pull requests and what changed on the ticket, in plain English. It
+  no longer names Limn, the review rounds or the plan's reasons.
+
+### Fixed
+
+- Repository search: Next and Prev show a spinner while the page loads.
+- Manage repos & workspaces: removing a repository fades its line and shows a spinner, and you can remove another
+  one at the same time. Before, the other remove buttons did nothing until the first removal finished.
+- Opening Limn after a restart comes back to the workspace you last had open from a link, not Default.
+
 ## [1.0.30] - 2026-11-12
 
 ### Added
