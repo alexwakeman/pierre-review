@@ -65,3 +65,13 @@ describe('the toast row', () => {
     expect(autoFixRowLine({ status: 'succeeded', failed: false, pushedAt: null })).toBe('Ready to push');
   });
 });
+
+describe('the fix start queue line', () => {
+  it('says the place in line and that it starts by itself', async () => {
+    const { fixWaitingLine } = await import('../src/lib/aiFixProgress.js');
+    expect(fixWaitingLine(null)).toBeNull();
+    expect(fixWaitingLine({ position: 1 })).toBe('Waiting for a free sandbox (1st in line). It starts by itself.');
+    expect(fixWaitingLine({ position: 2 })).toBe('Waiting for a free sandbox (2nd in line). It starts by itself.');
+    expect(fixWaitingLine({ position: 12 })).toBe('Waiting for a free sandbox (12th in line). It starts by itself.');
+  });
+});

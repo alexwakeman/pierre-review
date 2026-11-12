@@ -4517,7 +4517,7 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   fixer (`coding/agent.ts runCodingAgent` / `runPlanAgent`, its prompts, `no-shell.test.ts`, "Run
   tests") is REMOVED. ⚠ **NEVER QUEUED**: no runtime ⇒ `409 NoRuntime` and no row (the tab shows ONE
   line and "How to set up", as Implement does); no free session ⇒ `409 TooManySessions`; another session
-  building ⇒ `409 BuildBusy` (AI Fix and Implement share the two sessions and the ONE build slot). The
+  building ⇒ `409 BuildBusy` (AI Fix and Implement share the open sessions, 4, and the build slots, 3; a fix that finds none waits in THE FIX START QUEUE below). The
   unattended paths SKIP with a recorded reason (below; docs/MERGE-CI-TRUNK.md).
 - **A MANUAL FIX RUNS AT ONCE.** Start boots the session and starts the fix in build mode; the reader
   watches it live (the shared `components/sandbox/SessionView.tsx`), can **Stop** (the turn stops, the
@@ -4677,6 +4677,34 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   sessions).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
+
+### The fix start queue (`coding/ai-fix/start-queue.ts`, 2026-11-12)
+
+Up to `LIMN_SANDBOX_MAX_BUILDS` (3) fixes BUILD at once (story builds share the slots; the open-session cap,
+`LIMN_SANDBOX_MAX_SESSIONS`, is 4). Before, a second fix was refused (`409 BuildBusy`) and an auto fix skipped
+`sandbox_busy` until the next sweep. Now a start that finds every slot taken WAITS IN LINE (`StartFixInput
+.queueIfBusy`, set by the reader's press and the auto fix; never dependency automation) and starts the moment
+a slot frees — `onSessionSlotFreed` (sandbox/session/manager.ts: a reservation released, a build turn ended, a
+session closed), plus the auto fix queue's minute sweep as a backstop.
+
+- **The press answers `202 {fixId: null, status: 'waiting', position}`**; `GET …/ai-fix` and `…/status` carry
+  `waiting {position, queuedAt, trigger}` (status reads `queued`), the stream pushes each new position, and
+  Cancel (`POST …/ai-fix/cancel`) takes it out of line. Shown in the AI Fix tab ("Waiting for a free sandbox
+  (2nd in line). It starts by itself." + Cancel) and the AI fixes toast.
+- **One entry per PR**; a press replaces a waiting auto fix (keeps its place), never the reverse. ORDER:
+  presses first, then auto fixes, oldest first. ONE start at a time (a start awaits its seed and GitHub before
+  it reserves); one that loses the race goes back to the FRONT. A pump asked for while one runs is never
+  dropped (`again`).
+- **Re-validated at its turn**: a press re-runs the same `startRun` (the seed rebuilt then, at the PR's
+  current head); an auto entry asks `evaluateAutoFix` again.
+- **ROOM**: an unattended fix closes its sandbox after its turn, but a reader's fix session stays open for
+  follow-ups. When every SANDBOX is open and a fix waits, the longest-idle FIX session (idle ≥
+  `LIMN_SANDBOX_RECLAIM_IDLE_SECONDS`, 60) is closed with its work kept (`reclaimIdleFixSession`, built and
+  resumable, "Closed to make room for another fix that was waiting."); never a story session. Nothing idle
+  yet ⇒ the pump looks again every 30 s.
+- **In memory**: a restart drops the line (an auto fix is asked again by the sweep; a reader presses again).
+  Pinned by `start-queue.test.ts` and `fix-session-flow-db.test.ts` (five PRs at once: three build together,
+  two wait, all five finish with no further press).
 
 ### The auto fix queue (`coding/ai-fix/auto-fix-queue.ts`, 2026-11-12)
 

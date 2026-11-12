@@ -224,8 +224,9 @@ export async function maybeStartAutoFix(
     if (deps.sandbox) {
       const ready = await deps.sandbox();
       if (!ready.ok && ready.reason === 'no_runtime') return skip('no_sandbox');
-      // Busy because THIS PR's own fix holds a session: say so, not "the sandbox was busy".
-      if (!ready.ok) return skip(deps.isFixRunning(prId) ? 'fix_in_progress' : 'sandbox_busy');
+      // Busy because THIS PR's own fix holds a session: say so. Busy otherwise: go on — the start waits in
+      // THE FIX START QUEUE (start-queue.ts) and starts the moment a slot frees.
+      if (!ready.ok && deps.isFixRunning(prId)) return skip('fix_in_progress');
     }
     // WHAT an auto fix carries is the workspace's "Always include" sections (AutoFixSettings).
     const include = ws.settings.include;
@@ -324,8 +325,8 @@ export async function maybeStartAutoFix(
       : DEFAULT_AI_FIX_MODEL;
     const r =
       reviewId != null
-        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include })
-        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include } });
+        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include, queueIfBusy: true })
+        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include }, queueIfBusy: true });
     if (r.status === 'queued') {
       const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'started', fixId: r.fixId };
       if (reviewId != null) record(accountId, outcome);
@@ -335,7 +336,8 @@ export async function maybeStartAutoFix(
     if (r.status === 'nothing_to_fix') return skip('nothing_to_fix');
     if (r.status === 'already_running') return skip('fix_in_progress');
     if (r.status === 'no_runtime') return skip('no_sandbox');
-    if (r.status === 'too_many' || r.status === 'build_busy') return skip('sandbox_busy');
+    // Waiting in THE FIX START QUEUE (it starts by itself), or the line was full.
+    if (r.status === 'waiting' || r.status === 'too_many' || r.status === 'build_busy') return skip('sandbox_busy');
     if (r.status === 'over_budget') return skip('over_budget');
     ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) not started: ${r.status}`);
     return skip('not_started');

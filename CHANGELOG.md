@@ -35,6 +35,10 @@ no internals.
   is running; each starts from what is still open on the latest commit. The AI Review tab shows what the next
   auto fix waits for and lists every auto fix of the pull request, and an "Auto fixes" circle among the
   notifications shows the ones running or failed.
+- AI Fix: up to three fixes now run at once. When every sandbox is busy, a fix (yours or an auto fix) waits in
+  line and starts by itself as soon as one frees, your own presses first. The AI Fix tab shows its place in line,
+  with Cancel. To make room, a fix session of yours that has done nothing for a minute is closed; its changes
+  are kept.
 ### Changed
 
 - Implement is now offered on In progress tickets with no pull request, as well as Not started ones.

@@ -13,8 +13,9 @@
 //                    │                   pushed               (derived on read once every change is pushed)
 //                    └─► failed          Discard (any state) ─► discarded
 //
-// LIMITS: ≤ LIMN_SANDBOX_MAX_SESSIONS sandboxes at once (default 2) — story AND fix sessions, and the
-// slots an AI Fix start has reserved; ONE build-mode turn at a time on the machine; a session with no turn
+// LIMITS: ≤ LIMN_SANDBOX_MAX_SESSIONS sandboxes at once (default 4) — story AND fix sessions, and the
+// slots an AI Fix start has reserved; ≤ LIMN_SANDBOX_MAX_BUILDS build-mode turns at once (default 3; one
+// until 2026-11-12); every freed slot is announced (`onSessionSlotFreed`: AI Fix's start queue); a session with no turn
 // and no reader action for LIMN_SANDBOX_IDLE_MINUTES (15) is closed; one turn running longer than
 // LIMN_SANDBOX_TURN_MAX_MINUTES (120) is stopped.
 // EVERY END REMOVES THE SANDBOX (docs/SANDBOX.md § Every end removes the sandbox): `closeSession` runs
@@ -310,8 +311,31 @@ export interface Live extends SubjectLive {
 const live = new Map<SessionKey, Live>();
 /** Slots an AI Fix start holds while it reads GitHub and writes its row (counted in the cap). */
 const reserved = new Set<SessionKey>();
-/** The ONE build-mode turn on this machine (owner decision 3 of STORY-BUILD), story or fix. */
-let building: SessionKey | null = null;
+/** The build-mode turns running (or reserved) on this machine, story or fix: ≤ `maxBuilds`. */
+const building = new Set<SessionKey>();
+
+// A SLOT FREED (a reservation released, a build turn ended, a session closed): the listeners (AI Fix's start
+// queue, coding/ai-fix/start-queue.ts) start what waits. Deferred a tick so the freeing code finishes first.
+const slotListeners = new Set<() => void>();
+export function onSessionSlotFreed(fn: () => void): () => void {
+  slotListeners.add(fn);
+  return () => slotListeners.delete(fn);
+}
+function slotFreed(): void {
+  if (slotListeners.size === 0) return;
+  setImmediate(() => {
+    for (const fn of [...slotListeners]) {
+      try {
+        fn();
+      } catch {
+        /* a listener never stops the machine */
+      }
+    }
+  });
+}
+function stopBuilding(key: SessionKey): void {
+  if (building.delete(key)) slotFreed();
+}
 
 const storyKey = (id: number): SessionKey => `story:${id}`;
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -390,6 +414,40 @@ async function idleClose(l: Live): Promise<void> {
   await closeKeepingWork(l, idleLine(Math.round(sessionLimits().idleMs / 60_000)));
 }
 
+/** How long a fix session must sit idle before a waiting fix may take its place (LIMN_SANDBOX_RECLAIM_IDLE_SECONDS). */
+export function reclaimIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.LIMN_SANDBOX_RECLAIM_IDLE_SECONDS?.trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n * 1000 : 60_000;
+}
+export const RECLAIMED_LINE = 'Closed to make room for another fix that was waiting.';
+
+/**
+ * THE FIX START QUEUE's last resort (coding/ai-fix/start-queue.ts): every sandbox is open and a fix waits.
+ * Close the AI FIX session that has sat idle longest (no turn, no hold, at least `reclaimIdleMs`), KEEPING
+ * its work (built, resumable) — the same close the idle timer makes, only sooner. A story session is never
+ * reclaimed; an unattended fix closes by itself after its turn. True when one was closed.
+ */
+export async function reclaimIdleFixSession(): Promise<boolean> {
+  const { idleMs } = sessionLimits();
+  const minIdle = reclaimIdleMs();
+  const now = deps.now();
+  let pick: Live | null = null;
+  let pickSince = Infinity;
+  for (const l of live.values()) {
+    if (l.subject.kind !== 'fix' || l.closing || l.turn || l.hold || l.idleAt == null || l.driver == null || l.driver.busy()) continue;
+    const since = l.idleAt - idleMs;
+    if (now - since < minIdle) continue;
+    if (since < pickSince) {
+      pick = l;
+      pickSince = since;
+    }
+  }
+  if (pick == null) return false;
+  await closeKeepingWork(pick, RECLAIMED_LINE);
+  return true;
+}
+
 /** Close a session, keeping what it stored: `built` (or the subject's kept phase) with work, `failed` without. */
 async function closeKeepingWork(l: Live, line: string): Promise<void> {
   if (l.closing) return void (await l.closed?.catch(() => {}));
@@ -435,7 +493,8 @@ export function liveSandboxIds(): string[] {
 
 /** Another session's build-mode turn runs (or is reserved): a build here must wait. */
 export function buildSlotTaken(key: SessionKey | null = null): boolean {
-  return building != null && building !== key;
+  const others = building.size - (key != null && building.has(key) ? 1 : 0);
+  return others >= sessionLimits().maxBuilds;
 }
 
 export type ReserveResult = { ok: true } | { ok: false; reason: 'too_many'; message: string } | { ok: false; reason: 'build_busy' };
@@ -450,9 +509,9 @@ export function reserveSessionSlot(key: SessionKey, o: { build: boolean }): Rese
   const { maxOpen } = sessionLimits();
   if (live.has(key) || reserved.has(key)) return { ok: false, reason: 'too_many', message: 'This session is already open.' };
   if (openSessionCount() >= maxOpen) return { ok: false, reason: 'too_many', message: tooManyLine(maxOpen) };
-  if (o.build && building != null) return { ok: false, reason: 'build_busy' };
+  if (o.build && building.size >= sessionLimits().maxBuilds) return { ok: false, reason: 'build_busy' };
   reserved.add(key);
-  if (o.build) building = key;
+  if (o.build) building.add(key);
   return { ok: true };
 }
 
@@ -464,7 +523,7 @@ export function reserveSessionSlot(key: SessionKey, o: { build: boolean }): Rese
 export function sessionSlotFree(o: { build: boolean }): ReserveResult {
   const { maxOpen } = sessionLimits();
   if (openSessionCount() >= maxOpen) return { ok: false, reason: 'too_many', message: tooManyLine(maxOpen) };
-  if (o.build && building != null) return { ok: false, reason: 'build_busy' };
+  if (o.build && building.size >= sessionLimits().maxBuilds) return { ok: false, reason: 'build_busy' };
   return { ok: true };
 }
 
@@ -472,12 +531,13 @@ export function sessionSlotFree(o: { build: boolean }): ReserveResult {
 export function rekeySessionSlot(from: SessionKey, to: SessionKey): void {
   if (!reserved.delete(from)) return;
   reserved.add(to);
-  if (building === from) building = to;
+  if (building.delete(from)) building.add(to);
 }
 
 export function releaseSessionSlot(key: SessionKey): void {
-  reserved.delete(key);
-  if (building === key && !live.get(key)?.turn) building = null;
+  const was = reserved.delete(key);
+  if (building.has(key) && !live.get(key)?.turn) stopBuilding(key);
+  else if (was) slotFreed();
 }
 
 // ---- start ------------------------------------------------------------------------------------------------
@@ -870,7 +930,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
         return;
       }
       l.turn = true;
-      if (first.build) building = l.key;
+      if (first.build) building.add(l.key);
       addItem(l, { kind: 'reader', text: first.readerText, build: first.build });
       runTurn(l, { build: first.build, text: first.text, ...(first.planSource ? { planSource: first.planSource } : {}) });
       return;
@@ -1012,7 +1072,7 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
         if (!l.closing) addItem(l, { kind: 'error', code: 'session', text: scrub(err) });
       }
       l.turn = false;
-      if (building === l.key) building = null;
+      stopBuilding(l.key);
       if (!l.closing) {
         const follow = afterChat?.followUp ?? null;
         if (after === 'close') {
@@ -1022,7 +1082,7 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
           // A BUILD CONTINUATION (plan first: the turn cap hit with work unfinished; the subject asked the
           // budget gate): claimed in this same tick, the build slot with it.
           l.turn = true;
-          building = l.key;
+          building.add(l.key);
           const text = buildFollow;
           runTurn(l, { build: true, text: async () => text });
         } else if (afterChat?.autoBuild === true && claimAutoBuild(l)) {
@@ -1103,7 +1163,7 @@ export type HostTurnResult = 'started' | 'not_live' | 'busy' | 'build_busy';
 
 /**
  * A HOST-STARTED build turn (the review loop's fix pass): the same claim as a build continuation, in one
- * tick — the session is live, in build mode, idle, and the machine's ONE build slot is free.
+ * tick — the session is live, in build mode, idle, and a build slot is free (≤ maxBuilds).
  */
 export function startHostBuildTurn(key: SessionKey, text: string): HostTurnResult {
   const l = live.get(key);
@@ -1112,7 +1172,7 @@ export function startHostBuildTurn(key: SessionKey, text: string): HostTurnResul
   if (l.driver.mode() !== 'build') return 'busy';
   if (buildSlotTaken(key)) return 'build_busy';
   l.turn = true;
-  building = key;
+  building.add(key);
   l.loopTurn = true;
   try {
     l.subject.beforeHostTurn?.(l);
@@ -1180,7 +1240,7 @@ export async function messageSession(key: SessionKey, accountId: number, text: s
   if (build && buildSlotTaken(key)) return { status: 'build_busy' };
   // THE CLAIM, synchronously.
   l.turn = true;
-  if (build) building = key;
+  if (build) building.add(key);
   touch(l);
   addItem(l, { kind: 'reader', text, build: false });
   const sent = build ? (l.subject.followUpText ? l.subject.followUpText(l, text) : text) : l.subject.chatText ? l.subject.chatText(l, text) : text;
@@ -1212,7 +1272,7 @@ export function claimBuildTurn(l: Live, o: { readerText: string; instruction: ()
   if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
   if (buildSlotTaken(l.key)) return { status: 'build_busy' };
   l.turn = true;
-  building = l.key;
+  building.add(l.key);
   touch(l);
   addItem(l, { kind: 'reader', text: o.readerText, build: true });
   runTurn(l, {
@@ -1377,7 +1437,7 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
       l.egress.close();
     }
     await destroyNow(l);
-    if (building === l.key) building = null;
+    stopBuilding(l.key);
     if (o.error) addItem(l, { kind: 'notice', text: o.error });
     if (l.saveTimer) clearTimeout(l.saveTimer);
     l.saveTimer = null;
@@ -1386,6 +1446,7 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
       l.ctx.log.warn({ err }, `sandbox session ${l.key}: recording its close failed`),
     );
     live.delete(l.key);
+    slotFreed();
     await l.subject.onClosed?.(l, o.phase).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: after its close`));
     emit(l, { type: 'done' });
     l.subs.clear();
@@ -2039,7 +2100,7 @@ export async function _sessionsIdleForTest(timeoutMs = 10_000): Promise<void> {
 export async function _closeAllSessionsForTest(): Promise<void> {
   await Promise.all([...live.values()].map((l) => closeSession(l, { phase: 'discarded', error: null })));
   reserved.clear();
-  building = null;
+  building.clear();
 }
 
 /** Test seam: the turn-cap watchdog of one session's running turn, now (the grace as given). */

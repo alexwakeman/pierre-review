@@ -33,7 +33,8 @@ import type { AgentProviderId } from '../../ai/provider.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
-import { liveSession, NO_RUNTIME_LINE, sessionDeps, type SessionActionResult } from '../../sandbox/session/manager.js';
+import { liveSession, NO_RUNTIME_LINE, onSessionSlotFreed, reclaimIdleFixSession, sessionDeps, sessionSlotFree, type SessionActionResult } from '../../sandbox/session/manager.js';
+import { bindStartQueue, cancelQueuedStart, enqueueStart, pumpStartQueue, startWaitingFor } from './start-queue.js';
 import {
   capFixDiff,
   claimFixPr,
@@ -54,7 +55,7 @@ import {
   type FixDiscardResult,
 } from '../../sandbox/session/fix.js';
 import type { SessionKey } from '../../sandbox/session/subject.js';
-import { bindAutoFixQueueFacts } from './auto-fix-queue.js';
+import { bindAutoFixQueueFacts, bindAutoFixStartPlace } from './auto-fix-queue.js';
 
 export { subscribeFixStream } from './stream.js';
 
@@ -285,6 +286,8 @@ export function startReviewFix(
     trigger: AiFixTrigger;
     // An auto fix's sections (Settings → Auto review → Always include). Absent ⇒ the defaults.
     include?: AutoFixInclude;
+    // THE FIX START QUEUE: wait in line when every slot is taken (the auto fix sets it).
+    queueIfBusy?: boolean;
   },
 ): Promise<StartFixResult> {
   return startFix(ctx, {
@@ -295,6 +298,7 @@ export function startReviewFix(
     sourceReviewId: input.reviewId,
     trigger: input.trigger,
     selection: input.include ? { kind: 'sections', include: input.include } : undefined,
+    ...(input.queueIfBusy === true ? { queueIfBusy: true } : {}),
   });
 }
 
@@ -317,7 +321,9 @@ export type StartFixResult =
   | { status: 'build_busy' }
   // An UNATTENDED start over the AI spend budget (`automaticRunAllowed`, asked once more here so no
   // automatic caller can skip it). A reader's click never gets it.
-  | { status: 'over_budget' };
+  | { status: 'over_budget' }
+  // THE FIX START QUEUE (start-queue.ts): every slot was taken and the start asked to wait in line.
+  | { status: 'waiting'; position: number };
 
 export interface StartFixInput {
   accountId: number;
@@ -347,6 +353,10 @@ export interface StartFixInput {
   // THE CI-ONLY SEED only (dependency automation's combined run): Limn's OWN lines, set above the seed's
   // items (`dependencyMergeAndCiPreamble`). Never PR text: it sits outside every fence.
   preamble?: string;
+  // THE FIX START QUEUE: every sandbox slot taken ⇒ wait in line (start-queue.ts) instead of the refusal.
+  // Set by the reader's press (the start route) and the auto fix; never by dependency automation (its
+  // own tick retries) nor by the queue's own re-run.
+  queueIfBusy?: boolean;
 }
 
 export function startFix(ctx: AgentContext, input: StartFixInput): Promise<StartFixResult> {
@@ -366,6 +376,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
   const { accountId, prId } = input;
   const trigger: AiFixTrigger = input.trigger ?? 'manual';
   const unattended = trigger === 'auto';
+  bindStartQueue({ ctx });
 
   // THE PROVIDER IS PICKED ONCE, HERE: the request's per-run choice, else the default.
   const provider: AgentProviderId = input.provider ?? activeProviderId();
@@ -439,7 +450,21 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     if (!detected.available) return bail({ status: 'no_runtime', message: detected.problem ?? NO_RUNTIME_LINE });
     const placeholder: SessionKey = `fix:${-prId}`;
     const reserved = reserveFixSlot(placeholder, mode === 'fix');
-    if (!reserved.ok) return bail(reserved.reason === 'too_many' ? { status: 'too_many', message: reserved.message } : { status: 'build_busy' });
+    if (!reserved.ok) {
+      if (input.queueIfBusy === true) {
+        bail({ status: 'build_busy' });
+        // A reader's press re-runs this same start at its turn (the seed rebuilt then); an auto fix asks the
+        // auto fix queue again (it re-reads the PR's work at its current head).
+        const place = enqueueStart(
+          trigger === 'manual'
+            ? { accountId, prId, trigger, run: () => startRun(ctx, { ...input, queueIfBusy: false }, mode) }
+            : { accountId, prId, trigger },
+        );
+        if (place != null) return { status: 'waiting', position: place.position };
+        return reserved.reason === 'too_many' ? { status: 'too_many', message: reserved.message } : { status: 'build_busy' };
+      }
+      return bail(reserved.reason === 'too_many' ? { status: 'too_many', message: reserved.message } : { status: 'build_busy' });
+    }
     slot = placeholder;
 
     const head = await ctx.github.fetchPrHeadInfo(accountId, pr.owner, pr.name, pr.number);
@@ -555,7 +580,9 @@ export async function discardPlan(ctx: AgentContext, input: { accountId: number;
 }
 
 /** Stop (`POST …/ai-fix/cancel`): fix.ts `stopFixSession`. true ⇒ something was stopped. */
-export function requestFixCancel(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
+export async function requestFixCancel(ctx: AgentContext, accountId: number, prId: number): Promise<boolean> {
+  // A start still waiting in line is dropped (nothing ran); otherwise the session is stopped.
+  if (cancelQueuedStart(accountId, prId)) return true;
   return stopFixSession(ctx, accountId, prId);
 }
 
@@ -566,6 +593,10 @@ export function isFixRunning(prId: number): boolean {
 
 // THE AUTO FIX QUEUE reads this manager's claim through its registration (it never imports a manager).
 bindAutoFixQueueFacts({ fixRunning: isFixRunning });
+// THE FIX START QUEUE: is a build slot free now, and start what waits whenever one frees.
+bindStartQueue({ slotFree: () => sessionSlotFree({ build: true }).ok, reclaim: reclaimIdleFixSession });
+bindAutoFixStartPlace((a, p) => startWaitingFor(a, p)?.position ?? null);
+onSessionSlotFreed(pumpStartQueue);
 
 export async function getFixStatus(ctx: AgentContext, accountId: number, prId: number): Promise<AiFixStatusResponse> {
   // The DB lookup goes FIRST, and it is what establishes ownership: the in-memory claims are keyed by
@@ -579,6 +610,9 @@ export async function getFixStatus(ctx: AgentContext, accountId: number, prId: n
     .limit(1)
     .execute()) as Array<{ id: number; status: AiFixStatus }>;
   const row = rows[0];
+  // THE FIX START QUEUE: the PR's next fix waits for a free sandbox (it starts by itself).
+  const waiting = startWaitingFor(accountId, prId);
+  if (waiting != null) return { status: 'queued', fixId: row?.id ?? null, progress: null, waiting };
   if (!row) return { status: 'idle', fixId: null, progress: null };
   if (fixIdHoldingPr(prId) === row.id) {
     const now = fixLiveProgress(row.id);

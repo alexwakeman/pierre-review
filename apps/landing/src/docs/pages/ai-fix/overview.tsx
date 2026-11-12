@@ -155,8 +155,11 @@ export default function Page(): JSX.Element {
       </ul>
       <H3>Sharing the computer with Implement story</H3>
       <p>
-        AI Fix and Implement story use the same sandboxes: two open sessions on this computer at a time, and one of them
-        building at a time. One fix runs per pull request. See{' '}
+        AI Fix and Implement story use the same sandboxes: up to four open sessions on this computer, and up to three
+        building at once. One fix runs per pull request. When every sandbox is busy, a fix waits in line and starts by
+        itself when one frees; the <Ui>AI Fix</Ui> tab shows its place, with <Ui>Cancel</Ui>. To make room, a fix
+        session of yours that has done nothing for a minute is closed; its changes are kept, and <Ui>Resume</Ui> goes
+        on. See{' '}
         <DocLink to="security/ai-and-the-sandbox">AI and the sandbox</DocLink> for the full safety story.
       </p>
     </>

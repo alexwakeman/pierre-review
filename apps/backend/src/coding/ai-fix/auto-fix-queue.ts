@@ -215,6 +215,14 @@ async function latestFix(ctx: AgentContext, accountId: number, prId: number): Pr
 }
 
 const iso = (ms: number): string => new Date(ms).toISOString();
+const ordinal = (n: number): string => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'}`;
+
+// THE FIX START QUEUE's place of a PR (registered by start-queue.ts's owner, the AI Fix manager, through the
+// same binding as the other facts; null when it is not waiting).
+let startPlace: (accountId: number, prId: number) => number | null = () => null;
+export function bindAutoFixStartPlace(fn: (accountId: number, prId: number) => number | null): void {
+  startPlace = fn;
+}
 
 /**
  * Decide for one PR now. Returns the state (also kept for the AI Review tab), or null when the queue has
@@ -276,6 +284,9 @@ export async function evaluateAutoFix(
 
     // 1. A fix runs: the next one waits for it (and is read again at the head it leaves).
     if (running) return wait('fix_running', null);
+    // 1¼. Its start already waits in THE FIX START QUEUE (start-queue.ts) for a free sandbox: say where.
+    const inLine = startPlace(accountId, prId);
+    if (inLine != null) return put('waiting', 'sandbox_busy', { line: `Waiting for a free sandbox (${ordinal(inLine)} in line).` });
     // 1½. The last fix was PUSHED from this very head: the synced head has not caught up with the push yet.
     // Deciding now would read that head's review and CI causes again and fix them twice.
     if (last.pushedFrom === head) return wait('push_settling', null);
@@ -364,6 +375,10 @@ export async function runAutoFixQueueSweep(ctx: AgentContext, nowMs: number = Da
   if (sweeping) return 0;
   sweeping = true;
   try {
+    // THE FIX START QUEUE: start what waits if a slot is free (a missed "slot freed" signal costs a minute).
+    const sq = await import('./start-queue.js');
+    sq.bindStartQueue({ ctx });
+    sq.pumpStartQueue();
     const list = await candidates(ctx);
     const keep = new Set(list.map((c) => keyOf(c.accountId, c.prId)));
     for (const k of [...entries.keys()]) if (!keep.has(k)) entries.delete(k);

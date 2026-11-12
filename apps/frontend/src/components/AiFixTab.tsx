@@ -1,3 +1,4 @@
+import { fixWaitingLine } from '../lib/aiFixProgress.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
@@ -195,7 +196,9 @@ function FixerSection({
   const sessionShown = fix != null && session != null && fixSessionShown(session);
   const turnRunning = session != null && sessionTurnRunning(session);
   // A live session holds the PR: the picker waits until it ends.
-  const holdsPr = fixSessionHoldsPr(session) || fixStarting;
+  // THE FIX START QUEUE: a fix waiting for a free sandbox holds the PR too (it starts by itself).
+  const waiting = data?.waiting ?? null;
+  const holdsPr = fixSessionHoldsPr(session) || fixStarting || waiting != null;
 
   // The picker: the server's items for this review, the reader's ticks on top. A new review (or a
   // hand-over) starts from the defaults again.
@@ -310,6 +313,8 @@ function FixerSection({
           </p>
         ) : (
           <>
+            {waiting != null && <FixWaitingLine prId={pr.id} line={fixWaitingLine(waiting)} />}
+
             {!holdsPr && !fixSource && !reviewLoading && !preview.isLoading && (
               <div className="flex flex-wrap items-center gap-2">
                 <p className="text-meta text-ui-mute">
@@ -1024,6 +1029,19 @@ function PushControls({
       {push.isError && (
         <div className="mt-2 text-meta text-ui-danger">{errText(push.error)}</div>
       )}
+    </div>
+  );
+}
+
+/** THE FIX START QUEUE: the PR's fix waits for a free sandbox; Cancel takes it out of line (nothing ran). */
+function FixWaitingLine({ prId, line }: { prId: number; line: string | null }): JSX.Element {
+  const cancel = useCancelFix(prId);
+  return (
+    <div data-testid="ai-fix-waiting" className="mb-3 flex flex-wrap items-center gap-2 rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-ink">
+      <span>{line}</span>
+      <button type="button" className={BTN_SECONDARY} disabled={cancel.isPending} onClick={() => cancel.mutate()}>
+        Cancel
+      </button>
     </div>
   );
 }

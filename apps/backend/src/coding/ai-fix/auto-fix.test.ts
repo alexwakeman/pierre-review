@@ -203,6 +203,8 @@ describe('maybeStartAutoFix — the author gate', () => {
         trigger: 'auto',
         // The workspace's "Always include" sections — the defaults here (style bots off).
         include: AUTO_FIX_DEFAULT_INCLUDE,
+        // Every slot busy ⇒ it waits in THE FIX START QUEUE instead of a refusal.
+        queueIfBusy: true,
       },
     ]);
     expect(mod.autoFixOutcomeFor(501, 1)).toEqual(r);
@@ -380,7 +382,7 @@ describe('maybeStartAutoFix — the skips', () => {
     await setPlan('discarded', 'cancelled');
     expect(await go(prId)).toMatchObject({ status: 'started' });
     // ⚠ AN AUTO FIX NEVER PLANS: the one entry it calls carries no plan option at all.
-    expect(Object.keys(started[0] ?? {}).sort()).toEqual(['accountId', 'include', 'model', 'prId', 'reviewId', 'trigger']);
+    expect(Object.keys(started[0] ?? {}).sort()).toEqual(['accountId', 'include', 'model', 'prId', 'queueIfBusy', 'reviewId', 'trigger']);
   });
 
   it('a finished fix waits unpushed on this head — but not a pushed, empty or older-head one', async () => {
@@ -542,13 +544,16 @@ describe('maybeStartAutoFix — the sandbox (AI Fix runs only as a sandboxed ses
     expect(mod.autoFixOutcomeFor(reviewId, 2)).toBeNull();
   });
 
-  it('a busy machine ⇒ "sandbox_busy"; busy because THIS PR’s fix holds a session ⇒ "fix_in_progress"', async () => {
+  it('a busy machine ⇒ the start WAITS IN LINE ("sandbox_busy" while it waits); busy because THIS PR’s fix holds a session ⇒ "fix_in_progress"', async () => {
     const busy = withSandbox({ ok: false, reason: 'busy', message: 'x' });
     const prId = await seedPr(viewerId);
+    startAnswer = { status: 'waiting', position: 2 };
     expect(await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId: 1 }, busy, NOW)).toMatchObject({ reason: 'sandbox_busy' });
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatchObject({ queueIfBusy: true });
     running = true;
     expect(await mod.maybeStartAutoFix(ctx, { accountId: 1, prId, reviewId: 2 }, busy, NOW)).toMatchObject({ reason: 'fix_in_progress' });
-    expect(started).toEqual([]);
+    expect(started).toHaveLength(1);
   });
 
   it('the start’s own answer decides when the pre-check passed but the start lost a race', async () => {

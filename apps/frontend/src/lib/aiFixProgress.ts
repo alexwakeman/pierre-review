@@ -38,3 +38,11 @@ export function fixProgressPct(status: AiFixStatusResponse | null): number | nul
       return 20;
   }
 }
+
+/** THE FIX START QUEUE's words: "Waiting for a free sandbox (2nd in line). It starts by itself." Pure. */
+export function fixWaitingLine(w: { position: number } | null | undefined): string | null {
+  if (w == null) return null;
+  const n = w.position;
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+  return `Waiting for a free sandbox (${n}${suffix} in line). It starts by itself.`;
+}

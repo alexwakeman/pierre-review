@@ -83,7 +83,9 @@ export function sandboxSessionStatus(phase: SandboxSessionPhase): StoryBuildStat
 export const SANDBOX_SESSION_LIVE_PHASES: readonly SandboxSessionPhase[] = ['booting', 'ready', 'chatting', 'planning', 'plan_ready', 'revising', 'building', 'built'];
 
 /** Open sessions (a running sandbox) per machine (LIMN_SANDBOX_MAX_SESSIONS). */
-export const SANDBOX_MAX_OPEN_SESSIONS_DEFAULT = 2;
+export const SANDBOX_MAX_OPEN_SESSIONS_DEFAULT = 4;
+/** Build-mode turns running at once on this machine, story and fix alike (LIMN_SANDBOX_MAX_BUILDS). */
+export const SANDBOX_MAX_BUILDS_DEFAULT = 3;
 /**
  * A session with no turn and no reader action for this long is closed: its sandbox is stopped and
  * removed, its stored changes kept (Resume starts it again). LIMN_SANDBOX_IDLE_MINUTES.

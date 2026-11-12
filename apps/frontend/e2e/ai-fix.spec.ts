@@ -180,3 +180,23 @@ test.describe('The auto fix queue', () => {
     await expect(circle).toContainText('1 running');
   });
 });
+
+test.describe('The fix start queue', () => {
+  test('every sandbox busy: the tab says the fix waits in line and starts by itself; Cancel takes it out', async ({ page }) => {
+    await installMockApi(page, { aiFix: null, aiFixWaiting: { position: 2, queuedAt: new Date().toISOString(), trigger: 'manual' } });
+    const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
+    await page.route(
+      (u) => u.pathname.endsWith('/api/me'),
+      (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(me) }),
+    );
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=ai_fix`);
+    const line = page.getByTestId('ai-fix-waiting');
+    await expect(line).toContainText('Waiting for a free sandbox (2nd in line). It starts by itself.');
+    // The picker waits too: no second start while this one is in line.
+    await expect(page.locator('[data-ai-fix-action="start"]')).toHaveCount(0);
+    const cancel = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith(`/api/pro/prs/${PR_ID}/ai-fix/cancel`));
+    await line.getByRole('button', { name: 'Cancel' }).click();
+    await cancel;
+    await expect(line).toHaveCount(0);
+  });
+});

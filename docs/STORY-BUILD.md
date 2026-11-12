@@ -41,9 +41,9 @@ loop): the reader's tick is the consent. Even then GitHub sees only the branch c
 runtime, the tab says what is missing in one line with "How to set up" (owner decision Q2: there is no
 fallback to the removed shell-less agents).
 
-The session machine (caps, the ONE build slot, boot, idle close, stream, restart reconcile, Resume) is
+The session machine (caps, the build slots, boot, idle close, stream, restart reconcile, Resume) is
 shared with AI Fix, which is its second subject (docs/SANDBOX.md § AI Fix sessions): the two features
-share the machine's open sessions and its one build turn at a time.
+share the machine's open sessions and its build slots (3 at once).
 
 ## Plan first
 
@@ -135,7 +135,7 @@ From 2026-10-30, still in force:
    `fetchPrHeadInfo` per stacked PR, at boot) and falls back to the default branch with one line ("Your #n
    is from a fork, …"; a failed read falls back too). Push re-reads it and refuses `STACK_FORK`.
 2. **Draft by default** (`STORY_BUILD_PUSH_DRAFT_DEFAULT`), with a toggle to open ready for review.
-3. **One build at a time per computer** (`409 BuildBusy`); chat turns in other sessions go on.
+3. **Builds at once per computer: `LIMN_SANDBOX_MAX_BUILDS` (3; one until 2026-11-12)** (`409 BuildBusy` past it); chat turns in other sessions go on.
 4. **Entry point:** the STORY VIEW's action group (§ Entry points): Implement ONLY on a story that is NOT
    STARTED or IN PROGRESS (widened 2026-11-12) and has no PRs; Fill gaps ONLY on a STARTED one whose current story check found gaps. ONE gate
    decides both: shared `storyBuildOffered` returns `'implement' | 'fill_gaps' | null`. Not Open PRs, not
@@ -579,7 +579,8 @@ row per such build through the ONE fold, shared `storyBuildActivityOf` (`story-b
 
 | Limit | Default |
 |---|---|
-| `LIMN_SANDBOX_MAX_SESSIONS` (open sessions on this computer) | 2 |
+| `LIMN_SANDBOX_MAX_SESSIONS` (open sessions on this computer) | 4 |
+| `LIMN_SANDBOX_MAX_BUILDS` (build turns at once, story and fix) | 3 |
 | `LIMN_SANDBOX_IDLE_MINUTES` (a session with nothing to do closes: its sandbox is removed, its patches stay) | 15 |
 | `LIMN_SANDBOX_TURN_MAX_MINUTES` (one agent turn running longer is stopped; SANDBOX.md § Every end removes the sandbox) | 120 |
 | `STORY_BUILD_PATCH_MAX_BYTES` (one repository's patch; larger is refused, never cut) | 4 MB |

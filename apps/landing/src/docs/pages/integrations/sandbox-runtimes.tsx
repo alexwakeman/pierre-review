@@ -145,7 +145,7 @@ export default function Page(): JSX.Element {
           Each session may use 4 CPUs, 8 GB of memory and 30 GB of disk by default. Change these per workspace in{' '}
           <Ui>Settings → Sandbox</Ui>, under <Ui>Resources</Ui>.
         </li>
-        <li>At most two sessions are open on this computer at a time, and one of them builds.</li>
+        <li>At most four sessions are open on this computer at a time, and three of them build at once.</li>
         <li>A session with nothing to do closes after 15 minutes; its changes are kept.</li>
         <li>
           When a session ends, for any reason, Limn removes its containers, network and volumes. Every few minutes, and

@@ -2120,12 +2120,15 @@ export async function installMockApi(
     // THE AUTO FIX QUEUE: the AI Review tab's panel and the auto fixes toast (default: off / none).
     autoFixPanel?: AutoFixPanelResponse;
     autoFixActive?: AutoFixActiveResponse;
+    // THE FIX START QUEUE: the PR's fix waits for a free sandbox (cleared by Cancel).
+    aiFixWaiting?: AiFixResponse['waiting'];
   } = {},
 ): Promise<void> {
   // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
   // advanced by the writes below (one per page).
   const aiFixOn = opts.aiFix !== undefined;
   let aiFix: AiFix | null = opts.aiFix ?? null;
+  let aiFixWaiting = opts.aiFixWaiting ?? null;
   // "Implement story": ACME-1's session, advanced by the writes below (one per page). A spec may start
   // from a session (`opts.storyBuild`) and name the container runtime (`opts.runtime`).
   let storyBuild: StoryBuild | null = opts.storyBuild ?? null;
@@ -2776,6 +2779,7 @@ export async function installMockApi(
               },
               fix: aiFix,
               history: [],
+              waiting: aiFixWaiting,
             };
             return json(route, body);
           }
@@ -2789,7 +2793,10 @@ export async function installMockApi(
             aiFix = aiFixPlanned(prId);
             return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
           }
-          if (rest === '/cancel') return json(route, { status: 'cancelled' });
+          if (rest === '/cancel') {
+            aiFixWaiting = null;
+            return json(route, { status: 'cancelled' });
+          }
           if (rest === '/stream' || rest === '/status') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'done', status: aiFix?.status ?? 'idle', fixId: aiFix?.id ?? null })}\n\n` });
         }
         const fixRoute = path.match(/^\/api\/pro\/ai-fixes\/(\d+)\/([a-z/]+)$/);

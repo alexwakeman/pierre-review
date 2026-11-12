@@ -40,6 +40,7 @@ import {
 } from './manager.js';
 import { planStateOf } from './plan.js';
 import { registerAutoFixRoutes } from './auto-fix-routes.js';
+import { startWaitingFor } from './start-queue.js';
 import { pushFix } from './push.js';
 import { requestModelOf } from '../../ai/provider.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
@@ -327,6 +328,8 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         headInfo,
         fix: latest ? rowToAiFix(latest) : null,
         history: history.map(rowToSummary),
+        // THE FIX START QUEUE: the PR's next fix waits for a free sandbox.
+        waiting: startWaitingFor(accountId, prId),
       };
       return reply.send(resp);
     },
@@ -359,12 +362,16 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           sourceReviewId: parsed.sourceReviewId,
           trigger: 'manual' as const,
           selection: parsed.include ? { kind: 'keys' as const, keys: parsed.include } : undefined,
+          // Every sandbox busy: the press waits in line and starts by itself (start-queue.ts).
+          queueIfBusy: true,
         };
         const res = mode === 'fix' ? await startFix(ctx, input) : await startPlan(ctx, input);
 
         switch (res.status) {
           case 'queued':
             return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
+          case 'waiting':
+            return reply.code(202).send({ fixId: null, status: 'waiting', position: res.position });
           case 'already_running':
             return reply.code(409).send({ error: 'AlreadyRunning' });
           case 'no_runtime':
@@ -649,6 +656,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         status: snap.status,
         fixId: snap.fixId,
         progress: snap.progress,
+        ...(snap.waiting != null ? { waiting: snap.waiting } : {}),
       });
       if (snap.status !== 'running' && snap.status !== 'queued') {
         send({ type: 'done', status: snap.status, fixId: snap.fixId });

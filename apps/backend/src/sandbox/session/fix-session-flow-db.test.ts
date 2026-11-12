@@ -275,6 +275,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   delete process.env.LIMN_SANDBOX_MAX_SESSIONS;
+  delete process.env.LIMN_SANDBOX_MAX_BUILDS;
   gate = null;
 });
 
@@ -522,22 +523,22 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     expect(AF.isFixRunning(prB)).toBe(false);
   });
 
-  it('one build at a time (BuildBusy); the session cap (TooManySessions); a push while a turn runs is refused', async () => {
+  it('every build slot taken: a press WAITS IN LINE and starts by itself when one frees; a waiting start can be cancelled; a push while a turn runs is refused', async () => {
     extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
     reportAnswer = null;
+    // One build slot (LIMN_SANDBOX_MAX_BUILDS; 3 by default) so the second press must wait.
+    process.env.LIMN_SANDBOX_MAX_BUILDS = '1';
     let release: () => void = () => {};
     gate = new Promise<void>((r) => (release = r));
     const a = await post(`/api/pro/prs/${prB}/ai-fix`, { instruction: 'Fix B.' });
     expect(a.statusCode).toBe(202);
     const idB = a.json().fixId as number;
-    const busy = await post(`/api/pro/prs/${prC}/ai-fix`, { instruction: 'Fix C.' });
-    expect(busy.statusCode).toBe(409);
-    expect(busy.json().error).toBe('BuildBusy');
+    const waits = await post(`/api/pro/prs/${prC}/ai-fix`, { instruction: 'Fix C.' });
+    expect(waits.statusCode).toBe(202);
+    expect(waits.json()).toEqual({ fixId: null, status: 'waiting', position: 1 });
     expect(AF.isFixRunning(prC)).toBe(false);
-    process.env.LIMN_SANDBOX_MAX_SESSIONS = '1';
-    const full = await post(`/api/pro/prs/${prC}/ai-fix/plan`, { instruction: 'Fix C.' });
-    expect(full.statusCode).toBe(409);
-    expect(full.json()).toEqual({ error: 'TooManySessions', message: 'A session is already open. Discard one first.' });
+    const st = (await app.inject({ method: 'GET', url: `/api/pro/prs/${prC}/ai-fix/status`, headers: { 'x-acct': '1' } })).json();
+    expect(st).toMatchObject({ status: 'queued', waiting: { position: 1, trigger: 'manual' } });
     // The turn is running: no push.
     const end = Date.now() + 5_000;
     while (!F.fixTurnRunning(idB) && Date.now() < end) await new Promise((r) => setTimeout(r, 10));
@@ -545,6 +546,20 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     release();
     gate = null;
     await until(prB, (x) => x.session?.phase === 'built', 'built');
+    // B's build turn ended: C's waiting press starts by itself and builds.
+    await until(prC, (x) => x.session?.phase === 'built', 'C started from the line and built');
+    const c = await readFix(prC);
+    expect((await app.inject({ method: 'GET', url: `/api/pro/prs/${prC}/ai-fix/status`, headers: { 'x-acct': '1' } })).json().waiting ?? null).toBeNull();
+    expect((await post(`/api/pro/ai-fixes/${c.id}/discard`)).statusCode).toBe(200);
+    // The session cap: every session taken ⇒ Plan first waits too, and Cancel drops it (nothing ran).
+    process.env.LIMN_SANDBOX_MAX_SESSIONS = '1';
+    const full = await post(`/api/pro/prs/${prC}/ai-fix/plan`, { instruction: 'Fix C.' });
+    expect(full.statusCode).toBe(202);
+    expect(full.json()).toMatchObject({ status: 'waiting', position: 1 });
+    expect((await post(`/api/pro/prs/${prC}/ai-fix/cancel`)).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/api/pro/prs/${prC}/ai-fix/status`, headers: { 'x-acct': '1' } })).json().waiting ?? null).toBeNull();
+    delete process.env.LIMN_SANDBOX_MAX_SESSIONS;
+    delete process.env.LIMN_SANDBOX_MAX_BUILDS;
     // The idle close keeps a stored patch: succeeded, resumable.
     await M._idleCloseForTest(idB, 'fix');
     const f = await readFix(prB);
@@ -717,6 +732,8 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     expect(await F.fixSandboxReadiness()).toEqual({ ok: false, reason: 'no_runtime', message: 'Docker is not running.' });
     fake.setDetection({ available: true, problem: null });
     F._resetFixReadinessForTest();
+    // Every build slot held (one, here) ⇒ busy.
+    process.env.LIMN_SANDBOX_MAX_BUILDS = '1';
     const held = M.reserveSessionSlot('fix:-999', { build: true });
     expect(held.ok).toBe(true);
     expect(await F.fixSandboxReadiness()).toMatchObject({ ok: false, reason: 'busy' });
@@ -743,5 +760,55 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     // Nothing labelled is left behind by anything above.
     await M._closeAllSessionsForTest();
     expect(fake.resources().filter((x) => x.kind !== 'image')).toEqual([]);
+  });
+});
+
+describe('five PRs at once (the fix start queue, three build slots by default)', () => {
+  it('three fixes build together, two wait in line, and all five finish with no further press', { timeout: 60_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    // A reader's fix session stays open after its build; when every sandbox is open, a waiting fix takes the
+    // place of one idle this long (60 s by default; at once here).
+    process.env.LIMN_SANDBOX_RECLAIM_IDLE_SECONDS = '0';
+    extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+    reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: small', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+    const prs: number[] = [];
+    for (let n = 0; n < 5; n += 1) {
+      const [row] = await db
+        .insert(schema.pullRequests)
+        .values({ accountId: 1, repoId: api, githubNodeId: `PR-5x-${n}`, number: 90 + n, title: `Small fix ${n}`, body: null, state: 'open', headSha: HEAD, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+        .returning()
+        .execute();
+      prs.push(row.id);
+    }
+    let release: () => void = () => {};
+    gate = new Promise<void>((r) => (release = r));
+    const answers = [];
+    for (const p of prs) answers.push((await post(`/api/pro/prs/${p}/ai-fix`, { instruction: 'Fix it.' })).json());
+    // Three start at once (three build slots); the other two wait, in the order they were pressed.
+    expect(answers.slice(0, 3).map((a) => a.status)).toEqual(['queued', 'queued', 'queued']);
+    expect(answers.slice(3)).toEqual([
+      { fixId: null, status: 'waiting', position: 1 },
+      { fixId: null, status: 'waiting', position: 2 },
+    ]);
+    const status = async (p: number) => (await app.inject({ method: 'GET', url: `/api/pro/prs/${p}/ai-fix/status`, headers: { 'x-acct': '1' } })).json();
+    expect(await status(prs[4]!)).toMatchObject({ status: 'queued', waiting: { position: 2 } });
+    // The three run their build turns together.
+    const end = Date.now() + 10_000;
+    const running = async () => (await Promise.all(prs.slice(0, 3).map((p) => readFix(p)))).filter((f) => f?.id != null && F.fixTurnRunning(f.id)).length;
+    while ((await running()) < 3 && Date.now() < end) await new Promise((r) => setTimeout(r, 20));
+    expect(await running()).toBe(3);
+    // Release: as each ends, the next waiting one starts by itself; all five build.
+    release();
+    gate = null;
+    for (const p of prs) {
+      const f = await until(p, (x) => x.session?.phase === 'built' && x.status === 'succeeded', `PR ${p} built`);
+      expect(f.patch ?? f.filesChanged.length).toBeTruthy();
+    }
+    for (const p of prs) expect((await status(p)).waiting ?? null).toBeNull();
+    // A session closed to make room kept its work (resumable) and says why.
+    const all = await Promise.all(prs.map((p) => readFix(p)));
+    expect(all.every((f) => f.status === 'succeeded')).toBe(true);
+    delete process.env.LIMN_SANDBOX_RECLAIM_IDLE_SECONDS;
+    await M._closeAllSessionsForTest();
   });
 });

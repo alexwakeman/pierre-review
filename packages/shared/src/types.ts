@@ -9807,12 +9807,31 @@ export interface AiFixResponse {
   // The latest run, or null if never run.
   fix: AiFix | null;
   history: AiFixSummary[];
+  // THE FIX START QUEUE: the PR's next fix waits for a free sandbox (it starts by itself). Absent/null otherwise.
+  waiting?: AiFixWaiting | null;
+}
+
+/** `POST …/ai-fix` (and `…/plan`) when every sandbox is busy: the start waits in line (202). */
+export interface AiFixWaitingResponse {
+  fixId: null;
+  status: 'waiting';
+  position: number;
+}
+
+/** THE FIX START QUEUE (coding/ai-fix/start-queue.ts): this PR's fix waits for a free sandbox. */
+export interface AiFixWaiting {
+  /** 1 = next. */
+  position: number;
+  queuedAt: string;
+  trigger: AiFixTrigger;
 }
 
 export interface AiFixStatusResponse {
   status: AiFixStatus | 'idle';
   fixId: number | null;
   progress: AiFixProgress | null;
+  /** Set while the PR's next fix waits in the start queue (status reads 'queued'). */
+  waiting?: AiFixWaiting | null;
 }
 
 export type AiFixStreamEvent =
@@ -9821,6 +9840,7 @@ export type AiFixStreamEvent =
       status: AiFixStatus | 'idle';
       fixId: number | null;
       progress: AiFixProgress | null;
+      waiting?: AiFixWaiting | null;
     }
   | { type: 'done'; status: AiFixStatus | 'idle'; fixId: number | null };
 

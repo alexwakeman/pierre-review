@@ -30,6 +30,8 @@ export function useAiFix(prId: number | null, enabled: boolean) {
     // A live session: a slow fallback poll while something moves (its stream is the live path; an
     // agent waiting for the reader needs no poll).
     refetchInterval: (q) => {
+      // THE FIX START QUEUE: a fix waiting for a free sandbox starts by itself; follow it.
+      if (q.state.data?.waiting != null) return SESSION_POLL_MS;
       const s = q.state.data?.fix?.session;
       return s != null && s.live && s.phase !== 'ready' && s.phase !== 'built' ? SESSION_POLL_MS : false;
     },
@@ -232,7 +234,7 @@ export function useAiFixStream(
           settle();
           setStatus({ status: e.status, fixId: e.fixId, progress: null });
         } else {
-          setStatus({ status: e.status, fixId: e.fixId, progress: e.progress });
+          setStatus({ status: e.status, fixId: e.fixId, progress: e.progress, waiting: e.waiting ?? null });
         }
       },
     }).catch(() => {

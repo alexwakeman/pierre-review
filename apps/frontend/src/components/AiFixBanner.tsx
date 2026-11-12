@@ -9,7 +9,7 @@ import {
 } from '../hooks/useAiFix.js';
 import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters, type AiFixRunEntry } from '../store/filters.js';
-import { PHASE_LABEL, fixProgressPct } from '../lib/aiFixProgress.js';
+import { PHASE_LABEL, fixProgressPct, fixWaitingLine } from '../lib/aiFixProgress.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { HeaderToast, ToastList, ToastRow } from './HeaderToasts.js';
 import { WrenchIcon } from './Icons.js';
@@ -217,6 +217,11 @@ function AiFixBannerRow({
         </div>
       ) : starting ? (
         <div className="mt-1 text-meta text-ui-mute">Starting…</div>
+      ) : status?.waiting != null ? (
+        // THE FIX START QUEUE: every sandbox is busy; this fix starts by itself when one frees.
+        <div data-testid="ai-fix-toast-waiting" className="mt-1 text-meta text-ui-mute">
+          {fixWaitingLine(status.waiting)}
+        </div>
       ) : live ? (
         <div className="mt-1">
           <RegenProgressBar
