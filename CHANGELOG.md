@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.28] - 2026-11-12
+
 ### Added
 
 - Changes tab: Markdown files show rendered, with a Plain text button in the file's header to see the diff.
