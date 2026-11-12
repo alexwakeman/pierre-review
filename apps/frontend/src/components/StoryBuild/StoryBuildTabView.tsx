@@ -28,6 +28,8 @@ import { SessionView } from './SessionView.js';
 import { StartPanel } from './StartPanel.js';
 import { AutoPushLine } from './AutoPushOption.js';
 import { ReviewLoopSection } from './ReviewLoopSection.js';
+import { AutoApproveSetting } from './AutoApproveOption.js';
+import { TicketStep } from './TicketUpdatePanel.js';
 import { StoryBuildHeader } from './StoryBuildHeader.js';
 import { StoryBuildSection } from './StoryBuildSection.js';
 
@@ -119,6 +121,8 @@ function StoryBuildBody({
       {q.isLoading && <p className="mt-5 text-meta text-ui-mute">Loading…</p>}
       {q.isError && <p className="mt-5 text-body text-ui-danger">Could not load this session.</p>}
       {open != null && <AutoPushLine build={open.build} />}
+      {open != null && <AutoApproveSetting build={open.build} />}
+      {open != null && <TicketStep build={open.build} />}
       {q.isSuccess && open == null && <StartPanel workspaceId={workspaceId} ident={ident} last={closed ? build : null} offer={offer ?? null} />}
       {open != null && open.session.plan != null && open.session.phase !== 'booting' && <PlanPanel build={open.build} session={open.session} />}
       {open != null && <SessionView build={open.build} session={open.session} partials={stream.partials} />}

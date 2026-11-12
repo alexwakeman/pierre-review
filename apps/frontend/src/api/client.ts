@@ -319,7 +319,10 @@ import type {
   StoryBuildForTicketResponse,
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
+  StoryBuildActivityResponse,
+  StoryBuildAutoApproveResponse,
   StoryBuildAutoPushResponse,
+  StoryBuildTicketReviewResponse,
   StoryBuildLoopContinueBody,
   StoryBuildLoopRouteResponse,
   StoryBuildLoopSettingsBody,
@@ -1887,6 +1890,13 @@ export const api = {
   // The review loop's switch, the old alias route (the tab now writes `loop/settings`).
   setStoryBuildAutoPush: (id: number, body: StoryBuildAutoPushBody) =>
     fetch(storyBuildPath('autoPush', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildAutoPushResponse>(r)),
+  // "Approve the plan automatically" (docs/STORY-BUILD.md § Approve automatically) and the ticket step after it.
+  setStoryBuildAutoApprove: (id: number, on: boolean) =>
+    fetch(storyBuildPath('autoApprove', { id }), jsonBody('POST', { on })).then((r) => handle<StoryBuildAutoApproveResponse>(r)),
+  setStoryBuildTicketReview: (id: number, done: boolean) =>
+    fetch(storyBuildPath('ticketReview', { id }), jsonBody('POST', { done })).then((r) => handle<StoryBuildTicketReviewResponse>(r)),
+  // THE BUILDS TOAST: the workspace's running builds and the ones at a gate.
+  storyBuildActivity: (workspaceId: number) => get<StoryBuildActivityResponse>(withQuery(storyBuildPath('active'), workspaceParam(workspaceId))),
   // THE REVIEW LOOP (docs/STORY-BUILD.md § The review loop): the loop now, its switch + rounds, Continue, Stop.
   storyBuildLoop: (id: number) => get<StoryBuildLoopRouteResponse>(storyBuildPath('loop', { id })),
   setStoryBuildLoop: (id: number, body: StoryBuildLoopSettingsBody) =>

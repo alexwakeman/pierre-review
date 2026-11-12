@@ -3,15 +3,23 @@ import {
   STORY_BUILD_API,
   STORY_BUILD_BRANCH_MAX,
   STORY_BUILD_PUSH_DRAFT_DEFAULT,
+  storyBuildActivityOf,
+  type SandboxSessionPhase,
+  type StoryBuildActivity,
+  type StoryBuildActivityResponse,
+  type StoryBuildAutoApproveResponse,
   type StoryBuildAutoPushResponse,
+  type StoryBuildLoopState,
+  type StoryBuildTicketReviewResponse,
   type StoryBuildDiffResponse,
   type StoryBuildPrDiffResponse,
   type StoryBuildPrPushResult,
   type StoryBuildPushResponse,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
-import { getStoryBuildRepoPatch, getStoryBuildRepoRow, getStoryBuildRow } from './persist.js';
-import { getStoryBuildPrRow } from './plan-persist.js';
+import { resolveWorkspaceScope } from '../../db/queries.js';
+import { getStoryBuildRepoPatch, getStoryBuildRepoRow, getStoryBuildRow, listActiveStoryBuildRows, updateStoryBuild } from './persist.js';
+import { getStoryBuildPrRow, latestPlanRow, toPlanRevision } from './plan-persist.js';
 import { pushAllRepos, pushRepo } from './push.js';
 import { setStoryBuildAutoPush } from './auto-push.js';
 import { isPlannedBuild, isStoryBuildStackPushing, pushPlannedPr, pushPlannedStack, repoResultsOf, type PushPlannedPrArgs } from './push-stack.js';
@@ -30,6 +38,9 @@ import { registerStoryBuildLoopRoutes } from './loop/routes.js';
 //   GET  …/prs/:prId/diff         plan first: one planned PR's patch (against the PR before it)
 //   POST …/prs/:prId/push         plan first: push one planned PR (a stacked PR needs the one before it)
 //   POST …/auto-push              "Push and open the pull request when the build finishes" on/off (409 once pushed)
+//   POST …/auto-approve           "Approve the plan automatically" on/off (409 once the plan is approved)
+//   POST …/ticket-review          the ticket step after an automatically approved build: `{done}`
+//   GET  /api/story-builds/active THE BUILDS TOAST: running builds + builds at a gate (?workspace=; DB only)
 //
 // RENAME (the recovery from BRANCH_EXISTS): the single-item pushes take `branch` — `…/repos/:repoId/push`
 // of a build without planned PRs, and `…/prs/:prId/push`. Push all, and a planned build's per-repository
@@ -71,6 +82,13 @@ export function parseBranch(body: unknown): string | undefined | null {
 
 const BAD_BRANCH = { error: 'BadRequest', message: `\`branch\` must be a branch name of 1 to ${STORY_BUILD_BRANCH_MAX} characters.` } as const;
 const NO_BRANCH_HERE = { error: 'BadRequest', message: 'Name the branch on one pull request at a time.' } as const;
+
+/** A boolean field of a JSON body; null when absent or not a boolean. */
+function boolField(body: unknown, key: string): boolean | null {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return null;
+  const v = (body as Record<string, unknown>)[key];
+  return typeof v === 'boolean' ? v : null;
+}
 
 type Params = { id: string; repoId: string };
 const NOT_FOUND = { error: 'NotFound', message: 'Not found.' } as const;
@@ -176,6 +194,68 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     if (r.status === 'pushed') return reply.code(409).send({ error: 'NotReady', message: 'This build has already pushed.' });
     const resp: StoryBuildAutoPushResponse = { autoPush: r.autoPush };
     return reply.send(resp);
+  });
+
+  // "Approve the plan automatically" (sandbox/session/plan.ts): on or off until the plan is approved. It acts
+  // at the END of the next plan turn; a plan already waiting is approved by the reader's press.
+  app.post<{ Params: { id: string }; Body: unknown }>(STORY_BUILD_API.autoApprove, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const id = parseId(req.params.id);
+    if (id == null) return reply.code(404).send(NOT_FOUND);
+    const on = boolField(req.body, 'on');
+    if (on == null) return reply.code(400).send({ error: 'BadRequest', message: '`on` must be true or false.' });
+    const row = await getStoryBuildRow(ctx, accountId, id);
+    if (row == null || row.sessionPhase == null) return reply.code(404).send(NOT_FOUND);
+    if (row.approvedPlanId != null) return reply.code(409).send({ error: 'NotReady', message: 'The plan is already approved.' });
+    await updateStoryBuild(ctx, accountId, id, { autoApprovePlan: on });
+    const resp: StoryBuildAutoApproveResponse = { autoApprovePlan: on };
+    return reply.send(resp);
+  });
+
+  // The ticket step after an automatically approved build: the reader updated the ticket, or said no update
+  // (`done: true`); `done: false` asks again. DB only — the tracker write is `POST /api/ticket-update`.
+  app.post<{ Params: { id: string }; Body: unknown }>(STORY_BUILD_API.ticketReview, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const id = parseId(req.params.id);
+    if (id == null) return reply.code(404).send(NOT_FOUND);
+    const done = boolField(req.body, 'done');
+    if (done == null) return reply.code(400).send({ error: 'BadRequest', message: '`done` must be true or false.' });
+    const row = await getStoryBuildRow(ctx, accountId, id);
+    if (row == null || row.sessionPhase == null) return reply.code(404).send(NOT_FOUND);
+    const at = done ? new Date() : null;
+    await updateStoryBuild(ctx, accountId, id, { ticketReviewDoneAt: at });
+    const resp: StoryBuildTicketReviewResponse = { ticketReviewDoneAt: at?.toISOString() ?? null };
+    return reply.send(resp);
+  });
+
+  // THE BUILDS TOAST (shared story-build-activity.ts): one row per build that runs or waits at a gate. DB
+  // plus the in-process live map; never a tracker, GitHub or model call.
+  app.get<{ Querystring: { workspace?: string } }>(STORY_BUILD_API.active, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const scope = await resolveWorkspaceScope(accountId, req.query.workspace ?? null);
+    const { liveStoryIo } = await import('../../sandbox/session/manager.js');
+    const builds: StoryBuildActivity[] = [];
+    for (const row of await listActiveStoryBuildRows(ctx, accountId, scope.workspaceId)) {
+      if (row.sessionPhase == null) continue;
+      const ticketWaiting = row.planAutoApprovedAt != null && row.ticketReviewDoneAt == null && (await planHasTicketUpdate(row.id));
+      const a = storyBuildActivityOf({
+        phase: row.sessionPhase as SandboxSessionPhase,
+        live: liveStoryIo(row.id) != null,
+        loopOn: row.autoPush === true,
+        loopState: (row.loopState ?? null) as StoryBuildLoopState | null,
+        loopRound: row.loopRound,
+        loopRounds: row.loopRounds,
+        ticketWaiting,
+      });
+      if (a != null) builds.push({ id: row.id, ident: row.ident, ticketKey: row.ticketKey, ticketTitle: row.ticketTitle ?? null, ...a });
+    }
+    const resp: StoryBuildActivityResponse = { workspaceId: scope.workspaceId, builds };
+    return reply.send(resp);
+
+    async function planHasTicketUpdate(buildId: number): Promise<boolean> {
+      const latest = await latestPlanRow(ctx, accountId, buildId);
+      return latest != null && toPlanRevision(latest).ticketUpdate != null;
+    }
   });
 
   // THE REVIEW LOOP (loop/routes.ts): GET …/loop, POST …/loop/settings | continue | stop.

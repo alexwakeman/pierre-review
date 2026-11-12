@@ -255,6 +255,9 @@ export interface SandboxSessionStartBody {
   autoPush?: boolean;
   /** With `autoPush`: the review + fix rounds before the pull request opens (1..6, default 3). */
   loopRounds?: number;
+  /** "Approve the plan automatically": every open point is taken as Agree and the build starts at once.
+   *  Never writes the ticket. Off unless `true`; changeable in the tab until the plan is approved. */
+  autoApprovePlan?: boolean;
 }
 
 /** `POST …/messages`. 1..SANDBOX_MESSAGE_MAX characters. */

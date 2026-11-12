@@ -65,7 +65,7 @@ export function PlanPanel({ build, session }: { build: StoryBuild; session: Stor
       <>
         <ApprovedPlan build={build} plan={plan} />
         {/* Until the first build turn ends, the reader may still update the ticket. */}
-        {session.phase === 'building' && plan.latest != null && plan.latest.revision === plan.approvedRevision && (
+        {session.phase === 'building' && build.planAutoApprovedAt == null && plan.latest != null && plan.latest.revision === plan.approvedRevision && (
           <section aria-label="The ticket" className="mt-3 rounded-ui bg-ui-surface p-4">
             <TicketReview key={plan.latest.revision} build={build} update={plan.latest.ticketUpdate} />
           </section>

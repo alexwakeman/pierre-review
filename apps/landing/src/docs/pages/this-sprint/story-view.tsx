@@ -139,7 +139,7 @@ export default function Page(): JSX.Element {
           <DocLink to="docs-library/overview">docs library</DocLink>.
         </li>
         <li>
-          On This Sprint, press <Ui>Implement</Ui> on a not-started ticket with no pull request to have AI plan and
+          On This Sprint, press <Ui>Implement</Ui> on a not-started or in-progress ticket with no pull request to have AI plan and
           build it, or <Ui>Fill gaps</Ui> on a started ticket to build only the criteria the check found not met.
           Nothing is pushed until you press Push, unless you tick{' '}
           <DocLink to="implement-story/push#review-and-fix">After the build: review and fix, then open the pull request</DocLink>.

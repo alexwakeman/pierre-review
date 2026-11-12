@@ -223,6 +223,8 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             autoPush: { type: 'boolean' },
             // With autoPush: the review loop's rounds (docs/STORY-BUILD.md § The review loop).
             loopRounds: { type: 'integer', minimum: 1, maximum: 6 },
+            // "Approve the plan automatically" (docs/STORY-BUILD.md § Approve automatically).
+            autoApprovePlan: { type: 'boolean' },
           },
         },
       },
@@ -260,6 +262,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         docs: body.docs === true,
         autoPush: body.autoPush === true,
         ...(body.loopRounds !== undefined ? { loopRounds: body.loopRounds } : {}),
+        autoApprovePlan: body.autoApprovePlan === true,
         choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);

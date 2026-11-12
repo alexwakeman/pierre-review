@@ -1725,3 +1725,10 @@ target and attempt), `story_build_reviews` (+ a composite FK onto `repos`; uniqu
 `story_build_ac_responses` (unique per round and ref). All five join `accountScopedTables()`, the explicit
 erase and the export, with `verify:isolation` checks. Additive; journal idx 186, `when` `1792828800000`.
 [STORY-BUILD.md](STORY-BUILD.md) § The review loop; contracts in [DATA-MODEL.md](DATA-MODEL.md).
+
+### `0187_story_build_auto_approve` — Implement's "Approve the plan automatically"
+
+`ALTER TABLE story_builds ADD auto_approve_plan` (default 0, the reader's opt-in), `plan_auto_approved_at`
+(Limn approved the plan itself) and `ticket_review_done_at` (the reader closed the ticket step after the
+build). Additive; journal idx 187, `when` `1792915200000`. [STORY-BUILD.md](STORY-BUILD.md) § Approve
+automatically.

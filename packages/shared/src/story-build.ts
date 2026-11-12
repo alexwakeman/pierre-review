@@ -5,8 +5,8 @@
 // each one as a new pull request ONLY when the reader presses Push.
 //
 // Every cap is spelled ONCE, here. The backend validates against these; the SPA words its limits from them.
-// The ONLY entry points are This Sprint cards (`storyBuildOffered`): "Implement" on a NOT-STARTED ticket with
-// no pull request, "Fill gaps" on a STARTED ticket whose current story check found gaps. Once a session
+// The ONLY entry points are This Sprint cards (`storyBuildOffered`): "Implement" on a NOT-STARTED or
+// IN-PROGRESS ticket with no pull request, "Fill gaps" on a STARTED ticket whose current story check found gaps. Once a session
 // exists the card shows its mark (`storyBuildMark`).
 
 import type { DesignDiagram, FlowDiagram } from './sequence-diagrams.js';
@@ -467,6 +467,13 @@ export interface StoryBuild {
   autoPushRunning?: boolean;
   /** THE REVIEW LOOP (docs/STORY-BUILD.md § The review loop): null/absent when the option was never on. */
   loop?: StoryBuildLoop | null;
+  /** "Approve the plan automatically" (docs/STORY-BUILD.md § Approve automatically): every open point is
+   *  taken as Agree and the build starts. The ticket is never written by it. */
+  autoApprovePlan?: boolean;
+  /** ISO: when Limn approved the plan itself; null when the reader approved it (or not approved yet). */
+  planAutoApprovedAt?: string | null;
+  /** ISO: the reader closed the ticket step after the build (updated it, or said no update); null before. */
+  ticketReviewDoneAt?: string | null;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
@@ -599,7 +606,23 @@ export const STORY_BUILD_API = {
   loopSettings: '/api/story-builds/:id/loop/settings',
   loopContinue: '/api/story-builds/:id/loop/continue',
   loopStop: '/api/story-builds/:id/loop/stop',
+  /** "Approve the plan automatically" on/off (`{on}`; 409 once the plan is approved). */
+  autoApprove: '/api/story-builds/:id/auto-approve',
+  /** The ticket step after an automatically approved build: `{done}` — Update ticket ran, or "No update". */
+  ticketReview: '/api/story-builds/:id/ticket-review',
+  /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
+  active: '/api/story-builds/active',
 } as const;
+
+/** `POST …/auto-approve`. */
+export interface StoryBuildAutoApproveResponse {
+  autoApprovePlan: boolean;
+}
+
+/** `POST …/ticket-review`. */
+export interface StoryBuildTicketReviewResponse {
+  ticketReviewDoneAt: string | null;
+}
 
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;
 
@@ -668,7 +691,8 @@ export function storyBuildCheckGaps(c: SprintTicketCheck | null | undefined): nu
 /**
  * THE ONE ENTRY GATE (owner decision 4, widened 2026-10-31): which build a This Sprint card of a sprint
  * ticket (never a ghost) offers, and only while no session is open (then the card shows the mark instead).
- *   'implement'  its status sits in the Not started bucket and it has NO pull request
+ *   'implement'  its status sits in the Not started or In progress bucket and it has NO pull request
+ *                (In progress widened 2026-11-12: work under way with nothing pushed yet)
  *   'fill_gaps'  it has STARTED (a pull request, or a status past Not started, short of Complete) and its
  *                latest succeeded story check is CURRENT and found gaps (`storyBuildCheckGaps`). No check,
  *                or a stale one, offers nothing: the gaps are not known.
@@ -684,7 +708,7 @@ export function storyBuildOffered(n: {
   check?: SprintTicketCheck | null;
 }): StoryBuildAction | null {
   if (n.ghost || n.build != null) return null;
-  if (n.stage === 'not_started' && n.prs.length === 0) return 'implement';
+  if ((n.stage === 'not_started' || n.stage === 'in_progress') && n.prs.length === 0) return 'implement';
   const started = n.prs.length > 0 || (n.stage != null && n.stage !== 'not_started');
   if (!started || n.stage === 'done') return null;
   return storyBuildCheckGaps(n.check) > 0 ? 'fill_gaps' : null;

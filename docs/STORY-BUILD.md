@@ -137,7 +137,7 @@ From 2026-10-30, still in force:
 2. **Draft by default** (`STORY_BUILD_PUSH_DRAFT_DEFAULT`), with a toggle to open ready for review.
 3. **One build at a time per computer** (`409 BuildBusy`); chat turns in other sessions go on.
 4. **Entry point:** the STORY VIEW's action group (§ Entry points): Implement ONLY on a story that is NOT
-   STARTED and has no PRs; Fill gaps ONLY on a STARTED one whose current story check found gaps. ONE gate
+   STARTED or IN PROGRESS (widened 2026-11-12) and has no PRs; Fill gaps ONLY on a STARTED one whose current story check found gaps. ONE gate
    decides both: shared `storyBuildOffered` returns `'implement' | 'fill_gaps' | null`. Not Open PRs, not
    Reports. ⌘K offers "Implement KEY" / "Fill gaps in KEY" (or "Open KEY's build") only while that ticket's
    story view is open. Once a session exists the story view offers "Open build · <mark>" and the sprint
@@ -181,7 +181,7 @@ From 2026-11-12 (THE REVIEW LOOP, § The review loop):
 - After the PR opens, the closing review is stored as ONE non-posted `claude_reviews` row at the PR head
   (trigger `manual`), so auto review does not review the same head again.
 
-## Data model (migrations 0149, 0176, 0179, 0185, 0186)
+## Data model (migrations 0149, 0176, 0179, 0185, 0186, 0187)
 
 Four core tables, all account-scoped, on the erase checklist (`accountScopedTables`) and in the export.
 
@@ -278,6 +278,9 @@ story.
 | `POST …/:id/loop/settings` | `{on?, rounds?: 1..6}` → `{loop}` (400 · 404 · 409 `LoopStarted` once claimed or anything pushed) | read |
 | `POST …/:id/loop/continue` | `{branch?: {kind, id, name}}` → 202 `{loop}`: the reader's press, one new attempt of the paused step (409 `NotReady` when not paused) | ai + ai_hourly + github_write |
 | `POST …/:id/loop/stop` | stop at the next checkpoint → `{loop}` (409 `NotReady` when not running) | read |
+| `POST …/:id/auto-approve` | `{on}` → `{autoApprovePlan}` (400 · 404 · 409 `NotReady` once the plan is approved) | read |
+| `POST …/:id/ticket-review` | `{done}` → `{ticketReviewDoneAt}`: the ticket step closed (true) or open again (false) | read |
+| `GET /api/story-builds/active?workspace=` | THE BUILDS TOAST: `StoryBuildActivityResponse` (DB + the live map) | read |
 
 Error codes: shared `StoryBuildErrorCode` + `SandboxSessionErrorCode` + `BuildPlanErrorCode`. The plan paths
 are shared `BUILD_PLAN_API`; the start body's `docs: true` is `400 NoDocs` without a built document; its
@@ -530,6 +533,47 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   Continue reads the live ref first and ADOPTS a push or PR that landed (`liveBranchSha`, `openPrOfBranch`).
 - **Settings** (`POST …/loop/settings`, `setLoopSettings`): `{on?, rounds?}` until `loop_claimed_at` is set
   or anything was pushed (409 `LoopStarted`).
+
+## Approve automatically (`sandbox/session/plan.ts`; migration 0187)
+
+"Approve the plan automatically", OFF by default, ticked at Start (`autoApprovePlan: true`) or in the tab
+until the plan is approved (`POST …/auto-approve`). With "After the build: review and fix, then open the
+pull request" ticked too, Implement → Start is the whole flow: planned → approved → built → reviewed and
+fixed → pull request. The Start panel REMEMBERS both boxes in the browser (`START_PREFS_KEY`); the server
+stores each build's own choice (`story_builds.auto_approve_plan`).
+
+- **When.** After any plan turn that leaves a usable plan (`afterChatTurn`, the `ok` branch; a repair that
+  delivers counts). A plan already waiting when the switch is ticked is NOT approved by it: the reader
+  presses Approve and start.
+- **What.** Every unanswered point of the LATEST revision is stored as **Agree** (the plan's revision of
+  the story, its criteria included, is what gets built), `approveCheck` runs as for a press, and the plan
+  is HELD (`pendingApprove` + `pendingAuto`). `runTurn` then claims the build turn IN THE SAME TICK
+  (`claimAutoBuild` → `claimBuildTurn`, reader line "Approve and start (automatic)"); `approveNow` records
+  `plan_auto_approved_at` and one notice (`AUTO_APPROVED_LINE`).
+- **The gate.** The build turn is an AUTOMATIC run: `automaticAllowed` is asked first; refused ⇒ no
+  approval, one notice (`AUTO_APPROVE_BUDGET_LINE`), the plan waits. Another session holding the build slot
+  ⇒ the held plan is dropped with `AUTO_APPROVE_BUSY_LINE`.
+- **The ticket is NEVER written by it.** The plan's draft ticket update is shown AFTER the pull request
+  opens (the review loop `done`, or the session `pushed`): the TICKET STEP (`TicketStep`,
+  `TicketUpdatePanel.tsx`) — Update ticket (Jira, the reader's press, `POST /api/ticket-update`) or "No
+  update needed"; either sets `ticket_review_done_at` (`POST …/ticket-review {done: true}`), "Show the
+  ticket changes" clears it. Until then the build sits at the `ticket` gate of the builds toast. A plan the
+  READER approved keeps the old place: the ticket review in the plan panel while the build runs.
+
+## The builds toast (`components/StoryBuild/StoryBuildsToast.tsx`)
+
+ONE circle in the ONE toast cluster (`HammerIcon`) while any build of the workspace RUNS or waits at a
+GATE. `GET /api/story-builds/active?workspace=` (DB + the in-process live map, rate tier `read`) answers a
+row per such build through the ONE fold, shared `storyBuildActivityOf` (`story-build-activity.ts`).
+
+- **Running** = a live sandbox in `booting/planning/revising/chatting/building`, or the loop in
+  `pushing/reviewing/fixing/opening`. The circle's RING is the least advanced running build's progress
+  (planning ≈15 → build 45 → built 60 → the loop's rounds 62..97 → 100).
+- **Gates** (the COUNT badge and the alert ring): `plan` (waits for Approve), `push` (built, the loop off),
+  `paused` (the loop paused or stopped), `failed`, `ticket` (approved automatically, the PR open, the ticket
+  step not closed). A build neither running nor at a gate is not listed.
+- The cluster opens the panel; a row opens that build's tab (`useOpenStoryBuild`). Polled every 5 s while a
+  build runs, 30 s otherwise, and refetched after every build action (`invalidateBuild`).
 
 ## Limits
 

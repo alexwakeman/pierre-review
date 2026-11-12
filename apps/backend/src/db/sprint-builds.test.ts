@@ -72,7 +72,9 @@ describe('the card mark and the entry gate (shared)', () => {
     expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [] })).toBe('implement');
     expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [], build: null })).toBe('implement');
     expect(storyBuildOffered({ ghost: true, stage: 'not_started', prs: [] })).toBeNull();
-    expect(storyBuildOffered({ ghost: false, stage: 'in_progress', prs: [] })).toBeNull();
+    expect(storyBuildOffered({ ghost: false, stage: 'in_progress', prs: [] })).toBe('implement');
+    expect(storyBuildOffered({ ghost: false, stage: 'in_review', prs: [] })).toBeNull();
+    expect(storyBuildOffered({ ghost: false, stage: 'in_progress', prs: [{}] })).toBeNull();
     expect(storyBuildOffered({ ghost: false, stage: null, prs: [] })).toBeNull();
     expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [{}] })).toBeNull();
     expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [], build: b({ status: 'plan_ready' }) })).toBeNull();

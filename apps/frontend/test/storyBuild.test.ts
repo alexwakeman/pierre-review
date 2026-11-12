@@ -210,8 +210,13 @@ describe('the story view\'s entry (owner decision 4; shared `storyBuildOffered`)
     expect(entryOf(node())).toEqual({ kind: 'offer', action: 'implement', reviewId: null });
   });
 
-  it('offers nothing on a started ticket with no gaps known, with a PR and no check, on a ghost, or with no stage', () => {
-    expect(entryOf(node({ stage: 'in_progress' }))).toBeNull();
+  it('offers Implement on an in-progress ticket with no PR (widened 2026-11-12), never once it has one', () => {
+    expect(entryOf(node({ stage: 'in_progress' }))).toMatchObject({ kind: 'offer', action: 'implement' });
+    expect(entryOf(node({ stage: 'in_progress', prs: [PR] }))).toBeNull();
+    expect(entryOf(node({ stage: 'in_review' }))).toBeNull();
+  });
+
+  it('offers nothing with a PR and no check, on a ghost, or with no stage', () => {
     expect(entryOf(node({ prs: [PR] }))).toBeNull();
     expect(entryOf(node({ ghost: true }))).toBeNull();
     expect(entryOf(node({ stage: null }))).toBeNull();

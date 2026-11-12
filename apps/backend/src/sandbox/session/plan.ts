@@ -15,6 +15,12 @@
 // into the sandbox, records the approved revision and the planned PR rows in ONE transaction, and starts
 // the ONE build turn. Nothing here writes to the tracker: a draft ticket update is text for the reader.
 //
+// APPROVE AUTOMATICALLY (`story_builds.auto_approve_plan`, the reader's opt-in at Start; docs/STORY-BUILD.md
+// § Approve automatically): after a turn that leaves a usable plan, every open point is stored as Agree, the
+// plan is approved exactly as "Approve and start" approves it, and the machine starts the build turn in the
+// same tick. That build turn is an AUTOMATIC run, so the ONE budget gate is asked first; refused ⇒ the plan
+// waits for the reader (one line). The ticket is never written: its draft update is shown after the build.
+//
 // The machine (manager.ts) hands this module what it needs (`PlanMachine`): it never imports the manager.
 import { posix } from 'node:path';
 import {
@@ -58,6 +64,9 @@ export const PLAN_READER_LINE = 'Plan';
 export const PLAN_READER_LINE_DOCS = 'Plan with docs';
 export const PLAN_SENT_LINE = '(The plan went to Limn to check.)';
 export const PLAN_NOT_APPROVED_LINE = 'Approve the plan to start the build.';
+export const AUTO_APPROVED_LINE = 'Limn approved the plan, taking every point as Agree, and started the build.';
+export const AUTO_APPROVE_BUDGET_LINE = 'The AI spend limit is reached, so the plan waits for you. Press Approve and start.';
+export const AUTO_APPROVE_BUSY_LINE = 'Another session is building, so the plan waits for you. Press Approve and start when it ends.';
 export const NO_PLAN_LINE = 'The agent did not submit a plan.';
 export const planReadyLine = (n: number, dropped: { contentions: number; evidence: number }): string => {
   const left = dropped.contentions > 0 ? ` Limn left out ${dropped.contentions} ${dropped.contentions === 1 ? 'point' : 'points'} it could not check.` : '';
@@ -250,6 +259,8 @@ export class PlanStage {
   private approvedFlag: boolean | null = null;
   /** Approve's plan, held from the route's check to the build turn's instruction. */
   pendingApprove: StoryBuildPlanRow | null = null;
+  /** The held plan was approved by Limn (APPROVE AUTOMATICALLY), not by the reader's press. */
+  pendingAuto = false;
 
   constructor(private readonly o: PlanStageOpts) {}
 
@@ -345,8 +356,9 @@ export class PlanStage {
         l.state.planStage = 'ready';
         l.state.planProblem = null;
         m.scheduleSave();
+        const auto = await this.autoApproveReady(l, m);
         m.emitPlan(await this.view(l));
-        return { nextPhase: 'plan_ready' };
+        return auto ? { nextPhase: 'plan_ready', autoBuild: true } : { nextPhase: 'plan_ready' };
       }
       problems = r.problems;
     }
@@ -441,6 +453,45 @@ export class PlanStage {
     return { ok: true, text: planReplyInstruction({ revision, decisions, reply: { contentionId, text } }) };
   }
 
+  /**
+   * APPROVE AUTOMATICALLY: the build row asks for it, the gate allows the build turn, every open point of the
+   * LATEST revision is stored as Agree, and the approve check passes ⇒ the plan is HELD for the build turn
+   * (`pendingApprove`), as a reader's press holds it. false leaves the plan waiting (with one line when the
+   * gate refused). Never throws.
+   */
+  private async autoApproveReady(l: PlanLive, m: PlanMachine): Promise<boolean> {
+    try {
+      const { getStoryBuildRow } = await import('../../coding/story-build/persist.js');
+      const row = await getStoryBuildRow(this.o.ctx, this.o.accountId, this.o.buildId);
+      if (row?.autoApprovePlan !== true || (await this.approved())) return false;
+      if (!(await seams.automaticAllowed(this.o.ctx, this.o.accountId, l.choice.provider).catch(() => false))) {
+        m.notice(AUTO_APPROVE_BUDGET_LINE);
+        return false;
+      }
+      const latest = await latestPlanRow(this.o.ctx, this.o.accountId, this.o.buildId);
+      if (!latest) return false;
+      const answered = latest.decisionsJson ?? {};
+      const at = new Date(seams.now()).toISOString();
+      for (const c of toPlanRevision(latest).contentions) {
+        if (answered[c.id] == null) await setPlanDecision(this.o.ctx, this.o.accountId, latest.id, c.id, { decision: 'agree', fingerprint: c.fingerprint, at });
+      }
+      const check = await this.approveCheck(latest.revision);
+      if (!check.ok) return false;
+      this.pendingApprove = check.plan;
+      this.pendingAuto = true;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The machine could not start the auto-approved build turn: the plan waits for the reader. */
+  autoBuildRefused(notice: (text: string) => void, line: string): void {
+    this.pendingApprove = null;
+    this.pendingAuto = false;
+    notice(line);
+  }
+
   /** Approve's checks before the claim (the route): the LATEST revision, every point answered. */
   async approveCheck(revision: number): Promise<ApproveCheck> {
     if (await this.approved()) return { ok: false, code: 'PlanStale', message: 'The plan is already approved.' };
@@ -460,13 +511,20 @@ export class PlanStage {
    */
   async approveNow(l: PlanLive, m: PlanMachine): Promise<BuildPlanRevision> {
     const held = this.pendingApprove;
+    const auto = this.pendingAuto;
     this.pendingApprove = null;
+    this.pendingAuto = false;
     if (!held) throw new Error('There is no plan to approve.');
     const again = await this.approveCheck(held.revision);
     if (!again.ok) throw new Error(again.message);
     const ok = await approvePlanRevision(this.o.ctx, { accountId: this.o.accountId, buildId: this.o.buildId, plan: again.plan, now: new Date(seams.now()) });
     if (!ok) throw new Error('The plan is already approved.');
     this.approvedFlag = true;
+    if (auto) {
+      const { updateStoryBuild } = await import('../../coding/story-build/persist.js');
+      await updateStoryBuild(this.o.ctx, this.o.accountId, this.o.buildId, { planAutoApprovedAt: new Date(seams.now()) }).catch(() => {});
+      m.notice(AUTO_APPROVED_LINE);
+    }
     const rev = toPlanRevision(again.plan);
     if (l.container && l.layoutRoot) {
       await l.runtime.copyIn(l.container, [

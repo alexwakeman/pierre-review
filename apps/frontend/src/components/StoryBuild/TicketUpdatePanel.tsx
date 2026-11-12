@@ -10,6 +10,7 @@ import {
   type TicketUpdateCurrent,
 } from '@pierre-review/shared';
 import { useTicketUpdateCurrent, useUpdateTicket } from '../../hooks/useTicketPrs.js';
+import { useStoryBuildTicketReview } from '../../hooks/useStoryBuild.js';
 import { criteriaBoxLabel, ticketReviewSeed, ticketUpdateBody, ticketUpdateConfirm } from '../../lib/buildPlan.js';
 import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionErrorText } from '../../lib/sandboxSession.js';
@@ -29,7 +30,16 @@ import { cx } from '../ui/cx.js';
 // writes the criteria where the ticket keeps them (their own field, in its format, or the description's
 // criteria section). Asked once, never retried. Nothing else writes the ticket.
 
-export function TicketReview({ build, update }: { build: StoryBuild; update: BuildPlanTicketUpdate | null }): JSX.Element | null {
+export function TicketReview({
+  build,
+  update,
+  onWritten,
+}: {
+  build: StoryBuild;
+  update: BuildPlanTicketUpdate | null;
+  /** After Update ticket wrote to Jira (the ticket step closes itself). */
+  onWritten?: () => void;
+}): JSX.Element | null {
   const current = useTicketUpdateCurrent(build.workspaceId, build.ident);
   if (current.isLoading) {
     return (
@@ -39,17 +49,19 @@ export function TicketReview({ build, update }: { build: StoryBuild; update: Bui
     );
   }
   // No stored copy (or the read failed): the draft alone, editable and copyable, never written.
-  return <TicketReviewBody key={current.data != null ? 'held' : 'none'} build={build} update={update} current={current.data ?? null} />;
+  return <TicketReviewBody key={current.data != null ? 'held' : 'none'} build={build} update={update} current={current.data ?? null} onWritten={onWritten} />;
 }
 
 function TicketReviewBody({
   build,
   update,
   current,
+  onWritten,
 }: {
   build: StoryBuild;
   update: BuildPlanTicketUpdate | null;
   current: TicketUpdateCurrent | null;
+  onWritten?: () => void;
 }): JSX.Element | null {
   const seed = useMemo(() => ticketReviewSeed(update, current), [update, current]);
   const [description, setDescription] = useState(seed.description);
@@ -154,7 +166,7 @@ function TicketReviewBody({
                 data-testid="story-plan-ticket-update-confirm"
                 busy={write.isPending}
                 busyLabel="Updating…"
-                onClick={() => write.mutate(body, { onSettled: () => setAsking(false) })}
+                onClick={() => write.mutate(body, { onSettled: () => setAsking(false), onSuccess: () => onWritten?.() })}
               >
                 Replace
               </Button>
@@ -344,5 +356,42 @@ function MarkedTextarea({
         )}
       />
     </div>
+  );
+}
+
+/**
+ * THE TICKET STEP (docs/STORY-BUILD.md § Approve automatically): Limn approved the plan itself, so the
+ * ticket was never written. Once the pull request is open (the review loop done, or every change pushed),
+ * the plan's ticket changes wait here: Update ticket (Jira), or "No update needed". Either closes the step
+ * (`POST …/ticket-review {done}`), which also clears the builds toast's gate; "Show again" reopens it.
+ * The same "PR open" rule as the toast's fold (shared `storyBuildActivityOf`).
+ */
+export function TicketStep({ build }: { build: StoryBuild }): JSX.Element | null {
+  const step = useStoryBuildTicketReview(build.workspaceId, build.ident);
+  const plan = build.session?.plan ?? null;
+  if (build.planAutoApprovedAt == null || plan?.latest == null) return null;
+  const update = plan.latest.revision === plan.approvedRevision ? plan.latest.ticketUpdate : null;
+  const prOpen = build.loop?.state === 'done' || build.session?.phase === 'pushed';
+  if (update == null || !prOpen) return null;
+  if (build.ticketReviewDoneAt != null) {
+    return (
+      <p data-testid="story-build-ticket-step-done" className="mt-3 flex flex-wrap items-center gap-2 text-meta text-ui-mute">
+        The ticket step is done.
+        <button type="button" className="hit text-meta text-ui-ink underline" disabled={step.isPending} onClick={() => step.mutate({ id: build.id, done: false })}>
+          Show the ticket changes
+        </button>
+      </p>
+    );
+  }
+  return (
+    <section data-testid="story-build-ticket-step" aria-label="The ticket changes" className="mt-3 rounded-ui bg-ui-surface p-4 ring-1 ring-inset ring-ui-accent/40">
+      <p className="mb-2 text-body text-ui-ink">The pull request is open. Limn approved the plan for you and did not change the ticket.</p>
+      <TicketReview build={build} update={update} onWritten={() => step.mutate({ id: build.id, done: true })} />
+      <div className="mt-2">
+        <Button size="sm" variant="ghost" data-testid="story-build-ticket-step-skip" disabled={step.isPending} onClick={() => step.mutate({ id: build.id, done: true })}>
+          No update needed
+        </Button>
+      </div>
+    </section>
   );
 }

@@ -139,6 +139,10 @@ describe('tierFor — implement story', () => {
     expect(tiers('POST', '/api/story-builds/7/discard')).toEqual(['read']);
     // The automatic push's switch is DB only (the push it arms runs on the host after a build turn).
     expect(tiers('POST', '/api/story-builds/7/auto-push')).toEqual(['read']);
+    // Approve automatically (the switch) and the ticket step are DB only; the builds toast is a DB read.
+    expect(tiers('POST', '/api/story-builds/7/auto-approve')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/ticket-review')).toEqual(['read']);
+    expect(tiers('GET', '/api/story-builds/active')).toEqual(['read']);
     // The review loop: Continue may start reviews, a fix turn and pushes; the rest are DB only.
     expect(tiers('POST', '/api/story-builds/7/loop/continue')).toEqual(['ai', 'ai_hourly', 'github_write']);
     expect(tiers('GET', '/api/story-builds/7/loop')).toEqual(['read']);

@@ -1310,6 +1310,13 @@
       "when": 1792828800000,
       "tag": "0186_story_build_review_loop",
       "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "6",
+      "when": 1792915200000,
+      "tag": "0187_story_build_auto_approve",
+      "breakpoints": true
     }
   ]
 }

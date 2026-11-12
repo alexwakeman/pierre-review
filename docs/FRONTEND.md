@@ -4396,9 +4396,10 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   (`TicketStorySection` `StoryActions`: the rail's actions block in the two-column layout, the Story
   heading row in one column / the tray), so it is in EVERY story view: This Sprint's tray, the story tab
   and the PR view's Story tab. Shown only while `me.ai.enabled` (HIDDEN, never disabled). ONE gate,
-  shared `storyBuildOffered`, via `lib/storyBuild.ts storyViewBuildEntry`: `'implement'` (not started,
-  no PR, no open session — `WrenchIcon`, the AI Fix wrench (one mark for "a model writes code"; the
-  hammer `BuildIcon` is DELETED, 2026-11-04), "Implement", accessible name "Implement KEY") or `'fill_gaps'` (a
+  shared `storyBuildOffered`, via `lib/storyBuild.ts storyViewBuildEntry`: `'implement'` (not started
+  or in progress, no PR, no open session — `WrenchIcon`, the AI Fix wrench (one mark for "a model writes code"; the
+  hammer `BuildIcon` is DELETED, 2026-11-04; the builds TOAST has its own `HammerIcon`, docs/STORY-BUILD.md
+  § The builds toast), "Implement", accessible name "Implement KEY") or `'fill_gaps'` (a
   STARTED ticket — a PR, or a status past Not started, short of Complete — whose latest succeeded story
   check is CURRENT and found gaps, `storyBuildCheckGaps` over not met + partly met + unsettled +
   `missing`; `FillGapsIcon`, "Fill gaps in KEY"); with an OPEN session "Open build · <mark>" (accessible

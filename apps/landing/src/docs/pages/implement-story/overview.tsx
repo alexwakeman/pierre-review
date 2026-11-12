@@ -9,7 +9,7 @@ export const meta: DocMeta = {
 function StartPicture(): JSX.Element {
   return (
     <Illustration
-      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A box to give the agent the reference documents is ticked. A box to review and fix after the build, then open the pull request, is not ticked. A Start with docs button."
+      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A box to give the agent the reference documents is ticked. Boxes to approve the plan automatically and to review and fix after the build, then open the pull request, are not ticked. A Start with docs button."
       caption="A new build tab: what the session gets, your memories and skills, the docs and push boxes, the model and Start."
       title="PAY-142 Partial refunds"
       meta="Implement"
@@ -25,6 +25,7 @@ function StartPicture(): JSX.Element {
         <Chip>☑ Give the agent the reference documents</Chip>
       </p>
       <p>
+        <Chip>☐ Approve the plan automatically</Chip>
         <Chip>☐ After the build: review and fix, then open the pull request</Chip>
       </p>
       <p className="muted">Runs in Colima on this computer.</p>
@@ -56,7 +57,7 @@ export default function Page(): JSX.Element {
       </p>
       <ul>
         <li>
-          <Ui>Implement</Ui> is offered on a ticket that has not started and has no pull request.
+          <Ui>Implement</Ui> is offered on a ticket that is not started or in progress and has no pull request.
         </li>
         <li>
           <Ui>Fill gaps</Ui> is offered instead on a ticket that is under way, when its current story check found gaps.
@@ -73,6 +74,11 @@ export default function Page(): JSX.Element {
       <p>
         The button opens a build tab, pinned so a reload keeps it. The command menu (<Ui>⌘K</Ui>) offers the same action
         while the ticket's story view is open.
+      </p>
+      <p>
+        While a build runs, a hammer circle in the corner of the window shows its progress. A number on it counts the
+        builds waiting for you: a plan to approve, a build to push, a paused review, a failure, or ticket changes to
+        check. Open it and select a build to go to its tab.
       </p>
 
       <H2 id="the-four-steps">The four steps</H2>
@@ -103,6 +109,11 @@ export default function Page(): JSX.Element {
           ready for review. See <DocLink to="implement-story/push#review-and-fix">Review and fix</DocLink>.
         </li>
       </Steps>
+      <p>
+        Tick <Ui>Approve the plan automatically</Ui> as well, and <Ui>Start</Ui> is the only press: Limn agrees with every
+        change the plan proposes, builds it, reviews it and opens the pull request. The Start panel remembers both boxes.
+        See <DocLink to="implement-story/plan#approve-automatically">Approve automatically</DocLink>.
+      </p>
       <Warning>
         Nothing is pushed, posted or written to your tracker before you press a button, except the branch commits and the pull request you chose with{' '}
         <Ui>After the build: review and fix, then open the pull request</Ui>. The one tracker write is{' '}

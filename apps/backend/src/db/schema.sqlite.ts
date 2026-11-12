@@ -4638,6 +4638,11 @@ export const storyBuilds = sqliteTable(
     loopResume: text('loop_resume'),
     loopClaimedAt: integer('loop_claimed_at', { mode: 'timestamp' }),
     loopFinishedAt: integer('loop_finished_at', { mode: 'timestamp' }),
+    // APPROVE AUTOMATICALLY (migration 0187; docs/STORY-BUILD.md § Approve automatically): the reader's opt-in;
+    // when Limn approved the plan itself (every open point as Agree); when the reader closed the ticket step.
+    autoApprovePlan: integer('auto_approve_plan', { mode: 'boolean' }).notNull().default(false),
+    planAutoApprovedAt: integer('plan_auto_approved_at', { mode: 'timestamp' }),
+    ticketReviewDoneAt: integer('ticket_review_done_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),

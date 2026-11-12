@@ -107,7 +107,7 @@ import type { StoreSeams } from '../workspace/store.js';
 import { ticketMarkdown } from '../workspace/seed.js';
 import { listPlanRows, listPlannedPrRows, toStoryBuildPr } from '../../coding/story-build/plan-persist.js';
 import { storedServiceRuns, type ServiceRunRecord } from '../services/run-log.js';
-import { PLAN_SENT_LINE, PlanStage, planBuildInstruction, planMessageText, planViewOf, type PlanLive, type PlanMachine } from './plan.js';
+import { AUTO_APPROVE_BUSY_LINE, PLAN_SENT_LINE, PlanStage, planBuildInstruction, planMessageText, planViewOf, type PlanLive, type PlanMachine } from './plan.js';
 import { stripPlanBlock } from './plan-block.js';
 import { CONTINUATIONS_MAX, CONTINUE_LINE, extractApprovedStack, restoreApprovedStack } from './stack-turn.js';
 import { SANDBOX_DOCS_DIR } from '../workspace/docs.js';
@@ -497,6 +497,8 @@ export interface StartSessionArgs {
   autoPush?: boolean;
   /** With `autoPush`: the review loop's rounds (clamped 1..6; default 3). */
   loopRounds?: number;
+  /** "Approve the plan automatically" (plan.ts `afterChatTurn`). */
+  autoApprovePlan?: boolean;
 }
 
 export type StartSessionResult =
@@ -601,10 +603,11 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
   const state = { ...emptySessionState(a.action), planFirst: deps.planFirst, withDocs: a.docs === true, docs: null, serviceRuns: [], planStage: null, planProblem: null };
   const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
   registerLive(l, a.memberRepoIds);
-  if (a.docs === true || a.autoPush === true) {
+  if (a.docs === true || a.autoPush === true || a.autoApprovePlan === true) {
     await updateStoryBuild(ctx, a.accountId, id, {
       ...(a.docs === true ? { withDocs: true } : {}),
       ...(a.autoPush === true ? { autoPush: true, loopRounds: clampLoopRounds(a.loopRounds) } : {}),
+      ...(a.autoApprovePlan === true ? { autoApprovePlan: true } : {}),
     }).catch(() => {});
   }
   return { outcome: 'started', id };
@@ -1022,6 +1025,8 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
           building = l.key;
           const text = buildFollow;
           runTurn(l, { build: true, text: async () => text });
+        } else if (afterChat?.autoBuild === true && claimAutoBuild(l)) {
+          // APPROVE AUTOMATICALLY (plan.ts): the approved plan's build turn, claimed in this same tick.
         } else if (follow && l.driver != null && !l.driver.busy() && l.driver.mode() === 'chat') {
           // THE ONE AUTOMATIC FOLLOW-UP (plan first's repair): claimed in this same tick.
           l.turn = true;
@@ -1047,6 +1052,22 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
       }
     }
   })();
+}
+
+/**
+ * APPROVE AUTOMATICALLY: the plan stage HELD the approved plan; claim its build turn now, exactly as the
+ * reader's "Approve and start" does. Refused (another session builds, the subject is busy) ⇒ the held plan
+ * is dropped with one line and the plan waits for the reader. Returns whether the turn was claimed.
+ */
+function claimAutoBuild(l: Live): boolean {
+  const stage = l.subject.kind === 'story' ? (l.subject as StorySubject).plan : null;
+  if (stage == null || stage.pendingApprove == null) return false;
+  const r = l.driver != null && !l.driver.busy() && l.driver.mode() === 'chat'
+    ? claimBuildTurn(l, { readerText: 'Approve and start (automatic)', instruction: () => l.subject.buildInstruction(l, null) })
+    : ({ status: 'agent_busy' } as SessionActionResult);
+  if (r.status === 'queued') return true;
+  stage.autoBuildRefused((t) => notice(l, t), r.status === 'build_busy' ? AUTO_APPROVE_BUSY_LINE : `The plan waits for you: ${'message' in r && typeof r.message === 'string' ? r.message : 'the build could not start'}.`);
+  return false;
 }
 
 /** Every build turn that ended WITHOUT a continuation, whatever its outcome (the review loop). */

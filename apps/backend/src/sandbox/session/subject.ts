@@ -66,6 +66,9 @@ export interface SubjectLive {
 export interface AfterChatTurn {
   nextPhase: SandboxSessionPhase | null;
   followUp?: { text: string; planSource: BuildPlanSource } | null;
+  /** APPROVE AUTOMATICALLY (plan.ts): the plan is approved and held; the machine claims the build turn in
+   *  the same tick (or, when it cannot, leaves the plan waiting for the reader). */
+  autoBuild?: boolean;
 }
 
 export interface SessionSubject {

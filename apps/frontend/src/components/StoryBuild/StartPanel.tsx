@@ -29,6 +29,8 @@ import { CheckboxBox } from '../ui/FormControls.js';
 import { InfoButton } from '../InfoModal.js';
 import { SandboxRuntimeLine } from './SandboxSetupHelp.js';
 import { AUTO_PUSH_LABEL, AutoPushInfo, LoopRoundsControl } from './AutoPushOption.js';
+import { AUTO_APPROVE_LABEL, AutoApproveInfo, START_PREFS_DEFAULT, START_PREFS_KEY, type StartPrefs } from './AutoApproveOption.js';
+import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 
 // THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences
 // (it PLANS FIRST: docs/STORY-BUILD.md § Plan first), the docs box ("Give the agent the reference
@@ -84,7 +86,13 @@ export function StartPanel({
   const [docsPicked, setDocsPicked] = useState(offer?.docs === true);
   useEffect(() => setDocsPicked(offer?.docs === true), [offer?.docs]);
   const docs = docsAvailable && docsPicked;
-  const [autoPush, setAutoPush] = useState(false);
+  // Both automatic boxes remember the reader's last choice (this browser): two presses from Implement to a
+  // reviewed pull request once they are ticked.
+  const [prefs, setPrefs] = useLocalStorage<StartPrefs>(START_PREFS_KEY, START_PREFS_DEFAULT);
+  const autoPush = prefs.autoPush === true;
+  const autoApprove = prefs.autoApprovePlan === true;
+  const setAutoPush = (on: boolean): void => setPrefs({ ...prefs, autoPush: on });
+  const setAutoApprove = (on: boolean): void => setPrefs({ ...prefs, autoApprovePlan: on });
   const [loopRounds, setLoopRounds] = useState(STORY_BUILD_LOOP_ROUNDS_DEFAULT);
   const go = (): void => {
     start.mutate({
@@ -93,6 +101,7 @@ export function StartPanel({
       model: pick.chosen.model,
       ...(docs ? { docs: true } : {}),
       ...(autoPush ? { autoPush: true, loopRounds } : {}),
+      ...(autoApprove ? { autoApprovePlan: true } : {}),
     });
   };
   const err = start.error instanceof ApiError ? start.error : start.error != null ? { message: (start.error as Error).message } : null;
@@ -108,15 +117,15 @@ export function StartPanel({
         <>
           <p className="text-body text-ui-ink">
             The AI gets a sandbox with every repository in this workspace, the ticket and what the story check found missing. It
-            plans first. Nothing is built until you approve the plan, and nothing is pushed until you press Push or tick the
-            review box below.
+            plans first. Nothing is built until the plan is approved and nothing is pushed until you press Push, unless you
+            tick the boxes below.
           </p>
           <StartGaps reviewId={node?.check?.reviewId ?? offer?.reviewId ?? null} />
         </>
       ) : (
         <p className="text-body text-ui-ink">
-          The AI gets a sandbox with every repository in this workspace and the ticket. It plans first. Nothing is built until you
-          approve the plan, and nothing is pushed until you press Push or tick the review box below.
+          The AI gets a sandbox with every repository in this workspace and the ticket. It plans first. Nothing is built until
+          the plan is approved and nothing is pushed until you press Push, unless you tick the boxes below.
         </p>
       )}
       <div className="mt-3">
@@ -131,6 +140,13 @@ export function StartPanel({
             <p>Limn copies the parts of this workspace's reference library that match the story into the sandbox, read only.</p>
             <p className="mt-2">The agent can then cite a document where the story does not match it.</p>
           </InfoButton>
+        </label>
+      )}
+      {offered != null && (
+        <label data-testid="story-build-start-auto-approve" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
+          <CheckboxBox checked={autoApprove} disabled={busy} onChange={(e) => setAutoApprove(e.target.checked)} />
+          {AUTO_APPROVE_LABEL}
+          <AutoApproveInfo />
         </label>
       )}
       {offered != null && (

@@ -135,7 +135,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>Select the arrow in a card&rsquo;s corner to open the ticket in its own tab.</li>
         <li>
-          Press the hammer button on a not-started ticket with no pull request (<Ui>Implement</Ui>), or{' '}
+          Press the hammer button on a not-started or in-progress ticket with no pull request (<Ui>Implement</Ui>), or{' '}
           <Ui>Fill gaps</Ui> on a started ticket whose check found criteria not met. See{' '}
           <DocLink to="implement-story/overview">Implement story</DocLink>.
         </li>

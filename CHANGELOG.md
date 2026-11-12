@@ -20,9 +20,17 @@ no internals.
   Limn reviews again, for up to the number of rounds you pick (3 by default). Then it opens the pull request, ready
   for review. The review stays in Limn. The build tab shows each round, and Continue goes on after a pause (for
   example when the AI spend limit is reached).
+- Implement story and Fill gaps: "Approve the plan automatically". Limn agrees with every change the plan
+  proposes and starts the build without asking. It does not change the ticket: once the pull request is open,
+  the build shows the ticket changes so you can update the ticket or leave it. With "After the build: review and
+  fix" ticked too, Start is the only press. The Start panel remembers both boxes.
+- A hammer circle among the notifications shows each running build's progress, and counts the builds that
+  wait for you (a plan to approve, a build to push, a paused review, a failure, ticket changes to check).
+  Select a build to open it.
 
 ### Changed
 
+- Implement is now offered on In progress tickets with no pull request, as well as Not started ones.
 - Implement story and Fill gaps: the pull request and its commit are now yours, not your Limn bot's, so they
   count like any pull request of yours (auto review included). The branch is the ticket key, such as
   PAY-142, with no `limn/` in front. The pull request body no longer ends with "Built with Limn".

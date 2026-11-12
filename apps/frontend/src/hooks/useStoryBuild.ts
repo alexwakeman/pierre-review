@@ -80,6 +80,8 @@ function invalidateBuild(qc: QueryClient, workspaceId: number | null, ident: str
     qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
     qc.invalidateQueries({ queryKey: ['sprint-graph', workspaceKey(workspaceId)] }),
     qc.invalidateQueries({ queryKey: ['sprint-graph-token', workspaceKey(workspaceId)] }),
+    // The builds toast follows every action (a start, an approval, a push, a discard).
+    qc.invalidateQueries({ queryKey: storyBuildActivityKey(workspaceId) }),
   ]);
 }
 
@@ -225,6 +227,53 @@ export function useStoryBuildLoopSettings(workspaceId: number | null, ident: str
     onMutate: (v) => patch(v),
     onSuccess: () => invalidateBuild(qc, workspaceId, ident),
     onError: () => void qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
+  });
+}
+
+/** "Approve the plan automatically" on/off (DB only, its own key: a running turn never blocks it). */
+export function useStoryBuildAutoApprove(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  const patch = (on: boolean): void => {
+    qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) =>
+      old?.build == null ? old : { ...old, build: { ...old.build, autoApprovePlan: on } },
+    );
+  };
+  return useMutation({
+    mutationFn: (v: { id: number; on: boolean }) => api.setStoryBuildAutoApprove(v.id, v.on),
+    onMutate: (v) => patch(v.on),
+    onSuccess: (r) => patch(r.autoApprovePlan),
+    onError: () => void qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
+  });
+}
+
+/** The ticket step after an automatically approved build: done (updated, or no update) or ask again. */
+export function useStoryBuildTicketReview(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: number; done: boolean }) => api.setStoryBuildTicketReview(v.id, v.done),
+    onSuccess: (r) => {
+      qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) =>
+        old?.build == null ? old : { ...old, build: { ...old.build, ticketReviewDoneAt: r.ticketReviewDoneAt } },
+      );
+      void qc.invalidateQueries({ queryKey: storyBuildActivityKey(workspaceId) });
+    },
+  });
+}
+
+/** THE BUILDS TOAST's query. */
+export function storyBuildActivityKey(workspaceId: number | null): [string, string] {
+  return ['story-build-activity', workspaceKey(workspaceId)];
+}
+
+/** The toast polls: every 5 s while a build runs, every 30 s otherwise (a gate may appear after a restart). */
+export const STORY_BUILD_ACTIVITY_POLL_MS = { running: 5_000, idle: 30_000 } as const;
+
+export function useStoryBuildActivity(workspaceId: number | null, enabled: boolean) {
+  return useQuery({
+    queryKey: storyBuildActivityKey(workspaceId),
+    queryFn: () => api.storyBuildActivity(workspaceId as number),
+    enabled: enabled && workspaceId != null,
+    refetchInterval: (q) => (q.state.data?.builds.some((b) => b.running) ? STORY_BUILD_ACTIVITY_POLL_MS.running : STORY_BUILD_ACTIVITY_POLL_MS.idle),
   });
 }
 

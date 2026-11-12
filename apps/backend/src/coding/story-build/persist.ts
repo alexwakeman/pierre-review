@@ -104,6 +104,18 @@ export async function listStoryBuildRowsFor(
     .execute()) as StoryBuildRow[];
 }
 
+/** THE BUILDS TOAST: the workspace's workspace-session builds that are not discarded, newest first. */
+export async function listActiveStoryBuildRows(ctx: Ctx, accountId: number, workspaceId: number, limit = 25): Promise<StoryBuildRow[]> {
+  const b = B(ctx);
+  return (await ctx.db
+    .select()
+    .from(b)
+    .where(and(eq(b.accountId, accountId), eq(b.workspaceId, workspaceId), notInArray(b.status, ['discarded', 'cancelled'])))
+    .orderBy(desc(b.id))
+    .limit(limit)
+    .execute()) as StoryBuildRow[];
+}
+
 /** A session's repository rows, in BUILD ORDER. [] for a session that is not this account's. */
 export async function listStoryBuildRepoRows(ctx: Ctx, accountId: number, buildId: number): Promise<StoryBuildRepoRow[]> {
   const r = R(ctx);
@@ -408,6 +420,9 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     autoPush: row.autoPush === true,
     autoPushAt: iso(row.autoPushClaimedAt),
     autoPushError: row.autoPushError ?? null,
+    autoApprovePlan: row.autoApprovePlan === true,
+    planAutoApprovedAt: iso(row.planAutoApprovedAt),
+    ticketReviewDoneAt: iso(row.ticketReviewDoneAt),
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),

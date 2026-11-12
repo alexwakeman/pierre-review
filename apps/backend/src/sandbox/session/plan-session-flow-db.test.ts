@@ -609,3 +609,57 @@ describe('Implement with docs', () => {
     expect((await rowOf(id)).withDocs).toBe(true);
   });
 });
+
+describe('Approve the plan automatically', () => {
+  it('takes every open point as Agree, approves, and starts the build turn with no press; the ticket is not written', { timeout: 120_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    gateAllows = true;
+    gateAsked.length = 0;
+    const IDENT4 = 'jira:https://acme.atlassian.net#ACME-403';
+    answers.push(withBlock('Two repositories, two pull requests.', PLAN()));
+    const turnsBefore = sentToClaude.length;
+    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT4, autoApprovePlan: true });
+    expect(r.statusCode, r.body).toBe(202);
+    const id = r.json().buildId;
+    const b = await until(id, (x) => x.session?.phase === 'built', 'built with no press', 60_000);
+    // The planning turn, then the build turn: nobody pressed Approve.
+    expect(sentToClaude.length).toBe(turnsBefore + 2);
+    expect(sentToClaude.at(-1)).toMatch(/^The reader approved the plan \(revision 1\)\. Build it now\./);
+    expect(gateAsked).toEqual(['claude']);
+    expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 1, unanswered: 0 });
+    expect(Object.values(b.session!.plan!.decisions).map((d) => d.decision)).toEqual(['agree']);
+    expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === P.AUTO_APPROVED_LINE)).toBe(true);
+    expect(b.autoApprovePlan).toBe(true);
+    expect(b.planAutoApprovedAt).not.toBeNull();
+    expect(b.ticketReviewDoneAt).toBeNull();
+    // Approved: the switch cannot change now.
+    expect((await post(`/api/story-builds/${id}/auto-approve`, { on: false })).statusCode).toBe(409);
+    // The builds toast: built, the review loop off ⇒ the Push gate.
+    const act = (await get(`/api/story-builds/active?workspace=${wsId}`)).json();
+    expect(act.builds.find((x: { id: number }) => x.id === id)).toMatchObject({ running: false, gate: 'push', ticketKey: expect.any(String) });
+    // The ticket step: closed by the reader, asked again on `done: false`.
+    const done = await post(`/api/story-builds/${id}/ticket-review`, { done: true });
+    expect(done.json().ticketReviewDoneAt).not.toBeNull();
+    expect((await read(id)).ticketReviewDoneAt).not.toBeNull();
+    expect((await post(`/api/story-builds/${id}/ticket-review`, { done: 'yes' })).statusCode).toBe(400);
+  });
+
+  it('refused by the spend gate: the plan waits for the reader, with one line', { timeout: 60_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    gateAllows = false;
+    gateAsked.length = 0;
+    const IDENT5 = 'jira:https://acme.atlassian.net#ACME-404';
+    answers.push(withBlock('One plan.', PLAN()));
+    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT5, autoApprovePlan: true });
+    const id = r.json().buildId;
+    const b = await until(id, (x) => x.session?.phase === 'plan_ready', 'plan_ready');
+    expect(gateAsked).toEqual(['claude']);
+    expect(b.session!.plan).toMatchObject({ status: 'ready', approvedRevision: null, unanswered: 1 });
+    expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === P.AUTO_APPROVE_BUDGET_LINE)).toBe(true);
+    const act = (await get(`/api/story-builds/active?workspace=${wsId}`)).json();
+    expect(act.builds.find((x: { id: number }) => x.id === id)).toMatchObject({ gate: 'plan' });
+    // Still changeable before approval.
+    expect((await post(`/api/story-builds/${id}/auto-approve`, { on: false })).json()).toEqual({ autoApprovePlan: false });
+    gateAllows = true;
+  });
+});

@@ -22,6 +22,7 @@ import { SearchResultsTab } from './components/Search/SearchResultsTab.js';
 import { DetailPane } from './components/DetailPane.js';
 import { ClaudeReviewBanner } from './components/ClaudeReviewBanner.js';
 import { AiFixBanner } from './components/AiFixBanner.js';
+import { StoryBuildsToast } from './components/StoryBuild/StoryBuildsToast.js';
 import { AutoMergeBanner } from './components/AutoMergeBanner.js';
 import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { HeaderToastStrip } from './components/HeaderToasts.js';
@@ -272,6 +273,8 @@ export default function App(): JSX.Element {
       {/* Agentic AI-Fix runs started this session — the progress UI for a fix started outside the
           AI Fix tab. */}
       <AiFixBanner />
+      {/* Implement / Fill gaps builds: a ring while one works, a count for the ones waiting for the reader. */}
+      <StoryBuildsToast />
       {/* Automatic Claude runs paused by the reader's spend budget. */}
       <AiBudgetToast />
       {/* Auto reviews near, or at, the workspace's daily limit. */}

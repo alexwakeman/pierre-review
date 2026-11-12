@@ -47,6 +47,7 @@ export * from './criterion-status.js';
 export * from './notion-tracker.js';
 export * from './story-build.js';
 export * from './story-build-loop.js';
+export * from './story-build-activity.js';
 export * from './repo-status.js';
 export * from './features.js';
 export * from './flaky-checks.js';

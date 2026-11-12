@@ -83,6 +83,10 @@ import type {
   StoryBuildPushResponse,
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
+  StoryBuildActivity,
+  StoryBuildActivityResponse,
+  StoryBuildAutoApproveResponse,
+  StoryBuildTicketReviewResponse,
   StoryBuildAutoPushResponse,
   StoryBuildRepo,
   StoryBuildLoop,
@@ -132,6 +136,7 @@ import {
   resolveMyTurnSettings,
   SANDBOX_SESSION_API,
   STORY_BUILD_API,
+  storyBuildActivityOf,
   BUILD_PLAN_API,
 } from '@pierre-review/shared';
 
@@ -2155,10 +2160,44 @@ export async function installMockApi(
           storyBuild = {
             ...STORY_SESSION_PLAN_READY,
             autoPush: body.autoPush === true,
+            autoApprovePlan: body.autoApprovePlan === true,
             loop: body.autoPush === true ? loopNotStarted(body.loopRounds ?? 3) : null,
             session: { ...STORY_SESSION_PLAN_READY.session!, plan },
           };
           return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
+        }
+        // THE BUILDS TOAST: the one session, through the shared fold (live = the session says so).
+        if (path === STORY_BUILD_API.active) {
+          const b = storyBuild;
+          const s = b?.session;
+          const a =
+            b != null && s != null
+              ? storyBuildActivityOf({
+                  phase: s.phase,
+                  live: s.live,
+                  loopOn: b.autoPush === true,
+                  loopState: b.loop?.state ?? null,
+                  loopRound: b.loop?.round ?? 0,
+                  loopRounds: b.loop?.rounds ?? 3,
+                  ticketWaiting: b.planAutoApprovedAt != null && b.ticketReviewDoneAt == null && s.plan?.latest?.ticketUpdate != null,
+                })
+              : null;
+          const builds: StoryBuildActivity[] = a != null && b != null ? [{ id: b.id, ident: b.ident, ticketKey: b.ticketKey, ticketTitle: b.ticketTitle, ...a }] : [];
+          return json(route, { workspaceId: WORKSPACE.id, builds } satisfies StoryBuildActivityResponse);
+        }
+        if (/\/auto-approve$/.test(path)) {
+          const body = (route.request().postDataJSON() ?? {}) as { on: boolean };
+          if (storyBuild == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          if (storyBuild.session?.plan?.approvedRevision != null) return json(route, { error: 'NotReady', message: 'The plan is already approved.' }, 409);
+          storyBuild = { ...storyBuild, autoApprovePlan: body.on };
+          return json(route, { autoApprovePlan: body.on } satisfies StoryBuildAutoApproveResponse);
+        }
+        if (/\/ticket-review$/.test(path)) {
+          const body = (route.request().postDataJSON() ?? {}) as { done: boolean };
+          if (storyBuild == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          const at = body.done ? iso(0) : null;
+          storyBuild = { ...storyBuild, ticketReviewDoneAt: at };
+          return json(route, { ticketReviewDoneAt: at } satisfies StoryBuildTicketReviewResponse);
         }
         if (at('messages')) {
           const body = route.request().postDataJSON() as { text: string };

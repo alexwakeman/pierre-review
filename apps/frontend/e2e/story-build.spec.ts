@@ -7,7 +7,9 @@ import {
   STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS,
   STORY_SESSION_CLOSED,
   STORY_SESSION_LOOP,
+  STORY_PLAN_VIEW,
   STORY_SESSION_LOOP_DONE,
+  STORY_SESSION_PLAN_READY,
   STORY_SESSION_READY,
 } from './mock-api.js';
 import type { PrDetail, SandboxNetworkAllowBody, SandboxRuntimeStatus, StoryBuild, TicketPrsResponse, TicketReviewStatesResponse, WorkspaceTrackerSettings } from '@pierre-review/shared';
@@ -461,5 +463,75 @@ test.describe('Implement story', () => {
     await page.goto(`/app/?view=${encodeURIComponent('story-build:jira:https://acme.atlassian.net#ACME-9')}`);
     await expect(page.getByTestId('story-build-not-offered')).toBeVisible();
     await expect(page.getByTestId('story-build-start-button')).toHaveCount(0);
+  });
+
+  test('approve automatically: ticked at Start, sent with the start, and remembered for the next one', async ({ page }) => {
+    await gotoSprint(page);
+    const tray = await openTray(page, 'ACME-1');
+    await tray.getByRole('button', { name: 'Implement ACME-1' }).click();
+    const view = page.getByTestId('story-build-overlay');
+    const box = view.getByTestId('story-build-start-auto-approve');
+    await expect(box).toContainText('Approve the plan automatically');
+    await box.getByRole('checkbox').click();
+    await view.getByTestId('story-build-start-auto-push').getByRole('checkbox').click();
+    await expect(box.getByRole('checkbox')).toBeChecked();
+    // Remembered in this browser: a reload starts with both ticked (two presses from Implement to the PR).
+    await page.reload();
+    await expect(view.getByTestId('story-build-start-auto-approve').getByRole('checkbox')).toBeChecked();
+    await expect(view.getByTestId('story-build-start-auto-push').getByRole('checkbox')).toBeChecked();
+    const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
+    await view.getByTestId('story-build-start-button').click();
+    expect((await start).postDataJSON()).toMatchObject({ autoApprovePlan: true, autoPush: true, loopRounds: 3 });
+    // Until the plan is approved, the tab's own switch changes it.
+    const setting = view.getByTestId('story-build-auto-approve');
+    await expect(setting.getByRole('checkbox')).toBeChecked();
+    const off = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/auto-approve'));
+    await setting.getByRole('checkbox').click();
+    expect((await off).postDataJSON()).toEqual({ on: false });
+    await expect(setting.getByRole('checkbox')).not.toBeChecked();
+  });
+
+  test('the builds toast: a plan waiting is counted, and its row opens the build', async ({ page }) => {
+    await withAi(page, STORY_SESSION_PLAN_READY);
+    await page.goto('/app/');
+    const circle = page.getByTestId('story-builds-toast');
+    await expect(circle).toHaveAttribute('data-alert', 'true');
+    await expect(circle).toContainText('Builds');
+    await expect(circle).toContainText('1 needs you');
+    await page.getByTestId('header-toast-cluster').click();
+    const row = page.getByTestId('story-builds-toast-panel').getByTestId('story-builds-toast-row');
+    await expect(row).toHaveAttribute('data-gate', 'plan');
+    await expect(row).toContainText('ACME-1');
+    await expect(row).toContainText('Approve the plan');
+    await row.click();
+    await expect(page.getByTestId('story-build-overlay')).toBeVisible();
+    await expect(page.getByTestId('story-build-header')).toContainText('ACME-1');
+  });
+
+  test('approved automatically: once the pull request is open, the ticket changes wait for the reader', async ({ page }) => {
+    const plan = { ...STORY_PLAN_VIEW, status: 'approved' as const, approvedRevision: STORY_PLAN_VIEW.latest!.revision, unanswered: 0 };
+    const b: StoryBuild = {
+      ...STORY_SESSION_LOOP_DONE,
+      autoApprovePlan: true,
+      planAutoApprovedAt: '2026-11-12T10:00:00.000Z',
+      ticketReviewDoneAt: null,
+      session: { ...STORY_SESSION_LOOP_DONE.session!, plan },
+    };
+    await withAi(page, b);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
+    const step = view.getByTestId('story-build-ticket-step');
+    await expect(step).toContainText('Limn approved the plan for you and did not change the ticket.');
+    await expect(step.getByTestId('story-plan-ticket-update')).toBeVisible();
+    // The toast counts it as waiting for the reader.
+    await expect(page.getByTestId('story-builds-toast')).toHaveAttribute('data-alert', 'true');
+    const done = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/ticket-review'));
+    await step.getByTestId('story-build-ticket-step-skip').click();
+    expect((await done).postDataJSON()).toEqual({ done: true });
+    await expect(view.getByTestId('story-build-ticket-step-done')).toContainText('The ticket step is done.');
+    await expect(page.getByTestId('story-builds-toast')).toHaveCount(0);
+    // It can come back.
+    await view.getByTestId('story-build-ticket-step-done').getByRole('button', { name: 'Show the ticket changes' }).click();
+    await expect(view.getByTestId('story-build-ticket-step')).toBeVisible();
   });
 });

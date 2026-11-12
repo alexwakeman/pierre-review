@@ -131,6 +131,23 @@ export default function Page(): JSX.Element {
           Watch the build. <Ui>The agent then builds to the end. You can stop it or message it.</Ui>
         </li>
       </Steps>
+      <H3 id="approve-automatically">Approve automatically</H3>
+      <p>
+        Tick <Ui>Approve the plan automatically</Ui> at Start, or in the build tab before the plan is ready. When the plan
+        is ready, Limn takes every point as <Ui>Agree</Ui>, approves it and starts the build. The agent builds the plan as
+        revised, its acceptance criteria included.
+      </p>
+      <ul>
+        <li>The ticket is not changed.</li>
+        <li>
+          When the pull request is open, the build tab shows the ticket changes the plan suggested. Press{' '}
+          <Ui>Update ticket</Ui> to write them to Jira, or <Ui>No update needed</Ui>.
+        </li>
+        <li>
+          When the AI spend limit is reached, or another build is running, the plan waits for you to press{' '}
+          <Ui>Approve and start</Ui>.
+        </li>
+      </ul>
       <H3>What the build reports</H3>
       <p>
         When the build ends, <Ui>The agent says</Ui> gives, per pull request, <Ui>Done</Ui>, <Ui>Partly done</Ui> or{' '}

@@ -929,6 +929,17 @@ export function WrenchIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A hammer — the BUILDS TOAST (StoryBuild/StoryBuildsToast.tsx): Implement / Fill gaps builds at work or
+// waiting for the reader. Its own mark, so it never reads as the AI Fix toast's wrench.
+export function HammerIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <path d="M14.5 6.5 4 17a1.8 1.8 0 0 0 2.5 2.5L17 9" />
+      <path d="M12.5 4.5 15 2l7 7-2.5 2.5-2-2-2.5 2.5-3.5-3.5 2.5-2.5z" />
+    </IconShell>
+  );
+}
+
 // A dashed box with a plus — "Fill gaps": build only what a started story's check found missing (the
 // sprint card's Fill gaps button, the build tab).
 export function FillGapsIcon({ size = 13, ...rest }: IconProps): JSX.Element {
