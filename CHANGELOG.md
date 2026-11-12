@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.30] - 2026-11-12
+
 ### Added
 
 - Manage repos & workspaces: mark a repository External when your team changes it but does not maintain it,
