@@ -223,7 +223,7 @@ describe('pushRepo', () => {
     expect(call.body).toContain('- AC1: An API refunds a payment');
     expect(call.body).not.toContain('AC2');
     expect(call.body).not.toContain('Closes');
-    expect(call.body).toContain('Built with Limn from ACME-214.');
+    expect(call.body).not.toContain('Built with');
     // Recorded on the row.
     const row = (await P.getStoryBuildRepoRow(ctx, 1, s.id, s.api))!;
     expect(row).toMatchObject({ status: 'pushed', pushedPrNumber: r.prNumber, pushedBranch: 'acme-214-refunds-api', pushError: null, prTitle: 'ACME-214: Refunds by card' });

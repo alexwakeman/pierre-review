@@ -2012,7 +2012,7 @@ async function seedStoryBuilds(c: AgenticSeedCtx): Promise<Record<string, number
         repoId: API_REPO,
         number: PR_NUMBER,
         title: 'PLAT-310: Retry GitHub calls within the rate-limit budget',
-        body: 'The walk waits for the budget to reset and marks the repository paused until then.\n\nBuilt with Limn from PLAT-310.',
+        body: 'The walk waits for the budget to reset and marks the repository paused until then.',
         authorId: 1,
         mergedById: null,
         baseRefName: 'main',

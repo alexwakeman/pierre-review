@@ -1,6 +1,5 @@
 import { and, eq } from 'drizzle-orm';
 import {
-  PRODUCT_NAME,
   isTrackerIdent,
   parseTicketIdent,
   trackerTicketRow,
@@ -35,7 +34,7 @@ import type { PushRepoArgs, PushRepoFn } from './seams.js';
 //           PR's head branch (refused when that PR is no longer open)
 //   body    the summary, the criteria this repository covers, the ticket link (http(s) only), the
 //           sibling PRs this session already pushed, "Closes <issue>" on a single-repository GitHub
-//           Issues build, and "Built with Limn from <KEY>"
+//           Issues build (no "Built with Limn" footer: the PR is the reader's)
 //
 // After the PR syncs, a `detected_from='manual'` tracker link row is written for the ticket
 // (tracker/manual-links.ts), so every tracker links the PR — GitHub Issues included. The kept build
@@ -150,7 +149,6 @@ export function storyBuildPrBody(b: PrBodyInput): string {
   }
   if (b.closes) lines.push('', `Closes ${b.closes}`);
   if (b.review) lines.push('', b.review);
-  lines.push('', '---', `Built with ${PRODUCT_NAME} from ${b.ticketKey}.`);
   return clip(lines.join('\n'), BODY_MAX);
 }
 

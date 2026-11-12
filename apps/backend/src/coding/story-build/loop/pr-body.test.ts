@@ -40,10 +40,11 @@ describe('loopBodySection', () => {
     expect(s).not.toMatch(/(^|[^\w`])@[A-Za-z]/);
   });
 
-  it('sits above the footer in the PR body', () => {
+  it('ends the PR body, with no "Built with Limn" footer', () => {
     const body = storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null, review: '## Review in Limn\n\nReviewed once by Claude before this pull request opened.' });
     expect(body.indexOf('## Review in Limn')).toBeGreaterThan(0);
-    expect(body.indexOf('## Review in Limn')).toBeLessThan(body.indexOf('Built with'));
+    expect(body.trimEnd().endsWith('Reviewed once by Claude before this pull request opened.')).toBe(true);
+    expect(body).not.toContain('Built with');
     expect(storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null })).not.toContain('Review in Limn');
   });
 });

@@ -25,7 +25,7 @@ no internals.
 
 - Implement story and Fill gaps: the pull request and its commit are now yours, not your Limn bot's, so they
   count like any pull request of yours (auto review included). The branch is the ticket key, such as
-  PAY-142, with no `limn/` in front.
+  PAY-142, with no `limn/` in front. The pull request body no longer ends with "Built with Limn".
 - Implement story: after planning, you can review and edit the whole ticket (description and acceptance
   criteria), with the changed words highlighted, and update it in Jira with one press. The update keeps the ticket's layout.
 

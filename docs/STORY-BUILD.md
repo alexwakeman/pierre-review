@@ -368,7 +368,7 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
 - **Title** `${KEY}: ${title}` (what Jira, Linear and Notion detection read).
 - **Body:** the summary (the agent's last words in the build turn), the criteria this repository covers,
   the ticket link (http(s) only), `Stacked on #n.`, the sibling PRs this session already pushed, `Closes
-  owner/repo#n` on a single-repository GitHub Issues build only, and "Built with Limn from KEY." The
+  owner/repo#n` on a single-repository GitHub Issues build only. No "Built with Limn" footer. The
   model- and ticket-written parts go through `defangGithubText` (a closing keyword before an issue
   reference and an `@mention` are broken with a zero-width space). The code-written `Closes` line is added
   after it.
