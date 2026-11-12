@@ -265,6 +265,8 @@ export function ticketAutoCheckWords(
           return { label: 'No automatic story check — its PRs are older than auto review', title: 'Auto review checks tickets with a PR opened after it was turned on. Re-check runs one now.' };
         case 'already_tried':
           return { label: 'No automatic story check — the last one failed on these PRs', title: 'It tries again after the next push or change. Re-check runs one now.' };
+        case 'stopped':
+          return { label: 'No automatic story check — you stopped it', title: 'It starts again after the next push or change. Re-check runs one now.' };
         case 'all_met':
           return { label: 'No automatic story check — the last one found every criterion met', title: 'It checks again automatically only if the ticket text changes. Re-check runs one now.' };
         default:

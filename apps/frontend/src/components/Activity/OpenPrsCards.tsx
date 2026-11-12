@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { ClaudeReviewPrState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
+import type { ClaudeReviewPrState, MergeQueueEntryState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
 import { TRACKER_PROVIDER_LABEL, canAssignTickets, landsAfterOf } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
@@ -382,6 +382,7 @@ export function OpenPrsCards({
   layout = 'cards',
   writableRepoIds,
   queuedPrIds,
+  queueEntryStates,
 }: {
   prs: TimelinePr[];
   isLoading: boolean;
@@ -419,6 +420,8 @@ export function OpenPrsCards({
   writableRepoIds?: readonly number[];
   /** `OpenPrsResponse.queuedPrIds` — a queued PR's row menu never offers Merge. */
   queuedPrIds?: readonly number[];
+  /** `OpenPrsResponse.queueEntryStates` — the drawer's "Merge queue" fact. */
+  queueEntryStates?: ReadonlyArray<{ prId: number; entryState: MergeQueueEntryState | null }>;
 }): JSX.Element {
   const { data: users } = useUsers();
   const { data: repos } = useRepos();
@@ -478,6 +481,10 @@ export function OpenPrsCards({
   const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
   const writableSet = useMemo(() => (writableRepoIds != null ? new Set(writableRepoIds) : null), [writableRepoIds]);
   const queuedSet = useMemo(() => (queuedPrIds != null ? new Set(queuedPrIds) : null), [queuedPrIds]);
+  const queueStateMap = useMemo(
+    () => new Map((queueEntryStates ?? []).map((q) => [q.prId, q.entryState] as const)),
+    [queueEntryStates],
+  );
   const metaOf = (pr: TimelinePr): TabMeta => {
     const u = pr.authorId != null ? usersById.get(pr.authorId) : undefined;
     return {
@@ -678,6 +685,7 @@ export function OpenPrsCards({
         }}
         writableRepoIds={writableSet}
         queuedPrIds={queuedSet}
+        queueEntryStates={queueStateMap}
         windowKey={fullKey}
         offer={offer}
       />

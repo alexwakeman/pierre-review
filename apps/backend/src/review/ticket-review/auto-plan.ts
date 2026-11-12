@@ -47,6 +47,8 @@ export interface TicketAutoPlanInputs {
   tooManyPrs: boolean;
   // The newest attempt failed (or was refused) on exactly these inputs: it would stop the same way.
   alreadyTried: boolean;
+  // A person stopped the newest check while it was queued, and nothing changed since (auto-inputs.ts).
+  stopped?: boolean;
   // No succeeded run yet.
   first: boolean;
   // The latest succeeded run found every acceptance criterion done (≥ 1 criterion) and the story text
@@ -132,6 +134,7 @@ export function ticketAutoCheckPlan(inp: TicketAutoPlanInputs, nowMs: number): T
   if (inp.tooManyPrs) return out('off', 'too_many_prs');
   if (inp.allMet) return out('off', 'all_met');
   if (inp.alreadyTried) return out('off', 'already_tried');
+  if (inp.stopped === true) return out('off', 'stopped');
   if (inp.first && !inp.floorOk) return out('off', 'no_floor');
   // What holds it past the window is said first: a time that will not be kept is never promised.
   if (!inp.aiReady) return out('held', 'ai_not_ready');

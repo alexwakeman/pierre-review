@@ -4,12 +4,14 @@ import type {
   CiStatus,
   ClaudeReviewPrState,
   ClaudeTeamClaimSkip,
+  MergeQueueEntryState,
   TicketMergedPr,
   TicketReviewState,
   TimelinePr,
   User,
 } from '@pierre-review/shared';
 import { landsAfterOf } from '@pierre-review/shared';
+import { pendingQueueBadge } from './pendingLabels.js';
 import { useQueryClient } from '@tanstack/react-query';
 import { startDefaultReview, useClaudeReviewStarting } from '../../hooks/useClaudeReview.js';
 import { unlockReviewSound } from '../../lib/sound.js';
@@ -61,6 +63,7 @@ import {
   HEADER_ACTION_CLASS,
   SidePanel,
   StatusIcon,
+  STATUS_TONE_CLASS,
   cx,
   FOCUS_RING,
   TEXT_LINK,
@@ -132,6 +135,9 @@ export interface OpenPrsRowsData {
   writableRepoIds: ReadonlySet<number> | null;
   /** The listed PRs GitHub's merge queue holds (`OpenPrsResponse.queuedPrIds`): never Merge. */
   queuedPrIds: ReadonlySet<number> | null;
+  /** The queued PRs' synced entry states (`OpenPrsResponse.queueEntryStates`): the drawer's
+   *  "Merge queue" fact. A PR absent here is not queued. */
+  queueEntryStates?: ReadonlyMap<number, MergeQueueEntryState | null>;
   /** The list's identity (workspace, repo filter, sort, layout): a change starts at one page. */
   windowKey: string | null;
   /** "Tickets loaded. [Group by ticket]" — shown above the list when offered. */
@@ -679,6 +685,7 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
           onOpenThreads={() => props.onOpenThreads(menuEntry.pr)}
           onOpenReview={() => props.onOpenReview(menuEntry.pr)}
           claudeState={props.claudeStates.get(menuEntry.pr.id)}
+          githubUrl={githubPrUrl(props.repoNameById.get(menuEntry.pr.repoId) ?? '', menuEntry.pr.number)}
           onStartReview={(choice, overBudget) =>
             overBudget ? setBudgetAsk({ ...rowMenu, choice }) : startReview(menuEntry.pr, choice)
           }
@@ -1026,6 +1033,9 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
   const { pr } = entry;
   const author = pr.authorId != null ? data.usersById.get(pr.authorId) : undefined;
   const lead = leadStatus(pr);
+  const queue = data.queuedPrIds?.has(pr.id)
+    ? pendingQueueBadge({ inMergeQueue: true, mergeQueueEntryState: data.queueEntryStates?.get(pr.id) ?? null })
+    : null;
   const ci = ciStatusIcon(pr.ciStatus);
   const review = reviewStanding(pr);
   const threads = threadChipLabel(pr.threadCounts);
@@ -1040,6 +1050,20 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
           <StatusIcon tone={lead.tone} icon={lead.icon} label={lead.label} />
           {lead.detail != null && <p className="m-0 mt-0.5 text-meta text-ui-mute">{lead.detail}</p>}
         </Fact>
+        {/* GitHub's merge queue, from the synced columns (Pending's chip words, `pendingQueueBadge`):
+            shown only while GitHub holds the PR — "not queued" is never claimed. */}
+        {queue != null && (
+          <Fact label="Merge queue">
+            {/* Wraps rather than truncates: "running checks" is the part that matters. */}
+            <span
+              title={queue.title}
+              className={cx('inline-flex min-w-0 items-start gap-1.5', STATUS_TONE_CLASS[queue.tone === 'bad' ? 'blocked' : 'active'])}
+            >
+              <MergeIcon size={14} className="mt-0.5 shrink-0" aria-hidden />
+              <span className="min-w-0 break-words">{queue.label}</span>
+            </span>
+          </Fact>
+        )}
         <Fact label="Checks">
           {ci != null ? <StatusIcon tone={ci.tone} icon={ci.icon} label={ci.label} /> : <span className="text-ui-mute">No checks</span>}
         </Fact>

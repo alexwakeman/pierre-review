@@ -74,6 +74,11 @@ export default function Page(): JSX.Element {
         <DocLink to="pull-request/blast-radius">blast radius</DocLink>), and the full AI review. The panel's
         place is kept even when it is empty, so the list does not move when you open or close it.
       </p>
+      <p>
+        While GitHub&rsquo;s merge queue holds the pull request, a <Ui>Merge queue</Ui> row under{' '}
+        <Ui>Can it land</Ui> says where it is, for example &ldquo;In the merge queue · running checks&rdquo;, or
+        &ldquo;Leaving the merge queue&rdquo; when GitHub is taking it out.
+      </p>
 
       <H2 id="grouped-by-ticket">Grouped by ticket</H2>
       <p>
@@ -119,6 +124,9 @@ export default function Page(): JSX.Element {
         it, while AI is not set up or signed in, while a review of that pull request is starting, queued or
         running, and when the last review is on the latest commit. See{' '}
         <DocLink to="open-pull-requests/ai-review-column">The AI review column</DocLink>.
+      </p>
+      <p>
+        <Ui>Copy GitHub URL</Ui>, at the bottom of the menu, copies the pull request&rsquo;s github.com address.
       </p>
 
       <H3>Sort and narrow the list</H3>

@@ -1635,6 +1635,9 @@ export const api = {
   // `/api/ticket-reviews/:id/stream`, read through `sseStream` (hooks/useTicketReview.ts).
   // Start: `{prId}` (every ticket the PR is on) or `{prId, ident}` (one). 202 with one outcome per
   // ticket.
+  // Stop a queued or running story check; 404 when it is not queued or running any more.
+  cancelTicketReview: (runId: number) =>
+    fetch(`/api/ticket-reviews/${runId}/cancel`, jsonBody('POST')).then((r) => handle<{ status: string }>(r)),
   startTicketReview: (body: StartTicketReviewBody) =>
     fetch('/api/ticket-reviews', jsonBody('POST', body)).then((r) =>
       handle<StartTicketReviewResponse>(r),

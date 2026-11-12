@@ -115,6 +115,12 @@ export default function Page(): JSX.Element {
         </li>
         <li>Wait for the result. A check usually takes a few minutes, as the agent reads every pull request.</li>
       </Steps>
+      <p>
+        To stop a check that is waiting in line or running, press <Ui>Stop</Ui> in its Story check section. A
+        stopped automatic check does not start again by itself until something changes: a push, a pull request
+        joining or merging, a change to the ticket or a new comment. The line says &ldquo;No automatic story check
+        — you stopped it&rdquo;.
+      </p>
 
       <H3 id="when-the-pull-request-names-no-ticket">When the pull request names no ticket</H3>
       <p>

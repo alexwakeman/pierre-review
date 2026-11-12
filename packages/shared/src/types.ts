@@ -5492,6 +5492,10 @@ export interface OpenPrsResponse {
   /** The listed PRs GitHub's merge queue holds (a POSITIVE observation of the synced membership):
    *  the row menu never offers Merge on them. Absent on an older server (nothing known queued). */
   queuedPrIds?: number[];
+  /** The synced entry state of each `queuedPrIds` PR (`pull_requests.merge_queue_entry_state`;
+   *  null = queued, state not observed). The drawer's "Merge queue" fact words it. Absent on an
+   *  older server. */
+  queueEntryStates?: Array<{ prId: number; entryState: MergeQueueEntryState | null }>;
 }
 
 /** Reports → "Merged so far" (GET /api/merged-prs, Pro on `periodReports`): every PR MERGED in the
@@ -9033,6 +9037,7 @@ export interface TicketReviewState {
 //               'over_budget', 'ai_not_ready'
 //   off         no automatic check: 'auto_off', 'too_many_prs', 'no_floor' (its PRs predate auto
 //               review), 'already_tried' (the last automatic attempt failed on these same PRs),
+//               'stopped' (a person stopped the queued check; the next change re-opens it),
 //               'all_met' (the latest check found every criterion done; only a story edit re-opens it)
 export type TicketAutoCheckStatus = 'up_to_date' | 'running' | 'waiting' | 'due' | 'held' | 'off';
 export type TicketAutoCheckReason =
@@ -9045,6 +9050,7 @@ export type TicketAutoCheckReason =
   | 'too_many_prs'
   | 'no_floor'
   | 'already_tried'
+  | 'stopped'
   | 'all_met';
 // The newest change the grace window counts from: a push to a member PR (or its opening), a PR
 // joining the ticket, a member merging, the ticket itself changing (story text, a PR leaving), or a

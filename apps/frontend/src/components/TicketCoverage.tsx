@@ -46,6 +46,7 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { dateTime } from '../lib/ui.js';
 import {
   useStartTicketReview,
+  useCancelTicketReview,
   useTicketReviewById,
   useTicketReviewStarting,
   useTicketReviewStream,
@@ -166,6 +167,7 @@ function TicketBlock({
 }): JSX.Element {
   const { ident, state, review } = entry;
   const start = useStartTicketReview(ident);
+  const cancel = useCancelTicketReview();
   const starting = useTicketReviewStarting(ident);
   const running = state.status === 'running';
   const stream = useTicketReviewStream(state.runningRunId, running);
@@ -233,6 +235,17 @@ function TicketBlock({
           </span>
         )}
         <span className="ml-auto">
+          {/* Stop a queued or running check (the reader's; an automatic one too). */}
+          {running && state.runningRunId != null && (
+            <button
+              type="button"
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate(state.runningRunId as number)}
+              className={BTN}
+            >
+              {cancel.isPending ? 'Stopping…' : 'Stop'}
+            </button>
+          )}
           {!running && (
             <AiRunGate kind="ticket_review">
               <button

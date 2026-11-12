@@ -10,14 +10,16 @@ import { hasActivePopover } from '../../lib/activePopover.js';
 import { githubPrUrl } from '../../lib/prLink.js';
 import { defaultReviewChoice, startReviewMenuItem, type DefaultReviewChoice } from '../../lib/startReviewMenu.js';
 import { mergeVerdict } from '../../lib/ui.js';
-import { CloseIcon, CoinIcon, DiffIcon, MergeIcon, OverviewIcon, ReviewIcon, SparkleIcon, ThreadsIcon } from '../Icons.js';
+import { CloseIcon, CoinIcon, CopyIcon, DiffIcon, MergeIcon, OverviewIcon, ReviewIcon, SparkleIcon, ThreadsIcon } from '../Icons.js';
+import { writeClipboard } from '../CopyButton.js';
 import { MergeControl } from '../MergeControl.js';
 import { ContextMenu, cx, FOCUS_RING, type MenuEntry } from '../ui/index.js';
 import { usePlacedFloating } from '../ui/floating.js';
 
 // THE OPEN PRs ROW MENU (docs/FRONTEND.md § Open PRs → the row menu): a right-click on a row, or
 // Shift+F10 / the context-menu key on the selected one. Merge (only where it can land), then the
-// PR's Overview · Changes · Threads · AI Review — each opens the PR on that tab — then Start review.
+// PR's Overview · Changes · Threads · AI Review — each opens the PR on that tab — then Start review,
+// then Copy GitHub URL (the PR's github.com address, `githubPrUrl`; absent when it cannot be built).
 //
 // START REVIEW (lib/startReviewMenu.ts) starts the run the AI Review tab's Run button starts with
 // nothing picked, gated by the same checks: shown only while `me.ai.enabled`; DISABLED with the reason
@@ -61,6 +63,7 @@ export function OpenPrsRowMenu({
   onOpenReview,
   claudeState,
   onStartReview,
+  githubUrl = null,
 }: {
   x: number;
   y: number;
@@ -79,6 +82,8 @@ export function OpenPrsRowMenu({
   onOpenReview: () => void;
   /** Start review: the choice to run, and whether to ask first (over the spend budget). */
   onStartReview: (choice: DefaultReviewChoice, overBudget: boolean) => void;
+  /** The PR's github.com URL (`githubPrUrl`); null hides "Copy GitHub URL". */
+  githubUrl?: string | null;
 }): JSX.Element {
   const armed = usePrArmedIntent(pr.id) != null;
   const me = useMe().data;
@@ -113,6 +118,12 @@ export function OpenPrsRowMenu({
             onSelect: () => onStartReview(choice, start.overBudget),
           },
         ]
+      : []),
+    ...(githubUrl != null
+      ? ([
+          { id: 'sep-copy', separator: true },
+          { id: 'copy-url', label: 'Copy GitHub URL', icon: <CopyIcon size={14} />, onSelect: () => void writeClipboard(githubUrl) },
+        ] as MenuEntry[])
       : []),
   ];
   return <ContextMenu x={x} y={y} items={items} label={`Pull request #${pr.number}`} onClose={onClose} returnFocus={returnFocus} />;

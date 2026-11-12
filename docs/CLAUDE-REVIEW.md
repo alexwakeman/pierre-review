@@ -2518,7 +2518,11 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   back. ⚠ The same when the lane fills mid-tick: every candidate not yet reached waits. A refused
   attempt, one that ended without an answer (budget, turns) or a cancelled one on the same fingerprint
   is not retried; one that THREW or was cut off by a restart stores no fingerprint (`retryable`, the
-  boot reconcile), so it is. Every queued run stores its `cause` (`ticket_reviews.cause`: `first` ·
+  boot reconcile), so it is. ⚠ **A PERSON'S STOP HOLDS** (`POST /api/ticket-reviews/:id/cancel`, the Story
+  check's Stop; 2026-11-12): a run stopped while still QUEUED never wrote a fingerprint, so the rule above
+  cannot see it — `loadTicketAutoState` treats the newest attempt `cancelled` with no fingerprint as
+  `stopped` (reason `'stopped'`, "No automatic story check — you stopped it") until a change AFTER its
+  `completed_at` (a push, join, merge, ticket edit or comment). A stopped RUNNING run kept its fingerprint. Every queued run stores its `cause` (`ticket_reviews.cause`: `first` ·
   `pushed` — only when nothing but heads moved · `joined` · `left` · `merged` · `story_edited`).
 - **The automatic story check's clock** (2026-11-09, BMD-1175). ONE pure rule,
   `review/ticket-review/auto-plan.ts` `ticketAutoCheckPlan`, read from STORED rows by ONE reader

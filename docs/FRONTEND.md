@@ -431,6 +431,10 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   buys the live merge options. Portalled (`data-floating-layer`, so a press in it never closes the
   drawer), holds the popover slot, Escape / outside press / Tab close it and focus returns to the list;
   a phone gets a bottom sheet. No shortcut labels on its items. Pinned in `test/openPrsRows.test.ts`.
+  Its last item is **Copy GitHub URL** (`githubPrUrl`, `writeClipboard`; absent when the URL cannot be
+  built). The side panel's **Merge queue** fact sits under "Can it land" ONLY while `queuedPrIds` holds the
+  PR, worded by Pending's `pendingQueueBadge` from `OpenPrsResponse.queueEntryStates` (synced, no fetch;
+  "not queued" is never claimed).
   Selection, panel state and the drawn window survive Back (session memo). The icon columns sit
   under a HEADING ROW (Review · CI · Threads · AI review, each with a
   tooltip): ONE spec, `openPrsColumns`, gives the heading and every row the same fixed-width cells, so

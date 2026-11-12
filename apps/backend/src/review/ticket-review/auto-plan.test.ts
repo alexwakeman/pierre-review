@@ -130,6 +130,8 @@ describe('ticketAutoCheckPlan', () => {
     expect(ticketAutoCheckPlan(base({ autoOn: false }), at(5))).toMatchObject({ status: 'off', reason: 'auto_off' });
     expect(ticketAutoCheckPlan(base({ tooManyPrs: true }), at(5)).reason).toBe('too_many_prs');
     expect(ticketAutoCheckPlan(base({ alreadyTried: true }), at(5)).reason).toBe('already_tried');
+    // A person's Stop on a queued check holds until the next change (auto-inputs.ts decides `stopped`).
+    expect(ticketAutoCheckPlan(base({ stopped: true }), at(5))).toMatchObject({ status: 'off', reason: 'stopped', due: false });
     expect(ticketAutoCheckPlan(base({ allMet: true }), at(5))).toMatchObject({ status: 'off', reason: 'all_met', due: false });
     expect(ticketAutoCheckPlan(base({ first: true, floorOk: false }), at(5)).reason).toBe('no_floor');
     // The floor is a first check's rule only.

@@ -60,12 +60,12 @@ export async function openPrsRoutes(app: FastifyInstance): Promise<void> {
     // The listed PRs GitHub's merge queue POSITIVELY holds (the synced `in_merge_queue`; null = not
     // observed, never "queued"): a QUEUED PR never shows Merge (docs/MERGE-CI-TRUNK.md). One indexed read.
     const prIds = prs.map((p) => p.id);
-    const queuedPrIds =
+    const queuedRows =
       prIds.length === 0
         ? []
         : (
             await db
-              .select({ id: schema.pullRequests.id })
+              .select({ id: schema.pullRequests.id, entryState: schema.pullRequests.mergeQueueEntryState })
               .from(schema.pullRequests)
               .where(
                 and(
@@ -75,7 +75,10 @@ export async function openPrsRoutes(app: FastifyInstance): Promise<void> {
                 ),
               )
               .execute()
-          ).map((r) => r.id);
-    return { prs, writableRepoIds, queuedPrIds };
+          );
+    const queuedPrIds = queuedRows.map((r) => r.id);
+    // The synced entry state rides along for the drawer's "Merge queue" fact (no live call).
+    const queueEntryStates = queuedRows.map((r) => ({ prId: r.id, entryState: r.entryState ?? null }));
+    return { prs, writableRepoIds, queuedPrIds, queueEntryStates };
   });
 }

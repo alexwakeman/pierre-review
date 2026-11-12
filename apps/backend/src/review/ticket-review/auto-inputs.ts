@@ -197,6 +197,16 @@ export async function loadTicketAutoState(
     }
   }
 
+  // ⚠ A PERSON'S STOP HOLDS. A check stopped while still QUEUED never wrote a fingerprint (it is
+  // written when the run starts), so the rule above cannot see it, and the sweeper would queue it
+  // again 2 quiet minutes later. It holds until something changes AFTER the stop (a push, a PR
+  // joining or merging, a ticket edit, a comment). A stopped RUNNING check kept its fingerprint.
+  const stoppedAtMs =
+    attempt?.status === 'cancelled' && attempt.fingerprint == null && attempt.id > (st?.latest?.id ?? 0)
+      ? ms(attempt.completedAt ?? null)
+      : null;
+  const stopped = stoppedAtMs != null && !changes.some((c) => c.atMs > stoppedAtMs);
+
   // ---- the onboarding floor (a first check only) ----
   let floorOk = true;
   if (first && !a.kicked && workspaceId != null) {
@@ -223,6 +233,7 @@ export async function loadTicketAutoState(
       autoOn: workspaceId != null,
       tooManyPrs: live.length > TICKET_REVIEW_MAX_PRS,
       alreadyTried,
+      stopped,
       first,
       allMet,
       floorOk,

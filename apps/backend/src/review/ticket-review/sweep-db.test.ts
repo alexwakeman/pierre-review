@@ -162,11 +162,13 @@ const deps = (): import('./sweep.js').TicketSweepDeps => ({
 });
 
 /** The fake lane never runs what it queued: end those rows, as a finished run would. */
+// Ends the queued runs WITHOUT a fingerprint, i.e. still retryable ('failed', a run that threw).
+// Not 'cancelled': that is a person's Stop, which holds until the next change (auto-inputs.ts).
 async function endQueuedRuns(): Promise<void> {
   const { eq } = await import('drizzle-orm');
   await db
     .update(schema.ticketReviews)
-    .set({ status: 'cancelled' })
+    .set({ status: 'failed' })
     .where(eq(schema.ticketReviews.status, 'queued'))
     .execute();
 }
@@ -407,6 +409,26 @@ describe('ticket review sweep', () => {
       [T1, 'cascade'],
       [T2, 'cascade'],
     ]);
+  });
+
+  it("⚠ a person's Stop on a queued check holds until the next change", async () => {
+    // The previous test left T1 and T2 queued at B+16. The reader stops both while still queued.
+    const { eq } = await import('drizzle-orm');
+    const B = T0 + 70 * 60_000;
+    const min = (n: number): number => B + n * 60_000;
+    await db
+      .update(schema.ticketReviews)
+      .set({ status: 'cancelled', completedAt: new Date(min(17)) })
+      .where(eq(schema.ticketReviews.status, 'queued'))
+      .execute();
+    // Long after the grace window: nothing is queued again, and the line says why.
+    const quiet = await sweep.runTicketReviewSweep(ctx, min(40), deps());
+    expect(quiet.queued).toEqual([]);
+    // A push after the Stop re-opens it, on the usual 2-minute window.
+    await push('x', 'h_x_after_stop', min(41));
+    const after = await sweep.runTicketReviewSweep(ctx, min(44), deps());
+    expect(after.queued.map((q) => q.ident).sort()).toEqual([T1, T2].sort());
+    await endQueuedRuns();
   });
 
   it('oneHopIdents never follows a fellow member', () => {

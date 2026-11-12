@@ -40,6 +40,7 @@ import { jiraMemberIds, jiraStoryFor, ticketCommentsFor, workspaceOfPr } from '.
 import { newCommentsMakeStale, newCommentsSince } from '../../tracker/comments.js';
 import {
   getTicketRunStatus,
+  requestTicketReviewCancel,
   startTicketReview,
   subscribeTicketReviewStream,
   ticketAutoLaneRoom,
@@ -398,6 +399,20 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
     if (!AGENTIC_AI_ENABLED) return featureOff(reply);
     const states = await statesFor(ctx, ctx.accountIdOf(req), unique);
     return { states: idents.map((i) => states.get(i)!) };
+  });
+
+  // ---- stop a QUEUED or RUNNING story check (the reader's Stop) ----
+  // A queued run leaves the lane and is stored cancelled; a running one is aborted (its runner
+  // stores it). Account-scoped by `requestTicketReviewCancel`: another account's id is a 404.
+  // DB / in-process only — the `read` tier (rate-limit.ts, the ticket-reviews family).
+  app.post('/api/ticket-reviews/:id/cancel', { schema: idParam }, async (req, reply) => {
+    if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+    const { id } = req.params as { id: number };
+    if (!requestTicketReviewCancel(ctx.accountIdOf(req), id)) {
+      reply.status(404);
+      return { error: 'NotFound', message: 'No queued or running story check with this id.' };
+    }
+    return { status: 'cancelling' };
   });
 
   // ---- post the run's story gaps for one PR, as ONE comment ----

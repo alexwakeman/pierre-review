@@ -94,6 +94,15 @@ export function useStartTicketReview(ident: string) {
   });
 }
 
+/** Stop a queued or running story check (`POST /api/ticket-reviews/:id/cancel`). */
+export function useCancelTicketReview() {
+  const qc = useQueryClient();
+  return useMutation<{ status: string }, Error, number>({
+    mutationFn: (runId) => api.cancelTicketReview(runId),
+    onSettled: () => refreshAfterStart(qc),
+  });
+}
+
 /** One run by id — the last SUCCEEDED run of a ticket while a newer one runs or failed. */
 export function useTicketReviewById(id: number | null) {
   return useQuery<TicketReview>({

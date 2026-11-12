@@ -848,6 +848,8 @@ export interface TicketStateInputs {
     status: TicketReviewStatus;
     fingerprint: string | null;
     refused: string | null;
+    /** When it ended (a person's Stop on a QUEUED run is read by it: auto-inputs.ts). */
+    completedAt?: Date | null;
     ticketHash?: string | null;
     members?: FingerprintMember[];
   } | null;
@@ -903,6 +905,7 @@ export async function getTicketStateInputs(
               status: a.status,
               fingerprint: a.fingerprint,
               refused: a.refused,
+              completedAt: asDate(a.completedAt),
               ...(newer ? { ticketHash: a.ticketHash, members: membersOf(a.id) } : {}),
             }
           : null,

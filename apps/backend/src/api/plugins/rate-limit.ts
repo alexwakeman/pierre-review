@@ -516,6 +516,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   POST /api/ticket-reviews                          starts agent runs        → ai + ai_hourly
   //   POST /api/ticket-reviews/states                   batched DB + plugin rows → read
   //   POST /api/ticket-reviews/:id/post                 one GitHub comment       → github_write
+  //   POST /api/ticket-reviews/:id/cancel               stops a queued/running run → read
   //   GET  …/:id, …/:id/stream, /api/prs/:id/ticket-reviews                      → read
   if (path === '/api/ticket-reviews' && mutating) return [TIERS.ai, TIERS.aiHourly];
   if (path === '/api/ticket-reviews/states') return [TIERS.read];
