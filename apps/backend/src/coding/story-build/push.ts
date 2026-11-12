@@ -108,6 +108,8 @@ export interface PrBodyInput {
   } | null;
   /** Plan first: "Kept the story: …" / "Changed from the story: …" (one line each). */
   decisions?: Array<{ kind: 'kept' | 'changed'; text: string }>;
+  /** THE REVIEW LOOP: its `## Review in Limn` section (loop/pr-body.ts `loopBodySection`), already defanged. */
+  review?: string | null;
 }
 
 const oneLine = (s: string, n = 300): string => clip(s.replace(/\s+/g, ' ').trim(), n);
@@ -147,6 +149,7 @@ export function storyBuildPrBody(b: PrBodyInput): string {
     }
   }
   if (b.closes) lines.push('', `Closes ${b.closes}`);
+  if (b.review) lines.push('', b.review);
   lines.push('', '---', `Built with ${PRODUCT_NAME} from ${b.ticketKey}.`);
   return clip(lines.join('\n'), BODY_MAX);
 }
@@ -232,7 +235,7 @@ export async function firstPrBase(
 }
 
 /** The criteria this repository covers, as `ref: text` (the plan's planned rows for it + its steps' refs). */
-function coveredBy(build: StoryBuildRow, repo: StoryBuildRepoRow): Array<{ ref: string; text: string }> {
+export function coveredBy(build: StoryBuildRow, repo: StoryBuildRepoRow): Array<{ ref: string; text: string }> {
   const plan = build.planJson;
   const planRepo = plan?.repos.find((r) => r.repoId === repo.repoId) ?? plan?.repos.find((r) => r.ref === repo.ref);
   if (!plan || !planRepo) return [];
@@ -313,6 +316,16 @@ export const pushRepo: PushRepoFn = async (ctx, a: PushRepoArgs) => {
     return result(a.repoId, 'skipped', 'ALREADY_PUSHED', null, pr);
   }
   if (!repo.include) return result(a.repoId, 'skipped', 'NOT_INCLUDED', null);
+  // THE REVIEW LOOP (loop/driver.ts): never beside a running round; a branch the loop pushed opens its PR.
+  {
+    const loop = await import('./loop/driver.js');
+    if (loop.isStoryLoopBusy(a.buildId)) return result(a.repoId, 'skipped', 'PUSH_IN_PROGRESS', 'Wait for the review round to finish, or press Stop.');
+    if (repo.loopBranch && repo.loopEnded == null) {
+      if (a.branch !== undefined) return result(a.repoId, 'failed', 'PUSH_DENIED', 'This branch is already on GitHub.');
+      const r = await loop.loopManualPush(ctx, a.accountId, a.buildId, 'repo', repo.id, a.draft);
+      return result(a.repoId, r.outcome, r.code, r.error, r.prNumber != null ? { number: r.prNumber, url: r.prUrl ?? '' } : null);
+    }
+  }
   if (build.status !== 'ready') {
     const why = build.status === 'building' ? 'Wait for the build to finish.' : 'This build has nothing to push.';
     return result(a.repoId, 'failed', build.status === 'building' ? 'BUSY' : 'NOT_READY', why);

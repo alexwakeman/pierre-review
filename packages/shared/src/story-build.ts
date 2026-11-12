@@ -13,6 +13,7 @@ import type { DesignDiagram, FlowDiagram } from './sequence-diagrams.js';
 import type { SprintStage } from './sprint-stories.js';
 import type { SprintTicketCheck } from './sprint-graph.js';
 import type { StoryBuildSession } from './sandbox-session.js';
+import type { StoryBuildLoop } from './story-build-loop.js';
 import type { StoryBuildPr, StoryBuildPrPushResult } from './build-plan.js';
 import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignment.js';
 import type {
@@ -464,6 +465,8 @@ export interface StoryBuild {
   autoPushError?: string | null;
   /** The automatic push is running in this process right now (never stored: a restart ends it). */
   autoPushRunning?: boolean;
+  /** THE REVIEW LOOP (docs/STORY-BUILD.md § The review loop): null/absent when the option was never on. */
+  loop?: StoryBuildLoop | null;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
@@ -589,8 +592,13 @@ export const STORY_BUILD_API = {
   /** Plan first: one planned PR's patch, and its push (a stacked PR: the previous one first). */
   prDiff: '/api/story-builds/:id/prs/:prId/diff',
   prPush: '/api/story-builds/:id/prs/:prId/push',
-  /** "Push and open the pull request when the build finishes" — on or off, until the build pushed. */
+  /** The review loop's switch (an alias of `loopSettings` `{on}`, kept for older clients). */
   autoPush: '/api/story-builds/:id/auto-push',
+  /** THE REVIEW LOOP: the loop as it is now (a cheap poll), its switch and rounds, Continue, Stop. */
+  loop: '/api/story-builds/:id/loop',
+  loopSettings: '/api/story-builds/:id/loop/settings',
+  loopContinue: '/api/story-builds/:id/loop/continue',
+  loopStop: '/api/story-builds/:id/loop/stop',
 } as const;
 
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;

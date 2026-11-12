@@ -159,6 +159,26 @@ export async function prepareReview(args: {
   prNumber: number;
 }): Promise<PreparedReview> {
   const rawDiff = await fetchPrDiff(args.owner, args.name, args.prNumber);
+  return preparedFromDiff(rawDiff);
+}
+
+/**
+ * ctx.review.prepareBranchReview — the same as `prepareReview` for a BRANCH with no pull request (the story
+ * build's review loop): the diff is the clone cache's three-dot `base...head` (`localBranchDiff`), then the
+ * SAME noise strip, metrics and cap.
+ */
+export async function prepareBranchReview(args: {
+  owner: string;
+  name: string;
+  baseSha: string;
+  headSha: string;
+}): Promise<PreparedReview> {
+  const { localBranchDiff } = await import('./clone-manager.js');
+  return preparedFromDiff(await localBranchDiff(args.owner, args.name, args.baseSha, args.headSha));
+}
+
+/** The shared tail of both prepares: strip noise, analyse, cap. `prepareReview`'s behaviour is unchanged. */
+export function preparedFromDiff(rawDiff: string): PreparedReview {
   const { diff: strippedDiff, excluded } = stripNoiseFromDiff(rawDiff, isNoiseFile);
   const fileMetrics = analyzeDiff(strippedDiff);
   const changedFiles = fileMetrics.map((f) => f.path);

@@ -18,6 +18,7 @@ import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
+  prepBranchWorktree,
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
@@ -246,12 +247,15 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     const policy = reviewToolPolicy(mode, args.specialists, docsDir != null);
     if (mode === 'worktree') {
       onProgress({ phase: 'cloning', reviewMode: mode });
-      ({ repoCloneDir, worktreePath } = await prepWorktree(
-        args.owner,
-        args.name,
-        args.prNumber,
-        args.headSha,
-      ));
+      // THE REVIEW LOOP reviews a BRANCH with no PR: its commit through the branch checkout.
+      ({ repoCloneDir, worktreePath } = args.checkout
+        ? await prepBranchWorktree(args.owner, args.name, { remoteRef: args.checkout.remoteRef, destRef: args.checkout.destRef, sha: args.checkout.sha })
+        : await prepWorktree(
+            args.owner,
+            args.name,
+            args.prNumber,
+            args.headSha,
+          ));
       cwd = worktreePath;
       // NO TURN LIMIT on a worktree review (Codex has none either; the owner removed Claude's on
       // 2026-10-26 so the two compare fairly) unless REVIEW_MAX_TURNS is set explicitly. The US$

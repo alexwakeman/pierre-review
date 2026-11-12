@@ -5,7 +5,16 @@ import type { LibrarySnapshot } from '../../reference-docs/review-refs.js';
 import type { ServiceRunRecord } from '../../sandbox/services/run-log.js';
 import { CTX, goodPlan } from '../../sandbox/workspace/plan.test-support.js';
 import { carryDecisions } from './plan-persist.js';
-import { cleanRepoPath, contentionFingerprint, dataLabelFor, verifyBuildPlan, type PlanVerifyInput } from './plan-verify.js';
+import { ticketLayoutOf } from '@pierre-review/shared';
+import {
+  cleanRepoPath,
+  contentionFingerprint,
+  dataLabelFor,
+  ticketUpdateLayoutProblems,
+  TICKET_UPDATE_ESCAPED_LINE,
+  verifyBuildPlan,
+  type PlanVerifyInput,
+} from './plan-verify.js';
 
 const API = { repoId: 11, fullName: 'acme/api', baseSha: 'a'.repeat(40) };
 const WEB = { repoId: 12, fullName: 'acme/web', baseSha: 'b'.repeat(40) };
@@ -187,5 +196,52 @@ describe('verifyBuildPlan', () => {
     expect(cleanRepoPath('a/../../b')).toBeNull();
     expect(cleanRepoPath('.git/config')).toBeNull();
     expect(cleanRepoPath('sub/.GIT/x')).toBeNull();
+  });
+});
+
+describe('the ticket update layout check (never a refusal)', () => {
+  const layout = {
+    description: ticketLayoutOf('## Context\nWhy.\n## Scope\nWhat.'),
+    criteria: ticketLayoutOf('1. Given a report\n2. Then rows stream'),
+    acLocation: { kind: 'field' as const, fieldId: 'customfield_1', fieldName: 'AC' },
+  };
+
+  it('stores the problems on the revision; a kept layout stores []', async () => {
+    const bad = goodPlan({
+      ticketUpdate: { description: '## Scope\nWhat.', acceptanceCriteria: '- rows stream', why: 'C1', contentions: ['C1'] },
+    });
+    const r = await verifyBuildPlan(input(bad, { ticketLayout: layout }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.ticketUpdate?.layoutProblems).toEqual([
+      'The description drops the heading "Context".',
+      'The criteria were a numbered list; the draft uses bullets.',
+      'The criteria were written as GIVEN / WHEN / THEN; the draft is not.',
+    ]);
+    const good = goodPlan({
+      ticketUpdate: { description: '## Context\nNew.\n## Scope\nWhat.', acceptanceCriteria: '1. Given a report\n2. Then every row streams', why: 'C1', contentions: ['C1'] },
+    });
+    const g = await verifyBuildPlan(input(good, { ticketLayout: layout }));
+    expect(g.ok && g.plan.ticketUpdate?.layoutProblems).toEqual([]);
+  });
+
+  it('a Jira mention or macro the ticket does not hold is escaped in the draft, and the reader is told', async () => {
+    const r = await verifyBuildPlan(
+      input(goodPlan({ ticketUpdate: { description: '## Context\nAsk [~accountid:9].\n## Scope\nWhat.', acceptanceCriteria: null, why: 'C1', contentions: ['C1'] } }), { ticketLayout: layout }),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.plan.ticketUpdate?.description).toBe('## Context\nAsk \\[~accountid:9].\n## Scope\nWhat.');
+    expect(r.plan.ticketUpdate?.layoutProblems).toEqual([TICKET_UPDATE_ESCAPED_LINE]);
+  });
+
+  it('criteria in the description: the draft description’s criteria section keeps the criteria layout', () => {
+    const inDesc = { ...layout, acLocation: { kind: 'description' as const, heading: 'Acceptance criteria' } };
+    expect(
+      ticketUpdateLayoutProblems({ description: '## Acceptance criteria\n- rows stream', acceptanceCriteria: null }, {
+        ...inDesc,
+        description: ticketLayoutOf('## Acceptance criteria\n1. Given a report'),
+      }),
+    ).toContain('The criteria were a numbered list; the draft uses bullets.');
   });
 });

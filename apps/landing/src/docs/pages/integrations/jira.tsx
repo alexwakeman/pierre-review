@@ -188,8 +188,11 @@ export default function Page(): JSX.Element {
       <p>
         When you plan a build with <DocLink to="implement-story/plan">Implement story</DocLink>, the plan can include
         a draft update to the ticket&rsquo;s description and criteria. You can edit it, then press{' '}
-        <Ui>Update ticket</Ui>; Limn asks once before it replaces the text in Jira. The criteria go back into the
-        same field Limn read them from.
+        <Ui>Update ticket</Ui>; Limn asks once before it replaces the text in Jira. Update ticket writes the description
+        and the acceptance criteria field, in that field&rsquo;s own format, or the criteria section of the description
+        when the ticket keeps them there. When you change only the criteria in the description, Limn replaces only
+        that section and leaves the rest of the description exactly as it is in Jira. A criteria field that Jira does
+        not let Limn edit, or that is not a text field, is left as it is, and Limn says so.
       </p>
       <Warning>
         All three writes are made with the workspace&rsquo;s Jira token, so they show in Jira as made by that

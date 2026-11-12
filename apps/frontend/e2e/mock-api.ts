@@ -61,6 +61,7 @@ import type {
   TicketLinksResponse,
   TicketMergedPrsResponse,
   TicketStoryResponse,
+  TicketUpdateCurrent,
   TicketAssignablesResponse,
   TicketAssignResponse,
   WorkspaceTrackerSettings,
@@ -84,6 +85,12 @@ import type {
   StoryBuildAutoPushBody,
   StoryBuildAutoPushResponse,
   StoryBuildRepo,
+  StoryBuildLoop,
+  StoryBuildLoopContinueBody,
+  StoryBuildLoopFinding,
+  StoryBuildLoopRouteResponse,
+  StoryBuildLoopSettingsBody,
+  StoryBuildLoopTarget,
   StoryBuildSession,
   StoryBuildStartResponse,
   SandboxNetworkAllowResponse,
@@ -1058,6 +1065,238 @@ export const STORY_SESSION_CLOSED: StoryBuild = {
   session: { ...STORY_SESSION_BUILT.session!, live: false, resumable: true, agentState: null },
 };
 
+// ── THE REVIEW LOOP (docs/STORY-BUILD.md § The review loop) ──────────────────────────────────────
+//
+// "After the build: review and fix, then open the pull request" ticked on an older-style build of two
+// repositories. Limn pushed both branches, round 1 found four points on acme/api (a blocker, a warning, a
+// nit and a question) and one on acme/web, and the story check left AC2 not met and AC3 claimed not
+// applicable. The agent answered every point (fixed / answered / pushed back), the fixes were pushed, and
+// round 2 judged the answers (the pushback accepted, AC3's claim accepted). Round 3 waits: the AI spend
+// limit paused the loop, and Continue goes on (the reader's press is never refused).
+
+const LOOP_TARGET = (id: number, repoId: number, fullName: string, sha: string): StoryBuildLoopTarget => ({
+  kind: 'repo',
+  id,
+  repoId,
+  fullName,
+  key: null,
+  title: null,
+  branch: 'ACME-1',
+  pushedSha: sha.repeat(40).slice(0, 40),
+  pushedAt: iso(0.02),
+  ended: null,
+  prNumber: null,
+  prUrl: null,
+  pushError: null,
+  pushErrorCode: null,
+});
+
+function loopFinding(
+  id: number,
+  o: Pick<StoryBuildLoopFinding, 'severity' | 'title' | 'path' | 'line' | 'response'> & { targetId?: number; round?: number; body?: string },
+): StoryBuildLoopFinding {
+  return {
+    id,
+    reviewId: 700 + (o.round ?? 1),
+    path: o.path,
+    line: o.line,
+    side: 'RIGHT',
+    diffAnchorId: `anchor-${id}`,
+    severity: o.severity,
+    title: o.title,
+    body: o.body ?? `${o.title}.`,
+    editedBody: null,
+    suggestion: null,
+    diffHunk: null,
+    anchored: true,
+    fileInDiff: true,
+    included: true,
+    postedAt: null,
+    githubCommentId: null,
+    postedCommentKind: null,
+    createdAt: iso(0.02),
+    targetKind: 'repo',
+    targetId: o.targetId ?? 911,
+    round: o.round ?? 1,
+    raisedBy: 'claude',
+    response: o.response,
+  };
+}
+
+const LOOP_CHECK = (round: number, ac2: 'not_met' | 'met'): TicketReview => ({
+  ...ACME_2_CHECK,
+  id: 800 + round,
+  ident: ACME_1,
+  ticketKey: 'ACME-1',
+  ticketTitle: 'Export a report as CSV',
+  summary: ac2 === 'met' ? 'Every criterion that applies is met.' : 'The button is there; the export still caps at 500 rows.',
+  assessment: {
+    alignment: ac2 === 'met' ? 'aligned' : 'partly_aligned',
+    summary: null,
+    criteria: [
+      { ref: 'AC1', index: 0, text: 'A Download CSV button on the report header', status: 'met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null },
+      { ref: 'AC2', index: 1, text: 'The export has every row, not the first 500', status: ac2, explanation: ac2 === 'met' ? null : 'The 500-row cap is still in csv.ts.', deliveredBy: [], evidence: [], expectedIn: null },
+      { ref: 'AC3', index: 2, text: 'The PDF export keeps working', status: 'unclear', explanation: 'No PDF code was touched.', deliveredBy: [], evidence: [], expectedIn: null },
+    ],
+    missing: [],
+    notRequested: [],
+  },
+  members: [
+    { prId: 911, repoId: 11, repo: 'acme/api', number: 0, title: 'ACME-1', state: 'open', headSha: 'c'.repeat(40), checkedOut: true, label: 'branch ACME-1' },
+  ],
+  items: [],
+});
+
+export const STORY_LOOP_PAUSED: StoryBuildLoop = {
+  on: true,
+  rounds: 3,
+  editable: false,
+  state: 'paused',
+  round: 3,
+  pause: 'budget',
+  pauseLine: 'Paused: the AI spend limit is reached. Press Continue to go on.',
+  canContinue: true,
+  error: null,
+  targets: [LOOP_TARGET(911, 11, 'acme/api', 'd'), LOOP_TARGET(910, 10, 'acme/web', 'e')],
+  history: [
+    {
+      round: 1,
+      closing: false,
+      reviews: [
+        {
+          targetKind: 'repo',
+          targetId: 911,
+          headSha: 'c'.repeat(40),
+          baseSha: 'b'.repeat(40),
+          runs: [],
+          verdict: 'REQUEST_CHANGES',
+          summary: 'The CSV stream works, but the row cap is still there.',
+          findings: [
+            loopFinding(1, { severity: 'blocker', title: 'The 500-row cap is still applied', path: 'src/reports/csv.ts', line: 12, response: { action: 'fixed', text: 'Removed the cap; the stream pages through every row.', round: 1 } }),
+            loopFinding(2, { severity: 'warning', title: 'Commas in a cell are not quoted', path: 'src/reports/csv.ts', line: 30, response: { action: 'fixed', text: null, round: 1 } }),
+            loopFinding(3, { severity: 'nit', title: 'Name the header constant in capitals', path: 'src/reports/csv.ts', line: 3, response: { action: 'pushed_back', text: 'The file uses camelCase for every constant; I kept it.', round: 1 } }),
+            loopFinding(4, { severity: 'question', title: 'Should an empty report send a header row?', path: 'src/reports/csv.ts', line: 18, response: { action: 'answered', text: 'Yes: AC1 asks for the header on every export.', round: 1 } }),
+          ],
+          followUp: [],
+        },
+        {
+          targetKind: 'repo',
+          targetId: 910,
+          headSha: 'f'.repeat(40),
+          baseSha: 'b'.repeat(40),
+          runs: [],
+          verdict: 'COMMENT',
+          summary: null,
+          findings: [
+            loopFinding(5, { targetId: 910, severity: 'warning', title: 'Disable the button while the export runs', path: 'src/reports/ReportHeader.tsx', line: 22, response: { action: 'fixed', text: null, round: 1 } }),
+          ],
+          followUp: [],
+        },
+      ],
+      storyCheck: LOOP_CHECK(1, 'not_met'),
+      claimVerdicts: [],
+      acResponses: [
+        { ref: 'AC2', response: 'fixed', text: 'The cap is gone (see finding 1).' },
+        { ref: 'AC3', response: 'not_applicable', text: 'This story changes the CSV export only; PDF is untouched.' },
+      ],
+      open: { findings: 5, followUps: 0, criteria: 2 },
+      fix: { state: 'done', pushed: [{ targetKind: 'repo', targetId: 911, sha: 'd'.repeat(40), error: null }, { targetKind: 'repo', targetId: 910, sha: 'e'.repeat(40), error: null }] },
+    },
+    {
+      round: 2,
+      closing: false,
+      reviews: [
+        {
+          targetKind: 'repo',
+          targetId: 911,
+          headSha: 'd'.repeat(40),
+          baseSha: 'b'.repeat(40),
+          runs: [],
+          verdict: 'COMMENT',
+          summary: 'The cap is gone and quoting is right.',
+          findings: [
+            loopFinding(6, { round: 2, severity: 'nit', title: 'A test for a cell with a newline', path: 'src/reports/csv.test.ts', line: 40, response: null }),
+          ],
+          followUp: [
+            {
+              ref: 'P3',
+              priorFindingId: 3,
+              sent: true,
+              carried: false,
+              status: 'reply_accepted',
+              explanation: 'The file’s own style is camelCase; the reply holds.',
+              path: 'src/reports/csv.ts',
+              line: 3,
+              side: 'RIGHT',
+              severity: 'nit',
+              title: 'Name the header constant in capitals',
+              response: 'The file uses camelCase for every constant; I kept it.',
+              reply: { author: 'The build agent', excerpt: 'The file uses camelCase for every constant; I kept it.' },
+              reraisedFindingId: null,
+            },
+          ],
+        },
+      ],
+      storyCheck: LOOP_CHECK(2, 'met'),
+      claimVerdicts: [{ ref: 'AC3', verdict: 'accepted', why: 'The ticket is about the CSV export; no PDF code changed.' }],
+      acResponses: [],
+      open: { findings: 1, followUps: 0, criteria: 0 },
+      fix: null,
+    },
+  ],
+  next: 'Paused: the AI spend limit is reached. Press Continue to go on.',
+};
+
+/** The option ticked, the loop not started (the Start panel's box, or ticked in the tab). */
+function loopNotStarted(rounds: number): StoryBuildLoop {
+  return {
+    on: true,
+    rounds,
+    editable: true,
+    state: null,
+    round: 0,
+    pause: null,
+    pauseLine: null,
+    canContinue: false,
+    error: null,
+    targets: [],
+    history: [],
+    next: `After the build, Limn pushes the branch and Claude reviews it (up to ${rounds} rounds).`,
+  };
+}
+
+/** The loop above, on a built session: paused at round 3 on the spend limit. */
+export const STORY_SESSION_LOOP: StoryBuild = {
+  ...STORY_SESSION_BUILT,
+  autoPush: true,
+  autoPushAt: iso(0.03),
+  repos: STORY_SESSION_BUILT.repos.map((r) => ({ ...r, hasPatch: true, status: 'ready' as const })),
+  loop: STORY_LOOP_PAUSED,
+};
+
+/** The loop finished: the final review was clean and both pull requests opened, ready for review. */
+export const STORY_SESSION_LOOP_DONE: StoryBuild = {
+  ...STORY_SESSION_LOOP,
+  pushedAll: true,
+  repos: STORY_SESSION_LOOP.repos.map((r) => ({
+    ...r,
+    status: 'pushed' as const,
+    pushedBranch: 'ACME-1',
+    pushedPrNumber: 80 + (r.repoId === 11 ? 0 : 1),
+    pushedPrUrl: `https://github.com/${r.fullName}/pull/${80 + (r.repoId === 11 ? 0 : 1)}`,
+    pushedAt: iso(0),
+  })),
+  loop: {
+    ...STORY_LOOP_PAUSED,
+    state: 'done',
+    pause: null,
+    pauseLine: null,
+    canContinue: false,
+    next: null,
+    targets: STORY_LOOP_PAUSED.targets.map((t, i) => ({ ...t, ended: 'pr_opened' as const, prNumber: 80 + i, prUrl: `https://github.com/${t.fullName}/pull/${80 + i}` })),
+  },
+};
+
 // ── PLAN FIRST (docs/STORY-BUILD.md § Plan first) ─────────────────────────────────────────────────
 //
 // What a NEW session is now: Limn sends the planning turn itself, and the agent's checked plan waits for the
@@ -1913,7 +2152,12 @@ export async function installMockApi(
           // its checked plan waits for the reader ("with docs" only when the start asked for them).
           const body = route.request().postDataJSON() as SandboxSessionStartBody;
           const plan = { ...STORY_PLAN_VIEW, withDocs: body.docs === true, fillGaps: body.action === 'fill_gaps' };
-          storyBuild = { ...STORY_SESSION_PLAN_READY, autoPush: body.autoPush === true, session: { ...STORY_SESSION_PLAN_READY.session!, plan } };
+          storyBuild = {
+            ...STORY_SESSION_PLAN_READY,
+            autoPush: body.autoPush === true,
+            loop: body.autoPush === true ? loopNotStarted(body.loopRounds ?? 3) : null,
+            session: { ...STORY_SESSION_PLAN_READY.session!, plan },
+          };
           return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
         }
         if (at('messages')) {
@@ -1992,6 +2236,37 @@ export async function installMockApi(
         }
         const prDiff = /\/prs\/(\d+)\/diff$/.exec(path);
         if (prDiff != null) return json(route, STORY_PR_DIFF(Number(prDiff[1])));
+        // THE REVIEW LOOP: its switch + rounds until it starts, Continue (the paused step goes on), Stop.
+        if (/\/loop\/settings$/.test(path)) {
+          const body = (route.request().postDataJSON() ?? {}) as StoryBuildLoopSettingsBody;
+          if (storyBuild == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          if (storyBuild.loop != null && !storyBuild.loop.editable) return json(route, { error: 'LoopStarted', message: 'The review loop has started. Stop it to change this.' }, 409);
+          const on = body.on ?? storyBuild.autoPush === true;
+          const loop = on ? { ...(storyBuild.loop ?? loopNotStarted(3)), on, rounds: body.rounds ?? storyBuild.loop?.rounds ?? 3 } : null;
+          storyBuild = { ...storyBuild, autoPush: on, loop };
+          return json(route, { loop: loop ?? { ...loopNotStarted(3), on: false } } satisfies StoryBuildLoopRouteResponse);
+        }
+        if (/\/loop\/continue$/.test(path)) {
+          const body = (route.request().postDataJSON() ?? {}) as StoryBuildLoopContinueBody;
+          const l = storyBuild?.loop;
+          if (storyBuild == null || l == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          if (!l.canContinue) return json(route, { error: 'NotReady', message: 'The review loop is not paused.' }, 409);
+          const targets = body.branch != null ? l.targets.map((t) => (t.id === body.branch!.id ? { ...t, branch: body.branch!.name, pushError: null, pushErrorCode: null } : t)) : l.targets;
+          const loop: StoryBuildLoop = { ...l, targets, state: 'reviewing', pause: null, pauseLine: null, canContinue: false, next: `Next: the agent answers what round ${l.round} finds.` };
+          storyBuild = { ...storyBuild, loop };
+          return json(route, { loop } satisfies StoryBuildLoopRouteResponse, 202);
+        }
+        if (/\/loop\/stop$/.test(path)) {
+          const l = storyBuild?.loop;
+          if (storyBuild == null || l == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          const loop: StoryBuildLoop = { ...l, state: 'stopped', pause: null, pauseLine: null, canContinue: false, next: null };
+          storyBuild = { ...storyBuild, loop };
+          return json(route, { loop } satisfies StoryBuildLoopRouteResponse);
+        }
+        if (/\/loop$/.test(path)) {
+          if (storyBuild?.loop == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
+          return json(route, { loop: storyBuild.loop } satisfies StoryBuildLoopRouteResponse);
+        }
         if (/\/auto-push$/.test(path)) {
           const body = (route.request().postDataJSON() ?? {}) as StoryBuildAutoPushBody;
           if (storyBuild == null) return json(route, { error: 'NotFound', message: 'Not found.' }, 404);
@@ -2375,6 +2650,19 @@ export async function installMockApi(
           story: null,
           comments: [],
         } satisfies TicketStoryResponse);
+      }
+      // The plan panel's ticket review: the ticket as Limn holds it (DB only).
+      if (path.endsWith('/api/ticket-update/current')) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          ident: new URL(route.request().url()).searchParams.get('ident') ?? '',
+          jira: true,
+          description: 'As a manager, I want to download a report as a CSV file.',
+          acceptanceCriteria:
+            'AC1: A Download CSV button on the report\nAC2: The file has one row per report row\nAC3: GIVEN a report\nWHEN I select Download CSV\nTHEN the file has every row',
+          acLocation: { kind: 'field', fieldId: 'customfield_10050', fieldName: 'Acceptance Criteria' },
+          readAt: iso(0.01),
+        } satisfies TicketUpdateCurrent);
       }
       // The story view's assignee picker (click-gated: only when it opens) and its pick.
       if (path.endsWith('/api/ticket-assignees')) {

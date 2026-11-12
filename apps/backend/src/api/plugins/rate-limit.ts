@@ -490,9 +490,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // EXACT `===`, method-checked.
   if (!mutating && path === '/api/ticket-status/transitions') return [TIERS.search, TIERS.read];
   if (method === 'POST' && path === '/api/ticket-status') return [TIERS.search, TIERS.read];
-  // The other tracker write (tracker/ticket-update.ts): the plan's ticket update — one Jira PUT, the
-  // same spend as a transition.
+  // The other tracker write (tracker/ticket-update.ts): the plan's ticket update — an editmeta read
+  // and one Jira PUT, the same spend as a transition. Its GET …/current is the stored copy, DB only.
   if (method === 'POST' && path === '/api/ticket-update') return [TIERS.search, TIERS.read];
+  if (!mutating && path === '/api/ticket-update/current') return [TIERS.read];
   // The assignee picker (tracker/assignee.ts): GET /api/ticket-assignees lists the tracker's
   // assignable people (Jira / Linear quota with the saved token, or the reader's GitHub quota) on
   // the picker's open → `search`. POST /api/ticket-assignee is a WRITE on that tracker — on GitHub
@@ -590,6 +591,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   GET list / :id / stream / diff / repos/:repoId/diff / prs/:prId/diff / plan · POST interrupt /
   //   network/allow / discard / plan/decisions / auto-push → read
   //   (auto-push only stores the reader's opt-in; the push it arms runs once, on the host, after a build turn)
+  //   POST …/:id/loop/continue   THE REVIEW LOOP's Continue: may start reviews, a fix turn AND pushes
+  //                              → ai + ai_hourly + github_write
+  //   GET …/:id/loop · POST …/:id/loop/settings · …/:id/loop/stop → read (DB only; the loop's own automatic
+  //   runs ask the spend gate, never a route)
   // ⚠ The pushes are spelled EXACTLY here: the `hitsGithub` alternation further down is anchored to
   // `/api/prs/\d+/` and only reached by the Claude Review / `/api/pro/` family, so it never sees them.
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
@@ -599,6 +604,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
     if (mutating && /^\/api\/story-builds\/\d+\/plan\/(reply|approve)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
     // Plan first: one planned PR's push (`prs/:prId/push`) is the same GitHub write.
     if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/|prs\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
+    // The review loop's Continue: the reader's press may start reviews, a fix turn and pushes.
+    if (mutating && /^\/api\/story-builds\/\d+\/loop\/continue$/.test(path)) return [TIERS.ai, TIERS.aiHourly, TIERS.githubWrite];
     return [TIERS.read];
   }
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {

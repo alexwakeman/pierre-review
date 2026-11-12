@@ -98,6 +98,18 @@ describe('validateBuildPlan — shape', () => {
     expect(shape(goodPlan({ ticketUpdate: null })).join('\n')).toMatch(/"ticketUpdate" is null, but "contentions" says the story is wrong/);
     expect(shape(goodPlan({ ticketUpdate: null, contentions: [] }))).toEqual([]);
   });
+  it('a criterion not planned needs a draft ticket update too (the criteria need revising)', () => {
+    const p = goodPlan({ ticketUpdate: null, contentions: [] });
+    p.criteria[1] = { ...p.criteria[1], status: 'not_planned', prs: [], how: 'Out of scope: the export is another team.' };
+    expect(shape(p).join('\n')).toMatch(/"ticketUpdate" is null, but a criterion is "not_planned"/);
+  });
+  it('criteria that live in the description go in "description", never "acceptanceCriteria"', () => {
+    const tu = { description: null, acceptanceCriteria: '1. GIVEN a report', why: 'C1', contentions: ['C1'] };
+    const ticket = { acLocation: 'description' as const, headings: ['Acceptance criteria'], criteriaStyle: 'numbered', gherkin: true };
+    expect(shape(goodPlan({ ticketUpdate: tu }), { ticket }).join('\n')).toMatch(/criteria live in the ticket's description/);
+    expect(shape(goodPlan({ ticketUpdate: { ...tu, description: '## Acceptance criteria\n1. GIVEN a report', acceptanceCriteria: null } }), { ticket })).toEqual([]);
+    expect(shape(goodPlan({ ticketUpdate: tu }), { ticket: { ...ticket, acLocation: 'field' } })).toEqual([]);
+  });
   it('the ticket update: one whole field at least, and a reason', () => {
     expect(shape(goodPlan({ ticketUpdate: { description: null, acceptanceCriteria: null, why: 'x', contentions: [] } })).join('\n')).toMatch(/must have a new/);
     expect(shape(goodPlan({ ticketUpdate: { description: 'New text.', acceptanceCriteria: null, why: '', contentions: [] } })).join('\n')).toMatch(/ticketUpdate.why/);

@@ -139,6 +139,11 @@ describe('tierFor — implement story', () => {
     expect(tiers('POST', '/api/story-builds/7/discard')).toEqual(['read']);
     // The automatic push's switch is DB only (the push it arms runs on the host after a build turn).
     expect(tiers('POST', '/api/story-builds/7/auto-push')).toEqual(['read']);
+    // The review loop: Continue may start reviews, a fix turn and pushes; the rest are DB only.
+    expect(tiers('POST', '/api/story-builds/7/loop/continue')).toEqual(['ai', 'ai_hourly', 'github_write']);
+    expect(tiers('GET', '/api/story-builds/7/loop')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/loop/settings')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/loop/stop')).toEqual(['read']);
   });
   it('bills a workspace session turn, Start build and Resume as AI; Stop, Allow and the diff are read', async () => {
     expect(tiers('POST', '/api/story-builds/7/messages')).toEqual(['ai', 'ai_hourly']);
@@ -617,6 +622,7 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/ticket-status')).not.toEqual(['search', 'read']);
     expect(tiers('POST', '/api/ticket-update')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/ticket-update')).not.toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/ticket-update/current')).toEqual(['read']);
     // The assignee picker: the list spends tracker quota; the pick is a tracker (or GitHub) write.
     expect(tiers('GET', '/api/ticket-assignees')).toEqual(['search', 'read']);
     expect(tiers('POST', '/api/ticket-assignee')).toEqual(['search', 'github_write']);

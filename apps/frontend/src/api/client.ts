@@ -208,6 +208,7 @@ import type {
   TicketStoryResponse,
   TicketStatusChangeBody,
   TicketUpdateBody,
+  TicketUpdateCurrent,
   TicketUpdateResponse,
   TicketStatusChangeResponse,
   TicketTransitionsResponse,
@@ -319,6 +320,9 @@ import type {
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
   StoryBuildAutoPushResponse,
+  StoryBuildLoopContinueBody,
+  StoryBuildLoopRouteResponse,
+  StoryBuildLoopSettingsBody,
   StoryBuildPushResponse,
   StoryBuildStartResponse,
   SandboxSessionStartBody,
@@ -1106,6 +1110,11 @@ export const api = {
       handle<TicketAssignResponse>(r),
     ),
   // The build plan's ticket update (Jira only) — the other tracker write: the reader's press, once.
+  // The ticket as Limn holds it, for the plan panel's ticket review. DB only.
+  ticketUpdateCurrent: (workspaceId: number, ident: string) =>
+    get<TicketUpdateCurrent>(
+      withQuery('/api/ticket-update/current', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
+    ),
   updateTicket: (workspaceId: number, body: TicketUpdateBody) =>
     fetch(withQuery('/api/ticket-update', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
       handle<TicketUpdateResponse>(r),
@@ -1875,9 +1884,17 @@ export const api = {
   storyBuildPrDiff: (id: number, prId: number) => get<StoryBuildPrDiffResponse>(storyBuildPath('prDiff', { id, prId })),
   pushStoryBuildPr: (id: number, prId: number, body: StoryBuildPushBody) =>
     fetch(storyBuildPath('prPush', { id, prId }), jsonBody('POST', body)).then((r) => handle<StoryBuildPushResponse>(r)),
-  // "Push and open the pull request when the build finishes": on or off until the build pushed (409 NotReady after).
+  // The review loop's switch, the old alias route (the tab now writes `loop/settings`).
   setStoryBuildAutoPush: (id: number, body: StoryBuildAutoPushBody) =>
     fetch(storyBuildPath('autoPush', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildAutoPushResponse>(r)),
+  // THE REVIEW LOOP (docs/STORY-BUILD.md § The review loop): the loop now, its switch + rounds, Continue, Stop.
+  storyBuildLoop: (id: number) => get<StoryBuildLoopRouteResponse>(storyBuildPath('loop', { id })),
+  setStoryBuildLoop: (id: number, body: StoryBuildLoopSettingsBody) =>
+    fetch(storyBuildPath('loopSettings', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildLoopRouteResponse>(r)),
+  continueStoryBuildLoop: (id: number, body: StoryBuildLoopContinueBody = {}) =>
+    fetch(storyBuildPath('loopContinue', { id }), jsonBody('POST', body)).then((r) => handle<StoryBuildLoopRouteResponse>(r)),
+  stopStoryBuildLoop: (id: number) =>
+    fetch(storyBuildPath('loopStop', { id }), jsonBody('POST')).then((r) => handle<StoryBuildLoopRouteResponse>(r)),
   discardStoryBuild: (id: number) =>
     fetch(storyBuildPath('discard', { id }), jsonBody('POST')).then((r) => handle<StoryBuildDiscardResponse>(r)),
 

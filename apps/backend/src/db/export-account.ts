@@ -151,6 +151,13 @@ export interface AccountExport {
   storyBuildPlans: Record<string, unknown>[];
   /** Plan first: the planned pull requests and their pushes; the patch cut as `storyBuildRepos`'s. */
   storyBuildPrs: Record<string, unknown>[];
+  /** The review loop (0186): every review run, its findings with the agent's answers, the story checks,
+   *  the agent's criterion answers and every GitHub write the loop claimed. */
+  storyBuildReviews: Record<string, unknown>[];
+  storyBuildReviewFindings: Record<string, unknown>[];
+  storyBuildStoryChecks: Record<string, unknown>[];
+  storyBuildAcResponses: Record<string, unknown>[];
+  storyBuildLoopPushes: Record<string, unknown>[];
 }
 
 /** A stored story-build patch is exported up to this many characters. */
@@ -512,6 +519,18 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     .from(schema.storyBuildPrs)
     .where(eq(schema.storyBuildPrs.accountId, accountId))
     .execute();
+  // The review loop (0186): every column is the reader's own (no secret, no worktree path).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const loopRowsOf = async (t: any): Promise<Record<string, unknown>[]> =>
+    (await db.select().from(t).where(eq(t.accountId, accountId)).execute()) as Record<string, unknown>[];
+  const [storyBuildReviewRows, storyBuildReviewFindingRows, storyBuildStoryCheckRows, storyBuildAcResponseRows, storyBuildLoopPushRows] =
+    await Promise.all([
+      loopRowsOf(schema.storyBuildReviews),
+      loopRowsOf(schema.storyBuildReviewFindings),
+      loopRowsOf(schema.storyBuildStoryChecks),
+      loopRowsOf(schema.storyBuildAcResponses),
+      loopRowsOf(schema.storyBuildLoopPushes),
+    ]);
 
   const [
     reviewRows,
@@ -676,5 +695,10 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
         return { ...r, patch: long ? r.patch!.slice(0, STORY_BUILD_EXPORT_PATCH_MAX) : r.patch, patchTruncated: long };
       }),
     ),
+    storyBuildReviews: capped('storyBuildReviews', storyBuildReviewRows),
+    storyBuildReviewFindings: capped('storyBuildReviewFindings', storyBuildReviewFindingRows),
+    storyBuildStoryChecks: capped('storyBuildStoryChecks', storyBuildStoryCheckRows),
+    storyBuildAcResponses: capped('storyBuildAcResponses', storyBuildAcResponseRows),
+    storyBuildLoopPushes: capped('storyBuildLoopPushes', storyBuildLoopPushRows),
   };
 }

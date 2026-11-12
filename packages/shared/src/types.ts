@@ -8789,6 +8789,9 @@ export interface TicketReviewMember {
   // What this PR adds, at its CURRENT synced head (not necessarily the head this run read) — a
   // model-written description, never a verdict. Absent / null = no card at that head: show nothing.
   card?: TicketPrCard | null;
+  // THE REVIEW LOOP's story check (docs/STORY-BUILD.md § The review loop): a BRANCH with no pull request
+  // yet ('branch PAY-142'); `prId` is then the build-local target id and `number` 0. Absent = a PR.
+  label?: string | null;
 }
 
 // ---- Contribution cards: what ONE PR's head does, for the ticket review ----

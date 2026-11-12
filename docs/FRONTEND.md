@@ -4485,21 +4485,46 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   **Always allow** — a reader's click, never automatic), Spend → **Changes** (`BuildSection`, the old
   per-repository cards in SESSION mode: no Retry, no live step, no "Not built or tested here." — the
   agent ran the tests in the sandbox; lazy diff; Push / Push as draft; the pushed PR chip).
-- **PUSH AUTOMATICALLY + THE RENAME** ([STORY-BUILD.md](STORY-BUILD.md) § Push automatically, § Push):
-  `StartPanel`'s box "Push and open the pull request when the build finishes" (OFF; `autoPush: true` sent
-  ONLY when ticked, the `docs` pattern) and, under the header, `AutoPushOption.tsx` `AutoPushLine`: the
-  switch (`useStoryBuildAutoPush`, its OWN mutation key — a DB write, never blocked by a turn) while
-  `autoPushEditable` (nothing pushed, not claimed; "Limn pushes when the next build finishes." under it when
-  the build already settled, `autoPushWaitsForNextBuild`), "Pushing…" while `autoPushRunning` (the wire's
-  in-process `autoPushRunning` flag, never the claim alone, so a restart or a press that took over never
-  leaves it; the read polls then: the notice frame does not refetch), the recorded `autoPushError` until
-  everything is pushed. The
-  ⓘ says the PR opens ready for review, as the reader's, and that auto review picks it up when it is on. After
+- **THE REVIEW LOOP'S OPT-IN + THE RENAME** ([STORY-BUILD.md](STORY-BUILD.md) § The review loop, § Push):
+  `StartPanel`'s box "After the build: review and fix, then open the pull request" (OFF; `autoPush: true` +
+  `loopRounds` sent ONLY when ticked, the `docs` pattern), with `LoopRoundsControl` (Rounds − n +, 1..6,
+  default 3, its ⓘ) under it once ticked; under the header, `AutoPushOption.tsx` `AutoPushLine`: the switch and
+  the rounds (`useStoryBuildLoopSettings`, `POST …/loop/settings`, its OWN mutation key — a DB write, never
+  blocked by a turn; optimistic) while `loopEditable` (the wire's `loop.editable`; with no `loop` on the wire,
+  the old `autoPushEditable`), "Limn starts when the next build finishes." when the build already settled. A
+  build of the RETIRED automatic push (no `loop`) keeps its "Pushing…" / recorded `autoPushError` lines. After
   `BRANCH_EXISTS` — keyed on the press's `code`, else the row's stored `pushErrorCode`, NEVER on the
   sentence (`branchExistsFor`) — the card's Push becomes `RenameBranch` (a name prefilled by shared
   `storyBuildFreeBranch` over `buildBranchNames` + the names tried, + Push) on BuildSection's repository
   cards and StackView's PR cards; a refused new name keeps the field. The push body carries `branch` ONLY
   when named (`storyBuildPushBody`; the e2e pins `{ draft: true }` exactly).
+- **THE REVIEW LOOP** (2026-11-12; [STORY-BUILD.md](STORY-BUILD.md) § The review loop). `build.loop`
+  (null when the option was never on) drives it:
+  - **`ReviewLoopSection.tsx`**, mounted by `StoryBuildTabView` between `SessionView` and the changes while
+    `loop.on`: "Review rounds" + ⓘ, the state chip (`loopStateWords`) and the server's `next` line, the
+    `pauseLine`, **Continue** only while `canContinue` (after `BRANCH_EXISTS`, `RenameBranch` with
+    `buttonLabel="Continue"` sends `{branch: {kind, id, name}}`), **Stop review loop** only while it runs —
+    HIDDEN, never disabled. Then the coverage strip (`loopCoverage`: the latest story check's criteria as
+    met / not applicable — an ACCEPTED claim — / open), the opened PRs, and one collapsible row per round,
+    newest open: per target a `PrCardFrame` with `VerdictBadge` (exported from `ClaudeReviewTab`), the
+    runs' `AiRunLabel`s, the findings as `FindingRow` (`prId 0`, `prUrl null` — the code anchor links the
+    file at the reviewed commit; `actions={false}`, `editable={false}`) with the agent's response under
+    each (`note`: Fixed / Answered / Pushed back / Not answered + its words), the reviewer's judgement of
+    the last round's answers (`FollowUpRow`, `actions={false}`), the story check (`CriterionRow` /
+    `MissingList`, `viewedPrId null`, read only — a branch member reads its `label`, `memberLabel`, and
+    `MemberPrLink` draws no link for `number` 0), the not-applicable verdicts, the agent's criterion
+    answers, and the footer `loopFixLine` ("Fixes pushed: acme/api 3f2a1c9, acme/web no change.").
+  - **Steps**: `sessionSteps(session, loop)` adds **Review** between Build and Push when `loop.on` —
+    DERIVED (a fix turn is still phase `building`; built is Review until the PRs open), never a phase.
+  - **Push hides while the loop runs** (`loopRunning`): Push all + Draft in the header, every card's Push,
+    the stack's Push all, and ⌘K's Push all. Paused or done, a target the loop pushed reads **Open the pull
+    request** / **Open as draft** (`pushButtonWords`, the same route; the server ends the loop for it).
+  - **Freshness**: the read polls every 5 s while `loopRunning` (live or not); every `{type:'loop'}` frame
+    re-reads the build (`sessionEventNeedsRefetch`; the fold keeps no loop state of its own). Continue
+    (`useContinueStoryBuildLoop`) shares the ticket's billed action key; Stop
+    (`useStopStoryBuildLoop`) has its own, like the session's Stop.
+  - Pinned by `test/storyBuildLoop.test.ts` and `e2e/story-build.spec.ts` (the rounds view, Continue on a
+    spend-limit pause, Stop, the opened PRs).
 - **PLAN FIRST (2026-11-08; [STORY-BUILD.md](STORY-BUILD.md) § Plan first).** Every NEW session plans
   before it builds; the build starts only from the plan panel. The pieces:
   - **The split button** (`components/ui/SplitButton.tsx`: a primary `Button` joined to a `CaretIcon`
@@ -4525,11 +4550,17 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
     time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
     the dropped line ("Limn left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
-    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket update** — on the latest
-    revision an EDITABLE text box per field (`EditableTicketUpdate`: "(edited)", "Back to the draft",
-    Copy takes the edited text, an empty box leaves that field; on a Jira ticket **Update ticket** asks
-    once and writes it, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update), on an
-    older or approved revision preformatted text with a `CopyButton` — and **Approve and
+    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket review** — on the latest
+    revision ALWAYS (and after Approve until the first build turn ends), `StoryBuild/TicketUpdatePanel.tsx`
+    `TicketReview`: the WHOLE ticket in two boxes (Description, Acceptance criteria — "(in the
+    description)" when the ticket keeps them there, and then the box follows the description's section
+    until edited), seeded with the draft else the current text (`useTicketUpdateCurrent`,
+    `['ticket-update-current', ws, ident]`; pure seed/body in `lib/buildPlan.ts`), "What changes" per box
+    (`lib/textDiff.ts lineDiff`), the live layout check (shared `compareTicketLayout`, amber notes, never a
+    block), "(edited)" / "Back to the draft"; on a Jira ticket ONE **Update ticket** sends only the
+    changed fields, asks once, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update;
+    else "Updating the ticket works with Jira only. Copy the text instead." On an older or approved
+    revision the draft is preformatted text with a `CopyButton` — and **Approve and
     start** (`AiRunGate kind="story_build" followUp`; enabled only by `planApproveState`: live,
     `plan_ready`, every point answered — else its one line beside it). Agree / Keep the story post
     `plan/decisions` at once on their OWN mutation (no turn, never blocked by a billed press), laid over

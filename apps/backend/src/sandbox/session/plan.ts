@@ -46,7 +46,7 @@ import type { ServiceRunRecord } from '../services/run-log.js';
 import type { SandboxRuntime } from '../runtime/types.js';
 import { BUILD_REPORT_CHECKER, BUILD_REPORT_FILE, buildReportFiles } from '../workspace/build-report.js';
 import { PLAN_CONTEXT_FILE } from '../workspace/plan-check.js';
-import { planContextFor, ticketMarkdown } from '../workspace/seed.js';
+import { planContextFor, ticketLayoutFacts, ticketMarkdown } from '../workspace/seed.js';
 import type { SessionTicket } from '../workspace/ticket.js';
 import { extractPlanBlock } from './plan-block.js';
 import type { SessionStateJson } from './state.js';
@@ -78,7 +78,7 @@ export function planOpeningInstruction(o: { docsDir: string | null; fillGaps: bo
     `2. Decide which repositories you will change, and how you will meet each acceptance criterion (AC1, AC2, … in TICKET.md's numbering).${o.fillGaps ? ' Build only the gaps that TICKET.md lists. For a criterion that is already met, say which pull request meets it.' : ''}`,
     `3. Find where the story is wrong: inaccurate, inconsistent, or in conflict with the code, ${o.docsDir ? 'the documents ' : ''}or the data. Give each point evidence that Limn can check: a code excerpt (repository, path, lines and the exact text),${o.docsDir ? ' a document section and the exact text,' : ''} a data file excerpt, or a \`limn-svc run\` output. A point you cannot show is not a point of contention: leave it out.`,
     '4. Propose the pull requests. One per repository, unless splitting clearly reduces risk or review size.',
-    "5. If the story needs work (every point of contention says it does), write the updated description or acceptance criteria in the ticket's own format, in `ticketUpdate`.",
+    "5. If the story needs work (every point of contention and every criterion you do not plan says it does), write the updated description and acceptance criteria in `ticketUpdate`. Keep the ticket's layout: the same headings in the same order, the same list style and GIVEN / WHEN / THEN when it uses them. When the criteria live in the description, put them in `description`.",
     `6. Check the plan with \`node ~/.limn/plan-check.cjs\` until it prints OK, then end your answer with the plan in ONE ${LIMN_PLAN} block. Before the block, say the plan in at most five sentences.`,
   ].join('\n');
 }
@@ -388,12 +388,16 @@ export class PlanStage {
     };
     return verifyBuildPlan({
       body,
-      check: { criteria: check.criteria, gaps: check.gaps, repos: check.repos, runs: check.runs, docs: check.docs, fillGaps: check.fillGaps },
+      check: { criteria: check.criteria, gaps: check.gaps, repos: check.repos, runs: check.runs, docs: check.docs, fillGaps: check.fillGaps, ticket: check.ticket ?? null },
       repos: l.state.repos.map((r: SandboxSessionRepo) => ({ repoId: r.repoId, fullName: r.fullName, baseSha: r.baseSha })),
       ticketText: ticketMarkdown(ticket, mode, docsDir),
       criteriaText,
       branch: l.state.repos[0]?.branch ?? 'ticket',
       seams: verifySeams,
+      ticketLayout: (() => {
+        const f = ticketLayoutFacts(ticket);
+        return { description: f.description, criteria: f.criteria, acLocation: f.acLocation };
+      })(),
     });
   }
 

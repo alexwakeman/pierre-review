@@ -67,6 +67,16 @@ export interface PromptMember {
   omittedFiles: string[];
   // Lock / generated files the noise strip removed from the diff (a diff member only).
   noiseFiles?: string[];
+  // THE REVIEW LOOP (coding/story-build/loop/): a BRANCH with no pull request yet — 'branch PAY-142'
+  // shown in place of `#number` (then 0). Absent ⇒ every string is byte-identical.
+  label?: string;
+}
+
+/** One note of the build agent on a criterion (the review loop): it does not apply, or how it was met. */
+export interface PromptBuildClaim {
+  ref: string;
+  kind: 'not_applicable' | 'answer';
+  text: string;
 }
 
 /** One repository's default-branch checkout, shared by its merged members. */
@@ -302,6 +312,8 @@ export function buildTicketReviewPrompt(args: {
   defaultBranches?: readonly PromptDefaultBranch[];
   /** The people's comments on the ticket, oldest first (bots already left out). */
   comments?: readonly TicketComment[];
+  /** THE REVIEW LOOP: the build agent's notes on criteria. Absent/empty ⇒ byte-identical. */
+  claims?: readonly PromptBuildClaim[] | null;
 }, t: PromptTools = promptTools()): string {
   const { ticket, members, prior, legacy, nonce } = args;
   const comments = args.comments ?? [];
@@ -354,7 +366,7 @@ export function buildTicketReviewPrompt(args: {
   }
   for (const m of members) {
     const given = givenOf(m);
-    lines.push(`## ${m.ref}: ${m.repo} #${m.number} (${m.state === 'merged' ? 'merged' : 'open'})`);
+    lines.push(`## ${m.ref}: ${m.repo} ${m.label ?? `#${m.number}`} (${m.state === 'merged' ? 'merged' : 'open'})`);
     lines.push(`- Head commit: ${m.headSha.slice(0, 12) || 'unknown'}`);
     if (m.worktreePath) {
       lines.push(`- Checked out read-only at: ${m.worktreePath}`);
@@ -440,6 +452,22 @@ export function buildTicketReviewPrompt(args: {
     lines.push('');
   }
 
+  const claims = args.claims ?? [];
+  if (claims.length > 0) {
+    lines.push("# The build agent's notes on the criteria");
+    lines.push('');
+    lines.push(
+      'The agent that wrote the code says these criteria do not apply to this work, or explains how it met them. For each NOT APPLICABLE note, judge it in `notApplicable`: `accepted` when the criterion truly is out of scope for this ticket\'s work (the ticket says so, or the criterion is about something this work does not touch), `rejected` otherwise, with one sentence why. Keep judging each criterion\'s status on the code as usual.',
+    );
+    fence(
+      lines,
+      'BUILD AGENT NOTES',
+      nonce,
+      claims.map((c) => `${c.ref} (${c.kind === 'not_applicable' ? 'NOT APPLICABLE' : 'ANSWER'}): ${clip(c.text, PRIOR_TEXT_CHARS)}`).join('\n'),
+    );
+    lines.push('');
+  }
+
   lines.push(t.submit('When you are done, call submit_ticket_review once.'));
   return lines.join('\n');
 }
@@ -452,7 +480,7 @@ export function buildTicketReviewPrompt(args: {
 export function membersIndex(members: readonly PromptMember[]): string {
   const lines = ['# Pull requests on this ticket', ''];
   for (const m of members) {
-    lines.push(`## ${m.ref}: ${m.repo} #${m.number} (${m.state})`);
+    lines.push(`## ${m.ref}: ${m.repo} ${m.label ?? `#${m.number}`} (${m.state})`);
     lines.push(`- Head commit: ${m.headSha || 'unknown'}`);
     lines.push(`- Shown as: ${givenOf(m) === 'card' ? 'description' : givenOf(m) === 'unread' ? 'not read' : 'diff'}`);
     if (m.defaultBranchPath) lines.push(`- Default-branch checkout: ${m.defaultBranchPath}`);

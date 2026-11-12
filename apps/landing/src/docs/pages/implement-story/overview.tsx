@@ -9,7 +9,7 @@ export const meta: DocMeta = {
 function StartPicture(): JSX.Element {
   return (
     <Illustration
-      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A box to give the agent the reference documents is ticked. A box to push and open the pull request when the build finishes is not ticked. A Start with docs button."
+      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A box to give the agent the reference documents is ticked. A box to review and fix after the build, then open the pull request, is not ticked. A Start with docs button."
       caption="A new build tab: what the session gets, your memories and skills, the docs and push boxes, the model and Start."
       title="PAY-142 Partial refunds"
       meta="Implement"
@@ -25,7 +25,7 @@ function StartPicture(): JSX.Element {
         <Chip>☑ Give the agent the reference documents</Chip>
       </p>
       <p>
-        <Chip>☐ Push and open the pull request when the build finishes</Chip>
+        <Chip>☐ After the build: review and fix, then open the pull request</Chip>
       </p>
       <p className="muted">Runs in Colima on this computer.</p>
       <p className="muted">
@@ -98,13 +98,14 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>Push.</b> You review one diff per pull request and press <Ui>Push</Ui>. Limn pushes a new branch and opens a
-          new pull request, a draft by default. Or tick <Ui>Push and open the pull request when the build finishes</Ui> and
-          Limn does it for you, ready for review. See <DocLink to="implement-story/push">Push the result</DocLink>.
+          new pull request, a draft by default. Or tick <Ui>After the build: review and fix, then open the pull request</Ui>:
+          Limn pushes the branch, reviews it in rounds while the agent answers every point, then opens the pull request,
+          ready for review. See <DocLink to="implement-story/push#review-and-fix">Review and fix</DocLink>.
         </li>
       </Steps>
       <Warning>
-        Nothing is pushed, posted or written to your tracker before you press a button, except the push you chose with{' '}
-        <Ui>Push and open the pull request when the build finishes</Ui>. The one tracker write is{' '}
+        Nothing is pushed, posted or written to your tracker before you press a button, except the branch commits and the pull request you chose with{' '}
+        <Ui>After the build: review and fix, then open the pull request</Ui>. The one tracker write is{' '}
         <Ui>Update ticket</Ui> on a Jira ticket, which you press yourself.
       </Warning>
 

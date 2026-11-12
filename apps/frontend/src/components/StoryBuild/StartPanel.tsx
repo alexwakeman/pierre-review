@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
-import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
+import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_BUILD_LOOP_ROUNDS_DEFAULT, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { useModelPick } from '../../hooks/useModelPick.js';
 import {
@@ -28,13 +28,14 @@ import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { InfoButton } from '../InfoModal.js';
 import { SandboxRuntimeLine } from './SandboxSetupHelp.js';
-import { AUTO_PUSH_LABEL, AutoPushInfo } from './AutoPushOption.js';
+import { AUTO_PUSH_LABEL, AutoPushInfo, LoopRoundsControl } from './AutoPushOption.js';
 
 // THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences
 // (it PLANS FIRST: docs/STORY-BUILD.md § Plan first), the docs box ("Give the agent the reference
 // documents", ticked when the story view's "… with docs" opened the tab; shown only while the library has
-// a built document), the push box ("Push and open the pull request when the build finishes", OFF by
-// default, the same for Implement and Fill gaps; docs/STORY-BUILD.md § Push automatically),
+// a built document), the review box ("After the build: review and fix, then open the pull request", OFF by
+// default, the same for Implement and Fill gaps, with its Rounds once ticked; docs/STORY-BUILD.md § The
+// review loop),
 // the container runtime's ONE line (`GET /api/sandbox/runtime`; with none, what is wrong + "How to set
 // up" — the button stays, owner decision Q2: there is no other path), the model menu (kind
 // `story_build`, opening on the deep model) and Start inside the ONE `AiRunGate`. A failed / discarded
@@ -84,13 +85,14 @@ export function StartPanel({
   useEffect(() => setDocsPicked(offer?.docs === true), [offer?.docs]);
   const docs = docsAvailable && docsPicked;
   const [autoPush, setAutoPush] = useState(false);
+  const [loopRounds, setLoopRounds] = useState(STORY_BUILD_LOOP_ROUNDS_DEFAULT);
   const go = (): void => {
     start.mutate({
       action: fill ? 'fill_gaps' : 'implement',
       provider: pick.chosen.provider,
       model: pick.chosen.model,
       ...(docs ? { docs: true } : {}),
-      ...(autoPush ? { autoPush: true } : {}),
+      ...(autoPush ? { autoPush: true, loopRounds } : {}),
     });
   };
   const err = start.error instanceof ApiError ? start.error : start.error != null ? { message: (start.error as Error).message } : null;
@@ -107,14 +109,14 @@ export function StartPanel({
           <p className="text-body text-ui-ink">
             The AI gets a sandbox with every repository in this workspace, the ticket and what the story check found missing. It
             plans first. Nothing is built until you approve the plan, and nothing is pushed until you press Push or tick the
-            push box below.
+            review box below.
           </p>
           <StartGaps reviewId={node?.check?.reviewId ?? offer?.reviewId ?? null} />
         </>
       ) : (
         <p className="text-body text-ui-ink">
           The AI gets a sandbox with every repository in this workspace and the ticket. It plans first. Nothing is built until you
-          approve the plan, and nothing is pushed until you press Push or tick the push box below.
+          approve the plan, and nothing is pushed until you press Push or tick the review box below.
         </p>
       )}
       <div className="mt-3">
@@ -138,6 +140,7 @@ export function StartPanel({
           <AutoPushInfo />
         </label>
       )}
+      {offered != null && autoPush && <LoopRoundsControl value={loopRounds} disabled={busy} onChange={setLoopRounds} />}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {offered != null ? (
           <>

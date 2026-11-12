@@ -268,11 +268,22 @@ function fence(lines: string[], label: string, nonce: string, body: string): voi
   lines.push(`---END ${label} ${nonce}---`);
 }
 
+/**
+ * THE REVIEW LOOP's words (coding/story-build/loop/): a BRANCH with no pull request yet, reviewed inside
+ * Limn, whose earlier findings were answered by the BUILD AGENT (never posted to GitHub). PR_WORDS are the
+ * exact strings the PR review has always used, so a run without `subject` is byte-identical.
+ */
+interface SubjectWords {
+  branch: boolean;
+}
+const PR_WORDS: SubjectWords = { branch: false };
+
 function pushPreviousReviewSection(
   lines: string[],
   plan: FollowUpPlan,
   headSha: string,
   nonce: string,
+  words: SubjectWords = PR_WORDS,
 ): void {
   lines.push('## Previous review');
   lines.push('');
@@ -281,7 +292,9 @@ function pushPreviousReviewSection(
   // run over posted findings alone reads exactly as before.
   const unposted = plan.sent.some((s) => !s.finding.posted);
   lines.push(
-    unposted
+    words.branch
+      ? `An earlier review of this branch (at head ${shortSha(plan.priorHeadSha)}) made the findings below. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`
+      : unposted
       ? `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) made the findings below. Those marked "Not posted to GitHub yet" are still waiting to be posted; the rest were posted as comments on it. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`
       : `An earlier review of this pull request (at head ${shortSha(plan.priorHeadSha)}) posted the findings below as comments on it. For EACH one, decide whether the current code deals with it and report it once in \`followUp\` by its ref (P1, P2, …):`,
   );
@@ -297,7 +310,9 @@ function pushPreviousReviewSection(
   if (plan.sent.some((s) => hasReplies(s.finding))) {
     lines.push('');
     lines.push(
-      'Some findings below have "Replies on GitHub": people answering that comment. Replies marked "posted from Limn" are earlier replies on this finding, shown so the conversation reads whole; judge the most recent reply that is NOT marked so. For those findings ONLY, when the code has not dealt with the finding, judge the reply instead, on the code:',
+      words.branch
+        ? 'Some findings below have "The build agent\'s answers": the agent that wrote the code says what it did, or why it did not change the code. Judge the most recent answer. For those findings ONLY, when the code has not dealt with the finding, judge the answer instead, on the code:'
+        : 'Some findings below have "Replies on GitHub": people answering that comment. Replies marked "posted from Limn" are earlier replies on this finding, shown so the conversation reads whole; judge the most recent reply that is NOT marked so. For those findings ONLY, when the code has not dealt with the finding, judge the reply instead, on the code:',
     );
     lines.push(
       "- reply_accepted: the reply is reasonable. Set `acceptKind` to 'not_valid' when it shows the finding was wrong or does not apply here, or 'deferred' when it promises a reasonable later fix (a follow-up pull request, a ticket). Put ONE short sentence acknowledging it in `reply`, for example 'Fair point, a follow-up PR works.'",
@@ -355,7 +370,7 @@ function pushPreviousReviewSection(
     const body: string[] = [`Where: ${where}`];
     if (f.raisedBy) body.push(`(raised by ${aiProviderName(f.raisedBy)} in an earlier review, at head ${shortSha(f.headSha)})`);
     else if (f.carried) body.push(`(from an earlier review, at head ${shortSha(f.headSha)})`);
-    if (!f.posted) body.push('(Not posted to GitHub yet.)');
+    if (!f.posted && !words.branch) body.push('(Not posted to GitHub yet.)');
     body.push(`Severity: ${f.severity}`);
     body.push(`Title: ${clipBlock(f.title, PRIOR_TITLE_CHARS)}`);
     body.push(clipBlock(f.body, PRIOR_BODY_CHARS));
@@ -370,9 +385,9 @@ function pushPreviousReviewSection(
     if (f.conversation && f.conversation.replies.length > 0) {
       body.push(conversationLine(f.conversation));
     } else if (hasReplies(f)) {
-      body.push('Replies on GitHub (oldest first):');
+      body.push(words.branch ? "The build agent's answers (oldest first):" : 'Replies on GitHub (oldest first):');
       for (const r of f.thread!.replies) {
-        body.push(r.fromLimn ? `@${r.author} (posted from Limn, an earlier reply on this finding):` : `@${r.author}:`);
+        body.push(words.branch ? `${r.author}:` : r.fromLimn ? `@${r.author} (posted from Limn, an earlier reply on this finding):` : `@${r.author}:`);
         body.push(r.body);
       }
       if (f.thread!.pushedBack) body.push('(An earlier review already replied once to push back on this thread.)');
@@ -633,6 +648,10 @@ export function buildUserPrompt(input: {
   // The per-run fence tag. REQUIRED when `followUp`, `threads`, `peers` or `settled` is
   // present (throws otherwise).
   nonce?: string;
+  // THE REVIEW LOOP (coding/story-build/loop/): a BRANCH that has no pull request yet, reviewed inside
+  // Limn; its earlier findings' "replies" are the build agent's answers. Absent ⇒ every string is
+  // byte-identical (prompt-golden.json).
+  subject?: { kind: 'branch'; branch: string } | null;
 }): string {
   const {
     repoFullName,
@@ -655,7 +674,9 @@ export function buildUserPrompt(input: {
     openPoints = null,
     pushes = null,
     nonce,
+    subject = null,
   } = input;
+  const words: SubjectWords = subject?.kind === 'branch' ? { branch: true } : PR_WORDS;
   const hasFollowUp = followUp != null && followUp.plan.sent.length > 0;
   const hasThreads = threads != null && threads.sent.length > 0;
   const hasPeers = mode === 'worktree' && peers != null && peers.length > 0;
@@ -671,7 +692,7 @@ export function buildUserPrompt(input: {
 
   const lines: string[] = [];
 
-  lines.push(`# Reviewing ${repoFullName} PR #${prNumber}`);
+  lines.push(subject?.kind === 'branch' ? `# Reviewing ${repoFullName} branch ${subject.branch} (no pull request yet)` : `# Reviewing ${repoFullName} PR #${prNumber}`);
   lines.push('');
   lines.push(`Title: ${title}`);
   lines.push(`Head SHA: ${headSha}`);
@@ -679,7 +700,7 @@ export function buildUserPrompt(input: {
   lines.push('');
 
   const trimmedBody = body && body.trim().length > 0 ? trimBody(body) : null;
-  lines.push('## PR description');
+  lines.push(words.branch ? '## What the branch is for' : '## PR description');
   lines.push('');
   lines.push(trimmedBody ?? '(no description provided)');
   lines.push('');
@@ -727,7 +748,7 @@ export function buildUserPrompt(input: {
   }
 
   if (hasFollowUp && followUp && nonce) {
-    pushPreviousReviewSection(lines, followUp.plan, headSha, nonce);
+    pushPreviousReviewSection(lines, followUp.plan, headSha, nonce, words);
     pushChangesSinceSection(lines, followUp.plan, headSha, followUp.since, nonce);
   }
 

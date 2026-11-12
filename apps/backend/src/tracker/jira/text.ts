@@ -13,6 +13,8 @@
 // CRLF → LF, and the C0 control characters the shared validator refuses (everything but tab,
 // newline and carriage return, plus DEL) removed — Jira text can carry them and pg jsonb cannot.
 
+import { acSectionNameTier } from '@pierre-review/shared';
+
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
@@ -419,4 +421,153 @@ export function markdownToJiraWiki(md: string): string {
     else out.push(inlineMdToWiki(raw));
   }
   return out.join('\n');
+}
+
+// ── THE AC SECTION INSIDE A RAW WIKI DESCRIPTION (a criteria-only ticket update) ──────────────────────
+//
+// Limn's stored description is LOSSY markdown (`jiraWikiToMarkdown` drops colours, panels and images),
+// so a criteria-only update never rebuilds the description from it: it replaces ONLY the criteria block
+// of the LIVE wiki text and keeps every other byte. The section rule mirrors shared `findAcSection`:
+// an `hN.` heading (ends at the next heading of the same or a higher level) or a bold label line
+// (`*Acceptance Criteria:*`, ends at the next heading or bold label); exact names win over loose ones;
+// `{code}` / `{noformat}` blocks are skipped. No section ⇒ appended under `h2. <heading>`.
+const WIKI_HEADING_RE = /^\s*h([1-6])\.\s+(.*?)\s*$/;
+const WIKI_LABEL_RE = /^\s*\*([^*\n]+?)\*\s*:?\s*$/;
+const WIKI_BLOCK_RE = /^\s*\{(code|noformat)(?::[^}]*)?\}/;
+
+function wikiBlockLines(lines: readonly string[]): boolean[] {
+  const out: boolean[] = [];
+  let open: string | null = null;
+  for (const line of lines) {
+    if (open == null) {
+      const m = WIKI_BLOCK_RE.exec(line);
+      // A one-line block (`{code}x{code}`) opens and closes on the same line.
+      if (m && !new RegExp(`\\{${m[1]}\\}\\s*$`).test(line.slice(m[0].length))) open = m[1]!;
+      out.push(m != null);
+    } else {
+      out.push(true);
+      if (new RegExp(`\\{${open}\\}`).test(line)) open = null;
+    }
+  }
+  return out;
+}
+
+/** The criteria block of a wiki description: [start, end) lines, `start` the heading / label line. */
+export function findWikiAcSection(wiki: string): { heading: string; start: number; end: number } | null {
+  const lines = wiki.replace(/\r\n?/g, '\n').split('\n');
+  const blocks = wikiBlockLines(lines);
+  const found: Array<{ heading: string; start: number; end: number; tier: 0 | 1 }> = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (blocks[i]) continue;
+    const h = WIKI_HEADING_RE.exec(lines[i]!);
+    const b = h == null ? WIKI_LABEL_RE.exec(lines[i]!) : null;
+    if (h == null && b == null) continue;
+    const text = (h != null ? h[2]! : b![1]!).replace(/[*_{}]/g, '').replace(/:\s*$/, '').trim();
+    const tier = acSectionNameTier(text);
+    if (tier == null) continue;
+    const level = h != null ? Number(h[1]) : null;
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (blocks[j]) continue;
+      const n = WIKI_HEADING_RE.exec(lines[j]!);
+      if ((n != null && (level == null || Number(n[1]) <= level)) || (level == null && WIKI_LABEL_RE.test(lines[j]!))) {
+        end = j;
+        break;
+      }
+    }
+    found.push({ heading: text, start: i, end, tier });
+    if (tier === 0) break;
+  }
+  const pick = found.find((f) => f.tier === 0) ?? found[0];
+  return pick == null ? null : { heading: pick.heading, start: pick.start, end: pick.end };
+}
+
+/** Replace ONLY the criteria block of a raw wiki description with `criteriaWiki` (every other byte kept). */
+export function spliceWikiAcSection(wiki: string, criteriaWiki: string, heading: string | null): string {
+  const text = wiki.replace(/\r\n?/g, '\n');
+  const body = criteriaWiki.replace(/\r\n?/g, '\n').trim();
+  const s = findWikiAcSection(text);
+  const lines = text.split('\n');
+  if (s != null) {
+    const before = lines.slice(0, s.start + 1);
+    const after = lines.slice(s.end);
+    // A blank line before the next section only when the original had one there.
+    const gap = after.length > 0 && (lines[s.end - 1] ?? '').trim() === '' ? [''] : [];
+    return [...before, body, ...gap, ...after].join('\n');
+  }
+  const head = `h2. ${(heading ?? '').trim() || 'Acceptance criteria'}`;
+  const base = text.replace(/\s+$/, '');
+  return base === '' ? `${head}\n${body}` : `${base}\n\n${head}\n${body}`;
+}
+
+// ── UNTRUSTED DRAFT TEXT → WIKI (the plan's draft ticket update) ────────────────────────────────────
+//
+// `markdownToJiraWiki` passes Jira wiki markup through as typed, so a draft the planning agent wrote
+// (it reads untrusted ticket, repository and PR text) could carry a live user mention (`[~accountid:…]`,
+// `[~name]`, which notifies on save) or a macro (`{html}`, `{panel}`, `{color}`, `{include}`). The draft
+// path ESCAPES each one the stored ticket text does not already hold (a backslash: wiki shows it as
+// typed), so a round trip of the reader's own ticket stays lossless. The reader still sees and edits it.
+const WIKI_RISKY_RE = /\[~[^\]\n]{1,200}\]|\{(?:html|panel|color|include|iframe)(?::[^}\n]{0,200})?\}/gi;
+
+/** Escape the wiki mentions and macros `draft` has that `original` does not. `changed` = something was escaped. */
+export function neutraliseNewWikiMarkup(draft: string, original: string): { text: string; changed: boolean } {
+  const known = new Set((original.match(WIKI_RISKY_RE) ?? []).map((m) => m.toLowerCase()));
+  let changed = false;
+  const text = draft.replace(WIKI_RISKY_RE, (m) => {
+    if (known.has(m.toLowerCase())) return m;
+    changed = true;
+    return `\\${m}`;
+  });
+  return { text, changed };
+}
+
+/**
+ * Markdown → ONE line of plain text, for a single-line Jira text field (`…:textfield`): list markers,
+ * headings, quotes, emphasis, inline code and link syntax dropped (a link keeps its text), every run
+ * of whitespace collapsed to one space. The caller enforces the field's 255-character limit.
+ */
+export function plainOneLine(md: string): string {
+  return md
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) =>
+      l
+        .replace(/^\s*(?:`{3,}|~{3,}).*$/, '')
+        .replace(/^\s{0,3}#{1,6}\s+/, '')
+        .replace(/^\s{0,3}>\s?/, '')
+        .replace(/^\s*(?:[-*+]|\d{1,9}[.)])\s+(?:\[[ xX]\]\s+)?/, '')
+        .replace(/^\s*\|/, '')
+        .replace(/\|\s*$/, '')
+        .replace(/\s*\|\s*/g, ' | '),
+    )
+    .join(' ')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, '$2')
+    .replace(/(^|[^\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?!\w)/g, '$1$2')
+    .replace(/(^|[^\w])_(?=\S)([^_\n]+?)(?<=\S)_(?!\w)/g, '$1$2')
+    .replace(/~~(?=\S)(.+?)(?<=\S)~~/g, '$1')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The most a single-line Jira text field holds. */
+export const JIRA_TEXTFIELD_MAX = 255;
+
+/**
+ * How Limn may write a field, from its editmeta `schema` (REST v2): a multi-line text field — the
+ * `…:textarea` custom type, or a system string field with no custom type — takes WIKI markup (v2 takes
+ * wiki strings for rich-text fields on Cloud and Server alike, so Limn never writes ADF); a one-line
+ * `…:textfield` takes PLAIN text; anything else (a select, a checklist app's type) is null: refused.
+ */
+export function criteriaFieldFormat(schema: unknown): 'wiki' | 'plain' | null {
+  if (typeof schema !== 'object' || schema == null) return null;
+  const s = schema as { type?: unknown; custom?: unknown };
+  if (s.type !== 'string') return null;
+  if (s.custom == null) return 'wiki';
+  if (typeof s.custom !== 'string') return null;
+  if (s.custom.endsWith(':textarea')) return 'wiki';
+  if (s.custom.endsWith(':textfield')) return 'plain';
+  return null;
 }

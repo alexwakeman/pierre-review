@@ -54,6 +54,9 @@ export interface RunTicketAgentArgs {
   // Who the ledger row bills. A provider that records its own usage (Codex) writes it from this; on
   // Claude it is unused and the manager records the run as it always has.
   usageRecord?: AgentUsageRecord;
+  // THE REVIEW LOOP: the prompt carries the build agent's notes, so the tool gains `notApplicable`.
+  // Absent ⇒ the shape is exactly as before.
+  notApplicable?: boolean;
   onProgress(p: { recentActivity: string[]; usage: { inputTokens: number; outputTokens: number; costUsd: number } }): void;
 }
 
@@ -112,7 +115,7 @@ export async function runTicketReviewAgent(args: RunTicketAgentArgs): Promise<Ru
   try {
     if (provider.id === 'claude') restoreEnv = applyClaudeReviewAuth(args.applyAuthEnv);
     const docsDir = args.docsDir ?? null;
-    const shape = await submitTicketReviewShape({ docs: docsDir != null });
+    const shape = await submitTicketReviewShape({ docs: docsDir != null, ...(args.notApplicable ? { notApplicable: true } : {}) });
     let captured: SubmitTicketReviewPayload | null = null;
     const tools: AgentToolServer = {
       server: 'ticket',

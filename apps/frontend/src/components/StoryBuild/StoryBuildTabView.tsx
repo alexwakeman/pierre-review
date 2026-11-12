@@ -9,7 +9,7 @@ import {
   useStorySessionInterrupt,
   useStorySessionStream,
 } from '../../hooks/useStoryBuild.js';
-import { pushAllOffered } from '../../lib/storyBuild.js';
+import { loopRunning, pushAllOffered } from '../../lib/storyBuild.js';
 import { planApproveState, pushAllPrCount } from '../../lib/buildPlan.js';
 import { mergeSessionViews, sessionCanDiscard, sessionCanStartBuild, sessionClosedForGood, sessionTurnRunning } from '../../lib/sandboxSession.js';
 import { parseStoryBuildTabKey, ticketKeyOfIdent, usePinnedTabs, type TabTicketMeta } from '../../store/pinnedTabs.js';
@@ -27,6 +27,7 @@ import { StackView } from './StackView.js';
 import { SessionView } from './SessionView.js';
 import { StartPanel } from './StartPanel.js';
 import { AutoPushLine } from './AutoPushOption.js';
+import { ReviewLoopSection } from './ReviewLoopSection.js';
 import { StoryBuildHeader } from './StoryBuildHeader.js';
 import { StoryBuildSection } from './StoryBuildSection.js';
 
@@ -39,8 +40,9 @@ import { StoryBuildSection } from './StoryBuildSection.js';
 // the boot, then (plan first) the PLAN PANEL, the conversation beside the rail — and the changes with
 // Push: per planned pull request (StackView) once a plan was approved, else per repository. Nothing
 // changes before the plan is approved (Start build on an older session) and nothing is pushed before Push —
-// unless the reader ticked "Push and open the pull request when the build finishes" (`AutoPushLine`, under
-// the header: the switch until the build pushed, then the automatic push's outcome).
+// unless the reader ticked "After the build: review and fix, then open the pull request" (`AutoPushLine`,
+// under the header: the switch and the rounds until the loop starts; then ReviewLoopSection, between the
+// conversation and the changes, shows the rounds — docs/STORY-BUILD.md § The review loop).
 
 export function StoryBuildTabView(): JSX.Element | null {
   const activeTab = usePinnedTabs((s) => s.activeTab);
@@ -120,6 +122,7 @@ function StoryBuildBody({
       {q.isSuccess && open == null && <StartPanel workspaceId={workspaceId} ident={ident} last={closed ? build : null} offer={offer ?? null} />}
       {open != null && open.session.plan != null && open.session.phase !== 'booting' && <PlanPanel build={open.build} session={open.session} />}
       {open != null && <SessionView build={open.build} session={open.session} partials={stream.partials} />}
+      {open != null && open.build.loop?.on === true && <ReviewLoopSection build={open.build} />}
       {stacked && open != null ? (
         <StoryBuildSection title="Pull requests" testId="story-build-build">
           <StackView build={open.build} session={open.session} draft={draft} setDraft={setDraft} />
@@ -154,8 +157,10 @@ function HeaderActions({
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
   // A planned stack has its own Draft and Push all (the stack view); the header keeps Stop and Discard.
   const stacked = (build.prs?.length ?? 0) > 0;
-  const pushAll = !stacked && pushAllOffered(build);
-  const anyPushable = !stacked && build.repos.some((r) => r.include && r.status === 'ready' && r.hasPatch);
+  // THE REVIEW LOOP pushes by itself while it runs: Push all and Draft hide until it pauses or ends.
+  const loopBusy = loopRunning(build);
+  const pushAll = !stacked && !loopBusy && pushAllOffered(build);
+  const anyPushable = !stacked && !loopBusy && build.repos.some((r) => r.include && r.status === 'ready' && r.hasPatch);
   const running = sessionTurnRunning(session);
   const discardable = sessionCanDiscard(session);
   if (!anyPushable && !running && !discardable) return null;
@@ -227,7 +232,7 @@ function StoryBuildCommands({ build, session }: { build: StoryBuild | null; sess
   const canBuild = session != null && sessionCanStartBuild(session);
   const canApprove = session != null && planApproveState(session).enabled;
   const stacked = (build?.prs?.length ?? 0) > 0;
-  const canPushAll = build != null && (stacked ? pushAllPrCount(build.prs ?? []) >= 2 : pushAllOffered(build));
+  const canPushAll = build != null && !loopRunning(build) && (stacked ? pushAllPrCount(build.prs ?? []) >= 2 : pushAllOffered(build));
   const canStop = session != null && sessionTurnRunning(session);
   const key = build?.ticketKey ?? '';
   const commands = useMemo<Command[]>(() => {

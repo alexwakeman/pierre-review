@@ -48,7 +48,7 @@ export function StoryBuildHeader({
   const qc = useQueryClient();
   const node = qc.getQueryData<SprintGraphResponse>(sprintGraphKey(workspaceId))?.nodes.find((n) => n.ident === ident) ?? null;
   const session = build?.session ?? null;
-  const steps = sessionSteps(session);
+  const steps = sessionSteps(session, build?.loop ?? null);
   const cost = session != null ? costText(session.spend.costUsd, session.provider ?? build?.provider ?? null) : null;
   const shownTitle = build?.ticketTitle ?? title ?? (node != null && node.title !== '' ? node.title : null);
   const action = storyBuildActionOf(build, node, offered);
@@ -77,7 +77,7 @@ export function StoryBuildHeader({
         )}
         <p>
           Start build lets it change the code and run the tests. When it stops, each repository’s changes are shown here. Nothing
-          is pushed until you press Push, unless you ticked “Push and open the pull request”. Each push opens a new pull
+          is pushed until you press Push, unless you ticked “After the build: review and fix”. Each push opens a new pull
           request, as a draft unless you untick Draft.
         </p>
       </InfoButton>

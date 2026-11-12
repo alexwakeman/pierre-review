@@ -103,14 +103,21 @@ export default function Page(): JSX.Element {
 
       <H2 id="update-the-ticket">Update the ticket</H2>
       <p>
-        <Ui>Ticket update (draft)</Ui> is the agent's draft of the ticket, in the ticket's own style, as if you agree with
-        every point. Change it as you like, then copy it into the ticket.
+        After planning, <Ui>The ticket</Ui> shows the whole ticket in two boxes: the description and the acceptance criteria.
+        Each box starts with the agent&rsquo;s draft, or with the ticket&rsquo;s current text when the plan does not change
+        it. The agent must write a draft when it raises a point to settle or does not plan a criterion, and it keeps the
+        ticket&rsquo;s layout: the same headings in the same order, the same list style, and GIVEN / WHEN / THEN when the
+        ticket uses it.
+      </p>
+      <p>
+        Change the text as you like. Under each box, <Ui>What changes</Ui> shows the lines that differ from the ticket, and
+        a note says where the text no longer keeps the ticket&rsquo;s layout. The notes are advice; you decide.
       </p>
       <Warning>
-        On a Jira ticket, <Ui>Update ticket</Ui> writes the draft to Jira: the description, and the acceptance criteria into
-        the field Limn read them from. It asks once before it replaces anything. An empty box leaves that field as it is.{' '}
-        <Ui>Approve and start</Ui> then reads the ticket again. For other trackers, copy the text in yourself. See{' '}
-        <DocLink to="integrations/jira">Jira</DocLink>.
+        On a Jira ticket, <Ui>Update ticket</Ui> writes only the boxes that change, after it asks once. The acceptance
+        criteria go where the ticket keeps them: their own field, in that field&rsquo;s format, or the criteria section
+        of the description. <Ui>Approve and start</Ui> then reads the ticket again. For other trackers, copy the text in
+        yourself. See <DocLink to="integrations/jira">Jira</DocLink>.
       </Warning>
 
       <H2 id="approve-and-start">Approve and start</H2>

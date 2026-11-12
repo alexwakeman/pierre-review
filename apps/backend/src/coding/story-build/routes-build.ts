@@ -16,6 +16,7 @@ import { pushAllRepos, pushRepo } from './push.js';
 import { setStoryBuildAutoPush } from './auto-push.js';
 import { isPlannedBuild, isStoryBuildStackPushing, pushPlannedPr, pushPlannedStack, repoResultsOf, type PushPlannedPrArgs } from './push-stack.js';
 import type { PushRepoFn } from './seams.js';
+import { registerStoryBuildLoopRoutes } from './loop/routes.js';
 
 // "IMPLEMENT STORY" — THE PATCH ROUTES (docs/STORY-BUILD.md § Push; contracts in docs/API.md). A workspace
 // session stores each repository's work as a patch on its `story_build_repos` row; these routes read it
@@ -176,4 +177,7 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     const resp: StoryBuildAutoPushResponse = { autoPush: r.autoPush };
     return reply.send(resp);
   });
+
+  // THE REVIEW LOOP (loop/routes.ts): GET …/loop, POST …/loop/settings | continue | stop.
+  registerStoryBuildLoopRoutes(app, ctx);
 }

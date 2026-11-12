@@ -281,6 +281,13 @@ flowchart TD
 
 ---
 
+**A PR that Implement's review loop opened** (docs/STORY-BUILD.md § The review loop). Before the PR
+exists, Limn reviews the branch several times and the agent answers each point. All of that stays in the
+reader's Limn: teammates see none of it, and no team claim or `limn/` status is posted for it. When the PR
+opens, it is the reader's own PR. Limn stores the last internal review as the reader's own review of that
+commit (a manual run, not posted), so auto review does not review the same commit again. The PR body sums
+up the rounds. From the next commit on, the PR is treated like any other PR the reader wrote.
+
 ## 5. Verdicts and approvals
 
 Automatic posts use the reader's settings. With **"Approve or request changes for me"** on (the

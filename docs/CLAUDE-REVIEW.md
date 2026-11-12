@@ -32,8 +32,8 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
     files, run commands or reach the web; the fixer edits files, has no shell, builds and tests
     nothing; nothing is posted or pushed until the reader presses the button — EXCEPT what a
     workspace's AUTO-POSTING covers (§ Auto-posting; on by default, AUTO runs only), AI Fix's Push
-    automatically, and Implement / Fill gaps' opt-in "Push and open the pull request when the build
-    finishes" (docs/STORY-BUILD.md § Push automatically). Never promise
+    automatically, and Implement / Fill gaps' opt-in "After the build: review and fix, then open the pull
+    request" (docs/STORY-BUILD.md § The review loop: branch commits and the final PR only). Never promise
     subscription billing. Copy reads "your own Claude Code login or Anthropic API key", or names
     the ChatGPT sign-in when Codex is the provider (§ Codex, the second provider).
 
@@ -2341,6 +2341,45 @@ request.
   invalidation), so the button never comes back while the hold lasts, and the message shows under
   the cell only for as long as the hold does.
 
+## Reviewing a branch (the review loop, 2026-11-12)
+
+Implement story's REVIEW LOOP (docs/STORY-BUILD.md § The review loop) reviews a pushed BRANCH that has no
+PR yet with THIS machinery — the same runner, prompts, findings schema, provider pairing and follow-up —
+and stores the result in its own `story_build_reviews` / `story_build_review_findings` rows, never in
+`claude_reviews` (until the PR opens, below). Nothing is posted to GitHub. The seams:
+
+- **The diff**: `review/clone-manager.ts localBranchDiff(owner, name, baseSha, headSha)` (three-dot, both
+  commits in the clone cache, no gh) and `review/prepare.ts prepareBranchReview` — `prepareReview`'s tail
+  is the shared `preparedFromDiff`, so a PR review is unchanged. It is on the `ctx.review` contract.
+- **The checkout**: `RunReviewArgs.checkout {remoteRef, destRef, sha}` makes `runReview` use
+  `prepBranchWorktree` instead of a PR head (`prNumber` 0, unused). Absent ⇒ exactly as before.
+- **The prompt**: `buildUserPrompt`'s optional `subject: {kind:'branch', branch}` changes the header
+  ("branch X (no pull request yet)"), "What the branch is for", and the follow-up words: the replies are
+  "The build agent's answers" (the agent's response to each finding, as a `FindingReply`), and prior
+  findings pass `posted: true` so no "Not posted to GitHub" marker shows. Absent ⇒ BYTE-IDENTICAL
+  (`prompt-golden.json`); the branch wording has its own golden (`prompt-golden-branch.json`). The system
+  prompt's "a single GitHub pull request" is kept: the branch is about to become one.
+- **The follow-up**: `selectPriorFindings`, `reconcileFollowUp`, `linkReraisedFindings`,
+  `dropAcceptedReraises` run as in `runPipeline`. A same-head target is re-reviewed when the agent answered
+  something, so its pushback is judged; `reply_accepted` settles a finding, `reply_disputed` keeps it open.
+- **The pair**: halves at once, blind; `pair-consolidate.ts consolidateHalves` (DB-free; the merge pass,
+  else `pairRepeatGroups`) marks duplicates `merged_into` and stores the same `pair_consolidation` record.
+  No cover pass when one half fails (the other IS the review). Loop runs do not take a review slot.
+- **Usage**: feature `story_loop_review` (`prId` NULL); the ONE budget gate is asked per run
+  (`automaticRunAllowed`), except the step a reader's Continue resumes.
+- **The story check** reuses the ticket review's `buildTicketReviewPrompt` → `runTicketReviewAgent` →
+  `reconcileTicketReview` directly (`runPipeline` untouched). `PromptMember.label` renders a member as
+  `repo branch X` instead of `#n`; the optional `claims` section lists the agent's notes on criteria
+  (`not_applicable` / `answer`), and `buildSubmitTicketReviewShape(z, { notApplicable: true })` adds the
+  `notApplicable` verdicts (`accepted` | `rejected` + why) — only on request, so the ticket goldens and the
+  Codex schema are unchanged otherwise. Not applicable is BUILD-SCOPED: no shared criterion status.
+  Feature `story_loop_check`, provider `activeProviderId()`, never a pair.
+- **When the PR opens** (§ Auto review): `loop/review-on-pr.ts markLoopReviewOnPr` writes the CLOSING
+  review as ONE `claude_reviews` row at the PR head — `trigger 'manual'` (never the daily auto cap),
+  `kind` NULL, the lead half's provider/model, the consolidated findings, NOT posted — so the first-review
+  rule finds a row and auto review does not review that head again. A new head is reviewed as usual. A
+  failed write is logged; auto review then reviews the PR.
+
 ## Ticket review (one review per ticket, across its PRs)
 
 ⚠ **A PR REVIEW NO LONGER CHECKS STORIES.** The split (2026-10) made two processes: the PR review
@@ -2725,6 +2764,9 @@ is re-stamped on every off → on (whole seconds, so the echo matches what SQLit
 repeated on, and cleared on off, so nothing opened while it was off is picked up. Runs carry `claude_reviews.trigger = 'auto'`
 (core `0071`; `'manual'` is the default).
 
+- **A PR the review loop opened** (§ Reviewing a branch) already has a `claude_reviews` row at its head
+  (`trigger 'manual'`, the loop's closing review, not posted), so it is NOT a first-review candidate; a
+  later head is re-reviewed as for any PR.
 - **THE PIPELINE, AS ONE STATE DESCRIPTION.** Each minute the sweeper reads the candidates (first
   reviews, and re-reviews of a moved head or of new comments). A candidate is:
   1. **TRIGGERED** — a first review, a new head, or a new review-thread comment by a PERSON or a
@@ -5162,8 +5204,8 @@ reference-docs library, sprint briefs/paths and every one-shot completion. Detai
   deny-list `protectWrites`) are gone; do not bring them back as a fallback (owner decision Q2).
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post (ON by default) / Push automatically (OFF) switches, and Implement / Fill gaps' opt-in
-  "Push and open the pull request when the build finishes" tick (docs/STORY-BUILD.md § Push
-  automatically). Auto-posting is AUTO RUNS ONLY, under
+  "After the build: review and fix, then open the pull request" tick (docs/STORY-BUILD.md § The review
+  loop). Auto-posting is AUTO RUNS ONLY, under
   the reader's account, ONE review, `COMMENT` unless `autoVerdict` (ON by default) allows
   stricter; ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub write, a
   failure is recorded and NEVER retried. Every posted body carries the hidden marker so

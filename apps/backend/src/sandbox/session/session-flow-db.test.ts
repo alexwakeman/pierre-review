@@ -36,13 +36,14 @@ vi.mock('../../coding/git-ops.js', () => ({
     return { pushedBranch: a.branch, commitSha: `c${n}`, prNumber: n, prUrl: `https://github.com/${a.owner}/${a.name}/pull/${n}` };
   },
 }));
-// The automatic push's hook (manager.ts runTurn → the story subject): recorded, then the real gate.
-vi.mock('../../coding/story-build/auto-push.js', async (orig) => {
-  const real = await orig<typeof import('../../coding/story-build/auto-push.js')>();
+// The review loop's start hook (manager.ts runTurn → the story subject's afterBuildTurnEnded): recorded,
+// then the real gate.
+vi.mock('../../coding/story-build/loop/driver.js', async (orig) => {
+  const real = await orig<typeof import('../../coding/story-build/loop/driver.js')>();
   return {
     ...real,
-    maybeAutoPushBuild: async (...a: Parameters<typeof real.maybeAutoPushBuild>) => {
-      const d = await real.maybeAutoPushBuild(...a);
+    maybeStartLoop: async (...a: Parameters<typeof real.maybeStartLoop>) => {
+      const d = await real.maybeStartLoop(...a);
       G.autoPush.push({ ...a[1], decision: d });
       return d;
     },
@@ -372,12 +373,12 @@ describe('a workspace session, end to end', () => {
     const again = await post(`/api/story-builds/${id}/build`, {});
     expect(again.statusCode).toBe(409);
     expect(again.json().error).toBe('NotReady');
-    // The build turn ended well and settled in `built`: the automatic push was asked once — and, with the
-    // option off (the default), pushed nothing (the reader's Push below is the first push).
+    // The build turn ended well and settled in `built`: the review loop was asked once — and, with the
+    // option off (the default), started nothing (the reader's Push below is the first push).
     expect(b.autoPush).toBe(false);
     // It runs off the turn ("a push is not a turn"): wait for it to answer.
     for (let i = 0; i < 100 && G.autoPush.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
-    expect(G.autoPush).toEqual([{ accountId: 1, buildId: id, decision: { status: 'skipped', reason: 'off' } }]);
+    expect(G.autoPush).toEqual([{ accountId: 1, buildId: id, decision: 'skipped' }]);
     expect(G.pushes).toEqual([]);
   });
 
@@ -436,15 +437,27 @@ describe('limits, teardown, restart and resume', () => {
     ticketReads = 0;
     expect((await post('/api/story-builds', { workspaceId: wsId, ident: IDENT, autoPush: 'yes' })).statusCode).toBe(400);
     // "Push and open the pull request when the build finishes", ticked at Start: stored on the row.
-    const a = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT, autoPush: true });
+    expect((await post('/api/story-builds', { workspaceId: wsId, ident: IDENT, autoPush: true, loopRounds: 9 })).statusCode).toBe(400);
+    const a = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT, autoPush: true, loopRounds: 2 });
     expect(a.statusCode).toBe(202);
     const id = a.json().buildId;
     expect((await read(id)).autoPush).toBe(true);
+    // The review loop's rounds, stored with the option; the build carries the loop (not started).
+    expect((await rowOf(id)).loopRounds).toBe(2);
+    expect((await read(id)).loop).toMatchObject({ on: true, rounds: 2, state: null, editable: true });
     const b = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT2 });
     expect(b.statusCode).toBe(409);
     expect(b.json()).toEqual({ error: 'TooManySessions', message: 'A session is already open. Discard one first.' });
     await until(id, (x) => x.session?.phase === 'ready', 'ready');
     const sid = (await rowOf(id)).sandboxRef as string;
+    // THE REVIEW LOOP's hooks: a host turn needs a live session in build mode; a HELD session is never
+    // closed for being idle, and closes as usual once released.
+    expect(M.startHostBuildTurn('story:999999', 'x')).toBe('not_live');
+    expect(M.startHostBuildTurn(`story:${id}`, 'x')).toBe('busy');
+    expect(M.holdSession(`story:${id}`, 'review loop')).toBe(true);
+    await M._idleCloseForTest(id);
+    expect((await read(id)).session).toMatchObject({ phase: 'ready', live: true });
+    M.releaseSession(`story:${id}`);
     await M._idleCloseForTest(id);
     const after = await read(id);
     expect(after.session).toMatchObject({ phase: 'failed', live: false, resumable: false });

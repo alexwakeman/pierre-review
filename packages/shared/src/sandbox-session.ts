@@ -21,6 +21,7 @@ import type { SandboxAgentErrorCode, SandboxAgentEvent, SandboxAgentMode, Sandbo
 import type { SandboxServicesStatus } from './sandbox-services.js';
 import type { BuildPlanView, StoryBuildPr } from './build-plan.js';
 import type { StoryBuildStatus } from './story-build.js';
+import type { StoryBuildLoop } from './story-build-loop.js';
 import type { AiProviderId } from './types.js';
 
 export type SandboxSessionPhase =
@@ -233,6 +234,8 @@ export type SandboxSessionStreamEvent =
   | { type: 'plan'; plan: BuildPlanView }
   /** Plan first: the planned pull requests after a build turn's extraction. */
   | { type: 'prs'; prs: StoryBuildPr[] }
+  /** The review loop moved (state, round, pause): the tab refetches the build for the rounds. */
+  | { type: 'loop'; loop: StoryBuildLoop }
   | { type: 'done' };
 
 // ---- bodies --------------------------------------------------------------------------------------------
@@ -250,6 +253,8 @@ export interface SandboxSessionStartBody {
   /** "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically).
    *  Off unless `true`; the reader may change it in the tab until the build pushed (`STORY_BUILD_API.autoPush`). */
   autoPush?: boolean;
+  /** With `autoPush`: the review + fix rounds before the pull request opens (1..6, default 3). */
+  loopRounds?: number;
 }
 
 /** `POST …/messages`. 1..SANDBOX_MESSAGE_MAX characters. */

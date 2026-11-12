@@ -17,6 +17,21 @@ Meet each one. Refer to them as AC1, AC2, … in this order.
 1. GIVEN a baseline WHEN I open the summary THEN I see the habitat table _(already met by the existing pull requests)_
 2. Totals are in hectares to two decimal places _(a gap: build this)_
 
+## Acceptance criteria as written in the ticket
+
+They live in the ticket's own field "Acceptance Criteria".
+Layout: paragraphs.
+
+````text
+Shown on the summary page.
+Totals in hectares.
+````
+
+## Description layout
+
+No headings.
+Layout: paragraphs.
+
 ## Open points (not decided yet)
 
 Do not invent answers. Where the code depends on one, write `TODO(open point N)` and list it in your report.

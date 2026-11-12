@@ -99,7 +99,11 @@ The session starts with a plan. Limn sends the first message. Read and investiga
   - `data_run`: `run`, the `svc-<n>` id that `limn-svc run` prints at the end of a run, and `quote`, text of its output. Run each query as `limn-svc run <service> <command>` (for example `limn-svc run postgres psql -h postgres -c "select …"`). Limn records only these runs: a query over `localhost` is not evidence.
 - Limn checks every piece of evidence itself and removes what it cannot find. A point you cannot show is not a point of contention: leave it out. Never use production systems or production data.
 - `stack`: the pull requests in order (P1, P2, …). One pull request per repository, unless splitting clearly reduces risk or review size. At most 3 in one repository and 6 in all. In one repository each pull request builds on the one before it: put that one in `dependsOn`. Each pull request must build and pass its tests on its own. When there are more pull requests than repositories, `stackReason` says why. Titles do not include the ticket key.
-- `ticketUpdate`: required when there is a point of contention or the story needs work in another way, else null. Give the WHOLE new `description` and/or `acceptanceCriteria` in the ticket's own format: keep its headings, its list style, its GIVEN / WHEN / THEN lines and its spelling (British English if the ticket uses it). Write it as if the reader agrees with every point; list the points in `contentions`. Limn never writes it to the tracker: the reader copies it.
+- `ticketUpdate`: REQUIRED when there is a point of contention or a criterion is `not_planned`, or when the story needs work in another way. Else null: the ticket is right as written.
+  - Each field is the WHOLE new text, or null when that part does not change. Write it as if the reader agrees with every point; list the points in `contentions`.
+  - Keep the ticket's layout (TICKET.md, "Acceptance criteria as written in the ticket" and "Description layout"): the same headings in the same order, the same list style, GIVEN / WHEN / THEN when the ticket uses it, and the same spelling (British English if the ticket uses it).
+  - When the criteria live in the description, put the new criteria inside `description`, in the same section, and set `acceptanceCriteria` to null.
+  - Limn shows the draft to the reader, who can change it and press Update ticket. Limn writes nothing to the tracker by itself.
 - Check the plan before you send it: `node /home/agent/.limn/plan-check.cjs <<'EOF'` … `EOF` prints OK or the problems. If your tools do not let you run it, send the plan: Limn checks it anyway.
 - The reader answers each point of contention: agree, keep the story, or a reply. When you revise the plan, keep the ids of the points that did not change, and send the WHOLE plan again in one `limn-plan` block.
 - The build starts only when the reader approves the plan. Then `/Users/alex/Projects/DEFRA/bng-fe-be/PLAN.md` has the approved plan and the reader's decisions.
@@ -139,6 +143,21 @@ Meet each one. Refer to them as AC1, AC2, … in this order.
 
 1. GIVEN a baseline WHEN I open the summary THEN I see the habitat table
 2. Totals are in hectares to two decimal places
+
+## Acceptance criteria as written in the ticket
+
+They live in the ticket's own field "Acceptance Criteria".
+Layout: paragraphs.
+
+````text
+Shown on the summary page.
+Totals in hectares.
+````
+
+## Description layout
+
+No headings.
+Layout: paragraphs.
 
 ## Open points (not decided yet)
 

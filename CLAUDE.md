@@ -462,8 +462,8 @@ a shell, ONLY inside a sandbox `sandbox/runtime` started. The shell-less agents 
 fallback. AI Fix pushes ONLY the PR repository, to the PR's branch; never queued, an unattended one skips.
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
-  leaves ONLY as a patch per repository and the HOST pushes on the reader's press — or ONCE after a
-  build the reader opted into (`story-build/auto-push.ts`: claim first, never retried).
+  leaves ONLY as a patch per repo; the HOST pushes on the reader's press — or by the opt-in REVIEW
+  LOOP (`story-build/loop/`: branch, review rounds, fast-forward fixes, then the PR; claimed, never retried).
 - ⚠ **On Docker its only way out is Limn's allow-list proxy**; the model credential stays on the host.
 - **The base commit comes from Limn's clone cache**; the reader's clone only LENDS OBJECTS (never its
   tree, index or hooks) to the KEPT read-only repo store. **Memories only, never past sessions.** ONE fold

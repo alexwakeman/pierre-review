@@ -264,6 +264,13 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // repositories first, then their sessions (composite FK). The worktrees on disk are ledgered and
     // collected by the worktree sweep.
     // Plan first (0179): the planned PRs, then the plan revisions, before the repository rows and builds.
+    // The review loop (0186): its pushes, the agent's criterion answers, the story checks, the findings,
+    // then the review runs (findings point at reviews), all before the builds.
+    await tx.delete(schema.storyBuildLoopPushes).where(eq(schema.storyBuildLoopPushes.accountId, accountId)).execute();
+    await tx.delete(schema.storyBuildAcResponses).where(eq(schema.storyBuildAcResponses.accountId, accountId)).execute();
+    await tx.delete(schema.storyBuildStoryChecks).where(eq(schema.storyBuildStoryChecks.accountId, accountId)).execute();
+    await tx.delete(schema.storyBuildReviewFindings).where(eq(schema.storyBuildReviewFindings.accountId, accountId)).execute();
+    await tx.delete(schema.storyBuildReviews).where(eq(schema.storyBuildReviews.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildPrs).where(eq(schema.storyBuildPrs.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildPlans).where(eq(schema.storyBuildPlans.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildRepos).where(eq(schema.storyBuildRepos.accountId, accountId)).execute();
@@ -481,6 +488,12 @@ export function accountScopedTables(): {
     { name: 'storyBuildRepos', col: schema.storyBuildRepos.accountId, table: schema.storyBuildRepos },
     { name: 'storyBuildPlans', col: schema.storyBuildPlans.accountId, table: schema.storyBuildPlans },
     { name: 'storyBuildPrs', col: schema.storyBuildPrs.accountId, table: schema.storyBuildPrs },
+    // The review loop (migration 0186), erased explicitly above.
+    { name: 'storyBuildLoopPushes', col: schema.storyBuildLoopPushes.accountId, table: schema.storyBuildLoopPushes },
+    { name: 'storyBuildReviews', col: schema.storyBuildReviews.accountId, table: schema.storyBuildReviews },
+    { name: 'storyBuildReviewFindings', col: schema.storyBuildReviewFindings.accountId, table: schema.storyBuildReviewFindings },
+    { name: 'storyBuildStoryChecks', col: schema.storyBuildStoryChecks.accountId, table: schema.storyBuildStoryChecks },
+    { name: 'storyBuildAcResponses', col: schema.storyBuildAcResponses.accountId, table: schema.storyBuildAcResponses },
     // Chronology's settings history (migration 0096 / pg 0083), erased explicitly above.
     {
       name: 'workspaceSettingEvents',

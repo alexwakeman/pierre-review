@@ -214,6 +214,7 @@ export function buildAgentContext(log: FastifyBaseLogger): AgentContext {
     },
     review: {
       prepareReview: async (a) => (await import('./prepare.js')).prepareReview(a),
+      prepareBranchReview: async (a) => (await import('./prepare.js')).prepareBranchReview(a),
       runReview: async (a) => (await import('./agent.js')).runReview(a),
       postReview: async (a) => (await import('./post-seam.js')).postReview(a),
       postFinding: async (a) => (await import('./post-seam.js')).postFinding(a),

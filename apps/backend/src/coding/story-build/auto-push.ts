@@ -1,3 +1,8 @@
+// ⚠ RETIRED FROM THE SESSION (2026-11-12): the opt-in now runs THE REVIEW LOOP (loop/driver.ts), which
+// pushes the branch, reviews and fixes it, then opens the PR. The session no longer calls
+// `maybeAutoPushBuild`; it stays (with its tests) for the claim columns it shares with the loop (the loop's
+// start claim also stamps `auto_push_claimed_at`), the switch's alias route and the boot reconcile of old rows.
+//
 // PUSH AUTOMATICALLY — "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md
 // § Push automatically). The reader's OPT-IN on Implement and Fill gaps (`story_builds.auto_push`, OFF by
 // default; ticked in the Start panel, changeable in the tab until the build pushed). THE TICK IS THE
@@ -177,7 +182,8 @@ export async function reconcileStoryAutoPushOnStartup(ctx: Ctx & Pick<AgentConte
   const rows = (await ctx.db
     .select({ id: b.id, accountId: b.accountId })
     .from(b)
-    .where(and(isNotNull(b.autoPushClaimedAt), isNull(b.autoPushError)))
+    // A review loop's start claim stamps `auto_push_claimed_at` too: the loop reconciles its own rows.
+    .where(and(isNotNull(b.autoPushClaimedAt), isNull(b.autoPushError), isNull(b.loopClaimedAt)))
     .execute()) as Array<{ id: number; accountId: number }>;
   let marked = 0;
   for (const r of rows) {

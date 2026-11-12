@@ -180,14 +180,14 @@ test.describe('Implement, plan first', () => {
     await expect(p2.getByRole('button', { name: 'Push as draft' })).toBeVisible();
     await expect(p2).toContainText('Builds on #81 (P1)');
   });
-  test('the ticket draft is editable, and Update ticket writes it to Jira once asked', async ({ page }) => {
+  test('the ticket draft is editable, and Update ticket writes only what changes to Jira once asked', async ({ page }) => {
     await withAi(page, { storyBuild: STORY_SESSION_PLAN_READY });
     const sent: TicketUpdateBody[] = [];
     await page.route(
       (u) => u.pathname.endsWith('/api/ticket-update'),
       (r) => {
         sent.push(r.request().postDataJSON() as TicketUpdateBody);
-        const res: TicketUpdateResponse = { workspaceId: fixtures.WORKSPACE.id, ident: ACME_1, updated: { description: false, acceptanceCriteria: true }, criteriaField: 'Acceptance Criteria' };
+        const res: TicketUpdateResponse = { workspaceId: fixtures.WORKSPACE.id, ident: ACME_1, updated: { description: false, acceptanceCriteria: true }, criteriaField: 'Acceptance Criteria', criteriaWritten: 'field' };
         return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(res) });
       },
     );
@@ -195,8 +195,12 @@ test.describe('Implement, plan first', () => {
     const draft = page.getByTestId('story-plan-ticket-update');
     const box = draft.getByTestId('story-plan-ticket-criteria').getByRole('textbox', { name: 'Acceptance criteria' });
     await expect(box).toHaveValue(/GIVEN a report with more than 500 rows/);
+    // The whole ticket: the description box holds the current text (the draft leaves it), "No change".
+    await expect(draft.getByTestId('story-plan-ticket-description').getByRole('textbox')).toHaveValue(/download a report as a CSV file/);
+    await expect(draft.getByTestId('story-plan-ticket-description-diff')).toHaveText('No change.');
+    await expect(draft.getByTestId('story-plan-ticket-criteria-diff')).toContainText('What changes');
     await box.fill('AC3: GIVEN a report with 10,000 rows\nTHEN the file streams every row');
-    await expect(draft).toContainText('Ticket update (edited)');
+    await expect(draft).toContainText('The ticket (edited)');
     // Copy takes the edited text.
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await draft.getByRole('button', { name: 'Copy acceptance criteria' }).click();
@@ -205,7 +209,7 @@ test.describe('Implement, plan first', () => {
     await draft.getByTestId('story-plan-ticket-update-button').click();
     await expect(draft).toContainText('Replace the ticket\'s acceptance criteria in Jira?');
     await draft.getByTestId('story-plan-ticket-update-confirm').click();
-    await expect(draft.getByTestId('story-plan-ticket-updated')).toHaveText('Updated in Jira. Approve and start reads the ticket again.');
+    await expect(draft.getByTestId('story-plan-ticket-updated')).toHaveText('Updated in Jira.');
     expect(sent).toEqual([{ ident: ACME_1, description: null, acceptanceCriteria: 'AC3: GIVEN a report with 10,000 rows\nTHEN the file streams every row' }]);
     await expect(draft.getByTestId('story-plan-ticket-update-button')).toBeDisabled();
     // Back to the draft restores the agent's text.

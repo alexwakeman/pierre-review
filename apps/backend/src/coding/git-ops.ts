@@ -1,10 +1,13 @@
 import { and, eq } from 'drizzle-orm';
 import { getAccessToken, getAccountById } from '../auth/account.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   cleanupCloneCache,
   prepBranchWorktree,
   prepWorktree,
   removeWorktreeLocked,
+  resolveBranchCommit,
 } from '../review/clone-manager.js';
 import {
   createPullRequest,
@@ -320,13 +323,60 @@ export const TREE_MISMATCH_LINE = "Limn's copy of the earlier pull request does 
 export async function applyAndPushBranch(
   args: ApplyAndPushBranchArgs,
 ): Promise<{ pushedBranch: string; commitSha: string; prNumber: number; prUrl: string }> {
+  const { commitSha } = await pushNewBranch(args);
+  let pr: { prNumber: number; prUrl: string };
+  try {
+    pr = await openPrForBranch({
+      accountId: args.accountId,
+      owner: args.owner,
+      name: args.name,
+      branch: args.branch,
+      prBase: args.prBase,
+      title: args.title,
+      body: args.body,
+      draft: args.draft,
+      ...(args.afterSync ? { afterSync: args.afterSync } : {}),
+    });
+  } catch (err) {
+    // The branch IS on GitHub: say so, so nobody presses Push again into BRANCH_EXISTS.
+    throw prNotOpened(args.branch, commitSha, err);
+  }
+  return { pushedBranch: args.branch, commitSha, prNumber: pr.prNumber, prUrl: pr.prUrl };
+}
+
+/** The coded `PR_NOT_OPENED` error: the branch landed, the PR did not (carries the pushed commit). */
+export function prNotOpened(branch: string, commitSha: string, err: unknown): Error & { code: string; commitSha: string } {
+  const e = new Error(
+    `The branch ${branch} was pushed, but GitHub did not open the pull request (${err instanceof Error ? err.message : String(err)}). Open it on GitHub.`,
+  ) as Error & { code: string; commitSha: string };
+  e.code = 'PR_NOT_OPENED';
+  e.commitSha = commitSha;
+  return e;
+}
+
+/** The reader's commit identity (an Implement push is the READER'S: no ledger, no trailer). */
+async function readerAuthor(accountId: number): Promise<{ authorName: string; authorEmail: string }> {
+  const account = await getAccountById(accountId);
+  return {
+    authorName: account?.displayName || account?.githubLogin || 'pierre-review',
+    authorEmail: account?.githubLogin ? `${account.githubLogin}@users.noreply.github.com` : 'pierre-review@users.noreply.github.com',
+  };
+}
+
+const refPathOf = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/');
+
+export type PushNewBranchArgs = Omit<ApplyAndPushBranchArgs, 'prBase' | 'title' | 'body' | 'draft' | 'afterSync'>;
+
+/**
+ * Push a NEW branch, no PR (`applyAndPushBranch`'s steps 1–5; the story build's review loop pushes the build
+ * before it reviews it): git's rules and the protected names first, refused with `BRANCH_EXISTS` when the
+ * branch is live, a FRESH worktree at `baseSha`, the patch applied, ONE commit by the reader, the optional
+ * `expectTree` check, then the push (never forced). Returns the pushed commit and its tree.
+ */
+export async function pushNewBranch(args: PushNewBranchArgs): Promise<{ commitSha: string; treeSha: string }> {
   const { accountId, owner, name } = args;
   const token = await getAccessToken(accountId);
-  const account = await getAccountById(accountId);
-  const authorName = account?.displayName || account?.githubLogin || 'pierre-review';
-  const authorEmail = account?.githubLogin
-    ? `${account.githubLogin}@users.noreply.github.com`
-    : 'pierre-review@users.noreply.github.com';
+  const { authorName, authorEmail } = await readerAuthor(accountId);
   // AN IMPLEMENT PR IS THE READER'S (owner decision 2026-11-11): no ledger row, no `Limn-Run:` trailer, so
   // sync attributes the PR and its commit to the reader, never to their `limn:` bot — and the reader's own
   // auto review picks it up like any PR of theirs (docs/STORY-BUILD.md § Push).
@@ -335,8 +385,7 @@ export async function applyAndPushBranch(
   // The name is the reader's (or the plan's slug): git's own check and the protected names FIRST, before
   // it is spelled into a GitHub URL — each segment encoded (`#`, `%` and the like are valid in a ref).
   await assertPushTarget(args.branch, args.protect);
-  const refPath = args.branch.split('/').map(encodeURIComponent).join('/');
-  const existing = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${refPath}`);
+  const existing = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${refPathOf(args.branch)}`);
   if (existing.ok) {
     throw codedError('BRANCH_EXISTS', `branch ${args.branch} already exists on ${owner}/${name}`);
   }
@@ -356,7 +405,8 @@ export async function applyAndPushBranch(
       authorName,
       authorEmail,
     });
-    if (args.expectTree != null && (await headTree(worktreePath)) !== args.expectTree) throw codedError('TREE_MISMATCH', TREE_MISMATCH_LINE);
+    const treeSha = await headTree(worktreePath);
+    if (args.expectTree != null && treeSha !== args.expectTree) throw codedError('TREE_MISMATCH', TREE_MISMATCH_LINE);
     await pushRef({
       worktree: worktreePath,
       owner,
@@ -368,32 +418,7 @@ export async function applyAndPushBranch(
       origin,
       limnCommits: [commitSha],
     });
-    let pr: { number: number; url: string };
-    try {
-      pr = await createPullRequest(token, {
-        owner,
-        name,
-        head: args.branch,
-        base: args.prBase,
-        title: args.title,
-        body: args.body,
-        draft: args.draft,
-      }, origin);
-    } catch (err) {
-      // The branch IS on GitHub: say so, so nobody presses Push again into BRANCH_EXISTS.
-      const e = new Error(
-        `The branch ${args.branch} was pushed, but GitHub did not open the pull request (${err instanceof Error ? err.message : String(err)}). Open it on GitHub.`,
-      ) as Error & { code: string; commitSha: string };
-      e.code = 'PR_NOT_OPENED';
-      e.commitSha = commitSha;
-      throw e;
-    }
-    // ── The PR exists: nothing below may throw. Synced in the background (see applyAndPush). ──
-    const opened = pr.number;
-    void syncNewPrInRepo(accountId, owner, name, opened)
-      .then(() => args.afterSync?.(opened))
-      .catch(() => {});
-    return { pushedBranch: args.branch, commitSha, prNumber: pr.number, prUrl: pr.url };
+    return { commitSha, treeSha };
   } finally {
     if (repoCloneDir && worktreePath) {
       await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(() => {});
@@ -408,6 +433,166 @@ export async function applyAndPushBranch(
       });
     }
   }
+}
+
+/**
+ * Open the PR for a branch already on GitHub (the step `applyAndPushBranch` ends with; the review loop's
+ * last step), as the READER's PR — ready for review unless `draft`. Synced in the background, then
+ * `afterSync`; once the PR exists nothing here throws.
+ */
+export async function openPrForBranch(a: {
+  accountId: number;
+  owner: string;
+  name: string;
+  branch: string;
+  prBase: string;
+  title: string;
+  body: string;
+  draft: boolean;
+  afterSync?: (prNumber: number) => Promise<void>;
+}): Promise<{ prNumber: number; prUrl: string }> {
+  const token = await getAccessToken(a.accountId);
+  // AN IMPLEMENT PR IS THE READER'S (owner decision 2026-11-11; see `pushNewBranch`).
+  const origin: WriteOrigin = 'reader';
+  const pr = await createPullRequest(
+    token,
+    { owner: a.owner, name: a.name, head: a.branch, base: a.prBase, title: a.title, body: a.body, draft: a.draft },
+    origin,
+  );
+  // ── The PR exists: nothing below may throw. Synced in the background (see applyAndPush). ──
+  const opened = pr.number;
+  void syncNewPrInRepo(a.accountId, a.owner, a.name, opened)
+    .then(() => a.afterSync?.(opened))
+    .catch(() => {});
+  return { prNumber: pr.number, prUrl: pr.url };
+}
+
+/** The live tip of a branch on GitHub (one REST read): its sha, or null when the branch is not there. */
+export async function liveBranchSha(accountId: number, owner: string, name: string, branch: string): Promise<string | null> {
+  const token = await getAccessToken(accountId);
+  const res = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${refPathOf(branch)}`);
+  if (!res.ok) {
+    if (res.status === 404) return null;
+    throw codedError('PUSH_DENIED', `GitHub did not answer for ${branch} (HTTP ${res.status})`);
+  }
+  try {
+    const sha = (JSON.parse(res.text) as { object?: { sha?: unknown } }).object?.sha;
+    return typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The OPEN PR whose head is `branch` (one REST read), or null — the review loop's Continue after an
+ *  interrupted "open" adopts it rather than opening a second one. */
+export async function openPrOfBranch(accountId: number, owner: string, name: string, branch: string): Promise<{ prNumber: number; prUrl: string } | null> {
+  const token = await getAccessToken(accountId);
+  const res = await ghRestGetText(token, `/repos/${owner}/${name}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`);
+  if (!res.ok) throw codedError('PUSH_DENIED', `GitHub did not answer for ${branch} (HTTP ${res.status})`);
+  try {
+    const list = JSON.parse(res.text) as Array<{ number?: unknown; html_url?: unknown }>;
+    const pr = Array.isArray(list) ? list.find((p) => typeof p.number === 'number') : undefined;
+    return pr ? { prNumber: pr.number as number, prUrl: typeof pr.html_url === 'string' ? pr.html_url : '' } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** One commit's tree and first parents, read in the clone cache (the loop's Continue adopts a landed push). */
+export async function commitFacts(
+  accountId: number,
+  owner: string,
+  name: string,
+  branch: string,
+  sha: string,
+): Promise<{ tree: string; parents: string[] }> {
+  const token = await getAccessToken(accountId);
+  const { repoCloneDir } = await resolveBranchCommit(owner, name, { remoteRef: `refs/heads/${branch}`, destRef: 'refs/pierre/story-loop-read', sha }, token);
+  const { stdout } = await execGit(['-C', repoCloneDir, 'show', '-s', '--format=%T %P', sha]);
+  const [tree, ...parents] = stdout.trim().split(/\s+/);
+  return { tree: tree ?? '', parents };
+}
+
+/**
+ * The TREE a stored patch makes on its base (the review loop compares it with the last pushed tree): a
+ * fresh worktree at `baseSha`, the patch applied, `git add -A && git write-tree` (the tree objects land in
+ * the clone cache, so a later `commit-tree` there can use them). No commit; the worktree is removed.
+ */
+export async function treeOfPatch(accountId: number, owner: string, name: string, baseRef: string, baseSha: string, patch: string): Promise<string> {
+  const token = await getAccessToken(accountId);
+  let repoCloneDir: string | null = null;
+  let worktreePath: string | null = null;
+  try {
+    ({ repoCloneDir, worktreePath } = await prepBranchWorktree(
+      owner,
+      name,
+      { remoteRef: `refs/heads/${baseRef}`, destRef: 'refs/pierre/story-build-base', sha: baseSha },
+      token,
+    ));
+    if (patch.trim() !== '') await applyPatchToWorktree(worktreePath, patch);
+    await execGit(['add', '-A'], worktreePath);
+    const { stdout } = await execGit(['write-tree'], worktreePath);
+    return stdout.trim();
+  } finally {
+    if (repoCloneDir && worktreePath) await removeWorktreeLocked(owner, name, repoCloneDir, worktreePath).catch(() => {});
+  }
+}
+
+export const HEAD_MOVED_LOOP_LINE = (branch: string): string => `Someone pushed to ${branch} outside Limn. Limn stopped the review loop for it.`;
+
+/**
+ * A FAST-FORWARD commit on a branch the review loop pushed: a commit with tree `tree` and parents
+ * [pushedSha, ...extraParents], by the reader, pushed WITHOUT force. The live ref must still be `pushedSha`
+ * (`HEAD_MOVED` otherwise — someone pushed outside Limn). An unchanged tree with no extra parent pushes
+ * nothing (`pushed: false`). The tree must already be in the clone cache (`treeOfPatch`, or a planned PR's
+ * host-verified tree).
+ */
+export async function pushFastForward(a: {
+  accountId: number;
+  owner: string;
+  name: string;
+  branch: string;
+  pushedSha: string;
+  tree: string;
+  extraParents?: string[];
+  message: string;
+  protect: string[];
+  /** Where the pushed commit is kept fetched in the clone (a namespaced ref). */
+  destRef: string;
+}): Promise<{ commitSha: string; pushed: boolean }> {
+  const extra = a.extraParents ?? [];
+  const token = await getAccessToken(a.accountId);
+  const live = await liveBranchSha(a.accountId, a.owner, a.name, a.branch);
+  if (live !== a.pushedSha) throw codedError('HEAD_MOVED', HEAD_MOVED_LOOP_LINE(a.branch));
+  const { repoCloneDir } = await resolveBranchCommit(a.owner, a.name, { remoteRef: `refs/heads/${a.branch}`, destRef: a.destRef, sha: a.pushedSha }, token);
+  const { stdout: parentTree } = await execGit(['-C', repoCloneDir, 'rev-parse', `${a.pushedSha}^{tree}`]);
+  if (parentTree.trim() === a.tree && extra.length === 0) return { commitSha: a.pushedSha, pushed: false };
+  const { authorName, authorEmail } = await readerAuthor(a.accountId);
+  const args = ['-C', repoCloneDir, 'commit-tree', a.tree, '-p', a.pushedSha];
+  for (const p of extra) args.push('-p', p);
+  args.push('-m', a.message);
+  const env = { ...process.env, GIT_AUTHOR_NAME: authorName, GIT_AUTHOR_EMAIL: authorEmail, GIT_COMMITTER_NAME: authorName, GIT_COMMITTER_EMAIL: authorEmail };
+  const { stdout } = await execGit(args, undefined, env);
+  const commitSha = stdout.trim();
+  // Keep the new commit reachable in the shared clone (the next round's checkout and diff read it).
+  await execGit(['-C', repoCloneDir, 'update-ref', a.destRef, commitSha]);
+  await pushRef({
+    worktree: repoCloneDir,
+    owner: a.owner,
+    name: a.name,
+    token,
+    committish: commitSha,
+    remoteBranch: a.branch,
+    protect: a.protect,
+    origin: 'reader',
+    limnCommits: [commitSha],
+  });
+  return { commitSha, pushed: true };
+}
+
+const execFileAsync = promisify(execFile);
+function execGit(args: string[], cwd?: string, env?: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync('git', args, { ...(cwd ? { cwd } : {}), ...(env ? { env } : {}), timeout: 120_000, maxBuffer: 64 * 1024 * 1024 });
 }
 
 // The silent logger the visibility tails above sync with.

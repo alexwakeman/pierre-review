@@ -876,6 +876,36 @@ writes it for a claim a restart cut off) — wire `autoPush` / `autoPushAt` / `a
 NEVER-stored `autoPushRunning` (the in-process flag). `story_build_repos.push_error_code` + `story_build_prs.push_error_code`: the code beside
 `push_error` (`BRANCH_EXISTS` ⇒ the tab offers a new branch name), wire `pushErrorCode`; cleared with
 `push_error` on a landed push.
+Since 0186 the switch `auto_push` runs THE REVIEW LOOP (below); the old automatic push is retired, its
+columns kept (the loop's start claim also stamps `auto_push_claimed_at`).
+
+**THE REVIEW LOOP** (migration `0186`; [STORY-BUILD.md](STORY-BUILD.md) § The review loop). On
+`story_builds`: `loop_rounds` (N, default 3, 1..6), `loop_state` (shared `StoryBuildLoopState`; NULL =
+never ran), `loop_round`, `loop_pause` (`StoryBuildLoopPause`), `loop_error` (one sentence), `loop_resume`
+(the step Continue returns to), `loop_claimed_at` (THE START CLAIM — compare-and-set `WHERE auto_push = 1
+AND status = 'ready' AND loop_claimed_at IS NULL`; never cleared, once per build) and `loop_finished_at`.
+Per TARGET (`story_build_repos` and `story_build_prs` alike): `loop_branch` (pushed, no PR yet),
+`loop_pushed_sha`, `loop_pushed_tree`, `loop_pushed_at`, `loop_ended` (NULL | `pr_opened` |
+`manual_push` | `stopped`); `status` stays `ready` until the PR opens. Five account-scoped tables, every one
+with a named composite FK onto `story_builds (id, account_id)` (cascade), in `accountScopedTables()`, erased
+before `story_builds` and exported; ids are BUILD-LOCAL (never a `claude_reviews` or `pull_requests` id):
+- `story_build_loop_pushes` — ONE row per GitHub write (`step` `branch` round 0 · `fix` round k · `open`),
+  INSERTED BEFORE THE WRITE: the unique `(build_id, round, step, target_kind, target_id, attempt)` is the
+  claim. `parent_sha` / `expect_tree` let Continue ADOPT a write that landed before a restart; `attempt` grows
+  only on a reader's Continue. Never retried automatically; an unanswered row is marked `INTERRUPTED` at boot.
+- `story_build_reviews` — ONE row per code-review run (round, target, provider; unique on those): the
+  `claude_reviews` columns (status, mode, summary, verdict, `follow_up`, `pair_consolidation`, cost and
+  tokens), `pair_role` for a pair's halves. Composite FK onto `repos (id, account_id)` too; unique `(id,
+  account_id)` is the parent key for the findings.
+- `story_build_review_findings` — the run's findings (the `claude_review_findings` shape) plus `ref` (`F<n>`
+  as shown to the agent), `merged_into` (a pair's duplicate), and the agent's `response` (shared
+  `StoryBuildLoopResponse`), `response_text`, `response_round`. Composite FK onto `story_build_reviews (id,
+  account_id)`.
+- `story_build_story_checks` — ONE per round (unique `(build_id, round)`): status, provider/model, the
+  `assessment`, `members`, the agent's `claims` and the reviewer's `claim_verdicts` (not applicable: accepted
+  or rejected + why — build-scoped, never a shared criterion status).
+- `story_build_ac_responses` — the agent's answer per criterion (`AC<n>` / `M<n>`) and round (unique
+  `(build_id, round, ref)`); `not_reported` placeholders are written when REVIEW.md is.
 
 ## `ai_fixes` — AI Fix runs (CORE)
 

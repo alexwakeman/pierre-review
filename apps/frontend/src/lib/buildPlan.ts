@@ -5,7 +5,9 @@
 // which planned PR may be pushed now. The plan itself is the server's (`StoryBuildSession.plan`); nothing
 // here decides what the agent proposed.
 import {
+  acSectionText,
   buildPlanUnanswered,
+  findAcSection,
   type BuildPlanContention,
   type BuildPlanCriterionStatus,
   type BuildPlanDataKind,
@@ -18,6 +20,7 @@ import {
   type StoryBuildPrCheck,
   type StoryBuildPrStatus,
   type StoryBuildSession,
+  type TicketAcLocation,
 } from '@pierre-review/shared';
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
@@ -291,4 +294,58 @@ export function prsByRepo(prs: readonly StoryBuildPr[]): Array<{ repoId: number;
     g.prs.push(p);
   }
   return out;
+}
+
+// ── THE TICKET REVIEW (components/StoryBuild/TicketUpdatePanel.tsx; docs/TRACKERS.md § The ticket update) ──
+//
+// Two boxes, Description and Acceptance criteria, each seeded with the plan's draft field, else the
+// ticket's current text. When the ticket keeps its criteria IN THE DESCRIPTION, the criteria box shows
+// the description's criteria section (and follows the description box until the reader edits it); the
+// host splices a sent criteria text into that section.
+
+const sameText = (a: string, b: string): boolean => a.replace(/\r\n?/g, '\n').trim() === b.replace(/\r\n?/g, '\n').trim();
+
+/** What the two boxes start with. */
+export function ticketReviewSeed(
+  draft: { description: string | null; acceptanceCriteria: string | null } | null,
+  current: { description: string; acceptanceCriteria: string; acLocation: TicketAcLocation } | null,
+): { description: string; criteria: string } {
+  const description = draft?.description ?? current?.description ?? '';
+  if (draft?.acceptanceCriteria != null) return { description, criteria: draft.acceptanceCriteria };
+  if (current?.acLocation.kind === 'description' && findAcSection(description) != null) {
+    return { description, criteria: acSectionText(description) };
+  }
+  return { description, criteria: current?.acceptanceCriteria ?? '' };
+}
+
+/**
+ * The body "Update ticket" sends: ONLY what differs from the ticket's current text (null = leave it).
+ * Criteria in the description: the criteria box is sent only when it differs from the criteria section
+ * of the description being sent (the host splices it in), so an edit made in the description box is
+ * never overwritten.
+ */
+export function ticketUpdateBody(
+  edited: { description: string; criteria: string },
+  current: { description: string; acceptanceCriteria: string; acLocation: TicketAcLocation },
+): { description: string | null; acceptanceCriteria: string | null } {
+  const description = sameText(edited.description, current.description) ? null : edited.description;
+  let acceptanceCriteria: string | null = sameText(edited.criteria, current.acceptanceCriteria) ? null : edited.criteria;
+  if (current.acLocation.kind === 'description' && findAcSection(edited.description) != null && sameText(edited.criteria, acSectionText(edited.description))) {
+    acceptanceCriteria = null;
+  }
+  return { description, acceptanceCriteria };
+}
+
+/** The criteria box's label: where the update writes them. */
+export function criteriaBoxLabel(loc: TicketAcLocation | null): string {
+  if (loc?.kind === 'description') return 'Acceptance criteria (in the description)';
+  return 'Acceptance criteria';
+}
+
+/** The one confirm line: names only the fields that change. */
+export function ticketUpdateConfirm(body: { description: string | null; acceptanceCriteria: string | null }): string {
+  const what = [body.description != null ? 'description' : null, body.acceptanceCriteria != null ? 'acceptance criteria' : null]
+    .filter((x) => x != null)
+    .join(' and ');
+  return `Replace the ticket's ${what} in Jira?`;
 }

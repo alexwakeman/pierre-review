@@ -323,7 +323,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 async function runMergePass(
   ctx: AgentContext,
   accountId: number,
-  prId: number,
+  prId: number | null,
   a: ClaudeReview,
   b: ClaudeReview,
   deps: ConsolidateDeps,
@@ -336,7 +336,7 @@ async function runMergePass(
   ]);
   const prompt = pairMergePrompt(findings, halves, nonce);
   if (prompt == null) {
-    ctx.log.info(`claude review pr ${prId}: the pair's merge input is over the cap; joined in code`);
+    ctx.log.info(`claude review pr ${prId ?? 'n/a'}: the pair's merge input is over the cap; joined in code`);
     return null;
   }
   // The completion: a test's seam, else the context's (`ctx.llm.complete` = `cheapComplete`). None, or
@@ -352,13 +352,13 @@ async function runMergePass(
     );
     return ctx
       .recordAiUsage({ accountId, prId, seam: 'summary', feature: PAIR_MERGE_FEATURE, ...u })
-      .catch((err) => ctx.log.warn(`claude review pr ${prId}: the merge's usage was not recorded: ${String(err)}`));
+      .catch((err) => ctx.log.warn(`claude review pr ${prId ?? 'n/a'}: the merge's usage was not recorded: ${String(err)}`));
   };
   let call: Promise<CheapCompleteResult>;
   try {
     call = complete({ model: PAIR_MERGE_CLAUDE_MODEL, role: 'standard', system: PAIR_MERGE_SYSTEM, prompt, maxTokens: 2_000 });
   } catch (err) {
-    ctx.log.warn(`claude review pr ${prId}: the pair's merge pass failed; joined in code: ${err instanceof Error ? err.message : String(err)}`);
+    ctx.log.warn(`claude review pr ${prId ?? 'n/a'}: the pair's merge pass failed; joined in code: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
   const recorded = call.then(recordUsage, () => {});
@@ -366,12 +366,40 @@ async function runMergePass(
     const out = await withTimeout(call, deps.timeoutMs ?? PAIR_MERGE_TIMEOUT_MS);
     await recorded;
     const parsed = parseConsolidation(out.text, new Set(findings.map((f) => f.id)));
-    if (parsed == null) ctx.log.info(`claude review pr ${prId}: the pair's merge answer was invalid; joined in code`);
+    if (parsed == null) ctx.log.info(`claude review pr ${prId ?? 'n/a'}: the pair's merge answer was invalid; joined in code`);
     return parsed;
   } catch (err) {
-    ctx.log.warn(`claude review pr ${prId}: the pair's merge pass failed; joined in code: ${err instanceof Error ? err.message : String(err)}`);
+    ctx.log.warn(`claude review pr ${prId ?? 'n/a'}: the pair's merge pass failed; joined in code: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
+}
+
+/**
+ * THE MERGE PASS OVER TWO SUCCEEDED HALVES (wires), WITHOUT the claude_reviews store — the story build's
+ * review loop (coding/story-build/loop/) keeps its own rows. The code's repeats always count; the pass may
+ * add more; a pass that fails or is over the cap falls back to the code's groups. Usage is billed to
+ * `usagePrId` (null for a branch). The verdict is the code rule over what is kept. Never throws.
+ */
+export async function consolidateHalves(
+  ctx: AgentContext,
+  accountId: number,
+  usagePrId: number | null,
+  a: ClaudeReview,
+  b: ClaudeReview,
+  deps: ConsolidateDeps = {},
+): Promise<{ groups: DuplicateGroup[]; summary: string | null; verdict: ClaudeReview['verdict']; how: 'pass' | 'code'; sourceOf: Record<string, ClaudeFindingSource>; mergedFrom: Record<string, number> }> {
+  const repeats = pairRepeatGroups(a, b);
+  const pass = await runMergePass(ctx, accountId, usagePrId, a, b, deps).catch(() => null);
+  const groups = joinDuplicateGroups(pass ? [...repeats, ...pass.groups] : repeats);
+  const { sourceOf, mergedFrom } = applyDuplicateGroups(mergeFindingsOf([a, b]), groups);
+  return {
+    groups,
+    summary: pass?.summary ?? a.summary ?? b.summary ?? null,
+    verdict: consolidatedVerdict(a, b, mergedFrom),
+    how: pass ? 'pass' : 'code',
+    sourceOf,
+    mergedFrom,
+  };
 }
 
 /**

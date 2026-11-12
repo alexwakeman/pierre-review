@@ -4626,6 +4626,18 @@ export const storyBuilds = sqliteTable(
     autoPush: integer('auto_push', { mode: 'boolean' }).notNull().default(false),
     autoPushClaimedAt: integer('auto_push_claimed_at', { mode: 'timestamp' }),
     autoPushError: text('auto_push_error'),
+    // THE REVIEW LOOP (migration 0186; docs/STORY-BUILD.md § The review loop): with `auto_push` on, the build
+    // is pushed, reviewed and fixed for at most `loop_rounds` rounds, then the PR opens. `loop_claimed_at` is
+    // the start claim (compare-and-set, once per build); state / round / pause are written at every step.
+    loopRounds: integer('loop_rounds').notNull().default(3),
+    loopState: text('loop_state'),
+    loopRound: integer('loop_round').notNull().default(0),
+    loopPause: text('loop_pause'),
+    loopError: text('loop_error'),
+    // While paused: the step Continue goes back to; NULL otherwise.
+    loopResume: text('loop_resume'),
+    loopClaimedAt: integer('loop_claimed_at', { mode: 'timestamp' }),
+    loopFinishedAt: integer('loop_finished_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -4689,6 +4701,13 @@ export const storyBuildRepos = sqliteTable(
     pushError: text('push_error'),
     // The code beside push_error (`BRANCH_EXISTS`, …; migration 0185); NULL = none.
     pushErrorCode: text('push_error_code'),
+    // THE REVIEW LOOP (migration 0186): the branch the loop pushed (no PR yet), its last pushed commit and
+    // tree, and the target's own end (NULL | 'pr_opened' | 'manual_push' | 'stopped').
+    loopBranch: text('loop_branch'),
+    loopPushedSha: text('loop_pushed_sha'),
+    loopPushedTree: text('loop_pushed_tree'),
+    loopPushedAt: integer('loop_pushed_at', { mode: 'timestamp' }),
+    loopEnded: text('loop_ended'),
     provider: text('provider'),
     model: text('model'),
     effort: text('effort'),
@@ -4792,6 +4811,13 @@ export const storyBuildPrs = sqliteTable(
     pushError: text('push_error'),
     // The code beside push_error (`BRANCH_EXISTS`, …; migration 0185); NULL = none.
     pushErrorCode: text('push_error_code'),
+    // THE REVIEW LOOP (migration 0186): the branch the loop pushed (no PR yet), its last pushed commit and
+    // tree, and the target's own end (NULL | 'pr_opened' | 'manual_push' | 'stopped').
+    loopBranch: text('loop_branch'),
+    loopPushedSha: text('loop_pushed_sha'),
+    loopPushedTree: text('loop_pushed_tree'),
+    loopPushedAt: integer('loop_pushed_at', { mode: 'timestamp' }),
+    loopEnded: text('loop_ended'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
   },
@@ -4813,6 +4839,206 @@ export const storyBuildPrs = sqliteTable(
       name: 'story_build_prs_plan_account_fk',
       columns: [t.planId, t.accountId],
       foreignColumns: [storyBuildPlans.id, storyBuildPlans.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- THE REVIEW LOOP (migration 0186; docs/STORY-BUILD.md § The review loop) ----
+// story_build_loop_pushes — ONE row per GitHub write of the loop, CLAIMED (inserted) BEFORE the write; the
+// unique `(build_id, round, step, target_kind, target_id, attempt)` makes the insert the compare-and-set.
+// Never retried automatically: `attempt` grows only on the reader's Continue.
+export const storyBuildLoopPushes = sqliteTable(
+  'story_build_loop_pushes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    round: integer('round').notNull(),
+    // 'branch' | 'fix' | 'open'
+    step: text('step').notNull(),
+    // 'repo' (story_build_repos.id) | 'pr' (story_build_prs.id)
+    targetKind: text('target_kind').notNull(),
+    targetId: integer('target_id').notNull(),
+    attempt: integer('attempt').notNull().default(1),
+    branch: text('branch').notNull(),
+    parentSha: text('parent_sha'),
+    expectTree: text('expect_tree'),
+    claimedAt: integer('claimed_at', { mode: 'timestamp' }).notNull(),
+    pushedSha: text('pushed_sha'),
+    prNumber: integer('pr_number'),
+    prUrl: text('pr_url'),
+    doneAt: integer('done_at', { mode: 'timestamp' }),
+    error: text('error'),
+    errorCode: text('error_code'),
+  },
+  (t) => ({
+    stepUx: uniqueIndex('story_build_loop_pushes_step').on(t.buildId, t.round, t.step, t.targetKind, t.targetId, t.attempt),
+    accountIdx: index('story_build_loop_pushes_account_idx').on(t.accountId, t.buildId),
+    buildAccountFk: foreignKey({
+      name: 'story_build_loop_pushes_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_reviews — ONE row per code-review RUN of the loop (round, target, provider). The same columns and
+// JSON as `claude_reviews` (`follow_up` = ClaudeReviewFollowUpRecord, `pair_consolidation` on the 'first' row);
+// ids are BUILD-LOCAL (never a claude_reviews id). Status: 'queued' | 'running' | 'succeeded' | 'failed' |
+// 'skipped' | 'cancelled'.
+export const storyBuildReviews = sqliteTable(
+  'story_build_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    round: integer('round').notNull(),
+    targetKind: text('target_kind').notNull(),
+    targetId: integer('target_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    branch: text('branch').notNull(),
+    baseSha: text('base_sha').notNull(),
+    headSha: text('head_sha').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    effort: text('effort'),
+    pairRole: text('pair_role'),
+    status: text('status').notNull(),
+    reviewMode: text('review_mode'),
+    summary: text('summary'),
+    verdict: text('verdict'),
+    followUp: text('follow_up', { mode: 'json' }).$type<Record<string, unknown>>(),
+    pairConsolidation: text('pair_consolidation', { mode: 'json' }).$type<Record<string, unknown>>(),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    runUx: uniqueIndex('story_build_reviews_run').on(t.buildId, t.round, t.targetKind, t.targetId, t.provider),
+    idAccountUx: uniqueIndex('story_build_reviews_id_account').on(t.id, t.accountId),
+    accountIdx: index('story_build_reviews_account_idx').on(t.accountId, t.buildId, t.round),
+    buildAccountFk: foreignKey({
+      name: 'story_build_reviews_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'story_build_reviews_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_review_findings — the findings of one loop review run (the claude_review_findings columns that
+// matter here), plus the build agent's response to it (`response` 'fixed' | 'answered' | 'pushed_back' |
+// 'not_reported', its text and the round it answered). `prior_finding_id` / `merged_into` are SOFT (no FK).
+export const storyBuildReviewFindings = sqliteTable(
+  'story_build_review_findings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    reviewId: integer('review_id').notNull(),
+    buildId: integer('build_id').notNull(),
+    round: integer('round').notNull(),
+    severity: text('severity').notNull(),
+    path: text('path').notNull(),
+    line: integer('line'),
+    side: text('side').notNull().default('RIGHT'),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    suggestion: text('suggestion'),
+    diffHunk: text('diff_hunk'),
+    anchored: integer('anchored', { mode: 'boolean' }).notNull().default(false),
+    fileInDiff: integer('file_in_diff', { mode: 'boolean' }).notNull().default(false),
+    priorFindingId: integer('prior_finding_id'),
+    lens: text('lens'),
+    mergedInto: integer('merged_into'),
+    ref: text('ref'),
+    response: text('response'),
+    responseText: text('response_text'),
+    responseRound: integer('response_round'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('story_build_review_findings_review_idx').on(t.reviewId),
+    accountIdx: index('story_build_review_findings_account_idx').on(t.accountId, t.buildId, t.round),
+    reviewAccountFk: foreignKey({
+      name: 'story_build_review_findings_review_account_fk',
+      columns: [t.reviewId, t.accountId],
+      foreignColumns: [storyBuildReviews.id, storyBuildReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_story_checks — ONE story check per loop round, across every target (the ticket review's
+// assessment; members carry BUILD-LOCAL target ids as `prId`). `claims` = the build agent's criterion notes
+// shown this round, `claim_verdicts` = the checker's word on each "not applicable" note.
+export const storyBuildStoryChecks = sqliteTable(
+  'story_build_story_checks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    round: integer('round').notNull(),
+    status: text('status').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    assessment: text('assessment', { mode: 'json' }).$type<Record<string, unknown>>(),
+    members: text('members', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    claims: text('claims', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    claimVerdicts: text('claim_verdicts', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    roundUx: uniqueIndex('story_build_story_checks_round').on(t.buildId, t.round),
+    buildAccountFk: foreignKey({
+      name: 'story_build_story_checks_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_ac_responses — the build agent's answer per criterion ('AC3') or missing item ('M1') after a
+// round's review: 'fixed' | 'not_applicable' | 'answered' | 'pushed_back' | 'not_reported'.
+export const storyBuildAcResponses = sqliteTable(
+  'story_build_ac_responses',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    round: integer('round').notNull(),
+    ref: text('ref').notNull(),
+    response: text('response').notNull(),
+    text: text('text'),
+  },
+  (t) => ({
+    refUx: uniqueIndex('story_build_ac_responses_ref').on(t.buildId, t.round, t.ref),
+    buildAccountFk: foreignKey({
+      name: 'story_build_ac_responses_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
     }).onDelete('cascade'),
   }),
 );

@@ -439,6 +439,32 @@ export async function localPrDiff(
   });
 }
 
+/**
+ * A BRANCH's diff in the clone cache (the story build's review loop, coding/story-build/loop/): three-dot
+ * `base...head`, both commits ensured in the store (fetched by sha when missing — GitHub serves a pushed
+ * commit by its sha). No PR, no gh. The same lock, blobless lazy fetch and token rules as `localPrDiff`.
+ */
+export async function localBranchDiff(
+  owner: string,
+  name: string,
+  baseSha: string,
+  headSha: string,
+  token: string = getGithubToken(),
+): Promise<string> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await ensureClone(owner, name, token);
+    for (const sha of [baseSha, headSha]) {
+      if (!(await hasCommit(dir, sha))) await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, token), sha]);
+    }
+    const { stdout } = await execFileAsync(
+      'git',
+      [...insteadOfArgs(token), '-C', dir, 'diff', '--no-color', '--no-ext-diff', `${baseSha}...${headSha}`],
+      { timeout: 300_000, maxBuffer: 512 * 1024 * 1024 },
+    );
+    return stdout;
+  });
+}
+
 /** Tear down a per-run worktree under the per-repo lock (matches prepWorktree). */
 export async function removeWorktreeLocked(
   owner: string,

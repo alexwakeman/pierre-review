@@ -16,7 +16,7 @@ import {
 import { parseGitPatch } from '../../lib/diff.js';
 import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionTurnRunning } from '../../lib/sandboxSession.js';
-import { branchExistsFor, buildBranchNames, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
+import { branchExistsFor, buildBranchNames, loopRunning, pushButtonWords, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { PrCardChips, PrCardFrame, PrCardMeta, PrCardTitle, CARD_NEUTRAL_CHIP, CARD_RED_CHIP, CARD_TONE_CHIP } from '../Activity/PrCardShell.js';
@@ -52,7 +52,9 @@ export function StackView({ build, session, draft, setDraft }: { build: StoryBui
   const prs = useMemo(() => prsInOrder(build.prs ?? []), [build.prs]);
   const push = useStoryBuildPrPush(build.workspaceId, build.ident);
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
+  // THE REVIEW LOOP pushes by itself while it runs: Push and Push all hide until it pauses or ends.
   const running = sessionTurnRunning(session);
+  const loopBusy = loopRunning(build);
   const results = new Map((push.data?.prs ?? []).map((r) => [r.prId, r] as const));
   const ready = pushAllPrCount(prs);
   const groups = prsByRepo(prs);
@@ -70,7 +72,7 @@ export function StackView({ build, session, draft, setDraft }: { build: StoryBui
           <p>Push opens each pull request on GitHub. In one repository, each one is based on the branch of the one before it, so push them in order.</p>
           <p className="mt-2">Each description names the stack, the criteria it covers and your answers on the story.</p>
         </InfoButton>
-        {anyReady && (
+        {anyReady && !loopBusy && (
           <span className="ml-auto flex flex-wrap items-center gap-2" data-noactivate>
             <label className="flex cursor-pointer items-center gap-1.5 text-meta text-ui-ink" title="Open each new pull request as a draft">
               <CheckboxBox checked={draft} onChange={(e) => setDraft(e.target.checked)} />
@@ -106,6 +108,7 @@ export function StackView({ build, session, draft, setDraft }: { build: StoryBui
                   total={prs.length}
                   draft={draft}
                   disabled={busy || running}
+                  hidePush={loopBusy}
                   taken={taken}
                   branchExists={
                     // A refused NEW name keeps the field: Push would retry the old one.
@@ -131,6 +134,7 @@ function PrCard({
   total,
   draft,
   disabled,
+  hidePush = false,
   taken,
   branchExists,
   onPush,
@@ -138,6 +142,8 @@ function PrCard({
 }: {
   build: StoryBuild;
   pr: StoryBuildPr;
+  /** The review loop is running: no Push (it pushes by itself). */
+  hidePush?: boolean;
   prs: readonly StoryBuildPr[];
   total: number;
   draft: boolean;
@@ -206,14 +212,14 @@ function PrCard({
             {diffOpen && <PrDiff build={build} pr={pr} />}
           </div>
         )}
-        {pr.status === 'ready' && state.canPush && branchExists && (
+        {pr.status === 'ready' && !hidePush && state.canPush && branchExists && (
           <RenameBranch branch={pr.branch} taken={taken} draft={draft} disabled={disabled} actionId={`push-pr-renamed-${pr.id}`} onPush={(b) => onPush(b)} />
         )}
-        {pr.status === 'ready' && !(state.canPush && branchExists) && (
+        {pr.status === 'ready' && !hidePush && !(state.canPush && branchExists) && (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-noactivate>
             {state.canPush ? (
               <Button variant="primary" size="sm" icon={<PullRequestIcon size={12} />} disabled={disabled} data-story-build-action={`push-pr-${pr.id}`} onClick={() => onPush()}>
-                {draft ? 'Push as draft' : 'Push'}
+                {pushButtonWords(build, 'pr', pr.id, draft)}
               </Button>
             ) : (
               <span data-testid="story-build-pr-wait" className="text-meta text-ui-mute">

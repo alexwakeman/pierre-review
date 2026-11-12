@@ -57,7 +57,7 @@ const res = (
 ): StoryBuildPrPushResult => ({ prId: pr.id, key: pr.prKey, repoId: pr.repoId, outcome, prNumber: opened?.number ?? null, prUrl: opened?.url ?? null, code, error });
 
 /** The approved plan's revision (for Covers and Decisions), or null. */
-async function approvedRevision(ctx: AgentContext, accountId: number, build: StoryBuildRow): Promise<{ rev: BuildPlanRevision; decisions: Record<string, { decision: string }> } | null> {
+export async function approvedRevision(ctx: AgentContext, accountId: number, build: StoryBuildRow): Promise<{ rev: BuildPlanRevision; decisions: Record<string, { decision: string }> } | null> {
   if (build.approvedPlanId == null) return null;
   const row = (await listPlanRows(ctx, accountId, build.id)).find((r) => r.id === build.approvedPlanId);
   return row ? { rev: toPlanRevision(row), decisions: publicDecisions(row.decisionsJson) } : null;
@@ -121,6 +121,16 @@ export async function pushPlannedPr(ctx: AgentContext, a: PushPlannedPrArgs): Pr
   if (refused != null) return res(pr, 'failed', 'PUSH_DENIED', refused);
   if (pr.status === 'pushed') {
     return res(pr, 'skipped', 'ALREADY_PUSHED', null, pr.pushedPrNumber != null ? { number: pr.pushedPrNumber, url: pr.pushedPrUrl ?? '' } : null);
+  }
+  // THE REVIEW LOOP (loop/driver.ts): never beside a running round; a branch the loop pushed opens its PR.
+  {
+    const loop = await import('./loop/driver.js');
+    if (loop.isStoryLoopBusy(a.buildId)) return res(pr, 'skipped', 'PUSH_IN_PROGRESS', 'Wait for the review round to finish, or press Stop.');
+    if (pr.loopBranch && pr.loopEnded == null) {
+      if (a.branch !== undefined) return res(pr, 'failed', 'PUSH_DENIED', 'This branch is already on GitHub.');
+      const r = await loop.loopManualPush(ctx, a.accountId, a.buildId, 'pr', pr.id, a.draft);
+      return res(pr, r.outcome, r.code, r.error, r.prNumber != null ? { number: r.prNumber, url: r.prUrl ?? '' } : null);
+    }
   }
   if (build.status !== 'ready') {
     const busy = build.status === 'building';

@@ -61,9 +61,26 @@ export async function submitPrCardShape(): Promise<SubmitPrCardShape> {
 
 // THE REFERENCE LIBRARY (`opts.docs`, docs/REFERENCE-DOCS.md § Use in reviews): only a run that reads
 // the workspace's library gets `docReferences`; without it the shape is exactly the base one.
-export function buildSubmitTicketReviewShape(z: ZodNs, opts: { docs?: boolean } = {}) {
+// THE REVIEW LOOP (`opts.notApplicable`, docs/STORY-BUILD.md § The review loop): only a story check shown
+// the build agent's "not applicable" notes gets `notApplicable`; without it the shape is unchanged.
+export function buildSubmitTicketReviewShape(z: ZodNs, opts: { docs?: boolean; notApplicable?: boolean } = {}) {
   const base = buildBaseTicketReviewShape(z);
-  return opts.docs ? { ...base, docReferences: buildDocReferencesField(z) } : base;
+  const withDocs = opts.docs ? { ...base, docReferences: buildDocReferencesField(z) } : base;
+  return opts.notApplicable ? { ...withDocs, notApplicable: buildNotApplicableField(z) } : withDocs;
+}
+
+/** The checker's word on each "not applicable" note of the build agent (the review loop only). */
+export function buildNotApplicableField(z: ZodNs) {
+  return z
+    .array(
+      z.object({
+        ref: z.string().describe("The criterion's ref from the build agent's notes, e.g. 'AC3'."),
+        verdict: z.enum(['accepted', 'rejected']),
+        why: z.string().max(600).describe('One sentence: why the note holds, or why it does not.'),
+      }),
+    )
+    .optional()
+    .describe("Your verdict on EACH 'NOT APPLICABLE' note of the build agent.");
 }
 
 function buildBaseTicketReviewShape(z: ZodNs) {
@@ -146,9 +163,9 @@ function buildBaseTicketReviewShape(z: ZodNs) {
 
 export type SubmitTicketReviewShape = ReturnType<typeof buildBaseTicketReviewShape>;
 // A docs run's payload may also carry `docReferences` (raw; the manager checks them).
-export type SubmitTicketReviewPayload = Zod.infer<Zod.ZodObject<SubmitTicketReviewShape>> & { docReferences?: unknown };
+export type SubmitTicketReviewPayload = Zod.infer<Zod.ZodObject<SubmitTicketReviewShape>> & { docReferences?: unknown; notApplicable?: unknown };
 
 /** The raw shape `tool()` wants, built from the runtime's zod. */
-export async function submitTicketReviewShape(opts: { docs?: boolean } = {}): Promise<ReturnType<typeof buildSubmitTicketReviewShape>> {
+export async function submitTicketReviewShape(opts: { docs?: boolean; notApplicable?: boolean } = {}): Promise<ReturnType<typeof buildSubmitTicketReviewShape>> {
   return buildSubmitTicketReviewShape(await loadZod(), opts);
 }

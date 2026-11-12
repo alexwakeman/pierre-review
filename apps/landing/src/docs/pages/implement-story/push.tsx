@@ -6,6 +6,30 @@ export const meta: DocMeta = {
   summary: 'Check the changes, then push them to a new branch and open the pull request.',
 };
 
+function ReviewLoopPicture(): JSX.Element {
+  return (
+    <Illustration
+      label="Review rounds of the PAY-142 build. The state reads Reviewing round 2 of 3. Acceptance criteria: 3 of 4 met, 1 not applicable. Round 1 for acme/payments: a blocker, the refund window is not checked, marked Fixed; a nit, marked Pushed back with the agent's reason. Fixes pushed: acme/payments 3f2a1c9."
+      caption="Each round: what the review found, and what the agent did about it."
+      title="Review rounds"
+      meta="PAY-142 Partial refunds"
+    >
+      <p>
+        <Chip>Reviewing round 2 of 3</Chip> <Chip tone="green">AC1 · met</Chip> <Chip tone="green">AC2 · met</Chip>{' '}
+        <Chip tone="green">AC3 · met</Chip> <Chip>AC4 · not applicable</Chip>
+      </p>
+      <PrRow title="Round 1 · acme/payments" repo="acme/payments" status={<Chip tone="red">Request changes</Chip>} why="2 findings" />
+      <p>
+        <Chip tone="red">Blocker</Chip> The refund window is not checked · <Chip tone="green">Fixed</Chip>
+      </p>
+      <p>
+        <Chip>Nit</Chip> Rename policy.py · <Chip>Pushed back</Chip> The module name matches the other apps.
+      </p>
+      <p>Fixes pushed: acme/payments 3f2a1c9.</p>
+    </Illustration>
+  );
+}
+
 function StackPicture(): JSX.Element {
   return (
     <Illustration
@@ -38,7 +62,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         When the build ends, each planned pull request has its own diff, ready to review. Nothing has left your computer,
-        unless you chose <DocLink to="implement-story/push#push-automatically">Push automatically</DocLink>.{' '}
+        unless you chose <DocLink to="implement-story/push#review-and-fix">review and fix</DocLink>.{' '}
         <Ui>Push</Ui> sends one pull request's changes to a new branch on GitHub and opens the pull request, from your
         computer, under your GitHub account.
       </p>
@@ -83,18 +107,51 @@ export default function Page(): JSX.Element {
         overwrites a branch. In a stack, the pull requests after it build on the new branch.
       </p>
 
-      <H2 id="push-automatically">Push automatically</H2>
+      <H2 id="review-and-fix">Review and fix, then open the pull request</H2>
+      <ReviewLoopPicture />
       <p>
-        Tick <Ui>Push and open the pull request when the build finishes</Ui> before you start, or later in the tab until
-        anything is pushed. It is off by default. When a build finishes, Limn then does what <Ui>Push all</Ui> does, once,
-        and opens each pull request ready for review, not as a draft. It uses your GitHub login, as Push does.
+        Tick <Ui>After the build: review and fix, then open the pull request</Ui> before you start, or later in the tab
+        until the first review starts. It is off by default. Set <Ui>Rounds</Ui> (1 to 6, 3 by default) beside it.
+      </p>
+      <Steps>
+        <li>When the build finishes, Limn pushes the branch to GitHub. It does not open a pull request yet.</li>
+        <li>
+          Limn reviews the branch the way it reviews a pull request, with the AI review setting of your workspace (Claude,
+          or Claude and Codex). It also checks the work against the ticket&apos;s acceptance criteria, across all
+          repositories.
+        </li>
+        <li>
+          The agent deals with every point: blockers, warnings, nits, questions and unmet criteria. It fixes the code,
+          answers, or pushes back with a reason. It can say a criterion does not apply to this work; the next check
+          judges that.
+        </li>
+        <li>Limn pushes each fix as a new commit on the branch, then reviews again.</li>
+        <li>
+          When nothing is left, or after the last round, Limn opens the pull request, ready for review. Its description
+          sums up the rounds.
+        </li>
+      </Steps>
+      <p>
+        The tab shows each round: the findings per repository, what the agent did with each one, and which criteria are
+        met. The review stays in Limn: nothing is posted on GitHub except the commits and the pull request.
       </p>
       <ul>
-        <li>A build you stopped, or one that failed, is not pushed. Press Push yourself.</li>
-        <li>If the push fails, the tab says why. A branch that already exists gets the New branch field above.</li>
         <li>
-          The pull request is yours, so auto review picks it up when it is on for the workspace. Otherwise see{' '}
-          <DocLink to="ai-review/run-a-review">Run a review</DocLink>.
+          Each review and fix uses your AI allowance. If the{' '}
+          <DocLink to="settings/ai-usage-and-spend#spend-budget">spend limit</DocLink> is reached, the rounds pause. Press{' '}
+          <Ui>Continue</Ui> to go on.
+        </li>
+        <li>
+          If a push fails, or Limn restarts, the rounds pause and say why. <Ui>Continue</Ui> tries once more. A branch
+          that already exists gets a <Ui>New branch</Ui> field first.
+        </li>
+        <li>
+          <Ui>Stop review loop</Ui> ends the rounds. The branch stays on GitHub, and <Ui>Open the pull request</Ui> opens it
+          when you want.
+        </li>
+        <li>
+          The pull request is yours. Limn keeps its last review on it, so auto review does not review the same commit
+          again.
         </li>
       </ul>
 

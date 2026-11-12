@@ -54,6 +54,7 @@ const ticket: SessionTicket = {
   gaps: null,
   fresh: true,
   readAt: '2026-11-07T09:00:00.000Z',
+  acLocation: { kind: 'field', fieldId: 'customfield_10050', fieldName: 'Acceptance Criteria' },
 };
 
 const input = (over: Partial<SeedInput> = {}): SeedInput => ({
@@ -127,6 +128,21 @@ describe('the seed', () => {
   });
   it('⚠ plan first, Fill gaps: CLAUDE.md byte-for-byte the golden', () =>
     golden('seed-plan-fill-gaps.md', buildSeed(input({ planFirst: true, mode: 'fill_gaps', ticket: gapsTicket })).claudeMd));
+  it('TICKET.md tells where the criteria live and the layout to keep; the context carries it', () => {
+    const inDesc: SessionTicket = {
+      ...ticket,
+      description: '## Context\nWhy.\n\n## Acceptance criteria\n1. Given a baseline\n2. Then totals show',
+      acceptanceCriteriaText: '',
+      acLocation: { kind: 'description', heading: 'Acceptance criteria' },
+    };
+    const s = buildSeed(input({ planFirst: true, ticket: inDesc }));
+    expect(s.ticketMd).toContain('They live in the description, under the heading "Acceptance criteria".');
+    expect(s.ticketMd).toContain('Layout: a numbered list, 2 items, GIVEN / WHEN / THEN.');
+    expect(s.ticketMd).toContain('Headings, in order: Context, Acceptance criteria.');
+    const ctx = JSON.parse(String(s.files.find((f) => f.path === `${ROOT}/.limn/plan-context.json`)!.content));
+    expect(ctx.ticket).toEqual({ acLocation: 'description', headings: ['Context', 'Acceptance criteria'], criteriaStyle: 'numbered', gherkin: true });
+  });
+
   it('plan first: the checker and its context are seeded; the system prompt waits for approval', () => {
     const s = buildSeed(input({ planFirst: true, mode: 'fill_gaps', ticket: gapsTicket }));
     const ctxFile = s.files.find((f) => f.path === `${ROOT}/.limn/plan-context.json`)!;
@@ -139,6 +155,7 @@ describe('the seed', () => {
       fillGaps: true,
       repoPaths: { 'defra/bng-metric-backend': `${ROOT}/bng-metric-backend`, 'defra/bng-metric-harness': `${ROOT}/bng-metric-harness`, 'defra/bng-perf-tests': `${ROOT}/bng-perf-tests` },
       docsDir: null,
+      ticket: { acLocation: 'field', headings: [], criteriaStyle: 'paragraphs', gherkin: false },
     });
     expect(s.files.find((f) => f.path === '/home/agent/.limn/plan-check.cjs')?.mode).toBe(0o755);
     expect(s.systemPrompts.claude).toMatch(/Until the reader approves the plan, read and plan only/);

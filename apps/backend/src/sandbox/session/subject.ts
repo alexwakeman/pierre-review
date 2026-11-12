@@ -6,7 +6,7 @@
 //
 // A subject is made per session and holds what is only its own (its row id, its bases, its ticket or
 // task); the machine calls it at fixed points and never reads a subject's table itself.
-import type { BuildPlanSource, SandboxAgentMode, SandboxSessionPhase, SandboxTurnUsage } from '@pierre-review/shared';
+import type { BuildPlanSource, SandboxAgentMode, SandboxSessionPhase, SandboxTurnOutcome, SandboxTurnUsage } from '@pierre-review/shared';
 import type { SandboxUsageAccount } from '../drivers/index.js';
 import type { RepoBaseRequest, MirrorResult, FixSeedInput, SessionTicket, WorkspaceLayout } from '../workspace/index.js';
 
@@ -132,6 +132,11 @@ export interface SessionSubject {
   /** A build turn that ENDED WELL (outcome `completed`, no continuation) has settled in `built` — the row
    *  saved, so a push is no longer refused as busy (story: the opt-in automatic push). Never awaited. */
   afterBuildSettled?(l: SubjectLive): void;
+  /** EVERY build turn that ended without a continuation, whatever its outcome (story: the review loop —
+   *  a loop fix turn's end, or the start of the loop after a build that ended well). Never awaited. */
+  afterBuildTurnEnded?(l: SubjectLive, e: { outcome: SandboxTurnOutcome | null; stored: boolean; saved: boolean }): void;
+  /** A host-started build turn is claimed (story: the review loop's fix pass resets the continuations). */
+  beforeHostTurn?(l: SubjectLive): void;
   onPhase?(l: SubjectLive, phase: SandboxSessionPhase): void;
   onClosed?(l: SubjectLive, phase: SandboxSessionPhase): Promise<void>;
 }

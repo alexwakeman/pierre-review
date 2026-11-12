@@ -4800,6 +4800,27 @@ check(
     planFkRefused = true;
   }
   check("a plan row naming B's session under account A is refused by the composite FK", planFkRefused);
+
+  // THE REVIEW LOOP (migration 0186; coding/story-build/loop/): every getter and writer scopes the account,
+  // and a loop row naming B's build under account A is refused by the composite FK.
+  const lp = await import('../src/coding/story-build/loop/persist.js');
+  const bReview = await lp.insertLoopReview(dc, 2, { buildId: b, round: 1, targetKind: 'repo', targetId: bRepo, repoId: B.repoId, branch: 'b', baseSha: 'b', headSha: 'h', provider: 'claude', model: null, pairRole: null, status: 'succeeded' });
+  await lp.insertLoopFindings(dc, 2, [{ reviewId: bReview, buildId: b, round: 1, severity: 'nit', path: 'a.ts', line: 1, side: 'RIGHT', title: 't', body: 'b', suggestion: null, diffHunk: null, anchored: false, fileInDiff: false, priorFindingId: null, lens: null }]);
+  await lp.upsertLoopAcResponse(dc, 2, { buildId: b, round: 1, ref: 'AC1', response: 'fixed', text: 'x' });
+  await lp.claimLoopPush(dc, 2, { buildId: b, round: 0, step: 'branch', targetKind: 'repo', targetId: bRepo, attempt: 1, branch: 'b', now: new Date() });
+  check("listLoopReviews(A, B's build) is empty", (await lp.listLoopReviews(dc, 1, b)).length === 0);
+  check("listLoopFindings(A, B's build) is empty", (await lp.listLoopFindings(dc, 1, b)).length === 0);
+  check("listLoopAcResponses(A, B's build) is empty", (await lp.listLoopAcResponses(dc, 1, b)).length === 0);
+  check("listLoopPushes(A, B's build) is empty", (await lp.listLoopPushes(dc, 1, b)).length === 0);
+  check("listLoopReviews(B, B's build) is B's (mutation check)", (await lp.listLoopReviews(dc, 2, b)).length === 1);
+  check("claimLoopStart(A, B's build) claims nothing", !(await lp.claimLoopStart(dc, 1, b, new Date())));
+  let loopFkRefused = false;
+  try {
+    await lp.insertLoopReview(dc, 1, { buildId: b, round: 9, targetKind: 'repo', targetId: bRepo, repoId: B.repoId, branch: 'b', baseSha: 'b', headSha: 'h', provider: 'codex', model: null, pairRole: null, status: 'queued' });
+  } catch {
+    loopFkRefused = true;
+  }
+  check("a loop review naming B's build under account A is refused by the composite FK", loopFkRefused);
   const marks = await sprintBuildsFor(1, defaultA, [IDENT]);
   check("sprintBuildsFor(A) sees A's session only", marks.get(IDENT)?.id === a);
   check("sprintBuildsFor(A, B's workspace) is empty", (await sprintBuildsFor(1, defaultB, [IDENT])).size === 0);

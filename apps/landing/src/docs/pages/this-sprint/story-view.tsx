@@ -142,7 +142,7 @@ export default function Page(): JSX.Element {
           On This Sprint, press <Ui>Implement</Ui> on a not-started ticket with no pull request to have AI plan and
           build it, or <Ui>Fill gaps</Ui> on a started ticket to build only the criteria the check found not met.
           Nothing is pushed until you press Push, unless you tick{' '}
-          <DocLink to="implement-story/push#push-automatically">Push and open the pull request when the build finishes</DocLink>.
+          <DocLink to="implement-story/push#review-and-fix">After the build: review and fix, then open the pull request</DocLink>.
           See <DocLink to="implement-story/overview">Implement story</DocLink>.
         </li>
         <li>On Jira, change the ticket&rsquo;s status from the status menu.</li>

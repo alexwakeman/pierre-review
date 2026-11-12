@@ -12,6 +12,10 @@ import { describe, expect, it } from 'vitest';
 import type { BuildPlanEvidence, BuildPlanPr, BuildPlanRevision, BuildPlanView, StoryBuildPr, StoryBuildSession } from '@pierre-review/shared';
 import {
   contentionsHeading,
+  criteriaBoxLabel,
+  ticketReviewSeed,
+  ticketUpdateBody,
+  ticketUpdateConfirm,
   decisionsWithPending,
   droppedLine,
   evidenceGithubUrl,
@@ -256,5 +260,52 @@ describe('pushing the stack', () => {
       ['acme/api', ['P1', 'P2']],
       ['acme/web', ['P3']],
     ]);
+  });
+});
+
+// THE TICKET REVIEW's pure half (components/StoryBuild/TicketUpdatePanel.tsx).
+describe('the ticket review', () => {
+  const field = { kind: 'field' as const, fieldId: 'customfield_1', fieldName: 'Acceptance Criteria' };
+  const inDesc = { kind: 'description' as const, heading: 'Acceptance criteria' };
+  const current = { description: 'Story.', acceptanceCriteria: '1. old', acLocation: field };
+
+  it('seeds each box with the draft field, else the current text', () => {
+    expect(ticketReviewSeed({ description: null, acceptanceCriteria: '1. new' }, current)).toEqual({ description: 'Story.', criteria: '1. new' });
+    expect(ticketReviewSeed({ description: 'New story.', acceptanceCriteria: null }, current)).toEqual({ description: 'New story.', criteria: '1. old' });
+    expect(ticketReviewSeed(null, current)).toEqual({ description: 'Story.', criteria: '1. old' });
+    expect(ticketReviewSeed(null, null)).toEqual({ description: '', criteria: '' });
+  });
+
+  it('criteria in the description: the criteria box shows the (draft) description’s section', () => {
+    const cur = { description: '## Why\nx\n## Acceptance criteria\n1. old', acceptanceCriteria: '1. old', acLocation: inDesc };
+    expect(ticketReviewSeed({ description: '## Why\nx\n## Acceptance criteria\n1. new', acceptanceCriteria: null }, cur).criteria).toBe('1. new');
+  });
+
+  it('sends only the fields that differ from the current ticket', () => {
+    expect(ticketUpdateBody({ description: 'Story.', criteria: '1. old' }, current)).toEqual({ description: null, acceptanceCriteria: null });
+    expect(ticketUpdateBody({ description: 'Story. \n', criteria: '1. new' }, current)).toEqual({ description: null, acceptanceCriteria: '1. new' });
+    expect(ticketUpdateBody({ description: 'Other.', criteria: '1. old' }, current)).toEqual({ description: 'Other.', acceptanceCriteria: null });
+  });
+
+  it('criteria in the description: the criteria box is sent only when it differs from the section being sent', () => {
+    const cur = { description: '## Acceptance criteria\n1. old', acceptanceCriteria: '1. old', acLocation: inDesc };
+    // Edited inside the description box (the criteria box followed): one field.
+    expect(ticketUpdateBody({ description: '## Acceptance criteria\n1. new', criteria: '1. new' }, cur)).toEqual({
+      description: '## Acceptance criteria\n1. new',
+      acceptanceCriteria: null,
+    });
+    // Edited in the criteria box alone: the host splices it into the stored description.
+    expect(ticketUpdateBody({ description: '## Acceptance criteria\n1. old', criteria: '1. new' }, cur)).toEqual({
+      description: null,
+      acceptanceCriteria: '1. new',
+    });
+  });
+
+  it('labels the criteria box by where they live, and names only what changes in the confirm', () => {
+    expect(criteriaBoxLabel(inDesc)).toBe('Acceptance criteria (in the description)');
+    expect(criteriaBoxLabel(field)).toBe('Acceptance criteria');
+    expect(criteriaBoxLabel(null)).toBe('Acceptance criteria');
+    expect(ticketUpdateConfirm({ description: null, acceptanceCriteria: 'x' })).toBe("Replace the ticket's acceptance criteria in Jira?");
+    expect(ticketUpdateConfirm({ description: 'x', acceptanceCriteria: 'y' })).toBe("Replace the ticket's description and acceptance criteria in Jira?");
   });
 });

@@ -129,6 +129,8 @@ export function PrRefText({ text }: { text: string }): JSX.Element {
 
 /** A known member PR by id (the ticket review's "Done in api#88", "Post on web#4"). */
 export function MemberPrLink({ member }: { member: { repo: string; number: number; label: string } }): JSX.Element {
+  // A review loop's branch has no pull request yet (`number` 0): its name, no link.
+  if (member.number <= 0) return <span>{member.label}</span>;
   return (
     <PrRefLink repo={member.repo} number={member.number}>
       {member.label}

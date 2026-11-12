@@ -15,19 +15,25 @@ no internals.
 
 ### Added
 
-- Implement story and Fill gaps: a new box, "Push and open the pull request when the build finishes". Off by
-  default. When ticked, Limn pushes the build once it finishes and opens the pull request ready for review, with your
-  GitHub login. You can change it in the tab until anything is pushed. When auto review is on for the workspace, it
-  reviews the new pull request.
+- Implement story and Fill gaps: "After the build: review and fix, then open the pull request". Limn pushes the
+  branch, reviews it and checks it against the ticket, the agent fixes, answers or pushes back on each point, and
+  Limn reviews again, for up to the number of rounds you pick (3 by default). Then it opens the pull request, ready
+  for review. The review stays in Limn. The build tab shows each round, and Continue goes on after a pause (for
+  example when the AI spend limit is reached).
 
 ### Changed
 
 - Implement story and Fill gaps: the pull request and its commit are now yours, not your Limn bot's, so they
   count like any pull request of yours (auto review included). The branch is the ticket key, such as
   PAY-142, with no `limn/` in front.
+- Implement story: after planning, you can review and edit the whole ticket (description and acceptance
+  criteria), see what changes, and update it in Jira with one press. The update keeps the ticket's layout.
 
 ### Fixed
 
+- Update ticket now writes the acceptance criteria in the field's own format, so lists and headings show
+  correctly in Jira. When a ticket keeps its criteria in the description, they go into that section, and the
+  rest of the description (colours, images, panels) is left exactly as it is.
 - Implement story: when the branch already exists on GitHub, Push now offers a new branch name (such as
   PAY-142-v2) and pushes to it. Before, there was no way past it.
 

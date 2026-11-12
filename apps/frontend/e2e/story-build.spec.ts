@@ -1,5 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtures, installMockApi, prDetailFor, SANDBOX_RUNTIME_NONE, STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS, STORY_SESSION_CLOSED, STORY_SESSION_READY } from './mock-api.js';
+import {
+  fixtures,
+  installMockApi,
+  prDetailFor,
+  SANDBOX_RUNTIME_NONE,
+  STORY_SESSION_AUTO_PUSH_BRANCH_EXISTS,
+  STORY_SESSION_CLOSED,
+  STORY_SESSION_LOOP,
+  STORY_SESSION_LOOP_DONE,
+  STORY_SESSION_READY,
+} from './mock-api.js';
 import type { PrDetail, SandboxNetworkAllowBody, SandboxRuntimeStatus, StoryBuild, TicketPrsResponse, TicketReviewStatesResponse, WorkspaceTrackerSettings } from '@pierre-review/shared';
 
 // "Implement story" as a WORKSPACE SESSION (docs/SANDBOX.md § Sessions) against the mocked API (mock-api.ts
@@ -160,7 +170,7 @@ test.describe('Implement story', () => {
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
     expect((await start).postDataJSON()).not.toHaveProperty('docs');
-    // "Push and open the pull request" is off unless ticked, so it is not sent.
+    // "After the build: review and fix, then open the pull request" is off unless ticked, so it is not sent.
     expect((await start).postDataJSON()).not.toHaveProperty('autoPush');
     await expect(view.getByTestId('story-session')).toHaveAttribute('data-phase', 'plan_ready');
     // The option stays changeable in the tab until the build pushed.
@@ -215,23 +225,99 @@ test.describe('Implement story', () => {
     await expect(api.getByTestId('story-build-pushed-pr')).toContainText('#77');
   });
 
-  test('push automatically: ticked at Start, changeable in the tab until it pushes', async ({ page }) => {
+  test('review and fix: ticked at Start with its rounds, changeable in the tab until the loop starts', async ({ page }) => {
     await gotoSprint(page);
     const tray = await openTray(page, 'ACME-1');
     await tray.getByRole('button', { name: 'Implement ACME-1' }).click();
     const view = page.getByTestId('story-build-overlay');
     const box = view.getByTestId('story-build-start-auto-push');
-    await expect(box).toContainText('Push and open the pull request when the build finishes');
+    await expect(box).toContainText('After the build: review and fix, then open the pull request');
+    // The rounds show only once the box is ticked: 3 by default, 1 to 6.
+    await expect(view.getByTestId('story-build-loop-rounds')).toHaveCount(0);
     await box.getByRole('checkbox').check();
+    const rounds = view.getByTestId('story-build-loop-rounds');
+    await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('3');
+    await rounds.getByRole('button', { name: 'More rounds' }).click();
+    await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('4');
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
-    expect((await start).postDataJSON()).toMatchObject({ autoPush: true });
+    expect((await start).postDataJSON()).toMatchObject({ autoPush: true, loopRounds: 4 });
     const line = view.getByTestId('story-build-auto-push');
     await expect(line).toHaveAttribute('data-state', 'on');
-    const off = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/auto-push'));
+    // The tab's own rounds control writes the loop's settings.
+    const fewer = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/settings'));
+    await view.getByTestId('story-build-loop-rounds').getByRole('button', { name: 'Fewer rounds' }).click();
+    expect((await fewer).postDataJSON()).toEqual({ rounds: 3 });
+    await expect(view.getByTestId('story-build-loop-rounds-value')).toHaveText('3');
+    const off = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/settings'));
     await line.getByRole('checkbox').click(); // a controlled box: the state is asserted below, once the write answers
     expect((await off).postDataJSON()).toEqual({ on: false });
     await expect(line).toHaveAttribute('data-state', 'off');
+  });
+
+  test('review loop: rounds, the agent’s answers, Continue on a spend-limit pause', async ({ page }) => {
+    await withAi(page, STORY_SESSION_LOOP);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const view = page.getByTestId('story-build-overlay');
+    const loop = view.getByTestId('story-build-loop');
+    await expect(loop).toBeVisible();
+    // The steps gain Review, and it is the current one while the loop is not done.
+    await expect(view.getByTestId('story-build-steps').locator('[aria-current="step"]')).toHaveText('Review');
+    await expect(loop.getByTestId('story-build-loop-state')).toHaveAttribute('data-state', 'paused');
+    await expect(loop.getByTestId('story-build-loop-next')).toContainText('the AI spend limit is reached');
+    // The started loop has no switch any more.
+    await expect(view.getByTestId('story-build-auto-push')).toHaveCount(0);
+    // Coverage: AC1 and AC2 met, AC3 not applicable (the claim was accepted).
+    const coverage = loop.getByTestId('story-build-loop-coverage');
+    await expect(coverage).toContainText('2 of 3 met, 1 not applicable');
+    await expect(coverage.locator('[data-ref="AC3"]')).toHaveAttribute('data-state', 'not_applicable');
+    // Two rounds, newest open: round 2's review judged the pushback and accepted it.
+    const rows = loop.getByTestId('story-build-loop-round');
+    await expect(rows).toHaveCount(2);
+    const round2 = loop.locator('[data-testid="story-build-loop-round"][data-round="2"]');
+    await expect(round2).toContainText('The last round’s points');
+    await expect(round2.getByTestId('story-build-loop-claims')).toContainText('AC3 · Accepted');
+    // Round 1, opened: every finding carries the agent's answer.
+    const round1 = loop.locator('[data-testid="story-build-loop-round"][data-round="1"]');
+    await round1.getByRole('button', { name: /Round 1/ }).click();
+    const api = round1.locator('[data-testid="story-build-loop-target"][data-target="acme/api"]');
+    await expect(api.locator('[data-testid="story-build-loop-response"][data-action="fixed"]')).toHaveCount(2);
+    await expect(api.locator('[data-testid="story-build-loop-response"][data-action="pushed_back"]')).toContainText('camelCase');
+    await expect(api.locator('[data-testid="story-build-loop-response"][data-action="answered"]')).toContainText('AC1 asks for the header');
+    await expect(round1.getByTestId('story-build-loop-ac-answers')).toContainText('Not applicable');
+    await expect(round1.getByTestId('story-build-loop-fix')).toContainText('Fixes pushed: acme/api ddddddd, acme/web eeeeeee.');
+    // Paused: Push opens the pull request of a branch the loop already pushed.
+    await expect(view.locator('[data-testid="story-build-repo"][data-repo="acme/api"]').getByRole('button', { name: 'Open as draft' })).toBeVisible();
+
+    // Continue: the reader's press (never refused by the spend limit). The loop runs again, so Stop shows
+    // and every Push hides until it pauses or ends.
+    const cont = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/continue'));
+    await loop.getByRole('button', { name: 'Continue' }).click();
+    expect((await cont).postDataJSON()).toEqual({});
+    await expect(loop.getByTestId('story-build-loop-state')).toHaveAttribute('data-state', 'reviewing');
+    await expect(loop.getByRole('button', { name: 'Continue' })).toHaveCount(0);
+    await expect(view.getByRole('button', { name: 'Stop review loop' })).toBeVisible();
+    await expect(view.locator('[data-testid="story-build-repo"][data-repo="acme/api"]').getByRole('button', { name: /Open|Push/ })).toHaveCount(0);
+    await expect(view.getByRole('button', { name: 'Push all' })).toHaveCount(0);
+
+    // Stop ends the loop; the pushed branches stay.
+    const stop = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/stop'));
+    await view.getByRole('button', { name: 'Stop review loop' }).click();
+    await stop;
+    await expect(loop.getByTestId('story-build-loop-state')).toHaveAttribute('data-state', 'stopped');
+  });
+
+  test('review loop done: the pull requests opened, ready for review', async ({ page }) => {
+    await withAi(page, STORY_SESSION_LOOP_DONE);
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const loop = page.getByTestId('story-build-overlay').getByTestId('story-build-loop');
+    await expect(loop.getByTestId('story-build-loop-state')).toHaveAttribute('data-state', 'done');
+    await expect(loop.getByTestId('story-build-loop-next')).toHaveCount(0);
+    const prs = loop.getByTestId('story-build-loop-prs');
+    await expect(prs).toContainText('acme/api#80');
+    await expect(prs).toContainText('acme/web#81');
+    await expect(prs.getByRole('link', { name: /acme\/api#80/ })).toHaveAttribute('href', 'https://github.com/acme/api/pull/80');
+    await expect(loop.getByRole('button', { name: 'Continue' })).toHaveCount(0);
   });
 
   test('the automatic push hit an existing branch: the tab says so and pushes to a new name', async ({ page }) => {

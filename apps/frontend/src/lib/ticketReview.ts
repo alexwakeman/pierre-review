@@ -55,8 +55,10 @@ export function anyTicketRunning(states: readonly TicketReviewState[] | undefine
 
 // ---- PR labels ----
 
-/** "web#412": the repository's own name (no owner) and the PR number. */
-export function memberLabel(m: Pick<TicketReviewMember, 'repo' | 'number'>): string {
+/** "web#412": the repository's own name (no owner) and the PR number. A review loop's BRANCH (no PR yet:
+ *  `label` set, `number` 0) is named by its label ("branch PAY-142"). */
+export function memberLabel(m: Pick<TicketReviewMember, 'repo' | 'number'> & { label?: string | null }): string {
+  if (m.label != null && m.label !== '') return m.label;
   const name = m.repo.includes('/') ? m.repo.slice(m.repo.indexOf('/') + 1) : m.repo;
   return `${name}#${m.number}`;
 }

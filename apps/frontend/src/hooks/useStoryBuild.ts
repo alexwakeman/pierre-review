@@ -10,6 +10,8 @@ import {
   type StoryBuild,
   type StoryBuildDiffResponse,
   type StoryBuildForTicketResponse,
+  type StoryBuildLoopContinueBody,
+  type StoryBuildLoopSettingsBody,
   type StoryBuildPushBody,
   type StoryBuildPushResponse,
   type SandboxComposeFiles,
@@ -27,7 +29,7 @@ import { useSandboxSessionStream } from './useSandboxSessionStream.js';
 import { workspaceKey } from './useActivity.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import type { SessionStreamState } from '../lib/sandboxSession.js';
-import { autoPushRunning } from '../lib/storyBuild.js';
+import { autoPushRunning, loopRunning } from '../lib/storyBuild.js';
 
 // "IMPLEMENT STORY" — the build tab's server state (docs/STORY-BUILD.md; docs/FRONTEND.md § The build
 // tab). ONE query per ticket (`storyBuildForKey`) holds the latest session; the session's SSE stream
@@ -64,6 +66,9 @@ export function useStoryBuildFor(workspaceId: number | null, ident: string | nul
       if (b?.session == null) return false;
       // The automatic push runs on the host after the turn: follow it until it answers (a push or a failure).
       if (b.session.live && autoPushRunning(b)) return SESSION_POLL_MS;
+      // THE REVIEW LOOP works on the host between turns (reviews, pushes, the PR): follow it while it moves,
+      // whether the sandbox is open or not (a review or the PR open runs with the session closed too).
+      if (loopRunning(b)) return SESSION_POLL_MS;
       return b.session.live && b.session.phase !== 'ready' && b.session.phase !== 'plan_ready' && b.session.phase !== 'built' ? SESSION_POLL_MS : false;
     },
   });
@@ -201,22 +206,46 @@ export function useStoryBuildPrPush(workspaceId: number | null, ident: string) {
 }
 
 /**
- * "Push and open the pull request when the build finishes" on or off (`POST …/auto-push`). Its OWN key:
- * a DB write with no model turn, so a running turn never blocks it. 409 once the build pushed: re-read.
+ * THE REVIEW LOOP's switch and rounds (`POST …/loop/settings`, until the loop starts). Its OWN key, like
+ * the auto-push switch: a DB write. Optimistic; 409 LoopStarted re-reads the build.
  */
-export function useStoryBuildAutoPush(workspaceId: number | null, ident: string) {
+export function useStoryBuildLoopSettings(workspaceId: number | null, ident: string) {
   const qc = useQueryClient();
-  const setAutoPush = (on: boolean): void => {
-    qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) =>
-      old?.build == null ? old : { ...old, build: { ...old.build, autoPush: on } },
-    );
+  const patch = (v: StoryBuildLoopSettingsBody): void => {
+    qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) => {
+      if (old?.build == null) return old;
+      const b = old.build;
+      const on = v.on ?? b.autoPush === true;
+      const loop = b.loop != null ? { ...b.loop, on, rounds: v.rounds ?? b.loop.rounds } : b.loop;
+      return { ...old, build: { ...b, autoPush: on, loop } };
+    });
   };
   return useMutation({
-    mutationFn: (v: { id: number; on: boolean }) => api.setStoryBuildAutoPush(v.id, { on: v.on }),
-    // Optimistic: the box flips on the click; an error re-reads the stored value.
-    onMutate: (v) => setAutoPush(v.on),
-    onSuccess: (r) => setAutoPush(r.autoPush),
+    mutationFn: (v: { id: number } & StoryBuildLoopSettingsBody) => api.setStoryBuildLoop(v.id, { ...(v.on !== undefined ? { on: v.on } : {}), ...(v.rounds !== undefined ? { rounds: v.rounds } : {}) }),
+    onMutate: (v) => patch(v),
+    onSuccess: () => invalidateBuild(qc, workspaceId, ident),
     onError: () => void qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
+  });
+}
+
+/** Continue a paused loop: the reader's press (may start a review, a fix turn and pushes). Billed: the
+ *  ticket's ONE action key. `branch` renames one target's branch first (after BRANCH_EXISTS). */
+export function useContinueStoryBuildLoop(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: storyBuildMutationKey(ident),
+    mutationFn: (v: { id: number } & StoryBuildLoopContinueBody) => api.continueStoryBuildLoop(v.id, v.branch != null ? { branch: v.branch } : {}),
+    onSuccess: () => Promise.all([invalidateBuild(qc, workspaceId, ident), qc.invalidateQueries({ queryKey: ['ticket-prs'] })]),
+  });
+}
+
+/** Stop the loop at its next checkpoint (the work and the pushed branches stay). Its OWN key, like the
+ *  session's Stop: it must never wait behind a billed press. */
+export function useStopStoryBuildLoop(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.stopStoryBuildLoop(id),
+    onSuccess: () => invalidateBuild(qc, workspaceId, ident),
   });
 }
 

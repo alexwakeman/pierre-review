@@ -14,7 +14,16 @@
 // ⚠ The ticket text is UNTRUSTED (tracker text): it sits in TICKET.md under a line that says it is the
 // requirement, not instructions about the session.
 import { posix } from 'node:path';
-import { criterionIsGap, type AiProviderId } from '@pierre-review/shared';
+import {
+  acSectionText,
+  criterionIsGap,
+  describeTicketLayout,
+  findAcSection,
+  ticketLayoutOf,
+  type AiProviderId,
+  type TicketAcLocation,
+  type TicketLayout,
+} from '@pierre-review/shared';
 import { WRITING_RULES } from '../../ai/writing-rules.js';
 import type { FileToCopy } from '../runtime/types.js';
 import { FIX_REFS_FILE, FIX_REPORT_CHECKER, FIX_REPORT_FILE, fixReportCheckerSource } from './fix-report.js';
@@ -332,6 +341,47 @@ function agentFile(i: SeedInput, provider: AiProviderId): string {
 
 const numbered = (xs: readonly string[]): string => xs.map((x, n) => `${n + 1}. ${x}`).join('\n');
 
+/** The ticket's layout facts: where the criteria live, the criteria AS WRITTEN, and both layouts
+ *  (shared `ticketLayoutOf`). ONE fold for TICKET.md, `plan-context.json` and the host's layout check
+ *  (coding/story-build/plan-verify.ts). Pure. */
+export interface TicketLayoutFacts {
+  acLocation: TicketAcLocation;
+  /** The criteria as the ticket writes them: the field's text, else the description's AC section. */
+  rawCriteria: string;
+  description: TicketLayout;
+  criteria: TicketLayout;
+}
+
+export function ticketLayoutFacts(t: Pick<SessionTicket, 'description' | 'acceptanceCriteriaText' | 'acLocation'>): TicketLayoutFacts {
+  const acLocation: TicketAcLocation =
+    t.acLocation ??
+    ((): TicketAcLocation => {
+      const s = findAcSection(t.description);
+      if (s != null) return { kind: 'description', heading: s.heading };
+      // Criteria text with no section in the description: a field of their own (name not known).
+      return t.acceptanceCriteriaText.trim() !== '' ? { kind: 'field', fieldId: '', fieldName: null } : { kind: 'none' };
+    })();
+  const fromSection = acLocation.kind === 'description' ? acSectionText(t.description) : '';
+  const rawCriteria = t.acceptanceCriteriaText.trim() !== '' ? t.acceptanceCriteriaText.trim() : fromSection;
+  return { acLocation, rawCriteria, description: ticketLayoutOf(t.description), criteria: ticketLayoutOf(rawCriteria) };
+}
+
+/** Untrusted tracker text on one line, for a quoted name. */
+const oneLine = (s: string, max = 80): string => s.replace(/[\s"`]+/g, ' ').trim().slice(0, max);
+
+function acWhere(loc: TicketAcLocation): string {
+  if (loc.kind === 'field') {
+    const name = oneLine(loc.fieldName ?? loc.fieldId);
+    return name !== '' ? `They live in the ticket's own field "${name}".` : "They live in a field of the ticket's own.";
+  }
+  if (loc.kind === 'description') {
+    return loc.heading != null
+      ? `They live in the description, under the heading "${oneLine(loc.heading)}".`
+      : 'They live in the description.';
+  }
+  return 'Nowhere: the ticket has no acceptance criteria of its own.';
+}
+
 export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDir: string | null = null): string {
   const out: string[] = [`# ${t.key}: ${t.title || '(no title)'}`, ''];
   if (t.url) out.push(`Tracker: ${t.url}`, '');
@@ -364,6 +414,23 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
   } else {
     out.push('The ticket has no acceptance criteria. Work from the description, and state in your report the criteria you used.');
   }
+  // The ticket's STRUCTURE, so a ticket update keeps it (docs/TRACKERS.md § The ticket update).
+  const facts = ticketLayoutFacts(t);
+  out.push('', '## Acceptance criteria as written in the ticket', '', acWhere(facts.acLocation));
+  if (facts.rawCriteria !== '') {
+    out.push(`Layout: ${describeTicketLayout(facts.criteria)}.`);
+    // Printed once: the raw text is already above when the ticket has no numbered list.
+    if (t.criteria.length > 0) out.push('', '````text', facts.rawCriteria, '````');
+  }
+  out.push(
+    '',
+    '## Description layout',
+    '',
+    facts.description.headings.length > 0
+      ? `Headings, in order: ${facts.description.headings.map((h) => oneLine(h)).join(', ')}.`
+      : 'No headings.',
+    `Layout: ${describeTicketLayout(facts.description)}.`,
+  );
   out.push('', '## Open points (not decided yet)', '');
   if (t.openPoints.length > 0) {
     out.push(
@@ -424,6 +491,7 @@ export function planCriteriaRefs(t: SessionTicket, mode: SeedInput['mode']): { c
 /** `plan-context.json`: what the checker checks against (the host writes it again after every run). */
 export function planContextFor(i: Pick<SeedInput, 'ticket' | 'mode' | 'layout' | 'docs'>, runs: readonly string[]): PlanContextFile {
   const refs = planCriteriaRefs(i.ticket, i.mode);
+  const facts = ticketLayoutFacts(i.ticket);
   return {
     criteria: refs.criteria,
     gaps: refs.gaps,
@@ -433,6 +501,12 @@ export function planContextFor(i: Pick<SeedInput, 'ticket' | 'mode' | 'layout' |
     fillGaps: i.mode === 'fill_gaps',
     repoPaths: Object.fromEntries(i.layout.repos.map((r) => [r.fullName.toLowerCase(), r.path])),
     docsDir: i.docs?.dir ?? null,
+    ticket: {
+      acLocation: facts.acLocation.kind,
+      headings: facts.description.headings,
+      criteriaStyle: facts.criteria.listStyle,
+      gherkin: facts.criteria.gherkin,
+    },
   };
 }
 
@@ -479,7 +553,11 @@ function planSection(i: SeedInput, provider: AiProviderId): string {
     ...evidence,
     '- Limn checks every piece of evidence itself and removes what it cannot find. A point you cannot show is not a point of contention: leave it out. Never use production systems or production data.',
     '- `stack`: the pull requests in order (P1, P2, …). One pull request per repository, unless splitting clearly reduces risk or review size. At most 3 in one repository and 6 in all. In one repository each pull request builds on the one before it: put that one in `dependsOn`. Each pull request must build and pass its tests on its own. When there are more pull requests than repositories, `stackReason` says why. Titles do not include the ticket key.',
-    '- `ticketUpdate`: required when there is a point of contention or the story needs work in another way, else null. Give the WHOLE new `description` and/or `acceptanceCriteria` in the ticket\'s own format: keep its headings, its list style, its GIVEN / WHEN / THEN lines and its spelling (British English if the ticket uses it). Write it as if the reader agrees with every point; list the points in `contentions`. Limn never writes it to the tracker: the reader copies it.',
+    '- `ticketUpdate`: REQUIRED when there is a point of contention or a criterion is `not_planned`, or when the story needs work in another way. Else null: the ticket is right as written.',
+    '  - Each field is the WHOLE new text, or null when that part does not change. Write it as if the reader agrees with every point; list the points in `contentions`.',
+    '  - Keep the ticket\'s layout (TICKET.md, "Acceptance criteria as written in the ticket" and "Description layout"): the same headings in the same order, the same list style, GIVEN / WHEN / THEN when the ticket uses it, and the same spelling (British English if the ticket uses it).',
+    '  - When the criteria live in the description, put the new criteria inside `description`, in the same section, and set `acceptanceCriteria` to null.',
+    '  - Limn shows the draft to the reader, who can change it and press Update ticket. Limn writes nothing to the tracker by itself.',
     `- Check the plan before you send it: \`node ${PLAN_CHECKER} <<'EOF'\` … \`EOF\` prints OK or the problems.${provider === 'claude' ? ' If your tools do not let you run it, send the plan: Limn checks it anyway.' : ''}`,
     '- The reader answers each point of contention: agree, keep the story, or a reply. When you revise the plan, keep the ids of the points that did not change, and send the WHOLE plan again in one `limn-plan` block.',
     `- The build starts only when the reader approves the plan. Then \`${posix.join(i.layout.root, 'PLAN.md')}\` has the approved plan and the reader's decisions.`,

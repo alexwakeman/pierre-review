@@ -197,7 +197,7 @@ const VERDICT_LABEL: Record<ClaudeReviewVerdict, string> = {
 };
 
 // The run's OUTCOME — the header's first pill, the same size as the Open PRs panel's headline.
-function VerdictBadge({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Element {
+export function VerdictBadge({ verdict }: { verdict: ClaudeReviewVerdict }): JSX.Element {
   return (
     <span className={`${VERDICT_PILL} ${VERDICT_CLASS[verdict]}`}>
       <VerdictIcon verdict={verdict} size={13} />
@@ -700,7 +700,9 @@ export function FindingRow({
   /** Who wrote the finding: the provider that ran its review ('Claude' | 'Codex'). */
   authorName?: string;
   editable: boolean;
-  prUrl: string;
+  // null ⇒ no pull request yet (THE REVIEW LOOP reviews a pushed BRANCH): the code anchor links the file at
+  // `headSha` instead of the PR diff, and nothing that needs a PR is offered (pass `actions={false}`).
+  prUrl: string | null;
   // "owner/name" — for building a blob permalink to the finding's line.
   repoFullName: string;
   // The reviewed head SHA (run's headSha, falling back to the PR head). Pins the
@@ -791,9 +793,11 @@ export function FindingRow({
   // cosmetic GitHub-side delay we can't control, but it resolves correctly. When
   // the finding has no line we fall back to the file-level anchor (file header).
   const diffLineHref =
-    finding.line != null
-      ? `${prUrl}/files#diff-${finding.diffAnchorId}${finding.side === 'LEFT' ? 'L' : 'R'}${finding.line}`
-      : `${prUrl}/files#diff-${finding.diffAnchorId}`;
+    prUrl == null
+      ? null
+      : finding.line != null
+        ? `${prUrl}/files#diff-${finding.diffAnchorId}${finding.side === 'LEFT' ? 'L' : 'R'}${finding.line}`
+        : `${prUrl}/files#diff-${finding.diffAnchorId}`;
 
   // A blob permalink at the reviewed head SHA: non-virtualized, so #L<line> is
   // honoured instantly with no jump — but it shows the file, not the diff. We keep
@@ -817,10 +821,17 @@ export function FindingRow({
   // Fallback primary link, in reliability + usefulness order, unchanged from before:
   //   1. posted comment permalink (most reliable, already in PR context)
   //   2. the PR diff line anchor (in-review context — the useful default)
-  const primaryHref = commentUrl ?? diffLineHref;
+  //   3. no PR (a branch review): the file at the reviewed commit
+  const fileHref =
+    headSha != null && finding.path !== ''
+      ? `https://github.com/${repoFullName}/blob/${headSha}/${finding.path.split('/').map(encodeURIComponent).join('/')}${
+          finding.line != null && finding.side === 'RIGHT' ? `#L${finding.line}` : ''
+        }`
+      : null;
+  const primaryHref = commentUrl ?? diffLineHref ?? fileHref ?? undefined;
   // Secondary "view file" escape hatch (blob at head) — only when we didn't link a
-  // posted comment and a RIGHT-side blob link is available.
-  const secondaryBlobHref = commentUrl == null ? blobHref : null;
+  // posted comment and a RIGHT-side blob link is available (with no PR, it IS the primary link).
+  const secondaryBlobHref = commentUrl == null && prUrl != null ? blobHref : null;
   // Posting is offered for every finding on the editable run. Unanchored findings
   // (their own line isn't in the diff) still post inline — the server re-anchors
   // them onto the file's first change. Only a finding whose file isn't in the diff
@@ -1092,7 +1103,7 @@ export function FindingRow({
                   {anchorLabel}
                 </button>
                 <a
-                  href={diffLineHref}
+                  href={diffLineHref ?? fileHref ?? undefined}
                   target="_blank"
                   rel="noreferrer noopener"
                   aria-label={

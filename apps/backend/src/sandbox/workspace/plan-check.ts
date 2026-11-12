@@ -37,6 +37,12 @@ export interface BuildPlanCheckContext {
   /** Reference documents were copied in (a docs item is allowed). */
   docs: boolean;
   fillGaps: boolean;
+  /**
+   * The ticket's layout facts (shared `ticketLayoutOf`) and where its criteria live
+   * (tracker/ac-location.ts). Absent on a context file written before the whole-ticket update.
+   * The validator enforces only the location rule; the layout check is the host's (plan-verify.ts).
+   */
+  ticket?: { acLocation: 'field' | 'description' | 'none'; headings: string[]; criteriaStyle: string; gherkin: boolean } | null;
 }
 
 export interface BuildPlanCheck {
@@ -245,14 +251,17 @@ export const BUILD_PLAN_CHECK_SOURCE = String.raw`(function () {
 
     // ---- ticket update ----
     var tu = raw.ticketUpdate;
-    // A point of contention says the story is wrong: the reader gets the draft to fix it (owner, 2026-11-07).
-    if ((tu === null || tu === undefined) && raw.contentions.length > 0) shape.push('"ticketUpdate" is null, but "contentions" says the story is wrong: give the updated "description" and/or "acceptanceCriteria" in the ticket\'s own format.');
+    // A point of contention says the story is wrong, and a criterion not planned means the criteria need
+    // revising: the reader gets the draft of the WHOLE ticket to fix it (owner, 2026-11-07 / 2026-11-12).
+    var notPlanned = Array.isArray(raw.criteria) && raw.criteria.some(function (c) { return obj(c) && c.status === 'not_planned'; });
+    if ((tu === null || tu === undefined) && (raw.contentions.length > 0 || notPlanned)) shape.push('"ticketUpdate" is null, but ' + (raw.contentions.length > 0 ? '"contentions" says the story is wrong' : 'a criterion is "not_planned"') + ': give the updated "description" and/or "acceptanceCriteria" in the ticket\'s own layout.');
     if (tu !== null && tu !== undefined) {
       if (!obj(tu)) shape.push('"ticketUpdate" must be null or an object.');
       else {
         var fieldOk = function (v) { return v === null || v === undefined || str(v, L.ticketField); };
         if (!fieldOk(tu.description) || !fieldOk(tu.acceptanceCriteria)) shape.push('"ticketUpdate": "description" and "acceptanceCriteria" must each be null or the WHOLE new text (at most ' + L.ticketField + ' characters).');
         if (!str(tu.description, L.ticketField) && !str(tu.acceptanceCriteria, L.ticketField)) shape.push('"ticketUpdate" must have a new "description" or new "acceptanceCriteria" (or be null).');
+        if (ctx.ticket && ctx.ticket.acLocation === 'description' && str(tu.acceptanceCriteria, L.ticketField)) shape.push('The criteria live in the ticket\'s description: put them in "description" and set "acceptanceCriteria" to null.');
         if (!str(tu.why, L.ticketWhy)) shape.push('"ticketUpdate.why" must be a non-empty string of at most ' + L.ticketWhy + ' characters.');
         if (!strList(tu.contentions, L.contentions, 4)) shape.push('"ticketUpdate.contentions" must be a list of contention ids.');
         else for (var u = 0; u < tu.contentions.length; u++) if (!ids[tu.contentions[u]]) content.push('ticketUpdate.contentions: ' + tu.contentions[u] + ' is not a point of contention.');

@@ -401,3 +401,32 @@ describe('the next follow-up of a merged-away finding', () => {
     expect(isPairRepeat({ path: 'a', line: 1, title: 'x', priorFindingId: 7 }, { path: 'b', line: 90, title: 'y', priorFindingId: 8 })).toBe(false);
   });
 });
+
+describe('consolidateHalves (the review loop: no claude_reviews store)', () => {
+  const half = (id: number, provider: 'claude' | 'codex', fs: Array<[number, string, ClaudeFindingSeverity]>, verdict = 'COMMENT') =>
+    ({
+      id,
+      prId: 0,
+      provider,
+      summary: `${provider} summary`,
+      verdict,
+      findings: fs.map(([fid, title, severity]) => ({ id: fid, path: 'src/a.ts', line: 10, title, body: 'b', severity, editedBody: null, postedAt: null })),
+    }) as any;
+  it('the pass groups duplicates, the code keeps what to keep, usage billed to no PR', async () => {
+    const a = half(1, 'claude', [[10, 'Null check missing', 'warning']]);
+    const b = half(2, 'codex', [[20, 'Missing null guard', 'blocker'], [21, 'Rename x', 'nit']]);
+    usage.length = 0;
+    const r = await pc.consolidateHalves(ctx, 1, null, a, b, { complete: completeWith(answer([{ ids: [10, 20], keep: 10 }], 'One crash.')) });
+    // The blocker is never merged into the milder warning.
+    expect(r).toMatchObject({ how: 'pass', summary: 'One crash.', mergedFrom: { '10': 20 } });
+    expect(r.sourceOf['20']).toBe('both');
+    expect(r.verdict).toBe('REQUEST_CHANGES');
+    expect(usage).toEqual([expect.objectContaining({ feature: pc.PAIR_MERGE_FEATURE, prId: null })]);
+  });
+  it('falls back to the code repeats when the pass fails', async () => {
+    const a = half(1, 'claude', [[10, 'Null check missing on the user lookup', 'warning']]);
+    const b = half(2, 'codex', [[20, 'Missing null check on user lookup', 'warning']]);
+    const r = await pc.consolidateHalves(ctx, 1, null, a, b, { complete: completeWith(() => { throw new Error('down'); }) });
+    expect(r).toMatchObject({ how: 'code', summary: 'claude summary', mergedFrom: { '20': 10 } });
+  });
+});

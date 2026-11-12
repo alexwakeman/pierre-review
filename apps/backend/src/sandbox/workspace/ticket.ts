@@ -8,7 +8,7 @@
 //
 // The result is plain data for the seed fold (seed.ts). Everything in it is UNTRUSTED tracker text.
 // ⚠ `tracker/runtime.ts` opens the DB at import: every tracker import here is LAZY.
-import type { StoryBuildCoverage, StoryDocsCriteriaSource, TicketOpenPoint } from '@pierre-review/shared';
+import { findAcSection, type StoryBuildCoverage, type StoryDocsCriteriaSource, type TicketAcLocation, type TicketOpenPoint } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import type { StoryBuildInputs } from '../../coding/story-build/inputs.js';
 
@@ -47,6 +47,12 @@ export interface SessionTicket {
   /** The tracker was read again just now. false: Limn's stored copy (`readAt` says when). */
   fresh: boolean;
   readAt: string | null;
+  /**
+   * Where the ticket keeps its criteria — what the plan's ticket update writes (tracker/ac-location.ts,
+   * docs/TRACKERS.md § The ticket update). Absent = not known (an older fixture): seed.ts reads the
+   * description for an AC heading instead. The layout facts are computed from the text in seed.ts.
+   */
+  acLocation?: TicketAcLocation;
 }
 
 export interface SessionTicketSeams {
@@ -61,6 +67,8 @@ export interface SessionTicketSeams {
   repoNames(accountId: number, repoIds: readonly number[]): Promise<Map<number, string>>;
   /** The ticket's PRs before the refresh (the refresh needs them; `inputs` re-reads them after). */
   ticketPrs(ctx: AgentContext, accountId: number, ident: string): Promise<Array<{ prId: number; state: 'open' | 'merged' }>>;
+  /** Where the criteria live (stored rows; null = not known). Optional: absent ⇒ the description's AC heading. */
+  acLocation?(accountId: number, workspaceId: number, ident: string): Promise<TicketAcLocation | null>;
 }
 
 export const defaultSessionTicketSeams: SessionTicketSeams = {
@@ -93,7 +101,20 @@ export const defaultSessionTicketSeams: SessionTicketSeams = {
     const prs = await defaultStoryBuildInputSeams.ticketPrs(ctx, accountId, ids).catch(() => []);
     return prs.map((p) => ({ prId: p.prId, state: p.state }));
   },
+  async acLocation(accountId, workspaceId, ident) {
+    const [{ trackerContext }, { storedTicketText }] = await Promise.all([
+      import('../../tracker/runtime.js'),
+      import('../../tracker/ac-location.js'),
+    ]);
+    return (await storedTicketText(trackerContext(), accountId, workspaceId, ident))?.acLocation ?? null;
+  },
 };
+
+/** No stored answer: an AC heading in the description, else nowhere. Pure. */
+function acLocationFromText(description: string): TicketAcLocation {
+  const s = findAcSection(description);
+  return s != null ? { kind: 'description', heading: s.heading } : { kind: 'none' };
+}
 
 /** null ⇒ not a tracker ticket, or no story at all (the start refuses it). */
 export async function readSessionTicket(
@@ -114,6 +135,8 @@ export async function readSessionTicket(
   const { commentsText } = await import('../../coding/story-build/inputs.js');
   const comments = await commentsText(inputs.comments).catch(() => null);
   const cov = opts.coverage ?? null;
+  const acLocation =
+    (await seams.acLocation?.(accountId, workspaceId, ident).catch(() => null)) ?? acLocationFromText(inputs.story.description);
   return {
     ident,
     key: inputs.ticketKey,
@@ -147,5 +170,6 @@ export async function readSessionTicket(
           },
     fresh: refreshed.fresh,
     readAt: refreshed.fetchedAt,
+    acLocation,
   };
 }

@@ -153,6 +153,9 @@ export interface BuildPlanTicketUpdate {
   acceptanceCriteria: string | null;
   why: string;
   contentions: string[];
+  /** Host: the layout check (shared `compareTicketLayout`) against the ticket as Limn held it at plan
+   *  time. [] or absent = the layout is kept. Shown in the plan panel; never rejects a plan. */
+  layoutProblems?: string[];
 }
 
 export interface BuildPlanCriterion {

@@ -564,29 +564,77 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
 
 ## The ticket update — THE OTHER TRACKER WRITE (`tracker/ticket-update.ts`)
 
-Owner decision 2026-11-08 (it replaces "Limn does NOT update the tracker" in STORY-BUILD.md § Plan
-first): the build plan's draft ticket update can be EDITED by the reader and written to the ticket with
-**Update ticket** (`StoryBuild/PlanPanel.tsx` `EditableTicketUpdate`, the latest revision before
-Approve only). Jira only; on GitHub Issues, Linear and Notion the draft stays editable and copyable.
+Owner decisions 2026-11-08 (it replaces "Limn does NOT update the tracker" in STORY-BUILD.md § Plan
+first) and 2026-11-12 (THE WHOLE TICKET): after planning, the plan panel's ticket review
+(`StoryBuild/TicketUpdatePanel.tsx` `TicketReview`) shows the WHOLE ticket — description AND acceptance
+criteria — seeded with the plan's draft, else the current text; the reader edits it, sees what changes,
+and writes it with ONE **Update ticket** press. Jira only; on GitHub Issues, Linear and Notion the boxes
+stay editable and copyable ("Updating the ticket works with Jira only. Copy the text instead.").
 
-- `POST /api/ticket-update?workspace=` `{ident, description, acceptanceCriteria}` → `TicketUpdateResponse`.
-  Each field is the WHOLE new text or `null` (leave it); both null → `400 NothingToUpdate`. ⚠ The body
-  schema is a TYPE UNION (`['string','null']`), never `anyOf`: Fastify's coercion turns a null into `""`
-  under `anyOf`, which would blank the field.
+- **Where the criteria live** — ONE rule, `tracker/ac-location.ts` (`acLocationOf` pure, `storedTicketText`
+  over the stored rows: the TEXT from the freshest row — `tracker_tickets` of any workspace (the same
+  ticket) or this workspace's `sprint_tickets` row; the LOCATION only from THIS workspace's freshest row,
+  since the AC field choice is per workspace (no row here ⇒ the description alone decides):
+  a custom field (or another tracker's own place: `<p>:sub_issues`, `notion:property`) ⇒ `field`; else an
+  AC section in the stored description (shared `findAcSection`: an ATX heading or a bold label line —
+  Jira's `*Acceptance Criteria:*` — named "Acceptance criteria" / "AC", else, only when no such section
+  exists, "Criteria" / "Definition of done"; "Acceptance testing" is not one) ⇒ `description` + its heading; else a GitHub / Linear / Notion body rule
+  (`<p>:heading`, `<p>:task_list`, cut out of the stored description) ⇒ `description`; else `none`. The
+  planning agent is told it (TICKET.md "Acceptance criteria as written in the ticket", docs/SANDBOX.md §
+  The ticket) and the panel labels the box by it. ⚠ The READ side (`tracker/ac.ts`: "Acceptance criteria"
+  as a heading or a bold / colon label) is a separate rule and stays as it is: broadening it would move
+  stored criteria.
+- **The layout** — shared `ticket-layout.ts`: `ticketLayoutOf` (headings in order, the list style —
+  numbered / bulleted / checklist / GIVEN-WHEN-THEN / table / paragraphs / mixed — and GIVEN / WHEN /
+  THEN), `compareTicketLayout` (a dropped or moved heading, a changed list style, lost GIVEN / WHEN /
+  THEN; ≤ 6 plain lines). The agent is told to keep it; the host stores the check on the revision
+  (`ticketUpdate.layoutProblems`, plan-verify.ts) and the panel runs the SAME fold live on the reader's
+  edit. ⚠ It is ADVICE, never a gate: a plan is never refused for it and the button never disables.
+- `GET /api/ticket-update/current?workspace=&ident=` → `TicketUpdateCurrent {workspaceId, ident, jira,
+  description, acceptanceCriteria, acLocation, readAt}` — the stored copy (markdown), DB only; criteria in
+  the description answer the section's body. No stored row in this account → `404`. Tier `read`.
+- `POST /api/ticket-update?workspace=` `{ident, description, acceptanceCriteria}` → `TicketUpdateResponse
+  {…, updated, criteriaField, criteriaWritten: 'field' | 'description' | null}`. Each field is the WHOLE
+  new text (markdown) or `null` (leave it); the SPA sends ONLY the fields that differ from the current
+  text; both null → `400 NothingToUpdate`. ⚠ The body schema is a TYPE UNION (`['string','null']`),
+  never `anyOf`: Fastify's coercion turns a null into `""` under `anyOf`, which would blank the field.
 - **The gate is the status change's** (`statusGate`, its not-Jira sentence swapped): this workspace's
   Jira site, a ticket Limn holds a row for in this account, a usable token — refused before Jira is called.
 - **The description** is markdown in Limn (`jiraWikiToMarkdown` on read), so it goes back as wiki markup
-  (`jira/text.ts markdownToJiraWiki`: headings, lists by indent, quotes, rules, fences, tables, inline
-  marks, links, images; the round trip is pinned by `jira/md-wiki.test.ts`).
-- **The criteria** are written VERBATIM into the custom field Limn read them from (`ac_field_id` on a
-  stored `tracker_tickets` row, else the workspace's `sprint_tickets` row; only `customfield_<n>`) —
-  Limn shows that field's own text, so nothing is converted. No such field (the criteria live in the
-  description) → `400 NoCriteriaField` (shared `TICKET_UPDATE_NO_CRITERIA_FIELD`), before Jira is called.
+  (`jira/text.ts markdownToJiraWiki`; the round trip is pinned by `jira/md-wiki.test.ts`).
+- **The criteria go where the ticket keeps them**:
+  - **a custom field** — its FORMAT is read at press time from `GET /rest/api/2/issue/{key}/editmeta`
+    (`criteriaFieldFormat`): a `…:textarea` custom field or a system string field ⇒ `markdownToJiraWiki`
+    (the stored criteria are markdown, `jira/candidates.ts candidateText` — the old VERBATIM write put
+    markdown into Jira and was a bug); a one-line `…:textfield` ⇒ `plainOneLine` (markers stripped, one
+    line), over 255 characters ⇒ `400 CriteriaTooLong` (`TICKET_UPDATE_FIELD_ONE_LINE`); any other type,
+    or a field not on the edit screen ⇒ `400 CriteriaFieldNotEditable` (`TICKET_UPDATE_FIELD_NOT_EDITABLE`).
+    Both refusals come BEFORE the PUT. REST v2 takes wiki strings for rich-text fields on Cloud and
+    Server alike, so Limn never writes ADF (only a move to REST v3 would need it).
+  - **the description** — with a description sent in the same press: spliced into its criteria section
+    (shared `spliceAcSection`: the heading or label line kept, the body replaced, fenced code skipped) and
+    the whole description written from the reader's text. CRITERIA ONLY: ⚠ never rebuilt from Limn's
+    stored copy (lossy markdown: `jiraWikiToMarkdown` drops colours, panels, images and table-cell
+    breaks); ONE live `GET …/issue/{key}?fields=description`, and `jira/text.ts spliceWikiAcSection`
+    replaces ONLY the criteria block of that wiki text (`findWikiAcSection`: the same section rule over
+    `hN.` headings and `*Label:*` lines, `{code}` / `{noformat}` skipped) — every other byte kept. A
+    description Jira does not answer as text ⇒ `400 CriteriaFieldNotEditable`, before the PUT.
+    `criteriaWritten: 'description'`.
+  - **nowhere** — appended to the description under `## Acceptance criteria` / `h2. Acceptance criteria`
+    (the same two ways). `NoCriteriaField`
+    (`TICKET_UPDATE_NO_CRITERIA_FIELD`) is no longer answered; the constant stays for old clients.
 - ONE `PUT /rest/api/2/issue/{key}` `{fields}` (`jiraPutJson`, the same guard as every Jira call), then
   the PR rows are marked due (`next_check_at` = 0). The build's Approve and start reads the ticket live
   (`readSessionTicket`), so the build gets the new text. Refusals are the status change's sentences
   (403 → `TICKET_STATUS_NO_PERMISSION`, 400 → "Jira refused this change."). No worker, no automation,
-  no retry; the SPA asks once ("Replace the ticket's … in Jira?"). Rate tier `[search, read]`.
+  no retry (`retry: false`); the SPA asks once ("Replace the ticket's … in Jira?", naming only what
+  changes). ⚠ Nothing else calls it — the review loop (STORY-BUILD.md) never writes the tracker. Rate tier
+  `[search, read]` (the editmeta / description read is inside the same press).
+- **The draft is untrusted.** `markdownToJiraWiki` passes wiki markup through as typed, so plan-verify
+  ESCAPES (`neutraliseNewWikiMarkup`, a backslash) every Jira mention (`[~accountid:…]`, `[~name]`) or
+  macro (`{html}`, `{panel}`, `{color}`, `{include}`, `{iframe}`) in the agent's draft that the stored
+  ticket text does not already hold, and adds one line to `layoutProblems` ("The draft had a Jira mention
+  or Jira markup the ticket does not have. Limn writes it as plain text.").
 
 ## The assignee change — THE THIRD TRACKER WRITE (`tracker/assignee.ts`)
 
@@ -1000,6 +1048,7 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `GET /api/ticket-status/transitions?workspace=&ident=` | Jira's allowed transitions, on the picker's open (§ The status change) | `search` |
 | `POST /api/ticket-status?workspace=` | a tracker write: make the picked Jira transition, then settle | `search` |
 | `POST /api/ticket-update?workspace=` | the other tracker write: the build plan's edited ticket update (§ The ticket update) | `search` |
+| `GET /api/ticket-update/current?workspace=&ident=` | the ticket as Limn holds it, for the plan panel's ticket review (§ The ticket update), DB only | `read` |
 
 ⚠ **NOT A TRACKER PROXY.** The ticket routes address a PULL REQUEST (ownership → 404), re-run
 detection on it and answer only for a key detection found. Every failure is a 502 carrying a

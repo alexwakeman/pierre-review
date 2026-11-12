@@ -30,8 +30,9 @@
 //
 // ⚠ THE STREAM GAP: the in-memory session is set in the SAME tick as the claim, before any other await.
 // ⚠ Nothing here pushes, posts or writes to the tracker; the host pushes only on the reader's press (or
-//   an AI Fix's own push rules, coding/ai-fix/auto-push.ts, or a story build's opt-in automatic push,
-//   coding/story-build/auto-push.ts, started from the subject's afterBuildSettled).
+//   an AI Fix's own push rules, coding/ai-fix/auto-push.ts, or a story build's opt-in REVIEW LOOP,
+//   coding/story-build/loop/, started from the subject's afterBuildTurnEnded: it holds the session between
+//   its turns (`holdSession`) and starts its fix turns itself (`startHostBuildTurn`)).
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   SANDBOX_SESSION_LIVE_PHASES,
@@ -72,7 +73,17 @@ import {
 } from '../../coding/story-build/persist.js';
 import { isStoryBuildRepoPushing } from '../../coding/story-build/push.js';
 import { isStoryBuildStackPushing } from '../../coding/story-build/push-stack.js';
-import { isStoryBuildAutoPushing, maybeAutoPushBuild, reconcileStoryAutoPushOnStartup } from '../../coding/story-build/auto-push.js';
+import { isStoryBuildAutoPushing, reconcileStoryAutoPushOnStartup } from '../../coding/story-build/auto-push.js';
+import {
+  afterLoopFixTurn,
+  maybeStartLoop,
+  reconcileStoryLoopsOnStartup,
+  storyLoopBusyReason,
+  storyLoopDiscardRefusal,
+  stopLoopForDiscard,
+  storyLoopWire,
+} from '../../coding/story-build/loop/driver.js';
+import { clampLoopRounds } from '@pierre-review/shared';
 import { defaultSandboxSettings, readSandboxSettings, type SandboxSettingsRow } from '../../db/sandbox-settings.js';
 import { resolveSandboxAgentChoice, startSandboxAgent, type SandboxAgentChoice, type SandboxAgentDriver, type SandboxUsageSink } from '../drivers/index.js';
 import { credentialModeLine } from '../proxy/credentials.js';
@@ -290,6 +301,10 @@ export interface Live extends SubjectLive {
   saveTimer: ReturnType<typeof setTimeout> | null;
   closing: boolean;
   closed: Promise<void> | null;
+  /** THE REVIEW LOOP holds the sandbox between its turns (no idle close while set): why, or null. */
+  hold?: string | null;
+  /** The running build turn was started by the review loop (its end goes to the loop). */
+  loopTurn?: boolean;
 }
 
 const live = new Map<SessionKey, Live>();
@@ -361,7 +376,7 @@ function touch(l: Live): void {
   if (l.idleTimer) clearTimeout(l.idleTimer);
   l.idleTimer = null;
   l.idleAt = null;
-  if (l.closing || l.turn || l.driver == null) return;
+  if (l.closing || l.turn || l.hold || l.driver == null) return;
   const { idleMs } = sessionLimits();
   l.idleAt = deps.now() + idleMs;
   l.idleTimer = setTimeout(() => void idleClose(l), idleMs);
@@ -371,7 +386,7 @@ function touch(l: Live): void {
 
 async function idleClose(l: Live): Promise<void> {
   if (l.closing) return;
-  if (l.turn) return touch(l);
+  if (l.turn || l.hold) return touch(l);
   await closeKeepingWork(l, idleLine(Math.round(sessionLimits().idleMs / 60_000)));
 }
 
@@ -480,6 +495,8 @@ export interface StartSessionArgs {
   docs?: boolean;
   /** "Push and open the pull request when the build finishes" (coding/story-build/auto-push.ts). */
   autoPush?: boolean;
+  /** With `autoPush`: the review loop's rounds (clamped 1..6; default 3). */
+  loopRounds?: number;
 }
 
 export type StartSessionResult =
@@ -585,7 +602,10 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
   const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
   registerLive(l, a.memberRepoIds);
   if (a.docs === true || a.autoPush === true) {
-    await updateStoryBuild(ctx, a.accountId, id, { ...(a.docs === true ? { withDocs: true } : {}), ...(a.autoPush === true ? { autoPush: true } : {}) }).catch(() => {});
+    await updateStoryBuild(ctx, a.accountId, id, {
+      ...(a.docs === true ? { withDocs: true } : {}),
+      ...(a.autoPush === true ? { autoPush: true, loopRounds: clampLoopRounds(a.loopRounds) } : {}),
+    }).catch(() => {});
   }
   return { outcome: 'started', id };
 }
@@ -994,6 +1014,7 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
         const follow = afterChat?.followUp ?? null;
         if (after === 'close') {
           await closeSession(l, { phase: 'built', error: null }).catch(() => {});
+          if (o.build) buildTurnEnded(l, { outcome, stored, saved: false });
         } else if (buildFollow != null && l.driver != null && !l.driver.busy() && l.driver.mode() === 'build' && !buildSlotTaken(l.key)) {
           // A BUILD CONTINUATION (plan first: the turn cap hit with work unfinished; the subject asked the
           // budget gate): claimed in this same tick, the build slot with it.
@@ -1019,10 +1040,103 @@ function runTurn(l: Live, o: { build: boolean; text: () => Promise<string>; plan
               /* a subject's listener never stops the machine */
             }
           }
+          if (o.build) buildTurnEnded(l, { outcome, stored, saved });
         }
+      } else if (o.build) {
+        buildTurnEnded(l, { outcome, stored, saved: false });
       }
     }
   })();
+}
+
+/** Every build turn that ended WITHOUT a continuation, whatever its outcome (the review loop). */
+function buildTurnEnded(l: Live, e: { outcome: SandboxTurnOutcome | null; stored: boolean; saved: boolean }): void {
+  try {
+    l.subject.afterBuildTurnEnded?.(l, e);
+  } catch {
+    /* a subject's listener never stops the machine */
+  }
+}
+
+// ---- the review loop's hooks into a live session (coding/story-build/loop/driver.ts) ----------------------
+
+/** THE REVIEW LOOP holds the sandbox between its turns: no idle close until `releaseSession`. */
+export function holdSession(key: SessionKey, reason: string): boolean {
+  const l = live.get(key);
+  if (!l || l.closing) return false;
+  l.hold = reason;
+  if (l.idleTimer) clearTimeout(l.idleTimer);
+  l.idleTimer = null;
+  l.idleAt = null;
+  return true;
+}
+
+export function releaseSession(key: SessionKey): void {
+  const l = live.get(key);
+  if (!l || l.hold == null) return;
+  l.hold = null;
+  touch(l);
+}
+
+export type HostTurnResult = 'started' | 'not_live' | 'busy' | 'build_busy';
+
+/**
+ * A HOST-STARTED build turn (the review loop's fix pass): the same claim as a build continuation, in one
+ * tick — the session is live, in build mode, idle, and the machine's ONE build slot is free.
+ */
+export function startHostBuildTurn(key: SessionKey, text: string): HostTurnResult {
+  const l = live.get(key);
+  if (!l || l.closing || l.driver == null) return 'not_live';
+  if (l.turn || l.driver.busy()) return 'busy';
+  if (l.driver.mode() !== 'build') return 'busy';
+  if (buildSlotTaken(key)) return 'build_busy';
+  l.turn = true;
+  building = key;
+  l.loopTurn = true;
+  try {
+    l.subject.beforeHostTurn?.(l);
+  } catch {
+    /* never stops the claim */
+  }
+  runTurn(l, { build: true, text: async () => text });
+  return 'started';
+}
+
+/** The live session can take a host turn now (booted, in build mode, idle). */
+export function hostTurnReady(key: SessionKey): boolean {
+  const l = live.get(key);
+  return l != null && !l.closing && l.driver != null && !l.turn && !l.driver.busy() && l.driver.mode() === 'build' && l.container != null && l.layoutRoot != null;
+}
+
+/** What the review loop reads and writes in a live story session (null when it is not live). */
+export function liveStoryIo(buildId: number): {
+  root: string;
+  provider: AiProviderId;
+  copyIn(files: Array<{ path: string; content: string; mode?: number }>): Promise<void>;
+  runtime: SandboxRuntime;
+  container: string;
+} | null {
+  const l = live.get(storyKey(buildId));
+  if (!l || l.closing || !l.container || !l.layoutRoot) return null;
+  const container = l.container;
+  return {
+    root: l.layoutRoot,
+    provider: l.choice.provider,
+    copyIn: (files) => l.runtime.copyIn(container, files),
+    runtime: l.runtime,
+    container,
+  };
+}
+
+/** The review loop's frame and one conversation line on a live story session (no-ops when closed). */
+export function emitStoryEvent(buildId: number, e: SandboxSessionStreamEvent): void {
+  const l = live.get(storyKey(buildId));
+  if (l && !l.closing) emit(l, e);
+}
+
+export function noticeStory(buildId: number, text: string): void {
+  const l = live.get(storyKey(buildId));
+  if (l && !l.closing) notice(l, text);
 }
 
 async function turnTimedOut(l: Live, seq: number, maxMs: number, graceMs = TURN_STOP_GRACE_MS): Promise<void> {
@@ -1382,6 +1496,9 @@ export async function discardSession(ctx: AgentContext, accountId: number, build
   const planned = await listPlannedPrRows(ctx, accountId, buildId);
   if (isStoryBuildStackPushing(buildId, planned.map((p) => p.id))) return { status: 'not_ready' };
   if (isStoryBuildAutoPushing(buildId)) return { status: 'not_ready' };
+  // THE REVIEW LOOP: never while it pushes or opens a PR; otherwise it stops first (the branch stays).
+  if (storyLoopDiscardRefusal(buildId) != null) return { status: 'not_ready' };
+  await stopLoopForDiscard(ctx, accountId, buildId).catch(() => {});
   if (row.sessionPhase == null) {
     // A row of the old plan/build flow: its own discard (kept worktrees, refs).
     const { discardLegacyStoryBuild } = await import('../../coding/story-build/legacy.js');
@@ -1465,9 +1582,11 @@ export async function sessionWire(ctx: AgentContext, accountId: number, row: Sto
     repos.some((r) => (r.patch ?? '') !== ''),
     plan,
   );
+  const loop = await storyLoopWire(ctx, accountId, row).catch(() => null);
   return {
     ...base,
     autoPushRunning: isStoryBuildAutoPushing(row.id),
+    loop,
     session,
     prs: prRows.map((r) => toStoryBuildPr(r, prNames.get(r.repoId) ?? `#${r.repoId}`)),
   };
@@ -1539,6 +1658,8 @@ export async function reconcileSessionsOnStartup(ctx: AgentContext): Promise<num
   if (moved > 0) ctx.log.info(`reconciled ${moved} sandbox session(s) cut off by a restart`);
   // An automatic push a restart cut off after its claim: recorded so the tab says so (never a push).
   await reconcileStoryAutoPushOnStartup(ctx).catch((err: unknown) => ctx.log.warn({ err }, 'story auto-push reconcile failed'));
+  // A review loop a restart cut off: paused with one line and Continue (never a push or a review here).
+  await reconcileStoryLoopsOnStartup(ctx).catch((err: unknown) => ctx.log.warn({ err }, 'story review-loop reconcile failed'));
   return moved;
 }
 
@@ -1823,19 +1944,23 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       continuations = 0;
       return text;
     },
-    // PUSH AUTOMATICALLY (coding/story-build/auto-push.ts): the reader's opt-in. Off the turn ("a push is
-    // not a turn"); the module re-reads the option, claims once, records a failure, never throws.
-    afterBuildSettled(l0) {
+    // THE REVIEW LOOP (coding/story-build/loop/driver.ts; it replaces the old automatic push): the reader's
+    // opt-in. A loop fix turn's end goes to the loop, whatever its outcome; any other build turn that ended
+    // well may start the loop (the driver re-reads the option, claims once, never throws).
+    afterBuildTurnEnded(l0, e) {
       const l = l0 as Live;
-      void maybeAutoPushBuild(ctx, { accountId, buildId })
-        .then((d) => {
-          if (d.status === 'pushed' && d.opened > 0) notice(l, d.opened === 1 ? 'Limn pushed the build and opened the pull request.' : `Limn pushed the build and opened ${d.opened} pull requests.`);
-          else if (d.status === 'failed') notice(l, `Automatic push failed: ${d.message}`);
-        })
-        .catch(() => {});
+      if (l.loopTurn) {
+        l.loopTurn = false;
+        void afterLoopFixTurn(ctx, { accountId, buildId }, e).catch(() => {});
+        return;
+      }
+      if (e.outcome === 'completed' && e.stored && e.saved) void maybeStartLoop(ctx, { accountId, buildId }).catch(() => {});
     },
-    // A message would start a build turn that rewrites the stored work while the automatic push reads it.
-    busyReason: () => (isStoryBuildAutoPushing(buildId) ? 'Wait for the push to finish.' : null),
+    beforeHostTurn() {
+      continuations = 0;
+    },
+    // A message would start a build turn that rewrites the stored work while a push or a review reads it.
+    busyReason: () => storyLoopBusyReason(buildId) ?? (isStoryBuildAutoPushing(buildId) ? 'Wait for the push to finish.' : null),
   };
 }
 

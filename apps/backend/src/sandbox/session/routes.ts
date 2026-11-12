@@ -221,6 +221,8 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             docs: { type: 'boolean' },
             // "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically).
             autoPush: { type: 'boolean' },
+            // With autoPush: the review loop's rounds (docs/STORY-BUILD.md § The review loop).
+            loopRounds: { type: 'integer', minimum: 1, maximum: 6 },
           },
         },
       },
@@ -257,6 +259,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         action: body.action === 'fill_gaps' ? 'fill_gaps' : 'implement',
         docs: body.docs === true,
         autoPush: body.autoPush === true,
+        ...(body.loopRounds !== undefined ? { loopRounds: body.loopRounds } : {}),
         choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);

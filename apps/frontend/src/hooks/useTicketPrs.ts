@@ -9,6 +9,7 @@ import {
   type TicketStoryResponse,
   type TicketTransitionsResponse,
   type TicketUpdateBody,
+  type TicketUpdateCurrent,
   type TicketUpdateResponse,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
@@ -171,6 +172,16 @@ export function useSetTicketAssignee(workspaceId: number | null, ident: string) 
  * Write the reader's edited draft to the ticket (description and/or acceptance criteria). Never
  * retried. On success every read that shows the ticket's text refetches.
  */
+/** The ticket as Limn holds it (the plan panel's ticket review compares the draft with it). DB only. */
+export function useTicketUpdateCurrent(workspaceId: number | null, ident: string | null) {
+  return useQuery<TicketUpdateCurrent>({
+    queryKey: ['ticket-update-current', workspaceKey(workspaceId), ident],
+    queryFn: workspaceId == null || ident == null ? skipToken : () => api.ticketUpdateCurrent(workspaceId, ident),
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
 export function useUpdateTicket(workspaceId: number | null, ident: string) {
   const qc = useQueryClient();
   return useMutation<TicketUpdateResponse, Error, Omit<TicketUpdateBody, 'ident'>>({
@@ -186,6 +197,7 @@ export function useUpdateTicket(workspaceId: number | null, ident: string) {
         qc.invalidateQueries({ queryKey: ['ticket-story'] }),
         qc.invalidateQueries({ queryKey: ['sprint-graph', workspaceKey(workspaceId)] }),
         qc.invalidateQueries({ queryKey: ['jira-ticket'] }),
+        qc.invalidateQueries({ queryKey: ['ticket-update-current'] }),
       ]),
   });
 }

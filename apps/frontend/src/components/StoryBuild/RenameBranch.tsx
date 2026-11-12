@@ -15,6 +15,7 @@ export function RenameBranch({
   disabled,
   actionId,
   onPush,
+  buttonLabel,
 }: {
   /** The branch the last push tried. */
   branch: string;
@@ -25,6 +26,8 @@ export function RenameBranch({
   /** `data-story-build-action` of the Push button. */
   actionId: string;
   onPush: (branch: string) => void;
+  /** The button's words (the review loop's Continue); absent ⇒ Push / Push as draft. */
+  buttonLabel?: string;
 }): JSX.Element {
   const inputId = useId();
   const suggestion = storyBuildFreeBranch(branch, taken);
@@ -60,7 +63,7 @@ export function RenameBranch({
         data-story-build-action={actionId}
         onClick={() => onPush(value)}
       >
-        {draft ? 'Push as draft' : 'Push'}
+        {buttonLabel ?? (draft ? 'Push as draft' : 'Push')}
       </Button>
     </div>
   );

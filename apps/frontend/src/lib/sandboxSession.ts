@@ -11,6 +11,8 @@ import {
   type SandboxSessionPhase,
   type SandboxSessionStreamEvent,
   type StoryBuild,
+  type StoryBuildLoop,
+  type StoryBuildLoopState,
   type StoryBuildSession,
 } from '@pierre-review/shared';
 
@@ -90,12 +92,16 @@ export function applySessionEvent(s: SessionStreamState, e: SandboxSessionStream
     // Plan first: the planned PRs live on the build, not the session — the query's read brings them.
     case 'prs':
       return s;
+    // The review loop lives on the build too: every `loop` frame is a transition (state, round, pause), so
+    // the query's read is fetched again (`sessionEventNeedsRefetch`) and brings the rounds with it.
+    case 'loop':
+      return s;
   }
 }
 
 /** A frame after which the query's read is worth fetching again (spend, repositories, status). */
 export function sessionEventNeedsRefetch(e: SandboxSessionStreamEvent): boolean {
-  return e.type === 'phase' || e.type === 'done' || e.type === 'prs' || (e.type === 'item' && e.item.kind === 'turn');
+  return e.type === 'phase' || e.type === 'done' || e.type === 'prs' || e.type === 'loop' || (e.type === 'item' && e.item.kind === 'turn');
 }
 
 /**
@@ -154,7 +160,7 @@ export function sessionStatusLine(s: Pick<StoryBuildSession, 'phase' | 'live' | 
   }
 }
 
-export type SessionStepWord = 'Set up' | 'Talk' | 'Build' | 'Push';
+export type SessionStepWord = 'Set up' | 'Talk' | 'Build' | 'Review' | 'Push';
 export interface SessionStep {
   word: SessionStepWord;
   state: 'done' | 'current' | 'next';
@@ -174,12 +180,28 @@ const STEP_OF: Readonly<Record<SandboxSessionPhase, number>> = {
   failed: -1,
 };
 
-/** "Set up · Talk · Build · Push", the current one marked. Before a start: every step next. */
-export function sessionSteps(s: Pick<StoryBuildSession, 'phase'> | null): SessionStep[] {
-  const words: SessionStepWord[] = ['Set up', 'Talk', 'Build', 'Push'];
+/**
+ * "Set up · Talk · Build · Push", the current one marked. Before a start: every step next. With THE REVIEW
+ * LOOP on (docs/STORY-BUILD.md § The review loop) a fifth step, Review, sits between Build and Push. It is
+ * DERIVED, never a phase: the loop's state says it (a fix turn is still phase `building`).
+ */
+export function sessionSteps(
+  s: Pick<StoryBuildSession, 'phase'> | null,
+  loop: Pick<StoryBuildLoop, 'on' | 'state'> | null | undefined = null,
+): SessionStep[] {
+  const withReview = loop?.on === true;
+  const words: SessionStepWord[] = withReview ? ['Set up', 'Talk', 'Build', 'Review', 'Push'] : ['Set up', 'Talk', 'Build', 'Push'];
   // A message after Start build is a build turn (`building`), so the phase alone says the step.
-  const cur = s == null ? -1 : STEP_OF[s.phase];
+  const cur = s == null ? -1 : withReview ? reviewStepOf(s.phase, loop?.state ?? null) : STEP_OF[s.phase];
   return words.map((word, i) => ({ word, state: i < cur ? 'done' : i === cur ? 'current' : 'next' }));
+}
+
+/** The step with Review: a fix turn is Review; built is Review until the PRs open; pushed is all done. */
+function reviewStepOf(phase: SandboxSessionPhase, state: StoryBuildLoopState | null): number {
+  if (phase === 'building') return state === 'fixing' ? 3 : 2;
+  if (phase === 'built') return state === 'opening' || state === 'done' ? 4 : 3;
+  if (phase === 'pushed') return 5;
+  return STEP_OF[phase];
 }
 
 /** A turn is running (the composer waits; Stop is offered). */

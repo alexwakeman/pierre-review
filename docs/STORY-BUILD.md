@@ -31,12 +31,13 @@ session** (since 2026-11-07):
    files the reader picked — and reports per acceptance criterion. After every build turn each
    repository's work is stored as a patch.
 4. **Push.** The reader reviews one diff per repository and presses **Push** (or Push all). The push runs
-   on the HOST: a NEW branch and a NEW pull request, **draft** by default. Or, opted in at Start, the host
-   pushes once by itself when the build finishes (§ Push automatically).
+   on the HOST: a NEW branch and a NEW pull request, **draft** by default. Or, opted in at Start, THE
+   REVIEW LOOP runs (§ The review loop): Limn pushes the branch, reviews it and checks it against the
+   ticket, the agent answers every point, each fix is a new commit, and after N rounds the PR opens.
 
 Nothing is pushed, posted or written to the tracker before the reader presses a button — the one
-exception is the opt-in "Push and open the pull request when the build finishes" (§ Push automatically):
-the reader's tick is the consent. With no container
+exception is the opt-in "After the build: review and fix, then open the pull request" (§ The review
+loop): the reader's tick is the consent. Even then GitHub sees only the branch commits and the final PR. With no container
 runtime, the tab says what is missing in one line with "How to set up" (owner decision Q2: there is no
 fallback to the removed shell-less agents).
 
@@ -68,6 +69,18 @@ without a plan": a session whose agent never sends a usable plan can only be mes
   conversation item has the block replaced by one line. THE check is docs/SANDBOX.md § The plan and its
   checks: ONE validator text, then every piece of evidence verified on the HOST; what fails is dropped, a
   point left with none is dropped, and only counts and plain reasons are kept.
+- **The whole-ticket update** (owner decision 2026-11-12; docs/TRACKERS.md § The ticket update): TICKET.md
+  tells the agent WHERE the criteria live (`SessionTicket.acLocation`, `tracker/ac-location.ts`: a field,
+  the description's AC section, or none), the criteria as written and the LAYOUT to keep (headings in
+  order, list style, GIVEN / WHEN / THEN; shared `ticket-layout.ts`, `seed.ts ticketLayoutFacts`).
+  `ticketUpdate` is REQUIRED when the plan has a point of contention OR a criterion is `not_planned` (the
+  revised-criteria case); each field is the whole new text or null; criteria that live in the description
+  go inside `description` (the validator refuses `acceptanceCriteria` then, via `plan-context.json`
+  `ticket`). The host stores the layout check on the revision (`ticketUpdate.layoutProblems`, advice
+  only). The plan panel's ticket review (`TicketUpdatePanel.tsx`) is ALWAYS shown on the latest revision —
+  seeded with the draft, else the current ticket — and after Approve until the first build turn ends;
+  ONE **Update ticket** press writes only what changed. Nothing in the build or the review loop writes
+  the tracker.
 - **Revisions** (`story_build_plans`): every usable plan is a revision (≤ 12; an identical resubmission is
   none). Agree / Keep the story are stored at once on the LATEST revision (no turn). Reply stores the
   reply and sends a revision turn. A free message is a revision turn only when its answer has a block. An
@@ -142,7 +155,33 @@ documented (SANDBOX.md § Setting up a runtime) · D9 every part is free. Q1 the
 skills opt-in per workspace · Q2 no old fallback · Q3 the image is pulled from GHCR by digest, built
 locally if that fails · Q4 the model credential is injected at the proxy (spike 3).
 
-## Data model (migrations 0149, 0176, 0179)
+From 2026-11-12 (the whole-ticket update, docs/TRACKERS.md § The ticket update): the plan's draft covers
+the WHOLE ticket (description and acceptance criteria) and keeps its layout; the reader reviews and edits
+both after planning, sees what changes, and writes them with ONE Update ticket press (Jira only; other
+trackers copy). The criteria go where the ticket keeps them — their own field in its own format (editmeta),
+or the description's criteria section — and the write stays the reader's press only.
+
+From 2026-11-12 (THE REVIEW LOOP, § The review loop):
+- The opt-in is "After the build: review and fix, then open the pull request" — it REUSES
+  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, default 3, 1..6), set in
+  the Start panel and in the tab until the loop starts. Unticked = the manual flow (Push). The old "Push
+  automatically" (one push when the build finishes) is RETIRED: the subject no longer calls
+  `maybeAutoPushBuild`.
+- The review is Limn's OWN machinery, exactly as a PR review: the code review per target with the
+  providers the workspace's auto review uses (Claude + Codex pair on `both`), and ONE story check across
+  every target per round (`activeProviderId()`, never a pair). Every finding — blockers, warnings, nits and
+  QUESTIONS — and every open criterion goes to the agent, which fixes, answers or PUSHES BACK; it may call a
+  criterion not applicable, which the next story check judges. A blocker is never settled by pushback alone.
+- Everything the reviewers and the agent say stays IN LIMN: no GitHub comment or review, no tracker write.
+  GitHub sees the branch (pushed BEFORE the first review, no PR), one NEW fast-forward commit per fix pass
+  per target (never forced), then the PR, READY FOR REVIEW, the reader's own.
+- Every automatic run asks the ONE budget gate; a refusal PAUSES with a line and Continue (a reader's press
+  is never refused). Every GitHub write is claimed first and never retried; a restart pauses (never resumes
+  by itself) and Continue adopts a write that did land.
+- After the PR opens, the closing review is stored as ONE non-posted `claude_reviews` row at the PR head
+  (trigger `manual`), so auto review does not review the same head again.
+
+## Data model (migrations 0149, 0176, 0179, 0185, 0186)
 
 Four core tables, all account-scoped, on the erase checklist (`accountScopedTables`) and in the export.
 
@@ -170,6 +209,18 @@ Four core tables, all account-scoped, on the erase checklist (`accountScopedTabl
   the plan row; `deleteRepo` deletes a repository's rows explicitly.
 - `story_builds.with_docs`, `approved_plan_id` (NO FK; re-scoped by `(build_id, account_id)`) and
   `approved_at` (0179).
+- **The review loop** (0186; § The review loop): `story_builds.loop_rounds` (N), `loop_state`,
+  `loop_round`, `loop_pause`, `loop_error`, `loop_resume` (the step Continue returns to), `loop_claimed_at`
+  (THE START CLAIM, compare-and-set, never cleared) and `loop_finished_at`; per target
+  (`story_build_repos` / `story_build_prs`) `loop_branch`, `loop_pushed_sha`, `loop_pushed_tree`,
+  `loop_pushed_at` and `loop_ended` (`pr_opened` | `manual_push` | `stopped`). Five account-scoped
+  tables, all with a composite FK onto `story_builds (id, account_id)`: `story_build_loop_pushes` (ONE
+  row per GitHub write, inserted BEFORE it — the unique `(build_id, round, step, target_kind, target_id,
+  attempt)` is the claim), `story_build_reviews` (one row per code-review run: the `claude_reviews`
+  columns and JSON) + `story_build_review_findings` (its findings, with the agent's `response`,
+  `response_text`, `response_round` and `merged_into` for a pair's duplicates), `story_build_story_checks`
+  (one per round: assessment, members, claims, claim verdicts) and `story_build_ac_responses` (the agent's
+  answer per criterion and round). Ids on the wire are BUILD-LOCAL. Contracts: [DATA-MODEL.md](DATA-MODEL.md).
 - The plan / docs / checks columns (`plan_json`, `docs_json`, `checks_json`, `worktree_path`, …) are
   DORMANT: only rows of the removed plan/build flow carry them (§ Rows from the old flow). Never drop
   them casually ([MIGRATIONS.md](MIGRATIONS.md)).
@@ -222,12 +273,16 @@ story.
 | `POST …/:id/repos/:repoId/push` · `POST …/:id/push` | `StoryBuildPushBody` → `StoryBuildPushResponse` (plan first: that repository's stack / every planned PR, in order; adds `prs`). `branch` only on the per-repository push of a build without planned PRs (400 elsewhere) | github_write |
 | `GET …/:id/prs/:prId/diff` | plan first: one planned PR's host-computed patch, `StoryBuildPrDiffResponse` | read |
 | `POST …/:id/prs/:prId/push` | plan first: one planned PR → `StoryBuildPushResponse` with `prs: [one]`; takes `branch` | github_write |
-| `POST …/:id/auto-push` | `StoryBuildAutoPushBody {on}` → `{autoPush}` (400 not a boolean · 404 · 409 `NotReady` once anything pushed or the automatic push was claimed) | read |
+| `POST …/:id/auto-push` | the loop's switch, kept for older clients: `StoryBuildAutoPushBody {on}` → `{autoPush}` (400 not a boolean · 404 · 409 `NotReady` once anything pushed or the loop was claimed) | read |
+| `GET …/:id/loop` | `StoryBuildLoopRouteResponse {loop}` (404 when the option was never on) | read |
+| `POST …/:id/loop/settings` | `{on?, rounds?: 1..6}` → `{loop}` (400 · 404 · 409 `LoopStarted` once claimed or anything pushed) | read |
+| `POST …/:id/loop/continue` | `{branch?: {kind, id, name}}` → 202 `{loop}`: the reader's press, one new attempt of the paused step (409 `NotReady` when not paused) | ai + ai_hourly + github_write |
+| `POST …/:id/loop/stop` | stop at the next checkpoint → `{loop}` (409 `NotReady` when not running) | read |
 
 Error codes: shared `StoryBuildErrorCode` + `SandboxSessionErrorCode` + `BuildPlanErrorCode`. The plan paths
 are shared `BUILD_PLAN_API`; the start body's `docs: true` is `400 NoDocs` without a built document; its
-`autoPush: true` stores the option (§ Push automatically; a non-boolean is 400). The
-stream adds `{ type: 'plan', plan }` and `{ type: 'prs', prs }`; `StoryBuild.prs` lists the planned PRs (no patch).
+`autoPush: true` (+ `loopRounds`, an integer 1..6) stores the option (§ The review loop; a non-boolean is 400). The
+stream adds `{ type: 'plan', plan }`, `{ type: 'prs', prs }` and `{ type: 'loop', loop }` (every loop transition: the tab re-reads the build); `StoryBuild.prs` lists the planned PRs (no patch).
 
 ## Entry points
 
@@ -297,7 +352,7 @@ the session is open and that PR is not pushed, dropped with the session's refs).
 
 ## Push (`coding/story-build/push.ts`)
 
-On the reader's press — or once, by the host, when the reader opted in (§ Push automatically). `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
+On the reader's press — or by the review loop the reader opted into (§ The review loop: `pushNewBranch` + `pushFastForward` + `openPrForBranch`, the halves of the same code). `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
 stateless push: a fresh worktree at `base_sha`, the stored patch, ONE commit by the reader (the agent's
 commit messages as its message), a NEW branch `<KEY>` (the ticket key, case kept, `sessionBranch`) (`BRANCH_EXISTS` refused with a
 sentence, never forced; the default branch, the base ref and a stacked PR's head are protected and
@@ -344,38 +399,13 @@ refused before any process runs), then `createPullRequest` (`draft` unless the b
 - The routes answer 200 `StoryBuildPushResponse` with per-repository results (`404` for another account's
   build). The SPA refetches through `invalidateAfterPrWrite` + `['ticket-prs']` + `['sprint-graph']`.
 
-### Push automatically (`coding/story-build/auto-push.ts`)
+### Push automatically — RETIRED (2026-11-12)
 
-"Push and open the pull request when the build finishes": the reader's OPT-IN on Implement and Fill gaps
-(`story_builds.auto_push`, OFF by default; the Start panel's box sends `autoPush: true` only when ticked;
-the tab's switch `POST …/:id/auto-push` changes it until the build pushed). The tick IS the consent.
-
-- **When**: the machine calls the subject's `afterBuildSettled` from `runTurn`'s final branch only — a
-  BUILD turn whose own outcome is `completed` AND whose work was stored (`afterBuildTurn` returned — a
-  failed store never pushes an earlier turn's patch), with no continuation or chat follow-up claimed, after
-  `setPhase('built')` is saved (so the push guards see `ready`). Never from boot reconcile, Resume, idle
-  close or any other close; an interrupted, failed, over-budget or max-turns turn never pushes. Ticking
-  the option after the build finished (or a restart between `built` and the claim) waits for the next
-  build turn, and the tab says so ("Limn pushes when the next build finishes.").
-- **The gate** (`maybeAutoPushBuild`, re-read at push time): on, never claimed, `ready`, something ready
-  to push (a person's Push before it leaves nothing: their action wins). THE CLAIM is a compare-and-set
-  of `auto_push_claimed_at` (`WHERE auto_push = 1 AND status = 'ready' AND … IS NULL`) BEFORE any GitHub
-  write, never cleared: ONCE per build, never retried. The in-process flag (`isStoryBuildAutoPushing`) is
-  set in the FIRST tick, before the gate's reads, so a message cannot start a turn and burn the claim.
-- **The push**: the button's own path — `pushPlannedStack` for a plan-first build with planned PRs, else
-  `pushAllRepos` — with `draft: false`. The reader's own GitHub login (`getAccessToken` → `gh auth
-  token`), like the button; nothing is stored. `draft: false` because auto review skips drafts: the PR is
-  the READER'S (§ Push → "The reader's PR"), so the workspace's auto review picks it up when it is on.
-- **A concurrent press** is safe: `ALREADY_PUSHED` / `PUSH_IN_PROGRESS` / the stack's in-flight set answer
-  `skipped`, not a failure; when NOTHING was pushed that way the build records "Your own push was already
-  running." While it runs the session refuses a message (`busyReason`) and Discard waits.
-- **"Pushing…"** reads the in-process flag (wire `autoPushRunning`, never stored), so it ends with the push
-  or the process. A claim a restart cut off is recorded at boot (`reconcileStoryAutoPushOnStartup`, from
-  `reconcileSessionsOnStartup`; never a push): "Limn stopped before the push finished. Press Push."
-- **A failure** is RECORDED, never retried: each item's own `push_error` + `push_error_code`
-  (`BRANCH_EXISTS` ⇒ the rename above; a refused RENAME is judged by git's rules before any lookup,
-  `renameRefusal`, and never overwrites the stored code) and one sentence on the build (`auto_push_error`, wire
-  `autoPushError`); a session notice says what happened. The reader can still press Push.
+The opt-in now runs THE REVIEW LOOP (§ The review loop). `coding/story-build/auto-push.ts` keeps its claim
+columns (`auto_push_claimed_at` is also written by the loop's start claim, so `setStoryBuildAutoPush` and
+`reconcileStoryAutoPushOnStartup` stay consistent; the reconcile skips rows with `loop_claimed_at`) and
+`maybeAutoPushBuild` with its tests, but the session subject no longer calls it. A build claimed by the
+old automatic push before 0186 keeps its recorded outcome (`autoPushError`, "Pushing…") in the tab.
 
 ### Pushing a stack (`coding/story-build/push-stack.ts`)
 
@@ -405,6 +435,101 @@ pushed.
   pushes that repository's stack. ONE stack push per build at a time (`PUSH_IN_PROGRESS`; Discard waits).
 - **Recorded** on the PR row; once a repository's every planned PR with changes is pushed, its repository
   row is `pushed` too (the marks and the `pushed` phase read it); once every PR is, the session's refs go.
+
+## The review loop (`coding/story-build/loop/`)
+
+"After the build: review and fix, then open the pull request" — a SOFTWARE FACTORY with adversarial,
+iterative review. Owner decisions: § Owner decisions (2026-11-12). Modules: `driver.ts` (the state machine,
+never throws to the session), `targets.ts`, `branch-review.ts` (one code-review half), `story-check.ts`,
+`seed.ts` (REVIEW.md), `pr-body.ts` + `pr-facts.ts`, `review-on-pr.ts`, `wire.ts` (the folds and the wire
+mapper), `persist.ts`, `seams.ts` (lazy defaults; tests swap them with `setStoryLoopSeamsForTests`),
+`routes.ts`. The agent's report: `sandbox/workspace/review-response.ts` (docs/SANDBOX.md § The review response).
+
+- **Targets.** A TARGET is one branch that becomes one PR: a `story_build_repos` row with a patch (a
+  one-patch-per-repository build) or a `story_build_prs` row (plan first), in stack order. Every claim,
+  review row and column is keyed `(target_kind 'repo'|'pr', target_id)`.
+- **Rounds.** Round k (1..N) = REVIEW k, then, when anything is open, FIX k + PUSH k. After FIX N one
+  CLOSING review (N+1, same machinery, no fix). A review with nothing open opens the PRs at once. So at most
+  N fix passes and N+1 reviews. Re-review: round 1 reviews every target; a later round reviews a target whose
+  head moved or whose last review left something open; the story check runs every round.
+- **"Open"** after a review = this round's consolidated findings (not praise; questions included) + its
+  follow-up items `not_addressed` / `partly_addressed` / `reply_disputed` + every criterion `not_met` /
+  `partly_met` / `unclear` without an ACCEPTED not-applicable claim + every missing item. A blocker the agent
+  only pushed back on stays a dispute (`judgeReplyReport`); the round cap ends it and the PR body lists it.
+
+```
+built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: the branch, no PR)
+  pushing ─► reviewing k ─ nothing open, or k = N+1 ─► opening ─► [CLAIM 'open' per target] ─► done
+                         └ open, k ≤ N ─► fixing k (a host-started build turn) ─► pushing k ─► reviewing k+1
+  any ─► paused (budget · session_closed · interrupted · fix_stopped · fix_failed · push_failed ·
+                 branch_exists · review_failed · build_busy) ─Continue (the reader)─► the step it paused at
+  any ─Stop review loop─► stopped
+```
+
+- **The start** (`maybeStartLoop`, from the subject's `afterBuildTurnEnded` on a COMPLETED build turn with
+  its work stored and saved): compare-and-set `loop_claimed_at` (also `auto_push_claimed_at`) where
+  `auto_push = 1`, `status = 'ready'`, never claimed. It holds the sandbox (`holdSession`: no idle close)
+  until the PRs open or the loop pauses. State, round and pause are written at EVERY transition and sent
+  as `{type:'loop'}`.
+- **The code review** (`branch-review.ts`): `prepareBranchReview` (the clone cache's base...head diff, no
+  gh), `buildUserPrompt` with `subject: {kind:'branch'}`, `runReview` with `checkout` (the pushed branch,
+  no PR), then the PR pipeline's pure follow-up steps. Providers = the workspace's auto-review setting
+  (`both` ⇒ the pair, halves AT ONCE and blind, consolidated by `consolidateHalves`; a failed half leaves
+  the other as the review — no cover pass in v1). Docs: [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Reviewing a
+  branch. Loop runs do NOT take a PR-review slot.
+- **The story check** (`story-check.ts`): the ticket review's prompt, agent and reconcile over every
+  target as a member labelled `branch <name>`, with the agent's not-applicable and answer notes as
+  `claims`; the ticket is the build's frozen seed and Limn's stored comments (never a tracker read).
+- **The fix pass**: the driver writes REVIEW.md (`seed.ts`: `F<n>` findings by severity, `AC<n>` / `M<n>`
+  open criteria with the reviewer's words and a rejected claim's reason; an earlier finding still open is
+  re-raised as a finding of the round, with the agent's earlier answer), the refs file and the checker,
+  then `startHostBuildTurn` (the build slot, claimed in one tick; refused ⇒ waits, then `build_busy`).
+  `afterLoopFixTurn` reads `.limn/review-response.json`: `fixed` / `answered` / `pushed_back` per finding,
+  `not_applicable` too per criterion; a missing ref is `not_reported` (open again); `fixed` on a target whose
+  tree did not change is stored `answered`. The answers ARE the replies the next review judges. A turn
+  that ended without its work STORED (the session closing, a failed store) pauses `fix_failed` /
+  `session_closed` instead of pushing the old work.
+- **What stays open across rounds** (`wire.ts`). An ACCEPTED "not applicable" stays settled on every later
+  round (`effectiveClaimVerdicts`: the newest verdict per ref, an earlier `accepted` carried unless a later
+  check rejects it) — the criterion leaves the seed, so no claim is sent for it again, and the next check's
+  `not_met` does not reopen it; the wire's `claimVerdicts`, the coverage strip and the PR body read the
+  same fold. An earlier finding a round's review left `not_checked` (said nothing, or over the prompt cap)
+  is CARRIED, as in the PR flow: counted open, seeded to the fix pass with the agent's earlier answer, and
+  sent to the next review as `carried: true` (`notCheckedFindingsOf`); one another run of the round judged
+  is not.
+- **Pushes** (`coding/git-ops.ts`): round 0 `pushNewBranch` per target (the ticket-key branch; a planned PR
+  k ≥ 2 on the previous PR's pushed commit); each fix `pushFastForward` — the live ref must still be the
+  last pushed commit (else `HEAD_MOVED`: that target ends `stopped`, the others go on), a commit with the
+  new tree and parents `[pushed, …]` (a stacked PR whose predecessor moved gets that commit as a SECOND
+  parent so GitHub's diff stays right), pushed WITHOUT force; an unchanged tree pushes nothing. Each write
+  is a `story_build_loop_pushes` row inserted BEFORE it, never retried. Targets keep `status = 'ready'`
+  until their PR opens. ⚠ The fix commit is kept at `refs/pierre/story-loop-push/<buildId>/<kind>-<id>`,
+  NEVER under `refs/pierre/story-loop/<buildId>` (the review's and the story check's checkout ref): git
+  cannot hold a ref and refs below the same name.
+- **Opening** (`pr-facts.ts`): the same title / base / body builders as Push, `draft: false`, origin
+  `reader` (the reader's PR, no ledger, no trailer), the body ending in "## Review in Limn" (`pr-body.ts`:
+  reviews and who ran them; fixed · answered · pushed back and accepted · still open; criteria met / not
+  applicable with why / not met; up to 10 still-open points; defanged, clipped). Then `markLoopReviewOnPr`
+  (`review-on-pr.ts`): the closing review as ONE `claude_reviews` row at the PR head, `trigger 'manual'`,
+  never posted, so `getAutoReviewCandidates` skips that head; a later head is reviewed normally. If that
+  write fails it is logged, and auto review reviews the PR again.
+- **Budget.** Every automatic run asks `automaticRunAllowed` (`story_loop_review` per provider,
+  `story_loop_check`, `story_loop_fix`); a refusal before a round starts ⇒ `paused(budget)`; mid-round, that
+  half is skipped. The step a reader's Continue resumes is the READER'S run and skips the gate; later steps
+  ask again.
+- **Stop · Discard · manual Push.** "Stop review loop" (`POST …/loop/stop`) aborts a review and interrupts a
+  fix turn ⇒ `stopped`; like Discard it is refused (`409`, "Wait for the push to finish") while a push or a
+  PR open runs, and no later step writes over `stopped` (`setState` / `pause` read the row first); the header's Stop interrupts the fix turn ⇒ `paused(fix_stopped)` with Continue.
+  `busyReason` refuses a message while a step runs; a message while paused or done is a normal turn and
+  never restarts the loop. Discard is refused during a push or PR open, else stops the loop first; the
+  pushed branch stays on GitHub. A manual Push of a target the loop pushed (`loopManualPush`, refused while
+  a step runs) pushes its current tree, opens its PR and ends it `manual_push`; when every target ended the
+  loop is `done`.
+- **Restart** (`reconcileStoryLoopsOnStartup`, after `reconcileSessionsOnStartup`): a running loop becomes
+  `paused(interrupted)`; an unanswered push claim is marked `INTERRUPTED`; nothing is pushed or reviewed.
+  Continue reads the live ref first and ADOPTS a push or PR that landed (`liveBranchSha`, `openPrOfBranch`).
+- **Settings** (`POST …/loop/settings`, `setLoopSettings`): `{on?, rounds?}` until `loop_claimed_at` is set
+  or anything was pushed (409 `LoopStarted`).
 
 ## Limits
 

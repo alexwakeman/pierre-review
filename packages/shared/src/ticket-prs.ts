@@ -1,6 +1,7 @@
 import type { JiraStatusCategory, TimelinePr, TrackerProvider } from './types.js';
 import type { SprintBrief, SprintBriefState } from './sprint-graph.js';
 import type { TicketComment } from './ticket-comments.js';
+import type { TicketAcLocation } from './ticket-layout.js';
 
 // THE STORY VIEW (the ticket tab) — one ticket's story and pull requests, in isolation (docs/FRONTEND.md § The story view;
 // docs/API.md § GET /api/ticket-prs). CORE and FREE: PR data is free, so the tab is free wherever it
@@ -207,12 +208,14 @@ export interface TicketAssignResponse {
 // ── THE TICKET UPDATE (the reader's press in the build tab's plan panel) ─────────────────────────────
 //
 //   POST /api/ticket-update?workspace=<id>  { ident, description, acceptanceCriteria }  →  TicketUpdateResponse
+//   GET  /api/ticket-update/current?workspace=<id>&ident=<ident>                     →  TicketUpdateCurrent
 //
 // docs/TRACKERS.md § The ticket update. Jira only, like the status change, and behind the same
-// not-a-proxy gate. Writes the fields the reader sent (null = leave that field as it is): the
-// description as markdown, converted to Jira's wiki markup; the acceptance criteria verbatim, into
-// the custom field Limn read them from. A ticket whose criteria live in its description has no such
-// field: the request is refused (`NoCriteriaField`) before Jira is called. Nothing else writes the
+// not-a-proxy gate. Writes the fields the reader sent (null = leave that field as it is), in ONE PUT:
+// the description as markdown, converted to Jira's wiki markup; the acceptance criteria in their
+// field's OWN format (Jira's editmeta: a rich-text field gets wiki markup, a one-line text field plain
+// text of at most 255 characters, any other type is refused), or — when the ticket keeps its criteria
+// in the description — spliced into the description's criteria section. Nothing else writes the
 // ticket: no automation, no retry.
 
 /** The longest text one field may carry (the plan's own cap on a drafted field). */
@@ -222,7 +225,7 @@ export interface TicketUpdateBody {
   ident: string;
   /** The whole new description, in markdown; null leaves it. */
   description: string | null;
-  /** The whole new acceptance criteria, in the field's own text; null leaves it. */
+  /** The whole new acceptance criteria, in markdown; null leaves them. */
   acceptanceCriteria: string | null;
 }
 
@@ -231,10 +234,35 @@ export interface TicketUpdateResponse {
   ident: string;
   /** What was written. */
   updated: { description: boolean; acceptanceCriteria: boolean };
-  /** The field the criteria went into ("Acceptance Criteria"), or null when they were not written. */
+  /** The field the criteria went into ("Acceptance Criteria"), or null when they were not written to a field. */
   criteriaField: string | null;
+  /** Where the criteria went: their own field, the description's criteria section, or nowhere (not sent). */
+  criteriaWritten: 'field' | 'description' | null;
 }
 
-/** The refusal when the criteria have no field of their own. */
+/** The ticket as Limn holds it, for the plan panel's review. DB only. */
+export interface TicketUpdateCurrent {
+  workspaceId: number;
+  ident: string;
+  /** The update route can write it (the workspace's tracker is Jira). */
+  jira: boolean;
+  /** Markdown, as stored. When the criteria live in the description, the WHOLE description. */
+  description: string;
+  /** Markdown, as stored (the field's text, or the description's criteria section). */
+  acceptanceCriteria: string;
+  acLocation: TicketAcLocation;
+  /** When Limn last read the ticket. */
+  readAt: string | null;
+}
+
+/** Kept for old clients: the route now splices criteria into the description instead of refusing. */
 export const TICKET_UPDATE_NO_CRITERIA_FIELD =
   'This ticket keeps its acceptance criteria in the description. Put them in the description and clear the criteria box.';
+
+/** `CriteriaFieldNotEditable`: the field is not on Jira's edit screen, or not a text field. */
+export const TICKET_UPDATE_FIELD_NOT_EDITABLE =
+  "Jira does not let Limn write this ticket's acceptance criteria field. Copy the text into the ticket instead.";
+
+/** `CriteriaTooLong`: a one-line text field and a longer text. */
+export const TICKET_UPDATE_FIELD_ONE_LINE =
+  "This ticket's acceptance criteria field holds one line of at most 255 characters. Shorten the text, or copy it into the ticket.";

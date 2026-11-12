@@ -35,8 +35,15 @@ import {
   type BuildPlanPr,
   type BuildPlanRaw,
   type BuildPlanRevision,
+  acSectionText,
+  compareTicketLayout,
+  findAcSection,
+  ticketLayoutOf,
+  type TicketAcLocation,
+  type TicketLayout,
 } from '@pierre-review/shared';
 import { validateDocReferences, type LibrarySnapshot } from '../../reference-docs/review-refs.js';
+import { neutraliseNewWikiMarkup } from '../../tracker/jira/text.js';
 import type { ServiceRunRecord } from '../../sandbox/services/run-log.js';
 import { findQuote, validateBuildPlan, type BuildPlanCheckContext } from '../../sandbox/workspace/plan-check.js';
 
@@ -72,6 +79,28 @@ export interface PlanVerifyInput {
   /** The session branch (the ticket key, `<KEY>`): stack index k ≥ 2 gets `-k`. */
   branch: string;
   seams: PlanVerifySeams;
+  /** The ticket's layout as Limn held it at plan time (seed.ts `ticketLayoutFacts`): the draft ticket
+   *  update is checked against it (`layoutProblems`). Absent/null = no check. */
+  ticketLayout?: { description: TicketLayout; criteria: TicketLayout; acLocation: TicketAcLocation } | null;
+}
+
+/** Said when the draft held a Jira mention or macro the ticket did not: it is written as plain text. */
+export const TICKET_UPDATE_ESCAPED_LINE = 'The draft had a Jira mention or Jira markup the ticket does not have. Limn writes it as plain text.';
+
+/** The draft ticket update against the ticket's layout: plain problems, at most six. Never a refusal. Pure. */
+export function ticketUpdateLayoutProblems(
+  tu: { description: string | null; acceptanceCriteria: string | null },
+  layout: { description: TicketLayout; criteria: TicketLayout; acLocation: TicketAcLocation },
+): string[] {
+  const out = [
+    ...(tu.description != null ? compareTicketLayout(layout.description, ticketLayoutOf(tu.description), 'description') : []),
+    ...(tu.acceptanceCriteria != null ? compareTicketLayout(layout.criteria, ticketLayoutOf(tu.acceptanceCriteria), 'criteria') : []),
+    // Criteria in the description: the AC section of the draft description keeps the criteria's layout.
+    ...(layout.acLocation.kind === 'description' && tu.description != null && findAcSection(tu.description) != null
+      ? compareTicketLayout(layout.criteria, ticketLayoutOf(acSectionText(tu.description)), 'criteria')
+      : []),
+  ];
+  return [...new Set(out)].slice(0, 6);
 }
 
 export type VerifiedPlan = Omit<BuildPlanRevision, 'revision' | 'createdAt' | 'source'>;
@@ -270,6 +299,13 @@ export async function verifyBuildPlan(input: PlanVerifyInput): Promise<PlanVerif
     return { ref, text: input.criteriaText.get(ref) ?? '', status: c.status, how: c.how.trim(), prs: [...c.prs], openPoints: c.openPoints ? [...c.openPoints] : [] };
   });
   const tu = plan.ticketUpdate;
+  // The draft is the agent's (untrusted input behind it): a Jira mention or macro the ticket did not
+  // already hold is escaped, and the reader is told (tracker/jira/text.ts `neutraliseNewWikiMarkup`).
+  const tuDescriptionRaw = tu?.description?.trim() ? neutraliseNewWikiMarkup(tu.description, input.ticketText) : null;
+  const tuCriteriaRaw = tu?.acceptanceCriteria?.trim() ? neutraliseNewWikiMarkup(tu.acceptanceCriteria, input.ticketText) : null;
+  const tuDescription = tuDescriptionRaw?.text ?? null;
+  const tuCriteria = tuCriteriaRaw?.text ?? null;
+  const tuEscaped = tuDescriptionRaw?.changed === true || tuCriteriaRaw?.changed === true;
   return {
     ok: true,
     rawSha: sha('sha256', input.body),
@@ -282,10 +318,16 @@ export async function verifyBuildPlan(input: PlanVerifyInput): Promise<PlanVerif
       stackReason: plan.stackReason?.trim() || null,
       ticketUpdate: tu
         ? {
-            description: tu.description?.trim() ? tu.description : null,
-            acceptanceCriteria: tu.acceptanceCriteria?.trim() ? tu.acceptanceCriteria : null,
+            description: tuDescription,
+            acceptanceCriteria: tuCriteria,
             why: clipText(tu.why, BUILD_PLAN_LIMITS.ticketWhy),
             contentions: tu.contentions.filter((id) => kept.has(id)),
+            layoutProblems: [
+              ...(tuEscaped ? [TICKET_UPDATE_ESCAPED_LINE] : []),
+              ...(input.ticketLayout != null
+                ? ticketUpdateLayoutProblems({ description: tuDescription, acceptanceCriteria: tuCriteria }, input.ticketLayout)
+                : []),
+            ].slice(0, 6),
           }
         : null,
       dropped: { contentions: droppedContentions, evidence: droppedEvidence, reasons: [...reasons] },

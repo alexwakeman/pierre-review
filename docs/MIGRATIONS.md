@@ -1709,4 +1709,19 @@ compare-and-set claim, never cleared) and `auto_push_error` (the one recorded fa
 story_build_repos` / `story_build_prs ADD push_error_code` (so the tab offers the rename after
 `BRANCH_EXISTS` across a reload). Existing tables, so erasure and export already cover them. Additive;
 journal `when` `1792742400000` (written as 0184 on its own branch; renumbered at integration).
-[STORY-BUILD.md](STORY-BUILD.md) § Push automatically.
+[STORY-BUILD.md](STORY-BUILD.md) § Push automatically (retired by 0186: the switch now runs the review loop).
+
+### `0186_story_build_review_loop` — Implement's review loop
+
+"After the build: review and fix, then open the pull request" (the switch stays `story_builds.auto_push`;
+0185's automatic push is retired). `ALTER TABLE story_builds ADD loop_rounds` (default 3), `loop_state`,
+`loop_round` (default 0), `loop_pause`, `loop_error`, `loop_resume` (the step Continue returns to — added
+during the build, not in the first design), `loop_claimed_at` (the start claim) and `loop_finished_at`;
+`ALTER TABLE story_build_repos` / `story_build_prs ADD loop_branch, loop_pushed_sha, loop_pushed_tree,
+loop_pushed_at, loop_ended`. Five NEW account-scoped tables with named composite FKs onto `story_builds
+(id, account_id)`: `story_build_loop_pushes` (one claim row per GitHub write; unique per round, step,
+target and attempt), `story_build_reviews` (+ a composite FK onto `repos`; unique `(id, account_id)`),
+`story_build_review_findings` (FK onto the review row), `story_build_story_checks` (unique per round) and
+`story_build_ac_responses` (unique per round and ref). All five join `accountScopedTables()`, the explicit
+erase and the export, with `verify:isolation` checks. Additive; journal idx 186, `when` `1792828800000`.
+[STORY-BUILD.md](STORY-BUILD.md) § The review loop; contracts in [DATA-MODEL.md](DATA-MODEL.md).

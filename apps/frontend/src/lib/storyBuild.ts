@@ -24,6 +24,13 @@ import {
   type StoryBuildErrorCode,
   type StoryBuildRepo,
   type StoryBuildRepoStatus,
+  isStoryBuildLoopRunning,
+  type StoryBuildLoop,
+  type StoryBuildLoopAcResponse,
+  type StoryBuildLoopFinding,
+  type StoryBuildLoopResponse,
+  type StoryBuildLoopRound,
+  type StoryBuildLoopTarget,
 } from '@pierre-review/shared';
 
 // ── the ticket's own tracker ──────────────────────────────────────────────────────────────────────
@@ -224,7 +231,7 @@ function anyPushed(b: Pick<StoryBuild, 'repos' | 'prs'>): boolean {
   return b.repos.some((r) => r.status === 'pushed') || (b.prs ?? []).some((p) => p.status === 'pushed');
 }
 
-/** The reader may still switch "Push and open the pull request" on or off: nothing pushed, not started. */
+/** The RETIRED automatic push (a build with no `loop` on the wire): the switch may change while nothing pushed and nothing claimed. */
 export function autoPushEditable(b: Pick<StoryBuild, 'repos' | 'prs' | 'autoPushAt'>): boolean {
   return b.autoPushAt == null && !anyPushed(b);
 }
@@ -241,6 +248,115 @@ export function autoPushWaitsForNextBuild(
   b: Pick<StoryBuild, 'repos' | 'prs' | 'autoPush' | 'autoPushAt' | 'autoPushRunning'> & { session?: { phase: string } | null },
 ): boolean {
   return b.autoPush === true && b.autoPushAt == null && b.autoPushRunning !== true && b.session?.phase === 'built' && !anyPushed(b);
+}
+
+// ── the review loop (docs/STORY-BUILD.md § The review loop) ─────────────────────────────────────
+
+/** The switch and the rounds can still change: the loop has not started and nothing was pushed. A build
+ *  with no `loop` on the wire (an older server) falls back to the push-automatically rule. */
+export function loopEditable(b: Pick<StoryBuild, 'repos' | 'prs' | 'autoPushAt' | 'loop'>): boolean {
+  if (b.loop != null) return b.loop.editable;
+  return autoPushEditable(b);
+}
+
+/** The loop works by itself right now (the tab polls; Push and Push all hide). */
+export function loopRunning(b: Pick<StoryBuild, 'loop'> | null | undefined): boolean {
+  return b?.loop?.on === true && isStoryBuildLoopRunning(b.loop.state);
+}
+
+/** The loop already pushed this target's branch (no PR yet): its Push opens the pull request instead. */
+export function loopBranchPushed(b: Pick<StoryBuild, 'loop'>, kind: 'repo' | 'pr', id: number): boolean {
+  const t = b.loop?.targets.find((x) => x.kind === kind && x.id === id);
+  return t != null && t.branch != null && t.pushedSha != null && t.ended == null;
+}
+
+/** The per-target Push button's words. */
+export function pushButtonWords(b: Pick<StoryBuild, 'loop'>, kind: 'repo' | 'pr', id: number, draft: boolean): string {
+  if (loopBranchPushed(b, kind, id)) return draft ? 'Open as draft' : 'Open the pull request';
+  return draft ? 'Push as draft' : 'Push';
+}
+
+/** The state chip's words. */
+export function loopStateWords(loop: Pick<StoryBuildLoop, 'state' | 'round' | 'rounds'>): string | null {
+  const closing = loop.round > loop.rounds;
+  switch (loop.state) {
+    case null:
+      return null;
+    case 'waiting':
+      return 'Waiting';
+    case 'pushing':
+      return loop.round === 0 ? 'Pushing the branch' : 'Pushing the fixes';
+    case 'reviewing':
+      return closing ? 'Final review' : `Reviewing round ${loop.round} of ${loop.rounds}`;
+    case 'fixing':
+      return `Fixing round ${loop.round} of ${loop.rounds}`;
+    case 'opening':
+      return 'Opening the pull request';
+    case 'paused':
+      return 'Paused';
+    case 'done':
+      return 'Done';
+    case 'stopped':
+      return 'Stopped';
+    case 'failed':
+      return 'Failed';
+  }
+}
+
+/** What the agent did with a finding or a criterion, in words. */
+export const LOOP_RESPONSE_WORDS: Record<StoryBuildLoopResponse | StoryBuildLoopAcResponse, string> = {
+  fixed: 'Fixed',
+  answered: 'Answered',
+  pushed_back: 'Pushed back',
+  not_applicable: 'Not applicable',
+  not_reported: 'Not answered',
+};
+
+/** A target's name: "acme/api", or "PR2 · acme/api" for a planned pull request. */
+export function loopTargetName(t: Pick<StoryBuildLoopTarget, 'fullName' | 'key'>): string {
+  return t.key != null && t.key !== '' ? `${t.key} · ${t.fullName}` : t.fullName;
+}
+
+/** A round's heading: "Round 2", or "Final review" for the closing review. */
+export function loopRoundTitle(r: Pick<StoryBuildLoopRound, 'round' | 'closing'>): string {
+  return r.closing ? 'Final review' : `Round ${r.round}`;
+}
+
+/** The round's footer: "Fixes pushed: acme/api 3f2a1c9, acme/web no change." null while no fix ran. */
+export function loopFixLine(r: Pick<StoryBuildLoopRound, 'fix' | 'reviews'>, targets: readonly StoryBuildLoopTarget[]): string | null {
+  const fix = r.fix;
+  if (fix == null) return null;
+  if (fix.state === 'running') return 'The agent is working on the fixes.';
+  if (fix.state === 'stopped') return 'The fix was stopped.';
+  if (fix.state === 'failed') return 'The fix did not finish.';
+  const parts: string[] = [];
+  for (const t of targets) {
+    const p = fix.pushed.find((x) => x.targetKind === t.kind && x.targetId === t.id);
+    const name = loopTargetName(t);
+    if (p == null) {
+      if (r.reviews.some((v) => v.targetKind === t.kind && v.targetId === t.id)) parts.push(`${name} no change`);
+    } else if (p.error != null) parts.push(`${name} not pushed`);
+    else parts.push(`${name} ${p.sha != null ? p.sha.slice(0, 7) : 'no change'}`);
+  }
+  return parts.length > 0 ? `Fixes pushed: ${parts.join(', ')}.` : null;
+}
+
+/** The findings a round shows: praise last (the server already sends them so; kept stable here). */
+export function loopFindingsShown(findings: readonly StoryBuildLoopFinding[]): StoryBuildLoopFinding[] {
+  return [...findings].sort((a, b) => Number(a.severity === 'praise') - Number(b.severity === 'praise'));
+}
+
+/** The coverage strip: the latest story check's criteria, each met / not applicable / open. */
+export function loopCoverage(loop: Pick<StoryBuildLoop, 'history'>): Array<{ ref: string; text: string; state: 'met' | 'not_applicable' | 'open' }> {
+  const check = [...loop.history].reverse().find((r) => r.storyCheck?.assessment != null) ?? null;
+  const a = check?.storyCheck?.assessment;
+  if (check == null || a == null) return [];
+  const na = new Set(check.claimVerdicts.filter((v) => v.verdict === 'accepted').map((v) => v.ref.toUpperCase()));
+  return a.criteria.map((c) => ({
+    ref: c.ref,
+    text: c.text,
+    state: na.has(c.ref.toUpperCase()) ? 'not_applicable' : c.status === 'met' || c.status === 'met_outside_code' ? 'met' : 'open',
+  }));
 }
 
 // ── errors ─────────────────────────────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import { api, ApiError } from '../../api/client.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { storyBuildMutationKey, useStoryBuildDiff, useStoryBuildPush } from '../../hooks/useStoryBuild.js';
 import { parseGitPatch } from '../../lib/diff.js';
-import { branchExistsFor, buildBranchNames, canPushRepo, STORY_BUILD_REPO_STATUS_WORDS, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
+import { branchExistsFor, buildBranchNames, canPushRepo, loopRunning, pushButtonWords, STORY_BUILD_REPO_STATUS_WORDS, storyBuildErrorText, storyBuildRefAnchor } from '../../lib/storyBuild.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { PrCardChips, PrCardFrame, PrCardMeta, PrCardTitle, CARD_NEUTRAL_CHIP, CARD_RED_CHIP, CARD_TONE_CHIP } from '../Activity/PrCardShell.js';
@@ -105,6 +105,8 @@ function BuildRepoCard({
 }): JSX.Element {
   const titleId = useId();
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
+  // THE REVIEW LOOP pushes by itself while it runs: Push hides (never disabled) until it pauses or ends.
+  const loopBusy = loopRunning(build);
   const costText = useRunCostText();
   const [diffOpen, setDiffOpen] = useState(false);
   const by = aiRunProviderName(repo.model != null ? repo : build);
@@ -173,7 +175,7 @@ function BuildRepoCard({
             {diffOpen && <RepoDiff build={build} repo={repo} session={session} />}
           </div>
         )}
-        {canPushRepo(repo) && branchExists && (
+        {canPushRepo(repo) && !loopBusy && branchExists && (
           <RenameBranch
             branch={repo.branch ?? ''}
             taken={taken}
@@ -183,7 +185,7 @@ function BuildRepoCard({
             onPush={(branch) => onPush(branch)}
           />
         )}
-        {canPushRepo(repo) && !branchExists && (
+        {canPushRepo(repo) && !loopBusy && !branchExists && (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-noactivate>
             <Button
               variant="primary"
@@ -193,7 +195,7 @@ function BuildRepoCard({
               data-story-build-action={`push-${repo.repoId}`}
               onClick={() => onPush()}
             >
-              {draft ? 'Push as draft' : 'Push'}
+              {pushButtonWords(build, 'repo', repo.id, draft)}
             </Button>
             <ChecksStatus checks={repo.checks} />
             {!session && !repo.checks?.ran && <span className="text-meta text-ui-mute">Not built or tested here.</span>}

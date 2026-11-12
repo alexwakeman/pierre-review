@@ -5,8 +5,9 @@ reader's own computer that holds every repository of the workspace, the ticket i
 own Claude notes. A full **Claude Code** or **Codex** agent works in it with a shell. The reader talks to
 the agent in the build tab, presses **Start build**, reviews one diff per repository and presses
 **Push**. The push runs on the HOST, with the host's GitHub sign-in; nothing is pushed, posted or written
-to the tracker before the reader presses a button, except the opt-in "Push and open the pull request when
-the build finishes" (the reader's tick; docs/STORY-BUILD.md § Push automatically). **AI Fix** runs in the same kind of session, on a pull
+to the tracker before the reader presses a button, except the opt-in "After the build: review and fix, then
+open the pull request" (the reader's tick; docs/STORY-BUILD.md § The review loop: the branch, its fix
+commits and the final PR). **AI Fix** runs in the same kind of session, on a pull
 request: the PR's repository at its head, its ticket's other repositories read only, one push to the PR's own
 branch (§ AI Fix sessions). The product flows are [STORY-BUILD.md](STORY-BUILD.md) and
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix; this file is how the sandbox works and how to set one up.
@@ -81,7 +82,7 @@ shell. Treat everything it does as untrusted.
 | Ticket, PR or repository text tells the agent to send data out | The sandbox network has NO route out (`--internal`); the only way out is Limn's proxy, with an allow-list. Every request is logged and shown in the Network panel; a blocked host is opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the proxy adds it to each request to the provider (§ Credentials). Web search and web fetch are off in Claude Code, because they run on the provider's side, past the allow-list. |
 | The agent damages the host | No writable host mount and no Docker socket (a bind mount is read-only by type; `spec.ts` refuses the socket, `~/.ssh`, `~/.docker`, `~/.config/gh`, `/` and others as sources). Non-root, all capabilities dropped, `no-new-privileges`, CPU / memory / process caps. On Docker for Mac or Windows the VM is a second boundary; **on Linux Docker the kernel is shared** (stated here and in the setup table). microsandbox gives a separate kernel (untested). |
 | A compose file escalates | The compose policy (§ Services) refuses the WHOLE file for privileged mode, added capabilities, devices, host namespaces, host mounts (the Docker socket included), loosened security options, outside builds and images from unlisted registries; it rewrites every service onto the session network with Limn's caps. Limn runs compose on the host; the sandbox only asks. |
-| The agent's changes reach GitHub unseen | Work leaves the sandbox only as a patch per repository (an AI Fix with the merge item: as a git bundle of its commits, checked on the host — parents, conflict markers, fixes on top — and rebuilt from the checked trees; § AI Fix sessions, "The merge"); the HOST applies it and pushes, on the reader's Push press (Implement: draft by default). Two exceptions push with no press, both on AI Fix and both opt-in: an auto fix on the reader's OWN PR under the workspace's "Push automatically" (OFF by default), and dependency automation's fix of a TRUSTED bot's PR under its policy (all OFF by default; docs/MERGE-CI-TRUNK.md). Both push only the PR repository's patch to the PR's own branch, compare-and-set on the head, after the session has closed. A third, on Implement / Fill gaps: "Push and open the pull request when the build finishes" (the reader's tick at Start or in the tab, OFF by default): the HOST runs the Push button's own path ONCE after a completed build turn — new branches, ready-for-review PRs, the reader's `gh` login, claimed by compare-and-set before any write, never retried, never forced (docs/STORY-BUILD.md § Push automatically). The sandbox still holds no GitHub credential. |
+| The agent's changes reach GitHub unseen | Work leaves the sandbox only as a patch per repository (an AI Fix with the merge item: as a git bundle of its commits, checked on the host — parents, conflict markers, fixes on top — and rebuilt from the checked trees; § AI Fix sessions, "The merge"); the HOST applies it and pushes, on the reader's Push press (Implement: draft by default). Two exceptions push with no press, both on AI Fix and both opt-in: an auto fix on the reader's OWN PR under the workspace's "Push automatically" (OFF by default), and dependency automation's fix of a TRUSTED bot's PR under its policy (all OFF by default; docs/MERGE-CI-TRUNK.md). Both push only the PR repository's patch to the PR's own branch, compare-and-set on the head, after the session has closed. A third, on Implement / Fill gaps: "After the build: review and fix, then open the pull request" (the reader's tick at Start or in the tab, OFF by default; THE REVIEW LOOP): the HOST pushes the branch first (no PR), then ONE NEW fast-forward commit per fix pass (the live ref checked first, never forced), then the PR — ready for review, the reader's own, under the reader's `gh` login; every write a claim row inserted before it, never retried (docs/STORY-BUILD.md § The review loop). The sandbox still holds no GitHub credential. |
 | Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `LIMN_SANDBOX_MAX_SESSIONS` open sessions; one build turn per computer; idle teardown. |
 | Leftovers | Every resource carries Limn's labels; discard, the boot sweep and `limn sandbox prune` remove them. |
 | Spend | Every turn of Implement and of a manual AI Fix is a reader's press. An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE build turn with Claude's `--max-budget-usd`, then closes. Each turn's usage is recorded on the ledger and the session's spend is shown. |
@@ -498,7 +499,14 @@ a RUN the reader started, the same exception a PR review run makes (docs/TRACKER
 PRs: `openPointsForPr(…, {refresh: true})` on at most two of them, open first; with none: the workspace's
 sprint list read, marked due and run (waited for ≤ 20 s). Then the story is resolved exactly as the story
 view shows it (`resolveStoryBuildInputs`: the same AC1, AC2, … order). Never fatal: a failed read is the
-stored copy, said so in TICKET.md. Fill gaps adds the gap fold's verdicts and missing items.
+stored copy, said so in TICKET.md. Fill gaps adds the gap fold's verdicts and missing items. The ticket
+also carries WHERE its criteria live (`acLocation`, `tracker/ac-location.ts` through a lazy seam; absent ⇒
+the description's AC heading): TICKET.md's "Acceptance criteria as written in the ticket" names the
+place (a field, a description section, nowhere), the criteria's layout and their raw text (fenced), and
+"Description layout" lists the headings in order (`seed.ts ticketLayoutFacts`, shared `ticketLayoutOf`).
+`plan-context.json` gets the same as `ticket` (`acLocation`, `headings`, `criteriaStyle`, `gherkin`), so the
+validator refuses criteria written outside the description when they live in it (docs/TRACKERS.md § The
+ticket update).
 
 **The seed** (`seed.ts`, plan invariant 5): `CLAUDE.md`, `AGENTS.md` (the same, worded for Codex) and
 `TICKET.md` at the root, plus `systemPrompts[provider]` for the driver. They carry the layout (path, base,
@@ -884,6 +892,17 @@ come back (sessions are not persisted, D1); the stored conversation stays on scr
 reconcile** (`reconcileSessionsOnStartup`, at boot; `legacy.ts` then settles any old-flow row) does the same to every session
 that was live: `built` with patches, `failed` without.
 
+**The review loop's hooks** (docs/STORY-BUILD.md § The review loop): `Live.hold` — `holdSession(key,
+reason)` / `releaseSession(key)` keep a session from the idle close between turns while the loop reviews
+and pushes (the turn cap is unchanged); `startHostBuildTurn(key, text, {loopTurn: true})` starts a
+HOST-started build turn (the fix pass) with the same claim as a build continuation, in one tick (`started`
+| `not_live` | `busy` | `build_busy`), and resets the subject's continuation count; the subject hook
+`afterBuildTurnEnded(l, {outcome, stored, saved})` fires for EVERY build turn that ended with no
+continuation, whatever its outcome (the story subject routes a loop turn to `afterLoopFixTurn`, a
+completed stored turn to `maybeStartLoop`). `busyReason` refuses a reader's message while a loop step
+runs; Discard is refused during a loop push or PR open and otherwise stops the loop first. `sessionWire`
+carries `loop`, and the stream adds `{type: 'loop', loop}` at every loop transition.
+
 **The stream**: one `snapshot` (the whole `StoryBuildSession`), then `phase`, `boot`, `agent` (live-only:
 partial text and the agent's state), `item` (a stored conversation row; a tool's result re-sends its row
 by id), `network` and `services` frames; `done` when the sandbox closes. The conversation is stored
@@ -1029,6 +1048,20 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   requires a draft whenever there is a point of contention (a missing one gets the repair turn).
 - **Codex** is untested here (its usage limit): the block rides its final `agentMessage` the same way, and
   its chat turns can write files (reported, not prevented, as before).
+
+## The review response (`workspace/review-response.ts`)
+
+The review loop's fix pass (docs/STORY-BUILD.md § The review loop). Before each fix turn the host writes
+REVIEW.md into the layout root (the items, fenced, with refs `F<n>` / `AC<n>` / `M<n>`), the refs file
+`.limn/review-refs.json` and the checker `/home/agent/.limn/review-response-check.cjs`, and removes any
+earlier `.limn/review-response.json`. The agent ends the turn by writing that file —
+`{items: [{ref, action: 'fixed' | 'answered' | 'pushed_back' | 'not_applicable', reply}]}` — and running
+the checker. It follows `fix-report.ts` exactly: ONE validator text, compiled on the host (`new
+Function`) and embedded in the checker, so the two never disagree. Rules: each shown ref at most once;
+unknown refs are dropped and named; `not_applicable` only on `AC` / `M` refs; a reply is required (≤ 600
+characters); the file ≤ 256 KB. A missing or unreadable file makes every shown item `not_reported` (open
+again) with one notice; the loop goes on, since the code may still have changed. The agent never pushes
+and never opens a PR: the host pushes each fix as a new commit (§ Invariants hold).
 
 ## AI Fix sessions (`session/fix.ts`, `workspace/fix-report.ts`)
 
