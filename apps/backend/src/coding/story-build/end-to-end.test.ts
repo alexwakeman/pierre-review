@@ -9,7 +9,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BuildPlanRevision } from '@pierre-review/shared';
-import { endToEndCommentWiki, plainTitle, wikiLabel, type EndToEndDeps } from './end-to-end.js';
+import { changedLines, endToEndCommentWiki, plainSummary, plainTitle, wikiLabel, type EndToEndDeps } from './end-to-end.js';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-storybuild.end-to-end.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
@@ -36,6 +36,30 @@ describe('the comment (pure)', () => {
     const w = endToEndCommentWiki({ prs: [], ticket: { updated: [] } });
     expect(w).toContain('None yet.');
     expect(w).toContain('Nothing. The ticket stays as written.');
+  });
+  it('lists the lines a field lost and gained, list markers ignored', () => {
+    expect(changedLines('acceptanceCriteria', '- Refunds are instant\n- Refunds email the buyer', '* Refunds are queued\n* Refunds email the buyer')).toEqual({
+      field: 'acceptanceCriteria',
+      removed: ['Refunds are instant'],
+      added: ['Refunds are queued'],
+    });
+  });
+  it('keeps the summary short and free of internal references', () => {
+    expect(plainSummary('Refunds now wait in a queue (AC1).\nC2: Buyers still get an email.')).toBe(
+      'Refunds now wait in a queue. Buyers still get an email.',
+    );
+    expect(plainSummary('   ')).toBeNull();
+    expect(plainSummary('A sentence that goes on. '.repeat(30))!.length).toBeLessThanOrEqual(300);
+  });
+  it('shows the summary, then the lines removed and added', () => {
+    const w = endToEndCommentWiki({
+      prs: [],
+      ticket: { updated: ['acceptanceCriteria'] },
+      summary: 'Refunds now wait in a queue instead of happening at once.',
+      changes: [{ field: 'acceptanceCriteria', removed: ['Refunds are instant'], added: ['Refunds are queued'] }],
+    });
+    expect(w).toContain('*What changed on this ticket*\nRefunds now wait in a queue instead of happening at once.\n\nAcceptance criteria:\n* Removed: Refunds are instant\n* Added: Refunds are queued');
+    expect(w).toContain("The earlier version is in this ticket's history.");
   });
   it('drops the plan\'s internal references from a title', () => {
     expect(plainTitle('Queue refunds (AC1, AC2)')).toBe('Queue refunds');
@@ -94,7 +118,8 @@ async function openedBuild(o: { endToEnd: boolean; ticketUpdate?: BuildPlanRevis
   return id;
 }
 
-function fakeDeps(o: { jira?: boolean; writeFails?: string } = {}) {
+function fakeDeps(o: { jira?: boolean; writeFails?: string; summary?: string | null } = {}) {
+  const summaries: any[] = [];
   const writes: any[] = [];
   const comments: any[] = [];
   const notices: string[] = [];
@@ -111,8 +136,12 @@ function fakeDeps(o: { jira?: boolean; writeFails?: string } = {}) {
       comments.push(a);
       return { ok: true };
     },
+    summarise: async (_c, _a, input) => {
+      summaries.push(input);
+      return o.summary === undefined ? 'Refunds now wait in a queue (AC1).' : o.summary;
+    },
   };
-  return { deps, writes, comments, notices };
+  return { deps, writes, comments, notices, summaries };
 }
 
 describe('the ticket step', () => {
@@ -125,7 +154,13 @@ describe('the ticket step', () => {
     expect(f.comments).toHaveLength(1);
     const wiki: string = f.comments[0].wiki;
     expect(wiki).toContain('[acme/api#77|https://github.com/acme/api/pull/77]');
-    expect(wiki).toContain('The acceptance criteria were updated to match the work.');
+    expect(wiki).toContain('Refunds now wait in a queue.');
+    expect(wiki).toContain('* Removed: Refunds are instant');
+    expect(wiki).toContain('* Added: Refunds are queued');
+    // The summary was asked with the plan's reason, its settled point and the changed lines.
+    expect(f.summaries).toHaveLength(1);
+    expect(f.summaries[0].why).toBe('The code queues refunds.');
+    expect(f.summaries[0].points[0]).toContain('Say they are queued.');
     // Plain English for every reader: no tool name, no reasoning, no review rounds, no internal codes.
     expect(wiki).not.toMatch(/Limn|Why|review round|\bC1\b|\bAC1\b/);
     const row = await P.getStoryBuildRow(ctx, 1, id);
@@ -163,6 +198,16 @@ describe('the ticket step', () => {
     expect(r).toMatchObject({ updated: [], commented: true, error: 'Jira refused the change.' });
     expect(f.comments[0].wiki).toContain('Nothing. The ticket text could not be updated.');
     expect((await P.getStoryBuildRow(ctx, 1, id))?.ticketReviewDoneAt).toBeNull();
+    expect(f.summaries).toHaveLength(0);
+  });
+
+  it('no summary (no model, over budget): the changed lines still say what changed', async () => {
+    const id = await openedBuild({ endToEnd: true });
+    const f = fakeDeps({ summary: null });
+    await E.runEndToEndTicketStep(ctx, 1, id, f.deps);
+    const wiki: string = f.comments[0].wiki;
+    expect(wiki).toContain('*What changed on this ticket*\nAcceptance criteria:');
+    expect(wiki).toContain('* Added: Refunds are queued');
   });
 
   it('no change to make: comments that the story stood, and closes the step', async () => {

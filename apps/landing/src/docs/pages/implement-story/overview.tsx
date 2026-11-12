@@ -136,8 +136,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           On a Jira ticket, Limn updates the description and acceptance criteria the plan changed, and comments on the
-          ticket as you, in plain English for anyone who reads the ticket: links to the pull requests and what changed
-          on the ticket. It never changes the ticket&rsquo;s status. The earlier text is in the ticket&rsquo;s history
+          ticket as you, in plain English for anyone who reads the ticket: links to the pull requests, a short summary
+          of what changed and why, and the lines removed and added. It never changes the ticket&rsquo;s status. The earlier text is in the ticket&rsquo;s history
           in Jira.
         </li>
       </Steps>

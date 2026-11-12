@@ -633,7 +633,7 @@ stay editable and copyable ("Updating the ticket works with Jira only. Copy the 
   never retried) calls the same writer, now the exported `writeTicketUpdate` (the route is a thin wrapper),
   with the same diff rule (shared `ticketUpdateBody`), and then posts ONE comment through `postTicketComment`
   (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind the same `statusGate`, under the reader's Jira
-  login: the PRs and what changed on the ticket, in plain English — no tool name, no reasons). The status is never changed there. The review loop itself never
+  login: the PRs, a short plain summary and the lines removed and added, in plain English — no tool name). The status is never changed there. The review loop itself never
   writes the tracker. Rate tier `[search, read]` (the editmeta / description read is inside the same press).
 - **The draft is untrusted.** `markdownToJiraWiki` passes wiki markup through as typed, so plan-verify
   ESCAPES (`neutraliseNewWikiMarkup`, a backslash) every Jira mention (`[~accountid:…]`, `[~name]`) or

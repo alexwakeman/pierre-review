@@ -29,8 +29,9 @@ no internals.
   and the workspace you pick lists its Maintained and External repositories. "In other workspaces" is gone.
 - Manage repos & workspaces: the repository search lists nothing until you type, except before your first
   repository.
-- Build end to end: the Jira comment lists the pull requests and what changed on the ticket, in plain English. It
-  no longer names Limn, the review rounds or the plan's reasons.
+- Build end to end: the Jira comment lists the pull requests, then a short plain summary of what changed on the
+  ticket and why, and the lines removed and added. It no longer names Limn, the review rounds or internal
+  references.
 
 ### Fixed
 

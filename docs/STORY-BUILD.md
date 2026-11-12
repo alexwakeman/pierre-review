@@ -584,10 +584,16 @@ round the PR opens ready anyway, naming what is still open), and then THE TICKET
      writer (`tracker/ticket-update.ts writeTicketUpdate`) as the tab's "Update ticket": only the fields
      that differ from the ticket as Limn holds it.
   2. ONE comment (`postTicketComment`, Jira wiki markup, under the reader's own Jira login), in PLAIN
-     ENGLISH for every reader of the ticket, technical or not: the pull requests (links + titles, the plan's
-     internal references such as `AC1`/`C2` stripped by `plainTitle`) and what changed on the ticket. ⚠ NEVER
-     the tool's name, the review rounds, the plan's `why` or its contention text (the reader asked for "what
-     changed, not why"). PR titles are agent text: `wikiLabel` escapes mention/macro characters.
+     ENGLISH for every reader of the ticket, technical or not: the pull requests (links + titles, internal
+     references such as `AC1`/`C2` stripped by `plainTitle`), then what changed on the ticket — a SHORT
+     plain summary (≤ 2 sentences, ≤ 300 characters, `plainSummary`) and the lines each written field
+     lost and gained (`changedLines`, list markers ignored, ≤ 5 shown per side). ⚠ NEVER the tool's name,
+     the review rounds or internal references. The summary is ONE Haiku `ctx.llm.complete` call
+     (`summariseWithModel`, feature `e2e_ticket_summary`, recorded) fed the plan's `why`, its settled
+     points and the changed lines, fenced as data; it is an AUTOMATIC run, so it asks
+     `automaticRunAllowed` first, and a refusal, no credential, a 45 s timeout or a failure just leaves it
+     out — the lines still say what changed. Summary and titles are model text: `wikiLabel` escapes
+     mention/macro characters.
   ⚠ The status is never changed. ⚠ Jira only: another tracker records `skipped: 'not_jira'` and writes
   nothing. A failed update is recorded, still commented on, and leaves the tab's ticket step OPEN (Update
   ticket is still there); otherwise the step closes (`ticket_review_done_at`). The tab leads the step with
