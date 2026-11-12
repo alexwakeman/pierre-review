@@ -1,5 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   AddReviewCommentResult,
@@ -10,6 +10,7 @@ import type {
 import { useAddReviewComment } from '../../hooks/usePrWrites.js';
 import { usePrFileContent, usePrFileFullDiff } from '../../hooks/usePr.js';
 import { useDiffWrap } from '../../hooks/useDiffWrap.js';
+import { useMarkdownView } from '../../hooks/useMarkdownView.js';
 import { Switch } from '../ui/index.js';
 import { ApiError } from '../../api/client.js';
 import {
@@ -53,11 +54,21 @@ import { revealIntoView } from '../../lib/settleScroll.js';
 import { DERIVED_STATE_META, relativeTime, safeExternalUrl, userLabel } from '../../lib/ui.js';
 import {
   ChevronIcon,
+  CodeIcon,
+  EyeIcon,
   ExternalLinkIcon,
   FoldIcon,
   PendingClaudeReviewIcon,
   UnfoldIcon,
 } from '../Icons.js';
+import { Markdown, type RehypePlugins } from '../Markdown.js';
+import { FOCUS_RING, cx } from '../ui/cx.js';
+import {
+  isMarkdownPath,
+  markdownFileLinkHref,
+  markdownFromPatch,
+  rehypeDropRelativeImages,
+} from '../../lib/markdownFile.js';
 import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
 import { threadPillFor } from '../../lib/claudeThreadMarker.js';
 import { threadEdgeColor } from '../../lib/threadEdge.js';
@@ -894,6 +905,123 @@ function InlineCommentBox({
   );
 }
 
+// ---- the rendered view of a Markdown file (Changes tab only) ----
+
+const MARKDOWN_FILE_REHYPE: RehypePlugins = [rehypeDropRelativeImages];
+
+/** Links in a PR's Markdown file: only an absolute http(s) URL is a link (`markdownFileLinkHref`);
+ *  a repository-relative one prints as its text. Module-level, so `Markdown`'s memo holds. */
+function renderMarkdownFileLink(href: string | undefined, children: ReactNode): ReactNode {
+  const safe = markdownFileLinkHref(href);
+  if (safe == null) return <span>{children}</span>;
+  return (
+    <a href={safe} target="_blank" rel="noreferrer noopener">
+      {children}
+    </a>
+  );
+}
+
+/**
+ * The header switch between the rendered Markdown and the diff. The visible word is the view it
+ * switches TO; the accessible name is the action.
+ */
+function MarkdownViewToggle({
+  rendered,
+  onToggle,
+}: {
+  rendered: boolean;
+  onToggle: () => void;
+}): JSX.Element {
+  const label = rendered ? 'Show as plain text' : 'Show rendered';
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={label}
+      title={label}
+      data-testid="markdown-view-toggle"
+      className={cx(
+        'hit inline-flex shrink-0 items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta text-ui-mute hover:bg-ui-hover hover:text-ui-ink',
+        FOCUS_RING,
+      )}
+    >
+      {rendered ? <CodeIcon size={12} /> : <EyeIcon size={12} />}
+      {rendered ? 'Plain text' : 'Rendered'}
+    </button>
+  );
+}
+
+/**
+ * A Markdown file's NEW side, rendered. The whole file once it is loaded (`wholeLines`, the same
+ * click-gated read the gap arrows make); before that, the patch's added + unchanged lines, one
+ * segment per hunk — and when that is not the whole file, one line says so and offers the read.
+ * The PR's Markdown is untrusted: `Markdown` sanitizes raw HTML, links go through
+ * `markdownFileLinkHref`, relative images are dropped.
+ */
+function MarkdownFileView({
+  rows,
+  wholeLines,
+  status,
+  canLoad,
+  onLoad,
+  threadCount,
+}: {
+  rows: readonly DiffRow[];
+  wholeLines: readonly string[] | null;
+  status: GapLoadStatus;
+  canLoad: boolean;
+  onLoad: () => void;
+  threadCount: number;
+}): JSX.Element {
+  const fromPatch = useMemo(() => markdownFromPatch(rows), [rows]);
+  const whole = useMemo(() => (wholeLines != null ? wholeLines.join('\n') : null), [wholeLines]);
+  const showNote = whole == null && fromPatch.partial;
+  return (
+    <div data-testid="markdown-rendered" className="px-4 py-3">
+      {(showNote || threadCount > 0) && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
+          {showNote && <span>Only the changed parts are shown.</span>}
+          {showNote && canLoad && (status === 'idle' || status === 'loading') && (
+            <button
+              type="button"
+              onClick={onLoad}
+              disabled={status === 'loading'}
+              className={cx(
+                'hit rounded-ui bg-ui-raise px-2 py-0.5 text-ui-ink hover:bg-ui-hover disabled:opacity-60',
+                FOCUS_RING,
+              )}
+            >
+              {status === 'loading' ? 'Loading…' : 'Show whole file'}
+            </button>
+          )}
+          {showNote && status !== 'idle' && status !== 'loading' && <span>{GAP_STATUS_TEXT[status]}</span>}
+          {threadCount > 0 && (
+            <span>{threadCount === 1 ? 'Its review thread is in Plain text.' : 'Its review threads are in Plain text.'}</span>
+          )}
+        </div>
+      )}
+      {whole != null ? (
+        <Markdown rehypeExtra={MARKDOWN_FILE_REHYPE} renderLink={renderMarkdownFileLink} wideTables>
+          {whole}
+        </Markdown>
+      ) : (
+        fromPatch.segments.map((seg, i) => (
+          <Fragment key={i}>
+            {seg.hiddenBefore > 0 && (
+              <div className="my-3 border-y border-dashed border-ui-line py-1 text-center text-meta text-ui-mute">
+                {seg.hiddenBefore === 1 ? '1 unchanged line' : `${seg.hiddenBefore} unchanged lines`}
+              </div>
+            )}
+            <Markdown rehypeExtra={MARKDOWN_FILE_REHYPE} renderLink={renderMarkdownFileLink} wideTables>
+              {seg.text}
+            </Markdown>
+          </Fragment>
+        ))
+      )}
+    </div>
+  );
+}
+
 /**
  * A file GitHub sent no patch for — its diff is too large for the files listing, or it is binary,
  * and the listing does not say which. "Load full diff" asks the server to fetch both sides and
@@ -1347,6 +1475,30 @@ function FileDiffBlock({
 
   const unresolvedCount = threads.filter((t) => !t.isResolved).length;
 
+  // A Markdown file renders by default (Changes tab only — `fileSource`): its NEW side, through
+  // `MarkdownFileView`. Not for a deleted file (no new side) or a file GitHub sent no patch for
+  // (binary / too large: unchanged). ONE remembered choice for every file (`useMarkdownView`).
+  const markdownCapable =
+    fileSource != null && file.status !== 'removed' && file.patch != null && isMarkdownPath(file.path);
+  const [markdownView, setMarkdownView] = useMarkdownView();
+  // ⚠ A reveal that names a LINE or a THREAD lands on the code: the diff shows for that reveal
+  // (its `nonce`), whatever the preference, until the reader presses the toggle. Derived, never
+  // written to the preference, so a "Show in context" jump does not change how every other
+  // Markdown file reads. Synchronous, so the first render with the focus already has the rows the
+  // reveal scrolls to.
+  const [releasedNonce, setReleasedNonce] = useState<number | null>(null);
+  const revealWantsCode =
+    focus != null && (focus.line != null || focus.threadId != null) && focus.nonce !== releasedNonce;
+  const showRendered = markdownCapable && markdownView === 'rendered' && !revealWantsCode;
+  const toggleMarkdownView = (): void => {
+    if (showRendered) {
+      setMarkdownView('plain');
+      return;
+    }
+    if (focus != null) setReleasedNonce(focus.nonce);
+    setMarkdownView('rendered');
+  };
+
   const hasFocus =
     threadCtx?.focusThreadId != null && threads.some((t) => t.id === threadCtx.focusThreadId);
   // Files with threads (or the deep-link target) start expanded, mirroring GitHub —
@@ -1563,6 +1715,7 @@ function FileDiffBlock({
         {/* Beside the name button, never inside it (nested buttons). Copies the CURRENT path —
             the new one for a rename — not the "old → new" display string. */}
         <CopyButton text={file.path} what="file path" title="Copy file path" />
+        {markdownCapable && <MarkdownViewToggle rendered={showRendered} onToggle={toggleMarkdownView} />}
         {/* The full 4-state mix with counts — the old binary split (amber `N 💬` + grey `✓N`)
             blended untouched, replied and likely-addressed into one number. Same footprint,
             strictly more information; the `unresolvedCount > 0` auto-expand heuristic below
@@ -1633,6 +1786,15 @@ function FileDiffBlock({
               No textual diff for this file.
               {fileGrainPills}
             </div>
+          ) : showRendered ? (
+            <MarkdownFileView
+              rows={rows}
+              wholeLines={usableLines}
+              status={wantContent ? gapStatus : 'idle'}
+              canLoad={fileSource != null}
+              onLoad={() => setWantContent(true)}
+              threadCount={threadCtx != null ? threads.length : 0}
+            />
           ) : (
             <DiffTable rows={rows} wrap={wrap}>
               {threadCtx && unanchored.length > 0 && (

@@ -884,6 +884,16 @@ export function EyeIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// Angle brackets — "the source text" (a Markdown file's plain-text view, beside EyeIcon's rendered).
+export function CodeIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.9} {...rest}>
+      <polyline points="8.5 7 3.5 12 8.5 17" />
+      <polyline points="15.5 7 20.5 12 15.5 17" />
+    </IconShell>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────────
    Generated content, data & pinning
    ───────────────────────────────────────────────────────────────────────────────────────── */

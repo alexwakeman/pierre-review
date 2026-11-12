@@ -15,6 +15,8 @@ no internals.
 
 ### Added
 
+- Changes tab: Markdown files show rendered, with a Plain text button in the file's header to see the diff.
+  Limn remembers your choice.
 - Implement story and Fill gaps: "After the build: review and fix, then open the pull request". Limn pushes the
   branch, reviews it and checks it against the ticket, the agent fixes, answers or pushes back on each point, and
   Limn reviews again, for up to the number of rounds you pick (3 by default). Then it opens the pull request, ready

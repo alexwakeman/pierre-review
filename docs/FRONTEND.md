@@ -1315,6 +1315,30 @@ late arrival never shifts the 1–9 keys of the tabs before it):
   - ⚠ **A RESOLVE COLLAPSES THE THREAD IN BOTH VIEWS, once GitHub said yes**: ThreadList through
     `lib/threadCollapse.ts`, the inline pills through ChangesTab's `resolveBus` (*Inline thread
     indicators* below). Both read the one `useResolveEvents` hook.
+  - **A MARKDOWN FILE RENDERS BY DEFAULT** (2026-11-12; `.md`/`.mdx`/`.markdown`, `isMarkdownPath`
+    in `lib/markdownFile.ts`): `FileDiffView`'s `MarkdownFileView` draws the file's NEW side through
+    the shared `Markdown` component, and a header button (`MarkdownViewToggle`, after the copy
+    button) switches to the diff ("Plain text") and back ("Rendered"). Changes tab only
+    (`fileSource`), never for a deleted file (no new side) or a file with no patch (binary / too
+    large: unchanged). ONE remembered choice for every file: `hooks/useMarkdownView.ts`, a
+    `useSyncExternalStore` over localStorage `pierre:markdownView` (the `useDiffWrap` pattern).
+    - ⚠ **What it renders is CLICK-GATED like every whole-file read.** By default it is the PATCH's
+      new side (`markdownFromPatch`: context + added lines, removed dropped, ONE `Markdown` per hunk
+      so a fence crossing a hidden gap cannot swallow the next hunk, "N unchanged lines" between).
+      When that is not the whole file (`partial`: a hunk gap, or `patchReachesEnd` false) one line
+      says "Only the changed parts are shown." with **Show whole file**, which arms the SAME
+      `usePrFileContent` read the gap arrows use (one query key, so either click serves both). An
+      added file's patch IS the file: no note. Once the content is loaded and `patchMatchesFile`,
+      the whole file renders.
+    - ⚠ **A reveal naming a LINE or a THREAD shows the diff** (`revealWantsCode`, derived per
+      `focus.nonce`, never written to the preference), so "Show in context", a `?thread=` deep link
+      and a Claude Review finding land on their row; the toggle releases that nonce. Threads are not
+      drawn in the rendered view; it says "Its review threads are in Plain text."
+    - ⚠ **Untrusted content.** The `Markdown` component's sanitizer (raw HTML allowlisted, no
+      script/handlers/style), plus: links through `markdownFileLinkHref` (`safeExternalUrl` AND an
+      absolute http(s) URL — a repository-relative link prints as its text, it would resolve against
+      Limn's own server) and `rehypeDropRelativeImages` (a relative `<img>` becomes its alt text).
+      Pinned in `test/markdownFile.test.ts` + `e2e/changes-markdown.spec.ts`.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
   touch timeline + TTFR/follow-ups vs the bot's OWN typical (`/api/prs/:id/bot-behaviour`). A ⚠

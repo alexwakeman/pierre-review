@@ -29,6 +29,11 @@ export default function Page(): JSX.Element {
           start folded; open one with its header.
         </li>
         <li>
+          <b>Markdown files rendered.</b> A changed Markdown file (<code>.md</code>, <code>.mdx</code>,{' '}
+          <code>.markdown</code>) shows as formatted text. Until you choose <Ui>Show whole file</Ui>, only the changed
+          parts are shown. Review threads on a Markdown file are in its plain-text view.
+        </li>
+        <li>
           <b>Threads on their lines.</b> A thread whose code has moved since it was written is placed on the code
           it was written against, and says it may be a few lines off.
         </li>
@@ -66,6 +71,10 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>See more of the file.</b> Expand the gaps between changed parts to read the code around them.
+        </li>
+        <li>
+          <b>Switch a Markdown file's view.</b> <Ui>Plain text</Ui> in the file's header shows its diff;{' '}
+          <Ui>Rendered</Ui> goes back. Limn remembers your choice for every Markdown file.
         </li>
         <li>
           <b>Wrap lines.</b> <Ui>Wrap lines</Ui> wraps long lines instead of scrolling sideways.
