@@ -29,25 +29,30 @@ export async function openPrsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/open-prs', async (req): Promise<OpenPrsResponse> => {
     const q = req.query as { workspace?: string; repoIds?: string; userIds?: string };
     const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
+    // `projectPrs`: an EXTERNAL repo's project PRs list here beside the watched repos' PRs
+    // (db/external-repos.ts); its other PRs never do.
+    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds), { projectPrs: true });
     const prs = await getOpenPrs({
       accountId,
       repoIds: scope.repoIds,
       userIds: parseIntList(q.userIds),
+      projectPrIds: scope.projectPrIds ?? [],
     });
+    // The repos the listed PRs live in — the watched scope plus any external repo a project PR is in.
+    const listedRepoIds = [...new Set([...scope.repoIds, ...prs.map((p) => p.repoId)])];
     // PR CHIPS (db/pr-chips.ts): the stack and the criteria — on this list only, never the timeline.
     await attachPrChips(accountId, prs, (p) => p.id);
     // The scope's repos the viewer can PUSH to (the synced `repos.viewerPermission`, the ONE
     // WRITE_PERMISSIONS set): the row menu's Merge shows only there. A VISIBILITY gate, never the
     // authority — the merge route re-checks. One indexed read, no GitHub call.
     const writableRepoIds =
-      scope.repoIds.length === 0
+      listedRepoIds.length === 0
         ? []
         : (
             await db
               .select({ id: schema.repos.id, viewerPermission: schema.repos.viewerPermission })
               .from(schema.repos)
-              .where(and(eq(schema.repos.accountId, accountId), inArray(schema.repos.id, scope.repoIds)))
+              .where(and(eq(schema.repos.accountId, accountId), inArray(schema.repos.id, listedRepoIds)))
               .execute()
           )
             .filter((r) => WRITE_PERMISSIONS.has(r.viewerPermission ?? ''))

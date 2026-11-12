@@ -56,6 +56,7 @@ import {
 } from '../../sandbox/session/fix.js';
 import type { SessionKey } from '../../sandbox/session/subject.js';
 import { bindAutoFixQueueFacts, bindAutoFixStartPlace } from './auto-fix-queue.js';
+import { automationAllowedForPr } from '../../db/external-repos.js';
 
 export { subscribeFixStream } from './stream.js';
 
@@ -390,6 +391,9 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
   // caller can start an unattended fix past it. Before the claim, so nothing needs releasing.
   const dependencyRun = input.seed === 'plain' || input.preamble != null;
   if (unattended && !(await automaticRunAllowed(ctx, accountId, dependencyRun ? 'dependency CI fix' : 'auto fix'))) return { status: 'over_budget' };
+  // EXTERNAL REPOS (db/external-repos.ts): an UNATTENDED fix never runs on an external repo's PR
+  // (the callers skip first; this is the backstop). A reader's press is never refused.
+  if (unattended && !(await automationAllowedForPr(accountId, input.prId, ctx))) return { status: 'not_found' };
 
   // ⚠ THE CLAIM, in the same tick as its check and BEFORE any await. EVERY bail path below releases it
   // (and the reserved slot), or this PR's fixer wedges for the process's lifetime.
@@ -476,7 +480,8 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     const q = await import('../../db/queries.js');
     const repoScope = await q.workspaceScopeForRepo(accountId, pr.repoId);
     if (!repoScope) return bail({ status: 'not_found' });
-    const scope = await q.resolveWorkspaceScope(accountId, repoScope.workspaceId);
+    // `members: 'all'`: EXTERNAL repos are cloned too (docs/DATA-MODEL.md § External repos).
+    const scope = await q.resolveWorkspaceScope(accountId, repoScope.workspaceId, null, { members: 'all' });
 
     const choice = resolveSandboxAgentChoice({ provider, model: input.model });
     const nonce = pickReviewNonce([task.text, pr.title, pr.body ?? '', rawDiff]);

@@ -74,6 +74,7 @@ import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/au
 import { automaticRunAllowed } from '../../review/budget-gate.js';
 import { requestModelOf } from '../../ai/provider.js';
 import { trueAuthorId } from '../../db/true-author.js';
+import { automationAllowedForPr } from '../../db/external-repos.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
@@ -216,6 +217,8 @@ export async function maybeStartAutoFix(
   };
   try {
     if (!(await prAuthorIsAccount(ctx, accountId, prId))) return { status: 'not_own' };
+    // EXTERNAL REPOS (db/external-repos.ts): no auto fix on an external repo's PR — read as off.
+    if (!(await automationAllowedForPr(accountId, prId, ctx))) return skip('off');
     const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, prId);
     if (!ws?.enabled) return skip('off');
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, no auto fix — the next auto review decides again.

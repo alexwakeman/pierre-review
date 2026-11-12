@@ -9,6 +9,7 @@ import {
   type SetRelatedReposBody,
   type Workspace,
   type WorkspacePendingMuteUpdate,
+  type SetWorkspaceRepoModeBody,
   type WorkspacesResponse,
 } from '@pierre-review/shared';
 import {
@@ -18,12 +19,14 @@ import {
   listWorkspaces,
   rehomeReposToDefault,
   renameWorkspace,
+  setWorkspaceRepoMode,
 } from '../../db/queries.js';
 import { setWorkspacePendingMute } from '../../db/pending-mute.js';
 import { getRelatedRepoPairs, setRelatedRepos } from '../../db/related-repos.js';
 import { setWorkspaceFlowSettings, setWorkspaceFlowView } from '../../db/flow-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { kickGithubIssuesCheck } from '../../tracker/index.js';
+import { refreshExternalRepoCadence } from '../../sync/sync-manager.js';
 
 // Workspaces (CORE): the ONE scope this app has. A workspace groups an account's repos, and a repo
 // belongs to EXACTLY ONE workspace — a database fact (`workspace_repos`, UNIQUE (account_id,
@@ -133,6 +136,20 @@ const pendingMuteSchema = {
       muted: { type: 'boolean' },
       mutedRepoIds: { type: 'array', items: { type: 'integer' }, maxItems: 2000 },
     },
+  },
+};
+
+const repoModeSchema = {
+  params: {
+    type: 'object',
+    required: ['id', 'repoId'],
+    properties: { id: { type: 'integer' }, repoId: { type: 'integer' } },
+  },
+  body: {
+    type: 'object',
+    required: ['mode'],
+    additionalProperties: false,
+    properties: { mode: { type: 'string', enum: ['watched', 'external'] } },
   },
 };
 
@@ -294,6 +311,32 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
     }
     return { workspace };
   });
+
+  // EXTERNAL REPOS (docs/DATA-MODEL.md § External repos): how this workspace treats ONE member —
+  // 'watched' (the default) or 'external' (cloned for Implement and AI Fix, linked to tickets, only
+  // its project PRs on the boards, never in Reports, no automatic action). DB only, no GitHub call.
+  // 404 for a foreign workspace or a repo that is not a member of it. Echoes the refreshed workspace.
+  app.put(
+    '/api/workspaces/:id/repos/:repoId/mode',
+    { schema: repoModeSchema },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id, repoId } = req.params as { id: number; repoId: number };
+      const { mode } = req.body as SetWorkspaceRepoModeBody;
+      if (!(await setWorkspaceRepoMode(accountId, id, repoId, mode))) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Repository ${repoId} is not in workspace ${id}` };
+      }
+      // Sync's in-memory external set (cold cadence, light sync) follows at once.
+      await refreshExternalRepoCadence(req.log);
+      const workspace = await findWorkspace(accountId, id);
+      if (!workspace) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return { workspace };
+    },
+  );
 
   // THE PENDING MUTE for this workspace — CORE and FREE on every tier, in both deployment modes.
   //

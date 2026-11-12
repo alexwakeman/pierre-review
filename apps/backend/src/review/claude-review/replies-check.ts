@@ -87,6 +87,7 @@ import {
   repliesSystemPrompt,
 } from './replies-check-prompt.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
+import { automationAllowedForPr } from '../../db/external-repos.js';
 
 // THE REPLIES PASS — the I/O half (docs/CLAUDE-REVIEW.md § The replies pass; the pure half is
 // replies-pass.ts). A cheap run that judges ONLY people's replies on Limn's own posted findings, at
@@ -504,6 +505,11 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
     // Over the spend budget, or every provider it would use is locked out: skipped, never queued. The
     // gate is asked about the providers the pass RUNS on, not the default.
     if (auto && !a.pressed) {
+      // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR.
+      if (!(await automationAllowedForPr(a.accountId, a.prId, ctx))) {
+        claimed.delete(key);
+        return { outcome: 'disabled' };
+      }
       for (const p of new Set(groups.map((g) => g.provider))) {
         if (!(await automaticRunAllowed(ctx, a.accountId, 'replies check', p))) {
           claimed.delete(key);
@@ -628,6 +634,11 @@ export async function startCoverCheck(ctx: AgentContext, a: StartCoverCheckArgs)
       if (pr.state !== 'open') {
         claimed.delete(key);
         return { outcome: 'not_open' };
+      }
+      // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR.
+      if (auto && !a.pressed && !(await automationAllowedForPr(a.accountId, a.prId, ctx))) {
+        claimed.delete(key);
+        return { outcome: 'disabled' };
       }
       if (auto && !a.pressed && !(await automaticRunAllowed(ctx, a.accountId, 'cover check', a.survivor))) {
         claimed.delete(key);

@@ -1,7 +1,7 @@
 import { Select } from '../ui/index.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { Repo, Workspace } from '@pierre-review/shared';
+import type { Repo, Workspace, WorkspaceRepoMode } from '@pierre-review/shared';
 import { api, ApiError } from '../../api/client.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
@@ -10,6 +10,7 @@ import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.
 import { getSyncRoundActions, useFilters } from '../../store/filters.js';
 import { RepoSearch } from '../RepoSearch.js';
 import { CloseIcon, PencilIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { DeepSyncIcon, EmbeddedSyncPanel } from '../SyncProgressPanel.js';
 
 // Repo/workspace management for the Activity console: create/rename/delete workspaces, MOVE the
@@ -35,7 +36,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   const { data: repos } = useRepos();
   const activeWorkspaceId = useFilters((s) => s.workspaceId);
   const setWorkspace = useFilters((s) => s.setWorkspace);
-  const { createWorkspace, renameWorkspace, deleteWorkspace, assignRepoToWorkspace } =
+  const { createWorkspace, renameWorkspace, deleteWorkspace, assignRepoToWorkspace, setWorkspaceRepoMode } =
     useWorkspaceMutations();
 
   // The shared sync round (driven by SyncStatus). While it is open, an embedded progress
@@ -210,6 +211,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
     assignRepoToWorkspace.mutate({ workspaceId, repoId });
   };
 
+  // EXTERNAL REPOS: the repo's mode in the workspace that holds it (`Workspace.externalRepoIds`).
+  // A move keeps it, so the picker reads it off whichever workspace the repo is in now.
+  const externalIds = useMemo(() => new Set(list.flatMap((w) => w.externalRepoIds ?? [])), [list]);
+
   const confirmRemoveRepo = (r: Repo): void => {
     if (window.confirm(`Remove ${r.fullName}? This deletes all of its locally-synced data.`)) {
       removeRepo.mutate(r.id);
@@ -239,8 +244,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
         key={r.id}
         className="group rounded-ui px-1 py-1 text-meta hover:bg-ui-hover"
       >
-        <div className="flex items-center gap-2">
-          <span className="min-w-0 flex-1 truncate" title={r.fullName}>
+        {/* Two lines: the name keeps the full width (two pickers beside it truncated every name to
+            "acme…"), the workspace and Watched/External pickers sit under it. */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="min-w-0 basis-full truncate" title={r.fullName}>
             <span className="text-ui-faint">{r.owner}/</span>
             <span className="font-medium text-ui-ink">{r.name}</span>
           </span>
@@ -256,12 +263,26 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             }}
             options={list.map((w) => ({ value: String(w.id), label: w.name }))}
           />
+          <Select<WorkspaceRepoMode>
+            size="sm"
+            value={externalIds.has(r.id) ? 'external' : 'watched'}
+            disabled={current == null || setWorkspaceRepoMode.isPending}
+            label={`Watched or external: ${r.fullName}`}
+            className="max-w-[7rem] shrink-0"
+            onChange={(mode) => {
+              if (current != null) setWorkspaceRepoMode.mutate({ workspaceId: current, repoId: r.id, mode });
+            }}
+            options={[
+              { value: 'watched', label: 'Watched' },
+              { value: 'external', label: 'External' },
+            ]}
+          />
           <button
             type="button"
             onClick={() => confirmDeepResyncRepo(r)}
             title={`Deep re-sync ${r.fullName} — re-fetches its full backfill window`}
             aria-label={`Deep re-sync ${r.fullName}`}
-            className="hit shrink-0 px-1 text-ui-faint opacity-0 hover:text-ui-ink focus:opacity-100 group-hover:opacity-100"
+            className="hit ml-auto shrink-0 px-1 text-ui-faint opacity-0 hover:text-ui-ink focus:opacity-100 group-hover:opacity-100"
           >
             <DeepSyncIcon size={12} />
           </button>
@@ -524,8 +545,21 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           {/* RIGHT: the account's repos, each showing the ONE workspace it lives in */}
           <div className="flex min-h-0 flex-col">
             <div className="border-b border-ui-line px-3 py-2">
-              <div className="text-meta font-semibold  text-ui-faint">
+              <div className="flex items-center gap-1 text-meta font-semibold  text-ui-faint">
                 Repos
+                <InfoButton title="Watched and external repos" overModal>
+                  <p>
+                    <strong>Watched</strong>: Limn follows the repo’s pull requests everywhere, and automatic
+                    reviews and fixes run as you set them.
+                  </p>
+                  <p className="mt-2">
+                    <strong>External</strong>: a repo your team changes but does not maintain, such as a
+                    shared infrastructure repo. Implement and AI Fix can change it, and its pull requests
+                    link to your tickets. Open PRs and Pending show only its pull requests that name one
+                    of your project keys or that people who maintain your watched repos opened. Reports
+                    leave it out, and nothing runs on it automatically.
+                  </p>
+                </InfoButton>
               </div>
               <div className="text-meta text-ui-mute">
                 Every repo lives in exactly one workspace. Changing a repo’s workspace MOVES it — it

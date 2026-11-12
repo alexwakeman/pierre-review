@@ -265,7 +265,7 @@ async function computeBriefCounts(
 ): Promise<DailyBriefCounts> {
   // Number in → the resolver still owns membership (a foreign/dead id degrades to Default,
   // exactly the scoped-route posture; the caller already resolved real requests).
-  const scope = await resolveWorkspaceScope(accountId, workspaceId);
+  const scope = await resolveWorkspaceScope(accountId, workspaceId, null, { projectPrs: true });
 
   const [insights, backlog, botAnomalies, allRedTrunks] = await Promise.all([
     // The /api/attention fold verbatim (getWorkspaceInsights with the default window); the two

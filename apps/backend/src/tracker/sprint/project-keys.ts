@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import type { TrackerProvider } from '@pierre-review/shared';
 import type { TrackerContext } from '../context.js';
 import { parseProjectKeys } from '../detect.js';
@@ -21,14 +21,23 @@ export async function sprintProjectKeys(
 ): Promise<string[]> {
   if (provider === 'github') return [];
   const tt = ctx.schema.trackerTickets;
+  const pr = ctx.schema.pullRequests;
+  const wr = ctx.schema.workspaceRepos;
+  // ⚠ ONLY KEYS SEEN ON WATCHED REPOS (docs/DATA-MODEL.md § External repos): an EXTERNAL repo is
+  // shared with other teams, and their tickets' prefixes must not become "this workspace's projects".
   const rows = (await ctx.db
     .selectDistinct({ issueKey: tt.issueKey })
     .from(tt)
+    // LEFT joins: a ticket whose PR or membership row is gone still counts, as before; only a PR
+    // KNOWN to be in an external repo is left out.
+    .leftJoin(pr, and(eq(pr.id, tt.prId), eq(pr.accountId, tt.accountId)))
+    .leftJoin(wr, and(eq(wr.repoId, pr.repoId), eq(wr.accountId, tt.accountId)))
     .where(
       and(
         eq(tt.accountId, accountId),
         eq(tt.workspaceId, workspaceId),
         eq(tt.provider, provider),
+        or(isNull(wr.mode), ne(wr.mode, 'external')),
         ...(apiRoot != null ? [eq(tt.apiRoot, apiRoot)] : []),
       ),
     )

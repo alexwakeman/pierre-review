@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { ProEventHooks } from './contract.js';
+import { automationAllowedForPr, automationAllowedForRepo } from '../db/external-repos.js';
 
 // ── HOST → PLUGIN EVENT HOOKS (`ProContext.registerEventHooks`, optional, no apiVersion bump) ─────
 //
@@ -31,6 +32,9 @@ function fire(label: string, run: () => Promise<void> | void): void {
     });
 }
 
+// ⚠ EXTERNAL REPOS (db/external-repos.ts): neither fact is announced for an external repo's PR —
+// the Slack signals are automatic posts. Asked here, in core, so the platform needs no new host
+// dependency; the check runs inside the fire-and-forget, so an emit still never awaits.
 export function emitClaudeReviewCompleted(e: {
   accountId: number;
   prId: number;
@@ -39,11 +43,17 @@ export function emitClaudeReviewCompleted(e: {
 }): void {
   const h = hooks?.onClaudeReviewCompleted;
   if (h == null) return;
-  fire('onClaudeReviewCompleted', () => h(e));
+  fire('onClaudeReviewCompleted', async () => {
+    if (!(await automationAllowedForPr(e.accountId, e.prId))) return;
+    await h(e);
+  });
 }
 
 export function emitPullRequestMerged(e: { accountId: number; repoId: number; prId: number }): void {
   const h = hooks?.onPullRequestMerged;
   if (h == null) return;
-  fire('onPullRequestMerged', () => h(e));
+  fire('onPullRequestMerged', async () => {
+    if (!(await automationAllowedForRepo(e.accountId, e.repoId))) return;
+    await h(e);
+  });
 }

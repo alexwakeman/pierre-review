@@ -35,6 +35,7 @@ import {
   type VerdictRules,
 } from './auto-verdict.js';
 import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
+import { repoModeOf } from '../../db/external-repos.js';
 
 // AUTO CLAUDE REVIEW — THE PER-WORKSPACE SWITCH (CORE since migration 0074 / pg 0061; it lived on
 // the plugin's `pro_workspace_settings` until Claude Review left the plugin, and plugin migration
@@ -261,6 +262,7 @@ export async function readWorkspaceAutoPostForPr(
       enabled: w.autoPostEnabled,
       stored: w.autoPostSettings,
       ...verdictRuleCols(w),
+      ...repoModeCol(wr),
     })
     .from(prs)
     .innerJoin(wr, and(eq(wr.repoId, prs.repoId), eq(wr.accountId, accountId)))
@@ -274,17 +276,26 @@ export async function readWorkspaceAutoPostForPr(
     stored: StoredAutoPostSettings | null;
     pairStrictness?: string | null;
     approveLeftovers?: string | null;
+    repoMode?: string | null;
   }>;
   const r = rows[0];
-  return r
-    ? {
-        workspaceId: r.workspaceId,
-        settings: resolveAutoPostSettings(r.enabled, r.stored, r.approveLeftovers),
-        pairStrictness: resolvePairStrictness(r.pairStrictness),
-        autoReviewOn: r.autoReviewOn === true,
-      }
-    : null;
+  if (!r) return null;
+  const settings = resolveAutoPostSettings(r.enabled, r.stored, r.approveLeftovers);
+  // EXTERNAL REPOS (db/external-repos.ts): NO AUTOMATIC WRITE on an external repo's PR — auto-post,
+  // the auto verdict, "Resolve my Limn threads", auto resolve, pushback, SonarCloud's post and the
+  // ticket review's post all read these switches, so all of them read OFF here. A "Review and post"
+  // press needs no switch (the press is the consent) and still posts — as COMMENT.
+  const external = repoModeOf(r.repoMode) === 'external';
+  return {
+    workspaceId: r.workspaceId,
+    settings: external ? { ...settings, enabled: false, autoVerdict: false, resolveOwnPrs: false } : settings,
+    pairStrictness: resolvePairStrictness(r.pairStrictness),
+    autoReviewOn: !external && r.autoReviewOn === true,
+  };
 }
+
+// The membership's mode (migration 0188), when the schema has it (an older test schema may not).
+const repoModeCol = (wr: AgentContext['schema'][string]) => (wr.mode ? { repoMode: wr.mode } : {});
 
 // The two rule columns (migration 0145), when the schema has them (an older test schema may not).
 const verdictRuleCols = (w: AgentContext['schema'][string]) => ({
@@ -317,14 +328,15 @@ export async function readWorkspaceAutoFixForPr(
 ): Promise<boolean> {
   const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
   const rows = (await ctx.db
-    .select({ on: w.autoFixEnabled })
+    .select({ on: w.autoFixEnabled, ...repoModeCol(wr) })
     .from(prs)
     .innerJoin(wr, and(eq(wr.repoId, prs.repoId), eq(wr.accountId, accountId)))
     .innerJoin(w, and(eq(w.id, wr.workspaceId), eq(w.accountId, accountId)))
     .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
     .limit(1)
-    .execute()) as Array<{ on: boolean | null }>;
-  return rows[0]?.on === true;
+    .execute()) as Array<{ on: boolean | null; repoMode?: string | null }>;
+  // EXTERNAL REPOS (db/external-repos.ts): never an auto fix there.
+  return rows[0]?.on === true && repoModeOf(rows[0]?.repoMode) !== 'external';
 }
 
 /**
@@ -339,15 +351,22 @@ export async function readWorkspaceAutoFixSettingsForPr(
 ): Promise<{ workspaceId: number; enabled: boolean; settings: AutoFixSettings } | null> {
   const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
   const rows = (await ctx.db
-    .select({ workspaceId: w.id, on: w.autoFixEnabled, stored: w.autoFixSettings })
+    .select({ workspaceId: w.id, on: w.autoFixEnabled, stored: w.autoFixSettings, ...repoModeCol(wr) })
     .from(prs)
     .innerJoin(wr, and(eq(wr.repoId, prs.repoId), eq(wr.accountId, accountId)))
     .innerJoin(w, and(eq(w.id, wr.workspaceId), eq(w.accountId, accountId)))
     .where(and(eq(prs.id, prId), eq(prs.accountId, accountId)))
     .limit(1)
-    .execute()) as Array<{ workspaceId: number; on: boolean | null; stored: StoredAutoFixSettings | null }>;
+    .execute()) as Array<{ workspaceId: number; on: boolean | null; stored: StoredAutoFixSettings | null; repoMode?: string | null }>;
   const r = rows[0];
-  return r ? { workspaceId: r.workspaceId, enabled: r.on === true, settings: resolveAutoFixSettings(r.stored) } : null;
+  // EXTERNAL REPOS (db/external-repos.ts): never an auto fix there.
+  return r
+    ? {
+        workspaceId: r.workspaceId,
+        enabled: r.on === true && repoModeOf(r.repoMode) !== 'external',
+        settings: resolveAutoFixSettings(r.stored),
+      }
+    : null;
 }
 
 const autoCols = (w: AgentContext['schema'][string]) => ({

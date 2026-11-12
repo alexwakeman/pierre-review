@@ -10,6 +10,7 @@ import { ciReviewDue } from './currency.js';
 import { countAutoCiReviewsSince, getCiStateInputs, readSyncedCi } from './persist.js';
 import { ciAutoLaneRoom, ciReviewHeld, startCiReview, type StartCiArgs, type StartCiResult } from './manager.js';
 import { trueAuthorId } from '../../db/true-author.js';
+import { externalRepoIdsVia } from '../../db/external-repos.js';
 
 // THE CI REVIEW SWEEPER — explains a failing check as soon as the sync sees it, where auto review is
 // on for the workspace (Settings → Workspace → "Review new PRs automatically").
@@ -135,7 +136,10 @@ export async function runCiReviewSweep(
         result.overBudget = true;
         continue;
       }
+      // EXTERNAL REPOS (db/external-repos.ts): no automatic CI review on an external repo's PR.
+      const externals = await externalRepoIdsVia(accountId, ctx);
       const red = (await redOpenPrs(ctx, accountId, [...enabled.keys()]))
+        .filter((p) => !externals.has(p.repoId))
         .filter((p) => p.authorId == null || !automation.has(p.authorId))
         .sort((a, b) => a.prId - b.prId)
         .slice(0, MAX_CANDIDATES_PER_TICK);

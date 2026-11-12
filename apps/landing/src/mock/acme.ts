@@ -544,9 +544,11 @@ export const SETUP_WORKSPACES = {
     { name: REPOS.api, home: 'pay' },
     { name: REPOS.ledger, home: 'pay' },
     { name: 'acme/docs-site', home: 'pay' },
+    // An EXTERNAL repo (docs/DATA-MODEL.md § External repos): the platform team's, changed by Acme.
+    { name: 'acme/platform-config', home: 'pay', external: true },
     { name: REPOS.web, home: 'web' },
     { name: 'acme/design-system', home: 'web' },
-  ],
+  ] as Array<{ name: string; home: string; external?: boolean }>,
 };
 
 export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';

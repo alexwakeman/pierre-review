@@ -261,8 +261,9 @@ export async function insightsRoutes(app: FastifyInstance): Promise<void> {
       // `?workspace=` is THE scope parameter — absent/unknown/foreign resolves to the account's
       // DEFAULT workspace, never a 404, and the resolved id is echoed. Its `repoIds` are what
       // bound the id resolve below, so a PR the caller owns in ANOTHER workspace is not swept
-      // here: the board that asked is the board that gets refreshed.
-      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      // here: the board that asked is the board that gets refreshed. `members: 'all'`: the board
+      // lists an EXTERNAL repo's project PRs too (db/external-repos.ts), and those must freshen.
+      const scope = await resolveWorkspaceScope(accountId, q.workspace, null, { members: 'all' });
       const swept = await sweepPrLiveness({
         accountId,
         repoIds: scope.repoIds,

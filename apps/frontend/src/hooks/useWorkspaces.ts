@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   Workspace,
+  WorkspaceRepoMode,
   WorkspacePendingMuteUpdate,
   FlowSettings,
   WorkspacesResponse,
@@ -129,11 +130,20 @@ export function useWorkspaceMutations() {
       ]),
   });
 
+  // EXTERNAL REPOS: a mode change moves which PRs every board lists (Open PRs, Pending, My Turn,
+  // Timeline, Reports), so it sweeps the same key set as a membership move.
+  const setWorkspaceRepoMode = useMutation({
+    mutationFn: (v: { workspaceId: number; repoId: number; mode: WorkspaceRepoMode }) =>
+      api.setWorkspaceRepoMode(v.workspaceId, v.repoId, v.mode),
+    onSettled: invalidate,
+  });
+
   return {
     createWorkspace,
     renameWorkspace,
     deleteWorkspace,
     assignRepoToWorkspace,
+    setWorkspaceRepoMode,
     setWorkspaceRepos,
     setWorkspacePendingMute,
     setWorkspaceFlowSettings,

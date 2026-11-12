@@ -341,6 +341,15 @@ The order and grouping are code (`MY_TURN_ORDER`, `MY_TURN_GROUP_OF`, `myTurnGro
 Turn entirely**: both are dropped from the seeds (`getMyTurn`'s open-PR list and `getThreadTurns`'
 query), so the list, every count, the brief and the notifications move together.
 
+### External repos on My Turn and the boards
+
+An EXTERNAL repo's PRs reach My Turn, Open PRs and the Pending board ONLY as PROJECT PRs
+([DATA-MODEL.md](DATA-MODEL.md) § External repos). Like the mute, it is a SEED filter: every PR select in
+`getMyTurn` (and `getThreadTurns`) and the board's open-PR select in `getWorkspaceInsights` read
+`prInBoardScope(watchedRepoIds, projectPrIds)`, never a filter over built cards. The account-wide read
+(notifications, CLI) narrows through `accountBoardScope` only when the account has an external repo. The
+fold's SURVEYS (metrics, the bot signal, red trunks, review counts, coupling) keep the WATCHED list.
+
 ### The first-onboarding lookback (`db/my-turn-floor.ts`, migration `0154`)
 
 Every rule that reads the ONBOARDING FLOOR (S2, S3c, S3d, S5, S6; the table below) reads it through

@@ -102,8 +102,22 @@ function ensure(repoId: number, now: number): RepoCadence {
   return c;
 }
 
-/** The activity bucket for a repo at `now` (cold when unseen). */
+// EXTERNAL REPOS (db/external-repos.ts) are PINNED COLD: their PRs are not watched, so a busy
+// shared repo must not hold the hot cadence (or the hot settle interval). The set is also sync's
+// one "is this repo external?" answer (light planning, no trunk snapshot) — in memory, so no sync
+// path gains a query. Refreshed at boot and by every mode change (`refreshExternalRepoCadence`).
+let pinnedCold: ReadonlySet<number> = new Set();
+export function setPinnedColdRepos(ids: ReadonlySet<number>): void {
+  pinnedCold = ids;
+}
+/** Is this repo an EXTERNAL member (as of the last refresh)? In memory, no I/O. */
+export function isPinnedCold(repoId: number): boolean {
+  return pinnedCold.has(repoId);
+}
+
+/** The activity bucket for a repo at `now` (cold when unseen, and always for an external repo). */
 export function bucketFor(repoId: number, now: number): Bucket {
+  if (pinnedCold.has(repoId)) return 'cold';
   const c = cadence.get(repoId);
   if (!c) return 'cold';
   const sinceChange = now - c.lastChangeAt;

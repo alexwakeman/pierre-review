@@ -2563,6 +2563,23 @@ export interface Workspace {
   // Chronology's view (`FlowActorView`) for this workspace, RAW: null = the default
   // (`resolveFlowActorView`). Set with PUT /api/workspaces/:id/flow-view.
   flowView?: FlowActorView | null;
+  // EXTERNAL REPOS (docs/DATA-MODEL.md § External repos): the members whose mode is 'external' —
+  // ALWAYS a subset of `repoIds`. Set with PUT /api/workspaces/:id/repos/:repoId/mode.
+  // Trailing-optional for wire tolerance only; `listWorkspaces` always sets it.
+  externalRepoIds?: number[];
+}
+
+// How a workspace treats one member repo (`workspace_repos.mode`).
+//   'watched'  — the default: its PRs are watched, reported on and acted on as configured.
+//   'external' — the team changes it but does not maintain it: cloned for Implement and AI Fix,
+//                linked to tickets; only its PROJECT PRs (an allowlisted ticket key, or an author
+//                who maintains a watched repo of the workspace) reach Open PRs and Pending; never in
+//                Reports; no automatic action.
+export const WORKSPACE_REPO_MODES = ['watched', 'external'] as const;
+export type WorkspaceRepoMode = (typeof WORKSPACE_REPO_MODES)[number];
+
+export interface SetWorkspaceRepoModeBody {
+  mode: WorkspaceRepoMode;
 }
 
 // What ONE Save on the Pending-mute settings section writes: either half, both, or neither.

@@ -29,6 +29,7 @@ import {
   insertQueuedDiagram,
   subjectDrawHistory,
 } from './persist.js';
+import { automationAllowedForPr } from '../../db/external-repos.js';
 
 // "A REVIEW JUST FINISHED — DRAW ITS DIAGRAMS?" The one hook between Claude Review and this process.
 // claude-review/manager.ts calls it fire-and-forget after EVERY succeeded run, MANUAL OR AUTO, and
@@ -271,6 +272,11 @@ export async function maybeDrawDiagramsAfterReview(
     }
     // THE CLAUDE SPEND BUDGET asks only after an AUTO review: a diagram after a review the reader
     // started is part of that run (the reader already chose it, past the over-budget confirm).
+    // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR.
+    if (a.reviewTrigger === 'auto' && !(await automationAllowedForPr(accountId, prId, ctx))) {
+      result.pr = 'switched_off';
+      return result;
+    }
     if (a.reviewTrigger === 'auto' && !(await automaticRunAllowed(ctx, accountId, 'diagrams'))) {
       result.pr = 'over_budget';
       return result;
@@ -354,6 +360,7 @@ export async function maybeDrawStoryDiagramAfterTicketReview(
   if (p == null) return 'disabled';
   try {
     if (!(await deps.switchedOn(ctx, a.accountId, a.viaPrId))) return 'switched_off';
+    if (a.reviewTrigger === 'auto' && a.viaPrId != null && !(await automationAllowedForPr(a.accountId, a.viaPrId, ctx))) return 'switched_off';
     if (a.reviewTrigger === 'auto' && !(await automaticRunAllowed(ctx, a.accountId, 'diagrams'))) return 'over_budget';
     const dayStartMs = utcDayStartMs(nowMs);
     const used = { n: await deps.usedToday(ctx, a.accountId, dayStartMs) };

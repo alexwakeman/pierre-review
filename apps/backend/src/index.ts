@@ -114,6 +114,9 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // Register the platform (reporting, Bots Monitoring, Slack, settings — src/platform/). Static,
   // always on; its own migrations run here, after core's.
   await bindPlatform(app);
+  // EXTERNAL REPOS: load sync's in-memory external set (cold cadence, light sync) before the first
+  // tick. Never throws; the mode route refreshes it on every change.
+  await (await import('./sync/sync-manager.js')).refreshExternalRepoCadence(app.log);
 
   // The issue tracker's process half: the one-time move of the plugin-era tracker
   // data into core — AFTER the plugin's own migrations ran — then the ticket worker and its

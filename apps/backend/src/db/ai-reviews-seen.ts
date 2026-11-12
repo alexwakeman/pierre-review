@@ -21,6 +21,7 @@ import { AI_REVIEWS_LIST_CAP, type AiReviewCard } from '@pierre-review/shared';
 import { and, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { db, schema } from './client.js';
 import { TEAMMATE_KIND } from './teammate-reviews.js';
+import { prInBoardScope } from './queries.js';
 
 const { claudeReviews: cr, claudeReviewFindings: crf, pullRequests, repos, workspaces } = schema;
 
@@ -75,8 +76,11 @@ type Verdict = AiReviewCard['verdict'];
 export async function buildAiReviewCards(
   accountId: number,
   repoIds: readonly number[],
+  // The scope's PROJECT PRs in external repos (db/external-repos.ts) — listed beside the watched
+  // repos' PRs, so a review of the reader's own PR in an external repo shows here too.
+  projectPrIds: readonly number[] = [],
 ): Promise<{ cards: AiReviewCard[]; userIds: number[] }> {
-  if (repoIds.length === 0) return { cards: [], userIds: [] };
+  if (repoIds.length === 0 && projectPrIds.length === 0) return { cards: [], userIds: [] };
   // Own runs by FINISH time, teammates' reviews by POST time (else import time) — the two clocks
   // `listTeammateReviews` and the run panel already show.
   const clock = sql<number>`case when ${cr.kind} = ${TEAMMATE_KIND} then coalesce(${cr.postedAt}, ${cr.createdAt}) else coalesce(${cr.finishedAt}, ${cr.createdAt}) end`;
@@ -107,7 +111,7 @@ export async function buildAiReviewCards(
       and(
         eq(cr.accountId, accountId),
         eq(repos.accountId, accountId),
-        inArray(pullRequests.repoId, [...repoIds]),
+        prInBoardScope(repoIds, projectPrIds),
         or(
           and(
             isNull(cr.kind),

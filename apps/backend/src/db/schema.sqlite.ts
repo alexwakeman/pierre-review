@@ -2455,6 +2455,17 @@ export const workspaceRepos = sqliteTable(
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
+    // ── EXTERNAL REPOS (migration 0188; docs/DATA-MODEL.md § External repos) ─────────────────────
+    // shared `WorkspaceRepoMode`: 'watched' (the default — everything this file says about a
+    // member) or 'external' — a repo the team changes but does not maintain (an infrastructure
+    // platform's config repo). An external repo is cloned by Implement / AI Fix, linked to tickets
+    // and related repos, but its PRs are NOT watched: only its PROJECT PRs (db/external-repos.ts —
+    // an allowlisted ticket key, or an author who maintains a WATCHED repo here) reach Open PRs and
+    // Pending, nothing of it reaches Reports, and NO automatic action ever runs on it.
+    // ⚠ READ ONLY THROUGH db/external-repos.ts and `resolveWorkspaceScope` — never a raw filter.
+    // A MOVE to another workspace KEEPS it (no mover writes it): a repo the reader marked external
+    // must never start getting automatic actions as a side effect of a move or a workspace delete.
+    mode: text('mode').notNull().default('watched'),
   },
   (t) => ({
     // One workspace per repo, structurally. Also the upsert conflict target for

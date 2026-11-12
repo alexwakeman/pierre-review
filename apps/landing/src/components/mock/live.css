@@ -688,6 +688,7 @@
   font-size: 13px;
 }
 .lb .mk-wsrow > span {
+  flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--muted);

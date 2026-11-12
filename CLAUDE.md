@@ -198,9 +198,10 @@ EXACTLY ONE of which, `'review'`, is the reviewer cohort · `AutomatedReviewerKi
 - Timestamps are unix-epoch ints read as `Date`. GitHub node ids are the identity. Triage fields
   are computed on read, never stored.
 - **`workspaces` + `workspaceRepos` are the ONE scope** — a repo is in EXACTLY ONE workspace,
-  assignment is an upsert = a MOVE, and the one `isDefault` row per account is a partial unique
-  index in the `.sql` migration (drizzle predicates are inert). ⚠ A repo with NO membership row is
-  invisible everywhere, so `ensureRepoMemberships` MUST keep `ON CONFLICT … DO NOTHING`.
+  assignment is an upsert = a MOVE, the one `isDefault` row per account is a partial unique index
+  in the `.sql` (drizzle predicates are inert). ⚠ A repo with NO membership row is invisible
+  (`ensureRepoMemberships` keeps `ON CONFLICT … DO NOTHING`). ⚠ `external` members: read ONLY via
+  `db/external-repos.ts`.
 - **`workspaceReviewers` is THE BOT OBJECT** — one row per `(accountId, workspaceId,
   authorUserId)`: judgement, identity and price (one writer `setReviewerCost`). Price is per
   WORKSPACE — **never sum cost across workspaces**.

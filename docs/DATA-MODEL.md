@@ -818,6 +818,39 @@ moved repo's rows (`dropRepoRelations`) and every reader joins membership. Off b
 `claude_reviews.peers_read` (same migration) records what a run read beside the PR (`ReviewPeerRead[]`;
 NULL = nothing or an older row).
 
+## External repos — `workspace_repos.mode` (CORE; migration `0188`)
+
+How a workspace treats one member: `'watched'` (the default, every pre-existing row) or `'external'`
+(shared `WorkspaceRepoMode`) — a repo the team CHANGES but does not MAINTAIN (an infrastructure
+platform's config repo). Set in Manage repos & workspaces (`PUT /api/workspaces/:id/repos/:repoId/mode`,
+the ONE writer `setWorkspaceRepoMode`). ⚠ **READ ONLY THROUGH `db/external-repos.ts` and
+`resolveWorkspaceScope`** — a second spelling of "is this repo external" is the second visibility axis
+0046 removed (`repos.inbox_watch`).
+
+- **Scope.** `resolveWorkspaceScope` (and `getWorkspaceRepoIds`) return WATCHED members by default, so
+  Timeline, Feed, Activity, Bots, Reports, Chronology, the trunk strip, Slack's digest, dependency
+  automation and the auto-review candidates leave an external repo out with no code of their own.
+  `members: 'all'` — only the build and fix paths (Implement's session start, AI Fix) and the board's
+  liveness sweep — includes it.
+- **Project PRs.** `projectPrs: true` adds `BotScope.projectPrIds`: the external repos' OPEN PRs that
+  pass `isProjectPr` — the owner (`prOwnerId`) maintains a WATCHED repo of the workspace (merged into its
+  default branch, the `getMergers` proxy; bots excluded; the reader always counts; ⚠ the external repo's
+  OWN mergers never count), OR a stored `tracker_tickets` key of this workspace whose prefix is in the
+  tracker's project-key ALLOWLIST (a GitHub Issues key: an issue in a WATCHED repo). No allowlist ⇒ the
+  ticket rule never fires. Computed on READ, never stored (the maintainer set moves). Open PRs, the
+  Pending board (incl. AI reviews), the daily brief and My Turn opt in; their PR selects go through
+  `prInBoardScope(repoIds, projectPrIds)`. The ACCOUNT-WIDE `getMyTurn` (notifications, CLI) narrows to
+  every watched repo + every workspace's project PRs when the account has an external repo
+  (`accountBoardScope`), unchanged otherwise.
+- **No automatic action.** `automationAllowedForPr/Repo` is asked by every automatic path (pinned by
+  `db/external-automation-gate.test.ts`); `readWorkspaceAutoPostForPr` reads auto-post, auto verdict and
+  "Resolve my Limn threads" OFF and `autoReviewOn` false, so every automatic GitHub write that reads it is
+  off. A reader's press is never refused ("Review and post" posts as COMMENT).
+- **Sync light** ([SYNC.md](SYNC.md) § External repos), not in ML scoring, and `sprintProjectKeys` reads
+  keys from WATCHED repos only.
+- A MOVE (and a workspace delete's re-home) KEEPS the mode: no mover writes it, so a repo marked external
+  never starts getting automatic actions as a side effect.
+
 ## `worktree_ledger` — which run a checkout on disk belongs to (CORE; migration `0146`)
 
 One row per per-run checkout `addWorktree` made under `<cloneDir>/<owner__name>/.worktrees/`: the

@@ -13,12 +13,15 @@ import {
   noteWalkStart,
   noteWalkSuccess,
   recordFullWalk,
+  isPinnedCold,
+  setPinnedColdRepos,
 } from './adaptive.js';
 import { isSeverityApiConfigured } from '../ml/severity-client.js';
 import { runMlEnrichmentTick } from './ml-enrichment.js';
 import { notifyRepoWalked } from './walk-listeners.js';
 import { notifyRepoSynced } from './repo-synced-hooks.js';
 import { deleteMlLabelsForRepo } from '../db/ml-labels.js';
+import { allExternalRepoIds } from '../db/external-repos.js';
 
 const { repos, syncState, accounts } = schema;
 
@@ -257,7 +260,7 @@ async function getRepoRow(repoId: number): Promise<RepoRow | null> {
 // Decide window: incremental if we've ever synced, otherwise a full backfill.
 async function planSync(
   repoId: number,
-): Promise<{ mode: 'full' | 'incremental'; since: Date }> {
+): Promise<{ mode: 'full' | 'incremental'; since: Date; light?: boolean }> {
   const state = (
     await db
       .select()
@@ -272,10 +275,17 @@ async function planSync(
     );
     return { mode: 'incremental', since };
   }
+  // EXTERNAL REPOS (db/external-repos.ts) sync LIGHT: a first walk covers the foreground window
+  // only (no 90-day backfill, no second phase, no CI-history backfill). Their PRs are not watched;
+  // only recent project PRs and ticket-linked PRs are read from them.
+  if (isPinnedCold(repoId)) {
+    return { mode: 'full', since: new Date(Date.now() - config.foregroundSyncDays * DAY_MS), light: true };
+  }
   return { mode: 'full', since: new Date(Date.now() - config.backfillDays * DAY_MS) };
 }
 
-type Plan = { mode: 'full' | 'incremental'; since: Date };
+// `light`: an EXTERNAL repo's first walk (see `planSync`) — single pass, no CI-history backfill.
+type Plan = { mode: 'full' | 'incremental'; since: Date; light?: boolean };
 
 // Everything one walk needs once its slot is claimed and its lookups have landed.
 interface WalkCtx {
@@ -419,7 +429,11 @@ function releaseWalk(repoId: number, log: Logger, parked = false): void {
 // board is already populated, so there's no blank-board wait to shorten.
 function isTwoPhase(ctx: WalkCtx): boolean {
   return (
-    !ctx.forceFull && ctx.plan.mode === 'full' && config.backfillDays > config.foregroundSyncDays
+    !ctx.forceFull &&
+    ctx.plan.mode === 'full' &&
+    ctx.plan.light !== true &&
+    !isPinnedCold(ctx.repoId) &&
+    config.backfillDays > config.foregroundSyncDays
   );
 }
 
@@ -511,7 +525,9 @@ async function runBackfillPass(
   const r = await syncRepo({
     ...ctx.common,
     mode: 'full',
-    since: plan.since, // now − backfillDays
+    // now − backfillDays — or, for a repo marked EXTERNAL since the walk began, the foreground
+    // window: the continued cursor is already past it, so the pass ends at once (light sync).
+    since: isPinnedCold(repoId) ? new Date(Date.now() - config.foregroundSyncDays * DAY_MS) : plan.since,
     startCursor: cont.cursor,
     commitState: true,
     stampIncrementalAt: cont.stampAt,
@@ -798,6 +814,8 @@ async function afterCompletedWalk(
   // is already stamped, so after a restart (or a dropped parked job) nothing else would ask for it.
   if (
     ctx.plan.mode === 'full' &&
+    ctx.plan.light !== true &&
+    !isPinnedCold(ctx.repoId) &&
     !walk.cancelled &&
     !cancelRequested.has(ctx.repoId) &&
     config.ciHistoryBackfill
@@ -1225,6 +1243,18 @@ export async function syncAllRepos(log: Logger): Promise<void> {
     await runScheduledTick(log);
   } finally {
     tickInFlight = false;
+  }
+}
+
+/**
+ * EXTERNAL REPOS: reload sync's in-memory external set (sync/adaptive.ts `setPinnedColdRepos`) —
+ * the cold cadence and light sync read it. Called at boot and after every mode change. Never throws.
+ */
+export async function refreshExternalRepoCadence(log?: Pick<Logger, 'warn'>): Promise<void> {
+  try {
+    setPinnedColdRepos(await allExternalRepoIds());
+  } catch (err) {
+    log?.warn(`external repos: could not refresh the sync cadence: ${err instanceof Error ? err.message : err}`);
   }
 }
 

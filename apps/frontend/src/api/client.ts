@@ -254,6 +254,7 @@ import type {
   SearchHitKind,
   SearchResponse,
   Workspace,
+  WorkspaceRepoMode,
   WorkspacePendingMuteUpdate,
   FlowSettings,
   FlowActorView,
@@ -665,6 +666,13 @@ export const api = {
   // MOVE one repo into this workspace. Membership is the only write (see `setWorkspaceRepos`) —
   // the repo was already fully live wherever it was, and it stays fully live here.
   // To take a repo OUT of a workspace, move it into the Default one — there is no delete route.
+  // EXTERNAL REPOS: how the workspace treats one member — 'watched' (the default) or 'external'
+  // (cloned for Implement and AI Fix, linked to tickets; only its project PRs on Open PRs and
+  // Pending; never in Reports; no automatic action). DB only. 404 when the repo is not a member.
+  setWorkspaceRepoMode: (workspaceId: number, repoId: number, mode: WorkspaceRepoMode) =>
+    fetch(`/api/workspaces/${workspaceId}/repos/${repoId}/mode`, jsonBody('PUT', { mode })).then((r) =>
+      handle<{ workspace: Workspace }>(r),
+    ),
   assignRepoToWorkspace: (workspaceId: number, repoId: number) =>
     fetch(`/api/workspaces/${workspaceId}/repos`, jsonBody('POST', { repoId })).then((r) =>
       handle<{ workspace: Workspace }>(r),

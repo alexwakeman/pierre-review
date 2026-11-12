@@ -19,6 +19,11 @@ no internals.
   line and starts by itself as soon as one frees, your own presses first. The AI Fix tab shows its place in line,
   with Cancel. To make room, a fix session of yours that has done nothing for a minute is closed; its changes
   are kept.
+- Manage repos & workspaces: mark a repository External when your team changes it but does not maintain it,
+  such as a shared infrastructure repository. Implement story and AI Fix still work in it, and its pull requests
+  link to your tickets. Open PRs, Pending and AI reviews show only its pull requests that have one of your
+  project keys or that your team's maintainers opened. Reports, the Timeline, the Feed and Bots leave it out,
+  and nothing runs on it automatically.
 
 ## [1.0.28] - 2026-11-12
 

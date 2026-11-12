@@ -92,17 +92,27 @@ export function AddReposMock(): JSX.Element {
 
 // ---- Repos & workspaces ------------------------------------------------------------
 
+const MODE_OPTIONS = [
+  { id: 'watched', label: 'Watched' },
+  { id: 'external', label: 'External' },
+];
+
 export function WorkspacesMock(): JSX.Element {
   const ws = SETUP_WORKSPACES.workspaces;
   const initialHome = (): Record<string, string> =>
     Object.fromEntries(SETUP_WORKSPACES.repos.map((r) => [r.name, r.home]));
   const [selected, setSelected] = useState(ws[0]?.id ?? '');
   const [home, setHome] = useState<Record<string, string>>(initialHome);
+  const initialExternal = (): Record<string, boolean> =>
+    Object.fromEntries(SETUP_WORKSPACES.repos.map((r) => [r.name, r.external === true]));
+  const [external, setExternal] = useState<Record<string, boolean>>(initialExternal);
   const sel = ws.find((w) => w.id === selected) ?? ws[0];
   const count = (id: string): number => Object.values(home).filter((h) => h === id).length;
   const inSel = SETUP_WORKSPACES.repos.filter((r) => home[r.name] === selected);
   const elsewhere = SETUP_WORKSPACES.repos.filter((r) => home[r.name] !== selected);
-  const moved = SETUP_WORKSPACES.repos.some((r) => r.home !== home[r.name]);
+  const moved = SETUP_WORKSPACES.repos.some(
+    (r) => r.home !== home[r.name] || (r.external === true) !== external[r.name],
+  );
   const options = ws.map((w) => ({ id: w.id, label: w.name }));
 
   const row = (r: { name: string }): JSX.Element => {
@@ -118,6 +128,12 @@ export function WorkspacesMock(): JSX.Element {
           options={options}
           onChange={(v) => setHome((h) => ({ ...h, [r.name]: v }))}
         />
+        <SelectBox
+          label={`Watched or external: ${r.name}`}
+          value={external[r.name] ? 'external' : 'watched'}
+          options={MODE_OPTIONS}
+          onChange={(v) => setExternal((e) => ({ ...e, [r.name]: v === 'external' }))}
+        />
       </div>
     );
   };
@@ -130,11 +146,12 @@ export function WorkspacesMock(): JSX.Element {
         moved || selected !== ws[0]?.id
           ? () => {
               setHome(initialHome());
+              setExternal(initialExternal());
               setSelected(ws[0]?.id ?? '');
             }
           : null
       }
-      label="The Repos and workspaces dialog: two workspaces, Acme payments (the default) and Web, and each repository with a workspace picker that moves it"
+      label="The Repos and workspaces dialog: two workspaces, Acme payments (the default) and Web, and each repository with a workspace picker that moves it and a Watched or External picker"
     >
       <div className="mk-ws">
         <div className="mk-wslist" role="group" aria-label="Workspaces">

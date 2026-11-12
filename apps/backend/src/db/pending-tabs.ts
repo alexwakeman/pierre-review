@@ -54,6 +54,7 @@ import {
   getWorkspaceInsights,
   mapUser,
   resolveWorkspaceScope,
+  boardScopeEmpty,
   suggestRoutingReviewers,
   type BotScope,
   type BoardFactsSink,
@@ -234,7 +235,7 @@ export async function rankPendingTabs(
   // The reader's one switch (the survey), for the rules the response carries.
   const settings = await getMyTurnSettings(accountId);
   const { scored } =
-    scope.repoIds.length === 0
+    boardScopeEmpty(scope)
       ? { scored: [] as ScoredCard[] }
       : await scoreCards(accountId, insights.cards, now);
   const totals = insights.kindTotals ?? {};
@@ -342,7 +343,7 @@ export async function buildPendingBoard(
   opts: { live?: boolean; now?: number } = {},
 ): Promise<AttentionCardsResponse & { workspaceId: number }> {
   const live = opts.live === true;
-  const scope = await resolveWorkspaceScope(accountId, workspace);
+  const scope = await resolveWorkspaceScope(accountId, workspace, null, { projectPrs: true });
   // ⚠ THE UNCAPPED FOLD — the board ranks every card by its Do next score and THEN lists the top
   // of each kind, so it must see the whole population. `kindTotals` is the same either way, which
   // keeps each tab's count and the daily brief's line for it one number.
@@ -362,7 +363,7 @@ export async function buildPendingBoard(
   let aiNew = 0;
   if (live) {
     aiReviewsSeenAt = await getAiReviewsSeenAt(accountId, scope.workspaceId);
-    const ai = await buildAiReviewCards(accountId, scope.repoIds);
+    const ai = await buildAiReviewCards(accountId, scope.repoIds, scope.projectPrIds);
     aiNew = countNewAiReviews(ai.cards, aiReviewsSeenAt);
     insights.cards.push(...ai.cards);
     insights.kindTotals = { ...(insights.kindTotals ?? {}), ai_review: ai.cards.length };

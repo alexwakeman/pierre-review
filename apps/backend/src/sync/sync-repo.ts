@@ -16,6 +16,7 @@ import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/querie
 import { ensureCommitFiles } from './commit-files.js';
 import { drainReviewThreads, drainReviews } from './drain-review-threads.js';
 import { syncBranchStatus } from './branch-status.js';
+import { isPinnedCold } from './adaptive.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
 
 const { syncState } = schema;
@@ -462,14 +463,16 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
     // foreground pass as well as the deep one — the repeat is idempotent, and a freshly added
     // repo showing trunk status within seconds is worth the duplicate point.
     try {
-      await syncBranchStatus({
-        owner,
-        name,
-        repoId,
-        accountId,
-        token: opts.token,
-        log,
-      });
+      // EXTERNAL REPOS (db/external-repos.ts): no trunk snapshot — the trunk strip never shows one.
+      if (!isPinnedCold(repoId))
+        await syncBranchStatus({
+          owner,
+          name,
+          repoId,
+          accountId,
+          token: opts.token,
+          log,
+        });
     } catch (err) {
       log.warn(
         `sync ${owner}/${name}: default-branch status failed (non-fatal): ` +

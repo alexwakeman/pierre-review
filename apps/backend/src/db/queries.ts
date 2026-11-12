@@ -91,6 +91,7 @@ import type {
   ReasonTag,
   Repo,
   Workspace,
+  WorkspaceRepoMode,
   RepoInsights,
   RepoMergers,
   ReviewDetail,
@@ -280,6 +281,7 @@ import { newestPrLevelReplyTimes, newestReviewCommentTimes, type CountsAuthor } 
 import { loadLimnSeverityTargets } from './limn-finding-severity.js';
 import { limnBotUserIdForUser, limnBotUserIds, limnReplyAttribution } from './limn-bots.js';
 import { prOwnerId } from './true-author.js';
+import { accountBoardScope, projectPrIds, repoModeOf } from './external-repos.js';
 import { limnDischargedReviewRequests } from './limn-discharged-requests.js';
 import { ownRunsOnly } from './teammate-reviews.js';
 import { verdictPickupCandidates, type VerdictPickupCandidate } from './teammate-verdict-pickup.js';
@@ -505,6 +507,8 @@ function mapWorkspace(
   // (db/pending-mute.ts) — never folded together here, which would hand the settings screen one
   // merged number it could not un-mix into the two switches it has to render.
   mutedRepoIds: ReadonlySet<number>,
+  // The account's EXTERNAL member ids (db/external-repos.ts), intersected with this membership.
+  externalIds: ReadonlySet<number> = new Set(),
 ): Workspace {
   return {
     id: w.id,
@@ -520,6 +524,7 @@ function mapWorkspace(
     flowSettings: w.flowSettings ?? null,
     // Chronology's view, raw (null = the default; `resolveFlowActorView`).
     flowView: parseFlowActorView(w.flowView),
+    externalRepoIds: repoIds.filter((id) => externalIds.has(id)),
   };
 }
 
@@ -630,7 +635,7 @@ export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
   const [wsRows, memberRows, mutedRepoIds] = await Promise.all([
     db.select().from(workspaces).where(eq(workspaces.accountId, accountId)).execute(),
     db
-      .select({ workspaceId: workspaceRepos.workspaceId, repoId: workspaceRepos.repoId })
+      .select({ workspaceId: workspaceRepos.workspaceId, repoId: workspaceRepos.repoId, mode: workspaceRepos.mode })
       .from(workspaceRepos)
       .innerJoin(repos, eq(repos.id, workspaceRepos.repoId))
       .where(eq(workspaceRepos.accountId, accountId))
@@ -642,17 +647,19 @@ export async function listWorkspaces(accountId: number): Promise<Workspace[]> {
     repoGrainedPendingMutes(accountId),
   ]);
   const byWorkspace = new Map<number, number[]>();
+  const externalIds = new Set<number>();
   for (const m of memberRows) {
     const arr = byWorkspace.get(m.workspaceId) ?? [];
     arr.push(m.repoId);
     byWorkspace.set(m.workspaceId, arr);
+    if (repoModeOf(m.mode) === 'external') externalIds.add(m.repoId);
   }
   return wsRows
     .slice()
     .sort(
       (a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name),
     )
-    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? [], mutedRepoIds));
+    .map((w) => mapWorkspace(w, byWorkspace.get(w.id) ?? [], mutedRepoIds, externalIds));
 }
 
 // Create a workspace (unique per (accountId, name)). ALWAYS `isDefault: false` —
@@ -818,9 +825,13 @@ export async function deleteWorkspace(
 // The member repo ids of a workspace, account-scoped (foreign/unknown workspace → empty array).
 // Ordered owner/name so `DetectedReviewersResponse.repoIds` and every scope that derives from it
 // are in RENDER order rather than insertion order.
+//
+// ⚠ WATCHED MEMBERS BY DEFAULT (docs/DATA-MODEL.md § External repos): an EXTERNAL member is
+// left out unless the caller asks for `'all'` — the build and fix paths, which clone it.
 export async function getWorkspaceRepoIds(
   workspaceId: number,
   accountId: number,
+  members: 'watched' | 'all' = 'watched',
 ): Promise<number[]> {
   const rows = await db
     .select({ repoId: workspaceRepos.repoId })
@@ -830,6 +841,7 @@ export async function getWorkspaceRepoIds(
       and(
         eq(workspaceRepos.accountId, accountId),
         eq(workspaceRepos.workspaceId, workspaceId),
+        members === 'all' ? undefined : eq(workspaceRepos.mode, 'watched'),
       ),
     )
     .orderBy(asc(repos.owner), asc(repos.name))
@@ -958,6 +970,24 @@ export async function rehomeReposToDefault(
 export interface BotScope {
   workspaceId: number; // the JUDGEMENT grain — always exactly one
   repoIds: number[]; // the DATA narrowing — always concrete. [] = this workspace is empty.
+  // THE PROJECT PRs of the workspace's EXTERNAL repos (db/external-repos.ts), OPEN only — set ONLY
+  // when the caller asked for `projectPrs` (Open PRs, the Pending board, My Turn, the brief). A
+  // board fold lists `repoIds`' PRs PLUS these ids (`prInBoardScope`); absent = none.
+  projectPrIds?: number[];
+}
+
+// THE BOARD'S PR PREDICATE: a PR of a watched repo in scope, OR one of the scope's project PRs.
+// `repoIds` is the caller's (possibly further narrowed) watched list.
+export function prInBoardScope(repoIds: readonly number[], projectPrIds: readonly number[] | undefined) {
+  const extra = projectPrIds ?? [];
+  if (extra.length === 0) return inArray(pullRequests.repoId, [...repoIds]);
+  if (repoIds.length === 0) return inArray(pullRequests.id, [...extra]);
+  return or(inArray(pullRequests.repoId, [...repoIds]), inArray(pullRequests.id, [...extra]))!;
+}
+
+/** True when a board fold has nothing to read: no watched repo and no project PR. */
+export function boardScopeEmpty(scope: Pick<BotScope, 'repoIds' | 'projectPrIds'>): boolean {
+  return scope.repoIds.length === 0 && (scope.projectPrIds?.length ?? 0) === 0;
 }
 
 // THE ONE SCOPE RESOLVER. `raw` is the wire `?workspace=` value. Unknown, unparseable, or another
@@ -976,10 +1006,15 @@ export interface BotScope {
 // anti-fabrication gate exists to forbid, and making `getBotAnalytics(ws5, repos-of-ws9)` measure
 // one workspace's data through another's verdicts. Doing it here, once, is what stops it being a
 // per-route convention fourteen handlers must remember.
+//
+// ⚠ EXTERNAL MEMBERS (docs/DATA-MODEL.md § External repos): `repoIds` holds WATCHED members only,
+// unless `members: 'all'` (the build and fix paths — Implement, AI Fix — which clone every member).
+// `projectPrs: true` adds the external repos' OPEN project PRs as `projectPrIds` (the boards).
 export async function resolveWorkspaceScope(
   accountId: number,
   raw: string | number | undefined | null,
   narrow?: number[] | null,
+  opts: { members?: 'watched' | 'all'; projectPrs?: boolean } = {},
 ): Promise<BotScope> {
   await ensureRepoMemberships(accountId);
   const requested =
@@ -997,10 +1032,38 @@ export async function resolveWorkspaceScope(
     if (owned) workspaceId = owned.id;
   }
   if (workspaceId == null) workspaceId = await ensureDefaultWorkspace(accountId);
-  const membership = await getWorkspaceRepoIds(workspaceId, accountId);
+  const membership = await getWorkspaceRepoIds(workspaceId, accountId, opts.members ?? 'watched');
   const repoIds =
     narrow == null ? membership : membership.filter((id) => narrow.includes(id));
-  return { workspaceId, repoIds };
+  if (opts.projectPrs !== true) return { workspaceId, repoIds };
+  const projectPrIdList = await projectPrIds(accountId, workspaceId, {
+    openOnly: true,
+    ...(narrow != null ? { repoIds: narrow } : {}),
+  });
+  return { workspaceId, repoIds, projectPrIds: projectPrIdList };
+}
+
+// Set how this workspace treats one member (`workspace_repos.mode`). false ⇒ not this account's
+// workspace, or the repo is not a member of it (the route answers 404). The ONE writer of the column.
+export async function setWorkspaceRepoMode(
+  accountId: number,
+  workspaceId: number,
+  repoId: number,
+  mode: WorkspaceRepoMode,
+): Promise<boolean> {
+  const updated = await db
+    .update(workspaceRepos)
+    .set({ mode })
+    .where(
+      and(
+        eq(workspaceRepos.accountId, accountId),
+        eq(workspaceRepos.workspaceId, workspaceId),
+        eq(workspaceRepos.repoId, repoId),
+      ),
+    )
+    .returning({ id: workspaceRepos.id })
+    .execute();
+  return updated.length > 0;
 }
 
 // The repo → workspace direction, as a ready-made scope. Needed by the two plugin call sites that
@@ -2067,6 +2130,8 @@ export interface OpenPrsFilters {
   accountId: number;
   repoIds: number[] | null;
   userIds: number[] | null;
+  /** The scope's PROJECT PRs in external repos (db/external-repos.ts), listed beside `repoIds`. */
+  projectPrIds?: number[];
 }
 
 export async function getOpenPrs(filters: OpenPrsFilters): Promise<TimelinePr[]> {
@@ -2074,7 +2139,7 @@ export async function getOpenPrs(filters: OpenPrsFilters): Promise<TimelinePr[]>
     eq(pullRequests.accountId, filters.accountId),
     eq(pullRequests.state, 'open'),
   ];
-  if (filters.repoIds) conds.push(inArray(pullRequests.repoId, filters.repoIds));
+  if (filters.repoIds) conds.push(prInBoardScope(filters.repoIds, filters.projectPrIds));
   if (filters.userIds && filters.userIds.length > 0) {
     conds.push(inArray(pullRequests.authorId, filters.userIds));
   }
@@ -4469,8 +4534,24 @@ export async function getWorkspaceInsights(
     };
   }
 
+  // EXTERNAL REPOS (db/external-repos.ts): the scope's PROJECT PRs ride beside the watched repos.
+  // Their repos are looked up for names and the push gate ONLY — `repoIds` stays the WATCHED list,
+  // so every survey of the workspace (metrics, the bot signal, red trunks, review counts) is
+  // unchanged; the PR card builders read `prInBoardScope(repoIds, projectIds)`.
+  const projectIds = scope.projectPrIds ?? [];
+  const projectRepoIds =
+    projectIds.length === 0
+      ? []
+      : (
+          await db
+            .selectDistinct({ repoId: pullRequests.repoId })
+            .from(pullRequests)
+            .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, projectIds)))
+            .execute()
+        ).map((r) => r.repoId);
+  const lookupRepoIds = [...new Set([...scope.repoIds, ...projectRepoIds])];
   const scopedRepos =
-    scope.repoIds.length === 0
+    lookupRepoIds.length === 0
       ? [] // an empty workspace → no repos (also dodges the empty-array inArray pitfall)
       : await db
           .select({
@@ -4480,10 +4561,12 @@ export async function getWorkspaceInsights(
             viewerPermission: repos.viewerPermission,
           })
           .from(repos)
-          .where(and(eq(repos.accountId, accountId), inArray(repos.id, scope.repoIds)))
+          .where(and(eq(repos.accountId, accountId), inArray(repos.id, lookupRepoIds)))
           .execute();
   const repoName = new Map(scopedRepos.map((r) => [r.id, `${r.owner}/${r.name}`]));
-  const repoIds = scopedRepos.map((r) => r.id);
+  const watchedInScope = new Set(scope.repoIds);
+  const repoIds = scopedRepos.map((r) => r.id).filter((id) => watchedInScope.has(id));
+  const boardEmpty = repoIds.length === 0 && projectIds.length === 0;
   // The repos this viewer may PUSH to — the VISIBILITY gate on the Pending board's merge controls
   // (`MergeReadyCard.viewerCanPush`). It rides the CARD because the board must not fetch to find
   // out: PrDetail answers this from the live merge-options call (~3 GitHub calls per PR) and fifty
@@ -4502,7 +4585,7 @@ export async function getWorkspaceInsights(
 
   const noteReviewTargets = async (): Promise<void> => {
     // An empty workspace returns before the bot maps below are built — and holds no card.
-    if (repoIds.length === 0) return;
+    if (boardEmpty) return;
     const viewerId = await getAccountUserId(accountId);
     const targets = cards.filter(
       (c): c is StalledReviewCard | MyTurnCard =>
@@ -4594,7 +4677,7 @@ export async function getWorkspaceInsights(
       myTurnDismissed,
     };
   };
-  if (repoIds.length === 0) return finish();
+  if (boardEmpty) return finish();
 
   // WHO OPENED IT — the one bot judgement this fold makes, resolved ONCE into the maps `prRef`
   // below reads. `prRef` stays SYNCHRONOUS: it is called from six card builders inside tight
@@ -5666,7 +5749,7 @@ export async function getWorkspaceInsights(
     .where(
       and(
         eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, repoIds),
+        prInBoardScope(repoIds, projectIds),
         eq(pullRequests.state, 'open'),
         eq(pullRequests.isDraft, false),
         exists(
@@ -5949,7 +6032,7 @@ export async function getWorkspaceInsights(
     // STACKED PRs (db/pr-stacks.ts): a PR whose base is another OPEN PR's head branch would merge
     // into that branch, not the trunk, so it is never a "merge" card (mergeVerdict's "lands after
     // #N" says the same on every other surface). Updating it from its base is still fine.
-    const landsAfter = await prIdsLandingAfter(accountId, scope.repoIds);
+    const landsAfter = await prIdsLandingAfter(accountId, [...repoIds, ...projectRepoIds]);
     for (const p of openPrs) {
       // A dependency PR carries its merge actions on its Dependencies card instead; a PR the
       // reader promoted into My Turn ("Your PRs ready to land") carries them on its my_turn card.
@@ -7764,9 +7847,23 @@ export async function getMyTurn(
   if (localUserId == null) return empty;
   // An empty workspace has nothing on your plate — and returning here also dodges the
   // `inArray(col, [])` pitfall every scoped query below would otherwise hit.
-  if (scope && scope.repoIds.length === 0) return empty;
   // null (not []) is the "no narrowing" sentinel the scoped helpers below test for.
-  const scopedRepoIds = scope ? scope.repoIds : null;
+  let scopedRepoIds: number[] | null = scope ? scope.repoIds : null;
+  // EXTERNAL REPOS (db/external-repos.ts): the scope's PROJECT PRs ride beside the watched repos.
+  // The ACCOUNT-WIDE read (notifications, the CLI) has no workspace, so when the account has any
+  // external repo it narrows to every watched repo plus every workspace's project PRs — an
+  // external repo's other PRs never summon anyone. No external repo ⇒ unchanged ("no narrowing").
+  let projectIds: number[] = scope?.projectPrIds ?? [];
+  if (scope == null) {
+    const acct = await accountBoardScope(accountId);
+    if (acct != null) {
+      scopedRepoIds = acct.watchedRepoIds;
+      projectIds = acct.projectPrIds;
+    }
+  }
+  if (scopedRepoIds != null && scopedRepoIds.length === 0 && projectIds.length === 0) return empty;
+  // THE ONE PR-SCOPE PREDICATE every seed select below uses.
+  const prScope = scopedRepoIds == null ? undefined : prInBoardScope(scopedRepoIds, projectIds);
   const now = Date.now();
 
   // ── THE READER'S DISMISSALS (db/my-turn-dismissals.ts). One read; every section below passes
@@ -7810,9 +7907,7 @@ export async function getMyTurn(
       .where(
         and(
           eq(pullRequests.accountId, accountId),
-          scopedRepoIds == null
-            ? undefined
-            : inArray(pullRequests.repoId, scopedRepoIds),
+          prScope,
           eq(pullRequests.state, 'open'),
           eq(pullRequests.isDraft, false),
         ),
@@ -8210,7 +8305,7 @@ export async function getMyTurn(
             eq(prMentions.login, login),
             isNotNull(prMentions.mentionedAt),
             eq(pullRequests.state, 'open'),
-            scopedRepoIds == null ? undefined : inArray(pullRequests.repoId, scopedRepoIds),
+            prScope,
           ),
         )
         .execute()) {
@@ -8231,7 +8326,7 @@ export async function getMyTurn(
             and(
               eq(pullRequests.accountId, accountId),
               eq(pullRequests.state, 'open'),
-              scopedRepoIds == null ? undefined : inArray(pullRequests.repoId, scopedRepoIds),
+              prScope,
               eq(prComments.authorId, localUserId),
             ),
           )
@@ -8244,7 +8339,7 @@ export async function getMyTurn(
             and(
               eq(pullRequests.accountId, accountId),
               eq(pullRequests.state, 'open'),
-              scopedRepoIds == null ? undefined : inArray(pullRequests.repoId, scopedRepoIds),
+              prScope,
               eq(reviews.authorId, localUserId),
             ),
           )
@@ -8395,6 +8490,7 @@ export async function getMyTurn(
     accountId,
     repoNameById,
     repoIds: scopedRepoIds,
+    projectPrIds: projectIds,
     mutedRepoIds,
     bots,
     addedAtByRepo,
@@ -8439,7 +8535,9 @@ export async function getMyTurn(
   // ── DISCHARGE: a dismissal with nothing left under it is dropped, so a later summons on the
   //    same subject starts fresh. Only for subjects this read could have seen (a workspace fold has
   //    not looked at other workspaces' repos); a closed PR is dead wherever it lives.
-  const scopeSet = scopedRepoIds == null ? null : new Set(scopedRepoIds);
+  // A workspace fold discharges only within its WATCHED repos (an external repo's other PRs were
+  // never read); the account-wide read keeps its old "everything" reach.
+  const scopeSet = scope == null ? null : new Set(scope.repoIds);
   const discharged = inbox.dischargeable((repoId) => scopeSet == null || scopeSet.has(repoId));
   if (discharged.length > 0) await dischargeMyTurnDismissals(accountId, discharged);
 
@@ -8536,6 +8634,8 @@ async function getThreadTurns(opts: {
   // is a real, scoped answer ("this workspace has no repos") and the caller short-circuits before
   // reaching here.
   repoIds: number[] | null;
+  /** The scope's PROJECT PRs in external repos (db/external-repos.ts), beside `repoIds`. */
+  projectPrIds?: readonly number[];
   /** Repositories muted for Pending — their threads never enter My Turn. */
   mutedRepoIds: ReadonlySet<number>;
   bots: ReadonlySet<number>;
@@ -8551,7 +8651,7 @@ async function getThreadTurns(opts: {
   };
   const scoped = and(
     eq(pullRequests.accountId, accountId),
-    repoIds == null ? undefined : inArray(pullRequests.repoId, repoIds),
+    repoIds == null ? undefined : prInBoardScope(repoIds, opts.projectPrIds),
     // ⚠ X1 OF THE BALL RULE — THE PR MUST STILL BE OPEN. There is no action owed on a thread
     // whose PR has landed (this predicate was once missing, and 31 of 31 rows it returned were on
     // merged or closed PRs, hidden only by stored dismissals).

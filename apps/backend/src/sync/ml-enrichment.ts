@@ -427,9 +427,12 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
       // workspace: the same login can be a bot in one and a person in another.
       for (const workspace of await listWorkspaces(accountId)) {
         if (Date.now() >= deadline) break;
+        // EXTERNAL REPOS (db/external-repos.ts) are left out: their bot comments are not watched,
+        // and scoring a busy shared repo's backlog would cost CPU for comments nobody reads.
+        const external = new Set(workspace.externalRepoIds ?? []);
         const scope: BotScope = {
           workspaceId: workspace.id,
-          repoIds: workspace.repoIds,
+          repoIds: workspace.repoIds.filter((id) => !external.has(id)),
         };
         if (scope.repoIds.length === 0) continue;
 

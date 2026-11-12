@@ -17,6 +17,7 @@ import {
   type StartTicketArgs,
   type StartTicketResult,
 } from './manager.js';
+import { automationAllowedForPr, externalRepoIdsVia } from '../../db/external-repos.js';
 
 // THE TICKET REVIEW SWEEPER — re-checks a ticket when the PRs on it move, where auto review is on.
 //
@@ -140,15 +141,15 @@ async function openPrsIn(
   ctx: AgentContext,
   accountId: number,
   workspaceIds: readonly number[],
-): Promise<Array<{ prId: number; headSha: string; workspaceId: number }>> {
+): Promise<Array<{ prId: number; repoId: number; headSha: string; workspaceId: number }>> {
   if (workspaceIds.length === 0) return [];
   const { pullRequests: pr, workspaceRepos: wr } = s(ctx);
   const rows = (await ctx.db
-    .select({ prId: pr.id, headSha: pr.headSha, workspaceId: wr.workspaceId })
+    .select({ prId: pr.id, repoId: pr.repoId, headSha: pr.headSha, workspaceId: wr.workspaceId })
     .from(pr)
     .innerJoin(wr, and(eq(wr.repoId, pr.repoId), eq(wr.accountId, pr.accountId)))
     .where(and(eq(pr.accountId, accountId), eq(pr.state, 'open'), inArray(wr.workspaceId, [...workspaceIds])))
-    .execute()) as Array<{ prId: number; headSha: string | null; workspaceId: number }>;
+    .execute()) as Array<{ prId: number; repoId: number; headSha: string | null; workspaceId: number }>;
   return rows.map((r) => ({ ...r, headSha: r.headSha ?? '' }));
 }
 
@@ -192,7 +193,10 @@ export async function runTicketReviewSweep(
       }
 
       // ---- 1. what changed since the last tick ----
-      const open = await openPrsIn(ctx, accountId, [...enabled.keys()]);
+      // EXTERNAL REPOS (db/external-repos.ts): an external repo's PR never starts an automatic ticket
+      // review (its changes are not watched). Its auto-post target is off too (auto-settings.ts).
+      const externals = await externalRepoIdsVia(accountId, ctx);
+      const open = (await openPrsIn(ctx, accountId, [...enabled.keys()])).filter((p) => !externals.has(p.repoId));
       const before = prSnap.get(accountId);
       const now = new Map(open.map((p) => [p.prId, p.headSha]));
       const changed: number[] = [];
@@ -200,6 +204,8 @@ export async function runTicketReviewSweep(
       if (before) for (const prId of before.keys()) if (!now.has(prId)) changed.push(prId);
       const kickedHere = kicked.get(accountId) ?? new Set<number>();
       kicked.delete(accountId);
+      // A kick (sync saw a PR change) on an external repo's PR is dropped the same way.
+      for (const prId of [...kickedHere]) if (!(await automationAllowedForPr(accountId, prId, ctx))) kickedHere.delete(prId);
       const toRead = [...new Set([...kickedHere, ...changed])].slice(0, MAX_CHANGED_PRS_PER_TICK);
       const readSet = new Set(toRead);
 

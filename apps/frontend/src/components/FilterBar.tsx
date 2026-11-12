@@ -129,7 +129,9 @@ export function FilterBar(): JSX.Element | null {
   const workspaceRepos = useMemo(() => {
     if (workspaces == null || f.workspaceId == null) return [];
     const member = new Set(workspaceRepoIds(f.workspaceId, workspaces));
-    return (repos ?? []).filter((r) => member.has(r.id));
+    // EXTERNAL repos are not on the Timeline (the server leaves them out), so the picker omits them.
+    const external = new Set(workspaces.find((w) => w.id === f.workspaceId)?.externalRepoIds ?? []);
+    return (repos ?? []).filter((r) => member.has(r.id) && !external.has(r.id));
   }, [repos, workspaces, f.workspaceId]);
 
   // Show/hide a single repo ON THE TIMELINE BOARD. `repoIds` is the explicit visible subset (null =

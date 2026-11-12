@@ -143,6 +143,15 @@ data" Settings sections, GA + the cookie banner and `useAuthProviders` were remo
 with the hosted mode; GA and its consent banner live only on the website, `apps/landing`.) An
 expired SAML authorisation shows the reconnect banner, which now says `gh auth refresh`.
 
+### External repos in the client
+
+`Workspace.externalRepoIds` ([DATA-MODEL.md](DATA-MODEL.md) § External repos) is the only client-side
+fact. Manage repos & workspaces (`Activity/WorkspaceManager.tsx`) shows a Watched/External picker per repo
+(`useWorkspaceMutations().setWorkspaceRepoMode`, which sweeps the membership key set), with the ⓘ beside
+"Repos". The Timeline picker (`FilterBar`) omits external repos. Nothing else filters client-side: the
+server decides which of an external repo's PRs a scoped response carries, and `repoIds` narrowing sent
+with an external id is harmless (the server intersects it).
+
 ### UI regions (`App.tsx`) — THE SHELL (redesign, 2026-10)
 
 One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESIGN.md § 1, § 6):

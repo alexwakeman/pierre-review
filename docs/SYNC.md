@@ -236,6 +236,19 @@ nothing; a repository whose files can't be read is not read again for a day, and
 affected (docs/REFERENCE-DOCS.md § Docs offered from your repositories, § A repository whose files can't
 be read).
 
+## External repos — light sync
+
+An EXTERNAL member ([DATA-MODEL.md](DATA-MODEL.md) § External repos) is synced light, because its PRs are
+not watched — only its recent project PRs and ticket-linked PRs are read from it:
+
+- **First walk**: `planSync` plans the FOREGROUND window only (`foregroundSyncDays`), marked `light`: no
+  second phase, no 90-day backfill, and the CI-history backfill is never written owed. A reader's deep
+  re-sync still walks the full window (their choice).
+- **Cadence**: pinned COLD (`adaptive.ts setPinnedColdRepos`, refreshed by every scheduled tick from
+  `allExternalRepoIds`), so a busy shared repo never holds the hot probe or settle interval.
+- **No trunk snapshot** (`sync-repo.ts` skips `syncBranchStatus`), and ML enrichment skips it.
+- Incremental walks and the settle sweep run as for any repo (cold), so project PRs stay fresh on the board.
+
 ## Incremental updates (every subsequent sync)
 
 A repo **with** a `lastIncrementalSyncAt` is planned as `mode: 'incremental'`, with

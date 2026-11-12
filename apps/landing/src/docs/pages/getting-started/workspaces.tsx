@@ -61,9 +61,40 @@ export default function Page(): JSX.Element {
       <figure className="dx-fig">
         <WorkspacesMock />
         <figcaption>
-          <span>Illustration:</span> Manage repos &amp; workspaces. Try moving a repository to the other workspace.
+          <span>Illustration:</span> Manage repos &amp; workspaces. Try moving a repository to the other workspace,
+          or marking one external.
         </figcaption>
       </figure>
+
+      <H2 id="external-repositories">External repositories</H2>
+      <p>
+        Mark a repository <Ui>External</Ui> when your team changes it but does not maintain it, for example
+        a shared infrastructure repository where you update your services' configuration. In{' '}
+        <Ui>Manage repos &amp; workspaces</Ui>, change its picker from <Ui>Watched</Ui> to <Ui>External</Ui>.
+      </p>
+      <p>An external repository:</p>
+      <ul>
+        <li>
+          Is part of <DocLink to="implement-story/overview">Implement story</DocLink> and{' '}
+          <DocLink to="ai-fix/overview">AI Fix</DocLink>, like any other repository in the workspace.
+        </li>
+        <li>Links its pull requests to your tickets on This Sprint.</li>
+        <li>
+          Shows on Open PRs and Pending only the pull requests that are your team's: a pull request whose
+          title or branch has one of your tracker's project keys, or one opened by a person who maintains
+          (has merged into) one of your watched repositories. Your own pull requests always count. Pull
+          requests from other teams stay hidden.
+        </li>
+        <li>Is left out of Reports, the Timeline, the Feed and Bots Monitoring.</li>
+        <li>
+          Gets no automatic action: no auto review, auto-posting, auto fix, automatic thread resolving or
+          Slack signal. You can still run an AI review or AI Fix on one of its pull requests yourself.
+        </li>
+      </ul>
+      <Note>
+        The project-key rule needs the project keys set in your tracker settings. Without them, only the
+        maintainer rule applies. See <DocLink to="settings/integrations">Settings → Integrations</DocLink>.
+      </Note>
 
       <H2 id="what-a-workspace-holds">What belongs to a workspace</H2>
       <p>These settings and figures are kept per workspace:</p>

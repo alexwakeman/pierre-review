@@ -110,6 +110,7 @@ import { withWorktreeOwner } from '../worktree-owner.js';
 import { openPointsForPrompt, reconcileOpenPoints, type OpenPointsPlan } from './open-points.js';
 import { cleanPushSummary, planPushes, previousFullReviewHead } from './push-summary.js';
 import { bindAutoFixQueueFacts } from '../../coding/ai-fix/auto-fix-queue.js';
+import { automationAllowedForPr } from '../../db/external-repos.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -681,6 +682,9 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, drop the item before its row exists — the
     // sweeper re-derives it once the budget is under its limit again.
     // A READER'S PRESS is not asked again: they chose it (the SPA's over-budget confirm ran).
+    // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR — dropped
+    // like an off switch (the candidate read already leaves them out; this is the backstop).
+    if (!a.pressed && !(await automationAllowedForPr(accountId, prId, ctx))) return;
     if (!a.pressed && !(await automaticRunAllowed(ctx, accountId, 'auto review', provider))) {
       if (sayOnPr) postAutoSkipLinesLater(ctx, { accountId, prId }, providers.map((p) => ({ provider: p, reason: 'budget' as const })));
       return;

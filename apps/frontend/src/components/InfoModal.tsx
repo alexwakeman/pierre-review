@@ -127,6 +127,9 @@ export interface InfoButtonProps {
   width?: 'md' | 'lg';
   /** Colour override for the icon (the AI surface passes 'text-ai-ink'). */
   className?: string;
+  /** Inside a MODAL (z-[80]): open above it, and mark the panel a floating layer so a press on it
+   *  does not count as "outside" the modal (`useClickOutside`). Default: the page's z-[60]. */
+  overModal?: boolean;
 }
 
 const POPOVER_WIDTH: Record<'md' | 'lg', string> = {
@@ -151,11 +154,12 @@ const POPOVER_WIDTH: Record<'md' | 'lg', string> = {
  * portal events through the COMPONENT tree, so a click on its text would otherwise reach a card's
  * or a collapsible header's own onClick.
  */
-export function InfoButton({ title, children, width = 'md', className }: InfoButtonProps): JSX.Element {
+export function InfoButton({ title, children, width = 'md', className, overModal = false }: InfoButtonProps): JSX.Element {
   return (
     <ClickPopover
       title={title}
       width={width}
+      overModal={overModal}
       triggerLabel={`About “${title}”`}
       triggerClassName={(open) =>
         `relative inline-flex shrink-0 items-center justify-center rounded-full p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:after:absolute touch:after:-inset-3 touch:after:content-[''] ${
@@ -184,6 +188,8 @@ export interface ClickPopoverProps {
   /** Keep the trigger's click from reaching a clickable card or row around it. */
   isolate?: boolean;
   testId?: string;
+  /** See `InfoButtonProps.overModal`. */
+  overModal?: boolean;
 }
 
 /**
@@ -199,6 +205,7 @@ export function ClickPopover({
   width = 'md',
   isolate = false,
   testId,
+  overModal = false,
 }: ClickPopoverProps): JSX.Element {
   const [open, setOpen] = useState(false);
   const titleId = useId();
@@ -268,7 +275,8 @@ export function ClickPopover({
               role="dialog"
               aria-labelledby={titleId}
               data-noactivate
-              className={`z-[60] flex ${POPOVER_WIDTH[width]} max-w-[92vw] cursor-default flex-col rounded-ui bg-ui-raise text-ui-ink shadow-xl shadow-black/25 ring-1 ring-ui-line motion-safe:animate-ui-pop`}
+              {...(overModal ? { 'data-floating-layer': '' } : {})}
+              className={`${overModal ? 'z-[85]' : 'z-[60]'} flex ${POPOVER_WIDTH[width]} max-w-[92vw] cursor-default flex-col rounded-ui bg-ui-raise text-ui-ink shadow-xl shadow-black/25 ring-1 ring-ui-line motion-safe:animate-ui-pop`}
             >
               <p
                 id={titleId}

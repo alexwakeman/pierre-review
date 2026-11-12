@@ -235,7 +235,9 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       if (!isTrackerIdent(body.ident)) return fail(reply, 400, 'BadRequest', 'Not a tracker ticket.');
       const accountId = ctx.accountIdOf(req);
       const rawWs: unknown = body.workspaceId;
-      const scope = await resolveWorkspaceScope(accountId, typeof rawWs === 'number' || typeof rawWs === 'string' ? rawWs : null);
+      // `members: 'all'`: the session clones EVERY member, EXTERNAL repos included (an infrastructure
+      // repo the ticket's config change lands in — docs/DATA-MODEL.md § External repos).
+      const scope = await resolveWorkspaceScope(accountId, typeof rawWs === 'number' || typeof rawWs === 'string' ? rawWs : null, null, { members: 'all' });
       // A MANUAL run with a model menu (the reader's pick, validated); the default depth is deep.
       const picked = resolveManualRunChoice({ provider: body.provider, model: body.model }, 'story_build', {
         defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
