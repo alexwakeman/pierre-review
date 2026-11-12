@@ -17,6 +17,7 @@ import { autoReviewAvailable } from './claude-review/auto.js';
 import { registerCiReviewRoutes } from './ci-review/routes.js';
 import { reconcileCiReviewsOnStartup } from './ci-review/manager.js';
 import { registerCiReviewSweep } from './ci-review/sweep.js';
+import { registerAutoFixQueue } from '../coding/ai-fix/auto-fix-queue.js';
 import { registerSequenceDiagramRoutes } from './diagrams/routes.js';
 import { reconcileDiagramsOnStartup } from './diagrams/manager.js';
 import { registerAiFixRoutes } from '../coding/ai-fix/routes.js';
@@ -108,6 +109,9 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
   // The CI review's sweeper rides the same switch: a check that fails on a PR's head is explained
   // at once (no settle, no CI hold — a failing check is final).
   registerCiReviewSweep(ctx);
+  // THE AUTO FIX QUEUE's sweep (coding/ai-fix/auto-fix-queue.ts): once a minute it decides each own PR's
+  // next auto fix again — the waits for CI and reviews end here, and an event it missed is caught.
+  registerAutoFixQueue(ctx);
   // DEPENDENCY AUTOMATION's AI fallback (Settings → Dependencies → resolve conflicts): without this
   // binding the tick asks bots to rebase but never starts an AI run.
   bindDependencyAutomationAi(ctx);

@@ -568,13 +568,22 @@ function fixSubject(
       // ⚠ ONLY the unattended run's own close: a RESUMED auto fix is the reader's session (Resume sets
       // `unattended: false`), so its close never pushes, and an automatic push that failed once is
       // never retried by a later close.
+      // THE AUTO FIX QUEUE decides the PR's next fix once this one is done — after its automatic push,
+      // when there is one, so the next fix is read at the head that push leaves.
+      const queueNext = (): void => {
+        void import('../../coding/ai-fix/auto-fix-queue.js')
+          .then((m) => m.evaluateAutoFix(ctx, { accountId, prId: facts.prId, cause: 'fix_closed' }))
+          .catch(() => {});
+      };
       if (phase === 'built' && unattended && facts.trigger === 'auto') {
         const r = await row();
         if (r?.status === 'succeeded' && fixRowHasWork(r)) {
           const { maybeAutoPushFix } = await import('../../coding/ai-fix/auto-push.js');
-          void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {});
+          void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {}).finally(queueNext);
+          return;
         }
       }
+      queueNext();
     },
   };
 

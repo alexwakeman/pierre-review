@@ -83,6 +83,8 @@ import type {
   StoryBuildPushResponse,
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
+  AutoFixActiveResponse,
+  AutoFixPanelResponse,
   StoryBuildActivity,
   StoryBuildActivityResponse,
   StoryBuildAutoApproveResponse,
@@ -2115,6 +2117,9 @@ export async function installMockApi(
     aiFixOnStart?: (prId: number) => AiFix;
     // Settings → Features → Timeline. Default true (the fixtures above); false = the product default.
     timeline?: boolean;
+    // THE AUTO FIX QUEUE: the AI Review tab's panel and the auto fixes toast (default: off / none).
+    autoFixPanel?: AutoFixPanelResponse;
+    autoFixActive?: AutoFixActiveResponse;
   } = {},
 ): Promise<void> {
   // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
@@ -2744,6 +2749,10 @@ export async function installMockApi(
           configuredCount: 0,
         } satisfies WorkspaceSlackTargetResponse);
       }
+      // THE AUTO FIX QUEUE's two reads (always served: the AI Review tab and the toast mount them).
+      const autoPanel = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix\/auto$/);
+      if (autoPanel) return json(route, opts.autoFixPanel ?? ({ prId: Number(autoPanel[1]), on: false, queue: null, history: [] } satisfies AutoFixPanelResponse));
+      if (path === '/api/pro/ai-fixes/auto-active') return json(route, opts.autoFixActive ?? ({ workspaceId: WORKSPACE.id, fixes: [] } satisfies AutoFixActiveResponse));
       // AI FIX (only when the spec asked for it): the tab's read, the CI-only picker, the session presses.
       if (aiFixOn) {
         const prFix = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix(\/[a-z/]+)?$/);

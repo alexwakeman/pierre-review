@@ -4602,9 +4602,11 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   manual route goes through the same `startFix` → `startRun` — the same one-fix-per-PR claim, the same
   session machine, and `trigger` is recorded on the row (`unattended` for an auto or dependency fix). Nothing is pushed until a person presses Push, except an AUTO
   fix under "Push automatically" (below).
-- **AUTO FIX** (`coding/ai-fix/auto-fix.ts` `maybeStartAutoFix`, called fire-and-forget by the
-  review manager after an AUTO run is saved as succeeded — a failure here never touches the
-  review). ⚠ **ONLY THE READER'S OWN PR**: `pull_requests.author_id → users.github_login` equals
+- **AUTO FIX** (`coding/ai-fix/auto-fix.ts` `maybeStartAutoFix`, called by THE AUTO FIX QUEUE below —
+  never directly by a manager since 2026-11-12; a failure here never touches the review). `reviewId`
+  null is THE CI-ONLY SOURCE: the CI review's causes at the synced head (`loadCiOnlySeed`, only with
+  `include.ciFailures`), started through `startFix` with `sourceReviewId: null`; same gates, no
+  `head_moved`, and its outcome is not kept per review. ⚠ **ONLY THE READER'S OWN PR**: `pull_requests.author_id → users.github_login` equals
   `accounts.github_login` (case-insensitive); anyone else's PR gets nothing
   and records nothing. ⚠ **THE WORKSPACE SWITCH**: `workspaces.auto_fix_enabled` (core `0083`), **OFF by default** since core `0084` (which switched every existing workspace
   off; SQLite keeps 0083's DDL default of 1, so both workspace inserts write `false`), edited in
@@ -4675,6 +4677,42 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   sessions).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
+
+### The auto fix queue (`coding/ai-fix/auto-fix-queue.ts`, 2026-11-12)
+
+Before it, an auto fix started ONLY after a succeeded AUTO PR review: CI causes the CI review explained
+later started nothing. Now ONE per-PR decision (`evaluateAutoFix`) is made again on every event that may
+change the PR's work — a succeeded AUTO review (`claude-review/manager.ts`), a succeeded CI review (any
+trigger, `ci-review/manager.ts`), a fix session's close (after its automatic push, when there is one:
+`sandbox/session/fix.ts`) — and by THE SWEEP once a minute (`registerAutoFixQueue`, from
+`startAgenticBackground`), the pull that ends each bounded wait and catches a missed event. Only the reader's
+OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in order:
+
+1. a fix RUNS on the PR ⇒ `fix_running` (the queue). The next decision is made at the PR's CURRENT head: what
+   the fix fixed and pushed is no longer in the review or CI review of that head — the re-validation;
+2. the head's CI jobs STILL RUN ⇒ `ci_running`, at most `AUTO_FIX_CI_WAIT_MAX_MS` (45 min). A LIVE read
+   (`github/mutations.ts fetchPrHeadCheckCounts`, the rollup query counted per context, Limn's lines out),
+   asked only when the synced `ci_status` is pending / expected / failure / error: the synced rollup reads
+   FAILURE as soon as ONE job fails while others run;
+3. CI failed and the CI review of this head is running, or due (none yet, auto review on) ⇒ `ci_review`, at
+   most `AUTO_FIX_CI_REVIEW_WAIT_MS` (15 min);
+4. THE SOURCE: a succeeded AUTO review of THIS head ⇒ a review fix (its seed already carries the CI causes).
+   Else CI causes at this head: an AI review of the head running (`reviewHeldForPr`), settling
+   (`autoReviewWaiting`) or expected (auto review on, no full review row at the head) ⇒ `review_running` /
+   `review_due`, at most `AUTO_FIX_REVIEW_WAIT_MS` (15 min) after CI was ready — one fix covers both; then a
+   CI-ONLY fix. No CI causes and a review expected ⇒ wait for it, unbounded. Neither ⇒ `nothing_to_fix`;
+5. `maybeStartAutoFix` (every gate above). TRANSIENT refusals (`sandbox_busy`, `over_budget`, `no_sandbox`,
+   `fix_in_progress`) are WAITS the sweep retries; the rest (`fix_waiting`, `cap`, `already_tried`,
+   `nothing_to_fix`) end until the PR's facts change.
+
+The state is IN MEMORY (a restart restarts the wait clocks; the sweep re-derives the rest within a minute).
+The sweep skips a PR whose signature (head, synced CI, the head's review and CI review rows, the latest fix,
+a fix running) did not change since a FINAL decision, so it never starts the same fix twice. Each fix is its
+own run, commit and — under Push automatically — push. **Shown**: the AI Review tab's "Auto fix" section
+(`AutoFixQueuePanel`: the line, "(up to N min)", and every auto fix of the PR, `GET
+/api/pro/prs/:id/ai-fix/auto`); the "Auto fixes" toast (`AutoFixToast`, `GET
+/api/pro/ai-fixes/auto-active?workspace=`: running now or ended within `AUTO_FIX_TOAST_RECENT_MS`, 2 h; a
+failed run or failed automatic push is the alert). Both DB only, rate tier `read`.
 
 ### Run tests — REMOVED 2026-11-07
 

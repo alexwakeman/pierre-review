@@ -319,6 +319,8 @@ import type {
   StoryBuildForTicketResponse,
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
+  AutoFixActiveResponse,
+  AutoFixPanelResponse,
   StoryBuildActivityResponse,
   StoryBuildAutoApproveResponse,
   StoryBuildAutoPushResponse,
@@ -1818,6 +1820,9 @@ export const api = {
 
   // ---- AI Fix ----
   aiFix: (prId: number) => get<AiFixResponse>(`/api/pro/prs/${prId}/ai-fix`),
+  // THE AUTO FIX QUEUE (DB only): the AI Review tab's line + the PR's auto fixes; the auto fixes toast.
+  autoFixPanel: (prId: number) => get<AutoFixPanelResponse>(`/api/pro/prs/${prId}/ai-fix/auto`),
+  autoFixActive: (workspaceId: number) => get<AutoFixActiveResponse>(withQuery('/api/pro/ai-fixes/auto-active', workspaceParam(workspaceId))),
   aiFixStatus: (prId: number) =>
     get<AiFixStatusResponse>(`/api/pro/prs/${prId}/ai-fix/status`),
   // The fix picker: every item a review-seeded fix would include, with stable keys + defaults.

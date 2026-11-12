@@ -232,6 +232,10 @@ function launch(job: CiJob): void {
 
   void runPipeline(job, controller, progress)
     .then(() => {
+      // THE AUTO FIX QUEUE: the CI review's causes may be what an auto fix waits for (any trigger).
+      void import('../../coding/ai-fix/auto-fix-queue.js')
+        .then((m) => m.evaluateAutoFix(ctx, { accountId: job.accountId, prId: job.prId, cause: 'ci_review' }))
+        .catch(() => {});
       // CI AUTO-POSTING: an AUTOMATIC run may post its diagnosed causes as one PR comment when the
       // workspace switched auto-posting on (./auto-post.ts decides, reads the run's status itself,
       // never throws, never retries).

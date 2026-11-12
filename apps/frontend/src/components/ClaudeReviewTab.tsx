@@ -122,6 +122,7 @@ import {
   WarningIcon,
 } from './Icons.js';
 import { VerdictIcon } from './VerdictIcon.js';
+import { AutoFixQueuePanel } from './AutoFixQueuePanel.js';
 import { RegenProgressBar } from './Activity/RegenProgressBar.js';
 import { VERDICT_PILL } from './Activity/ClaudeReviewCell.js';
 import { EarlierFindingNote, FollowUpRow, SettledEarlierRow } from './ClaudeReviewFollowUp.js';
@@ -2474,6 +2475,9 @@ export function ClaudeReviewTab({
               {autoFixOutcomeLine(data?.autoFix)}
             </div>
           )}
+
+          {/* THE AUTO FIX QUEUE: what the next auto fix waits for, and this PR's auto fixes. */}
+          <AutoFixQueuePanel prId={pr.id} />
 
           {/* Team claims: a teammate's Limn reviewing now, or a pending line to clear. */}
           <TeamClaimLine prId={pr.id} data={data} />

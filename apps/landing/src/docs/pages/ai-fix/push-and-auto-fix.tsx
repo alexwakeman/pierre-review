@@ -3,7 +3,7 @@ import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, Steps
 
 export const meta: DocMeta = {
   title: 'Push the fix, and auto fix',
-  summary: 'Nothing leaves your computer until you press Push. Auto fix can fix your own pull requests after an auto review.',
+  summary: 'Nothing leaves your computer until you press Push. Auto fix can fix your own pull requests when a review or CI finds something.',
 };
 
 function PushPicture(): JSX.Element {
@@ -85,8 +85,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="auto-fix">Auto fix</H2>
       <p>
-        With <Ui>Auto AI Fix on your own PRs</Ui> on, Limn prepares one fix after each auto review of a pull request you
-        opened. It is set per workspace in <Ui>Settings → AI review</Ui>, and it is off by default. It runs only while
+        With <Ui>Auto AI Fix on your own PRs</Ui> on, Limn prepares a fix on a pull request you opened whenever there is
+        something to fix: the findings of an auto review, or CI failures the CI review explained. It is set per workspace in <Ui>Settings → AI review</Ui>, and it is off by default. It runs only while
         auto review is on.
       </p>
       <Illustration
@@ -123,6 +123,23 @@ export default function Page(): JSX.Element {
           Open pull requests shows <Ui>Fixing…</Ui> while it runs and <Ui>Fix ready</Ui> when it waits for you.
         </li>
       </ul>
+      <H3 id="when-it-starts">When an auto fix starts</H3>
+      <ul>
+        <li>It waits for the CI jobs on the latest commit to finish, at most 45 minutes.</li>
+        <li>When CI fails, it waits up to 15 minutes for the CI review to explain why.</li>
+        <li>
+          A fix for CI failures waits up to 15 minutes for the AI review of the same commit, so one fix covers both.
+        </li>
+        <li>
+          While a fix runs, the next one waits. When it starts, it works from what is still open on the latest commit, so
+          nothing already fixed is done again. Each fix is its own commit, and its own push with <Ui>Push automatically</Ui>.
+        </li>
+      </ul>
+      <p>
+        The <Ui>AI Review</Ui> tab shows what the next auto fix waits for, such as{' '}
+        <Ui>Waiting for the CI jobs to finish (up to 12 min).</Ui>, and lists every auto fix of the pull request. A{' '}
+        <Ui>Auto fixes</Ui> circle among the notifications shows the ones running and the ones that failed.
+      </p>
       <H3>Why an auto fix did not start</H3>
       <p>
         The <Ui>AI Review</Ui> tab says <Ui>Auto fix started. See the AI Fix tab.</Ui> when one starts. When one could
@@ -140,7 +157,10 @@ export default function Page(): JSX.Element {
         Other skips are not shown: nothing to fix, a finished fix waiting to be pushed, the daily limit, new commits, or
         auto AI Fix off.
       </p>
-      <p>A skipped auto fix is not queued; the next auto review decides again.</p>
+      <p>
+        When the sandbox is busy or the AI spend limit is reached, Limn tries again by itself. The rest wait until the
+        pull request changes.
+      </p>
 
       <H2 id="push-automatically">Push automatically</H2>
       <p>

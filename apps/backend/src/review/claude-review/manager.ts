@@ -1128,10 +1128,9 @@ function runEnded(item: RunEndedItem, end: RunEnd, opts: { slackSignal?: boolean
       .catch((err) =>
         ctx.log.warn(`sonar auto post pr ${prId}: ${err instanceof Error ? err.message : String(err)}`),
       );
-    void import('../../coding/ai-fix/auto-fix.js')
-      .then((m) =>
-        m.maybeStartAutoFix(ctx, { accountId: item.accountId, prId, reviewId }),
-      )
+    // THE AUTO FIX QUEUE decides (auto-fix-queue.ts): it may start the fix now, or wait for the head's CI.
+    void import('../../coding/ai-fix/auto-fix-queue.js')
+      .then((m) => m.evaluateAutoFix(ctx, { accountId: item.accountId, prId, cause: 'review' }))
       .catch((err) =>
         ctx.log.warn(
           `auto fix pr ${prId}: ${err instanceof Error ? err.message : String(err)}`,

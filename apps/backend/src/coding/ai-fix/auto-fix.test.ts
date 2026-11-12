@@ -573,3 +573,31 @@ describe('maybeStartAutoFix — the sandbox (AI Fix runs only as a sandboxed ses
     expect(started[0]).toMatchObject({ trigger: 'auto' });
   });
 });
+
+describe('maybeStartAutoFix — THE CI-ONLY SOURCE (the auto fix queue, no AI review of the head)', () => {
+  it('reviewId null ⇒ the CI review’s causes at the head, a CI-only start (sourceReviewId null), nothing kept per review', async () => {
+    const prId = await seedPr(viewerId);
+    const startFix: any[] = [];
+    const r = await mod.maybeStartAutoFix(
+      ctx,
+      { accountId: 1, prId, reviewId: null },
+      {
+        ...deps(),
+        loadCiOnlySeed: (async () => ({ items: [item('C1', 'tests fail', { kind: 'ci_failure' as any })], sentRefs: ['C1'], text: 'x' })) as any,
+        startFix: (async (_c: unknown, input: any) => {
+          startFix.push(input);
+          return { status: 'queued', fixId: 88 };
+        }) as any,
+      },
+      NOW,
+    );
+    expect(r).toMatchObject({ status: 'started', fixId: 88 });
+    expect(startFix).toHaveLength(1);
+    expect(startFix[0]).toMatchObject({ prId, seed: 'review', sourceReviewId: null, trigger: 'auto' });
+    expect(started).toEqual([]);
+    // An empty CI seed is nothing to fix.
+    const prId2 = await seedPr(viewerId);
+    const r2 = await mod.maybeStartAutoFix(ctx, { accountId: 1, prId: prId2, reviewId: null }, { ...deps(), loadCiOnlySeed: (async () => ({ items: [], sentRefs: [], text: '' })) as any }, NOW);
+    expect(r2).toMatchObject({ status: 'skipped', reason: 'nothing_to_fix' });
+  });
+});

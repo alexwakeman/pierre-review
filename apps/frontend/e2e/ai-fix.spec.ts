@@ -138,3 +138,45 @@ test.describe('AI Fix in the sandbox', () => {
     await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
   });
 });
+
+test.describe('The auto fix queue', () => {
+  test('the AI Review tab says what the next auto fix waits for, lists the auto fixes, and the toast shows one running', async ({ page }) => {
+    const until = new Date(Date.now() + 10 * 60_000 + 30_000).toISOString();
+    await installMockApi(page, {
+      autoFixPanel: {
+        prId: PR_ID,
+        on: true,
+        queue: { prId: PR_ID, headSha: 'h', status: 'waiting', reason: 'ci_running', line: 'Waiting for the CI jobs to finish.', until, fixId: null, source: null, at: new Date().toISOString() },
+        history: [
+          { id: 2, status: 'running', sourceReviewId: null, items: 1, addressed: null, unaddressed: null, commitMessage: null, pushedAt: null, pushedBranch: null, error: null, createdAt: '2026-11-12T10:00:00.000Z', finishedAt: null },
+          { id: 1, status: 'succeeded', sourceReviewId: 7, items: 3, addressed: 3, unaddressed: 0, commitMessage: 'Handle an empty report', pushedAt: '2026-11-12T09:00:00.000Z', pushedBranch: 'feature/e2e-branch', error: null, createdAt: '2026-11-12T08:50:00.000Z', finishedAt: '2026-11-12T08:58:00.000Z' },
+        ],
+      },
+      autoFixActive: {
+        workspaceId: fixtures.WORKSPACE.id,
+        fixes: [{ fixId: 2, prId: PR_ID, prNumber: fixtures.PRS[0]!.number, prTitle: fixtures.PRS[0]!.title, repoFullName: 'acme/api', status: 'running', failed: false, pushedAt: null, createdAt: '2026-11-12T10:00:00.000Z' }],
+      },
+    });
+    const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
+    await page.route(
+      (u) => u.pathname.endsWith('/api/me'),
+      (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(me) }),
+    );
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=ai_review`);
+    const panel = page.getByTestId('auto-fix-queue');
+    await expect(panel.getByTestId('auto-fix-queue-line')).toHaveText('Waiting for the CI jobs to finish (up to 11 min).');
+    await expect(panel.getByTestId('auto-fix-queue-line')).toHaveAttribute('data-reason', 'ci_running');
+    await panel.getByTestId('auto-fix-history-toggle').click();
+    const rows = panel.getByTestId('auto-fix-history-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText('Fixing');
+    await expect(rows.nth(0)).toContainText('From the CI review');
+    await expect(rows.nth(1)).toContainText('Pushed');
+    await expect(rows.nth(1)).toContainText('3 of 3 points addressed');
+    await expect(rows.nth(1)).toContainText('Handle an empty report');
+    // The toast: one auto fix running.
+    const circle = page.getByTestId('auto-fix-toast');
+    await expect(circle).toContainText('Auto fixes');
+    await expect(circle).toContainText('1 running');
+  });
+});

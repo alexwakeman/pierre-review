@@ -23,7 +23,7 @@ import {
 } from './client.js';
 import type { GqlCheckContext, GqlReactionGroup } from './queries.js';
 import { checkContextState } from './check-context-state.js';
-import { rollupStateWithoutLimn } from '@pierre-review/shared';
+import { isLimnStatusContext, rollupStateWithoutLimn } from '@pierre-review/shared';
 import { summariseReactionGroups, toGithubReactionContent } from './reactions.js';
 import { limnWrite, type WriteOrigin } from './write-origin.js';
 
@@ -970,6 +970,50 @@ export async function fetchPrHeadCheckRollup(
           .map((c) => ({ name: c.__typename === 'CheckRun' ? c.name : c.context, state: checkContextState(c) }))
       : null;
     return rollupStateWithoutLimn(rollup.state, contexts, rollup.contexts?.pageInfo?.hasNextPage !== true);
+  } catch {
+    return null;
+  }
+}
+
+/** The head's CI jobs, Limn's own status lines left out (`isLimnStatusContext`). */
+export interface PrHeadCheckCounts {
+  headSha: string | null;
+  total: number;
+  running: number;
+  failing: number;
+  /** Every context fitted on the one page (≤ 100); false ⇒ the counts are a lower bound. */
+  complete: boolean;
+}
+
+// The same query with the head's sha: the answer must be about the head the queue judged.
+const PR_HEAD_CHECKS_QUERY = PR_CHECK_ROLLUP_QUERY.replace('statusCheckRollup {', 'oid statusCheckRollup {');
+
+/**
+ * THE AUTO FIX QUEUE's "have the CI jobs finished?" (coding/ai-fix/auto-fix-queue.ts): the same one-call
+ * rollup read as `fetchPrHeadCheckRollup`, counted per context. The synced `ci_status` cannot say it: it
+ * reads FAILURE as soon as ONE job fails, while others still run. null = unknown (never "finished").
+ */
+export async function fetchPrHeadCheckCounts(token: string, owner: string, name: string, number: number): Promise<PrHeadCheckCounts | null> {
+  try {
+    const gql = getGraphqlClientFor(token);
+    const res = await gql<GqlPrCheckRollup & { repository?: { pullRequest?: { commits?: { nodes?: Array<{ commit?: { oid?: string | null } }> } } } }>(PR_HEAD_CHECKS_QUERY, { owner, name, number });
+    const commit = res.repository?.pullRequest?.commits?.nodes?.[0]?.commit as ({ oid?: string | null; statusCheckRollup?: { state?: string | null; contexts?: { nodes?: Array<GqlCheckContext | null> | null; pageInfo?: { hasNextPage?: boolean | null } | null } | null } | null } | undefined);
+    if (commit == null) return null;
+    const rollup = commit.statusCheckRollup ?? null;
+    const nodes = (rollup?.contexts?.nodes ?? []).filter((c): c is GqlCheckContext => c != null);
+    const states = nodes
+      .map((c) => ({ name: c.__typename === 'CheckRun' ? c.name : c.context, state: checkContextState(c) }))
+      .filter((c) => !isLimnStatusContext(c.name));
+    const complete = rollup?.contexts?.pageInfo?.hasNextPage !== true;
+    const expected = (rollup?.state ?? '').toUpperCase() === 'EXPECTED';
+    return {
+      headSha: commit.oid ?? null,
+      total: states.length,
+      // A required check that has not reported yet (EXPECTED) is a job still to run.
+      running: states.filter((c) => c.state === 'pending').length + (expected ? 1 : 0),
+      failing: states.filter((c) => c.state === 'failure' || c.state === 'error').length,
+      complete,
+    };
   } catch {
     return null;
   }

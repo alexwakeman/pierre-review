@@ -64,7 +64,7 @@ import {
   type ClaudeAutoFixSkipReason,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
-import { isFixRunning, loadReviewSeed, startReviewFix } from './manager.js';
+import { isFixRunning, loadCiOnlySeed, loadReviewSeed, startFix, startReviewFix } from './manager.js';
 import { fixSandboxReadiness, type FixSandboxReadiness } from '../../sandbox/session/fix.js';
 import { fixRowHasWork } from '../../sandbox/session/fix-merge.js';
 import { parseChangeReport, parseReviewItems } from './persist.js';
@@ -163,6 +163,9 @@ const toMs = (v: Date | number | null): number =>
 export interface AutoFixDeps {
   startReviewFix: typeof startReviewFix;
   loadReviewSeed: typeof loadReviewSeed;
+  /** THE CI-ONLY SOURCE (the auto fix queue: CI causes with no AI review of the head). Absent ⇒ the real one. */
+  loadCiOnlySeed?: typeof loadCiOnlySeed;
+  startFix?: typeof startFix;
   isFixRunning: typeof isFixRunning;
   /** The PR's head on GitHub right now; null when unknown. Absent ⇒ never asked. */
   liveHeadSha?: (ctx: AgentContext, accountId: number, prId: number) => Promise<string | null>;
@@ -181,7 +184,7 @@ async function liveHeadSha(ctx: AgentContext, accountId: number, prId: number): 
   }
 }
 
-const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, isFixRunning, liveHeadSha, sandbox: fixSandboxReadiness };
+const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, loadCiOnlySeed, startFix, isFixRunning, liveHeadSha, sandbox: fixSandboxReadiness };
 
 // `not_auto`: the review was one a person started — an auto fix (which may then be pushed
 // automatically) follows AUTO reviews only. The manager already calls this for auto runs alone;
@@ -189,18 +192,20 @@ const defaultDeps: AutoFixDeps = { startReviewFix, loadReviewSeed, isFixRunning,
 export type AutoFixDecision = { status: 'not_own' } | { status: 'not_auto' } | ClaudeAutoFixOutcome;
 
 /**
- * Called once per SUCCEEDED auto review (manager.ts). Returns what it did; never throws.
+ * Called by THE AUTO FIX QUEUE (auto-fix-queue.ts) when the PR's work is ready. Returns what it did;
+ * never throws. `reviewId` null ⇒ THE CI-ONLY SOURCE: the CI review's causes at the PR's current head,
+ * with no AI review (the same gates; the outcome is not kept per review).
  */
 export async function maybeStartAutoFix(
   ctx: AgentContext,
-  input: { accountId: number; prId: number; reviewId: number },
+  input: { accountId: number; prId: number; reviewId: number | null },
   deps: AutoFixDeps = defaultDeps,
   nowMs: number = Date.now(),
 ): Promise<AutoFixDecision> {
   const { accountId, prId, reviewId } = input;
   const skip = (reason: ClaudeAutoFixSkipReason): AutoFixDecision => {
-    const outcome: ClaudeAutoFixOutcome = { reviewId, status: 'skipped', reason };
-    record(accountId, outcome);
+    const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'skipped', reason };
+    if (reviewId != null) record(accountId, outcome);
     ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) skipped: ${reason}`);
     return outcome;
   };
@@ -220,14 +225,14 @@ export async function maybeStartAutoFix(
     // WHAT an auto fix carries is the workspace's "Always include" sections (AutoFixSettings).
     const include = ws.settings.include;
 
-    const loaded = await deps.loadReviewSeed(ctx, {
-      accountId,
-      prId,
-      reviewId,
-      selection: { kind: 'sections', include },
-    });
+    const loaded =
+      reviewId != null
+        ? await deps.loadReviewSeed(ctx, { accountId, prId, reviewId, selection: { kind: 'sections', include } })
+        : include.ciFailures
+          ? { review: null, seed: await (deps.loadCiOnlySeed ?? loadCiOnlySeed)(ctx, { accountId, prId, selection: { kind: 'sections', include } }) }
+          : { review: null, seed: { items: [], sentRefs: [], text: '' } };
     if (!loaded) return skip('not_started');
-    if (loaded.review.trigger !== 'auto') return { status: 'not_auto' };
+    if (loaded.review != null && loaded.review.trigger !== 'auto') return { status: 'not_auto' };
     if (loaded.seed.sentRefs.length === 0) return skip('nothing_to_fix');
 
     const { pullRequests: prs, aiFixes: af } = ctx.schema;
@@ -240,7 +245,8 @@ export async function maybeStartAutoFix(
         .execute()) as Array<{ headSha: string | null }>
     )[0];
     const head = prRow?.headSha ?? null;
-    if (head && head !== loaded.review.headSha) return skip('head_moved');
+    // A review seed is the REVIEWED head's; a CI-only seed is read at the synced head by construction.
+    if (loaded.review != null && head && head !== loaded.review.headSha) return skip('head_moved');
 
     // The manager's in-memory claim is the authority (a queued/running ROW it no longer holds is an
     // orphan the next boot reconciles).
@@ -274,7 +280,7 @@ export async function maybeStartAutoFix(
     // too, and the live head is asked for — once, only when an unpushed fix sits on neither.
     const heads = new Set<string>();
     if (head) heads.add(head);
-    if (loaded.review.headSha) heads.add(loaded.review.headSha);
+    if (loaded.review?.headSha) heads.add(loaded.review.headSha);
     const atHead = (f: FixRow): boolean => heads.has(f.baseSha);
     const waiting = fixes.filter(
       (f) => f.status === 'succeeded' && f.pushedAt == null && fixRowHasWork({ ...f, patch: (f.patch ?? '').trim() }),
@@ -307,14 +313,17 @@ export async function maybeStartAutoFix(
     }
 
     // The review stores what RAN (a Codex id on Codex): ask for the same depth again.
-    const asked = requestModelOf(loaded.review.model);
+    const asked = loaded.review != null ? requestModelOf(loaded.review.model) : DEFAULT_AI_FIX_MODEL;
     const model: AiFixModel = (CLAUDE_REVIEW_MODELS as readonly string[]).includes(asked)
       ? (asked as AiFixModel)
       : DEFAULT_AI_FIX_MODEL;
-    const r = await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include });
+    const r =
+      reviewId != null
+        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include })
+        : await (deps.startFix ?? startFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include } });
     if (r.status === 'queued') {
-      const outcome: ClaudeAutoFixOutcome = { reviewId, status: 'started', fixId: r.fixId };
-      record(accountId, outcome);
+      const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'started', fixId: r.fixId };
+      if (reviewId != null) record(accountId, outcome);
       ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) started: fix ${r.fixId}`);
       return outcome;
     }

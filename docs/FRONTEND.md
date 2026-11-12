@@ -1101,7 +1101,9 @@ rail still flows (no `sticky`). The slots:
     hold the teammate's verdict; Pending's "Waiting on others" row keeps its line), live progress + Stop (no live token
     or cost readout), failures, an auto fix that STARTED or failed on a fault the reader can fix
     (`autoFixOutcomeLine`: `not_started` / `over_budget` / `no_sandbox`; routine skips such as "auto AI
-    Fix is off" say nothing), the replies pass ONLY while it runs (status + Cancel) or when the newest
+    Fix is off" say nothing), THE AUTO FIX SECTION (`AutoFixQueuePanel`, own PRs with auto AI Fix on or any
+    auto fix: what the next auto fix waits for with "(up to N min)", and the PR's auto fixes behind a
+    disclosure, each with Open → the AI Fix tab; docs/CLAUDE-REVIEW.md § The auto fix queue), the replies pass ONLY while it runs (status + Cancel) or when the newest
     one failed (`RepliesCheckLine`; NO "Check replies" button, removed 2026-11-10 — the pass starts by
     itself); its ⓘ ("Review only, or review and post") sits beside the section
     title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Limn reviews so far ·
@@ -5611,7 +5613,8 @@ shared between the header sync button and the WorkspaceManager's embedded progre
 circle in ONE cluster, `<HeaderToastStrip>` (the component names keep "Header" from when it lived in
 the top bar / a page header's toast seat; both are GONE, 2026-11-04), mounted ONCE by App.tsx OUTSIDE
 the page flow and FIXED AT THE BOTTOM RIGHT of the main content. App.tsx mounts the jobs: `UndoToast`,
-the Claude reviews frame, `AiFixBanner`, `AiBudgetToast`, `AutoReviewCapToast`, `ClosedResolverToast`,
+the Claude reviews frame, `AiFixBanner`, `StoryBuildsToast` (docs/STORY-BUILD.md § The builds toast),
+`AutoFixToast` (the auto fixes: docs/CLAUDE-REVIEW.md § The auto fix queue), `AiBudgetToast`, `AutoReviewCapToast`, `ClosedResolverToast`,
 `DependencyMergeToast`, `AutoMergeBanner`, `GlobalLoadingBar` — the circles' left-to-right order is
 `toastRank`, not this mount order.
 

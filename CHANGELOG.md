@@ -28,6 +28,11 @@ no internals.
   wait for you (a plan to approve, a build to push, a paused review, a failure, ticket changes to check).
   Select a build to open it.
 
+- Auto fix now starts on CI failures too, not only after an auto review. It waits for the CI jobs to finish,
+  gives the AI review of the same commit a short time so one fix covers both, and queues a fix behind one that
+  is running; each starts from what is still open on the latest commit. The AI Review tab shows what the next
+  auto fix waits for and lists every auto fix of the pull request, and an "Auto fixes" circle among the
+  notifications shows the ones running or failed.
 ### Changed
 
 - Implement is now offered on In progress tickets with no pull request, as well as Not started ones.

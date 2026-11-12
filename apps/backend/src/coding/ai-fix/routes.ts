@@ -39,6 +39,7 @@ import {
   type FixActionResult,
 } from './manager.js';
 import { planStateOf } from './plan.js';
+import { registerAutoFixRoutes } from './auto-fix-routes.js';
 import { pushFix } from './push.js';
 import { requestModelOf } from '../../ai/provider.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
@@ -262,6 +263,8 @@ function messageText(body: unknown): { text: string } | { error: string; message
 }
 
 export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): void {
+  // THE AUTO FIX QUEUE's reads (auto-fix-routes.ts): the AI Review tab's line + history, the toast.
+  registerAutoFixRoutes(app, ctx);
   const parseId = (raw: string): number | null => {
     const n = Number.parseInt(raw, 10);
     return Number.isInteger(n) ? n : null;

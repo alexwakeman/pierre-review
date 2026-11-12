@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
+  AutoFixActiveResponse,
+  AutoFixPanelResponse,
   AiFixPickerPreview,
   AiFixPushBody,
   AiFixResponse,
@@ -240,4 +242,29 @@ export function useAiFixStream(
   }, [prId, active, qc]);
 
   return { status };
+}
+
+/** THE AUTO FIX QUEUE on one PR (the AI Review tab): polled every 15 s while it waits or a fix runs. */
+export function useAutoFixPanel(prId: number | null, enabled: boolean) {
+  return useQuery<AutoFixPanelResponse>({
+    queryKey: ['auto-fix-panel', prId],
+    queryFn: () => api.autoFixPanel(prId as number),
+    enabled: prId != null && enabled,
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (d == null || !d.on) return false;
+      const running = d.history.some((h) => h.status === 'queued' || h.status === 'running');
+      return running || d.queue?.status === 'waiting' || d.queue?.status === 'started' ? 15_000 : 60_000;
+    },
+  });
+}
+
+/** THE AUTO FIXES TOAST: the workspace's auto fixes running now or ended in the last two hours. */
+export function useAutoFixActive(workspaceId: number | null, enabled: boolean) {
+  return useQuery<AutoFixActiveResponse>({
+    queryKey: ['auto-fix-active', workspaceId ?? 'none'],
+    queryFn: () => api.autoFixActive(workspaceId as number),
+    enabled: enabled && workspaceId != null,
+    refetchInterval: (q) => (q.state.data?.fixes.some((f) => f.status === 'queued' || f.status === 'running') ? 10_000 : 30_000),
+  });
 }
