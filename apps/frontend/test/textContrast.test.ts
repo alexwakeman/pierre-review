@@ -255,4 +255,15 @@ describe('the reference-docs quote highlight (index.css `::highlight(doc-quote)`
     const { bg, fg } = rule('.dark ::highlight(doc-quote)');
     expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(AA_BODY);
   });
+
+  it('the ticket boxes\' changed-words mark wears the same pairs, both themes', () => {
+    for (const [mark, hl] of [
+      ['\n.doc-quote-mark', '\n::highlight(doc-quote)'],
+      ['.dark .doc-quote-mark', '.dark ::highlight(doc-quote)'],
+    ] as const) {
+      expect(rule(mark)).toEqual(rule(hl));
+      const { bg, fg } = rule(mark);
+      expect(contrastRatio(fg, bg)).toBeGreaterThanOrEqual(AA_BODY);
+    }
+  });
 });

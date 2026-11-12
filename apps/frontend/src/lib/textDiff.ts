@@ -58,3 +58,95 @@ export function lineDiffSummary(d: readonly TextDiffLine[]): string | null {
   if (del > 0) parts.push(`${del} removed`);
   return parts.join(', ');
 }
+
+/** A span of the NEW text, `[start, end)` in UTF-16 offsets of `normaliseNewlines(after)`. */
+export interface TextRange {
+  start: number;
+  end: number;
+}
+
+export function normaliseNewlines(t: string): string {
+  return t.replace(/\r\n?/g, '\n');
+}
+
+// Words and the whitespace between them; a change is marked word by word.
+const tokens = (t: string): string[] => t.match(/\s+|[^\s]+/g) ?? [];
+const isSpace = (t: string): boolean => /^\s+$/.test(t);
+
+/** Which tokens of `b` are not in an LCS of `a` and `b` (every one past MAX_CELLS). */
+function addedTokens(a: readonly string[], b: readonly string[]): boolean[] {
+  if (a.length === 0 || a.length * b.length > MAX_CELLS) return b.map(() => true);
+  const lcs: Uint32Array[] = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    for (let j = b.length - 1; j >= 0; j -= 1) {
+      lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+  const added = b.map(() => true);
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) {
+      added[j] = false;
+      i += 1;
+      j += 1;
+    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) i += 1;
+    else j += 1;
+  }
+  return added;
+}
+
+/**
+ * THE CHANGED WORDS of the new text (the ticket boxes paint them, TicketUpdatePanel.tsx): a line diff
+ * first, then, inside each run of changed lines, a word diff of the old run against the new one. A
+ * removal leaves nothing to mark here (the "What changes" diff shows it). Whitespace is marked when it
+ * sits between two marked words (even a space the old text had), so a changed phrase reads as one wash. Empty when nothing changed.
+ */
+export function changedRanges(before: string, after: string): TextRange[] {
+  const b = normaliseNewlines(after);
+  if (normaliseNewlines(before) === b) return [];
+  const diff = lineDiff(before, b);
+  // Offsets of each new line.
+  const out: TextRange[] = [];
+  let offset = 0; // start of the next NEW line
+  let k = 0;
+  while (k < diff.length) {
+    if (diff[k]!.kind === 'same') {
+      offset += diff[k]!.text.length + 1;
+      k += 1;
+      continue;
+    }
+    // One hunk: its removed lines and its added lines.
+    const dels: string[] = [];
+    const adds: string[] = [];
+    while (k < diff.length && diff[k]!.kind !== 'same') {
+      (diff[k]!.kind === 'del' ? dels : adds).push(diff[k]!.text);
+      k += 1;
+    }
+    if (adds.length === 0) continue;
+    const newText = adds.join('\n');
+    const bt = tokens(newText);
+    const added = addedTokens(tokens(dels.join('\n')), bt);
+    // Whitespace counts only when it joins two marked words.
+    const marked = bt.map((t, n) => {
+      if (!isSpace(t)) return added[n]!;
+      let p = n - 1;
+      while (p >= 0 && isSpace(bt[p]!)) p -= 1;
+      let q = n + 1;
+      while (q < bt.length && isSpace(bt[q]!)) q += 1;
+      // (a space between two changed words, even one the old text also had)
+      return p >= 0 && q < bt.length && added[p]! && added[q]! && !t.includes('\n');
+    });
+    let at = offset;
+    bt.forEach((t, n) => {
+      if (marked[n]) {
+        const last = out[out.length - 1];
+        if (last != null && last.end === at) last.end = at + t.length;
+        else out.push({ start: at, end: at + t.length });
+      }
+      at += t.length;
+    });
+    offset += newText.length + 1;
+  }
+  return out;
+}

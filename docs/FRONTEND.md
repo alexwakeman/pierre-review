@@ -4555,7 +4555,10 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     `TicketReview`: the WHOLE ticket in two boxes (Description, Acceptance criteria — "(in the
     description)" when the ticket keeps them there, and then the box follows the description's section
     until edited), seeded with the draft else the current text (`useTicketUpdateCurrent`,
-    `['ticket-update-current', ws, ident]`; pure seed/body in `lib/buildPlan.ts`), "What changes" per box
+    `['ticket-update-current', ws, ident]`; pure seed/body in `lib/buildPlan.ts`), the CHANGED WORDS
+    washed in the box itself (`lib/textDiff.ts changedRanges`, a word diff inside each changed line run,
+    painted in `.doc-quote-mark` — the docs-quote highlight's colours — by a mirror BEHIND a
+    transparent-text textarea; ⚠ both layers share `MIRROR_TEXT` so they wrap identically), "What changes" per box
     (`lib/textDiff.ts lineDiff`), the live layout check (shared `compareTicketLayout`, amber notes, never a
     block), "(edited)" / "Back to the draft"; on a Jira ticket ONE **Update ticket** sends only the
     changed fields, asks once, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update;

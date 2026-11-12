@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   TICKET_UPDATE_FIELD_MAX,
   acSectionText,
@@ -13,7 +13,7 @@ import { useTicketUpdateCurrent, useUpdateTicket } from '../../hooks/useTicketPr
 import { criteriaBoxLabel, ticketReviewSeed, ticketUpdateBody, ticketUpdateConfirm } from '../../lib/buildPlan.js';
 import { REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionErrorText } from '../../lib/sandboxSession.js';
-import { lineDiff, lineDiffSummary } from '../../lib/textDiff.js';
+import { changedRanges, lineDiff, lineDiffSummary, normaliseNewlines } from '../../lib/textDiff.js';
 import { CopyButton } from '../CopyButton.js';
 import { ChevronIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
@@ -88,6 +88,9 @@ function TicketReviewBody({
             Under each box: what changes, and where the text no longer keeps the ticket's layout (its headings, its list style, GIVEN /
             WHEN / THEN). Those notes are advice: you decide.
           </p>
+          <p className="mt-2">
+            <span className="doc-quote-mark px-0.5">Highlighted</span> words differ from the ticket as it is now.
+          </p>
           {current?.acLocation.kind === 'description' && (
             <p className="mt-2">This ticket keeps its acceptance criteria in the description. Limn writes them into that section.</p>
           )}
@@ -119,6 +122,7 @@ function TicketReviewBody({
           touched();
         }}
         testId="story-plan-ticket-description"
+        baseline={current?.description ?? null}
       />
       {current != null && <WhatChanges before={current.description} after={description} testId="story-plan-ticket-description-diff" />}
       <LayoutNotes problems={layoutDescription} testId="story-plan-ticket-description-layout" />
@@ -131,6 +135,7 @@ function TicketReviewBody({
           touched();
         }}
         testId="story-plan-ticket-criteria"
+        baseline={current?.acceptanceCriteria ?? null}
       />
       {current != null && <WhatChanges before={current.acceptanceCriteria} after={criteria} testId="story-plan-ticket-criteria-diff" />}
       <LayoutNotes problems={layoutCriteria} testId="story-plan-ticket-criteria-layout" />
@@ -231,8 +236,33 @@ function LayoutNotes({ problems, testId }: { problems: string[]; testId: string 
   );
 }
 
-export function DraftEditor({ label, text, onChange, testId }: { label: string; text: string; onChange: (v: string) => void; testId: string }): JSX.Element {
+/**
+ * One ticket box. With a `baseline` (the ticket as it is now), the words that differ from it wear the
+ * reference-docs highlight (`.doc-quote-mark`, index.css — the same wash as a docs quote): a mirror
+ * BEHIND a transparent-text textarea draws the text and the marks, so the box stays a plain textarea
+ * for typing, selection and the clipboard. ⚠ The mirror and the textarea must wrap identically: the
+ * SAME padding, font, wrapping and scrollbar gutter (MIRROR_TEXT), and the mirror follows the
+ * textarea's scroll. No baseline (no stored copy): a plain box, nothing marked.
+ */
+const MIRROR_TEXT = 'whitespace-pre-wrap break-words p-2 font-mono text-meta [scrollbar-gutter:stable]';
+
+export function DraftEditor({
+  label,
+  text,
+  onChange,
+  testId,
+  baseline = null,
+}: {
+  label: string;
+  text: string;
+  onChange: (v: string) => void;
+  testId: string;
+  baseline?: string | null;
+}): JSX.Element {
   const id = useId();
+  const rows = Math.min(14, Math.max(4, text.split('\n').length + 1));
+  const ring =
+    'rounded-ui ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent';
   return (
     <div data-testid={testId} className="mt-1.5">
       <div className="flex items-center gap-1.5">
@@ -241,13 +271,77 @@ export function DraftEditor({ label, text, onChange, testId }: { label: string; 
         </label>
         <CopyButton text={text} what={label.toLowerCase()} title={`Copy the ${label.toLowerCase()}, exactly as written`} />
       </div>
+      {baseline == null ? (
+        <textarea
+          id={id}
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+          rows={rows}
+          spellCheck
+          className={cx('mt-1 block max-h-[28rem] w-full resize-y bg-ui-raise p-2 font-mono text-meta text-ui-ink', ring)}
+        />
+      ) : (
+        <MarkedTextarea id={id} text={text} baseline={baseline} onChange={onChange} rows={rows} ring={ring} />
+      )}
+    </div>
+  );
+}
+
+function MarkedTextarea({
+  id,
+  text,
+  baseline,
+  onChange,
+  rows,
+  ring,
+}: {
+  id: string;
+  text: string;
+  baseline: string;
+  onChange: (v: string) => void;
+  rows: number;
+  ring: string;
+}): JSX.Element {
+  const box = useRef<HTMLTextAreaElement>(null);
+  const mirror = useRef<HTMLDivElement>(null);
+  const shown = normaliseNewlines(text);
+  const ranges = useMemo(() => changedRanges(baseline, shown), [baseline, shown]);
+  const follow = (): void => {
+    if (box.current != null && mirror.current != null) mirror.current.scrollTop = box.current.scrollTop;
+  };
+  useLayoutEffect(follow, [shown]);
+  const parts: JSX.Element[] = [];
+  let at = 0;
+  ranges.forEach((r, i) => {
+    if (r.start > at) parts.push(<span key={`t${i}`}>{shown.slice(at, r.start)}</span>);
+    parts.push(
+      <mark key={`m${i}`} className="doc-quote-mark">
+        {shown.slice(r.start, r.end)}
+      </mark>,
+    );
+    at = r.end;
+  });
+  if (at < shown.length) parts.push(<span key="tail">{shown.slice(at)}</span>);
+  return (
+    <div className="relative mt-1 rounded-ui bg-ui-raise" data-changed-words={ranges.length}>
+      <div ref={mirror} aria-hidden="true" className={cx('pointer-events-none absolute inset-0 overflow-hidden text-ui-ink', MIRROR_TEXT)}>
+        {parts}
+        {/* A trailing newline still takes a line in the textarea. */}
+        {'\n'}
+      </div>
       <textarea
+        ref={box}
         id={id}
         value={text}
         onChange={(e) => onChange(e.target.value)}
-        rows={Math.min(14, Math.max(4, text.split('\n').length + 1))}
+        onScroll={follow}
+        rows={rows}
         spellCheck
-        className="mt-1 block max-h-[28rem] w-full resize-y rounded-ui bg-ui-raise p-2 font-mono text-meta text-ui-ink ring-1 ring-inset ring-ui-line focus:outline-none focus:ring-2 focus:ring-ui-accent"
+        className={cx(
+          'relative block max-h-[28rem] w-full resize-y bg-transparent text-transparent caret-ui-ink selection:bg-ui-accent/30',
+          MIRROR_TEXT,
+          ring,
+        )}
       />
     </div>
   );

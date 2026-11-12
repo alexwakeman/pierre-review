@@ -2216,6 +2216,17 @@ body {
 .dark .doc-quote-swatch {
   background-color: #92400e;
 }
+/* The SAME wash on an element: the plan panel's ticket boxes paint the words that change
+   (components/StoryBuild/TicketUpdatePanel.tsx). Measured by test/textContrast.test.ts too. */
+.doc-quote-mark {
+  background-color: #fde68a; /* amber-200 */
+  color: #111827; /* gray-900 */
+  border-radius: 2px;
+}
+.dark .doc-quote-mark {
+  background-color: #92400e; /* amber-800 */
+  color: #fef3c7; /* amber-100 */
+}
 
 /* ── REDUCED MOTION, ONCE FOR THE WHOLE APP ───────────────────────────────────────────────────
    The redesign's primitives use `motion-safe:` for their own transitions; this backstop covers

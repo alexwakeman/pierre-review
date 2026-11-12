@@ -199,8 +199,12 @@ test.describe('Implement, plan first', () => {
     await expect(draft.getByTestId('story-plan-ticket-description').getByRole('textbox')).toHaveValue(/download a report as a CSV file/);
     await expect(draft.getByTestId('story-plan-ticket-description-diff')).toHaveText('No change.');
     await expect(draft.getByTestId('story-plan-ticket-criteria-diff')).toContainText('What changes');
+    // The changed words wear the docs-quote wash in the box; the unchanged description has none.
+    await expect(draft.getByTestId('story-plan-ticket-description').locator('mark.doc-quote-mark')).toHaveCount(0);
+    await expect(draft.getByTestId('story-plan-ticket-criteria').locator('mark.doc-quote-mark').first()).toBeVisible();
     await box.fill('AC3: GIVEN a report with 10,000 rows\nTHEN the file streams every row');
     await expect(draft).toContainText('The ticket (edited)');
+    await expect(draft.getByTestId('story-plan-ticket-criteria').locator('mark.doc-quote-mark')).toHaveText(['with 10,000 rows', 'streams']);
     // Copy takes the edited text.
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await draft.getByRole('button', { name: 'Copy acceptance criteria' }).click();

@@ -27,7 +27,7 @@ no internals.
   count like any pull request of yours (auto review included). The branch is the ticket key, such as
   PAY-142, with no `limn/` in front.
 - Implement story: after planning, you can review and edit the whole ticket (description and acceptance
-  criteria), see what changes, and update it in Jira with one press. The update keeps the ticket's layout.
+  criteria), with the changed words highlighted, and update it in Jira with one press. The update keeps the ticket's layout.
 
 ### Fixed
 

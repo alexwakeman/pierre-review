@@ -110,7 +110,8 @@ export default function Page(): JSX.Element {
         ticket uses it.
       </p>
       <p>
-        Change the text as you like. Under each box, <Ui>What changes</Ui> shows the lines that differ from the ticket, and
+        Change the text as you like. In each box, the words that differ from the ticket are highlighted, in the same
+        colour as a quote from your reference docs. Under each box, <Ui>What changes</Ui> shows the lines that differ from the ticket, and
         a note says where the text no longer keeps the ticket&rsquo;s layout. The notes are advice; you decide.
       </p>
       <Warning>
