@@ -474,6 +474,10 @@ export interface StoryBuild {
   planAutoApprovedAt?: string | null;
   /** ISO: the reader closed the ticket step after the build (updated it, or said no update); null before. */
   ticketReviewDoneAt?: string | null;
+  /** BUILD END TO END (docs/STORY-BUILD.md § Build end to end): started from "Build end to end". */
+  endToEnd?: boolean;
+  /** What its ticket step did once the PRs opened; null before (or not an end-to-end build). */
+  endToEndTicket?: StoryBuildEndToEndTicket | null;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
@@ -733,3 +737,25 @@ export function storyBuildGapsOf(a: Pick<TicketAssessment, 'criteria' | 'missing
     ...a.missing.map((m) => ({ ref: m.ref, text: m.title, verdict: null })),
   ];
 }
+
+/**
+ * BUILD END TO END'S TICKET STEP (docs/STORY-BUILD.md § Build end to end): after the review loop opened the
+ * pull requests, Limn updates the Jira ticket from the approved plan and comments on it, under the reader's
+ * Jira login. ONE claimed attempt, never retried. Stored on `story_builds.e2e_ticket_json`.
+ */
+export interface StoryBuildEndToEndTicket {
+  /** ISO: when the step ended. */
+  at: string;
+  /** The fields written ('none' when the plan proposed no change or the text already matched). */
+  updated: Array<'description' | 'acceptanceCriteria'>;
+  /** The comment was posted. */
+  commented: boolean;
+  /** Why nothing was written: the workspace's tracker is not Jira (Limn writes Jira only). */
+  skipped?: 'not_jira' | null;
+  /** The plain sentence of the first write that failed; null when every write succeeded. */
+  error?: string | null;
+}
+
+/** The start body's one-click option, and its fixed settings. */
+export const STORY_BUILD_END_TO_END_LABEL = 'Build end to end';
+

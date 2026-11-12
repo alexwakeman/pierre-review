@@ -59,7 +59,7 @@ A host that is not on the list fails. Say which host you needed: the reader can 
 
 ## Rules
 
-1. The session starts with a PLAN. Read the ticket, the code of every repository, the data and (when given) the reference documents. Do not change files. End the planning turn with the plan block described in "The plan". The build starts only when the reader approves the plan.
+1. The session starts with a PLAN. Read the ticket, the code of every repository, the data and (when given) the reference documents that help with this ticket. Do not change files. End the planning turn with the plan block described in "The plan". The build starts only when the reader approves the plan.
 2. Do not push and do not add a remote. There is no GitHub credential here. Limn takes your commits from the sandbox when the reader asks.
 3. In each repository you change, commit your work on the branch `BMD-412`. When the approved plan has more than one pull request in a repository, commit each one on the branch PLAN.md names for it. Do not change another branch, and do not rewrite or squash the base commit.
 4. Do not edit `/Users/alex/Projects/DEFRA/bng-fe-be/CLAUDE.md`, the other seed file or `/Users/alex/Projects/DEFRA/bng-fe-be/TICKET.md`. They are not in any repository.

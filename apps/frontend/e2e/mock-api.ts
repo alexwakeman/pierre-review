@@ -2162,14 +2162,16 @@ export async function installMockApi(
         if (path === STORY_BUILD_API.list && method === 'POST') {
           if (!runtime.available) return json(route, { error: 'NoRuntime', message: runtime.problem }, 409);
           // The boot and the planning turn are over at once in the mock: a NEW session is plan first, and
-          // its checked plan waits for the reader ("with docs" only when the start asked for them).
+          // its checked plan waits for the reader. The reference documents are not a choice (the server gives
+          // them whenever the library has one), so the mock's plan never says "With docs".
           const body = route.request().postDataJSON() as SandboxSessionStartBody;
-          const plan = { ...STORY_PLAN_VIEW, withDocs: body.docs === true, fillGaps: body.action === 'fill_gaps' };
+          const plan = { ...STORY_PLAN_VIEW, withDocs: false, fillGaps: body.action === 'fill_gaps' };
           storyBuild = {
             ...STORY_SESSION_PLAN_READY,
+            endToEnd: body.endToEnd === true,
             autoPush: body.autoPush === true,
             autoApprovePlan: body.autoApprovePlan === true,
-            loop: body.autoPush === true ? loopNotStarted(body.loopRounds ?? 3) : null,
+            loop: body.autoPush === true ? loopNotStarted(body.loopRounds ?? 4) : null,
             session: { ...STORY_SESSION_PLAN_READY.session!, plan },
           };
           return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
@@ -2186,7 +2188,7 @@ export async function installMockApi(
                   loopOn: b.autoPush === true,
                   loopState: b.loop?.state ?? null,
                   loopRound: b.loop?.round ?? 0,
-                  loopRounds: b.loop?.rounds ?? 3,
+                  loopRounds: b.loop?.rounds ?? 4,
                   ticketWaiting: b.planAutoApprovedAt != null && b.ticketReviewDoneAt == null && s.plan?.latest?.ticketUpdate != null,
                 })
               : null;

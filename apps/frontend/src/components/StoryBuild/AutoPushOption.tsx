@@ -8,7 +8,7 @@ import { CheckboxBox } from '../ui/FormControls.js';
 
 // THE REVIEW LOOP'S OPT-IN (docs/STORY-BUILD.md § The review loop): "After the build: review and fix, then
 // open the pull request", OFF by default, on Implement and Fill gaps. It reuses `story_builds.auto_push` as
-// the switch, with a rounds number N (1..6, default 3). Ticked in the Start panel (`autoPush: true` +
+// the switch, with a rounds number N (1..6, default 4). Ticked in the Start panel (`autoPush: true` +
 // `loopRounds` on the start body, sent only when ticked); changeable here until the loop starts or
 // something was pushed (`POST …/loop/settings`, its own mutation key: a running turn never blocks it).
 // Once the loop runs, the tab's ReviewLoopSection says what it does.

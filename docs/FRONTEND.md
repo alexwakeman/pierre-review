@@ -4569,16 +4569,15 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   before it builds; the build starts only from the plan panel. The pieces:
   - **The split button** (`components/ui/SplitButton.tsx`: a primary `Button` joined to a `CaretIcon`
     trigger of the one `Menu`, its own tab stop; ONE action ⇒ a plain Button). The story view's entry is
-    one: "Implement" / "Fill gaps", the menu adding "Implement with docs" / "Fill gaps with docs" (and ⌘K
-    the same pair) only while the workspace library has a built document — `TicketStorySection` hands
-    its Check against docs read's `available` in (`docsAvailable`; nothing new is fetched). ⚠ The docs
-    gate is `available` (`hasDocs`), NOT `docsContextFor().usable` (that folds the "docs in Claude
-    Review" switch, off by default). The choice travels as `TabTicketMeta.buildOffer.docs` (parsed in
-    `ticketMetaFrom`, survives a reload). ⚠ A split button's menu items RUN, and `OverBudgetConfirm`
-    guards only a button on the page — so it only ever OPENS the tab: the start state carries the choice
-    as a checkbox, "Give the agent the reference documents" (ticked from the offer, shown only while
-    `available`), and its ONE gated button reads "Start with docs" / "Fill gaps with docs", sending
-    `docs: true`.
+    one: "Implement" / "Fill gaps", the menu adding **"Build end to end"** (`RocketIcon`; ⌘K too;
+    docs/STORY-BUILD.md § Build end to end). The reference documents are NOT a choice (the server gives
+    them whenever the library has one; the start state says so in one line with an ⓘ). ⚠ A split
+    button's menu items RUN, and `OverBudgetConfirm` guards only a button on the page — so the menu only
+    OPENS the tab, with `TabTicketMeta.buildOffer.endToEnd` (parsed in `ticketMetaFrom`, survives a
+    reload) and a ONE-SHOT in-memory start request (`requestEndToEndStart`, never persisted). The start
+    state takes it once (`takeEndToEndStart`) and starts only when the gate is ready and the provider is
+    not over budget; else its button reads "Build end to end" behind the ONE `AiRunGate`. "Set it up
+    myself" drops back to the ordinary panel (Approve automatically + the review box + Rounds).
   - **The plan panel** (`StoryBuild/PlanPanel.tsx`, above the conversation while `session.plan` is set;
     pure half `lib/buildPlan.ts`, pinned by `test/buildPlan.test.ts`): "Plan · revision N" (+ With docs,
     ⓘ, an "Earlier revisions" menu → `GET …/plan?revision=`, read-only), the stage line

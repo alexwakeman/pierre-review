@@ -217,7 +217,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             model: { type: 'string', maxLength: 80 },
             // The old start's diagram switch, accepted and ignored.
             diagram: { type: 'boolean' },
-            // "Implement with docs": a read-only copy of part of the reference library goes into the sandbox.
+            // IGNORED (2026-11-12): the reference documents go in whenever the library has one.
             docs: { type: 'boolean' },
             // "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically).
             autoPush: { type: 'boolean' },
@@ -225,6 +225,8 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             loopRounds: { type: 'integer', minimum: 1, maximum: 6 },
             // "Approve the plan automatically" (docs/STORY-BUILD.md § Approve automatically).
             autoApprovePlan: { type: 'boolean' },
+            // "Build end to end" (docs/STORY-BUILD.md § Build end to end): implies the two above + the ticket step.
+            endToEnd: { type: 'boolean' },
           },
         },
       },
@@ -250,9 +252,10 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       // The cheap DB check first (the fresh tracker read happens in the boot): no story ⇒ no sandbox.
       const inputs = await sessionStoryInputs(ctx, accountId, scope.workspaceId, body.ident);
       if (inputs == null || inputs.empty) return fail(reply, 400, 'NoStory', 'This ticket has no story or criteria to build from.');
-      if (body.docs === true && !(await sessionDocsAvailable(accountId, scope.workspaceId))) {
-        return fail(reply, 400, 'NoDocs', 'No reference documents are built for this workspace.');
-      }
+      // ⚠ THE DOCS ARE NOT A CHOICE (2026-11-12): every session gets the reference documents when the
+      // workspace's library has a built one, and the agent decides whether they help (the plan says which
+      // it used). `body.docs` is ignored (kept on the wire for an older SPA).
+      const withDocs = await sessionDocsAvailable(accountId, scope.workspaceId);
       const r = await startSession(ctx, {
         accountId,
         workspaceId: scope.workspaceId,
@@ -261,10 +264,12 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         ticketKey: inputs.ticketKey,
         ticketTitle: inputs.title,
         action: body.action === 'fill_gaps' ? 'fill_gaps' : 'implement',
-        docs: body.docs === true,
-        autoPush: body.autoPush === true,
+        docs: withDocs,
+        // BUILD END TO END implies the review loop and the automatic approval (the reader's one press).
+        autoPush: body.autoPush === true || body.endToEnd === true,
         ...(body.loopRounds !== undefined ? { loopRounds: body.loopRounds } : {}),
-        autoApprovePlan: body.autoApprovePlan === true,
+        autoApprovePlan: body.autoApprovePlan === true || body.endToEnd === true,
+        endToEnd: body.endToEnd === true,
         choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);

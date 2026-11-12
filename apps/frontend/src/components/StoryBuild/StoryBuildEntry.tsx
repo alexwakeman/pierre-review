@@ -1,6 +1,6 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { STORY_BUILD_MARK_WORDS, type SprintGraphNode, type SprintGraphResponse, type TicketReviewState } from '@pierre-review/shared';
+import { STORY_BUILD_END_TO_END_LABEL, STORY_BUILD_MARK_WORDS, type SprintGraphNode, type SprintGraphResponse, type TicketReviewState } from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { sprintGraphKey } from '../../hooks/useSprintStories.js';
 import { useStoryBuildFor } from '../../hooks/useStoryBuild.js';
@@ -14,9 +14,9 @@ import {
   storyViewCheck,
   type StoryViewBuildEntry,
 } from '../../lib/storyBuild.js';
-import { useOpenStoryBuild } from '../../lib/storyBuildTab.js';
+import { requestEndToEndStart, useOpenStoryBuild } from '../../lib/storyBuildTab.js';
 import { useFilters } from '../../store/filters.js';
-import { BookIcon, WrenchIcon, FillGapsIcon } from '../Icons.js';
+import { RocketIcon, WrenchIcon, FillGapsIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import type { MenuEntry } from '../ui/Menu.js';
 import { SplitButton } from '../ui/SplitButton.js';
@@ -24,14 +24,15 @@ import { useRegisterCommands, type Command } from '../ui/commands.js';
 
 // "IMPLEMENT STORY"'S ENTRY (docs/STORY-BUILD.md § Entry points): the STORY VIEW's primary action —
 // "Implement" on a not-started story with no pull request, "Fill gaps" on a started one whose current
-// story check found gaps — each a SPLIT BUTTON whose menu adds "Implement with docs" / "Fill gaps with
-// docs" when the workspace's reference library has a built document (the tab's start state then ticks
-// its docs box) (shared `storyBuildOffered`, the ONE gate), "Open build · <mark>" once a session
-// is open. It sits first in the story's action group (TicketStorySection `StoryActions`: the rail's
+// story check found gaps — each a SPLIT BUTTON whose menu adds "Build end to end" (docs/STORY-BUILD.md
+// § Build end to end: the tab opens AND starts — the plan approved automatically, the review loop, then the
+// Jira ticket updated and commented on) (shared `storyBuildOffered`, the ONE gate), "Open build · <mark>"
+// once a session is open. (The reference documents are no longer a choice: every session gets them when
+// the library has one, and the agent decides whether they help.) It sits first in the story's action group (TicketStorySection `StoryActions`: the rail's
 // actions in the two-column layout, the Story heading row otherwise), in EVERY story view — This
 // Sprint's tray, the story tab and the PR view's Story tab — and registers the same action in ⌘K.
-// Opens the build tab through `useOpenStoryBuild` (the one opener); never starts anything. Hidden, never
-// disabled, unless `me.ai.enabled`.
+// Opens the build tab through `useOpenStoryBuild` (the one opener); only "Build end to end" starts, through
+// the tab's own start (`requestEndToEndStart`). Hidden, never disabled, unless `me.ai.enabled`.
 //
 //   INPUTS   This Sprint's tray hands in the board's NODE (`StoryBuildEntryFacts.sprintNode`): the gate
 //            reads it as the card did, and nothing is fetched. Elsewhere the view's own facts stand in:
@@ -57,30 +58,24 @@ export function StoryBuildEntryProvider({ facts, children }: { facts: StoryBuild
 export function StoryBuildEntry({
   ticket,
   state,
-  docsAvailable = false,
 }: {
   ticket: CardTicket & { ident: string };
   state: TicketReviewState | undefined;
-  /** The workspace's reference library has a built document (the Story section's Check against docs read,
-   *  `available`): the "… with docs" action is offered. Nothing is fetched for it here. */
-  docsAvailable?: boolean;
 }): JSX.Element | null {
   const aiOn = useAiCapabilities().enabled;
   const facts = useContext(StoryBuildEntryContext);
   if (!aiOn || facts == null) return null;
-  return <Entry ticket={ticket} state={state} facts={facts} docsAvailable={docsAvailable} />;
+  return <Entry ticket={ticket} state={state} facts={facts} />;
 }
 
 function Entry({
   ticket,
   state,
   facts,
-  docsAvailable,
 }: {
   ticket: CardTicket & { ident: string };
   state: TicketReviewState | undefined;
   facts: StoryBuildEntryFacts;
-  docsAvailable: boolean;
 }): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const node = facts.sprintNode != null && facts.sprintNode.ident === ticket.ident ? facts.sprintNode : null;
@@ -104,17 +99,19 @@ function Entry({
   }
 
   const title = ticket.title != null && ticket.title !== '' ? ticket.title : null;
-  const open = (docs = false): void => {
+  const open = (endToEnd = false): void => {
+    // "Build end to end": the tab's start state starts the session as it opens (one-shot, in memory).
+    if (endToEnd && entry?.kind === 'offer') requestEndToEndStart(ticket.ident);
     openBuild({
       ident: ticket.ident,
       key: ticket.key,
       title,
-      ...(entry?.kind === 'offer' ? { offer: { action: entry.action, reviewId: entry.reviewId, ...(docs ? { docs: true } : {}) } } : {}),
+      ...(entry?.kind === 'offer' ? { offer: { action: entry.action, reviewId: entry.reviewId, ...(endToEnd ? { endToEnd: true } : {}) } } : {}),
     });
   };
   const live = useRef(open);
   live.current = open;
-  const withDocs = docsAvailable && entry?.kind === 'offer';
+  const canEndToEnd = entry?.kind === 'offer';
 
   const words =
     entry == null
@@ -135,19 +132,19 @@ function Entry({
     const out: Command[] = [
       { id: `story-build:${ticket.ident}`, group: 'Actions', title: title != null ? `${label} · ${title}` : label, keywords, icon, run: () => live.current() },
     ];
-    if (withDocs) {
-      const docsLabel = `${label} with docs`;
+    if (canEndToEnd) {
+      const e2e = `${STORY_BUILD_END_TO_END_LABEL}: ${ticket.key}`;
       out.push({
-        id: `story-build-docs:${ticket.ident}`,
+        id: `story-build-e2e:${ticket.ident}`,
         group: 'Actions',
-        title: title != null ? `${docsLabel} · ${title}` : docsLabel,
-        keywords: [...keywords, 'docs', 'reference'],
-        icon,
+        title: title != null ? `${e2e} · ${title}` : e2e,
+        keywords: [...keywords, 'end to end', 'one click', 'automatic'],
+        icon: <RocketIcon size={14} />,
         run: () => live.current(true),
       });
     }
     return out;
-  }, [label, commandKind, ticket.ident, title, withDocs]);
+  }, [label, commandKind, ticket.ident, ticket.key, title, canEndToEnd]);
   useRegisterCommands(`story-build-entry:${ticket.ident}`, commands);
 
   if (entry == null || words == null) return null;
@@ -167,11 +164,16 @@ function Entry({
       </Button>
     );
   }
-  // "Implement" / "Fill gaps", and beside it the menu with "… with docs" when the library has a document.
+  // "Implement" / "Fill gaps", and beside it the menu with "Build end to end" (it starts as the tab opens).
   const verb = entry.action === 'fill_gaps' ? 'Fill gaps' : 'Implement';
   const items: MenuEntry[] = [
     { id: 'plain', label: verb, icon, onSelect: () => open() },
-    ...(withDocs ? [{ id: 'docs', label: `${verb} with docs`, icon: <BookIcon size={12} />, onSelect: () => open(true) }] : []),
+    {
+      id: 'end-to-end',
+      label: STORY_BUILD_END_TO_END_LABEL,
+      icon: <RocketIcon size={12} />,
+      onSelect: () => open(true),
+    },
   ];
   return (
     <SplitButton

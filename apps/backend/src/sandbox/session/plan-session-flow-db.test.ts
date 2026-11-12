@@ -578,13 +578,14 @@ describe('no usable plan: the ONE repair turn and the budget gate', () => {
   });
 });
 
-describe('Implement with docs', () => {
-  it('refuses the docs start when no document is built; otherwise copies the docs in read only and checks docs evidence', async () => {
+describe('The reference documents', () => {
+  it('the docs are not a choice: none built ⇒ none; built ⇒ copied in read only, offered as optional, docs evidence checked', async () => {
     const IDENT3 = 'jira:https://acme.atlassian.net#ACME-402';
+    // No document built: the start is not refused (the old `docs: true` is ignored), and nothing goes in.
     docsBuilt = false;
-    const no = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, docs: true });
-    expect(no.statusCode).toBe(400);
-    expect(no.json()).toEqual({ error: 'NoDocs', message: 'No reference documents are built for this workspace.' });
+    const none = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, docs: true });
+    expect(none.statusCode, none.body).toBe(202);
+    expect((await rowOf(none.json().buildId)).withDocs).toBe(false);
 
     // Free a slot: the earlier sessions close.
     await M._closeAllSessionsForTest();
@@ -592,19 +593,26 @@ describe('Implement with docs', () => {
     const plan = PLAN();
     (plan.contentions as any[])[0].evidence.push({ kind: 'docs', link: 'billing/sections/01-refunds.md', quote: 'Refunds are allowed for 14 days after the order.' });
     answers.push(withBlock('With the handbook.', plan));
-    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, docs: true });
+    // A document is built: the session gets it with NO docs field on the start.
+    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3 });
     expect(r.statusCode, r.body).toBe(202);
     const id = r.json().buildId;
     const b = await until(id, (x) => x.session?.phase === 'plan_ready', 'docs plan');
     expect(b.session!.boot.map((x) => [x.key, x.state, x.detail])).toContainEqual(['docs', 'done', '1 section']);
     expect(b.session!.conversation[0]).toMatchObject({ kind: 'reader', text: 'Plan with docs' });
-    expect(sentToClaude.at(-1)).toContain('Read `/home/agent/.limn/docs/INDEX.md`, the sections that apply, and `/workspace/DOCS.md`.');
+    // THE AGENT DECIDES: the documents may not apply; it reads the index first and says which it used.
+    expect(sentToClaude.at(-1)).toContain(
+      'They may not apply to this ticket: read `/home/agent/.limn/docs/INDEX.md` and `/workspace/DOCS.md`, decide which sections help, and read only those.',
+    );
+    expect(sentToClaude.at(-1)).toContain('One of them says which document sections you used, or that none applied.');
     expect(b.session!.plan!.withDocs).toBe(true);
     expect(b.session!.plan!.latest!.contentions[0]!.evidence.map((e) => e.kind)).toEqual(['code', 'docs']);
     expect(b.session!.plan!.latest!.contentions[0]!.evidence[1]).toMatchObject({ kind: 'docs', path: 'billing/sections/01-refunds.md', docTitle: 'Billing handbook', verdict: 'contradicts' });
     const files = fake.files(`limn-${(await rowOf(id)).sandboxRef}-sandbox`);
     expect(String(files.get('/home/agent/.limn/docs/billing/sections/01-refunds.md'))).toBe(SECTION);
-    expect(String(files.get('/workspace/TICKET.md'))).toContain('Reference documents for this ticket are in `/home/agent/.limn/docs/` (read only).');
+    expect(String(files.get('/workspace/TICKET.md'))).toContain(
+      'Reference documents are in `/home/agent/.limn/docs/` (read only). They may not apply to this ticket: start at INDEX.md and use only the sections that help.',
+    );
     expect(String(files.get('/workspace/DOCS.md'))).toMatch(/Limn has no current docs check for this ticket/);
     expect((await rowOf(id)).withDocs).toBe(true);
   });

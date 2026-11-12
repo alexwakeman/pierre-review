@@ -17,6 +17,7 @@ import {
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  StoryBuildEndToEndTicket,
   BlastRadiusConfig,
   SprintStatusAutoOrder,
   SprintStatusSettings,
@@ -2175,6 +2176,11 @@ export const aiFixes = sqliteTable(
     commentVerdicts: text('comment_verdicts'),
     // 0078. Who started the run ('manual' | 'auto'); NULL on older rows reads as 'manual'.
     trigger: text('trigger'),
+    // 0190 — PUSH WHEN DONE (docs/CLAUDE-REVIEW.md § AI Fix "Push when done"): the reader's tick at start (ON by
+    // default in the SPA). A MANUAL fix whose build turn leaves work, a valid report with nothing unaddressed,
+    // on the reader's OWN PR, closes and is pushed through the Push button's path (coding/ai-fix/auto-push.ts
+    // `maybePushWhenDone`). Otherwise the session stays open and says why.
+    pushWhenDone: integer('push_when_done', { mode: 'boolean' }).notNull().default(false),
     // 0078. seed === 'review': JSON AiFixReviewItem[] — the items the run was given, refs and all,
     // written at insert (`included: false` = left out for the prompt budget). NULL otherwise.
     reviewItems: text('review_items'),
@@ -4640,6 +4646,8 @@ export const storyBuilds = sqliteTable(
     // THE REVIEW LOOP (migration 0186; docs/STORY-BUILD.md § The review loop): with `auto_push` on, the build
     // is pushed, reviewed and fixed for at most `loop_rounds` rounds, then the PR opens. `loop_claimed_at` is
     // the start claim (compare-and-set, once per build); state / round / pause are written at every step.
+    // Always WRITTEN at start (clampLoopRounds; default STORY_BUILD_LOOP_ROUNDS_DEFAULT = 4). The column
+    // default 3 is the migration-0186 value and is never relied on.
     loopRounds: integer('loop_rounds').notNull().default(3),
     loopState: text('loop_state'),
     loopRound: integer('loop_round').notNull().default(0),
@@ -4654,6 +4662,14 @@ export const storyBuilds = sqliteTable(
     autoApprovePlan: integer('auto_approve_plan', { mode: 'boolean' }).notNull().default(false),
     planAutoApprovedAt: integer('plan_auto_approved_at', { mode: 'timestamp' }),
     ticketReviewDoneAt: integer('ticket_review_done_at', { mode: 'timestamp' }),
+    // BUILD END TO END (migration 0189; docs/STORY-BUILD.md § Build end to end): the reader's one-click start
+    // (plan approved automatically, the review loop, then the ticket). When the loop has opened the PRs, Limn
+    // updates the Jira ticket from the approved plan and comments on it under the reader's login — CLAIMED
+    // (`e2e_ticket_claimed_at`, compare-and-set) before the first write, NEVER retried; the outcome is
+    // `e2e_ticket_json` (shared `StoryBuildEndToEndTicket`).
+    endToEnd: integer('end_to_end', { mode: 'boolean' }).notNull().default(false),
+    e2eTicketClaimedAt: integer('e2e_ticket_claimed_at', { mode: 'timestamp' }),
+    e2eTicketJson: text('e2e_ticket_json', { mode: 'json' }).$type<StoryBuildEndToEndTicket>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),

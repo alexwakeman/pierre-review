@@ -62,7 +62,7 @@ export interface PrepareSessionArgs {
   mode?: 'implement' | 'fill_gaps';
   /** A story session opens with a planning turn (seed.ts `planFirst`). */
   planFirst?: boolean;
-  /** "Implement with docs": copy the reference documents in AFTER the mirror, before the services and the
+  /** The reference documents: copy the reference documents in AFTER the mirror, before the services and the
    *  seed (docs.ts). Returns where they are, or null when none were copied. */
   docs?: (mirror: MirrorResult) => Promise<{ dir: string } | null>;
   fix?: FixSeedInput;

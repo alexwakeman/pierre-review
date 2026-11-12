@@ -423,6 +423,8 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     autoApprovePlan: row.autoApprovePlan === true,
     planAutoApprovedAt: iso(row.planAutoApprovedAt),
     ticketReviewDoneAt: iso(row.ticketReviewDoneAt),
+    endToEnd: row.endToEnd === true,
+    endToEndTicket: row.e2eTicketJson ?? null,
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),

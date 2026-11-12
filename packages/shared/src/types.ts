@@ -9887,6 +9887,10 @@ export interface GenerateFixBody {
   // seed === 'plain' (required, non-blank, at most AI_FIX_MAX_INSTRUCTION_CHARS): what to fix.
   // (The SPA no longer offers a plain fix; the route still accepts it.)
   instruction?: string;
+  // "PUSH WHEN DONE" (the start panel's tick, ON by default): when the fix finishes with work, a valid report
+  // and nothing unaddressed, on the reader's OWN PR, Limn pushes it to the PR's branch without a press (the
+  // session ends, as any push ends it). Otherwise it waits for Push and the session says why.
+  pushWhenDone?: boolean;
   // seed === 'review' only: the reader's selection from the fix picker — `AiFixPickerItem.key`s to
   // include. Absent ⇒ the server's defaults (`defaultIncluded`). An unknown key is ignored; a list
   // selecting nothing ⇒ 409 NothingToFix. The budget is applied AFTER selection.

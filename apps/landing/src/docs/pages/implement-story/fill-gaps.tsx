@@ -60,8 +60,8 @@ export default function Page(): JSX.Element {
       <H2 id="the-flow">The flow</H2>
       <Steps>
         <li>
-          On the story view, press <Ui>Fill gaps</Ui>, or <Ui>Fill gaps with docs</Ui> from the caret when the workspace has
-          reference documents.
+          On the story view, press <Ui>Fill gaps</Ui>. (<Ui>Build end to end</Ui>, from the caret, runs the whole build
+          from one press: see <DocLink to="implement-story/overview#build-end-to-end">Build end to end</DocLink>.)
         </li>
         <li>
           In the build tab, press <Ui>Fill gaps</Ui>. The tab says{' '}

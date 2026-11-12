@@ -212,3 +212,32 @@ describe('loadSeedThreads — who is a style bot', () => {
     expect(await loadSeedThreads(ctx, 1, pr.id)).toEqual([]);
   });
 });
+
+describe('push when done: the hold rule (pure)', () => {
+  const base = { trigger: 'manual', pushWhenDone: true, pushedAt: null, changeReport: JSON.stringify({ changes: [], unaddressed: [], notReported: [] }) };
+  it('pushes a clean fix on my own PR', () => {
+    expect(mod.pushWhenDoneHold(base, { hasWork: true, own: true })).toBeNull();
+  });
+  it('holds, and says why, for each rule', () => {
+    const u = mod.pushWhenDoneHold({ ...base, changeReport: JSON.stringify({ unaddressed: [{ ref: 'C1' }, { ref: 'C2' }] }) }, { hasWork: true, own: true });
+    expect(u).toEqual({ hold: 'unaddressed', count: 2 });
+    expect(mod.pushWhenDoneHoldLine(u)).toBe('Not pushed: the agent says 2 items are not fixed. Ask for more, or press Push.');
+    const nr = mod.pushWhenDoneHold({ ...base, changeReport: JSON.stringify({ unaddressed: [], notReported: ['F1'] }) }, { hasWork: true, own: true });
+    expect(mod.pushWhenDoneHoldLine(nr)).toBe("Not pushed: the agent's report does not cover 1 item. Ask for more, or press Push.");
+    expect(mod.pushWhenDoneHold({ ...base, changeReport: null }, { hasWork: true, own: true })).toEqual({ hold: 'no_report' });
+    expect(mod.pushWhenDoneHold({ ...base, changeReport: '{not json' }, { hasWork: true, own: true })).toEqual({ hold: 'no_report' });
+    expect(mod.pushWhenDoneHold(base, { hasWork: true, own: false })).toEqual({ hold: 'not_own' });
+  });
+  it('says nothing when it is off, already pushed, or has nothing to push', () => {
+    for (const h of [
+      mod.pushWhenDoneHold({ ...base, pushWhenDone: false }, { hasWork: true, own: true }),
+      mod.pushWhenDoneHold({ ...base, trigger: 'auto' }, { hasWork: true, own: true }),
+      mod.pushWhenDoneHold({ ...base, pushedAt: new Date() }, { hasWork: true, own: true }),
+      mod.pushWhenDoneHold(base, { hasWork: false, own: true }),
+    ]) {
+      expect(h).not.toBeNull();
+      expect(mod.pushWhenDoneHoldLine(h)).toBeNull();
+    }
+  });
+});
+

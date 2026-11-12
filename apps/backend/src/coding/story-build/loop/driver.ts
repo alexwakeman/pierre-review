@@ -1,5 +1,5 @@
 // THE REVIEW LOOP — THE STATE MACHINE (docs/STORY-BUILD.md § The review loop). "After the build: review and
-// fix, then open the pull request" (`story_builds.auto_push`; `loop_rounds` = N, default 3):
+// fix, then open the pull request" (`story_builds.auto_push`; `loop_rounds` = N, default 4):
 //
 //   built ──maybeStartLoop──► [CLAIM loop_claimed_at] ──► pushing (round 0: each target's branch, no PR)
 //   pushing ──► reviewing k (each target's code review — the workspace's AI review providers, a pair runs
@@ -1079,6 +1079,9 @@ async function stepOpen(ctx: AgentContext, accountId: number, b: StoryBuildRow, 
   await setState(ctx, accountId, b.id, 'done', k, { loopFinishedAt: seams.now() });
   seams.session.release(b.id);
   if (opened > 0) seams.session.notice(b.id, opened === 1 ? 'Limn opened the pull request.' : `Limn opened ${opened} pull requests.`);
+  // BUILD END TO END: the ticket step (update + comment), once, after the PRs are open and the loop's state
+  // is stored. It has its own claim and record (../end-to-end.ts) and never throws.
+  if (b.endToEnd === true) await seams.afterLoopDone?.(ctx, accountId, b.id).catch(() => {});
 }
 
 /** The PR is open: the target is pushed like a normal push (the session's marks read it), and ended. */

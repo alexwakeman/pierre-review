@@ -28,9 +28,22 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        A finished fix waits in the <Ui>AI Fix</Ui> tab until you decide. Push sends it to GitHub from your computer,
-        with your own GitHub sign-in; the sandbox never holds your GitHub credentials. This page also covers auto fix,
-        which prepares a fix by itself after an auto review of your own pull request.
+        A finished fix is pushed by itself when you left <Ui>Push when done</Ui> ticked (below); otherwise it waits in
+        the <Ui>AI Fix</Ui> tab until you decide. Push sends it to GitHub from your computer, with your own GitHub
+        sign-in; the sandbox never holds your GitHub credentials. This page also covers auto fix, which prepares a fix
+        by itself after an auto review of your own pull request.
+      </p>
+
+      <H2 id="push-when-done">Push when done</H2>
+      <p>
+        <Ui>Push when done</Ui>, beside <Ui>Start fix</Ui>, is ticked by default, and Limn remembers your choice in this
+        browser. When the fix finishes on your own pull request, Limn pushes it to the pull request&rsquo;s branch the
+        same way as <Ui>Push</Ui>, and the session ends.
+      </p>
+      <p>
+        It waits for your press instead, and the session says why, when the agent says something is not fixed, its
+        report does not cover every item or is missing, or the pull request is someone else&rsquo;s. Untick it to keep
+        talking to the agent before anything is pushed: a push ends the session.
       </p>
 
       <H2 id="push">Push a fix</H2>

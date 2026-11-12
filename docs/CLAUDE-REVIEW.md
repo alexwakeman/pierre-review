@@ -4682,6 +4682,21 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
   auto fix, under "Push automatically".
 
+### Push when done (`coding/ai-fix/auto-push.ts` `pushWhenDoneHold`; migration 0190; 2026-11-12)
+
+A MANUAL fix (the picker's Start fix, or Plan first's build) carries the reader's "Push when done" tick (ON by
+default in the SPA, remembered per browser; `ai_fixes.push_when_done`). After every BUILD turn the session asks
+`pushWhenDoneReady`: PUSH when the turn left work (`fixRowHasWork`), the agent's report is valid with nothing
+`unaddressed` and nothing `notReported`, and the PR is the reader's OWN (`prAuthorIsAccount`) — then
+`afterBuildTurn` answers `'close'`, and the close (`onClosed`, phase `built`) pushes through `maybePushWhenDone`
+→ `pushFix` 'existing' (the Push button's path: never forced, HEAD_MOVED refused, write access re-checked;
+ledger origin `reader_pressed` — the tick was the press). A failed push is recorded on the row ("Automatic push
+failed: …") and never retried. Otherwise the session STAYS OPEN and says why in ONE notice ("Not pushed: the
+agent says 2 items are not fixed. Ask for more, or press Push." · its report does not cover N items · no valid
+report · "this is not your pull request" — a teammate's branch is pushed only on a press). A push ends a fix
+session, so a reader who wants to talk first unticks it. An automatic fix never reads the tick (its own rule is
+"Push automatically", above).
+
 ### The fix start queue (`coding/ai-fix/start-queue.ts`, 2026-11-12)
 
 Up to `LIMN_SANDBOX_MAX_BUILDS` (3) fixes BUILD at once (story builds share the slots; the open-session cap,

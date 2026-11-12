@@ -230,6 +230,8 @@ export const FIX = {
     { id: 'email', sev: 'Minor', tone: 'amber', text: 'Retried refund sends a second email.', on: false },
   ] as { id: string; sev: string; tone: Tone; text: string; on: boolean }[],
   start: 'Start fix',
+  // "Push when done" (ticked by default, as in the app): a clean fix on your own PR is pushed with no press.
+  pushWhenDone: 'Push when done',
   busy: 'Setting up the sandbox…',
   ready: 'Ready to push',
   // The session's rows after the build turn (the agent runs the checks in the sandbox itself).

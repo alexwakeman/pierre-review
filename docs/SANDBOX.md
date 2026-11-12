@@ -519,7 +519,9 @@ session. A driver, the manager and the UI read these strings; nothing rebuilds t
 `limn.plan/1` shape and its rules (goldens `__fixtures__/seed-plan-*.md`), and the seed writes the
 checker and its context (§ The plan and its checks); after Approve `PLAN.md` joins the root files.
 
-**Reference documents** ("Implement with docs"; `workspace/docs.ts`, `docs-choose.ts`): a `docs` boot step
+**Reference documents** (every session whose workspace has a built document — not a choice since
+2026-11-12; the agent decides whether they help: docs/STORY-BUILD.md § Plan first; `workspace/docs.ts`,
+`docs-choose.ts`): a `docs` boot step
 after `repos`, before `services`, copies a READ-ONLY SUBSET of the library to `/home/agent/.limn/docs/`
 at the library's own relative paths (`INDEX.md`, every `CONTENTS.md`, the chosen sections, a
 `SHORTLIST.md`), as root, files 0444 and folders 0555; no host folder is mounted and no model is asked.

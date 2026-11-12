@@ -249,3 +249,38 @@ export function spliceAcSection(description: string, criteria: string, heading: 
   const base = (description ?? '').trim();
   return (base === '' ? `${head}\n\n${body}` : `${base}\n\n${head}\n\n${body}`).trim();
 }
+
+// THE TICKET UPDATE'S DIFF RULE — the plan panel's "Update ticket" (frontend TicketUpdatePanel) and the
+// end-to-end build's host-side update (backend coding/story-build/end-to-end.ts) send the SAME body.
+const sameText = (a: string, b: string): boolean => a.replace(/\r\n?/g, '\n').trim() === b.replace(/\r\n?/g, '\n').trim();
+
+/** What the two boxes start with. */
+export function ticketReviewSeed(
+  draft: { description: string | null; acceptanceCriteria: string | null } | null,
+  current: { description: string; acceptanceCriteria: string; acLocation: TicketAcLocation } | null,
+): { description: string; criteria: string } {
+  const description = draft?.description ?? current?.description ?? '';
+  if (draft?.acceptanceCriteria != null) return { description, criteria: draft.acceptanceCriteria };
+  if (current?.acLocation.kind === 'description' && findAcSection(description) != null) {
+    return { description, criteria: acSectionText(description) };
+  }
+  return { description, criteria: current?.acceptanceCriteria ?? '' };
+}
+
+/**
+ * The body "Update ticket" sends: ONLY what differs from the ticket's current text (null = leave it).
+ * Criteria in the description: the criteria box is sent only when it differs from the criteria section
+ * of the description being sent (the host splices it in), so an edit made in the description box is
+ * never overwritten.
+ */
+export function ticketUpdateBody(
+  edited: { description: string; criteria: string },
+  current: { description: string; acceptanceCriteria: string; acLocation: TicketAcLocation },
+): { description: string | null; acceptanceCriteria: string | null } {
+  const description = sameText(edited.description, current.description) ? null : edited.description;
+  let acceptanceCriteria: string | null = sameText(edited.criteria, current.acceptanceCriteria) ? null : edited.criteria;
+  if (current.acLocation.kind === 'description' && findAcSection(edited.description) != null && sameText(edited.criteria, acSectionText(edited.description))) {
+    acceptanceCriteria = null;
+  }
+  return { description, acceptanceCriteria };
+}

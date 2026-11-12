@@ -53,9 +53,12 @@ plan is a structured panel; when the story needs work the plan carries a DRAFT t
 reader may edit and copy — and, since 2026-11-08, write to a Jira ticket with **Update ticket** (their
 press, once; docs/TRACKERS.md § The ticket update — Approve then reads the updated ticket); ≤ 3 PRs per repository, ≤ 6 in all, each building and
 passing its tests on its own; Fill gaps gets the same flow, its plan about the gaps; after Approve the
-build runs to the end (Stop / redirect stay). The split button offers "Implement with docs" / "Fill gaps
-with docs" when the workspace has a built reference document (`docsContextFor().hasDocs`, the `available`
-Check against docs reads — not `.usable`, which also needs the Claude Review switch). There is no "build
+build runs to the end (Stop / redirect stay). ⚠ **THE REFERENCE DOCUMENTS ARE NOT A CHOICE** (2026-11-12):
+every session gets them when the workspace has a built document (`docsContextFor().hasDocs`, the
+`available` Check against docs reads — not `.usable`, which also needs the Claude Review switch), and THE
+AGENT DECIDES whether they help: the opening turn says they may not apply — read `INDEX.md` and `DOCS.md`,
+read only the sections that help, and say in the plan's sentences which it used or that none applied
+(TICKET.md and DOCS.md say the same). The start body's `docs` is ignored. There is no "build
 without a plan": a session whose agent never sends a usable plan can only be messaged or discarded.
 
 - **The opening turn** (`sandbox/session/plan.ts planOpeningInstruction`) is the subject's `firstTurn`,
@@ -163,7 +166,7 @@ or the description's criteria section — and the write stays the reader's press
 
 From 2026-11-12 (THE REVIEW LOOP, § The review loop):
 - The opt-in is "After the build: review and fix, then open the pull request" — it REUSES
-  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, default 3, 1..6), set in
+  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, default 4 since 2026-11-12 — `STORY_BUILD_LOOP_ROUNDS_DEFAULT`, always written at start; the column default 3 is never read, 1..6), set in
   the Start panel and in the tab until the loop starts. Unticked = the manual flow (Push). The old "Push
   automatically" (one push when the build finishes) is RETIRED: the subject no longer calls
   `maybeAutoPushBuild`.
@@ -293,11 +296,9 @@ ONE component, `apps/frontend/src/components/StoryBuild/StoryBuildEntry.tsx`, th
 story view's action group (beside Check against docs / Redraw design). The story view is mounted by the
 tray, the story tab (`?view=ticket:…`) and the PR view's Story tab (`?prTab=story`), so all three offer it.
 Gated on `me.ai.enabled` (hidden, never disabled); opens the build tab through `useOpenStoryBuild` only.
-It is a SPLIT BUTTON (`components/ui/SplitButton.tsx`): its menu adds "Implement with docs" / "Fill gaps
-with docs" while the library has a built document (the Story section's Check against docs read,
-`available`; nothing new is fetched). The choice only opens the tab (`buildOffer.docs`): the start state's
-"Give the agent the reference documents" box starts ticked, and its one gated Start sends `docs: true`. The
-plan panel and the stack view: docs/FRONTEND.md § The build tab.
+It is a SPLIT BUTTON (`components/ui/SplitButton.tsx`): its menu adds **"Build end to end"** (§ Build end to
+end), which opens the tab AND starts it. The plain action only opens the tab. The plan panel and the stack
+view: docs/FRONTEND.md § The build tab.
 
 - **Inputs.** The tray hands in the board's node: the gate reads it exactly as the board would, and no
   request is made. Elsewhere the view derives the node's fields (`lib/storyBuild.ts`): the stage from the
@@ -559,6 +560,36 @@ stores each build's own choice (`story_builds.auto_approve_plan`).
   update needed"; either sets `ticket_review_done_at` (`POST …/ticket-review {done: true}`), "Show the
   ticket changes" clears it. Until then the build sits at the `ticket` gate of the builds toast. A plan the
   READER approved keeps the old place: the ticket review in the plan panel while the build runs.
+
+## Build end to end (`coding/story-build/end-to-end.ts`; migration 0189; 2026-11-12)
+
+The story view's menu item "Build end to end" is ONE press for the whole build: the plan approved
+automatically (§ Approve automatically: every open point as Agree), the build, THE REVIEW LOOP with
+`STORY_BUILD_LOOP_ROUNDS_DEFAULT` (4) rounds (it stops early when a round finds nothing open; after the last
+round the PR opens ready anyway, naming what is still open), and then THE TICKET STEP.
+
+- **The start.** The menu press leaves a ONE-SHOT, IN-MEMORY request (`lib/storyBuildTab.ts
+  requestEndToEndStart`) and opens the tab with `buildOffer.endToEnd`; the tab's start state takes it once
+  (`takeEndToEndStart`) and sends `{endToEnd: true, autoApprovePlan: true, autoPush: true, loopRounds: 4}`
+  with the menu's default model. ⚠ It does NOT start by itself when the run could not start (no sign-in for
+  the kind) or the provider is over the spend budget — a menu item cannot show `OverBudgetConfirm`, so the
+  panel waits with its "Build end to end" button and the usual two presses. A reload never starts again
+  (the request is never persisted). "Set it up myself" returns to the ordinary panel. The server makes
+  `endToEnd` imply `autoApprovePlan` + `autoPush` (`story_builds.end_to_end`).
+- **The ticket step** runs when the loop is `done` (the PRs are open): `loop/driver.ts` → the
+  `afterLoopDone` seam → `runEndToEndTicketStep`. It CLAIMS `e2e_ticket_claimed_at` (compare-and-set) before
+  the first Jira write and is NEVER retried; the outcome is `e2e_ticket_json` (shared
+  `StoryBuildEndToEndTicket`, on the wire as `StoryBuild.endToEndTicket`).
+  1. The approved plan's `ticketUpdate`, through the SAME diff rule (shared `ticketUpdateBody`) and the SAME
+     writer (`tracker/ticket-update.ts writeTicketUpdate`) as the tab's "Update ticket": only the fields
+     that differ from the ticket as Limn holds it.
+  2. ONE comment (`postTicketComment`, Jira wiki markup, under the reader's own Jira login): the pull
+     requests (links), what changed in the ticket and why (the plan's `why` and the points it settled), and
+     the review rounds. "The earlier text is in this ticket's history" — Jira keeps it.
+  ⚠ The status is never changed. ⚠ Jira only: another tracker records `skipped: 'not_jira'` and writes
+  nothing. A failed update is recorded, still commented on, and leaves the tab's ticket step OPEN (Update
+  ticket is still there); otherwise the step closes (`ticket_review_done_at`). The tab leads the step with
+  one line (`TicketUpdatePanel.tsx endToEndTicketLine`).
 
 ## The builds toast (`components/StoryBuild/StoryBuildsToast.tsx`)
 

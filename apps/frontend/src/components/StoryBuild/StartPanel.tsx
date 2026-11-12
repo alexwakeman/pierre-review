@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
-import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_BUILD_LOOP_ROUNDS_DEFAULT, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
+import { DEFAULT_CLAUDE_REVIEW_MODEL, STORY_BUILD_END_TO_END_LABEL, STORY_BUILD_LOOP_ROUNDS_DEFAULT, STORY_MISSING_HEADING, TICKET_CRITERION_STATUS_LABEL, storyBuildGapsOf, storyBuildOffered, type StoryBuild, type StoryBuildGap } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { useModelPick } from '../../hooks/useModelPick.js';
 import {
@@ -23,7 +23,11 @@ import type { TabTicketMeta } from '../../store/pinnedTabs.js';
 import { storyBuildStatusLine } from '../../lib/storyBuild.js';
 import { AiRunGate } from '../AiSetup.js';
 import { ModelPicker } from '../ModelPicker.js';
-import { WrenchIcon, FillGapsIcon } from '../Icons.js';
+import { RocketIcon, WrenchIcon, FillGapsIcon } from '../Icons.js';
+import { useMe } from '../../hooks/useTriage.js';
+import { useAiBudget } from '../../hooks/useAiBudget.js';
+import { aiGateReadyFor } from '../../lib/aiCapabilities.js';
+import { endToEndStartPending, takeEndToEndStart } from '../../lib/storyBuildTab.js';
 import { Button } from '../ui/Button.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { InfoButton } from '../InfoModal.js';
@@ -33,9 +37,8 @@ import { AUTO_APPROVE_LABEL, AutoApproveInfo, START_PREFS_DEFAULT, START_PREFS_K
 import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 
 // THE START STATE (no open session; docs/SANDBOX.md § Sessions): what a session does in two sentences
-// (it PLANS FIRST: docs/STORY-BUILD.md § Plan first), the docs box ("Give the agent the reference
-// documents", ticked when the story view's "… with docs" opened the tab; shown only while the library has
-// a built document), the review box ("After the build: review and fix, then open the pull request", OFF by
+// (it PLANS FIRST: docs/STORY-BUILD.md § Plan first; the reference documents go in whenever the library has
+// one and the agent uses only what helps — no box since 2026-11-12), the review box ("After the build: review and fix, then open the pull request", OFF by
 // default, the same for Implement and Fill gaps, with its Rounds once ticked; docs/STORY-BUILD.md § The
 // review loop),
 // the container runtime's ONE line (`GET /api/sandbox/runtime`; with none, what is wrong + "How to set
@@ -48,6 +51,13 @@ import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 // — counted before Start by the same rules the boot copies by (lib/sessionInherits.ts). Three local
 // reads, asked only while this panel offers Start: the folder check (disk walks), the sandbox setting
 // and the project skills (`git ls-tree` in Limn's clone cache). "Change" opens Settings → Sandbox.
+//
+// BUILD END TO END (docs/STORY-BUILD.md § Build end to end): opened from the story view's "Build end to
+// end", the panel is that one start — the plan approved automatically, the review loop (4 rounds), then the
+// Jira ticket updated and commented on — and it STARTS ITSELF once (`takeEndToEndStart`, an in-memory
+// request: a reload never starts it again). It holds back, leaving the Start button, when the run could not
+// start or would need the over-budget confirm (a reader's run is never refused, it asks first).
+// "Set it up myself" goes back to the ordinary panel.
 //
 // "FILL GAPS" (a started ticket whose current story check found gaps — shared `storyBuildOffered`): the
 // same start, worded for the gaps, listed UP FRONT from that check (`check.reviewId`, one read of the
@@ -79,13 +89,14 @@ export function StartPanel({
   const node = graph.data?.nodes.find((n) => n.ident === ident);
   const offered = node != null ? storyBuildOffered({ ...node, build: null }) : (offer?.action ?? null);
   const fill = offered === 'fill_gaps';
-  // "… with docs" (the story view's menu ticks it): offered only while the library has a built document.
-  // The Story section reads the same query, so it is usually in memory already.
+  // The reference documents go in whenever the library has one (no choice); this only words the panel. The
+  // Story section reads the same query, so it is usually in memory already.
   const docsQ = useStoryDocsAlignment(workspaceId, ident);
   const docsAvailable = docsQ.data?.available === true;
-  const [docsPicked, setDocsPicked] = useState(offer?.docs === true);
-  useEffect(() => setDocsPicked(offer?.docs === true), [offer?.docs]);
-  const docs = docsAvailable && docsPicked;
+  // BUILD END TO END (see the header).
+  const [endToEnd, setEndToEnd] = useState(offer?.endToEnd === true);
+  useEffect(() => setEndToEnd(offer?.endToEnd === true), [offer?.endToEnd]);
+  const e2e = endToEnd && offered != null;
   // Both automatic boxes remember the reader's last choice (this browser): two presses from Implement to a
   // reviewed pull request once they are ticked.
   const [prefs, setPrefs] = useLocalStorage<StartPrefs>(START_PREFS_KEY, START_PREFS_DEFAULT);
@@ -99,11 +110,24 @@ export function StartPanel({
       action: fill ? 'fill_gaps' : 'implement',
       provider: pick.chosen.provider,
       model: pick.chosen.model,
-      ...(docs ? { docs: true } : {}),
-      ...(autoPush ? { autoPush: true, loopRounds } : {}),
-      ...(autoApprove ? { autoApprovePlan: true } : {}),
+      ...(e2e
+        ? { endToEnd: true, autoPush: true, autoApprovePlan: true, loopRounds: STORY_BUILD_LOOP_ROUNDS_DEFAULT }
+        : { ...(autoPush ? { autoPush: true, loopRounds } : {}), ...(autoApprove ? { autoApprovePlan: true } : {}) }),
     });
   };
+  // The one-shot start of "Build end to end": decided once the sign-in and budget answers are in.
+  const me = useMe().data;
+  const budget = useAiBudget(pick.chosen.provider, { enabled: e2e });
+  const gateReady = aiGateReadyFor(me, { kind: 'story_build', anyProvider: true, provider: pick.chosen.provider }) === true;
+  const goRef = useRef(go);
+  goRef.current = go;
+  useEffect(() => {
+    if (!e2e || busy || !endToEndStartPending(ident)) return;
+    if (me == null || budget.isLoading) return;
+    const take = takeEndToEndStart(ident);
+    // Not signed in, or over the spend budget: no automatic start — the Start button (and its confirm) stays.
+    if (take && gateReady && budget.data?.status?.overBudget !== true) goRef.current();
+  }, [e2e, busy, ident, me, budget.isLoading, budget.data, gateReady]);
   const err = start.error instanceof ApiError ? start.error : start.error != null ? { message: (start.error as Error).message } : null;
   const lastLine = last == null ? null : last.session != null ? sessionStatusLine(last.session, last.error) : storyBuildStatusLine(last);
   return (
@@ -133,30 +157,48 @@ export function StartPanel({
       </div>
       {offered != null && <InheritsLine workspaceId={workspaceId} />}
       {offered != null && docsAvailable && (
-        <label data-testid="story-build-start-docs" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
-          <CheckboxBox checked={docsPicked} disabled={busy} onChange={(e) => setDocsPicked(e.target.checked)} />
-          Give the agent the reference documents
+        <p data-testid="story-build-start-docs" className="mt-3 flex w-fit items-center gap-1.5 text-body text-ui-mute">
+          The agent also gets the workspace's reference documents.
           <InfoButton title="Reference documents">
             <p>Limn copies the parts of this workspace's reference library that match the story into the sandbox, read only.</p>
-            <p className="mt-2">The agent can then cite a document where the story does not match it.</p>
+            <p className="mt-2">
+              The agent reads their index first and uses only the sections that help with this ticket. The plan says which it
+              used. It can cite a document where the story does not match it.
+            </p>
           </InfoButton>
-        </label>
+        </p>
       )}
-      {offered != null && (
+      {e2e && (
+        <div data-testid="story-build-start-e2e" className="mt-3 rounded-ui bg-ui-raise p-3">
+          <p className="flex items-center gap-1.5 text-body font-semibold text-ui-ink">
+            <RocketIcon size={13} />
+            {STORY_BUILD_END_TO_END_LABEL}
+            <EndToEndInfo />
+          </p>
+          <p className="mt-1 text-body text-ui-mute">
+            Limn approves the plan, reviews and fixes the work for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds, opens the pull
+            request, then updates the Jira ticket and comments on it as you.
+          </p>
+          <button type="button" className="hit mt-1 text-meta text-ui-ink underline" disabled={busy} onClick={() => setEndToEnd(false)}>
+            Set it up myself
+          </button>
+        </div>
+      )}
+      {offered != null && !e2e && (
         <label data-testid="story-build-start-auto-approve" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
           <CheckboxBox checked={autoApprove} disabled={busy} onChange={(e) => setAutoApprove(e.target.checked)} />
           {AUTO_APPROVE_LABEL}
           <AutoApproveInfo />
         </label>
       )}
-      {offered != null && (
+      {offered != null && !e2e && (
         <label data-testid="story-build-start-auto-push" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
           <CheckboxBox checked={autoPush} disabled={busy} onChange={(e) => setAutoPush(e.target.checked)} />
           {AUTO_PUSH_LABEL}
           <AutoPushInfo />
         </label>
       )}
-      {offered != null && autoPush && <LoopRoundsControl value={loopRounds} disabled={busy} onChange={setLoopRounds} />}
+      {offered != null && !e2e && autoPush && <LoopRoundsControl value={loopRounds} disabled={busy} onChange={setLoopRounds} />}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {offered != null ? (
           <>
@@ -166,12 +208,12 @@ export function StartPanel({
                 variant="primary"
                 data-ai-run
                 data-testid="story-build-start-button"
-                icon={fill ? <FillGapsIcon size={13} /> : <WrenchIcon size={13} />}
+                icon={e2e ? <RocketIcon size={13} /> : fill ? <FillGapsIcon size={13} /> : <WrenchIcon size={13} />}
                 busy={busy}
                 busyLabel="Starting…"
                 onClick={go}
               >
-                {fill ? (docs ? 'Fill gaps with docs' : 'Fill gaps') : docs ? 'Start with docs' : 'Start'}
+                {e2e ? STORY_BUILD_END_TO_END_LABEL : fill ? 'Fill gaps' : 'Start'}
               </Button>
             </AiRunGate>
           </>
@@ -301,3 +343,20 @@ function GapLine({ g }: { g: StoryBuildGap }): JSX.Element {
     </li>
   );
 }
+
+/** What "Build end to end" does, behind its ⓘ. */
+function EndToEndInfo(): JSX.Element {
+  return (
+    <InfoButton title={STORY_BUILD_END_TO_END_LABEL}>
+      <p>One press runs the whole build:</p>
+      <ul className="mt-1 list-disc pl-5">
+        <li>The agent plans. Limn approves the plan, taking every open point as Agree.</li>
+        <li>The agent builds. Limn reviews the work and the agent fixes it, for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds; it stops early when nothing is open.</li>
+        <li>Limn opens the pull request, ready for review, even if something is still open. The pull request lists it.</li>
+        <li>Limn updates the Jira ticket from the plan and comments on it as you, saying what changed and linking the pull request. The status does not change.</li>
+      </ul>
+      <p className="mt-2">The ticket's earlier text is in its history in Jira.</p>
+    </InfoButton>
+  );
+}
+

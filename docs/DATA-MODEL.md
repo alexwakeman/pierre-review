@@ -940,10 +940,19 @@ before `story_builds` and exported; ids are BUILD-LOCAL (never a `claude_reviews
 - `story_build_ac_responses` — the agent's answer per criterion (`AC<n>` / `M<n>`) and round (unique
   `(build_id, round, ref)`); `not_reported` placeholders are written when REVIEW.md is.
 
+## `story_builds.end_to_end` + `e2e_ticket_*` — Build end to end (CORE; migration `0189`)
+
+`end_to_end` (bool, default 0): the reader started the build with "Build end to end" (implies
+`auto_approve_plan` + `auto_push`). `e2e_ticket_claimed_at`: the CLAIM on its one ticket step (update +
+comment), compare-and-set from NULL before the first Jira write, never retried. `e2e_ticket_json`: what it
+did (shared `StoryBuildEndToEndTicket`: `at`, `updated[]`, `commented`, `skipped: 'not_jira'`, `error`).
+Erased with the build row. [STORY-BUILD.md](STORY-BUILD.md) § Build end to end.
+
 ## `ai_fixes` — AI Fix runs (CORE)
 
 ONE row per fix run (history kept; a re-run is a new row), account-scoped, in `accountScopedTables()` and
-both delete paths. **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
+both delete paths. `push_when_done` (migration `0190`, bool, default 0): a MANUAL fix's "Push when done" tick
+([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done). **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
 sessions): `session_phase` (shared `SandboxSessionPhase`; NULL = a row of the removed shell-less fixer, read
 as history), and `status` is DERIVED from it (shared `aiFixStatusForPhase`), never written apart. `sandbox_ref`
 (NULL once torn down), `agent_ref`, `runtime`, `session_json` (boot steps, conversation, repositories, the

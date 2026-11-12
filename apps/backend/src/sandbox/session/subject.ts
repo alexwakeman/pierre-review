@@ -116,7 +116,7 @@ export interface SessionSubject {
   keptPhase?(phase: SandboxSessionPhase): Promise<SandboxSessionPhase | null>;
   /** The phase after a boot with no first turn (a resumed plan: plan_ready). Absent ⇒ built / ready. */
   bootedPhase?(l: SubjectLive): SandboxSessionPhase | null;
-  /** "with docs": copy the reference documents in after the mirror. null ⇒ none (the step says why). */
+  /** The reference documents: copy the reference documents in after the mirror. null ⇒ none (the step says why). */
   prepareDocs?(l: SubjectLive): Promise<{ dir: string | null; detail: string | null }>;
   /** A `limn-svc run` was recorded. */
   onServiceRun?(l: SubjectLive): void;

@@ -792,8 +792,8 @@ alone. A run that consults the library:
 The switch is per workspace, `workspaces.docs_in_review` (NULL/false = OFF), via
 `GET`/`PUT /api/workspaces/:id/docs-settings`; the ONE reader/writer is `store.ts`.
 
-**The build session ("Implement with docs", 2026-11-07)** is the one exception to `usable`: it is offered
-on `hasDocs` (the same `available` Check against docs reads) and gets a COPY, not the folder — a read-only,
+**The build session (2026-11-07; every session since 2026-11-12, the agent deciding whether they help)** is
+the one exception to `usable`: it gets them on `hasDocs` (the same `available` Check against docs reads) and gets a COPY, not the folder — a read-only,
 root-owned subset under `/home/agent/.limn/docs/` at the library's own relative paths, chosen without a
 model call (the current Check against docs run's sections, else the whole small library, else the top 30
 full-text hits; `sandbox/workspace/docs.ts`). Its plan's docs evidence is checked with

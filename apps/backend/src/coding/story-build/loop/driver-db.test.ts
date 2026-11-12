@@ -235,7 +235,7 @@ beforeEach(() => {
 let identSeq = 0;
 let prSeq = 0;
 /** A built session with both repositories ready and the option on. */
-async function readyBuild(o: { rounds?: number; autoPush?: boolean; only?: 'api' } = {}): Promise<number> {
+async function readyBuild(o: { rounds?: number; autoPush?: boolean; only?: 'api'; endToEnd?: boolean } = {}): Promise<number> {
   const started = await P.insertStoryBuild(ctx, { accountId: 1, workspaceId: ws, ident: `${IDENT}-${++identSeq}`, ticketKey: 'PAY-142', ticketTitle: 'Refunds', wantDiagram: false, wantDocs: false, provider: 'claude', model: 'claude-opus-5-5' });
   const id = started.id;
   await P.updateStoryBuild(ctx, 1, id, {
@@ -243,6 +243,7 @@ async function readyBuild(o: { rounds?: number; autoPush?: boolean; only?: 'api'
     sessionPhase: 'built',
     autoPush: o.autoPush ?? true,
     loopRounds: o.rounds ?? 3,
+    ...(o.endToEnd === true ? { endToEnd: true } : {}),
     seedJson: { version: 1, story: { key: 'PAY-142', title: 'Refunds', text: 'Refund card payments.', url: null }, criteria: [{ n: 1, text: 'Refund a card' }, { n: 2, text: 'Email the buyer' }], comments: null, cards: [] },
   });
   const common = { accountId: 1, buildId: id, baseRef: 'main', baseSha: 'b'.repeat(40), stackedOnPrId: null, status: 'ready' as const };
@@ -317,6 +318,20 @@ describe('the review loop', () => {
       [2, 0, 0],
     ]);
     expect(loop!.history[0]!.reviews[0]!.findings[0]!.response).toMatchObject({ action: 'fixed', text: 'Done F1.' });
+  });
+
+  it('BUILD END TO END: the ticket step runs once the PRs are open — and never for an ordinary build', async () => {
+    const calls: number[] = [];
+    D.setStoryLoopSeamsForTests({ ...seams(), afterLoopDone: async (_c, _a, buildId) => void calls.push(buildId) });
+    const e2e = await readyBuild({ endToEnd: true, only: 'api' });
+    await D.maybeStartLoop(ctx, { accountId: 1, buildId: e2e });
+    await until(e2e, (x) => x.loopState === 'done', 'done');
+    expect(G.opened).toHaveLength(1);
+    expect(calls).toEqual([e2e]);
+    const plain = await readyBuild({ only: 'api' });
+    await D.maybeStartLoop(ctx, { accountId: 1, buildId: plain });
+    await until(plain, (x) => x.loopState === 'done', 'done');
+    expect(calls).toEqual([e2e]);
   });
 
   it('after N rounds the closing review opens the PR anyway, naming what is still open', async () => {

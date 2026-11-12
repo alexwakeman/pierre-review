@@ -234,23 +234,23 @@ test.describe('Implement story', () => {
     const view = page.getByTestId('story-build-overlay');
     const box = view.getByTestId('story-build-start-auto-push');
     await expect(box).toContainText('After the build: review and fix, then open the pull request');
-    // The rounds show only once the box is ticked: 3 by default, 1 to 6.
+    // The rounds show only once the box is ticked: 4 by default, 1 to 6.
     await expect(view.getByTestId('story-build-loop-rounds')).toHaveCount(0);
     await box.getByRole('checkbox').check();
     const rounds = view.getByTestId('story-build-loop-rounds');
-    await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('3');
-    await rounds.getByRole('button', { name: 'More rounds' }).click();
     await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('4');
+    await rounds.getByRole('button', { name: 'More rounds' }).click();
+    await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('5');
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
-    expect((await start).postDataJSON()).toMatchObject({ autoPush: true, loopRounds: 4 });
+    expect((await start).postDataJSON()).toMatchObject({ autoPush: true, loopRounds: 5 });
     const line = view.getByTestId('story-build-auto-push');
     await expect(line).toHaveAttribute('data-state', 'on');
     // The tab's own rounds control writes the loop's settings.
     const fewer = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/settings'));
     await view.getByTestId('story-build-loop-rounds').getByRole('button', { name: 'Fewer rounds' }).click();
-    expect((await fewer).postDataJSON()).toEqual({ rounds: 3 });
-    await expect(view.getByTestId('story-build-loop-rounds-value')).toHaveText('3');
+    expect((await fewer).postDataJSON()).toEqual({ rounds: 4 });
+    await expect(view.getByTestId('story-build-loop-rounds-value')).toHaveText('4');
     const off = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/settings'));
     await line.getByRole('checkbox').click(); // a controlled box: the state is asserted below, once the write answers
     expect((await off).postDataJSON()).toEqual({ on: false });
@@ -481,7 +481,7 @@ test.describe('Implement story', () => {
     await expect(view.getByTestId('story-build-start-auto-push').getByRole('checkbox')).toBeChecked();
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
-    expect((await start).postDataJSON()).toMatchObject({ autoApprovePlan: true, autoPush: true, loopRounds: 3 });
+    expect((await start).postDataJSON()).toMatchObject({ autoApprovePlan: true, autoPush: true, loopRounds: 4 });
     // Until the plan is approved, the tab's own switch changes it.
     const setting = view.getByTestId('story-build-auto-approve');
     await expect(setting.getByRole('checkbox')).toBeChecked();

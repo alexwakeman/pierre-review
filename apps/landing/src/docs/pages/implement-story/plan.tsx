@@ -39,8 +39,8 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Every Implement session starts with a plan. The agent reads the ticket, the code, the data and (with docs) your
-        reference documents, and says what it will build, where, and where it thinks the story is wrong or unclear. Limn
+        Every Implement session starts with a plan. The agent reads the ticket, the code, the data and the reference
+        documents that help with the ticket (it says which it used), and says what it will build, where, and where it thinks the story is wrong or unclear. Limn
         checks every piece of evidence in the plan before you see it. Nothing is built until you approve the plan.
       </p>
 

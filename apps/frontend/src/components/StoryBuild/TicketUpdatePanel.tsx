@@ -7,6 +7,7 @@ import {
   ticketLayoutOf,
   type BuildPlanTicketUpdate,
   type StoryBuild,
+  type StoryBuildEndToEndTicket,
   type TicketUpdateCurrent,
 } from '@pierre-review/shared';
 import { useTicketUpdateCurrent, useUpdateTicket } from '../../hooks/useTicketPrs.js';
@@ -367,6 +368,37 @@ function MarkedTextarea({
  * The same "PR open" rule as the toast's fold (shared `storyBuildActivityOf`).
  */
 export function TicketStep({ build }: { build: StoryBuild }): JSX.Element | null {
+  const prOpenNow = build.loop?.state === 'done' || build.session?.phase === 'pushed';
+  // BUILD END TO END (docs/STORY-BUILD.md § Build end to end): Limn wrote the ticket itself. Its one line
+  // leads; the ordinary step below still shows when the update failed (the step stays open).
+  const e2e = build.endToEnd === true && prOpenNow ? endToEndTicketLine(build.endToEndTicket ?? null) : null;
+  const rest = <OrdinaryTicketStep build={build} />;
+  if (e2e == null) return rest;
+  return (
+    <>
+      <p data-testid="story-build-e2e-ticket" className={cx('mt-3 text-meta', e2e.bad ? 'text-ui-danger' : 'text-ui-mute')}>
+        {e2e.text}
+      </p>
+      {rest}
+    </>
+  );
+}
+
+/** "Build end to end"'s ticket step, in one line. Pure (test/storyBuildEndToEnd.test.ts). */
+export function endToEndTicketLine(r: StoryBuildEndToEndTicket | null): { text: string; bad: boolean } {
+  if (r == null) return { text: 'Updating the Jira ticket…', bad: false };
+  if (r.skipped === 'not_jira') return { text: 'Limn updates Jira tickets only, so it did not change this one.', bad: false };
+  const what = r.updated.map((f) => (f === 'description' ? 'description' : 'acceptance criteria')).join(' and ');
+  const did =
+    r.updated.length > 0
+      ? `Limn updated the ticket's ${what}${r.commented ? ' and commented on it in Jira.' : ' in Jira.'}`
+      : r.commented
+        ? 'Limn commented on the ticket in Jira. The plan did not change the ticket text.'
+        : 'Limn did not change the ticket.';
+  return r.error != null ? { text: `${did} ${r.error}`, bad: true } : { text: did, bad: false };
+}
+
+function OrdinaryTicketStep({ build }: { build: StoryBuild }): JSX.Element | null {
   const step = useStoryBuildTicketReview(build.workspaceId, build.ident);
   const plan = build.session?.plan ?? null;
   if (build.planAutoApprovedAt == null || plan?.latest == null) return null;

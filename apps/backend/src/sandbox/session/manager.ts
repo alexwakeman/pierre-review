@@ -186,9 +186,9 @@ export interface SessionDeps {
   usageSink?: SandboxUsageSink;
   /** New story sessions open with a planning turn (always; false only in the tests of the older flow). */
   planFirst: boolean;
-  /** "Implement with docs" is offered: the workspace has a built reference document. */
+  /** The session gets the reference documents: the workspace has a built one (every build, since 2026-11-12). */
   docsAvailable(accountId: number, workspaceId: number): Promise<boolean>;
-  /** "Implement with docs": which library sections go into the sandbox (no model call). */
+  /** The reference documents: which library sections go into the sandbox (no model call). */
   chooseDocs(ctx: AgentContext, accountId: number, workspaceId: number, ident: string): Promise<DocsPick>;
   /** THE ONE budget gate, for an AUTOMATIC build continuation (plan first). */
   automaticAllowed(ctx: AgentContext, accountId: number, provider: AiProviderId): Promise<boolean>;
@@ -462,7 +462,7 @@ async function keptPhaseOf(l: Live): Promise<SandboxSessionPhase> {
   return (await l.subject.keptPhase?.(l.phase).catch(() => null)) ?? keptPhase(l.phase);
 }
 
-/** "Implement with docs" needs a built document (the `available` Check against docs reads). */
+/** A session gets the reference documents when the workspace has a built one (the `available` Check against docs reads). */
 export function sessionDocsAvailable(accountId: number, workspaceId: number): Promise<boolean> {
   return deps.docsAvailable(accountId, workspaceId);
 }
@@ -551,14 +551,16 @@ export interface StartSessionArgs {
   ticketTitle: string | null;
   action: 'implement' | 'fill_gaps';
   choice: SandboxAgentChoice;
-  /** "Implement with docs". */
+  /** The reference documents go in (the start route: the library has a built one). */
   docs?: boolean;
   /** "Push and open the pull request when the build finishes" (coding/story-build/auto-push.ts). */
   autoPush?: boolean;
-  /** With `autoPush`: the review loop's rounds (clamped 1..6; default 3). */
+  /** With `autoPush`: the review loop's rounds (clamped 1..6; default 4, STORY_BUILD_LOOP_ROUNDS_DEFAULT). */
   loopRounds?: number;
   /** "Approve the plan automatically" (plan.ts `afterChatTurn`). */
   autoApprovePlan?: boolean;
+  /** "Build end to end": the ticket step after the loop (coding/story-build/end-to-end.ts). */
+  endToEnd?: boolean;
 }
 
 export type StartSessionResult =
@@ -663,11 +665,12 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
   const state = { ...emptySessionState(a.action), planFirst: deps.planFirst, withDocs: a.docs === true, docs: null, serviceRuns: [], planStage: null, planProblem: null };
   const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
   registerLive(l, a.memberRepoIds);
-  if (a.docs === true || a.autoPush === true || a.autoApprovePlan === true) {
+  if (a.docs === true || a.autoPush === true || a.autoApprovePlan === true || a.endToEnd === true) {
     await updateStoryBuild(ctx, a.accountId, id, {
       ...(a.docs === true ? { withDocs: true } : {}),
       ...(a.autoPush === true ? { autoPush: true, loopRounds: clampLoopRounds(a.loopRounds) } : {}),
       ...(a.autoApprovePlan === true ? { autoApprovePlan: true } : {}),
+      ...(a.endToEnd === true ? { endToEnd: true } : {}),
     }).catch(() => {});
   }
   return { outcome: 'started', id };
@@ -810,7 +813,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       store: store != null ? { owner: l.owner, ...(deps.storeSeams ? { seams: deps.storeSeams } : {}) } : null,
       onProgress: (line) => step(l, current, 'running', line),
       signal: l.abort.signal,
-      // "Implement with docs": the reference documents, after the repositories, before the services.
+      // The reference documents (when the library has any), after the repositories, before the services.
       ...(sub.prepareDocs && l.state.withDocs
         ? {
             docs: async (mirror) => {

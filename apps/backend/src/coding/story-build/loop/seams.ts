@@ -69,6 +69,9 @@ export interface LoopSeams {
     emit(buildId: number, e: SandboxSessionStreamEvent): void;
     notice(buildId: number, text: string): void;
   };
+  /** The loop is DONE (the PRs are open): "Build end to end"'s ticket step (../end-to-end.ts). Optional, so a
+   *  test's fake seams need not name it; it does nothing for an ordinary build. Never throws. */
+  afterLoopDone?(ctx: AgentContext, accountId: number, buildId: number): Promise<void>;
 }
 
 const mgr = () => import('../../../sandbox/session/manager.js');
@@ -124,6 +127,10 @@ export function defaultLoopSeams(): LoopSeams {
     async afterPrSync(ctx, a) {
       const { linkTicket } = await import('../push.js');
       await linkTicket(ctx, a.accountId, a.repoId, a.prNumber, a.ident);
+    },
+    async afterLoopDone(ctx, accountId, buildId) {
+      const { runEndToEndTicketStep, defaultEndToEndDeps } = await import('../end-to-end.js');
+      await runEndToEndTicketStep(ctx, accountId, buildId, defaultEndToEndDeps((text) => m?.noticeStory(buildId, text)));
     },
     session: {
       hold: (id) => void need().then((x) => x.holdSession(key(id), 'review loop')),

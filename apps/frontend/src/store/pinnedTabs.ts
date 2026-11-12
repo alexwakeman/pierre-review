@@ -83,8 +83,8 @@ export interface TabTicketMeta {
   /** A build tab opened from a STORY VIEW (`useOpenStoryBuild`): what it offered there — its action and,
    *  for Fill gaps, the story check whose gaps it lists. The start state uses it only when the sprint
    *  board's node is not in memory (a story outside the sprint). Absent on a tab rebuilt from a URL. */
-  /** `docs`: the reader picked "… with docs" (the start state's docs box starts ticked). */
-  buildOffer?: { action: 'implement' | 'fill_gaps'; reviewId: number | null; docs?: boolean } | null;
+  /** `endToEnd`: the reader picked "Build end to end" (the start state is that one-press start). */
+  buildOffer?: { action: 'implement' | 'fill_gaps'; reviewId: number | null; endToEnd?: boolean } | null;
 }
 
 export interface Tab {
@@ -395,7 +395,7 @@ function ticketMetaFrom(ident: string, raw: unknown): TabTicketMeta {
           buildOffer: {
             action: offer.action,
             reviewId: typeof offer.reviewId === 'number' ? offer.reviewId : null,
-            ...(offer.docs === true ? { docs: true } : {}),
+            ...(offer.endToEnd === true ? { endToEnd: true } : {}),
           },
         }
       : {}),

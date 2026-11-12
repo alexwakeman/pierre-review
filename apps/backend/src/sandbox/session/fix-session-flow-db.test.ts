@@ -721,6 +721,55 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     }
   });
 
+  it('PUSH WHEN DONE: a clean manual fix on my own PR closes and is pushed; an unfinished one waits and says why', async () => {
+    const { eq } = await import('drizzle-orm');
+    const meId = (await db.select().from(schema.users).where(eq(schema.users.githubLogin, 'Me-Flow')).execute())[0].id;
+    const ownPr = async (n: number) =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({ accountId: 1, repoId: api, githubNodeId: `PR-${n}`, number: n, title: `Own PR ${n}`, body: null, state: 'open', headSha: HEAD, baseRefName: 'main', authorId: meId, openedAt: new Date(), updatedAt: new Date() })
+          .returning()
+          .execute()
+      )[0];
+    extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+
+    // Clean: work, a valid report, nothing unaddressed — closed and pushed with no press.
+    const clean = await ownPr(46);
+    reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: own', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+    const before = pushes.length;
+    const r = await post(`/api/pro/prs/${clean.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.', pushWhenDone: true });
+    expect(r.statusCode).toBe(202);
+    const cleanId = r.json().fixId;
+    const f = await until(clean.id, (x) => x.session?.phase === 'pushed', 'pushed when done');
+    expect(f.trigger).toBe('manual');
+    expect(f.pushedAt).not.toBeNull();
+    expect(pushes.length).toBe(before + 1);
+    expect(pushes.at(-1)).toMatchObject({ prNumber: 46, target: { kind: 'existing' } });
+    expect(M.liveSession(F.fixKey(cleanId))).toBeNull();
+    expect((await rowOf(cleanId)).pushWhenDone).toBe(true);
+
+    // A TEAMMATE'S PR: never pushed without a press — the session stays open, one line says why. (The
+    // report rules — "not fixed", "not covered", no report — are pinned in auto-push.test.ts.)
+    const [mate] = await db.insert(schema.users).values({ githubLogin: 'mate-flow', githubNodeId: 'U_mate_flow' }).returning().execute();
+    const [theirs] = await db
+      .insert(schema.pullRequests)
+      .values({ accountId: 1, repoId: api, githubNodeId: 'PR-47', number: 47, title: 'Their PR', body: null, state: 'open', headSha: HEAD, baseRefName: 'main', authorId: mate.id, openedAt: new Date(), updatedAt: new Date() })
+      .returning()
+      .execute();
+    const r2 = await post(`/api/pro/prs/${theirs.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.', pushWhenDone: true });
+    expect(r2.statusCode).toBe(202);
+    const heldId = r2.json().fixId;
+    const held = await until(theirs.id, (x) => x.session?.phase === 'built' && notices(x).length > 0 && M.liveSession(F.fixKey(heldId)) != null, 'held');
+    expect(notices(held)).toContain('Not pushed: this is not your pull request. Press Push to push to its branch.');
+    expect(held.pushedAt).toBeNull();
+    expect(pushes.length).toBe(before + 1);
+    await M._closeAllSessionsForTest();
+    // A discarded session never pushes on its close.
+    await new Promise((res) => setTimeout(res, 50));
+    expect(pushes.length).toBe(before + 1);
+  });
+
   it('the unattended pre-check: no runtime, a busy machine, then ready (it never reserves)', async () => {
     F._resetFixReadinessForTest();
     expect(await F.fixSandboxReadiness()).toEqual({ ok: true });

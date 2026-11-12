@@ -250,16 +250,21 @@ export interface SandboxSessionStartBody {
   action?: 'implement' | 'fill_gaps';
   provider?: AiProviderId;
   model?: string;
-  /** "Implement with docs": a read-only subset of the workspace's reference library goes into the sandbox. */
+  /** IGNORED since 2026-11-12: every session gets the reference documents when the library has one, and the
+   *  agent decides whether they help. Kept on the wire for an older SPA. */
   docs?: boolean;
   /** "Push and open the pull request when the build finishes" (docs/STORY-BUILD.md § Push automatically).
    *  Off unless `true`; the reader may change it in the tab until the build pushed (`STORY_BUILD_API.autoPush`). */
   autoPush?: boolean;
-  /** With `autoPush`: the review + fix rounds before the pull request opens (1..6, default 3). */
+  /** With `autoPush`: the review + fix rounds before the pull request opens (1..6, default 4). */
   loopRounds?: number;
   /** "Approve the plan automatically": every open point is taken as Agree and the build starts at once.
    *  Never writes the ticket. Off unless `true`; changeable in the tab until the plan is approved. */
   autoApprovePlan?: boolean;
+  /** BUILD END TO END (docs/STORY-BUILD.md § Build end to end): the plan approved automatically, the review
+   *  loop (`loopRounds`, default 4), and — once the PRs are open — the Jira ticket updated from the plan and a
+   *  comment on it, under the reader's login. Implies `autoApprovePlan` and `autoPush`. */
+  endToEnd?: boolean;
 }
 
 /** `POST …/messages`. 1..SANDBOX_MESSAGE_MAX characters. */

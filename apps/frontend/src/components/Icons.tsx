@@ -939,6 +939,18 @@ export function WrenchIcon({ size = 13, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// A rocket — "Build end to end" (StoryBuild/StoryBuildEntry.tsx): the one-press start that runs a build
+// all the way to an open pull request and an updated ticket. Its own mark beside Implement's wrench.
+export function RocketIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} strokeWidth={1.8} {...rest}>
+      <path d="M12 2.5c3.5 2 5.5 5.6 5.5 9.5v4.5h-11V12c0-3.9 2-7.5 5.5-9.5z" />
+      <circle cx="12" cy="10" r="1.8" />
+      <path d="M6.5 13.5 4 16v3l2.5-1.5M17.5 13.5 20 16v3l-2.5-1.5M10 16.5v3.5M14 16.5v3.5" />
+    </IconShell>
+  );
+}
+
 // A hammer — the BUILDS TOAST (StoryBuild/StoryBuildsToast.tsx): Implement / Fill gaps builds at work or
 // waiting for the reader. Its own mark, so it never reads as the AI Fix toast's wrench.
 export function HammerIcon({ size = 13, ...rest }: IconProps): JSX.Element {

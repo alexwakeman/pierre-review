@@ -548,7 +548,14 @@ function fixSubject(
       const l = l0 as Live;
       if (merge) await storeMergeTurn(l);
       else await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath });
-      return unattended ? 'close' : 'keep';
+      if (unattended) return 'close';
+      // PUSH WHEN DONE (coding/ai-fix/auto-push.ts): a clean manual fix on the reader's own PR closes, and its
+      // close pushes. Otherwise the session stays open and says, in one line, why it did not push.
+      const { pushWhenDoneReady } = await import('../../coding/ai-fix/auto-push.js');
+      const ready = await pushWhenDoneReady(ctx, accountId, fixId).catch(() => ({ push: false as const, line: null }));
+      if (ready.push) return 'close';
+      if (ready.line != null) notice(l, ready.line);
+      return 'keep';
     },
     onPhase(l, phase) {
       const status = aiFixStatusForPhase(phase, { pushed: pushedAt != null });
@@ -575,6 +582,16 @@ function fixSubject(
           .then((m) => m.evaluateAutoFix(ctx, { accountId, prId: facts.prId, cause: 'fix_closed' }))
           .catch(() => {});
       };
+      // PUSH WHEN DONE: a MANUAL fix the reader asked to push once it is done (the close above was its own:
+      // `afterBuildTurn` closed a clean fix). Every rule is read again at push time.
+      if (phase === 'built' && !unattended && facts.trigger !== 'auto') {
+        const r = await row();
+        if (r?.pushWhenDone === true && r.status === 'succeeded' && fixRowHasWork(r)) {
+          const { maybePushWhenDone } = await import('../../coding/ai-fix/auto-push.js');
+          void maybePushWhenDone(ctx, { accountId, fixId }).catch(() => {}).finally(queueNext);
+          return;
+        }
+      }
       if (phase === 'built' && unattended && facts.trigger === 'auto') {
         const r = await row();
         if (r?.status === 'succeeded' && fixRowHasWork(r)) {

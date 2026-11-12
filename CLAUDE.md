@@ -424,7 +424,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Limn threads when addressed"
-  (ON; own PRs, any run, still `ownOnly`) switches, and Implement's opt-in tick (below). Auto-posting is
+  (ON; own PRs, any run, still `ownOnly`) switches, Implement's opt-in tick (below) and AI Fix's "Push
+  when done" (own PR, clean report). Auto-posting is
   AUTO runs plus a manual "Review and post" press, under the reader's account, ONE review,
   `COMMENT` unless `autoVerdict` (ON likewise) allows stricter (a run not approved says why,
   ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
@@ -460,7 +461,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 
 [docs/STORY-BUILD.md](docs/STORY-BUILD.md) · [docs/SANDBOX.md](docs/SANDBOX.md). A Claude Code / Codex agent WITH
 a shell, ONLY inside a sandbox `sandbox/runtime` started. The shell-less agents are REMOVED — never a
-fallback. AI Fix pushes ONLY the PR repository, to the PR's branch; never queued, an unattended one skips.
+fallback. AI Fix pushes ONLY the PR repository, to the PR's branch.
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
   leaves ONLY as a patch per repo; the HOST pushes on the reader's press — or by the opt-in REVIEW
@@ -519,8 +520,8 @@ Monitoring, Slack.
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
   RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONLY tracker writes are the
-  reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion)
-  (`tracker/status-change.ts`, `ticket-update.ts`, `assignee.ts`); nothing else writes. Customer-typed hosts use `tracker/jira/fetch.ts`. Idents only via
+  reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion), and "Build end
+  to end"'s update + comment (`tracker/*`, `end-to-end.ts`). Customer-typed hosts use `tracker/jira/fetch.ts`. Idents only via
   `trackerTicketIdent`/`trackerTicketRow`.
 
 ## ML severity/category on bot comments (no LLM)

@@ -9,8 +9,8 @@ export const meta: DocMeta = {
 function StartPicture(): JSX.Element {
   return (
     <Illustration
-      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A box to give the agent the reference documents is ticked. Boxes to approve the plan automatically and to review and fix after the build, then open the pull request, are not ticked. A Start with docs button."
-      caption="A new build tab: what the session gets, your memories and skills, the docs and push boxes, the model and Start."
+      label="The build tab for ticket PAY-142, Partial refunds. The step line reads Set up, Talk, Build, Push. The start panel says the AI gets a sandbox with every repository in this workspace and the ticket, and plans first. A line says the agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills, with a Change link. A line says the agent also gets the workspace's reference documents. Boxes to approve the plan automatically and to review and fix after the build, then open the pull request, are not ticked. A Start button."
+      caption="A new build tab: what the session gets, your memories and skills, the reference documents, the automatic boxes, the model and Start."
       title="PAY-142 Partial refunds"
       meta="Implement"
     >
@@ -21,9 +21,7 @@ function StartPicture(): JSX.Element {
         The AI gets a sandbox with every repository in this workspace and the ticket. It plans first. Nothing is built
         until you approve the plan.
       </p>
-      <p>
-        <Chip>☑ Give the agent the reference documents</Chip>
-      </p>
+      <p className="muted">The agent also gets the workspace&rsquo;s reference documents. ⓘ</p>
       <p>
         <Chip>☐ Approve the plan automatically</Chip>
         <Chip>☐ After the build: review and fix, then open the pull request</Chip>
@@ -33,7 +31,7 @@ function StartPicture(): JSX.Element {
         The agent also gets 23 memories from 2 projects, your CLAUDE.md and 3 project skills. ⓘ <u>Change</u>
       </p>
       <p>
-        <Chip>Model: Claude Opus 5.5 (most thorough)</Chip> <Btn tone="go">Start with docs</Btn>
+        <Chip>Model: Claude Opus 5.5 (most thorough)</Chip> <Btn tone="go">Start</Btn>
       </p>
     </Illustration>
   );
@@ -44,8 +42,8 @@ export default function Page(): JSX.Element {
     <>
       <p>
         Implement story hands a ticket to an agent (Claude Code or Codex) that works in a sandbox on your computer. The
-        sandbox holds every repository in the workspace, the ticket in full, your own Claude notes and, if you choose,
-        your reference documents. The agent first studies the code and proposes a plan; you settle its questions; then
+        sandbox holds every repository in the workspace, the ticket in full, your own Claude notes and the workspace&rsquo;s
+        reference documents, which the agent uses only where they help. The agent first studies the code and proposes a plan; you settle its questions; then
         it builds, tests and reports against each acceptance criterion. You review the changes and push them as new pull
         requests.
       </p>
@@ -64,7 +62,8 @@ export default function Page(): JSX.Element {
           See <DocLink to="implement-story/fill-gaps">Fill gaps</DocLink>.
         </li>
         <li>
-          When the workspace has reference documents, the caret on the button adds <Ui>Implement with docs</Ui>.
+          The caret on the button adds <Ui>Build end to end</Ui>: one press for the whole build. See{' '}
+          <DocLink to="implement-story/overview#build-end-to-end">Build end to end</DocLink>.
         </li>
         <li>
           Once a session exists, the button reads <Ui>Open build</Ui> with its state, and the sprint card shows the same
@@ -88,7 +87,7 @@ export default function Page(): JSX.Element {
         <li>
           <b>Set up.</b> Above <Ui>Start</Ui>, one line counts what the agent gets beside the code: your Claude
           memories and the projects they come from, your CLAUDE.md and the skills. <Ui>Change</Ui> opens Settings →
-          Sandbox. Press <Ui>Start</Ui> (or <Ui>Start with docs</Ui>). Limn starts the sandbox. It takes seconds once
+          Sandbox. Press <Ui>Start</Ui>. Limn starts the sandbox. It takes seconds once
           the sandbox image is on your computer; the first time it downloads it, which takes minutes. While the
           repositories load, the line counts them: <Ui>Loading repositories 3/7</Ui> and the repository&rsquo;s name.
         </li>
@@ -116,9 +115,36 @@ export default function Page(): JSX.Element {
       </p>
       <Warning>
         Nothing is pushed, posted or written to your tracker before you press a button, except the branch commits and the pull request you chose with{' '}
-        <Ui>After the build: review and fix, then open the pull request</Ui>. The one tracker write is{' '}
-        <Ui>Update ticket</Ui> on a Jira ticket, which you press yourself.
+        <Ui>After the build: review and fix, then open the pull request</Ui>. The tracker is written only by{' '}
+        <Ui>Update ticket</Ui> on a Jira ticket, which you press yourself, and by <Ui>Build end to end</Ui>, below.
       </Warning>
+
+      <H2 id="build-end-to-end">Build end to end</H2>
+      <p>
+        <Ui>Build end to end</Ui>, from the caret on <Ui>Implement</Ui> or <Ui>Fill gaps</Ui>, runs the whole build
+        from one press. The build tab opens and starts by itself:
+      </p>
+      <Steps>
+        <li>The agent plans. Limn approves the plan, taking every open point as Agree.</li>
+        <li>
+          The agent builds. Limn reviews the work and the agent fixes it, for up to 4 rounds. It stops early when a round
+          finds nothing open.
+        </li>
+        <li>
+          Limn opens the pull request, ready for review. If something is still open after the last round, the pull
+          request opens anyway and lists it.
+        </li>
+        <li>
+          On a Jira ticket, Limn updates the description and acceptance criteria the plan changed, and comments on the
+          ticket as you: what changed and why, with links to the pull requests. It never changes the ticket&rsquo;s
+          status. The earlier text is in the ticket&rsquo;s history in Jira.
+        </li>
+      </Steps>
+      <p>
+        If you are over your AI spend budget, or the AI is not signed in, the tab does not start by itself: it waits with
+        a <Ui>Build end to end</Ui> button. <Ui>Set it up myself</Ui> goes back to the usual start. If the ticket update
+        fails, the tab says so and <Ui>Update ticket</Ui> stays.
+      </p>
 
       <H2 id="what-the-agent-gets">What the agent gets</H2>
       <MiniTable
@@ -131,7 +157,7 @@ export default function Page(): JSX.Element {
           { _key: 't', w: 'The ticket in full', d: 'Description, numbered acceptance criteria and open points.' },
           { _key: 'n', w: 'Your Claude notes', d: 'The notes of each repository’s clone (untick one in Settings → Sandbox), your CLAUDE.md and, if you allow, skills. Copied in; the originals are never changed. Each repository’s own CLAUDE.md and AGENTS.md are in its code. Past sessions are never brought in.' },
           { _key: 'k', w: 'Skills', d: 'Skills your repositories keep in .claude/skills come with the code, and the agent is told where each one is. Your own ~/.claude/skills come only if you allow it in Settings → Sandbox.' },
-          { _key: 'd', w: 'Reference documents', d: 'With docs: the parts of the workspace library that match the story, read only.' },
+          { _key: 'd', w: 'Reference documents', d: 'When the workspace has them: the parts of the library that match the story, read only. The agent reads their index first and uses only what helps; the plan says which it used.' },
           { _key: 's', w: 'Services', d: 'The compose services you picked, for integration tests. The agent starts them when it needs them.' },
         ]}
       />

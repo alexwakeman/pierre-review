@@ -24,6 +24,18 @@ no internals.
 - Open PRs: the side panel shows a "Merge queue" row while GitHub's merge queue holds the pull request.
 - Story check: a Stop button on a check that is waiting in line or running. A stopped automatic check does
   not start again until the ticket's pull requests or the ticket change.
+- Implement story: "Build end to end" in the caret menu of Implement and Fill gaps. One press plans, approves the
+  plan, builds, reviews and fixes for up to 4 rounds, opens the pull request, then updates the Jira ticket from the
+  plan and comments on it as you, with links to the pull requests. It never changes the ticket's status.
+- AI Fix: "Push when done", ticked by default. A fix that finishes on your own pull request with nothing left
+  unfixed is pushed to its branch without a press; otherwise the session says why it waited.
+
+### Changed
+
+- Implement story and Fill gaps: the agent always gets the workspace's reference documents when there are any, and
+  uses only the parts that help with the ticket. The plan says which it used. "Implement with docs" and the docs box
+  are gone.
+- Implement story: the review and fix loop runs up to 4 rounds by default (was 3).
 
 ## [1.0.29] - 2026-11-12
 

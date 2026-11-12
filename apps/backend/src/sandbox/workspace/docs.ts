@@ -58,7 +58,7 @@ const fenceText = (body: string): string => ['````text', body.trimEnd(), '````']
 
 /** DOCS.md: what Check against docs found for this ticket when that check is current. Pure. */
 export function docsMarkdown(choice: DocsChoice, docsDir: string): string {
-  const out = ['# Reference documents', '', `The workspace's reference documents for this ticket are in \`${docsDir}/\` (read only). Start at \`INDEX.md\`; \`SHORTLIST.md\` lists the sections copied here.`, ''];
+  const out = ['# Reference documents', '', `The workspace's reference documents are in \`${docsDir}/\` (read only). They may not apply to this ticket: start at \`INDEX.md\` (\`SHORTLIST.md\` lists the sections copied here) and use only the sections that help.`, ''];
   const r = choice.check;
   if (choice.source !== 'check' || r == null) {
     out.push('Limn has no current docs check for this ticket.', '');

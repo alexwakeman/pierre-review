@@ -79,7 +79,11 @@ const LIMN_PLAN = '```limn-plan';
 /** The opening planning turn (Limn sends it; the reader's line is "Plan"). */
 export function planOpeningInstruction(o: { docsDir: string | null; fillGaps: boolean; root: string }): string {
   const ticket = posix.join(o.root, 'TICKET.md');
-  const docs = o.docsDir ? ` Read \`${o.docsDir}/INDEX.md\`, the sections that apply, and \`${posix.join(o.root, 'DOCS.md')}\`.` : '';
+  // ⚠ THE DOCS ARE OPTIONAL (2026-11-12): every session gets them when the library has any, so the agent
+  // decides whether they help this ticket — never a mandatory read.
+  const docs = o.docsDir
+    ? ` Reference documents are in \`${o.docsDir}/\`. They may not apply to this ticket: read \`${o.docsDir}/INDEX.md\` and \`${posix.join(o.root, 'DOCS.md')}\`, decide which sections help, and read only those.`
+    : '';
   return [
     'Make the plan for this ticket now. Do not change any file.',
     '',
@@ -88,7 +92,7 @@ export function planOpeningInstruction(o: { docsDir: string | null; fillGaps: bo
     `3. Find where the story is wrong: inaccurate, inconsistent, or in conflict with the code, ${o.docsDir ? 'the documents ' : ''}or the data. Give each point evidence that Limn can check: a code excerpt (repository, path, lines and the exact text),${o.docsDir ? ' a document section and the exact text,' : ''} a data file excerpt, or a \`limn-svc run\` output. A point you cannot show is not a point of contention: leave it out.`,
     '4. Propose the pull requests. One per repository, unless splitting clearly reduces risk or review size.',
     "5. If the story needs work (every point of contention and every criterion you do not plan says it does), write the updated description and acceptance criteria in `ticketUpdate`. Keep the ticket's layout: the same headings in the same order, the same list style and GIVEN / WHEN / THEN when it uses them. When the criteria live in the description, put them in `description`.",
-    `6. Check the plan with \`node ~/.limn/plan-check.cjs\` until it prints OK, then end your answer with the plan in ONE ${LIMN_PLAN} block. Before the block, say the plan in at most five sentences.`,
+    `6. Check the plan with \`node ~/.limn/plan-check.cjs\` until it prints OK, then end your answer with the plan in ONE ${LIMN_PLAN} block. Before the block, say the plan in at most five sentences.${o.docsDir ? ' One of them says which document sections you used, or that none applied.' : ''}`,
   ].join('\n');
 }
 

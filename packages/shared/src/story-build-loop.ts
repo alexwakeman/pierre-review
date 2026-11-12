@@ -12,7 +12,7 @@
 import type { AiProviderId, ClaudeFinding, ClaudeFollowUpItem, ClaudeReview, TicketReview } from './types.js';
 import { aiProviderName } from './ai-run-label.js';
 
-export const STORY_BUILD_LOOP_ROUNDS_DEFAULT = 3;
+export const STORY_BUILD_LOOP_ROUNDS_DEFAULT = 4;
 export const STORY_BUILD_LOOP_ROUNDS_MIN = 1;
 export const STORY_BUILD_LOOP_ROUNDS_MAX = 6;
 

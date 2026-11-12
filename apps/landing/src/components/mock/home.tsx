@@ -324,16 +324,18 @@ export function PendingListMock({ initialTab = 'my_turn' }: { initialTab?: 'my_t
 
 // ---- one pull request ----------------------------------------------------------
 
-/** AI Fix: tick findings → Start fix → the diff → Push → Pushed. */
+/** AI Fix: tick findings → Start fix → (Push when done: Pushed) or the diff → Push → Pushed. */
 function FixFlow(): JSX.Element {
   const [ticked, setTicked] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(FIX.items.map((i) => [i.id, i.on])),
   );
+  // "Push when done" is ticked by default, as in the app (components/AiFixTab.tsx).
+  const [pushWhenDone, setPushWhenDone] = useState(true);
   const fix = useAction(900);
   const push = useAction();
   const n = Object.values(ticked).filter(Boolean).length;
 
-  if (push.phase === 'done') {
+  if (push.phase === 'done' || (fix.phase === 'done' && pushWhenDone)) {
     return (
       <div className="mk-done" role="status">
         <Chip tone="green">
@@ -382,6 +384,10 @@ function FixFlow(): JSX.Element {
         ))}
       </div>
       <div className="mk-end">
+        <label className="mk-pick">
+          <input type="checkbox" checked={pushWhenDone} disabled={fix.phase === 'busy'} onChange={(e) => setPushWhenDone(e.target.checked)} />
+          <span>{FIX.pushWhenDone}</span>
+        </label>
         <Act tone="gold" onClick={() => fix.run()} disabled={n === 0 || fix.phase === 'busy'}>
           {fix.phase === 'busy' ? FIX.busy : FIX.start}
         </Act>

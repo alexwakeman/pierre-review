@@ -165,6 +165,7 @@ type ParsedStartBody =
       instruction: string | undefined;
       sourceReviewId: number | null;
       include: string[] | null;
+      pushWhenDone: boolean;
     }
   | { error: string; message: string };
 
@@ -202,7 +203,7 @@ function parseStartBody(
         message: `Keep the instruction under ${AI_FIX_MAX_INSTRUCTION_CHARS.toLocaleString('en-US')} characters.`,
       };
     }
-    return { model, provider, seed, instruction, sourceReviewId: null, include: null };
+    return { model, provider, seed, instruction, sourceReviewId: null, include: null, pushWhenDone: (body as { pushWhenDone?: unknown }).pushWhenDone === true };
   }
   // Absent / null ⇒ THE CI-ONLY SEED (no AI review: the CI check's fixable items at the current
   // head — manager.ts `loadCiOnlySeed`). Anything else must be a positive integer id.
@@ -225,7 +226,7 @@ function parseStartBody(
     }
     include = inc as string[];
   }
-  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include };
+  return { model, provider, seed, instruction: undefined, sourceReviewId: raw, include, pushWhenDone: (body as { pushWhenDone?: unknown }).pushWhenDone === true };
 }
 
 /** One session action's answer: 202 `{ fixId, status: 'queued' }`, or the refusal it maps to. */
@@ -364,6 +365,8 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           selection: parsed.include ? { kind: 'keys' as const, keys: parsed.include } : undefined,
           // Every sandbox busy: the press waits in line and starts by itself (start-queue.ts).
           queueIfBusy: true,
+          // "Push when done" (the start panel's tick, ON by default).
+          pushWhenDone: parsed.pushWhenDone,
         };
         const res = mode === 'fix' ? await startFix(ctx, input) : await startPlan(ctx, input);
 

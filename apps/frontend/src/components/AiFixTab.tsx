@@ -66,11 +66,15 @@ import { DiffWrapToggle, FileDiffView, type DiffFile } from './diff/FileDiffView
 import { parseGitPatch } from '../lib/diff.js';
 import { InfoButton } from './InfoModal.js';
 import { CheckboxBox, RadioBox } from './ui/FormControls.js';
+import { useLocalStorage } from '../hooks/useLocalStorage.js';
 import { ChecksReport, ChecksStatus } from './AiFix/RunTests.js';
 import { RailSection, SharedSessionView, type SessionActions, type SessionWords } from './sandbox/SessionView.js';
 import { SandboxRuntimeLine } from './StoryBuild/SandboxSetupHelp.js';
 import { Button } from './ui/Button.js';
 import { CheckIcon, ConflictIcon, WarningIcon } from './Icons.js';
+
+/** "Push when done" (ON by default): this browser remembers the reader's last choice. */
+const AI_FIX_PUSH_WHEN_DONE_KEY = 'limn.aiFix.pushWhenDone';
 
 const BTN_PRIMARY =
   'inline-flex h-7 items-center whitespace-nowrap rounded-ui bg-ui-raise px-2.5 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3';
@@ -178,6 +182,10 @@ function FixerSection({
   const canPlan = aiProviderReadyFor(me, modelPick.chosen.provider, 'plan');
   const [planFirstPicked, setPlanFirst] = useState(false);
   const planFirst = planFirstPicked && canPlan;
+  // "PUSH WHEN DONE" (docs/CLAUDE-REVIEW.md § AI Fix): ON by default, remembered in this browser. A fix that
+  // finishes cleanly on your own PR is pushed to its branch without a press; otherwise it waits for Push and
+  // the session says why (the server decides: coding/ai-fix/auto-push.ts `pushWhenDoneHold`).
+  const [pushWhenDone, setPushWhenDone] = useLocalStorage<boolean>(AI_FIX_PUSH_WHEN_DONE_KEY, true);
 
   const noteAiFixRun = useFilters((s) => s.noteAiFixRun);
   // In-flight read off the SHARED start key, not this mount's `startFix.isPending` — a per-mount
@@ -249,6 +257,7 @@ function FixerSection({
       seed: 'review' as const,
       ...(reviewId != null ? { sourceReviewId: reviewId } : {}),
       include: picked,
+      pushWhenDone,
     };
     if (planFirst) {
       // The plan is read here, in the session; the banner follows the fix from Start fix.
@@ -385,6 +394,18 @@ function FixerSection({
                         Plan first
                       </label>
                     )}
+                    <label data-testid="ai-fix-push-when-done" className="flex cursor-pointer items-center gap-1.5 text-meta text-ui-ink">
+                      <CheckboxBox checked={pushWhenDone} disabled={fixStarting} onChange={(e) => setPushWhenDone(e.target.checked)} />
+                      Push when done
+                      <InfoButton title="Push when done">
+                        <p>When the fix finishes on your own pull request, Limn pushes it to the pull request's branch. You do not press Push.</p>
+                        <p className="mt-2">
+                          It waits for your press instead when the agent says something is not fixed, its report does not cover
+                          every item, or the pull request is someone else's. The session says which.
+                        </p>
+                        <p className="mt-2">A push ends the session, so untick this to keep talking to the agent first.</p>
+                      </InfoButton>
+                    </label>
                     {/* No AI runtime or no Claude credential: one line (or the one-time setup) in
                         place of the start button. */}
                     {/* Any provider that can fix may run it (the menu lists those); "Plan first" shows

@@ -50,32 +50,33 @@ async function withAi(page: Page, o: { storyBuild?: StoryBuild; docs?: boolean }
 const tabUrl = `/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`;
 
 test.describe('Implement, plan first', () => {
-  test('the docs action shows only when the library has a document, and carries into the start', async ({ page }) => {
+  test('the reference documents are not a choice: the start state says the agent gets them', async ({ page }) => {
     await withAi(page, { docs: true });
+    await page.goto(`/app/?view=${encodeURIComponent(`ticket:${ACME_1}`)}`);
+    const tab = page.getByTestId('ticket-tab-view');
+    await tab.getByRole('button', { name: 'Implement ACME-1' }).click();
+    const view = page.getByTestId('story-build-overlay');
+    await expect(view.getByTestId('story-build-start-docs')).toContainText("The agent also gets the workspace's reference documents.");
+    await expect(view.getByTestId('story-build-start-docs').getByRole('checkbox')).toHaveCount(0);
+    await expect(view.getByTestId('story-build-start-button')).toHaveText('Start');
+    const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
+    await view.getByTestId('story-build-start-button').click();
+    expect((await start).postDataJSON()).not.toHaveProperty('docs');
+  });
+
+  test('"Build end to end" starts the build as the tab opens, with its fixed settings', async ({ page }) => {
+    await withAi(page);
     await page.goto(`/app/?view=${encodeURIComponent(`ticket:${ACME_1}`)}`);
     const tab = page.getByTestId('ticket-tab-view');
     await expect(tab.getByRole('button', { name: 'Implement ACME-1' })).toBeVisible();
     await tab.getByTestId('story-build-entry-menu').click();
     const menu = page.getByRole('menu', { name: 'More ways to implement' });
-    await expect(menu.getByRole('menuitem')).toHaveText(['Implement', 'Implement with docs']);
-    await menu.getByRole('menuitem', { name: 'Implement with docs' }).click();
-
-    const view = page.getByTestId('story-build-overlay');
-    const box = view.getByTestId('story-build-start-docs').getByRole('checkbox');
-    await expect(box).toBeChecked();
-    await expect(view.getByTestId('story-build-start-button')).toHaveText('Start with docs');
+    await expect(menu.getByRole('menuitem')).toHaveText(['Implement', 'Build end to end']);
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
-    await view.getByTestId('story-build-start-button').click();
-    expect((await start).postDataJSON()).toMatchObject({ action: 'implement', docs: true });
-    await expect(view.getByTestId('story-plan')).toContainText('With docs');
-  });
-
-  test('without a built document there is no menu', async ({ page }) => {
-    await withAi(page);
-    await page.goto(`/app/?view=${encodeURIComponent(`ticket:${ACME_1}`)}`);
-    const tab = page.getByTestId('ticket-tab-view');
-    await expect(tab.getByRole('button', { name: 'Implement ACME-1' })).toBeVisible();
-    await expect(tab.getByTestId('story-build-entry-menu')).toHaveCount(0);
+    await menu.getByRole('menuitem', { name: 'Build end to end' }).click();
+    // No Start press: the menu press is the start.
+    expect((await start).postDataJSON()).toMatchObject({ action: 'implement', endToEnd: true, autoApprovePlan: true, autoPush: true, loopRounds: 4 });
+    await expect(page.getByTestId('story-build-overlay').getByTestId('story-plan')).toBeVisible();
   });
 
   test('the plan panel: evidence, answers, a reply, an earlier revision, then Approve and start', async ({ page }) => {

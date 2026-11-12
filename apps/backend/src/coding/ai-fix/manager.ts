@@ -354,6 +354,9 @@ export interface StartFixInput {
   // THE CI-ONLY SEED only (dependency automation's combined run): Limn's OWN lines, set above the seed's
   // items (`dependencyMergeAndCiPreamble`). Never PR text: it sits outside every fence.
   preamble?: string;
+  // "PUSH WHEN DONE" (a MANUAL start's tick; ignored on an automatic run): a fix that finishes cleanly on the
+  // reader's own PR is pushed without a press (auto-push.ts `maybePushWhenDone`).
+  pushWhenDone?: boolean;
   // THE FIX START QUEUE: every sandbox slot taken ⇒ wait in line (start-queue.ts) instead of the refusal.
   // Set by the reader's press (the start route) and the auto fix; never by dependency automation (its
   // own tick retries) nor by the queue's own re-run.
@@ -498,6 +501,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
       trigger,
       reviewItems,
       provider,
+      ...(trigger === 'manual' && input.pushWhenDone === true ? { pushWhenDone: true } : {}),
       session: { workspaceId: scope.workspaceId, unattended, effort: choice.effort },
     });
     insertedId = fixId;

@@ -75,6 +75,8 @@ export interface AiFixRow {
   sessionJson?: Record<string, unknown> | null;
   lastActiveAt?: Date | number | null;
   unattended?: boolean | null;
+  /** 0190: push a clean manual fix without a press (auto-push.ts `maybePushWhenDone`). */
+  pushWhenDone?: boolean | null;
   workspaceId?: number | null;
   // 0178 — the merge (sandbox/session/fix-merge.ts `FixMergeState`) and the agent's commits (base64 bundle).
   mergeJson?: Record<string, unknown> | null;
@@ -155,6 +157,8 @@ export async function insertQueuedFix(
     provider?: 'claude' | 'codex';
     // THE WORKSPACE SESSION (0177): the row opens `booting` (status derived: running).
     session?: { workspaceId: number; unattended: boolean; effort: string } | null;
+    // A MANUAL fix's "Push when done" (the start body's tick).
+    pushWhenDone?: boolean;
   },
 ): Promise<number> {
   const t = ctx.schema.aiFixes;
@@ -174,6 +178,7 @@ export async function insertQueuedFix(
       sourceReviewId: input.sourceReviewId,
       prompt: input.prompt,
       trigger: input.trigger ?? 'manual',
+      ...(input.pushWhenDone === true ? { pushWhenDone: true } : {}),
       // Omitted (→ NULL) on a plain run: null means "this run had no review items".
       ...(items != null ? { reviewItems: JSON.stringify(items) } : {}),
       ...(input.session

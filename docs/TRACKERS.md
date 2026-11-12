@@ -562,7 +562,7 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
   the other account holds → 404).
 
 
-## The ticket update — THE OTHER TRACKER WRITE (`tracker/ticket-update.ts`)
+## The ticket update — THE OTHER TRACKER WRITE (`tracker/ticket-update.ts`; + Build end to end's comment)
 
 Owner decisions 2026-11-08 (it replaces "Limn does NOT update the tracker" in STORY-BUILD.md § Plan
 first) and 2026-11-12 (THE WHOLE TICKET): after planning, the plan panel's ticket review
@@ -628,8 +628,13 @@ stay editable and copyable ("Updating the ticket works with Jira only. Copy the 
   (`readSessionTicket`), so the build gets the new text. Refusals are the status change's sentences
   (403 → `TICKET_STATUS_NO_PERMISSION`, 400 → "Jira refused this change."). No worker, no automation,
   no retry (`retry: false`); the SPA asks once ("Replace the ticket's … in Jira?", naming only what
-  changes). ⚠ Nothing else calls it — the review loop (STORY-BUILD.md) never writes the tracker. Rate tier
-  `[search, read]` (the editmeta / description read is inside the same press).
+  changes). ⚠ The ONE other caller is "Build end to end" (STORY-BUILD.md § Build end to end): the reader's
+  one press there is the consent, spent ONCE — its ticket step (`coding/story-build/end-to-end.ts`, claimed,
+  never retried) calls the same writer, now the exported `writeTicketUpdate` (the route is a thin wrapper),
+  with the same diff rule (shared `ticketUpdateBody`), and then posts ONE comment through `postTicketComment`
+  (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind the same `statusGate`, under the reader's Jira
+  login: the PRs, what changed and why). The status is never changed there. The review loop itself never
+  writes the tracker. Rate tier `[search, read]` (the editmeta / description read is inside the same press).
 - **The draft is untrusted.** `markdownToJiraWiki` passes wiki markup through as typed, so plan-verify
   ESCAPES (`neutraliseNewWikiMarkup`, a backslash) every Jira mention (`[~accountid:…]`, `[~name]`) or
   macro (`{html}`, `{panel}`, `{color}`, `{include}`, `{iframe}`) in the agent's draft that the stored

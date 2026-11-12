@@ -111,9 +111,13 @@ test.describe('AI Fix in the sandbox', () => {
     await expect(page.getByText('3 items')).toBeVisible();
     // The old separate conflict run is gone: no "Also resolve" box.
     await expect(page.getByText(/Also resolve merge conflicts/)).toHaveCount(0);
+    // "Push when done" is ON by default, and the start says so.
+    await expect(page.getByTestId('ai-fix-push-when-done').getByRole('checkbox')).toBeChecked();
     const startReq = page.waitForRequest((r) => r.url().endsWith(`/api/pro/prs/${PR_ID}/ai-fix`) && r.method() === 'POST');
     await page.locator('[data-ai-fix-action="start"]').click();
-    expect((await startReq).postDataJSON().include).toEqual(['conflict:merge', 'ci:1', 'ci:2']);
+    const startBody = (await startReq).postDataJSON();
+    expect(startBody.include).toEqual(['conflict:merge', 'ci:1', 'ci:2']);
+    expect(startBody.pushWhenDone).toBe(true);
 
     const merge = page.getByTestId('ai-fix-merge');
     await expect(merge).toHaveAttribute('data-merge-status', 'valid');
