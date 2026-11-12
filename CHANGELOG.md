@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.31] - 2026-11-12
+
 ### Added
 
 - Manage repos & workspaces: a repository can be in more than one workspace. It is Maintained in one at most and
