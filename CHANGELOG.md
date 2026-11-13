@@ -13,6 +13,17 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- The story view: "Ask about this story". Ask how to prove the ticket is done once its pull requests are merged,
+  what is still missing, or how it fits with the rest of the system. The answer comes from the ticket, the pull
+  requests' changes and code, every repository in the workspace, the reference documents, the sprint's other
+  stories, and your Claude memory, CLAUDE.md and skills; nothing is run or changed. Chats are saved with the story.
+
+### Fixed
+
+- Build end to end: the summary in the Jira comment keeps words like "Q3" and "P1" instead of removing them.
+
 ## [1.0.31] - 2026-11-12
 
 ### Added
@@ -24,10 +35,6 @@ no internals.
   "Add as" picks Maintained or External for new ones.
 - The sidebar's Repositories list shows the workspace's External repositories too, marked External, and their
   pages open.
-- The story view: "Ask about this story". Ask how to prove the ticket is done once its pull requests are merged,
-  what is still missing, or how it fits with the rest of the system. The answer comes from the ticket, the pull
-  requests' changes and code, every repository in the workspace, the reference documents, the sprint's other
-  stories, and your Claude memory, CLAUDE.md and skills; nothing is run or changed. Chats are saved with the story.
 
 ### Changed
 
@@ -41,7 +48,6 @@ no internals.
 
 ### Fixed
 
-- Build end to end: the summary in the Jira comment keeps words like "Q3" and "P1" instead of removing them.
 - Repository search: Next and Prev show a spinner while the page loads.
 - Manage repos & workspaces: removing a repository fades its line and shows a spinner, and you can remove another
   one at the same time. Before, the other remove buttons did nothing until the first removal finished.
