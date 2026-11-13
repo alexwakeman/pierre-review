@@ -13,6 +13,11 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Ask about this story: the agent is ready sooner. It reads each repository from one copy kept between chats and
+  brought up to date when the default branch moves.
+
 ## [1.0.32] - 2026-11-13
 
 ### Added
