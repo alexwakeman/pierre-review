@@ -6447,3 +6447,11 @@ removed from the card; it moved one click (or Enter) away.
   repo header's compact `BranchStatusPanel`; 2026-11-01, was the workspace's Open PRs); a red head no local PR names → its GitHub checks page (`safeExternalUrl`,
   new tab); a reviewer's load has nowhere to go → the panel. Pinned in
   `test/pendingDestination.test.ts`. It reads only the card; nothing fetches before the reader acts.
+
+## The story view → Ask about this story
+
+`components/Ticket/StoryChat.tsx`, mounted at the end of `StoryViewBody` (all three hosts), gated on
+`me.ai.enabled` and its Ask on `AiRunGate kind="story_chat"`. It keeps the story's agent ready with
+`POST /api/story-chats/prepare` at mount and every 3 minutes while visible (in the PR view's Story tab:
+only once the box is focused), and polls quickly only while preparing or answering
+(`hooks/useStoryChat.ts`). [STORY-CHAT.md](STORY-CHAT.md).

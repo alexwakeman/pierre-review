@@ -1,5 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  StoryChatListResponse,
+  StoryChatLive,
   PrTabSummariesResponse,
   ActiveReviewsResponse,
   AiFix,
@@ -2699,6 +2701,17 @@ export async function installMockApi(
           story: null,
           comments: [],
         } satisfies TicketStoryResponse);
+      }
+      // Story chat (the story view mounts it): no saved chat, the agent cold; prepare keeps it cold.
+      if (path.endsWith('/api/story-chats') || path.endsWith('/api/story-chats/prepare')) {
+        const live: StoryChatLive = { state: 'cold', chatId: null, shell: true, shellNote: null, note: null, activity: [], partial: '', checkouts: [] };
+        if (path.endsWith('/prepare')) return json(route, { live });
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          ident: new URL(route.request().url()).searchParams.get('ident') ?? '',
+          chats: [],
+          live,
+        } satisfies StoryChatListResponse);
       }
       // The plan panel's ticket review: the ticket as Limn holds it (DB only).
       if (path.endsWith('/api/ticket-update/current')) {

@@ -3805,7 +3805,10 @@ export type AiAgentKind =
   // "Implement story" (docs/STORY-BUILD.md): the READ-ONLY assess + plan pass (and its chat re-plans),
   // and the per-repository WRITE build (no shell).
   | 'story_plan'
-  | 'story_build';
+  | 'story_build'
+  // Story chat (docs/STORY-CHAT.md): quick questions about one story; on Claude its commands run in a
+  // process sandbox, on Codex it reads only.
+  | 'story_chat';
 
 /**
  * What a Run gate asks about: one agent kind, or `'complete'` — the ONE-SHOT features (sprint briefs
@@ -3831,6 +3834,7 @@ export const AI_AGENT_KINDS: readonly AiAgentKind[] = [
   'docs_chat',
   'story_plan',
   'story_build',
+  'story_chat',
 ];
 
 /** Every run kind: the agent kinds, then the one-shot `complete`. */

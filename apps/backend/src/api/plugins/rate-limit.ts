@@ -600,6 +600,17 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   runs ask the spend gate, never a route)
   // ⚠ The pushes are spelled EXACTLY here: the `hitsGithub` alternation further down is anchored to
   // `/api/prs/\d+/` and only reached by the Claude Review / `/api/pro/` family, so it never sees them.
+  // STORY CHAT (story-chat/routes.ts; docs/STORY-CHAT.md). FOLLOWING THE TOKEN:
+  //   POST /api/story-chats/ask       one model run (a question)                          → ai + ai_hourly
+  //   POST /api/story-chats/prepare   git fetches of the story's PR heads (GitHub quota) and a
+  //                                   local agent process, no model call; the open story view
+  //                                   repeats it as a keep-alive every few minutes             → sync
+  //   everything else (list, detail, stop, close, delete): DB and memory only              → read
+  if (path === '/api/story-chats' || path.startsWith('/api/story-chats/')) {
+    if (mutating && path === '/api/story-chats/ask') return [TIERS.ai, TIERS.aiHourly];
+    if (mutating && path === '/api/story-chats/prepare') return [TIERS.sync];
+    return [TIERS.read];
+  }
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
     if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly];
     if (mutating && /^\/api\/story-builds\/\d+\/(messages|build|resume)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];

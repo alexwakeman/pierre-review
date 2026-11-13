@@ -308,8 +308,63 @@ export interface ProviderUsageSource {
   probeReady(): boolean;
 }
 
+/**
+ * THE PROCESS SANDBOX a session's shell runs in (story chat, docs/STORY-CHAT.md): Anthropic's
+ * sandbox-runtime (`srt`) as the Agent SDK runs it — Seatbelt on macOS, bubblewrap on Linux. Commands
+ * may WRITE only `allowWrite`; READS are denied under `denyRead` except `allowRead`; the network is the
+ * SDK's allow-list proxy over `allowedDomains`; `denyEnv` names are removed from every command's
+ * environment (the model credential). Fail closed: no sandbox ⇒ no command runs.
+ */
+export interface AgentSandboxPolicy {
+  allowWrite: string[];
+  denyWrite: string[];
+  denyRead: string[];
+  allowRead: string[];
+  allowedDomains: string[];
+  denyEnv: string[];
+}
+
+/**
+ * A LIVE agent kept between questions (story chat): started once, asked many times. The process is up
+ * before the first question, so an answer starts in about a second (docs/QUICK-CHAT-SPIKE.md).
+ */
+export interface AgentSessionSpec {
+  kind: AgentKind;
+  model: ModelChoice;
+  system: string;
+  cwd: string;
+  /** Roots the FILE tools may write (the path guard); commands are bounded by `sandbox` instead. */
+  roots: string[];
+  /** Roots the file tools may only read. */
+  readOnlyRoots: string[];
+  /** The shell's sandbox. null ⇒ no shell at all (Bash denied). */
+  sandbox: AgentSandboxPolicy | null;
+  /**
+   * The ALLOW-LISTED environment the agent process runs with (never the server's whole environment:
+   * srt passes it through to every command). The provider adds its own credential variables.
+   */
+  env: Record<string, string>;
+  /** US$ cap for the whole session (the provider stops it past this). */
+  budgetUsd: number | undefined;
+  /** Model turns per question. */
+  turnsPerQuestion: number;
+  claude: { allowedTools: string[]; disallowedTools: string[] };
+}
+
+export interface AgentSession {
+  /** Ask one question; resolves when its answer is complete. One at a time. */
+  ask(text: string, onProgress: (p: AgentProgress) => void): Promise<AgentOutcome>;
+  /** Stop the running answer (the session stays usable). */
+  interrupt(): Promise<void>;
+  /** End the process. Idempotent. */
+  close(): void;
+  readonly closed: boolean;
+}
+
 export interface AgentProvider {
   id: AgentProviderId;
+  /** A live session (story chat). Absent ⇒ this provider answers one run per question (Codex). */
+  openSession?(spec: AgentSessionSpec): Promise<AgentSession>;
   /** Resolve a role (or an explicit id) to this provider's model id. */
   resolveModel(choice: ModelChoice): string;
   runAgent(spec: AgentRunSpec): Promise<AgentRunResult>;

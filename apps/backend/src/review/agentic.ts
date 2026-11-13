@@ -31,6 +31,7 @@ import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
 import { registerStoryDocsRoutes } from './story-docs/routes.js';
 import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 import { registerSandboxSessionRoutes } from '../sandbox/session/routes.js';
+import { registerStoryChatRoutes } from '../story-chat/routes.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -85,6 +86,8 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // agent, starts the build, and pushes on a click only (the push routes are coding/story-build's). The
   // old plan/build flow's routes are no longer mounted (its code goes in WP10).
   registerSandboxSessionRoutes(app, ctx);
+  // Story chat (docs/STORY-CHAT.md): quick questions about one story, its commands in a process sandbox.
+  registerStoryChatRoutes(app, ctx);
   return ctx;
 }
 

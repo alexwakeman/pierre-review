@@ -674,3 +674,13 @@ PR IN PLAN ORDER and `POST …/repos/:repoId/push` that repository's stack in or
 repository (later PRs `skipped` `STACK_BELOW_FAILED`) and the PRs depending on it (`DEPENDS_ON_NOT_PUSHED`);
 other repositories go on; a pushed PR is `skipped` `ALREADY_PUSHED`. Both answer `prs` (plan order) beside
 `results` (one per repository: its first failure, else its last push).
+
+## Story chat
+
+`GET /api/story-chats?workspace=&ident=` → `StoryChatListResponse` (the story's saved chats, newest
+first, + the live agent). `GET /api/story-chats/:id` → `StoryChatDetailResponse` (turns + live).
+`POST /api/story-chats/prepare {workspaceId, ident, chatId?}` → `{live}`: starts or keeps alive the
+story's agent (no model call). `POST /api/story-chats/ask {workspaceId, ident, chatId?, question}` →
+`{chatId, turnId}` (409 `busy` while one answers; 503 `no_credential`). `POST /api/story-chats/:id/stop`,
+`POST /api/story-chats/close {workspaceId, ident}`, `DELETE /api/story-chats/:id`. Agentic only; a chat
+id resolves within (account, workspace, ticket). Design: [STORY-CHAT.md](STORY-CHAT.md).

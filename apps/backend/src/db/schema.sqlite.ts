@@ -2539,6 +2539,76 @@ export const workspaceExternalRepos = sqliteTable(
   }),
 );
 
+// ---- STORY CHAT (CORE) — migration 0192; docs/STORY-CHAT.md ----
+//
+// Quick questions about one story. A chat belongs to (account, workspace, ticket ident); its turns are
+// kept so a chat can be read and continued later. The live agent is memory only (story-chat/live.ts).
+// Limn's OWN record: never an import of the reader's Claude or Codex sessions.
+export const storyChats = sqliteTable(
+  'story_chats',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    /** Shared `trackerTicketIdent`. */
+    ticketIdent: text('ticket_ident').notNull(),
+    /** The first question, shortened. */
+    title: text('title').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    idAccountUx: uniqueIndex('story_chats_id_account').on(t.id, t.accountId),
+    accountTicketIdx: index('story_chats_account_ws_ticket_idx').on(t.accountId, t.workspaceId, t.ticketIdent, t.updatedAt),
+    workspaceAccountFk: foreignKey({
+      name: 'story_chats_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const storyChatTurns = sqliteTable(
+  'story_chat_turns',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    chatId: integer('chat_id').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer'),
+    /** 'running' | 'done' | 'failed' | 'stopped'. */
+    status: text('status').notNull(),
+    error: text('error'),
+    provider: text('provider'),
+    model: text('model'),
+    /** The agent could run commands (the sandbox was up). */
+    shell: integer('shell', { mode: 'boolean' }).notNull().default(false),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    finishedAt: integer('finished_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    chatIdx: index('story_chat_turns_chat_idx').on(t.chatId, t.id),
+    chatAccountFk: foreignKey({
+      name: 'story_chat_turns_chat_account_fk',
+      columns: [t.chatId, t.accountId],
+      foreignColumns: [storyChats.id, storyChats.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- The REPO half of the Pending mute (CORE, free) — migration 0058 / pg 0045 ----
 //
 // PRESENCE IS THE FACT: one row per (account, repo) the reader has muted for Pending, no

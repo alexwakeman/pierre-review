@@ -339,6 +339,12 @@ import type {
   SandboxNetworkAllowResponse,
   SandboxSessionDiffResponse,
   ReviewSuggestionDismissResponse,
+  StoryChatAskBody,
+  StoryChatAskResponse,
+  StoryChatDetailResponse,
+  StoryChatListResponse,
+  StoryChatLive,
+  StoryChatPrepareBody,
 } from '@pierre-review/shared';
 import { aiFixSessionPath, buildPlanPath, sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
 
@@ -1108,6 +1114,21 @@ export const api = {
     get<TicketStoryResponse>(
       withQuery('/api/ticket-story', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
     ),
+  // STORY CHAT (agentic, LOCAL-ONLY; docs/STORY-CHAT.md): quick questions about one story. `prepare`
+  // starts (or keeps alive) the story's agent with no model call; `ask` is one model run.
+  storyChats: (workspaceId: number, ident: string) =>
+    get<StoryChatListResponse>(withQuery('/api/story-chats', workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`)),
+  storyChat: (chatId: number) => get<StoryChatDetailResponse>(`/api/story-chats/${chatId}`),
+  storyChatPrepare: (body: StoryChatPrepareBody) =>
+    fetch('/api/story-chats/prepare', jsonBody('POST', body)).then((r) => handle<{ live: StoryChatLive }>(r)),
+  storyChatAsk: (body: StoryChatAskBody) =>
+    fetch('/api/story-chats/ask', jsonBody('POST', body)).then((r) => handle<StoryChatAskResponse>(r)),
+  storyChatStop: (chatId: number) =>
+    fetch(`/api/story-chats/${chatId}/stop`, jsonBody('POST')).then((r) => handle<{ stopped: boolean }>(r)),
+  storyChatClose: (workspaceId: number, ident: string) =>
+    fetch('/api/story-chats/close', jsonBody('POST', { workspaceId, ident })).then((r) => handle<{ closed: true }>(r)),
+  storyChatDelete: (chatId: number) =>
+    fetch(`/api/story-chats/${chatId}`, jsonBody('DELETE')).then((r) => handle<{ deleted: true }>(r)),
   // The story view's status picker (Jira only) — a TRACKER WRITE. The GET is made when the
   // picker opens (one Jira call); the POST makes the transition the reader picked and settles it.
   ticketTransitions: (workspaceId: number, ident: string) =>

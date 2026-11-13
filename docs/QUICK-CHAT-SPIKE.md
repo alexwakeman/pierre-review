@@ -1,6 +1,6 @@
 # Spike: quick story chats under sandbox-runtime (`srt`)
 
-Status: **spike, 2026-11-13. Nothing here ships yet.** Scripts: `scripts/spikes/srt/`.
+Status: **spike, 2026-11-13. Built as the story chat: [STORY-CHAT.md](STORY-CHAT.md).** Scripts: `scripts/spikes/srt/`.
 
 ## The question
 

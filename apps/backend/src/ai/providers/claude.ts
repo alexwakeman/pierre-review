@@ -29,7 +29,10 @@ import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../..
 import type {
   AgentMessage,
   AgentOutcome,
+  AgentProgress,
   AgentProvider,
+  AgentSession,
+  AgentSessionSpec,
   AgentResultMessage,
   AgentRunResult,
   AgentRunSpec,
@@ -156,6 +159,173 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
     }
   }
   return { outcome };
+}
+
+// ---- openSession (story chat: a LIVE agent kept between questions) ---------------------------
+//
+// ONE `query()` in STREAMING-INPUT mode: the prompt is an async queue, so the Claude Code process starts
+// once and answers each question as it is pushed (docs/QUICK-CHAT-SPIKE.md: ~1 s to the first words
+// when warm, ~4 s more cold). Everything a run gets (the path guard first, own-tools-only, no host
+// settings, no claude.ai connectors, no session files) plus, when `spec.sandbox` is set, the SDK's
+// PROCESS SANDBOX (`srt`) around every Bash command, FAIL CLOSED: `failIfUnavailable` (no sandbox ⇒ every
+// command refused, never run bare) and `allowUnsandboxedCommands: false` (the model cannot ask out).
+// The environment is the caller's ALLOW-LIST plus the credential ladder's rung (`agentSdkEnv`), never
+// the server's own: srt passes the agent's environment through to every command.
+
+/** The SDK `sandbox` settings for a policy. Exported for the test. */
+export function sdkSandboxSettings(p: NonNullable<AgentSessionSpec['sandbox']>): Record<string, unknown> {
+  return {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    network: { allowedDomains: [...p.allowedDomains] },
+    filesystem: {
+      allowWrite: [...p.allowWrite],
+      denyWrite: [...p.denyWrite],
+      denyRead: [...p.denyRead],
+      allowRead: [...p.allowRead],
+    },
+    credentials: { envVars: p.denyEnv.map((name) => ({ name, mode: 'deny' as const })) },
+  };
+}
+
+/** The base tool set of a session: the read tools, plus the shell and edits when sandboxed. Exported for the test. */
+export function sessionTools(spec: Pick<AgentSessionSpec, 'sandbox' | 'claude'>): { tools: string[]; allowed: string[]; disallowed: string[] } {
+  const base = spec.sandbox ? ['Read', 'Glob', 'Grep', 'Bash', 'Edit', 'Write'] : ['Read', 'Glob', 'Grep'];
+  const disallowed = new Set(spec.claude.disallowedTools);
+  if (!spec.sandbox) for (const t of ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']) disallowed.add(t);
+  const tools = base.filter((t) => !disallowed.has(t));
+  return { tools, allowed: [...new Set([...tools, ...spec.claude.allowedTools])].filter((t) => !disallowed.has(t)), disallowed: [...disallowed] };
+}
+
+async function openSession(spec: AgentSessionSpec): Promise<AgentSession> {
+  const model = resolveModel(spec.model);
+  const { query } = await loadAgentSdk();
+  const guard = createPathGuard(spec.cwd, spec.roots, { readOnlyRoots: spec.readOnlyRoots });
+  const extraDirs = [...spec.roots, ...spec.readOnlyRoots].filter((d) => d !== spec.cwd);
+  const { tools, allowed, disallowed } = sessionTools(spec);
+
+  // The input queue: each ask() pushes one user message; close() ends the stream.
+  const pending: unknown[] = [];
+  let wake: (() => void) | null = null;
+  let ended = false;
+  async function* input(): AsyncGenerator<never> {
+    while (!ended) {
+      if (pending.length === 0) await new Promise<void>((r) => (wake = r));
+      while (pending.length > 0) yield pending.shift() as never;
+    }
+  }
+  const abort = new AbortController();
+  const q = query({
+    prompt: input(),
+    options: {
+      model,
+      ...sdkModelOptions(model, 'worktree'),
+      systemPrompt: withWritingRules(spec.system, writingStyleFor(spec.kind)),
+      cwd: spec.cwd,
+      ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
+      permissionMode: 'bypassPermissions',
+      tools,
+      allowedTools: allowed,
+      disallowedTools: disallowed,
+      hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook([])] as never },
+      ...(spec.budgetUsd !== undefined ? { maxBudgetUsd: spec.budgetUsd } : {}),
+      ...(spec.sandbox ? { sandbox: sdkSandboxSettings(spec.sandbox) as never } : {}),
+      settingSources: [],
+      ...ISOLATED_MCP,
+      ...NO_SESSION_FILES,
+      abortController: abort,
+      ...claudeExecutableOptions(),
+      env: agentSdkEnv(spec.env as NodeJS.ProcessEnv),
+    },
+  });
+
+  // ONE reader of the message stream for the session's life; the current ask() gets its messages.
+  interface Asking {
+    onProgress: (p: AgentProgress) => void;
+    resolve: (o: AgentOutcome) => void;
+    reject: (e: unknown) => void;
+    usage: Map<string, UsageTokens>;
+    steps: number;
+  }
+  // A holder, not a `let`: TypeScript does not see the closures assign it.
+  const st: { current: Asking | null } = { current: null };
+  let closed = false;
+  let prevCost = 0;
+  const finish = (fn: (c: Asking) => void): void => {
+    const c = st.current;
+    st.current = null;
+    if (c) fn(c);
+  };
+  void (async () => {
+    try {
+      for await (const message of q) {
+        const c = st.current;
+        if (!c) continue;
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(c.usage, message);
+          } catch {
+            /* usage shape varies */
+          }
+          let lines: string[] = [];
+          try {
+            lines = describeFixBlocks(message);
+          } catch {
+            /* never let progress break the session */
+          }
+          c.steps += 1;
+          c.onProgress({ kind: 'step', lines, text: assistantText(message), usage: sumUsageMap(c.usage) });
+          // The per-question turn cap: the SDK's maxTurns counts the whole session, so it is enforced here.
+          if (c.steps > spec.turnsPerQuestion) void q.interrupt().catch(() => {});
+        } else if (message.type === 'result') {
+          const o = outcomeOf(message as AgentResultMessage);
+          // The result's US$ is the SESSION's running total: this question's share is the difference.
+          const total = o.costUsd;
+          const own = total == null ? null : total >= prevCost ? total - prevCost : total;
+          if (total != null) prevCost = Math.max(prevCost, total);
+          const outcome: AgentOutcome = { ...o, costUsd: own, usage: sumUsageMap(c.usage) };
+          c.onProgress({ kind: 'outcome', outcome });
+          finish((x) => x.resolve(outcome));
+        }
+      }
+      finish((x) => x.reject(new Error('The agent stopped.')));
+    } catch (err) {
+      finish((x) => x.reject(err));
+    } finally {
+      closed = true;
+    }
+  })();
+
+  const session: AgentSession = {
+    get closed() {
+      return closed;
+    },
+    ask(text, onProgress) {
+      if (closed) return Promise.reject(new Error('The agent stopped.'));
+      if (st.current) return Promise.reject(new Error('A question is already being answered.'));
+      return new Promise<AgentOutcome>((resolve, reject) => {
+        st.current = { onProgress, resolve, reject, usage: new Map(), steps: 0 };
+        pending.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
+        wake?.();
+        wake = null;
+      });
+    },
+    async interrupt() {
+      if (st.current && !closed) await q.interrupt().catch(() => {});
+    },
+    close() {
+      if (closed && ended) return;
+      ended = true;
+      closed = true;
+      wake?.();
+      wake = null;
+      abort.abort();
+      finish((x) => x.reject(new Error('The chat was closed.')));
+    },
+  };
+  return session;
 }
 
 /** Claude's result message → the neutral outcome. Exported for the test. */
@@ -469,6 +639,7 @@ async function sdkUsageProbe(): Promise<unknown> {
 export const claudeProvider: AgentProvider = {
   id: 'claude',
   resolveModel,
+  openSession,
   // THE WRITING RULES ride every system prompt (ai/writing-rules.ts) — added here, at the one door.
   runAgent: (spec) => runAgent({ ...spec, system: withWritingRules(spec.system, writingStyleFor(spec.kind)) }),
   complete: (req) => complete({ ...req, system: withWritingRules(req.system) }),

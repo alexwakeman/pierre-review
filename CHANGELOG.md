@@ -22,6 +22,9 @@ no internals.
   "Add as" picks Maintained or External for new ones.
 - The sidebar's Repositories list shows the workspace's External repositories too, marked External, and their
   pages open.
+- The story view: "Ask about this story". Ask about the ticket and its pull requests, for example their test
+  strategy. On Claude the agent can run the tests, in a sandbox that writes only to its own copies of the code. It
+  is ready when the story opens, closes after 10 minutes without use, and chats are saved with the story.
 
 ### Changed
 
@@ -35,6 +38,7 @@ no internals.
 
 ### Fixed
 
+- Build end to end: the summary in the Jira comment keeps words like "Q3" and "P1" instead of removing them.
 - Repository search: Next and Prev show a spinner while the page loads.
 - Manage repos & workspaces: removing a repository fades its line and shows a spinner, and you can remove another
   one at the same time. Before, the other remove buttons did nothing until the first removal finished.

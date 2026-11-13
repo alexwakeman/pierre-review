@@ -10,6 +10,7 @@ import { CODEX_DOCS_KINDS } from './codex/kinds/docs.js';
 import { CODEX_FIX_KINDS } from './codex/kinds/fix.js';
 import { CODEX_REVIEW_KINDS } from './codex/kinds/review.js';
 import { CODEX_STORY_BUILD_KINDS } from './codex/kinds/story-build.js';
+import { CODEX_STORY_CHAT_KINDS } from './codex/kinds/story-chat.js';
 import { CODEX_TICKETS_KINDS } from './codex/kinds/tickets.js';
 import type { AgentKind } from './provider.js';
 import { isLockedOut } from './usage-lockout.js';
@@ -79,6 +80,8 @@ export const CODEX_AGENT_KINDS: ReadonlySet<AgentKind> = new Set<AgentKind>([
   ...CODEX_DOCS_KINDS,
   // "Implement story" (listed from its contract commit — see that file's header).
   ...CODEX_STORY_BUILD_KINDS,
+  // Story chat: read-only on Codex (that file's header).
+  ...CODEX_STORY_CHAT_KINDS,
 ]);
 
 /** Can Codex run this agent kind in this version? (`allow` is for tests.) */
@@ -102,6 +105,7 @@ const KIND_WORDS: Record<AgentKind, string> = {
   docs_chat: 'the docs chat',
   story_plan: 'story plans',
   story_build: 'story builds',
+  story_chat: 'the story chat',
 };
 
 /** Every agent kind (the KIND_WORDS keys, so a new kind cannot be missed: the Record is exhaustive). */

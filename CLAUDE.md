@@ -11,9 +11,8 @@ organisations where ≤ 3 people use it; a commercial licence above that, via th
 competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
 or Settings → AI). The website is a separate service, `apps/site`.
 
-> **How to use this file.** The lean operating guide: the mental model, the commands, the invariants
-> and landmines to know BEFORE editing. Depth is in the topic docs below — read the matching one
-> before non-trivial work in its area; put NEW detail there. **Hard size
+> **How to use this file.** The mental model, commands, invariants and landmines to know BEFORE
+> editing. Depth is in the topic docs below — read the matching one first; put NEW detail there. **Hard size
 > budget: under 48k bytes**; nothing discoverable by grepping code or a route/table belongs here.
 
 ## Doc map
@@ -29,6 +28,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [TEAM-REVIEW](docs/TEAM-REVIEW.md) | ANY multi-user behaviour (claims, author vs reviewer, verdicts, threads, pushback) — the plain-English design; update it in the same commit |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history |
 | [STORY-BUILD](docs/STORY-BUILD.md) · [SANDBOX](docs/SANDBOX.md) | Implement story (flow, Fill gaps, Push) · its sandbox (and AI Fix's): setup, proxy, drivers, services, threats |
+| [STORY-CHAT](docs/STORY-CHAT.md) | "Ask about this story": warm agent, srt sandbox |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker: Jira, GitHub Issues, Linear, Notion, stored tickets + worker, the sealed token |
@@ -127,9 +127,9 @@ All from the repo root unless noted.
 | `pnpm build` · `pnpm typecheck` | recursive build · `tsc --noEmit` everywhere — **run typecheck before calling work done** |
 | `pnpm test:changed` · `test` · `test:all` | what a change touches · fast + site · + `slow` |
 | `pnpm db:generate` · `db:migrate` · `db:studio` | Drizzle migration from `schema.sqlite.ts` · apply (also runs on boot) · studio |
-| `pnpm sync:once owner/repo` | one-off sync of one repo without the server |
+| `pnpm sync:once owner/repo` | sync one repo, no server |
 | `pnpm --filter @pierre-review/backend verify:isolation` | query-layer cross-account IDOR check |
-| `pnpm demo` | seed `acme/*` + boot the ISOLATED screenshot stack (`:4100`/`:5273`, gh off PATH); `--no-seed` reuses the DB |
+| `pnpm demo` | seed `acme/*` + boot the ISOLATED screenshot stack (`:4100`/`:5273`, gh off PATH); `--no-seed` keeps the DB |
 | `pnpm dev:scratch` | a throwaway stack, run from a WORKTREE (`:4200`/`:5373`); `--seed demo\|copy\|empty` |
 | `pnpm shots` | the README's screenshots (`apps/landing/public/shots/`) |
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
@@ -327,7 +327,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   `HeaderToasts`, FIXED at the bottom right** (never a second one; its panel opens up and left).
   **Every page title goes through `PageHeader`** (`PAGE_GUTTER` + `PAGE_HEADER_TOP`, pinned by
   `e2e/header-geometry.spec.ts`); the top bar is `lg:hidden` everywhere. Both: docs/FRONTEND.md.
-- **Reactions are fetched ON DEMAND (batched), NEVER STORED.**
+- **Reactions: fetched ON DEMAND (batched), NEVER STORED.**
 
 ---
 
@@ -419,8 +419,8 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `['ai-budget']` query. Claude's usage reading (the `loadAgentSdk` Query tap — never add per-runner
   forwarding) NEVER blocks; ChatGPT's share is TOKEN-WEIGHTED (docs/CLAUDE-REVIEW.md).
 - **The agents' tools**: the reviewer and every chat are read-only, **`Bash`
-  denied**. AI Fix and Implement run in the workspace session (below), the ONE
-  place an agent has a shell. Every host run sits behind the PATH GUARD (`review/path-guard.ts`).
+  denied** (story chat: Bash ONLY in srt, fail closed). AI Fix and Implement run in
+  the workspace session (below). Every host run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
   auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Limn threads when addressed"
@@ -617,7 +617,7 @@ Ships to npm as `limn-review` (bin `limn`; the deprecated `pierre-review` stub f
 re-add that bin to limn-review). An existing `~/.pierre-review` is moved to `~/.limn` ONCE by a
 single rename (`data-dir.ts`), never clobbering. Internal identifiers (`pierre*`, the DB file
 name, `pro_*` tables, `/api/pro/*`) stay. **The release ships the backend + SPA only — no landing.**
-Publishing is CI-only — **never run `npm publish`/`npm login` here**.
+Publishing is CI-only — **never `npm publish`/`npm login` here**.
 [docs/PACKAGING.md](docs/PACKAGING.md) · [docs/RELEASE.md](docs/RELEASE.md).
 
 - **`@pierre-review/shared` is VENDORED** at `release/dist/shared` (it holds real code, e.g. the

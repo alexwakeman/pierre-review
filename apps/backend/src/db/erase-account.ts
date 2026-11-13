@@ -136,6 +136,9 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.accountId, accountId)).execute();
     // The EXTRA External memberships (migration 0191) — same shape, same reason.
     await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.accountId, accountId)).execute();
+    // Story chats (migration 0192): turns first (their FK names the chat), then the chats.
+    await tx.delete(schema.storyChatTurns).where(eq(schema.storyChatTurns.accountId, accountId)).execute();
+    await tx.delete(schema.storyChats).where(eq(schema.storyChats.accountId, accountId)).execute();
     // The REPO half of the Pending mute (migration 0058 / pg 0045). Deleted BEFORE `workspaces`
     // only for tidiness — it has no FK to a workspace at all (a repo belongs to exactly one
     // workspace already, so copying that fact onto the mute row would give the account two
@@ -533,6 +536,9 @@ export function accountScopedTables(): {
     { name: 'workspaceRepos', col: workspaceRepos.accountId, table: workspaceRepos },
     // The EXTRA External memberships (migration 0191): a repo External in more than one workspace.
     { name: 'workspaceExternalRepos', col: workspaceExternalRepos.accountId, table: workspaceExternalRepos },
+    // Story chats (migration 0192): the reader's questions and the answers.
+    { name: 'storyChats', col: schema.storyChats.accountId, table: schema.storyChats },
+    { name: 'storyChatTurns', col: schema.storyChatTurns.accountId, table: schema.storyChatTurns },
     // The bot object, now one grain. It holds the human judgements, the human-set vendor names
     // and `monthly_cents` — the one column no classifier can regenerate — so this is the entry
     // whose omission would cost the user data they entered by hand.

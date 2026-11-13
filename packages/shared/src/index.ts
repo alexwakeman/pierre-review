@@ -61,3 +61,4 @@ export * from './sandbox-session.js';
 export * from './build-plan.js';
 export * from './ai-fix-session.js';
 export * from './auto-fix-queue.js';
+export * from './story-chat.js';
