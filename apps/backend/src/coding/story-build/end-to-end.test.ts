@@ -49,6 +49,13 @@ describe('the comment (pure)', () => {
       'Refunds now wait in a queue. Buyers still get an email.',
     );
     expect(plainSummary('   ')).toBeNull();
+    // Ordinary words that look like codes stay: only a bare "AC1" or a "Q3:" label goes.
+    expect(plainSummary('Refunds now ship in Q3 for P1 customers on C4 plans.')).toBe(
+      'Refunds now ship in Q3 for P1 customers on C4 plans.',
+    );
+    expect(plainSummary('AC1 is met. Q3: buyers get an email.')).toBe('is met. buyers get an email.');
+    // No sentence break to cut at: the cap still holds, ellipsis included.
+    expect(plainSummary('x'.repeat(400))!.length).toBeLessThanOrEqual(300);
     expect(plainSummary('A sentence that goes on. '.repeat(30))!.length).toBeLessThanOrEqual(300);
   });
   it('shows the summary, then the lines removed and added', () => {

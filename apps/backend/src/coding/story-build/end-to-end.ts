@@ -176,7 +176,9 @@ export interface EndToEndCommentFacts {
 
 // The plan's internal references (AC1, C2, P1, Q3) mean nothing to a reader of the ticket.
 const INTERNAL_REF = /\s*[([]\s*(?:AC|C|P|Q)\d+(?:\s*[,/&]\s*(?:AC|C|P|Q)\d+)*\s*[)\]]/g;
-const BARE_REF = /\b(?:AC|C|P|Q)\d+\b:?\s*/g;
+// Bare: "AC1" anywhere; "C2:" / "P1:" / "Q3:" only as a LABEL (with its colon). "Q3", "P1" and "C4" alone
+// are ordinary words in a summary ("ship in Q3", "P1 customers") and stay.
+const BARE_REF = /\bAC\d+\b:?\s*|\b[CPQ]\d+:\s*/g;
 
 /** A pull request title for the ticket's readers: internal references removed. Pure. */
 export function plainTitle(title: string): string {
@@ -190,7 +192,7 @@ export function plainSummary(text: string): string | null {
   if (t.length > 300) {
     const cut = t.slice(0, 300);
     const end = cut.lastIndexOf('. ');
-    t = end > 80 ? cut.slice(0, end + 1) : `${cut.trimEnd()}…`;
+    t = end > 80 ? cut.slice(0, end + 1) : `${cut.slice(0, 299).trimEnd()}…`;
   }
   return t;
 }
