@@ -1,7 +1,8 @@
 // STORY CHAT — WHAT THE AGENT IS TOLD (docs/STORY-CHAT.md § The seed). ONE fold, pure: the story
 // (from the same `readSessionTicket` builds use, from Limn's STORED copy — a view never reads the
-// tracker), the checkouts, the reader's memory (the same projects the workspace's sandbox settings
-// tick for builds), how commands behave here, and — for a continued chat — the earlier turns.
+// tracker), the checkouts and each PR's diff, the reader's memory (the same projects the workspace's
+// sandbox settings tick for builds), what the chat is for, and — for a continued chat — the earlier
+// turns. READ-ONLY: the agent reads and advises; it runs nothing and changes nothing.
 // ⚠ The ticket and PR text are UNTRUSTED: they sit under a line that says they are the requirement,
 // not instructions.
 import type { SessionTicket } from '../sandbox/workspace/ticket.js';
@@ -33,12 +34,9 @@ export interface SeedTurn {
 export interface StoryChatSeedInput {
   ticket: SessionTicket;
   checkouts: readonly SeedCheckout[];
-  /** Borrowed read-only `node_modules` folders, by checkout path. */
-  borrowed: ReadonlyMap<string, string[]>;
   memories: readonly SeedMemory[];
   userClaudeMd: string | null;
-  /** null ⇒ commands run; else the one line why they do not. */
-  noShell: string | null;
+  /** Where the PR diffs are. */
   tmpDir: string;
   earlier: readonly SeedTurn[];
 }
@@ -71,7 +69,7 @@ export function storyChatSystemPrompt(s: StoryChatSeedInput): string {
   const t = s.ticket;
   const lines: string[] = [];
   lines.push(
-    'You answer a developer\'s questions about ONE story and its pull requests, in Limn. Answer the question asked, short and exact. Cite code as path:line. Say what you ran and what it showed. When you are not sure, say so.',
+    "You advise a developer about ONE story and its pull requests, in Limn: how the change works, how it fits with the rest of the system, what is risky, what is still missing, and how to prove the ticket is done once the pull requests are merged (manual test steps a person can follow, in order, with what to expect). Answer the question asked, short and exact. Cite code as path:line. When you are not sure, say so.",
   );
   lines.push('');
   lines.push(`# The story: ${t.key} ${t.title}`.trimEnd());
@@ -98,8 +96,6 @@ export function storyChatSystemPrompt(s: StoryChatSeedInput): string {
     const where = c.path ? `checked out at ${c.path}${head}` : `not checked out (${c.error ?? 'unknown reason'})`;
     lines.push(`- ${c.repo}#${c.number} (${c.state}) "${c.title}": ${where}`);
     if (c.diffFile) lines.push(`  its full diff: ${c.diffFile}`);
-    const nm = c.path ? s.borrowed.get(c.path) : undefined;
-    if (nm && nm.length > 0) lines.push(`  node_modules borrowed READ-ONLY from the developer's own clone: ${nm.join(', ')}`);
   }
   lines.push(
     "Each checkout is a detached copy of the pull request's head, with its files in full. Its git history is partial and cannot be fetched from here: read the PR's diff file for what it changes.",
@@ -107,22 +103,17 @@ export function storyChatSystemPrompt(s: StoryChatSeedInput): string {
   lines.push('');
 
   lines.push('# How to work here');
-  if (s.noShell == null) {
-    lines.push(
-      [
-        '- Use Read, Grep and Glob to read code, and Bash to run commands. Every command runs in a SANDBOX:',
-        `  you may write only inside the checkouts and $TMPDIR (${s.tmpDir}); the developer's home folder is hidden;`,
-        '  the network reaches package registries only. A blocked action is the sandbox, not a bug: say so and move on.',
-        '- Nothing you change is kept or pushed: the checkouts are removed when the chat closes.',
-        '- Run the FEWEST, most relevant tests. Send tool caches to $TMPDIR (for vitest: --cache=false; for jest:',
-        '  --cacheDirectory=$TMPDIR/jest). Borrowed node_modules are read-only. When dependencies are missing,',
-        '  say so; do not install large dependency trees.',
-      ].join('\n'),
-    );
-  } else {
-    lines.push(`- You cannot run commands in this chat: ${s.noShell} Read the code with Read, Grep and Glob, and answer from it.`);
-  }
-  lines.push('- You cannot change the ticket, GitHub or anything outside the checkouts. If the developer asks for that, tell them which button in Limn does it.');
+  lines.push(
+    [
+      '- This chat is READ-ONLY. Read the diffs and the code with Read, Grep and Glob. You cannot run commands, run tests or change files.',
+      '- Start from each PR\'s diff file: it says what changed. Open other code only to answer the question, and answer within about 20 reads; say what you did not check.',
+      '- Cite code as path:line from the CHECKOUT (open the file to get the line), never a line number of a diff file.',
+      '- Start the answer with the answer itself: no lead-in about what you read or will write.',
+      "- For manual test steps, describe what a person does in the running product (screens, API calls, data to set up) and what they should see. Name the environment or flag each step needs.",
+      '- Name anything the story still needs outside these pull requests: configuration, migrations, other services, documentation, a ticket update.',
+      "- You cannot change the ticket, GitHub or the code. If the developer wants that, name Limn's button: Implement story or Fill gaps for code on this story, AI Fix for a pull request, and the plan's Update ticket for the ticket's text.",
+    ].join('\n'),
+  );
 
   if (s.userClaudeMd || s.memories.length > 0) {
     lines.push('');

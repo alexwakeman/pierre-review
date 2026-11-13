@@ -182,33 +182,27 @@ export default function Page(): JSX.Element {
 
       <H2 id="ask-about-this-story">Ask about this story</H2>
       <p>
-        At the bottom of the story view, ask a question about the ticket and its pull requests, such as &ldquo;What is
-        the test strategy?&rdquo;. Pick a ready-made question (<Ui>Test strategy</Ui>, <Ui>Risks</Ui>,{' '}
-        <Ui>Manual test steps</Ui>, <Ui>Criteria check</Ui>) or type your own, then press <Ui>Ask</Ui>.
+        At the bottom of the story view, ask for advice about the ticket and its pull requests. Pick a ready-made
+        question or type your own, then press <Ui>Ask</Ui>:
       </p>
       <ul>
         <li>
-          The agent reads the ticket and the story&rsquo;s pull requests, checked out on your computer. It also gets
-          your Claude memory for these projects and your own CLAUDE.md, the same ones Implement story uses (Settings →
-          Sandbox).
+          <Ui>How to test</Ui>: what to do, step by step, to prove the ticket is done once its pull requests are merged,
+          and what still needs doing.
         </li>
         <li>
-          On Claude it can run commands, such as the tests. They run in a sandbox: they can write only in the
-          checkouts and a temporary folder, cannot read your home folder, and reach package registries only. Nothing
-          is pushed. On Codex the agent reads the code but runs no commands.
+          <Ui>Integration</Ui>: how the change fits with the other services, repositories, configuration and data.
         </li>
         <li>
-          The agent gets ready when you open the story, so the first answer starts quickly. It closes after 10 minutes
-          without use, and its checkouts are removed.
-        </li>
-        <li>
-          Chats are saved with the story. Pick an earlier chat in the menu to read it or ask a follow-up, or delete it.
+          <Ui>Risks</Ui> and <Ui>Criteria check</Ui>.
         </li>
       </ul>
-      <Note>
-        On Linux, commands need <code>bubblewrap</code> and <code>socat</code> installed. Without them, or on Windows,
-        the agent answers from the code only and says why.
-      </Note>
+      <p>
+        The agent reads the ticket, each pull request&rsquo;s changes and its code, with your Claude memory for these
+        projects and your own CLAUDE.md (the same ones Implement story uses). It only reads: it runs nothing and changes
+        nothing. It gets ready when you open the story, so the first answer starts quickly, and closes after 10 minutes
+        without use. Chats are saved with the story: pick an earlier one in the menu to read it or ask a follow-up.
+      </p>
 
       <H2 id="why-it-helps">Why it helps</H2>
       <p>

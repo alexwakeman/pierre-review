@@ -1565,6 +1565,6 @@ workspace calls the actor automated.
 ## Story chats (migration 0192)
 
 `story_chats` (account, workspace, `ticket_ident`, `title` = the first question) and `story_chat_turns`
-(question, answer, `status` running|done|failed|stopped, provider, model, `shell`, cost, tokens), the
+(question, answer, `status` running|done|failed|stopped, provider, model, cost, tokens), the
 turns FK'd by `(chat_id, account_id)`. Limn's own record of the reader's questions — never an import of
 their agent sessions. Erased and exported with the account. [STORY-CHAT.md](STORY-CHAT.md).

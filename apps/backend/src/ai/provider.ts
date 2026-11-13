@@ -309,22 +309,6 @@ export interface ProviderUsageSource {
 }
 
 /**
- * THE PROCESS SANDBOX a session's shell runs in (story chat, docs/STORY-CHAT.md): Anthropic's
- * sandbox-runtime (`srt`) as the Agent SDK runs it — Seatbelt on macOS, bubblewrap on Linux. Commands
- * may WRITE only `allowWrite`; READS are denied under `denyRead` except `allowRead`; the network is the
- * SDK's allow-list proxy over `allowedDomains`; `denyEnv` names are removed from every command's
- * environment (the model credential). Fail closed: no sandbox ⇒ no command runs.
- */
-export interface AgentSandboxPolicy {
-  allowWrite: string[];
-  denyWrite: string[];
-  denyRead: string[];
-  allowRead: string[];
-  allowedDomains: string[];
-  denyEnv: string[];
-}
-
-/**
  * A LIVE agent kept between questions (story chat): started once, asked many times. The process is up
  * before the first question, so an answer starts in about a second (docs/QUICK-CHAT-SPIKE.md).
  */
@@ -333,22 +317,13 @@ export interface AgentSessionSpec {
   model: ModelChoice;
   system: string;
   cwd: string;
-  /** Roots the FILE tools may write (the path guard); commands are bounded by `sandbox` instead. */
+  /** More roots the READ tools may reach (the path guard). A session is READ-ONLY: no shell, no edits. */
   roots: string[];
-  /** Roots the file tools may only read. */
-  readOnlyRoots: string[];
-  /** The shell's sandbox. null ⇒ no shell at all (Bash denied). */
-  sandbox: AgentSandboxPolicy | null;
-  /**
-   * The ALLOW-LISTED environment the agent process runs with (never the server's whole environment:
-   * srt passes it through to every command). The provider adds its own credential variables.
-   */
-  env: Record<string, string>;
   /** US$ cap for the whole session (the provider stops it past this). */
   budgetUsd: number | undefined;
   /** Model turns per question. */
   turnsPerQuestion: number;
-  claude: { allowedTools: string[]; disallowedTools: string[] };
+  claude: { disallowedTools: string[] };
 }
 
 export interface AgentSession {

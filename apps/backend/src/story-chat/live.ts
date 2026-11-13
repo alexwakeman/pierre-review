@@ -2,22 +2,20 @@
 // workspace, ticket), at most `maxLive()` at once.
 //
 //   prepare   the story view opened (and every keep-alive while it stays open): check the story's
-//             PRs out (clone-manager worktrees, ledgered as kind 'chat'), borrow the reader's
-//             node_modules read-only, read the reader's memory, and START the agent — so a question
-//             is answered at once (docs/QUICK-CHAT-SPIKE.md: ~1 s warm vs ~5 s cold). No model call.
-//   ask       one question: a stored turn, answered by the warm Claude session (commands in the srt
-//             process sandbox), or on Codex by one read-only run with the earlier turns in the prompt.
+//             PRs out (clone-manager worktrees, ledgered as kind 'chat'), write each PR's diff, read
+//             the reader's memory, and START the agent — so a question is answered at once
+//             (docs/QUICK-CHAT-SPIKE.md: ~1 s warm vs ~5 s cold). No model call.
+//   ask       one question: a stored turn, answered by the warm Claude session, or on Codex by one run
+//             with the earlier turns in the prompt. READ-ONLY on both: no shell, nothing written.
 //   reap      every minute: a chat with no question and no keep-alive for STORY_CHAT_IDLE_MINUTES is
 //             closed — the agent stopped, its worktrees removed, its temp folder deleted. The stored
 //             turns stay; asking again prepares a fresh agent told the earlier turns.
 //   boot      leftover temp folders of this install are deleted, running turns marked cut off; a
 //             worktree a crash left behind is the worktree sweep's (review/worktree-gc.ts: its process
 //             is gone).
-import { execFile } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { join } from 'node:path';
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   STORY_CHAT_IDLE_MINUTES,
@@ -42,28 +40,16 @@ import { withWorktreeOwner } from '../review/worktree-owner.js';
 import { prepPeerWorktrees, cleanupCloneCache } from '../review/clone-manager.js';
 import { CHAT_DISALLOWED_TOOLS } from '../review/chat-agent.js';
 import { readSessionTicket, defaultSessionTicketSeams, type SessionTicket } from '../sandbox/workspace/ticket.js';
-import {
-  agentEnv,
-  caReadPaths,
-  chatAllowedDomains,
-  chatSandboxPolicy,
-  chatTmpBase,
-  chatTmpPrefix,
-  real,
-  sandboxSupport,
-  type ChatCheckoutPaths,
-  type SandboxSupport,
-} from './policy.js';
+import { chatTmpBase, chatTmpPrefix } from './tmp.js';
 import { storyChatSystemPrompt, type SeedCheckout, type SeedMemory, type SeedTurn } from './seed.js';
 import * as store from './store.js';
 
-const execFileAsync = promisify(execFile);
 
 /** Most PRs a chat checks out (open ones first, then the newest merged). */
 export const STORY_CHAT_MAX_CHECKOUTS = 6;
 /** The US$ cap of one live agent (a new one starts, told the earlier turns, when it is reached). */
 export const STORY_CHAT_SESSION_BUDGET_USD = 5;
-export const STORY_CHAT_TURNS_PER_QUESTION = 40;
+export const STORY_CHAT_TURNS_PER_QUESTION = 60;
 const ACTIVITY_MAX = 40;
 const DIFF_MAX_CHARS = 2_000_000;
 const IDLE_MS = STORY_CHAT_IDLE_MINUTES * 60_000;
@@ -76,14 +62,11 @@ export function maxLive(env: NodeJS.ProcessEnv = process.env): number {
 
 // ---- seams (tests replace them) -----------------------------------------------------------------
 
-export interface PreparedCheckout extends SeedCheckout {
-  paths: ChatCheckoutPaths | null;
-}
+export type PreparedCheckout = SeedCheckout;
 
 export interface StoryChatDeps {
   now(): number;
   provider(): AgentProvider;
-  support(): SandboxSupport;
   readTicket(ctx: AgentContext, accountId: number, workspaceId: number, ident: string): Promise<SessionTicket | null>;
   /** Check the PRs out. `cleanup` removes every worktree made. */
   checkout(
@@ -93,12 +76,8 @@ export interface StoryChatDeps {
   ): Promise<{ checkouts: PreparedCheckout[]; cleanup: () => Promise<void> }>;
   /** The PRs' head commits, by `owner/name#number`. */
   heads(accountId: number, prs: ReadonlyArray<{ repo: string; number: number }>): Promise<Map<string, string>>;
-  /** The reader's memory, CLAUDE.md, workspace rules and borrowable node_modules. */
-  readerContext(
-    accountId: number,
-    workspaceId: number,
-    checkouts: readonly PreparedCheckout[],
-  ): Promise<{ memories: SeedMemory[]; userClaudeMd: string | null; allowedHosts: string[]; borrowed: Map<string, string[]> }>;
+  /** The reader's memory and CLAUDE.md (the workspace's sandbox settings choose, as for builds). */
+  readerContext(accountId: number, workspaceId: number): Promise<{ memories: SeedMemory[]; userClaudeMd: string | null }>;
   tmpBase(): string;
   /** A PR's unified diff (GitHub's own, so it works for merged PRs and needs no blobs locally). */
   diff(repo: string, number: number): Promise<string>;
@@ -107,7 +86,6 @@ export interface StoryChatDeps {
 const realDeps: StoryChatDeps = {
   now: () => Date.now(),
   provider: () => getProvider(activeProviderId()),
-  support: () => sandboxSupport(),
   readTicket: (ctx, accountId, workspaceId, ident) =>
     // From Limn's STORED copy: opening a story never reads the tracker (CLAUDE.md § Trackers).
     readSessionTicket(ctx, accountId, workspaceId, ident, {
@@ -136,7 +114,6 @@ const realDeps: StoryChatDeps = {
         headSha: p.headSha,
         path,
         error: p.headSha == null ? 'its head commit is not known yet' : (peer?.error ?? null),
-        paths: path ? await gitPaths(path) : null,
       });
     }
     return { checkouts: out, cleanup };
@@ -155,31 +132,22 @@ const realDeps: StoryChatDeps = {
     for (const row of rows) if (row.headSha) out.set(`${row.owner}/${row.name}#${row.number}`.toLowerCase(), row.headSha);
     return out;
   },
-  async readerContext(accountId, workspaceId, checkouts) {
-    const [{ getSandboxSettings, sandboxWorkspaceRepos }, { resolveWorkspaceLayout, defaultLayoutPlaces }, mem, { discoverReaderClones }] =
-      await Promise.all([
-        import('../db/sandbox-settings.js'),
-        import('../sandbox/workspace/check.js'),
-        import('../sandbox/workspace/memories.js'),
-        import('../sandbox/workspace/discover.js'),
-      ]);
+  async readerContext(accountId, workspaceId) {
+    const [{ getSandboxSettings, sandboxWorkspaceRepos }, { resolveWorkspaceLayout, defaultLayoutPlaces }, mem] = await Promise.all([
+      import('../db/sandbox-settings.js'),
+      import('../sandbox/workspace/check.js'),
+      import('../sandbox/workspace/memories.js'),
+    ]);
     const [settings, repos] = await Promise.all([getSandboxSettings(accountId, workspaceId), sandboxWorkspaceRepos(accountId, workspaceId)]);
     const places = defaultLayoutPlaces();
     const memories: SeedMemory[] = [];
     let userClaudeMd: string | null = null;
-    const borrowed = new Map<string, string[]>();
     if (repos && repos.length > 0) {
       try {
         const resolved = resolveWorkspaceLayout(repos, { memoryProjects: settings?.memoryProjects ?? null }, places);
         for (const p of resolved.projects.filter((x) => x.ticked)) {
           const got = mem.readMemories(places.claude, p.key);
           memories.push({ dir: p.dir, files: got.files.map((f) => ({ rel: f.rel, text: f.content.toString('utf8') })) });
-        }
-        const clones = discoverReaderClones(repos, places.claude, places.home).clones;
-        for (const c of checkouts) {
-          if (!c.path) continue;
-          const clone = clones.find((x) => x.fullName.toLowerCase() === c.repo.toLowerCase());
-          if (clone) borrowed.set(c.path, borrowNodeModules(clone.dir, c.path));
         }
       } catch {
         /* the reader's files are a help, never a reason to fail the chat */
@@ -189,7 +157,7 @@ const realDeps: StoryChatDeps = {
       const b = mem.readUserClaudeMd(places.claude);
       if (b) userClaudeMd = b.toString('utf8');
     }
-    return { memories, userClaudeMd, allowedHosts: settings?.alwaysAllowedHosts ?? [], borrowed };
+    return { memories, userClaudeMd };
   },
   tmpBase: () => chatTmpBase(process.platform, tmpdir(), existsSync('/tmp')),
   async diff(repo, number) {
@@ -205,59 +173,6 @@ export function setStoryChatDepsForTest(d: Partial<StoryChatDeps> | null): void 
   deps = d == null ? realDeps : { ...realDeps, ...d };
 }
 
-async function gitPaths(path: string): Promise<ChatCheckoutPaths> {
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', path, 'rev-parse', '--absolute-git-dir', '--git-common-dir'], { timeout: 10_000 });
-    const [gitDir, common] = stdout.trim().split('\n');
-    return { path, gitDir: gitDir ?? null, commonDir: common ? (isAbsolute(common) ? common : resolve(path, common)) : null };
-  } catch {
-    return { path, gitDir: null, commonDir: null };
-  }
-}
-
-/**
- * Link the reader's installed `node_modules` into a checkout, READ-ONLY (the sandbox denies writes to
- * them): the root one and those one or two folders down (apps/x, packages/y) where the checkout has
- * the same folder and none of its own. Returns the borrowed real paths.
- */
-export function borrowNodeModules(cloneDir: string, worktree: string): string[] {
-  const rels = ['node_modules'];
-  const skip = (n: string): boolean => n.startsWith('.') || n === 'node_modules';
-  try {
-    for (const a of readdirSync(cloneDir)) {
-      if (skip(a) || !isDir(join(cloneDir, a))) continue;
-      rels.push(`${a}/node_modules`);
-      for (const b of readdirSync(join(cloneDir, a)).slice(0, 200)) {
-        if (skip(b) || !isDir(join(cloneDir, a, b))) continue;
-        rels.push(`${a}/${b}/node_modules`);
-      }
-    }
-  } catch {
-    /* unreadable clone: nothing borrowed */
-  }
-  const out: string[] = [];
-  for (const rel of rels.slice(0, 400)) {
-    const from = join(cloneDir, rel);
-    const to = join(worktree, rel);
-    if (!isDir(from) || existsSync(to) || !isDir(join(to, '..'))) continue;
-    try {
-      symlinkSync(from, to, 'dir');
-      out.push(real(from));
-    } catch {
-      /* skip this one */
-    }
-  }
-  return out;
-}
-
-function isDir(p: string): boolean {
-  try {
-    return statSync(p).isDirectory() && !lstatSync(p).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 // ---- the live chats -------------------------------------------------------------------------------
 
 interface Live {
@@ -268,8 +183,6 @@ interface Live {
   chatId: number | null;
   state: StoryChatLiveState;
   note: string | null;
-  shell: boolean;
-  shellNote: string | null;
   provider: AgentProvider;
   checkouts: PreparedCheckout[];
   cleanup: (() => Promise<void>) | null;
@@ -277,8 +190,6 @@ interface Live {
   ticket: SessionTicket | null;
   seedParts: Omit<Parameters<typeof storyChatSystemPrompt>[0], 'earlier'> | null;
   session: AgentSession | null;
-  sandbox: Parameters<typeof chatSandboxPolicy>[0] | null;
-  env: Record<string, string>;
   lastActive: number;
   activity: string[];
   partial: string;
@@ -290,17 +201,15 @@ interface Live {
 const lives = new Map<string, Live>();
 const keyOf = (accountId: number, workspaceId: number, ident: string): string => `${accountId}:${workspaceId}:${ident}`;
 
-const COLD: StoryChatLive = { state: 'cold', chatId: null, shell: false, shellNote: null, note: null, activity: [], partial: '', checkouts: [] };
+const COLD: StoryChatLive = { state: 'cold', chatId: null, note: null, activity: [], partial: '', checkouts: [] };
 
 /** The live state for the SPA. */
 export function liveOf(accountId: number, workspaceId: number, ident: string): StoryChatLive {
   const l = lives.get(keyOf(accountId, workspaceId, ident));
-  if (!l) return { ...COLD, shell: deps.support().ok, shellNote: deps.support().why };
+  if (!l) return { ...COLD };
   return {
     state: l.state,
     chatId: l.chatId,
-    shell: l.shell,
-    shellNote: l.shellNote,
     note: l.note,
     activity: [...l.activity],
     partial: l.partial,
@@ -337,7 +246,6 @@ export async function prepare(ctx: AgentContext, accountId: number, workspaceId:
     return l;
   }
   await evictForRoom();
-  const support = deps.support();
   const provider = deps.provider();
   const live: Live = {
     key,
@@ -347,9 +255,6 @@ export async function prepare(ctx: AgentContext, accountId: number, workspaceId:
     chatId,
     state: 'preparing',
     note: null,
-    // Commands run only on Claude (its SDK runs srt) and only where the sandbox works here.
-    shell: provider.openSession != null && support.ok,
-    shellNote: provider.openSession == null ? 'Codex answers by reading the code here; it does not run commands.' : support.why,
     provider,
     checkouts: [],
     cleanup: null,
@@ -357,8 +262,6 @@ export async function prepare(ctx: AgentContext, accountId: number, workspaceId:
     ticket: null,
     seedParts: null,
     session: null,
-    sandbox: null,
-    env: {},
     lastActive: deps.now(),
     activity: [],
     partial: '',
@@ -405,8 +308,8 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
     mkdirSync(base, { recursive: true });
     l.tmpDir = mkdtempSync(join(base, chatTmpPrefix(resolveDataDir(process.env, homedir()))));
 
-    // The clone cache is BLOBLESS and the sandbox has no GitHub access, so `git show` of a PR could not
-    // fetch what it lacks: each PR's diff is written here, on the host, for the agent to read.
+    // The clone cache is BLOBLESS (a checkout's history is partial), so each PR's change is GitHub's own
+    // diff, written here for the agent to read.
     await Promise.all(
       checkouts.map(async (c) => {
         try {
@@ -419,27 +322,8 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
         }
       }),
     );
-    const reader = await deps.readerContext(l.accountId, l.workspaceId, checkouts);
-    const allowedDomains = chatAllowedDomains(reader.allowedHosts);
-    const borrowedAll = [...reader.borrowed.values()].flat();
-    l.env = agentEnv(process.env, { tmpDir: l.tmpDir, allowedDomains });
-    l.sandbox = {
-      home: homedir(),
-      checkouts: checkouts.flatMap((c) => (c.paths ? [c.paths] : [])),
-      borrowed: borrowedAll,
-      tmpDir: l.tmpDir,
-      extraRead: caReadPaths(process.env),
-      allowedDomains,
-    };
-    l.seedParts = {
-      ticket,
-      checkouts,
-      borrowed: reader.borrowed,
-      memories: reader.memories,
-      userClaudeMd: reader.userClaudeMd,
-      noShell: l.shell ? null : l.shellNote ?? 'commands are off here.',
-      tmpDir: l.tmpDir,
-    };
+    const reader = await deps.readerContext(l.accountId, l.workspaceId);
+    l.seedParts = { ticket, checkouts, memories: reader.memories, userClaudeMd: reader.userClaudeMd, tmpDir: l.tmpDir };
     if (l.provider.openSession) await startSession(l);
     l.state = 'ready';
   } catch (err) {
@@ -460,12 +344,9 @@ async function startSession(l: Live): Promise<void> {
     system: storyChatSystemPrompt({ ...l.seedParts, earlier }),
     cwd,
     roots: [...roots, l.tmpDir!].filter((r) => r !== cwd),
-    readOnlyRoots: [],
-    sandbox: l.shell && l.sandbox ? chatSandboxPolicy(l.sandbox) : null,
-    env: l.env,
     budgetUsd: STORY_CHAT_SESSION_BUDGET_USD,
     turnsPerQuestion: STORY_CHAT_TURNS_PER_QUESTION,
-    claude: { allowedTools: [], disallowedTools: ['WebFetch', 'WebSearch', 'Task', 'NotebookEdit'] },
+    claude: { disallowedTools: [] },
   });
 }
 
@@ -496,7 +377,6 @@ export async function ask(
     question,
     provider: providerId,
     model: l.provider.resolveModel(MODEL),
-    shell: l.shell,
   });
   l.running = { turnId, chatId: id, abort: new AbortController() };
   l.state = 'answering';
@@ -573,7 +453,7 @@ export function stopReason(subtype: string | null): string {
   return 'The agent stopped before answering.';
 }
 
-/** Codex (no live session): one read-only run per question, the earlier turns in the system prompt. */
+/** Codex (no live session): one run per question, the earlier turns in the system prompt. */
 async function askReadOnly(l: Live, question: string, abort: AbortController, onProgress: (p: AgentProgress) => void): Promise<AgentOutcome | null> {
   const earlier = await earlierTurns(l.accountId, l.running!.chatId);
   const roots = l.checkouts.flatMap((c) => (c.path ? [c.path] : []));
@@ -586,9 +466,9 @@ async function askReadOnly(l: Live, question: string, abort: AbortController, on
     prompt: question,
     system: storyChatSystemPrompt({ ...l.seedParts!, earlier }),
     cwd,
-    roots: roots.filter((r) => r !== cwd),
-    // The PR diffs written at prepare time.
-    readOnlyRoots: l.tmpDir ? [l.tmpDir] : [],
+    roots: [],
+    // Read-only: the other checkouts and the PR diffs written at prepare time.
+    readOnlyRoots: [...roots.filter((r) => r !== cwd), ...(l.tmpDir ? [l.tmpDir] : [])],
     writeRoots: [],
     budget: { usd: STORY_CHAT_SESSION_BUDGET_USD, turns: STORY_CHAT_TURNS_PER_QUESTION },
     abortController: abort,

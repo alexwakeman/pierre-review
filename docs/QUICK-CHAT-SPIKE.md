@@ -1,6 +1,6 @@
 # Spike: quick story chats under sandbox-runtime (`srt`)
 
-Status: **spike, 2026-11-13. Built as the story chat: [STORY-CHAT.md](STORY-CHAT.md).** Scripts: `scripts/spikes/srt/`.
+Status: **spike, 2026-11-13. Not built: the story chat ([STORY-CHAT.md](STORY-CHAT.md)) shipped READ-ONLY (owner decision: advice and manual testing, not running tests), so it needs no sandbox.** Kept for a later shell lane. Scripts: `scripts/spikes/srt/`. Also measured since: the Agent SDK's bundled Claude Code 2.1.295 started srt's network bridge but nothing listened inside the sandbox on Linux; 2.1.323 worked.
 
 ## The question
 

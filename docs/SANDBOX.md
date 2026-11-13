@@ -1523,9 +1523,3 @@ Open questions only a real run can answer: whether `-u agent` works for `msb exe
 image's user; dind start time and disk use for the BNG stack; whether `host.microsandbox.internal`
 rules accept a port list in one token; first-boot time of a 1.3 GB image. A GitHub Actions Linux
 runner is reported to expose `/dev/kvm` (after a udev rule) — not verified here.
-
-## Not this sandbox: the story chat
-
-"Ask about this story" runs its commands in a PROCESS sandbox on the host (the Agent SDK's srt), not in
-this container sandbox: a lighter boundary for questions, with builds staying here.
-[STORY-CHAT.md](STORY-CHAT.md).

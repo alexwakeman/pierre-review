@@ -28,10 +28,8 @@ const base: StoryChatSeedInput = {
     { repo: 'acme/api', number: 12, title: 'Queue refunds', state: 'open', path: '/wt/api', headSha: 'abcdef1234', error: null },
     { repo: 'acme/web', number: 3, title: 'Email', state: 'merged', path: null, headSha: null, error: 'fetch failed' },
   ],
-  borrowed: new Map([['/wt/api', ['/home/me/api/node_modules']]]),
   memories: [{ dir: '/home/me/api', files: [{ rel: 'MEMORY.md', text: 'Use pnpm, never npm.' }] }],
   userClaudeMd: 'Write British English.',
-  noShell: null,
   tmpDir: '/tmp/limn-q-a-1',
   earlier: [],
 };
@@ -47,19 +45,21 @@ describe('the story chat seed', () => {
     expect(s).toContain('AC1. Refunds wait in a queue');
   });
 
-  it('names each checkout, the one that failed, and the borrowed node_modules', () => {
-    const s = storyChatSystemPrompt(base);
+  it('names each checkout, its diff, and the one that failed', () => {
+    const s = storyChatSystemPrompt({ ...base, checkouts: [{ ...base.checkouts[0]!, diffFile: '/tmp/q/acme__api-12.diff' }, base.checkouts[1]!] });
     expect(s).toContain('acme/api#12 (open) "Queue refunds": checked out at /wt/api at abcdef1');
+    expect(s).toContain('  its full diff: /tmp/q/acme__api-12.diff');
     expect(s).toContain('acme/web#3 (merged) "Email": not checked out (fetch failed)');
-    expect(s).toContain("node_modules borrowed READ-ONLY from the developer's own clone: /home/me/api/node_modules");
   });
 
-  it('says how commands behave, or why there are none', () => {
-    expect(storyChatSystemPrompt(base)).toContain('Every command runs in a SANDBOX');
-    expect(storyChatSystemPrompt(base)).toContain('$TMPDIR (/tmp/limn-q-a-1)');
-    const off = storyChatSystemPrompt({ ...base, noShell: 'Commands are off: install bubblewrap and socat to turn them on.' });
-    expect(off).toContain('You cannot run commands in this chat: Commands are off');
-    expect(off).not.toContain('Every command runs in a SANDBOX');
+  it('is read-only and aimed at advice, integration and proving the ticket is done', () => {
+    const s = storyChatSystemPrompt(base);
+    expect(s).toContain('This chat is READ-ONLY');
+    expect(s).toContain('You cannot run commands, run tests or change files.');
+    expect(s).toContain('how to prove the ticket is done once the pull requests are merged');
+    expect(s).toContain('what is still missing');
+    expect(s).not.toContain('Bash');
+    expect(s).toContain('never a line number of a diff file');
   });
 
   it("carries the developer's CLAUDE.md and memory", () => {

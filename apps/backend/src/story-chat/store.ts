@@ -91,7 +91,6 @@ export async function listTurns(accountId: number, chatId: number): Promise<Stor
     error: r.error,
     provider: r.provider,
     model: r.model,
-    shell: r.shell,
     costUsd: r.costUsd,
     createdAt: r.createdAt.toISOString(),
     finishedAt: iso(r.finishedAt),
@@ -101,11 +100,11 @@ export async function listTurns(accountId: number, chatId: number): Promise<Stor
 export async function startTurn(
   accountId: number,
   chatId: number,
-  a: { question: string; provider: string; model: string; shell: boolean },
+  a: { question: string; provider: string; model: string },
 ): Promise<number> {
   const [row] = await db
     .insert(t)
-    .values({ accountId, chatId, question: a.question, status: 'running', provider: a.provider, model: a.model, shell: a.shell })
+    .values({ accountId, chatId, question: a.question, status: 'running', provider: a.provider, model: a.model })
     .returning({ id: t.id })
     .execute();
   await db.update(c).set({ updatedAt: new Date() }).where(and(eq(c.id, chatId), eq(c.accountId, accountId))).execute();

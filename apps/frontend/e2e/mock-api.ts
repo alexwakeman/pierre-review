@@ -2704,7 +2704,7 @@ export async function installMockApi(
       }
       // Story chat (the story view mounts it): no saved chat, the agent cold; prepare keeps it cold.
       if (path.endsWith('/api/story-chats') || path.endsWith('/api/story-chats/prepare')) {
-        const live: StoryChatLive = { state: 'cold', chatId: null, shell: true, shellNote: null, note: null, activity: [], partial: '', checkouts: [] };
+        const live: StoryChatLive = { state: 'cold', chatId: null, note: null, activity: [], partial: '', checkouts: [] };
         if (path.endsWith('/prepare')) return json(route, { live });
         return json(route, {
           workspaceId: WORKSPACE.id,

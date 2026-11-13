@@ -1,5 +1,6 @@
-// STORY CHAT — quick questions about one story, answered by an agent that can read the story's
-// pull requests and RUN commands in them (docs/STORY-CHAT.md). The wire contract between
+// STORY CHAT — quick, READ-ONLY questions about one story: advice, integration, how to prove it is done.
+// An agent answers from the ticket, the story's pull requests (diffs and checked-out code) and the
+// reader's memory; it runs no commands and changes nothing (docs/STORY-CHAT.md). The wire contract between
 // apps/backend/src/story-chat/ and the story view (apps/frontend/src/components/Ticket/StoryChat.tsx).
 //
 // A chat belongs to (workspace, ticket ident). Its turns are kept in Limn's database, so a chat can be
@@ -15,21 +16,22 @@ export const STORY_CHAT_MAX_QUESTION = 4_000;
 /** The ready-made questions shown under the box. */
 export const STORY_CHAT_PRESETS: ReadonlyArray<{ label: string; question: string }> = [
   {
-    label: 'Test strategy',
+    label: 'How to test',
     question:
-      "What is the test strategy for this story's pull requests? Name what the existing tests cover, the gaps against the acceptance criteria, and run the relevant tests.",
+      'Once these pull requests are merged, what must I do to prove this ticket is done? Give the manual test steps in order, with what to expect at each step, and name anything still missing from the pull requests or that needs doing outside the code.',
+  },
+  {
+    label: 'Integration',
+    question:
+      'How do these changes fit with the rest of the system? Name the other services, repositories, configuration and data they depend on or affect, and what to check when they are deployed together.',
   },
   {
     label: 'Risks',
-    question: 'What is risky in these changes? Name the code paths most likely to break and why.',
-  },
-  {
-    label: 'Manual test steps',
-    question: 'Write the steps to test this story by hand, in order, with what to expect at each step.',
+    question: 'What is risky in these changes? Name what is most likely to break, where, and how I would notice.',
   },
   {
     label: 'Criteria check',
-    question: 'For each acceptance criterion, say whether the pull requests meet it and point at the code that does.',
+    question: 'For each acceptance criterion, say whether the pull requests meet it and point at the code that does. Name what is left.',
   },
 ];
 
@@ -44,8 +46,6 @@ export interface StoryChatTurn {
   error: string | null;
   provider: string | null;
   model: string | null;
-  /** The agent could run commands for this turn (the sandbox was up). */
-  shell: boolean;
   costUsd: number | null;
   createdAt: string;
   finishedAt: string | null;
@@ -76,9 +76,6 @@ export interface StoryChatLive {
   state: StoryChatLiveState;
   /** The chat the live agent is attached to (null before the first question). */
   chatId: number | null;
-  /** Commands run in a sandbox; false = the agent only reads (`shellNote` says why). */
-  shell: boolean;
-  shellNote: string | null;
   /** One line when something is worth knowing (a PR that could not be checked out, a failure). */
   note: string | null;
   /** The running turn's activity lines (tool calls), oldest first, capped. */

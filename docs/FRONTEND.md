@@ -6451,7 +6451,7 @@ removed from the card; it moved one click (or Enter) away.
 ## The story view → Ask about this story
 
 `components/Ticket/StoryChat.tsx`, mounted at the end of `StoryViewBody` (all three hosts), gated on
-`me.ai.enabled` and its Ask on `AiRunGate kind="story_chat"`. It keeps the story's agent ready with
+`me.ai.enabled` and its Ask on `AiRunGate kind="story_chat"`. Read-only answers. It keeps the story's agent ready with
 `POST /api/story-chats/prepare` at mount and every 3 minutes while visible (in the PR view's Story tab:
 only once the box is focused), and polls quickly only while preparing or answering
 (`hooks/useStoryChat.ts`). [STORY-CHAT.md](STORY-CHAT.md).

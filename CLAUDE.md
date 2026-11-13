@@ -28,7 +28,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [TEAM-REVIEW](docs/TEAM-REVIEW.md) | ANY multi-user behaviour (claims, author vs reviewer, verdicts, threads, pushback) — the plain-English design; update it in the same commit |
 | [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history |
 | [STORY-BUILD](docs/STORY-BUILD.md) · [SANDBOX](docs/SANDBOX.md) | Implement story (flow, Fill gaps, Push) · its sandbox (and AI Fix's): setup, proxy, drivers, services, threats |
-| [STORY-CHAT](docs/STORY-CHAT.md) | "Ask about this story": warm agent, srt sandbox |
+| [STORY-CHAT](docs/STORY-CHAT.md) | "Ask about this story": read-only warm agent, reaper |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker: Jira, GitHub Issues, Linear, Notion, stored tickets + worker, the sealed token |
@@ -419,7 +419,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `['ai-budget']` query. Claude's usage reading (the `loadAgentSdk` Query tap — never add per-runner
   forwarding) NEVER blocks; ChatGPT's share is TOKEN-WEIGHTED (docs/CLAUDE-REVIEW.md).
 - **The agents' tools**: the reviewer and every chat are read-only, **`Bash`
-  denied** (story chat: Bash ONLY in srt, fail closed). AI Fix and Implement run in
+  denied** (the story chat too). AI Fix and Implement run in
   the workspace session (below). Every host run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace

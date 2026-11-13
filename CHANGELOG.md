@@ -22,9 +22,9 @@ no internals.
   "Add as" picks Maintained or External for new ones.
 - The sidebar's Repositories list shows the workspace's External repositories too, marked External, and their
   pages open.
-- The story view: "Ask about this story". Ask about the ticket and its pull requests, for example their test
-  strategy. On Claude the agent can run the tests, in a sandbox that writes only to its own copies of the code. It
-  is ready when the story opens, closes after 10 minutes without use, and chats are saved with the story.
+- The story view: "Ask about this story". Ask how to prove the ticket is done once its pull requests are merged,
+  what is still missing, or how it fits with the rest of the system. The answer comes from the ticket, the pull
+  requests' changes and code, and your Claude memory; nothing is run or changed. Chats are saved with the story.
 
 ### Changed
 

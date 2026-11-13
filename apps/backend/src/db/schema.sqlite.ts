@@ -2541,7 +2541,7 @@ export const workspaceExternalRepos = sqliteTable(
 
 // ---- STORY CHAT (CORE) — migration 0192; docs/STORY-CHAT.md ----
 //
-// Quick questions about one story. A chat belongs to (account, workspace, ticket ident); its turns are
+// Quick, read-only questions about one story. A chat belongs to (account, workspace, ticket ident); its turns are
 // kept so a chat can be read and continued later. The live agent is memory only (story-chat/live.ts).
 // Limn's OWN record: never an import of the reader's Claude or Codex sessions.
 export const storyChats = sqliteTable(
@@ -2589,8 +2589,6 @@ export const storyChatTurns = sqliteTable(
     error: text('error'),
     provider: text('provider'),
     model: text('model'),
-    /** The agent could run commands (the sandbox was up). */
-    shell: integer('shell', { mode: 'boolean' }).notNull().default(false),
     costUsd: real('cost_usd'),
     inputTokens: integer('input_tokens'),
     outputTokens: integer('output_tokens'),

@@ -29,7 +29,6 @@ CREATE TABLE IF NOT EXISTS `story_chat_turns` (
 	`error` text,
 	`provider` text,
 	`model` text,
-	`shell` integer DEFAULT 0 NOT NULL,
 	`cost_usd` real,
 	`input_tokens` integer,
 	`output_tokens` integer,

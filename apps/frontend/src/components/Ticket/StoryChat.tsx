@@ -23,8 +23,8 @@ import { Markdown } from '../Markdown.js';
 import { Select } from '../ui/index.js';
 
 // STORY CHAT (docs/STORY-CHAT.md; docs/FRONTEND.md § The story view → Ask about this story). Quick
-// questions about one story, answered by an agent that reads the story's PRs and — on Claude — runs
-// commands in a process sandbox. The agent is PREPARED while this panel is mounted (keep-alive), so an
+// READ-ONLY questions about one story — advice, integration, how to prove it is done — answered by an
+// agent that reads the ticket, the story's PR diffs and code, and the reader's memory. The agent is PREPARED while this panel is mounted (keep-alive), so an
 // answer starts at once; the server closes it after STORY_CHAT_IDLE_MINUTES without use. Chats are
 // saved against the story and can be continued.
 
@@ -42,7 +42,7 @@ export function liveLine(live: StoryChatLive): string {
     case 'preparing':
       return 'Getting the pull requests ready…';
     case 'ready':
-      return live.shell ? 'Ready. Commands run in a sandbox.' : 'Ready.';
+      return 'Ready.';
     case 'answering':
       return 'Answering…';
     case 'failed':
@@ -112,12 +112,12 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
         </h2>
         <InfoButton title="Ask about this story">
           <p>
-            An agent answers from the ticket and the story’s pull requests, checked out on this computer. It knows your
-            Claude memory for these projects.
+            Ask for advice on the story: how to test it by hand once its pull requests are merged, what is still missing,
+            how it fits with the rest of the system.
           </p>
           <p className="mt-2">
-            On Claude it can run commands, such as tests. They run in a sandbox: they can write only in the checkouts and
-            a temporary folder, cannot read your home folder, and can reach package registries only. Nothing is pushed.
+            An agent answers from the ticket, the pull requests’ changes and their code, checked out on this computer,
+            with your Claude memory for these projects. It only reads: it runs nothing and changes nothing.
           </p>
           <p className="mt-2">
             The agent stays ready while the story is open and closes after {STORY_CHAT_IDLE_MINUTES} minutes without use;
@@ -150,7 +150,6 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
       {live != null && (
         <p className="text-meta text-ui-mute" aria-live="polite">
           {liveLine(live)}
-          {live.state !== 'failed' && live.shellNote != null && ` ${live.shellNote}`}
           {live.state !== 'failed' && live.note != null && ` ${live.note}`}
         </p>
       )}
@@ -171,11 +170,9 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
                   )}
                   {t.status === 'failed' && <p className="text-meta text-ui-danger">{t.error ?? 'The answer failed.'}</p>}
                   {t.status === 'stopped' && <p className="text-meta text-ui-mute">Stopped.</p>}
-                  <p className="text-meta text-ui-mute">
-                    {[t.shell ? 'Could run commands' : 'Read only', costText(t.costUsd, (t.provider as 'claude' | 'codex' | null) ?? null)]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </p>
+                  {costText(t.costUsd, (t.provider as 'claude' | 'codex' | null) ?? null) != null && (
+                    <p className="text-meta text-ui-mute">{costText(t.costUsd, (t.provider as 'claude' | 'codex' | null) ?? null)}</p>
+                  )}
                 </div>
               )}
             </li>
@@ -204,7 +201,7 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
           }
         }}
         rows={3}
-        placeholder={chatId == null ? 'Ask about the story, its pull requests or its tests' : 'Ask a follow-up'}
+        placeholder={chatId == null ? 'Ask how to test it, what is missing, or how it fits with the rest' : 'Ask a follow-up'}
         aria-label="Question about this story"
         className="w-full resize-y rounded-ui bg-ui-bg px-2.5 py-1.5 text-body leading-normal text-ui-ink"
       />
