@@ -3,7 +3,8 @@
 // ONE warm session serves every question of a chat; a busy chat refuses a second question; Codex answers
 // with the earlier turns, nothing writable; Stop; the 10-minute reaper removes the worktrees and the
 // temp folder; the boot sweep settles cut-off turns and deletes leftover folders.
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 const RUN_DIR = process.env.LIMN_TEST_RUN_DIR ?? '/tmp';
@@ -43,6 +44,7 @@ let now = 1_000_000;
 let cleanups = 0;
 const sessions: any[] = [];
 const runs: any[] = [];
+const repoCheckoutCalls: string[][] = [];
 
 function fakeSession(spec: any) {
   const s: any = {
@@ -133,7 +135,27 @@ beforeAll(async () => {
         cleanups += 1;
       },
     }),
-    readerContext: async () => ({ memories: [], userClaudeMd: null }),
+    readerContext: async () => ({
+      memories: [{ dir: '/home/me/code/api', files: [{ rel: 'MEMORY.md', text: 'Staging needs the REFUNDS_V2 flag.' }] }],
+      userClaudeMd: 'Write British English.',
+      folderClaudeMd: { folder: '/home/me/code', text: 'api and web deploy together.' },
+      userSkills: { dir: '/home/me/.claude/skills', names: ['release'] },
+    }),
+    repos: async () => [
+      { repoId: 1, owner: 'acme', name: 'api', defaultBranch: 'main' },
+      { repoId: 2, owner: 'acme', name: 'web', defaultBranch: 'develop' },
+    ],
+    repoCheckouts: async (_a, _i, repos) => {
+      repoCheckoutCalls.push(repos.map((r) => `${r.owner}/${r.name}@${r.defaultBranch}`));
+      return {
+        checkouts: repos.map((r) => ({ repo: `${r.owner}/${r.name}`, path: `/repos/${r.name}`, sha: 'feedface00', error: null })),
+        cleanup: async () => {
+          cleanups += 1;
+        },
+      };
+    },
+    docs: async () => ({ dir: '/home/me/.limn/docs/1' }),
+    sprint: async () => '- ACME-10 "Refund emails" — In Progress; acme/web#3 (open)',
     tmpBase: () => TMP_BASE,
     diff: async (repo, n) => `diff --git a/x b/x\n# ${repo}#${n}\n`,
   });
@@ -167,8 +189,26 @@ describe('story chat — the live agent', () => {
     expect(spec.kind).toBe('story_chat');
     expect(spec.cwd).toBe('/wt/12');
     expect(spec.sandbox).toBeUndefined();
-    expect(spec.roots).toHaveLength(1); // the temp folder with the diffs
     expect(spec.system).toContain('This chat is READ-ONLY');
+    // Every workspace repository at its default branch, the temp folder, the library and the skills: all read-only roots.
+    expect(repoCheckoutCalls.at(-1)).toEqual(['acme/api@main', 'acme/web@develop']);
+    expect(spec.roots).toEqual(expect.arrayContaining(['/repos/api', '/repos/web', '/home/me/.limn/docs/1', '/home/me/.claude/skills']));
+    expect(L.liveOf(1, ws, IDENT).repos).toEqual([
+      { repo: 'acme/api', ok: true },
+      { repo: 'acme/web', ok: true },
+    ]);
+    // The reader's memory, CLAUDE.md files and skills, the library and the sprint are all in the seed.
+    expect(spec.system).toContain('Staging needs the REFUNDS_V2 flag.');
+    expect(spec.system).toContain('Write British English.');
+    expect(spec.system).toContain('api and web deploy together.');
+    expect(spec.system).toContain("The developer's skills, in /home/me/.claude/skills: release.");
+    expect(spec.system).toContain('# The reference library');
+    expect(spec.system).toContain('ACME-10 "Refund emails"');
+    expect(spec.system).toContain('- acme/web: /repos/web at feedfac');
+    // Every memory file is written in full where the agent can read it.
+    const memFile = (spec.system.match(/Every memory file is also in (\S+?)\./) ?? [])[1];
+    expect(memFile).toBeTruthy();
+    expect(readFileSync(join(memFile!, '1-api', 'MEMORY.md'), 'utf8')).toBe('Staging needs the REFUNDS_V2 flag.');
     // The PR's diff is written on the host (the checkout is blobless; the sandbox has no GitHub).
     expect(spec.system).toMatch(/its full diff: .*acme__api-12\.diff/);
   });
@@ -239,7 +279,7 @@ describe('story chat — the live agent', () => {
     now += 2 * 60_000;
     expect(await L.reapIdle(now)).toBe(1);
     expect(sessions[0].closed).toBe(true);
-    expect(cleanups).toBe(1);
+    expect(cleanups).toBe(2); // the PR worktrees and the repositories' worktrees
     expect(tmpFolders()).toHaveLength(0);
     expect(L.liveOf(1, ws, IDENT).state).toBe('cold');
   });

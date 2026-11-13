@@ -24,7 +24,8 @@ no internals.
   pages open.
 - The story view: "Ask about this story". Ask how to prove the ticket is done once its pull requests are merged,
   what is still missing, or how it fits with the rest of the system. The answer comes from the ticket, the pull
-  requests' changes and code, and your Claude memory; nothing is run or changed. Chats are saved with the story.
+  requests' changes and code, every repository in the workspace, the reference documents, the sprint's other
+  stories, and your Claude memory, CLAUDE.md and skills; nothing is run or changed. Chats are saved with the story.
 
 ### Changed
 

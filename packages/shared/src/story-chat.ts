@@ -82,8 +82,10 @@ export interface StoryChatLive {
   activity: string[];
   /** The running turn's text so far. */
   partial: string;
-  /** The checkouts the agent works in. */
+  /** The pull requests checked out. */
   checkouts: Array<{ repo: string; number: number; ok: boolean }>;
+  /** The workspace's repositories, checked out at their default branch. */
+  repos: Array<{ repo: string; ok: boolean }>;
 }
 
 export interface StoryChatListResponse {

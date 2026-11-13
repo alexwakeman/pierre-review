@@ -2,8 +2,10 @@
 // workspace, ticket), at most `maxLive()` at once.
 //
 //   prepare   the story view opened (and every keep-alive while it stays open): check the story's
-//             PRs out (clone-manager worktrees, ledgered as kind 'chat'), write each PR's diff, read
-//             the reader's memory, and START the agent — so a question is answered at once
+//             PRs out AND every workspace repository at its default branch (clone-manager worktrees,
+//             ledgered as kind 'chat'), write each PR's diff, read the reader's memory, CLAUDE.md
+//             files and skills, the reference library and the sprint's other stories (context.ts),
+//             and START the agent — so a question is answered at once
 //             (docs/QUICK-CHAT-SPIKE.md: ~1 s warm vs ~5 s cold). No model call.
 //   ask       one question: a stored turn, answered by the warm Claude session, or on Codex by one run
 //             with the earlier turns in the prompt. READ-ONLY on both: no shell, nothing written.
@@ -37,11 +39,12 @@ import { recordAiUsage } from '../db/usage.js';
 import { db, schema } from '../db/client.js';
 import { resolveDataDir } from '../data-dir.js';
 import { withWorktreeOwner } from '../review/worktree-owner.js';
-import { prepPeerWorktrees, cleanupCloneCache } from '../review/clone-manager.js';
+import { prepDefaultBranchCheckouts, prepPeerWorktrees, cleanupCloneCache } from '../review/clone-manager.js';
 import { CHAT_DISALLOWED_TOOLS } from '../review/chat-agent.js';
 import { readSessionTicket, defaultSessionTicketSeams, type SessionTicket } from '../sandbox/workspace/ticket.js';
 import { chatTmpBase, chatTmpPrefix } from './tmp.js';
-import { storyChatSystemPrompt, type SeedCheckout, type SeedMemory, type SeedTurn } from './seed.js';
+import { storyChatSystemPrompt, type SeedCheckout, type SeedRepo, type SeedTurn } from './seed.js';
+import { projectSkillsIn, readerContextFor, sprintText, type ReaderContext } from './context.js';
 import * as store from './store.js';
 
 
@@ -52,6 +55,8 @@ export const STORY_CHAT_SESSION_BUDGET_USD = 5;
 export const STORY_CHAT_TURNS_PER_QUESTION = 60;
 const ACTIVITY_MAX = 40;
 const DIFF_MAX_CHARS = 2_000_000;
+/** Most workspace repositories checked out at their default branch (the rest are named as left out). */
+export const STORY_CHAT_MAX_REPOS = 20;
 const IDLE_MS = STORY_CHAT_IDLE_MINUTES * 60_000;
 const MODEL: ModelChoice = { role: 'standard' };
 
@@ -76,8 +81,20 @@ export interface StoryChatDeps {
   ): Promise<{ checkouts: PreparedCheckout[]; cleanup: () => Promise<void> }>;
   /** The PRs' head commits, by `owner/name#number`. */
   heads(accountId: number, prs: ReadonlyArray<{ repo: string; number: number }>): Promise<Map<string, string>>;
-  /** The reader's memory and CLAUDE.md (the workspace's sandbox settings choose, as for builds). */
-  readerContext(accountId: number, workspaceId: number): Promise<{ memories: SeedMemory[]; userClaudeMd: string | null }>;
+  /** The reader's memory, CLAUDE.md files and skills (the workspace's sandbox settings choose, as for builds). */
+  readerContext(accountId: number, workspaceId: number): Promise<ReaderContext>;
+  /** The workspace's repositories (every member, External included), with their default branch. */
+  repos(accountId: number, workspaceId: number): Promise<Array<{ repoId: number; owner: string; name: string; defaultBranch: string | null }>>;
+  /** Each repository at its default branch. `cleanup` removes every worktree made. */
+  repoCheckouts(
+    accountId: number,
+    ident: string,
+    repos: ReadonlyArray<{ owner: string; name: string; defaultBranch: string | null }>,
+  ): Promise<{ checkouts: SeedRepo[]; cleanup: () => Promise<void> }>;
+  /** The reference library's folder, when the workspace has built documents. */
+  docs(accountId: number, workspaceId: number): Promise<{ dir: string } | null>;
+  /** The sprint's other stories, one line each (stored data), or null. */
+  sprint(accountId: number, workspaceId: number, ident: string): Promise<string | null>;
   tmpBase(): string;
   /** A PR's unified diff (GitHub's own, so it works for merged PRs and needs no blobs locally). */
   diff(repo: string, number: number): Promise<string>;
@@ -133,31 +150,46 @@ const realDeps: StoryChatDeps = {
     return out;
   },
   async readerContext(accountId, workspaceId) {
-    const [{ getSandboxSettings, sandboxWorkspaceRepos }, { resolveWorkspaceLayout, defaultLayoutPlaces }, mem] = await Promise.all([
+    const [{ getSandboxSettings, sandboxWorkspaceRepos }, { defaultLayoutPlaces }] = await Promise.all([
       import('../db/sandbox-settings.js'),
       import('../sandbox/workspace/check.js'),
-      import('../sandbox/workspace/memories.js'),
     ]);
     const [settings, repos] = await Promise.all([getSandboxSettings(accountId, workspaceId), sandboxWorkspaceRepos(accountId, workspaceId)]);
-    const places = defaultLayoutPlaces();
-    const memories: SeedMemory[] = [];
-    let userClaudeMd: string | null = null;
-    if (repos && repos.length > 0) {
-      try {
-        const resolved = resolveWorkspaceLayout(repos, { memoryProjects: settings?.memoryProjects ?? null }, places);
-        for (const p of resolved.projects.filter((x) => x.ticked)) {
-          const got = mem.readMemories(places.claude, p.key);
-          memories.push({ dir: p.dir, files: got.files.map((f) => ({ rel: f.rel, text: f.content.toString('utf8') })) });
-        }
-      } catch {
-        /* the reader's files are a help, never a reason to fail the chat */
-      }
-    }
-    if (settings?.userClaudeMd !== false) {
-      const b = mem.readUserClaudeMd(places.claude);
-      if (b) userClaudeMd = b.toString('utf8');
-    }
-    return { memories, userClaudeMd };
+    return readerContextFor(
+      repos ?? [],
+      { memoryProjects: settings?.memoryProjects ?? null, userClaudeMd: settings?.userClaudeMd !== false, userSkills: settings?.userSkills === true },
+      defaultLayoutPlaces(),
+    );
+  },
+  async repos(accountId, workspaceId) {
+    const { sandboxWorkspaceRepos } = await import('../db/sandbox-settings.js');
+    const members = (await sandboxWorkspaceRepos(accountId, workspaceId)) ?? [];
+    if (members.length === 0) return [];
+    const r = schema.repos;
+    const rows = await db
+      .select({ id: r.id, defaultBranch: r.defaultBranch })
+      .from(r)
+      .where(and(eq(r.accountId, accountId), inArray(r.id, members.map((m) => m.repoId))))
+      .execute();
+    const branch = new Map(rows.map((x) => [x.id, x.defaultBranch]));
+    return members.map((m) => ({ ...m, defaultBranch: branch.get(m.repoId) ?? null }));
+  },
+  async repoCheckouts(accountId, ident, repos) {
+    const { checkouts, cleanup } = await withWorktreeOwner({ kind: 'chat', accountId, ticket: ident }, () =>
+      prepDefaultBranchCheckouts(repos.map((r) => ({ owner: r.owner, name: r.name, branch: r.defaultBranch }))),
+    );
+    return { checkouts: checkouts.map((c) => ({ repo: `${c.owner}/${c.name}`, path: c.path, sha: c.sha, error: c.error })), cleanup };
+  },
+  async docs(accountId, workspaceId) {
+    const [{ docsContextFor }, { config }] = await Promise.all([import('../reference-docs/context.js'), import('../config.js')]);
+    const d = await docsContextFor(accountId, workspaceId);
+    return d.hasDocs && config.aiEnabled ? { dir: d.dir } : null;
+  },
+  async sprint(accountId, workspaceId, ident) {
+    const { getSprintGraph } = await import('../db/sprint-graph.js');
+    const g = await getSprintGraph(accountId, workspaceId, { aiEnabled: true, now: Date.now() });
+    if (!g.trackerOn || g.nodes.length === 0) return null;
+    return sprintText(g.nodes, ident) || null;
   },
   tmpBase: () => chatTmpBase(process.platform, tmpdir(), existsSync('/tmp')),
   async diff(repo, number) {
@@ -185,6 +217,11 @@ interface Live {
   note: string | null;
   provider: AgentProvider;
   checkouts: PreparedCheckout[];
+  /** Every workspace repository at its default branch. */
+  repos: SeedRepo[];
+  reposLeftOut: string[];
+  /** The reference library and the reader's skills folder: read-only. */
+  extraReadRoots: string[];
   cleanup: (() => Promise<void>) | null;
   tmpDir: string | null;
   ticket: SessionTicket | null;
@@ -201,7 +238,7 @@ interface Live {
 const lives = new Map<string, Live>();
 const keyOf = (accountId: number, workspaceId: number, ident: string): string => `${accountId}:${workspaceId}:${ident}`;
 
-const COLD: StoryChatLive = { state: 'cold', chatId: null, note: null, activity: [], partial: '', checkouts: [] };
+const COLD: StoryChatLive = { state: 'cold', chatId: null, note: null, activity: [], partial: '', checkouts: [], repos: [] };
 
 /** The live state for the SPA. */
 export function liveOf(accountId: number, workspaceId: number, ident: string): StoryChatLive {
@@ -214,6 +251,7 @@ export function liveOf(accountId: number, workspaceId: number, ident: string): S
     activity: [...l.activity],
     partial: l.partial,
     checkouts: l.checkouts.map((c) => ({ repo: c.repo, number: c.number, ok: c.path != null })),
+    repos: l.repos.map((r) => ({ repo: r.repo, ok: r.path != null })),
   };
 }
 
@@ -257,6 +295,9 @@ export async function prepare(ctx: AgentContext, accountId: number, workspaceId:
     note: null,
     provider,
     checkouts: [],
+    repos: [],
+    reposLeftOut: [],
+    extraReadRoots: [],
     cleanup: null,
     tmpDir: null,
     ticket: null,
@@ -294,11 +335,22 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
       state: p.state,
       headSha: heads.get(`${p.fullName}#${p.number}`.toLowerCase()) ?? null,
     }));
-    const { checkouts, cleanup } = await deps.checkout(l.accountId, l.ident, want);
+    const members = await deps.repos(l.accountId, l.workspaceId).catch(() => []);
+    const kept = members.slice(0, STORY_CHAT_MAX_REPOS);
+    l.reposLeftOut = members.slice(STORY_CHAT_MAX_REPOS).map((m) => `${m.owner}/${m.name}`);
+    // The PRs and the workspace's repositories check out at the same time (each repo under its own lock).
+    const [prs2, repos2] = await Promise.all([
+      deps.checkout(l.accountId, l.ident, want),
+      deps.repoCheckouts(l.accountId, l.ident, kept).catch(() => ({ checkouts: [] as SeedRepo[], cleanup: async () => {} })),
+    ]);
+    const { checkouts } = prs2;
     l.checkouts = checkouts;
-    l.cleanup = cleanup;
+    l.repos = repos2.checkouts;
+    l.cleanup = async () => {
+      await Promise.all([prs2.cleanup().catch(() => {}), repos2.cleanup().catch(() => {})]);
+    };
     if (l.closed) {
-      await cleanup().catch(() => {});
+      await l.cleanup();
       return;
     }
     const failed = checkouts.filter((c) => c.path == null);
@@ -322,8 +374,42 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
         }
       }),
     );
-    const reader = await deps.readerContext(l.accountId, l.workspaceId);
-    l.seedParts = { ticket, checkouts, memories: reader.memories, userClaudeMd: reader.userClaudeMd, tmpDir: l.tmpDir };
+    const [reader, docs, sprint] = await Promise.all([
+      deps.readerContext(l.accountId, l.workspaceId),
+      deps.docs(l.accountId, l.workspaceId).catch(() => null),
+      deps.sprint(l.accountId, l.workspaceId, l.ident).catch(() => null),
+    ]);
+    // Every memory file in full (the prompt carries them only up to its budget).
+    let memoryDir: string | null = null;
+    if (reader.memories.length > 0) {
+      memoryDir = join(l.tmpDir, 'memory');
+      reader.memories.forEach((m, i) => {
+        const dir = join(memoryDir!, `${i + 1}-${m.dir.split(/[\\/]/).filter(Boolean).pop() ?? 'project'}`);
+        for (const f of m.files) {
+          const file = join(dir, f.rel);
+          if (!file.startsWith(dir)) continue;
+          mkdirSync(join(file, '..'), { recursive: true });
+          writeFileSync(file, f.text);
+        }
+      });
+    }
+    l.extraReadRoots = [...(docs ? [docs.dir] : []), ...(reader.userSkills ? [reader.userSkills.dir] : [])];
+    const { docsNavigationPrompt } = await import('../reference-docs/context.js');
+    l.seedParts = {
+      ticket,
+      checkouts,
+      repos: l.repos,
+      reposLeftOut: l.reposLeftOut,
+      memories: reader.memories,
+      memoryDir,
+      userClaudeMd: reader.userClaudeMd,
+      folderClaudeMd: reader.folderClaudeMd,
+      userSkills: reader.userSkills,
+      projectSkills: projectSkillsIn([...checkouts, ...l.repos]),
+      docs: docs ? { dir: docs.dir, navigation: docsNavigationPrompt(docs.dir, l.provider.id) } : null,
+      sprint,
+      tmpDir: l.tmpDir,
+    };
     if (l.provider.openSession) await startSession(l);
     l.state = 'ready';
   } catch (err) {
@@ -332,18 +418,30 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
   }
 }
 
+/** Every folder the agent may read: the PR checkouts first (the working folder), the repositories, the
+ *  temp folder (diffs, memories), the library and the skills. */
+function readRoots(l: Live): { cwd: string; others: string[] } {
+  const all = [
+    ...l.checkouts.flatMap((c) => (c.path ? [c.path] : [])),
+    ...l.repos.flatMap((r) => (r.path ? [r.path] : [])),
+    ...(l.tmpDir ? [l.tmpDir] : []),
+    ...l.extraReadRoots,
+  ];
+  const cwd = all[0]!;
+  return { cwd, others: [...new Set(all.slice(1))] };
+}
+
 /** Start the warm Claude session, told the attached chat's earlier turns. */
 async function startSession(l: Live): Promise<void> {
   if (!l.seedParts || !l.provider.openSession) return;
   const earlier = l.chatId != null ? await earlierTurns(l.accountId, l.chatId) : [];
-  const roots = l.checkouts.flatMap((c) => (c.path ? [c.path] : []));
-  const cwd = roots[0] ?? l.tmpDir!;
+  const { cwd, others } = readRoots(l);
   l.session = await l.provider.openSession({
     kind: 'story_chat',
     model: MODEL,
     system: storyChatSystemPrompt({ ...l.seedParts, earlier }),
     cwd,
-    roots: [...roots, l.tmpDir!].filter((r) => r !== cwd),
+    roots: others,
     budgetUsd: STORY_CHAT_SESSION_BUDGET_USD,
     turnsPerQuestion: STORY_CHAT_TURNS_PER_QUESTION,
     claude: { disallowedTools: [] },
@@ -456,8 +554,7 @@ export function stopReason(subtype: string | null): string {
 /** Codex (no live session): one run per question, the earlier turns in the system prompt. */
 async function askReadOnly(l: Live, question: string, abort: AbortController, onProgress: (p: AgentProgress) => void): Promise<AgentOutcome | null> {
   const earlier = await earlierTurns(l.accountId, l.running!.chatId);
-  const roots = l.checkouts.flatMap((c) => (c.path ? [c.path] : []));
-  const cwd = roots[0] ?? l.tmpDir!;
+  const { cwd, others } = readRoots(l);
   let outcome: AgentOutcome | null = null;
   const res = await l.provider.runAgent({
     kind: 'story_chat',
@@ -467,8 +564,8 @@ async function askReadOnly(l: Live, question: string, abort: AbortController, on
     system: storyChatSystemPrompt({ ...l.seedParts!, earlier }),
     cwd,
     roots: [],
-    // Read-only: the other checkouts and the PR diffs written at prepare time.
-    readOnlyRoots: [...roots.filter((r) => r !== cwd), ...(l.tmpDir ? [l.tmpDir] : [])],
+    // Read-only: every other checkout, the diffs and memories, the library and the skills.
+    readOnlyRoots: others,
     writeRoots: [],
     budget: { usd: STORY_CHAT_SESSION_BUDGET_USD, turns: STORY_CHAT_TURNS_PER_QUESTION },
     abortController: abort,

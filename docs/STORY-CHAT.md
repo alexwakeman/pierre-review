@@ -2,7 +2,9 @@
 
 Quick, READ-ONLY questions about ONE story: how to prove it is done once its pull requests are merged
 (manual test steps), what is still missing, how it fits with the rest of the system, what is risky.
-An agent answers from the ticket, each PR's diff, the PRs' checked-out code and the reader's memory.
+The agent gets the same context a build gets, read-only: the ticket, each PR's diff and checked-out
+code, EVERY workspace repository at its default branch, the reader's Claude project memories,
+CLAUDE.md files and skills, the reference library, and — beyond builds — the sprint's other stories.
 It runs nothing and changes nothing. Code: `apps/backend/src/story-chat/`, the panel
 `apps/frontend/src/components/Ticket/StoryChat.tsx`, the wire `packages/shared/src/story-chat.ts`.
 
@@ -16,9 +18,13 @@ stay in the container sandbox ([SANDBOX.md](SANDBOX.md)).
 ```
 story view mounts ─► POST /prepare (keep-alive every 3 min while the panel is open + visible)
                        │ stored ticket (readSessionTicket, NO tracker read) · PR heads from the DB
-                       │ worktrees of the PR heads (clone-manager, ledgered as kind 'chat')
+                       │ worktrees of the PR heads + every workspace repo at its default branch
+                       │   (clone-manager, ledgered as kind 'chat'; at most 20 repos, the rest named)
                        │ each PR's unified diff (GitHub REST) → <tmp>/<owner>__<name>-<n>.diff
-                       │ the reader's memory + CLAUDE.md (the workspace's sandbox settings choose)
+                       │ context.ts: memories, ~/.claude/CLAUDE.md, the projects folder's CLAUDE.md,
+                       │   skills (the workspace's sandbox settings choose, as for builds); every
+                       │   memory file also written to <tmp>/memory/
+                       │ the reference library (docsContextFor) · the sprint's other stories (DB only)
                        │ Claude: ONE live Agent SDK session (streaming input), no model call yet
                        ▼
 "Ask" ─► POST /ask ─► a stored turn ─► the session answers (Codex: one run per question)
@@ -27,6 +33,14 @@ story view mounts ─► POST /prepare (keep-alive every 3 min while the panel i
 idle 10 min ─► the reaper: session closed, worktrees removed, temp folder deleted; turns kept
 ```
 
+- **The context, and where it comes from** (`story-chat/context.ts`): memories are found exactly as
+  builds find them (`resolveWorkspaceLayout`: the reader's clones of the workspace's repositories,
+  through their Claude projects; the ticked projects of Settings → Sandbox, default all). They go in
+  the system prompt up to its budget and in full under `<tmp>/memory/`. `userClaudeMd` brings
+  `~/.claude/CLAUDE.md` and the projects folder's own CLAUDE.md; `userSkills` brings `~/.claude/skills`
+  as a read-only folder; the repositories' own `.claude/skills/*/SKILL.md` are listed. The reference
+  library is a read-only folder with the reviews' navigation rules. The sprint is one line per story
+  (key, title, status, PRs, the brief's one line), at most 80, from the stored sprint graph.
 - **Read-only, twice over.** The Claude session's base tool set is Read/Glob/Grep, with Bash and every
   write tool denied (`ai/providers/claude.ts` `SESSION_TOOLS` / `SESSION_DENIED_TOOLS`), and the path
   guard treats every root as read-only. Codex runs under its usual lockdown (no shell) with no write

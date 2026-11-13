@@ -36,13 +36,23 @@ const BTN_SMALL =
 const CHIP =
   'rounded-full bg-ui-raise px-2.5 py-0.5 text-meta text-ui-ink hover:bg-ui-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:opacity-50 touch:min-h-10';
 
+const count = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+
+/** What the ready agent has: its pull requests and the workspace's repositories. */
+export function readyLine(live: StoryChatLive): string {
+  const prs = live.checkouts.filter((c) => c.ok).length;
+  const repos = live.repos.filter((r) => r.ok).length;
+  if (prs === 0 && repos === 0) return 'Ready.';
+  return `Ready: ${count(prs, 'pull request')} and ${count(repos, 'repository', 'repositories')}.`;
+}
+
 /** The live agent's state as one short line. */
 export function liveLine(live: StoryChatLive): string {
   switch (live.state) {
     case 'preparing':
       return 'Getting the pull requests ready…';
     case 'ready':
-      return 'Ready.';
+      return readyLine(live);
     case 'answering':
       return 'Answering…';
     case 'failed':
@@ -116,8 +126,9 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
             how it fits with the rest of the system.
           </p>
           <p className="mt-2">
-            An agent answers from the ticket, the pull requests’ changes and their code, checked out on this computer,
-            with your Claude memory for these projects. It only reads: it runs nothing and changes nothing.
+            An agent answers from the ticket, the pull requests’ changes and code, every repository in this workspace,
+            the reference documents and the sprint’s other stories, with your Claude memory, CLAUDE.md and skills for
+            these projects (as set in Settings → Sandbox). It only reads: it runs nothing and changes nothing.
           </p>
           <p className="mt-2">
             The agent stays ready while the story is open and closes after {STORY_CHAT_IDLE_MINUTES} minutes without use;

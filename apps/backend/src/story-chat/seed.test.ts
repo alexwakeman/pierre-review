@@ -28,6 +28,10 @@ const base: StoryChatSeedInput = {
     { repo: 'acme/api', number: 12, title: 'Queue refunds', state: 'open', path: '/wt/api', headSha: 'abcdef1234', error: null },
     { repo: 'acme/web', number: 3, title: 'Email', state: 'merged', path: null, headSha: null, error: 'fetch failed' },
   ],
+  repos: [
+    { repo: 'acme/api', path: '/repos/api', sha: 'feedface00', error: null },
+    { repo: 'acme/infra', path: null, sha: null, error: 'clone failed' },
+  ],
   memories: [{ dir: '/home/me/api', files: [{ rel: 'MEMORY.md', text: 'Use pnpm, never npm.' }] }],
   userClaudeMd: 'Write British English.',
   tmpDir: '/tmp/limn-q-a-1',
@@ -75,5 +79,34 @@ describe('the story chat seed', () => {
     expect(t).toContain('Q: q3');
     expect(t).not.toContain('Q: q0');
     expect(storyChatSystemPrompt({ ...base, earlier: [{ question: 'What broke?', answer: null }] })).toContain('# Earlier in this chat\nQ: What broke?\nA: (no answer)');
+  });
+
+  it('names every workspace repository, the library, the sprint and the skills', () => {
+    const s = storyChatSystemPrompt({
+      ...base,
+      reposLeftOut: ['acme/old'],
+      docs: { dir: '/lib', navigation: '# The reference library\nStart at INDEX.md.' },
+      sprint: '- ACME-10 "Refund emails" — In Progress; no pull requests',
+      userSkills: { dir: '/home/me/.claude/skills', names: ['release'] },
+      projectSkills: [{ repo: 'acme/api', name: 'testing', path: '/repos/api/.claude/skills/testing/SKILL.md' }],
+      folderClaudeMd: { folder: '/home/me/code', text: 'api and web deploy together.' },
+      memoryDir: '/tmp/q/memory',
+    });
+    expect(s).toContain("# The workspace's repositories (default branch, read-only)");
+    expect(s).toContain('- acme/api: /repos/api at feedfac');
+    expect(s).toContain('- acme/infra: not checked out (clone failed)');
+    expect(s).toContain('Not checked out (too many repositories): acme/old.');
+    expect(s).toContain('# The reference library\nStart at INDEX.md.');
+    expect(s).toContain("# The sprint's other stories");
+    expect(s).toContain('ACME-10 "Refund emails"');
+    expect(s).toContain('- testing (acme/api): /repos/api/.claude/skills/testing/SKILL.md');
+    expect(s).toContain('<folder-claude-md folder="/home/me/code">\napi and web deploy together.');
+    expect(s).toContain('Every memory file is also in /tmp/q/memory.');
+  });
+
+  it('says how many memory files did not fit, and where they all are', () => {
+    const big = Array.from({ length: 5 }, (_, i) => ({ rel: `m${i}.md`, text: 'x'.repeat(20_000) }));
+    const s = storyChatSystemPrompt({ ...base, userClaudeMd: null, memories: [{ dir: '/p', files: big }], memoryDir: '/tmp/q/memory' });
+    expect(s).toMatch(/Every memory file is also in \/tmp\/q\/memory \(\d+ not shown above\)\./);
   });
 });

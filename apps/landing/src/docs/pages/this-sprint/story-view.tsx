@@ -198,9 +198,10 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        The agent reads the ticket, each pull request&rsquo;s changes and its code, with your Claude memory for these
-        projects and your own CLAUDE.md (the same ones Implement story uses). It only reads: it runs nothing and changes
-        nothing. It gets ready when you open the story, so the first answer starts quickly, and closes after 10 minutes
+        The agent reads the ticket, each pull request&rsquo;s changes and code, every repository in the workspace, the
+        workspace&rsquo;s reference documents and the sprint&rsquo;s other stories. It also gets your Claude memory,
+        CLAUDE.md and skills for these projects, the same ones Implement story uses (Settings → Sandbox). It only reads:
+        it runs nothing and changes nothing. It gets ready when you open the story, so the first answer starts quickly, and closes after 10 minutes
         without use. Chats are saved with the story: pick an earlier one in the menu to read it or ask a follow-up.
       </p>
 
