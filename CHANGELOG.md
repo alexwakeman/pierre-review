@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.32] - 2026-11-13
+
 ### Added
 
 - The story view: "Ask about this story". Ask how to prove the ticket is done once its pull requests are merged,
