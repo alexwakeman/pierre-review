@@ -18,8 +18,9 @@ stay in the container sandbox ([SANDBOX.md](SANDBOX.md)).
 ```
 story view mounts ─► POST /prepare (keep-alive every 3 min while the panel is open + visible)
                        │ stored ticket (readSessionTicket, NO tracker read) · PR heads from the DB
-                       │ worktrees of the PR heads + every workspace repo at its default branch
-                       │   (clone-manager, ledgered as kind 'chat'; at most 20 repos, the rest named)
+                       │ worktrees of the PR heads (clone-manager, ledgered as kind 'chat')
+                       │ every workspace repo at its default branch: the SHARED trees (trees.ts;
+                       │   at most 20 repos, the rest named)
                        │ each PR's unified diff (GitHub REST) → <tmp>/<owner>__<name>-<n>.diff
                        │ context.ts: memories, ~/.claude/CLAUDE.md, the projects folder's CLAUDE.md,
                        │   skills (the workspace's sandbox settings choose, as for builds); every
@@ -60,6 +61,28 @@ idle 10 min ─► the reaper: session closed, worktrees removed, temp folder de
   a fresh agent puts its earlier turns in the system prompt (`seed.ts` `earlierText`, newest kept).
 - **Per-turn cost** is the session's running total minus the previous total; Claude's is recorded
   here (`recordAiUsage`, feature `story_chat`, group "chat"); Codex records its own.
+
+## Shared trees
+
+`story-chat/trees.ts`. Every chat reads each workspace repository at its default branch from ONE shared,
+read-only folder per (repository, commit): `<dataDir>/chat-trees/<owner>__<name>/<sha>/`, the files only
+(no `.git`), complete when it holds `.limn-tree-complete`. Sharing is safe because the chat cannot write
+(no shell, no write tool, every root read-only to the path guard).
+
+- **Acquire** (prepare): the tree of the commit sync last saw (`repos.defaultBranchHeadSha`) — no git work
+  and no network; else the newest tree there is, with a rebuild behind it when sync knows a newer commit;
+  else (the first chat on the repository) it is built now. Measured: prepare with warm trees ~0.8 s, of
+  which the PR worktree is most; a cold first chat ~8 s per repository.
+- **Build**: a worktree of the branch tip through the clone cache (batched blob fetch), its files COPIED
+  into `<sha>.part-…`, then renamed. A tree never depends on the clone cache, whose LRU may evict a clone.
+  One build per repository at a time.
+- **Refresh**: the default-branch snapshot (`sync/branch-status.ts`, after its transaction, lazy, never
+  awaited) calls `noteDefaultBranchHead`: a repository that already has a tree gets the new commit's tree
+  built in the background. A repository no chat has read is never cloned for this.
+- **Prune**: a tree goes when a newer one is complete and no live chat holds it (in-memory holds, released
+  when a chat closes). At boot (`sweepAtBoot`): unfinished trees, all but the newest per repository, and
+  repositories Limn no longer has.
+- **Disk**: one copy of each repository's files per repository a chat has read, kept between chats.
 
 ## Routes
 

@@ -122,6 +122,8 @@ beforeAll(async () => {
   const { ensureDefaultWorkspace } = await import('../db/queries.js');
   await db.insert(schema.accounts).values({ id: 1, githubUserId: 'N1', githubLogin: 'u1', isLocal: true }).onConflictDoNothing().execute();
   ws = await ensureDefaultWorkspace(1);
+  // The shared trees live in a scratch folder: the boot sweep must never touch a real data folder.
+  (await import('./trees.js')).setTreeDepsForTest({ root: () => `${RUN_DIR}/sc-trees` });
   L = await import('./live.js');
   S = await import('./store.js');
   L.setStoryChatDepsForTest({
@@ -142,8 +144,8 @@ beforeAll(async () => {
       userSkills: { dir: '/home/me/.claude/skills', names: ['release'] },
     }),
     repos: async () => [
-      { repoId: 1, owner: 'acme', name: 'api', defaultBranch: 'main' },
-      { repoId: 2, owner: 'acme', name: 'web', defaultBranch: 'develop' },
+      { repoId: 1, owner: 'acme', name: 'api', defaultBranch: 'main', headSha: null },
+      { repoId: 2, owner: 'acme', name: 'web', defaultBranch: 'develop', headSha: null },
     ],
     repoCheckouts: async (_a, _i, repos) => {
       repoCheckoutCalls.push(repos.map((r) => `${r.owner}/${r.name}@${r.defaultBranch}`));

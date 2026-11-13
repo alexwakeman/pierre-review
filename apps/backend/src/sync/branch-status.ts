@@ -742,6 +742,15 @@ export async function syncBranchStatus(
       .execute();
   });
 
+  // STORY CHAT's shared trees (story-chat/trees.ts): a repository a chat has read gets its new default
+  // branch tree built in the background. AFTER the transaction, lazy, never awaited, never fatal.
+  if (headSha != null) {
+    const [owner, name] = fullName.split('/') as [string, string];
+    void import('../story-chat/trees.js')
+      .then((m) => m.noteDefaultBranchHead({ owner, name, branch: branchName ?? null, headSha }))
+      .catch(() => {});
+  }
+
   // The trunk CI transition log — AFTER the snapshot's transaction and inside its own guard, so
   // this feed nicety can never roll back (or fail) the strip that just succeeded. The failing
   // checks handed over come from the head COMMIT's own node under the same partial-response

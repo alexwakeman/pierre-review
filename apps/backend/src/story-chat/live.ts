@@ -39,7 +39,8 @@ import { recordAiUsage } from '../db/usage.js';
 import { db, schema } from '../db/client.js';
 import { resolveDataDir } from '../data-dir.js';
 import { withWorktreeOwner } from '../review/worktree-owner.js';
-import { prepDefaultBranchCheckouts, prepPeerWorktrees, cleanupCloneCache } from '../review/clone-manager.js';
+import { prepPeerWorktrees, cleanupCloneCache } from '../review/clone-manager.js';
+import { acquireTree, sweepTreesAtBoot } from './trees.js';
 import { CHAT_DISALLOWED_TOOLS } from '../review/chat-agent.js';
 import { readSessionTicket, defaultSessionTicketSeams, type SessionTicket } from '../sandbox/workspace/ticket.js';
 import { chatTmpBase, chatTmpPrefix } from './tmp.js';
@@ -84,12 +85,15 @@ export interface StoryChatDeps {
   /** The reader's memory, CLAUDE.md files and skills (the workspace's sandbox settings choose, as for builds). */
   readerContext(accountId: number, workspaceId: number): Promise<ReaderContext>;
   /** The workspace's repositories (every member, External included), with their default branch. */
-  repos(accountId: number, workspaceId: number): Promise<Array<{ repoId: number; owner: string; name: string; defaultBranch: string | null }>>;
-  /** Each repository at its default branch. `cleanup` removes every worktree made. */
+  repos(
+    accountId: number,
+    workspaceId: number,
+  ): Promise<Array<{ repoId: number; owner: string; name: string; defaultBranch: string | null; headSha: string | null }>>;
+  /** Each repository at its default branch: the SHARED read-only trees (trees.ts). `cleanup` releases them. */
   repoCheckouts(
     accountId: number,
     ident: string,
-    repos: ReadonlyArray<{ owner: string; name: string; defaultBranch: string | null }>,
+    repos: ReadonlyArray<{ owner: string; name: string; defaultBranch: string | null; headSha: string | null }>,
   ): Promise<{ checkouts: SeedRepo[]; cleanup: () => Promise<void> }>;
   /** The reference library's folder, when the workspace has built documents. */
   docs(accountId: number, workspaceId: number): Promise<{ dir: string } | null>;
@@ -167,18 +171,28 @@ const realDeps: StoryChatDeps = {
     if (members.length === 0) return [];
     const r = schema.repos;
     const rows = await db
-      .select({ id: r.id, defaultBranch: r.defaultBranch })
+      .select({ id: r.id, defaultBranch: r.defaultBranch, headSha: r.defaultBranchHeadSha })
       .from(r)
       .where(and(eq(r.accountId, accountId), inArray(r.id, members.map((m) => m.repoId))))
       .execute();
-    const branch = new Map(rows.map((x) => [x.id, x.defaultBranch]));
-    return members.map((m) => ({ ...m, defaultBranch: branch.get(m.repoId) ?? null }));
+    const byId = new Map(rows.map((x) => [x.id, x]));
+    return members.map((m) => ({ ...m, defaultBranch: byId.get(m.repoId)?.defaultBranch ?? null, headSha: byId.get(m.repoId)?.headSha ?? null }));
   },
-  async repoCheckouts(accountId, ident, repos) {
-    const { checkouts, cleanup } = await withWorktreeOwner({ kind: 'chat', accountId, ticket: ident }, () =>
-      prepDefaultBranchCheckouts(repos.map((r) => ({ owner: r.owner, name: r.name, branch: r.defaultBranch }))),
+  async repoCheckouts(_accountId, _ident, repos) {
+    const got = await Promise.all(
+      repos.map(async (r) => ({ r, t: await acquireTree({ owner: r.owner, name: r.name, branch: r.defaultBranch, headSha: r.headSha }).catch(() => null) })),
     );
-    return { checkouts: checkouts.map((c) => ({ repo: `${c.owner}/${c.name}`, path: c.path, sha: c.sha, error: c.error })), cleanup };
+    return {
+      checkouts: got.map(({ r, t }) => ({
+        repo: `${r.owner}/${r.name}`,
+        path: t?.path ?? null,
+        sha: t?.sha ?? null,
+        error: t ? null : 'could not be checked out',
+      })),
+      cleanup: async () => {
+        for (const { t } of got) t?.release();
+      },
+    };
   },
   async docs(accountId, workspaceId) {
     const [{ docsContextFor }, { config }] = await Promise.all([import('../reference-docs/context.js'), import('../config.js')]);
@@ -645,7 +659,7 @@ function ensureReaper(): void {
 }
 
 /** Boot: delete this install's leftover temp folders and settle turns a restart cut off. */
-export async function sweepAtBoot(): Promise<{ folders: number; turns: number }> {
+export async function sweepAtBoot(): Promise<{ folders: number; turns: number; trees: number }> {
   let folders = 0;
   const base = deps.tmpBase();
   const prefix = chatTmpPrefix(resolveDataDir(process.env, homedir()));
@@ -659,7 +673,10 @@ export async function sweepAtBoot(): Promise<{ folders: number; turns: number }>
     /* no temp base */
   }
   const turns = await store.settleRunningTurns().catch(() => 0);
-  return { folders, turns };
+  // The shared trees: unfinished ones, older ones and those of repositories Limn no longer has go.
+  const known = await db.select({ owner: schema.repos.owner, name: schema.repos.name }).from(schema.repos).execute().catch(() => null);
+  const trees = known ? sweepTreesAtBoot(known).removed : 0;
+  return { folders, turns, trees };
 }
 
 /** Tests only: forget every live chat without cleanup. */
