@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.33] - 2026-11-13
+
 ### Changed
 
 - Ask about this story: the agent is ready sooner. It reads each repository from one copy kept between chats and
