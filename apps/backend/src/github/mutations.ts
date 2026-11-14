@@ -1746,3 +1746,64 @@ async function setReactionNow(
     viewerCanReact: subject.viewerCanReact === true,
   };
 }
+
+// ---- Release tags and pre-releases (docs/RELEASES.md § Releases tab 6) ----
+//
+// The READER's Confirm (releases/create.ts) — the caller claims each write first and never retries.
+// `createAnnotatedReleaseTag` makes the annotated tag object on the commit, then its ref; it NEVER moves
+// a ref (no PATCH): a 422 on the ref (the name exists) is reported as `exists`. Errors carry GitHub's
+// `status` (ghRest), which the caller turns into a short sentence.
+
+export async function createAnnotatedReleaseTag(
+  token: string,
+  args: { owner: string; name: string; tag: string; sha: string; message: string },
+  origin: WriteOrigin,
+): Promise<{ tagObjectOid: string }> {
+  return limnWrite(
+    origin,
+    'release_tag',
+    {},
+    async () => {
+      const seg = encodeURIComponent;
+      const obj = await ghRestPostFor<{ sha?: string }>(token, `/repos/${seg(args.owner)}/${seg(args.name)}/git/tags`, {
+        tag: args.tag,
+        message: args.message,
+        object: args.sha,
+        type: 'commit',
+      });
+      if (typeof obj.sha !== 'string') throw Object.assign(new Error('GitHub returned no tag object'), { status: 422, stage: 'object' });
+      try {
+        await ghRestPostFor<unknown>(token, `/repos/${seg(args.owner)}/${seg(args.name)}/git/refs`, { ref: `refs/tags/${args.tag}`, sha: obj.sha });
+      } catch (err) {
+        throw Object.assign(err instanceof Error ? err : new Error(String(err)), { stage: 'ref' });
+      }
+      return { tagObjectOid: obj.sha };
+    },
+    () => ({ detail: args.tag }),
+  );
+}
+
+export async function createGithubPrerelease(
+  token: string,
+  args: { owner: string; name: string; tag: string; title: string; body: string },
+  origin: WriteOrigin,
+): Promise<{ id: number; url: string }> {
+  return limnWrite(
+    origin,
+    'prerelease',
+    {},
+    async () => {
+      const seg = encodeURIComponent;
+      const r = await ghRestPostFor<{ id?: number; html_url?: string }>(token, `/repos/${seg(args.owner)}/${seg(args.name)}/releases`, {
+        tag_name: args.tag,
+        name: args.title,
+        body: args.body,
+        prerelease: true,
+        draft: false,
+      });
+      if (typeof r.id !== 'number' || typeof r.html_url !== 'string') throw Object.assign(new Error('GitHub returned no release'), { status: 422 });
+      return { id: r.id, url: r.html_url };
+    },
+    (r) => ({ detail: r.url }),
+  );
+}

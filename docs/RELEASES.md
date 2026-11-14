@@ -288,8 +288,10 @@ Notes
   `releaseFinalState`. Wire types `ReleasePreviewBody/Response`, `CreateReleaseBody/Response`,
   `ReleaseDetail`, `ReleaseSnapshot`, `RELEASE_NOTES_SECTION_MAX`.
 - **Backend** `apps/backend/src/releases/`: `github.ts` (`releaseGithubFor(token)`: `readTagSha` over
-  `git/ref/tags/<name>` peeled, `createReleaseTag` = `git/tags` + `git/refs` with a 422 read as
-  "exists", `createPrerelease`), `notes.ts` (`storySummaryInputs`, `storySummaries` — ≤ 30 stories, 4 at
+  `git/ref/tags/<name>` peeled, `createReleaseTag` = `git/tags` + `git/refs` with a 422 on the ref read
+  as "exists", `createPrerelease`; the two writes are `github/mutations.ts` `createAnnotatedReleaseTag` /
+  `createGithubPrerelease` through `limnWrite` with the `'reader'` origin — new `LimnActionKind`s
+  `release_tag` / `prerelease`, never ledgered today), `notes.ts` (`storySummaryInputs`, `storySummaries` — ≤ 30 stories, 4 at
   once, an in-memory 30-min memo; `modelStorySummary` through `cheapComplete`, usage recorded, never
   gated: a reader's click), `create.ts` (`previewRelease`, `createRelease`, `getReleaseDetail`,
   `releaseTagStored`, `ReleaseRequestError`, the `ReleaseWriteDeps` seam with `defaultReleaseWriteDeps`).

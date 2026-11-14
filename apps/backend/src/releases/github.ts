@@ -8,7 +8,10 @@
 //                     (`refs/tags/<name>`). A 422 on the ref = the name already exists → `exists`:
 //                     REFUSED, never moved (there is no PATCH anywhere here).
 //   createPrerelease  POST releases `{tag_name, name, body, prerelease: true}`.
-import { ghRestGetFor, ghRestPostFor } from '../github/client.js';
+// The two writes live in github/mutations.ts (`createAnnotatedReleaseTag`, `createGithubPrerelease`),
+// through `limnWrite` with the 'reader' origin: the reader's press, under the reader's account.
+import { ghRestGetFor } from '../github/client.js';
+import { createAnnotatedReleaseTag, createGithubPrerelease } from '../github/mutations.js';
 
 export interface ReleaseGithub {
   readTagSha(owner: string, name: string, tag: string): Promise<string | null>;
@@ -65,39 +68,21 @@ export function releaseGithubFor(token: string): ReleaseGithub {
     },
 
     async createReleaseTag(owner, name, a) {
-      let tagObject: { sha?: string };
       try {
-        tagObject = await ghRestPostFor(token, `/repos/${seg(owner)}/${seg(name)}/git/tags`, {
-          tag: a.tag,
-          message: a.message,
-          object: a.sha,
-          type: 'commit',
-        });
+        const out = await createAnnotatedReleaseTag(token, { owner, name, tag: a.tag, sha: a.sha, message: a.message }, 'reader');
+        return { ok: true, tagObjectOid: out.tagObjectOid };
       } catch (err) {
+        // 422 on the REF ("Reference already exists"): the name is taken — refused, never moved.
+        const onRef = (err as { stage?: unknown } | null)?.stage === 'ref';
+        if (onRef && statusOf(err) === 422) return { ok: false, exists: true, message: 'the tag already exists' };
         return { ok: false, exists: false, message: githubFailureWords(err) };
       }
-      if (typeof tagObject.sha !== 'string') return { ok: false, exists: false, message: 'GitHub refused it' };
-      try {
-        await ghRestPostFor(token, `/repos/${seg(owner)}/${seg(name)}/git/refs`, { ref: `refs/tags/${a.tag}`, sha: tagObject.sha });
-      } catch (err) {
-        // 422 "Reference already exists": the name is taken — refused, never moved.
-        if (statusOf(err) === 422) return { ok: false, exists: true, message: 'the tag already exists' };
-        return { ok: false, exists: false, message: githubFailureWords(err) };
-      }
-      return { ok: true, tagObjectOid: tagObject.sha };
     },
 
     async createPrerelease(owner, name, a) {
       try {
-        const r = await ghRestPostFor<{ id?: number; html_url?: string }>(token, `/repos/${seg(owner)}/${seg(name)}/releases`, {
-          tag_name: a.tag,
-          name: a.title,
-          body: a.body,
-          prerelease: true,
-          draft: false,
-        });
-        if (typeof r.id !== 'number' || typeof r.html_url !== 'string') return { ok: false, message: 'GitHub refused it' };
-        return { ok: true, id: r.id, url: r.html_url };
+        const r = await createGithubPrerelease(token, { owner, name, tag: a.tag, title: a.title, body: a.body }, 'reader');
+        return { ok: true, id: r.id, url: r.url };
       } catch (err) {
         return { ok: false, message: githubFailureWords(err) };
       }

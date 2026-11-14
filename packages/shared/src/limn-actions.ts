@@ -38,7 +38,11 @@ export type LimnActionKind =
   | 'pr_body'
   | 'close'
   | 'reopen'
-  | 'rerun';
+  | 'rerun'
+  /** A release tag (the annotated tag object + its ref) and the GitHub pre-release on it
+   *  (docs/RELEASES.md). Today only the READER writes these (Confirm), so no ledger row is made. */
+  | 'release_tag'
+  | 'prerelease';
 
 export const LIMN_ACTION_KINDS: readonly LimnActionKind[] = [
   'review',
