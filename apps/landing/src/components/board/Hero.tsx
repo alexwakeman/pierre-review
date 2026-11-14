@@ -26,8 +26,8 @@ export function Hero(): JSX.Element {
       <div className="tile ph p1">
         <img
           src={adagio}
-          width={1280}
-          height={1283}
+          width={960}
+          height={962}
           alt="Bach's handwritten score of the Adagio from his first sonata for solo violin, 1720"
         />
       </div>
