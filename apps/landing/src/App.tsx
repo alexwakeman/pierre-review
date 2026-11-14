@@ -9,9 +9,10 @@ import CookieBanner from './components/CookieBanner';
 import { useReveal } from './components/board/useReveal';
 import './components/chrome.css';
 import Home from './pages/Home';
-import Reporting from './pages/Reporting';
-import HowWeMeasure from './pages/HowWeMeasure';
-import Teams from './pages/Teams';
+import Build from './pages/Build';
+import EnsembleReview from './pages/EnsembleReview';
+import Automation from './pages/Automation';
+import EverythingElse from './pages/EverythingElse';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
@@ -21,9 +22,10 @@ import { isDocsPath } from './docs/routes';
 
 const ROUTES: Record<string, () => JSX.Element> = {
   '/': Home,
-  '/reporting': Reporting,
-  '/teams': Teams,
-  '/how-we-measure': HowWeMeasure,
+  '/build': Build,
+  '/ensemble-review': EnsembleReview,
+  '/automation': Automation,
+  '/everything-else': EverythingElse,
   // Contact. Also where an organisation with more than three people asks for a
   // licence, which is why /pricing aliases to it below.
   '/contact': Contact,
@@ -37,27 +39,31 @@ const ROUTES: Record<string, () => JSX.Element> = {
   // content, so a bookmark or a search result lands on something rather than a 404.
   // The prerenderer writes the same mapping to disk (see prerender.mjs), and the
   // canonical in that HTML points at the surviving page.
-  '/for-managers': Reporting,
-  '/how-it-works': HowWeMeasure,
-  '/bots': Reporting,
-  '/pro': Reporting,
+  '/for-managers': EverythingElse,
+  '/how-it-works': EverythingElse,
+  '/bots': EverythingElse,
+  '/pro': EverythingElse,
   // /pricing goes to CONTACT: its first two lines say what it costs (nothing, unless
   // the organisation has more than three users) and how to get a licence.
   '/pricing': Contact,
-  '/insights': Reporting,
-  '/reviews': Reporting,
+  '/insights': EverythingElse,
+  '/reviews': EverythingElse,
 };
 
-// Retired pages whose content now lives in the docs. apps/site answers these with a 301
-// before the landing loads (src/app.ts MOVED_TO_DOCS); this table only matters where no
-// site server stands in front, such as `vite dev`. Keep the two lists the same.
-const MOVED_TO_DOCS: Record<string, string> = {
+// Retired pages that moved for good: Getting started into the docs, For teams to Ensemble
+// review, Reporting and How we measure into Everything else. apps/site answers these with a
+// 301 before the landing loads (src/app.ts MOVED); this table only matters where no site
+// server stands in front, such as `vite dev`. Keep the two lists the same.
+const MOVED: Record<string, string> = {
+  '/teams': '/ensemble-review',
+  '/reporting': '/everything-else#reporting',
+  '/how-we-measure': '/everything-else#how-we-measure',
   '/getting-started': '/docs/getting-started/install-and-run',
   '/for-developers': '/docs/getting-started/install-and-run',
   '/features': '/docs/getting-started/install-and-run',
 };
 
-function MovedToDocs({ to }: { to: string }): JSX.Element {
+function Moved({ to }: { to: string }): JSX.Element {
   useEffect(() => {
     window.location.replace(to);
   }, [to]);
@@ -66,7 +72,7 @@ function MovedToDocs({ to }: { to: string }): JSX.Element {
       <section className="board nf">
         <div className="tile nf-head">
           <p>
-            This page moved to <Link to={to}>the docs</Link>.
+            This page moved <Link to={to}>here</Link>.
           </p>
         </div>
       </section>
@@ -101,7 +107,7 @@ export default function App(): JSX.Element {
   // /docs and every page under it: the docs layout, in its own chunk (docs-loader.tsx).
   const docs = isDocsPath(path);
   const Page = ROUTES[path] ?? NotFound;
-  const moved = MOVED_TO_DOCS[path];
+  const moved = MOVED[path];
 
   // Re-arm analytics on mount for a visitor who consented on a PREVIOUS visit: the
   // stored grant is still valid, but a fresh page load starts with no gtag on the
@@ -126,7 +132,7 @@ export default function App(): JSX.Element {
           {docs ? (
             <DocsRoute path={path} />
           ) : moved ? (
-            <MovedToDocs to={moved} />
+            <Moved to={moved} />
           ) : (
             <Page />
           )}

@@ -6,7 +6,7 @@
    CLASSES
      shared     .shot (a quiet tile holding an HTML mock from components/mock)
                 · .r-chap (h2 + p over a section) · .r-txt (heading + copy tile)
-     header     .r-head > .r-name (h1, .r-lead) · .ph.r-pic · .r-say · .r-say2
+     header     .r-head > .r-name (h2.r-title, .r-lead) · .ph.r-pic · .r-say · .r-say2
      split      .r-split > .r-txt + .shot.r-wide  (.r-flip puts the shot first)
      period     .r-period > .r-chap + .board > .r-full · .r-fact×3
      chronology .r-chron > .r-txt · .r-wide · .r-big (.r-fig > span) · .r-proof
@@ -73,7 +73,7 @@
   gap: 24px;
   padding: 28px;
 }
-.lb.rep .r-name h1 {
+.lb.rep .r-name .r-title {
   font-size: clamp(56px, 7.4vw, 124px);
   font-weight: 500;
   letter-spacing: -0.05em;
@@ -305,7 +305,7 @@
     padding: 22px;
     min-height: 260px;
   }
-  .lb.rep .r-name h1 {
+  .lb.rep .r-name .r-title {
     font-size: 15vw;
   }
   .lb.rep .r-pic {

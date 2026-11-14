@@ -594,3 +594,59 @@ export const TEAM = {
     ] as { name: string; verdict: string; day: string; sha: string }[],
   },
 };
+
+// ---- the build page (/build) ------------------------------------------------
+
+/**
+ * PAY-142 as the /build page shows it: the ticket across TWO pull requests (#612 in acme/payments and
+ * #1196 in acme/web), its "Ticket design" and its story check.
+ *
+ * `flow` has the shape of the app's stored `FlowDiagram` (packages/shared sequence-diagrams.ts):
+ * lanes from FLOW_LANES, step kinds from FLOW_STEP_KINDS (shown by FLOW_STEP_WORD), each lane and step
+ * tagged with the pull request that does it. The PR chips are `prBadgeTexts` for two repositories
+ * ("payments #612", "web #1196"). The flow agrees with the story check below: there is NO step that
+ * checks the 30 days (criterion 3 Not met), and the amount check does not say whole pence (the
+ * handbook finding).
+ */
+export const BUILD = {
+  ticket: STORY,
+  prs: [PRS.refunds, { num: 1196, title: 'Refund form', repo: REPOS.web }] as Pr[],
+  flow: {
+    lanes: [
+      { id: 'form', kind: 'Screen', label: 'Refund form', change: 'new', pr: 'web #1196' },
+      { id: 'route', kind: 'API route', label: 'Refunds route', change: 'changed', pr: 'payments #612' },
+      { id: 'policy', kind: 'Service', label: 'RefundPolicy', change: 'changed', pr: 'payments #612' },
+      { id: 'tables', kind: 'Database', label: 'orders, refunds tables', change: 'changed', pr: 'payments #612' },
+      { id: 'ledger', kind: 'Queue / job', label: 'Daily ledger job', change: 'unchanged', pr: null },
+      { id: 'mail', kind: 'Outside API', label: 'Email service', change: 'unchanged', pr: null },
+    ] as { id: string; kind: string; label: string; change: 'new' | 'changed' | 'unchanged'; pr: string | null }[],
+    steps: [
+      { n: 1, from: 'form', to: 'route', word: 'Call', label: 'refund amount and order id', pr: 'web #1196' },
+      { n: 2, from: 'route', to: 'route', word: 'Check', label: 'amount is above 0', pr: 'payments #612' },
+      { n: 3, from: 'route', to: 'policy', word: 'Call', label: 'the refund request', pr: 'payments #612' },
+      { n: 4, from: 'policy', to: 'tables', word: 'Read', label: 'the order and its refunds so far', pr: 'payments #612' },
+      { n: 5, from: 'policy', to: 'tables', word: 'Write', label: 'a refund row; the order stays open', pr: 'payments #612' },
+      { n: 6, from: 'policy', to: 'ledger', word: 'Emit', label: 'refund event for the daily ledger', pr: 'payments #612' },
+      { n: 7, from: 'policy', to: 'mail', word: 'Call', label: 'the refund email', pr: 'payments #612' },
+      { n: 8, from: 'policy', to: 'route', word: 'Return', label: 'the new refund total', pr: 'payments #612' },
+      { n: 9, from: 'route', to: 'form', word: 'Return', label: 'refund total and order status', pr: 'payments #612' },
+    ] as { n: number; from: string; to: string; word: string; label: string; pr: string }[],
+  },
+  /** The story check's words for the same ticket (shared TICKET_CRITERION_STATUS_LABEL, STORY_MISSING_HEADING). */
+  check: {
+    why: [
+      'Done in #612',
+      'Code in #612, the retry path still sends two',
+      'Belongs in #612',
+      'Done in #612',
+    ],
+    missing: 'An audit log entry for each partial refund',
+    notAsked: { pr: 'web #1196', text: 'A refunds filter on the orders list' },
+  },
+  /** The "Review in Ensemble" section the review loop ends a pull request's description with (loop/pr-body.ts). */
+  loopBody: {
+    reviewed: 'Reviewed 3 times by Claude and Codex before this pull request opened.',
+    counts: 'Fixed: 3 · Answered: 1 · Pushed back and accepted: 1 · Still open: 0',
+    criteria: 'Acceptance criteria: 2 met, 0 not applicable, 0 not met.',
+  },
+};

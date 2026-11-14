@@ -1,22 +1,29 @@
 import adagio from '../../assets/board/img/bach-bwv1001.jpg';
-import { INSTALL_COMMAND } from '../../lib/site';
+import hand from '../../assets/board/img/bach-hand.jpg';
+import { INSTALL_COMMAND, SITE_NAME } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
-import { PendingBoardMock } from '../mock/home';
 
 // ---------------------------------------------------------------------------
-// The hero: the claim, the command, and the Pending board as the picture. Under
-// the claim, Hilliard's miniature and his line on limning, which named the app.
+// The hero: the claim, the command, and Bach's hand holding his six-part canon
+// (Haussmann, 1746) as the picture. Under the claim, Bach's own hand again (the solo
+// violin Adagio, 1720) and Goethe's line on the string quartet: an ensemble as a
+// conversation, which is what a review is.
+//
+// ⚠ "Fully local, no added service" is the claim, and it is exact: the app runs on each
+// person's machine and talks only to GitHub, their tracker and their own AI provider.
+// "Decentralised" describes the REVIEW only (no orchestrator; GitHub is where teammates
+// meet) — never the whole product.
 // ---------------------------------------------------------------------------
 
 export function Hero(): JSX.Element {
   return (
-    <section className="board hero" aria-label="Ensemble">
+    <section className="board hero" aria-label={SITE_NAME}>
       <div className="tile say">
-        <p className="kick">Ensemble · code review on your machine</p>
-        <h1>Your team writes more code than it can review.</h1>
+        <p className="kick">{SITE_NAME} · an agentic SDLC on your machine</p>
+        <h1>Define, build, and review as an ensemble.</h1>
         <p className="lead">
-          Ensemble reviews every pull request against its story and your docs on your own Claude or Codex, shows each
-          person what needs them next, and fixes what it finds. Free, on your machine.
+          From ticket to merged pull request with your own Claude or Codex. It runs fully on your team&rsquo;s own
+          machines, with no added service.
         </p>
         <div className="cmd">
           <CopyCommand />
@@ -35,12 +42,15 @@ export function Hero(): JSX.Element {
         <blockquote>
           <p>“One hears four sensible people conversing among themselves.”</p>
         </blockquote>
-        <figcaption>
-          Goethe, on the string quartet, in a letter to Zelter, 1829
-        </figcaption>
+        <figcaption>Goethe, on the string quartet, in a letter to Zelter, 1829</figcaption>
       </figure>
-      <div className="tile pic rise">
-        <PendingBoardMock />
+      <div className="tile ph hand">
+        <img
+          src={hand}
+          width={930}
+          height={843}
+          alt="Bach's hand holding his canon for six voices, from Haussmann's portrait, 1746"
+        />
       </div>
     </section>
   );

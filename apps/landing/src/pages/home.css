@@ -5,7 +5,10 @@
 
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
-     hero       .hero > .say (.kick, h1, .lead, .cmd) · .ph.p1 · figure.motto · .pic (mock)
+     hero       .hero > .say (.kick, h1, .lead, .cmd) · .ph.p1 · figure.motto · .ph.hand
+     flow       .board.flow > ol.flow-steps > li.tile (.flow-n, h3, p) · p.flow-loop · p.flow-more
+     ensemble   .board.ensemble > .tile.circle (svg.circle-svg) · .ens-points > .tile (h3, p) · p.ens-more
+     bots       .board.bots > .tile (h3, p, p.more)
      strip      .strip > .ww-say (h2, p) · ul.ww-tools > li (.ww-mk > .logo-mk, .ww-nm > small)
      proof      .proof > .board > .tile (.n > s, p) · p.src
      chapters   .chap (h2 > .tag, p) · .board.feat(.two) > .tile (.k, h3, .say, .m)
@@ -17,6 +20,10 @@
    =========================================================================== */
 
 /* ---- shared ----------------------------------------------------------- */
+/* Everything else's page heading: a chapter heading as the page's one h1, close under the header. */
+.lb.home .ee-head {
+  margin-top: var(--gap);
+}
 .lb.home .k {
   font-size: 12px;
   letter-spacing: 0.08em;
@@ -113,14 +120,12 @@
 .lb.home .hero .motto figcaption::before {
   content: '— ';
 }
-.lb.home .hero .pic {
+.lb.home .hero .hand {
   grid-column: 8 / 13;
   grid-row: 1 / 3;
-  background: var(--surface-2);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+}
+.lb.home .hero .hand img {
+  object-position: 30% 60%;
 }
 
 /* ---- works with ---------------------------------------------------------- */
@@ -234,7 +239,8 @@
   margin-bottom: var(--gap);
   padding: 0 6px;
 }
-.lb.home .chap h2 {
+.lb.home .chap h2,
+.lb.home .chap h1 {
   grid-column: 1 / 6;
   font-size: clamp(46px, 6vw, 96px);
   display: flex;
@@ -414,7 +420,7 @@
     grid-template-rows: none;
   }
   .lb.home .hero .say,
-  .lb.home .hero .pic,
+  .lb.home .hero .hand,
   .lb.home .strip .ww-say,
   .lb.home .ww-tools,
   .lb.home .proof .tile,
@@ -441,8 +447,8 @@
     grid-column: 5 / -1;
     grid-row: auto;
   }
-  .lb.home .hero .pic {
-    padding: 10px;
+  .lb.home .hero .hand {
+    aspect-ratio: 930 / 843;
   }
   .lb.home .why4 > .tile {
     grid-column: span 6;
@@ -470,7 +476,241 @@
   .lb.home .feat > .tile {
     padding: 16px;
   }
-  .lb.home .hero .pic {
-    padding: 6px;
+
+}
+
+/* ---- how it works: the build flow ----------------------------------------- */
+.lb.home .flow {
+  row-gap: var(--gap);
+}
+.lb.home .flow-steps {
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--gap);
+  counter-reset: none;
+}
+.lb.home .flow-steps > li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 26px 22px 28px;
+  min-height: 250px;
+}
+.lb.home .flow-steps .flow-n {
+  font-size: 56px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  opacity: 0.55;
+  margin-bottom: 28px;
+}
+.lb.home .flow-steps h3 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.lb.home .flow-steps p {
+  font-size: 15px;
+  line-height: 1.4;
+}
+.lb.home .flow-steps .gold {
+  color: var(--dark);
+}
+/* The arrow between two steps, sitting in the gap. */
+.lb.home .flow-steps > li + li::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--gap) * -1 - 7px);
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 11px solid var(--ink);
+  transform: translateY(-50%);
+  z-index: 1;
+}
+/* The review loop: drawn under steps 3 and 4. */
+.lb.home .flow-loop {
+  grid-column: 5 / 10;
+  margin: 0;
+  padding: 12px 16px;
+  border: 2px dashed rgba(241, 241, 239, 0.4);
+  border-top: 0;
+  font-size: 15px;
+  color: #dcdad5;
+  text-align: center;
+}
+.lb.home .flow-loop span {
+  font-size: 18px;
+  margin-right: 6px;
+}
+.lb.home .flow-more,
+.lb.home .ens-more {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 4px 6px 0;
+  font-size: 16px;
+}
+.lb.home .flow-more a,
+.lb.home .ens-more a {
+  color: var(--ink);
+}
+
+/* ---- review as an ensemble: the circle ------------------------------------ */
+.lb.home .ensemble .circle {
+  grid-column: 1 / 7;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lb.home .circle-svg {
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+}
+.lb.home .circle-svg text {
+  text-anchor: middle;
+  fill: var(--ink);
+  font-family: inherit;
+}
+.lb.home .circle-svg .c-orbit {
+  fill: none;
+  stroke: rgba(241, 241, 239, 0.18);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 6;
+}
+.lb.home .circle-svg .c-spoke {
+  stroke: rgba(241, 241, 239, 0.45);
+  stroke-width: 2;
+}
+.lb.home .circle-svg .c-hub {
+  fill: var(--gold);
+}
+.lb.home .circle-svg .c-hub-k {
+  fill: #3d2f12;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+.lb.home .circle-svg .c-hub-t {
+  fill: var(--dark);
+  font-size: 17px;
+  font-weight: 600;
+}
+.lb.home .circle-svg .c-hub-s {
+  fill: #3d2f12;
+  font-size: 12px;
+}
+.lb.home .circle-svg .c-node-0 {
+  fill: var(--lapis);
+}
+.lb.home .circle-svg .c-node-1 {
+  fill: var(--verdigris);
+}
+.lb.home .circle-svg .c-node-2 {
+  fill: var(--madder);
+}
+.lb.home .circle-svg .c-node-3 {
+  fill: var(--lapis-2);
+}
+.lb.home .circle-svg .c-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+.lb.home .circle-svg .c-agent {
+  font-size: 12px;
+  fill: #e3e1db;
+}
+.lb.home .ens-points {
+  grid-column: 7 / 13;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap);
+  align-content: start;
+}
+.lb.home .ens-points > .tile {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lb.home .ens-points h3,
+.lb.home .bots h3 {
+  font-size: 21px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.lb.home .ens-points p,
+.lb.home .bots p {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+/* ---- dependency updates ----------------------------------------------------- */
+.lb.home .bots > .tile {
+  grid-column: span 3;
+  padding: 24px;
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lb.home .bots h3 {
+  margin-top: auto;
+}
+.lb.home .bots .gold {
+  color: var(--dark);
+}
+.lb.home .bots .gold a {
+  color: var(--dark);
+}
+
+@media (max-width: 960px) {
+  .lb.home .flow-steps {
+    grid-template-columns: 1fr;
+  }
+  .lb.home .flow-steps > li {
+    min-height: 0;
+  }
+  .lb.home .flow-steps .flow-n {
+    font-size: 36px;
+    margin-bottom: 4px;
+  }
+  /* The arrow points down between stacked steps. */
+  .lb.home .flow-steps > li + li::before {
+    left: 50%;
+    top: calc(var(--gap) * -1 - 7px);
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-top: 11px solid var(--ink);
+    border-bottom: 0;
+    transform: translateX(-50%);
+  }
+  .lb.home .flow-loop {
+    grid-column: 1 / -1;
+    border-top: 2px dashed rgba(241, 241, 239, 0.4);
+  }
+  .lb.home .ensemble .circle,
+  .lb.home .ens-points {
+    grid-column: 1 / -1;
+  }
+  .lb.home .bots > .tile {
+    grid-column: span 6;
+  }
+}
+@media (max-width: 760px) {
+  .lb.home .ens-points {
+    grid-template-columns: 1fr;
+  }
+  .lb.home .bots > .tile {
+    grid-column: 1 / -1;
+    min-height: 0;
   }
 }

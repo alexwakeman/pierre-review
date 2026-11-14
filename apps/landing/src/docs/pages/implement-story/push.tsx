@@ -110,8 +110,9 @@ export default function Page(): JSX.Element {
       <H2 id="review-and-fix">Review and fix, then open the pull request</H2>
       <ReviewLoopPicture />
       <p>
-        Tick <Ui>After the build: review and fix, then open the pull request</Ui> before you start, or later in the tab
-        until the first review starts. It is off by default. Set <Ui>Rounds</Ui> (1 to 6, 4 by default) beside it.
+        <Ui>After the build: review and fix, then open the pull request</Ui> is ticked by default. Untick it before you
+        start, or later in the tab until the first review starts, to push by hand instead. Set <Ui>Rounds</Ui> (1 to 6,
+        4 by default) beside it.
       </p>
       <Steps>
         <li>When the build finishes, Limn pushes the branch to GitHub. It does not open a pull request yet.</li>

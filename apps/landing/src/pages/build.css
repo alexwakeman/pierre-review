@@ -1,0 +1,641 @@
+/* ===========================================================================
+   Build (pages/Build.tsx) and its mocks (components/mock/build.tsx). Layout only;
+   the tokens, tiles, pigments and buttons come from src/board.css. Every rule is
+   scoped under `.lb.build`, so nothing here reaches another page.
+
+   CLASSES
+     shared   .bd-txt (h2/h3 + p) · .bd-shot (a quiet tile holding a mock) · .bd-list
+              · spans .bd-full .bd-half .bd-third .bd-left/.bd-right (7/5) .bd-id/.bd-wide (4/8)
+     header   .bd-head > .bd-name (h1, .bd-lead) · .lapis.bd-facts · .verdigris.bd-say · .gold.bd-go
+     flow     .bd-flowrow > h3.bd-wayh · ol.bd-flowsteps > li.tile (.bd-fn, .bd-who, h4, p) · p.bd-loop
+     check    .bd-pair > .bd-id (.bd-word, .bd-story) · .bd-wide (.bd-stat)
+     verify   .bd-verify > .gold.bd-vhead · .bd-tier ×3 · .bd-checklist (ol.bd-ol)
+     start    .bd-start > .gold.bd-start-main (code.bd-cmd) · .bd-start-list
+     mocks    .bd-flow (--n lanes) > ul.bd-lanes > li.bd-lane.ch-* · ol.bd-steps > .bd-line,
+              li.bd-step.(to-r|to-l|self).k-* (.seg, .bd-box) · .bd-keys · .bd-md
+   Under 961px everything restacks to one column, and the diagram's steps become a list.
+   =========================================================================== */
+
+/* ---- shared ----------------------------------------------------------- */
+.lb.build .board + .board:not(.section) {
+  margin-top: var(--gap);
+}
+.lb.build .bd-notes + .bd-flowrow {
+  margin-top: clamp(56px, 6vw, 96px);
+}
+.lb.build h2 {
+  font-size: clamp(30px, 3.2vw, 50px);
+}
+.lb.build h3 {
+  font-size: clamp(22px, 1.9vw, 28px);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.lb.build .bd-txt {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+}
+.lb.build .bd-txt p {
+  max-width: 62ch;
+}
+.lb.build .bd-shot {
+  padding: 10px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.lb.build .bd-full { grid-column: 1 / -1; }
+.lb.build .bd-half { grid-column: span 6; }
+.lb.build .bd-third { grid-column: span 4; }
+.lb.build .bd-left { grid-column: 1 / 8; }
+.lb.build .bd-right { grid-column: 8 / 13; }
+.lb.build .bd-id { grid-column: 1 / 5; }
+.lb.build .bd-wide { grid-column: 5 / 13; }
+.lb.build b {
+  font-weight: 600;
+}
+.lb.build .bd-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.build .bd-list li {
+  position: relative;
+  padding: 12px 14px 12px 38px;
+  background: #ffffff0f;
+  line-height: 1.4;
+}
+.lb.build .bd-list li::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: calc(12px + 0.45em);
+  width: 10px;
+  height: 10px;
+  background: var(--gold);
+}
+.lb.build .bd-list a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- header ----------------------------------------------------------- */
+.lb.build .bd-head {
+  grid-template-rows: minmax(340px, auto) minmax(150px, auto);
+}
+.lb.build .bd-name {
+  grid-column: 1 / 8;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 28px;
+  padding: 32px;
+}
+.lb.build .bd-name h1 {
+  font-size: clamp(52px, 6.4vw, 108px);
+  font-weight: 500;
+  letter-spacing: -0.05em;
+  line-height: 0.92;
+  max-width: 11ch;
+}
+.lb.build .bd-lead {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 46ch;
+  color: var(--muted);
+}
+.lb.build .bd-facts {
+  grid-column: 8 / 13;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 28px;
+}
+.lb.build .bd-facts .bd-list li {
+  background: #0000002b;
+}
+.lb.build .bd-say,
+.lb.build .bd-go {
+  grid-row: 2;
+  display: flex;
+  align-items: flex-end;
+  padding: 28px;
+}
+.lb.build .bd-say {
+  grid-column: 1 / 5;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+.lb.build .bd-go {
+  grid-column: 5 / 8;
+}
+
+/* ---- the two flows ---------------------------------------------------- */
+.lb.build .bd-wayh {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 6px 6px;
+  font-size: clamp(26px, 2.4vw, 36px);
+}
+.lb.build .bd-flowsteps {
+  grid-column: 1 / -1;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--gap);
+}
+.lb.build .bd-flowsteps > li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px 20px 26px;
+  min-height: 250px;
+  overflow: visible;
+}
+.lb.build .bd-fn {
+  font-size: 48px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  opacity: 0.55;
+}
+.lb.build .bd-who {
+  align-self: flex-start;
+  margin-top: 14px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #0000002e;
+}
+.lb.build .bd-flowsteps h4 {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+.lb.build .bd-flowsteps p {
+  font-size: 15px;
+  line-height: 1.4;
+}
+/* The arrow between two steps, sitting in the gap. */
+.lb.build .bd-flowsteps > li + li::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--gap) * -1 - 7px);
+  top: 50%;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 11px solid var(--ink);
+  transform: translateY(-50%);
+  z-index: 1;
+}
+/* The review rounds: drawn under steps 4 and 5 (each step is 2 of the board's 12 columns). */
+.lb.build .bd-loop {
+  grid-column: 7 / 11;
+  margin: 0;
+  padding: 12px 16px;
+  border: 2px dashed rgba(241, 241, 239, 0.4);
+  border-top: 0;
+  font-size: 15px;
+  color: #dcdad5;
+  text-align: center;
+}
+.lb.build .bd-loop span {
+  font-size: 18px;
+  margin-right: 6px;
+}
+
+/* ---- the story check -------------------------------------------------- */
+.lb.build .bd-id {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 32px;
+  min-height: 260px;
+}
+.lb.build .bd-word {
+  font-size: clamp(40px, 4vw, 64px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+.lb.build .bd-story {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 18px;
+  line-height: 1.35;
+}
+.lb.build .bd-stat {
+  display: grid;
+  gap: 8px;
+}
+.lb.build .bd-stat p {
+  max-width: none;
+  padding: 10px 12px;
+  background: #ffffff0a;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.lb.build .bd-stat .mk-chip {
+  margin-right: 6px;
+}
+
+/* ---- verify ----------------------------------------------------------- */
+.lb.build .bd-vhead {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 44px;
+}
+.lb.build .bd-vhead h2 {
+  font-size: clamp(44px, 5.6vw, 92px);
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+.lb.build .bd-vhead p {
+  font-size: var(--step-lead);
+  line-height: 1.3;
+  max-width: 50ch;
+}
+.lb.build .bd-tier {
+  grid-column: span 4;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 28px;
+  border-top: 6px solid var(--lapis);
+}
+.lb.build .bd-tier:nth-of-type(3) { border-top-color: var(--verdigris); }
+.lb.build .bd-tier:nth-of-type(4) { border-top-color: var(--madder-lt); }
+.lb.build .bd-tier p {
+  color: #dcdad5;
+  line-height: 1.45;
+}
+.lb.build .bd-checklist {
+  grid-column: 1 / -1;
+}
+.lb.build .bd-ol {
+  list-style: none;
+  counter-reset: bd;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.lb.build .bd-ol li {
+  counter-increment: bd;
+  position: relative;
+  padding: 14px 16px 14px 52px;
+  background: #ffffff0f;
+  line-height: 1.4;
+}
+.lb.build .bd-ol li::before {
+  content: counter(bd);
+  position: absolute;
+  left: 16px;
+  top: 12px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+/* ---- start ------------------------------------------------------------ */
+.lb.build .bd-start-main {
+  grid-column: 1 / 8;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 44px;
+}
+.lb.build .bd-cmd {
+  font-size: 18px;
+}
+.lb.build .bd-start-list {
+  grid-column: 8 / 13;
+}
+
+/* ---- mock: the Ticket design ------------------------------------------- */
+.lb.build .bd-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lb.build .bd-lanes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--n), minmax(0, 1fr));
+  gap: 8px;
+}
+.lb.build .bd-lane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  text-align: center;
+  background: #1b1c20;
+}
+.lb.build .bd-lane.ch-new { border: 2px solid var(--gold); }
+.lb.build .bd-lane.ch-changed { border: 2px dashed rgba(210, 176, 113, 0.75); }
+.lb.build .bd-lane.ch-unchanged { border: 1px solid #3a3b42; background: #17181b; }
+.lb.build .bd-k {
+  font-size: 11px;
+  color: var(--muted);
+}
+.lb.build .bd-lane b {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+.lb.build .bd-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.lb.build .bd-ch {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gold);
+}
+.lb.build .bd-pr {
+  padding: 0 4px;
+  border: 1px solid #3a3b42;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.lb.build .bd-steps {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 6px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.build .bd-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed #4a4b52;
+}
+.lb.build .bd-step {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  margin-left: var(--lo);
+  margin-right: var(--hi);
+  color: #8d8a84;
+}
+.lb.build .bd-step.k-check { color: var(--ink); }
+.lb.build .bd-step.k-write { color: var(--gold); }
+.lb.build .seg {
+  position: relative;
+  flex: 1 1 14px;
+  min-width: 14px;
+  border-top: 1.5px solid currentColor;
+}
+.lb.build .k-check .seg { border-top: 2px dotted currentColor; }
+.lb.build .k-write .seg { border-top-width: 3px; }
+.lb.build .k-return .seg { border-top-style: dashed; }
+.lb.build .to-r .seg.b::after,
+.lb.build .to-l .seg.a::before,
+.lb.build .self .seg.a::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+}
+.lb.build .to-r .seg.b::after {
+  right: -1px;
+  border-left: 8px solid currentColor;
+}
+.lb.build .to-l .seg.a::before,
+.lb.build .self .seg.a::before {
+  left: -1px;
+  border-right: 8px solid currentColor;
+}
+/* A step that stays on one lane: a loop out to its box and back. */
+.lb.build .self .seg.a {
+  flex: 0 0 22px;
+  height: 16px;
+  border-bottom: 2px dotted currentColor;
+}
+.lb.build .self .seg.a::before {
+  top: auto;
+  bottom: -6px;
+}
+.lb.build .bd-box {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 10px;
+  background: #1b1c20;
+  border: 1px solid #3a3b42;
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+}
+.lb.build .bd-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.lb.build .bd-n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #2c2d33;
+  font-size: 11px;
+}
+.lb.build .bd-route {
+  display: none;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb.build .bd-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding-top: 8px;
+  border-top: 1px solid #2c2d33;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb.build .bd-keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lb.build .kb {
+  width: 18px;
+  height: 12px;
+  border-radius: 2px;
+}
+.lb.build .kb.new { border: 2px solid var(--gold); }
+.lb.build .kb.changed { border: 2px dashed rgba(210, 176, 113, 0.75); }
+.lb.build .kb.unchanged { border: 1px solid #3a3b42; background: #17181b; }
+.lb.build .kl {
+  width: 24px;
+  border-top: 2px dotted var(--ink);
+}
+.lb.build .kl.write { border-top: 3px solid var(--gold); }
+.lb.build .kl.return { border-top: 1.5px dashed #8d8a84; }
+
+/* ---- mock: the pull request description ---------------------------------- */
+.lb.build .bd-md {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* ---- tablet ----------------------------------------------------------- */
+@media (max-width: 1100px) and (min-width: 961px) {
+  .lb.build .bd-flowsteps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .lb.build .bd-flowsteps > li:nth-child(3n + 1)::before {
+    display: none;
+  }
+  .lb.build .bd-loop {
+    grid-column: 1 / -1;
+    border-top: 2px dashed rgba(241, 241, 239, 0.4);
+  }
+  .lb.build .bd-tier,
+  .lb.build .bd-third {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---- narrow: one column ----------------------------------------------- */
+@media (max-width: 960px) {
+  .lb.build .board > * {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+  }
+  .lb.build .bd-head {
+    grid-template-rows: none;
+  }
+  .lb.build .bd-name {
+    min-height: 240px;
+  }
+  .lb.build .bd-flowsteps {
+    grid-template-columns: 1fr;
+  }
+  .lb.build .bd-flowsteps > li {
+    min-height: 0;
+  }
+  .lb.build .bd-fn {
+    font-size: 32px;
+  }
+  /* The arrow points down between stacked steps. */
+  .lb.build .bd-flowsteps > li + li::before {
+    left: 50%;
+    top: calc(var(--gap) * -1 - 7px);
+    border-left: 9px solid transparent;
+    border-right: 9px solid transparent;
+    border-top: 11px solid var(--ink);
+    border-bottom: 0;
+    transform: translateX(-50%);
+  }
+  .lb.build .bd-loop {
+    border-top: 2px dashed rgba(241, 241, 239, 0.4);
+  }
+  .lb.build .bd-ol {
+    grid-template-columns: 1fr;
+  }
+  .lb.build .bd-id {
+    min-height: 0;
+  }
+  /* The diagram's steps become a list; each says where the data goes. */
+  .lb.build .bd-lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lb.build .bd-line,
+  .lb.build .seg {
+    display: none;
+  }
+  .lb.build .bd-step {
+    margin: 0;
+  }
+  .lb.build .bd-box {
+    flex: 1 1 auto;
+    max-width: none;
+    text-align: left;
+  }
+  .lb.build .bd-top {
+    justify-content: flex-start;
+  }
+  .lb.build .bd-route {
+    display: block;
+  }
+}
+
+@media (max-width: 760px) {
+  .lb.build .bd-name h1 {
+    font-size: clamp(34px, 11vw, 64px);
+    max-width: none;
+  }
+  .lb.build h2 {
+    font-size: clamp(24px, 7vw, 34px);
+  }
+  .lb.build .bd-vhead h2 {
+    font-size: clamp(34px, 10vw, 52px);
+  }
+  .lb.build .bd-txt,
+  .lb.build .bd-id,
+  .lb.build .bd-tier,
+  .lb.build .bd-vhead,
+  .lb.build .bd-say,
+  .lb.build .bd-go,
+  .lb.build .bd-facts,
+  .lb.build .bd-name,
+  .lb.build .bd-start-main {
+    padding: 22px;
+  }
+  .lb.build .bd-say {
+    font-size: 20px;
+  }
+  .lb.build .bd-shot {
+    padding: 6px;
+  }
+}

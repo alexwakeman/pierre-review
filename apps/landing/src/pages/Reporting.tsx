@@ -1,10 +1,8 @@
-import { useSeo } from '../lib/seo';
-import { seoFor } from '../lib/routes';
 import type { ReactNode } from 'react';
 import { INSTALL_COMMAND } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { CopyCommand } from '../components/board/CopyCommand';
-import portrait from '../assets/board/img/bach-haussmann.jpg';
+import adagioDetail from '../assets/board/img/bach-bwv1001-detail.jpg';
 import {
   BenchmarkMock,
   BotsSeverityMock,
@@ -54,23 +52,23 @@ function RunIt(): JSX.Element {
   );
 }
 
-export default function Reporting(): JSX.Element {
-  useSeo(seoFor('/reporting'));
+/** Reporting and metrics: a section of Everything else (pages/EverythingElse.tsx), at #reporting. */
+export function ReportingSection(): JSX.Element {
   const ref = useReveal<HTMLDivElement>();
   return (
-    <div className="lb rep" ref={ref}>
+    <div className="lb rep" id="reporting" ref={ref}>
       {/* ---- header ---------------------------------------------------- */}
       <section className="board r-head" aria-labelledby="r-h1">
         <div className="tile r-name">
-          <h1 id="r-h1">Reporting and metrics</h1>
+          <h2 id="r-h1" className="r-title">Reporting and metrics</h2>
           <p className="r-lead">Where the work is, where it waits, and what your review bots are worth.</p>
         </div>
         <div className="tile ph r-pic">
           <img
-            src={portrait}
+            src={adagioDetail}
             width={800}
             height={919}
-            alt="Johann Sebastian Bach in 1746, holding his six-part canon, painted by Elias Gottlob Haussmann"
+            alt="A passage of the Adagio from Bach's first sonata for solo violin, in his own hand, 1720"
           />
         </div>
         <div className="tile verdigris r-say">

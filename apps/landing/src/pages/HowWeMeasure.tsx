@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react';
 import { Link } from '../router';
-import { useSeo } from '../lib/seo';
-import { seoFor } from '../lib/routes';
 import { FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import { CopyCommand } from '../components/board/CopyCommand';
 import { useReveal } from '../components/board/useReveal';
@@ -96,16 +94,16 @@ function Ident({
   );
 }
 
-export default function HowWeMeasure(): JSX.Element {
-  useSeo(seoFor('/how-we-measure'));
+/** How we measure: a section of Everything else (pages/EverythingElse.tsx), at #how-we-measure. */
+export function HowWeMeasureSection(): JSX.Element {
   const ref = useReveal<HTMLDivElement>();
 
   return (
-    <div className="lb hwm" ref={ref}>
+    <div className="lb hwm" id="how-we-measure" ref={ref}>
       {/* ---- header ---------------------------------------------------- */}
       <section className="board hwm-head" aria-labelledby="hwm-h1">
         <div className="tile hwm-name">
-          <h1 id="hwm-h1">Two models. One job each.</h1>
+          <h2 id="hwm-h1" className="hwm-title">Two models. One job each.</h2>
           <p className="hwm-lead">
             Almost everything {SITE_NAME} shows you is arithmetic — counted, not predicted. Two
             questions resist counting, and each has a model of its own built for it: how serious
@@ -120,7 +118,7 @@ export default function HowWeMeasure(): JSX.Element {
         </div>
         <div className="tile gold hwm-go">
           <p className="btns">
-            <Link className="btn" to="/reporting">
+            <Link className="btn" to="/everything-else#reporting">
               See what it produces →
             </Link>
           </p>

@@ -13,15 +13,16 @@ block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE`
 
 ## Structure
 
-A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Five content routes** (home, `/reporting`, `/teams`, `/how-we-measure`, `/contact`)
-plus the three legal ones and the docs:
+A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Six content routes** (home, `/build`, `/ensemble-review`, `/automation`, `/everything-else`, `/contact`)
+plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `/ensemble-review`; `/reporting` and `/how-we-measure` 301 to their sections of `/everything-else` — `apps/site` `MOVED`, mirrored in `App.tsx`.)
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Your team writes more code than it can review": the hero (with the Pending board), works with, the proof figures, the Review / Fix / Ship / See chapters, Why Limn, every feature free, questions and the close |
-| `/reporting` | `pages/Reporting.tsx` | Reporting and metrics: the one window, period reports, Chronology, 26 weeks, where the work is happening, what bots are worth, This Sprint |
-| `/teams` | `pages/Teams.tsx` | For teams: several teammates each running Limn, with GitHub as the go-between — team claims (one review per commit per provider), the author can't approve their own PR, one review across teammates, Waiting on others, what it never does, and the licence above the free size |
-| `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
+| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (Bach's hand and the Adagio, Goethe's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
+| `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
+| `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
+| `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
+| `/everything-else` | `pages/EverythingElse.tsx` | The Review / Fix / Ship / See chapters, works with, proof, `#reporting` (`ReportingSection`) and `#how-we-measure` (`HowWeMeasureSection`), Why, tiers and questions |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
 | `/docs` and `/docs/**` | `docs/DocsApp.tsx` + `docs/pages/**` | **The user documentation** (below): every screen of the app, AI review, AI Fix, Implement story, merging, every Settings tab, one page per integration, security, licence, FAQ, troubleshooting, the changelog |
 | `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Ensemble License and defer to it |
@@ -80,6 +81,7 @@ are the app's own; never invent a feature for a mock.
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx` (the People + bots / People view in the meta line), `ChronologyTrend.tsx` (Show markers) |
 | `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
 | `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
+| `build.tsx` TicketDesignMock, TicketCheckMock, LoopBodyMock | `/build` | `components/FlowDiagram.tsx` + `StoryDesignSection.tsx` ("Ticket design"), the story check in `ClaudeReviewTab.tsx` / `StoryLayout.tsx`, the loop's PR body (`coding/story-build/loop/pr-body.ts`) |
 | `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
 | `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
 | `reports.tsx` SprintLanesMock | `/reporting` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` |
