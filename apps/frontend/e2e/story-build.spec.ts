@@ -169,10 +169,13 @@ test.describe('Implement story', () => {
     // No built document in this workspace: no docs box.
     await expect(view.getByTestId('story-build-start-docs')).toHaveCount(0);
 
+    // "After the build: review and fix, then open the pull request" is ticked by default; untick it here.
+    await expect(view.getByTestId('story-build-start-auto-push').getByRole('checkbox')).toBeChecked();
+    await view.getByTestId('story-build-start-auto-push').getByRole('checkbox').uncheck();
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
     expect((await start).postDataJSON()).not.toHaveProperty('docs');
-    // "After the build: review and fix, then open the pull request" is off unless ticked, so it is not sent.
+    // Unticked, it is not sent.
     expect((await start).postDataJSON()).not.toHaveProperty('autoPush');
     await expect(view.getByTestId('story-session')).toHaveAttribute('data-phase', 'plan_ready');
     // The option stays changeable in the tab until the build pushed.
@@ -234,7 +237,9 @@ test.describe('Implement story', () => {
     const view = page.getByTestId('story-build-overlay');
     const box = view.getByTestId('story-build-start-auto-push');
     await expect(box).toContainText('After the build: review and fix, then open the pull request');
-    // The rounds show only once the box is ticked: 4 by default, 1 to 6.
+    // Ticked by default, so the rounds show: 4 by default, 1 to 6. Unticked, they go.
+    await expect(box.getByRole('checkbox')).toBeChecked();
+    await box.getByRole('checkbox').uncheck();
     await expect(view.getByTestId('story-build-loop-rounds')).toHaveCount(0);
     await box.getByRole('checkbox').check();
     const rounds = view.getByTestId('story-build-loop-rounds');
@@ -473,7 +478,7 @@ test.describe('Implement story', () => {
     const box = view.getByTestId('story-build-start-auto-approve');
     await expect(box).toContainText('Approve the plan automatically');
     await box.getByRole('checkbox').click();
-    await view.getByTestId('story-build-start-auto-push').getByRole('checkbox').click();
+    await view.getByTestId('story-build-start-auto-push').getByRole('checkbox').check();
     await expect(box.getByRole('checkbox')).toBeChecked();
     // Remembered in this browser: a reload starts with both ticked (two presses from Implement to the PR).
     await page.reload();

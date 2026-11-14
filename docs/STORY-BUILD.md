@@ -540,7 +540,9 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
 "Approve the plan automatically", OFF by default, ticked at Start (`autoApprovePlan: true`) or in the tab
 until the plan is approved (`POST …/auto-approve`). With "After the build: review and fix, then open the
 pull request" ticked too, Implement → Start is the whole flow: planned → approved → built → reviewed and
-fixed → pull request. The Start panel REMEMBERS both boxes in the browser (`START_PREFS_KEY`); the server
+fixed → pull request. The review loop is TICKED BY DEFAULT (2026-11; `START_PREFS_DEFAULT`, key `.v2` so the
+new default reached every browser once); plan approval stays a press by default. The Start panel REMEMBERS
+both boxes in the browser (`START_PREFS_KEY`); the server
 stores each build's own choice (`story_builds.auto_approve_plan`).
 
 - **When.** After any plan turn that leaves a usable plan (`afterChatTurn`, the `ok` branch; a repair that

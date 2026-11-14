@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Implement: "After the build: review and fix, then open the pull request" is now ticked by default. Untick it at
+  Start to push by hand. Approving the plan is still yours.
+- The licence is now called the Ensemble License 1.0. Only the name changed.
+
 ## [1.0.33] - 2026-11-13
 
 ### Changed

@@ -11,16 +11,19 @@ import { CheckboxBox } from '../ui/FormControls.js';
 //
 // With the review loop ticked too, Start → planned → built → reviewed and fixed → pull request, with no
 // other press. Both boxes REMEMBER the reader's last choice in this browser (`START_PREFS_KEY`).
+//
+// THE REVIEW LOOP IS TICKED BY DEFAULT (2026-11): build, then review in rounds, then the PR. Approving the plan
+// stays a person's press by default. The key moved to `.v2` so the new default reaches every browser once.
 
 export const AUTO_APPROVE_LABEL = 'Approve the plan automatically';
 
 /** The Start panel's remembered boxes (this browser only; the server stores each build's own choice). */
-export const START_PREFS_KEY = 'limn.storyBuild.startPrefs';
+export const START_PREFS_KEY = 'limn.storyBuild.startPrefs.v2';
 export interface StartPrefs {
   autoApprovePlan: boolean;
   autoPush: boolean;
 }
-export const START_PREFS_DEFAULT: StartPrefs = { autoApprovePlan: false, autoPush: false };
+export const START_PREFS_DEFAULT: StartPrefs = { autoApprovePlan: false, autoPush: true };
 
 export function AutoApproveInfo(): JSX.Element {
   return (
