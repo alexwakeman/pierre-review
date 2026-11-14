@@ -18,7 +18,7 @@ import {
 //
 // There is no hosted service any more, so there are no accounts, no billing and no
 // service levels to describe. What is left: this website (marketing pages and the
-// contact form), and the software itself — which is governed by the Limn License
+// contact form), and the software itself — which is governed by the Ensemble License
 // at the repository root, NOT by this page. §3 summarises that licence and says the
 // licence wins; FREE_TEAM_SIZE mirrors it.
 //
@@ -46,11 +46,11 @@ export default function Terms(): JSX.Element {
             {SITE_NAME} and no account to sign up for.
           </p>
           <div>
-            <LegalNote title="The software is licensed under the Limn License">
+            <LegalNote title="The software is licensed under the Ensemble License">
               <p>
                 Your right to use the software comes from the{' '}
                 <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
-                  Limn License
+                  Ensemble License
                 </a>
                 , published with the source. It is free for individuals and for organisations
                 where no more than {FREE_TEAM_SIZE} people use it. Above that, the organisation
@@ -109,7 +109,7 @@ export default function Terms(): JSX.Element {
         <P>
           This is a summary for convenience. The{' '}
           <a href={LICENSE_URL} target="_blank" rel="noreferrer noopener" className={LINK}>
-            Limn License
+            Ensemble License
           </a>{' '}
           is the binding text.
         </P>

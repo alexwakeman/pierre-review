@@ -101,7 +101,7 @@ Plain English, as the app's own copy (`CLAUDE.md` § Product voice), leaning on 
 - Address the reader as "you". A developer and an engineering manager both read these pages; say
   in the text what each gets where the answer differs. No per-page "who it helps" blocks.
 - British spelling, as the rest of the site ("licence" the noun, "organisation", "colour").
-- No "Pro", "paid", "upgrade" or credits wording: every feature is free under the Limn License
+- No "Pro", "paid", "upgrade" or credits wording: every feature is free under the Ensemble License
   (free for individuals and for organisations where no more than three people use it).
 - Do not promise what Limn does not do. Where Limn guesses (Likely addressed, blast radius),
   say it is a guess. Where Limn refuses (the benchmark), say so and why.

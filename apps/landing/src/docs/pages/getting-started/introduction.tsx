@@ -93,7 +93,7 @@ export default function Page(): JSX.Element {
       </ul>
 
       <Note title="Free to use">
-        Every feature is free under the Limn License: free for individuals and for organisations where no
+        Every feature is free under the Ensemble License: free for individuals and for organisations where no
         more than three people use it. Larger organisations can ask for a commercial licence through the
         contact form. See <DocLink to="licence/licence">the licence page</DocLink>.
       </Note>

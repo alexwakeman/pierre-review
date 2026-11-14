@@ -6,7 +6,7 @@ which PRs are stalled, which review threads sit untouched, and what needs _your_
 
 It ships to npm as **Limn** (`npx limn-review`) and runs **only on your machine**: SQLite, no
 hosted backend, no sign-in, no stored GitHub credentials (it shells out to your logged-in `gh`).
-**Every feature is free** under the Limn License 1.0 (`LICENSE`: free for individuals and for
+**Every feature is free** under the Ensemble License 1.0 (`LICENSE`: free for individuals and for
 organisations where ≤ 3 people use it; a commercial licence above that, via the contact form; no
 competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
 or Settings → AI). The website is a separate service, `apps/site`.

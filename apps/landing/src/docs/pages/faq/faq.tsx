@@ -18,7 +18,7 @@ export default function Page(): JSX.Element {
       <p>
         Nothing, for individuals and for organisations where no more than three people use it. Every feature is
         included. Above three people, ask for a commercial licence. See{' '}
-        <DocLink to="licence/licence">The Limn License</DocLink>.
+        <DocLink to="licence/licence">The Ensemble License</DocLink>.
       </p>
       <H3>Do the AI features cost extra?</H3>
       <p>

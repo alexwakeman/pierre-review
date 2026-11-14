@@ -81,7 +81,7 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/terms': {
     title: `Terms and conditions — ${SITE_NAME}`,
-    description: `The terms for this website and the ${SITE_NAME} software: a summary of the Limn License (free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it), the frontier models the AI tools support, what we do against leaks and prompt injection, and why the software is provided as is.`,
+    description: `The terms for this website and the ${SITE_NAME} software: a summary of the Ensemble License (free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it), the frontier models the AI tools support, what we do against leaks and prompt injection, and why the software is provided as is.`,
   },
 };
 

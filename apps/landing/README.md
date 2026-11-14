@@ -9,7 +9,7 @@ so the site's call to action is the npm command (`npx limn-review`). There is no
 the product pictures are clickable HTML mocks (below). The one limit — free for individuals and for
 organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Every feature, free" tiers, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
-`src/lib/site.ts` (which mirrors the Limn License at the repository root).
+`src/lib/site.ts` (which mirrors the Ensemble License at the repository root).
 
 ## Structure
 
@@ -24,7 +24,7 @@ plus the three legal ones and the docs:
 | `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
 | `/docs` and `/docs/**` | `docs/DocsApp.tsx` + `docs/pages/**` | **The user documentation** (below): every screen of the app, AI review, AI Fix, Implement story, merging, every Settings tab, one page per integration, security, licence, FAQ, troubleshooting, the changelog |
-| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Limn License and defer to it |
+| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Ensemble License and defer to it |
 
 **THE DESIGN IS ONE DARK "BOARD OF TILES"**, on every page. `src/board.css` holds the
 tokens (the dark ground, the four pigments lapis / verdigris / madder / gold), the self-hosted

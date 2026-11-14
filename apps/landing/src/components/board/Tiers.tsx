@@ -3,7 +3,7 @@ import { FREE_TEAM_SIZE, INSTALL_COMMAND } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
 
 // "Every feature, free": the two tiers. The team size comes from FREE_TEAM_SIZE
-// (it mirrors the Limn License); never type the number here.
+// (it mirrors the Ensemble License); never type the number here.
 
 export function Tiers(): JSX.Element {
   return (

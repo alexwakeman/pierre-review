@@ -156,7 +156,7 @@ locally instead — a larger database, but PR detail then works fully offline.
 
 ## License
 
-Source-available under the **Limn License 1.0** — see [LICENSE](./LICENSE).
+Source-available under the **Ensemble License 1.0** — see [LICENSE](./LICENSE).
 Limn is free for individuals, and for organisations where no more than 3 people
 use it (affiliates count together). More users than that need a licence — ask
 through the [contact form](https://limn-review.com/contact?topic=licence). You may

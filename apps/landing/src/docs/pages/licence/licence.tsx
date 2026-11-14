@@ -2,7 +2,7 @@ import type { DocMeta } from '../../types';
 import { ExtLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
 
 export const meta: DocMeta = {
-  title: 'The Limn License',
+  title: 'The Ensemble License',
   summary: 'Free for individuals and for organisations where no more than three people use Limn. Above that, ask for a licence.',
 };
 
@@ -23,7 +23,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn is released under the Limn License 1.0. Every feature is included for everyone the licence covers: there
+        Limn is released under the Ensemble License 1.0. Every feature is included for everyone the licence covers: there
         are no locked features and no trial. This page explains the licence in plain English. The licence text itself is
         what counts; read it in full in the <code>LICENSE</code> file that comes with Limn, or{' '}
         <ExtLink href={LICENSE_URL}>on GitHub</ExtLink>.

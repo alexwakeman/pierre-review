@@ -10,7 +10,7 @@ import './contact.css';
 // Contact — and the way an organisation gets a licence.
 //
 // Ensemble is free for individuals, and for organisations where no more than FREE_TEAM_SIZE
-// people use it (the Limn License at the repository root). More users than that need a
+// people use it (the Ensemble License at the repository root). More users than that need a
 // commercial licence, and there is no checkout: it starts
 // with a message here. So the first sentence says who this page is for, and the
 // form opens on the licence topic when the visitor arrives from a licence link
@@ -95,7 +95,7 @@ export default function Contact(): JSX.Element {
             {FREE_TEAM_SIZE}, it is free. More than {FREE_TEAM_SIZE}, the organisation needs
             a licence.
           </p>
-          <p>The full terms are in the Limn License, published with the source.</p>
+          <p>The full terms are in the Ensemble License, published with the source.</p>
         </div>
       </section>
 

@@ -368,7 +368,7 @@ const manifest = {
     'cli',
     'team',
   ],
-  // Source-available under the Limn License 1.0: free for individuals and for organisations
+  // Source-available under the Ensemble License 1.0: free for individuals and for organisations
   // where at most 3 people use it, a commercial licence above that, no competing product, and
   // no conversion to MIT. The full text ships as LICENSE (copied below). npm's
   // documented form for a non-SPDX license is "SEE LICENSE IN <file>".

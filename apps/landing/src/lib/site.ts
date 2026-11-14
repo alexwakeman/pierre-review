@@ -48,7 +48,7 @@ export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
 /**
  * How many people in one organisation (affiliates counted together) may use Ensemble
  * without a licence. Mirrors the
- * Limn License at the repository root — change both together.
+ * Ensemble License at the repository root — change both together.
  */
 export const FREE_TEAM_SIZE = 3;
 

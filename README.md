@@ -194,7 +194,7 @@ See `CLAUDE.md` for the architecture and conventions.
 
 ## License
 
-Limn is **source-available** under the [Limn License 1.0](./LICENSE).
+Limn is **source-available** under the [Ensemble License 1.0](./LICENSE).
 
 - **Free** for individuals, and for any team or organisation where **3 people or
   fewer** use it. You may use, copy and change it.

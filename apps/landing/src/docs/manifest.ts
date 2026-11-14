@@ -315,7 +315,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Licence',
     group: 'Reference',
     writer: 'W5',
-    blurb: 'The Limn License in plain English.',
+    blurb: 'The Ensemble License in plain English.',
     pages: [
       { slug: 'licence' },
     ],
