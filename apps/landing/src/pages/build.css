@@ -157,6 +157,12 @@
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--gap);
 }
+/* A five-step flow (Automation) fills the row on wide screens; narrower ones use the rules below. */
+@media (min-width: 1101px) {
+  .lb.build .bd-flowsteps.five {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
 .lb.build .bd-flowsteps > li {
   position: relative;
   display: flex;

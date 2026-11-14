@@ -115,7 +115,7 @@ export default function Automation(): JSX.Element {
         </div>
       </section>
       <div className="board bd-flowrow">
-        <ol className="bd-flowsteps" aria-labelledby="au-how-h">
+        <ol className="bd-flowsteps five" aria-labelledby="au-how-h">
           {STEPS.map((s, i) => (
             <li key={s.h} className={`tile ${s.tone} rise`}>
               <span className="bd-fn" aria-hidden="true">
