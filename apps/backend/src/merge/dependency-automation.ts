@@ -1,14 +1,16 @@
 // ── DEPENDENCY AUTOMATION: APPROVE, RESOLVE CONFLICTS, FIX WITH AI (CORE, free) ─────────────────
 //
 // docs/MERGE-CI-TRUNK.md § Dependency automation. Settings → Dependencies holds, per workspace and
-// every one OFF by default: "merge" (merge/dependency-policy.ts, the older switch), "approve",
+// every one ON by default (2026-11-14, migration 0193: NULL reads ON, off is an explicit false):
+// "merge" (merge/dependency-policy.ts, the older switch), "approve",
 // "resolve conflicts" and "fix with AI" (this file), and ONE policy (size, security-only,
 // ecosystems) that gates them all. The decisions are pure and tested in merge/dependency-rules.ts;
 // this file gathers values, claims, writes and records.
 //
 // WHO: approval, conflict resolution and the AI fix act ONLY on PRs opened by a bot the reader
-// TRUSTS — its STORED row in this workspace says automated, role `dependency`, and
-// `dependency_trusted` (`isTrustedDependencyBot`). Never a login guess.
+// TRUSTS — its STORED row in this workspace says automated, role `dependency`, and its
+// `dependency_trusted` mark resolves to trusted (`isTrustedDependencyBot`): the reader's mark wins
+// both ways (an untick is stored as false); untouched, only dependabot[bot] and renovate[bot] are.
 //
 // APPROVE (`runDependencyAutomationTick`, on the auto-merge watcher's cron just before the merge
 // sweep): an open, non-draft, same-repo PR whose SYNCED CI is `success` (green, not merely not red)
@@ -96,6 +98,8 @@ import {
   dependencyMergeAndCiPreamble,
   classifyDependencyUpdate,
   conflictStep,
+  dependencySwitchOn,
+  dependencyTrustedOf,
   isTrustedDependencyBot,
   parseLevel,
   policyNeedsLevel,
@@ -109,7 +113,10 @@ import {
   depsHeldNow,
   endDepsClaim,
   familyOfAction,
+  isRebaseOpenLine,
   markAiPushedHead,
+  openRebaseToTeammates,
+  rebaseOpenLine,
   postDepsClaim,
   readDepsClaim,
   rememberDepsAwaitingCi,
@@ -120,6 +127,7 @@ import {
   type DepsClaimHandle,
   type DepsHold,
 } from './deps-claim.js';
+import { dbDepsClaimLedger, ownRebaseLineAt, updateDepsClaimLine } from './deps-claim-ledger.js';
 import { limnOriginForPr, orReader } from '../db/limn-actions.js';
 import type { WriteOrigin } from '../github/write-origin.js';
 
@@ -186,11 +194,12 @@ type SettingsRow = {
 };
 
 function settingsOf(row: SettingsRow): DependencyAutomationSettings {
+  // ON BY DEFAULT (migration 0193): NULL is on, only an explicit false is off.
   return {
-    autoMerge: row.autoMerge === true,
-    autoApprove: row.autoApprove === true,
-    autoResolveConflicts: row.autoResolve === true,
-    autoFix: row.autoFix === true,
+    autoMerge: dependencySwitchOn(row.autoMerge),
+    autoApprove: dependencySwitchOn(row.autoApprove),
+    autoResolveConflicts: dependencySwitchOn(row.autoResolve),
+    autoFix: dependencySwitchOn(row.autoFix),
     policy: policyFromColumns(row),
   };
 }
@@ -238,7 +247,7 @@ export async function listDependencyBots(accountId: number, workspaceId: number)
     login: r.login,
     kind: r.kind ?? null,
     label: r.label ?? null,
-    trusted: r.trusted === true,
+    trusted: dependencyTrustedOf(r.trusted, r.login),
     canRebase: botCanRebase(r.kind ?? null),
   }));
 }
@@ -254,9 +263,11 @@ export async function getDependencyAutomation(
 
 /**
  * THE ONE WRITER of the panel. Only what the patch names changes. `autoMerge` goes through the
- * older setting's own writer (it records its own history line). `trustedBotIds` is the FULL trusted
- * set among the workspace's dependency bots: listed ones become trusted, the rest untrusted; an id
- * that is not one of them is ignored. false = no such workspace.
+ * older setting's own writer (it records its own history line). ⚠ OFF IS STORED AS false: NULL reads
+ * ON (migration 0193). `trustedBotIds` is the FULL trusted set among the workspace's dependency bots:
+ * listed ones become trusted, the rest untrusted — both stored EXPLICITLY, so an untick of a default
+ * trusted bot (dependabot[bot], renovate[bot]) wins; a bot whose resolved trust does not change is not
+ * written. An id that is not one of them is ignored. false = no such workspace.
  */
 export async function setDependencyAutomation(
   accountId: number,
@@ -269,11 +280,9 @@ export async function setDependencyAutomation(
     if (!(await setDependencyAutoMerge(accountId, workspaceId, patch.autoMerge))) return false;
   }
   const set: Partial<typeof workspaces.$inferInsert> = {};
-  if (patch.autoApprove !== undefined) set.dependencyAutoApprove = patch.autoApprove ? true : null;
-  if (patch.autoResolveConflicts !== undefined) {
-    set.dependencyAutoResolve = patch.autoResolveConflicts ? true : null;
-  }
-  if (patch.autoFix !== undefined) set.dependencyAutoFix = patch.autoFix ? true : null;
+  if (patch.autoApprove !== undefined) set.dependencyAutoApprove = patch.autoApprove;
+  if (patch.autoResolveConflicts !== undefined) set.dependencyAutoResolve = patch.autoResolveConflicts;
+  if (patch.autoFix !== undefined) set.dependencyAutoFix = patch.autoFix;
   if (patch.maxLevel !== undefined) {
     set.dependencyMaxLevel = patch.maxLevel === DEFAULT_DEPENDENCY_POLICY.maxLevel ? null : patch.maxLevel;
   }
@@ -296,7 +305,7 @@ export async function setDependencyAutomation(
       if (trusted === b.trusted) continue;
       await db
         .update(workspaceReviewers)
-        .set({ dependencyTrusted: trusted ? true : null })
+        .set({ dependencyTrusted: trusted })
         .where(
           and(
             eq(workspaceReviewers.accountId, accountId),
@@ -538,7 +547,8 @@ async function claimBecameSkip(id: number, hold: DepsHold): Promise<void> {
 const firstLine = (err: unknown): string =>
   (err instanceof Error ? err.message : String(err)).split('\n')[0]!.slice(0, 200);
 
-/** At boot: a row still `running` lost its process mid-action. Recorded as failed, never retried. */
+/** At boot: a row still `running` lost its process mid-action. Recorded as failed, never retried. Its
+ *  `limn/deps` line is the ledger's: the reconciler (deps-claim-release.ts) releases it right after. */
 export async function reconcileDependencyActionsOnStartup(): Promise<void> {
   await db
     .update(daa)
@@ -592,7 +602,7 @@ export async function beginDependencyAction(
   now: number = Date.now(),
   opts: { ciGreen?: boolean } = {},
 ): Promise<ActionClaim | null> {
-  if (depsHeldNow(pr.accountId, pr.id, pr.headSha, familyOfAction(action), now)) return null;
+  if (depsHeldNow(pr.accountId, pr.id, pr.headSha, familyOfAction(action), now, action)) return null;
   const target = { accountId: pr.accountId, prId: pr.id, owner: pr.owner, name: pr.name, headSha: pr.headSha, action };
   const read = await readDepsClaim(target, c.log, now, opts);
   if (read.awaitingCi) {
@@ -608,7 +618,9 @@ export async function beginDependencyAction(
   }
   const id = await claimAction(pr.accountId, pr.id, pr.headSha, action);
   if (id == null) return null;
-  const posted = await postDepsClaim(read.login, target, c.log);
+  // The ledger row is written BEFORE the pending line (deps-claim-ledger.ts), so the reconciler can
+  // release or finish it whatever happens to this process.
+  const posted = await postDepsClaim(read.login, target, c.log, Date.now, dbDepsClaimLedger);
   if (posted.hold) {
     rememberDepsHold(target, posted.hold);
     await claimBecameSkip(id, posted.hold);
@@ -624,11 +636,12 @@ async function finishAction(
   detail: string | null,
   log: FastifyBaseLogger,
   resultSha: string | null = null,
+  aiOpen = false,
 ): Promise<void> {
   await settleAction(claim.id, state, detail, resultSha).catch((err) =>
     log.warn({ err, claimId: claim.id }, 'dependency automation: could not record the outcome'),
   );
-  const end: DepsClaimEnd = state === 'done' ? { outcome: 'done', pushedSha: resultSha } : { outcome: 'failed' };
+  const end: DepsClaimEnd = state === 'done' ? { outcome: 'done', pushedSha: resultSha, aiOpen } : { outcome: 'failed' };
   await endDepsClaim(claim.line, end, log);
   // The pushed commit carries its own line, so EVERY machine waits for its CI before arming it.
   if (state === 'done' && resultSha != null) await markAiPushedHead(claim.line, resultSha, log);
@@ -870,13 +883,15 @@ async function tickWorkspace(
       role: workspaceReviewers.role,
       trusted: workspaceReviewers.dependencyTrusted,
       kind: workspaceReviewers.kind,
+      login: users.githubLogin,
     })
     .from(workspaceReviewers)
+    .innerJoin(users, eq(users.id, workspaceReviewers.authorUserId))
     .where(and(eq(workspaceReviewers.accountId, accountId), eq(workspaceReviewers.workspaceId, workspaceId)))
     .execute();
   const trusted = new Map(
     botRows
-      .filter((r) => isTrustedDependencyBot({ automated: r.automated, role: r.role, trusted: r.trusted ?? null }))
+      .filter((r) => isTrustedDependencyBot({ automated: r.automated, role: r.role, trusted: r.trusted ?? null, login: r.login }))
       .map((r) => [r.userId, r.kind ?? null]),
   );
   if (trusted.size === 0) return;
@@ -921,7 +936,7 @@ async function tickWorkspace(
     .map((r) => ({ ...r, accountId })) as Candidate[];
   if (prs.length === 0) return;
   const ids = prs.map((p) => p.id);
-  const [skipRows, actionRows, facts, sandboxSkipRows] = await Promise.all([
+  const [skipRows, actionRows, facts, sandboxSkipRows, teammateRebaseRows] = await Promise.all([
     db
       .select({ prId: autoMergePolicySkips.prId })
       .from(autoMergePolicySkips)
@@ -946,6 +961,22 @@ async function tickWorkspace(
           inArray(daa.action, ['ai_fix', 'ai_resolve']),
           eq(daa.state, 'skipped'),
           isNull(daa.teammateLogin),
+        ),
+      )
+      .execute(),
+    // A TEAMMATE already asked the bot to rebase at a head (their finished line, recorded as our skip):
+    // the conflict steps count it as the ask, so the wait runs from it and the AI step may follow —
+    // when their line leaves that step open to teammates (gap d), this machine may take it.
+    db
+      .select({ prId: daa.prId, headSha: daa.headSha, createdAt: daa.createdAt })
+      .from(daa)
+      .where(
+        and(
+          eq(daa.accountId, accountId),
+          inArray(daa.prId, ids),
+          eq(daa.action, 'rebase_request'),
+          eq(daa.state, 'skipped'),
+          eq(daa.teammateHandled, true),
         ),
       )
       .execute(),
@@ -979,7 +1010,9 @@ async function tickWorkspace(
 
     if (conflicting) {
       if (!conflictsOn) continue;
-      const rebase = actionAt(pr.id, pr.headSha, 'rebase_request');
+      const own = actionAt(pr.id, pr.headSha, 'rebase_request');
+      const mate = own ? null : teammateRebaseRows.find((r) => r.prId === pr.id && r.headSha === pr.headSha);
+      const rebase = own ?? (mate ? { state: 'done', createdAt: mate.createdAt } : null);
       const ai = actionAt(pr.id, pr.headSha, 'ai_resolve');
       const step = conflictStep(
         {
@@ -995,15 +1028,22 @@ async function tickWorkspace(
         aiWatching.has(pr.id) ||
         aiRunsInWindow(pr.id) >= DEPENDENCY_AI_FIX_DAILY_CAP ||
         (await aiFixDeps.isFixRunning(pr.id).catch(() => true));
-      if (step === 'ai' && aiBlocked) continue;
+      if (step === 'ai' && aiBlocked) {
+        // ⚠ GAP (d): our rebase ask must not hold a teammate's AI step that this machine can't run.
+        await openConflictsToTeammates(c, pr);
+        continue;
+      }
       if (step === 'ai') {
         // THE SANDBOX first, as for the CI fix: busy ⇒ a later tick; no runtime already recorded at this
         // head ⇒ nothing more to say (no GitHub read).
         const sandbox = await aiFixDeps.sandbox(aiCtx!).catch(() => ({ ok: true as const }));
-        if (!sandbox.ok && (sandbox.reason === 'busy' || sandboxSkipped.has(`${pr.id}:${pr.headSha}:ai_resolve`))) continue;
+        if (!sandbox.ok && (sandbox.reason === 'busy' || sandboxSkipped.has(`${pr.id}:${pr.headSha}:ai_resolve`))) {
+          await openConflictsToTeammates(c, pr);
+          continue;
+        }
       }
       // A teammate's remembered hold on this action costs no GitHub read and no budget.
-      if (depsHeldNow(accountId, pr.id, pr.headSha, 'conflicts', now)) continue;
+      if (depsHeldNow(accountId, pr.id, pr.headSha, 'conflicts', now, step === 'ask_bot' ? 'rebase_request' : 'ai_resolve')) continue;
       token ??= await getAccessToken(accountId);
       const live = await fetchPrForAutomation(token, pr.owner, pr.name, pr.number).catch(() => null);
       if (!live || live.state !== 'open' || live.isDraft || live.headSha !== pr.headSha || live.isFork) continue;
@@ -1012,7 +1052,10 @@ async function tickWorkspace(
       if (step === 'ask_bot') {
         const req = rebaseRequestFor(kind, live.body);
         if (req) {
-          await askBotToRebase(c, pr, kind, req, token, viewerUserId);
+          // Can this machine go on to the AI step after the wait? If not, the ask's line says the AI
+          // step is open to teammates, so it never holds theirs (gap d).
+          const aiOpen = aiBlocked || !(await aiStepPossibleHere(pr));
+          await askBotToRebase(c, pr, kind, req, token, viewerUserId, aiOpen);
           continue;
         }
         // Renovate without its checkbox: nothing to ask — straight to the AI, if it can run.
@@ -1135,6 +1178,7 @@ async function askBotToRebase(
   req: NonNullable<ReturnType<typeof rebaseRequestFor>>,
   token: string,
   viewerUserId: number | null,
+  aiOpen = false,
 ): Promise<void> {
   const { log } = c;
   const claim = await beginDependencyAction(c, pr, 'rebase_request');
@@ -1144,7 +1188,7 @@ async function askBotToRebase(
     if (req.method === 'comment') {
       // ⚠ NO MARKER: the bot reads the command from the comment. The ledger is what makes it Limn's.
       const gh = await addIssueComment(token, pr.owner, pr.name, pr.number, req.body, await depsOrigin(pr, claim.id));
-      await finishAction(claim, 'done', `Asked ${bot} to rebase`, log);
+      await finishAction(claim, 'done', `Asked ${bot} to rebase`, log, null, aiOpen);
       await upsertLocalPrComment(pr.id, viewerUserId, gh);
     } else {
       const out = await updatePullRequestBody(token, pr.owner, pr.name, pr.number, req.body, await depsOrigin(pr, claim.id));
@@ -1152,7 +1196,7 @@ async function askBotToRebase(
         await finishAction(claim, 'failed', out.message, log);
         return;
       }
-      await finishAction(claim, 'done', `Asked ${bot} to rebase`, log);
+      await finishAction(claim, 'done', `Asked ${bot} to rebase`, log, null, aiOpen);
       await resyncPrAfterWrite({ prId: pr.id, accountId: pr.accountId, log });
     }
     await notePrChangedForPr(pr.accountId, pr.id);
@@ -1186,7 +1230,10 @@ async function startAiConflictFix(
 ): Promise<void> {
   const { log } = c;
   const deps = aiFixDeps;
-  if (!(await deps.allowed(ctx, pr.accountId))) return;
+  if (!(await deps.allowed(ctx, pr.accountId))) {
+    await openConflictsToTeammates(c, pr); // over budget: the AI step is a teammate's to take (gap d)
+    return;
+  }
   const { peekSession } = await import('../conflict/session.js');
   const open = peekSession(pr.accountId, pr.id);
   if (open != null && (open.commitRunning || open.subscribers.size > 0)) return;
@@ -1198,6 +1245,7 @@ async function startAiConflictFix(
       );
       log.info({ prId: pr.id }, 'dependency automation: conflict run skipped, no container runtime');
     }
+    await openConflictsToTeammates(c, pr);
     return;
   }
   const claim = await beginDependencyAction(c, pr, 'ai_resolve');
@@ -1226,12 +1274,50 @@ async function startAiConflictFix(
       // Nothing was written and no model ran: give the claim back so a later tick may try.
       await giveBack(claim, "didn't start", log);
       if (res?.status === 'no_runtime') await recordSandboxSkip(pr.accountId, pr.id, pr.headSha, 'ai_resolve', NO_SANDBOX_DETAIL).catch(() => {});
+      await openConflictsToTeammates(c, pr);
     }
     return;
   }
   renewDepsClaim(claim.line, log);
   aiWatching.add(pr.id);
   void watchFixAndPush(ctx, claim, pr, res.fixId, deps, log, 'conflicts').finally(() => aiWatching.delete(pr.id));
+}
+
+/**
+ * Could THIS machine run the AI conflict step at all right now (asked at the rebase ask, gap d)? Agentic
+ * AI bound, a container runtime, and under the spend budget. The cap and a running fix are asked by
+ * the caller (`aiBlocked`). Never throws (unreadable ⇒ yes: the ask keeps its usual line).
+ */
+async function aiStepPossibleHere(pr: Candidate): Promise<boolean> {
+  if (aiCtx == null) return false;
+  try {
+    const sandbox = await aiFixDeps.sandbox(aiCtx);
+    if (!sandbox.ok && sandbox.reason === 'no_runtime') return false;
+    return await aiFixDeps.allowed(aiCtx, pr.accountId);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * GAP (d): this machine asked the bot to rebase at this head, the AI step has come, and it can't run
+ * it (AI off, no sandbox runtime, over budget, at the cap, busy). Our "asked the bot to rebase" line
+ * held the whole conflicts family for teammates; re-post it ONCE as "· AI step open to teammates" so a
+ * teammate's Limn may take the AI step. DB first (no GitHub call when there is nothing to open). Never
+ * throws.
+ */
+async function openConflictsToTeammates(c: ClaimCtx, pr: Candidate): Promise<void> {
+  try {
+    const row = await ownRebaseLineAt(pr.accountId, pr.id, pr.headSha);
+    if (row == null || row.login == null || row.state !== 'finished') return;
+    if (isRebaseOpenLine(row.lastDescription)) return; // already open
+    if (!(await openRebaseToTeammates({ accountId: pr.accountId, prId: pr.id, owner: pr.owner, name: pr.name, headSha: pr.headSha }, row.login, c.log))) {
+      return;
+    }
+    await updateDepsClaimLine(row.id, { lastDescription: rebaseOpenLine(row.login), lastPostedAt: new Date() }, { anyState: true });
+  } catch (err) {
+    c.log.warn({ err, prId: pr.id }, 'dependency automation: could not open the conflict step to teammates');
+  }
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

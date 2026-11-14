@@ -3,7 +3,7 @@
 // Two features on one wire file (docs/MERGE-CI-TRUNK.md § Dependency auto-merge):
 //   • "Merge or arm all" on Pending → Dependencies — POST /api/dependencies/merge-all?workspace=;
 //   • the per-workspace "Merge dependency updates automatically" setting —
-//     GET / PUT /api/workspaces/:id/dependency-auto-merge (OFF by default).
+//     GET / PUT /api/workspaces/:id/dependency-auto-merge (ON by default since 2026-11-14).
 
 import { PENDING_LIMITS } from './pending-rules.js';
 
@@ -63,7 +63,7 @@ export interface DependencyMergeAllResponse {
 }
 
 export interface WorkspaceDependencyAutoMerge {
-  /** OFF unless switched on. */
+  /** ON unless switched off (a stored NULL reads ON; off is stored as an explicit false). */
   enabled: boolean;
 }
 
@@ -74,11 +74,14 @@ export interface WorkspaceDependencyAutoMergeResponse {
 
 // ── DEPENDENCY AUTOMATION (the Settings → Dependencies panel) ───────────────────────────────────
 //
-// docs/MERGE-CI-TRUNK.md § Dependency automation. Three per-workspace switches, every one OFF by
-// default — merge (the setting above), APPROVE, RESOLVE CONFLICTS (ask the bot to rebase, then
-// an unattended AI Fix session that merges the base in the sandbox) and FIX WITH AI (failing CI) — and ONE policy that gates them: how big an update
-// may be, security fixes only, which ecosystems. Approval and conflict resolution act only on PRs
-// opened by a bot the reader TRUSTS (`trustedBotIds`, a mark on the workspace's bot row).
+// docs/MERGE-CI-TRUNK.md § Dependency automation. Four per-workspace switches, every one ON by
+// default since 2026-11-14 (migration 0193; off is stored as an explicit false) — merge (the setting
+// above), APPROVE, RESOLVE CONFLICTS (ask the bot to rebase, then an unattended AI Fix session that
+// merges the base in the sandbox) and FIX WITH AI (failing CI) — and ONE policy that gates them: how
+// big an update may be, security fixes only, which ecosystems. Approval, conflict resolution and the
+// AI fix act only on PRs opened by a bot the reader TRUSTS (`trustedBotIds`, a mark on the
+// workspace's bot row). Untouched, the mark trusts `DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS` and no
+// other bot; an untick is stored and wins.
 //   GET / PUT /api/workspaces/:id/dependency-automation   the panel (DB only)
 //   GET /api/dependencies/automation-log?workspace=        what automation did (DB only)
 
@@ -145,6 +148,11 @@ export interface DependencyAutomationSettings {
   policy: DependencyAutomationPolicy;
 }
 
+/** The dependency bots trusted until the reader unticks them: GitHub App logins, which nobody can
+ *  sign up under (the `[bot]` suffix is reserved). Every other bot needs trusting by hand. Exact
+ *  logins, compared case-insensitively. */
+export const DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS: readonly string[] = ['dependabot[bot]', 'renovate[bot]'];
+
 /** AI runs (CI fixes and conflict resolutions together) the automation may start on one PR in any
  *  rolling 24 hours. */
 export const DEPENDENCY_AI_FIX_DAILY_CAP = 2;
@@ -157,6 +165,7 @@ export interface DependencyBot {
   kind: string | null;
   /** The name a person gave it in Bot settings, or null (the SPA shows the brand, else the login). */
   label: string | null;
+  /** Resolved: the reader's mark, else the default (dependabot[bot] and renovate[bot] only). */
   trusted: boolean;
   /** Can Limn ask it to rebase? Dependabot (a comment) and Renovate (its checkbox) can. */
   canRebase: boolean;

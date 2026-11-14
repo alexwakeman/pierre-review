@@ -106,8 +106,8 @@ export default function Page(): JSX.Element {
       </p>
       <Note>
         An automatic fix resolves merge conflicts only when you tick <Ui>Merge conflicts with the base branch</Ui> under{' '}
-        <DocLink to="ai-fix/push-and-auto-fix#auto-fix">Auto fix</DocLink> (off by default). Dependency automation can,
-        for a trusted bot's update, when you switch that on. See{' '}
+        <DocLink to="ai-fix/push-and-auto-fix#auto-fix">Auto fix</DocLink> (off by default). Dependency automation does,
+        for a trusted bot's update, unless you switch it off. See{' '}
         <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
       </Note>
     </>

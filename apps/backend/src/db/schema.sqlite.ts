@@ -2353,12 +2353,14 @@ export const workspaces = sqliteTable(
     approveLeftovers: text('approve_leftovers'),
     // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
     // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
-    // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert
-    // has to name it. The setting IS the consent, so a bot's new head is re-armed; a reader's
-    // cancel is recorded in `auto_merge_policy_skips` and never overridden.
+    // ⚠ ON BY DEFAULT since migration 0193: NULL reads ON, OFF is an explicit false (`!== false`);
+    // nullable with no default, so no insert has to name it. The setting IS the consent, so a bot's
+    // new head is re-armed; a reader's cancel is recorded in `auto_merge_policy_skips` and never
+    // overridden.
     dependencyAutoMerge: integer('dependency_auto_merge', { mode: 'boolean' }),
-    // DEPENDENCY AUTOMATION (migration 0147; docs/MERGE-CI-TRUNK.md § Dependency automation). Every
-    // switch NULL/false = OFF, the default. `dependencyAutoApprove`: approve a TRUSTED dependency
+    // DEPENDENCY AUTOMATION (migration 0147; docs/MERGE-CI-TRUNK.md § Dependency automation). ⚠ Every
+    // switch is ON BY DEFAULT since migration 0193: NULL reads ON, OFF is an explicit false
+    // (`dependencySwitchOn`). `dependencyAutoApprove`: approve a TRUSTED dependency
     // bot's PR (`workspace_reviewers.dependency_trusted`) once its CI is green, under the reader's
     // account. `dependencyAutoResolve`: on a conflict, ask that bot to rebase, then fall back to an AI
     // run through the in-app resolver. The POLICY gates all three switches (merge included):
@@ -2367,7 +2369,7 @@ export const workspaces = sqliteTable(
     // every ecosystem. The ONE writer is `setDependencyAutomation` (merge/dependency-automation.ts).
     dependencyAutoApprove: integer('dependency_auto_approve', { mode: 'boolean' }),
     dependencyAutoResolve: integer('dependency_auto_resolve', { mode: 'boolean' }),
-    // "Fix dependency PRs with AI" (migration 0162), NULL/false = OFF: an unattended AI Fix on a
+    // "Fix dependency PRs with AI" (migration 0162), NULL = ON (0193), false = OFF: an unattended AI Fix on a
     // TRUSTED bot's PR whose CI failed (proven live), pushed to its branch; also runs the conflict
     // steps of `dependencyAutoResolve`. merge/dependency-automation.ts.
     dependencyAutoFix: integer('dependency_auto_fix', { mode: 'boolean' }),
@@ -2927,7 +2929,10 @@ export const workspaceReviewers = sqliteTable(
       .default('flat'),
     // ── TRUST (migration 0147; one writer, `setDependencyAutomation`) ──
     // The reader marked this DEPENDENCY bot as belonging to the project: Settings → Dependencies may
-    // approve its PRs and resolve their conflicts. NULL/false = not trusted, the default. Like the
+    // approve its PRs and resolve their conflicts. true = trusted, false = NOT trusted (the reader's
+    // untick, stored explicitly so it wins). NULL = untouched, RESOLVED on read by
+    // `dependencyTrustedOf` (merge/dependency-rules.ts): trusted for dependabot[bot] and renovate[bot]
+    // (GitHub App logins: the `[bot]` suffix is reserved), untrusted for every other bot. Like the
     // price, nothing derived ever writes it (no detection UPDATE names it, no INSERT seeds it).
     dependencyTrusted: integer('dependency_trusted', { mode: 'boolean' }),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
@@ -5283,6 +5288,48 @@ export const teamClaimSkipLines = sqliteTable(
   },
   (t) => ({
     keyUx: uniqueIndex('team_claim_skip_lines_key').on(t.accountId, t.prId, t.headSha, t.provider, t.reason),
+  }),
+);
+
+// 0193. THE DEPENDENCY CLAIM LEDGER (merge/deps-claim-ledger.ts; docs/MERGE-CI-TRUNK.md § Team claims
+// for dependency work). ONE row per `limn/deps` commit status this machine holds or released — the
+// dependency automation's twin of `team_claim_lines`, with the same rules:
+//   whose 'mine'     a claim this machine made: 'claiming' BEFORE its pending line is posted, 'pending'
+//                    once it is up, 'finished' / 'released' once its final line is up. An ARMED merge
+//                    ('arm_merge') stays 'armed' while its intent is armed: the reconciler renews its line
+//                    (`last_posted_at`) and posts the release line when the intent ends unlanded. An
+//                    'ai_pushed' row is the line on the commit an AI run PUSHED (`head_sha` = that commit).
+//   whose 'teammate' a teammate's expired pending line this machine released ("Cleared by alex: robin's
+//                    claim expired"), recorded so it is posted ONCE. Always 'released'.
+// `final_description`: a line that could not be written when the action ended — the reconciler posts IT.
+// No FK on pr_id: BOTH delete paths keep this machine's OPEN rows (db/team-claim-lines-delete.ts); the
+// erasure deletes everything.
+export const depsClaimLines = sqliteTable(
+  'deps_claim_lines',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id'),
+    owner: text('owner'),
+    name: text('name'),
+    headSha: text('head_sha').notNull(),
+    // 'approve' | 'rebase_request' | 'ai_resolve' | 'ai_fix' | 'arm_merge' | 'ai_pushed'
+    action: text('action').notNull(),
+    whose: text('whose', { enum: ['mine', 'teammate'] }).notNull().default('mine'),
+    state: text('state', { enum: ['claiming', 'pending', 'armed', 'finished', 'released'] }).notNull(),
+    login: text('login'),
+    lastDescription: text('last_description'),
+    finalDescription: text('final_description'),
+    lastPostedAt: integer('last_posted_at', { mode: 'timestamp' }),
+    releaseAttempts: integer('release_attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    stateIdx: index('deps_claim_lines_state').on(t.state),
+    prHeadIdx: index('deps_claim_lines_account_pr_head').on(t.accountId, t.prId, t.headSha),
   }),
 );
 

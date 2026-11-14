@@ -15,6 +15,28 @@ no internals.
 
 ### Changed
 
+- Settings → Dependencies: every switch is now on by default — Merge them automatically, Approve them
+  automatically, Resolve their conflicts and Fix them with AI. This also turns them on in workspaces where they
+  were off before, so check the tab if you want any of them off. Switching one off now stays off.
+- Settings → Dependencies: Dependabot and Renovate are trusted by default. Any other dependency bot still needs a
+  tick under Trusted bots, and unticking Dependabot or Renovate stays unticked.
+
+### Fixed
+
+- Dependency updates on a team: when Ensemble stops partway through an action, its "limn/deps" status on the commit
+  is cleared the next time it starts, instead of holding teammates back for half an hour. A status GitHub did not
+  accept is sent again.
+- Dependency updates on a team: a teammate's Ensemble that armed a merge no longer holds it for ever. Its status is
+  renewed while the merge is armed, is cleared when the merge ends without landing, and runs out after two hours if
+  that computer is off, so your Ensemble can arm it.
+- Dependency updates on a team: when a teammate's Ensemble asked the bot to rebase but cannot run AI, its status now
+  says so ("AI step open to teammates") and your Ensemble resolves the conflicts after the 30-minute wait.
+- Dependency updates on a team: a teammate's claim that expired is cleared once ("Cleared by alex: robin's claim
+  expired"), and the "AI pushed this commit" status is sent again if GitHub did not accept it, so no one merges an
+  AI-written commit before its CI passes.
+
+### Changed
+
 - Implement: "After the build: review and fix, then open the pull request" is now ticked by default. Untick it at
   Start to push by hand. Approving the plan is still yours.
 - The licence is now called the Ensemble License 1.0. Only the name changed.

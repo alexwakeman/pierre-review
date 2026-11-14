@@ -13,13 +13,13 @@ export default function Page(): JSX.Element {
         Dependabot, Renovate and other dependency bots open a steady stream of small pull requests. Dependency
         automation lets Limn handle them for you, by rules you set per workspace: merge them when their checks pass,
         approve them, ask the bot to rebase when they conflict, and, with AI on, fix them when CI fails. Everything is
-        off until you switch it on.
+        on until you switch it off, for Dependabot and Renovate; any other bot waits until you trust it.
       </p>
 
 
-      <H2 id="switch-it-on">Switch it on</H2>
+      <H2 id="switch-it-on">Choose what it does</H2>
       <Illustration
-        label="The Dependency updates section of Settings: Merge them automatically on, Approve them automatically on, Resolve their conflicts off, Fix them with AI off"
+        label="The Dependency updates section of Settings: Merge them automatically on, Approve them automatically on, Resolve their conflicts on, Fix them with AI on"
         caption="Settings → Dependencies, for one workspace."
       >
         <SettingsRow
@@ -28,8 +28,8 @@ export default function Page(): JSX.Element {
           control={<Toggle on />}
         />
         <SettingsRow label="Approve them automatically" hint="Once CI passes, as you. Trusted bots only." control={<Toggle on />} />
-        <SettingsRow label="Resolve their conflicts" hint="Asks the bot to rebase. Trusted bots only." control={<Toggle on={false} />} />
-        <SettingsRow label="Fix them with AI" hint="When CI fails, AI fixes the branch and pushes." control={<Toggle on={false} />} />
+        <SettingsRow label="Resolve their conflicts" hint="Asks the bot to rebase. Trusted bots only." control={<Toggle on />} />
+        <SettingsRow label="Fix them with AI" hint="When CI fails, AI fixes the branch and pushes." control={<Toggle on />} />
       </Illustration>
       <Steps>
         <li>
@@ -37,8 +37,9 @@ export default function Page(): JSX.Element {
           workspace you have selected.
         </li>
         <li>
-          Switch on the actions you want: <Ui>Merge them automatically</Ui>, <Ui>Approve them automatically</Ui>,{' '}
-          <Ui>Resolve their conflicts</Ui> and, while AI is on, <Ui>Fix them with AI</Ui>.
+          Switch off any action you don&rsquo;t want: <Ui>Merge them automatically</Ui>,{' '}
+          <Ui>Approve them automatically</Ui>, <Ui>Resolve their conflicts</Ui> and, while AI is on,{' '}
+          <Ui>Fix them with AI</Ui>. All four start on.
         </li>
         <li>
           Under <Ui>Which updates</Ui>, choose <Ui>Patch updates only</Ui>, <Ui>Patch and minor updates</Ui> or{' '}
@@ -48,8 +49,9 @@ export default function Page(): JSX.Element {
           Under <Ui>Ecosystems</Ui>, keep <Ui>All ecosystems</Ui> or choose <Ui>Only these</Ui> and tick them.
         </li>
         <li>
-          Under <Ui>Trusted bots</Ui>, tick the bots Limn may approve, resolve and fix for. Merging does not need a
-          trusted bot; the other three do nothing until you trust one.
+          Under <Ui>Trusted bots</Ui>, tick the bots Limn may approve, resolve and fix for. Dependabot and Renovate are
+          ticked until you untick them; any other bot does nothing until you tick it. Merging does not need a trusted
+          bot.
         </li>
         <li>
           Press <Ui>Save</Ui>.
@@ -106,7 +108,7 @@ export default function Page(): JSX.Element {
       <Note title="Teams with more than one Limn">
         When a teammate also runs Limn, each action first puts a <code>limn/deps</code> status on the commit, such as
         “alex handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already
-        did. This is always on.
+        did. If their Limn stops partway, its status is cleared or runs out and yours takes over. This is always on.
       </Note>
 
       <H2 id="why-it-helps">Why it helps</H2>

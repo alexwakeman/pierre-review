@@ -94,8 +94,9 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        The only pushes without a press are the ones you switch on: <Ui>Push automatically</Ui> for an auto fix on your
-        own pull request, and dependency automation for a trusted bot&rsquo;s pull request. Both are off by default.
+        The only pushes without a press are these: <Ui>Push automatically</Ui> for an auto fix on your own pull
+        request (off by default), and dependency automation for a trusted bot&rsquo;s pull request (on by default for
+        Dependabot and Renovate; switch it off in <Ui>Settings → Dependencies</Ui>).
       </p>
       <Warning>
         On Linux with Docker, the sandbox shares your computer&rsquo;s kernel. On a Mac or on Windows, the container

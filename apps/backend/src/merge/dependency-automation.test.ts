@@ -1,7 +1,8 @@
 // Dependency automation (merge/dependency-automation.ts) on a THROWAWAY sqlite DB, GitHub stubbed.
 //
-// Pinned: every switch is OFF by default and per workspace; trust is the STORED bot row's mark and
-// only a dependency bot can carry it; approval needs a trusted author, green CI and a policy that
+// Pinned: every switch is ON by default (a NULL reads ON; off is stored as false) and per workspace;
+// trust is the STORED bot row's mark and only a dependency bot can carry it — untouched, it trusts
+// dependabot[bot] and renovate[bot] and no other bot, and an untick (stored false) wins; approval needs a trusted author, green CI and a policy that
 // admits the update, is pinned to the head, happens ONCE per head and is never retried after a
 // failure; a conflict first asks Dependabot to rebase, once; a person's cancel stops everything.
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -46,6 +47,7 @@ const A = 1;
 let viewerId = 0;
 let botId = 0;
 let renovateId = 0;
+let otherBotId = 0;
 let personId = 0;
 let wsId = 0;
 let botPr = 0;
@@ -82,6 +84,7 @@ beforeAll(async () => {
   viewerId = await user('me', false);
   botId = await user('dependabot[bot]', true);
   renovateId = await user('renovate[bot]', true);
+  otherBotId = await user('pyup-bot', true);
   personId = await user('alice', false);
   const [repo] = await db
     .insert(repos)
@@ -129,7 +132,12 @@ beforeAll(async () => {
   });
   await db
     .insert(workspaceReviewers)
-    .values([row(botId, 'dependency', 'dependabot'), row(renovateId, 'dependency', 'renovate'), row(personId, 'human', null)])
+    .values([
+      row(botId, 'dependency', 'dependabot'),
+      row(renovateId, 'dependency', 'renovate'),
+      row(otherBotId, 'dependency', null),
+      row(personId, 'human', null),
+    ])
     .execute();
 });
 
@@ -178,18 +186,24 @@ beforeEach(async () => {
 });
 
 describe('the panel', () => {
-  it('is OFF by default, lists only dependency bots, and 404s a foreign workspace', async () => {
+  it('is ON by default (NULL reads ON), lists only dependency bots, and 404s a foreign workspace', async () => {
+    const ws = schema.workspaces;
+    const nulls = { dependencyAutoMerge: null, dependencyAutoApprove: null, dependencyAutoResolve: null, dependencyAutoFix: null };
+    await db.update(ws).set(nulls).where(eq(ws.id, wsId)).execute();
+    await db.update(schema.workspaceReviewers).set({ dependencyTrusted: null }).execute();
     const got = await auto.getDependencyAutomation(A, wsId);
     expect(got.settings).toEqual({
-      autoMerge: false,
-      autoApprove: false,
-      autoResolveConflicts: false,
-      autoFix: false,
+      autoMerge: true,
+      autoApprove: true,
+      autoResolveConflicts: true,
+      autoFix: true,
       policy: { maxLevel: 'major', securityOnly: false, ecosystems: null },
     });
+    // Untouched trust: dependabot[bot] and renovate[bot] are trusted; any other bot is not.
     expect(got.bots.map((b: any) => [b.login, b.trusted, b.canRebase])).toEqual([
-      ['dependabot[bot]', false, true],
-      ['renovate[bot]', false, true],
+      ['dependabot[bot]', true, true],
+      ['pyup-bot', false, false],
+      ['renovate[bot]', true, true],
     ]);
     expect(await auto.getDependencyAutomation(A, 99_999)).toBeNull();
     expect(await auto.setDependencyAutomation(A, 99_999, { autoApprove: true })).toBe(false);
@@ -208,6 +222,63 @@ describe('the panel', () => {
       securityOnly: false,
       ecosystems: ['javascript', 'python'],
     });
+  });
+});
+
+describe('explicit off and explicit untrust', () => {
+  it('⚠ OFF is stored as false — never NULL, which would read ON', async () => {
+    const ws = schema.workspaces;
+    await auto.setDependencyAutomation(A, wsId, { autoMerge: false, autoApprove: false, autoResolveConflicts: false, autoFix: false });
+    const [row] = await db.select().from(ws).where(eq(ws.id, wsId)).execute();
+    expect([row.dependencyAutoMerge, row.dependencyAutoApprove, row.dependencyAutoResolve, row.dependencyAutoFix]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    const got = await auto.getDependencyAutomation(A, wsId);
+    expect([got.settings.autoMerge, got.settings.autoApprove, got.settings.autoResolveConflicts, got.settings.autoFix]).toEqual([
+      false,
+      false,
+      false,
+      false,
+    ]);
+    await auto.setDependencyAutomation(A, wsId, { autoApprove: true });
+    expect((await db.select().from(ws).where(eq(ws.id, wsId)).execute())[0].dependencyAutoApprove).toBe(true);
+  });
+
+  it('an untick of a default-trusted bot is stored as false and wins; other bots need trusting by hand', async () => {
+    const wr = schema.workspaceReviewers;
+    await db.update(wr).set({ dependencyTrusted: null }).execute();
+    // Trusting renovate[bot] only: dependabot[bot] is unticked — an explicit false.
+    await auto.setDependencyAutomation(A, wsId, { trustedBotIds: [renovateId] });
+    const rows = await db.select().from(wr).execute();
+    const of = (id: number) => rows.find((r: any) => r.authorUserId === id).dependencyTrusted;
+    expect(of(botId)).toBe(false);
+    expect(of(renovateId)).toBeNull(); // already trusted by default: nothing written
+    expect(of(otherBotId)).toBeNull(); // untrusted by default: nothing written
+    const bots = (await auto.getDependencyAutomation(A, wsId)).bots;
+    expect(bots.map((b: any) => [b.login, b.trusted])).toEqual([
+      ['dependabot[bot]', false],
+      ['pyup-bot', false],
+      ['renovate[bot]', true],
+    ]);
+    // The untick holds against the default on every read, and the tick honours it: no approval.
+    await auto.setDependencyAutomation(A, wsId, { autoApprove: true });
+    await auto.runDependencyAutomationTick(log);
+    expect(gh.submitPrReview).not.toHaveBeenCalled();
+    // Trusting the other bot by hand works.
+    await auto.setDependencyAutomation(A, wsId, { trustedBotIds: [otherBotId] });
+    const after = (await auto.getDependencyAutomation(A, wsId)).bots;
+    expect(after.find((b: any) => b.userId === otherBotId).trusted).toBe(true);
+    expect(after.find((b: any) => b.userId === renovateId).trusted).toBe(false);
+  });
+
+  it('a default-trusted bot (untouched) is approved without any trust mark', async () => {
+    await db.update(schema.workspaceReviewers).set({ dependencyTrusted: null }).execute();
+    await auto.setDependencyAutomation(A, wsId, { autoApprove: true });
+    await auto.runDependencyAutomationTick(log);
+    expect(gh.submitPrReview).toHaveBeenCalledTimes(1);
   });
 });
 

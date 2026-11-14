@@ -3288,8 +3288,13 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 - **DEPENDENCY WORK HAS ITS OWN LINE** (2026-11-03): `limn/deps`, posted before every dependency
   automation action (approve, rebase ask, AI conflict run, AI fix, arming a merge) under the SAME
   workspace switch; its own fold (`merge/deps-claim.ts` `decideDepsClaim`: a 30-minute TTL, a
-  teammate's finished action holds its family only, no ledger). docs/MERGE-CI-TRUNK.md § Dependency
-  automation → Team claims for dependency work.
+  teammate's finished action holds its family only, an armed merge on a renewed 2-hour lease). Since
+  2026-11-14 it follows THIS section's rules too: its own ledger (`deps_claim_lines`) written before
+  every line, a reconciler at boot and after every auto-merge tick (`merge/deps-claim-release.ts`:
+  leftover pending lines released, failed final lines and AI-pushed lines retried, an armed line renewed
+  and released when its intent ends unlanded), and a teammate's expired claim released once ("Cleared
+  by alex: robin's claim expired"). docs/MERGE-CI-TRUNK.md § Dependency automation → Team claims for
+  dependency work.
 - ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
   My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge

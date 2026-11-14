@@ -993,7 +993,7 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   ⚠ ALWAYS GitHub's merge-in update, never the local clone rebase — a force-push onto a Dependabot /
   Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
   ONE card in the toast cluster; the SPA refetches through `invalidateAfterPrWrite`.
-- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF, Settings →
+- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, NULL = ON since migration 0193, off = an explicit false, Settings →
   Dependencies; a draft + Save like every other section — ticking the box writes nothing). The
   panel's POLICY (§ Dependency automation, below) gates it like the other two switches.
   `runDependencyPolicyTick` runs on the watcher's cron just before it
@@ -1040,7 +1040,10 @@ probe stamped.
 ### Dependency automation (`merge/dependency-automation.ts` + pure `merge/dependency-rules.ts`, CORE)
 
 **Settings → Dependencies** (`DependencyAutomationSection`, its own tab; it used to be one checkbox
-under Bots) holds, per workspace and EVERY ONE OFF BY DEFAULT: merge (above), **approve**,
+under Bots) holds, per workspace and ⚠ EVERY ONE ON BY DEFAULT (owner's decision 2026-11-14, migration
+0193: the existing NULLs were set to 1 — including workspaces whose NULL meant "switched off" — and from
+then on NULL reads ON (`dependencySwitchOn`, `!== false`; the merge sweep's roster reads `IS NULL OR = 1`)
+and OFF is stored as an explicit false by the two writers): merge (above), **approve**,
 **resolve conflicts** and **fix with AI** (2026-11-03, `workspaces.dependency_auto_fix`, migration
 0162; shown only where agentic AI runs — and, stored on while the AI is off, it does NOTHING: it
 counts toward the conflict steps only while the AI can run), plus ONE **policy** that gates all four, plus the **trusted
@@ -1060,11 +1063,17 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   facts first; ONE live `GET /pulls/{n}` (`fetchPrForAutomation`) when only the size is missing,
   remembered per (PR, head) so a refused PR is not re-read every tick.
 - **TRUST** (`isTrustedDependencyBot`): approval, conflict resolution and the AI fix act ONLY on PRs whose
-  author's STORED `workspace_reviewers` row says `automated`, role `dependency`, and
-  `dependency_trusted` — the reader's mark in the panel's "Trusted bots" list (which lists exactly
-  those stored dependency rows). ⚠ Never a login guess over the stored judgement — a person can open
-  a fork PR under a bot-like login; a fork is refused anyway (live check). The merge switch keeps
-  its own wider classifier (`authorAutomationFor`), unchanged.
+  author's STORED `workspace_reviewers` row says `automated`, role `dependency`, and whose
+  `dependency_trusted` mark RESOLVES to trusted (`dependencyTrustedOf`, 2026-11-14): true = trusted,
+  false = the reader's untick (stored explicitly by `setDependencyAutomation`, so it WINS over the
+  default), NULL (untouched) = trusted ONLY for `DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS` —
+  `dependabot[bot]` and `renovate[bot]`, exact logins, case-insensitive: GitHub App identities, the
+  `[bot]` suffix is reserved, so nobody can open a PR under them. Every other bot is trusted by hand in
+  the panel's "Trusted bots" list (which lists exactly those stored dependency rows and shows the
+  resolved mark). ⚠ Never a guess from a login that LOOKS like a bot — a person can open a fork PR under
+  a bot-like login; a fork is refused anyway (live check). The limn-bots repair's `dependency_trusted IS
+  NULL` "untouched" test stays right: an untick is 0, not NULL. The merge switch keeps its own wider
+  classifier (`authorAutomationFor`), unchanged.
 - **APPROVE**: an open, non-draft, same-repo PR of a trusted bot, synced `ci_status = success`
   (GREEN, not merely not red — so a repo with no CI is never auto-approved), review decision not
   already `approved`, write access, policy admits it. The live re-read must show the SYNCED head; the
@@ -1151,7 +1160,7 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   claim" (nothing written). AI runs re-post the pending line every 10 min.
   - **THE FOLD** (`decideDepsClaim`, pure, `deps-claim.test.ts`): a teammate's PENDING line younger than
     **30 min** (`DEPS_CLAIM_TTL_MS`, from their NEWEST line) holds the head for EVERY action ("Robin is
-    handling this"); older is stale — a crashed Limn's line frees itself, no reconciler. A teammate's
+    handling this"); older is stale (and released by the reconciler, below). A teammate's
     SUCCESS line (done OR failed: their attempt is theirs) holds only the SAME FAMILY — approve ·
     conflicts (rebase + AI resolve) · CI fix · merge — so Robin's approval never stops Alex's Limn
     arming the merge; a line whose family can't be read holds every family. Free lines ("Cleared
@@ -1161,15 +1170,60 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     login ("approver-x armed the merge" is a merge). A race goes to the pending run that STARTED
     first; the loser posts "Cleared by alex: robin is handling this". A new head has no lines.
     ⚠ Two of ONE login's machines that both hold a LIVE pending line both fold to `mine` (lines carry
-    no install identity) — not yet guarded.
+    no install identity) — not yet guarded (docs/TEAM-REVIEW.md § 13 gap 16).
+    Per poster only their NEWEST finished line of an ACTION counts (`seenAction`: a re-posted armed line,
+    a rebase ask re-posted as open), so an older line of the same action never holds.
+  - ⚠ **AN ARMED MERGE HOLDS ON A LEASE** (gap c, 2026-11-14): "alex armed the merge · lands when checks
+    pass" holds the merge family only for `DEPS_ARMED_LEASE_MS` (2 h) from alex's NEWEST armed line; the
+    arming machine's reconciler RE-POSTS it every `DEPS_ARMED_RENEW_MS` (45 min, ~32 a day — GitHub keeps
+    ≤ 1,000 statuses per commit and context) while ITS intent is `armed` on that head, and when the intent
+    ends unlanded (expired, failed, `disarmed_*`, retargeted, gone, re-armed on another head) posts
+    "Cleared by alex: merge not armed any more · free to claim" (`armedReleaseLine`), which frees alex's
+    earlier armed lines in every fold at once. A landed intent (`merged`) is closed with nothing posted.
+    A machine that went away stops renewing: the lease runs out and a teammate arms. (An older Limn's
+    un-renewed armed line expires the same way.)
+  - ⚠ **A REBASE ASK THAT CANNOT GO ON TO AI** (gap d): the asker posts "alex asked the bot to rebase · AI
+    step open to teammates" (`rebaseOpenLine`) instead of the plain done line when, at the ask, this
+    machine can't run the AI step (`aiBlocked` — AI not bound, the cap, a fix running — or
+    `aiStepPossibleHere`: no container runtime, over budget); or RE-POSTS it once
+    (`openConflictsToTeammates`, DB first: its own `rebase_request` ledger row, `finished`, not yet open)
+    when the AI step comes and this machine can't take it (the same reasons, a busy sandbox, a start
+    that did not happen). That line holds ONLY the rebase ask (`onlyAction: 'rebase_request'`, remembered
+    under its action, `depsHeldNow(…, action)`); the AI step is free. On the teammate's machine the
+    tick counts a teammate's FINISHED rebase ask (its `skipped` row, `teammate_handled`) as the ask in
+    `conflictStep`, so it never asks the bot again, waits `REBASE_WAIT_MS` from it, then runs the AI step.
+    The plain ask still holds the whole conflicts family (the asker will run the AI step).
   - **AI-PUSHED HEADS** (`markAiPushedHead`): an AI run that pushed a commit posts "alex's AI pushed
-    this commit · merged only once CI is green" ON THAT COMMIT. Every machine's merge sweep folds it to
+    this commit · merged only once CI is green" ON THAT COMMIT — ledgered first (an `ai_pushed` row whose
+    `head_sha` is the pushed commit), so a write GitHub did not take is RETRIED by the reconciler (gap h). Every machine's merge sweep folds it to
     `awaiting_ci` until the head's synced CI is `success` (re-checked every 5 min, no skip row), so a
     teammate's AI-written head is never armed while its CI runs. It holds nothing else.
   - **HOLDS BEFORE READS**: the tick and the merge sweep check the remembered hold for the action's
     family (`depsHeldNow`) BEFORE any live PR / CI read and before spending the per-tick budget.
-  - **ORDER**: read lines → hold ⇒ a `skipped` row and stop; else the DB claim (compare-and-set) → our
-    pending line → re-read (lost ⇒ the row becomes the teammate's skip) → act → the final line.
+  - **ORDER**: read lines → hold ⇒ a `skipped` row and stop; else the DB claim (compare-and-set) → the
+    LEDGER intent → our pending line → re-read (lost ⇒ the row becomes the teammate's skip) → act → the
+    final line.
+  - **THE LEDGER AND ITS RECONCILER** (gap a + b, 2026-11-14; `deps_claim_lines`, migration 0193;
+    `merge/deps-claim-ledger.ts`, `merge/deps-claim-release.ts`; the review claims' rules, docs/CLAUDE-REVIEW.md
+    § Team claims → Releasing stale lines): every line is written to the ledger ('claiming') BEFORE it is
+    posted and moved on after every write ('pending' → 'finished' / 'released', an armed merge 'armed').
+    A line GitHub did not take is kept as `final_description`. `releaseStaleDepsClaims` runs at boot
+    (after `reconcileDependencyActionsOnStartup`) and LAST in every auto-merge cron chain (after the
+    watcher, so it sees every intent that just ended). For each OPEN own row no claim of this process
+    holds (`depsClaimLive`: the row, or any live handle at that head — an AI run in flight): a
+    'claiming' / 'pending' row posts ONLY when the head's NEWEST line is still our pending one — the
+    kept final line (or stand-down), else "Cleared by alex: didn't finish · free to claim"; a newer line
+    by someone else, one of ours settled, or no line ⇒ closed, nothing posted. 'armed' rows renew /
+    release (above); 'ai_pushed' rows post unless one of ours is on the commit. Failures back off 1, 2,
+    4, 8 min, ≤ `DEPS_RELEASE_MAX_ATTEMPTS` (5); 403/404 ⇒ closed; a rate limit stops the pass. ⚠ Only
+    status lines are retried — never the action itself.
+    TEAMMATES' EXPIRED LINES: a `skipped` row with `teammate_handled` false (the DURABLE record of a
+    teammate's pending claim — it survives a restart) on the PR's CURRENT head, whose remembered lease
+    has ended: if the head's newest line is still that teammate's pending claim past the TTL
+    (`staleTeammateDepsLine`), post "Cleared by alex: robin's claim expired" (`releasedLine`) ONCE,
+    recorded as a 'teammate' row posted or not. Settled or live ⇒ nothing, re-read after 30 min / the
+    lease. A Limn that claims the head itself needs none of this (its claim takes the skip row over).
+    The delete paths keep this machine's OPEN rows (claiming / pending / armed); the erasure deletes all.
   - ⚠ **A SKIP IS NOT A FAILURE**: `state 'skipped'` + `teammate_login` / `teammate_handled` (migration
     0162), written once per (PR, head, action) and refreshed only when the holder changes; it is no
     attempt — never counted by the cap or the conflict steps, and a later claim TAKES THE ROW OVER. The
@@ -1417,12 +1471,13 @@ shorter form of each rule; this is the full wording.
 
 ### Dependency auto-merge
 
-- **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a policy intent merges
+- **Dependency auto-merge** (`merge/dependency-policy.ts`): ON by default (NULL = on, off stored false); a policy intent merges
   like a click; a person's cancel is never overridden; red CI backs off after ONE live-proven
   failure (`checks_failed`).
 - **Dependency automation** (`merge/dependency-automation.ts`, Settings → Dependencies): approve +
-  resolve conflicts + fix with AI, OFF by default, TRUSTED bots only (the stored row's mark); one
-  policy gates every switch; claim before write (DB + the `limn/deps` team line), never retried; ≤ 2
+  resolve conflicts + fix with AI, ON by default, TRUSTED bots only (the stored mark; untouched =
+  dependabot[bot] / renovate[bot]); one policy gates every switch; claim before write (DB + the
+  ledgered `limn/deps` team line, reconciled), never retried; ≤ 2
   AI runs per PR per 24 h; an AI-pushed head must be green again; "Merged" is logged only on a landing.
 
 ### Auto-merge

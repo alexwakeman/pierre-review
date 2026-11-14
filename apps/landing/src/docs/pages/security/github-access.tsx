@@ -58,8 +58,12 @@ export default function Page(): JSX.Element {
           branch; pushing an AI Fix, a resolved conflict or an Implement branch.
         </li>
         <li>
-          <b>Only if you switch it on:</b> posting auto reviews, auto merge (&ldquo;merge when ready&rdquo;), dependency
-          automation, pushing auto fixes, and resolving Limn&rsquo;s own threads once fixed.
+          <b>Only if you switch it on:</b> posting auto reviews, auto merge (&ldquo;merge when ready&rdquo;), pushing
+          auto fixes, and resolving Limn&rsquo;s own threads once fixed.
+        </li>
+        <li>
+          <b>Unless you switch it off:</b> dependency automation for Dependabot and Renovate pull requests (merge,
+          approve, ask to rebase, AI fixes). See <DocLink to="settings/dependencies">Dependencies settings</DocLink>.
         </li>
       </ul>
       <p>

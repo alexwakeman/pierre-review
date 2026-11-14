@@ -252,6 +252,19 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   lines still need releasing, from the row's own `owner`/`name`; `db/team-claim-lines-delete.ts`), the
   erasure takes all; in `accountScopedTables()`. The reconciler reads only rows with `releaseAttempts`
   under the cap.
+- **THE DEPENDENCY CLAIM LEDGER** (`depsClaimLines`, `deps_claim_lines`, migration `0193`;
+  docs/MERGE-CI-TRUNK.md § Team claims for dependency work → The ledger and its reconciler): the same
+  contract for the `limn/deps` lines — `(accountId, prId, repoId, owner, name, headSha, action
+  ∈ approve|rebase_request|ai_resolve|ai_fix|arm_merge|ai_pushed (+ 'release' on a teammate row), whose,
+  state 'claiming'|'pending'|'armed'|'finished'|'released', login, lastDescription, finalDescription,
+  lastPostedAt, releaseAttempts, lastError, createdAt, updatedAt)`. ⚠ Written 'claiming' BEFORE the line
+  is posted (`recordDepsClaimIntent`, which supersedes our older open row of the same PR, head and
+  action). 'armed' = an armed merge's line, renewed (`lastPostedAt`) and released by the reconciler
+  (`merge/deps-claim-release.ts`); an 'ai_pushed' row's `headSha` is the PUSHED commit.
+  `finalDescription` = a line GitHub did not take, posted by the reconciler. `lastDescription` = the last
+  line posted (it says whether a rebase ask is already "open to teammates"). No unique index (no upsert).
+  No FK on `pr_id`: both delete paths keep this machine's OPEN rows ('claiming' / 'pending' / 'armed'),
+  the erasure takes all; in `accountScopedTables()`.
 - **AUTO-POSTING columns** (migration `0087`, all nullable, no defaults, no new table —
   docs/CLAUDE-REVIEW.md § Auto-posting): `workspaces.autoPostEnabled` (⚠ since 2026-11-04 NULL reads
   ON, only a stored false is off — no migration; before, NULL/false = off) + `workspaces.autoPostSettings`
@@ -295,7 +308,8 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `(accountId, prId)` whose auto-merge intent a PERSON cancelled; the dependency setting never
   re-arms it. Composite FK `amps_pr_account_fk (pr_id, account_id) → pull_requests`. Joins both
   delete paths, `eraseAccountData` and `accountScopedTables()`. `workspaces.dependency_auto_merge`
-  (same migration) is the setting itself — NULL/false = OFF, the one writer
+  (same migration) is the setting itself — ⚠ since migration 0193 NULL = ON and OFF = an explicit false
+  (the migration set every NULL to 1, the owner's decision); the one writer
   `setDependencyAutoMerge` (merge/dependency-policy.ts).
 - **`dependencyAutomationActions`** (`dependency_automation_actions`, 0147, 0162) — one row per
   (account, PR, head, action ∈ approve / rebase_request / ai_resolve / ai_fix / arm_merge /
@@ -310,9 +324,11 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   marks leftover `running` rows failed. Composite FK to `pull_requests(id, account_id)`; both delete
   paths, `eraseAccountData`, `accountScopedTables()`. Also the "What automation did" log. Siblings:
   `workspaces.dependency_auto_approve` / `_auto_resolve` / `_auto_fix` (0162) / `_max_level` / `_security_only` /
-  `_ecosystems` (NULL = off / `major` / every update / every ecosystem) and
-  `workspace_reviewers.dependency_trusted` — the reader's trust mark on a DEPENDENCY bot, written
-  only by `setDependencyAutomation` (like the price: no derived writer names it).
+  `_ecosystems` (NULL = ⚠ ON since 0193, off is an explicit false (`dependencySwitchOn`) / `major` / every
+  update / every ecosystem) and `workspace_reviewers.dependency_trusted` — the reader's trust mark on a
+  DEPENDENCY bot, written only by `setDependencyAutomation` (like the price: no derived writer names it):
+  true / false (an untick, stored so it wins) / NULL = untouched, RESOLVED on read by `dependencyTrustedOf`
+  — trusted for `dependabot[bot]` and `renovate[bot]` only (`DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS`).
 - **`branchCommits`** — the recent commits on each repo's DEFAULT branch (`accountId`
   denormalized; unique `(accountId, repoId, sha)`; trimmed to `BRANCH_COMMIT_WINDOW`=100 per
   repo in the same transaction as the upsert. COUNT bound only — a writer-side age bound was

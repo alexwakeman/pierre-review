@@ -76,7 +76,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>Let Limn do it.</b> Settings can merge, approve, resolve threads on, or AI-fix dependency updates by
-          themselves, for the bots you trust. All of it is off until you switch it on. What it did is listed on
+          themselves, for the bots you trust. All of it is on until you switch it off. What it did is listed on
           this tab. See <DocLink to="merging/dependency-automation">Dependency automation</DocLink> and{' '}
           <DocLink to="settings/dependencies">Settings → Dependencies</DocLink>.
         </li>

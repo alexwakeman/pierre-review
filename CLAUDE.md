@@ -350,9 +350,9 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   re-check at LAND time. ⚠ **`behindBy > 0` is normal** — only `mergeStateStatus === 'behind'`
   blocks. Every arm goes through `armIntentLive`. Queue repos: freshen BEFORE the first enqueue,
   never while queued.
-- **Dependency automation** (Settings → Dependencies): all OFF; ONE policy gates merge, approve,
-  resolve, AI fix; the last three only for a TRUSTED bot. ⚠ Claim before write, never retry; a
-  person's cancel wins; no container runtime ⇒ ONE skip row, never a claim (the rest: the doc).
+- **Dependency automation** (Settings → Dependencies): all ON (off: a stored false); ONE policy;
+  approve/resolve/AI fix need a TRUSTED bot (default: Dependabot, Renovate). ⚠ Claim before write,
+  never retry; `limn/deps` ledgered like review claims; a cancel wins; no runtime ⇒ ONE skip row.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
 - **Conflicts: TWO ways** — by hand in the resolver (`src/conflict/`, `components/conflicts/`; the doc's

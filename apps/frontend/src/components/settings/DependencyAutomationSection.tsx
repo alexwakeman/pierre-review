@@ -17,7 +17,8 @@ import { CheckInput, RadioInput, SaveButton, SectionShell } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 // SETTINGS → DEPENDENCIES (CORE, free). Everything the server does to dependency updates in THIS
-// workspace, every switch OFF by default (docs/MERGE-CI-TRUNK.md § Dependency automation):
+// workspace, every switch ON by default since 2026-11-14 (off is stored; docs/MERGE-CI-TRUNK.md §
+// Dependency automation):
 //   • merge them once their required checks pass (`dependency_auto_merge`, the older switch);
 //   • approve them once CI passes — trusted bots only;
 //   • resolve their conflicts — ask the bot to rebase, then (where AI runs) an AI run — trusted bots
@@ -25,7 +26,8 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 //   • fix them with AI — an unattended AI Fix pushed to the bot's branch when CI fails, and the same
 //     conflict steps — trusted bots only, where AI runs (hidden otherwise);
 //   • ONE policy over all three: the largest update, security fixes only, which ecosystems;
-//   • which of the workspace's dependency bots the reader TRUSTS (a mark on the bot's row).
+//   • which of the workspace's dependency bots the reader TRUSTS (a mark on the bot's row; untouched,
+//     dependabot[bot] and renovate[bot] are trusted and no other bot — the server resolves it).
 //
 // ⚠ DRAFT + SAVE, like every other section in this modal — toggling a box writes NOTHING. A switch
 // that approves or merges on the reader's behalf is the last one that should fire on a stray click.
@@ -182,6 +184,7 @@ export function DependencyAutomationSection(): JSX.Element {
           <p className="mt-2">
             When a teammate also runs Limn, each action first puts a “limn/deps” status on the commit, such as “alex
             handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already did.
+            If their Limn stops, its status is cleared or runs out, and yours takes over.
           </p>
           <p className="mt-2">
             Update size is read from the version numbers in the pull request. When Limn can’t read it, only “All updates”
@@ -295,6 +298,9 @@ export function DependencyAutomationSection(): JSX.Element {
               </span>
             </label>
           ))
+        )}
+        {data.bots.length > 0 && (
+          <p className="text-meta text-ui-mute">Dependabot and Renovate are trusted until you untick them.</p>
         )}
         {trustedNeeded && draft.trusted.length === 0 && data.bots.length > 0 && (
           <p className="text-meta text-ui-mute">Approving, resolving and fixing do nothing until you trust a bot.</p>

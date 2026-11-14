@@ -92,8 +92,9 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Can the AI push code by itself?</H3>
       <p>
-        Only if you switch on <code>Push automatically</code> for auto fixes on your own pull requests, or dependency
-        automation for bots you trust. Both are off by default. Otherwise you press Push.
+        Two cases. <code>Push automatically</code> for auto fixes on your own pull requests, off by default. And
+        dependency automation for bots you trust, on by default for Dependabot and Renovate; switch it off in
+        Settings → Dependencies. Otherwise you press Push.
       </p>
       <H3>Will automatic reviews use up my plan?</H3>
       <p>

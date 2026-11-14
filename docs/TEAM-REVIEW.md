@@ -3,9 +3,10 @@
 **Status:** the design reference for every multi-user behaviour. A shareable copy with drawn
 diagrams lives in Claude Docs ("Limn on a team: how shared reviews work"); this file is the source. Checked against the code on
 2026-11-05 (Limn 1.0.5); § 4 "A teammate's verdict" and § 3's catch-up on 2026-11-10; claims, resolving
-Limn's threads and lifting a teammate's block made always on (no settings) on 2026-11-10. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
+Limn's threads and lifting a teammate's block made always on (no settings) on 2026-11-10; dependency
+claims (§ 3 Dependency updates) on 2026-11-14. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
-updates this file in the same commit. Engineering detail (names, tables, markers) lives in
+updates this file in the same commit — so does any change to the dependency automation's claims. Engineering detail (names, tables, markers) lives in
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md); this file says what happens and why, in plain words.
 
 ---
@@ -203,6 +204,39 @@ stateDiagram-v2
 - **Your replies are still judged (2026-11-09).** When you reply on your own Limn's findings after a
   push and Robin's claim makes your Limn skip that commit, your Limn runs a **replies pass** at that
   commit instead (§ 7): the same 5-a-day cap per PR and the same spend budget. Robin keeps the review.
+
+### Dependency updates (2026-11-14)
+
+Settings → Dependencies is **on by default** in every workspace: merge, approve, resolve conflicts and fix
+with AI, for Dependabot and Renovate (trusted by default; any other bot is trusted by hand, and an
+untick wins). So when two people run Limn on the same repos, both would act on the same bot PR. They
+share it the way auto reviews share a commit, with one more status line on the PR's head, `limn/deps`
+(engineering detail: [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Team claims for dependency work).
+
+- **Before every action** (approve, ask the bot to rebase, AI conflict run, AI fix, arm the merge), Limn
+  reads the line, then posts its own: "alex handling · fixing CI". The same race rule as reviews: the
+  claim that started first wins, the other Limn stands down ("Cleared by robin: alex is handling this").
+- **A live claim holds every action for 30 minutes** from its newest line; an AI run re-posts it every 10
+  minutes. **A finished action holds only its own kind**: Robin's approval does not stop your Limn
+  arming the merge, but Robin's AI fix (done or not) stops your Limn trying the same commit again.
+- **An armed merge holds on a lease.** "alex armed the merge" holds the merge for two hours from its
+  newest line, and alex's Limn re-posts it every 45 minutes while the merge is still armed. When alex's
+  intent ends without landing (it expired, failed, was disarmed or retargeted), alex's Limn posts
+  "Cleared by alex: merge not armed any more" and your Limn may arm it. If alex's laptop is closed, the
+  lease runs out and your Limn takes over.
+- **A rebase ask that can't go on to AI.** Asking the bot to rebase normally holds the whole conflict
+  for 30 minutes and then the asker runs the AI step. When the asker's Limn cannot run that step (no AI,
+  no container runtime, over budget, at its limit of two AI runs a day, busy), its line says "· AI step open to
+  teammates", and after the wait your Limn runs it. It never asks the bot a second time.
+- **An AI-written commit merges only once its CI is green**, on every machine: the pushing Limn puts
+  "alex's AI pushed this commit" on the commit it pushed.
+- **Never left pending.** Each line is written to a ledger before it is posted. At start-up and every two
+  minutes Limn finishes what it could not: a final line GitHub refused, a claim a crash left pending
+  ("Cleared by alex: didn't finish · free to claim"), the AI-pushed line. A teammate's claim that
+  expired is cleared once: "Cleared by alex: robin's claim expired". Only status lines are ever retried —
+  never an approval, a rebase ask, an arm or a push.
+- **A skip is not a failure.** Pending → Dependencies' log says "robin is handling this" or "robin handled
+  this". Your cancel of a PR's auto-merge still wins for every switch.
 
 ---
 
@@ -749,6 +783,7 @@ All are per workspace, in Settings → Auto review, except where noted.
 | Resolving Limn's threads once fixed | Always on, no setting | Any PR, automatic runs with posting on. |
 | Resolve my Limn threads when addressed | On | Your own PRs, any run. |
 | Lifting a teammate's Limn "changes requested" | Always on, no setting | Once every point is fixed at the latest commit. A post with no consent is still dismissed when its owner is away and your review approves (§ 5). |
+| Dependency updates: merge, approve, resolve conflicts, fix with AI (Settings → Dependencies) | All on; Dependabot and Renovate trusted | Each action is claimed with a `limn/deps` line first (§ 3 Dependency updates). Off and an untrusted bot are stored as such and win. |
 | Auto AI Fix on your own PRs / Push automatically | Off / Off | Fix after an auto review; push only if allowed. "Merge conflicts with the base branch" (off) lets it merge the base first; a merge Limn's check refuses is never pushed. |
 
 ---
@@ -800,3 +835,4 @@ Confirmed in the code on 2026-11-05. Each is a candidate for the next change; up
 | 11 | A `limn/` status line made a required check in branch protection. | An unfinished line would block merges. Guidance only — Limn does not read branch rules; the claims setting's ⓘ says not to. |
 | 14 | You post a manual review while a teammate's automatic run holds a live claim on that model, so your Limn writes no "reviewed" line; then the teammate's run fails. | Nothing marks the commit as reviewed for that model, so a third teammate's Limn may review it again. |
 | 15 | A finding whose point moved to a new thread (§ 6). | Its jump-to-thread link in the AI Review tab still opens the original thread, not the new one. |
+| 16 | Two of one person's machines both run dependency automation on the same PR at once. | Both read the other's live `limn/deps` claim as their own (lines carry no machine identity), so both may act on that commit. |
