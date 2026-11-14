@@ -519,10 +519,10 @@ Monitoring, Slack.
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
-  RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONLY tracker writes are the
-  reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion), and "Build end
-  to end"'s update + comment (`tracker/*`, `end-to-end.ts`). Customer-typed hosts use `tracker/jira/fetch.ts`. Idents only via
-  `trackerTicketIdent`/`trackerTicketRow`.
+  RECEIVED, never when VIEWED (exceptions: the sprint list read, release Confirm). ⚠ **The ONLY tracker
+  writes are the reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion),
+  "Build end to end"'s update + comment, the release comment (`tracker/*`, `end-to-end.ts`,
+  `releases/`). Customer hosts: `tracker/jira/fetch.ts`. Idents only via `trackerTicketIdent`/`trackerTicketRow`.
 
 ## ML severity/category on bot comments (no LLM)
 
@@ -643,8 +643,6 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
   ([apps/landing/src/docs/CONTRIBUTING.md](apps/landing/src/docs/CONTRIBUTING.md)).
 
 ## Migrations
-
-Read [docs/MIGRATIONS.md](docs/MIGRATIONS.md) before writing ANY migration.
 
 - **The journal is hand-maintained** (`db/migrations/meta/_journal.json`, entries `"version":
   "6"`). An unregistered file **SILENTLY SKIPS** — the boot looks fine and queries fail on a

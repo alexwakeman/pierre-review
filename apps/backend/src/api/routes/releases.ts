@@ -1,10 +1,14 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
+  RELEASE_NOTES_SECTION_MAX,
   RELEASE_SUFFIX_MAX,
   validateReleaseSettings,
+  type CreateReleaseBody,
+  type ReleasePreviewBody,
   type ReleasesResponse,
   type SetReleaseSettingsBody,
 } from '@pierre-review/shared';
+import { ReleaseRequestError, createRelease, getReleaseDetail, previewRelease } from '../../releases/create.js';
 import { getReleases } from '../../db/release-check.js';
 import { getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
@@ -21,6 +25,14 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                              `foldReleaseCheck` over db/release-check.ts's stored
 //                                              inputs), the newest release, whether both suffixes are
 //                                              set. DB only, NEVER a GitHub or tracker call; tier `read`.
+//   POST /api/releases/preview?workspace=<id>  "Create release…" opening: `{repoIds}` → the snapshot,
+//                                              the notes (a model summary per story when AI is on — a
+//                                              reader's click, never refused by the spend gate) and the
+//                                              comment preview. No GitHub or tracker call; tier `ai`.
+//   POST /api/releases?workspace=<id>          Confirm: `{repoIds, snapshot, sections?}` → re-reads the
+//                                              tickets and the tags, then the writes (releases/create.ts).
+//                                              Tracker reads + GitHub writes: tier `search` + `github_write`.
+//   GET  /api/releases/:id                     one stored release (its notes and per-step results).
 //
 // Both are DB only — the workspace-CRUD `read` tier (api/plugins/rate-limit.ts). 404 on a workspace
 // that is not this account's, like every id-addressed workspace route.
@@ -33,10 +45,113 @@ const idParamSchema = {
 
 const suffixSchema = { type: ['string', 'null'], maxLength: RELEASE_SUFFIX_MAX * 4 } as const;
 
+const repoIdsSchema = { type: 'array', minItems: 1, maxItems: 200, items: { type: 'integer' } } as const;
+const snapshotSchema = {
+  type: 'object',
+  required: ['repos', 'tickets'],
+  additionalProperties: false,
+  properties: {
+    repos: {
+      type: 'array',
+      maxItems: 200,
+      items: {
+        type: 'object',
+        required: ['repoId', 'tagName', 'sha'],
+        additionalProperties: false,
+        properties: {
+          repoId: { type: 'integer' },
+          tagName: { type: 'string', minLength: 1, maxLength: 300 },
+          sha: { type: 'string', minLength: 1, maxLength: 64 },
+        },
+      },
+    },
+    tickets: {
+      type: 'array',
+      maxItems: 2000,
+      items: {
+        type: 'object',
+        required: ['ident', 'key'],
+        additionalProperties: false,
+        properties: { ident: { type: 'string', minLength: 1, maxLength: 600 }, key: { type: 'string', minLength: 1, maxLength: 200 } },
+      },
+    },
+  },
+} as const;
+
 export async function releaseRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/releases', async (req): Promise<ReleasesResponse> => {
     const q = req.query as { workspace?: string };
     return getReleases(accountIdOf(req), q.workspace);
+  });
+
+  const refusal = (reply: FastifyReply, err: unknown) => {
+    if (err instanceof ReleaseRequestError) {
+      reply.status(err.status);
+      return { error: err.code, message: err.message };
+    }
+    throw err;
+  };
+
+  app.post(
+    '/api/releases/preview',
+    {
+      schema: {
+        body: { type: 'object', required: ['repoIds'], additionalProperties: false, properties: { repoIds: repoIdsSchema } },
+      },
+    },
+    async (req, reply) => {
+      const q = req.query as { workspace?: string };
+      try {
+        return await previewRelease(accountIdOf(req), q.workspace, req.body as ReleasePreviewBody);
+      } catch (err) {
+        return refusal(reply, err);
+      }
+    },
+  );
+
+  app.post(
+    '/api/releases',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['repoIds', 'snapshot'],
+          additionalProperties: false,
+          properties: {
+            repoIds: repoIdsSchema,
+            snapshot: snapshotSchema,
+            sections: {
+              type: 'array',
+              maxItems: 200,
+              items: {
+                type: 'object',
+                required: ['repoId', 'markdown'],
+                additionalProperties: false,
+                properties: { repoId: { type: 'integer' }, markdown: { type: 'string', maxLength: RELEASE_NOTES_SECTION_MAX } },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const q = req.query as { workspace?: string };
+      try {
+        return await createRelease(accountIdOf(req), q.workspace, req.body as CreateReleaseBody);
+      } catch (err) {
+        return refusal(reply, err);
+      }
+    },
+  );
+
+  app.get('/api/releases/:id', { schema: { params: idParamSchema } }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const detail = await getReleaseDetail(accountIdOf(req), id);
+    if (detail == null) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Release ${id} not found` };
+    }
+    return detail;
   });
 
   app.get('/api/workspaces/:id/release-settings', { schema: { params: idParamSchema } }, async (req, reply) => {

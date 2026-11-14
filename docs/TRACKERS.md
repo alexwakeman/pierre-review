@@ -691,6 +691,29 @@ no list of who may hold it); the routes answer `400 CannotAssign` with that sent
 - Rate tiers: the GET `[search, read]`, the POST `[search, github_write]` (on GitHub Issues it is a GitHub
   write). `verify:isolation` pins the gate and the settle. No worker, no automation, no retry.
 
+## The release comment — A FOURTH TRACKER WRITE, and Confirm's re-read (`releases/create.ts`)
+
+Owner decision 2026-11-14 ([RELEASES.md](RELEASES.md) § Releases tab 5–6). "Create release…" in This
+Sprint → Releases is the reader's press, and it does two tracker things:
+
+- **Confirm's re-read — a deliberate exception to "read when received, never when viewed".** Before
+  anything is written, EVERY ticket the release ships (the dialog's snapshot ∪ what the check ships now)
+  is read again from the tracker through the worker's own path (`syncOnePrNow`, `force: true`, on one of
+  the ticket's PRs, ≤ 4 at once), so the rows the check reads are the tracker's answer at the press. A
+  ticket that does not answer (`fetched === 0`) is a change; any change (a ticket left Done, a moved
+  candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
+  the Releases tab and the dialog's preview read the stored rows (a view still never calls a reader).
+- **The comment** — one per shipped ticket whose repos ALL tagged in this release, through the same
+  `postTicketComment` (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind `statusGate`, under the
+  reader's Jira login). Exactly three lines (shared `releaseCommentWiki`): "Approved for release by <name>
+  on 14 Nov 2026." · the ticket's repos and release tags (`api v2.4.0-rc · web v1.8.2-rc`) · "Release
+  notes: <the GitHub pre-release link>". No product wording; every wiki character is escaped. Jira only:
+  GitHub Issues, Linear and Notion tickets are recorded `skipped` with "comments on <tracker> are not
+  supported yet". ⚠ CLAIMED (`release_ticket_comments.state` `pending → claimed`, compare-and-set)
+  BEFORE the POST, the outcome recorded, NEVER retried; a ticket whose repo failed to tag gets `skipped`
+  ("web was not tagged"). Pressing again posts nothing new (the tags are refused, so no ticket qualifies).
+  Rate tier `[search, github_write]` on `POST /api/releases`.
+
 ## Created and resolved dates (`tracker/dates.ts`, `tracker/dates-backfill.ts`)
 
 Every reader returns the ticket's OWN created / resolved instants on `FetchedTicket`

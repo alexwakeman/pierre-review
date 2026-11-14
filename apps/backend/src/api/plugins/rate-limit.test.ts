@@ -619,6 +619,11 @@ describe('tierFor — GitHub quota spenders', () => {
     // The story view (the ticket tab): DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
     expect(tiers('GET', '/api/releases')).toEqual(['read']);
+    // Releases: one stored release is DB only; the dialog's preview may spend model dollars; Confirm
+    // re-reads the tickets (tracker quota) and writes tags, pre-releases and comments (GitHub writes).
+    expect(tiers('GET', '/api/releases/12')).toEqual(['read']);
+    expect(tiers('POST', '/api/releases/preview')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/releases')).toEqual(['search', 'github_write']);
     expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
     // The story view's status picker — a tracker write: Jira quota on both.
     expect(tiers('GET', '/api/ticket-status/transitions')).toEqual(['search', 'read']);

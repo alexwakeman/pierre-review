@@ -63,3 +63,4 @@ export * from './ai-fix-session.js';
 export * from './auto-fix-queue.js';
 export * from './releases.js';
 export * from './release-check.js';
+export * from './release-write.js';

@@ -488,6 +488,14 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // rows (db/release-check.ts). DB only, never a GitHub or tracker call. `read`, DECIDED; EXACT `===`
   // (the release WRITES will be their own paths with their own tiers).
   if (!mutating && path === '/api/releases') return [TIERS.read];
+  // GET /api/releases/:id — one stored release (its notes and step results). DB only.
+  if (!mutating && /^\/api\/releases\/\d+$/.test(path)) return [TIERS.read];
+  // POST /api/releases/preview — the "Create release…" dialog: a model summary per story when AI is on
+  // (model dollars, the reader's click) → `ai` + `ai_hourly`; no GitHub or tracker call.
+  if (method === 'POST' && path === '/api/releases/preview') return [TIERS.ai, TIERS.aiHourly];
+  // POST /api/releases — Confirm: re-reads every ticket from the tracker (the customer's quota, as every
+  // tracker call → `search`) and writes release tags, pre-releases and tracker comments (`github_write`).
+  if (method === 'POST' && path === '/api/releases') return [TIERS.search, TIERS.githubWrite];
   // A TRACKER WRITE (tracker/status-change.ts): GET /api/ticket-status/transitions (one or two
   // Jira calls, on the picker's open) and POST /api/ticket-status (the transition + its re-read) both
   // spend the customer's Jira quota with the saved token → `search`, as every other tracker call.

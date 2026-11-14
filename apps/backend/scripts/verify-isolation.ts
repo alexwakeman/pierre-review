@@ -5036,6 +5036,31 @@ check(
   check("getReleases(B) lists B's own repo (mutation check)", (ownB.check?.repos ?? []).some((r) => r.repoId === B.repoId));
   const input = await rc.loadReleaseCheckInput(1, homeB, [B.repoId], settings);
   check("loadReleaseCheckInput(A, B's repo id) reads no repo and no PR", input.repos.length === 0 && input.prs.length === 0);
+
+  // A stored release of B (GET /api/releases/:id is id-addressed): A reads nothing.
+  const rcw = await import('../src/releases/create.js');
+  const [relB] = await db
+    .insert(schema.releases)
+    .values({ accountId: 2, workspaceId: homeB, createdAt: new Date(), releaseSuffix: '-rc', state: 'done' })
+    .returning({ id: schema.releases.id })
+    .execute();
+  await db
+    .insert(schema.releaseItems)
+    .values({ accountId: 2, releaseId: relB!.id, repoId: B.repoId, versionTag: 'v1.0.0', sha: 'b'.repeat(40), releaseTagName: 'v1.0.0-rc', updatedAt: new Date() })
+    .execute();
+  check("getReleaseDetail(A, B's release id) reads nothing", (await rcw.getReleaseDetail(1, relB!.id)) == null);
+  check("getReleaseDetail(B, B's release) reads it (mutation check)", (await rcw.getReleaseDetail(2, relB!.id))?.items.length === 1);
+  // A's Confirm naming B's repo releases nothing: the repo is outside A's workspace scope.
+  let refused = false;
+  try {
+    await rcw.createRelease(1, homeB, { repoIds: [B.repoId], snapshot: { repos: [], tickets: [] } });
+  } catch (err) {
+    refused = err instanceof rcw.ReleaseRequestError && err.code === 'NothingToRelease';
+  }
+  check("createRelease(A, B's repo id) is refused before any read or write", refused);
+  await db.delete(schema.releaseItems).where(eq(schema.releaseItems.releaseId, relB!.id)).execute();
+  await db.delete(schema.releases).where(eq(schema.releases.id, relB!.id)).execute();
+
   await rs.setReleaseSettings(1, defaultA, { releaseSuffix: null, hotfixSuffix: null });
   await rs.setReleaseSettings(2, homeB, { releaseSuffix: null, hotfixSuffix: null });
 }

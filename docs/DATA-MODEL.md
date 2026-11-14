@@ -909,7 +909,11 @@ reader/writer `db/release-settings.ts`, validated by shared `validateReleaseSett
   (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
 
 All five carry `account_id`, composite FKs `(…, account_id)` with cascade, sit in `accountScopedTables()`
-and are erased explicitly; `deleteRepo` deletes a repo's tags, ranges and release items.
+and are erased explicitly; `deleteRepo` deletes a repo's tags, ranges and release items. The three
+release tables have ONE writer, `releases/create.ts` (Confirm): rows inserted in one `runTransaction`
+(an item whose tag name an earlier release already holds is `onConflictDoNothing` — that press owns
+it), then each state moved by compare-and-set from `pending` before its network call, never back. A
+`stopped` Confirm writes NO row (the enum value stays unused for now); `comment_id` is not filled yet.
 
 ## `worktree_ledger` — which run a checkout on disk belongs to (CORE; migration `0146`)
 

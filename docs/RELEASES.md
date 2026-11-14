@@ -274,3 +274,45 @@ Notes
   commits (`unmatchedCommits`) and truncated compares are reported per tag but never block; PR numbers
   in a range that are not stored yet are ONE `unsynced_prs` warning per repo.
 
+
+### Slice 3 — creating a release: the writes, the notes, the tracker comment
+
+- **Shared, pure** `packages/shared/src/release-write.ts`: the dialog SNAPSHOT (`releaseSnapshotOf`,
+  `releaseShippedTickets`) and `releaseSnapshotChanges(before, after, {liveShaChanged, unread})` (the
+  sentences that stop Confirm); the NOTES (`releaseNotesInputOf(result, repoIds, summaries)` →
+  `releaseNotesSection` per repo = that repo's pre-release body, `releaseNotesDocument`, `notesText` —
+  markdown escaped, an `@name` put in code so it notifies nobody, `candidatePrIds`); the summary gate
+  `cleanStorySummary` (any `\p{Nd}\p{No}\p{Nl}` numeral or the product's name ⇒ null); the COMMENT
+  (`releaseCommentLines` — exactly the spec's three lines — `releaseCommentWiki`, `jiraWikiPlain`,
+  `releaseDateWords`); `releaseTagMessage`; `releaseStepLines` (the per-step result list) and
+  `releaseFinalState`. Wire types `ReleasePreviewBody/Response`, `CreateReleaseBody/Response`,
+  `ReleaseDetail`, `ReleaseSnapshot`, `RELEASE_NOTES_SECTION_MAX`.
+- **Backend** `apps/backend/src/releases/`: `github.ts` (`releaseGithubFor(token)`: `readTagSha` over
+  `git/ref/tags/<name>` peeled, `createReleaseTag` = `git/tags` + `git/refs` with a 422 read as
+  "exists", `createPrerelease`), `notes.ts` (`storySummaryInputs`, `storySummaries` — ≤ 30 stories, 4 at
+  once, an in-memory 30-min memo; `modelStorySummary` through `cheapComplete`, usage recorded, never
+  gated: a reader's click), `create.ts` (`previewRelease`, `createRelease`, `getReleaseDetail`,
+  `releaseTagStored`, `ReleaseRequestError`, the `ReleaseWriteDeps` seam with `defaultReleaseWriteDeps`).
+- **Confirm** (`createRelease`): tickets re-read through `syncOnePrNow` (`force: true`; documented in
+  TRACKERS.md § The release comment), the check re-run, each snapshot version tag read live; any change
+  ⇒ `{outcome: 'stopped', changes}` and NO row. Then one `runTransaction` inserts the `releases` row and
+  its items (`onConflictDoNothing` on the cross-release tag-name unique: an earlier press owns that
+  name, said as a step); a release tag name GitHub already has is inserted `refused`. Tags, then
+  pre-releases (only on tags that landed), then comments (only for tickets whose repos ALL tagged in this
+  release; Jira only, others `skipped` "not supported yet"), each claimed `pending → claimed` by
+  compare-and-set before the call and never retried. Then the tags step per tagged repo (settle) and a
+  check the release tag is stored at its commit (verify; else "It will show up here shortly").
+- **Routes** (`api/routes/releases.ts`): `POST /api/releases/preview` (tier `ai` + `ai_hourly`),
+  `POST /api/releases` (tier `search` + `github_write`), `GET /api/releases/:id` (tier `read`); client
+  `api.releasePreview`, `api.createRelease`, `api.release`. docs/API.md § Releases.
+- **Tests:** `releases/release-write.test.ts` (acceptance 18/21 change lists, 22 step lines, 32 notes AI
+  off / on, 33 no "Limn", the digit gate, the comment's exact lines), `releases/create.test.ts` on a
+  throwaway DB with fake GitHub / tracker (acceptance 18 at Confirm, 19, 20, 21, 22, 23; an unread
+  ticket and a moved version tag stop Confirm; a claimed-and-failed tag is never written again; another
+  tracker's "not supported yet"; edited notes reach the pre-release; preview AI off / on),
+  `rate-limit.test.ts`, `verify:isolation` (another account's release id reads nothing; Confirm naming
+  another account's repo is refused).
+- **Deferred:** the Releases tab and the dialog UI (the routes and client methods exist), so no user
+  docs or CHANGELOG entry yet; `release_ticket_comments.comment_id` (`postTicketComment` returns no id);
+  a `stopped` release row (nothing is recorded for a stopped Confirm); hotfix. Confirm runs its writes
+  inside the request (a few GitHub calls per repo); a very large release could be slow to answer.

@@ -260,6 +260,11 @@ import type {
   FlowActorView,
   ReleaseSettingsResponse,
   ReleasesResponse,
+  ReleasePreviewBody,
+  ReleasePreviewResponse,
+  CreateReleaseBody,
+  CreateReleaseResponse,
+  ReleaseDetail,
   SetReleaseSettingsBody,
   FlowPointersResponse,
   SandboxComposeFiles,
@@ -652,6 +657,16 @@ export const api = {
     ),
   // This Sprint → Releases: the release check over stored tags, ranges and tickets (DB only).
   releases: (workspaceId: number) => get<ReleasesResponse>(withQuery('/api/releases', workspaceParam(workspaceId))),
+  // "Create release…": the dialog's preview (notes + comment), Confirm (the writes), one stored release.
+  releasePreview: (workspaceId: number, body: ReleasePreviewBody) =>
+    fetch(withQuery('/api/releases/preview', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
+      handle<ReleasePreviewResponse>(r),
+    ),
+  createRelease: (workspaceId: number, body: CreateReleaseBody) =>
+    fetch(withQuery('/api/releases', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
+      handle<CreateReleaseResponse>(r),
+    ),
+  release: (id: number) => get<ReleaseDetail>(`/api/releases/${id}`),
   // Settings → Workspace → Sandbox (docs/SANDBOX.md § The workspace mirror). Registered only while AI
   // is on. ⚠ The PUT body is the WHOLE setting: a field left out goes back to its default.
   sandboxSettings: (id: number) =>
