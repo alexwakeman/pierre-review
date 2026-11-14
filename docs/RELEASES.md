@@ -198,3 +198,43 @@ Notes
 ## Implementation
 
 (Filled in as it lands: modules, tables, routes, tests.)
+
+### Slice 1 — data and sync foundation
+
+- **Settings.** `workspaces.release_suffix` / `hotfix_suffix` (migration `0192`, NULL = not set, no
+  default). Shared `packages/shared/src/releases.ts`: `validateReleaseSuffix`, `validateReleaseSettings`
+  (the ONE validator, route and form), `normaliseReleaseSuffix`, `releaseSettingsConfigured`, `tagKind`
+  (`'release' | 'hotfix' | 'version'` by NAME; a version tag also needs `on_default_branch`),
+  `releaseTagName`, types `ReleaseSettings` / `ReleaseSettingsResponse` / `SetReleaseSettingsBody`.
+  `db/release-settings.ts` (`getReleaseSettings`, `setReleaseSettings`, `workspaceHasReleases`,
+  `getReleaseSettingsResponse`). Routes `GET`/`PUT /api/workspaces/:id/release-settings`
+  (`api/routes/releases.ts`, tier `read`); client `releaseSettings` / `setReleaseSettings`.
+- **`pull_requests.merge_commit_oid`** from `mergeCommit { oid }` in `PR_NODE_FIELDS` (walk and single-PR
+  read); `sync/upsert.ts` `mergeCommitOidToWrite` (null only for a PR GitHub says is not merged).
+- **Tag sync.** `repo_tags` + `repos.tags_signature` / `tags_synced_at`; `github/tag-queries.ts`;
+  `sync/repo-tags.ts` (`syncRepoTags`, `syncRepoTagsSafe`, pure `foldTagRefs`, `tagSignature`,
+  `planTagWrites`, `ancestryTargets`, `ancestryFromCompareStatus`). Newest 100 by `TAG_COMMIT_DATE`, the
+  rest logged as not read. Ancestry: REST compare `tag...head` (`per_page=1`), ≤ 20 per sync.
+- **Ranges.** `repo_tag_ranges` holds each tag's INCREMENT (previous default-branch tag, tag] — suffix-free,
+  so a new baseline or a suffix change needs no recompute; the release check sums increments from the
+  baseline. Same-commit tags (a release tag on its version tag) are empty. `sync/tag-ranges.ts`
+  (`computeTagRanges`, pure `planTagRanges`, `compareTagOrder`, `rangePrNumbersFromAssociated`).
+  Commit → PR: `merge_commit_oid`, then stored PR `commits`, then GraphQL `associatedPullRequests`;
+  PRs merged into the default branch only. The OLDEST tag has no base: method `'history'` = stored PRs
+  merged into the default branch no later than its commit.
+- **Wiring.** `sync/tags-step.ts` `runTagsStep` (after `syncBranchStatus` in `sync-repo.ts`, own
+  non-fatal guard, not for external repos, tag read at most every 15 min from a walk) and
+  `scheduleTagSync` (the settle sweep: `refs(first: 1)` in `github/settle-query.ts`; `observedTagSig`,
+  `tagSyncDue` in `sync/settle-sweep.ts`).
+- **Release tables** (schema only, no writer yet): `releases`, `release_items` (unique
+  `(account, repo, release_tag_name)` across releases), `release_ticket_comments`. All five new tables:
+  composite FKs, `accountScopedTables()`, erased explicitly; `deleteRepo` drops tags/ranges/items;
+  `deleteWorkspace` re-homes releases to Default.
+- **Reads for the next slice:** `db/repo-tags.ts` `getRepoTags(accountId, repoIds)` and
+  `getTagRanges(accountId, repoIds)` (PR numbers resolved to ids; unstored numbers kept).
+- **Tests:** `api/routes/release-settings.test.ts` (acceptance 1–3 at the settings level),
+  `sync/repo-tags.test.ts`, `sync/tag-ranges.test.ts` (acceptance 4 ranges, 13 hotfix PRs excluded).
+- **Deferred:** the release check fold, the Releases tab, the release writes, notes, hotfix; the
+  Settings → Releases form (only the route + client exist); a `merge_commit_oid` backfill for already
+  synced merged PRs (unmatched commits fall back to `associatedPullRequests`); the data export does not
+  include the new tables yet.

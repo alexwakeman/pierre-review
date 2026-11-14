@@ -258,6 +258,8 @@ import type {
   WorkspacePendingMuteUpdate,
   FlowSettings,
   FlowActorView,
+  ReleaseSettingsResponse,
+  SetReleaseSettingsBody,
   FlowPointersResponse,
   SandboxComposeFiles,
   SandboxFolderCheck,
@@ -638,6 +640,14 @@ export const api = {
   setWorkspaceFlowView: (id: number, view: FlowActorView | null) =>
     fetch(`/api/workspaces/${id}/flow-view`, jsonBody('PUT', { view })).then((r) =>
       handle<{ workspace: Workspace }>(r),
+    ),
+  // Settings → Releases (docs/RELEASES.md): the release + hotfix suffixes (null = not set; no default).
+  // ⚠ The PUT body is the WHOLE setting; null or "" clears a suffix. Validate with the shared
+  // `validateReleaseSettings` before sending — the 400 carries the same sentence.
+  releaseSettings: (id: number) => get<ReleaseSettingsResponse>(`/api/workspaces/${id}/release-settings`),
+  setReleaseSettings: (id: number, body: SetReleaseSettingsBody) =>
+    fetch(`/api/workspaces/${id}/release-settings`, jsonBody('PUT', body)).then((r) =>
+      handle<ReleaseSettingsResponse>(r),
     ),
   // Settings → Workspace → Sandbox (docs/SANDBOX.md § The workspace mirror). Registered only while AI
   // is on. ⚠ The PUT body is the WHOLE setting: a field left out goes back to its default.

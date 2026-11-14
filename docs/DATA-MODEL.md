@@ -876,6 +876,41 @@ move). ⚠ READ ONLY THROUGH `db/external-repos.ts` (`externalRepoIds(account, w
   `assignReposToWorkspace` (a move of the home), `rehomeReposToDefault` and `deleteWorkspace` delete the
   target's extra row for the repos they move; `deleteWorkspace` drops the deleted workspace's extra rows.
 
+## Releases — tags, tag ranges, releases (CORE; migration `0192`)
+
+[RELEASES.md](RELEASES.md). New columns: `pull_requests.merge_commit_oid` (the commit a PR landed as —
+GraphQL `mergeCommit { oid }`; cleared only on a positive statement: `sync/upsert.ts`
+`mergeCommitOidToWrite` writes null only for a PR GitHub says is not merged; indexed with
+`(account_id, repo_id)`), `workspaces.release_suffix` / `hotfix_suffix` (NULL = not set, NO default; ONE
+reader/writer `db/release-settings.ts`, validated by shared `validateReleaseSettings`) and
+`repos.tags_signature` / `tags_synced_at` (what the last complete tag read saw; the settle sweep compares).
+
+- **`repo_tags`** — one row per `(account_id, repo_id, name)`: `sha` (the tagged COMMIT, annotated tags
+  peeled one level), `tag_object_oid` (NULL = lightweight), `committed_at` (the order "newest" means),
+  `tagged_at` (the tie-break), `on_default_branch` (NULL = not known; `true` final for the sha, `false`
+  re-asked when `ancestry_head_sha` is no longer the head), `previous_sha` / `moved_at` (a MOVED tag),
+  `first_seen_at` / `last_seen_at`. ONE writer `sync/repo-tags.ts` (insert `onConflictDoNothing` on the
+  unique, then updates by id); reader `db/repo-tags.ts` `getRepoTags`.
+- **`repo_tag_ranges`** — one row per `(account_id, repo_id, tag_name)`: the INCREMENT (base, tag] —
+  `base_tag_name` / `base_sha` (the tag before it on the default branch; NULL for the oldest, `method
+  'history'`), `pr_numbers` (JSON, by NUMBER; resolved to ids within `(account, repo)` on read by
+  `getTagRanges`), `commit_count`, `unmatched_commits`, `truncated`, `moved_from_sha`, `computed_at`.
+  Suffix-free: the release check sums increments from its baseline. ONE writer `sync/tag-ranges.ts`
+  (`onConflictDoUpdate` on the unique, a FRESH `set` object).
+- **`releases`** — one row per "Create release…" press: `workspace_id` (composite FK; `deleteWorkspace`
+  re-homes rows to Default first), `created_by_user_id` / `created_by_login`, `created_at`,
+  `release_suffix` (in force then), `notes_markdown`, `state` (`writing`·`done`·`partial`·`failed`·
+  `stopped`), `finished_at`. Unique `(id, account_id)` is the children's FK parent.
+- **`release_items`** — one row per `(release, repo)`: `version_tag`, `sha`, `release_tag_name`,
+  `notes_markdown` (the pre-release body), `tag_state` (`pending`→`claimed`→`done`|`failed`|`refused`),
+  `tag_object_oid`, `prerelease_state` (…|`skipped`), `github_release_id` / `_url`, `error`. ⚠ UNIQUE
+  `(account_id, repo_id, release_tag_name)` across releases — the claim that a tag is written once.
+- **`release_ticket_comments`** — one row per `(release, ticket_key)`: `tracker_kind`, `state`
+  (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
+
+All five carry `account_id`, composite FKs `(…, account_id)` with cascade, sit in `accountScopedTables()`
+and are erased explicitly; `deleteRepo` deletes a repo's tags, ranges and release items.
+
 ## `worktree_ledger` — which run a checkout on disk belongs to (CORE; migration `0146`)
 
 One row per per-run checkout `addWorktree` made under `<cloneDir>/<owner__name>/.worktrees/`: the
@@ -1504,6 +1539,7 @@ and check every hit against its table's declared unique.**
 | `worktree_ledger` | `[path]` (`worktree_ledger_path`), `onConflictDoUpdate` (overwrites the whole row and reopens it: a recycled pid reached the same per-run path) | `review/worktree-ledger.ts` `recordWorktreeCreated` (the ONLY insert; `recordWorktreeReleased` and the sweep's `closeRow` only UPDATE) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
+| `repo_tag_ranges` | `[accountId, repoId, tagName]` (`repo_tag_ranges_account_repo_tag`) | `sync/tag-ranges.ts` `computeTagRanges` (the ONLY writer) |
 
 ⚠ **`persist()` must NOT share one values object between the insert and the `set:`.** It did,
 and that was correct while the table held one grain. With judgement + identity + price in one

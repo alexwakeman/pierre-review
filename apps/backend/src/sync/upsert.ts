@@ -336,6 +336,24 @@ function prState(s: GqlPullRequest['state']): 'open' | 'merged' | 'closed' {
   return 'open';
 }
 
+/**
+ * The `pull_requests.merge_commit_oid` value to WRITE for a synced PR node (migration 0192;
+ * docs/RELEASES.md), per the partial-response policy:
+ *   • an oid string arrived ⇒ write it;
+ *   • `mergeCommit: null` on a PR GitHub says is OPEN or CLOSED ⇒ null (a positive "not merged");
+ *   • anything else — the key absent, or a null on a MERGED PR (a nulled selection) ⇒ `undefined`,
+ *     omit the column so a stored oid is never cleared without a positive statement.
+ * Pure, for the test.
+ */
+export function mergeCommitOidToWrite(
+  pr: Pick<GqlPullRequest, 'state' | 'mergeCommit'>,
+): string | null | undefined {
+  const oid = pr.mergeCommit?.oid;
+  if (typeof oid === 'string' && oid.length > 0) return oid;
+  if (pr.mergeCommit === null && prState(pr.state) !== 'merged') return null;
+  return undefined;
+}
+
 type CiStatus =
   | 'success'
   | 'failure'
@@ -874,6 +892,11 @@ export async function persistPr(
     // answer; null / undefined learn nothing and leave the column alone (spread, never assigned).
     const forkObserved: { isCrossRepository?: boolean } =
       typeof pr.isCrossRepository === 'boolean' ? { isCrossRepository: pr.isCrossRepository } : {};
+    // THE LANDED COMMIT (migration 0192): an oid when one arrives; a null only for a PR GitHub says
+    // is not merged. Spread, never assigned.
+    const mergeCommitWrite = mergeCommitOidToWrite(pr);
+    const mergeCommitObserved: { mergeCommitOid?: string | null } =
+      mergeCommitWrite === undefined ? {} : { mergeCommitOid: mergeCommitWrite };
     const labels = (pr.labels?.nodes ?? []).map((l) => ({
       name: l.name,
       color: l.color,
@@ -970,6 +993,7 @@ export async function persistPr(
         baseRefName: pr.baseRefName ?? null,
         headRefName: pr.headRefName ?? null,
         ...forkObserved,
+        ...mergeCommitObserved,
         state: prState(pr.state),
         isDraft: pr.isDraft,
         openedAt,
@@ -1008,6 +1032,7 @@ export async function persistPr(
           baseRefName: pr.baseRefName ?? null,
           headRefName: pr.headRefName ?? null,
           ...forkObserved,
+          ...mergeCommitObserved,
           state: prState(pr.state),
           isDraft: pr.isDraft,
           firstReviewAt,

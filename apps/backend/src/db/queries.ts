@@ -822,6 +822,13 @@ export async function deleteWorkspace(
     // 1b. EXTRA External memberships (migration 0191). The deleted workspace's own rows go (the
     //     FK cascades too); a repo re-homed to Default by step 1 loses any extra row it had THERE,
     //     because a repo is never External in its own home.
+    // RELEASES (migration 0192): the workspace's releases follow its repos to Default — a release is
+    // history of those repos' tags, and the cascade would delete it.
+    await tx
+      .update(schema.releases)
+      .set({ workspaceId: defaultId })
+      .where(and(eq(schema.releases.accountId, accountId), eq(schema.releases.workspaceId, id)))
+      .execute();
     await tx
       .delete(workspaceExternalRepos)
       .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, id)))
@@ -10029,6 +10036,20 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // nothing else, but a surviving row would keep this repo's file paths after the repo is gone
     // AND, on Postgres, block the `repos` delete outright.
     await tx.delete(schema.repoFileCoupling).where(eq(schema.repoFileCoupling.repoId, id)).execute();
+    // RELEASES (migration 0192): the repo's tags, their ranges and its release items (the release
+    // rows themselves are the workspace's and stay). Their repo FKs cascade; explicit all the same.
+    await tx
+      .delete(schema.repoTagRanges)
+      .where(and(eq(schema.repoTagRanges.repoId, id), eq(schema.repoTagRanges.accountId, accountId)))
+      .execute();
+    await tx
+      .delete(schema.repoTags)
+      .where(and(eq(schema.repoTags.repoId, id), eq(schema.repoTags.accountId, accountId)))
+      .execute();
+    await tx
+      .delete(schema.releaseItems)
+      .where(and(eq(schema.releaseItems.repoId, id), eq(schema.releaseItems.accountId, accountId)))
+      .execute();
     // Docs folders offered from this repo (migration 0155). The composite FK cascades; explicit
     // anyway, for the same stated reason as the rows above.
     await tx

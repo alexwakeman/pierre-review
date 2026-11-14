@@ -274,6 +274,12 @@ export const repos = sqliteTable(
     // from GitHub (a nulled selection leaves it as it was); `checked_at` stamps every attempt.
     usesGithubIssues: integer('uses_github_issues', { mode: 'boolean' }),
     githubIssuesCheckedAt: integer('github_issues_checked_at', { mode: 'timestamp' }),
+    // ---- TAGS (migration 0192; docs/RELEASES.md) ----
+    // What the last COMPLETE tag read saw, as `tagSignature` (sync/repo-tags.ts): the tag count plus
+    // the newest tag's name and target. The settle sweep reads the same three facts for ~nothing and
+    // starts a tag sync when they differ — a tag push is updatedAt-silent. NULL = never read.
+    tagsSignature: text('tags_signature'),
+    tagsSyncedAt: integer('tags_synced_at', { mode: 'timestamp' }),
   },
   (t) => ({
     // Composite uniques so two accounts can watch the same GitHub repo (each
@@ -507,9 +513,18 @@ export const pullRequests = sqliteTable(
     linearLinks: text('linear_links', { mode: 'json' }).$type<string[]>(),
     linearLinksRoot: text('linear_links_root'),
     linearLinksCheckedAt: integer('linear_links_checked_at', { mode: 'timestamp' }),
+    // ---- RELEASES (migration 0192; docs/RELEASES.md) ----
+    // The commit this PR landed as on its base branch (GraphQL `mergeCommit { oid }`): the squash
+    // commit, the merge commit, or the last rebased commit. A version tag's range maps the commits
+    // between two tags to PRs through it (sync/tag-ranges.ts). ⚠ Cleared only on a positive
+    // statement: an oid is written when one arrives; null only for a PR GitHub says is NOT merged
+    // (sync/upsert.ts `mergeCommitOidToWrite`). NULL on a merged PR = not observed yet.
+    mergeCommitOid: text('merge_commit_oid'),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
+    // The tag range's commit → PR lookup (sync/tag-ranges.ts), a batch of shas within one repo.
+    mergeCommitIdx: index('pr_account_repo_merge_commit_idx').on(t.accountId, t.repoId, t.mergeCommitOid),
     openedIdx: index('pr_opened_idx').on(t.openedAt),
     accountIdx: index('pr_account_idx').on(t.accountId),
     // Drives getUserStats (the contributor popover) from the person rather than the account.
@@ -2386,6 +2401,13 @@ export const workspaces = sqliteTable(
     // `AI_REVIEWS_FIRST_LOOK_DAYS` days). Never moves back. The ONE reader/writer is
     // db/ai-reviews-seen.ts.
     aiReviewsSeenAt: integer('ai_reviews_seen_at', { mode: 'timestamp' }),
+    // RELEASES (migration 0192; docs/RELEASES.md § Terms and settings): the RELEASE suffix (a
+    // release tag is `<version tag><release suffix>`) and the HOTFIX suffix (a hotfix tag ends in
+    // it). NULL = not set, and there is NO default: the Releases tab and the hotfix option do
+    // nothing until BOTH are set. Validated by shared `validateReleaseSettings`; the ONE reader /
+    // writer is db/release-settings.ts. Per workspace, no inheritance.
+    releaseSuffix: text('release_suffix'),
+    hotfixSuffix: text('hotfix_suffix'),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -5330,6 +5352,224 @@ export const limnActions = sqliteTable(
       name: 'limn_actions_pr_account_fk',
       columns: [t.prId, t.accountId],
       foreignColumns: [pullRequests.id, pullRequests.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- RELEASES (migration 0192; docs/RELEASES.md) ------------------------------------------------
+//
+// FIVE tables, all account-scoped with composite FKs (tenancy as a constraint), all in
+// `accountScopedTables()` and erased explicitly; the repo-anchored ones in `deleteRepo` too.
+//
+//   repo_tags                one row per (account, repo, tag name): what the tag points at.
+//   repo_tag_ranges          one row per (account, repo, tag name): the PRs between the tag and the
+//                            tag before it on the default branch, computed once per (tag sha, base sha).
+//   releases                 one row per reader press of "Create release…".
+//   release_items            one row per (release, repo): the release tag and the pre-release.
+//   release_ticket_comments  one row per (release, ticket): the tracker comment.
+
+// The repo's git tags, synced as part of the default-branch snapshot step (sync/repo-tags.ts) —
+// STRICTLY NON-FATAL, the newest REPO_TAGS_READ_CAP by the tagged commit's date. A tag PUSH is
+// updatedAt-silent, so the settle sweep notices it (`repos.tags_signature`).
+//   sha             the COMMIT the tag points at (an annotated tag is peeled one level).
+//   tag_object_oid  the annotated tag object's oid; NULL for a lightweight tag.
+//   committed_at    the tagged commit's date — the order "newest version tag" means.
+//   tagged_at       the annotated tag's tagger date (the tie-break "by tag creation"); NULL for a
+//                   lightweight tag.
+//   on_default_branch  the tagged commit is an ancestor of (or equal to) the default branch head.
+//                   NULL = not known yet. `ancestry_head_sha` is the head it was checked against:
+//                   true is final for that sha (until the tag moves); false is re-checked when the
+//                   head moves.
+//   previous_sha / moved_at  the tag was MOVED to another commit (re-pushed with --force): the sha
+//                   it pointed at before, and when Limn saw the move.
+export const repoTags = sqliteTable(
+  'repo_tags',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    name: text('name').notNull(),
+    sha: text('sha').notNull(),
+    tagObjectOid: text('tag_object_oid'),
+    committedAt: integer('committed_at', { mode: 'timestamp' }),
+    taggedAt: integer('tagged_at', { mode: 'timestamp' }),
+    onDefaultBranch: integer('on_default_branch', { mode: 'boolean' }),
+    ancestryHeadSha: text('ancestry_head_sha'),
+    previousSha: text('previous_sha'),
+    movedAt: integer('moved_at', { mode: 'timestamp' }),
+    firstSeenAt: integer('first_seen_at', { mode: 'timestamp' }).notNull(),
+    lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    nameUx: uniqueIndex('repo_tags_account_repo_name').on(t.accountId, t.repoId, t.name),
+    shaIdx: index('repo_tags_account_repo_sha_idx').on(t.accountId, t.repoId, t.sha),
+    repoAccountFk: foreignKey({
+      name: 'repo_tags_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// A tag's range INCREMENT (sync/tag-ranges.ts): the PRs merged into the default branch in
+// (base, tag], where base is the tag before it on the default branch (by committed date, then
+// name). Suffix-free on purpose — the release check sums increments from the baseline up to a
+// version tag, so a new release (a new baseline) or a changed suffix needs no recompute.
+//   base_tag_name / base_sha  NULL for the OLDEST tag Limn knows: its range is every PR in the
+//                   synced history merged into the default branch no later than the tag's commit
+//                   (method 'history'), so older PRs are not checked.
+//   method          'compare' (REST compare base...tag) | 'history' (no base: the stored PRs).
+//   pr_numbers      the PRs, by NUMBER (a PR the walk has not stored yet still counts). Resolved to
+//                   local ids within (account, repo) on read (db/repo-tags.ts).
+//   commit_count / unmatched_commits  commits in the range, and how many matched no PR (direct pushes).
+//   truncated       the compare had more commits than Limn reads (TAG_RANGE_MAX_COMMITS).
+//   moved_from_sha  the tag MOVED since the last computation: the sha the old range was for.
+// Recomputed only when the tag's sha or its base's sha changes.
+export const repoTagRanges = sqliteTable(
+  'repo_tag_ranges',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    tagName: text('tag_name').notNull(),
+    sha: text('sha').notNull(),
+    baseTagName: text('base_tag_name'),
+    baseSha: text('base_sha'),
+    method: text('method', { enum: ['compare', 'history'] }).notNull(),
+    prNumbers: text('pr_numbers', { mode: 'json' }).$type<number[]>().notNull(),
+    commitCount: integer('commit_count').notNull().default(0),
+    unmatchedCommits: integer('unmatched_commits').notNull().default(0),
+    truncated: integer('truncated', { mode: 'boolean' }).notNull().default(false),
+    movedFromSha: text('moved_from_sha'),
+    computedAt: integer('computed_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    tagUx: uniqueIndex('repo_tag_ranges_account_repo_tag').on(t.accountId, t.repoId, t.tagName),
+    repoAccountFk: foreignKey({
+      name: 'repo_tag_ranges_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// One row per press of "Create release…" (docs/RELEASES.md § Releases tab). `notes_markdown` is the
+// whole document (a section per repo); `release_suffix` the suffix in force when it was made.
+//   state  'writing' (the writes are running) · 'done' (every step worked) · 'partial' (some
+//          failed) · 'failed' (nothing was written) · 'stopped' (Confirm's re-check found a change).
+export const releases = sqliteTable(
+  'releases',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    createdByUserId: integer('created_by_user_id').references(() => users.id),
+    createdByLogin: text('created_by_login'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    releaseSuffix: text('release_suffix').notNull(),
+    notesMarkdown: text('notes_markdown').notNull().default(''),
+    state: text('state', { enum: ['writing', 'done', 'partial', 'failed', 'stopped'] }).notNull(),
+    finishedAt: integer('finished_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    workspaceIdx: index('releases_account_workspace_idx').on(t.accountId, t.workspaceId, t.createdAt),
+    // The PARENT KEY of the two child tables' composite FKs (the `repos_id_account` trick).
+    idAccountUx: uniqueIndex('releases_id_account').on(t.id, t.accountId),
+    workspaceAccountFk: foreignKey({
+      name: 'releases_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// One row per (release, repo). Two GitHub writes, each CLAIMED (compare-and-set on its state)
+// BEFORE the call and NEVER retried: the annotated release tag, then the pre-release on it.
+//   *_state  'pending' → 'claimed' → 'done' | 'failed'; a tag whose name already exists is
+//            'refused' (never moved); a pre-release whose tag did not land is 'skipped'.
+// ⚠ UNIQUE (account, repo, release_tag_name) across releases: a second press can never write the
+// same tag again — the claim is the row.
+export const releaseItems = sqliteTable(
+  'release_items',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    releaseId: integer('release_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    versionTag: text('version_tag').notNull(),
+    sha: text('sha').notNull(),
+    releaseTagName: text('release_tag_name').notNull(),
+    notesMarkdown: text('notes_markdown').notNull().default(''),
+    tagState: text('tag_state', { enum: ['pending', 'claimed', 'done', 'failed', 'refused'] })
+      .notNull()
+      .default('pending'),
+    tagObjectOid: text('tag_object_oid'),
+    prereleaseState: text('prerelease_state', {
+      enum: ['pending', 'claimed', 'done', 'failed', 'skipped'],
+    })
+      .notNull()
+      .default('pending'),
+    githubReleaseId: integer('github_release_id'),
+    githubReleaseUrl: text('github_release_url'),
+    error: text('error'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    releaseRepoUx: uniqueIndex('release_items_account_release_repo').on(t.accountId, t.releaseId, t.repoId),
+    tagNameUx: uniqueIndex('release_items_account_repo_tag').on(t.accountId, t.repoId, t.releaseTagName),
+    releaseAccountFk: foreignKey({
+      name: 'release_items_release_account_fk',
+      columns: [t.releaseId, t.accountId],
+      foreignColumns: [releases.id, releases.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'release_items_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// One row per (release, ticket): the tracker comment on a shipped ticket (a ticket whose repos ALL
+// tagged). CLAIMED before the tracker write, NEVER retried.
+//   state  'pending' → 'claimed' → 'posted' | 'failed'; 'skipped' when the ticket did not ship
+//          whole or the tracker cannot take a comment yet (`error` says which).
+export const releaseTicketComments = sqliteTable(
+  'release_ticket_comments',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    releaseId: integer('release_id').notNull(),
+    ticketKey: text('ticket_key').notNull(),
+    trackerKind: text('tracker_kind'),
+    state: text('state', { enum: ['pending', 'claimed', 'posted', 'failed', 'skipped'] })
+      .notNull()
+      .default('pending'),
+    commentId: text('comment_id'),
+    error: text('error'),
+    claimedAt: integer('claimed_at', { mode: 'timestamp' }),
+    postedAt: integer('posted_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    releaseTicketUx: uniqueIndex('release_ticket_comments_account_release_ticket').on(
+      t.accountId,
+      t.releaseId,
+      t.ticketKey,
+    ),
+    releaseAccountFk: foreignKey({
+      name: 'release_ticket_comments_release_account_fk',
+      columns: [t.releaseId, t.accountId],
+      foreignColumns: [releases.id, releases.accountId],
     }).onDelete('cascade'),
   }),
 );

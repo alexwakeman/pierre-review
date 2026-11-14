@@ -249,6 +249,23 @@ not watched — only its recent project PRs and ticket-linked PRs are read from 
 - **No trunk snapshot** (`sync-repo.ts` skips `syncBranchStatus`), and ML enrichment skips it.
 - Incremental walks and the settle sweep run as for any repo (cold), so project PRs stay fresh on the board.
 
+## Tags (the default-branch snapshot's second half)
+
+Right after `syncBranchStatus`, `sync-repo.ts` runs `runTagsStep` (`sync/tags-step.ts`; [RELEASES.md](RELEASES.md)),
+in its own non-fatal guard, skipped for external repos:
+
+- **The tag read** (`sync/repo-tags.ts`, 1 point): the newest `REPO_TAGS_READ_CAP` (100) tags by
+  `TAG_COMMIT_DATE`; tags past the cap are logged as not read. At most once per
+  `TAG_READ_MIN_INTERVAL_MS` (15 min) from a walk — the settle sweep starts it sooner on a tag push.
+  Writes `repo_tags` (insert / refresh / MOVE / delete-on-a-positive-statement) and
+  `repos.tags_signature`, then asks up to `ANCESTRY_CHECKS_PER_SYNC` (20) tags whether they are on the
+  default branch (REST compare `tag...head`, `per_page=1`), newest first, while the budget allows.
+- **The ranges** (`sync/tag-ranges.ts`): for the newest `TAG_RANGE_WINDOW` (40) tags on the default
+  branch, the PRs between each and the tag before it — REST compare base...tag (≤ 1000 commits), each
+  commit → PR by `merge_commit_oid`, then stored PR commits, then GraphQL `associatedPullRequests`
+  (≤ 100 commits, 2 points); only PRs merged INTO THE DEFAULT BRANCH. ≤ `TAG_RANGES_PER_SYNC` (10)
+  per sync; once per (tag sha, base sha); a failed compare is retried next sync.
+
 ## Incremental updates (every subsequent sync)
 
 A repo **with** a `lastIncrementalSyncAt` is planned as `mode: 'incremental'`, with

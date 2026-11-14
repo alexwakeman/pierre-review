@@ -136,6 +136,14 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.accountId, accountId)).execute();
     // The EXTRA External memberships (migration 0191) — same shape, same reason.
     await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.accountId, accountId)).execute();
+    // RELEASES (migration 0192): child before parent (both children's composite FKs point at
+    // `releases`, which points at `workspaces`), then the synced tags and their ranges. The repo and
+    // workspace cascades normally take them; explicit so the guarantee depends on neither.
+    await tx.delete(schema.releaseTicketComments).where(eq(schema.releaseTicketComments.accountId, accountId)).execute();
+    await tx.delete(schema.releaseItems).where(eq(schema.releaseItems.accountId, accountId)).execute();
+    await tx.delete(schema.releases).where(eq(schema.releases.accountId, accountId)).execute();
+    await tx.delete(schema.repoTagRanges).where(eq(schema.repoTagRanges.accountId, accountId)).execute();
+    await tx.delete(schema.repoTags).where(eq(schema.repoTags.accountId, accountId)).execute();
     // The REPO half of the Pending mute (migration 0058 / pg 0045). Deleted BEFORE `workspaces`
     // only for tidiness — it has no FK to a workspace at all (a repo belongs to exactly one
     // workspace already, so copying that fact onto the mute row would give the account two
@@ -533,6 +541,12 @@ export function accountScopedTables(): {
     { name: 'workspaceRepos', col: workspaceRepos.accountId, table: workspaceRepos },
     // The EXTRA External memberships (migration 0191): a repo External in more than one workspace.
     { name: 'workspaceExternalRepos', col: workspaceExternalRepos.accountId, table: workspaceExternalRepos },
+    // RELEASES (migration 0192): the synced tags, their ranges, and every release the reader made.
+    { name: 'repoTags', col: schema.repoTags.accountId, table: schema.repoTags },
+    { name: 'repoTagRanges', col: schema.repoTagRanges.accountId, table: schema.repoTagRanges },
+    { name: 'releases', col: schema.releases.accountId, table: schema.releases },
+    { name: 'releaseItems', col: schema.releaseItems.accountId, table: schema.releaseItems },
+    { name: 'releaseTicketComments', col: schema.releaseTicketComments.accountId, table: schema.releaseTicketComments },
     // The bot object, now one grain. It holds the human judgements, the human-set vendor names
     // and `monthly_cents` — the one column no classifier can regenerate — so this is the entry
     // whose omission would cost the user data they entered by hand.

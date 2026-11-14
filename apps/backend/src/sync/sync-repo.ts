@@ -16,6 +16,7 @@ import { REPO_ACTIVITY_QUERY, type RepoActivityResponse } from '../github/querie
 import { ensureCommitFiles } from './commit-files.js';
 import { drainReviewThreads, drainReviews } from './drain-review-threads.js';
 import { syncBranchStatus } from './branch-status.js';
+import { runTagsStep, TAG_READ_MIN_INTERVAL_MS } from './tags-step.js';
 import { isPinnedCold } from './adaptive.js';
 import { createUserResolver, persistPr, upsertRepo } from './upsert.js';
 
@@ -476,6 +477,17 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
     } catch (err) {
       log.warn(
         `sync ${owner}/${name}: default-branch status failed (non-fatal): ` +
+          `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+      );
+    }
+    // The TAGS half of the snapshot step (sync/tags-step.ts; docs/RELEASES.md): the repo's tags,
+    // their ancestry and the version-tag ranges. STRICTLY NON-FATAL like the strip above, and its
+    // own guard, so a tag failure never costs the strip or the PR sync. Not for EXTERNAL repos.
+    try {
+      if (!isPinnedCold(repoId)) await runTagsStep({ owner, name, repoId, accountId, token: opts.token, log, minIntervalMs: TAG_READ_MIN_INTERVAL_MS });
+    } catch (err) {
+      log.warn(
+        `sync ${owner}/${name}: tag sync failed (non-fatal): ` +
           `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
       );
     }

@@ -72,6 +72,8 @@ import { isSettleDue, markDirty, noteSettle } from './adaptive.js';
 import { fetchRollupsWithoutLimn } from './limn-ci.js';
 import { syncOnePr } from './sync-one-pr.js';
 import { runUnsettledPrBackstop, scheduleTrunkMovedRecheck } from './unsettled-prs.js';
+import { tagSignature } from './repo-tags.js';
+import { scheduleTagSync } from './tags-step.js';
 import { ciStatusFrom, reviewDecisionFrom } from './upsert.js';
 import type { Logger } from './sync-repo.js';
 
@@ -283,6 +285,36 @@ function noteFailedAttempt(key: string, sig: string): number {
 }
 
 // `account:repo` → the default branch head the sweep last saw. Bounded FIFO.
+// The tag signature each repo's last background tag sync was started on — so a signature the tag
+// read itself builds differently (two tags on one commit date can list in either order) costs ONE
+// read per distinct observation, not one per sweep.
+const tagActed = new Map<number, string>();
+function rememberTagActed(repoId: number, sig: string): void {
+  tagActed.delete(repoId);
+  if (tagActed.size >= TRUNK_MAX) {
+    const oldest = tagActed.keys().next().value;
+    if (oldest !== undefined) tagActed.delete(oldest);
+  }
+  tagActed.set(repoId, sig);
+}
+
+/** The tag signature GitHub gave for one repo, or undefined when the selection did not arrive. Pure. */
+export function observedTagSig(node: GqlSettleRepo): string | undefined {
+  const tags = node.tags;
+  if (tags == null || !Array.isArray(tags.nodes) || typeof tags.totalCount !== 'number') return undefined;
+  return tagSignature(tags.totalCount, tags.nodes[0] ?? null);
+}
+
+/**
+ * Whether a tag sync is due: GitHub's signature arrived, differs from the stored one, and is not the
+ * one a background sync was already started on. Pure.
+ */
+export function tagSyncDue(stored: string | null, observed: string | undefined, actedOn: string | undefined): boolean {
+  if (observed === undefined) return false;
+  if (observed === stored) return false;
+  return observed !== actedOn;
+}
+
 const trunkHeads = new Map<string, string>();
 function trunkMoved(key: string, oid: string): boolean {
   const prev = trunkHeads.get(key);
@@ -304,11 +336,15 @@ interface SweepRepo {
   name: string;
   accountId: number;
   lastIncrementalSyncAt: Date;
+  /** `repos.tags_signature`: what the last tag read saw (null = never read). */
+  tagsSignature: string | null;
 }
 
 interface RepoRead {
   repo: SweepRepo;
   trunkOid: string | undefined;
+  /** The tag signature GitHub gave (sync/repo-tags.ts `tagSignature`); undefined = not received. */
+  tagSig: string | undefined;
   prs: GqlSettlePr[];
   /** The whole open list arrived (no further page) — absence from it is a statement. */
   complete: boolean;
@@ -338,6 +374,8 @@ export interface SettleSweepResult {
   walksMarked: number;
   /** Repos whose trunk moved (merge-state recheck scheduled). */
   trunkMoves: number;
+  /** Repos whose tags changed (a background tag sync started). */
+  tagSyncs: number;
   /** GraphQL points the sweep's own reads reported (rateLimit.cost). */
   cost: number;
   /** An account was skipped or cut short by a rate limit. Never an error. */
@@ -353,6 +391,7 @@ function emptyResult(): SettleSweepResult {
     deferred: 0,
     walksMarked: 0,
     trunkMoves: 0,
+    tagSyncs: 0,
     cost: 0,
     paused: false,
   };
@@ -367,6 +406,7 @@ async function listSweepRepos(): Promise<SweepRepo[]> {
       name: repos.name,
       accountId: repos.accountId,
       lastIncrementalSyncAt: syncState.lastIncrementalSyncAt,
+      tagsSignature: repos.tagsSignature,
     })
     .from(repos)
     .innerJoin(syncState, eq(syncState.repoId, repos.id))
@@ -488,6 +528,7 @@ async function readRepos(
       const read = reads.get(p.repo.id) ?? {
         repo: p.repo,
         trunkOid: node.defaultBranchRef?.target?.oid ?? undefined,
+        tagSig: observedTagSig(node),
         prs: [],
         complete: false,
       };
@@ -517,6 +558,14 @@ async function judgeRepo(
   if (read.trunkOid && trunkMoved(`${accountId}:${repo.id}`, read.trunkOid)) {
     result.trunkMoves += 1;
     scheduleTrunkMovedRecheck(accountId, repo.id, log);
+  }
+  // A TAG PUSH (docs/RELEASES.md): GitHub's tag signature differs from the stored one → the tags
+  // step runs in the background (sync/tags-step.ts). Once per distinct observation.
+  if (tagSyncDue(repo.tagsSignature, read.tagSig, tagActed.get(repo.id))) {
+    if (scheduleTagSync(accountId, repo.id, log)) {
+      result.tagSyncs += 1;
+      rememberTagActed(repo.id, read.tagSig!);
+    }
   }
   const observed = read.prs.map(foldSettlePr).filter((o): o is SettleObservedPr => o != null);
   const stored = await getSettleStoredPrs(
@@ -684,11 +733,11 @@ export async function runSettleSweep(args: {
       void runUnsettledPrBackstop({ accountId: repo.accountId, repoId: repo.id, log });
     }
 
-    if (result.prSyncs > 0 || result.walksMarked > 0 || result.trunkMoves > 0 || result.deferred > 0) {
+    if (result.prSyncs > 0 || result.walksMarked > 0 || result.trunkMoves > 0 || result.tagSyncs > 0 || result.deferred > 0) {
       log.info(
         `settle sweep: read ${result.repos} repo(s), ${result.compared} open PR(s), ${result.cost} pt(s); ` +
           `re-synced ${result.prSyncs}${result.deferred ? ` (+${result.deferred} next sweep)` : ''}, ` +
-          `${result.walksMarked} walk(s) marked, ${result.trunkMoves} trunk move(s)`,
+          `${result.walksMarked} walk(s) marked, ${result.trunkMoves} trunk move(s), ${result.tagSyncs} tag sync(s)`,
       );
     }
     return result;
@@ -705,5 +754,6 @@ export function __resetSettleSweep(): void {
   actedOn.clear();
   failedAttempts.clear();
   trunkHeads.clear();
+  tagActed.clear();
   sweepInFlight = false;
 }

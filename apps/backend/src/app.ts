@@ -23,6 +23,7 @@ import { registerTracker } from './tracker/index.js';
 import { registerSonar } from './sonar/index.js';
 import { repoRoutes } from './api/routes/repos.js';
 import { workspaceRoutes } from './api/routes/workspaces.js';
+import { releaseRoutes } from './api/routes/releases.js';
 import { sandboxSettingsRoutes } from './api/routes/sandbox-settings.js';
 import { userRoutes } from './api/routes/users.js';
 import { timelineRoutes } from './api/routes/timeline.js';
@@ -177,6 +178,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // a repo belongs to exactly one — so assignment is a MOVE and there is no "unassign" route.
   // Account-scoped, no AI, no GitHub calls.
   await app.register(workspaceRoutes);
+  // Releases (CORE, docs/RELEASES.md): the per-workspace release + hotfix suffixes. DB only.
+  await app.register(releaseRoutes);
   await app.register(userRoutes);
   await app.register(timelineRoutes);
   await app.register(prRoutes);

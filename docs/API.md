@@ -588,6 +588,16 @@ on (absent ⇒ 404). Machine-wide, no `?workspace=`. Tier `read` (a local walk; 
 |---|---|
 | `GET /api/storage/clones` | → `CloneStorageResponse {cloneBytes, checkouts, checkoutBytes, freedBytes30d, lastSweepAt}`: the shared repository copies (without checkouts), the per-run checkouts on disk now and their bytes, what the worktree sweep removed in the last 30 days (the ledger's closed rows; ⚠ `null` when unreadable, never 0), and when this process last finished a sweep (ISO, `null` before the first). One walk of the clone cache, cached for a minute. |
 
+### Releases (`api/routes/releases.ts`)
+
+[RELEASES.md](RELEASES.md). CORE, always registered. Per workspace by path id; another account's
+workspace → `404`. DB only: the workspace-CRUD tier `read`. Shared types: `packages/shared/src/releases.ts`.
+
+| Route | Contract |
+|---|---|
+| `GET /api/workspaces/:id/release-settings` | → `ReleaseSettingsResponse {workspaceId, releaseSuffix, hotfixSuffix, configured, hasReleases}`. Suffixes RAW (null = not set; no default); `configured` = both set; `hasReleases` = a release row exists for the workspace, or a stored tag of one of its repos ends in the current release suffix (the form warns before a change). |
+| `PUT /api/workspaces/:id/release-settings` | Body `SetReleaseSettingsBody {releaseSuffix, hotfixSuffix}` — BOTH required, the WHOLE setting; null or `""` clears one. Meaning by `validateReleaseSettings` → `400 {error:'InvalidReleaseSettings', message}` (one sentence: a git ref fragment of 1–32 characters; the two differ; neither ends with the other). Echoes the response. |
+
 ### Sandbox settings (`api/routes/sandbox-settings.ts`)
 
 Settings → Sandbox ([SANDBOX.md](SANDBOX.md) § The workspace mirror). Registered only when AI

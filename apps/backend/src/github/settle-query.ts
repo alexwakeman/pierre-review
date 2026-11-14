@@ -4,7 +4,8 @@
 // enough to tell whether our stored row is still right about the things GitHub changes WITHOUT
 // bumping `updatedAt`: the head commit, its CI rollup, the review-thread resolutions — plus
 // `updatedAt` itself, so a PR the walk missed is noticed too, and the default branch's head, so a
-// trunk move (which silently re-decides every open PR's merge state) is noticed.
+// trunk move (which silently re-decides every open PR's merge state) is noticed, and the newest
+// tag + tag count (`refs(first: 1)`, one node), so a tag push is noticed (sync/tags-step.ts).
 //
 // COST — MEASURED 2026-10-28 (`rateLimit { cost }`, read-only, on a real 9-repo workspace): 9
 // points for 9 aliased repos, i.e. ~1 point per repo. GitHub prices a query by the requests its
@@ -73,6 +74,15 @@ export function buildSettleSweepQuery(count: number): string {
           oid
         }
       }
+      tags: refs(refPrefix: "refs/tags/", first: 1, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) {
+        totalCount
+        nodes {
+          name
+          target {
+            oid
+          }
+        }
+      }
       pullRequests(
         states: [OPEN]
         first: ${SETTLE_PR_PAGE}
@@ -123,6 +133,12 @@ export interface GqlSettlePr {
 
 export interface GqlSettleRepo {
   defaultBranchRef?: { target?: { oid?: string | null } | null } | null;
+  // The newest tag and the tag count (docs/RELEASES.md): a tag push is updatedAt-silent, so the
+  // sweep compares this with `repos.tags_signature` (sync/repo-tags.ts `tagSignature`). One node.
+  tags?: {
+    totalCount?: number | null;
+    nodes?: Array<{ name?: string | null; target?: { oid?: string | null } | null } | null> | null;
+  } | null;
   pullRequests?: {
     pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
     nodes?: Array<GqlSettlePr | null> | null;

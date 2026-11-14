@@ -146,6 +146,11 @@ const PR_NODE_FIELDS = /* GraphQL */ `
   # another open PR's head branch in THIS repo, and a fork's branch name says nothing about a branch
   # here — so a parent must be proven same-repo. A Boolean! scalar on a node already fetched.
   isCrossRepository
+  # The commit this PR landed as (docs/RELEASES.md): a version tag's range maps commits to PRs
+  # through it. A nullable OBJECT, not a connection — no nodes, no cost.
+  mergeCommit {
+    oid
+  }
   mergeable
   mergeStateStatus
   # ---- merge verdict (cluster A: the merge surface) ------------------------------------
@@ -986,6 +991,9 @@ export interface GqlPullRequest {
   // GitHub types it Boolean!; OPTIONAL here so hand-built fixtures predating it still typecheck.
   // null / undefined = not received (learn nothing), see sync/upsert.ts.
   isCrossRepository?: boolean | null;
+  // The landed commit. null on a PR that is not merged (and on a nulled selection); OPTIONAL so
+  // hand-built fixtures predating it still typecheck. See sync/upsert.ts `mergeCommitOidToWrite`.
+  mergeCommit?: { oid?: string | null } | null;
   mergeable: string | null;
   mergeStateStatus: string | null;
   // GraphQL PullRequestReviewDecision (APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED) or

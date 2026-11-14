@@ -241,6 +241,7 @@ nodes { isResolved } }`, plus the default branch's head oid. **Measured 2026-10-
 | head oid, CI, unresolved-thread count, draft or review decision differ | `syncOnePr` for that PR only |
 | a stored OPEN PR absent from a COMPLETE open list | `syncOnePr` by number (absence from GitHub's full open list is a positive statement) |
 | the default-branch head moved (or first sight) | `scheduleTrunkMovedRecheck` — merge state for ≤25 PRs per request, twice |
+| the tag signature (`refs(refPrefix: "refs/tags/", first: 1)`: count + newest tag + target) differs from `repos.tags_signature` | `scheduleTagSync` (sync/tags-step.ts) — the tag sync + ranges in the background, one per repo; once per distinct observation ([RELEASES.md](RELEASES.md)) |
 | (every repo the sweep read, after its re-syncs) | `runUnsettledPrBackstop` — merge state stored unknown, CI stuck `pending`; free when there are none |
 
 - **At most `SYNC_SETTLE_MAX_PR_SYNCS` (20) single-PR syncs per sweep** (~1 point each), in list
