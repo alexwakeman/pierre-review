@@ -238,3 +238,39 @@ Notes
   Settings → Releases form (only the route + client exist); a `merge_commit_oid` backfill for already
   synced merged PRs (unmatched commits fall back to `associatedPullRequests`); the data export does not
   include the new tables yet.
+
+### Slice 2 — the release check fold and its read route
+
+- **The fold** is shared `packages/shared/src/release-check.ts` `foldReleaseCheck(input)` (pure, no
+  clock, no fetch). Inputs per repo: stored tags + range increments; PRs (`isBot` by
+  `globalAutomationUserIds`, `intoDefaultBranch`, state, ticket idents); tickets (`done`, read state);
+  accepted repos (`sprint_ticket_repos`). It sums each version tag's increments after the baseline (in
+  `compareTagOrder`, now shared and re-exported by `sync/tag-ranges.ts`), blocks on not Done /
+  unreadable / open PR into the default branch, then runs SHIPS WHOLE to a fixpoint (`rounds`). An
+  increment missing or stale (moved tag, changed base) is `range_pending`: that tag cannot be a
+  candidate yet. Also `releaseSelectionProblems(result, includedRepoIds)` (the dialog's untick
+  re-check, acceptance 18) and `releaseBlockerText(blocker, ctx)` (the sentences, e.g. "PLAT-290 holds
+  api at v2.4.0: its web PR #21 is merged but not in a version tag yet. Cut a tag in web.").
+- **Reading of "ships whole".** A ticket is held when the candidates would ship SOME of its merged PRs
+  into the default branch while another is outside its repo's candidate; once held it stays held (so
+  the rounds are monotone and end). A ticket wholly past every candidate ships nothing, is `ready`,
+  and holds nothing (`inRelease: false`). A merged PR in no stored range is "not in a version tag yet",
+  unless it merged no later than the oldest stored range's floor (older than the read history: treated
+  as shipped).
+- **The DB half** `apps/backend/src/db/release-check.ts`: `loadReleaseCheckInput`, `getReleases`, pure
+  `ticketIsDone` (THE This Sprint resolver: `sprintStageOf` over `sprintLayoutFor`, category fallback
+  when the sprint was never read; "Won't do" → Complete) and `bestTicketRow`. Ticket links are
+  `tracker_tickets` rows on the workspace's CURRENT tracker site only (`workspaceSite`); rows of another
+  site are not links. A fresher `sprint_tickets` status wins over the PR rows'.
+- **Route** `GET /api/releases?workspace=` (`api/routes/releases.ts`, tier `read` in `tierFor`), client
+  `api.releases`, wire type `ReleasesResponse`. docs/API.md § Releases.
+- **Tests:** `db/release-check.test.ts` (acceptance 4–18 by number on the pure fold, plus pending /
+  moved increments, an existing release tag name, latest release vs baseline, one-repo ships whole;
+  `ticketIsDone`; `getReleases` on a throwaway DB), `api/routes/release-settings.test.ts` (the route:
+  Default fallback, acceptance 3 at the check level), `rate-limit.test.ts`, `verify:isolation` (the
+  release check never reads another account's workspace, repo or PRs).
+- **Deferred:** the Releases tab, the dialog, the writes, notes, hotfix. "Refresh" (acceptance 6) is
+  the tracker worker's next read of the ticket; a forced re-read belongs to the tab's slice. Direct
+  commits (`unmatchedCommits`) and truncated compares are reported per tag but never block; PR numbers
+  in a range that are not stored yet are ONE `unsynced_prs` warning per repo.
+

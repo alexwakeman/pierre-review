@@ -23,6 +23,7 @@
 //           next sync.
 //   moves   a tag whose sha changed is recomputed and the row keeps `moved_from_sha`.
 import { and, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
+import { compareTagOrder as sharedCompareTagOrder } from '@pierre-review/shared';
 import { db, schema, runTransaction } from '../db/client.js';
 import {
   getGraphqlClientFor,
@@ -81,15 +82,9 @@ export interface RangePlan {
   deleteTagNames: string[];
 }
 
-/** Oldest first: commit date, then tag date (a lightweight tag sorts first), then name. Pure. */
+/** Oldest first — THE ONE tag order, shared with the release check (shared `compareTagOrder`). */
 export function compareTagOrder(a: RangeTag, b: RangeTag): number {
-  const ca = a.committedAt?.getTime() ?? 0;
-  const cb = b.committedAt?.getTime() ?? 0;
-  if (ca !== cb) return ca - cb;
-  const ta = a.taggedAt?.getTime() ?? 0;
-  const tb = b.taggedAt?.getTime() ?? 0;
-  if (ta !== tb) return ta - tb;
-  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  return sharedCompareTagOrder(a, b);
 }
 
 /**

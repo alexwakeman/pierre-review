@@ -618,6 +618,7 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/sprint-stories/statuses')).toEqual(['read']);
     // The story view (the ticket tab): DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);
+    expect(tiers('GET', '/api/releases')).toEqual(['read']);
     expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
     // The story view's status picker — a tracker write: Jira quota on both.
     expect(tiers('GET', '/api/ticket-status/transitions')).toEqual(['search', 'read']);

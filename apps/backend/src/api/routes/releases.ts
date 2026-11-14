@@ -2,8 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import {
   RELEASE_SUFFIX_MAX,
   validateReleaseSettings,
+  type ReleasesResponse,
   type SetReleaseSettingsBody,
 } from '@pierre-review/shared';
+import { getReleases } from '../../db/release-check.js';
 import { getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -15,6 +17,10 @@ import { accountIdOf } from '../plugins/auth.js';
 //   PUT /api/workspaces/:id/release-settings   the WHOLE setting: `{ releaseSuffix, hotfixSuffix }`,
 //                                              null or "" clears one. 400 with the SAME sentence
 //                                              shared `validateReleaseSettings` gives the Settings form.
+//   GET /api/releases?workspace=<id>           This Sprint → Releases: the release check (shared
+//                                              `foldReleaseCheck` over db/release-check.ts's stored
+//                                              inputs), the newest release, whether both suffixes are
+//                                              set. DB only, NEVER a GitHub or tracker call; tier `read`.
 //
 // Both are DB only — the workspace-CRUD `read` tier (api/plugins/rate-limit.ts). 404 on a workspace
 // that is not this account's, like every id-addressed workspace route.
@@ -28,6 +34,11 @@ const idParamSchema = {
 const suffixSchema = { type: ['string', 'null'], maxLength: RELEASE_SUFFIX_MAX * 4 } as const;
 
 export async function releaseRoutes(app: FastifyInstance): Promise<void> {
+  app.get('/api/releases', async (req): Promise<ReleasesResponse> => {
+    const q = req.query as { workspace?: string };
+    return getReleases(accountIdOf(req), q.workspace);
+  });
+
   app.get('/api/workspaces/:id/release-settings', { schema: { params: idParamSchema } }, async (req, reply) => {
     const accountId = accountIdOf(req);
     const { id } = req.params as { id: number };

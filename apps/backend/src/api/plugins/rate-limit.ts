@@ -484,6 +484,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/ticket-merged-prs') return [TIERS.read];
   // GET /api/ticket-prs — the ticket tab: stored ticket rows joined to PRs, DB-only.
   if (!mutating && path === '/api/ticket-prs') return [TIERS.read];
+  // GET /api/releases — This Sprint → Releases: the release check over stored tags, ranges and ticket
+  // rows (db/release-check.ts). DB only, never a GitHub or tracker call. `read`, DECIDED; EXACT `===`
+  // (the release WRITES will be their own paths with their own tiers).
+  if (!mutating && path === '/api/releases') return [TIERS.read];
   // A TRACKER WRITE (tracker/status-change.ts): GET /api/ticket-status/transitions (one or two
   // Jira calls, on the picker's open) and POST /api/ticket-status (the transition + its re-read) both
   // spend the customer's Jira quota with the saved token → `search`, as every other tracker call.

@@ -591,12 +591,14 @@ on (absent ⇒ 404). Machine-wide, no `?workspace=`. Tier `read` (a local walk; 
 ### Releases (`api/routes/releases.ts`)
 
 [RELEASES.md](RELEASES.md). CORE, always registered. Per workspace by path id; another account's
-workspace → `404`. DB only: the workspace-CRUD tier `read`. Shared types: `packages/shared/src/releases.ts`.
+workspace → `404`. DB only: the workspace-CRUD tier `read`. Shared types: `packages/shared/src/releases.ts`,
+`packages/shared/src/release-check.ts`.
 
 | Route | Contract |
 |---|---|
 | `GET /api/workspaces/:id/release-settings` | → `ReleaseSettingsResponse {workspaceId, releaseSuffix, hotfixSuffix, configured, hasReleases}`. Suffixes RAW (null = not set; no default); `configured` = both set; `hasReleases` = a release row exists for the workspace, or a stored tag of one of its repos ends in the current release suffix (the form warns before a change). |
 | `PUT /api/workspaces/:id/release-settings` | Body `SetReleaseSettingsBody {releaseSuffix, hotfixSuffix}` — BOTH required, the WHOLE setting; null or `""` clears one. Meaning by `validateReleaseSettings` → `400 {error:'InvalidReleaseSettings', message}` (one sentence: a git ref fragment of 1–32 characters; the two differ; neither ends with the other). Echoes the response. |
+| `GET /api/releases?workspace=<id>` | → `ReleasesResponse {workspaceId, configured, releaseSuffix, hotfixSuffix, latestRelease, latestReleaseTagAt, check}` (shared `release-check.ts`). Scope by `?workspace=` (absent / unknown ⇒ Default, never a 404; tier `read`, decided in `tierFor`). DB ONLY — never a GitHub or tracker call. `check` is null until both suffixes are set; otherwise shared `foldReleaseCheck` over `db/release-check.ts` `loadReleaseCheckInput`: per repo `status` (`candidate` / `blocked` / `nothing_new`), `baseline`, `latestRelease` (newest release OR hotfix tag), `candidate {name, sha, releaseTagName, releaseTagExists}`, `tags` (version tags after the baseline, newest first, each with its increment's `prIds`, `blockers`, `pending`), `ticketIdents` / `untrackedPrIds` / `botPrIds` in the candidate, `warningCount`, `noBaseline`, `writable`; `tickets` (per ticket `ready`, `inRelease`, `blocker`, per repo `state`); `warnings`; `prs`. `latestRelease` = the newest `releases` row of the workspace; `latestReleaseTagAt` = the newest release or hotfix tag's commit date across its repos. Words: shared `releaseBlockerText`; the dialog's untick re-check: `releaseSelectionProblems`. |
 
 ### Sandbox settings (`api/routes/sandbox-settings.ts`)
 

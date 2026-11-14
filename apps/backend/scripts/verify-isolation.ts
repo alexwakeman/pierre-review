@@ -5012,6 +5012,34 @@ check(
   await db.update(schema.workspaces).set({ aiReviewsSeenAt: null }).where(eq(schema.workspaces.id, defaultB)).execute();
 }
 
+// ── THIS SPRINT → RELEASES: THE RELEASE CHECK (db/release-check.ts) ─────────────────────────────
+// The workspace id arrives in a query string, and the loader takes repo ids: A naming B's workspace
+// resolves to A's own Default, and A's loader never reads B's repo, tags or PRs.
+{
+  const rc = await import('../src/db/release-check.js');
+  const rs = await import('../src/db/release-settings.js');
+  const settings = { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' };
+  // B's repo's home workspace (earlier blocks move it around).
+  const homeB = (
+    await db
+      .select({ workspaceId: schema.workspaceRepos.workspaceId })
+      .from(schema.workspaceRepos)
+      .where(and(eq(schema.workspaceRepos.accountId, 2), eq(schema.workspaceRepos.repoId, B.repoId)))
+      .execute()
+  )[0]!.workspaceId;
+  await rs.setReleaseSettings(1, defaultA, settings);
+  await rs.setReleaseSettings(2, homeB, settings);
+  const viaB = await rc.getReleases(1, homeB);
+  check("getReleases(A, B's workspace id) answers A's Default, never B's", viaB.workspaceId === defaultA);
+  check("getReleases(A, B's workspace id) never lists B's repo", (viaB.check?.repos ?? []).every((r) => r.repoId !== B.repoId));
+  const ownB = await rc.getReleases(2, homeB);
+  check("getReleases(B) lists B's own repo (mutation check)", (ownB.check?.repos ?? []).some((r) => r.repoId === B.repoId));
+  const input = await rc.loadReleaseCheckInput(1, homeB, [B.repoId], settings);
+  check("loadReleaseCheckInput(A, B's repo id) reads no repo and no PR", input.repos.length === 0 && input.prs.length === 0);
+  await rs.setReleaseSettings(1, defaultA, { releaseSuffix: null, hotfixSuffix: null });
+  await rs.setReleaseSettings(2, homeB, { releaseSuffix: null, hotfixSuffix: null });
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);

@@ -259,6 +259,7 @@ import type {
   FlowSettings,
   FlowActorView,
   ReleaseSettingsResponse,
+  ReleasesResponse,
   SetReleaseSettingsBody,
   FlowPointersResponse,
   SandboxComposeFiles,
@@ -649,6 +650,8 @@ export const api = {
     fetch(`/api/workspaces/${id}/release-settings`, jsonBody('PUT', body)).then((r) =>
       handle<ReleaseSettingsResponse>(r),
     ),
+  // This Sprint → Releases: the release check over stored tags, ranges and tickets (DB only).
+  releases: (workspaceId: number) => get<ReleasesResponse>(withQuery('/api/releases', workspaceParam(workspaceId))),
   // Settings → Workspace → Sandbox (docs/SANDBOX.md § The workspace mirror). Registered only while AI
   // is on. ⚠ The PUT body is the WHOLE setting: a field left out goes back to its default.
   sandboxSettings: (id: number) =>

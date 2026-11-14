@@ -190,6 +190,38 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
     expect((await call('PUT', ownWs, { releaseSuffix: '-rc' })).status).toBe(400);
   });
 
+  it('GET /api/releases: scope falls back to Default (never a 404); acceptance 3: a suffix change drops the old baseline', async () => {
+    const { repoTags } = client.schema;
+    await call('PUT', ownWs, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+    const at = new Date(Date.UTC(2026, 10, 1));
+    await client.db
+      .update(repoTags)
+      .set({ onDefaultBranch: true, committedAt: at, taggedAt: new Date(at.getTime() + 60_000) })
+      .execute();
+    const repoId = (await client.db.select().from(repoTags).execute())[0].repoId;
+    await client.db
+      .insert(repoTags)
+      .values({ accountId: 1, repoId, name: 'v1.0.0', sha: 'a'.repeat(40), committedAt: at, onDefaultBranch: true, firstSeenAt: at, lastSeenAt: at })
+      .execute();
+    const get = async (ws: number | string) => {
+      const res = await app.inject({ method: 'GET', url: `/api/releases?workspace=${ws}` });
+      return { status: res.statusCode, body: res.json() as any };
+    };
+    const before = await get(ownWs);
+    expect(before.status).toBe(200);
+    expect(before.body).toMatchObject({ workspaceId: ownWs, configured: true, releaseSuffix: '-rc' });
+    expect(before.body.check.repos[0]).toMatchObject({ status: 'nothing_new', baseline: { name: 'v1.0.0-rc' } });
+    // Another account's workspace id is not this account's: the Default workspace answers.
+    expect((await get(foreignWs)).body.workspaceId).toBe(ownWs);
+    await call('PUT', ownWs, { releaseSuffix: '-release', hotfixSuffix: '-hotfix' });
+    const after = (await get(ownWs)).body;
+    expect(after.check.repos[0].baseline).toBeNull();
+    expect(after.check.repos[0].tags.map((t: any) => t.name).sort()).toEqual(['v1.0.0', 'v1.0.0-rc']);
+    // Not configured → no check, only the setup line.
+    await call('PUT', ownWs, { releaseSuffix: null, hotfixSuffix: null });
+    expect((await get(ownWs)).body).toMatchObject({ configured: false, check: null });
+  });
+
   it('the new tables are on the erasure checklist', async () => {
     const { accountScopedTables } = await import('../../db/erase-account.js');
     expect(accountScopedTables().map((t) => t.name)).toEqual(
