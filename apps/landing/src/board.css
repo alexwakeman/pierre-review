@@ -25,7 +25,7 @@
    The home page's own layout lives in pages/home.css; the product mocks in
    components/mock/mock.css.
    HEADER (.lb-nav): .bar > .mark · .links > a[aria-current] · .go ; .links-sm
-   FOOTER (.lb-foot): .blocks > .blk×4 · .flinks > div + p.c · .last
+   FOOTER (.lb-foot): .blocks > .blk (one per letter) · .flinks > div + p.c · .last
    =========================================================================== */
 
 @font-face {
@@ -60,7 +60,7 @@
   --ink: #f1f1ef;
   --muted: #a9a69f;
   --dark: #121110;
-  /* the limner's pigments */
+  /* the four pigments (kept from the limning theme; all four were Baroque pigments too) */
   --lapis: #2f5288;
   --lapis-2: #1b2d4f;
   --verdigris: #336b5d;
@@ -308,8 +308,10 @@ body:has(.lb) {
   padding-bottom: var(--m);
 }
 .lb-foot .blocks {
+  /* One block per letter of the name (Footer.tsx sets --n). The heights rise and fall
+     like a phrase of music; the four pigments repeat in order. */
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(var(--n, 8), 1fr);
   gap: 4px;
   height: 34svh;
   min-height: 260px;
@@ -322,29 +324,32 @@ body:has(.lb) {
   justify-content: center;
   font-weight: 600;
   letter-spacing: -0.06em;
-  font-size: min(26vw, 30svh);
+  font-size: min(calc(104vw / var(--n, 8)), 30svh);
   line-height: 0.78;
   overflow: hidden;
-  color: #0b0b0c;
-}
-.lb-foot .blk:nth-child(-n + 3) {
   color: var(--ink);
 }
-.lb-foot .blk:nth-child(1) {
+.lb-foot .blk:nth-child(4n + 1) {
   background: var(--lapis) var(--g-lapis);
 }
-.lb-foot .blk:nth-child(2) {
-  height: 72%;
+.lb-foot .blk:nth-child(4n + 2) {
   background: var(--verdigris) var(--g-verdigris);
 }
-.lb-foot .blk:nth-child(3) {
-  height: 88%;
+.lb-foot .blk:nth-child(4n + 3) {
   background: var(--madder) var(--g-madder);
 }
-.lb-foot .blk:nth-child(4) {
-  height: 64%;
+.lb-foot .blk:nth-child(4n) {
   background: var(--gold) var(--g-gold);
+  color: #0b0b0c;
 }
+.lb-foot .blk:nth-child(1) { height: 70%; }
+.lb-foot .blk:nth-child(2) { height: 84%; }
+.lb-foot .blk:nth-child(3) { height: 100%; }
+.lb-foot .blk:nth-child(4) { height: 78%; }
+.lb-foot .blk:nth-child(5) { height: 92%; }
+.lb-foot .blk:nth-child(6) { height: 66%; }
+.lb-foot .blk:nth-child(7) { height: 80%; }
+.lb-foot .blk:nth-child(8) { height: 60%; }
 .lb-foot .flinks {
   display: grid;
   grid-template-columns: repeat(12, 1fr);

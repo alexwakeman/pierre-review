@@ -1,12 +1,12 @@
 import { Link } from '../../router';
 
-// "Why Limn": four tiles. The AI tile carries the link to setting a budget.
+// "Why Ensemble": four tiles. The AI tile carries the link to setting a budget.
 
-export function WhyLimn(): JSX.Element {
+export function WhyEnsemble(): JSX.Element {
   return (
     <section className="section chapter why" aria-labelledby="why-h">
       <div className="chap minor rise">
-        <h2 id="why-h">Why Limn</h2>
+        <h2 id="why-h">Why Ensemble</h2>
         <p>Built to fit how your team already works.</p>
       </div>
       <div className="board why4">

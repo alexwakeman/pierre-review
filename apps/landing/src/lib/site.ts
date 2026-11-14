@@ -7,7 +7,11 @@
 // that place. Everything user-visible — the wordmark, the SEO titles, the
 // JSON-LD, the footer © line — composes from SITE_NAME.
 //
-// SCOPE OF THE RENAME (Pierre → Limn), staged in two tranches:
+// SCOPE OF THE RENAME (Limn → Ensemble, 2026-11): the same split as the earlier
+// Pierre → Limn rename below — every user-visible string moves, identifiers that
+// are migrations stay. `<!-- pierre:claude-review … -->` is still read AND written.
+//
+// SCOPE OF THE EARLIER RENAME (Pierre → Limn), staged in two tranches:
 //
 //   DONE — the domain (limn-review.com, 2026-10-23) and every user-visible string: this site, the SPA's chrome, the CLI banner,
 //          and the re-captured screenshots. Then, in the release that made Claude
@@ -27,13 +31,13 @@
 // ---------------------------------------------------------------------------
 
 /** The product name. The one value the identity layer reads. */
-export const SITE_NAME = 'Limn';
+export const SITE_NAME = 'Ensemble';
 
 /**
  * The published npm package, and therefore the literal command in copy.
  * NOT derived from SITE_NAME on purpose — see the note above.
  */
-export const NPM_PACKAGE = 'limn-review';
+export const NPM_PACKAGE = 'ensemble-review';
 
 /** The install command as it appears on the site. */
 export const INSTALL_COMMAND = `npx ${NPM_PACKAGE}`;
@@ -42,7 +46,7 @@ export const INSTALL_COMMAND = `npx ${NPM_PACKAGE}`;
 export const REPO_URL = 'https://github.com/alexwakeman/pierre-review';
 
 /**
- * How many people in one organisation (affiliates counted together) may use Limn
+ * How many people in one organisation (affiliates counted together) may use Ensemble
  * without a licence. Mirrors the
  * Limn License at the repository root — change both together.
  */

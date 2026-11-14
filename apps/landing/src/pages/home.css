@@ -250,7 +250,7 @@
   max-width: 40ch;
   padding-bottom: 12px;
 }
-/* Why Limn, Every feature free, Questions: longer headings, a size down. */
+/* Why Ensemble, Every feature free, Questions: longer headings, a size down. */
 .lb.home .chap.minor h2 {
   grid-column: 1 / 7;
   font-size: clamp(40px, 4.6vw, 68px);

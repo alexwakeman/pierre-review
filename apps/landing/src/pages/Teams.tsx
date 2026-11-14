@@ -10,14 +10,14 @@ import { ClaimLinesMock, TeamStandingMock } from '../components/mock/teams';
 import './teams.css';
 
 // ---------------------------------------------------------------------------
-// For teams — how reviews work when several teammates each run Limn, in the board
+// For teams — how reviews work when several teammates each run Ensemble, in the board
 // style (src/board.css). Page-only layout lives in ./teams.css, scoped under `.lb.teams`.
 //
 // ⚠ EVERY CLAIM HERE IS A PRODUCT FACT, from docs/CLAUDE-REVIEW.md § Team claims and
 // § Teammates' reviews, and docs/BACKEND.md § Waiting on others. The traps:
 //   · only AUTO reviews claim; a review the reader starts never claims or checks;
-//   · one line per PROVIDER (limn/review-claude, limn/review-codex), not per model;
-//   · a review "kept in Limn" posts nothing, so it holds nothing and nobody sees it;
+//   · one line per PROVIDER (ensemble/review-claude, ensemble/review-codex), not per model;
+//   · a review "kept in Ensemble" posts nothing, so it holds nothing and nobody sees it;
 //   · claims are ALWAYS ON (no setting since 2026-11-10); auto review itself is OFF until switched on;
 //   · the PR author's own lines never hold the commit.
 // When the product changes one of these, change this page in the same commit.
@@ -121,8 +121,8 @@ export default function Teams(): JSX.Element {
               request’s latest commit. A teammate’s {SITE_NAME} reads that line and skips the commit.
             </p>
             <p>
-              There is one line for each provider: <code>limn/review-claude</code> and{' '}
-              <code>limn/review-codex</code>. A teammate reviewing with Claude does not stop yours
+              There is one line for each provider: <code>ensemble/review-claude</code> and{' '}
+              <code>ensemble/review-codex</code>. A teammate reviewing with Claude does not stop yours
               reviewing the same commit with Codex.
             </p>
           </div>

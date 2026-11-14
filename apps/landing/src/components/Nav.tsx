@@ -9,7 +9,7 @@ import { SITE_NAME } from '../lib/site';
 // The active page is marked by a gold underline on its link (aria-current="page").
 // The home page and the legal pages match no link, so nothing is marked there.
 //
-// There is no sign-in. Limn has no hosted app and no accounts.
+// There is no sign-in. Ensemble has no hosted app and no accounts.
 //
 // NO MOBILE DRAWER. On a phone the link tile is hidden, as in the design, and the
 // same six links follow as a second row of small text under the tiles. A modal
@@ -22,7 +22,7 @@ const NAV_LINKS = [
   // The documentation: every screen of the app, Settings, integrations, security, the changelog.
   { to: '/docs', label: 'Docs' },
   { to: '/reporting', label: 'Reporting and metrics' },
-  // How reviews work when several teammates run Limn, and where a team above the free size asks for a licence.
+  // How reviews work when several teammates run Ensemble, and where a team above the free size asks for a licence.
   { to: '/teams', label: 'For teams' },
   { to: '/how-we-measure', label: 'How we measure' },
   // Contact is in the header, not only the footer, because it is how an organisation

@@ -523,7 +523,7 @@ export function WhereWorkMock(): JSX.Element {
 
 // ---- bots ----------------------------------------------------------------------------
 
-/** Bots Monitoring. A bot's row opens what Limn's model made of its comments. */
+/** Bots Monitoring. A bot's row opens what Ensemble's model made of its comments. */
 export function BotsSeverityMock(): JSX.Element {
   const [sel, setSel] = useState<string | null>(null);
   const b = BOTS.find((x) => x.bot === sel);
@@ -531,7 +531,7 @@ export function BotsSeverityMock(): JSX.Element {
     <MockFrame
       live
       title="What the bots are flagging"
-      meta="graded by Limn's model"
+      meta="graded by Ensemble's model"
       onReset={sel ? () => setSel(null) : null}
       label="Bots Monitoring: 502 findings, 49% high severity, 30% nits, mostly about correctness; a row per bot with threads, share used, not addressed and severity mix. Each bot's row opens its breakdown."
     >

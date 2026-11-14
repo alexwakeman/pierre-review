@@ -1,4 +1,4 @@
-import hilliard from '../../assets/board/img/hilliard.jpg';
+import adagio from '../../assets/board/img/bach-bwv1001.jpg';
 import { INSTALL_COMMAND } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
 import { PendingBoardMock } from '../mock/home';
@@ -10,12 +10,12 @@ import { PendingBoardMock } from '../mock/home';
 
 export function Hero(): JSX.Element {
   return (
-    <section className="board hero" aria-label="Limn">
+    <section className="board hero" aria-label="Ensemble">
       <div className="tile say">
-        <p className="kick">Limn · code review on your machine</p>
+        <p className="kick">Ensemble · code review on your machine</p>
         <h1>Your team writes more code than it can review.</h1>
         <p className="lead">
-          Limn reviews every pull request against its story and your docs on your own Claude or Codex, shows each
+          Ensemble reviews every pull request against its story and your docs on your own Claude or Codex, shows each
           person what needs them next, and fixes what it finds. Free, on your machine.
         </p>
         <div className="cmd">
@@ -24,14 +24,19 @@ export function Hero(): JSX.Element {
         </div>
       </div>
       <div className="tile ph p1">
-        <img src={hilliard} width={1280} height={1283} alt="Nicholas Hilliard's self-portrait miniature, 1577" />
+        <img
+          src={adagio}
+          width={1280}
+          height={1283}
+          alt="Bach's handwritten score of the Adagio from his first sonata for solo violin, 1720"
+        />
       </div>
       <figure className="tile motto">
         <blockquote>
-          <p>“The line without shadow showeth all to good judgment.”</p>
+          <p>“One hears four sensible people conversing among themselves.”</p>
         </blockquote>
         <figcaption>
-          Nicholas Hilliard, <cite>The Arte of Limning</cite>, c.1600
+          Goethe, on the string quartet, in a letter to Zelter, 1829
         </figcaption>
       </figure>
       <div className="tile pic rise">

@@ -3,13 +3,13 @@ import { seoFor } from '../lib/routes';
 import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { ContactForm } from '../components/ContactForm';
-import initialH from '../assets/board/img/initial-h.jpg';
+import cantata from '../assets/board/img/bach-bwv56.jpg';
 import './contact.css';
 
 // ---------------------------------------------------------------------------
 // Contact — and the way an organisation gets a licence.
 //
-// Limn is free for individuals, and for organisations where no more than FREE_TEAM_SIZE
+// Ensemble is free for individuals, and for organisations where no more than FREE_TEAM_SIZE
 // people use it (the Limn License at the repository root). More users than that need a
 // commercial licence, and there is no checkout: it starts
 // with a message here. So the first sentence says who this page is for, and the
@@ -49,7 +49,7 @@ export default function Contact(): JSX.Element {
           </p>
         </div>
         <div className="tile ph c-pic">
-          <img src={initialH} width={700} height={722} alt="Illuminated initial H from a choirbook" />
+          <img src={cantata} width={700} height={722} alt="The first page of Bach's handwritten score of the cantata Ich will den Kreuzstab gerne tragen, 1726" />
         </div>
         <div className="tile verdigris c-say">
           <p>

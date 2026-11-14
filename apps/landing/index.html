@@ -12,42 +12,42 @@
          written here is the home-page copy and the dev-server fallback; keep the
          markers, and keep the copy in sync with ROUTE_SEO['/']. -->
     <!-- seo:start -->
-    <title>Limn — your team writes more code than it can review</title>
+    <title>Ensemble — your team writes more code than it can review</title>
     <meta
       name="description"
-      content="Limn reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to 3 people, on your machine: npx limn-review."
+      content="Ensemble reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to 3 people, on your machine: npx ensemble-review."
     />
     <meta name="robots" content="index, follow" />
 
     <!-- Open Graph / Twitter (home defaults; useSeo() sets per-route title/desc/url). -->
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Limn" />
-    <meta property="og:title" content="Limn — your team writes more code than it can review" />
+    <meta property="og:site_name" content="Ensemble" />
+    <meta property="og:title" content="Ensemble — your team writes more code than it can review" />
     <meta
       property="og:description"
-      content="Limn reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to 3 people, on your machine: npx limn-review."
+      content="Ensemble reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to 3 people, on your machine: npx ensemble-review."
     />
     <meta property="og:image" content="https://limn-review.com/og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="The Limn board showing everything waiting across a team’s repositories, ranked most actionable first."
+      content="The Ensemble board showing everything waiting across a team’s repositories, ranked most actionable first."
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Limn — your team writes more code than it can review" />
+    <meta name="twitter:title" content="Ensemble — your team writes more code than it can review" />
     <meta
       name="twitter:description"
-      content="Limn reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to 3 people, on your machine: npx limn-review."
+      content="Ensemble reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to 3 people, on your machine: npx ensemble-review."
     />
     <meta name="twitter:image" content="https://limn-review.com/og-image.png" />
     <meta
       name="twitter:image:alt"
-      content="The Limn board showing everything waiting across a team’s repositories, ranked most actionable first."
+      content="The Ensemble board showing everything waiting across a team’s repositories, ranked most actionable first."
     />
     <!-- seo:end -->
 
-    <!-- Favicons: the Limn mark, rendered from apps/landing/src/lib/sprites.ts by
+    <!-- Favicons: the Ensemble mark, rendered from apps/landing/src/lib/sprites.ts by
          `node scripts/make-favicons.mjs`. Regenerate there, never by hand. -->
     <!-- ⚠ THE SVG MUST STAY FIRST AND KEEP ITS `type`. A tab slot is 16 CSS px — 32 device px
          at DPR 2 — and Chrome picks ONE of these and scales it, so any pick but an exact 1:1
@@ -61,12 +61,12 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
 
-    <!-- Structured data: helps search engines understand what Limn is.
+    <!-- Structured data: helps search engines understand what Ensemble is.
          LANDMINE: this block sits OUTSIDE the seo:start/end markers, so the
          prerenderer copies it verbatim into EVERY route. It is a second, site-wide
          copy of the product name and the price (0), so when either changes it must
          change here as well as in src/lib/routes.ts and src/lib/site.ts.
-         There is one offer and it is free: Limn is local-only, installed from npm,
+         There is one offer and it is free: Ensemble is local-only, installed from npm,
          with no hosted tier. The licence limit (organisations with more than three
          users need a commercial licence) is described in words, not as a price. -->
     <script type="application/ld+json">
@@ -76,7 +76,7 @@
           {
             "@type": "Organization",
             "@id": "https://limn-review.com/#org",
-            "name": "Limn",
+            "name": "Ensemble",
             "url": "https://limn-review.com/",
             "logo": "https://limn-review.com/icon-512.png",
             "sameAs": ["https://github.com/alexwakeman/pierre-review"]
@@ -84,18 +84,18 @@
           {
             "@type": "WebSite",
             "@id": "https://limn-review.com/#site",
-            "name": "Limn",
+            "name": "Ensemble",
             "url": "https://limn-review.com/",
             "publisher": { "@id": "https://limn-review.com/#org" }
           },
           {
             "@type": "SoftwareApplication",
-            "name": "Limn",
+            "name": "Ensemble",
             "applicationCategory": "DeveloperApplication",
             "operatingSystem": "macOS, Linux, Windows",
             "softwareRequirements": "Node.js 20 or later",
             "downloadUrl": "https://www.npmjs.com/package/limn-review",
-            "description": "Code review on your machine: reviews every pull request against its story and your docs on your own Claude Code or Codex, shows each person what needs them next, fixes findings, red CI and merge conflicts, and reports where the work waits. Install with npx limn-review.",
+            "description": "Code review on your machine: reviews every pull request against its story and your docs on your own Claude Code or Codex, shows each person what needs them next, fixes findings, red CI and merge conflicts, and reports where the work waits. Install with npx ensemble-review.",
             "url": "https://limn-review.com/",
             "publisher": { "@id": "https://limn-review.com/#org" },
             "offers": {
@@ -143,7 +143,7 @@
       >
         <span
           style="font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 21px; font-weight: 600; letter-spacing: -0.02em"
-          >Limn<span style="color: #d2b071">.</span></span
+          >Ensemble<span style="color: #d2b071">.</span></span
         >
       </div>
       <!-- app:end -->

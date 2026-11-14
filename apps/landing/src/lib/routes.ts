@@ -33,7 +33,7 @@ export type RouteSeo = {
  *
  * THE SITE IS FIVE CONTENT PAGES plus the three legal ones (and the docs, whose
  * routes come from the docs manifest): home, Reporting and metrics, For teams
- * (/teams: how reviews work when several teammates run Limn), How we measure and
+ * (/teams: how reviews work when several teammates run Ensemble), How we measure and
  * Contact. The earlier feature-area pages (/features, /bots, /pro, /pricing,
  * /how-it-works, /arcade) and then the two role pages (/for-developers,
  * /for-managers) were retired; their URLs survive as aliases. The Getting started
@@ -41,7 +41,7 @@ export type RouteSeo = {
  * /for-developers and /features now 301 there (apps/site src/app.ts).
  *
  * /contact is load-bearing, and it is load-bearing rather than courtesy: an
- * organisation where more than FREE_TEAM_SIZE people use Limn needs a licence,
+ * organisation where more than FREE_TEAM_SIZE people use Ensemble needs a licence,
  * and this is where it asks. See src/pages/Contact.tsx.
  *
  * Legacy aliases for the removed routes are handled in App.tsx and by the

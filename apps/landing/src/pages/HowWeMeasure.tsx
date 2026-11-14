@@ -5,7 +5,7 @@ import { seoFor } from '../lib/routes';
 import { FREE_TEAM_SIZE, INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import { CopyCommand } from '../components/board/CopyCommand';
 import { useReveal } from '../components/board/useReveal';
-import hoursLeaf from '../assets/board/img/hours-leaf.jpg';
+import preludio from '../assets/board/img/bach-bwv1006.jpg';
 import { BenchmarkMock, BotsSeverityMock } from '../components/mock/reports';
 import './how-we-measure.css';
 
@@ -113,7 +113,7 @@ export default function HowWeMeasure(): JSX.Element {
           </p>
         </div>
         <div className="tile ph hwm-pic">
-          <img src={hoursLeaf} width={800} height={1018} alt="A page from a Book of Hours, around 1500" />
+          <img src={preludio} width={800} height={1018} alt="Bach's handwritten score of the Preludio from his third partita for solo violin, 1720" />
         </div>
         <div className="tile verdigris hwm-say">
           <p>Both are built and run by us. Neither sends your code or your comments anywhere.</p>

@@ -65,7 +65,7 @@ export function Review(): JSX.Element {
       id="review"
       name="Review"
       color="var(--lapis)"
-      line="Check the decisions, not every line. Limn does the first read and tells you where to look."
+      line="Check the decisions, not every line. Ensemble does the first read and tells you where to look."
       features={[
         {
           k: 'Pending',
@@ -101,13 +101,13 @@ export function Fix(): JSX.Element {
         {
           k: 'AI Fix',
           h: 'Fix what the review found',
-          p: 'Pick the findings. Limn writes the change and shows you the diff.',
+          p: 'Pick the findings. Ensemble writes the change and shows you the diff.',
           mock: <FixMock />,
         },
         {
           k: 'CI diagnosis',
           h: 'Why the build is red',
-          p: 'Limn reads the failing log and says whether it is your code or a flaky test.',
+          p: 'Ensemble reads the failing log and says whether it is your code or a flaky test.',
           mock: <CiMock />,
         },
         {
@@ -138,7 +138,7 @@ export function Ship(): JSX.Element {
         {
           k: 'Merge when ready',
           h: 'Lands on its own',
-          p: 'Arm it once. Limn merges when checks pass, and stops if anyone pushes.',
+          p: 'Arm it once. Ensemble merges when checks pass, and stops if anyone pushes.',
           mock: <MergeWhenReadyMock />,
         },
         {

@@ -5,7 +5,7 @@ import { Hero } from '../components/board/Hero';
 import { WorksWith } from '../components/board/WorksWith';
 import { Proof } from '../components/board/Proof';
 import { Fix, Review, See, Ship } from '../components/board/Chapters';
-import { WhyLimn } from '../components/board/WhyLimn';
+import { WhyEnsemble } from '../components/board/WhyEnsemble';
 import { Tiers } from '../components/board/Tiers';
 import { Faq } from '../components/board/Faq';
 import { Close } from '../components/board/Close';
@@ -23,7 +23,7 @@ import './home.css';
 // so the prerendered HTML shows every word.
 //
 // Running order: hero · works with · proof figures · Review · Fix · Ship · See ·
-// Why Limn · every feature, free · questions · run it.
+// Why Ensemble · every feature, free · questions · run it.
 // ---------------------------------------------------------------------------
 
 export default function Home(): JSX.Element {
@@ -38,7 +38,7 @@ export default function Home(): JSX.Element {
       <Fix />
       <Ship />
       <See />
-      <WhyLimn />
+      <WhyEnsemble />
       <Tiers />
       <Faq />
       <Close />

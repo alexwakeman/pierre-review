@@ -7,15 +7,15 @@ const QUESTIONS: ReadonlyArray<{ q: string; a: string }> = [
   },
   {
     q: 'Can I keep my review bots?',
-    a: 'Yes. Limn reads them, scores them and shows what they cost.',
+    a: 'Yes. Ensemble reads them, scores them and shows what they cost.',
   },
   {
     q: 'Do I need to install Claude or Codex?',
-    a: 'No. Limn sets them up. You only sign in.',
+    a: 'No. Ensemble sets them up. You only sign in.',
   },
   {
     q: 'What does it cost?',
-    a: 'Nothing from us. Reviews run on your own Claude Code or Codex, and Limn shows what each run used.',
+    a: 'Nothing from us. Reviews run on your own Claude Code or Codex, and Ensemble shows what each run used.',
   },
   {
     q: 'Will it post to GitHub for me?',

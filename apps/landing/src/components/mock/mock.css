@@ -727,7 +727,7 @@
 }
 
 /* ---- team claims + standings (mock/teams.tsx) ------------------------------ */
-/* The "Limn" label beside a limn/review-* line (CheckList.tsx): listed, never counted as CI. */
+/* The "Ensemble" label beside a ensemble/review-* line (CheckList.tsx): listed, never counted as CI. */
 .lb .mk-limn {
   margin-left: 8px;
   padding: 0 5px;

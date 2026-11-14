@@ -166,8 +166,8 @@ export const PENDING = {
    *  (Activity/PendingAiReviews.tsx). Read-only rows; `isNew` = since the reader last opened the tab;
    *  `seen` = the visit that first showed it ("Seen today 09:12"), one block per visit. */
   aiSeen: [
-    { pr: PRS.refunds, by: 'Your Limn', verdict: 'Request changes', tone: 'red', findings: '2 findings', when: '4 min ago', isNew: true },
-    { pr: PRS.ledgerIndex, by: 'Priya’s Limn', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false, seen: 'Seen today 09:12' },
+    { pr: PRS.refunds, by: 'Your Ensemble', verdict: 'Request changes', tone: 'red', findings: '2 findings', when: '4 min ago', isNew: true },
+    { pr: PRS.ledgerIndex, by: 'Priya’s Ensemble', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false, seen: 'Seen today 09:12' },
   ] as { pr: Pr; by: string; verdict: string; tone: Tone; findings: string; when: string; isNew: boolean; seen?: string }[],
 };
 
@@ -463,7 +463,7 @@ export const BOT_SUMMARY = [
 export const BOT_WORTH = [
   { bot: 'CodeRabbit', comments: 412, high: 60, acted: '38%', actedN: 157 },
   { bot: 'Copilot', comments: 290, high: 35, acted: '22%', actedN: 64 },
-  { bot: 'Limn', comments: 118, high: 75, acted: '71%', actedN: 84, ours: true },
+  { bot: 'Ensemble', comments: 118, high: 75, acted: '71%', actedN: 84, ours: true },
 ];
 
 export const BENCH = {
@@ -520,7 +520,7 @@ export const SPRINT = {
 /** First run (Activity/FirstRunOnboarding.tsx): the repositories you have been active in. */
 export const SETUP_REPOS = {
   title: 'Add the repos you work on',
-  lead: 'Limn tracks the repos you care about — here’s what you’ve been working on.',
+  lead: 'Ensemble tracks the repos you care about — here’s what you’ve been working on.',
   suggestions: [
     { name: REPOS.payments, desc: 'Card and bank payments', stars: 24, prs: 11, on: true },
     { name: REPOS.api, desc: 'Public API and webhooks', stars: 12, prs: 7, on: true },
@@ -559,8 +559,8 @@ export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';
 
 /**
  * Team claims (always on, docs/CLAUDE-REVIEW.md § Team claims): the status
- * lines each teammate's Limn posts on a commit, as the PR's checks list shows them
- * (components/CheckList.tsx: the "Limn" label, the state words "passed" / "running"). The lines'
+ * lines each teammate's Ensemble posts on a commit, as the PR's checks list shows them
+ * (components/CheckList.tsx: the "Ensemble" label, the state words "passed" / "running"). The lines'
  * own words are the backend's (review/claude-review/team-claim.ts). #1190 is Priya's pull request.
  */
 export const TEAM = {
@@ -570,11 +570,11 @@ export const TEAM = {
     checks: [
       { name: 'build', limn: false, state: 'passed', tone: 'green', note: null },
       { name: 'test-web', limn: false, state: 'passed', tone: 'green', note: null },
-      { name: 'limn/review-claude', limn: true, state: 'passed', tone: 'green', note: 'sam reviewed · 2 comments' },
-      { name: 'limn/review-codex', limn: true, state: 'running', tone: 'amber', note: 'dana is reviewing with Codex' },
+      { name: 'ensemble/review-claude', limn: true, state: 'passed', tone: 'green', note: 'sam reviewed · 2 comments' },
+      { name: 'ensemble/review-codex', limn: true, state: 'running', tone: 'amber', note: 'dana is reviewing with Codex' },
     ] as { name: string; limn: boolean; state: string; tone: Tone; note: string | null }[],
-    /** The "Limn" label's tooltip in CheckList.tsx. */
-    limnTitle: 'Posted by Limn to mark an auto review. Not CI.',
+    /** The "Ensemble" label's tooltip in CheckList.tsx. */
+    limnTitle: 'Posted by Ensemble to mark an auto review. Not CI.',
     /** The Open PRs panel's cell for the provider a teammate holds (Activity/OpenPrsAiReview.tsx). */
     skip: 'Reviewed by @sam',
   },

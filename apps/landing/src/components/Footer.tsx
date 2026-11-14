@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { MouseEvent } from 'react';
+import type { CSSProperties, MouseEvent } from 'react';
 import { Link } from '../router';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
@@ -7,7 +7,7 @@ import { LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The footer, on the board's dark ground (styles: .lb-foot in board.css): the
-// name built as four pigment blocks, four columns of links, the picture credits,
+// name built as one pigment block per letter, four columns of links, the picture credits,
 // and a last line with the © and "Back to top".
 //
 // Two of these links are compliance, not decoration, and must stay on every page:
@@ -39,7 +39,12 @@ export default function Footer(): JSX.Element {
 
   return (
     <footer className="lb-foot">
-      <div className="blocks" role="img" aria-label={SITE_NAME}>
+      <div
+        className="blocks"
+        role="img"
+        aria-label={SITE_NAME}
+        style={{ '--n': letters.length } as CSSProperties}
+      >
         {letters.map((ch, i) => (
           <div key={i} className="blk" aria-hidden="true">
             {ch}
@@ -82,9 +87,9 @@ export default function Footer(): JSX.Element {
           )}
         </div>
         <p className="c muted">
-          Pictures: Nicholas Hilliard, self-portrait, 1577; a leaf from a Book of Hours, around 1500
-          (The Met); Jacques de Guyse at his desk, Master of Antoine Rolin, around 1500; illuminated
-          initial H (Art Institute of Chicago, CC0). Public domain or CC0.
+          Pictures: J. S. Bach&rsquo;s own scores of the solo violin Adagio BWV 1001 and Preludio BWV
+          1006 (1720) and the cantata BWV 56 (1726), from Bach digital, Leipzig; Bach in 1746, by Elias
+          Gottlob Haussmann. All public domain.
         </p>
       </div>
 
