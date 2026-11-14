@@ -172,7 +172,8 @@ body:has(.lb) {
   padding: 0;
 }
 .lb .tile.ph img {
-  filter: grayscale(1) contrast(1.05) brightness(0.9);
+  /* Bach's iron-gall ink on paper keeps its warmth; only toned down to sit on the dark board. */
+  filter: saturate(0.8) contrast(1.04) brightness(0.88);
 }
 .lb .lapis {
   background: var(--lapis) var(--g-lapis);
@@ -250,7 +251,8 @@ body:has(.lb) {
   gap: var(--gap);
 }
 .lb-nav .mark {
-  grid-column: span 1;
+  grid-column: span 2;
+  white-space: nowrap;
   background: var(--ink);
   color: var(--dark);
   display: flex;
@@ -263,7 +265,7 @@ body:has(.lb) {
   text-decoration: none;
 }
 .lb-nav .links {
-  grid-column: span 9;
+  grid-column: span 8;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -445,13 +447,13 @@ body:has(.lb) {
    links drop to the phone's second row (same rules as the phone block). */
 @media (max-width: 960px) and (min-width: 761px) {
   .lb-nav .mark {
-    grid-column: span 3;
+    grid-column: span 5;
   }
   .lb-nav .links {
     display: none;
   }
   .lb-nav .go {
-    grid-column: span 9;
+    grid-column: span 7;
     justify-content: flex-end;
   }
   .lb-nav .links-sm {
@@ -481,13 +483,13 @@ body:has(.lb) {
     --m: 8px;
   }
   .lb-nav .mark {
-    grid-column: span 3;
+    grid-column: span 5;
   }
   .lb-nav .links {
     display: none;
   }
   .lb-nav .go {
-    grid-column: span 9;
+    grid-column: span 7;
     justify-content: flex-end;
   }
   .lb-nav .links-sm {
