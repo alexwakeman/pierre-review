@@ -670,7 +670,11 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
         role="dialog"
         aria-modal="true"
         aria-label="Manage repos and workspaces"
-        className={`flex max-h-[85vh] w-full ${syncRound.open ? 'max-w-[90rem]' : 'max-w-6xl'} flex-col rounded-ui bg-ui-surface shadow-xl`}
+        // ONE FIXED SIZE. The modal used to size to its content and widen when the sync panel
+        // opened, so adding a repo (a new row + the sync panel) resized it under the reader's
+        // pointer; and its body clips overflow, so a short modal cut the search dropdown off
+        // after two rows that "grew" into the full list once the add made it taller.
+        className="flex h-[85vh] w-full max-w-[90rem] flex-col rounded-ui bg-ui-surface shadow-xl"
       >
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ui-line px-4 py-2.5">
           <span className="flex items-center gap-1 text-body font-semibold text-ui-ink">

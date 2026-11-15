@@ -32,6 +32,12 @@ no internals.
   without a hyphen now has one.
 - Implement → "Treat as a hotfix": a repository not released from this workspace is read only.
 
+## [1.0.41] - 2026-11-15
+
+### Fixed
+
+- Repos & workspaces: adding a repo from the search no longer resizes the window, and the search list no longer jumps to show more results after you add one.
+
 ## [1.0.40] - 2026-11-15
 
 ### Changed
