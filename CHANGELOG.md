@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.36] - 2026-11-15
+
 ### Added
 
 - Implement and Fill gaps on a team: when a teammate is building a ticket, the story view says "robin is building
