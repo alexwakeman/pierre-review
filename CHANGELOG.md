@@ -15,8 +15,6 @@ no internals.
 
 ### Added
 
-- Settings → Releases → "Released from this workspace": tick the repositories you release. Releases checks, tags
-  and offers hotfix bases for those only, and ignores the rest. Nothing is ticked at first.
 - This Sprint → Releases finds the candidate by itself. It checks every version tag on main after the last
   release, or from the very first tag when there is none, oldest first. The first tag with a ticket that is not
   Complete, or that could not be read, holds itself and every later tag, and the tag before it is the candidate.
@@ -31,13 +29,43 @@ no internals.
 
 - This Sprint → Releases: only a Complete ticket is Done. A cancelled ticket ("Won't do") now holds a tag back like
   any other unfinished ticket.
-
 - This Sprint → Releases: one row per repository: "Release 0.388.0 → 0.388.0-rc" (with the latest version tag
   beside it when different), or "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In
   Progress)". Open a row to see every tag after the candidate and why each one is held back. The separate tickets
   list is gone.
+
+## [1.0.43] - 2026-11-15
+
+### Added
+
+- Settings → Features: switches for AI (Claude and Codex) and Bot comment analysis. Switching one on that is not downloaded asks first, then downloads it; an installed one lists what was found. Switched off, AI features show how to set them up again and nothing runs automatically, and no new bot comments are scored. Nothing is deleted.
+- Repos & workspaces: a Bot scoring switch on each repository leaves its bot comments out of severity scoring. Every repository is scored by default.
+
+### Changed
+
+- AI and bot comment analysis now download only from Settings → Features (or the terminal). The Set up buttons elsewhere link there, and bot comment scoring left Settings → Bots.
+
+### Fixed
+
+- Builds: you can now dismiss a failed build from the builds circle in the corner, and it stays dismissed.
+
+## [1.0.42] - 2026-11-15
+
+### Added
+
+- Settings → Releases → "Released from this workspace": tick the repositories you release. Releases checks, tags
+  and offers hotfix bases for those only, and ignores the rest. Nothing is ticked at first.
+- This Sprint → Releases → "Start from this tag": treat a version tag on main, and everything before it, as
+  accepted, so only later tags are checked. Change or clear it from the repository row. Nothing is written to GitHub.
+
+### Changed
+
+- This Sprint → Releases: one row per repository with the latest version tag and the candidate ("Latest 0.394.0 ·
+  candidate 0.390.0 → 0.390.0-rc"). Open a row to see each tag's tickets and status. The separate tickets list is gone.
 - This Sprint → Releases: a version tag is held back only by its own tickets that are not Done or could not be read.
   A ticket's pull requests in other repositories, and open pull requests, no longer hold anything back.
+- This Sprint → Releases: tags whose changes are still being read say "Reading changes…" instead of holding the
+  release back, and repositories you release catch up much sooner.
 - Settings → Releases: the hyphen before each suffix is fixed. Type `rc`, and the tag is `v2.4.0-rc`. A suffix saved
   without a hyphen now has one.
 - Implement → "Treat as a hotfix": a repository not released from this workspace is read only.

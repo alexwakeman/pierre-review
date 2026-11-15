@@ -1,4 +1,4 @@
-import { Select } from '../ui/index.js';
+import { Select, Switch } from '../ui/index.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Repo, Workspace, WorkspaceRepoMode } from '@pierre-review/shared';
@@ -6,6 +6,8 @@ import { api, ApiError } from '../../api/client.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
 import { useRepos } from '../../hooks/useTimeline.js';
+import { useMe } from '../../hooks/useTriage.js';
+import { useSetRepoBotScoring } from '../../hooks/useToolSwitches.js';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { getSyncRoundActions, useFilters } from '../../store/filters.js';
 import { RepoSearch } from '../RepoSearch.js';
@@ -65,6 +67,11 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   const qc = useQueryClient();
   const { data: workspaces } = useWorkspaces();
   const { data: repos } = useRepos();
+  // BOT SCORING PER REPO: offered only while bot comment analysis is installed and switched on
+  // (Settings → Features). Off = this repo's bot comments are not scored; labels already shown stay.
+  const botTool = useMe().data?.tools?.botAnalysis;
+  const offerBotScoring = botTool?.installed === true && botTool.on;
+  const setBotScoring = useSetRepoBotScoring();
   const activeWorkspaceId = useFilters((s) => s.workspaceId);
   const setWorkspace = useFilters((s) => s.setWorkspace);
   const {
@@ -367,6 +374,22 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                 }}
                 options={MODE_OPTIONS}
               />
+              {offerBotScoring && (
+                <Switch
+                  className="shrink-0"
+                  label="Bot scoring"
+                  aria-label={`Score bot comments in ${r.fullName}`}
+                  title={
+                    r.botScoringExcluded === true
+                      ? `${r.fullName}'s bot comments are not scored`
+                      : `${r.fullName}'s bot comments are scored on this machine`
+                  }
+                  data-testid="manager-repo-bot-scoring"
+                  checked={r.botScoringExcluded !== true}
+                  disabled={setBotScoring.isPending && setBotScoring.variables?.repoId === r.id}
+                  onChange={(e) => setBotScoring.mutate({ repoId: r.id, excluded: !e.target.checked })}
+                />
+              )}
               <button
                 type="button"
                 onClick={() => confirmDeepResyncRepo(r)}

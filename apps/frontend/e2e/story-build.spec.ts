@@ -513,6 +513,24 @@ test.describe('Implement story', () => {
     await expect(page.getByTestId('story-build-header')).toContainText('ACME-1');
   });
 
+  test('the builds toast: a failed build can be dismissed, and stays dismissed after a reload', async ({ page }) => {
+    const failed: StoryBuild = { ...STORY_SESSION_PLAN_READY, session: { ...STORY_SESSION_PLAN_READY.session!, phase: 'failed', live: false } };
+    await withAi(page, failed);
+    await page.goto('/app/');
+    const circle = page.getByTestId('story-builds-toast');
+    await expect(circle).toHaveAttribute('data-alert', 'true');
+    await page.getByTestId('header-toast-cluster').click();
+    const panel = page.getByTestId('story-builds-toast-panel');
+    await expect(panel.getByTestId('story-builds-toast-row')).toHaveAttribute('data-gate', 'failed');
+    await panel.getByRole('button', { name: 'Dismiss ACME-1' }).click();
+    await expect(circle).toHaveCount(0);
+    // The next poll and a reload still answer the failed build: it stays dismissed.
+    const polled = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/story-builds/active');
+    await page.reload();
+    await polled;
+    await expect(page.getByTestId('story-builds-toast')).toHaveCount(0);
+  });
+
   test('approved automatically: once the pull request is open, the ticket changes wait for the reader', async ({ page }) => {
     const plan = { ...STORY_PLAN_VIEW, status: 'approved' as const, approvedRevision: STORY_PLAN_VIEW.latest!.revision, unanswered: 0 };
     const b: StoryBuild = {

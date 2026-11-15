@@ -90,6 +90,7 @@ import type {
   StoryBuildPlan,
   SandboxRepoStat,
   FeatureSettings,
+  ToolSwitches,
   BuildPlanDecision,
   BuildPlanRevision,
   LimnActionKind,
@@ -198,6 +199,10 @@ export const accounts = sqliteTable('accounts', {
   // 0153. The account had repositories BEFORE Features existed (stamped once by the migration): every
   // destination's default is "shown", so an existing install looks as it did. A new install is 0.
   featuresExistingInstall: integer('features_existing_install', { mode: 'boolean' }).notNull().default(false),
+  // 0199. SETTINGS → FEATURES, THE TOOL SWITCHES (shared tool-switches.ts): AI and Bot comment analysis.
+  // OVERRIDES ONLY, `{ai?, botAnalysis?}` booleans; NULL = every default. One writer: PUT
+  // /api/me/tool-switches. Mirrored in memory by ai/tool-switches.ts for the synchronous gates.
+  toolSwitches: text('tool_switches', { mode: 'json' }).$type<ToolSwitches>(),
   // 0154. When the reader dismissed Pending's one-time "Review your PR with Claude" card
   // (db/pending-first-landing.ts). NULL = never; once set, the card never shows again.
   reviewSuggestionDismissedAt: integer('review_suggestion_dismissed_at', { mode: 'timestamp' }),
@@ -282,6 +287,9 @@ export const repos = sqliteTable(
     // starts a tag sync when they differ — a tag push is updatedAt-silent. NULL = never read.
     tagsSignature: text('tags_signature'),
     tagsSyncedAt: integer('tags_synced_at', { mode: 'timestamp' }),
+    // 0199. LEFT OUT OF BOT COMMENT SCORING (Repos & workspaces): the scoring worker skips this repo's
+    // bot comments (sync/ml-enrichment.ts). Labels already stored stay. Default false.
+    botScoringExcluded: integer('bot_scoring_excluded', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => ({
     // Composite uniques so two accounts can watch the same GitHub repo (each

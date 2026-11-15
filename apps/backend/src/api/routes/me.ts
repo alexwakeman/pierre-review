@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import type {
   AiKindStatus,
   FeatureSettingsBody,
+  ToolSwitchBody,
+  ToolSwitchesResponse,
   FeatureSettingsResponse,
   ReviewSuggestionDismissResponse,
   FeaturesStatus,
@@ -17,12 +19,13 @@ import type {
   MyTurnSettingsResponse,
   PushedSinceCommitsResponse,
 } from '@pierre-review/shared';
-import { FEATURE_IDS, resolveFeatures, resolveMyTurnSettings } from '@pierre-review/shared';
+import { FEATURE_IDS, TOOL_IDS, resolveFeatures, resolveMyTurnSettings } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import {
   accountToLocalUser,
   setBlastRadiusConfig,
   setFeatureSettings,
+  setToolSwitch,
   setLargePrCodeLocThreshold,
   setMyTurnSettings,
 } from '../../auth/account.js';
@@ -33,6 +36,7 @@ import { getAuthNotices } from '../../sync/auth-notices.js';
 import { isMlScoringAvailable } from '../../ml/scorer.js';
 import { getMlStatus } from '../../ml/runtime.js';
 import { activeRuntimeStatus } from '../../ai/active-runtime.js';
+import { toolSwitchesStatus, withAiSwitch } from '../../ai/tool-switches.js';
 import { getAiRuntimeStatus } from '../../ai/runtime.js';
 import { codexKindStatus, detectClaudeAuth, NO_CLAUDE_AUTH_MESSAGE } from '../../review/auth.js';
 import { resolveAiCredential } from '../../ai/credentials.js';
@@ -68,6 +72,18 @@ const featureSettingsSchema = {
         additionalProperties: false,
         properties: Object.fromEntries(FEATURE_IDS.map((k) => [k, { type: 'boolean' }])),
       },
+    },
+  },
+};
+
+const toolSwitchSchema = {
+  body: {
+    type: 'object',
+    required: ['id', 'on'],
+    additionalProperties: false,
+    properties: {
+      id: { type: 'string', enum: [...TOOL_IDS] },
+      on: { type: ['boolean', 'null'] },
     },
   },
 };
@@ -223,7 +239,9 @@ function agenticAiStatus(): MeResponse['ai'] {
   // (a stale cache kicks the background probe; this request never waits on a process).
   const claudeRoute = resolveAiCredential().route;
   const codex = codexDetailCached();
-  const claudeRt = getAiRuntimeStatus();
+  // A provider's own download, as the app must see it: 'absent' while AI is switched off.
+  const claudeRt = withAiSwitch(getAiRuntimeStatus());
+  const codexRt = withAiSwitch({ runtime: codex.runtime, runtimeMessage: codex.runtimeMessage });
   return {
     enabled: true,
     autoInstall: config.aiAutoInstall,
@@ -252,8 +270,8 @@ function agenticAiStatus(): MeResponse['ai'] {
         usageLockedUntil: usageLockedUntilIso('claude'),
       },
       codex: {
-        runtime: codex.runtime,
-        runtimeMessage: codex.runtimeMessage,
+        runtime: codexRt.runtime,
+        runtimeMessage: codexRt.runtimeMessage,
         // ⚠ Only a ChatGPT sign-in can run Codex: the API-key route is refused until it can be priced
         // (its message is ai/codex/detect.ts CODEX_API_KEY_NOT_AVAILABLE_MESSAGE).
         // ⚠ …and only one KNOWN to be ChatGPT: a sign-in no probe has confirmed is not 'ok' yet.
@@ -328,6 +346,7 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
       },
       // SETTINGS → FEATURES, resolved (visibility only; a deep link still opens a hidden one).
       features: await featuresFor(accountId, req.account),
+      tools: toolSwitchesStatus(req.account?.toolSwitches ?? null),
       // Orgs currently SAML-blocked for this account (empty in the normal case).
       authNotices: getAuthNotices(accountId),
     };
@@ -422,6 +441,19 @@ export async function meRoutes(app: FastifyInstance): Promise<void> {
     const stored = await setFeatureSettings(accountId, settings);
     const features = await featuresFor(accountId, { ...(req.account as Account), featureSettings: stored });
     const body: FeatureSettingsResponse = { status: 'ok', featureSettings: stored, features };
+    return body;
+  });
+
+  // SETTINGS → FEATURES, THE TOOL SWITCHES (shared tool-switches.ts; ai/tool-switches.ts): AI and Bot
+  // comment analysis. ONE switch per PUT (`on: null` = back to its default); echoes what was STORED and
+  // both switches resolved. It downloads nothing: Settings starts a download through the existing install
+  // routes after the reader confirms. Rate tier `read` (pinned in rate-limit.test.ts): one UPDATE, no
+  // GitHub, no model.
+  app.put('/api/me/tool-switches', { schema: toolSwitchSchema }, async (req) => {
+    const accountId = accountIdOf(req);
+    const { id, on } = req.body as ToolSwitchBody;
+    const stored = await setToolSwitch(accountId, id, on);
+    const body: ToolSwitchesResponse = { status: 'ok', toolSwitches: stored, tools: toolSwitchesStatus(stored) };
     return body;
   });
 

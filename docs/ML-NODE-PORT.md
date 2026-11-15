@@ -209,8 +209,9 @@ that version would keep the old bytes. In dev nothing is downloaded: `pnpm dev` 
 **Built.**
 - **Backend:** `MeResponse.ml` (absent under ENSEMBLE_ML_DISABLED) and
   `POST /api/ml/install` (SSE, `sync` tier).
-- **SPA:** Settings → "Bot comment scoring" (`BotScoringSection`). "Set up AI" chains into the same
-  download when scoring is not set up, which is decision 3's single button.
+- **SPA:** Settings → Features → "Bot comment analysis" (`settings/ToolsSection.tsx`, the tool switch;
+  docs/FRONTEND.md). The AI download no longer chains into it (2026-11-15). Per repo: Repos & workspaces →
+  Bot scoring (`PUT /api/repos/:id/bot-scoring`).
 
 ### 6. Shadow run, then cut over (1 day + elapsed time)
 

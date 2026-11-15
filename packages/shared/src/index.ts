@@ -52,6 +52,7 @@ export * from './story-build-loop.js';
 export * from './story-build-activity.js';
 export * from './repo-status.js';
 export * from './features.js';
+export * from './tool-switches.js';
 export * from './flaky-checks.js';
 export * from './pr-chips.js';
 export * from './still-open.js';

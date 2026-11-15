@@ -546,7 +546,11 @@ export default function App(): JSX.Element {
       {helpOpen && <HelpModal onClose={closeHelp} />}
       {shortcutsOpen && <ShortcutsSheet onClose={closeShortcuts} />}
       <CommandPalette />
-      {settingsOpen && <SettingsModal focus={settingsFocus} onClose={closeSettings} />}
+      {settingsOpen && (
+        // Keyed on the focus: a deep link opened from INSIDE Settings ("Set up in Settings → Features")
+        // re-lands the modal on its section, the same as opening it from outside.
+        <SettingsModal key={settingsFocus ?? 'none'} focus={settingsFocus} onClose={closeSettings} />
+      )}
       {/* "Manage repos & workspaces": opened from the workspace menu, ⌘K, the empty-workspace note,
           and once for a zero-repo account (useWorkspaceShell). */}
       {managerOpen && <WorkspaceManagerModal onClose={closeManager} />}

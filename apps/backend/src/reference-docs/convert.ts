@@ -108,7 +108,7 @@ export function pdfPageCount(buf: Buffer): number | null {
 
 export class ConverterMissingError extends Error {
   constructor() {
-    super('Reading Word files and web pages needs the latest AI download. Press "Set up AI" again, then rebuild.');
+    super('Reading Word files and web pages needs the latest AI download. Download it again from Settings → Features, then rebuild.');
     this.name = 'ConverterMissingError';
   }
 }

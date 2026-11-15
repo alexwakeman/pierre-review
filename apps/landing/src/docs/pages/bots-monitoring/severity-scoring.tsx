@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, DocLink, H2, Illustration, Note, Pill, SettingsRow, Steps, Thread, Ui } from '../../kit';
+import { DocLink, H2, Illustration, Note, Pill, SettingsRow, Steps, Thread, Toggle, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Severity scoring',
@@ -20,30 +20,37 @@ export default function Page(): JSX.Element {
 
       <H2 id="set-it-up">Set it up</H2>
       <Illustration
-        label="The Bot comment scoring section of Settings → Bots, with the button Set up (one-time ~240 MB download)"
-        caption="Settings → Bots: scoring is set up once per computer."
+        label="The Bot comment analysis switch in Settings → Features, off, with the hint Not downloaded yet."
+        caption="Settings → Features: scoring is downloaded once per computer."
       >
         <SettingsRow
-          label="Bot comment scoring"
-          hint="Score how serious each bot review comment is."
-          control={<Btn>Set up (one-time ~240 MB download)</Btn>}
+          label="Bot comment analysis"
+          hint="Not downloaded yet. Switching it on asks before downloading."
+          control={<Toggle on={false} />}
         />
       </Illustration>
       <Steps>
         <li>
-          Open <DocLink to="settings/bots">Settings → Bots</DocLink>.
+          Open <DocLink to="settings/features">Settings → Features</DocLink>.
         </li>
         <li>
-          Under <Ui>Bot comment scoring</Ui>, press <Ui>Set up (one-time ~240 MB download)</Ui>. This downloads the
-          model and the program that runs it, once.
+          Switch on <Ui>Bot comment analysis</Ui>, then select <Ui>Download</Ui>. This downloads the models and the
+          program that runs them, about 240 MB, once.
         </li>
         <li>
-          Wait for the section to say <Ui>Set up. Bot review comments are scored on this machine.</Ui>
+          When it is ready, the switch lists the models it found and where they are.
         </li>
       </Steps>
       <p>
         You can also run <code>npx ensemble-review ml install</code> in a terminal, and{' '}
         <code>npx ensemble-review ml status</code> to check it.
+      </p>
+
+      <H2 id="leave-a-repository-out">Leave a repository out</H2>
+      <p>
+        Every repository is scored. To leave one out, open <Ui>Repos &amp; workspaces</Ui> and switch off its{' '}
+        <Ui>Bot scoring</Ui> switch. Its new bot comments are not scored; labels it already has stay. To stop scoring
+        everywhere, switch off <Ui>Bot comment analysis</Ui> in Settings → Features.
       </p>
 
       <H2 id="it-will-not-slow-your-computer">It will not slow your computer</H2>

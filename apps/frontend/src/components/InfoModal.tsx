@@ -14,6 +14,7 @@ import {
 import { usePlacedFloating } from './ui/floating.js';
 import { claimActivePopover, closeActivePopover } from '../lib/activePopover.js';
 import { CloseIcon, InfoIcon } from './Icons.js';
+import { ESCAPE_OWNER_ATTR } from '../lib/escapeOwner.js';
 
 // A PANEL'S EXPLANATION, BEHIND AN "i". The page keeps figures, charts and the one-line disclosures;
 // how a panel is read — what it counts, which rule decides a verdict, what it leaves out — moves in
@@ -44,9 +45,11 @@ export interface InfoModalProps {
   children: ReactNode;
   /** 'md' = w-[34rem] (default), 'lg' = w-[44rem]; both max-w-[94vw]. */
   width?: 'md' | 'lg';
+  /** Opened over another modal (Settings): its Escape closes THIS dialog only (lib/escapeOwner.ts). */
+  overModal?: boolean;
 }
 
-export function InfoModal({ title, onClose, children, width = 'md' }: InfoModalProps): JSX.Element {
+export function InfoModal({ title, onClose, children, width = 'md', overModal = false }: InfoModalProps): JSX.Element {
   const titleId = useId();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const { refs, context } = useFloating({
@@ -88,6 +91,7 @@ export function InfoModal({ title, onClose, children, width = 'md' }: InfoModalP
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
+            {...(overModal ? { [ESCAPE_OWNER_ATTR]: '' } : {})}
             className={`flex max-h-[90vh] w-full flex-col rounded-t-xl bg-ui-raise pb-[env(safe-area-inset-bottom)] shadow-2xl shadow-black/30 focus:outline-none motion-safe:animate-ui-sheet-up sm:max-h-[85vh] sm:max-w-[94vw] sm:rounded-ui sm:pb-0 sm:motion-safe:animate-ui-pop ${WIDTH[width]}`}
           >
             <div className="flex items-center justify-between gap-3 px-5 pb-1 pt-4">

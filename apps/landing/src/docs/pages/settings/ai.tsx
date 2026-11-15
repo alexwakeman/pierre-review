@@ -76,8 +76,9 @@ export default function Page(): JSX.Element {
         <DocLink to="integrations/codex">Codex (OpenAI)</DocLink>.
       </p>
       <Tip>
-        If a download failed, the line says why and shows <Ui>Retry</Ui>. The terminal command{' '}
-        <code>ensemble ai install</code> does the same.
+        If the download failed, or AI is switched off, the line says why and links to{' '}
+        <DocLink to="settings/features">Settings → Features</DocLink>, where the AI switch downloads it again. The
+        terminal command <code>ensemble ai install</code> does the same.
       </Tip>
 
       <H2 id="api-keys">Use my API keys first</H2>

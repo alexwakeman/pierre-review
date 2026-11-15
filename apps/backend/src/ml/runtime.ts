@@ -86,7 +86,7 @@ export interface MlInstallProgress {
 export type MlInstallResult = { ok: true } | { ok: false; message: string };
 
 export const ML_MISSING_MESSAGE =
-  'Bot comment scoring is not set up yet. Press "Set up" in Ensemble, or run: ensemble ml install';
+  'Bot comment analysis is not set up yet. Switch it on in Settings → Features, or run: ensemble ml install';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

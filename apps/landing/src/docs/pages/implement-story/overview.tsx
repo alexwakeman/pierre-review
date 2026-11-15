@@ -81,7 +81,8 @@ export default function Page(): JSX.Element {
       <p>
         While a build runs, a hammer circle in the corner of the window shows its progress. A number on it counts the
         builds waiting for you: a plan to approve, a build to push, a paused review, a failure, or ticket changes to
-        check. Open it and select a build to go to its tab.
+        check. Open it and select a build to go to its tab. To clear a failed build from the list, press its{' '}
+        <Ui>×</Ui>.
       </p>
 
       <H2 id="the-four-steps">The four steps</H2>

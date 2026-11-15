@@ -161,14 +161,15 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Bot comment scoring (on your machine)">
             A small model labels each comment a review bot leaves, from <strong>nit</strong> to{' '}
             <strong>critical</strong>, so you can see which ones matter. With{' '}
-            <Code>npx ensemble-review</Code>, turn it on once: <strong>Settings → Bot comment
-            scoring → Set up</strong> (<strong>Set up AI</strong> does it too), or run{' '}
-            <Code>npx ensemble-review ml install</Code>. That downloads about 240 MB into{' '}
+            <Code>npx ensemble-review</Code>, turn it on once: <strong>Settings → Features → Bot comment
+            analysis</strong>, or run <Code>npx ensemble-review ml install</Code>. That downloads about 240 MB into{' '}
             <Code>~/.ensemble</Code>. It scores on this machine and sends nothing anywhere. It runs in
             the background at low priority, using at most half of one CPU core, and pauses on
             battery, so a large backlog of old comments takes a while. To score faster, start Ensemble
             with <Code>ENSEMBLE_ML_CPU_SHARE=1</Code>; to keep scoring on battery,{' '}
-            <Code>ENSEMBLE_ML_ON_BATTERY=run</Code>; to turn it off, <Code>ENSEMBLE_ML_DISABLED=true</Code>.
+            <Code>ENSEMBLE_ML_ON_BATTERY=run</Code>. Switch it off in Settings → Features to stop scoring
+            new comments (the labels already shown stay). To leave one repository out, switch off its bot
+            scoring in Repos &amp; workspaces.
             Check it with <Code>npx ensemble-review ml status</Code>.
           </Section>
 
