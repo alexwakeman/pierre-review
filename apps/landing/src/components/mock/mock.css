@@ -768,3 +768,79 @@
 .lb .mk-stand > .mk-stand-v {
   color: var(--ink);
 }
+/* This Sprint → Releases (SprintLanesMock's 4th tab) */
+.lb .rp-releases {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.lb .rp-releases .top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lb .rp-releases .dlg {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .rp-releases ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lb .rp-releases .repos li {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 8px;
+  padding: 6px 0;
+  border-top: 1px solid #26272c;
+}
+.lb .rp-releases .repos .name {
+  font-weight: 600;
+}
+.lb .rp-releases .repos em {
+  font-style: normal;
+  color: var(--gold);
+}
+.lb .rp-releases .repos .txt {
+  color: var(--muted);
+}
+.lb .rp-releases .repos .cand .txt {
+  color: inherit;
+}
+.lb .rp-releases .tickets li {
+  padding: 5px 0;
+  border-top: 1px solid #26272c;
+}
+.lb .rp-releases .key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c8c5f0;
+}
+.lb .rp-releases .marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .rp-releases .mark i {
+  font-style: normal;
+}
+.lb .rp-releases .mark.ok i {
+  color: #7fc99a;
+}
+.lb .rp-releases .mark.bad i {
+  color: #e8877b;
+}
+.lb .rp-releases .mark.warn i {
+  color: #e0b860;
+}
+.lb .rp-releases .warns li {
+  font-size: 12px;
+}

@@ -82,7 +82,7 @@ are the app's own; never invent a feature for a mock.
 | `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
 | `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
 | `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
-| `reports.tsx` SprintLanesMock | `/reporting` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` |
+| `reports.tsx` SprintLanesMock (`initialView="releases"` on `/docs/this-sprint/releases`) | `/reporting`, `/docs/this-sprint/overview`, `/docs/this-sprint/releases` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` (the four tabs); the Releases tab: `Sprint/ReleasesView.tsx`, `Sprint/releasesModel.ts` (`repoRowText`, `ticketRepoMark`, `releaseWarningText`) |
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
 `/how-it-works`) plus an arcade game, and they were removed together. The two role pages

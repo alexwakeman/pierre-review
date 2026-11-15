@@ -482,7 +482,7 @@ export const BENCH = {
   ],
 };
 
-export type SprintView = 'themes' | 'paths' | 'people';
+export type SprintView = 'themes' | 'paths' | 'people' | 'releases';
 export type SprintCard = {
   key: string;
   title: string;
@@ -495,7 +495,7 @@ export type SprintCard = {
   waiting?: boolean;
 };
 
-/** This Sprint: one lane board, three views (sprintRailModel.ts SPRINT_RAIL_TABS). */
+/** This Sprint: one lane board, three views, and the Releases tab (sprintRailModel.ts SPRINT_RAIL_TABS). */
 export const SPRINT = {
   name: 'Payments Sprint 24',
   meta: 'Oct 15 – Oct 28 · day 10 of 14',
@@ -503,6 +503,7 @@ export const SPRINT = {
     { id: 'themes', label: 'Theme' },
     { id: 'paths', label: 'Critical path' },
     { id: 'people', label: 'People' },
+    { id: 'releases', label: 'Releases' },
   ] as { id: SprintView; label: string }[],
   columns: ['Not started', 'In progress', 'Code review', 'Product review'],
   cards: [
@@ -513,6 +514,46 @@ export const SPRINT = {
     { key: 'PAY-146', title: 'Rename ledger tables', criteria: '1 of 3 criteria met', who: 'Priya Nair', theme: 'Ledger', col: 1, path: 3 },
     { key: 'PAY-148', title: 'Index ledger by day', criteria: '3 of 3 criteria met', who: 'Wei Zhang', theme: 'Ledger', col: 2 },
   ] as SprintCard[],
+};
+
+export type ReleaseMark = 'ok' | 'bad' | 'warn';
+
+/** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`. */
+export const SPRINT_RELEASES = {
+  latest: 'Latest release: 14 Oct',
+  action: 'Create release…',
+  /** The dialog's ticked repositories (Sprint/ReleaseDialog.tsx). */
+  dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
+  repos: [
+    { name: REPOS.payments, candidate: true, text: 'v3.2.0 → v3.2.0-rc · 3 tickets · 1 warning' },
+    { name: REPOS.web, candidate: true, text: 'v1.8.2 → v1.8.2-rc · 1 ticket' },
+    { name: REPOS.ledger, candidate: false, text: 'No candidate: v0.9.0 held by PAY-146 (In progress)' },
+    { name: REPOS.api, candidate: false, text: 'Nothing new since v2.3.0-rc' },
+  ],
+  tickets: [
+    { key: 'PAY-146', title: 'Rename ledger tables', marks: [{ repo: REPOS.ledger, tone: 'bad', text: 'open PR' }] },
+    {
+      key: 'PAY-131',
+      title: 'Card retries back off',
+      marks: [
+        { repo: REPOS.payments, tone: 'ok', text: 'in candidate' },
+        { repo: REPOS.web, tone: 'ok', text: 'in candidate' },
+      ],
+    },
+    { key: 'PAY-134', title: 'Payout dates in the export', marks: [{ repo: REPOS.payments, tone: 'ok', text: 'in candidate' }] },
+    {
+      key: 'PAY-137',
+      title: 'Refund webhook names the reason',
+      marks: [
+        { repo: REPOS.payments, tone: 'ok', text: 'in candidate' },
+        { repo: REPOS.api, tone: 'warn', text: 'linked, no PR' },
+      ],
+    },
+  ] as Array<{ key: string; title: string; marks: Array<{ repo: string; tone: ReleaseMark; text: string }> }>,
+  warnings: [
+    'acme/payments #605 has no ticket: Tidy the refund logs.',
+    'PAY-137 is linked to acme/api, which has no pull request for it.',
+  ],
 };
 
 // ---- the docs' Getting started: first run and Repos & workspaces ----------------

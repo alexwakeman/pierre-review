@@ -31,13 +31,14 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [STORY-BUILD](docs/STORY-BUILD.md) · [SANDBOX](docs/SANDBOX.md) | Implement story (flow, Fill gaps, Push) · its sandbox (and AI Fix's): setup, proxy, drivers, services, threats |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |
 | [BLAST-RADIUS](docs/BLAST-RADIUS.md) | the Low/Medium/High reach chip, the co-change index |
+| [RELEASES](docs/RELEASES.md) | tag sync, the release check, its writes, hotfix builds |
 | [TRACKERS](docs/TRACKERS.md) | the issue tracker: Jira, GitHub Issues, Linear, Notion, stored tickets + worker, the sealed token |
 | [SONARCLOUD](docs/SONARCLOUD.md) | the per-(PR, head) snapshot, the review block, the one PR comment, AI Fix's `Q<n>` items |
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, Slack |
-| [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
+| [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, AI routes, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
 | [`apps/site/README.md`](apps/site/README.md) · [`apps/landing/README.md`](apps/landing/README.md) | the website service + contact form · the landing and its HTML mocks |
@@ -89,7 +90,7 @@ The load-bearing concept is **derived thread state** (below).
   comes from `.env` (repo root) then `apps/backend/.env`.
 
 **Removed 2026-10-22 — do not reintroduce:** cloud mode, Postgres, the Pro entitlement layer,
-credits, Stripe billing, the cloud benchmark collection ([docs/BACKEND.md](docs/BACKEND.md)). Their tables stay dormant, never dropped.
+credits, Stripe billing, the cloud benchmark collection (docs/BACKEND.md). Their tables stay dormant, never dropped.
 
 ---
 
@@ -333,7 +334,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 
 ## Merge, CI logs & trunk status (no AI)
 
-Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
+Full detail: docs/MERGE-CI-TRUNK.md. The invariants:
 
 - **Every "can this land?" surface resolves through the pure `mergeVerdict()`** (`lib/ui.ts`);
   lead with `mergeStateStatus`. ⚠ **`unstable` IS mergeable**; `behind` is not.
@@ -518,6 +519,8 @@ Monitoring, Slack.
   `GET /api/sprint-graph` is DB only, ONE fold (`db/sprint-graph-fold.ts`). Briefs, themes, "needs
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
+- **Releases**: the check is ONE pure shared fold, `foldReleaseCheck`, DB only on a view;
+  `repo_tag_ranges` holds per-tag INCREMENTS.
 - **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
   RECEIVED, never when VIEWED (exceptions: the sprint list read, release Confirm). ⚠ **The ONLY tracker
   writes are the reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion),
@@ -546,8 +549,7 @@ categories. [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) · [docs/ML-NODE-PORT.md]
 
 ## Security & privacy
 
-Read [docs/SECURITY.md](docs/SECURITY.md) before touching `app.ts`, CORS/CSP, rate limiting or an
-AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard, the host guard —
+`api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard, the host guard —
 421 on a non-loopback `Host`, against DNS rebinding) and `api/plugins/rate-limit.ts`.
 
 - **CORS allows loopback origins only** — the server has no auth, so any wider origin lets any
@@ -631,7 +633,7 @@ Publishing is CI-only — **never run `npm publish`/`npm login` here**.
 ## The website (`apps/site`) and the landing
 
 - **`apps/site`** serves limn-review.com: the prerendered landing and the contact form (`/demo/` 302s to `/`)
-  (the commercial-licence path; [apps/site/README.md](apps/site/README.md)). ⚠ Its rate limit reads
+  (the commercial-licence path). ⚠ Its rate limit reads
   `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). GA lives in the landing only, never the SPA.
 - The landing's `<!-- seo:start/end -->` / `<!-- app:start/end -->` markers in
   `apps/landing/index.html` are load-bearing (the prerenderer throws without them).

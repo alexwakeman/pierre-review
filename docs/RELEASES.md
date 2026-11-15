@@ -407,3 +407,25 @@ The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
   checkout is a second mirror of the repository (`<path>.main`), not a git worktree: the agent ports by fetch +
   cherry-pick between the two, or by hand. The Codex and Claude seeds differ only in the existing file names; no
   Claude prompt golden changed. The landing's build-tab mock does not show a hotfix build.
+
+### Slice 6 — docs, landing mock, changelog, final consistency
+
+- **Landing mock**: `SprintLanesMock` (`apps/landing/src/components/mock/reports.tsx`) now has the app's FOUR
+  This Sprint tabs; the 4th, Releases, is `ReleasesPanel` (latest release, a row per repository with the
+  candidate starred, the tickets with their per-repo marks, the warnings, and a clickable "Create release…"
+  that shows what the dialog would write). Data: `SPRINT_RELEASES` in `src/mock/acme.ts`, worded with
+  `Sprint/releasesModel.ts`'s sentences. A new `initialView` prop opens it on Releases, used on
+  `/docs/this-sprint/releases`. The mock → component table in `apps/landing/README.md` names
+  `Sprint/ReleasesView.tsx` and `releasesModel.ts`. Styles: `.rp-releases` in `mock.css`.
+- **User docs and CHANGELOG**: the pages `this-sprint/releases`, `settings/releases` and
+  `implement-story/hotfix`, and the three Unreleased "Added" entries, landed with slices 4 and 5; checked
+  here, unchanged.
+- **Topic docs**: FRONTEND (§ This Sprint, the Releases tab), DATA-MODEL (§ Releases, the hotfix columns),
+  API (§ Releases and the story-build hotfix routes), SYNC (§ Tags), TRACKERS and STORY-BUILD were checked
+  against the code: every new route and table is documented.
+- **CLAUDE.md**: a RELEASES row in the doc map and one invariant line under This Sprint (the check is ONE
+  pure shared fold, DB only on a view; `repo_tag_ranges` holds per-tag increments). To stay under 48,000
+  bytes (now 47,998), three links that repeat the doc map became plain text, and the Security section's
+  "Read docs/SECURITY.md before …" sentence moved into the doc map row ("AI routes").
+- **Deferred**: the release tables are still not in `GET /api/me/export` (they are erased); no Playwright
+  spec for the Releases tab or a hotfix build; no landing mock of a hotfix build.

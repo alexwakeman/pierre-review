@@ -1,4 +1,5 @@
 import type { DocMeta } from '../../types';
+import { SprintLanesMock } from '../../../components/mock/reports';
 import { DocLink, H2, H3, Kbd, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
@@ -35,6 +36,7 @@ export default function Page(): JSX.Element {
       </ul>
 
       <H2 id="what-you-see">What you see</H2>
+      <SprintLanesMock initialView="releases" />
       <H3 id="the-header">The header</H3>
       <p>
         &ldquo;Latest release: none&rdquo; or the date of the latest release, for example &ldquo;Latest release: 12

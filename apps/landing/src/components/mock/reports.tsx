@@ -10,10 +10,11 @@ import {
   OVER_TIME,
   PERIODS,
   SPRINT,
+  SPRINT_RELEASES,
   WHERE,
 } from '../../mock/acme';
-import type { PeriodGrain, SprintCard, SprintView } from '../../mock/acme';
-import { Chip, CourtBar, Group, HBar, MiniTable, MockFrame, MockTabs, Segmented, Stat } from './kit';
+import type { PeriodGrain, ReleaseMark, SprintCard, SprintView } from '../../mock/acme';
+import { Act, Chip, CourtBar, Group, HBar, MiniTable, MockFrame, MockTabs, Segmented, Stat } from './kit';
 
 // The Reporting and How we measure pages' mocks. Words and numbers:
 // src/mock/acme.ts. The app surface each one mirrors: apps/landing/README.md.
@@ -650,50 +651,107 @@ function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
   );
 }
 
-export function SprintLanesMock(): JSX.Element {
-  const [view, setView] = useState<SprintView>('themes');
+const MARK_GLYPH: Record<ReleaseMark, string> = { ok: '✓', bad: '✗', warn: '!' };
+
+/** This Sprint → Releases: the latest release, a row per repository, the tickets and the warnings. */
+function ReleasesPanel(): JSX.Element {
+  const R = SPRINT_RELEASES;
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rp-releases">
+      <div className="top">
+        <b>{R.latest}</b>
+        <Act tone="go" pressed={open} onClick={() => setOpen((o) => !o)}>
+          {R.action}
+        </Act>
+      </div>
+      {open ? <p className="dlg">{R.dialog}</p> : null}
+      <ul className="repos">
+        {R.repos.map((r) => (
+          <li key={r.name} className={r.candidate ? 'cand' : undefined}>
+            <span className="name">
+              {r.name}
+              {r.candidate ? <em aria-label="candidate"> ★</em> : null}
+            </span>
+            <span className="txt">{r.text}</span>
+          </li>
+        ))}
+      </ul>
+      <Group>Tickets</Group>
+      <ul className="tickets">
+        {R.tickets.map((t) => (
+          <li key={t.key}>
+            <span className="key">{t.key}</span> <span className="ti">{t.title}</span>
+            <span className="marks">
+              {t.marks.map((m) => (
+                <span key={m.repo} className={`mark ${m.tone}`}>
+                  <i aria-hidden="true">{MARK_GLYPH[m.tone]}</i> {m.repo} {m.text}
+                </span>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <Group>Warnings</Group>
+      <ul className="warns">
+        {R.warnings.map((w) => (
+          <li key={w}>{w}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function SprintLanesMock({ initialView = 'themes' }: { initialView?: SprintView } = {}): JSX.Element {
+  const [view, setView] = useState<SprintView>(initialView);
   const lanes = lanesFor(view);
   return (
     <MockFrame
       live
       title={SPRINT.name}
       meta={SPRINT.meta}
-      onReset={view !== 'themes' ? () => setView('themes') : null}
-      label="This Sprint: one lane board by theme, critical path or person, with status columns from not started to product review, ticket cards with criteria and assignee, and numbered critical-path links"
+      onReset={view !== initialView ? () => setView(initialView) : null}
+      label="This Sprint: one lane board by theme, critical path or person, with status columns from not started to product review, ticket cards with criteria and assignee, and numbered critical-path links; and a Releases tab naming each repository's release candidate and the tickets behind it"
     >
       <MockTabs label="This Sprint views" tabs={SPRINT.views} value={view} onChange={setView}>
-        <div className="rp-lanes">
-          <div className="hd" aria-hidden="true">
-            <span />
-            {SPRINT.columns.map((c) => (
-              <span key={c}>{c}</span>
+        {view === 'releases' ? (
+          <ReleasesPanel />
+        ) : (
+          <div className="rp-lanes">
+            <div className="hd" aria-hidden="true">
+              <span />
+              {SPRINT.columns.map((c) => (
+                <span key={c}>{c}</span>
+              ))}
+            </div>
+            {lanes.map((lane) => (
+              <div key={lane.name} className="lane">
+                <b className="theme">{lane.name}</b>
+                {SPRINT.columns.map((_, col) => {
+                  const here = lane.cards.filter((c) => c.col === col);
+                  return here.length > 0 ? (
+                    <div key={col} className="cell">
+                      {here.map((c) => (
+                        <SprintCardBox key={c.key} card={c} />
+                      ))}
+                    </div>
+                  ) : (
+                    <span key={col} className="empty" />
+                  );
+                })}
+              </div>
             ))}
           </div>
-          {lanes.map((lane) => (
-            <div key={lane.name} className="lane">
-              <b className="theme">{lane.name}</b>
-              {SPRINT.columns.map((_, col) => {
-                const here = lane.cards.filter((c) => c.col === col);
-                return here.length > 0 ? (
-                  <div key={col} className="cell">
-                    {here.map((c) => (
-                      <SprintCardBox key={c.key} card={c} />
-                    ))}
-                  </div>
-                ) : (
-                  <span key={col} className="empty" />
-                );
-              })}
-            </div>
-          ))}
-        </div>
+        )}
       </MockTabs>
-      <Legend
-        items={[
-          { label: 'On a critical path', color: 'var(--gold)' },
-          { label: 'On a path and waiting', color: '#8a7240' },
-        ]}
-      />
+      {view !== 'releases' && (
+        <Legend
+          items={[
+            { label: 'On a critical path', color: 'var(--gold)' },
+            { label: 'On a path and waiting', color: '#8a7240' },
+          ]}
+        />
+      )}
     </MockFrame>
   );
 }
