@@ -37,7 +37,7 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
       blend
       className={className}
       label={label}
-      preserveAspectRatio="xMidYMid meet"
+      fit="meet"
     />
   );
 }
@@ -52,7 +52,7 @@ export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
       viewBox={QUARTET.viewBox}
       className={className}
       label={label}
-      preserveAspectRatio="xMidYMid meet"
+      fit="meet"
       quarters={QUARTET.quarters}
     />
   );
