@@ -43,7 +43,9 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 (`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
 `Arcs.tsx` draws a composition; `pieces.tsx` holds the Spiral, Quartet, Orchestra and Combo;
 `arcMotion.ts` draws them out and opens them up on scroll, started by `useReveal`, off under
-reduced motion). No photographs. The voice tiles carry a quarter in their corner
+reduced motion). No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
+`public/og-image.png` are generated (`node scripts/make-favicons.mjs`, `node scripts/make-og-image.mjs`):
+the mark from `packages/shared/src/brand-mark.ts`, the one definition the app's Wordmark also draws. The voice tiles carry a quarter in their corner
 (`assets/arcs/corner.svg`, the same geometry).
 
 **PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Ensemble UI. They are built from one kit,

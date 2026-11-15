@@ -368,6 +368,11 @@ body:has(.lb) {
 .lb-nav {
   padding-top: var(--m);
 }
+.lb-nav .mark img {
+  width: 30px;
+  height: 30px;
+  flex: none;
+}
 .lb-nav .bar {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -377,10 +382,11 @@ body:has(.lb) {
 .lb-nav .mark {
   grid-column: span 2;
   white-space: nowrap;
-  background: var(--ink);
-  color: var(--dark);
+  background: #000;
+  color: var(--ink);
   display: flex;
   align-items: flex-end;
+  gap: 10px;
   font-weight: 600;
   font-size: 22px;
   letter-spacing: -0.04em;

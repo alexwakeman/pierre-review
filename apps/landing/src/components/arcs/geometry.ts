@@ -92,6 +92,67 @@ export interface Quarter {
   seats?: boolean;
 }
 
+// ---- a quarter, laid out ---------------------------------------------------
+// The ONE layout both renderers use: <Arcs> (React) and quartersToSvg (a string,
+// for the scripts that render the share image).
+
+const BULGE: Record<Corner, [number, number]> = { br: [-1, -1], bl: [1, -1], tl: [1, 1], tr: [-1, 1] };
+const round = (n: number, p = 100): number => Math.round(n * p) / p;
+
+export interface LaidOutQuarter {
+  /** Gradient line, x1 y1 x2 y2. */
+  line: [number, number, number, number];
+  stops: readonly string[];
+  /** Assembly offset and the transform origin (the cut-adjusted centre). */
+  dx: number;
+  dy: number;
+  ox: number;
+  oy: number;
+  paths: { d: string; w: number; k: number; dash?: string }[];
+}
+
+export function layoutQuarter(q: Quarter): LaidOutQuarter {
+  const [bx, by] = BULGE[q.corner];
+  // the cut: each quarter pulls back from the lines it shares with its neighbours
+  const c = (CUT * q.R) / 2;
+  const cx = q.cx + bx * c;
+  const cy = q.cy + by * c;
+  return {
+    line: gradientLine(q.cx, q.cy, q.R, q.corner),
+    stops: RUNS[q.run],
+    dx: q.dx ?? round(bx * q.R * 0.18),
+    dy: q.dy ?? round(by * q.R * 0.18),
+    ox: round(cx),
+    oy: round(cy),
+    paths: bands(q.R - c, q.n, q.inner).map((b) => ({
+      d: arcPath(cx, cy, b.r, q.corner),
+      w: round(b.t),
+      k: round(b.k, 1000),
+      // seats are dashes in user units (a chair every ~1.4 band widths)
+      dash: q.seats ? `${round(b.t * 1.5)} ${round(b.t * 0.9)}` : undefined,
+    })),
+  };
+}
+
+/** A whole composition as an SVG string (still, finished): for scripts, not pages. */
+export function quartersToSvg(viewBox: string, quarters: Quarter[], extra = '', fit = 'xMidYMid meet'): string {
+  let defs = '';
+  let body = '';
+  quarters.forEach((q, i) => {
+    const l = layoutQuarter(q);
+    const n = l.stops.length;
+    defs +=
+      `<linearGradient id="g${i}" gradientUnits="userSpaceOnUse" x1="${round(l.line[0])}" y1="${round(l.line[1])}" x2="${round(l.line[2])}" y2="${round(l.line[3])}">` +
+      l.stops.map((c, j) => `<stop offset="${n > 1 ? j / (n - 1) : 0}" stop-color="${c}"/>`).join('') +
+      '</linearGradient>';
+    body +=
+      `<g fill="none" stroke="url(#g${i})">` +
+      l.paths.map((p) => `<path d="${p.d}" stroke-width="${p.w}"${p.dash ? ` stroke-dasharray="${p.dash}"` : ''}/>`).join('') +
+      '</g>';
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" preserveAspectRatio="${fit}"><defs>${defs}</defs>${body}${extra}</svg>`;
+}
+
 // ---- the colour runs --------------------------------------------------------
 // Sampled from the artwork (the brightest band at each angle), then named. Each run is
 // read from the pole to the diameter.
@@ -126,3 +187,54 @@ export const RUNS: Record<RunName, readonly string[]> = {
 
 /** The order compositions cycle through. */
 export const RUN_ORDER: readonly RunName[] = ['ember', 'dawn', 'meadow', 'dusk', 'bloom'];
+
+// ---- the signature composition --------------------------------------------
+
+// Neighbouring quarters never share a temperature: warm, cool, warm, cool …
+const SPIRAL_RUNS: readonly RunName[] = ['ember', 'dusk', 'dawn', 'bloom', 'meadow'];
+
+/** A golden spiral, portrait (13 × 21 units of `u`), turning clockwise inward. */
+export function spiralQuarters(u: number, steps = 7, offset = 0): Quarter[] {
+  let x = 0;
+  let y = 0;
+  let w = 13;
+  let h = 21;
+  const out: Quarter[] = [];
+  for (let i = 0; i < steps; i++) {
+    const dir = i % 4; // top, right, bottom, left
+    let s: number;
+    let cx: number;
+    let cy: number;
+    let corner: Corner;
+    if (dir === 0) {
+      s = w;
+      [cx, cy, corner] = [x, y + s, 'bl'];
+      y += s;
+      h -= s;
+    } else if (dir === 1) {
+      s = h;
+      [cx, cy, corner] = [x + w - s, y, 'tl'];
+      w -= s;
+    } else if (dir === 2) {
+      s = w;
+      [cx, cy, corner] = [x + s, y + h - s, 'tr'];
+      h -= s;
+    } else {
+      s = h;
+      [cx, cy, corner] = [x + s, y + s, 'br'];
+      x += s;
+      w -= s;
+    }
+    out.push({
+      cx: cx * u,
+      cy: cy * u,
+      R: s * u,
+      corner,
+      run: SPIRAL_RUNS[(i + offset) % SPIRAL_RUNS.length] as RunName,
+      n: Math.max(3, Math.round(4 + (12 * s) / 13)),
+    });
+    if (w <= 0 || h <= 0) break;
+  }
+  return out;
+}
+

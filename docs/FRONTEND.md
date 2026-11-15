@@ -5080,7 +5080,7 @@ selector) and exposed to Tailwind in `apps/frontend/tailwind.config.ts` as
   degrees of `--ui-danger` (`#B82A26` / `#F07572`), so every AI action and sparkle read as
   "blocked" — against the colour rule (red = what blocks). Measured: on `--ai-surface` 6.49:1,
   `/15` wash 5.17:1, on `--ui-sel` 5.42:1 (light); 8.33:1 on `--ui-bg`, 6.67:1 on `--ui-sel`
-  (dark). The landing and `Wordmark` keep the brand vermilion. `--ai-signal-fill` (`#7C4DDB`) is
+  (dark). The landing and `Wordmark` no longer use vermilion: the brand is the banded ember quarter (`packages/shared` `brandMark`). `--ai-signal-fill` (`#7C4DDB`) is
   **NON-TEXT ONLY** — meters, strokes, rules; dark collapses both to one violet.
 - Solid CTAs are `bg-ai-signal text-white dark:text-gray-950`.
 

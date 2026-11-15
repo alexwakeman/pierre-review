@@ -1,4 +1,5 @@
 import { Arcs } from './Arcs';
+import { spiralQuarters } from './geometry';
 import type { Corner, Quarter, RunName } from './geometry';
 
 // ---------------------------------------------------------------------------
@@ -16,53 +17,6 @@ import type { Corner, Quarter, RunName } from './geometry';
 // ---------------------------------------------------------------------------
 
 /** A golden spiral, portrait (13 × 21 units of `u`), turning clockwise inward. */
-// Neighbouring quarters never share a temperature: warm, cool, warm, cool …
-const SPIRAL_RUNS: readonly RunName[] = ['ember', 'dusk', 'dawn', 'bloom', 'meadow'];
-
-export function spiralQuarters(u: number, steps = 7, offset = 0): Quarter[] {
-  let x = 0;
-  let y = 0;
-  let w = 13;
-  let h = 21;
-  const out: Quarter[] = [];
-  for (let i = 0; i < steps; i++) {
-    const dir = i % 4; // top, right, bottom, left
-    let s: number;
-    let cx: number;
-    let cy: number;
-    let corner: Corner;
-    if (dir === 0) {
-      s = w;
-      [cx, cy, corner] = [x, y + s, 'bl'];
-      y += s;
-      h -= s;
-    } else if (dir === 1) {
-      s = h;
-      [cx, cy, corner] = [x + w - s, y, 'tl'];
-      w -= s;
-    } else if (dir === 2) {
-      s = w;
-      [cx, cy, corner] = [x + s, y + h - s, 'tr'];
-      h -= s;
-    } else {
-      s = h;
-      [cx, cy, corner] = [x + s, y + s, 'br'];
-      x += s;
-      w -= s;
-    }
-    out.push({
-      cx: cx * u,
-      cy: cy * u,
-      R: s * u,
-      corner,
-      run: SPIRAL_RUNS[(i + offset) % SPIRAL_RUNS.length] as RunName,
-      n: Math.max(3, Math.round(4 + (12 * s) / 13)),
-    });
-    if (w <= 0 || h <= 0) break;
-  }
-  return out;
-}
-
 interface PieceProps {
   className?: string;
   label?: string;
