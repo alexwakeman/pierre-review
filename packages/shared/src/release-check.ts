@@ -46,6 +46,22 @@ export function compareTagOrder(a: TagOrderKey, b: TagOrderKey): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
+/**
+ * A repository's LATEST RELEASE (docs/RELEASES.md § Words): the newest release OR hotfix tag, on ANY
+ * branch, by `compareTagOrder` (the tagged commit's date, ties by tag creation). The hotfix base. null when
+ * the suffixes are not both set or the repository has no such tag. Pure — THE ONE rule, shared by the
+ * release check and the hotfix bases (hotfix.ts).
+ */
+export function latestReleaseTag<T extends TagOrderKey>(tags: readonly T[], settings: ReleaseSettings): { tag: T; kind: 'release' | 'hotfix' } | null {
+  let best: { tag: T; kind: 'release' | 'hotfix' } | null = null;
+  for (const t of tags) {
+    const k = tagKind(t.name, settings);
+    if (k !== 'release' && k !== 'hotfix') continue;
+    if (best == null || compareTagOrder(best.tag, t) < 0) best = { tag: t, kind: k };
+  }
+  return best;
+}
+
 // ── Input ───────────────────────────────────────────────────────────────────────────────────────
 
 export interface ReleaseCheckTagInput extends TagOrderKey {
@@ -313,16 +329,9 @@ function prepRepo(repo: ReleaseCheckRepoInput, settings: ReleaseSettings): RepoP
     from = i + 1;
   }
 
-  let latest: ReleaseCheckTagInput | null = null;
-  let latestKind: 'release' | 'hotfix' | null = null;
-  for (const t of repo.tags) {
-    const k = kindOf(t.name);
-    if (k !== 'release' && k !== 'hotfix') continue;
-    if (latest == null || compareTagOrder(latest, t) < 0) {
-      latest = t;
-      latestKind = k;
-    }
-  }
+  const latestHit = latestReleaseTag(repo.tags, settings);
+  const latest = latestHit?.tag ?? null;
+  const latestKind = latestHit?.kind ?? null;
   return {
     input: repo,
     ordered,

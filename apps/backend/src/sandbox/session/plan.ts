@@ -142,21 +142,33 @@ export function planBuildInstruction(o: {
   /** The approved stack, for the branch lines (PLAN.md has the same). */
   stack?: ReadonlyArray<Pick<BuildPlanRevision['stack'][number], 'key' | 'fullName' | 'branch' | 'stackIndex'>>;
   fillGaps?: boolean;
+  /** A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): the release fix, then the port to main, on `branch`. */
+  hotfix?: { branch: string } | null;
 }): string {
   const stack = o.stack ?? [];
   const split = stack.some((p) => p.stackIndex > 1);
   const branchLines = stack.map((p) => `  - ${p.key}: \`${p.branch}\` in ${p.fullName}${p.stackIndex > 1 ? `, made from the branch of the pull request before it` : ''}`);
+  const work = o.hotfix
+    ? [
+        `- This is a hotfix build ("Hotfix" in CLAUDE.md and AGENTS.md). In each repository you change, commit on the branch \`${o.hotfix.branch}\` in BOTH checkouts:`,
+        '  1. Fix the release checkout. Run its checks and fix what fails.',
+        '  2. Port the fix to the main checkout. Resolve the differences where the code moved. Run its checks again and fix what fails.',
+        '- Do not change a read-only repository. Limn refuses its changes.',
+      ]
+    : [
+        '- Build the pull requests in PLAN.md\'s order. Commit each one on its own branch:',
+        ...branchLines,
+        ...(split
+          ? ['- In a repository with more than one pull request, make each branch from the previous one (`git checkout -b <next branch>` on the previous branch). Do not merge branches. Leave the LAST branch of each repository checked out when you finish.']
+          : []),
+        '- Each pull request must build and pass its repository\'s checks on its own: check out its branch and run them before you go on. If you change an earlier pull request, rebase the later branches onto it.',
+      ];
   const lines = [
     `The reader approved the plan (revision ${o.revision}). Build it now. \`${posix.join(o.root, 'PLAN.md')}\` has the plan and the reader's decisions.`,
     '',
     '- Where the reader agreed with a point, build your proposal. Where the reader kept the story, build what the story says.',
     ...(o.fillGaps ? ['- Build only the gaps PLAN.md plans. Do not redo what the existing pull requests deliver.'] : []),
-    '- Build the pull requests in PLAN.md\'s order. Commit each one on its own branch:',
-    ...branchLines,
-    ...(split
-      ? ['- In a repository with more than one pull request, make each branch from the previous one (`git checkout -b <next branch>` on the previous branch). Do not merge branches. Leave the LAST branch of each repository checked out when you finish.']
-      : []),
-    '- Each pull request must build and pass its repository\'s checks on its own: check out its branch and run them before you go on. If you change an earlier pull request, rebase the later branches onto it.',
+    ...work,
     '- Do not stop to ask. If something blocks a pull request, do what you can and say why in the report.',
     `- Finish with the build report: write \`${posix.join(o.root, BUILD_REPORT_FILE)}\` (per pull request: id, status done / partly / not_done, a summary of at most 2,000 characters for its description, the checks you ran with passed / failed / not_run; per acceptance criterion: ref, status met / partly / not_met, how). Check it with \`node ${BUILD_REPORT_CHECKER}\` until it prints OK.`,
     '- Then end with one line per acceptance criterion: done, partly done or not done, and why.',
@@ -252,6 +264,8 @@ export interface PlanStageOpts {
   ticket: () => SessionTicket | null;
   mode: () => 'implement' | 'fill_gaps';
   approvedPlanId: () => Promise<number | null>;
+  /** A HOTFIX build: Approve writes no planned-PR rows (Push opens two PRs per repository instead). */
+  hotfix?: boolean;
 }
 
 export type ApproveCheck = { ok: true; plan: StoryBuildPlanRow } | { ok: false; code: 'PlanStale' | 'PlanUnanswered' | 'NoPlan' | 'NotFound'; message: string };
@@ -521,7 +535,7 @@ export class PlanStage {
     if (!held) throw new Error('There is no plan to approve.');
     const again = await this.approveCheck(held.revision);
     if (!again.ok) throw new Error(again.message);
-    const ok = await approvePlanRevision(this.o.ctx, { accountId: this.o.accountId, buildId: this.o.buildId, plan: again.plan, now: new Date(seams.now()) });
+    const ok = await approvePlanRevision(this.o.ctx, { accountId: this.o.accountId, buildId: this.o.buildId, plan: again.plan, now: new Date(seams.now()), ...(this.o.hotfix ? { writePrs: false } : {}) });
     if (!ok) throw new Error('The plan is already approved.');
     this.approvedFlag = true;
     if (auto) {

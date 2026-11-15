@@ -42,7 +42,10 @@ export type LimnActionKind =
   /** A release tag (the annotated tag object + its ref) and the GitHub pre-release on it
    *  (docs/RELEASES.md). Today only the READER writes these (Confirm), so no ledger row is made. */
   | 'release_tag'
-  | 'prerelease';
+  | 'prerelease'
+  /** A hotfix build's `hotfix/<tag>` branch, made at the release commit by the reader's Push
+   *  (docs/STORY-BUILD.md § Hotfix builds). The reader's write: no ledger row. */
+  | 'hotfix_branch';
 
 export const LIMN_ACTION_KINDS: readonly LimnActionKind[] = [
   'review',

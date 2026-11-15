@@ -398,6 +398,7 @@ session manager (WP7) calls, in order: `resolveWorkspaceLayout` (the SAME comput
 | `mirror.ts` | The repositories into the sandbox (`MIRROR_CONCURRENCY` = 3 at once), the per-session copy, and the reader's files. |
 | `store.ts` | The repo store's side: the local-clone check, the copy into the store, the repository built from it (§ The repo store). |
 | `index.ts` | The order above, and `prepareSessionWorkspace`. |
+| `hotfix.ts` | A HOTFIX build's MAIN checkout path, `<release path>.main` beside the release checkout (`-2`, `-3`… on a clash): `prepareSessionWorkspace`'s `hotfix` option mirrors each repository with a release a second time there, at the default branch, as an ordinary mirrored repository (its own `refs/limn/base`, its own patch). [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds. |
 
 **Where the reader's clones are** (`discover.ts`; since 2026-11-10 — the "local folder" and "starting
 folder" settings are REMOVED, their columns `local_folder` / `start_dir` DORMANT: never read, never written,

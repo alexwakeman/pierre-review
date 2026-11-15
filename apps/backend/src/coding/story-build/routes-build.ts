@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  HOTFIX_NO_LOOP_LINE,
   STORY_BUILD_API,
   STORY_BUILD_BRANCH_MAX,
   STORY_BUILD_PUSH_DRAFT_DEFAULT,
@@ -12,6 +13,7 @@ import {
   type StoryBuildLoopState,
   type StoryBuildTicketReviewResponse,
   type StoryBuildDiffResponse,
+  type StoryBuildHotfixBasesResponse,
   type StoryBuildPrDiffResponse,
   type StoryBuildPrPushResult,
   type StoryBuildPushResponse,
@@ -133,9 +135,13 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     const id = parseId(req.params.id);
     const repoId = parseId(req.params.repoId);
     if (id == null || repoId == null) return reply.code(404).send(NOT_FOUND);
-    const got = await getStoryBuildRepoPatch(ctx, accountId, id, repoId);
+    // `?target=main`: a HOTFIX build's MAIN FIX (404 on a row without a main checkout).
+    const raw = (req.query as { target?: unknown } | undefined)?.target;
+    if (raw !== undefined && raw !== 'release' && raw !== 'main') return reply.code(400).send({ error: 'BadRequest', message: '`target` must be release or main.' });
+    const target = raw === 'main' ? 'main' : 'release';
+    const got = await getStoryBuildRepoPatch(ctx, accountId, id, repoId, target);
     if (!got) return reply.code(404).send(NOT_FOUND);
-    const resp: StoryBuildDiffResponse = { repoId, baseSha: got.baseSha, patch: got.patch, filesChanged: got.filesChanged };
+    const resp: StoryBuildDiffResponse = { repoId, baseSha: got.baseSha, patch: got.patch, filesChanged: got.filesChanged, target };
     return reply.send(resp);
   });
 
@@ -189,6 +195,11 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     const b = req.body;
     const on = b != null && typeof b === 'object' && !Array.isArray(b) ? (b as { on?: unknown }).on : undefined;
     if (typeof on !== 'boolean') return reply.code(400).send({ error: 'BadRequest', message: '`on` must be true or false.' });
+    if (on) {
+      const row = await getStoryBuildRow(ctx, accountId, id);
+      if (row == null) return reply.code(404).send(NOT_FOUND);
+      if (row.hotfix === true) return reply.code(409).send({ error: 'HotfixNoLoop', message: HOTFIX_NO_LOOP_LINE });
+    }
     const r = await setStoryBuildAutoPush(ctx, accountId, id, on);
     if (r.status === 'not_found') return reply.code(404).send(NOT_FOUND);
     if (r.status === 'pushed') return reply.code(409).send({ error: 'NotReady', message: 'This build has already pushed.' });
@@ -225,6 +236,17 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     const at = done ? new Date() : null;
     await updateStoryBuild(ctx, accountId, id, { ticketReviewDoneAt: at });
     const resp: StoryBuildTicketReviewResponse = { ticketReviewDoneAt: at?.toISOString() ?? null };
+    return reply.send(resp);
+  });
+
+  // HOTFIX (docs/STORY-BUILD.md § Hotfix builds): the Start panel's base list — each workspace repository's
+  // latest release, or read only — and whether "Treat as a hotfix" is offered. DB only (the synced tags).
+  app.get<{ Querystring: { workspace?: string } }>(STORY_BUILD_API.hotfixBases, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    // The session's own scope: EVERY member, external repos included (sandbox/session/routes.ts's start).
+    const scope = await resolveWorkspaceScope(accountId, req.query.workspace ?? null, null, { members: 'all' });
+    const { sessionHotfixBases } = await import('../../sandbox/session/manager.js');
+    const resp: StoryBuildHotfixBasesResponse = await sessionHotfixBases(accountId, scope.workspaceId, scope.repoIds);
     return reply.send(resp);
   });
 

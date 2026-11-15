@@ -36,7 +36,11 @@
 //   its turns (`holdSession`) and starts its fix turns itself (`startHostBuildTurn`)).
 import { and, eq, inArray } from 'drizzle-orm';
 import {
+  HOTFIX_NOT_OFFERED_LINE,
   SANDBOX_SESSION_LIVE_PHASES,
+  hotfixBranchName,
+  hotfixPatchVerdict,
+  hotfixReadOnlyLine,
   sandboxSessionStatus,
   type AiProviderId,
   type BuildPlanDecision,
@@ -53,9 +57,10 @@ import {
   type SandboxTurnOutcome,
   type StoryBuild,
   type StoryBuildCoverage,
+  type StoryBuildHotfixBasesResponse,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
-import { storyBuildBaseRef, dropSessionBaseRefs } from '../../coding/story-build/base-refs.js';
+import { storyBuildBaseRef, storyBuildMainRef, dropSessionBaseRefs } from '../../coding/story-build/base-refs.js';
 import { baseFor, unstackablePrs } from '../../coding/story-build/candidates.js';
 import type { StoryBuildTicketPr } from '../../coding/story-build/inputs.js';
 import { storyBuildLimits } from '../../coding/story-build/limits.js';
@@ -69,6 +74,7 @@ import {
   updateStoryBuildRepo,
   upsertStoryBuildRepo,
   type StoryBuildRepoRow,
+  type StoryBuildRepoSet,
   type StoryBuildRow,
   type StoryBuildSeed,
 } from '../../coding/story-build/persist.js';
@@ -114,7 +120,7 @@ import { CONTINUATIONS_MAX, CONTINUE_LINE, extractApprovedStack, restoreApproved
 import { SANDBOX_DOCS_DIR } from '../workspace/docs.js';
 import type { DocsPick } from '../workspace/docs-choose.js';
 import { sessionLimits } from './limits.js';
-import { extractRepoPatch, PatchTooLargeError, restoreRepoPatch } from './patches.js';
+import { extractRepoPatch, PatchTooLargeError, restoreRepoPatch, type ExtractedPatch } from './patches.js';
 import {
   emptySessionState,
   itemForAgentEvent,
@@ -126,7 +132,7 @@ import {
   toStoryBuildSession,
   type SessionStateJson,
 } from './state.js';
-import type { AfterChatTurn, SessionKey, SessionRepoInfo, SessionRowPatch, SessionSubject, SubjectLive } from './subject.js';
+import type { AfterChatTurn, SessionKey, SessionRepoInfo, SessionRowPatch, SessionSubject, SubjectBases, SubjectLive } from './subject.js';
 
 export type { SessionRepoInfo } from './subject.js';
 
@@ -192,6 +198,8 @@ export interface SessionDeps {
   chooseDocs(ctx: AgentContext, accountId: number, workspaceId: number, ident: string): Promise<DocsPick>;
   /** THE ONE budget gate, for an AUTOMATIC build continuation (plan first). */
   automaticAllowed(ctx: AgentContext, accountId: number, provider: AiProviderId): Promise<boolean>;
+  /** HOTFIX: each repository's latest release (db/hotfix-bases.ts; DB only). */
+  hotfixBases(accountId: number, workspaceId: number, repoIds: readonly number[]): Promise<StoryBuildHotfixBasesResponse>;
   now(): number;
 }
 
@@ -245,6 +253,10 @@ const defaultDeps: SessionDeps = {
   async automaticAllowed(ctx, accountId, provider) {
     const { automaticRunAllowed } = await import('../../review/budget-gate.js');
     return automaticRunAllowed(ctx, accountId, 'story_build_continue', provider);
+  },
+  async hotfixBases(accountId, workspaceId, repoIds) {
+    const { getHotfixBases } = await import('../../db/hotfix-bases.js');
+    return getHotfixBases(accountId, workspaceId, repoIds);
   },
   now: () => Date.now(),
 };
@@ -468,6 +480,11 @@ export function sessionDocsAvailable(accountId: number, workspaceId: number): Pr
 }
 
 /** The start's cheap check: null ⇒ not a ticket Limn knows; `empty` ⇒ no story text and no criteria. */
+/** HOTFIX: the bases "Treat as a hotfix" would start from (the start route's check and the Start panel). */
+export function sessionHotfixBases(accountId: number, workspaceId: number, repoIds: readonly number[]): Promise<StoryBuildHotfixBasesResponse> {
+  return deps.hotfixBases(accountId, workspaceId, repoIds);
+}
+
 export function sessionStoryInputs(ctx: AgentContext, accountId: number, workspaceId: number, ident: string): ReturnType<SessionDeps['storyInputs']> {
   return deps.storyInputs(ctx, accountId, workspaceId, ident);
 }
@@ -561,6 +578,8 @@ export interface StartSessionArgs {
   autoApprovePlan?: boolean;
   /** "Build end to end": the ticket step after the loop (coding/story-build/end-to-end.ts). */
   endToEnd?: boolean;
+  /** "Treat as a hotfix" (docs/STORY-BUILD.md § Hotfix builds). The route refused it with autoPush / endToEnd. */
+  hotfix?: boolean;
 }
 
 export type StartSessionResult =
@@ -643,6 +662,7 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
     provider: a.choice.provider,
     model: a.choice.model,
     session: { effort: a.choice.effort, lastActiveAt: new Date(deps.now()) },
+    ...(a.hotfix === true ? { hotfix: true } : {}),
   };
   let claim = await insertStoryBuild(ctx, claimArgs);
   if (claim.outcome === 'already_open') {
@@ -660,7 +680,7 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
     await updateStoryBuild(ctx, a.accountId, id, { sessionPhase: 'discarded', status: 'discarded', completedAt: new Date() });
     return tooMany(maxOpen);
   }
-  const subject = storySubject(ctx, { id, accountId: a.accountId, workspaceId: a.workspaceId, ident: a.ident, ticketKey: a.ticketKey });
+  const subject = storySubject(ctx, { id, accountId: a.accountId, workspaceId: a.workspaceId, ident: a.ident, ticketKey: a.ticketKey, hotfix: a.hotfix === true });
   // PLAN FIRST: every new story session opens with a planning turn (docs/STORY-BUILD.md § Plan first).
   const state = { ...emptySessionState(a.action), planFirst: deps.planFirst, withDocs: a.docs === true, docs: null, serviceRuns: [], planStage: null, planProblem: null };
   const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
@@ -796,7 +816,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     step(l, 'sandbox', 'done');
     stopIfClosing(l);
 
-    const { bases, labels: baseLabels } = await sub.bases(l, repos);
+    const { bases, labels: baseLabels, hotfix: hotfixBases } = await sub.bases(l, repos);
 
     begin('repos');
     const branch = sub.branch();
@@ -807,6 +827,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       baseLabels,
       branch,
       ...sub.seed(layout),
+      ...(hotfixBases ? { hotfix: hotfixBases } : {}),
       userClaudeMd: settings.userClaudeMd,
       userSkills: settings.userSkills,
       ...(deps.mirrorSeams ? { seams: deps.mirrorSeams } : {}),
@@ -879,7 +900,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     l.state.startDir = layout.startDir;
     l.state.repos = prepared.mirror.repos.map((r) => ({ repoId: r.repoId, fullName: r.fullName, path: r.path, branch, baseSha: r.sha }));
     if (prepared.mirror.repos.length === 0) throw new SessionFail('No repository could be cloned.');
-    await sub.afterMirror(l, prepared.mirror, bases);
+    await sub.afterMirror(l, prepared.mirror, bases, prepared.mainMirror ?? null);
     step(l, 'repos', 'done', `${prepared.mirror.repos.length} of ${layout.repos.length} cloned`);
     stopIfClosing(l);
 
@@ -1764,7 +1785,7 @@ async function storyHasOpenPlan(ctx: AgentContext, accountId: number, row: Pick<
 type StorySubject = SessionSubject & { plan: PlanStage };
 
 /** Implement's subject: the ticket, the bases (the reader's own open ticket PR, else the default branch), one row per repository. */
-function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accountId' | 'workspaceId' | 'ident' | 'ticketKey'>): StorySubject {
+function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accountId' | 'workspaceId' | 'ident' | 'ticketKey'> & { hotfix?: boolean }): StorySubject {
   const buildId = row.id;
   const accountId = row.accountId;
   let ticket: SessionTicket | null = null;
@@ -1772,6 +1793,10 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
   let repoRows: StoryBuildRepoRow[] = [];
   let planFirstFlag = false;
   const stacked = new Map<number, number | null>();
+  // HOTFIX (docs/STORY-BUILD.md § Hotfix builds): per repository its release tag (null ⇒ read only) and the
+  // main checkout's base; the main checkouts' sandbox paths once mirrored.
+  const hotfixBuild = row.hotfix === true;
+  const hotfixInfo = new Map<number, { tagName: string | null; readOnly: boolean; mainBaseRef: string | null }>();
   const stateOf = (l: SubjectLive): SessionStateJson => (l as Live).state;
   // PLAN FIRST (sandbox/session/plan.ts): the planning turn, the revisions, the reader's answers, Approve.
   const plan = new PlanStage({
@@ -1781,10 +1806,11 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     ticket: () => ticket,
     mode: () => action,
     approvedPlanId: async () => (await getStoryBuildRow(ctx, accountId, buildId))?.approvedPlanId ?? null,
+    hotfix: hotfixBuild,
   });
   const inPlan = (l: SubjectLive): boolean => stateOf(l).planFirst === true && !plan.isApproved();
   /** Plan first, after Approve: the work is the approved stack (one branch per planned PR). */
-  const isStacked = (l: SubjectLive): boolean => stateOf(l).planFirst === true && plan.isApproved();
+  const isStacked = (l: SubjectLive): boolean => stateOf(l).planFirst === true && plan.isApproved() && !hotfixBuild;
   /** Build continuations sent since the reader last acted (at most CONTINUATIONS_MAX). */
   let continuations = 0;
   let lastUnfinished = false;
@@ -1814,6 +1840,44 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       notice(l, 'The ticket could not be read again, so the build uses the copy from the start of the session.');
     }
     return ticketChanged;
+  }
+
+  /** HOTFIX BASES (docs/STORY-BUILD.md § Hotfix builds): a repository with a latest release starts its release
+   *  checkout at that commit (the tag fetched when the cache lacks it) and gets a main checkout at the default
+   *  branch; one without is read only, at the default branch. Stacking is OFF. A resumed session keeps its rows'. */
+  async function hotfixBasesFor(l: SubjectLive, repos: readonly SessionRepoInfo[]): Promise<SubjectBases> {
+    const found = l.resume ? null : await deps.hotfixBases(accountId, l.workspaceId, repos.map((r) => r.repoId));
+    if (found != null && !found.offered) throw new SessionFail(HOTFIX_NOT_OFFERED_LINE);
+    const bases = new Map<number, RepoBaseRequest>();
+    const labels = new Map<number, { label: string; note: string | null }>();
+    const mainBases = new Map<number, RepoBaseRequest>();
+    const releases = new Map<number, { tagName: string; hotfixBranch: string }>();
+    const mainLabels = new Map<number, string>();
+    for (const r of repos) {
+      const stored = repoRows.find((x) => x.repoId === r.repoId);
+      const defaultRef = r.defaultBranch ?? 'HEAD';
+      const rel = stored
+        ? stored.hotfixTag != null
+          ? { tagName: stored.hotfixTag, sha: stored.baseSha }
+          : null
+        : (found?.repos.find((x) => x.repoId === r.repoId)?.release ?? null);
+      const pinRef = storyBuildBaseRef(buildId, r.repoId);
+      if (rel != null) {
+        bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: rel.tagName, baseSha: rel.sha || null, pinRef, remoteRef: `refs/tags/${rel.tagName}` });
+        labels.set(r.repoId, { label: `the release ${rel.tagName}`, note: null });
+        const mainBaseRef = stored?.mainBaseRef ?? defaultRef;
+        mainBases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: mainBaseRef, baseSha: stored?.mainBaseSha ?? null, pinRef: storyBuildMainRef(buildId, r.repoId) });
+        releases.set(r.repoId, { tagName: rel.tagName, hotfixBranch: hotfixBranchName(rel.tagName) });
+        mainLabels.set(r.repoId, r.defaultBranch ?? 'the default branch');
+        hotfixInfo.set(r.repoId, { tagName: rel.tagName, readOnly: false, mainBaseRef });
+      } else {
+        bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: stored?.baseRef ?? defaultRef, baseSha: stored?.baseSha || null, pinRef });
+        labels.set(r.repoId, { label: r.defaultBranch ?? 'the default branch', note: 'Read only in this hotfix build: no release yet.' });
+        hotfixInfo.set(r.repoId, { tagName: null, readOnly: true, mainBaseRef: null });
+      }
+      stacked.set(r.repoId, null);
+    }
+    return { bases, labels, hotfix: { mainBases, releases, mainLabels } };
   }
 
   return {
@@ -1878,6 +1942,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       return [...new Set([...memberRepoIds, ...repoRows.map((r) => r.repoId)])];
     },
     async bases(l, repos) {
+      if (hotfixBuild) return hotfixBasesFor(l, repos);
       // The bases: today's rules (the reader's own open ticket PR, else the default branch); a resumed
       // session keeps the commits its patches were made on.
       const prs = l.resume ? [] : await deps.ticketPrs(ctx, accountId, row.ident).catch(() => []);
@@ -1908,11 +1973,13 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     seed() {
       return { ticket: ticket!, mode: action, planFirst: planFirstFlag && !plan.isApproved() };
     },
-    async afterMirror(_l, mirror, bases) {
+    async afterMirror(_l, mirror, bases, mainMirror) {
       // One row per mirrored repository: the patch Push applies lands here.
       const branch = sessionBranch(row.ticketKey);
       for (const [i, r] of mirror.repos.entries()) {
         const stored = repoRows.find((x) => x.repoId === r.repoId);
+        const hf = hotfixBuild ? hotfixInfo.get(r.repoId) : undefined;
+        const main = mainMirror?.repos.find((m) => m.repoId === r.repoId) ?? null;
         const rowId =
           stored?.id ??
           (await upsertStoryBuildRepo(ctx, {
@@ -1927,9 +1994,14 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
             baseSha: r.sha,
             stackedOnPrId: stacked.get(r.repoId) ?? null,
             branch,
+            ...(hf ? { hotfix: { tagName: hf.tagName, readOnly: hf.readOnly, mainBaseRef: hf.mainBaseRef, mainBaseSha: main?.sha ?? null } } : {}),
           }));
-        await updateStoryBuildRepo(ctx, accountId, rowId, { sandboxPath: r.path });
+        await updateStoryBuildRepo(ctx, accountId, rowId, {
+          sandboxPath: r.path,
+          ...(hotfixBuild ? { mainSandboxPath: main?.path ?? null, ...(stored == null || stored.mainBaseSha == null ? { mainBaseSha: main?.sha ?? null } : {}) } : {}),
+        });
       }
+      if (hotfixBuild) repoRows = await listStoryBuildRepoRows(ctx, accountId, buildId);
     },
     async restore(l, mirror) {
       // After Approve: each planned PR's patch back on its own branch, stacked (stack-turn.ts).
@@ -1939,6 +2011,13 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         const at = mirror.repos.find((m) => m.repoId === rr.repoId);
         if (!at || !rr.patch || !l.container) continue;
         await restoreRepoPatch((l as Live).runtime, l.container, at.path, rr.patch, rr.commitMessage?.trim() || `${row.ticketKey}: the work so far`, (n += 1));
+      }
+      // HOTFIX: each stored MAIN FIX back onto its main checkout.
+      if (hotfixBuild && l.container) {
+        for (const rr of await listStoryBuildRepoRows(ctx, accountId, buildId)) {
+          if (!rr.mainPatch || !rr.mainSandboxPath) continue;
+          await restoreRepoPatch((l as Live).runtime, l.container, rr.mainSandboxPath, rr.mainPatch, rr.mainCommitMessage?.trim() || `${row.ticketKey}: the work so far`, (n += 1));
+        }
       }
       // Plan first, before approval: the latest revision as PLAN.md ("not approved yet"); no automatic turn.
       if (inPlan(l)) await plan.restorePlan(l as Live).catch(() => false);
@@ -1991,7 +2070,15 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         const rev = await plan.approveNow(l, machine(l));
         const ticketChanged = await rereadTicket(l);
         continuations = 0;
-        return planBuildInstruction({ revision: rev.revision, root: l.layoutRoot ?? '/workspace', ticketChanged, extra, stack: rev.stack, fillGaps: action === 'fill_gaps' });
+        return planBuildInstruction({
+          revision: rev.revision,
+          root: l.layoutRoot ?? '/workspace',
+          ticketChanged,
+          extra,
+          stack: rev.stack,
+          fillGaps: action === 'fill_gaps',
+          ...(hotfixBuild ? { hotfix: { branch: sessionBranch(row.ticketKey) } } : {}),
+        });
       }
       const ticketChanged = await rereadTicket(l);
       return buildInstruction({ ticketChanged, extra });
@@ -2008,7 +2095,8 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         lastUnfinished = r.unfinished;
         return 'keep';
       }
-      await extractAll(l, buildId);
+      if (hotfixBuild) await extractHotfix(l, buildId);
+      else await extractAll(l, buildId);
       return 'keep';
     },
     async buildFollowUp(l0) {
@@ -2039,7 +2127,8 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         void afterLoopFixTurn(ctx, { accountId, buildId }, e).catch(() => {});
         return;
       }
-      if (e.outcome === 'completed' && e.stored && e.saved) void maybeStartLoop(ctx, { accountId, buildId }).catch(() => {});
+      // A HOTFIX build never runs the review loop (v1): its PRs open on the reader's Push.
+      if (e.outcome === 'completed' && e.stored && e.saved && !hotfixBuild) void maybeStartLoop(ctx, { accountId, buildId }).catch(() => {});
     },
     beforeHostTurn() {
       continuations = 0;
@@ -2086,6 +2175,80 @@ async function extractAll(l: Live, buildId: number): Promise<void> {
       }
       notice(l, `${name}: ${message}`);
     }
+  }
+  notice(l, stored.length > 0 ? `Changes stored: ${stored.join(', ')}.` : 'The build changed no files.');
+}
+
+/**
+ * HOTFIX (docs/STORY-BUILD.md § Hotfix builds): after every build turn, each repository's TWO checkouts are read
+ * out: the RELEASE FIX (the row's own patch, against the release commit) and the MAIN FIX (`main_*`, against
+ * the default branch). A READ-ONLY repository's change is refused (`hotfixPatchVerdict`): never stored, so
+ * never pushed. A row is `ready` when either fix has a change.
+ */
+async function extractHotfix(l: Live, buildId: number): Promise<void> {
+  const { patchMaxBytes } = sessionLimits();
+  const rows = await listStoryBuildRepoRows(l.ctx, l.accountId, buildId);
+  const names = await storyBuildRepoNames(l.ctx, l.accountId, rows.map((r) => r.repoId));
+  const stored: string[] = [];
+  const summary = l.lastAgentText.trim() ? l.lastAgentText.trim().slice(0, 4_000) : null;
+  const read = async (path: string): Promise<ExtractedPatch | { error: string; tooLarge: boolean }> => {
+    try {
+      return await extractRepoPatch(l.runtime, l.container!, path, { maxBytes: patchMaxBytes });
+    } catch (err) {
+      return { error: err instanceof PatchTooLargeError ? err.message : scrub(err), tooLarge: err instanceof PatchTooLargeError };
+    }
+  };
+  for (const row of rows) {
+    if (!row.sandboxPath || row.status === 'pushed' || !l.container) continue;
+    const name = names.get(row.repoId) ?? `#${row.repoId}`;
+    const set: StoryBuildRepoSet = { error: null };
+    let releaseReady = false;
+    let mainReady = false;
+    const rel = await read(row.sandboxPath);
+    if ('error' in rel) {
+      if (rel.tooLarge) Object.assign(set, { patch: null, patchSha: null, error: rel.error });
+      notice(l, `${name}: ${rel.error}`);
+    } else {
+      const verdict = hotfixPatchVerdict({ readOnly: row.readOnly === true, patch: rel.patch });
+      if (verdict === 'refused') {
+        Object.assign(set, { patch: null, patchSha: null, statJson: rel.stat, filesChangedJson: [], error: hotfixReadOnlyLine(name) });
+        notice(l, hotfixReadOnlyLine(name));
+      } else if (verdict === 'empty') {
+        Object.assign(set, { patch: null, patchSha: null, statJson: rel.stat, filesChangedJson: [] });
+      } else {
+        releaseReady = true;
+        Object.assign(set, { patch: rel.patch, patchSha: rel.sha, statJson: rel.stat, filesChangedJson: rel.filesChanged, commitMessage: rel.commitMessage });
+      }
+    }
+    if (row.mainSandboxPath && !row.readOnly && row.mainStatus !== 'pushed') {
+      const main = await read(row.mainSandboxPath);
+      if ('error' in main) {
+        if (main.tooLarge) Object.assign(set, { mainStatus: 'failed', mainPatch: null, mainPatchSha: null, mainError: main.error });
+        notice(l, `${name} (main): ${main.error}`);
+      } else if (main.patch === '') {
+        Object.assign(set, { mainStatus: 'skipped', mainPatch: null, mainPatchSha: null, mainStatJson: main.stat, mainFilesChangedJson: [], mainError: null });
+      } else {
+        mainReady = true;
+        Object.assign(set, {
+          mainStatus: 'ready',
+          mainPatch: main.patch,
+          mainPatchSha: main.sha,
+          mainStatJson: main.stat,
+          mainFilesChangedJson: main.filesChanged,
+          mainCommitMessage: main.commitMessage,
+          mainError: null,
+        });
+      }
+    } else if (row.mainStatus === 'pushed') {
+      mainReady = true;
+    }
+    const ready = releaseReady || mainReady || (row.patch != null && 'error' in rel && !rel.tooLarge);
+    Object.assign(set, {
+      status: ready ? 'ready' : 'skipped',
+      ...(ready ? { summary, provider: l.choice.provider, model: l.choice.model, effort: l.choice.effort, completedAt: new Date(deps.now()) } : {}),
+    });
+    await updateStoryBuildRepo(l.ctx, l.accountId, row.id, set);
+    if (releaseReady || mainReady) stored.push(`${name} (${[releaseReady ? 'release fix' : null, mainReady ? 'main fix' : null].filter(Boolean).join(' and ')})`);
   }
   notice(l, stored.length > 0 ? `Changes stored: ${stored.join(', ')}.` : 'The build changed no files.');
 }

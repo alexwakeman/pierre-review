@@ -318,6 +318,7 @@ import type {
   StartCiReviewResponse,
   StoryBuild,
   StoryBuildDiffResponse,
+  StoryBuildHotfixBasesResponse,
   StoryBuildPrDiffResponse,
   BuildPlanApproveBody,
   BuildPlanDecisionBody,
@@ -1924,8 +1925,9 @@ export const api = {
     ),
   storyBuild: (id: number) => get<StoryBuild>(storyBuildPath('one', { id })),
   // The stored patch, fetched only when the reader opens the diff.
-  storyBuildRepoDiff: (id: number, repoId: number) =>
-    get<StoryBuildDiffResponse>(storyBuildPath('repoDiff', { id, repoId })),
+  // `target: 'main'`: a HOTFIX build's main fix (docs/STORY-BUILD.md § Hotfix builds).
+  storyBuildRepoDiff: (id: number, repoId: number, target: 'release' | 'main' = 'release') =>
+    get<StoryBuildDiffResponse>(target === 'main' ? withQuery(storyBuildPath('repoDiff', { id, repoId }), 'target=main') : storyBuildPath('repoDiff', { id, repoId })),
   // Push one repository / every unpushed ready one (in build order). Draft unless `draft === false`.
   pushStoryBuildRepo: (id: number, repoId: number, body: StoryBuildPushBody) =>
     fetch(storyBuildPath('repoPush', { id, repoId }), jsonBody('POST', body)).then((r) =>
@@ -1946,6 +1948,9 @@ export const api = {
   setStoryBuildTicketReview: (id: number, done: boolean) =>
     fetch(storyBuildPath('ticketReview', { id }), jsonBody('POST', { done })).then((r) => handle<StoryBuildTicketReviewResponse>(r)),
   // THE BUILDS TOAST: the workspace's running builds and the ones at a gate.
+  // HOTFIX: each repository's latest release (the hotfix base) and whether "Treat as a hotfix" is offered. DB only.
+  storyBuildHotfixBases: (workspaceId: number) =>
+    get<StoryBuildHotfixBasesResponse>(withQuery(storyBuildPath('hotfixBases'), workspaceParam(workspaceId))),
   storyBuildActivity: (workspaceId: number) => get<StoryBuildActivityResponse>(withQuery(storyBuildPath('active'), workspaceParam(workspaceId))),
   // THE REVIEW LOOP (docs/STORY-BUILD.md § The review loop): the loop now, its switch + rounds, Continue, Stop.
   storyBuildLoop: (id: number) => get<StoryBuildLoopRouteResponse>(storyBuildPath('loop', { id })),

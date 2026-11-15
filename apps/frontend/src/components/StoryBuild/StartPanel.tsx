@@ -10,7 +10,9 @@ import {
   useSandboxRuntime,
   useSandboxSettings,
   useStartStorySession,
+  useHotfixBases,
 } from '../../hooks/useStoryBuild.js';
+import { hotfixBaseLine } from '../../lib/hotfix.js';
 import { sessionInherits, sessionInheritsText } from '../../lib/sessionInherits.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
@@ -105,6 +107,13 @@ export function StartPanel({
   const setAutoPush = (on: boolean): void => setPrefs({ ...prefs, autoPush: on });
   const setAutoApprove = (on: boolean): void => setPrefs({ ...prefs, autoApprovePlan: on });
   const [loopRounds, setLoopRounds] = useState(STORY_BUILD_LOOP_ROUNDS_DEFAULT);
+  // HOTFIX (docs/STORY-BUILD.md § Hotfix builds): offered only with both suffixes set and a repository with a
+  // release (`GET …/hotfix-bases`, DB only, asked while this panel offers a start). Not with Build end to end;
+  // the review loop is off for it.
+  const hotfixBases = useHotfixBases(workspaceId, offered != null && !e2e);
+  const hotfixOffered = hotfixBases.data?.offered === true;
+  const [hotfixTicked, setHotfix] = useState(false);
+  const hotfix = hotfixTicked && hotfixOffered && !e2e;
   const go = (): void => {
     start.mutate({
       action: fill ? 'fill_gaps' : 'implement',
@@ -112,7 +121,9 @@ export function StartPanel({
       model: pick.chosen.model,
       ...(e2e
         ? { endToEnd: true, autoPush: true, autoApprovePlan: true, loopRounds: STORY_BUILD_LOOP_ROUNDS_DEFAULT }
-        : { ...(autoPush ? { autoPush: true, loopRounds } : {}), ...(autoApprove ? { autoApprovePlan: true } : {}) }),
+        : hotfix
+          ? { hotfix: true, ...(autoApprove ? { autoApprovePlan: true } : {}) }
+          : { ...(autoPush ? { autoPush: true, loopRounds } : {}), ...(autoApprove ? { autoApprovePlan: true } : {}) }),
     });
   };
   // The one-shot start of "Build end to end": decided once the sign-in and budget answers are in.
@@ -191,14 +202,33 @@ export function StartPanel({
           <AutoApproveInfo />
         </label>
       )}
-      {offered != null && !e2e && (
+      {offered != null && !e2e && !hotfix && (
         <label data-testid="story-build-start-auto-push" className="mt-3 flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
           <CheckboxBox checked={autoPush} disabled={busy} onChange={(e) => setAutoPush(e.target.checked)} />
           {AUTO_PUSH_LABEL}
           <AutoPushInfo />
         </label>
       )}
-      {offered != null && !e2e && autoPush && <LoopRoundsControl value={loopRounds} disabled={busy} onChange={setLoopRounds} />}
+      {offered != null && !e2e && !hotfix && autoPush && <LoopRoundsControl value={loopRounds} disabled={busy} onChange={setLoopRounds} />}
+      {offered != null && !e2e && hotfixOffered && hotfixBases.data != null && (
+        <div data-testid="story-build-start-hotfix" className="mt-3">
+          <label className="flex w-fit cursor-pointer items-center gap-1.5 text-body text-ui-ink">
+            <CheckboxBox checked={hotfixTicked} disabled={busy} onChange={(e) => setHotfix(e.target.checked)} />
+            Treat as a hotfix
+            <HotfixInfo />
+          </label>
+          {hotfix && (
+            <ul data-testid="story-build-start-hotfix-bases" className="mt-2 space-y-0.5 pl-6">
+              {hotfixBases.data.repos.map((b) => (
+                <li key={b.repoId} data-testid="story-build-start-hotfix-base" data-read-only={b.release == null || undefined} className="flex flex-wrap gap-x-3 text-body">
+                  <span className="font-mono text-meta text-ui-ink">{b.fullName}</span>
+                  <span className={b.release == null ? 'text-ui-mute' : 'text-ui-ink'}>{hotfixBaseLine(b)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         {offered != null ? (
           <>
@@ -341,6 +371,24 @@ function GapLine({ g }: { g: StoryBuildGap }): JSX.Element {
       {g.verdict != null && <span className={`${REVIEW_CHIP} ${TICKET_CRITERION_STATUS_CLASS[g.verdict]}`}>{TICKET_CRITERION_STATUS_LABEL[g.verdict]}</span>}
       <span className="min-w-0 flex-1">{g.text}</span>
     </li>
+  );
+}
+
+/** What "Treat as a hotfix" does, behind its ⓘ. */
+function HotfixInfo(): JSX.Element {
+  return (
+    <InfoButton title="Treat as a hotfix">
+      <p>The fix is made twice in the same sandbox:</p>
+      <ul className="mt-1 list-disc pl-5">
+        <li>First on each repository's latest release: the newest release or hotfix tag.</li>
+        <li>Then the agent ports it to the default branch, resolves the differences and runs the tests again.</li>
+      </ul>
+      <p className="mt-2">
+        Push opens two pull requests per changed repository: one into <span className="font-mono">hotfix/&lt;tag&gt;</span>, made at
+        the release if it is not there yet, and one into the default branch. Each links the other.
+      </p>
+      <p className="mt-2">A repository with no release is read only. The review loop and Build end to end are off for a hotfix.</p>
+    </InfoButton>
   );
 }
 

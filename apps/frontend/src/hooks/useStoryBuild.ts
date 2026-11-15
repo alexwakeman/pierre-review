@@ -9,6 +9,7 @@ import {
   type StoryBuildPrDiffResponse,
   type StoryBuild,
   type StoryBuildDiffResponse,
+  type StoryBuildHotfixBasesResponse,
   type StoryBuildForTicketResponse,
   type StoryBuildLoopContinueBody,
   type StoryBuildLoopSettingsBody,
@@ -125,13 +126,23 @@ export function useStoryBuildPush(workspaceId: number | null, ident: string) {
 }
 
 /** The stored patch — fetched only once the reader opens a repository's diff. */
-export function useStoryBuildDiff(buildId: number, repoId: number, enabled: boolean, patchKey: string) {
+export function useStoryBuildDiff(buildId: number, repoId: number, enabled: boolean, patchKey: string, target: 'release' | 'main' = 'release') {
   return useQuery<StoryBuildDiffResponse>({
     // `patchKey` (the repo row's completion stamp) re-reads the patch after a later build turn.
-    queryKey: ['story-build-diff', buildId, repoId, patchKey],
-    queryFn: () => api.storyBuildRepoDiff(buildId, repoId),
+    queryKey: ['story-build-diff', buildId, repoId, patchKey, target],
+    queryFn: () => api.storyBuildRepoDiff(buildId, repoId, target),
     enabled,
     staleTime: Infinity,
+  });
+}
+
+/** HOTFIX: the bases "Treat as a hotfix" would start from — asked only while the Start panel offers a start. */
+export function useHotfixBases(workspaceId: number | null, enabled: boolean) {
+  return useQuery<StoryBuildHotfixBasesResponse>({
+    queryKey: ['story-build-hotfix-bases', `ws:${workspaceId ?? 'none'}`],
+    queryFn: () => api.storyBuildHotfixBases(workspaceId!),
+    enabled: enabled && workspaceId != null,
+    staleTime: 60_000,
   });
 }
 

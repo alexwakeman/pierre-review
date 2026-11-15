@@ -10,7 +10,8 @@
 import { posix } from 'node:path';
 import { readSmallFile } from './memories.js';
 import { mirrorRepos, prepareSandboxGit, readerFiles, type MirrorResult, type MirrorSeams, type RepoBaseRequest } from './mirror.js';
-import { buildSeed, type FixSeedInput, type Seed, type SeedProjectSkill, type SeedRepoBase, type SeedService } from './seed.js';
+import { buildSeed, type FixSeedInput, type Seed, type SeedHotfix, type SeedProjectSkill, type SeedRepoBase, type SeedService } from './seed.js';
+import { mainCheckoutPaths } from './hotfix.js';
 import type { LayoutPlaces, ResolvedWorkspace } from './check.js';
 import { folderClaudeMdPath } from './check.js';
 import type { WorkspaceLayout } from './layout.js';
@@ -25,7 +26,8 @@ export { buildSeed, sessionBranch, fixSessionBranch, SANDBOX_HOME } from './seed
 export { SANDBOX_BASE_REF } from './mirror.js';
 export type { WorkspaceLayout, LayoutRepo } from './layout.js';
 export type { SessionTicket } from './ticket.js';
-export type { Seed, FixSeedInput } from './seed.js';
+export type { Seed, FixSeedInput, SeedHotfix } from './seed.js';
+export { mainCheckoutPaths, MAIN_CHECKOUT_SUFFIX } from './hotfix.js';
 export type { RepoBaseRequest, MirrorResult } from './mirror.js';
 
 export const FOLDER_CLAUDE_MD_MAX_BYTES = 64 * 1024;
@@ -80,10 +82,22 @@ export interface PrepareSessionArgs {
   projectSkills?: (repos: MirrorResult['repos']) => Promise<SeedProjectSkill[]>;
   onProgress?: (line: string) => void;
   signal?: AbortSignal;
+  /**
+   * A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): `bases` put each repository with a release at its
+   * release commit; `mainBases` (those repositories only) are mirrored AGAIN beside it, at the default branch
+   * (`mainCheckoutPaths`). `releases` names each one's tag; a repository without one is READ ONLY.
+   */
+  hotfix?: {
+    mainBases: ReadonlyMap<number, RepoBaseRequest>;
+    releases: ReadonlyMap<number, { tagName: string; hotfixBranch: string }>;
+    mainLabels: ReadonlyMap<number, string>;
+  } | null;
 }
 
 export interface PreparedSession {
   mirror: MirrorResult;
+  /** A hotfix build's main checkouts (one per repository with a release that cloned). */
+  mainMirror?: MirrorResult;
   seed: Seed;
   /** Plain lines for the boot steps (left out, skipped). */
   notes: string[];
@@ -102,6 +116,21 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
   });
   for (const f of mirror.failed) notes.push(`${f.fullName} could not be cloned: ${f.reason}`);
   notes.push(...mirror.notes);
+  // HOTFIX: the main checkouts, beside the release checkouts that cloned.
+  let mainMirror: MirrorResult | undefined;
+  if (a.hotfix != null && a.hotfix.mainBases.size > 0) {
+    const want = new Set(mirror.repos.map((r) => r.repoId).filter((id) => a.hotfix!.mainBases.has(id)));
+    const paths = mainCheckoutPaths(layout, want);
+    const mainLayout: WorkspaceLayout = { ...layout, repos: layout.repos.filter((r) => paths.has(r.repoId)).map((r) => ({ ...r, path: paths.get(r.repoId)! })) };
+    a.onProgress?.('Loading the main checkouts');
+    mainMirror = await mirrorRepos(runtime, container, mainLayout, a.hotfix.mainBases, a.branch, {
+      seams: a.seams,
+      signal: a.signal,
+      store: a.store ?? null,
+      localClones: localClonesOf(a.resolved),
+    });
+    for (const f of mainMirror.failed) notes.push(`The main checkout of ${f.fullName} could not be cloned: ${f.reason}`);
+  }
   const docs = a.docs ? await a.docs(mirror) : null;
   const services = typeof a.services === 'function' ? await a.services(mirror) : a.services;
   const seedNotes = [...notes];
@@ -145,9 +174,33 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
     services,
   };
   if (a.fix == null && a.ticket == null) throw new Error('A session needs a ticket or a fix to seed.');
-  const seed = a.fix != null ? buildSeed({ ...common, kind: 'fix', fix: a.fix }) : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement', planFirst: a.planFirst === true, docs });
+  const hotfix = a.hotfix != null ? hotfixSeedOf(mirror, mainMirror ?? null, a.hotfix) : null;
+  const seed =
+    a.fix != null
+      ? buildSeed({ ...common, kind: 'fix', fix: a.fix })
+      : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement', planFirst: a.planFirst === true, docs, ...(hotfix ? { hotfix } : {}) });
   await runtime.copyIn(container, seed.files);
-  return { mirror, seed, notes };
+  return { mirror, seed, notes, ...(mainMirror ? { mainMirror } : {}) };
+}
+
+/** The seed's hotfix facts: every cloned repository, its release (or read only) and its main checkout. Pure. */
+export function hotfixSeedOf(
+  mirror: Pick<MirrorResult, 'repos'>,
+  mainMirror: Pick<MirrorResult, 'repos'> | null,
+  h: NonNullable<PrepareSessionArgs['hotfix']>,
+): SeedHotfix {
+  return {
+    repos: mirror.repos.map((r) => {
+      const rel = h.releases.get(r.repoId);
+      const main = mainMirror?.repos.find((m) => m.repoId === r.repoId);
+      return {
+        repoId: r.repoId,
+        fullName: r.fullName,
+        release: rel ? { tagName: rel.tagName, path: r.path, hotfixBranch: rel.hotfixBranch } : null,
+        main: rel && main ? { path: main.path, label: h.mainLabels.get(r.repoId) ?? 'the default branch', sha: main.sha } : null,
+      };
+    }),
+  };
 }
 
 /** The cloned repositories' own skills, read from Limn's clone cache at each repository's base commit. */

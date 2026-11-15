@@ -235,6 +235,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
       { slug: 'overview' },
       { slug: 'plan' },
       { slug: 'fill-gaps' },
+      { slug: 'hotfix' },
       { slug: 'push' },
     ],
   },

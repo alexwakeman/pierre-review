@@ -8,6 +8,7 @@
 //   POST …/loop/stop       stop at the next checkpoint (the work and the branches stay)
 import type { FastifyInstance } from 'fastify';
 import {
+  HOTFIX_NO_LOOP_LINE,
   STORY_BUILD_API,
   STORY_BUILD_BRANCH_MAX,
   STORY_BUILD_LOOP_ROUNDS_MAX,
@@ -82,6 +83,12 @@ export function registerStoryBuildLoopRoutes(app: FastifyInstance, ctx: AgentCon
     const body = parseLoopSettings(req.body);
     if (!body) {
       return reply.code(400).send({ error: 'BadRequest', message: `Send \`on\` (true or false) and/or \`rounds\` (${STORY_BUILD_LOOP_ROUNDS_MIN} to ${STORY_BUILD_LOOP_ROUNDS_MAX}).` });
+    }
+    // A HOTFIX build never runs the review loop (v1; docs/STORY-BUILD.md § Hotfix builds).
+    if (body.on === true) {
+      const row = await getStoryBuildRow(ctx, accountId, id);
+      if (row == null) return reply.code(404).send(NOT_FOUND);
+      if (row.hotfix === true) return reply.code(409).send({ error: 'HotfixNoLoop', message: HOTFIX_NO_LOOP_LINE });
     }
     const r = await setLoopSettings(ctx, accountId, id, body);
     if (r.status === 'not_found') return reply.code(404).send(NOT_FOUND);

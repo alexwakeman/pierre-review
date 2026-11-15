@@ -96,6 +96,23 @@ export interface SeedInput {
   planFirst?: boolean;
   /** The reference documents: where the read-only reference documents are (the docs boot step copied them). */
   docs?: { dir: string } | null;
+  /** A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): the release and main checkouts, and the read-only
+   *  repositories. Absent on every other build, whose seed stays byte-identical. */
+  hotfix?: SeedHotfix | null;
+}
+
+/** One repository of a hotfix build, as the seed names it. */
+export interface SeedHotfixRepo {
+  repoId: number;
+  fullName: string;
+  /** The release checkout (the repository's layout path, at the latest release); null ⇒ READ ONLY. */
+  release: { tagName: string; path: string; hotfixBranch: string } | null;
+  /** The main checkout beside it, at the default branch's head; null when it could not be cloned. */
+  main: { path: string; label: string; sha: string } | null;
+}
+
+export interface SeedHotfix {
+  repos: readonly SeedHotfixRepo[];
 }
 
 /** What an AI Fix session's agent is told (docs/SANDBOX.md § AI Fix sessions). */
@@ -313,6 +330,48 @@ function rules(i: SeedInput, provider: AiProviderId): string {
   ].join('\n');
 }
 
+/**
+ * HOTFIX: the release checkouts (fix there first), the main checkouts (port the fix there), the read-only
+ * repositories, and the order of work. Only a hotfix build's seed has it.
+ */
+function hotfixSection(i: SeedInput, h: SeedHotfix): string {
+  const fixable = h.repos.filter((r) => r.release != null);
+  const readOnly = h.repos.filter((r) => r.release == null);
+  const out = [
+    '## Hotfix',
+    '',
+    'This is a HOTFIX build. Fix the problem on the latest release first. Then port the same fix to the default branch.',
+    '',
+    'Release checkouts (fix here first):',
+    '',
+    list(fixable.map((r) => `${r.fullName}: \`${r.release!.path}\` at the release ${r.release!.tagName}.`)),
+    '',
+    'Main checkouts (port the fix here):',
+    '',
+    list(
+      fixable.map((r) =>
+        r.main != null ? `${r.fullName}: \`${r.main.path}\` at ${r.main.label} (${short(r.main.sha)}).` : `${r.fullName}: no main checkout could be cloned. Fix the release checkout only.`,
+      ),
+    ),
+  ];
+  if (readOnly.length > 0) {
+    out.push('', 'Read only (no release yet). Read them, but do not change them: Limn refuses their changes.', '', list(readOnly.map((r) => `${r.fullName}: \`${i.layout.repos.find((x) => x.repoId === r.repoId)?.path ?? r.fullName}\``)));
+  }
+  out.push(
+    '',
+    'The order of work:',
+    '',
+    numbered([
+      'Fix the release checkout of each repository you change. Run its checks and fix what fails.',
+      `Port the fix to the main checkout of the same repository. For example, fetch the commits from the release checkout (\`git -C <main checkout> fetch <release checkout> ${i.branch}\`) and cherry-pick them, or make the change by hand. Resolve the differences where the code moved. Run the checks again and fix what fails.`,
+      `Commit in both checkouts on the branch \`${i.branch}\`. Limn makes two pull requests for each repository: one into the release's \`hotfix/<tag>\` branch, one into the default branch.`,
+      'In the plan, put ONE pull request per repository you change in `stack`. The port to the main checkout is part of that pull request.',
+      'In the report, say for each repository what the port changed and the result of the checks in both checkouts.',
+    ]),
+  );
+  return out.join('\n');
+}
+
 function agentFile(i: SeedInput, provider: AiProviderId): string {
   const ticketPath = posix.join(i.layout.root, 'TICKET.md');
   const what = i.mode === 'fill_gaps' ? 'close the gaps the ticket check found in this ticket' : 'implement this ticket';
@@ -325,6 +384,7 @@ function agentFile(i: SeedInput, provider: AiProviderId): string {
     '',
     reposSection(i),
     '',
+    ...(i.hotfix ? [hotfixSection(i, i.hotfix), ''] : []),
     memoriesSection(i, provider),
     '',
     servicesSection(i),
@@ -476,6 +536,7 @@ function systemPromptOf(i: SeedInput, provider: AiProviderId): string {
     `You are in a Limn workspace session for the ticket ${i.ticket.key}. Read \`${own}\` and \`${posix.join(i.layout.root, 'TICKET.md')}\` before anything else.`,
     i.planFirst ? 'Until the reader approves the plan, read and plan only: do not change files.' : 'Until the reader starts the build, read and plan only: do not change files.',
     `Never push or add a remote. Commit your work on \`${i.branch}\`. Report per acceptance criterion at the end of the build.`,
+    ...(i.hotfix ? ['This is a hotfix build: fix each release checkout first, then port the fix to its main checkout ("Hotfix" in that file). Never change a read-only repository.'] : []),
   ].join(' ');
 }
 

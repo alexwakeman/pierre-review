@@ -64,3 +64,4 @@ export * from './auto-fix-queue.js';
 export * from './releases.js';
 export * from './release-check.js';
 export * from './release-write.js';
+export * from './hotfix.js';

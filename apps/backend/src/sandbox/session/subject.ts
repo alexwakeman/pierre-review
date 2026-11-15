@@ -36,6 +36,12 @@ export interface SessionRepoInfo {
 export interface SubjectBases {
   bases: Map<number, RepoBaseRequest>;
   labels: Map<number, { label: string; note: string | null }>;
+  /** A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): the main checkouts to mirror beside the release ones. */
+  hotfix?: {
+    mainBases: Map<number, RepoBaseRequest>;
+    releases: Map<number, { tagName: string; hotfixBranch: string }>;
+    mainLabels: Map<number, string>;
+  } | null;
 }
 
 /** One turn the machine starts by itself the moment the agent is ready (an AI Fix: the reader's Start; a
@@ -98,7 +104,7 @@ export interface SessionSubject {
   /** What the seed fold gets (the layout says where each repository will be). */
   seed(layout: WorkspaceLayout): { ticket: SessionTicket; mode: 'implement' | 'fill_gaps'; planFirst?: boolean } | { fix: FixSeedInput };
   /** The mirror is in: record where each repository is (and fail when the one that matters is missing). */
-  afterMirror(l: SubjectLive, mirror: MirrorResult, bases: ReadonlyMap<number, RepoBaseRequest>): Promise<void>;
+  afterMirror(l: SubjectLive, mirror: MirrorResult, bases: ReadonlyMap<number, RepoBaseRequest>, mainMirror?: MirrorResult | null): Promise<void>;
   /** Resume: put the stored work back. Returns how many repositories. */
   restore(l: SubjectLive, mirror: MirrorResult): Promise<number>;
   /** The driver's mode at start. */

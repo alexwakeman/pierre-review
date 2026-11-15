@@ -2,6 +2,8 @@
 // the action, the story view's entry, the repository words, the push gating and the error words.
 // React-free so test/storyBuild.test.ts pins it. A session's own pure half is lib/sandboxSession.ts.
 import {
+  HOTFIX_NOT_OFFERED_LINE,
+  HOTFIX_NO_LOOP_LINE,
   criterionCounts,
   isStoryBuildOpen,
   isTrackerIdent,
@@ -193,8 +195,9 @@ export function storyBuildRefAnchor(ref: string): string {
 // ── push ───────────────────────────────────────────────────────────────────────────────────────
 
 /** Built, not pushed, with a change to push. Tests may be failing: the reader decides. */
-export function canPushRepo(r: Pick<StoryBuildRepo, 'include' | 'status' | 'hasPatch'>): boolean {
-  return r.include && r.status === 'ready' && r.hasPatch;
+export function canPushRepo(r: Pick<StoryBuildRepo, 'include' | 'status' | 'hasPatch'> & { hotfix?: StoryBuildRepo['hotfix'] }): boolean {
+  // A HOTFIX repository may have only its main fix (the release needed no change), or only its release fix.
+  return r.include && r.status === 'ready' && (r.hasPatch || r.hotfix?.mainHasPatch === true);
 }
 
 export function pushableRepos(b: Pick<StoryBuild, 'repos'>): StoryBuildRepo[] {
@@ -368,6 +371,8 @@ export const STORY_BUILD_ERROR_WORDS: Record<Exclude<StoryBuildErrorCode, 'BadRe
   NoStory: 'Could not read this ticket’s story.',
   NotReady: 'Wait for the current step to finish.',
   NotFound: 'This build no longer exists.',
+  HotfixNotOffered: HOTFIX_NOT_OFFERED_LINE,
+  HotfixNoLoop: HOTFIX_NO_LOOP_LINE,
 };
 
 /** An action's failure in words: the code's sentence when it is one we know, else the server's. */

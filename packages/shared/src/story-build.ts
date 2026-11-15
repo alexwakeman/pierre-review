@@ -14,6 +14,7 @@ import type { SprintStage } from './sprint-stories.js';
 import type { SprintTicketCheck } from './sprint-graph.js';
 import type { StoryBuildSession } from './sandbox-session.js';
 import type { StoryBuildLoop } from './story-build-loop.js';
+import type { StoryBuildRepoHotfix } from './hotfix.js';
 import type { StoryBuildPr, StoryBuildPrPushResult } from './build-plan.js';
 import type { StoryDocsCriteriaSource, StoryDocsRef } from './story-docs-alignment.js';
 import type {
@@ -401,6 +402,9 @@ export interface StoryBuildRepo {
   pushError: string | null;
   /** The code beside `pushError` (`BRANCH_EXISTS` ⇒ the tab offers a new branch name); null otherwise. */
   pushErrorCode?: string | null;
+  /** A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): the release, read-only flag and the MAIN FIX beside
+   *  this row's own work (the release fix). Absent/null on an ordinary build. */
+  hotfix?: StoryBuildRepoHotfix | null;
   provider?: AiProviderId;
   model: string | null;
   effort: string | null;
@@ -476,6 +480,8 @@ export interface StoryBuild {
   ticketReviewDoneAt?: string | null;
   /** BUILD END TO END (docs/STORY-BUILD.md § Build end to end): started from "Build end to end". */
   endToEnd?: boolean;
+  /** "Treat as a hotfix" (docs/STORY-BUILD.md § Hotfix builds): two checkouts and two PRs per repository. */
+  hotfix?: boolean;
   /** What its ticket step did once the PRs opened; null before (or not an end-to-end build). */
   endToEndTicket?: StoryBuildEndToEndTicket | null;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
@@ -579,16 +585,28 @@ export interface StoryBuildPushResponse {
   prs?: StoryBuildPrPushResult[];
 }
 
-/** `GET …/repos/:repoId/diff` — the stored patch. */
+/** `GET …/repos/:repoId/diff` — the stored patch. `?target=main` (a hotfix build) reads the MAIN FIX. */
 export interface StoryBuildDiffResponse {
   repoId: number;
   baseSha: string;
   patch: string | null;
   filesChanged: string[];
+  /** Which checkout's work this is: 'release' (the row's own; every ordinary build) or 'main'. */
+  target?: 'release' | 'main';
 }
 
 /** Error codes the routes answer (`{ error: code, message }`). */
-export type StoryBuildErrorCode = 'NoClaudeAuth' | 'ModelNotOnProvider' | 'NoStory' | 'NotReady' | 'BadRequest' | 'NotFound';
+export type StoryBuildErrorCode =
+  | 'NoClaudeAuth'
+  | 'ModelNotOnProvider'
+  | 'NoStory'
+  | 'NotReady'
+  | 'BadRequest'
+  | 'NotFound'
+  /** A hotfix start when the option is not offered (no suffixes, or no repository with a release). */
+  | 'HotfixNotOffered'
+  /** The review loop or Build end to end asked of a hotfix build. */
+  | 'HotfixNoLoop';
 
 // ---- the routes (one spelling for the backend's registration, the client and the rate-limit tiers) ----
 
@@ -616,6 +634,8 @@ export const STORY_BUILD_API = {
   ticketReview: '/api/story-builds/:id/ticket-review',
   /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
   active: '/api/story-builds/active',
+  /** HOTFIX: each workspace repository's latest release (the hotfix base) and whether the option is offered. */
+  hotfixBases: '/api/story-builds/hotfix-bases',
 } as const;
 
 /** `POST …/auto-approve`. */

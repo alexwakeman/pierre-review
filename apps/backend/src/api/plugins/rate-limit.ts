@@ -604,6 +604,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   GET list / :id / stream / diff / repos/:repoId/diff / prs/:prId/diff / plan · POST interrupt /
   //   network/allow / discard / plan/decisions / auto-push → read
   //   (auto-push only stores the reader's opt-in; the push it arms runs once, on the host, after a build turn)
+  //   (a HOTFIX build's push is the same route: the hotfix branch, two PRs and one PR-body edit → github_write)
+  //   GET /api/story-builds/hotfix-bases → read (DB only: the synced tags)
   //   POST …/:id/auto-approve · …/:id/ticket-review · GET /api/story-builds/active → read (DB only: the
   //   automatic approval's build turn is started by the plan turn's end and asks the spend gate itself)
   //   POST …/:id/loop/continue   THE REVIEW LOOP's Continue: may start reviews, a fix turn AND pushes

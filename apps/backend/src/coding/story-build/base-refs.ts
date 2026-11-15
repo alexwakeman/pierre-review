@@ -24,6 +24,12 @@ export function storyBuildBaseRef(buildId: number, repoId: number): string {
   return `${STORY_BUILD_REF_PREFIX}${buildId}/${repoId}`;
 }
 
+/** HOTFIX: the ref pinning one repository's MAIN checkout base (the default branch at the build's start). It
+ *  shares the repository's sweep key (`buildId/repoId`), so it is kept and dropped with that base. */
+export function storyBuildMainRef(buildId: number, repoId: number): string {
+  return `${STORY_BUILD_REF_PREFIX}${buildId}/main/${repoId}`;
+}
+
 /**
  * One of these refs: a repository's base (`<buildId>/<repoId>`), or — plan first — one planned PR's
  * verified tip (`<buildId>/stack/<prRowId>`, coding/story-build/stack-verify.ts).
@@ -41,6 +47,8 @@ export function parseStoryBuildBaseRef(ref: string): StoryBuildRefKey | null {
   const rest = ref.slice(STORY_BUILD_REF_PREFIX.length);
   const stack = /^(\d+)\/stack\/(\d+)$/.exec(rest);
   if (stack != null) return { buildId: Number(stack[1]), stackPrId: Number(stack[2]) };
+  const main = /^(\d+)\/main\/(\d+)$/.exec(rest);
+  if (main != null) return { buildId: Number(main[1]), repoId: Number(main[2]) };
   const m = /^(\d+)\/(\d+)$/.exec(rest);
   if (m == null) return null;
   return { buildId: Number(m[1]), repoId: Number(m[2]) };
@@ -66,8 +74,8 @@ export async function dropStoryBuildBaseRefs(fullName: string, buildId: number, 
   const dir = repoCloneDir(owner, name);
   if (!existsSync(join(dir, '.git'))) return;
   await withRepoLock(`${owner}/${name}`, async () => {
-    const prefix = repoId != null ? storyBuildBaseRef(buildId, repoId) : `${STORY_BUILD_REF_PREFIX}${buildId}/`;
-    const refs = (await gitOut(dir, ['for-each-ref', '--format=%(refname)', prefix]).catch(() => ''))
+    const prefixes = repoId != null ? [storyBuildBaseRef(buildId, repoId), storyBuildMainRef(buildId, repoId)] : [`${STORY_BUILD_REF_PREFIX}${buildId}/`];
+    const refs = (await gitOut(dir, ['for-each-ref', '--format=%(refname)', ...prefixes]).catch(() => ''))
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean);

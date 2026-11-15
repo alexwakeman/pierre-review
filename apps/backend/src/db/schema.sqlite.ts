@@ -18,6 +18,7 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   StoryBuildEndToEndTicket,
+  StoryBuildHotfixBranch,
   BlastRadiusConfig,
   SprintStatusAutoOrder,
   SprintStatusSettings,
@@ -4729,6 +4730,10 @@ export const storyBuilds = sqliteTable(
     endToEnd: integer('end_to_end', { mode: 'boolean' }).notNull().default(false),
     e2eTicketClaimedAt: integer('e2e_ticket_claimed_at', { mode: 'timestamp' }),
     e2eTicketJson: text('e2e_ticket_json', { mode: 'json' }).$type<StoryBuildEndToEndTicket>(),
+    // HOTFIX (migration 0193; docs/STORY-BUILD.md § Hotfix builds): "Treat as a hotfix" at Start. Each repository
+    // with a latest release is fixed there and the fix PORTED to the default branch; the review loop and
+    // "Build end to end" are refused for it.
+    hotfix: integer('hotfix', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -4799,6 +4804,32 @@ export const storyBuildRepos = sqliteTable(
     loopPushedTree: text('loop_pushed_tree'),
     loopPushedAt: integer('loop_pushed_at', { mode: 'timestamp' }),
     loopEnded: text('loop_ended'),
+    // HOTFIX (migration 0193; docs/STORY-BUILD.md § Hotfix builds). `hotfix_tag` = the latest release the
+    // release checkout starts at (NULL on an ordinary build and on a read-only repository); `read_only` = no
+    // release yet, its changes are refused at extraction. `main_*` = THE MAIN FIX (the default-branch checkout
+    // in the same sandbox): its base, path, patch and push record, beside the row's own (the RELEASE FIX).
+    hotfixTag: text('hotfix_tag'),
+    readOnly: integer('read_only', { mode: 'boolean' }).notNull().default(false),
+    mainBaseRef: text('main_base_ref'),
+    mainBaseSha: text('main_base_sha'),
+    mainSandboxPath: text('main_sandbox_path'),
+    mainPatch: text('main_patch'),
+    mainPatchSha: text('main_patch_sha'),
+    mainStatJson: text('main_stat_json', { mode: 'json' }).$type<SandboxRepoStat>(),
+    mainFilesChangedJson: text('main_files_changed_json', { mode: 'json' }).$type<string[]>(),
+    mainCommitMessage: text('main_commit_message'),
+    // NULL (not built yet) | 'ready' | 'skipped' (no change) | 'failed' | 'pushed'.
+    mainStatus: text('main_status'),
+    mainError: text('main_error'),
+    mainPushedBranch: text('main_pushed_branch'),
+    mainPushedPrNumber: integer('main_pushed_pr_number'),
+    mainPushedPrUrl: text('main_pushed_pr_url'),
+    mainPushedCommitSha: text('main_pushed_commit_sha'),
+    mainPushedAt: integer('main_pushed_at', { mode: 'timestamp' }),
+    mainPushError: text('main_push_error'),
+    mainPushErrorCode: text('main_push_error_code'),
+    // Push's record of `hotfix/<tag>` (shared StoryBuildHotfixBranch): created or found, moved, the PRs on it.
+    hotfixBranchJson: text('hotfix_branch_json', { mode: 'json' }).$type<StoryBuildHotfixBranch>(),
     provider: text('provider'),
     model: text('model'),
     effort: text('effort'),

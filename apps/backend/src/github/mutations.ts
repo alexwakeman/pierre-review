@@ -1783,6 +1783,50 @@ export async function createAnnotatedReleaseTag(
   );
 }
 
+// HOTFIX (docs/STORY-BUILD.md § Hotfix builds): `hotfix/<tag>` made at the release commit, on the reader's Push.
+// A NEW ref only (POST git/refs): it never moves one. GitHub's 422 ("Reference already exists") comes back as
+// `exists`, so the caller re-reads the branch instead of guessing.
+export async function createHotfixBranch(
+  token: string,
+  args: { owner: string; name: string; branch: string; sha: string },
+  origin: WriteOrigin,
+): Promise<{ outcome: 'created' } | { outcome: 'exists' }> {
+  return limnWrite(
+    origin,
+    'hotfix_branch',
+    {},
+    async (): Promise<{ outcome: 'created' } | { outcome: 'exists' }> => {
+      const seg = encodeURIComponent;
+      try {
+        await ghRestPostFor<unknown>(token, `/repos/${seg(args.owner)}/${seg(args.name)}/git/refs`, { ref: `refs/heads/${args.branch}`, sha: args.sha });
+        return { outcome: 'created' };
+      } catch (err) {
+        if ((err as { status?: number })?.status === 422) return { outcome: 'exists' };
+        throw err;
+      }
+    },
+    () => ({ detail: args.branch }),
+  );
+}
+
+/** The OPEN pull requests whose base is `branch` (a hotfix branch that moved past its release: the tab names
+ *  them). A read; at most 30, newest first. Throws on a failed read. */
+export async function fetchOpenPrsOnBase(
+  token: string,
+  owner: string,
+  name: string,
+  branch: string,
+): Promise<Array<{ number: number; title: string; url: string | null }>> {
+  const seg = encodeURIComponent;
+  const rows = await ghRestGetFor<Array<{ number?: unknown; title?: unknown; html_url?: unknown }>>(
+    token,
+    `/repos/${seg(owner)}/${seg(name)}/pulls?state=open&base=${seg(branch)}&sort=created&direction=desc&per_page=30`,
+  );
+  return (Array.isArray(rows) ? rows : [])
+    .filter((p): p is { number: number; title?: unknown; html_url?: unknown } => typeof p.number === 'number')
+    .map((p) => ({ number: p.number, title: typeof p.title === 'string' ? p.title : '', url: typeof p.html_url === 'string' ? p.html_url : null }));
+}
+
 export async function createGithubPrerelease(
   token: string,
   args: { owner: string; name: string; tag: string; title: string; body: string },

@@ -66,6 +66,10 @@ export default function Page(): JSX.Element {
           <DocLink to="implement-story/overview#build-end-to-end">Build end to end</DocLink>.
         </li>
         <li>
+          After a release, the start offers <Ui>Treat as a hotfix</Ui>: the fix on the latest release and on the default
+          branch. See <DocLink to="implement-story/hotfix">Hotfix a release</DocLink>.
+        </li>
+        <li>
           Once a session exists, the button reads <Ui>Open build</Ui> with its state, and the sprint card shows the same
           mark: <Ui>Working…</Ui>, <Ui>Waiting for you</Ui>, <Ui>Ready to push</Ui> or <Ui>Pushed</Ui>.
         </li>

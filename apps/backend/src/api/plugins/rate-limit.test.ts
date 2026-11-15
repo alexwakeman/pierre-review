@@ -143,6 +143,8 @@ describe('tierFor — implement story', () => {
     expect(tiers('POST', '/api/story-builds/7/auto-approve')).toEqual(['read']);
     expect(tiers('POST', '/api/story-builds/7/ticket-review')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/active')).toEqual(['read']);
+    // HOTFIX: the bases are DB only; a hotfix build's push is the same github_write route.
+    expect(tiers('GET', '/api/story-builds/hotfix-bases')).toEqual(['read']);
     // The review loop: Continue may start reviews, a fix turn and pushes; the rest are DB only.
     expect(tiers('POST', '/api/story-builds/7/loop/continue')).toEqual(['ai', 'ai_hourly', 'github_write']);
     expect(tiers('GET', '/api/story-builds/7/loop')).toEqual(['read']);

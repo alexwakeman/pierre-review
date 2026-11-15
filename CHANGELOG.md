@@ -19,6 +19,9 @@ no internals.
   with the tickets and warnings behind it. "Create release…" tags each one with your release suffix, publishes the
   release notes as a GitHub pre-release and comments on each ticket.
 - Settings → Releases: the release suffix and hotfix suffix the Releases tab needs.
+- Implement → "Treat as a hotfix": the agent fixes your latest release, then ports the fix to the default branch in
+  the same sandbox. Push opens two pull requests per repository, one into `hotfix/<tag>` and one into the default
+  branch, each linking the other.
 
 ## [1.0.31] - 2026-11-12
 

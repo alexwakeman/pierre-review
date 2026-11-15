@@ -307,6 +307,11 @@ export const pushRepo: PushRepoFn = async (ctx, a: PushRepoArgs) => {
   if (refused != null) return result(a.repoId, 'failed', 'PUSH_DENIED', refused);
   const build = await getStoryBuildRow(ctx, a.accountId, a.buildId);
   if (!build) return result(a.repoId, 'failed', 'NotFound', 'Build not found.');
+  // A HOTFIX build pushes two PRs per repository (push-hotfix.ts; docs/STORY-BUILD.md § Hotfix builds).
+  if (build.hotfix === true) {
+    const { pushHotfixRepo } = await import('./push-hotfix.js');
+    return pushHotfixRepo(ctx, a);
+  }
   const repo = await getStoryBuildRepoRow(ctx, a.accountId, a.buildId, a.repoId);
   if (!repo) return result(a.repoId, 'failed', 'NotFound', 'This repository is not part of the build.');
   if (repo.status === 'pushed') {

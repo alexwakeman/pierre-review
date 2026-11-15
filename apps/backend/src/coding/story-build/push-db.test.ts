@@ -395,7 +395,7 @@ describe('the patch routes', () => {
     const s = await readySession();
     const ok = await app.inject({ method: 'GET', url: storyBuildPath('repoDiff', { id: s.id, repoId: s.api }), headers: as(1) });
     expect(ok.statusCode).toBe(200);
-    expect(ok.json()).toEqual({ repoId: s.api, baseSha: 'b'.repeat(40), patch: 'diff --git a/a.ts b/a.ts\n', filesChanged: [] });
+    expect(ok.json()).toEqual({ repoId: s.api, baseSha: 'b'.repeat(40), patch: 'diff --git a/a.ts b/a.ts\n', filesChanged: [], target: 'release' });
     expect((await app.inject({ method: 'GET', url: storyBuildPath('repoDiff', { id: s.id, repoId: s.api }), headers: as(2) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: storyBuildPath('repoDiff', { id: s.id, repoId: 99999 }), headers: as(1) })).statusCode).toBe(404);
     expect((await app.inject({ method: 'GET', url: '/api/story-builds/x/repos/1/diff', headers: as(1) })).statusCode).toBe(404);

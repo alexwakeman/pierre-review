@@ -21,6 +21,7 @@ import { DiffWrapToggle, FileDiffView, type DiffFile } from '../diff/FileDiffVie
 import { ChevronIcon, ExternalLinkIcon, PullRequestIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { RenameBranch } from './RenameBranch.js';
+import { HOTFIX_DIFF_LABEL, hotfixDiffTargets, hotfixMovedLine, hotfixPushWords } from '../../lib/hotfix.js';
 
 // THE CHANGES: one card per repository with stored work, in build order (the One PR card shell look).
 // Each card: its status, what the agent says it changed (`ChangeReportSections`; the refs jump to the
@@ -105,6 +106,11 @@ function BuildRepoCard({
 }): JSX.Element {
   const titleId = useId();
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
+  // A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): two diffs, two pull requests, no rename.
+  const hf = repo.hotfix ?? null;
+  const [mainDiffOpen, setMainDiffOpen] = useState(false);
+  const movedLine = hotfixMovedLine(hf?.branch);
+  const mainUrl = safeExternalUrl(hf?.mainPushedPrUrl) ?? null;
   // THE REVIEW LOOP pushes by itself while it runs: Push hides (never disabled) until it pauses or ends.
   const loopBusy = loopRunning(build);
   const costText = useRunCostText();
@@ -117,7 +123,19 @@ function BuildRepoCard({
   return (
     <PrCardFrame labelledBy={titleId}>
       <div data-testid="story-build-repo" data-repo={repo.fullName} data-status={repo.status}>
-        <PrCardTitle id={titleId} end={repo.status === 'pushed' ? <PushedPrLink repo={repo} url={pushedUrl} /> : null}>
+        <PrCardTitle
+          id={titleId}
+          end={
+            hf != null ? (
+              <span className="flex items-center gap-2">
+                {repo.pushedPrNumber != null && <PushedPrLink repo={repo} url={pushedUrl} />}
+                {hf.mainPushedPrNumber != null && <PushedPrLink repo={repo} number={hf.mainPushedPrNumber} url={mainUrl} />}
+              </span>
+            ) : repo.status === 'pushed' ? (
+              <PushedPrLink repo={repo} url={pushedUrl} />
+            ) : null
+          }
+        >
           {repo.fullName}
         </PrCardTitle>
         <PrCardChips>
@@ -126,9 +144,17 @@ function BuildRepoCard({
         <PrCardMeta
           parts={[
             repo.branch != null ? <span key="b" className="font-mono">{repo.pushedBranch ?? repo.branch}</span> : null,
-            <span key="base">
-              from <span className="font-mono">{repo.baseRef}</span>
-            </span>,
+            hf != null && hf.readOnly ? (
+              <span key="base">read only: no release yet</span>
+            ) : hf != null && hf.tagName != null ? (
+              <span key="base">
+                from the release <span className="font-mono">{hf.tagName}</span> and <span className="font-mono">{hf.mainBaseRef ?? 'the default branch'}</span>
+              </span>
+            ) : (
+              <span key="base">
+                from <span className="font-mono">{repo.baseRef}</span>
+              </span>
+            ),
             repo.filesChanged.length > 0 ? `${repo.filesChanged.length} file${repo.filesChanged.length === 1 ? '' : 's'} changed` : null,
             repo.model != null ? <AiRunLabel key="m" provider={repo.provider} model={repo.model} /> : null,
             cost,
@@ -160,7 +186,7 @@ function BuildRepoCard({
           </div>
         )}
         <ChecksReport checks={repo.checks} />
-        {repo.hasPatch && (
+        {hf == null && repo.hasPatch && (
           <div className="mt-2">
             <button
               type="button"
@@ -175,7 +201,34 @@ function BuildRepoCard({
             {diffOpen && <RepoDiff build={build} repo={repo} session={session} />}
           </div>
         )}
-        {canPushRepo(repo) && !loopBusy && branchExists && (
+        {hf != null &&
+          hotfixDiffTargets(repo).map((t) => {
+            const open = t === 'main' ? mainDiffOpen : diffOpen;
+            return (
+              <div key={t} className="mt-2" data-testid={`story-build-hotfix-diff-${t}`}>
+                <button
+                  type="button"
+                  data-testid="story-build-diff-toggle"
+                  className="hit inline-flex items-center gap-1 text-meta text-ui-mute hover:text-ui-ink"
+                  aria-expanded={open}
+                  onClick={() => (t === 'main' ? setMainDiffOpen((v) => !v) : setDiffOpen((v) => !v))}
+                >
+                  <ChevronIcon dir={open ? 'down' : 'right'} />
+                  {HOTFIX_DIFF_LABEL[t]}
+                  {t === 'release' && hf.tagName != null && <span className="font-mono">({hf.tagName})</span>}
+                  {t === 'main' && <span className="font-mono">({hf.mainBaseRef ?? 'default branch'})</span>}
+                </button>
+                {open && <RepoDiff build={build} repo={repo} session={session} target={t} />}
+              </div>
+            );
+          })}
+        {hf?.mainError != null && <p className="mt-1 text-meta text-ui-danger">{hf.mainError}</p>}
+        {movedLine != null && (
+          <p data-testid="story-build-hotfix-moved" className="mt-2 text-meta text-ui-mute">
+            {movedLine}
+          </p>
+        )}
+        {hf == null && canPushRepo(repo) && !loopBusy && branchExists && (
           <RenameBranch
             branch={repo.branch ?? ''}
             taken={taken}
@@ -185,7 +238,7 @@ function BuildRepoCard({
             onPush={(branch) => onPush(branch)}
           />
         )}
-        {canPushRepo(repo) && !loopBusy && !branchExists && (
+        {canPushRepo(repo) && !loopBusy && (hf != null || !branchExists) && (
           <div className="mt-3 flex flex-wrap items-center gap-2" data-noactivate>
             <Button
               variant="primary"
@@ -195,24 +248,25 @@ function BuildRepoCard({
               data-story-build-action={`push-${repo.repoId}`}
               onClick={() => onPush()}
             >
-              {pushButtonWords(build, 'repo', repo.id, draft)}
+              {hf != null ? hotfixPushWords(repo, draft) : pushButtonWords(build, 'repo', repo.id, draft)}
             </Button>
             <ChecksStatus checks={repo.checks} />
             {!session && !repo.checks?.ran && <span className="text-meta text-ui-mute">Not built or tested here.</span>}
           </div>
         )}
         {(pushError ?? repo.pushError) != null && <p className="mt-1 text-meta text-ui-danger">{pushError ?? repo.pushError}</p>}
+        {hf?.mainPushError != null && pushError == null && <p className="mt-1 text-meta text-ui-danger">{hf.mainPushError}</p>}
       </div>
     </PrCardFrame>
   );
 }
 
 /** The pushed pull request: opens its PR tab when Limn has synced it, else GitHub. Read on click only. */
-function PushedPrLink({ repo, url }: { repo: StoryBuildRepo; url: string | null }): JSX.Element | null {
+function PushedPrLink({ repo, url, number }: { repo: StoryBuildRepo; url: string | null; number?: number }): JSX.Element | null {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const [looking, setLooking] = useState(false);
-  if (repo.pushedPrNumber == null) return null;
-  const n = repo.pushedPrNumber;
+  const n = number ?? repo.pushedPrNumber;
+  if (n == null) return null;
   const open = async (): Promise<void> => {
     setLooking(true);
     try {
@@ -259,8 +313,8 @@ function PushedPrLink({ repo, url }: { repo: StoryBuildRepo; url: string | null 
 }
 
 /** The stored patch, read when the reader opens it, drawn as AI Fix draws its changeset. */
-function RepoDiff({ build, repo, session }: { build: StoryBuild; repo: StoryBuildRepo; session: boolean }): JSX.Element {
-  const diff = useStoryBuildDiff(build.id, repo.repoId, true, repo.completedAt ?? '');
+function RepoDiff({ build, repo, session, target = 'release' }: { build: StoryBuild; repo: StoryBuildRepo; session: boolean; target?: 'release' | 'main' }): JSX.Element {
+  const diff = useStoryBuildDiff(build.id, repo.repoId, true, repo.completedAt ?? '', target);
   const files = useMemo<DiffFile[]>(() => parseGitPatch(diff.data?.patch ?? null), [diff.data?.patch]);
   if (diff.isLoading) return <p className="mt-1 text-meta text-ui-mute">Loading the diff…</p>;
   if (diff.isError) return <p className="mt-1 text-meta text-ui-danger">Could not load the diff.</p>;

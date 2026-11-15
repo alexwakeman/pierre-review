@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, asc, notInArray } from 'drizzle-orm';
 import {
   aiRunProvider,
+  hotfixBranchName,
   isFlowDiagram,
   isLegacyDesignDiagram,
   isStoryBuildOpen,
@@ -11,6 +12,7 @@ import {
   type StoryBuildDocsStatus,
   type StoryBuildPhase,
   type StoryBuildRepo,
+  type StoryBuildRepoHotfix,
   type StoryBuildRepoStatus,
   type StoryBuildStatus,
   type StoryBuildSummary,
@@ -169,6 +171,8 @@ export interface InsertStoryBuildArgs {
   model: string | null;
   /** A WORKSPACE SESSION (docs/SANDBOX.md § Sessions): inserted `booting`, with no plan phase. */
   session?: { effort: string | null; lastActiveAt: Date };
+  /** "Treat as a hotfix" (docs/STORY-BUILD.md § Hotfix builds): stored at the claim, before the boot reads it. */
+  hotfix?: boolean;
 }
 
 export type InsertStoryBuildOutcome = { outcome: 'started'; id: number } | { outcome: 'already_open'; id: number };
@@ -198,6 +202,7 @@ export async function insertStoryBuild(ctx: Ctx, a: InsertStoryBuildArgs): Promi
         ...(a.session ? { sessionPhase: 'booting', effort: a.session.effort, lastActiveAt: a.session.lastActiveAt } : {}),
         wantDiagram: a.wantDiagram,
         wantDocs: a.wantDocs,
+        ...(a.hotfix === true ? { hotfix: true } : {}),
         createdAt: new Date(),
         startedAt: new Date(),
       })
@@ -241,6 +246,8 @@ export interface UpsertStoryBuildRepoArgs {
   baseSha: string;
   stackedOnPrId: number | null;
   branch: string | null;
+  /** A HOTFIX build (docs/STORY-BUILD.md § Hotfix builds): the release tag, read only, the main checkout's base. */
+  hotfix?: { tagName: string | null; readOnly: boolean; mainBaseRef: string | null; mainBaseSha: string | null } | null;
 }
 
 /** Insert or refresh a session's repository row (ON CONFLICT `(build_id, repo_id)`). Returns its id. */
@@ -259,13 +266,15 @@ export async function upsertStoryBuildRepo(ctx: Ctx, a: UpsertStoryBuildRepoArgs
     stackedOnPrId: a.stackedOnPrId,
     branch: a.branch,
   };
+  const hotfix = (): Partial<StoryBuildRepoSet> =>
+    a.hotfix ? { hotfixTag: a.hotfix.tagName, readOnly: a.hotfix.readOnly, mainBaseRef: a.hotfix.mainBaseRef, mainBaseSha: a.hotfix.mainBaseSha } : {};
   const rows = (await ctx.db
     .insert(r)
-    .values(values)
+    .values({ ...values, ...hotfix() })
     .onConflictDoUpdate({
       target: [r.buildId, r.repoId],
       // A separate object from `values` (CLAUDE.md: never share one between insert and `set:`).
-      set: { ref: a.ref, buildOrder: a.buildOrder, include: a.include, status: a.status, baseRef: a.baseRef, baseSha: a.baseSha, stackedOnPrId: a.stackedOnPrId, branch: a.branch },
+      set: { ref: a.ref, buildOrder: a.buildOrder, include: a.include, status: a.status, baseRef: a.baseRef, baseSha: a.baseSha, stackedOnPrId: a.stackedOnPrId, branch: a.branch, ...hotfix() },
     })
     .returning({ id: r.id })
     .execute()) as Array<{ id: number }>;
@@ -300,16 +309,48 @@ export async function deleteStoryBuildRepoRowsExcept(ctx: Ctx, accountId: number
   return rows.length;
 }
 
-/** The stored patch of one repository (the `…/diff` route; never part of `StoryBuild`). */
+/** The stored patch of one repository (the `…/diff` route; never part of `StoryBuild`). `target: 'main'` = a
+ *  hotfix build's MAIN FIX (null on a row without a main checkout). */
 export async function getStoryBuildRepoPatch(
   ctx: Ctx,
   accountId: number,
   buildId: number,
   repoId: number,
+  target: 'release' | 'main' = 'release',
 ): Promise<{ baseSha: string; patch: string | null; filesChanged: string[] } | null> {
   const row = await getStoryBuildRepoRow(ctx, accountId, buildId, repoId);
   if (row == null) return null;
+  if (target === 'main') {
+    if (row.mainBaseSha == null) return null;
+    return { baseSha: row.mainBaseSha, patch: row.mainPatch ?? null, filesChanged: row.mainFilesChangedJson ?? [] };
+  }
   return { baseSha: row.baseSha, patch: row.patch ?? null, filesChanged: row.filesChangedJson ?? [] };
+}
+
+const MAIN_STATUSES = new Set(['ready', 'skipped', 'failed', 'pushed']);
+
+/** A hotfix build's per-repository facts on the wire (null on an ordinary build). */
+export function toStoryBuildRepoHotfix(row: StoryBuildRepoRow, hotfixBuild: boolean): StoryBuildRepoHotfix | null {
+  if (!hotfixBuild) return null;
+  return {
+    tagName: row.hotfixTag ?? null,
+    readOnly: row.readOnly === true,
+    hotfixBranch: row.hotfixTag != null ? hotfixBranchName(row.hotfixTag) : null,
+    mainBaseRef: row.mainBaseRef ?? null,
+    mainBaseSha: row.mainBaseSha ?? null,
+    mainStatus: row.mainStatus != null && MAIN_STATUSES.has(row.mainStatus) ? (row.mainStatus as StoryBuildRepoHotfix['mainStatus']) : null,
+    mainHasPatch: row.mainPatch != null && row.mainPatch.length > 0,
+    mainFilesChanged: row.mainFilesChangedJson ?? [],
+    mainInsertions: row.mainStatJson?.insertions ?? null,
+    mainDeletions: row.mainStatJson?.deletions ?? null,
+    mainError: row.mainError ?? null,
+    mainPushedBranch: row.mainPushedBranch ?? null,
+    mainPushedPrNumber: row.mainPushedPrNumber ?? null,
+    mainPushedPrUrl: row.mainPushedPrUrl ?? null,
+    mainPushError: row.mainPushError ?? null,
+    mainPushErrorCode: row.mainPushErrorCode ?? null,
+    branch: row.hotfixBranchJson ?? null,
+  };
 }
 
 // ---- the wire mapper --------------------------------------------------------------------------------
@@ -327,6 +368,7 @@ export function toStoryBuildRepo(
   row: StoryBuildRepoRow,
   fullName: string,
   candidate: StoryBuildCandidate | null,
+  hotfixBuild = false,
 ): StoryBuildRepo {
   return {
     id: row.id,
@@ -356,6 +398,7 @@ export function toStoryBuildRepo(
     pushedAt: iso(row.pushedAt),
     pushError: row.pushError ?? null,
     pushErrorCode: row.pushErrorCode ?? null,
+    ...(hotfixBuild ? { hotfix: toStoryBuildRepoHotfix(row, true) } : {}),
     ...(row.model != null || row.provider != null ? { provider: aiRunProvider(row.provider, row.model) } : {}),
     model: row.model ?? null,
     effort: row.effort ?? null,
@@ -380,7 +423,7 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
   const byRepo = new Map(candidates.map((c) => [c.repoId, c] as const));
   const repos = [...repoRows]
     .sort((a, b) => a.buildOrder - b.buildOrder || a.id - b.id)
-    .map((r) => toStoryBuildRepo(r, opts.repoNames.get(r.repoId) ?? byRepo.get(r.repoId)?.fullName ?? `#${r.repoId}`, byRepo.get(r.repoId) ?? null));
+    .map((r) => toStoryBuildRepo(r, opts.repoNames.get(r.repoId) ?? byRepo.get(r.repoId)?.fullName ?? `#${r.repoId}`, byRepo.get(r.repoId) ?? null, row.hotfix === true));
   const built = repos.filter((r) => r.include && (r.status === 'ready' || r.status === 'pushed'));
   const running = isStoryBuildRunning(row.status) || row.docsStatus === 'running';
   return {
@@ -425,6 +468,7 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     ticketReviewDoneAt: iso(row.ticketReviewDoneAt),
     endToEnd: row.endToEnd === true,
     endToEndTicket: row.e2eTicketJson ?? null,
+    hotfix: row.hotfix === true,
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),

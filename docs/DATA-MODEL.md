@@ -976,6 +976,18 @@ NEVER-stored `autoPushRunning` (the in-process flag). `story_build_repos.push_er
 Since 0186 the switch `auto_push` runs THE REVIEW LOOP (below); the old automatic push is retired, its
 columns kept (the loop's start claim also stamps `auto_push_claimed_at`).
 
+**HOTFIX BUILDS** (migration `0193`; [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds). `story_builds.hotfix`
+(0/1, written at the claim). Per `story_build_repos` row: `hotfix_tag` (the latest release the RELEASE checkout
+starts at; NULL on an ordinary build and on a read-only repository), `read_only` (no release yet: its change is
+refused at extraction, it is never pushed), and THE MAIN FIX beside the row's own patch (the release fix):
+`main_base_ref` / `main_base_sha` (the default branch at the start, pinned by `refs/pierre/story-build/<id>/main/<repoId>`,
+which shares the repository's sweep key), `main_sandbox_path`, `main_patch` (+ `main_patch_sha`, `main_stat_json`,
+`main_files_changed_json`, `main_commit_message`), `main_status` (NULL | ready | skipped | failed | pushed),
+`main_error`, the PR 2 push record `main_pushed_*` + `main_push_error` / `main_push_error_code`, and
+`hotfix_branch_json` (shared `StoryBuildHotfixBranch`: `hotfix/<tag>` made or found, moved past the release, the
+open PRs already on it). The row's `status` is `ready` when either fix has a change, `pushed` once every fix with a
+change has its PR. No new table: the erase and export cover the columns with their rows.
+
 **THE REVIEW LOOP** (migration `0186`; [STORY-BUILD.md](STORY-BUILD.md) § The review loop). On
 `story_builds`: `loop_rounds` (N, default 3, 1..6), `loop_state` (shared `StoryBuildLoopState`; NULL =
 never ran), `loop_round`, `loop_pause` (`StoryBuildLoopPause`), `loop_error` (one sentence), `loop_resume`

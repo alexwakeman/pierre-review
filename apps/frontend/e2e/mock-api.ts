@@ -140,6 +140,7 @@ import {
   resolveMyTurnSettings,
   SANDBOX_SESSION_API,
   STORY_BUILD_API,
+  type StoryBuildHotfixBasesResponse,
   storyBuildActivityOf,
   BUILD_PLAN_API,
 } from '@pierre-review/shared';
@@ -2177,6 +2178,10 @@ export async function installMockApi(
             session: { ...STORY_SESSION_PLAN_READY.session!, plan },
           };
           return json(route, { outcome: 'started', buildId: STORY_SESSION_READY.id } satisfies StoryBuildStartResponse, 202);
+        }
+        // HOTFIX: no release suffixes set in the fixtures, so "Treat as a hotfix" is not offered.
+        if (path === STORY_BUILD_API.hotfixBases) {
+          return json(route, { workspaceId: 1, configured: false, offered: false, repos: [] } satisfies StoryBuildHotfixBasesResponse);
         }
         // THE BUILDS TOAST: the one session, through the shared fold (live = the session says so).
         if (path === STORY_BUILD_API.active) {

@@ -62,7 +62,7 @@ vi.mock('../../review/clone-manager.js', async (orig) => ({
 
 const IDENT = 'jira:https://acme.atlassian.net#ACME-300';
 const IDENT2 = 'jira:https://acme.atlassian.net#ACME-301';
-const SHA = { api: 'a'.repeat(40), web: 'b'.repeat(40) };
+const SHA = { api: 'a'.repeat(40), web: 'b'.repeat(40), main: 'c'.repeat(40) };
 
 const OUT = readFileSync(fileURLToPath(new URL('../drivers/__fixtures__/claude-interactive.out.jsonl', import.meta.url)), 'utf8').split('\n').filter(Boolean);
 /** The recorded stream, by the stdin line that releases it: start, chat turn 1, Start build, build turn. */
@@ -217,7 +217,8 @@ beforeAll(async () => {
     ticketPrs: async () => [],
     places: () => ({ claude: { claudeDir, projectsDir: join(claudeDir, 'projects'), litter: [] }, home: '/nowhere', dataDir: '/nowhere/.limn' }),
     mirrorSeams: {
-      prepare: async (req) => ({ sha: req.name === 'api' ? SHA.api : SHA.web, dir: '/fake', cleanup: async () => {} }),
+      // A hotfix build's MAIN checkout (pinned under `…/main/<repoId>`) is at the default branch's head.
+      prepare: async (req) => ({ sha: req.pinRef.includes('/main/') ? SHA.main : req.name === 'api' ? SHA.api : SHA.web, dir: '/fake', cleanup: async () => {} }),
       async *tarGitDir() {
         yield Buffer.from('tar');
       },
@@ -503,5 +504,79 @@ describe('limits, teardown, restart and resume', () => {
     // The repository row kept its base and patch (never reset to `planned`).
     expect(b.repos.find((x) => x.repoId === api)).toMatchObject({ status: 'ready', baseSha: SHA.api, hasPatch: true });
     expect((await post(`/api/story-builds/${kept}/discard`)).statusCode).toBe(200);
+  });
+});
+
+// HOTFIX (docs/STORY-BUILD.md § Hotfix builds; docs/RELEASES.md acceptance 25–27): the start's refusals, the
+// bases from the synced tags (api at its latest release + a main checkout beside it, web read only), the seed's
+// hotfix section, and the extraction: the release fix and the main fix stored apart, a read-only change refused.
+describe('a hotfix build', () => {
+  const IDENT3 = 'jira:https://acme.atlassian.net#ACME-320';
+  const MAIN_PATCH = 'diff --git a/src/export.ts b/src/export.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/export.ts\n@@ -0,0 +1 @@\n+export const csv = 2;\n';
+  let id = 0;
+
+  beforeAll(async () => {
+    await M._closeAllSessionsForTest();
+  });
+
+  it('1: refused before the suffixes are set; the review loop is refused with it', async () => {
+    const no = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, hotfix: true });
+    expect(no.statusCode).toBe(400);
+    expect(no.json().error).toBe('HotfixNotOffered');
+    const loop = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, hotfix: true, autoPush: true });
+    expect(loop.statusCode).toBe(400);
+    expect(loop.json().error).toBe('HotfixNoLoop');
+    const e2e = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, hotfix: true, endToEnd: true });
+    expect(e2e.json().error).toBe('HotfixNoLoop');
+  });
+
+  it('25 + 26: the release checkout starts at the latest release, the main checkout at main; web is read only', async () => {
+    const { setReleaseSettings } = await import('../../db/release-settings.js');
+    await setReleaseSettings(1, wsId, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+    const now = new Date();
+    await db
+      .insert(schema.repoTags)
+      .values({ accountId: 1, repoId: api, name: 'v1.0.0-rc', sha: SHA.api, committedAt: new Date('2026-11-12T10:00:00Z'), onDefaultBranch: true, firstSeenAt: now, lastSeenAt: now })
+      .execute();
+    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT3, hotfix: true });
+    expect(r.statusCode).toBe(202);
+    id = r.json().buildId;
+    const b = await until(id, (x) => x.session?.phase === 'ready', 'ready');
+    expect(b.hotfix).toBe(true);
+    const repos = new Map(b.repos.map((x) => [x.fullName, x]));
+    expect(repos.get('acme/api')).toMatchObject({ baseRef: 'v1.0.0-rc', baseSha: SHA.api, hotfix: { tagName: 'v1.0.0-rc', readOnly: false, hotfixBranch: 'hotfix/v1.0.0-rc', mainBaseRef: 'main', mainBaseSha: SHA.main } });
+    expect(repos.get('acme/web')).toMatchObject({ baseRef: 'main', hotfix: { tagName: null, readOnly: true } });
+    const box = `limn-${(await rowOf(id)).sandboxRef}-sandbox`;
+    const claudeMd = fake.files(box).get('/workspace/CLAUDE.md')!.toString();
+    expect(claudeMd).toContain('## Hotfix');
+    expect(claudeMd).toContain('acme/api: `/workspace/acme/api` at the release v1.0.0-rc.');
+    expect(claudeMd).toContain('acme/api: `/workspace/acme/api.main` at main (ccccccc).');
+    expect(claudeMd).toContain('- acme/web: `/workspace/acme/web`');
+  });
+
+  it('27 + read only: the release fix and the main fix are stored apart; a read-only change is refused', async () => {
+    extractAnswer = (path) =>
+      path.endsWith('/api')
+        ? out(API_PATCH, ['src/export.ts'], 'fix: CSV export on the release')
+        : path.endsWith('/api.main')
+          ? out(MAIN_PATCH, ['src/export.ts'], 'fix: CSV export on main')
+          : out(API_PATCH, ['src/export.ts'], 'chore: touched web');
+    // The recorded stream answers a chat turn first, then the build (the flow above).
+    expect((await post(`/api/story-builds/${id}/messages`, { text: 'Look at the release first.' })).statusCode).toBe(202);
+    await until(id, (x) => x.session?.phase === 'ready' && x.session.agentState !== 'working', 'the chat turn');
+    const r = await post(`/api/story-builds/${id}/build`, {});
+    expect(r.statusCode).toBe(202);
+    const b = await until(id, (x) => x.session?.phase === 'built', 'built');
+    const repos = new Map(b.repos.map((x) => [x.fullName, x]));
+    expect(repos.get('acme/api')).toMatchObject({ status: 'ready', hasPatch: true, hotfix: { mainStatus: 'ready', mainHasPatch: true, mainFilesChanged: ['src/export.ts'] } });
+    expect(repos.get('acme/web')).toMatchObject({ status: 'skipped', hasPatch: false, error: 'acme/web has no release yet, so it is read only in this hotfix build. Its changes were not kept.' });
+    const notices = b.session!.conversation.filter((c) => c.kind === 'notice').map((c) => (c as { text: string }).text);
+    expect(notices).toContain('Changes stored: acme/api (release fix and main fix).');
+    const main = (await get(`/api/story-builds/${id}/repos/${api}/diff?target=main`)).json();
+    expect(main).toMatchObject({ target: 'main', baseSha: SHA.main, patch: MAIN_PATCH });
+    // The review loop is never asked for a hotfix build.
+    await new Promise((res) => setTimeout(res, 50));
+    expect(G.autoPush.filter((x) => x.buildId === id)).toEqual([]);
+    expect((await post(`/api/story-builds/${id}/discard`)).statusCode).toBe(200);
   });
 });

@@ -64,6 +64,7 @@ const MUTATIONS_READS = new Set([
   'fetchMergeQueueState',
   'isWaitableEnqueueRefusal',
   'isFailingEnqueueRefusal',
+  'fetchOpenPrsOnBase',
 ]);
 
 describe('every GitHub write says whose it is, and Limn\'s record', () => {
@@ -132,6 +133,7 @@ const WRITE_CALL = /\b(addReviewThreadReply|setReviewThreadResolved|addIssueComm
 const READER_BUTTONS: Record<string, string> = {
   'bot-triage/resolve.ts': 'the reader confirms "resolve these bot threads"',
   'merge/dependency-policy.ts': 'the reader presses "Merge all" (their decision, like the merge button)',
+  'coding/story-build/push-hotfix.ts': 'the reader presses Push on a hotfix build: the hotfix branch and the PR body link are the READER\'S PR, like every Implement push',
 };
 
 function walk(dir: string): string[] {

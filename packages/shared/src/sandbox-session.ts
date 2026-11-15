@@ -265,6 +265,9 @@ export interface SandboxSessionStartBody {
    *  loop (`loopRounds`, default 4), and — once the PRs are open — the Jira ticket updated from the plan and a
    *  comment on it, under the reader's login. Implies `autoApprovePlan` and `autoPush`. */
   endToEnd?: boolean;
+  /** "Treat as a hotfix" (docs/STORY-BUILD.md § Hotfix builds): each repository with a release is fixed on its
+   *  latest release and the fix ported to the default branch. Refused with `autoPush` / `endToEnd`. */
+  hotfix?: boolean;
 }
 
 /** `POST …/messages`. 1..SANDBOX_MESSAGE_MAX characters. */

@@ -205,6 +205,8 @@ export interface ApproveArgs {
   buildId: number;
   plan: StoryBuildPlanRow;
   now: Date;
+  /** false ⇒ no planned-PR rows (a HOTFIX build pushes two PRs per repository instead; push-hotfix.ts). */
+  writePrs?: boolean;
 }
 
 /**
@@ -224,7 +226,7 @@ export async function approvePlanRevision(ctx: Ctx, a: ApproveArgs): Promise<boo
       .execute()) as Array<{ id: number; approvedPlanId: number | null }>;
     if (rows.length === 0 || rows[0]!.approvedPlanId != null) return false;
     await db.update(b).set({ approvedPlanId: a.plan.id, approvedAt: a.now }).where(and(eq(b.id, a.buildId), eq(b.accountId, a.accountId))).execute();
-    for (const [position, p] of revision.stack.entries()) {
+    for (const [position, p] of a.writePrs === false ? [] : revision.stack.entries()) {
       await db
         .insert(pr)
         .values({

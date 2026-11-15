@@ -11,6 +11,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   BUILD_PLAN_API,
+  HOTFIX_NOT_OFFERED_LINE,
+  HOTFIX_NO_LOOP_LINE,
   BUILD_PLAN_LIMITS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   SANDBOX_MESSAGE_MAX,
@@ -57,6 +59,7 @@ import {
   resumeSession,
   sendSessionMessage,
   sessionDocsAvailable,
+  sessionHotfixBases,
   sessionStoryInputs,
   sessionWire,
   startSession,
@@ -227,6 +230,8 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
             autoApprovePlan: { type: 'boolean' },
             // "Build end to end" (docs/STORY-BUILD.md § Build end to end): implies the two above + the ticket step.
             endToEnd: { type: 'boolean' },
+            // "Treat as a hotfix" (docs/STORY-BUILD.md § Hotfix builds): refused with autoPush / endToEnd.
+            hotfix: { type: 'boolean' },
           },
         },
       },
@@ -249,6 +254,12 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         const code: StoryBuildErrorCode = picked.error === 'ModelNotOnProvider' || picked.error === 'NoClaudeAuth' ? picked.error : 'BadRequest';
         return fail(reply, 400, code, picked.message);
       }
+      // HOTFIX: the review loop and Build end to end are off for it (v1), and it needs a release to start from.
+      const hotfix = body.hotfix === true;
+      if (hotfix && (body.autoPush === true || body.endToEnd === true)) return fail(reply, 400, 'HotfixNoLoop', HOTFIX_NO_LOOP_LINE);
+      if (hotfix && !(await sessionHotfixBases(accountId, scope.workspaceId, scope.repoIds)).offered) {
+        return fail(reply, 400, 'HotfixNotOffered', HOTFIX_NOT_OFFERED_LINE);
+      }
       // The cheap DB check first (the fresh tracker read happens in the boot): no story ⇒ no sandbox.
       const inputs = await sessionStoryInputs(ctx, accountId, scope.workspaceId, body.ident);
       if (inputs == null || inputs.empty) return fail(reply, 400, 'NoStory', 'This ticket has no story or criteria to build from.');
@@ -270,6 +281,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         ...(body.loopRounds !== undefined ? { loopRounds: body.loopRounds } : {}),
         autoApprovePlan: body.autoApprovePlan === true || body.endToEnd === true,
         endToEnd: body.endToEnd === true,
+        ...(hotfix ? { hotfix: true } : {}),
         choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);

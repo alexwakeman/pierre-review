@@ -599,6 +599,59 @@ round the PR opens ready anyway, naming what is still open), and then THE TICKET
   ticket is still there); otherwise the step closes (`ticket_review_done_at`). The tab leads the step with
   one line (`TicketUpdatePanel.tsx endToEndTicketLine`).
 
+## Hotfix builds (2026-11-15; [RELEASES.md](RELEASES.md) § Hotfix)
+
+"Treat as a hotfix" at Start builds ONE fix twice in ONE sandbox: on each repository's LATEST RELEASE, then
+ported to the default branch. Push opens two pull requests per changed repository. Code:
+`packages/shared/src/hotfix.ts` (the pure half), `db/hotfix-bases.ts`, `sandbox/workspace/hotfix.ts`,
+the story subject in `sandbox/session/manager.ts` (`hotfixBasesFor`, `extractHotfix`),
+`coding/story-build/push-hotfix.ts`, the tab's `lib/hotfix.ts`.
+
+- **Offered** (the Start panel, `GET /api/story-builds/hotfix-bases?workspace=`, DB only): both suffixes are set
+  (Settings → Releases) and ≥ 1 workspace repository has a latest release — the newest release OR hotfix tag on
+  any branch (shared `latestReleaseTag`, the release check's own rule). Not with Build end to end. Ticked, the
+  panel lists each repository's base: `api  from v2.4.0-rc (12 Nov) → PRs into hotfix/v2.4.0-rc and main`, or
+  `worker  no release yet — read only`. The start body's `hotfix: true` is stored on the row at the claim
+  (`story_builds.hotfix`); with `autoPush` / `endToEnd` it is `400 HotfixNoLoop`, not offered `400
+  HotfixNotOffered`.
+- **Bases** (`hotfixBasesFor`, read once at boot through the same fold; a resumed session keeps its rows'): a
+  repository with a release starts its RELEASE checkout at the release commit (`baseRef` = the tag,
+  `remoteRef: refs/tags/<tag>`, pinned by the usual base ref; the clone cache fetches the tag, or the commit by
+  sha, when it lacks it) and gets a MAIN checkout beside it at the default branch's head (`<path>.main`,
+  pinned by `refs/pierre/story-build/<id>/main/<repoId>`, which shares the repository's sweep key). Stacking
+  is OFF. A repository without a release is READ ONLY, at the default branch.
+- **What the agent is told** (the ONE seed fold, `seed.ts` `hotfixSection`; an ordinary build's seed is
+  byte-identical): the release checkouts, the main checkouts, the read-only repositories, and the order of work
+  — fix the release checkout and run its checks; port the fix to the main checkout (fetch and cherry-pick, or by
+  hand), resolve the differences, run the checks again; commit in both on `<KEY>`; plan ONE PR per repository.
+  The system prompt adds one line. After Approve, `planBuildInstruction({hotfix})` replaces the stack's branch
+  lines with the release-then-port steps. No Claude prompt golden changes (the goldens are ordinary builds).
+- **Plan first works as usual**, except that Approve writes NO `story_build_prs` rows (`approvePlanRevision
+  {writePrs: false}`): the build is pushed per repository, never as a stack.
+- **Extraction** (`extractHotfix`, after every build turn): each repository's TWO checkouts — the RELEASE FIX
+  (the row's `patch`, against the release commit) and the MAIN FIX (`main_patch`, against the default branch).
+  A READ-ONLY repository's change is REFUSED (shared `hotfixPatchVerdict`): not stored, one notice, the row's
+  `error` says so. The row is `ready` when either fix has a change. Resume puts both back.
+- **The review loop and Build end to end are OFF** (v1): refused at the start, `POST …/loop/settings {on:
+  true}` and `…/auto-push {on: true}` answer `409 HotfixNoLoop`, and `maybeStartLoop` skips a hotfix row.
+- **Push** (the reader's press, the same routes, `push.ts` → `push-hotfix.ts`), per repository, every write the
+  READER'S (origin `reader`: no ledger, no trailer):
+  1. `hotfix/<tag>` read live; when missing, made at the release commit (`createHotfixBranch`, a NEW ref; a
+     422 is "it exists", read again). When it has MOVED past the release commit, PR 1 still targets it and the
+     open PRs already on it are recorded (`hotfix_branch_json`), so the tab names them.
+  2. PR 1 `<KEY>` → `hotfix/<tag>`: the release fix on the release commit.
+  3. PR 2 `<KEY>-main` → the default branch: the main fix on its base.
+  4. PR 1's body edited ONCE to link PR 2 (PR 2's links PR 1 from the start). A failed edit is logged, never retried.
+  Both titled `<KEY>: <title>`, draft by default (the toggle), `applyAndPushBranch`'s rules (`BRANCH_EXISTS`
+  refused, never forced; the default branch, `hotfix/<tag>`, the tag and the pair's other branch protected),
+  push permission re-checked. A rename (`branch`) is refused; a read-only repository is `skipped READ_ONLY`. A
+  second press pushes only what is left; once every fix with a change has its PR the row is `pushed` and
+  NOTHING more is written for that build. `Closes …` goes on the default-branch PR only.
+- **The tab** (`BuildSection.tsx`): per repository "from the release <tag> and main" (or "read only: no
+  release yet"), two diffs, **Release fix** and **Main fix** (`GET …/repos/:repoId/diff?target=main`), Push
+  ("Push both as drafts"), both PR links once open, and the moved-branch line ("hotfix/v2.4.0-rc has moved past
+  the release, … Already on it: #12 …").
+
 ## The builds toast (`components/StoryBuild/StoryBuildsToast.tsx`)
 
 ONE circle in the ONE toast cluster (`HammerIcon`) while any build of the workspace RUNS or waits at a

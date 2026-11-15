@@ -221,7 +221,7 @@ export async function maybeStartLoop(ctx: AgentContext, input: { accountId: numb
   try {
     if (running.has(buildId)) return 'skipped';
     const b = await getStoryBuildRow(ctx, accountId, buildId);
-    if (!b || !b.autoPush || b.loopClaimedAt != null || b.autoPushClaimedAt != null || b.status !== 'ready') return 'skipped';
+    if (!b || !b.autoPush || b.hotfix === true || b.loopClaimedAt != null || b.autoPushClaimedAt != null || b.status !== 'ready') return 'skipped';
     const targets = (await loopTargets(ctx, accountId, buildId)).filter(isLive);
     if (targets.length === 0) return 'skipped';
     if (running.has(buildId)) return 'skipped';

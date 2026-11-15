@@ -359,3 +359,51 @@ Notes
   boards'). Only the newest release made here can be viewed again (no release list route). The landing's
   `SprintLanesMock` still shows the three lane boards only (it mirrors the boards, not this tab). Hotfix is
   still to come.
+
+### Slice 5 — hotfix builds (Implement's "Treat as a hotfix")
+
+The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
+
+- **Migration `0193_story_build_hotfix`** (registered in the journal): `story_builds.hotfix`; on
+  `story_build_repos` `hotfix_tag`, `read_only`, the MAIN FIX columns `main_base_ref` / `main_base_sha` /
+  `main_sandbox_path` / `main_patch` (+ sha, stat, files, commit message) / `main_status` / `main_error`, PR 2's
+  push record `main_pushed_*` + `main_push_error(_code)`, and `hotfix_branch_json`. No new table (the rows are
+  already erased and exported).
+- **Shared** `packages/shared/src/hotfix.ts`: `hotfixBasesOf` (the bases fold, through the new
+  `release-check.ts` `latestReleaseTag` — the release check's `latestRelease` now calls it too, ONE rule),
+  `hotfixPatchVerdict` (the read-only refusal), `hotfixPushTargets`, `hotfixBranchName`,
+  `hotfixMainBranchName`, `hotfixBranchState`, `hotfixPairLine`, the lines `HOTFIX_NO_LOOP_LINE` /
+  `HOTFIX_NOT_OFFERED_LINE` / `hotfixReadOnlyLine`, the wire `StoryBuildHotfixBasesResponse`,
+  `StoryBuildRepoHotfix` (`StoryBuildRepo.hotfix`), `StoryBuildHotfixBranch`; `StoryBuild.hotfix`,
+  `SandboxSessionStartBody.hotfix`, `StoryBuildDiffResponse.target`, the error codes `HotfixNotOffered` /
+  `HotfixNoLoop`, `STORY_BUILD_API.hotfixBases`, the `LimnActionKind` `'hotfix_branch'`.
+- **Backend**: `db/hotfix-bases.ts getHotfixBases`; the story subject (`sandbox/session/manager.ts`):
+  `hotfixBasesFor` (release checkout at the tag via `remoteRef: refs/tags/<tag>`, main checkout pinned by
+  `base-refs.ts storyBuildMainRef`, stacking off, read-only repositories), `extractHotfix`, the main patches put
+  back on Resume, no review loop; `sandbox/workspace/hotfix.ts mainCheckoutPaths` + `prepareSessionWorkspace`'s
+  `hotfix` option (the second mirror) + `hotfixSeedOf`; `seed.ts hotfixSection` (+ one system-prompt line);
+  `plan.ts planBuildInstruction({hotfix})`; `approvePlanRevision({writePrs: false})`;
+  `coding/story-build/push-hotfix.ts pushHotfixRepo` (seam `setHotfixPushDepsForTests`), dispatched from
+  `push.ts pushRepo`; `github/mutations.ts createHotfixBranch` (origin `reader`) + `fetchOpenPrsOnBase`.
+- **Routes**: `GET /api/story-builds/hotfix-bases?workspace=` (DB only, tier `read`, pinned in
+  `rate-limit.test.ts`); `POST /api/story-builds` takes `hotfix` (`400 HotfixNoLoop` / `HotfixNotOffered`);
+  `…/loop/settings {on: true}` and `…/auto-push {on: true}` answer `409 HotfixNoLoop` on a hotfix build;
+  `GET …/repos/:repoId/diff?target=main`. The push is the existing `github_write` route.
+- **Frontend**: the Start panel's "Treat as a hotfix" box and base list (`useHotfixBases`), the build tab's
+  two diffs ("Release fix" / "Main fix"), both PR links, the moved-branch line and "Push both as drafts"
+  (`lib/hotfix.ts`; `canPushRepo` counts a main-only fix). E2E fixture for `GET …/hotfix-bases`.
+- **User docs**: `/docs/implement-story/hotfix`, a line on Implement's overview, CHANGELOG Unreleased.
+- **Tests**: `coding/story-build/hotfix.test.ts` (acceptance 1, 25, 26, 28, 29, 30: the bases, the read-only
+  verdict, the targets and branch names, the moved state, the pair line, the main paths and pin key, the seed
+  byte-identical without a hotfix, the build turn); `coding/story-build/push-hotfix-db.test.ts` (25, 28, 29, 31:
+  the bases from the DB, the two PRs and the body edit, a moved branch, a second press writing nothing, read
+  only, permission, the review-loop refusals, `?target=main`); `sandbox/session/session-flow-db.test.ts` § a
+  hotfix build (1, 25–27 over the real routes and manager: the start refusals, both checkouts, the seed, both
+  patches stored apart and a read-only change refused, no loop); `apps/frontend/test/hotfixBuild.test.ts`.
+- **Deferred / deviations:** acceptance 27's "conflicting port resolved by the agent" is the agent's work in
+  the sandbox (told by the seed and the build turn); Limn checks nothing about the port beyond storing both
+  patches, and the build report is unchanged (one entry per planned PR). A hotfix repository's PRs are not
+  stacked and cannot be renamed after `BRANCH_EXISTS` (the push says so; discard and start again). The main
+  checkout is a second mirror of the repository (`<path>.main`), not a git worktree: the agent ports by fetch +
+  cherry-pick between the two, or by hand. The Codex and Claude seeds differ only in the existing file names; no
+  Claude prompt golden changed. The landing's build-tab mock does not show a hotfix build.
