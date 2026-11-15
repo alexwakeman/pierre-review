@@ -15,11 +15,16 @@
    `--lb-bleed: 0`. Without it, a root would break out of a narrower ancestor to
    the viewport edges with a negative inline margin.
 
+   THE MOTIF is the banded quarter-disc of components/arcs (geometry, colour runs,
+   compositions, scroll motion). Every picture is one of its compositions in a
+   `.tile.art`; the voice tiles carry a quarter in their corner.
+
    CLASS NAMES EVERY PAGE MAY USE (all inside .lb):
-     layout     .board (12-col grid) · .tile · .tile.ph (photo tile, img inside)
+     layout     .board (12-col grid) · .tile · .tile.art (a picture tile: an <Arcs> piece)
+                · .tile.ph (a plain picture tile)
                 · .section (big top margin) · .vh (visually hidden) · .muted
                 · .cap (caption pinned to a tile's bottom: <b> + <span>) · .btns
-     pigments   .lapis · .verdigris · .madder · .gold   (tile backgrounds)
+     voices     .lapis (dusk) · .verdigris (meadow) · .madder (bloom) · .gold (ember fill)
      button     .btn (on .gold tiles it inverts; .btn.alt is the outlined one)
      motion     .rise (revealed by useReveal) · .hl (fade-in)
    The home page's own layout lives in pages/home.css; the product mocks in
@@ -60,20 +65,58 @@
   --ink: #f1f1ef;
   --muted: #a9a69f;
   --dark: #121110;
-  /* the four pigments (kept from the limning theme; all four were Baroque pigments too) */
-  --lapis: #2f5288;
-  --lapis-2: #1b2d4f;
-  --verdigris: #336b5d;
-  --verdigris-2: #21483f;
-  --madder: #8a5a66;
-  --madder-2: #4f3039;
-  --madder-lt: #d6aab2;
-  --gold: #d2b071;
-  --gold-2: #9a763f;
-  --g-lapis: linear-gradient(140deg, var(--lapis) 0%, var(--lapis-2) 100%);
-  --g-verdigris: linear-gradient(140deg, var(--verdigris) 0%, var(--verdigris-2) 100%);
-  --g-madder: linear-gradient(140deg, var(--madder) 0%, var(--madder-2) 100%);
-  --g-gold: linear-gradient(135deg, #e2c487 0%, var(--gold) 45%, var(--gold-2) 100%);
+  /* THE SPECTRUM — sampled from the reference artwork's bands (components/arcs/
+     geometry.ts SPECTRUM holds the same values). Colour lives on LINES and
+     FILLS; running text stays --ink / --muted on the dark ground. */
+  --red: #f80e0f;
+  --orange: #ff6a00;
+  --amber: #fe9c00;
+  --yellow: #ffcf00;
+  --lime: #d6e92b;
+  --green: #86c246;
+  --mint: #52c395;
+  --teal: #3faca9;
+  --azure: #4ba0e0;
+  --indigo: #5b7cc1;
+  --violet: #6f47a7;
+  --plum: #883a9f;
+  --magenta: #ee0056;
+  --pink: #f70e6a;
+  /* THE RUNS — each quarter carries one, read from its pole to its diameter. */
+  --run-ember: var(--red), var(--orange), var(--amber), var(--yellow);
+  --run-dawn: var(--teal), var(--lime), var(--yellow), var(--amber);
+  --run-meadow: var(--teal), var(--mint), var(--green), var(--lime);
+  --run-dusk: var(--plum), var(--violet), var(--azure), var(--mint), var(--lime);
+  --run-bloom: var(--magenta), var(--pink), var(--plum), var(--azure), var(--mint);
+  /* The four tile classes keep their old names (lapis, verdigris, madder, gold) so
+     no page markup changed; each is now a VOICE: a deep ground and its run.
+     --lapis etc. stay as single accents for the pages' own diagrams. */
+  --lapis: var(--azure);
+  --lapis-2: var(--violet);
+  --verdigris: var(--mint);
+  --verdigris-2: var(--teal);
+  --madder: var(--pink);
+  --madder-2: var(--plum);
+  --madder-lt: #ff8db6;
+  --gold: var(--amber);
+  --gold-2: var(--orange);
+  --deep-dusk: #18152a;
+  --deep-meadow: #10201e;
+  --deep-bloom: #23111d;
+  /* the ember fill: kept to its warm, light end so dark text holds 7:1 */
+  --g-gold: linear-gradient(120deg, var(--orange) 0%, var(--amber) 45%, var(--yellow) 100%);
+  --g-ember: linear-gradient(90deg, var(--run-ember));
+  --g-spectrum: linear-gradient(
+    90deg,
+    var(--red),
+    var(--orange),
+    var(--yellow),
+    var(--lime),
+    var(--mint),
+    var(--azure),
+    var(--violet),
+    var(--pink)
+  );
   --gap: 8px;
   --m: 10px;
   --step-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
@@ -171,23 +214,104 @@ body:has(.lb) {
 .lb .tile.ph {
   padding: 0;
 }
-.lb .tile.ph img {
-  /* Bach's iron-gall ink on paper keeps its warmth; only toned down to sit on the dark board. */
-  filter: saturate(0.8) contrast(1.04) brightness(0.88);
+.lb .tile.ph {
+  background: #000;
 }
+
+/* ---- the voices (pigment tiles) --------------------------------------- */
+/* lapis, verdigris and madder: a deep ground with a banded quarter in the
+   bottom-right corner, painted in the voice's run (the mask is
+   assets/arcs/corner.svg, the same band geometry as components/arcs). The
+   tile's own content sits above it. gold: the ember fill, dark text. */
 .lb .lapis {
-  background: var(--lapis) var(--g-lapis);
+  --run: var(--run-dusk);
+  background: var(--deep-dusk);
 }
 .lb .verdigris {
-  background: var(--verdigris) var(--g-verdigris);
+  --run: var(--run-meadow);
+  background: var(--deep-meadow);
 }
 .lb .madder {
-  background: var(--madder) var(--g-madder);
+  --run: var(--run-bloom);
+  background: var(--deep-bloom);
 }
 .lb .gold {
-  background: var(--gold) var(--g-gold);
+  background: var(--amber) var(--g-gold);
   color: var(--dark);
 }
+.lb :is(.lapis, .verdigris, .madder) {
+  isolation: isolate;
+}
+.lb .tile:is(.lapis, .verdigris, .madder)::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  right: 0;
+  bottom: 0;
+  width: min(46%, 220px);
+  aspect-ratio: 1;
+  background: url('./assets/arcs/grain.svg'), linear-gradient(170deg, var(--run));
+  background-blend-mode: multiply;
+  -webkit-mask: url('./assets/arcs/corner.svg') right bottom / 100% 100% no-repeat;
+  mask: url('./assets/arcs/corner.svg') right bottom / 100% 100% no-repeat;
+  /* behind text: held back so the tile's words stay readable over it */
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ---- the arcs (components/arcs) ---------------------------------------- */
+/* Two inputs, set by arcMotion.ts from the scroll position: --draw (the bands
+   draw out, innermost first, and each quarter slides home) and --spread (it
+   opens out as it leaves). The defaults are the finished, still picture. */
+.lb svg.arcs,
+.lb-foot svg.arcs {
+  --draw: 1;
+  --spread: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.lb svg.arcs path {
+  fill: none;
+  stroke-linecap: butt;
+}
+.lb svg.arcs .q:not(.seats) path {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: calc(1 - clamp(0, var(--draw) * 1.8 - var(--k) * 0.8, 1));
+}
+.lb svg.arcs .q.seats path {
+  opacity: clamp(0, var(--draw) * 1.8 - var(--k) * 0.8, 1);
+}
+.lb svg.arcs .q {
+  transform-box: view-box;
+  transform: translate(
+      calc(var(--dx) * (1 - var(--draw) + var(--spread) * 0.6) * 1px),
+      calc(var(--dy) * (1 - var(--draw) + var(--spread) * 0.6) * 1px)
+    )
+    scale(calc(1 + var(--spread) * 0.06));
+}
+.lb svg.arcs.blend .q {
+  mix-blend-mode: screen;
+}
+.lb svg.arcs .player {
+  fill: var(--ink);
+}
+/* The artwork's print grain, over every picture tile; on the dark ground it vanishes. */
+.lb .tile.art {
+  padding: 0;
+  background: #000;
+}
+.lb .tile.art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('./assets/arcs/grain.svg');
+  mix-blend-mode: multiply;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
 .lb .btn,
 .lb-foot .btn {
   display: inline-block;
@@ -201,7 +325,7 @@ body:has(.lb) {
 }
 .lb .gold .btn {
   background: var(--dark);
-  color: var(--gold);
+  color: var(--yellow);
 }
 .lb .section {
   margin-top: clamp(120px, 13vw, 190px);
@@ -283,14 +407,16 @@ body:has(.lb) {
 }
 .lb-nav .links a:hover,
 .lb-nav .links-sm a:hover {
-  color: var(--gold);
+  color: var(--amber);
 }
+/* The current page: a short spectrum underline, the site's one gradient rule. */
 .lb-nav a[aria-current='page'] {
-  border-bottom-color: var(--gold);
+  border-bottom-color: transparent;
+  border-image: var(--g-spectrum) 1;
 }
 .lb-nav .go {
   grid-column: span 2;
-  background: var(--gold);
+  background: var(--amber) var(--g-gold);
   color: var(--dark);
   display: flex;
   align-items: center;
@@ -309,11 +435,20 @@ body:has(.lb) {
   padding-top: var(--m);
   padding-bottom: var(--m);
 }
+.lb-foot::before {
+  /* the footer opens on one spectrum hairline */
+  content: '';
+  display: block;
+  height: 3px;
+  margin-top: 64px;
+  background: var(--g-spectrum);
+}
 .lb-foot .flinks {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 24px;
-  margin-top: 96px;
+  margin-top: 40px;
   padding: 0 10px;
   font-size: 15px;
 }
@@ -332,7 +467,7 @@ body:has(.lb) {
 }
 .lb-foot .flinks a:hover,
 .lb-foot .flinks button:hover {
-  color: var(--gold);
+  color: var(--amber);
 }
 .lb-foot .flinks button {
   all: unset;
@@ -478,3 +613,10 @@ body:has(.lb) {
 .lb .btns { display: flex; flex-wrap: wrap; gap: 10px; }
 .lb .gold .btn.alt { background: transparent; color: var(--dark); box-shadow: inset 0 0 0 2px var(--dark); }
 .lb .gold .btn.alt:hover { background: rgba(18, 17, 16, .1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lb svg.arcs {
+    --draw: 1 !important;
+    --spread: 0 !important;
+  }
+}

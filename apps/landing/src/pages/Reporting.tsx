@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { INSTALL_COMMAND } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { CopyCommand } from '../components/board/CopyCommand';
-import adagioDetail from '../assets/board/img/bach-bwv1001-detail.jpg';
+import { Orchestra } from '../components/arcs/pieces';
 import {
   BenchmarkMock,
   BotsSeverityMock,
@@ -63,13 +63,8 @@ export function ReportingSection(): JSX.Element {
           <h2 id="r-h1" className="r-title">Reporting and metrics</h2>
           <p className="r-lead">Where the work is, where it waits, and what your review bots are worth.</p>
         </div>
-        <div className="tile ph r-pic">
-          <img
-            src={adagioDetail}
-            width={800}
-            height={919}
-            alt="A passage of the Adagio from Bach's first sonata for solo violin, in his own hand, 1720"
-          />
+        <div className="tile art r-pic">
+          <Orchestra label="An orchestra's seating plan from above: rows of chairs in four coloured sections around the conductor" />
         </div>
         <div className="tile verdigris r-say">
           <p>Bots and people are counted apart.</p>

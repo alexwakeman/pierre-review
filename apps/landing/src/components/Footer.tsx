@@ -73,9 +73,7 @@ export default function Footer(): JSX.Element {
           )}
         </div>
         <p className="c muted">
-          Pictures: J. S. Bach&rsquo;s own scores of the solo violin Adagio BWV 1001 and Preludio BWV
-          1006 (1720) and the cantata BWV 56 (1726), from Bach digital, Leipzig; Bach&rsquo;s hand holding
-          his six-part canon, from Elias Gottlob Haussmann&rsquo;s portrait, 1746. All public domain.
+          Every picture here is drawn in code, from one banded quarter-circle.
         </p>
       </div>
 
