@@ -17,7 +17,9 @@
 // accent change here must be transcribed there in the same commit, and vice
 // versa.
 
-export const APP_NAME = 'Limn';
+import { PRODUCT_NAME } from '@pierre-review/shared';
+
+export const APP_NAME = PRODUCT_NAME;
 
 /**
  * The "group" sprite from the arcade game, in the current text colour with

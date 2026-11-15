@@ -9,6 +9,7 @@ import {
   SPRINT_PATHS_DAILY_CAP_DEFAULT,
   SPRINT_PATHS_MAX_TURNS_DEFAULT,
 } from '@pierre-review/shared';
+import { readEnv } from './env-name.js';
 
 // apps/backend as the base for relative paths regardless of cwd.
 const backendRoot = resolve(import.meta.dirname, '..');
@@ -48,7 +49,7 @@ function floatFromEnv(key: string, fallback: number): number {
 }
 
 
-// Local: move a pre-rename ~/.pierre-review to ~/.limn, once, BEFORE anything below resolves a path
+// Local: move a pre-rename ~/.limn (or ~/.pierre-review) to ~/.ensemble, once, BEFORE anything below resolves a path
 // inside the data directory (data-dir.ts). Here, not in index.ts's start(): `pnpm dev` imports this
 // module first, so a later call would move the directory out from under `dataDir`/`cloneDir`. The
 // .env files are loaded by now, so a DATABASE_URL/CLONE_DIR pinned inside the old directory is seen.
@@ -289,8 +290,8 @@ export const config = {
   // first-use download, "Set up" in the app).
   // LIMN_ML_DISABLED=true turns it off. LIMN_ML_SCORER picks the scorer: `auto` (the default:
   // local when it is set up, else the HTTP service above when configured), `local` or `http`.
-  mlLocalEnabled: process.env.LIMN_ML_DISABLED !== 'true',
-  mlScorer: (['local', 'http'] as const).find((v) => v === process.env.LIMN_ML_SCORER) ?? ('auto' as const),
+  mlLocalEnabled: readEnv(process.env, 'ML_DISABLED') !== 'true',
+  mlScorer: (['local', 'http'] as const).find((v) => v === readEnv(process.env, 'ML_SCORER')) ?? ('auto' as const),
   // Extra headers for every severity-api call, as a JSON object string — e.g.
   // `SEVERITY_API_HEADERS='{"X-Severity-Token":"…"}'`. Empty by default (a loopback service
   // needs no credential). It
@@ -357,12 +358,12 @@ export const config = {
   // LIMN_AI_DISABLED=true is the kill switch for a team that forbids AI tooling — hides every
   // AI surface (`MeResponse.ai.enabled` false), registers no agentic route and refuses every
   // one-shot completion.
-  aiEnabled: process.env.LIMN_AI_DISABLED !== 'true',
+  aiEnabled: readEnv(process.env, 'AI_DISABLED') !== 'true',
   // The FIRST-BOOT DOWNLOAD of both AI runtimes (Claude's SDKs and the Codex program), in the
   // background after the server listens (ai/auto-install.ts). On by default; LIMN_AI_AUTO_INSTALL=false
   // leaves it to `limn ai install` or the Set up button (the demo and recording stacks set it). Inert
   // when AI is off.
-  aiAutoInstall: process.env.LIMN_AI_AUTO_INSTALL !== 'false',
+  aiAutoInstall: readEnv(process.env, 'AI_AUTO_INSTALL') !== 'false',
   // ---- Claude Review — infra knobs ----
   // The routing thresholds, concurrency + queue caps keep their historical PRO_REVIEW_* env names.
   // Partial clones + ephemeral worktrees live here (a user-writable home path,
@@ -487,11 +488,11 @@ export const config = {
   // Where the markdown tree lives: `<docsDir>/<accountId>/<workspaceId>/library/` (+ `sources/`).
   // LIMN_DOCS_DIR overrides. Default: ONE ROOT PER DATABASE (data-dir.ts `defaultDocsDir`) —
   // `<dataDir>/docs` for the data directory's own DB, `<dataDir>/docs/db-<hash>` for any other.
-  docsDir: process.env.LIMN_DOCS_DIR?.trim() || defaultDocsDir(dbPath, resolveDataDir()),
+  docsDir: readEnv(process.env, 'DOCS_DIR')?.trim() || defaultDocsDir(dbPath, resolveDataDir()),
   // The root every database shared before the split: a DB with another root moves its own
   // workspace folders out of it ONCE (reference-docs/owner.ts `migrateLegacyDocs`). Never when
   // LIMN_DOCS_DIR is set — the user chose where the library lives.
-  legacyDocsDir: process.env.LIMN_DOCS_DIR?.trim() ? null : join(resolveDataDir(), 'docs'),
+  legacyDocsDir: readEnv(process.env, 'DOCS_DIR')?.trim() ? null : join(resolveDataDir(), 'docs'),
   // One Sonnet 5 build per document: its OWN spend and turn caps (a long PDF is read in 20-page
   // slices and written out section by section). Env only — no route sets them.
   docsBuildBudgetUsd: floatFromEnv('DOCS_BUILD_BUDGET_USD', 6),

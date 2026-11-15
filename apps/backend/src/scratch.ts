@@ -13,6 +13,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { DATA_DIR_NAME, LEGACY_DATA_DIR_NAMES } from './data-dir.js';
 
 export type ScratchGithubMode = 'off' | 'read' | 'write';
 
@@ -70,21 +71,21 @@ export const REAL_FRONTEND_PORT = 5173;
 
 /**
  * Why this scratch configuration must not start, or null when it is safe. Refused:
- *   - a database under `~/.limn`, `~/.pierre-review`, or ANY checkout's `apps/backend/data/` (the
- *     `pnpm dev` default — the reader's real database lives there);
- *   - a data directory that is, or is inside, `~/.limn` / `~/.pierre-review`;
+ *   - a database under `~/.ensemble`, `~/.limn`, `~/.pierre-review`, or ANY checkout's
+ *     `apps/backend/data/` (the `pnpm dev` default — the reader's real database lives there);
+ *   - a data directory that is, or is inside, `~/.ensemble` / `~/.limn` / `~/.pierre-review`;
  *   - a clone or docs directory outside the scratch data directory;
  *   - port 4000 or frontend port 5173.
  */
 export function scratchRefusal(p: ScratchPaths): string | null {
   const home = realishPath(p.home ?? homedir());
-  const realHomes = [join(home, '.limn'), join(home, '.pierre-review')];
+  const realHomes = [DATA_DIR_NAME, ...LEGACY_DATA_DIR_NAMES].map((n) => join(home, n));
   const db = realishPath(p.dbPath);
   const dataDir = realishPath(p.dataDir);
 
   for (const h of realHomes) {
-    if (isWithin(dataDir, h)) return `the data folder ${p.dataDir} is the real Limn's (${h})`;
-    if (isWithin(db, h)) return `the database ${p.dbPath} is inside the real Limn's folder ${h}`;
+    if (isWithin(dataDir, h)) return `the data folder ${p.dataDir} is the real Ensemble's (${h})`;
+    if (isWithin(db, h)) return `the database ${p.dbPath} is inside the real Ensemble's folder ${h}`;
   }
   const parts = db.split(/[\\/]+/);
   for (let i = 0; i + 2 < parts.length; i++) {
@@ -98,16 +99,16 @@ export function scratchRefusal(p: ScratchPaths): string | null {
   if (!isWithin(realishPath(p.docsDir), dataDir)) {
     return `the docs folder ${p.docsDir} is outside the scratch data folder ${p.dataDir}`;
   }
-  if (p.port === REAL_BACKEND_PORT) return `port ${REAL_BACKEND_PORT} belongs to the real Limn`;
+  if (p.port === REAL_BACKEND_PORT) return `port ${REAL_BACKEND_PORT} belongs to the real Ensemble`;
   if (p.frontendPort === REAL_FRONTEND_PORT) {
-    return `frontend port ${REAL_FRONTEND_PORT} belongs to the real Limn (set FRONTEND_PORT)`;
+    return `frontend port ${REAL_FRONTEND_PORT} belongs to the real Ensemble (set FRONTEND_PORT)`;
   }
   return null;
 }
 
 export class ScratchRefusedError extends Error {
   constructor(reason: string) {
-    super(`Scratch Limn refused to start: ${reason}. Start it with \`pnpm dev:scratch\` from a git worktree.`);
+    super(`Scratch Ensemble refused to start: ${reason}. Start it with \`pnpm dev:scratch\` from a git worktree.`);
     this.name = 'ScratchRefusedError';
   }
 }

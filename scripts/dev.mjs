@@ -2,7 +2,7 @@
 // IN-PROCESS by the Node port (apps/backend/src/ml, docs/ML-NODE-PORT.md), which reads the model
 // from packages/ml/serving_assets — so the Python severity-api is NOT started by default.
 // PIERRE_ML_HTTP=1 brings the old loop back (start packages/ml's severity-api on :8799 and score
-// over HTTP with LIMN_ML_SCORER=http), e.g. to compare the two.
+// over HTTP with ENSEMBLE_ML_SCORER=http), e.g. to compare the two.
 //
 // WHY THIS IS A SCRIPT AND NOT A `concurrently` ONE-LINER. Whether the ML service is available
 // is a runtime question (is the submodule checked out? is `uv` installed?), and its answer
@@ -13,7 +13,7 @@
 // decision, made here, used for both.
 //
 //   PIERRE_ML_HTTP=1       also start the Python severity-api and score over HTTP (see above)
-//   LIMN_ML_DISABLED=true  no bot-comment scoring at all (the backend's own switch)
+//   ENSEMBLE_ML_DISABLED=true  no bot-comment scoring at all (the backend's own switch; LIMN_ML_DISABLED too)
 //   PIERRE_ML_DIR=…        override the submodule location (default: packages/ml)
 //   SEVERITY_API_PORT=…    port for the severity-api (default 8799)
 //   PIERRE_ML_DISABLED=1   with PIERRE_ML_HTTP=1: don't start the service after all
@@ -51,7 +51,7 @@ const startMl = withMl && occupant === 'free';
 const env = { ...process.env };
 if (withMl) {
   // Without this, `auto` would still prefer the local model and the service would sit idle.
-  env.LIMN_ML_SCORER ??= 'http';
+  if (!env.ENSEMBLE_ML_SCORER?.trim() && !env.LIMN_ML_SCORER?.trim()) env.ENSEMBLE_ML_SCORER = 'http';
   env.SEVERITY_API_DEFAULT_URL = `http://127.0.0.1:${ML_PORT}`;
   console.log(`[dev] severity-api: ${ML_DIR} → ${env.SEVERITY_API_DEFAULT_URL}`);
   if (!startMl) {

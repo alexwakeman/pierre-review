@@ -1,0 +1,21 @@
+{
+  "name": "limn-review",
+  "version": "0.0.0-stub",
+  "description": "Renamed to ensemble-review. This package only forwards to it: use `npx ensemble-review`.",
+  "type": "module",
+  "bin": {
+    "limn": "cli.js",
+    "limn-review": "cli.js"
+  },
+  "files": ["cli.js", "README.md"],
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "ensemble-review": "*"
+  },
+  "license": "SEE LICENSE IN README.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alexwakeman/pierre-review.git"
+  },
+  "homepage": "https://www.npmjs.com/package/ensemble-review"
+}

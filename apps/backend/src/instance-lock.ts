@@ -38,8 +38,8 @@ export class InstanceLockedError extends Error {
       ? `process ${holder.pid}, port ${holder.port}, database ${holder.dbPath}`
       : 'a process that is starting now';
     super(
-      `Another Limn is already running on the data folder ${dataDir} (${who}). ` +
-        'Stop it first, or start this one with LIMN_DATA_DIR set to a different folder ' +
+      `Another copy of Ensemble is already running on the data folder ${dataDir} (${who}). ` +
+        'Stop it first, or start this one with ENSEMBLE_DATA_DIR set to a different folder ' +
         '(`pnpm dev:scratch` does this for you).',
     );
     this.name = 'InstanceLockedError';
@@ -77,7 +77,7 @@ export function isLiveNodeProcess(pid: number): boolean {
       timeout: 5_000,
     });
     if (!cmd.trim()) return false;
-    return /node|tsx|limn/i.test(cmd);
+    return /node|tsx|ensemble|limn/i.test(cmd);
   } catch {
     // `ps` missing or refused: trust the signal check.
     return true;

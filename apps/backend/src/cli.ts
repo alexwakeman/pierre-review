@@ -2,6 +2,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
+import { envNameSet, readEnv } from './env-name.js';
 
 // ── tiny ANSI helpers (degrade gracefully when not a TTY) ──────────────────
 const useColor = process.stdout.isTTY && process.env.NO_COLOR === undefined;
@@ -51,7 +52,7 @@ function parseArgs(argv: string[]): CliOptions {
         break;
       default:
         console.error(`Unknown argument: ${arg}`);
-        console.error('Run `limn --help` for usage.');
+        console.error('Run `ensemble --help` for usage.');
         process.exit(1);
     }
   }
@@ -59,25 +60,25 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function printUsage(): void {
-  console.log(`limn — ${'local-only GitHub PR activity dashboard'}
+  console.log(`ensemble — ${'local-only GitHub PR activity dashboard'}
 
 Usage:
-  limn [options]
-  limn status [options]
-  limn ai install
-  limn ml install
+  ensemble [options]
+  ensemble status [options]
+  ensemble ai install
+  ensemble ml install
 
 Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
-                   clickable links (see \`limn status --help\`)
+                   clickable links (see \`ensemble status --help\`)
   ai install       Download the AI runtime AI Review and AI Fix run on
-                   (one time, about 110 MB). Limn does this by itself the
+                   (one time, about 110 MB). Ensemble does this by itself the
                    first time it starts, with Codex.
   ai status        Say whether the AI runtime is set up
   ml install       Download the model that scores bot review comments
                    (one time, about 240 MB). The app offers the same button.
   ml status        Say whether bot comment scoring is set up
-  sandbox prune    Remove leftover Implement sandboxes (stop Limn first;
+  sandbox prune    Remove leftover Implement sandboxes (stop Ensemble first;
                    --dry-run lists them, --store also removes the repo store)
 
 Options:
@@ -86,10 +87,11 @@ Options:
   --db <path>      SQLite DB path (also DATABASE_URL env)
   -h, --help       Show this help
 
-The old \`pierre-review\` package now only forwards to this one; it will be removed.
+The old \`limn-review\` and \`pierre-review\` packages now only forward to this one;
+they will be removed.
 
-Your data lives in ~/.limn (LIMN_DATA_DIR overrides). An existing ~/.pierre-review
-is moved there once, on first start.
+Your data lives in ~/.ensemble (ENSEMBLE_DATA_DIR overrides). An existing ~/.limn
+(or ~/.pierre-review) is moved there once, on first start.
 
 Prerequisite:
   Requires the GitHub CLI (https://cli.github.com), authenticated via
@@ -109,23 +111,23 @@ function openBrowser(url: string): void {
 }
 
 // The default local SQLite location — a user-writable home dir, never the (possibly
-// read-only) install dir. Shared by the server boot and `limn status`. The FILE keeps its
-// pre-rename name on purpose: the one-time move of ~/.pierre-review → ~/.limn carries it (and its
+// read-only) install dir. Shared by the server boot and `ensemble status`. The FILE keeps its
+// pre-rename name on purpose: the one-time move of ~/.limn → ~/.ensemble carries it (and its
 // WAL files) across untouched, and renaming a live SQLite file is a second migration for nothing.
 async function defaultLocalDbPath(): Promise<string> {
   const { resolveDataDir } = await import('./data-dir.js');
   return join(resolveDataDir(), 'pierre-review.sqlite');
 }
 
-// Move a pre-rename ~/.pierre-review to ~/.limn, once, before anything reads a path inside it.
-// Never clobbers an existing ~/.limn; never moves into an explicit LIMN_DATA_DIR.
+// Move a pre-rename ~/.limn (or ~/.pierre-review) to ~/.ensemble, once, before anything reads a path
+// inside it. Never clobbers an existing ~/.ensemble; never moves into an explicit ENSEMBLE_DATA_DIR.
 async function migrateDataDir(): Promise<void> {
   const { migrateLegacyDataDir } = await import('./data-dir.js');
   migrateLegacyDataDir({ log: (msg) => console.log(`  ${dim(msg)}`) });
 }
 
 // Fail fast with a friendly message when the GitHub CLI isn't installed / authed.
-// Both the local server boot and `limn status` need a working `gh` token.
+// Both the local server boot and `ensemble status` need a working `gh` token.
 function ghAuthPreCheck(): void {
   try {
     execFileSync('gh', ['auth', 'token'], { stdio: 'ignore' });
@@ -190,7 +192,7 @@ function parseStatusArgs(argv: string[]): StatusOptions {
         break;
       default:
         console.error(`Unknown argument: ${arg}`);
-        console.error('Run `limn status --help` for usage.');
+        console.error('Run `ensemble status --help` for usage.');
         process.exit(1);
     }
   }
@@ -198,10 +200,10 @@ function parseStatusArgs(argv: string[]): StatusOptions {
 }
 
 function printStatusUsage(): void {
-  console.log(`limn status — your cross-repo "my turn" queue in the terminal
+  console.log(`ensemble status — your cross-repo "my turn" queue in the terminal
 
 Usage:
-  limn status [options]
+  ensemble status [options]
 
 Options:
   --sync           Fetch fresh state from GitHub first (otherwise shows data as of
@@ -211,8 +213,8 @@ Options:
   --db <path>      SQLite DB path (also DATABASE_URL env)
   -h, --help       Show this help
 
-Reads the local Limn database. Without --sync it shows data as of the last sync
-— run it alongside \`limn\`, or pass --sync to fetch fresh state first. Links are
+Reads the local Ensemble database. Without --sync it shows data as of the last sync
+— run it alongside \`ensemble\`, or pass --sync to fetch fresh state first. Links are
 clickable in terminals that support OSC-8 hyperlinks.
 `);
 }
@@ -242,7 +244,7 @@ async function runStatusCommand(argv: string[]): Promise<void> {
   // an empty queue. --sync legitimately bootstraps a fresh DB, so skip the guard then.
   if (!opts.sync && !existsSync(process.env.DATABASE_URL)) {
     console.error(
-      `No Limn database found at ${process.env.DATABASE_URL} — run \`limn\` first to sync, or pass --db.`,
+      `No Ensemble database found at ${process.env.DATABASE_URL} — run \`ensemble\` first to sync, or pass --db.`,
     );
     process.exit(1);
   }
@@ -280,14 +282,14 @@ async function runCleanSessions(dryRun: boolean): Promise<void> {
   if (dryRun) {
     for (const name of r.matched) console.log(name);
     console.log(
-      `\n${r.matched.length} Limn session folders would be deleted from ${places.projectsDir}; ${r.kept} other folders are kept.`,
+      `\n${r.matched.length} Ensemble session folders would be deleted from ${places.projectsDir}; ${r.kept} other folders are kept.`,
     );
     console.log(dim('Run without --dry-run to delete them.'));
     return;
   }
   if (existsSync(places.dataDir)) recordSessionCleanup(places.dataDir, r);
   console.log(
-    `Deleted ${r.removed} Limn session folders from ${places.projectsDir}; ${r.kept} other folders are kept.` +
+    `Deleted ${r.removed} Ensemble session folders from ${places.projectsDir}; ${r.kept} other folders are kept.` +
       (r.failed > 0 ? ` ${r.failed} could not be deleted.` : ''),
   );
   if (r.failed > 0) process.exit(1);
@@ -303,31 +305,33 @@ async function runAiCommand(argv: string[]): Promise<void> {
     : sub === 'login' || sub === 'logout' ? target === 'codex'
     : true;
   if (!known || !targetOk) {
-    console.log(`limn ai — the AI runtime AI Review and AI Fix run on (Claude or Codex)
+    console.log(`ensemble ai — the AI runtime AI Review and AI Fix run on (Claude or Codex)
 
 Usage:
-  limn ai install          Download it (one time, about 110 MB) into ~/.limn/ai-runtime
-  limn ai install codex    The same, plus the Codex CLI (about 360 MB unpacked)
-  limn ai status           Say whether it is set up
-  limn ai login codex      Sign Limn's own Codex in (add --device-auth on a headless machine)
-  limn ai logout codex     Sign it out
-  limn ai clean-sessions   Delete the session folders older Limn runs left in
-                           ~/.claude/projects (add --dry-run to list them first)
+  ensemble ai install          Download it (one time, about 110 MB) into ~/.ensemble/ai-runtime
+  ensemble ai install codex    The same, plus the Codex CLI (about 360 MB unpacked)
+  ensemble ai status           Say whether it is set up
+  ensemble ai login codex      Sign Ensemble's own Codex in (add --device-auth on a headless machine)
+  ensemble ai logout codex     Sign it out
+  ensemble ai clean-sessions   Delete the session folders older runs left in
+                               ~/.claude/projects (add --dry-run to list them first)
 
-Limn downloads Claude and Codex by itself the first time it starts
-(LIMN_AI_AUTO_INSTALL=false turns that off). Signing in is the only step.
+Ensemble downloads Claude and Codex by itself the first time it starts
+(ENSEMBLE_AI_AUTO_INSTALL=false turns that off). Signing in is the only step.
 
 AI Review and AI Fix are free. One AI runs every feature: Claude, unless only
-Codex is signed in. Set LIMN_AI_PROVIDER=claude or codex to choose.
+Codex is signed in. Set ENSEMBLE_AI_PROVIDER=claude or codex to choose.
 
 Claude runs on your own Claude Code login or Anthropic API key: sign in to
-Claude Code, or set ANTHROPIC_API_KEY. Set LIMN_AI_USE_API_KEY=true to use the
-key even when you are signed in. Set LIMN_CLAUDE_PATH to use your installed
+Claude Code, or set ANTHROPIC_API_KEY. Set ENSEMBLE_AI_USE_API_KEY=true to use the
+key even when you are signed in. Set ENSEMBLE_CLAUDE_PATH to use your installed
 \`claude\` and skip its bundled copy.
 
-Codex runs on your ChatGPT sign-in, kept in ~/.limn/codex (your ~/.codex is not
-used). Codex with an OpenAI API key is not available yet. Set LIMN_CODEX_PATH to
+Codex runs on your ChatGPT sign-in, kept in ~/.ensemble/codex (your ~/.codex is not
+used). Codex with an OpenAI API key is not available yet. Set ENSEMBLE_CODEX_PATH to
 use your installed codex program.
+
+The older LIMN_ names of these settings still work.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }
@@ -336,8 +340,8 @@ use your installed codex program.
     await runCleanSessions(argv.includes('--dry-run'));
     return;
   }
-  if (process.env.LIMN_AI_DISABLED === 'true') {
-    console.error('AI is turned off here (LIMN_AI_DISABLED=true).');
+  if (readEnv(process.env, 'AI_DISABLED') === 'true') {
+    console.error(`AI is turned off here (${envNameSet(process.env, 'AI_DISABLED')}=true).`);
     process.exit(1);
   }
   await migrateDataDir();
@@ -347,7 +351,7 @@ use your installed codex program.
   if (sub === 'status') {
     const s = getAiRuntimeStatus();
     const words =
-      s.runtime === 'ready' ? 'AI is set up.' : 'AI is not set up. Run: limn ai install';
+      s.runtime === 'ready' ? 'AI is set up.' : 'AI is not set up. Run: ensemble ai install';
     console.log(s.runtimeMessage ? `${words} ${s.runtimeMessage}` : words);
     const c = getCodexRuntimeStatus();
     if (c.runtime === 'ready') {
@@ -359,11 +363,11 @@ use your installed codex program.
           ? `Codex is set up and signed in${plan}.`
           : d.route === 'api_key'
             ? // The API-key route is REFUSED until it can be priced: say so, never "it works".
-              `Codex is set up. ${CODEX_API_KEY_NOT_AVAILABLE_MESSAGE}: limn ai login codex`
+              `Codex is set up. ${CODEX_API_KEY_NOT_AVAILABLE_MESSAGE}: ensemble ai login codex`
             : d.route === 'login'
               ? // A sign-in no `account/read` has confirmed: never "signed in" on a guess.
                 `Codex is set up. ${d.message ?? 'The Codex sign-in could not be checked.'}`
-              : 'Codex is set up but not signed in. Run: limn ai login codex',
+              : 'Codex is set up but not signed in. Run: ensemble ai login codex',
       );
     } else if (c.runtimeMessage) {
       console.log(`Codex: ${c.runtimeMessage}`);
@@ -384,7 +388,7 @@ use your installed codex program.
     // File-store auth in Limn's own home BEFORE anything is written there.
     await ensureCodexHomeConfig(null);
     const args = sub === 'logout' ? ['logout'] : ['login', ...(argv.includes('--device-auth') ? ['--device-auth'] : [])];
-    if (sub === 'login') console.log(dim(`Signing Limn's own Codex in (${codexHome()}). Your ~/.codex is not used.`));
+    if (sub === 'login') console.log(dim(`Signing Ensemble's own Codex in (${codexHome()}). Your ~/.codex is not used.`));
     const { spawnSync } = await import('node:child_process');
     // The terminal is attached: Codex prints its own URL or device code and waits for the reader.
     const r = spawnSync(bin, args, { stdio: 'inherit', env: codexProcessEnv(process.env, { interactive: true }), cwd: codexHome() });
@@ -406,31 +410,31 @@ use your installed codex program.
     },
     { providers: withCodex ? ['claude', 'codex'] : ['claude'] },
   );
-  if (result.ok && withCodex) console.log(dim('Next: limn ai login codex'));
+  if (result.ok && withCodex) console.log(dim('Next: ensemble ai login codex'));
   if (!result.ok) {
     console.error(bold(result.message));
     process.exit(1);
   }
 }
 
-// ── `limn ml install` / `limn ml status` — local bot-comment scoring ───────────────
+// ── `ensemble ml install` / `ensemble ml status` — local bot-comment scoring ───────────────
 // The same download the app's "Set up" runs (ml/runtime.ts): onnxruntime-node + the tokenizer
-// into ~/.limn/ml-runtime, and the severity model into ~/.limn/ml-models.
+// into <data dir>/ml-runtime, and the severity model into <data dir>/ml-models.
 async function runMlCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
   if (sub !== 'install' && sub !== 'status') {
-    console.log(`limn ml — the model that scores bot review comments
+    console.log(`ensemble ml — the model that scores bot review comments
 
 Usage:
-  limn ml install   Download it (one time, about 240 MB) into ~/.limn
-  limn ml status    Say whether it is set up
+  ensemble ml install   Download it (one time, about 240 MB) into ~/.ensemble
+  ensemble ml status    Say whether it is set up
 
 It runs on this machine. Nothing is sent anywhere to score a comment.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }
-  if (process.env.LIMN_ML_DISABLED === 'true') {
-    console.error('Bot comment scoring is turned off here (LIMN_ML_DISABLED=true).');
+  if (readEnv(process.env, 'ML_DISABLED') === 'true') {
+    console.error(`Bot comment scoring is turned off here (${envNameSet(process.env, 'ML_DISABLED')}=true).`);
     process.exit(1);
   }
   await migrateDataDir();
@@ -439,7 +443,7 @@ It runs on this machine. Nothing is sent anywhere to score a comment.
   if (sub === 'status') {
     const st = getMlStatus();
     const words =
-      st.state === 'ready' ? 'Bot comment scoring is set up.' : 'Bot comment scoring is not set up. Run: limn ml install';
+      st.state === 'ready' ? 'Bot comment scoring is set up.' : 'Bot comment scoring is not set up. Run: ensemble ml install';
     console.log(st.message ? `${words} ${st.message}` : words);
     process.exit(st.state === 'ready' ? 0 : 1);
   }
@@ -463,7 +467,7 @@ It runs on this machine. Nothing is sent anywhere to score a comment.
   }
 }
 
-// ── `limn sandbox prune [--dry-run] [--store]` — remove leftover sandbox containers ─────
+// ── `ensemble sandbox prune [--dry-run] [--store]` — remove leftover sandbox containers ─────
 // The same sweep the server runs at boot (sandbox/runtime/index.ts): every container, network and
 // volume this Limn labelled (`limn.managed`). Run it with Limn stopped: a running session's sandbox is removed too.
 // `--store` ALSO removes the kept repo store (docs/SANDBOX.md § The repo store), which the sweep never touches.
@@ -472,13 +476,13 @@ async function runSandboxCommand(argv: string[]): Promise<void> {
   const dryRun = argv.includes('--dry-run');
   const store = argv.includes('--store');
   if (sub !== 'prune' || argv.slice(1).some((a) => a !== '--dry-run' && a !== '--store')) {
-    console.log(`limn sandbox — the containers Implement runs in
+    console.log(`ensemble sandbox — the containers Implement runs in
 
 Usage:
-  limn sandbox prune [--dry-run]   Remove every leftover sandbox container, microVM, network, volume and image.
-                                   Stop Limn first: open sessions are removed too.
-  limn sandbox prune --store       Also remove the kept copy of your repositories (the repo store).
-                                   The next session copies them again.
+  ensemble sandbox prune [--dry-run]   Remove every leftover sandbox container, microVM, network, volume and image.
+                                       Stop Ensemble first: open sessions are removed too.
+  ensemble sandbox prune --store       Also remove the kept copy of your repositories (the repo store).
+                                       The next session copies them again.
 `);
     process.exit(sub === undefined || sub === '--help' || sub === '-h' ? 0 : 1);
   }
@@ -506,14 +510,18 @@ Usage:
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
 
-  // The package was renamed `pierre-review` → `limn-review` (bin `limn`). The old name survives as
-  // the forwarding stub's bin (scripts/deprecated-pierre-review/, never limn-review's own — that
-  // collides with an old global install); say so, once per start, on stderr so piped output is clean.
-  if (/^pierre(-review)?(\.(c?js|cmd|ps1))?$/.test(basename(process.argv[1] ?? ''))) {
-    console.error(dim('`pierre-review` is now `limn` (npm package: limn-review). The old name will be removed.'));
+  // The package was renamed `pierre-review` → `limn-review` (bin `limn`) → `ensemble-review` (bin
+  // `ensemble`). The old names survive as the forwarding stubs' bins (scripts/deprecated-pierre-review/,
+  // scripts/deprecated-limn-review/ — never ensemble-review's own, which would collide with an old
+  // global install); say so, once per start, on stderr so piped output is clean.
+  const invokedAs = basename(process.argv[1] ?? '');
+  if (/^pierre(-review)?(\.(c?js|cmd|ps1))?$/.test(invokedAs)) {
+    console.error(dim('`pierre-review` is now `ensemble` (npm package: ensemble-review). The old name will be removed.'));
+  } else if (/^limn(-review)?(\.(c?js|cmd|ps1))?$/.test(invokedAs)) {
+    console.error(dim('`limn` is now `ensemble` (npm package: ensemble-review). The old name will be removed.'));
   }
 
-  // `limn status` — a read-only subcommand with its own parser, usage, and env
+  // `ensemble status` — a read-only subcommand with its own parser, usage, and env
   // mapping. Peeled off BEFORE parseArgs (whose default case rejects any bare token),
   // and it never reaches the server boot below.
   if (argv[0] === 'status') {
@@ -587,9 +595,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // The product NAME, not the command — the banner above already says Limn. A literal rather
-  // than shared's PRODUCT_NAME on purpose: this module has no top-level imports outside
-  // `node:*` (everything else is a dynamic import, to keep `npx` startup lean) and one word is
+  // The product NAME, not the command — the banner above already says Ensemble. A literal rather
+  // than shared's PRODUCT_NAME on purpose: this module has no top-level imports outside the
+  // import-free env-name.ts and `node:*` (everything else is a dynamic import, to keep `npx` startup lean) and one word is
   // not worth loading shared before the failure can be printed.
   // The SQLite driver is the one native module. better-sqlite3 ≥ 13 ships its binaries inside the
   // package (N-API, no install script), so a missing binding means a broken or partial install:
@@ -597,12 +605,12 @@ main().catch((err) => {
   const message = err instanceof Error ? err.message : String(err);
   if (/bindings file|better_sqlite3\.node|NODE_MODULE_VERSION/.test(message)) {
     console.error(
-      'Failed to start Limn: the SQLite driver did not install correctly for this machine ' +
+      'Failed to start Ensemble: the SQLite driver did not install correctly for this machine ' +
         `(Node ${process.version}, ${process.platform}-${process.arch}).\n` +
-        'Clear the npx cache and try again:  rm -rf ~/.npm/_npx && npx limn-review@latest',
+        'Clear the npx cache and try again:  rm -rf ~/.npm/_npx && npx ensemble-review@latest',
     );
     process.exit(1);
   }
-  console.error('Failed to start Limn:', err);
+  console.error('Failed to start Ensemble:', err);
   process.exit(1);
 });

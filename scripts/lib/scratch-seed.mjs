@@ -58,7 +58,7 @@ export function discoverRealDb(root) {
       .split('\n')
       .filter((l) => l.startsWith('n') && /\.(sqlite|db)$/.test(l))
       .map((l) => l.slice(1));
-    if (open.length > 0) return { path: open[0], from: `the Limn on :4000 (process ${pid})` };
+    if (open.length > 0) return { path: open[0], from: `the Ensemble on :4000 (process ${pid})` };
   }
   return {
     path: join(mainCheckout(root), 'apps', 'backend', 'data', 'pierre-review.sqlite'),

@@ -26,7 +26,7 @@ const tWorktree = performance.now() - t0;
 
 // The seed: what Limn already folds for a build (ticket + PRs), here hand-written.
 const diffStat = execFileSync('git', ['-C', SRC, 'diff', '--stat', BASE, HEAD]).toString();
-const seed = `You are answering questions about one story in a Limn workspace.
+const seed = `You are answering questions about one story in an Ensemble workspace.
 Repository checkout (the PR head): ${repo}
 Story LIMN-42 "Jira end-to-end comment: say what changed and why"
 Acceptance: the comment lists the story's PRs; leads with a short plain summary (one cheap model

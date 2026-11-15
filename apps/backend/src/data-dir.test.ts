@@ -1,4 +1,4 @@
-// The one-time ~/.pierre-review → ~/.limn move (data-dir.ts), over a temp "home" only.
+// The one-time ~/.limn (or ~/.pierre-review) → ~/.ensemble move (data-dir.ts), over a temp "home" only.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,17 +21,19 @@ const seedLegacy = (): void => {
 };
 
 describe('resolveDataDir', () => {
-  it('is ~/.limn by default', () => {
-    expect(resolveDataDir({}, home)).toBe(join(home, '.limn'));
+  it('is ~/.ensemble by default', () => {
+    expect(resolveDataDir({}, home)).toBe(join(home, '.ensemble'));
   });
-  it('honours LIMN_DATA_DIR', () => {
+  it('honours ENSEMBLE_DATA_DIR, then LIMN_DATA_DIR', () => {
     expect(resolveDataDir({ LIMN_DATA_DIR: join(home, 'elsewhere') }, home)).toBe(join(home, 'elsewhere'));
+    expect(resolveDataDir({ ENSEMBLE_DATA_DIR: join(home, 'new') }, home)).toBe(join(home, 'new'));
+    expect(resolveDataDir({ ENSEMBLE_DATA_DIR: join(home, 'new'), LIMN_DATA_DIR: join(home, 'old') }, home)).toBe(join(home, 'new'));
   });
-  it('⚠ is the OLD directory while it exists and ~/.limn does not (the move has not happened)', () => {
+  it('⚠ is the OLD directory while it exists and ~/.ensemble does not (the move has not happened)', () => {
     seedLegacy();
     expect(resolveDataDir({}, home)).toBe(join(home, '.pierre-review'));
-    mkdirSync(join(home, '.limn'));
-    expect(resolveDataDir({}, home)).toBe(join(home, '.limn'));
+    mkdirSync(join(home, '.ensemble'));
+    expect(resolveDataDir({}, home)).toBe(join(home, '.ensemble'));
   });
 });
 
@@ -42,10 +44,10 @@ describe('migrateLegacyDataDir', () => {
     const first = migrateLegacyDataDir({ env: {}, home, log: (m) => logs.push(m) });
     expect(first.moved).toBe(true);
     expect(existsSync(join(home, '.pierre-review'))).toBe(false);
-    expect(readFileSync(join(home, '.limn', 'pierre-review.sqlite'), 'utf8')).toBe('db');
-    expect(readFileSync(join(home, '.limn', 'pierre-review.sqlite-wal'), 'utf8')).toBe('wal');
-    expect(readFileSync(join(home, '.limn', 'config.json'), 'utf8')).toContain('maxReviewBudgetUsd');
-    expect(existsSync(join(home, '.limn', 'clones', 'acme'))).toBe(true);
+    expect(readFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'utf8')).toBe('db');
+    expect(readFileSync(join(home, '.ensemble', 'pierre-review.sqlite-wal'), 'utf8')).toBe('wal');
+    expect(readFileSync(join(home, '.ensemble', 'config.json'), 'utf8')).toContain('maxReviewBudgetUsd');
+    expect(existsSync(join(home, '.ensemble', 'clones', 'acme'))).toBe(true);
     expect(logs).toHaveLength(1);
 
     const second = migrateLegacyDataDir({ env: {}, home, log: (m) => logs.push(m) });
@@ -53,22 +55,23 @@ describe('migrateLegacyDataDir', () => {
     expect(logs).toHaveLength(1);
   });
 
-  it('never clobbers an existing ~/.limn, and leaves the old directory untouched', () => {
+  it('never clobbers an existing ~/.ensemble, and leaves the old directory untouched', () => {
     seedLegacy();
-    mkdirSync(join(home, '.limn'));
-    writeFileSync(join(home, '.limn', 'pierre-review.sqlite'), 'newer');
+    mkdirSync(join(home, '.ensemble'));
+    writeFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'newer');
     const r = migrateLegacyDataDir({ env: {}, home });
     expect(r).toEqual({ moved: false, reason: 'target_exists' });
-    expect(readFileSync(join(home, '.limn', 'pierre-review.sqlite'), 'utf8')).toBe('newer');
+    expect(readFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'utf8')).toBe('newer');
     expect(readFileSync(join(home, '.pierre-review', 'pierre-review.sqlite'), 'utf8')).toBe('db');
   });
 
-  it('moves nothing when LIMN_DATA_DIR names the directory', () => {
+  it('moves nothing when ENSEMBLE_DATA_DIR or LIMN_DATA_DIR names the directory', () => {
     seedLegacy();
+    expect(migrateLegacyDataDir({ env: { ENSEMBLE_DATA_DIR: join(home, 'x') }, home })).toEqual({ moved: false, reason: 'explicit_dir' });
     const r = migrateLegacyDataDir({ env: { LIMN_DATA_DIR: join(home, 'x') }, home });
     expect(r).toEqual({ moved: false, reason: 'explicit_dir' });
     expect(existsSync(join(home, '.pierre-review', 'pierre-review.sqlite'))).toBe(true);
-    expect(existsSync(join(home, '.limn'))).toBe(false);
+    expect(existsSync(join(home, '.ensemble'))).toBe(false);
   });
 
   it('⚠ moves nothing when DATABASE_URL or CLONE_DIR points inside the old directory', () => {
@@ -82,7 +85,7 @@ describe('migrateLegacyDataDir', () => {
       expect(r).toEqual({ moved: false, reason: 'pinned_path' });
     }
     expect(existsSync(join(home, '.pierre-review', 'pierre-review.sqlite'))).toBe(true);
-    expect(existsSync(join(home, '.limn'))).toBe(false);
+    expect(existsSync(join(home, '.ensemble'))).toBe(false);
     // …so everything else keeps using the same (old) directory.
     expect(resolveDataDir({}, home)).toBe(join(home, '.pierre-review'));
     expect(logs.length).toBeGreaterThan(0);
@@ -91,13 +94,13 @@ describe('migrateLegacyDataDir', () => {
     expect(moved.moved).toBe(true);
   });
 
-  it('⚠ a failed rename leaves the old directory in use and creates no ~/.limn', () => {
+  it('⚠ a failed rename leaves the old directory in use and creates no ~/.ensemble', () => {
     seedLegacy();
     chmodSync(home, 0o500); // the rename into home is refused (EACCES)
     try {
       const r = migrateLegacyDataDir({ env: {}, home });
       expect(r).toMatchObject({ moved: false, reason: 'rename_failed' });
-      expect(existsSync(join(home, '.limn'))).toBe(false);
+      expect(existsSync(join(home, '.ensemble'))).toBe(false);
       expect(resolveDataDir({}, home)).toBe(join(home, '.pierre-review'));
     } finally {
       chmodSync(home, 0o700);
@@ -106,9 +109,9 @@ describe('migrateLegacyDataDir', () => {
     expect(migrateLegacyDataDir({ env: {}, home }).moved).toBe(true);
   });
 
-  it('says so when ~/.limn exists without a database but the old directory has one', () => {
+  it('says so when ~/.ensemble exists without a database but the old directory has one', () => {
     seedLegacy();
-    mkdirSync(join(home, '.limn'));
+    mkdirSync(join(home, '.ensemble'));
     const logs: string[] = [];
     expect(migrateLegacyDataDir({ env: {}, home, log: (m) => logs.push(m) })).toMatchObject({ reason: 'target_exists' });
     expect(logs).toHaveLength(1);
@@ -116,7 +119,63 @@ describe('migrateLegacyDataDir', () => {
 
   it('is a no-op on a fresh machine', () => {
     expect(migrateLegacyDataDir({ env: {}, home })).toEqual({ moved: false, reason: 'no_legacy_dir' });
+    expect(existsSync(join(home, '.ensemble'))).toBe(false);
+  });
+});
+
+// THE LIMN → ENSEMBLE MOVE: ~/.limn is the newest old directory and is the one moved.
+describe('migrateLegacyDataDir from ~/.limn', () => {
+  const seedLimn = (): void => {
+    mkdirSync(join(home, '.limn', 'codex'), { recursive: true });
+    mkdirSync(join(home, '.limn', 'ai-runtime'), { recursive: true });
+    writeFileSync(join(home, '.limn', 'pierre-review.sqlite'), 'limn-db');
+    writeFileSync(join(home, '.limn', 'codex', 'auth.json'), '{}');
+  };
+
+  it('resolves to ~/.limn until the move, then ~/.ensemble', () => {
+    seedLimn();
+    expect(resolveDataDir({}, home)).toBe(join(home, '.limn'));
+    expect(migrateLegacyDataDir({ env: {}, home }).moved).toBe(true);
+    expect(resolveDataDir({}, home)).toBe(join(home, '.ensemble'));
+  });
+
+  it('moves ~/.limn with everything under it (Codex home, runtimes), once', () => {
+    seedLimn();
+    const r = migrateLegacyDataDir({ env: {}, home });
+    expect(r).toEqual({ moved: true, from: join(home, '.limn'), to: join(home, '.ensemble') });
     expect(existsSync(join(home, '.limn'))).toBe(false);
+    expect(readFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'utf8')).toBe('limn-db');
+    expect(existsSync(join(home, '.ensemble', 'codex', 'auth.json'))).toBe(true);
+    expect(existsSync(join(home, '.ensemble', 'ai-runtime'))).toBe(true);
+    expect(migrateLegacyDataDir({ env: {}, home })).toEqual({ moved: false, reason: 'no_legacy_dir' });
+  });
+
+  it('prefers ~/.limn over an older ~/.pierre-review left beside it, and leaves that one alone', () => {
+    seedLegacy();
+    seedLimn();
+    expect(resolveDataDir({}, home)).toBe(join(home, '.limn'));
+    expect(migrateLegacyDataDir({ env: {}, home })).toMatchObject({ moved: true, from: join(home, '.limn') });
+    expect(readFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'utf8')).toBe('limn-db');
+    expect(readFileSync(join(home, '.pierre-review', 'pierre-review.sqlite'), 'utf8')).toBe('db');
+    // Never a second move into an existing ~/.ensemble.
+    expect(migrateLegacyDataDir({ env: {}, home })).toEqual({ moved: false, reason: 'target_exists' });
+    expect(resolveDataDir({}, home)).toBe(join(home, '.ensemble'));
+  });
+
+  it('never clobbers an existing ~/.ensemble', () => {
+    seedLimn();
+    mkdirSync(join(home, '.ensemble'));
+    writeFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'newer');
+    expect(migrateLegacyDataDir({ env: {}, home })).toEqual({ moved: false, reason: 'target_exists' });
+    expect(readFileSync(join(home, '.ensemble', 'pierre-review.sqlite'), 'utf8')).toBe('newer');
+    expect(readFileSync(join(home, '.limn', 'pierre-review.sqlite'), 'utf8')).toBe('limn-db');
+  });
+
+  it('a path pinned inside ~/.limn stops the move', () => {
+    seedLimn();
+    const r = migrateLegacyDataDir({ env: { DATABASE_URL: join(home, '.limn', 'pierre-review.sqlite') }, home });
+    expect(r).toEqual({ moved: false, reason: 'pinned_path' });
+    expect(resolveDataDir({}, home)).toBe(join(home, '.limn'));
   });
 });
 

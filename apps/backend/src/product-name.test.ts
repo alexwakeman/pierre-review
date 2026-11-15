@@ -1,4 +1,4 @@
-// THE PRODUCT-NAME GUARD. The app is called Limn; it used to be called Pierre, and the rename
+// THE PRODUCT-NAME GUARD. The app is called Ensemble (it was Pierre, then Limn), and the first rename
 // was staged so that the published identifiers (the `pierre_session` cookie, the `'pierre'` reviewer kind, the `<!-- pierre:claude-review -->`
 // marker) deliberately keep the old spelling FOREVER. That split is what makes this hard to test:
 // a blanket "no pierre anywhere" scan would fail on every one of those, and a blanket
@@ -37,9 +37,9 @@ const read = (rel: string): string => readFileSync(REPO_ROOT + rel, 'utf8');
  *  and hyphenated (`pierre-review`, `pierre:claude-review`), so this cannot fire on one. */
 const OLD_BRAND = /\bPierre\b(?![-:/])/;
 
-describe('the product name is Limn', () => {
+describe('the product name is Ensemble', () => {
   it('is one constant, and the labels that compose it read from it', () => {
-    expect(PRODUCT_NAME).toBe('Limn');
+    expect(PRODUCT_NAME).toBe('Ensemble');
     expect(GENERIC_REVIEWER_LABELS.pierre).toBe(PRODUCT_NAME);
     for (const label of Object.values(GENERIC_REVIEWER_LABELS)) {
       expect(label).not.toMatch(/pierre/i);
@@ -125,13 +125,14 @@ describe('no user-visible "Pierre" in the sources that render one', () => {
     expect(src).not.toMatch(/restart pierre/i);
   });
 
-  // The COMMAND moved with the npm package (`limn-review`, bin `limn`); `pierre-review` survives
-  // only as a deprecated alias that the usage text names as one.
+  // The COMMAND moved with the npm package (`ensemble-review`, bin `ensemble`); `limn-review` and
+  // `pierre-review` survive only as deprecated packages that the usage text names as such.
   it('the CLI failure line says the product name', () => {
     const src = read('apps/backend/src/cli.ts');
-    expect(src).toContain("console.error('Failed to start Limn:'");
-    expect(src).toContain('  limn [options]');
+    expect(src).toContain("console.error('Failed to start Ensemble:'");
+    expect(src).toContain('  ensemble [options]');
+    expect(src).not.toContain('  limn [options]');
     expect(src).not.toContain('  pierre-review [options]');
-    expect(src).toContain('package now only forwards to this one');
+    expect(src).toContain('packages now only forward to this one');
   });
 });

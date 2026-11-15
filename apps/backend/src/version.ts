@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const NAMES = new Set(['limn-review', '@pierre-review/backend']);
+const NAMES = new Set(['ensemble-review', 'limn-review', '@pierre-review/backend']);
 let cached: string | null | undefined;
 
 export function limnVersion(): string | null {
