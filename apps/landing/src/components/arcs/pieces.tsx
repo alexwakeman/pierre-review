@@ -7,8 +7,8 @@ import type { Corner, Quarter, RunName } from './geometry';
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
 //   Quartet    four equal quarters facing one centre, "four sensible people
-//              conversing", in the close at the foot of the page. It draws in
-//              and its quarters slide together as it scrolls into view.
+//              conversing", in the close at the foot of the page. Its quarters
+//              start mirrored, cross as it scrolls into view, and land overlapping.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
 //              mirrored across the tile and cross through each other into place as
@@ -31,6 +31,7 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   return (
     <Arcs
       lead={lead}
+      align="end"
       viewBox={`0 0 ${CHAIN.width} ${CHAIN.height}`}
       quarters={CHAIN.quarters}
       // the links cross through each other on the way in: overlaps mix like light
@@ -42,8 +43,9 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   );
 }
 
-// The margin keeps the apart state inside the tile.
-const QUARTET = quartetQuarters(22);
+// R 62: the quarters overlap in the middle and land on crossing lines; they cross
+// into place like the hero's Chain. The margin leaves room for the corner dots.
+const QUARTET = quartetQuarters(4, 62, true);
 
 export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
   return (
@@ -53,6 +55,7 @@ export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
       className={className}
       label={label}
       fit="meet"
+      blend
       quarters={QUARTET.quarters}
     />
   );

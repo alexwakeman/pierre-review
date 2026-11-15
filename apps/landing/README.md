@@ -42,8 +42,8 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 **EVERY OTHER PICTURE IS DRAWN IN CODE** from one motif, the banded quarter-circle
 (`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
 `Arcs.tsx` draws a composition; `pieces.tsx` holds the Chain, Quartet, Orchestra and Combo;
-`arcMotion.ts` draws them out and brings them together as the reader scrolls down, started by `useReveal`, off under
-reduced motion). No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
+each quarter a layer moved on the compositor by CSS scroll-driven animations as the reader scrolls down,
+`arcMotion.ts` the fallback where those are unsupported, off under reduced motion). No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
 `public/og-image.png` are generated (`node scripts/make-favicons.mjs`, `node scripts/make-og-image.mjs`):
 the mark from `packages/shared/src/brand-mark.ts`, the one definition the app's Wordmark also draws. The voice tiles carry a quarter in their corner
 (`assets/arcs/corner.svg`, the same geometry).

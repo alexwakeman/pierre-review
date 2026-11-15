@@ -128,8 +128,10 @@
   grid-row: 1 / 3;
 }
 .lb.home .hero .hand {
-  /* none: the Chain fills its tile edge to edge, as it does in every tile it sits in */
+  /* the tile runs to the screen's right edge; the Chain's own margin (in slice
+     radii) keeps a gap that scales with the slices, not the screen */
   padding: 0;
+  margin-right: calc(-1 * var(--m));
 }
 
 /* ---- works with ---------------------------------------------------------- */
@@ -457,6 +459,7 @@
   }
   .lb.home .hero .hand {
     aspect-ratio: 3 / 4;
+    margin-right: 0;
   }
   .lb.home .why4 > .tile {
     grid-column: span 6;

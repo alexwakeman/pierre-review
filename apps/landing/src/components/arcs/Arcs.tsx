@@ -12,16 +12,14 @@ import type { Quarter } from './geometry';
 // the page scrolls. (One SVG moved by CSS variables repainted hundreds of band
 // paths on every scroll frame, and the page juddered.)
 //
-// THE MOTION (board.css § the arcs; arcMotion.ts):
-//   lead     the hero's pictures. Each layer starts APART (--ax, --ay) from the
-//            very first paint, and a CSS scroll-driven animation brings it home
-//            over the first 60vh of scrolling, on the compositor. Browsers
-//            without scroll-driven animations get the same mapping from
-//            arcMotion.ts. No JS (a <noscript> style) and reduced motion: home.
-//   others   draw in ONCE as they scroll into view: each layer slides home from
-//            (--ex, --ey) and its bands draw out, innermost first, by CSS
-//            transition. A piece already on screen at load is simply drawn.
-// The prerendered HTML is final for everything but the lead pieces' start.
+// THE MOTION (board.css § the arcs; arcMotion.ts). Every layer starts APART
+// (--ax, --ay) from the very first paint and a CSS scroll-driven animation
+// brings it home, on the compositor:
+//   lead     the hero's picture: over the first 60vh of page scroll
+//   others   over their own way into view (a view timeline, entry → 60% cover)
+// Browsers without scroll-driven animations get the same mappings from
+// arcMotion.ts. No JS (a <noscript> style) and reduced motion: home, still.
+// Nothing is ever redrawn: the bands are painted once, only layers move.
 // ---------------------------------------------------------------------------
 
 export interface ArcsProps {
@@ -38,6 +36,8 @@ export interface ArcsProps {
   fit?: 'meet' | 'slice';
   /** A hero picture: it starts apart and comes together as the reader scrolls. */
   lead?: boolean;
+  /** 'end' anchors the composition to the right of its box instead of centring it. */
+  align?: 'center' | 'end';
 }
 
 /** How far a lead layer starts from home, as a multiple of its offset. */
@@ -54,10 +54,11 @@ export function Arcs({
   label,
   fit = 'slice',
   lead,
+  align = 'center',
 }: ArcsProps): JSX.Element {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const [, , W = 100, H = 100] = viewBox.split(/\s+/).map(Number);
-  const cls = ['arcs', fit, blend && 'blend', lead && 'lead', className].filter(Boolean).join(' ');
+  const cls = ['arcs', fit, blend && 'blend', lead && 'lead', align === 'end' && 'end', className].filter(Boolean).join(' ');
   return (
     <div
       className={cls}
@@ -71,8 +72,6 @@ export function Arcs({
           const l = layoutQuarter(q);
           const id = `${uid}g${i}`;
           const style = {
-            '--ex': pct(l.dx, W),
-            '--ey': pct(l.dy, H),
             '--ax': pct(l.dx * APART, W),
             '--ay': pct(l.dy * APART, H),
           } as React.CSSProperties;

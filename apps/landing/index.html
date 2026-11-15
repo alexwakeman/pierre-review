@@ -61,10 +61,10 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
 
-    <!-- The hero's arc pictures are painted APART by CSS until the reader scrolls
+    <!-- The arc pictures are painted APART by CSS until the reader scrolls
          (components/arcs/Arcs.tsx). Where the browser cannot animate that from the
          scroll itself, JavaScript does it; with no JavaScript they must start home. -->
-    <noscript><style>@supports not (animation-timeline: scroll()) { .lb .arcs.lead .layer { transform: none !important; } }</style></noscript>
+    <noscript><style>@supports not (animation-timeline: scroll()) { .lb .arcs .layer { transform: none !important; } }</style></noscript>
 
     <!-- Structured data: helps search engines understand what Ensemble is.
          LANDMINE: this block sits OUTSIDE the seo:start/end markers, so the
