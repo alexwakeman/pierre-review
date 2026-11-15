@@ -10,7 +10,7 @@ import type { Corner, Quarter, RunName } from './geometry';
 //              "four sensible people conversing". Its quarters start apart and
 //              close in as the reader scrolls down.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
-//              on from link to link (the small tile beside Goethe's line)
+//              on from link to link (the small tile beside Poincaré's line)
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their

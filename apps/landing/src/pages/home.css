@@ -120,6 +120,16 @@
 .lb.home .hero .motto figcaption::before {
   content: '— ';
 }
+.lb.home .hero .motto figcaption a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.lb.home .hero .motto figcaption a:hover {
+  color: var(--amber);
+}
+.lb.home .hero .motto cite {
+  font-style: italic;
+}
 .lb.home .hero .hand {
   grid-column: 8 / 13;
   grid-row: 1 / 3;

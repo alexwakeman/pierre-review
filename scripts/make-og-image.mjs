@@ -54,8 +54,8 @@ code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background
 .art svg { width: 100%; height: 100%; }
 .motto { background: linear-gradient(120deg, #ff6a00 0%, #fe9c00 45%, #ffcf00 100%); color: #121110;
   padding: 22px 26px; display: flex; flex-direction: column; justify-content: center; }
-.motto p { font-size: 21px; line-height: 1.25; font-weight: 500; letter-spacing: -0.01em; }
-.motto span { font-size: 15px; margin-top: 8px; color: #2a1d05; }
+.motto p { font-size: 17px; line-height: 1.25; font-weight: 500; letter-spacing: -0.01em; }
+.motto span { font-size: 14px; margin-top: 6px; color: #2a1d05; }
 </style></head><body>
 <div class="tile say">
   <p class="kick">${brandMarkSvg(4)}<span><b>Ensemble</b> · an agentic SDLC on your machine</span></p>
@@ -64,7 +64,7 @@ code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background
   <div class="foot"><code>npx ensemble-review</code><span class="url">ensemble.ac</span></div>
 </div>
 <div class="tile art">${quartetSvg()}</div>
-<div class="tile motto"><p>“One hears four sensible people conversing among themselves.”</p><span>Goethe, on the string quartet, 1829</span></div>
+<div class="tile motto"><p>“It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once both the ensemble and the details.”</p><span>Henri Poincaré, <i>Science and Method</i>, 1908</span></div>
 </body></html>`;
 
 // CHROMIUM_PATH: a Chrome binary other than the one this Playwright downloaded.
