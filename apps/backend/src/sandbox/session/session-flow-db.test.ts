@@ -577,6 +577,9 @@ describe('a hotfix build', () => {
   it('25 + 26: the release checkout starts at the latest release, the main checkout at main; web is read only', async () => {
     const { setReleaseSettings } = await import('../../db/release-settings.js');
     await setReleaseSettings(1, wsId, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+    // api is released from this workspace; web is not ticked (read only either way: no release).
+    const { setReleaseRepos } = await import('../../db/release-repos.js');
+    await setReleaseRepos(1, wsId, [api]);
     const now = new Date();
     await db
       .insert(schema.repoTags)
@@ -620,7 +623,7 @@ describe('a hotfix build', () => {
     const b = await until(id, (x) => x.session?.phase === 'built', 'built');
     const repos = new Map(b.repos.map((x) => [x.fullName, x]));
     expect(repos.get('acme/api')).toMatchObject({ status: 'ready', hasPatch: true, hotfix: { mainStatus: 'ready', mainHasPatch: true, mainFilesChanged: ['src/export.ts'] } });
-    expect(repos.get('acme/web')).toMatchObject({ status: 'skipped', hasPatch: false, error: 'acme/web has no release yet, so it is read only in this hotfix build. Its changes were not kept.' });
+    expect(repos.get('acme/web')).toMatchObject({ status: 'skipped', hasPatch: false, error: 'acme/web has no release here, so it is read only in this hotfix build. Its changes were not kept.' });
     const notices = b.session!.conversation.filter((c) => c.kind === 'notice').map((c) => (c as { text: string }).text);
     expect(notices).toContain('Changes stored: acme/api (release fix and main fix).');
     // The port report (acceptance 35): stored per repository, checked against the patches on read.

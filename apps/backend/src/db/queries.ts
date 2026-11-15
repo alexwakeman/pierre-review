@@ -830,6 +830,12 @@ export async function deleteWorkspace(
       .set({ workspaceId: defaultId })
       .where(and(eq(schema.releases.accountId, accountId), eq(schema.releases.workspaceId, id)))
       .execute();
+    // The releasable ticks and start tags (migration 0199) are THIS workspace's choice: they do not
+    // follow the repos to Default (the FK cascades too; explicit, as below).
+    await tx
+      .delete(schema.workspaceReleaseRepos)
+      .where(and(eq(schema.workspaceReleaseRepos.accountId, accountId), eq(schema.workspaceReleaseRepos.workspaceId, id)))
+      .execute();
     await tx
       .delete(workspaceExternalRepos)
       .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, id)))
@@ -10050,6 +10056,10 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     await tx
       .delete(schema.releaseItems)
       .where(and(eq(schema.releaseItems.repoId, id), eq(schema.releaseItems.accountId, accountId)))
+      .execute();
+    await tx
+      .delete(schema.workspaceReleaseRepos)
+      .where(and(eq(schema.workspaceReleaseRepos.repoId, id), eq(schema.workspaceReleaseRepos.accountId, accountId)))
       .execute();
     // Docs folders offered from this repo (migration 0155). The composite FK cascades; explicit
     // anyway, for the same stated reason as the rows above.

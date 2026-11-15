@@ -686,10 +686,11 @@ the story subject in `sandbox/session/manager.ts` (`hotfixBasesFor`, `extractHot
 `coding/story-build/push-hotfix.ts`, the tab's `lib/hotfix.ts`.
 
 - **Offered** (the Start panel, `GET /api/story-builds/hotfix-bases?workspace=`, DB only): both suffixes are set
-  (Settings → Releases) and ≥ 1 workspace repository has a latest release — the newest release OR hotfix tag on
-  any branch (shared `latestReleaseTag`, the release check's own rule). Not with Build end to end. Ticked, the
-  panel lists each repository's base: `api  from v2.4.0-rc (12 Nov) → PRs into hotfix/v2.4.0-rc and main`, or
-  `worker  no release yet — read only`. The start body's `hotfix: true` is stored on the row at the claim
+  (Settings → Releases) and ≥ 1 workspace repository ticked "Released from this workspace" has a latest release —
+  the newest release OR hotfix tag on any branch (shared `latestReleaseTag`, the release check's own rule). An
+  unticked repository has no base and is read only (`StoryBuildHotfixBase.releasable`). Not with Build end to end.
+  Ticked, the panel lists each repository's base: `api  from v2.4.0-rc (12 Nov) → PRs into hotfix/v2.4.0-rc and
+  main`, `worker  no release yet — read only`, or `docs  not released from this workspace — read only`. The start body's `hotfix: true` is stored on the row at the claim
   (`story_builds.hotfix`); with `autoPush` / `endToEnd` it is `400 HotfixNoLoop`, not offered `400
   HotfixNotOffered`.
 - **Bases** (`hotfixBasesFor`, read once at boot through the same fold; a resumed session keeps its rows'): a

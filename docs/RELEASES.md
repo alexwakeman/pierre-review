@@ -1,13 +1,16 @@
 # Releases (This Sprint → Releases) and hotfix builds
 
-The spec agreed with the owner on 2026-11-14. It is the acceptance contract: § Acceptance checks is
+The spec agreed with the owner on 2026-11-14, reworked with the owner on 2026-11-15 after a try on real
+data (releasable repos, the start tag, each repo judged on its own, the fixed hyphen). It is the
+acceptance contract: § Acceptance checks is
 what a build of this feature must pass. Implementation notes are added below § Implementation as the
 work lands; keep the spec sections true.
 
 ## Purpose
 
-Say, per repository, which version tag on `main` is safe to release: the newest one whose changes
-link only to Done tickets, with every ticket shipping WHOLE across all its repositories. One reader
+Say, per RELEASABLE repository (ticked "Released from this workspace"), which version tag on `main` is
+safe to release: the newest one whose changes link only to Done tickets. Each repository is judged on its
+own. One reader
 press tags each safe version with the workspace's release suffix (the tag is the trigger for the
 team's image build; Ensemble deploys nothing), publishes release notes and comments on each shipped
 ticket. A hotfix is an Implement option that builds one fix twice: on the latest release and on
@@ -23,8 +26,16 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
 - **Release suffix** (e.g. `-rc`) and **Hotfix suffix** (e.g. `-hotfix`). Both REQUIRED before the
   Releases tab or the hotfix option does anything; there is NO default (the owner has not settled the
   suffix). Until both are set the tab shows ONE line linking to the setting.
-- Validation: a valid git ref fragment (no spaces, `~^:?*[\`, `..`, `@{`, no trailing `.lock`/`/`/`.`),
-  1–32 characters, the two must differ, and neither may END WITH the other (a tag must classify one way).
+- **The hyphen is fixed.** The reader types `rc`; the stored suffix is `-rc`. The form shows a fixed "-"
+  to the left of the box (not editable). Older stored values without a leading `-` got one (migration).
+- Validation, on the TYPED part: no leading hyphen; a valid git ref fragment (no spaces, `~^:?*[\`, `..`,
+  `@{`, no trailing `.lock`/`/`/`.`), 1–32 characters; the two must differ, and neither may END WITH the
+  other (a tag must classify one way).
+- **Released from this workspace** — a tick per workspace repository (home and External). Default: none.
+  EVERYTHING in Releases uses only ticked repos: the rows, the check, the tickets, the dialog, the writes,
+  the tag sync's ranges, and the hotfix bases (an unticked repo is read only in a hotfix build). Unticked
+  repos are ignored entirely — never a warning, never a block. With none ticked the tab shows ONE line
+  linking to the setting.
 - Changing a suffix after releases exist warns before saving: older tags stop counting as releases.
 - User-facing words never say "rc" or name a suffix except the configured one.
 
@@ -37,9 +48,13 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
 - **Hotfix tag** — a tag ending in the hotfix suffix. The team creates these by hand on a hotfix branch.
 - **Latest release** (per repo) — the newest release OR hotfix tag (by the tagged commit's date, ties
   by tag creation). The hotfix base.
-- **Baseline** (per repo) — the newest RELEASE tag whose commit is an ancestor of `main`. None ⇒ the
-  first release covers everything merged to `main`; PRs merged before Ensemble's synced history are not
-  checked, said in ONE line.
+- **Start tag** (per workspace and repo) — the reader's "Start from this tag": an existing version tag on
+  `main`; everything up to and including it is treated as accepted. Stored with its commit, who and when.
+  Writes nothing to GitHub. A start tag that moved to another commit, or is gone, is said on the row and
+  not used.
+- **Baseline** (per repo) — the newer of: the newest RELEASE tag whose commit is an ancestor of `main`, and
+  the start tag. None ⇒ only the newest 40 tags on `main` are checked (said in ONE line, which suggests a
+  start tag); PRs before the checked history are simply not listed.
 - **Range of a version tag** — the PRs merged INTO THE DEFAULT BRANCH after the baseline, up to and
   including that tag's commit (commit → PR by the stored merge commit oid; fallback GraphQL
   `associatedPullRequests` for unmatched commits).
@@ -50,25 +65,20 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
 
 ## The release check (one pure fold)
 
-**Per repo:** the candidate is the newest version tag after the baseline whose range has no PR (into
-the default branch) linked to a ticket that is not Done.
+**Per releasable repo, on its own:** the candidate is the newest version tag after the baseline whose
+range has no PR (into the default branch) linked to a ticket that is not Done. Readiness is the TICKET
+being Done; nothing else about PRs across repositories counts (no "ships whole", no "open work").
 
 - A human PR with no ticket: a WARNING, never a block.
 - A bot PR with no ticket: no warning; listed under "Dependency and bot changes" in the notes.
 - A bot PR naming a not-done ticket: BLOCKS (the ticket rule ignores authorship).
-- A ticket that could not be read (`not_found`, `no_access`, `failed`): BLOCKS, with the reason.
+- A ticket that could not be read (`not_found`, `no_access`, `failed`, not read yet): BLOCKS, with the
+  reason (Done is unknown).
+- A version tag with more commits than are read: BLOCKS (its changes cannot be checked).
+- A version tag whose changes are not read yet cannot be the candidate; the row says "Reading changes…",
+  never a ticket blocker.
 - No version tag after the baseline: "Nothing new" — not in the release.
-
-**Across repos** — a ticket's repos are its accepted `sprint_ticket_repos` rows ∪ every repo with a
-merged PR into the default branch that names it. For every ticket in any repo's range:
-
-1. **Ships whole**: every merged PR into the default branch for the ticket, in each of its repos, is
-   inside that repo's candidate. If not, the ticket is NOT READY: it blocks wherever its PRs appear and
-   the check repeats until nothing changes (candidates only move back, so it ends). The reason names
-   the fix ("PLAT-290 holds api at v2.4.0: its web PR is merged but not in a version tag yet").
-2. **No open work**: an OPEN PR into the default branch on the ticket blocks. A PR into a hotfix branch
-   never counts (merged or open) — it is a separate line.
-3. **Linked repo with no PR**: a WARNING only.
+- A PR into a hotfix branch is in no range (merged or open) — it is a separate line.
 
 The fold is pure and DB-only on a view (tags, ranges and ticket rows are synced/stored); it never
 fetches on mount.
@@ -76,15 +86,20 @@ fetches on mount.
 ## Releases tab (This Sprint → Releases, the 4th inner tab, key `4`)
 
 1. Header: "Latest release: none" / "Latest release: 12 Nov", Refresh, an ⓘ with the rules in a few lines.
-2. Repo rows: `api ★ v2.4.0 → v2.4.0<suffix> · 6 tickets · 1 warning`; "Nothing new since …";
-   "No candidate: v0.3.0 held by PLAT-301 (In review)". A row expands to its version tags (newest first),
-   their PRs and ticket chips; the blocking one named, the candidate starred.
-3. Tickets panel: per ticket, per repo: ✓ in candidate · ✗ merged after candidate · ✗ open PR ·
-   ⚠ linked, no PR. A ticket chip opens the story tray (`useOpenStory()`), a PR opens its PR tab.
-4. Warnings (untracked human PRs, linked repos without a PR) listed under the release; never block.
+2. ONE ROW PER RELEASABLE REPO showing the PAIR — the latest version tag on main and the candidate:
+   "Latest 0.394.0 · candidate 0.390.0 → 0.390.0-rc", "Latest 0.394.0 is the candidate → 0.394.0-rc",
+   "No candidate: 0.391.0 held by BMD-1048 (In PO Review)", "Latest 0.394.0 · Reading changes…",
+   "Nothing new since 0.390.0-rc". There is no separate tickets panel.
+3. A row expands to the version tags after the baseline, newest first, each with its tickets (key, title,
+   status; Done or not) and its PRs with no ticket; the candidate starred, the first held tag marked, and
+   "Start from this tag" beside each. A start tag reads "Starts from 0.380.0 · Change" (Change picks any
+   version tag on main; Clear removes it). A ticket chip opens the story (`useOpenStory()`), a PR its PR
+   tab. "Released" is never said unless a release tag contains it.
+4. Warnings (untracked human PRs, PRs not synced yet) listed under the rows; never block.
 5. **"Create release…"** — shown only with ≥ 1 candidate in a writable repo (HIDE, never disable).
-   Dialog: repos (ticked; unticking re-runs the check and blocks Confirm if a ticket would ship in
-   part, naming it); release notes preview (editable); tracker comment preview; Confirm.
+   Dialog: the releasable repos with a candidate (ticked; each judged on its own, so unticking one only
+   leaves it out; none ticked hides Confirm); release notes preview (editable); tracker comment preview;
+   Confirm.
    Confirm FIRST re-reads every ticket in the release from the tracker and re-checks each version
    tag's commit; any change stops it and shows what — nothing is written.
 6. Writes, in order, each claimed (compare-and-set) BEFORE the GitHub/tracker write, NEVER retried:
@@ -113,7 +128,8 @@ against the release and viewable again from the tab.
 ## Hotfix (an Implement option)
 
 In the story view, Implement's Start offers **"Treat as a hotfix"** — only when both suffixes are set
-and ≥ 1 workspace repo has a latest release. Start shows each repo's base:
+and ≥ 1 RELEASABLE workspace repo has a latest release. Start shows each repo's base (a repo not released
+from this workspace is read only, whatever its tags):
 
 ```
 api     from v2.4.0-rc (12 Nov)   → PRs into hotfix/v2.4.0-rc and main
@@ -151,8 +167,9 @@ worker  no release yet — read only
 ## Invariants this feature adds
 
 - Tag sync is part of the default-branch snapshot step: STRICTLY NON-FATAL, found by the settle sweep
-  (tag pushes are updatedAt-silent). A version tag's range is computed once per (repo, tag, sha) and
-  stored; a tag MOVED to another sha is re-computed and flagged.
+  (tag pushes are updatedAt-silent). Ancestry checks and ranges run for RELEASABLE repos only, with
+  raised caps, and ranges only for tags after the baseline. A version tag's range is computed once per
+  (repo, tag, sha) and stored; a tag MOVED to another sha is re-computed and flagged.
 - `pullRequests.mergeCommitOid` is cleared only on a positive statement from GitHub.
 - New tracker write: the release comment (the reader's press). Added to the tracker-writes list.
 - New GitHub writes: release tags, pre-releases, the hotfix base branch — each a reader's press,
@@ -162,8 +179,10 @@ worker  no release yet — read only
 ## Acceptance checks
 
 Settings
-1. Without both suffixes the Releases tab shows only the setup line, and "Treat as a hotfix" is absent.
-2. Equal suffixes, or one ending with the other, are refused with a sentence.
+1. Without both suffixes, or with no repository ticked "Released from this workspace", the Releases tab
+   shows only the setup line, and "Treat as a hotfix" is absent.
+2. Equal suffixes, or one ending with the other, are refused with a sentence. The reader types `rc` and
+   `-rc` is stored; a typed leading hyphen is refused; a stored `rc` reads as `-rc` after the migration.
 3. Changing the release suffix after a release exists warns; after saving, old release tags no longer
    form the baseline.
 
@@ -179,13 +198,15 @@ Candidate
 12. No version tag after the baseline → "Nothing new", not in the release.
 13. A merged PR into `hotfix/…` for a not-done ticket blocks no `main` candidate.
 
-Cross-repo
-14. PLAT-290 Done; api PR in v2.4.0; web PR merged after web's newest version tag → PLAT-290 not
-    ready, api's candidate moves back before it, the reason says to cut a tag in web.
-15. After a web version tag containing it → both candidates include PLAT-290.
-16. A Done ticket with an open PR into the default branch in any repo → blocks.
-17. A ticket linked to a repo with no PR there → warning only.
-18. Unticking web when PLAT-290 needs it → Confirm blocked, PLAT-290 named.
+Start tag, releasable repos, each repo on its own
+14. Start from v1.1.0 → v1.1.0 and everything before it is accepted; only v1.2.0 is checked; nothing is
+    written to GitHub.
+15. A release tag newer than the start tag is the baseline.
+16. The start tag moved to another commit, or is gone → the row says so and the check falls back.
+17. Ranges are computed only after the baseline; while a tag's changes are not read the row reads
+    "Reading changes…", never a ticket blocker.
+18. An unticked repository is ignored entirely (no row, no block, no warning). A Done ticket ships in one
+    repository whatever its PRs elsewhere; another repository's held tag, or an open PR, holds nothing.
 
 Writes
 19. Confirm creates `<version><release suffix>`, annotated, on the version tag's commit; no Ensemble wording.
@@ -196,8 +217,8 @@ Writes
 24. After success every released repo reads "Nothing new" until the next version tag.
 
 Hotfix
-25. After a release, "Treat as a hotfix" shows each repo's base as its latest release; repos without one
-    are read-only.
+25. After a release, "Treat as a hotfix" shows each releasable repo's base as its latest release; repos
+    without one, or not released from this workspace, are read only.
 26. The release checkout starts at the release commit; the main checkout at `main`'s head.
 27. A conflicting port is resolved by the agent; both diffs shown with test results.
 28. Push creates `hotfix/<tag>` at the release commit and opens two PRs per changed repo, right bases,
@@ -532,3 +553,65 @@ and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds → The port re
 - **Deviations:** the report is a FILE the agent writes and checks (as the build and fix reports are), not a
   tool call, so Claude and Codex share one handler. A `not_needed` repository whose main checkout changed still
   opens both PRs (the patches win; the flag says so). The landing's build-tab mock still shows no hotfix build.
+
+### Releasable repos and start tag (2026-11-15 rework)
+
+The owner tried the tab on real data (~10 repos, two released): nothing was releasable — no release tag
+meant ranges back through all history that never caught up, test repos blocked through "ships whole", and
+the tickets panel said "released" for PRs older than the checked history. The rework, as decided:
+
+- **Migration `0199_workspace_release_repos`** (registered in the journal): `workspace_release_repos` — one
+  row per `(account, workspace, repo)` ticked "Released from this workspace", holding the START TAG
+  (`start_tag_name` / `start_tag_sha` / `start_set_by_login` / `start_set_at`). Composite FKs to workspaces and
+  repos (cascade); `accountScopedTables()`, erased explicitly; `deleteRepo` and `deleteWorkspace` delete their
+  rows (a tick is never re-homed to Default). The same migration prefixes `-` to any stored suffix that lacks it.
+- **Shared** `releases.ts`: `RELEASE_SUFFIX_PREFIX`, `suffixTypedPart`, `suffixFromTyped`;
+  `normaliseReleaseSuffix` puts the hyphen in front when missing; `validateReleaseSuffix` checks the TYPED part
+  (no leading hyphen); `validateReleaseSettings` compares typed parts; `ReleaseSettingsRepo`,
+  `ReleaseSettingsResponse.repos`, `SetReleaseReposBody`. `release-check.ts`: THE FOLD REWRITTEN — each repo
+  on its own; blockers are `not_done` / `unreadable` / `too_large` only (`not_whole`, `open_pr`,
+  `range_pending`, the `linked_no_pr` warning, `acceptedRepos`, `rounds`, `releaseSelectionProblems` and the
+  `released` / `merged_after_candidate` / `open_pr` / `linked_no_pr` / `hotfix_only` ticket states are
+  REMOVED); ticket repo states `in_candidate` / `after_candidate`; repo status `reading`; per repo
+  `latestVersion`, `baseline.kind` (`release` / `start`), `startTag` (+ `problem` `moved` / `missing`),
+  `reading`, `versionTags` (the picker, ≤ 100). `releaseBaselineOf` (THE baseline: newer of the newest release
+  tag and the start tag) and `tagRangeKeepFrom(ordered, all, views)` (shared by the fold and the range
+  planner). With no baseline only the newest `TAG_RANGE_WINDOW` tags are listed and checked.
+  `ReleasesResponse.hasReleasableRepos`; `SetReleaseStartTagBody`; `ReleasePreviewResponse.problems` removed.
+  `hotfix.ts`: `HotfixBaseRepoInput.releasable` / `StoryBuildHotfixBase.releasable` — an unticked repo has no
+  base (read only).
+- **Backend**: `db/release-repos.ts` (`getReleaseRepos` ∩ current membership, `setReleaseRepos`,
+  `setReleaseStartTag`, `releaseRangeViews`); `db/release-check.ts` loads ONLY ticked repos (and only range
+  PRs — no other PRs of a ticket); `db/release-settings.ts` lists the repos with their ticks
+  (`configuredReleaseSettings` removed); `db/hotfix-bases.ts` passes `releasable`; `releases/create.ts` folds
+  over the releasable repos and refuses another id (`400 NotReleasable`); no untick re-check.
+- **Sync**: `sync/tags-step.ts` reads `releaseRangeViews` once per run — releasable repos get ancestry checks
+  (`ANCESTRY_CHECKS_RELEASABLE`, every tag read) and ranges (`TAG_RANGES_PER_SYNC` now 40, the whole window);
+  others get neither (stored ranges dropped); an external repo runs the step only when releasable; work left
+  ⇒ `markTagCatchUp`, taken by the settle sweep after 60 s (`takeTagCatchUp`). `sync/tag-ranges.ts`
+  `planTagRanges({views})` keeps ranges only after each releasing workspace's baseline. `sync/repo-tags.ts`
+  takes `ancestryCap` and reports `ancestryLeft`.
+- **Routes**: `PUT /api/workspaces/:id/release-repos` (tier `read`, the workspaces line) and
+  `PUT /api/releases/start-tag?workspace=` (tier `read`, decided in `tierFor`); both DB only, both mark the
+  repo for catch-up. Client `api.setReleaseRepos`, `api.setReleaseStartTag`; hooks `useSetReleaseRepos`,
+  `useSetReleaseStartTag`. docs/API.md § Releases.
+- **Frontend**: Settings → Releases — the fixed "-" beside each suffix box, and a "Released from this
+  workspace" section (a tick per member repo, saved whole). This Sprint → Releases — ONE setup line also when
+  no repo is ticked; no tickets panel; rows show the pair (`repoRowText`, `repoRowCounts`,
+  `repoReadingNote`); the expanded row lists tags with tickets (`tagContents`, `ticketMark`), "Start from this
+  tag", and the start line (`startTagLine`, Change = a `Select` over `versionTags`, Clear). The dialog's
+  `confirmStops(ticked)` only refuses an empty selection. `lib/hotfix.ts` `hotfixBaseLine`: "not released from
+  this workspace — read only". The landing mock (`ReleasesPanel`, `SPRINT_RELEASES`) shows the pair and one
+  expanded row. E2E fixtures carry `hasReleasableRepos` and `repos`.
+- **Tests**: `db/release-check.test.ts` (acceptance 4–18 on the new fold; the unticked repo in the DB half),
+  `api/routes/release-settings.test.ts` (acceptance 1–3, the hyphen, the ticks route, the start-tag route),
+  `sync/tag-ranges.test.ts` (ranges only after the baseline, a start tag, no view ⇒ none),
+  `sync/tags-step.test.ts` (the catch-up, the caps, an unreleased external repo), `releases/create.test.ts`
+  (each repo on its own, `NotReleasable`), `coding/story-build/hotfix.test.ts` (an unticked repo is read only),
+  `apps/frontend/test/releasesModel.test.ts`, `hotfixBuild.test.ts`, `rate-limit.test.ts`, `verify:isolation`.
+- **Decisions**: unticking deletes the row, so a re-ticked repo starts with no start tag. The start-tag picker
+  lists at most the 100 newest version tags on main (the tag read's cap). A repo in two workspaces gets ranges
+  from the OLDER of their baselines. An External repo that is ticked runs the tags step, but its PRs are only
+  light-synced, so range PRs not stored yet show as "not synced yet" warnings. The agent's hotfix seed still
+  says "no release yet" for a read-only repository (prompt text unchanged); the user-facing lines say "no
+  release here".

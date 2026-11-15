@@ -653,10 +653,12 @@ function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
 
 const MARK_GLYPH: Record<ReleaseMark, string> = { ok: '✓', bad: '✗', warn: '!' };
 
-/** This Sprint → Releases: the latest release, a row per repository, the tickets and the warnings. */
+/** This Sprint → Releases: the latest release, a row per released repository (the latest version tag and the
+ *  candidate) that opens to its version tags and their tickets, and the warnings. */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(R.repos[0]?.name ?? null);
   return (
     <div className="rp-releases">
       <div className="top">
@@ -667,30 +669,56 @@ function ReleasesPanel(): JSX.Element {
       </div>
       {open ? <p className="dlg">{R.dialog}</p> : null}
       <ul className="repos">
-        {R.repos.map((r) => (
-          <li key={r.name} className={r.candidate ? 'cand' : undefined}>
-            <span className="name">
-              {r.name}
-              {r.candidate ? <em aria-label="candidate"> ★</em> : null}
-            </span>
-            <span className="txt">{r.text}</span>
-          </li>
-        ))}
-      </ul>
-      <Group>Tickets</Group>
-      <ul className="tickets">
-        {R.tickets.map((t) => (
-          <li key={t.key}>
-            <span className="key">{t.key}</span> <span className="ti">{t.title}</span>
-            <span className="marks">
-              {t.marks.map((m) => (
-                <span key={m.repo} className={`mark ${m.tone}`}>
-                  <i aria-hidden="true">{MARK_GLYPH[m.tone]}</i> {m.repo} {m.text}
+        {R.repos.map((r) => {
+          const isOpen = expanded === r.name && (r.tags.length > 0 || r.start != null);
+          return (
+            <li key={r.name} className={r.candidate ? 'cand' : undefined}>
+              <button
+                type="button"
+                className="row"
+                aria-expanded={r.tags.length > 0 ? isOpen : undefined}
+                onClick={() => setExpanded(isOpen ? null : r.name)}
+              >
+                <span className="name">
+                  {r.name}
+                  {r.candidate ? <em aria-label="candidate"> ★</em> : null}
                 </span>
-              ))}
-            </span>
-          </li>
-        ))}
+                <span className="txt">
+                  {r.text}
+                  {r.counts ? <small> · {r.counts}</small> : null}
+                </span>
+              </button>
+              {isOpen ? (
+                <div className="tags">
+                  {r.start ? <p className="start">{r.start} · Change</p> : null}
+                  {r.tags.map((t) => (
+                    <div key={t.name} className="tag">
+                      <span className="tn">
+                        {t.candidate ? <em aria-label="candidate">★ </em> : null}
+                        {t.name}
+                        {t.candidate ? <small> candidate</small> : null}
+                        {t.held ? <small className="held"> first tag held back</small> : null}
+                      </span>
+                      <ul className="tickets">
+                        {t.tickets.map((k) => (
+                          <li key={k.key} className={`mark ${k.tone}`}>
+                            <i aria-hidden="true">{MARK_GLYPH[k.tone]}</i> <span className="key">{k.key}</span> {k.title}{' '}
+                            <small>{k.status}</small>
+                          </li>
+                        ))}
+                        {(t.untracked ?? []).map((p) => (
+                          <li key={p} className="mark warn">
+                            <small>No ticket</small> {p}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       <Group>Warnings</Group>
       <ul className="warns">

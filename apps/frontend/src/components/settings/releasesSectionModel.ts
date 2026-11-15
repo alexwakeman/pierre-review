@@ -19,3 +19,12 @@ export function releaseSuffixChangeWarning(
   }
   return parts.length > 0 ? parts.join(' ') : null;
 }
+
+/** The ticked "Released from this workspace" set differs from the stored one (order does not count). Pure. */
+export function releaseReposDirty(stored: readonly number[], ticked: readonly number[]): boolean {
+  const a = new Set(stored);
+  const b = new Set(ticked);
+  if (a.size !== b.size) return true;
+  for (const id of a) if (!b.has(id)) return true;
+  return false;
+}

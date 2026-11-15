@@ -2714,6 +2714,7 @@ export async function installMockApi(
         return json(route, {
           workspaceId: WORKSPACE.id,
           configured: false,
+          hasReleasableRepos: false,
           releaseSuffix: null,
           hotfixSuffix: null,
           latestRelease: null,
@@ -2728,6 +2729,7 @@ export async function installMockApi(
           hotfixSuffix: null,
           configured: false,
           hasReleases: false,
+          repos: [],
         } satisfies ReleaseSettingsResponse);
       }
       // The change-token poll: the SAME token as the graph, so no "changed since you loaded it" hint.

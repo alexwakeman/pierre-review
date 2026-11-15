@@ -21,7 +21,8 @@ export default function Page(): JSX.Element {
           Both suffixes are set in <DocLink to="settings/releases">Settings → Releases</DocLink>.
         </li>
         <li>
-          At least one repository of the workspace has a latest release: its newest release or hotfix tag. See{' '}
+          At least one repository released from this workspace (ticked in Settings → Releases) has a latest release:
+          its newest release or hotfix tag. See{' '}
           <DocLink to="this-sprint/releases">Release safe version tags</DocLink>.
         </li>
       </ul>
@@ -33,8 +34,14 @@ export default function Page(): JSX.Element {
         <li>
           <Ui>acme/worker no release yet — read only</Ui>
         </li>
+        <li>
+          <Ui>acme/docs not released from this workspace — read only</Ui>
+        </li>
       </ul>
-      <p>A repository with no release is read only: the agent can read it, and Ensemble keeps none of its changes.</p>
+      <p>
+        A repository with no release, or not ticked as released from this workspace, is read only: the agent can read
+        it, and Ensemble keeps none of its changes.
+      </p>
 
       <H2 id="the-flow">The flow</H2>
       <Steps>

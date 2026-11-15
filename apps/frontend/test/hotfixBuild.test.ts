@@ -39,14 +39,16 @@ describe('the Start panel base list (acceptance 25)', () => {
   it('25: each repository reads its latest release and both PR bases; one without a release reads read only', () => {
     const r = hotfixBasesOf(
       [
-        { repoId: 1, fullName: 'acme/api', defaultBranch: 'main', tags: [{ name: 'v2.4.0-rc', sha: 'b'.repeat(40), committedAt: at('2026-11-12'), taggedAt: null }] },
-        { repoId: 3, fullName: 'acme/worker', defaultBranch: 'main', tags: [] },
+        { repoId: 1, fullName: 'acme/api', defaultBranch: 'main', releasable: true, tags: [{ name: 'v2.4.0-rc', sha: 'b'.repeat(40), committedAt: at('2026-11-12'), taggedAt: null }] },
+        { repoId: 3, fullName: 'acme/worker', defaultBranch: 'main', releasable: true, tags: [] },
+        { repoId: 4, fullName: 'acme/tests', defaultBranch: 'main', releasable: false, tags: [{ name: 'v9.0.0-rc', sha: 'c'.repeat(40), committedAt: at('2026-11-12'), taggedAt: null }] },
       ],
       SETTINGS,
     );
     expect(r.offered).toBe(true);
     expect(r.repos.map((b) => `${b.fullName} ${hotfixBaseLine(b)}`)).toEqual([
       'acme/api from v2.4.0-rc (12 Nov) → PRs into hotfix/v2.4.0-rc and main',
+      'acme/tests not released from this workspace — read only',
       'acme/worker no release yet — read only',
     ]);
   });

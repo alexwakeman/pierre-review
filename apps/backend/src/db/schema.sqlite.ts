@@ -2417,7 +2417,8 @@ export const workspaces = sqliteTable(
     // release tag is `<version tag><release suffix>`) and the HOTFIX suffix (a hotfix tag ends in
     // it). NULL = not set, and there is NO default: the Releases tab and the hotfix option do
     // nothing until BOTH are set. Validated by shared `validateReleaseSettings`; the ONE reader /
-    // writer is db/release-settings.ts. Per workspace, no inheritance.
+    // writer is db/release-settings.ts. Per workspace, no inheritance. A set suffix ALWAYS starts
+    // with the fixed hyphen (`-rc`; the reader types `rc` — migration 0199 prefixed older values).
     releaseSuffix: text('release_suffix'),
     hotfixSuffix: text('hotfix_suffix'),
     createdAt: integer('created_at', { mode: 'timestamp' })
@@ -5777,6 +5778,47 @@ export const releaseTicketComments = sqliteTable(
       name: 'release_ticket_comments_release_account_fk',
       columns: [t.releaseId, t.accountId],
       foreignColumns: [releases.id, releases.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// RELEASABLE REPOSITORIES (migration 0199; docs/RELEASES.md § Releasable repos and start tag). One row
+// per (account, workspace, repo) the reader ticked "Released from this workspace" in Settings → Releases:
+// ONLY these are folded by the release check, tagged, ranged by the tag sync, and offered as hotfix
+// bases. No row = not released from this workspace (the default), ignored entirely. Unticking deletes
+// the row (its start tag with it). Read through db/release-repos.ts only, intersected with the
+// workspace's CURRENT membership (home + External): a row of a repo that left is inert.
+//   start_tag_name / start_tag_sha   the reader's "Start from this tag": a version tag on the default
+//                   branch; everything up to and including it is treated as accepted. The sha is the
+//                   commit it pointed at when set — a tag moved since (or gone) is not used. NULL = none.
+//   start_set_by_login / start_set_at  who set it and when.
+export const workspaceReleaseRepos = sqliteTable(
+  'workspace_release_repos',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    repoId: integer('repo_id').notNull(),
+    startTagName: text('start_tag_name'),
+    startTagSha: text('start_tag_sha'),
+    startSetByLogin: text('start_set_by_login'),
+    startSetAt: integer('start_set_at', { mode: 'timestamp' }),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    workspaceRepoUx: uniqueIndex('workspace_release_repos_account_ws_repo').on(t.accountId, t.workspaceId, t.repoId),
+    repoIdx: index('workspace_release_repos_account_repo_idx').on(t.accountId, t.repoId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_release_repos_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'workspace_release_repos_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),
 );

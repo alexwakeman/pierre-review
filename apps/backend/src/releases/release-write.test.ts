@@ -81,7 +81,6 @@ function input(over: { done?: Record<string, boolean>; webTagged?: boolean } = {
       done: d,
       readState: 'ok' as const,
     })),
-    acceptedRepos: [],
   };
 }
 

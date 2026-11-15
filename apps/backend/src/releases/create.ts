@@ -21,8 +21,10 @@
 // row), and a ticket is commented on only when its repos tagged in THIS release — so pressing again
 // writes nothing new. A FAILED or REFUSED row holds no name: a later press (a reader's press, never an
 // automatic retry) is a new claim on a new row. A press where no repo gets a row records no release.
-// ⚠ The check is folded over the WHOLE workspace, the selection applied after (`releasable`,
-// `releaseShippedTickets`, `releaseSelectionProblems`) — a ticket's other repos must be seen.
+// ⚠ The check is folded over the workspace's RELEASABLE repos (ticked "Released from this workspace";
+// db/release-repos.ts), the selection applied after (`releasable`, `releaseShippedTickets`). Each repo is
+// judged on its own: unticking one in the dialog blocks nothing else. A repo id that is not releasable
+// is refused (400 NotReleasable).
 // ⚠ One failure never undoes the steps that worked.
 // ⚠ No transaction spans a network call: `runTransaction` only for the rows written before the writes.
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -36,7 +38,6 @@ import {
   releaseNotesDocument,
   releaseNotesInputOf,
   releaseNotesSection,
-  releaseSelectionProblems,
   releaseSettingsConfigured,
   releaseShippedTickets,
   releaseSnapshotChanges,
@@ -56,6 +57,7 @@ import {
 import { db, runTransaction, schema } from '../db/client.js';
 import { resolveWorkspaceScope } from '../db/queries.js';
 import { loadReleaseCheckInput } from '../db/release-check.js';
+import { getReleaseRepos } from '../db/release-repos.js';
 import { getReleaseSettings } from '../db/release-settings.js';
 import type { ReleaseGithub } from './github.js';
 import { storySummaries, storySummaryInputs, summariesAvailable, type StorySummariser } from './notes.js';
@@ -167,8 +169,7 @@ interface Scoped {
   workspaceId: number;
   settings: ReleaseSettings;
   included: number[];
-  /** Every repo of the workspace: the check ALWAYS folds over all of them (the ships-whole and
-   *  open-work rules must see a ticket's other repos); the selection is applied after. */
+  /** Every RELEASABLE repo of the workspace: the check folds over them; the selection is applied after. */
   all: number[];
 }
 
@@ -178,10 +179,14 @@ async function scoped(accountId: number, rawWorkspace: string | number | undefin
   if (!releaseSettingsConfigured(settings)) {
     throw new ReleaseRequestError(400, 'ReleasesNotSet', 'Set the release suffix and the hotfix suffix first.');
   }
-  const members = new Set(scope.repoIds);
-  const included = [...new Set(repoIds)].filter((id) => members.has(id));
-  if (included.length === 0) throw new ReleaseRequestError(400, 'NothingToRelease', 'Choose at least one repository to release.');
-  return { workspaceId: scope.workspaceId, settings, included, all: [...scope.repoIds] };
+  const releasableIds = [...(await getReleaseRepos(accountId, scope.workspaceId)).keys()];
+  const members = new Set(releasableIds);
+  const asked = [...new Set(repoIds)];
+  if (asked.some((id) => !members.has(id))) {
+    throw new ReleaseRequestError(400, 'NotReleasable', 'Only repositories released from this workspace can be released.');
+  }
+  if (asked.length === 0) throw new ReleaseRequestError(400, 'NothingToRelease', 'Choose at least one repository to release.');
+  return { workspaceId: scope.workspaceId, settings, included: asked, all: releasableIds };
 }
 
 /** The repos of the selection that can be released: a candidate and write access. */
@@ -232,7 +237,6 @@ export async function previewRelease(
     sections,
     notesMarkdown: releaseNotesDocument(sections.map((x) => x.markdown)),
     commentPreview,
-    problems: releaseSelectionProblems(result, included),
     summaries: { written, missing: shipped.length - written, ai },
   };
 }
@@ -307,9 +311,6 @@ export async function createRelease(
   }
   const snapRepoIds = new Set(snapshot.repos.map((r) => r.repoId));
   for (const id of included) if (!snapRepoIds.has(id)) extraChanges.push(`${nameOf(id)} now has a version tag to release.`);
-  for (const p of releaseSelectionProblems(after.result, included)) {
-    extraChanges.push(`${p.key} also needs ${p.missingRepoIds.map(nameOf).join(' and ')}.`);
-  }
   const changes = [
     ...releaseSnapshotChanges(
       { repos: snapshot.repos.filter((r) => s.included.includes(r.repoId)), tickets: snapshot.tickets },

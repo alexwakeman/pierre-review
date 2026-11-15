@@ -170,7 +170,7 @@ export async function pushHotfixRepo(ctx: AgentContext, a: PushRepoArgs): Promis
     const pr = repo.pushedPrNumber != null ? { number: repo.pushedPrNumber, url: repo.pushedPrUrl ?? '' } : null;
     return result(a.repoId, 'skipped', 'ALREADY_PUSHED', null, pr);
   }
-  if (repo.readOnly) return result(a.repoId, 'skipped', 'READ_ONLY', 'This repository has no release yet, so it is read only in this hotfix build.');
+  if (repo.readOnly) return result(a.repoId, 'skipped', 'READ_ONLY', 'This repository has no release here, so it is read only in this hotfix build.');
   if (!repo.include) return result(a.repoId, 'skipped', 'NOT_INCLUDED', null);
   if (build.status !== 'ready') {
     const why = build.status === 'building' ? 'Wait for the build to finish.' : 'This build has nothing to push.';

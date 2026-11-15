@@ -46,6 +46,9 @@ beforeAll(async () => {
   workspaceId = (await q.resolveWorkspaceScope(1, undefined)).workspaceId;
   const { setReleaseSettings } = await import('../db/release-settings.js');
   await setReleaseSettings(1, workspaceId, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+  // Both repos are released from this workspace (only ticked repos can be released).
+  const { setReleaseRepos } = await import('../db/release-repos.js');
+  await setReleaseRepos(1, workspaceId, [API, WEB]);
   m = await import('./create.js');
 });
 
@@ -149,7 +152,6 @@ function input(): ReleaseCheckInput {
       done: w.stored[key]!,
       readState: 'ok' as const,
     })),
-    acceptedRepos: [],
   };
 }
 
@@ -310,22 +312,26 @@ describe('createRelease — the writes, in order, each claimed', () => {
     expect(w.calls.tag).toEqual([]);
   });
 
-  it('acceptance 18 at Confirm: releasing api alone when PLAT-1 needs web too stops, naming PLAT-1', async () => {
+  it('each repo on its own: releasing api alone ships PLAT-1 there, its comment naming only the api tag', async () => {
     const res = await create([API]);
-    expect(res.outcome).toBe('stopped');
-    expect(res.changes).toContain('PLAT-1 also needs web.');
-    expect(w.calls.tag).toEqual([]);
+    expect(res.outcome).toBe('written');
+    expect(w.calls.tag.map((t) => t.split(' ')[0])).toEqual(['api']);
+    const plat1 = w.calls.comment.find((c) => c.ident === ident('PLAT-1'))!.wiki;
+    expect(plat1.split('\n')[1]).toBe('api v1.0.0\\-rc');
   });
 
-  it('the check folds over the WHOLE workspace: an open web PR for PLAT-2 opened after the dialog stops an api-only Confirm', async () => {
-    dropPrs = new Set([20]); // PLAT-1 is api-only here, so api alone ships whole
-    const snap = await snapshot([API]);
-    expect(snap.tickets.map((t) => t.key)).toEqual(['PLAT-1', 'PLAT-2']);
-    extraPrs = [{ id: 30, repoId: WEB, number: 30, title: 'More export work', url: 'https://github.com/acme/web/pull/30', isBot: false, intoDefaultBranch: true, state: 'open', mergedAt: null, ticketIdents: [ident('PLAT-2')] }];
-    const res = await m.createRelease(1, workspaceId, { repoIds: [API], snapshot: snap }, deps());
-    expect(res.outcome).toBe('stopped');
-    expect(res.changes.join(' ')).toContain('PLAT-2');
-    expect(w.calls.tag).toEqual([]);
+  it('a repo that is not released from this workspace is refused before anything is read or written', async () => {
+    const { setReleaseRepos } = await import('../db/release-repos.js');
+    await setReleaseRepos(1, workspaceId, [API]);
+    try {
+      await expect(m.createRelease(1, workspaceId, { repoIds: [API, WEB], snapshot: { repos: [], tickets: [] } }, deps())).rejects.toMatchObject({
+        status: 400,
+        code: 'NotReleasable',
+      });
+      expect(w.calls.reread).toEqual([]);
+    } finally {
+      await setReleaseRepos(1, workspaceId, [API, WEB]);
+    }
   });
 
   it('acceptance 22: a repo fails to tag → its tickets get no comment; tickets only in other repos do; the result says so', async () => {
@@ -421,7 +427,8 @@ describe('createRelease — the writes, in order, each claimed', () => {
   });
 
   it('refuses before anything with no repos of this workspace', async () => {
-    await expect(m.createRelease(1, workspaceId, { repoIds: [999_999], snapshot: { repos: [], tickets: [] } }, deps())).rejects.toMatchObject({ status: 400, code: 'NothingToRelease' });
+    await expect(m.createRelease(1, workspaceId, { repoIds: [999_999], snapshot: { repos: [], tickets: [] } }, deps())).rejects.toMatchObject({ status: 400, code: 'NotReleasable' });
+    await expect(m.createRelease(1, workspaceId, { repoIds: [], snapshot: { repos: [], tickets: [] } }, deps())).rejects.toMatchObject({ status: 400, code: 'NothingToRelease' });
   });
 });
 
@@ -446,7 +453,6 @@ describe('previewRelease — the dialog', () => {
     expect(p.sections.map((s) => s.releaseTagName)).toEqual(['v1.0.0-rc', 'v1.0.0-rc']);
     expect(p.notesMarkdown).toContain('#### [PLAT-1](https://acme.atlassian.net/browse/PLAT-1) Story PLAT-1');
     expect(p.commentPreview?.split('\n')[0]).toBe('Approved for release by Ada Lovelace on 14 Nov 2026.');
-    expect(p.problems).toEqual([]);
   });
 
   it('acceptance 32 (AI on): a summary per story; one with a model-written number is dropped', async () => {
@@ -464,10 +470,5 @@ describe('previewRelease — the dialog', () => {
     expect(p.summaries).toEqual({ written: 2, missing: 1, ai: true });
     expect(p.notesMarkdown).toContain('People can use story plat.');
     expect(p.notesMarkdown).not.toContain('3 times');
-  });
-
-  it('acceptance 18: unticking web when PLAT-1 needs it names PLAT-1', async () => {
-    const p = await m.previewRelease(1, workspaceId, { repoIds: [API] }, deps());
-    expect(p.problems).toEqual([{ ident: ident('PLAT-1'), key: 'PLAT-1', missingRepoIds: [WEB] }]);
   });
 });

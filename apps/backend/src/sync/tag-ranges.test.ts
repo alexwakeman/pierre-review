@@ -93,22 +93,50 @@ describe('planTagRanges', () => {
   });
 });
 
-describe('planTagRanges — the window reaches back to every baseline', () => {
-  it('50 version tags after a release tag 45 back: every range after the baseline is kept and computed, not just the newest 40', () => {
-    const at = (i: number) => new Date(Date.UTC(2026, 10, 1, 0, i));
-    const tags = Array.from({ length: 50 }, (_, i) => tag(`v0.0.${i}`, `c${i}`, 1, { committedAt: at(i) }));
+describe('planTagRanges — only for a releasable repo, only after its baseline', () => {
+  const at = (i: number) => new Date(Date.UTC(2026, 10, 1, 0, i));
+  const fifty = () => Array.from({ length: 50 }, (_, i) => tag(`v0.0.${i}`, `c${i}`, 1, { committedAt: at(i) }));
+  const settings = { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' };
+
+  it('50 version tags after a release tag 45 back: every range after the baseline is kept and computed, and nothing before it', () => {
+    const tags = fifty();
     // v0.0.4 was released (its release tag shares the commit).
     tags.push(tag('v0.0.4-rc', 'c4', 1, { committedAt: at(4), taggedAt: day(9) }));
-    const settings = [{ releaseSuffix: '-rc', hotfixSuffix: '-hotfix' }];
-    const plan = m.planTagRanges(tags, [], { perSync: Number.MAX_SAFE_INTEGER, settings });
+    const plan = m.planTagRanges(tags, [], { perSync: Number.MAX_SAFE_INTEGER, views: [{ settings, startTag: null }] });
     const names = new Set(plan.work.map((w) => w.tag.name));
-    // Everything after the baseline (the release tag at ordered index 5) has a range.
+    // Everything after the baseline (the release tag at ordered index 5) has a range, nothing up to it.
     for (let i = 5; i < 50; i += 1) expect(names.has(`v0.0.${i}`)).toBe(true);
-    // Without the settings only the newest 40 do.
-    expect(m.planTagRanges(tags, [], { perSync: Number.MAX_SAFE_INTEGER }).work).toHaveLength(40);
+    expect(names.has('v0.0.4')).toBe(false);
+    expect(names.has('v0.0.4-rc')).toBe(false);
+    // Without a baseline only the newest 40 do.
+    expect(m.planTagRanges(fifty(), [], { perSync: Number.MAX_SAFE_INTEGER, views: [{ settings, startTag: null }] }).work).toHaveLength(40);
     // A stored row after the baseline is NOT deleted as out of the window.
-    const kept = m.planTagRanges(tags, [{ tagName: 'v0.0.6', sha: sha('c6'), baseTagName: 'v0.0.5', baseSha: sha('c5') }], { settings });
+    const kept = m.planTagRanges(tags, [{ tagName: 'v0.0.6', sha: sha('c6'), baseTagName: 'v0.0.5', baseSha: sha('c5') }], { views: [{ settings, startTag: null }] });
     expect(kept.deleteTagNames).toEqual([]);
+  });
+
+  it('a start tag: ranges only for the tags after it (a short list, so it catches up fast)', () => {
+    const plan = m.planTagRanges(fifty(), [{ tagName: 'v0.0.20', sha: sha('c20'), baseTagName: 'v0.0.19', baseSha: sha('c19') }], {
+      perSync: Number.MAX_SAFE_INTEGER,
+      views: [{ settings, startTag: { name: 'v0.0.47', sha: sha('c47') } }],
+    });
+    expect(plan.work.map((w) => w.tag.name)).toEqual(['v0.0.49', 'v0.0.48']);
+    expect(plan.deleteTagNames).toEqual(['v0.0.20']);
+    // Two workspaces release it: the OLDER baseline decides.
+    const two = m.planTagRanges(fifty(), [], {
+      perSync: Number.MAX_SAFE_INTEGER,
+      views: [
+        { settings, startTag: { name: 'v0.0.47', sha: sha('c47') } },
+        { settings, startTag: { name: 'v0.0.44', sha: sha('c44') } },
+      ],
+    });
+    expect(two.work).toHaveLength(5);
+  });
+
+  it('no workspace releases the repo → no range at all, and stored ones are dropped', () => {
+    const plan = m.planTagRanges(fifty(), [{ tagName: 'v0.0.49', sha: sha('c49'), baseTagName: 'v0.0.48', baseSha: sha('c48') }], { views: [] });
+    expect(plan.work).toEqual([]);
+    expect(plan.deleteTagNames).toEqual(['v0.0.49']);
   });
 });
 
@@ -135,6 +163,9 @@ describe('computeTagRanges (DB)', () => {
   const commitPrCalls: string[][] = [];
   const compareLists: Record<string, string[]> = {};
   const deps: TagRangeDeps = {
+    // One workspace releases this repo, with no start tag and a suffix no tag here ends in (no baseline:
+    // the whole window gets ranges).
+    views: () => [{ settings: { releaseSuffix: '-final', hotfixSuffix: '-hf' }, startTag: null }],
     compare: async (base: string, head: string, page: number) => {
       compareCalls.push(`${base.slice(0, 2)}...${head.slice(0, 2)}#${page}`);
       const list = compareLists[`${base}...${head}`] ?? [];

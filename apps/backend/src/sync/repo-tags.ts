@@ -10,7 +10,9 @@
 //      every absent tag when the read was complete, else only absent tags inside the read window
 //      (no older than the oldest tag read). `repos.tags_signature` records what was read, so the
 //      settle sweep can tell a tag push from nothing (sync/settle-sweep.ts).
-//   3. ANCESTRY, bounded (ANCESTRY_CHECKS_PER_SYNC, newest first): is the tagged commit on the
+//   3. ANCESTRY, ONLY FOR A RELEASABLE REPO (the tags step passes `ancestryCap`: 0 for a repo no
+//      workspace releases, ANCESTRY_CHECKS_RELEASABLE — every tag read — for one that is), newest
+//      first: is the tagged commit on the
 //      default branch? One REST compare `tag...head` (per_page=1) per tag: 'ahead' / 'identical'
 //      means the tag is an ancestor of the head. `true` is final for that sha; `false` is asked
 //      again when the head moves (a branch can be merged later). Skipped while the account's
@@ -37,8 +39,11 @@ import {
 
 const { repos, repoTags } = schema;
 
-/** Ancestry compares per sync. The rest wait for the next sync. */
+/** Ancestry compares per sync by default (the planner's own default). The rest wait for the next sync. */
 export const ANCESTRY_CHECKS_PER_SYNC = 20;
+/** Ancestry compares per run for a RELEASABLE repo: every tag the read can return, so one run catches up
+ *  when the budget allows (the budget check still stops it early). */
+export const ANCESTRY_CHECKS_RELEASABLE = REPO_TAGS_READ_CAP;
 
 export interface TagSyncLogger {
   info: (msg: string, ...args: unknown[]) => void;
@@ -243,6 +248,9 @@ export interface SyncRepoTagsOptions {
   accountId: number;
   token: string;
   log?: TagSyncLogger;
+  /** Ancestry compares this run (default ANCESTRY_CHECKS_PER_SYNC); 0 = none (a repo no workspace
+   *  releases: nothing needs to know whether its tags are on the default branch). */
+  ancestryCap?: number;
   /** Test seams; production reads GitHub. */
   deps?: {
     readTags?: () => Promise<RepoTagsResponse>;
@@ -259,6 +267,8 @@ export interface RepoTagSyncResult {
   deleted: number;
   dropped: number;
   ancestryChecked: number;
+  /** Tags still to ask about (the cap or the budget stopped the run). */
+  ancestryLeft: number;
   defaultBranchName: string | null;
   headSha: string | null;
   cost: number;
@@ -279,6 +289,7 @@ export async function syncRepoTags(opts: SyncRepoTagsOptions): Promise<RepoTagSy
     deleted: 0,
     dropped: 0,
     ancestryChecked: 0,
+    ancestryLeft: 0,
     defaultBranchName: null,
     headSha: null,
     cost: 0,
@@ -398,13 +409,15 @@ export async function syncRepoTags(opts: SyncRepoTagsOptions): Promise<RepoTagSy
   if (result.moved > 0) log?.info(`tags ${fullName}: ${result.moved} tag(s) moved to another commit`);
 
   // ANCESTRY — after the write, outside the transaction (a network call never holds the lock).
-  if (result.headSha != null) {
-    result.ancestryChecked = await checkAncestry(opts, result.headSha, now);
+  if (result.headSha != null && (opts.ancestryCap ?? ANCESTRY_CHECKS_PER_SYNC) > 0) {
+    const { checked, left } = await checkAncestry(opts, result.headSha, now);
+    result.ancestryChecked = checked;
+    result.ancestryLeft = left;
   }
   return result;
 }
 
-async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Date): Promise<number> {
+async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Date): Promise<{ checked: number; left: number }> {
   const { owner, name, repoId, accountId, token, log } = opts;
   const rows = await db
     .select({
@@ -433,15 +446,18 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
       .execute();
   };
   for (const t of inheritedAncestry(rows)) await write(t, true);
-  const targets = ancestryTargets(rows, headSha);
+  const all = ancestryTargets(rows, headSha, Number.MAX_SAFE_INTEGER);
+  const targets = all.slice(0, opts.ancestryCap ?? ANCESTRY_CHECKS_PER_SYNC);
   // Every tag on an asked commit takes the answer (one request per commit).
   const sameCommit = (sha: string): Array<{ name: string; sha: string }> =>
     rows
       .filter((r) => r.sha === sha && (r.onDefaultBranch == null || (r.onDefaultBranch === false && r.ancestryHeadSha !== headSha)))
       .map((r) => ({ name: r.name, sha: r.sha }));
   let checked = 0;
+  let asked = 0;
   for (const t of targets) {
     if (isLimited(accountId) || isBudgetLow(accountId)) break;
+    asked += 1;
     let onBranch: boolean | undefined;
     if (t.sha === headSha) onBranch = true;
     else {
@@ -454,6 +470,7 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
         const rl = isRateLimitError(err);
         if (rl.limited) {
           noteLimited(accountId, rl.resumeAt);
+          asked -= 1;
           break;
         }
         log?.warn(`tags ${owner}/${name}: ancestry of ${t.name} unknown (non-fatal): ${errMsg(err)}`);
@@ -464,7 +481,7 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
     checked += 1;
     for (const same of sameCommit(t.sha)) await write(same, onBranch);
   }
-  return checked;
+  return { checked, left: all.length - asked };
 }
 
 /** `syncRepoTags` that NEVER THROWS: a failure is a warn line and changes nothing stored. */

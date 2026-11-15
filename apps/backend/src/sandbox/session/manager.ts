@@ -1893,7 +1893,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         hotfixInfo.set(r.repoId, { tagName: rel.tagName, readOnly: false, mainBaseRef });
       } else {
         bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: stored?.baseRef ?? defaultRef, baseSha: stored?.baseSha || null, pinRef });
-        labels.set(r.repoId, { label: r.defaultBranch ?? 'the default branch', note: 'Read only in this hotfix build: no release yet.' });
+        labels.set(r.repoId, { label: r.defaultBranch ?? 'the default branch', note: 'Read only in this hotfix build: no release here.' });
         hotfixInfo.set(r.repoId, { tagName: null, readOnly: true, mainBaseRef: null });
       }
       stacked.set(r.repoId, null);

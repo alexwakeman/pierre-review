@@ -1,27 +1,29 @@
 // THE RELEASE CHECK (docs/RELEASES.md § The release check) — ONE pure fold, DB-only inputs.
 //
-// Per repo the CANDIDATE is the newest version tag after the BASELINE (the newest release tag on the
-// default branch) whose range holds no pull request linked to a ticket that is not ready. A ticket is
-// not ready when it is:
-//   • not Done (the workspace's Complete stage — the caller resolves that through the This Sprint
-//     stage resolver and hands `done` in);
-//   • unreadable (`not_found` / `no_access` / `failed`, or never read on the workspace's site);
-//   • on an OPEN pull request into the default branch;
-//   • NOT SHIPPING WHOLE: the candidates would ship some of its merged pull requests into the default
-//     branch while another one, in any of its repos, is not inside that repo's candidate. Holding it
-//     moves candidates back, which can make more tickets ship in part, so the check REPEATS until
-//     nothing changes (a held ticket stays held, candidates only move back: it ends). A ticket wholly
-//     past every candidate ships nothing and holds nothing (it is ready, just not in this release).
+// ONLY THE WORKSPACE'S RELEASABLE REPOSITORIES are folded ("Released from this workspace", Settings →
+// Releases); the caller hands in no other. EACH REPOSITORY IS JUDGED ON ITS OWN: its CANDIDATE is the
+// newest version tag on the default branch after its BASELINE whose range holds no pull request linked
+// to a ticket that is not Done. A ticket holds a tag when it is:
+//   • not Done (the workspace's Complete stage — the caller resolves that through the This Sprint stage
+//     resolver and hands `done` in);
+//   • unreadable (`not_found` / `no_access` / `failed`, or never read on the workspace's site): Done is
+//     unknown.
+// Nothing else about pull requests across repositories counts (no "ships whole", no "open work"). A tag
+// whose changes are not all read yet (`pending`) cannot be the candidate, and is said as "Reading
+// changes…", never as a ticket blocker; a tag with more commits than are read (`too_large`) holds.
 // Authorship never changes a block (a bot PR on a not-done ticket blocks). A human PR with no ticket is
-// a WARNING; a bot PR with no ticket is listed under "Dependency and bot changes". A linked repo with
-// no pull request for the ticket is a warning — unless it has one into another branch (`hotfix_only`: a
-// hotfix not needed on the default branch). A pull request into any other branch (a hotfix branch)
-// never counts — the caller marks it `intoDefaultBranch: false` and the stored ranges never hold it.
+// a WARNING; a bot PR with no ticket is listed under "Dependency and bot changes". A pull request into
+// any other branch (a hotfix branch) is never in a stored range.
+//
+// THE BASELINE is the newer of: the newest RELEASE tag on the default branch, and the reader's START TAG
+// ("Start from this tag": a version tag on the default branch; everything up to and including it is
+// treated as accepted). A start tag that moved to another commit or is gone is not used (said on the
+// row). With no baseline, only the newest TAG_RANGE_WINDOW tags are checked.
 //
 // RANGES are the stored per-tag INCREMENTS (previous default-branch tag, tag] (backend
 // sync/tag-ranges.ts). A version tag's range from the baseline is the sum of the increments after the
 // baseline, in `compareTagOrder` order. An increment that is missing or stale (its tag moved, or its
-// base is no longer the previous tag) is PENDING: that tag cannot be a candidate yet.
+// base is no longer the previous tag) is PENDING.
 //
 // The fold never reads the clock and never fetches. Timestamps come in as Date and go out as ISO-8601.
 import { tagKind, releaseTagName, type ReleaseSettings, type TagKind } from './releases.js';
@@ -29,9 +31,8 @@ import { tagKind, releaseTagName, type ReleaseSettings, type TagKind } from './r
 /** A ticket's read state, as `tracker_tickets.state` stores it; `not_read` = no row on the site. */
 export type ReleaseTicketReadState = 'ok' | 'not_found' | 'no_access' | 'failed' | 'not_read';
 
-/** The newest tags on the default branch that always get a stored range (sync/tag-ranges.ts). The
- *  sync ALSO computes every range after a workspace's baseline; with no baseline, a tag older than
- *  this window is treated like a PR older than the synced history (not checked). */
+/** With NO baseline, the newest tags on the default branch that are checked (and get a stored range,
+ *  sync/tag-ranges.ts). Older tags are treated like PRs older than the synced history: not listed. */
 export const TAG_RANGE_WINDOW = 40;
 
 export interface TagOrderKey {
@@ -52,22 +53,76 @@ export function compareTagOrder(a: TagOrderKey, b: TagOrderKey): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
+/** The reader's "Start from this tag" for one repository, as stored (name + the commit it was at). */
+export interface ReleaseStartTag {
+  name: string;
+  sha: string;
+}
+
+/** Why a stored start tag is not used: it now points at another commit, or it is no longer a version
+ *  tag on the default branch (deleted, or the suffixes changed). */
+export type ReleaseStartProblem = 'moved' | 'missing';
+
+export interface BaselineTag extends TagOrderKey {
+  sha: string;
+  onDefaultBranch: boolean | null;
+}
+
 /**
- * The oldest index of `ordered` (default-branch tags, oldest first by `compareTagOrder`) that must
- * have a stored range: the window's start, or earlier — just after the OLDEST baseline any of these
- * workspaces' suffixes give, so a baseline more than the window behind still gets every range after
- * it. Pure.
+ * THE BASELINE of one repository (pure; the fold and the range planner share it). `ordered` = the tags on
+ * the default branch with a commit date, oldest first (`compareTagOrder`); `all` = every stored tag (to
+ * tell a MOVED start tag from a missing one). `idx` = the ordered index of the baseline (−1 = none); the
+ * newer of the newest release tag and the start tag wins.
+ */
+export function releaseBaselineOf<T extends BaselineTag>(
+  ordered: readonly T[],
+  all: readonly BaselineTag[],
+  settings: ReleaseSettings,
+  startTag: ReleaseStartTag | null,
+): { idx: number; kind: 'release' | 'start' | null; releaseIdx: number; startIdx: number; startProblem: ReleaseStartProblem | null } {
+  let releaseIdx = -1;
+  for (let i = 0; i < ordered.length; i += 1) if (tagKind(ordered[i]!.name, settings) === 'release') releaseIdx = i;
+  let startIdx = -1;
+  let startProblem: ReleaseStartProblem | null = null;
+  if (startTag != null) {
+    const stored = all.find((t) => t.name === startTag.name);
+    if (stored == null) startProblem = 'missing';
+    else if (stored.sha !== startTag.sha) startProblem = 'moved';
+    else {
+      startIdx = ordered.findIndex((t) => t.name === startTag.name);
+      const kind = tagKind(startTag.name, settings);
+      if (startIdx < 0 || (kind != null && kind !== 'version')) {
+        startIdx = -1;
+        startProblem = 'missing';
+      }
+    }
+  }
+  const idx = Math.max(releaseIdx, startIdx);
+  return { idx, kind: idx < 0 ? null : idx === releaseIdx ? 'release' : 'start', releaseIdx, startIdx, startProblem };
+}
+
+/** One workspace's view of a repository the range planner serves: its suffixes and its start tag. */
+export interface ReleaseRangeView {
+  settings: ReleaseSettings;
+  startTag: ReleaseStartTag | null;
+}
+
+/**
+ * The oldest index of `ordered` (default-branch tags, oldest first by `compareTagOrder`) that must have a
+ * stored range, given every workspace that RELEASES this repository: just after the OLDEST baseline any
+ * of them gives, or the window's start for one with no baseline. No such workspace ⇒ `ordered.length`
+ * (no range is needed at all). Pure.
  */
 export function tagRangeKeepFrom(
-  ordered: readonly TagOrderKey[],
-  settingsList: readonly ReleaseSettings[],
+  ordered: readonly BaselineTag[],
+  all: readonly BaselineTag[],
+  views: readonly ReleaseRangeView[],
   window: number = TAG_RANGE_WINDOW,
 ): number {
-  let from = Math.max(0, ordered.length - window);
-  for (const st of settingsList) {
-    let b = -1;
-    for (let i = 0; i < ordered.length; i += 1) if (tagKind(ordered[i]!.name, st) === 'release') b = i;
-    if (b >= 0) from = Math.min(from, b + 1);
+  let from = ordered.length;
+  for (const v of views) {
+    const b = releaseBaselineOf(ordered, all, v.settings, v.startTag);
+    from = Math.min(from, b.idx >= 0 ? b.idx + 1 : Math.max(0, ordered.length - window));
   }
   return from;
 }
@@ -88,7 +143,7 @@ export function latestReleaseTag<T extends TagOrderKey>(tags: readonly T[], sett
   return best;
 }
 
-// ── Input ───────────────────────────────────────────────────────────────────────────────────────
+// ── Input ──────────────────────────────────────────────────────────────────────────────────────
 
 export interface ReleaseCheckTagInput extends TagOrderKey {
   sha: string;
@@ -121,6 +176,8 @@ export interface ReleaseCheckRepoInput {
   writable: boolean;
   tags: ReleaseCheckTagInput[];
   ranges: ReleaseCheckRangeInput[];
+  /** The reader's "Start from this tag" (null = none), with who set it and when. */
+  startTag?: (ReleaseStartTag & { setBy: string | null; setAt: Date | null }) | null;
 }
 
 export interface ReleaseCheckPrInput {
@@ -152,36 +209,24 @@ export interface ReleaseCheckTicketInput {
 
 export interface ReleaseCheckInput {
   settings: ReleaseSettings;
+  /** The workspace's RELEASABLE repositories only. */
   repos: ReleaseCheckRepoInput[];
-  /** Every PR in a stored range, plus every open / merged PR on a ticket any of them names. */
+  /** Every PR in a stored range. */
   prs: ReleaseCheckPrInput[];
   tickets: ReleaseCheckTicketInput[];
-  /** The reader's accepted repos per ticket (`sprint_ticket_repos`). */
-  acceptedRepos: Array<{ ident: string; repoId: number }>;
 }
 
 // ── Output ──────────────────────────────────────────────────────────────────────────────────────
 
-/** Why a version tag (or a ticket) is held back. */
+/** Why a version tag is held back: a ticket by its own state, or a tag too large to read. */
 export type ReleaseBlocker =
   | { kind: 'not_done'; ident: string; key: string; statusName: string | null }
   | { kind: 'unreadable'; ident: string; key: string; reason: Exclude<ReleaseTicketReadState, 'ok'> }
-  | { kind: 'open_pr'; ident: string; key: string; repoId: number; prId: number }
-  | {
-      kind: 'not_whole';
-      ident: string;
-      key: string;
-      /** Each merged PR into the default branch that is not inside its repo's candidate. `tagName`
-       *  null = merged but in no version tag yet. */
-      missing: Array<{ repoId: number; prId: number; tagName: string | null }>;
-    }
-  /** The tag's changes are not all read yet; `too_large` = its compare has more commits than are
-   *  read (`truncated`), so they cannot be checked at all. */
-  | { kind: 'range_pending'; tagName: string; reason?: 'too_large' };
+  /** The tag's compare has more commits than are read (`truncated`): its changes cannot be checked. */
+  | { kind: 'too_large'; tagName: string };
 
 export type ReleaseWarning =
   | { kind: 'untracked_pr'; repoId: number; prId: number }
-  | { kind: 'linked_no_pr'; ident: string; key: string; repoId: number }
   | { kind: 'unsynced_prs'; repoId: number; count: number };
 
 export interface ReleaseTagRef {
@@ -193,7 +238,7 @@ export interface ReleaseTagRef {
 export interface ReleaseTagCheck extends ReleaseTagRef {
   moved: boolean;
   isCandidate: boolean;
-  /** Held back: by its own blockers, or by an earlier version tag's. */
+  /** Held back: by its own blockers or pending changes, or by an earlier version tag's. */
   blocked: boolean;
   /** What this tag ADDS (since the previous version tag or the baseline) that holds it back. */
   blockers: ReleaseBlocker[];
@@ -201,13 +246,23 @@ export interface ReleaseTagCheck extends ReleaseTagRef {
   prIds: number[];
   /** Ticket idents on those PRs. */
   ticketIdents: string[];
+  /** Its changes are not all read yet ("Reading changes…"): it cannot be the candidate yet. */
   pending: boolean;
   unmatchedCommits: number;
   truncated: boolean;
   unresolvedPrCount: number;
 }
 
-export type ReleaseRepoStatus = 'candidate' | 'blocked' | 'nothing_new';
+/** candidate · blocked (a ticket or a too-large tag holds the first tag) · reading (the first tag's
+ *  changes are not read yet) · nothing_new (no version tag after the baseline). */
+export type ReleaseRepoStatus = 'candidate' | 'blocked' | 'reading' | 'nothing_new';
+
+export interface ReleaseRepoStartTag extends ReleaseStartTag {
+  setBy: string | null;
+  setAt: string | null;
+  /** Not used, and why; null = it is the start (or a newer release tag is the baseline). */
+  problem: ReleaseStartProblem | null;
+}
 
 export interface ReleaseRepoCheck {
   repoId: number;
@@ -215,16 +270,25 @@ export interface ReleaseRepoCheck {
   name: string;
   writable: boolean;
   status: ReleaseRepoStatus;
-  /** `nothing_new` only: no tags at all, or none after the baseline. */
+  /** `nothing_new` only: no version tag on the default branch at all, or none after the baseline. */
   nothingNewReason: 'no_tags' | 'no_new_tags' | null;
-  baseline: ReleaseTagRef | null;
+  /** The newest version tag on the default branch (null = none). */
+  latestVersion: ReleaseTagRef | null;
+  /** The newer of the newest release tag on the default branch and the start tag. */
+  baseline: (ReleaseTagRef & { kind: 'release' | 'start' }) | null;
+  /** The reader's start tag, as stored (null = none). */
+  startTag: ReleaseRepoStartTag | null;
   /** The newest release OR hotfix tag (any branch) — the hotfix base. */
   latestRelease: (ReleaseTagRef & { kind: 'release' | 'hotfix' }) | null;
   candidate: (ReleaseTagRef & { releaseTagName: string; releaseTagExists: boolean }) | null;
   /** The first held-back version tag (newest-first order puts it after the candidate). */
   firstBlocked: string | null;
+  /** Some tag after the baseline has changes not read yet. */
+  reading: boolean;
   /** Version tags after the baseline, NEWEST first. */
   tags: ReleaseTagCheck[];
+  /** Every version tag on the default branch, NEWEST first (the start-tag picker), at most 100. */
+  versionTags: ReleaseTagRef[];
   /** Tickets in (baseline, candidate]. */
   ticketIdents: string[];
   /** Human PRs with no ticket in (baseline, candidate]. */
@@ -232,18 +296,12 @@ export interface ReleaseRepoCheck {
   /** Bot PRs with no ticket in (baseline, candidate] — "Dependency and bot changes". */
   botPrIds: number[];
   warningCount: number;
-  /** No baseline: PRs merged before the synced history are not checked (said in ONE line). */
+  /** No baseline: only the newest TAG_RANGE_WINDOW tags are checked (said in ONE line). */
   noBaseline: boolean;
 }
 
-export type ReleaseTicketRepoState =
-  | 'in_candidate'
-  | 'released'
-  | 'merged_after_candidate'
-  | 'open_pr'
-  | 'linked_no_pr'
-  /** Linked, with pull requests into another branch only (a hotfix branch): no warning. */
-  | 'hotfix_only';
+/** A ticket in one repository: in that repository's candidate, or in a tag after it. */
+export type ReleaseTicketRepoState = 'in_candidate' | 'after_candidate';
 
 export interface ReleaseTicketCheck {
   ident: string;
@@ -253,10 +311,13 @@ export interface ReleaseTicketCheck {
   statusName: string | null;
   done: boolean;
   readState: ReleaseTicketReadState;
+  /** Done and readable. */
   ready: boolean;
-  /** Ready and in at least one candidate. */
+  /** Ready and in at least one repository's candidate. */
   inRelease: boolean;
-  blocker: ReleaseBlocker | null;
+  /** Its own state when not ready (not Done, unreadable). */
+  blocker: Extract<ReleaseBlocker, { kind: 'not_done' | 'unreadable' }> | null;
+  /** Per releasable repository it appears in (after the baseline). */
   repos: Array<{ repoId: number; state: ReleaseTicketRepoState; prIds: number[] }>;
 }
 
@@ -278,9 +339,10 @@ export interface ReleaseCheckResult {
   /** Warnings for what the release would ship (the candidates). Never block. */
   warnings: ReleaseWarning[];
   prs: ReleaseCheckPr[];
-  /** Rounds of the ships-whole rule until nothing changed (≥ 1). */
-  rounds: number;
 }
+
+/** The version tags listed for the start-tag picker. */
+export const RELEASE_VERSION_TAGS_MAX = 100;
 
 // ── The fold ────────────────────────────────────────────────────────────────────────────────────
 
@@ -290,7 +352,7 @@ const ref = (t: ReleaseCheckTagInput): ReleaseTagRef => ({ name: t.name, sha: t.
 /** One version tag after the baseline and the ordered indexes its increment spans. */
 interface Span {
   tagIdx: number;
-  /** A compare in the span was truncated: its PRs cannot all be known (holds, like `pending`). */
+  /** A compare in the span was truncated: its PRs cannot all be known (holds). */
   tooLarge: boolean;
   /** Ordered indexes (prevVersionOrBaseline, tagIdx]. */
   from: number;
@@ -301,19 +363,15 @@ interface Span {
   unresolved: number;
 }
 
-interface RepoPrep {
-  input: ReleaseCheckRepoInput;
-  ordered: ReleaseCheckTagInput[];
-  baselineIdx: number;
-  spans: Span[];
-  /** PR id → ordered index of the increment holding it. */
-  pos: Map<number, number>;
-  /** PRs merged no later than this (ms) and in no range are older than the read history. */
-  floorMs: number | null;
-  latestRelease: ReleaseRepoCheck['latestRelease'];
-}
+type TicketBlocker = Extract<ReleaseBlocker, { kind: 'not_done' | 'unreadable' }>;
 
-function prepRepo(repo: ReleaseCheckRepoInput, settings: ReleaseSettings): RepoPrep {
+/** Fold ONE releasable repository. Pure. */
+function foldRepo(
+  repo: ReleaseCheckRepoInput,
+  settings: ReleaseSettings,
+  prById: ReadonlyMap<number, ReleaseCheckPrInput>,
+  blockerOf: (ident: string) => TicketBlocker | null,
+): { out: ReleaseRepoCheck; spans: Span[]; candidateSpan: number; ordered: ReleaseCheckTagInput[] } {
   const kindOf = (name: string): TagKind | null => tagKind(name, settings);
   const ordered = repo.tags.filter((t) => t.onDefaultBranch === true && t.committedAt != null).sort(compareTagOrder);
   const rangeByName = new Map(repo.ranges.map((r) => [r.tagName, r]));
@@ -325,35 +383,30 @@ function prepRepo(repo: ReleaseCheckRepoInput, settings: ReleaseSettings): RepoP
     if (r.baseTagName !== (prev?.name ?? null) || r.baseSha !== (prev?.sha ?? null)) return null;
     return r;
   };
-  const pos = new Map<number, number>();
-  let floorMs: number | null = null;
-  for (let i = 0; i < ordered.length; i += 1) {
-    const r = valid(i);
-    if (r == null) continue;
-    if (floorMs == null) {
-      const at = r.method === 'history' ? ordered[i]!.committedAt : (ordered[i - 1]?.committedAt ?? null);
-      floorMs = at?.getTime() ?? null;
-    }
-    for (const id of r.prIds) if (!pos.has(id)) pos.set(id, i);
-  }
-  let baselineIdx = -1;
-  for (let i = 0; i < ordered.length; i += 1) if (kindOf(ordered[i]!.name) === 'release') baselineIdx = i;
+  const start = repo.startTag ?? null;
+  const base = releaseBaselineOf(ordered, repo.tags, settings, start);
+  const baselineIdx = base.idx;
   const baselineSha = baselineIdx >= 0 ? ordered[baselineIdx]!.sha : null;
+  // With no baseline only the window is checked: older tags are not listed (like PRs older than the
+  // synced history).
+  const firstIdx = baselineIdx >= 0 ? baselineIdx + 1 : Math.max(0, ordered.length - TAG_RANGE_WINDOW);
+
+  // A PR is counted in the FIRST increment that holds it.
+  const pos = new Map<number, number>();
+  for (let i = firstIdx; i < ordered.length; i += 1) {
+    const r = valid(i);
+    if (r != null) for (const id of r.prIds) if (!pos.has(id)) pos.set(id, i);
+  }
 
   const spans: Span[] = [];
-  const windowStart = ordered.length - TAG_RANGE_WINDOW;
-  let from = baselineIdx + 1;
-  for (let i = baselineIdx + 1; i < ordered.length; i += 1) {
+  let from = firstIdx;
+  for (let i = firstIdx; i < ordered.length; i += 1) {
     const t = ordered[i]!;
     if (kindOf(t.name) !== 'version' || t.sha === baselineSha) continue;
     const span: Span = { tagIdx: i, from, tooLarge: false, pending: false, prIds: [], unmatched: 0, truncated: false, unresolved: 0 };
     for (let j = from; j <= i; j += 1) {
       const r = valid(j);
       if (r == null) {
-        // Older than the stored ranges' window with no baseline: like a PR older than the synced
-        // history, not checked (the no-baseline line says so). With a baseline the sync computes
-        // every range after it, so a missing one is only not read YET.
-        if (baselineIdx < 0 && j < windowStart) continue;
         span.pending = true;
         continue;
       }
@@ -367,270 +420,160 @@ function prepRepo(repo: ReleaseCheckRepoInput, settings: ReleaseSettings): RepoP
     from = i + 1;
   }
 
-  const latestHit = latestReleaseTag(repo.tags, settings);
-  const latest = latestHit?.tag ?? null;
-  const latestKind = latestHit?.kind ?? null;
-  return {
-    input: repo,
-    ordered,
-    baselineIdx,
-    spans,
-    pos,
-    floorMs,
-    latestRelease: latest != null && latestKind != null ? { ...ref(latest), kind: latestKind } : null,
-  };
-}
-
-/** Run the release check. Pure. */
-export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
-  const preps = input.repos.map((r) => prepRepo(r, input.settings));
-  const prepById = new Map(preps.map((p) => [p.input.repoId, p]));
-  const prById = new Map(input.prs.map((p) => [p.id, p]));
-  const ticketByIdent = new Map(input.tickets.map((t) => [t.ident, t]));
-  const ticketOf = (ident: string): ReleaseCheckTicketInput =>
-    ticketByIdent.get(ident) ?? {
-      ident,
-      key: ident,
-      title: null,
-      url: null,
-      statusName: null,
-      done: false,
-      readState: 'not_read',
-    };
-
-  // Every PR per ticket (any repo of the workspace), merged / open into the default branch only.
-  const mergedByTicket = new Map<string, ReleaseCheckPrInput[]>();
-  const openByTicket = new Map<string, ReleaseCheckPrInput[]>();
-  for (const p of input.prs) {
-    if (!p.intoDefaultBranch || !prepById.has(p.repoId)) continue;
-    const into = p.state === 'merged' ? mergedByTicket : p.state === 'open' ? openByTicket : null;
-    if (into == null) continue;
-    for (const ident of new Set(p.ticketIdents)) into.set(ident, [...(into.get(ident) ?? []), p]);
-  }
-  // A ticket's open / merged PRs into ANOTHER branch (a hotfix branch). They never count toward a release;
-  // they only keep a linked repo from reading "no pull request" (a hotfix whose port report said main
-  // does not need it opens no default-branch PR there).
-  const otherBranchByTicket = new Map<string, ReleaseCheckPrInput[]>();
-  for (const p of input.prs) {
-    if (p.intoDefaultBranch || p.state === 'closed') continue;
-    for (const ident of new Set(p.ticketIdents)) otherBranchByTicket.set(ident, [...(otherBranchByTicket.get(ident) ?? []), p]);
-  }
-
-  // THE POPULATION: tickets on a PR in any repo's range after its baseline.
-  const population: string[] = [];
-  const seen = new Set<string>();
-  for (const prep of preps) {
-    for (const span of prep.spans) {
-      for (const id of span.prIds) {
-        for (const ident of prById.get(id)?.ticketIdents ?? []) {
-          if (!seen.has(ident)) {
-            seen.add(ident);
-            population.push(ident);
-          }
+  const ticketBlockers = (span: Span): TicketBlocker[] => {
+    const out: TicketBlocker[] = [];
+    const named = new Set<string>();
+    for (const id of span.prIds) {
+      for (const ident of prById.get(id)?.ticketIdents ?? []) {
+        const b = blockerOf(ident);
+        if (b != null && !named.has(ident)) {
+          named.add(ident);
+          out.push(b);
         }
       }
-    }
-  }
-
-  // Ticket-level blocks that do not depend on candidates.
-  const blocked = new Map<string, ReleaseBlocker>();
-  for (const ident of population) {
-    const t = ticketOf(ident);
-    if (t.readState !== 'ok') blocked.set(ident, { kind: 'unreadable', ident, key: t.key, reason: t.readState });
-    else if (!t.done) blocked.set(ident, { kind: 'not_done', ident, key: t.key, statusName: t.statusName });
-    else {
-      const open = (openByTicket.get(ident) ?? []).sort((a, b) => a.repoId - b.repoId || a.number - b.number)[0];
-      if (open != null) blocked.set(ident, { kind: 'open_pr', ident, key: t.key, repoId: open.repoId, prId: open.id });
-    }
-  }
-
-  const posOf = (prep: RepoPrep, p: ReleaseCheckPrInput): number => {
-    const at = prep.pos.get(p.id);
-    if (at != null) return at;
-    const merged = p.mergedAt?.getTime() ?? null;
-    if (merged != null && prep.floorMs != null && merged <= prep.floorMs) return Number.NEGATIVE_INFINITY;
-    return Number.POSITIVE_INFINITY;
-  };
-
-  /** Per repo: the candidate's span index (−1 = none) and the cover index (what is released or in the candidate). */
-  const candidates = (): Map<number, { spanIdx: number; coverIdx: number }> => {
-    const out = new Map<number, { spanIdx: number; coverIdx: number }>();
-    for (const prep of preps) {
-      let spanIdx = -1;
-      for (let s = 0; s < prep.spans.length; s += 1) {
-        const span = prep.spans[s]!;
-        const held =
-          span.pending ||
-          span.tooLarge ||
-          span.prIds.some((id) => (prById.get(id)?.ticketIdents ?? []).some((ident) => blocked.has(ident)));
-        if (held) break;
-        spanIdx = s;
-      }
-      const coverIdx = spanIdx >= 0 ? prep.spans[spanIdx]!.tagIdx : prep.baselineIdx;
-      out.set(prep.input.repoId, { spanIdx, coverIdx });
     }
     return out;
   };
 
-  // THE SHIPS-WHOLE RULE, to a fixpoint.
-  let cands = candidates();
-  let rounds = 0;
-  for (;;) {
-    rounds += 1;
-    const added: Array<[string, ReleaseBlocker]> = [];
-    for (const ident of population) {
-      if (blocked.has(ident)) continue;
-      const missing: Array<{ repoId: number; prId: number; tagName: string | null }> = [];
-      let shipping = false;
-      for (const p of mergedByTicket.get(ident) ?? []) {
-        const prep = prepById.get(p.repoId)!;
-        const at = posOf(prep, p);
-        if (at <= cands.get(p.repoId)!.coverIdx) {
-          if (at > prep.baselineIdx) shipping = true;
-          continue;
-        }
-        missing.push({ repoId: p.repoId, prId: p.id, tagName: Number.isFinite(at) ? taggedIn(prep, at) : null });
-      }
-      // Only a ticket the candidates would ship IN PART is held: one wholly past every candidate ships
-      // nothing and holds nothing. Once held it stays held (that is what keeps the rounds monotone).
-      if (shipping && missing.length > 0) added.push([ident, { kind: 'not_whole', ident, key: ticketOf(ident).key, missing }]);
-    }
-    if (added.length === 0) break;
-    for (const [ident, b] of added) blocked.set(ident, b);
-    cands = candidates();
+  // The candidate: the newest span with nothing held at or before it.
+  let candidateSpan = -1;
+  for (let s = 0; s < spans.length; s += 1) {
+    const span = spans[s]!;
+    if (span.pending || span.tooLarge || ticketBlockers(span).length > 0) break;
+    candidateSpan = s;
   }
 
-  // ── Build the output ──
-  const accepted = new Map<string, Set<number>>();
-  for (const a of input.acceptedRepos) {
-    if (!prepById.has(a.repoId)) continue;
-    const s = accepted.get(a.ident) ?? new Set<number>();
-    s.add(a.repoId);
-    accepted.set(a.ident, s);
+  const tags: ReleaseTagCheck[] = spans.map((span, s) => {
+    const t = ordered[span.tagIdx]!;
+    const blockers: ReleaseBlocker[] = [];
+    if (span.tooLarge) blockers.push({ kind: 'too_large', tagName: t.name });
+    blockers.push(...ticketBlockers(span));
+    const idents: string[] = [];
+    for (const id of span.prIds) for (const ident of prById.get(id)?.ticketIdents ?? []) if (!idents.includes(ident)) idents.push(ident);
+    return {
+      ...ref(t),
+      moved: t.moved,
+      isCandidate: s === candidateSpan,
+      blocked: s > candidateSpan,
+      blockers,
+      prIds: [...span.prIds],
+      ticketIdents: idents,
+      pending: span.pending,
+      unmatchedCommits: span.unmatched,
+      truncated: span.truncated,
+      unresolvedPrCount: span.unresolved,
+    };
+  });
+
+  const ticketIdents: string[] = [];
+  const untrackedPrIds: number[] = [];
+  const botPrIds: number[] = [];
+  for (const span of candidateSpan >= 0 ? spans.slice(0, candidateSpan + 1) : []) {
+    for (const id of span.prIds) {
+      const p = prById.get(id);
+      if (p == null) continue;
+      if (p.ticketIdents.length === 0) (p.isBot ? botPrIds : untrackedPrIds).push(id);
+      for (const ident of p.ticketIdents) if (!ticketIdents.includes(ident)) ticketIdents.push(ident);
+    }
   }
+
+  const candTag = candidateSpan >= 0 ? ordered[spans[candidateSpan]!.tagIdx]! : null;
+  const suffix = settings.releaseSuffix ?? '';
+  const candidate =
+    candTag == null
+      ? null
+      : {
+          ...ref(candTag),
+          releaseTagName: releaseTagName(candTag.name, suffix),
+          releaseTagExists: repo.tags.some((t) => t.name === releaseTagName(candTag.name, suffix)),
+        };
+  const firstHeld = spans[candidateSpan + 1] ?? null;
+  const versions = ordered.filter((t) => kindOf(t.name) === 'version');
+  const latestVersion = versions.length > 0 ? ref(versions[versions.length - 1]!) : null;
+  const status: ReleaseRepoStatus =
+    spans.length === 0 ? 'nothing_new' : candidate != null ? 'candidate' : firstHeld?.pending === true && !firstHeld.tooLarge ? 'reading' : 'blocked';
+  const latestHit = latestReleaseTag(repo.tags, settings);
+  const out: ReleaseRepoCheck = {
+    repoId: repo.repoId,
+    fullName: repo.fullName,
+    name: repo.name,
+    writable: repo.writable,
+    status,
+    nothingNewReason: spans.length > 0 ? null : latestVersion == null ? 'no_tags' : 'no_new_tags',
+    latestVersion,
+    baseline: baselineIdx >= 0 && base.kind != null ? { ...ref(ordered[baselineIdx]!), kind: base.kind } : null,
+    startTag:
+      start == null
+        ? null
+        : { name: start.name, sha: start.sha, setBy: start.setBy, setAt: iso(start.setAt), problem: base.startProblem },
+    latestRelease: latestHit != null ? { ...ref(latestHit.tag), kind: latestHit.kind } : null,
+    candidate,
+    firstBlocked: firstHeld != null ? ordered[firstHeld.tagIdx]!.name : null,
+    reading: spans.some((sp) => sp.pending),
+    tags: tags.reverse(),
+    versionTags: versions.slice(-RELEASE_VERSION_TAGS_MAX).reverse().map(ref),
+    ticketIdents,
+    untrackedPrIds,
+    botPrIds,
+    warningCount: 0,
+    noBaseline: baselineIdx < 0,
+  };
+  return { out, spans, candidateSpan, ordered };
+}
+
+/** Run the release check. Pure. */
+export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
+  const prById = new Map(input.prs.map((p) => [p.id, p]));
+  const ticketByIdent = new Map(input.tickets.map((t) => [t.ident, t]));
+  const ticketOf = (ident: string): ReleaseCheckTicketInput =>
+    ticketByIdent.get(ident) ?? { ident, key: ident, title: null, url: null, statusName: null, done: false, readState: 'not_read' };
+  const blockerOf = (ident: string): TicketBlocker | null => {
+    const t = ticketOf(ident);
+    if (t.readState !== 'ok') return { kind: 'unreadable', ident, key: t.key, reason: t.readState };
+    if (!t.done) return { kind: 'not_done', ident, key: t.key, statusName: t.statusName };
+    return null;
+  };
 
   const warnings: ReleaseWarning[] = [];
-  const repoWarnings = new Map<number, number>();
-  const bump = (repoId: number): void => void repoWarnings.set(repoId, (repoWarnings.get(repoId) ?? 0) + 1);
-  const shippedTickets = new Map<number, string[]>();
-  const repoOut: ReleaseRepoCheck[] = [];
-
-  for (const prep of preps) {
-    const { input: repo, ordered, baselineIdx, spans } = prep;
-    const c = cands.get(repo.repoId)!;
-    const tags: ReleaseTagCheck[] = spans.map((span, s) => {
-      const t = ordered[span.tagIdx]!;
-      const blockers: ReleaseBlocker[] = [];
-      if (span.pending) blockers.push({ kind: 'range_pending', tagName: t.name });
-      else if (span.tooLarge) blockers.push({ kind: 'range_pending', tagName: t.name, reason: 'too_large' });
-      const named = new Set<string>();
-      const idents: string[] = [];
+  const repos: ReleaseRepoCheck[] = [];
+  /** ident → per repo: state and PRs. */
+  const ticketRepos = new Map<string, Map<number, { state: ReleaseTicketRepoState; prIds: number[] }>>();
+  const population: string[] = [];
+  for (const repo of input.repos) {
+    const { out, spans, candidateSpan } = foldRepo(repo, input.settings, prById, blockerOf);
+    let unresolved = 0;
+    spans.forEach((span, s) => {
+      if (s <= candidateSpan) unresolved += span.unresolved;
       for (const id of span.prIds) {
         for (const ident of prById.get(id)?.ticketIdents ?? []) {
-          if (!idents.includes(ident)) idents.push(ident);
-          const b = blocked.get(ident);
-          if (b != null && !named.has(ident)) {
-            named.add(ident);
-            blockers.push(b);
+          if (!ticketRepos.has(ident)) {
+            ticketRepos.set(ident, new Map());
+            population.push(ident);
+          }
+          const per = ticketRepos.get(ident)!;
+          const state: ReleaseTicketRepoState = s <= candidateSpan ? 'in_candidate' : 'after_candidate';
+          const cur = per.get(repo.repoId);
+          if (cur == null) per.set(repo.repoId, { state, prIds: [id] });
+          else {
+            if (!cur.prIds.includes(id)) cur.prIds.push(id);
+            // A ticket split across the candidate is "after" for the repository: not all of it ships.
+            if (state === 'after_candidate') cur.state = 'after_candidate';
           }
         }
       }
-      return {
-        ...ref(t),
-        moved: t.moved,
-        isCandidate: s === c.spanIdx,
-        blocked: s > c.spanIdx,
-        blockers,
-        prIds: [...span.prIds],
-        ticketIdents: idents,
-        pending: span.pending,
-        unmatchedCommits: span.unmatched,
-        truncated: span.truncated,
-        unresolvedPrCount: span.unresolved,
-      };
     });
-
-    const inCandidate = c.spanIdx >= 0 ? spans.slice(0, c.spanIdx + 1) : [];
-    const ticketIdents: string[] = [];
-    const untrackedPrIds: number[] = [];
-    const botPrIds: number[] = [];
-    let unresolved = 0;
-    for (const span of inCandidate) {
-      unresolved += span.unresolved;
-      for (const id of span.prIds) {
-        const p = prById.get(id);
-        if (p == null) continue;
-        if (p.ticketIdents.length === 0) (p.isBot ? botPrIds : untrackedPrIds).push(id);
-        for (const ident of p.ticketIdents) if (!ticketIdents.includes(ident)) ticketIdents.push(ident);
-      }
-    }
-    for (const prId of untrackedPrIds) {
-      warnings.push({ kind: 'untracked_pr', repoId: repo.repoId, prId });
-      bump(repo.repoId);
-    }
-    if (unresolved > 0) {
-      warnings.push({ kind: 'unsynced_prs', repoId: repo.repoId, count: unresolved });
-      bump(repo.repoId);
-    }
-    shippedTickets.set(repo.repoId, ticketIdents);
-
-    const candTag = c.spanIdx >= 0 ? ordered[spans[c.spanIdx]!.tagIdx]! : null;
-    const suffix = input.settings.releaseSuffix ?? '';
-    const candidate =
-      candTag == null
-        ? null
-        : {
-            ...ref(candTag),
-            releaseTagName: releaseTagName(candTag.name, suffix),
-            releaseTagExists: repo.tags.some((t) => t.name === releaseTagName(candTag.name, suffix)),
-          };
-    const firstBlockedSpan = spans[c.spanIdx + 1];
-    repoOut.push({
-      repoId: repo.repoId,
-      fullName: repo.fullName,
-      name: repo.name,
-      writable: repo.writable,
-      status: spans.length === 0 ? 'nothing_new' : candidate != null ? 'candidate' : 'blocked',
-      nothingNewReason: spans.length > 0 ? null : ordered.length === 0 ? 'no_tags' : 'no_new_tags',
-      baseline: baselineIdx >= 0 ? ref(ordered[baselineIdx]!) : null,
-      latestRelease: prep.latestRelease,
-      candidate,
-      firstBlocked: firstBlockedSpan != null ? ordered[firstBlockedSpan.tagIdx]!.name : null,
-      tags: tags.reverse(),
-      ticketIdents,
-      untrackedPrIds,
-      botPrIds,
-      warningCount: 0,
-      noBaseline: baselineIdx < 0,
-    });
+    for (const prId of out.untrackedPrIds) warnings.push({ kind: 'untracked_pr', repoId: repo.repoId, prId });
+    if (unresolved > 0) warnings.push({ kind: 'unsynced_prs', repoId: repo.repoId, count: unresolved });
+    out.warningCount = out.untrackedPrIds.length + (unresolved > 0 ? 1 : 0);
+    repos.push(out);
   }
 
-  // Tickets: per repo state.
   const tickets: ReleaseTicketCheck[] = population.map((ident) => {
     const t = ticketOf(ident);
-    const merged = mergedByTicket.get(ident) ?? [];
-    const open = openByTicket.get(ident) ?? [];
-    const repoIds = new Set<number>([...(accepted.get(ident) ?? []), ...merged.map((p) => p.repoId), ...open.map((p) => p.repoId)]);
-    const repos = [...repoIds]
-      .sort((a, b) => a - b)
-      .map((repoId) => {
-        const prep = prepById.get(repoId)!;
-        const c = cands.get(repoId)!;
-        const m = merged.filter((p) => p.repoId === repoId);
-        const o = open.filter((p) => p.repoId === repoId);
-        const side = o.length === 0 && m.length === 0 ? (otherBranchByTicket.get(ident) ?? []).filter((p) => p.repoId === repoId) : [];
-        const prIds = [...o, ...m, ...side].map((p) => p.id);
-        let state: ReleaseTicketRepoState;
-        if (o.length > 0) state = 'open_pr';
-        else if (m.length === 0) state = side.length > 0 ? 'hotfix_only' : 'linked_no_pr';
-        else {
-          const at = m.map((p) => posOf(prep, p));
-          if (at.some((x) => x > c.coverIdx)) state = 'merged_after_candidate';
-          else state = at.some((x) => x > prep.baselineIdx) ? 'in_candidate' : 'released';
-        }
-        return { repoId, state, prIds };
-      });
-    const b = blocked.get(ident) ?? null;
+    const b = blockerOf(ident);
+    const per = [...(ticketRepos.get(ident) ?? new Map()).entries()]
+      .sort((a, z) => a[0] - z[0])
+      .map(([repoId, v]) => ({ repoId, state: v.state, prIds: [...v.prIds].sort((x, y) => x - y) }));
     return {
       ident,
       key: t.key,
@@ -640,22 +583,11 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       done: t.done,
       readState: t.readState,
       ready: b == null,
-      inRelease: b == null && repos.some((r) => r.state === 'in_candidate'),
+      inRelease: b == null && per.some((r) => r.state === 'in_candidate'),
       blocker: b,
-      repos,
+      repos: per,
     };
   });
-
-  // Linked repos with no PR, for tickets the release ships.
-  for (const tk of tickets) {
-    if (!tk.inRelease) continue;
-    for (const r of tk.repos) {
-      if (r.state !== 'linked_no_pr') continue;
-      warnings.push({ kind: 'linked_no_pr', ident: tk.ident, key: tk.key, repoId: r.repoId });
-      for (const out of repoOut) if (shippedTickets.get(out.repoId)?.includes(tk.ident)) bump(out.repoId);
-    }
-  }
-  for (const out of repoOut) out.warningCount = repoWarnings.get(out.repoId) ?? 0;
 
   const prs: ReleaseCheckPr[] = input.prs.map((p) => ({
     id: p.id,
@@ -668,43 +600,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
     mergedAt: iso(p.mergedAt),
     ticketIdents: [...p.ticketIdents],
   }));
-  return { repos: repoOut, tickets, warnings, prs, rounds };
-}
-
-/** The version tag whose increment holds ordered index `at` (or the tag at `at` itself). */
-function taggedIn(prep: RepoPrep, at: number): string | null {
-  for (const span of prep.spans) if (at >= span.from && at <= span.tagIdx) return prep.ordered[span.tagIdx]!.name;
-  return prep.ordered[at]?.name ?? null;
-}
-
-// ── The dialog's re-check ───────────────────────────────────────────────────────────────────────
-
-export interface ReleaseSelectionProblem {
-  ident: string;
-  key: string;
-  /** Unticked repos the ticket needs. */
-  missingRepoIds: number[];
-}
-
-/**
- * Unticking repos in "Create release…": every ticket the release would ship that ALSO needs an
- * unticked repo would ship in part — Confirm is blocked, naming it. Empty = the selection may be
- * released. Pure; reads the fold's result (unticking moves no candidate, it blocks Confirm).
- */
-export function releaseSelectionProblems(
-  result: Pick<ReleaseCheckResult, 'tickets'>,
-  includedRepoIds: readonly number[],
-): ReleaseSelectionProblem[] {
-  const included = new Set(includedRepoIds);
-  const out: ReleaseSelectionProblem[] = [];
-  for (const t of result.tickets) {
-    if (!t.inRelease) continue;
-    const shipping = t.repos.filter((r) => r.state === 'in_candidate');
-    if (!shipping.some((r) => included.has(r.repoId))) continue;
-    const missing = shipping.filter((r) => !included.has(r.repoId)).map((r) => r.repoId);
-    if (missing.length > 0) out.push({ ident: t.ident, key: t.key, missingRepoIds: missing });
-  }
-  return out;
+  return { repos, tickets, warnings, prs };
 }
 
 // ── Words ───────────────────────────────────────────────────────────────────────────────────────
@@ -712,9 +608,6 @@ export function releaseSelectionProblems(
 export interface ReleaseWordsContext {
   repoName: (repoId: number) => string;
   prNumber: (prId: number) => number | null;
-  /** Where the sentence is shown: a repo and its held tag ("PLAT-290 holds api at v2.4.0"). */
-  shownRepoId?: number;
-  shownTagName?: string;
 }
 
 const READ_WORDS: Record<Exclude<ReleaseTicketReadState, 'ok'>, string> = {
@@ -725,34 +618,14 @@ const READ_WORDS: Record<Exclude<ReleaseTicketReadState, 'ok'>, string> = {
 };
 
 /** One plain sentence for a blocker. Pure. */
-export function releaseBlockerText(b: ReleaseBlocker, ctx: ReleaseWordsContext): string {
-  const pr = (id: number): string => {
-    const n = ctx.prNumber(id);
-    return n == null ? 'PR' : `PR #${n}`;
-  };
+export function releaseBlockerText(b: ReleaseBlocker, _ctx?: ReleaseWordsContext): string {
   switch (b.kind) {
-    case 'range_pending':
-      return b.reason === 'too_large'
-        ? `${b.tagName} has more commits than can be read, so its changes cannot be checked.`
-        : `The changes in ${b.tagName} are not read yet.`;
+    case 'too_large':
+      return `${b.tagName} has more commits than can be read, so its changes cannot be checked.`;
     case 'not_done':
       return b.statusName != null ? `${b.key} is not done (${b.statusName}).` : `${b.key} is not done.`;
     case 'unreadable':
       return `${b.key} could not be read: ${READ_WORDS[b.reason]}.`;
-    case 'open_pr':
-      return `${b.key} has an open ${ctx.repoName(b.repoId)} ${pr(b.prId)}.`;
-    case 'not_whole': {
-      const m = b.missing.find((x) => x.repoId !== ctx.shownRepoId) ?? b.missing[0];
-      const lead =
-        ctx.shownRepoId != null && ctx.shownTagName != null
-          ? `${b.key} holds ${ctx.repoName(ctx.shownRepoId)} at ${ctx.shownTagName}`
-          : `${b.key} is not ready`;
-      if (m == null) return `${lead}.`;
-      const repo = ctx.repoName(m.repoId);
-      return m.tagName == null
-        ? `${lead}: its ${repo} ${pr(m.prId)} is merged but not in a version tag yet. Cut a tag in ${repo}.`
-        : `${lead}: its ${repo} ${pr(m.prId)} is in ${m.tagName}, which is held back.`;
-    }
   }
 }
 
@@ -763,11 +636,14 @@ export interface ReleasesResponse {
   workspaceId: number;
   /** Both suffixes are set. False → `check` is null and the tab shows its ONE setup line. */
   configured: boolean;
+  /** At least one repository is ticked "Released from this workspace". False (and configured) →
+   *  `check` is null and the tab shows its ONE setup line. */
+  hasReleasableRepos: boolean;
   releaseSuffix: string | null;
   hotfixSuffix: string | null;
   /** The newest release made from this workspace (null = none yet). */
   latestRelease: { id: number; createdAt: string; state: 'writing' | 'done' | 'partial' | 'failed' | 'stopped' } | null;
-  /** The newest release or hotfix tag across the workspace's repos, by its commit date. */
+  /** The newest release or hotfix tag across the releasable repos, by its commit date. */
   latestReleaseTagAt: string | null;
   check: ReleaseCheckResult | null;
 }
@@ -777,4 +653,11 @@ export interface ReleasesResponse {
 export interface ReleasesRefreshResponse extends ReleasesResponse {
   reread: number;
   unread: string[];
+}
+
+/** PUT /api/releases/start-tag?workspace=<id> — "Start from this tag" for one releasable repository
+ *  (`tagName` null clears it). DB only; nothing is written to GitHub. Answers the check again. */
+export interface SetReleaseStartTagBody {
+  repoId: number;
+  tagName: string | null;
 }

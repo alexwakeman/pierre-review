@@ -12,8 +12,8 @@ import { confirmStops, defaultTickedRepoIds, editedSections, releasableRepos, re
 // the preview read (notes + comment — POST /api/releases/preview, which may write story summaries
 // with the model).
 //
-//   • Repos, ticked. Unticking re-checks on the CLIENT through the shared `releaseSelectionProblems`
-//     (`confirmStops`): a ticket that would ship in part is NAMED and Confirm is HIDDEN in its place.
+//   • The releasable repos with a candidate, ticked. Each repository is judged on its own, so unticking
+//     one only leaves it out; with none ticked Confirm is HIDDEN (`confirmStops`).
 //   • The notes per repo, editable (an edited section is sent; the others are built on the server).
 //   • The tracker comment one ticket would get.
 //   • Confirm: the server re-reads every shipped ticket and each version tag; any change STOPS it and
@@ -39,7 +39,7 @@ export function ReleaseDialog({
   const preview = useReleasePreview(workspaceId, offeredIds, true);
   const create = useCreateRelease(workspaceId);
   const creating = useCreatingRelease(workspaceId);
-  const stops = confirmStops(check, ticked);
+  const stops = confirmStops(ticked);
   const result: CreateReleaseResponse | undefined = create.data;
   const notesId = useId();
 

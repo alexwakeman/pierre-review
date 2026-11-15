@@ -482,9 +482,10 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
     }
     // The TAGS half of the snapshot step (sync/tags-step.ts; docs/RELEASES.md): the repo's tags,
     // their ancestry and the version-tag ranges. STRICTLY NON-FATAL like the strip above, and its
-    // own guard, so a tag failure never costs the strip or the PR sync. Not for EXTERNAL repos.
+    // own guard, so a tag failure never costs the strip or the PR sync. An EXTERNAL repo only when
+    // some workspace releases it (the step decides).
     try {
-      if (!isPinnedCold(repoId)) await runTagsStep({ owner, name, repoId, accountId, token: opts.token, log, minIntervalMs: TAG_READ_MIN_INTERVAL_MS });
+      await runTagsStep({ owner, name, repoId, accountId, token: opts.token, log, minIntervalMs: TAG_READ_MIN_INTERVAL_MS, external: isPinnedCold(repoId) });
     } catch (err) {
       log.warn(
         `sync ${owner}/${name}: tag sync failed (non-fatal): ` +

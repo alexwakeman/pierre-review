@@ -77,6 +77,9 @@ beforeAll(async () => {
     .execute();
   const { setReleaseSettings } = await import('../../db/release-settings.js');
   await setReleaseSettings(1, wsId, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+  // Both are released from this workspace (worker has no release: read only).
+  const { setReleaseRepos } = await import('../../db/release-repos.js');
+  await setReleaseRepos(1, wsId, [repo.api, repo.worker]);
   ctx = { db, schema, log: { warn: () => {}, info: () => {}, error: () => {} }, accountIdOf: (req: any) => Number(req.headers['x-account'] ?? 1), github: {} };
   P = await import('./persist.js');
   H = await import('./push-hotfix.js');

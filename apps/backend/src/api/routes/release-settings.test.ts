@@ -8,8 +8,11 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import {
+  normaliseReleaseSuffix,
   releaseSettingsConfigured,
   releaseTagName,
+  suffixFromTyped,
+  suffixTypedPart,
   tagKind,
   validateReleaseSettings,
   validateReleaseSuffix,
@@ -19,30 +22,54 @@ const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-release-setti
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
-describe('validateReleaseSuffix — a valid git ref fragment, 1–32 characters', () => {
-  it.each(['-rc', '-hotfix', '.rc1', '_release', '-rc/2', 'r'])('accepts %s', (s) => {
+describe('validateReleaseSuffix — the TYPED part (after the fixed hyphen): a valid git ref fragment, 1–32 characters', () => {
+  it.each(['rc', 'hotfix', '.rc1', '_release', 'rc/2', 'r', 'x'.repeat(32)])('accepts %s', (s) => {
     expect(validateReleaseSuffix(s)).toBeNull();
   });
   it.each([
     ['', 'empty'],
-    ['-r c', 'spaces'],
-    ['-rc~', '~'],
-    ['-rc^', '^'],
-    ['-rc:', ':'],
-    ['-rc?', '?'],
-    ['-rc*', '*'],
-    ['-rc[', '['],
-    ['-rc\\', 'backslash'],
-    ['-r..c', '..'],
-    ['-r@{c', '@{'],
-    ['-rc.lock', '.lock'],
-    ['-rc/', 'trailing /'],
-    ['-rc.', 'trailing .'],
-    ['-r//c', '//'],
+    ['-rc', 'a leading hyphen'],
+    ['r c', 'spaces'],
+    ['rc~', '~'],
+    ['rc^', '^'],
+    ['rc:', ':'],
+    ['rc?', '?'],
+    ['rc*', '*'],
+    ['rc[', '['],
+    ['rc\\', 'backslash'],
+    ['r..c', '..'],
+    ['r@{c', '@{'],
+    ['rc.lock', '.lock'],
+    ['rc/', 'trailing /'],
+    ['rc.', 'trailing .'],
+    ['r//c', '//'],
     ['x'.repeat(33), 'too long'],
   ])('refuses %j (%s) with a sentence', (s) => {
     const problem = validateReleaseSuffix(s);
     expect(problem).toMatch(/\.$/);
+  });
+  it('a leading hyphen is refused with a sentence saying it is added', () => {
+    expect(validateReleaseSuffix('-rc', 'The release suffix')).toBe('The release suffix cannot start with a hyphen. The hyphen is added for you.');
+  });
+});
+
+describe('the fixed hyphen', () => {
+  it('the stored suffix is the hyphen plus what was typed', () => {
+    expect(suffixFromTyped('rc')).toBe('-rc');
+    expect(suffixFromTyped('')).toBeNull();
+    expect(suffixFromTyped('  ')).toBeNull();
+    expect(suffixFromTyped('-rc')).toBe('--rc');
+    expect(suffixTypedPart('-rc')).toBe('rc');
+    expect(suffixTypedPart(null)).toBe('');
+  });
+  it('normalising puts the hyphen in front only when it is missing (the route and migration 0199)', () => {
+    expect(normaliseReleaseSuffix('rc')).toBe('-rc');
+    expect(normaliseReleaseSuffix('-rc')).toBe('-rc');
+    expect(normaliseReleaseSuffix('')).toBeNull();
+    expect(normaliseReleaseSuffix(null)).toBeNull();
+  });
+  it('a typed leading hyphen ("--rc" stored) is refused', () => {
+    expect(validateReleaseSettings({ releaseSuffix: suffixFromTyped('-rc'), hotfixSuffix: null })).toMatch(/cannot start with a hyphen/);
   });
 });
 
@@ -56,10 +83,12 @@ describe('validateReleaseSettings', () => {
       'The release and hotfix suffixes must be different.',
     );
   });
-  it('acceptance 2: refuses one suffix ending with the other, both ways', () => {
+  it('acceptance 2: refuses one suffix ending with the other, both ways (on the typed parts)', () => {
     const sentence = 'One suffix cannot end with the other, or a tag could be read as both.';
     expect(validateReleaseSettings({ releaseSuffix: '-rc', hotfixSuffix: '-hotfix-rc' })).toBe(sentence);
     expect(validateReleaseSettings({ releaseSuffix: '-final-hf', hotfixSuffix: '-hf' })).toBe(sentence);
+    expect(validateReleaseSettings({ releaseSuffix: '-rc', hotfixSuffix: '-c' })).toBe(sentence);
+    expect(validateReleaseSettings({ releaseSuffix: 'rc', hotfixSuffix: 'hotfix' })).toBeNull();
   });
   it('names the field that is wrong', () => {
     expect(validateReleaseSettings({ releaseSuffix: 'a b', hotfixSuffix: '-hf' })).toMatch(/^The release suffix/);
@@ -136,14 +165,27 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
       hotfixSuffix: null,
       configured: false,
       hasReleases: false,
+      repos: [],
     });
   });
 
-  it('stores both suffixes and reports configured', async () => {
-    const res = await call('PUT', ownWs, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+  it('stores both suffixes and reports configured; a suffix sent without the hyphen gets one', async () => {
+    const res = await call('PUT', ownWs, { releaseSuffix: 'rc', hotfixSuffix: '-hotfix' });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ releaseSuffix: '-rc', hotfixSuffix: '-hotfix', configured: true });
     expect((await call('GET', ownWs)).body.releaseSuffix).toBe('-rc');
+  });
+
+  it('migration 0199: a stored suffix without the hyphen reads with one in front', async () => {
+    const { workspaces } = client.schema;
+    const { eq } = await import('drizzle-orm');
+    // The migration's own UPDATE, run again over a row written the old way.
+    await client.db.update(workspaces).set({ releaseSuffix: 'rc' }).where(eq(workspaces.id, ownWs)).execute();
+    client.rawSqlite?.exec?.(
+      "UPDATE `workspaces` SET `release_suffix` = '-' || `release_suffix` WHERE `release_suffix` IS NOT NULL AND trim(`release_suffix`) <> '' AND substr(`release_suffix`, 1, 1) <> '-'",
+    );
+    expect((await call('GET', ownWs)).body.releaseSuffix).toBe('-rc');
+    await client.db.update(workspaces).set({ releaseSuffix: '-rc' }).where(eq(workspaces.id, ownWs)).execute();
   });
 
   it('acceptance 2: refuses equal suffixes with the validator sentence, and stores nothing', async () => {
@@ -170,6 +212,11 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
       .insert(repoTags)
       .values({ accountId: 1, repoId: repo.id, name: 'v1.0.0-rc', sha: 'a'.repeat(40), firstSeenAt: now, lastSeenAt: now })
       .execute();
+    // Only a RELEASABLE repo's tags count: unticked, nothing.
+    expect((await call('GET', ownWs)).body.hasReleases).toBe(false);
+    const tick = await app.inject({ method: 'PUT', url: `/api/workspaces/${ownWs}/release-repos`, payload: { repoIds: [repo.id] } });
+    expect(tick.statusCode).toBe(200);
+    expect(tick.json().repos).toEqual([{ repoId: repo.id, fullName: 'acme/api', external: false, releasable: true }]);
     expect((await call('GET', ownWs)).body.hasReleases).toBe(true);
     // After the suffix changes, the old tag no longer counts.
     const res = await call('PUT', ownWs, { releaseSuffix: '-release', hotfixSuffix: '-hotfix' });
@@ -217,15 +264,49 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
     const after = (await get(ownWs)).body;
     expect(after.check.repos[0].baseline).toBeNull();
     expect(after.check.repos[0].tags.map((t: any) => t.name).sort()).toEqual(['v1.0.0', 'v1.0.0-rc']);
+    // Unticked → no check, the setup line (an unticked repo is ignored entirely).
+    await app.inject({ method: 'PUT', url: `/api/workspaces/${ownWs}/release-repos`, payload: { repoIds: [] } });
+    expect((await get(ownWs)).body).toMatchObject({ configured: true, hasReleasableRepos: false, check: null });
+    await app.inject({ method: 'PUT', url: `/api/workspaces/${ownWs}/release-repos`, payload: { repoIds: [repoId] } });
     // Not configured → no check, only the setup line.
     await call('PUT', ownWs, { releaseSuffix: null, hotfixSuffix: null });
     expect((await get(ownWs)).body).toMatchObject({ configured: false, check: null });
   });
 
+  it('PUT …/release-repos refuses a repo outside the workspace, and another account\'s workspace', async () => {
+    const bad = await app.inject({ method: 'PUT', url: `/api/workspaces/${ownWs}/release-repos`, payload: { repoIds: [999_999] } });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toMatchObject({ error: 'NotAMember' });
+    const foreign = await app.inject({ method: 'PUT', url: `/api/workspaces/${foreignWs}/release-repos`, payload: { repoIds: [] } });
+    expect(foreign.statusCode).toBe(404);
+  });
+
+  it('PUT /api/releases/start-tag: a version tag on main is stored with its commit; anything else is refused; null clears', async () => {
+    const { repoTags, workspaceReleaseRepos } = client.schema;
+    await call('PUT', ownWs, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
+    const repoId = (await client.db.select().from(repoTags).execute())[0].repoId;
+    const put = async (body: unknown) => {
+      const res = await app.inject({ method: 'PUT', url: `/api/releases/start-tag?workspace=${ownWs}`, payload: body as any });
+      return { status: res.statusCode, body: res.json() as any };
+    };
+    const ok = await put({ repoId, tagName: 'v1.0.0' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.check.repos[0].startTag).toMatchObject({ name: 'v1.0.0', sha: 'a'.repeat(40), problem: null });
+    const row = (await client.db.select().from(workspaceReleaseRepos).execute())[0];
+    expect(row).toMatchObject({ startTagName: 'v1.0.0', startTagSha: 'a'.repeat(40) });
+    // A release tag is not a version tag; an unknown tag neither.
+    expect((await put({ repoId, tagName: 'v1.0.0-rc' })).body).toMatchObject({ error: 'NotAVersionTag' });
+    expect((await put({ repoId, tagName: 'nope' })).status).toBe(400);
+    // A repo not released from this workspace.
+    expect((await put({ repoId: 999_999, tagName: 'v1.0.0' })).status).toBe(404);
+    const cleared = await put({ repoId, tagName: null });
+    expect(cleared.body.check.repos[0].startTag).toBeNull();
+  });
+
   it('the new tables are on the erasure checklist', async () => {
     const { accountScopedTables } = await import('../../db/erase-account.js');
     expect(accountScopedTables().map((t) => t.name)).toEqual(
-      expect.arrayContaining(['repoTags', 'repoTagRanges', 'releases', 'releaseItems', 'releaseTicketComments']),
+      expect.arrayContaining(['repoTags', 'repoTagRanges', 'releases', 'releaseItems', 'releaseTicketComments', 'workspaceReleaseRepos']),
     );
   });
 });
