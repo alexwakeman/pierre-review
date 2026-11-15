@@ -1,77 +1,66 @@
 // ---------------------------------------------------------------------------
-// The JavaScript half of the arcs' motion (called by useReveal, which skips it
-// under prefers-reduced-motion). It never runs per frame on a browser that has
-// CSS scroll-driven animations, and it only ever writes a transform.
-//
-// 1. REVEAL (every non-lead picture). A picture below the fold at load gets
-//    `pre` (layers offset, bands undrawn); when a fifth of it scrolls into view
-//    it swaps to `in` and CSS transitions draw it, once. A picture already on
-//    screen at load is left alone, so nothing flashes.
-// 2. LEAD FALLBACK (the hero's pictures, only where `animation-timeline:
-//    scroll()` is unsupported). CSS already paints each lead layer apart; this
-//    maps scrollY → apart = 1 − scrollY / (0.6 × viewport height), the same as
-//    the CSS animation's range, and writes it as one transform per layer per
-//    frame (rAF, passive listener, no layout reads).
+// The JavaScript FALLBACK for the arcs' motion (called by useReveal, which skips
+// it under prefers-reduced-motion). On a browser with CSS scroll-driven
+// animations it does nothing at all: board.css runs every picture on the
+// compositor. Elsewhere it reproduces the same two mappings, writing only a
+// transform per layer per frame (rAF, passive listener):
+//   lead     apart = 1 − scrollY / (0.6 × viewport height)
+//   others   apart = 1 − progress from "entry 0%" to "cover 60%" of its own view
+//            timeline: the top meeting the viewport's bottom, to 60% of the way
+//            through the viewport.
+// CSS already paints every layer apart, so nothing flashes before this runs.
 // ---------------------------------------------------------------------------
 
 const clamp = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
 
+interface Track {
+  el: HTMLElement;
+  layers: SVGSVGElement[];
+  lead: boolean;
+  last: number;
+}
+
 export function startArcMotion(root: HTMLElement): () => void {
-  const cleanups: (() => void)[] = [];
+  if (typeof CSS !== 'undefined' && CSS.supports('animation-timeline: scroll()')) return () => undefined;
 
-  // ---- 1. reveal ----
-  const vh = window.innerHeight;
-  const pending = Array.from(root.querySelectorAll<HTMLElement>('.arcs:not(.lead)')).filter(
-    (el) => el.getBoundingClientRect().top >= vh,
-  );
-  if (pending.length > 0 && typeof IntersectionObserver !== 'undefined') {
-    pending.forEach((el) => el.classList.add('pre'));
-    const io = new IntersectionObserver(
-      (entries) => {
-        for (const e of entries) {
-          if (!e.isIntersecting) continue;
-          const el = e.target as HTMLElement;
-          el.classList.remove('pre');
-          el.classList.add('in');
-          io.unobserve(el);
-        }
-      },
-      { threshold: 0.2 },
-    );
-    pending.forEach((el) => io.observe(el));
-    cleanups.push(() => {
-      io.disconnect();
-      pending.forEach((el) => el.classList.remove('pre', 'in'));
+  const tracks: Track[] = Array.from(root.querySelectorAll<HTMLElement>('.arcs')).map((el) => ({
+    el,
+    layers: Array.from(el.querySelectorAll<SVGSVGElement>('.layer')),
+    lead: el.classList.contains('lead'),
+    last: -1,
+  }));
+  if (tracks.length === 0) return () => undefined;
+
+  let raf = 0;
+  const paint = (): void => {
+    raf = 0;
+    const vh = window.innerHeight;
+    // read everything first, then write: no layout thrash
+    const aparts = tracks.map((t) => {
+      if (t.lead) return clamp(1 - window.scrollY / (vh * 0.6));
+      const r = t.el.getBoundingClientRect();
+      // entry 0% = top at the viewport's bottom; cover 60% = 60% of (vh + height) later
+      return clamp(1 - (vh - r.top) / ((vh + r.height) * 0.6));
     });
-  }
-
-  // ---- 2. lead fallback ----
-  const scrollDriven = typeof CSS !== 'undefined' && CSS.supports('animation-timeline: scroll()');
-  const layers = scrollDriven ? [] : Array.from(root.querySelectorAll<SVGSVGElement>('.arcs.lead .layer'));
-  if (layers.length > 0) {
-    let raf = 0;
-    let last = -1;
-    const paint = (): void => {
-      raf = 0;
-      const a = clamp(1 - window.scrollY / (window.innerHeight * 0.6));
-      if (Math.abs(a - last) < 0.0005) return;
-      last = a;
-      const t = a === 0 ? 'none' : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
-      for (const l of layers) l.style.transform = t;
-    };
-    const kick = (): void => {
-      if (!raf) raf = requestAnimationFrame(paint);
-    };
-    window.addEventListener('scroll', kick, { passive: true });
-    window.addEventListener('resize', kick);
-    paint();
-    cleanups.push(() => {
-      window.removeEventListener('scroll', kick);
-      window.removeEventListener('resize', kick);
-      if (raf) cancelAnimationFrame(raf);
-      layers.forEach((l) => (l.style.transform = ''));
+    tracks.forEach((t, i) => {
+      const a = aparts[i] ?? 0;
+      if (Math.abs(a - t.last) < 0.0005) return;
+      t.last = a;
+      const tf = a === 0 ? 'none' : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
+      for (const l of t.layers) l.style.transform = tf;
     });
-  }
+  };
+  const kick = (): void => {
+    if (!raf) raf = requestAnimationFrame(paint);
+  };
+  window.addEventListener('scroll', kick, { passive: true });
+  window.addEventListener('resize', kick);
+  paint();
 
-  return () => cleanups.forEach((c) => c());
+  return () => {
+    window.removeEventListener('scroll', kick);
+    window.removeEventListener('resize', kick);
+    if (raf) cancelAnimationFrame(raf);
+    for (const t of tracks) for (const l of t.layers) l.style.transform = '';
+  };
 }

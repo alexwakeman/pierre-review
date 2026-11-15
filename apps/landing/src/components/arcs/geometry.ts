@@ -288,30 +288,37 @@ export function chainQuarters(
 }
 
 /** The site's chain (the hero's big picture and the share image): it zigzags down a portrait box of
- *  3 × 4 radii, and its links cross through each other on their way in. A chain that stacks half-discs on one centre line is avoided on purpose:
+ *  3 × 4 radii, and its links cross through each other on their way in. The margin
+ *  (0.15 of a slice's radius) is the gap it keeps from the tile's edges, so the gap
+ *  scales with the slices, not the screen. A chain that stacks half-discs on one centre line is avoided on purpose:
  *  that is the reference artwork's own figure. */
-export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0, cross: true } as const;
+export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.15, cross: true } as const;
 
 /**
- * The QUARTET: four equal quarters centred on the corners of a 100-unit square, facing
- * one centre, each with a player's dot at its corner. Each waits OUTWARD (away from the
- * middle) and closes in. `margin` (in units) is added round the square so the apart
- * state fits; the returned viewBox includes it.
+ * The QUARTET: four quarters centred on the corners of a 100-unit square, facing one
+ * centre, each with a player's dot at its corner. With R above 50 the quarters
+ * OVERLAP in the middle, so the picture lands on crossing lines (mixed like light).
+ * With `cross`, each quarter starts at the mirror of its place through the middle
+ * (−2u, reached at APART × dx) and travels through the others to land; otherwise it
+ * waits outward. `margin` (in units) is added round the square.
  */
-export function quartetQuarters(margin = 0): { quarters: Quarter[]; viewBox: string } {
-  const R = 50;
+export function quartetQuarters(margin = 0, R = 50, cross = false): { quarters: Quarter[]; viewBox: string } {
   const away = R * 0.2;
-  const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => ({
-    cx,
-    cy,
-    R,
-    corner,
-    run,
-    n: 11,
-    dot: 3.2,
-    dx: cx === 0 ? -away : away,
-    dy: cy === 0 ? -away : away,
-  });
+  const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => {
+    const ux = (cx === 0 ? R / 2 : 100 - R / 2) - 50;
+    const uy = (cy === 0 ? R / 2 : 100 - R / 2) - 50;
+    return {
+      cx,
+      cy,
+      R,
+      corner,
+      run,
+      n: Math.round((11 * R) / 50),
+      dot: 3.2,
+      dx: cross ? Math.round(((-2 * ux) / 1.6) * 100) / 100 : cx === 0 ? -away : away,
+      dy: cross ? Math.round(((-2 * uy) / 1.6) * 100) / 100 : cy === 0 ? -away : away,
+    };
+  };
   return {
     quarters: [q(0, 0, 'tl', 'ember'), q(100, 0, 'tr', 'dawn'), q(100, 100, 'br', 'dusk'), q(0, 100, 'bl', 'bloom')],
     viewBox: `${-margin} ${-margin} ${100 + 2 * margin} ${100 + 2 * margin}`,
