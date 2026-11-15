@@ -1,6 +1,7 @@
 import { useRememberedScroll } from '../../hooks/useRememberedScroll.js';
 import { useFilters } from '../../store/filters.js';
 import { SprintView } from '../Activity/SprintView.js';
+import { ReleasesView } from './ReleasesView.js';
 import { effectiveSprintTab, SPRINT_RAIL_TABS } from '../Activity/sprintRailModel.js';
 import { panelId, tabId, Tabs, type TabItem } from '../ui/Tabs.js';
 import { PAGE_GUTTER, PageHeader } from '../ui/PageHeader.js';
@@ -19,6 +20,8 @@ const TABS: ReadonlyArray<TabItem<SprintInnerTab>> = SPRINT_RAIL_TABS.map((t) =>
 //     the worker read the sprint at all. "Ask Claude" inside is agentic and LOCAL-ONLY, gated on
 //     `me.ai` (useSprintAiOn). A ticket shows its story in the tray beside
 //     the board (Sprint/SprintStoryTray.tsx, `?sprintStory=`).
+//   • Releases — the 4th tab, NOT a lane board: which version tag each repository may release
+//     (Sprint/ReleasesView.tsx, GET /api/releases; docs/RELEASES.md).
 // (What has merged in the sprint is Open PRs → Merged — MergedPrsView; a legacy
 // `?sprintTab=merged` lands there.)
 // ⚠ NO TRACKER ⇒ THE THREE BOARDS SHOW THE SETUP LINE (`SprintTrackerSetup`, drawn by SprintView on
@@ -31,7 +34,7 @@ export function SprintTabView(): JSX.Element {
   // Back, or re-opening the tab, returns to where the reader was on THIS sub-tab (per session).
   const scrollRef = useRememberedScroll<HTMLDivElement>(`sprint:${tab}`);
   // THE PAGE HEADER (docs/redesign/DESIGN.md § 1): the page title once, then the page's own tabs —
-  // the shared `Tabs`, which give 1–3 from anywhere on the page (`numberKeys`). The panel below is
+  // the shared `Tabs`, which give 1–4 from anywhere on the page (`numberKeys`). The panel below is
   // labelled by its tab.
   return (
     <div ref={scrollRef} className="pb-10" data-testid="sprint-tab-view">
@@ -39,7 +42,7 @@ export function SprintTabView(): JSX.Element {
         <Tabs tabs={TABS} value={tab} onChange={setTab} label="This Sprint views" numberKeys idPrefix="sprint" className="-mx-1 mt-3" />
       </PageHeader>
       <div role="tabpanel" id={panelId('sprint', tab)} aria-labelledby={tabId('sprint', tab)} className={`pt-1 ${PAGE_GUTTER}`}>
-        <SprintView view={tab} />
+        {tab === 'releases' ? <ReleasesView /> : <SprintView view={tab} />}
       </div>
     </div>
   );

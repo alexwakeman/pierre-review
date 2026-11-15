@@ -24,6 +24,7 @@ import { ConfluenceSection } from './ConfluenceSection.js';
 import { NotionSection } from './NotionSection.js';
 import { RelatedReposSection } from './RelatedReposSection.js';
 import { FlowSettingsSection } from './FlowSettingsSection.js';
+import { ReleasesSection } from './ReleasesSection.js';
 import { useSettingsWorkspace } from './workspaceScope.js';
 import {
   initialSettingsTab,
@@ -100,6 +101,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   RelatedReposSection,
   FlowSettingsSection,
   SprintSection,
+  ReleasesSection,
   IssueLinksSection,
   SonarSection,
   SandboxRuntimeSection,

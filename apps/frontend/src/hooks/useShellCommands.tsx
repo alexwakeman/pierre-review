@@ -54,6 +54,7 @@ const SPRINT_TABS = [
   ['themes', 'Theme'],
   ['paths', 'Critical path'],
   ['people', 'People'],
+  ['releases', 'Releases'],
 ] as const;
 const REPORT_TABS = [
   ['overview', 'Overview'],

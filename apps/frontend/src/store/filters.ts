@@ -88,8 +88,10 @@ export const INSIGHTS_INNER_TABS: readonly InsightsInnerTab[] = ['overview', 'bo
 // FILTER_STORAGE_VERSION bump is owed.
 // ⚠ `'merged'` LEFT THIS UNION (2026-11-03): "Merged so far" is Open PRs → Merged now
 // (`OpenPrsTab`). A legacy `?sprintTab=merged` is read by useUrlState onto that tab, never emitted.
-export type SprintInnerTab = 'paths' | 'themes' | 'people';
-export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people'];
+// `'releases'` (2026-11-15, docs/RELEASES.md): the 4th tab, NOT a lane board — the release check
+// (Sprint/ReleasesView.tsx). `?sprintTab=releases`.
+export type SprintInnerTab = 'paths' | 'themes' | 'people' | 'releases';
+export const SPRINT_INNER_TABS: readonly SprintInnerTab[] = ['themes', 'paths', 'people', 'releases'];
 // Open PRs' own tab strip: `'open'` (the open pull requests, the default) and `'merged'` (every PR
 // merged in the reporting window — this sprint so far, else the last 14 days; MergedPrsView over
 // GET /api/merged-prs). URL: `?openPrsTab=merged`, the default omitted, emitted ONLY on Open PRs.

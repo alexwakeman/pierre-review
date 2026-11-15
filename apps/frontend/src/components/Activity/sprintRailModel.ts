@@ -7,6 +7,8 @@ export const SPRINT_RAIL_TABS: ReadonlyArray<{ key: SprintInnerTab; label: strin
   { key: 'themes', label: 'Theme' },
   { key: 'paths', label: 'Critical path' },
   { key: 'people', label: 'People' },
+  // Not a lane board: which version tag each repository may release (Sprint/ReleasesView.tsx).
+  { key: 'releases', label: 'Releases' },
 ];
 
 /**

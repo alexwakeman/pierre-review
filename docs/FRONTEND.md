@@ -2891,6 +2891,19 @@ cards two to a row, the Complete toggle as a line above, and the ARROWS as a VIS
 narrow mode, columns ≥ 9rem, scrolling sideways in its own box with snap. The story tray is a
 FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky column at lg+.
 
+**Releases — the 4th tab (2026-11-15, docs/RELEASES.md).** `?sprintTab=releases`, key `4`; NOT a lane
+board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`. ONE fetch on mount,
+`GET /api/releases` (`hooks/useReleases.ts`, key `['releases', ws:<id>]`); nothing renders while
+`workspaceId` is null; not configured ⇒ ONE setup line (`openSettings('releases')`). The words are pure
+in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED fold, never a second
+one here. "Create release…" is HIDDEN unless a writable repo has a candidate (`showCreateRelease`). The
+dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only while open, re-checks unticks
+through shared `releaseSelectionProblems` (`confirmStops`, Confirm HIDDEN in its place), sends
+`releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = the This Sprint tracker
+read (`useSprintRefresh`) + a re-read of the check. Ticket chips → `useOpenStory()`; PRs →
+`openPrDetailTab`. Settings → Releases is `settings/ReleasesSection.tsx` (the shared validator; the
+suffix-change warning `releasesSectionModel.ts`).
+
 **GitHub Projects scope line.** When a GitHub Issues read fell back to milestones because the gh login
 lacks `read:project`, the source carries `projectsAccess: 'needs_scope'` and the toolbar is followed by ONE
 muted line, "Run `gh auth refresh -s read:project` to use your GitHub Projects iterations.", with a

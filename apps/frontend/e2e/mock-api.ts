@@ -74,6 +74,8 @@ import type {
   StoryDocsAlignmentResponse,
   SprintGraphResponse,
   SprintGraphTokenResponse,
+  ReleasesResponse,
+  ReleaseSettingsResponse,
   StoryBuild,
   StoryBuildDiffResponse,
   StoryBuildDiscardResponse,
@@ -2683,6 +2685,28 @@ export async function installMockApi(
         return json(route, { prs: [], titlesComplete: true } satisfies TicketLinksResponse);
       }
       if (path.endsWith('/api/sprint-graph')) return json(route, SPRINT_GRAPH);
+      // This Sprint → Releases (DB only) and Settings → Releases: no suffix set, so the tab shows its
+      // one setup line (docs/RELEASES.md acceptance 1). Typed: the catch-all `{}` has no `configured`.
+      if (path.endsWith('/api/releases') && route.request().method() === 'GET') {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          configured: false,
+          releaseSuffix: null,
+          hotfixSuffix: null,
+          latestRelease: null,
+          latestReleaseTagAt: null,
+          check: null,
+        } satisfies ReleasesResponse);
+      }
+      if (/\/api\/workspaces\/\d+\/release-settings$/.test(path)) {
+        return json(route, {
+          workspaceId: WORKSPACE.id,
+          releaseSuffix: null,
+          hotfixSuffix: null,
+          configured: false,
+          hasReleases: false,
+        } satisfies ReleaseSettingsResponse);
+      }
       // The change-token poll: the SAME token as the graph, so no "changed since you loaded it" hint.
       if (path.endsWith('/api/sprint-graph/token')) {
         return json(route, { workspaceId: WORKSPACE.id, changeToken: SPRINT_GRAPH.changeToken } satisfies SprintGraphTokenResponse);

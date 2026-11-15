@@ -50,8 +50,10 @@ describe('tab', () => {
 
   // "Merged so far" LEFT This Sprint for Open PRs → Merged (2026-11-03).
   it('This Sprint opens on Theme; Critical path and People follow; anything else derives to Theme', () => {
-    expect(SPRINT_INNER_TABS).toEqual(['themes', 'paths', 'people']);
-    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Theme', 'Critical path', 'People']);
+    expect(SPRINT_INNER_TABS).toEqual(['themes', 'paths', 'people', 'releases']);
+    // Releases is the 4th tab (key 4; docs/RELEASES.md § Releases tab).
+    expect(SPRINT_RAIL_TABS.map((t) => t.label)).toEqual(['Theme', 'Critical path', 'People', 'Releases']);
+    expect(effectiveSprintTab('releases')).toBe('releases');
     expect(effectiveSprintTab('merged')).toBe('themes');
     expect(effectiveSprintTab('paths')).toBe('paths');
     expect(effectiveSprintTab('people')).toBe('people');

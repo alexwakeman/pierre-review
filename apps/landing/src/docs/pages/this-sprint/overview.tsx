@@ -57,6 +57,10 @@ export default function Page(): JSX.Element {
         board with the tickets in different rows. Press <Kbd>1</Kbd>, <Kbd>2</Kbd> or <Kbd>3</Kbd> to switch. The
         picture below is a working model of the board with made-up tickets: select a view to see the rows change.
       </p>
+      <p>
+        A fourth tab, <Ui>Releases</Ui> (<Kbd>4</Kbd>), is not a board: it says which version tag each repository may
+        release. See <DocLink to="this-sprint/releases">Release safe version tags</DocLink>.
+      </p>
       <SprintLanesMock />
 
       <H3 id="the-toolbar">The toolbar</H3>

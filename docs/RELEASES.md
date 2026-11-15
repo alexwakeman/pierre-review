@@ -318,3 +318,44 @@ Notes
   docs or CHANGELOG entry yet; `release_ticket_comments.comment_id` (`postTicketComment` returns no id);
   a `stopped` release row (nothing is recorded for a stopped Confirm); hotfix. Confirm runs its writes
   inside the request (a few GitHub calls per repo); a very large release could be slow to answer.
+
+### Slice 4 — the Releases tab and Settings → Releases (frontend)
+
+- **This Sprint → Releases** is the 4th inner tab (`SprintInnerTab` `'releases'`, `SPRINT_RAIL_TABS`,
+  key `4`, `?sprintTab=releases`, ⌘K "This Sprint: Releases"). `SprintTabView` mounts
+  `components/Sprint/ReleasesView.tsx` in place of the lane board. One fetch on mount, `GET /api/releases`
+  (`hooks/useReleases.ts` `useReleases`, key `['releases', ws:<id>]`); nothing renders while `workspaceId`
+  is null; not configured ⇒ one setup line with "Set up in Settings" (`openSettings('releases')`).
+- **The view**: header ("Latest release: none / 12 Nov", ⓘ with the rules, "View notes" for the newest
+  release made here, Refresh, "Create release…"); the no-baseline line; repo rows that expand to their
+  version tags newest first (candidate starred, held tags with `releaseBlockerText`, PRs → PR tabs, ticket
+  chips → `useOpenStory()`); the tickets panel (per repo ✓/✗/⚠ marks through Icons.tsx); warnings.
+- **The dialog** `components/Sprint/ReleaseDialog.tsx` (`ReleaseDialog`, `ReleaseDetailModal`, on
+  `InfoModal`): the preview is read only while it is open (`useReleasePreview`, once, for every
+  releasable repo); unticking re-checks through the shared `releaseSelectionProblems` and HIDES Confirm,
+  naming the ticket; editable notes per ticked repo (only edited sections are sent); the comment preview
+  (its tag line follows the ticks); Confirm sends `releaseSnapshotOf(check, ticked)`; a stopped Confirm lists
+  `changes` ("Nothing was written."); a written one shows `steps` and the pre-release links
+  (`safeExternalUrl`). `useCreateRelease` (shared mutation key, `useCreatingRelease`) re-reads the check,
+  the settings and drops the preview when it settles.
+- **Pure helpers** `components/Sprint/releasesModel.ts`: `releaseDayWords`, `latestReleaseLine`,
+  `releaseWordsContext`, `shortBlocker`, `repoFirstBlocker`, `repoRowText`, `ticketRepoMark`,
+  `ticketsPanelRows`, `releaseWarningText`, `releasableRepos`, `showCreateRelease`, `defaultTickedRepoIds`,
+  `confirmStops`, `editedSections`, `releaseTagsLine`.
+- **Settings → Releases**: a new Settings tab `releases` (`settingsTabs.ts`, focus `'releases'`) holding
+  `settings/ReleasesSection.tsx` — two fields, the shared `validateReleaseSettings` inline, and
+  `settings/releasesSectionModel.ts` `releaseSuffixChangeWarning` shown before the Save once a release
+  exists (acceptance 3).
+- **E2E fixtures**: `GET /api/releases` (not configured) and `GET /api/workspaces/:id/release-settings`
+  in `apps/frontend/e2e/mock-api.ts`, typed.
+- **User docs**: `/docs/this-sprint/releases`, `/docs/settings/releases`, a line on This Sprint's overview,
+  CHANGELOG Unreleased.
+- **Tests**: `apps/frontend/test/releasesModel.test.ts` (acceptance 3, 4, 5, 7, 12/24, 14, 15, 17, 18 over the
+  real shared fold; the header line; hidden Create release; edited sections), `settingsTabs.test.ts`,
+  `sprintModel.test.ts` (the 4th tab).
+- **Deferred / deviations:** Refresh is the This Sprint tracker read plus a re-read of the check — tickets
+  outside the current sprint update on the tracker worker's next read (no forced per-ticket re-read route).
+  The ticket chip opens the story TAB (`useOpenStory()`), not This Sprint's tray (the tray is the lane
+  boards'). Only the newest release made here can be viewed again (no release list route). The landing's
+  `SprintLanesMock` still shows the three lane boards only (it mirrors the boards, not this tab). Hotfix is
+  still to come.

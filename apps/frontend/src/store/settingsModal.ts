@@ -22,8 +22,9 @@ import type { SettingsTabId } from '../components/settings/settingsTabs.js';
  *  workspace's issue tracker (This Sprint's "Set up in Settings"), or the Claude spend budget (the
  *  budget meter beside a Run button, the over-budget toast), the workspace's auto review and the AI
  *  section's effort (Reports → AI usage's suggestions), and the Bots tab (where a bot's category and
- *  price are set; it opens on the tab, with no section scroll). */
-export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend' | 'auto-review' | 'ai-effort' | 'bots' | 'sandbox';
+ *  price are set; it opens on the tab, with no section scroll), and Releases (This Sprint → Releases'
+ *  setup line; on the tab). */
+export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend' | 'auto-review' | 'ai-effort' | 'bots' | 'sandbox' | 'releases';
 
 interface SettingsModalState {
   open: boolean;

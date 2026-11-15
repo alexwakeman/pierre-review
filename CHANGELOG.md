@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- This Sprint → Releases: per repository, the newest version tag whose pull requests link only to Done tickets,
+  with the tickets and warnings behind it. "Create release…" tags each one with your release suffix, publishes the
+  release notes as a GitHub pre-release and comments on each ticket.
+- Settings → Releases: the release suffix and hotfix suffix the Releases tab needs.
+
 ## [1.0.31] - 2026-11-12
 
 ### Added

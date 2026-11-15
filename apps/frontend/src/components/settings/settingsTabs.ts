@@ -27,6 +27,7 @@ export type SettingsTabId =
   | 'docs'
   | 'sandbox'
   | 'reports'
+  | 'releases'
   | 'integrations'
   | 'bots';
 
@@ -99,6 +100,8 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     global: [],
     workspace: ['FlowSettingsSection', 'SprintSection'],
   },
+  // THE RELEASE AND HOTFIX SUFFIXES (docs/RELEASES.md § Terms and settings): per workspace, no default.
+  { id: 'releases', label: 'Releases', summary: 'Release and hotfix tag suffixes', global: [], workspace: ['ReleasesSection'] },
   {
     id: 'integrations',
     label: 'Integrations', summary: 'Issue tracker, acceptance criteria field, SonarCloud, Slack',
@@ -128,6 +131,7 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   'ai-effort': 'ai',
   bots: 'bots',
   sandbox: 'sandbox',
+  releases: 'releases',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a
