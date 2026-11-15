@@ -170,10 +170,30 @@ describe('repo rows — the automatic candidate', () => {
   });
 
   it('acceptance 17: still being read → "Checking…" with a bar and ONE line; a standing candidate gets a small "Still reading later tags" bar', () => {
+    // NEWEST FIRST: main's history is still being read — nothing held yet, so the latest tag caps it.
     const first = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1], noRange: true }, { name: 'v1.1.0', d: 3, prs: [2] }]);
+    first.defaultBranch = 'main';
+    first.history = { done: 2000, total: 5000, complete: false };
     const res = run({ repos: [first], ...all() });
-    expect(repoRowText(res.repos[0]!)).toBe('Checking…');
-    expect(repoProgress(res.repos[0]!)).toEqual({ share: 0.5, line: "Matching v1.0.0's commits to pull requests (tag 1 of 2)", small: false });
+    expect(repoRowText(res.repos[0]!)).toBe('Candidate at most v1.1.0 — checking older history (40%)');
+    expect(repoProgress(res.repos[0]!)).toEqual({ share: 0.4, line: "Reading main's history: 2,000 of 5,000 commits", small: false });
+    // A held tag found early caps it at the tag before it.
+    const held = run({ repos: [first], prs: all().prs, tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' })] });
+    expect(repoRowText(held.repos[0]!)).toBe('Candidate at most v1.0.0 — checking older history (40%)');
+    // The held tag is the oldest read so far: the tag before it is not known yet.
+    expect(repoRowText({ ...held.repos[0]!, upperLimit: null, heldFrom: 'v1.1.0' })).toBe('Checking — v1.1.0 and later cannot be released');
+    const three = repo(1, 'api', [
+      { name: 'v1.0.0', d: 1, prs: [1], noRange: true },
+      { name: 'v1.1.0', d: 3, prs: [2] },
+      { name: 'v1.2.0', d: 5, prs: [3] },
+    ]);
+    three.history = { done: 540, total: 5400, complete: false };
+    const capped = run({ repos: [three], prs: all().prs, tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false })] });
+    expect(repoRowText(capped.repos[0]!)).toBe('Candidate at most v1.1.0 — checking older history (10%)');
+    // Nothing read yet at all.
+    const none = repo(1, 'api', []);
+    none.history = { done: 0, total: 0, complete: false };
+    expect(repoRowText(run({ repos: [none] }).repos[0]!)).toBe('Checking…');
     const later = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1] }, { name: 'v1.1.0', d: 3, prs: [2], noRange: true }]);
     const res2 = run({ repos: [later], ...all() });
     expect(repoRowText(res2.repos[0]!)).toBe('Release v1.0.0 → v1.0.0-rc');

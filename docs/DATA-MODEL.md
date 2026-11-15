@@ -917,16 +917,36 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
 
 - **`repo_tags`** — one row per `(account_id, repo_id, name)`: `sha` (the tagged COMMIT, annotated tags
   peeled one level), `tag_object_oid` (NULL = lightweight), `committed_at` (the order "newest" means),
-  `tagged_at` (the tie-break), `on_default_branch` (NULL = not known; `true` final for the sha, `false`
-  re-asked when `ancestry_head_sha` is no longer the head), `previous_sha` / `moved_at` (a MOVED tag),
+  `tagged_at` (the tie-break), `on_default_branch` / `ancestry_head_sha` (DORMANT since migration 0202:
+  no longer written by ancestry checks — on the default branch is DERIVED on read from the history pass;
+  only a tag move still clears them), `previous_sha` / `moved_at` (a MOVED tag),
   `first_seen_at` / `last_seen_at`. ONE writer `sync/repo-tags.ts` (insert `onConflictDoNothing` on the
   unique, then updates by id); reader `db/repo-tags.ts` `getRepoTags`.
-- **`repo_tag_ranges`** — one row per `(account_id, repo_id, tag_name)`: the INCREMENT (base, tag] —
+- **`repo_tag_ranges`** — ⚠ DORMANT since migration 0202 (the one history pass): no writer, no reader; kept,
+  never dropped, still erased. Was: one row per `(account_id, repo_id, tag_name)`: the INCREMENT (base, tag] —
   `base_tag_name` / `base_sha` (the tag before it on the default branch; NULL for the oldest, `method
   'history'`), `pr_numbers` (JSON, by NUMBER; resolved to ids within `(account, repo)` on read by
   `getTagRanges`), `commit_count`, `unmatched_commits`, `truncated`, `moved_from_sha`, `computed_at`.
-  Suffix-free: the release check sums increments from its baseline. ONE writer `sync/tag-ranges.ts`
-  (`onConflictDoUpdate` on the unique, a FRESH `set` object).
+  Suffix-free: the release check sums increments from its baseline.
+- **`release_history_scans`** (migration 0202) — one row per `(account_id, repo_id)`: where the history pass
+  stands — `top_sha` (the newest head whose chain is stored), `max_base` (the newest segment's seq base),
+  the DEEP segment (`deep_start_sha`, `deep_cursor`, `deep_expected_sha` — NULL = reached the root,
+  `deep_next_idx`, `deep_estimate`) and the TIP segment (`tip_start_sha` … `tip_base`, `tip_estimate`; NULL
+  = none). Composite FK to repos (cascade). ONE writer `sync/release-history.ts` (`onConflictDoUpdate` on
+  the unique on a restart).
+- **`release_history_commits`** (migration 0202) — one row per first-parent commit walked, unique `(account_id,
+  repo_id, sha)`: `seq` (larger = newer; deep `-idx`, a tip `max_base + 1e9 - idx`), `pr_numbers` (JSON; [] =
+  a direct push), `committed_at`. Which tag a commit belongs to is derived on read (`releases/history-fold.ts`).
+  ONE writer `sync/release-history.ts`; reader `db/release-check.ts`.
+- **`release_range_prs`** (migration 0202) — the LIGHT record of a range PR, unique `(account_id, repo_id,
+  number)`: `title`, `head_ref_name`, `author_login`, `is_bot` (GitHub typed it a Bot, or a known automation
+  login), `merged_at`, `merge_sha`, `url`, `seen_at`. Its id is the release check's PR id; a PR also stored in
+  `pull_requests` lends its row (`prId`). ONE writer `sync/release-history.ts`.
+- **`tracker_ticket_status`** (migration 0202) — a ticket's status read in a BATCH, unique `(account_id,
+  workspace_id, ident)`: `provider`, `api_root`, `issue_key`, `state` (`ok`·`not_found`·`no_access`·`failed`),
+  `status_name`, `status_category`, `title`, `url`, `attempts` (failed reads in a row), `fetched_at`,
+  `checked_at`. Composite FK to workspaces (cascade; `deleteWorkspace` deletes its rows). ONE writer
+  `tracker/ticket-status.ts`; reader `db/release-check.ts`.
 - **`releases`** — one row per "Create release…" press: `workspace_id` (composite FK; `deleteWorkspace`
   re-homes rows to Default first), `created_by_user_id` / `created_by_login`, `created_at`,
   `release_suffix` (in force then), `notes_markdown`, `state` (`writing`·`done`·`partial`·`failed`·
@@ -1601,7 +1621,11 @@ and check every hit against its table's declared unique.**
 | `worktree_ledger` | `[path]` (`worktree_ledger_path`), `onConflictDoUpdate` (overwrites the whole row and reopens it: a recycled pid reached the same per-run path) | `review/worktree-ledger.ts` `recordWorktreeCreated` (the ONLY insert; `recordWorktreeReleased` and the sweep's `closeRow` only UPDATE) |
 | `accounts` | the account uniques | `auth/account.ts` (`ensureLocalAccount`) |
 | `repos` head/trunk columns | `[accountId, githubNodeId]` / `branch_commits` composite | `sync/branch-status.ts`, `sync/sync-repo.ts` |
-| `repo_tag_ranges` | `[accountId, repoId, tagName]` (`repo_tag_ranges_account_repo_tag`) | `sync/tag-ranges.ts` `computeTagRanges` (the ONLY writer) |
+| `repo_tag_ranges` | `[accountId, repoId, tagName]` (`repo_tag_ranges_account_repo_tag`) | DORMANT since 0202 (no writer) |
+| `release_history_scans` | `[accountId, repoId]` (`release_history_scans_account_repo`) | `sync/release-history.ts` (the ONLY writer) |
+| `release_history_commits` | `[accountId, repoId, sha]` (`release_history_commits_account_repo_sha`) | `sync/release-history.ts` `storePage` (the ONLY writer) |
+| `release_range_prs` | `[accountId, repoId, number]` (`release_range_prs_account_repo_number`) | `sync/release-history.ts` `storePage` (the ONLY writer) |
+| `tracker_ticket_status` | `[accountId, workspaceId, ident]` (`tracker_ticket_status_account_ws_ident`) | `tracker/ticket-status.ts` `readTicketStatuses` (the ONLY writer) |
 
 ⚠ **`persist()` must NOT share one values object between the insert and the `set:`.** It did,
 and that was correct while the table held one grain. With judgement + identity + price in one

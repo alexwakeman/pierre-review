@@ -481,7 +481,7 @@ export async function syncRepo(opts: SyncRepoOptions): Promise<SyncRepoResult> {
       );
     }
     // The TAGS half of the snapshot step (sync/tags-step.ts; docs/RELEASES.md): the repo's tags,
-    // their ancestry and the version-tag ranges. STRICTLY NON-FATAL like the strip above, and its
+    // then (releasable) the one history pass and the batched ticket reads. STRICTLY NON-FATAL like the strip above, and its
     // own guard, so a tag failure never costs the strip or the PR sync. An EXTERNAL repo only when
     // some workspace releases it (the step decides).
     try {

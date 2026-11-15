@@ -13,6 +13,14 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- This Sprint → Releases checks much faster: it reads main's history once, newest first, instead of asking
+  GitHub about each tag and each old pull request, and reads tickets from Jira up to 100 at a time. Later
+  checks read only the new commits.
+- This Sprint → Releases: while a repository is still being read it already says "Candidate at most 0.388.0 —
+  checking older history (40%)".
+
 ## [1.0.44] - 2026-11-15
 
 ### Added

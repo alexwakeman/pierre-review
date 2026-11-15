@@ -2,25 +2,29 @@
 // shared `foldReleaseCheck` and answers GET /api/releases. DB ONLY: never a GitHub or tracker call.
 //
 //   • Repos: the workspace's RELEASABLE repos only (db/release-repos.ts: ticked "Released from this
-//     workspace", ∩ its current membership — unticked repos are ignored entirely), their stored tags
-//     and range increments (db/repo-tags.ts), `writable` from the synced `viewerPermission` (the ONE
-//     WRITE_PERMISSIONS set), and the range PRs GitHub did not give (releases/scan-state.ts).
-//   • PRs: every PR in a stored range (each repository is judged on its own: a ticket's PRs elsewhere
-//     do not count).
-//   • Tickets: `tracker_tickets` rows ON THE WORKSPACE'S TRACKER SITE only (a row of another site is a
-//     ticket of a tracker the workspace no longer uses: not a link). The best row per ticket is the
-//     newest successful read; a fresher `sprint_tickets` row's status wins. DONE = the This Sprint
-//     stage resolver (`sprintStageOf` over `sprintLayoutFor`) says Complete (`stage === 'done'`; a
-//     Cancelled ticket holds like any not-Done one) — never a second resolver.
-//     A range PR with a ticket key THE detection rule finds but no stored row yet is `not_read`: the
-//     scan has queued it for the tracker worker, so the fold says "checking" — unless the workspace's
-//     tracker cannot read at all (`ticketsReadable` false), when it holds.
-//   • A 'history' range (the oldest tag) is its stored numbers (read from GitHub) plus the stored PRs
-//     merged by then, read fresh.
+//     workspace", ∩ its current membership — unticked repos are ignored entirely), their stored tags,
+//     `writable` from the synced `viewerPermission` (the ONE WRITE_PERMISSIONS set).
+//   • THE HISTORY PASS (sync/release-history.ts) is read here: the walked first-parent commits from
+//     this workspace's baseline up (`release_history_commits`, seq ≥ the newest walked release tag's)
+//     → releases/history-fold.ts `historyView` → each tag's place on the default branch and each tag's
+//     INCREMENT (a missing one is still being read), and the walk's progress (`history`).
+//   • PRs: one per LIGHT record (`release_range_prs`) in an increment; a PR also stored in
+//     `pull_requests` lends its full row (links, author, the PR tab's id). Each repository is judged
+//     on its own: a ticket's PRs elsewhere do not count.
+//   • Tickets: THE detection rule (`releasePrDetectInput` → `detectKeysWithAccess`) on each range PR,
+//     plus a stored PR's own `tracker_tickets` rows, ON THE WORKSPACE'S TRACKER SITE only. A ticket's
+//     reads come from three stores — the PR rows, the batched status rows (`tracker_ticket_status`,
+//     tracker/ticket-status.ts) and the sprint rows — and `bestTicketRead` keeps the freshest
+//     successful one. DONE = the This Sprint stage resolver (`sprintStageOf` over `sprintLayoutFor`)
+//     says Complete (`stage === 'done'`; a Cancelled ticket holds like any not-Done one) — never a
+//     second resolver. A ticket with no read yet is `not_read`: "checking" (the scan reads it in its
+//     next batch) — unless the workspace's tracker cannot read at all (`ticketsReadable` false), when
+//     it holds.
 //   • PROGRESS: the fold derives it; the scan's live step (releases/scan-state.ts) is laid over it while
-//     fresh. Still DB + memory only.
-//   • Bot-ness: `globalAutomationUserIds`, never the hidden-bots list.
-import { and, desc, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
+//     fresh (for its "waiting for GitHub's rate limit"). Still DB + memory only.
+//   • Bot-ness: `globalAutomationUserIds` (the stored author, or the login's user row) or the light
+//     record's own rule — never the hidden-bots list.
+import { and, count, desc, eq, gte, inArray, max } from 'drizzle-orm';
 import {
   TRACKER_PROVIDER_LABEL,
   foldReleaseCheck,
@@ -43,11 +47,13 @@ import { db, schema } from './client.js';
 import { WRITE_PERMISSIONS, resolveWorkspaceScope } from './queries.js';
 import { getReleaseRepos } from './release-repos.js';
 import { getReleaseSettings } from './release-settings.js';
-import { getRepoTags, getTagRanges } from './repo-tags.js';
-import { liveScanStep, unreadablePrNumbers } from '../releases/scan-state.js';
+import { getRepoTags } from './repo-tags.js';
+import { liveScanStep } from '../releases/scan-state.js';
+import { historyView, type HistoryIncrement } from '../releases/history-fold.js';
+import { RELEASE_TICKET_FAILS_HOLD } from '../tracker/ticket-status.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
 
-const { repos, pullRequests, trackerTickets, sprintTickets, releases } = schema;
+const { repos, pullRequests, trackerTickets, sprintTickets, releases, releaseHistoryCommits, releaseRangePrs, trackerTicketStatus, users } = schema;
 
 const CHUNK = 400;
 
@@ -113,62 +119,65 @@ async function workspaceTrackerOf(accountId: number, workspaceId: number) {
   return { access, readable, name };
 }
 
-/**
- * THE ONE detection rule (tracker/enricher.ts `detectKeysWithAccess`: title + head branch + stored
- * links) over these PRs, against the WORKSPACE's tracker: prId → keys. DB only (no tracker call). A
- * key detected on a range PR with no stored row is a ticket the worker has not read yet (`not_read`) —
- * never an untracked PR.
- */
-async function detectedKeysByPr(
-  accountId: number,
-  access: Awaited<ReturnType<typeof workspaceTrackerOf>>['access'],
-  prIds: readonly number[],
-): Promise<Map<number, string[]>> {
-  const out = new Map<number, string[]>();
-  if (prIds.length === 0) return out;
-  const { detectKeysWithAccess, withParsedLinks, prLinkColumns } = await import('../tracker/enricher.js');
-  for (const part of chunks(prIds)) {
-    const rows = await db
-      .select({ id: pullRequests.id, title: pullRequests.title, headRefName: pullRequests.headRefName, ...prLinkColumns(pullRequests) })
-      .from(pullRequests)
-      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, part)))
-      .execute();
-    for (const r of rows) {
-      const keys = detectKeysWithAccess(access, withParsedLinks(r as typeof r & { closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown }));
-      if (keys != null && keys.length > 0) out.set(r.id, keys);
-    }
-  }
-  return out;
+/** What THE ONE detection rule (tracker/enricher.ts `detectKeysWithAccess`: title + head branch +
+ *  stored links) reads off a range PR: its FULL row when one is stored (links included), else its
+ *  LIGHT record from the history pass (title + head branch; no links read). ONE function for both, so
+ *  a light record and a stored PR with the same title and branch name the same tickets. Pure. */
+export function releasePrDetectInput<S extends { title: string; headRefName: string | null }>(
+  light: { title: string; headRefName: string | null },
+  stored: S | null,
+): S | { title: string; headRefName: string | null } {
+  if (stored != null) return stored;
+  return { title: light.title, headRefName: light.headRefName };
+}
+
+/** One read of a ticket from any of its stores, for `bestTicketRead`. */
+export interface TicketReadCandidate {
+  source: 'pr' | 'status' | 'sprint';
+  state: string;
+  key: string;
+  title: string | null;
+  url: string | null;
+  statusName: string | null;
+  statusCategory: string | null;
+  fetchedAt: Date | null;
+  checkedAt: Date;
+  /** status rows: failed reads in a row. */
+  attempts?: number;
 }
 
 /**
- * A 'history' range (the oldest tag: no base) also takes the stored PRs FRESH, on top of its row's
- * numbers (read from GitHub): a PR stored after the row was computed enters it. Merged into the
- * default branch no later than the tag's commit (or by the tag's own commit).
+ * THE ticket read the release check believes, from every store (a PR's row, the batched status row,
+ * the sprint row): the freshest SUCCESSFUL read; with none, the newest attempt's state — a batched
+ * read that FAILED fewer than `failsHold` times in a row is "not read yet" (checking, retried), never
+ * a hold. Pure.
  */
-async function historyPrIds(
-  accountId: number,
-  repoId: number,
-  defaultBranch: string,
-  tag: { sha: string; committedAt: Date },
-): Promise<number[]> {
-  const rows = await db
-    .select({ id: pullRequests.id })
-    .from(pullRequests)
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        eq(pullRequests.repoId, repoId),
-        eq(pullRequests.state, 'merged'),
-        eq(pullRequests.baseRefName, defaultBranch),
-        or(
-          eq(pullRequests.mergeCommitOid, tag.sha),
-          and(isNotNull(pullRequests.mergedAt), lte(pullRequests.mergedAt, tag.committedAt)),
-        ),
-      ),
-    )
-    .execute();
-  return [...new Set(rows.map((r) => r.id))].sort((a, b) => a - b);
+export function bestTicketRead(
+  cands: readonly TicketReadCandidate[],
+  failsHold: number,
+): { read: TicketReadCandidate | null; readState: ReleaseTicketReadState } {
+  const ms = (d: Date | null): number => (d == null ? 0 : d.getTime());
+  const ok = cands.filter((c) => c.state === 'ok' && c.fetchedAt != null).sort((a, b) => ms(b.fetchedAt) - ms(a.fetchedAt));
+  if (ok[0] != null) return { read: ok[0], readState: 'ok' };
+  const last = [...cands].sort((a, b) => ms(b.checkedAt) - ms(a.checkedAt))[0] ?? null;
+  if (last == null) return { read: null, readState: 'not_read' };
+  if (last.state === 'failed' && last.source === 'status' && (last.attempts ?? 0) < failsHold) return { read: last, readState: 'not_read' };
+  const st = last.state as ReleaseTicketReadState;
+  return { read: last, readState: READ_STATES.has(st) && st !== 'ok' ? st : 'not_read' };
+}
+
+/** When a ticket of the check was last read (any store), for the scan's batched refresh. */
+export interface TicketReadInfo {
+  ident: string;
+  key: string;
+  readState: ReleaseTicketReadState;
+  /** The newest read or attempt (null = never). */
+  lastAt: Date | null;
+}
+
+export interface ReleaseCheckLoaded {
+  input: ReleaseCheckInput;
+  reads: TicketReadInfo[];
 }
 
 /** Every stored input of the fold for one workspace (the caller checked the settings are set). Only the
@@ -179,6 +188,28 @@ export async function loadReleaseCheckInput(
   requestedRepoIds: readonly number[],
   settings: ReleaseSettings,
 ): Promise<ReleaseCheckInput> {
+  return (await loadReleaseCheck(accountId, workspaceId, requestedRepoIds, settings)).input;
+}
+
+type StoredPr = {
+  id: number;
+  repoId: number;
+  number: number;
+  title: string;
+  headRefName: string | null;
+  authorId: number | null;
+  closingIssues?: unknown;
+  linearLinks?: unknown;
+  linearLinksRoot?: unknown;
+};
+
+/** The loader, with when each ticket was last read (the scan's refresh reads that). DB only. */
+export async function loadReleaseCheck(
+  accountId: number,
+  workspaceId: number,
+  requestedRepoIds: readonly number[],
+  settings: ReleaseSettings,
+): Promise<ReleaseCheckLoaded> {
   const ticked = await getReleaseRepos(accountId, workspaceId);
   const repoIds = [...new Set(requestedRepoIds)].filter((id) => ticked.has(id));
   const repoRows =
@@ -197,28 +228,107 @@ export async function loadReleaseCheckInput(
           .where(and(eq(repos.accountId, accountId), inArray(repos.id, [...repoIds])))
           .execute();
   const ids = repoRows.map((r) => r.id);
-  const [tags, storedRanges] = await Promise.all([getRepoTags(accountId, ids), getTagRanges(accountId, ids)]);
-  const repoRowById = new Map(repoRows.map((r) => [r.id, r]));
-  const ranges = await Promise.all(
-    storedRanges.map(async (r) => {
-      if (r.method !== 'history') return r;
-      const tag = tags.find((t) => t.repoId === r.repoId && t.name === r.tagName);
-      const row = repoRowById.get(r.repoId);
-      const def = row?.defaultBranch ?? row?.defaultBranchName ?? null;
-      if (tag == null || tag.sha !== r.sha || tag.committedAt == null || def == null) return r;
-      const fresh = await historyPrIds(accountId, r.repoId, def, { sha: tag.sha, committedAt: tag.committedAt });
-      return { ...r, prIds: [...new Set([...r.prIds, ...fresh])].sort((a, b) => a - b) };
-    }),
-  );
+  const tags = await getRepoTags(accountId, ids);
+  const { readHistoryScan, historyProgress } = await import('../sync/release-history.js');
+
+  // ── Per repo: the walked history → each tag's place on the default branch and its increment ──
+  interface RepoHistory {
+    onDefault: Map<string, boolean | null>;
+    increments: HistoryIncrement[];
+    history: { done: number; total: number; complete: boolean };
+  }
+  const historyByRepo = new Map<number, RepoHistory>();
+  const hc = releaseHistoryCommits;
+  for (const r of repoRows) {
+    const repoTagsOf = tags.filter((t) => t.repoId === r.id);
+    const scan = await readHistoryScan(accountId, r.id);
+    // The floor: the newest WALKED release tag of this workspace (its baseline). Older commits are not
+    // needed, and not loaded.
+    const releaseShas = [...new Set(repoTagsOf.filter((t) => tagKind(t.name, settings) === 'release').map((t) => t.sha))];
+    let floorSeq: number | null = null;
+    for (const part of chunks(releaseShas)) {
+      const row = (
+        await db
+          .select({ seq: max(hc.seq) })
+          .from(hc)
+          .where(and(eq(hc.accountId, accountId), eq(hc.repoId, r.id), inArray(hc.sha, part)))
+          .execute()
+      )[0];
+      if (row?.seq != null) floorSeq = Math.max(floorSeq ?? Number.NEGATIVE_INFINITY, Number(row.seq));
+    }
+    const commitRows =
+      scan == null
+        ? []
+        : await db
+            .select({ sha: hc.sha, seq: hc.seq, prNumbers: hc.prNumbers, committedAt: hc.committedAt })
+            .from(hc)
+            .where(and(eq(hc.accountId, accountId), eq(hc.repoId, r.id), ...(floorSeq != null ? [gte(hc.seq, floorSeq)] : [])))
+            .execute();
+    const walked =
+      scan == null
+        ? 0
+        : Number((await db.select({ n: count() }).from(hc).where(and(eq(hc.accountId, accountId), eq(hc.repoId, r.id))).execute())[0]?.n ?? 0);
+    const topAt = scan == null ? null : (commitRows.find((c) => c.sha === scan.topSha)?.committedAt ?? null);
+    const view = historyView(
+      commitRows.map((c) => ({ ...c, prNumbers: c.prNumbers ?? [] })),
+      repoTagsOf,
+      {
+        coversAll: scan != null && scan.deepExpectedSha == null && floorSeq == null,
+        tipPending: scan == null || scan.tipStartSha != null,
+        topCommittedAt: topAt,
+      },
+    );
+    // Complete for THIS workspace: no newer head left, and the deep walk met its baseline or the root.
+    const complete = scan != null && scan.tipStartSha == null && (scan.deepExpectedSha == null || floorSeq != null);
+    const progress = scan == null ? { done: 0, total: 0 } : historyProgress(scan, walked, floorSeq != null);
+    historyByRepo.set(r.id, { onDefault: view.onDefaultBranch, increments: view.increments, history: { ...progress, complete } });
+  }
+
+  // ── The range PRs: their light records, and the full row when one is stored ──
+  const lightRows: Array<typeof releaseRangePrs.$inferSelect> = [];
+  for (const r of repoRows) {
+    const numbers = [...new Set((historyByRepo.get(r.id)?.increments ?? []).flatMap((x) => x.prNumbers))];
+    for (const part of chunks(numbers)) {
+      lightRows.push(
+        ...(await db
+          .select()
+          .from(releaseRangePrs)
+          .where(and(eq(releaseRangePrs.accountId, accountId), eq(releaseRangePrs.repoId, r.id), inArray(releaseRangePrs.number, part)))
+          .execute()),
+      );
+    }
+  }
+  const lightByKey = new Map(lightRows.map((l) => [`${l.repoId}#${l.number}`, l]));
+  const { prLinkColumns, detectKeysWithAccess, withParsedLinks } = await import('../tracker/enricher.js');
+  const storedByKey = new Map<string, StoredPr>();
+  for (const r of repoRows) {
+    const numbers = lightRows.filter((l) => l.repoId === r.id).map((l) => l.number);
+    for (const part of chunks(numbers)) {
+      const rows = (await db
+        .select({
+          id: pullRequests.id,
+          repoId: pullRequests.repoId,
+          number: pullRequests.number,
+          title: pullRequests.title,
+          headRefName: pullRequests.headRefName,
+          authorId: pullRequests.authorId,
+          ...prLinkColumns(pullRequests),
+        })
+        .from(pullRequests)
+        .where(and(eq(pullRequests.accountId, accountId), eq(pullRequests.repoId, r.id), inArray(pullRequests.number, part)))
+        .execute()) as StoredPr[];
+      for (const p of rows) storedByKey.set(`${p.repoId}#${p.number}`, p);
+    }
+  }
 
   // The workspace's tracker site (LAZY: db/stories.ts reaches the tracker runtime).
   const { workspaceSite } = await import('./stories.js');
   const site = await workspaceSite(accountId, workspaceId);
   const tracker = site != null ? await workspaceTrackerOf(accountId, workspaceId) : null;
+  const identOf = (issueKey: string): string => trackerTicketIdent(site!.provider as TrackerProvider, site!.apiRoot, issueKey);
 
-  const rangePrIds = [...new Set(ranges.flatMap((r) => r.prIds))];
-  const ticketRows: TicketRow[] = [];
-  const detectedOnly = new Map<number, string[]>();
+  // Ticket keys per range PR: THE detection rule (on the stored row, else the light record), plus a
+  // stored PR's own ticket rows on the site (a ticket linked by hand, a link read).
   const ticketSelect = {
     prId: trackerTickets.prId,
     issueKey: trackerTickets.issueKey,
@@ -230,135 +340,77 @@ export async function loadReleaseCheckInput(
     fetchedAt: trackerTickets.fetchedAt,
     checkedAt: trackerTickets.checkedAt,
   };
-  if (site != null) {
-    for (const part of chunks(rangePrIds)) {
-      ticketRows.push(
-        ...(await db
-          .select(ticketSelect)
-          .from(trackerTickets)
-          .where(
-            and(
-              eq(trackerTickets.accountId, accountId),
-              eq(trackerTickets.provider, site.provider),
-              eq(trackerTickets.apiRoot, site.apiRoot),
-              inArray(trackerTickets.prId, part),
-            ),
-          )
-          .execute()),
-      );
+  const siteWhere =
+    site != null ? and(eq(trackerTickets.accountId, accountId), eq(trackerTickets.provider, site.provider), eq(trackerTickets.apiRoot, site.apiRoot)) : null;
+  const prRowsByPrId = new Map<number, TicketRow[]>();
+  if (siteWhere != null) {
+    for (const part of chunks([...storedByKey.values()].map((p) => p.id))) {
+      for (const r of await db.select(ticketSelect).from(trackerTickets).where(and(siteWhere, inArray(trackerTickets.prId, part))).execute()) {
+        prRowsByPrId.set(r.prId, [...(prRowsByPrId.get(r.prId) ?? []), r]);
+      }
     }
-    // Keys the detection rule finds on a range PR but no stored row answers for that PR yet.
-    const rowKeys = new Map<number, Set<string>>();
-    for (const r of ticketRows) rowKeys.set(r.prId, (rowKeys.get(r.prId) ?? new Set()).add(r.issueKey));
-    for (const [prId, keys] of await detectedKeysByPr(accountId, tracker!.access, rangePrIds)) {
-      const missing = keys.filter((k) => !(rowKeys.get(prId)?.has(k) ?? false));
-      if (missing.length > 0) detectedOnly.set(prId, missing);
+  }
+  const keysByLight = new Map<number, string[]>();
+  if (tracker != null) {
+    for (const l of lightRows) {
+      const stored = storedByKey.get(`${l.repoId}#${l.number}`) ?? null;
+      const detected =
+        detectKeysWithAccess(
+          tracker.access,
+          withParsedLinks(releasePrDetectInput(l, stored) as { title: string; headRefName: string | null; closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown }),
+        ) ?? [];
+      const keys = [...detected];
+      for (const row of stored != null ? (prRowsByPrId.get(stored.id) ?? []) : []) if (!keys.includes(row.issueKey)) keys.push(row.issueKey);
+      if (keys.length > 0) keysByLight.set(l.id, keys);
     }
-    // The same tickets' rows on OTHER PRs: a ticket read through another PR is read (its status counts),
-    // though those PRs are not in this check.
-    const keys = [...new Set([...ticketRows.map((r) => r.issueKey), ...[...detectedOnly.values()].flat()])];
-    const have = new Set(ticketRows.map((r) => `${r.prId}#${r.issueKey}`));
-    for (const part of chunks(keys)) {
-      const more = await db
-        .select(ticketSelect)
-        .from(trackerTickets)
-        .where(
-          and(
-            eq(trackerTickets.accountId, accountId),
-            eq(trackerTickets.provider, site.provider),
-            eq(trackerTickets.apiRoot, site.apiRoot),
-            inArray(trackerTickets.issueKey, part),
-          ),
-        )
+  }
+
+  // ── The tickets: every store's reads; the freshest successful one wins ──
+  const keyByIdent = new Map<string, string>();
+  for (const keys of keysByLight.values()) for (const k of keys) keyByIdent.set(identOf(k), k);
+  const idents = [...keyByIdent.keys()];
+  const cands = new Map<string, TicketReadCandidate[]>();
+  const add = (ident: string, c: TicketReadCandidate): void => {
+    cands.set(ident, [...(cands.get(ident) ?? []), c]);
+  };
+  if (siteWhere != null) {
+    for (const part of chunks([...new Set(keyByIdent.values())])) {
+      for (const r of await db.select(ticketSelect).from(trackerTickets).where(and(siteWhere, inArray(trackerTickets.issueKey, part))).execute()) {
+        add(identOf(r.issueKey), {
+          source: 'pr',
+          state: r.state,
+          key: r.issueKey,
+          title: r.title,
+          url: r.url,
+          statusName: r.statusName,
+          statusCategory: r.statusCategory,
+          fetchedAt: r.fetchedAt,
+          checkedAt: r.checkedAt,
+        });
+      }
+    }
+    for (const part of chunks(idents)) {
+      const rows = await db
+        .select()
+        .from(trackerTicketStatus)
+        .where(and(eq(trackerTicketStatus.accountId, accountId), eq(trackerTicketStatus.workspaceId, workspaceId), inArray(trackerTicketStatus.ident, part)))
         .execute();
-      for (const r of more) if (!have.has(`${r.prId}#${r.issueKey}`)) ticketRows.push(r);
-    }
-  }
-
-  // The PRs: the ranges' only, within the releasable repos.
-  const prIdSet = rangePrIds;
-  type PrRow = {
-    id: number;
-    repoId: number;
-    number: number;
-    title: string;
-    state: 'open' | 'merged' | 'closed';
-    baseRefName: string | null;
-    mergedAt: Date | null;
-    authorId: number | null;
-  };
-  const prRows: PrRow[] = [];
-  if (ids.length > 0) {
-    for (const part of chunks(prIdSet)) {
-      prRows.push(
-        ...((await db
-          .select({
-            id: pullRequests.id,
-            repoId: pullRequests.repoId,
-            number: pullRequests.number,
-            title: pullRequests.title,
-            state: pullRequests.state,
-            baseRefName: pullRequests.baseRefName,
-            mergedAt: pullRequests.mergedAt,
-            authorId: pullRequests.authorId,
-          })
-          .from(pullRequests)
-          .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.repoId, ids), inArray(pullRequests.id, part)))
-          .execute()) as PrRow[]),
-      );
-    }
-  }
-  const bots = prRows.some((p) => p.authorId != null) ? await globalAutomationUserIds() : new Set<number>();
-
-  const identOf = (issueKey: string): string => trackerTicketIdent(site!.provider as TrackerProvider, site!.apiRoot, issueKey);
-  const identsByPr = new Map<number, string[]>();
-  const rowsByIdent = new Map<string, TicketRow[]>();
-  for (const r of ticketRows) {
-    const ident = identOf(r.issueKey);
-    const list = identsByPr.get(r.prId) ?? [];
-    if (!list.includes(ident)) list.push(ident);
-    identsByPr.set(r.prId, list);
-    rowsByIdent.set(ident, [...(rowsByIdent.get(ident) ?? []), r]);
-  }
-  /** Detected on a range PR, no stored row anywhere on the site: ident → key (read state `not_read`). */
-  const unreadKeys = new Map<string, string>();
-  for (const [prId, keys] of detectedOnly) {
-    for (const key of keys) {
-      const ident = identOf(key);
-      const list = identsByPr.get(prId) ?? [];
-      if (!list.includes(ident)) list.push(ident);
-      identsByPr.set(prId, list);
-      if (!rowsByIdent.has(ident)) unreadKeys.set(ident, key);
-    }
-  }
-
-  const repoById = new Map(repoRows.map((r) => [r.id, r]));
-  const defaultOf = (repoId: number): string | null => {
-    const r = repoById.get(repoId);
-    return r?.defaultBranch ?? r?.defaultBranchName ?? null;
-  };
-  const prs: ReleaseCheckPrInput[] = prRows.map((p) => {
-    const r = repoById.get(p.repoId)!;
-    const def = defaultOf(p.repoId);
-    return {
-      id: p.id,
-      repoId: p.repoId,
-      number: p.number,
-      title: p.title,
-      url: `https://github.com/${r.owner}/${r.name}/pull/${p.number}`,
-      isBot: p.authorId != null && bots.has(p.authorId),
-      intoDefaultBranch: def != null && p.baseRefName === def,
-      state: p.state,
-      mergedAt: p.mergedAt,
-      ticketIdents: identsByPr.get(p.id) ?? [],
-    };
-  });
-
-  // The tickets: best stored read, a fresher sprint read's status wins, Done by the stage resolver.
-  const idents = [...rowsByIdent.keys(), ...unreadKeys.keys()];
-  const sprintByIdent = new Map<string, { statusName: string | null; statusCategory: string | null; fetchedAt: Date; title: string; url: string | null }>();
-  for (const part of chunks(idents)) {
-    const srows = await db
+      for (const r of rows) {
+        if (r.provider !== site!.provider || r.apiRoot !== site!.apiRoot) continue;
+        add(r.ident, {
+          source: 'status',
+          state: r.state,
+          key: r.issueKey,
+          title: r.title,
+          url: r.url,
+          statusName: r.statusName,
+          statusCategory: r.statusCategory,
+          fetchedAt: r.fetchedAt,
+          checkedAt: r.checkedAt,
+          attempts: r.attempts,
+        });
+      }
+      const srows = await db
         .select({
           ident: sprintTickets.ident,
           statusName: sprintTickets.statusName,
@@ -370,88 +422,121 @@ export async function loadReleaseCheckInput(
         .from(sprintTickets)
         .where(and(eq(sprintTickets.accountId, accountId), eq(sprintTickets.workspaceId, workspaceId), inArray(sprintTickets.ident, part)))
         .execute();
-    for (const s of srows) sprintByIdent.set(s.ident, s);
+      for (const r of srows) {
+        add(r.ident, {
+          source: 'sprint',
+          state: 'ok',
+          key: keyByIdent.get(r.ident)!,
+          title: r.title,
+          url: r.url,
+          statusName: r.statusName,
+          statusCategory: r.statusCategory,
+          fetchedAt: r.fetchedAt,
+          checkedAt: r.fetchedAt,
+        });
+      }
+    }
   }
   const layout = idents.length > 0 ? await sprintLayoutFor(accountId, workspaceId) : null;
+  const reads: TicketReadInfo[] = [];
   const tickets: ReleaseCheckTicketInput[] = idents.map((ident) => {
-    const unreadKey = unreadKeys.get(ident);
-    if (unreadKey != null) {
-      // A sprint read of it is a real read of the ticket; with none, it is not read yet (blocks).
-      const sprint = sprintByIdent.get(ident);
-      if (sprint == null) return { ident, key: unreadKey, title: null, url: null, statusName: null, done: false, readState: 'not_read' };
-      return {
-        ident,
-        key: unreadKey,
-        title: sprint.title,
-        url: sprint.url,
-        statusName: sprint.statusName,
-        done: ticketIsDone(layout, sprint.statusName, sprint.statusCategory),
-        readState: 'ok',
-      };
-    }
-    const rows = rowsByIdent.get(ident)!;
-    const best = bestTicketRow(rows)!;
-    const readState: ReleaseTicketReadState =
-      best.state === 'ok' && best.fetchedAt != null
-        ? 'ok'
-        : READ_STATES.has(best.state as ReleaseTicketReadState) && best.state !== 'ok'
-          ? (best.state as ReleaseTicketReadState)
-          : 'not_read';
-    const sprint = sprintByIdent.get(ident);
-    const useSprint = sprint != null && (best.fetchedAt == null || sprint.fetchedAt.getTime() > best.fetchedAt.getTime());
-    const statusName = useSprint ? sprint.statusName : best.statusName;
-    const statusCategory = useSprint ? sprint.statusCategory : best.statusCategory;
+    const list = cands.get(ident) ?? [];
+    const { read, readState } = bestTicketRead(list, RELEASE_TICKET_FAILS_HOLD);
+    const key = keyByIdent.get(ident)!;
+    const lastAt = list.reduce<Date | null>((m, c) => (m == null || c.checkedAt.getTime() > m.getTime() ? c.checkedAt : m), null);
+    reads.push({ ident, key, readState, lastAt });
     return {
       ident,
-      key: best.issueKey,
-      title: best.title ?? sprint?.title ?? null,
-      url: best.url ?? sprint?.url ?? null,
-      statusName,
-      done: readState === 'ok' && ticketIsDone(layout, statusName, statusCategory),
+      key: read?.key ?? key,
+      title: read?.title ?? list.find((c) => c.title != null)?.title ?? null,
+      url: read?.url ?? list.find((c) => c.url != null)?.url ?? null,
+      statusName: readState === 'ok' ? (read?.statusName ?? null) : null,
+      done: readState === 'ok' && ticketIsDone(layout, read?.statusName ?? null, read?.statusCategory ?? null),
       readState,
     };
   });
 
-  const tagsByRepo = new Map<number, typeof tags>();
-  for (const t of tags) tagsByRepo.set(t.repoId, [...(tagsByRepo.get(t.repoId) ?? []), t]);
-  const rangesByRepo = new Map<number, typeof ranges>();
-  for (const r of ranges) rangesByRepo.set(r.repoId, [...(rangesByRepo.get(r.repoId) ?? []), r]);
+  // ── The PRs: one per light record. Bot-ness by the GLOBAL automation set (the stored author, or
+  // the login's user row), or the light record's own rule (GitHub typed it a Bot, a known vendor). ──
+  const bots = lightRows.length > 0 ? await globalAutomationUserIds() : new Set<number>();
+  const botLogins = new Set<string>();
+  for (const part of chunks([...new Set(lightRows.map((l) => l.authorLogin).filter((x): x is string => x != null))])) {
+    for (const u of await db.select({ id: users.id, login: users.githubLogin }).from(users).where(inArray(users.githubLogin, part)).execute()) {
+      if (bots.has(u.id)) botLogins.add(u.login);
+    }
+  }
+  const prs: ReleaseCheckPrInput[] = lightRows.map((l) => {
+    const stored = storedByKey.get(`${l.repoId}#${l.number}`) ?? null;
+    const isBot =
+      l.isBot || (stored?.authorId != null && bots.has(stored.authorId)) || (l.authorLogin != null && botLogins.has(l.authorLogin));
+    return {
+      id: l.id,
+      prId: stored?.id ?? null,
+      repoId: l.repoId,
+      number: l.number,
+      title: stored?.title ?? l.title,
+      url: l.url,
+      isBot,
+      // The history pass keeps only PRs merged into the default branch.
+      intoDefaultBranch: true,
+      state: 'merged' as const,
+      mergedAt: l.mergedAt,
+      ticketIdents: (keysByLight.get(l.id) ?? []).map(identOf),
+    };
+  });
 
   return {
-    settings,
-    ticketsReadable: tracker?.readable ?? true,
-    trackerName: tracker?.name ?? null,
-    repos: [...repoRows]
-      .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id)
-      .map((r) => ({
-        repoId: r.id,
-        fullName: `${r.owner}/${r.name}`,
-        name: r.name,
-        writable: WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
-        defaultBranch: r.defaultBranch ?? r.defaultBranchName ?? null,
-        unreadablePrNumbers: unreadablePrNumbers(r.id),
-        tags: (tagsByRepo.get(r.id) ?? []).map((t) => ({
-          name: t.name,
-          sha: t.sha,
-          committedAt: t.committedAt,
-          taggedAt: t.taggedAt,
-          onDefaultBranch: t.onDefaultBranch,
-          moved: t.movedAt != null,
-        })),
-        ranges: (rangesByRepo.get(r.id) ?? []).map((x) => ({
-          tagName: x.tagName,
-          sha: x.sha,
-          baseTagName: x.baseTagName,
-          baseSha: x.baseSha,
-          method: x.method,
-          prIds: x.prIds,
-          unresolvedPrNumbers: x.unresolvedPrNumbers,
-          unmatchedCommits: x.unmatchedCommits,
-          truncated: x.truncated,
-        })),
-      })),
-    prs,
-    tickets,
+    input: {
+      settings,
+      ticketsReadable: tracker?.readable ?? true,
+      trackerName: tracker?.name ?? null,
+      repos: [...repoRows]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id)
+        .map((r) => {
+          const h = historyByRepo.get(r.id)!;
+          return {
+            repoId: r.id,
+            fullName: `${r.owner}/${r.name}`,
+            name: r.name,
+            writable: WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
+            defaultBranch: r.defaultBranch ?? r.defaultBranchName ?? null,
+            history: h.history,
+            tags: tags
+              .filter((t) => t.repoId === r.id)
+              .map((t) => ({
+                name: t.name,
+                sha: t.sha,
+                committedAt: t.committedAt,
+                taggedAt: t.taggedAt,
+                onDefaultBranch: h.onDefault.get(t.name) ?? null,
+                moved: t.movedAt != null,
+              })),
+            ranges: h.increments.map((x) => {
+              const prIds: number[] = [];
+              const unresolvedPrNumbers: number[] = [];
+              for (const n of x.prNumbers) {
+                const l = lightByKey.get(`${r.id}#${n}`);
+                if (l != null) prIds.push(l.id);
+                else unresolvedPrNumbers.push(n);
+              }
+              return {
+                tagName: x.tagName,
+                sha: x.sha,
+                baseTagName: x.baseTagName,
+                baseSha: x.baseSha,
+                method: 'walk' as const,
+                prIds,
+                unresolvedPrNumbers,
+                unmatchedCommits: x.unmatchedCommits,
+                truncated: false,
+              };
+            }),
+          };
+        }),
+      prs,
+      tickets,
+    },
+    reads,
   };
 }
 
@@ -461,42 +546,55 @@ export async function loadReleaseCheckInput(
  */
 export function withLiveProgress(result: ReleaseCheckResult, input: Pick<ReleaseCheckInput, 'repos' | 'trackerName'>, now: number = Date.now()): ReleaseCheckResult {
   for (const r of result.repos) {
-    if (!r.checking) continue;
+    if (!r.checking || r.progress?.step !== 'history') continue;
     const live = liveScanStep(r.repoId, now);
-    if (live == null || live.step === 'tickets') continue;
+    if (live == null || live.step !== 'history') continue;
     const repo = input.repos.find((x) => x.repoId === r.repoId);
-    const p = {
-      step: live.step,
-      done: live.done,
-      total: live.total,
-      tagName: live.tagName ?? null,
-      tagIndex: live.tagIndex ?? null,
-      branch: repo?.defaultBranch ?? null,
-      tracker: input.trackerName ?? null,
-      paused: live.paused,
-    };
+    const p = { step: live.step, done: live.done, total: live.total, branch: repo?.defaultBranch ?? null, paused: live.paused };
     r.progress = { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
   }
   return result;
 }
 
+/** A ticket read this long ago is read again by the scan's next batch (its status decides the answer). */
+export const RELEASE_TICKET_TTL_MS = 10 * 60_000;
+/** A failed batched read is tried again after this long. */
+export const RELEASE_TICKET_RETRY_MS = 2 * 60_000;
+
+/** The keys the scan's batch should read now: not read yet, failed and due, or read longer ago than
+ *  the TTL. `force` (Refresh): every ticket of `scope`. Pure. */
+export function ticketKeysOwed(
+  reads: readonly TicketReadInfo[],
+  nowMs: number,
+  opts: { force?: boolean; ttlMs?: number; retryMs?: number } = {},
+): string[] {
+  const ttl = opts.ttlMs ?? RELEASE_TICKET_TTL_MS;
+  const retry = opts.retryMs ?? RELEASE_TICKET_RETRY_MS;
+  const out: string[] = [];
+  for (const r of reads) {
+    const age = r.lastAt == null ? Infinity : nowMs - r.lastAt.getTime();
+    const due = opts.force === true || r.lastAt == null || (r.readState === 'not_read' ? age >= retry : age >= ttl);
+    if (due && !out.includes(r.key)) out.push(r.key);
+  }
+  return out.sort();
+}
+
 /**
- * The release scan's ticket step (sync/release-scan.ts): one releasable repo's range PRs whose tickets
- * are not read yet in this workspace (`not_read`: a key detected, no stored row), and how many tickets
- * wait. DB only. Nothing when the workspace's tracker cannot read.
+ * The release scan's ticket step (sync/tags-step.ts): one releasable repo's tickets (in the tags after
+ * this workspace's baseline) whose status the next batch should read, and how many are not read yet.
+ * DB only. Nothing when the workspace's tracker cannot read.
  */
-export async function releaseTicketsOwed(
+export async function releaseTicketKeysOwed(
   accountId: number,
   workspaceId: number,
   repoId: number,
   settings: ReleaseSettings,
-): Promise<{ prIds: number[]; waiting: number }> {
-  if (!releaseSettingsConfigured(settings)) return { prIds: [], waiting: 0 };
-  const input = await loadReleaseCheckInput(accountId, workspaceId, [repoId], settings);
-  if (input.ticketsReadable === false) return { prIds: [], waiting: 0 };
-  const waiting = new Set(input.tickets.filter((t) => t.readState === 'not_read').map((t) => t.ident));
-  const prIds = input.prs.filter((p) => p.ticketIdents.some((i) => waiting.has(i))).map((p) => p.id);
-  return { prIds, waiting: waiting.size };
+  nowMs: number = Date.now(),
+): Promise<{ keys: string[]; waiting: number }> {
+  if (!releaseSettingsConfigured(settings)) return { keys: [], waiting: 0 };
+  const { input, reads } = await loadReleaseCheck(accountId, workspaceId, [repoId], settings);
+  if (input.ticketsReadable === false) return { keys: [], waiting: 0 };
+  return { keys: ticketKeysOwed(reads, nowMs), waiting: reads.filter((r) => r.readState === 'not_read').length };
 }
 
 /** GET /api/releases. `rawWorkspace` absent / unknown / unparseable ⇒ the Default workspace. With no

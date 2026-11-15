@@ -160,10 +160,19 @@ export interface TrackerCall {
   notion?: NotionTrackerMapping;
 }
 
+/** One ticket's STATUS from a batch read (./ticket-status.ts). `missing`: the batch did not name it
+ *  (moved, or not visible) — the caller reads it on its own. */
+export type TicketStatusAnswer =
+  | { state: 'ok'; key: string; title: string | null; status: { name: string; category: JiraStatusCategory | null } | null; url?: string | null }
+  | { state: 'not_found' | 'no_access' | 'failed' | 'missing'; key: string };
+
 export interface TrackerReader {
   credential: 'token' | 'none';
   /** Read one ticket. Throws `JiraFetchError` (any provider: the codes are transport-generic). */
   fetchTicket(call: TrackerCall, key: string): Promise<FetchedTicket>;
+  /** OPTIONAL bulk lookup of many tickets' statuses (Jira: one search per ≤ 100 keys). Never throws:
+   *  every key gets an answer. `calls` = requests made. A reader without it is read one by one. */
+  readStatuses?(call: TrackerCall, keys: readonly string[]): Promise<{ answers: Map<string, TicketStatusAnswer>; calls: number }>;
   /** A plain-English sentence for a failure, naming the provider. Never anything it sent back. */
   errorMessage(err: unknown): string;
 }

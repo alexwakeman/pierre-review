@@ -527,15 +527,15 @@ export const pullRequests = sqliteTable(
     linearLinksCheckedAt: integer('linear_links_checked_at', { mode: 'timestamp' }),
     // ---- RELEASES (migration 0195; docs/RELEASES.md) ----
     // The commit this PR landed as on its base branch (GraphQL `mergeCommit { oid }`): the squash
-    // commit, the merge commit, or the last rebased commit. A version tag's range maps the commits
-    // between two tags to PRs through it (sync/tag-ranges.ts). ⚠ Cleared only on a positive
+    // commit, the merge commit, or the last rebased commit. (The release ranges once mapped commits to
+    // PRs through it; the one history pass reads each commit's PRs from GitHub instead.) ⚠ Cleared only on a positive
     // statement: an oid is written when one arrives; null only for a PR GitHub says is NOT merged
     // (sync/upsert.ts `mergeCommitOidToWrite`). NULL on a merged PR = not observed yet.
     mergeCommitOid: text('merge_commit_oid'),
   },
   (t) => ({
     repoIdx: index('pr_repo_idx').on(t.repoId),
-    // The tag range's commit → PR lookup (sync/tag-ranges.ts), a batch of shas within one repo.
+    // A commit → PR lookup by landed commit, a batch of shas within one repo.
     mergeCommitIdx: index('pr_account_repo_merge_commit_idx').on(t.accountId, t.repoId, t.mergeCommitOid),
     openedIdx: index('pr_opened_idx').on(t.openedAt),
     accountIdx: index('pr_account_idx').on(t.accountId),
@@ -5569,8 +5569,8 @@ export const limnActions = sqliteTable(
 // `accountScopedTables()` and erased explicitly; the repo-anchored ones in `deleteRepo` too.
 //
 //   repo_tags                one row per (account, repo, tag name): what the tag points at.
-//   repo_tag_ranges          one row per (account, repo, tag name): the PRs between the tag and the
-//                            tag before it on the default branch, computed once per (tag sha, base sha).
+//   repo_tag_ranges          DORMANT since migration 0202 (the increments are derived from
+//                            `release_history_commits`).
 //   releases                 one row per reader press of "Create release…".
 //   release_items            one row per (release, repo): the release tag and the pre-release.
 //   release_ticket_comments  one row per (release, ticket): the tracker comment.
@@ -5586,7 +5586,9 @@ export const limnActions = sqliteTable(
 //   on_default_branch  the tagged commit is an ancestor of (or equal to) the default branch head.
 //                   NULL = not known yet. `ancestry_head_sha` is the head it was checked against:
 //                   true is final for that sha (until the tag moves); false is re-checked when the
-//                   head moves.
+//                   head moves. ⚠ DORMANT since migration 0202: on the default branch is DERIVED on
+//                   read from the history pass (`release_history_commits`); only a tag move still
+//                   clears these. Kept, never dropped.
 //   previous_sha / moved_at  the tag was MOVED to another commit (re-pushed with --force): the sha
 //                   it pointed at before, and when Ensemble saw the move.
 export const repoTags = sqliteTable(
@@ -5620,7 +5622,7 @@ export const repoTags = sqliteTable(
   }),
 );
 
-// A tag's range INCREMENT (sync/tag-ranges.ts): the PRs merged into the default branch in
+// A tag's range INCREMENT (was sync/tag-ranges.ts, removed): the PRs merged into the default branch in
 // (base, tag], where base is the tag before it on the default branch (by committed date, then
 // name). Suffix-free on purpose — the release check sums increments from the baseline up to a
 // version tag, so a new release (a new baseline) or a changed suffix needs no recompute.
@@ -5634,6 +5636,8 @@ export const repoTags = sqliteTable(
 //   truncated       the compare had more commits than Ensemble reads (TAG_RANGE_MAX_COMMITS).
 //   moved_from_sha  the tag MOVED since the last computation: the sha the old range was for.
 // Recomputed only when the tag's sha or its base's sha changes.
+// ⚠ DORMANT since 2026-11-15 (migration 0202, the one history pass): no writer, no reader — a tag's
+// increment is derived from `release_history_commits` on read. Kept, never dropped; still erased.
 export const repoTagRanges = sqliteTable(
   'repo_tag_ranges',
   {
@@ -5780,6 +5784,148 @@ export const releaseTicketComments = sqliteTable(
       name: 'release_ticket_comments_release_account_fk',
       columns: [t.releaseId, t.accountId],
       foreignColumns: [releases.id, releases.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- THE RELEASE SCAN'S ONE HISTORY PASS (migration 0202; docs/RELEASES.md § Implementation → One
+// history pass). Four tables, account-scoped, composite FKs, in `accountScopedTables()`, erased
+// explicitly (the repo / workspace cascades take them too).
+//
+// One row per (account, repo): where the walk of the default branch's FIRST-PARENT history stands
+// (sync/release-history.ts). The DEEP segment walks back from the first head ever read; a TIP segment
+// walks a newer head down to `top_sha` (the newest head whose chain is stored). Cursors are GraphQL
+// `history` cursors pinned to the segment's start commit, so an interrupted pass resumes where it
+// stopped. `seq` bases order the commits: deep = 0, each tip = the previous `max_base` + SEQ_SPAN.
+//   deep_expected_sha  the next first-parent commit the deep walk looks for; NULL = it reached the root.
+//   *_estimate         GitHub's `history` totalCount (the deep one `since` the newest release tag's
+//                      date when there is one), for the progress bar only.
+export const releaseHistoryScans = sqliteTable(
+  'release_history_scans',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    topSha: text('top_sha').notNull(),
+    maxBase: integer('max_base').notNull().default(0),
+    deepStartSha: text('deep_start_sha').notNull(),
+    deepCursor: text('deep_cursor'),
+    deepExpectedSha: text('deep_expected_sha'),
+    deepNextIdx: integer('deep_next_idx').notNull().default(0),
+    deepEstimate: integer('deep_estimate'),
+    tipStartSha: text('tip_start_sha'),
+    tipStopSha: text('tip_stop_sha'),
+    tipCursor: text('tip_cursor'),
+    tipExpectedSha: text('tip_expected_sha'),
+    tipNextIdx: integer('tip_next_idx').notNull().default(0),
+    tipBase: integer('tip_base'),
+    tipEstimate: integer('tip_estimate'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    repoUx: uniqueIndex('release_history_scans_account_repo').on(t.accountId, t.repoId),
+    repoAccountFk: foreignKey({
+      name: 'release_history_scans_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// One row per FIRST-PARENT commit of the default branch the history pass walked: its place (`seq`,
+// larger = newer) and the PRs merged into the default branch it came from (`pr_numbers`, by number;
+// [] = a direct push). Which tag a commit belongs to is DERIVED on read (releases/history-fold.ts), so
+// a new or moved tag needs no GitHub call.
+export const releaseHistoryCommits = sqliteTable(
+  'release_history_commits',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    sha: text('sha').notNull(),
+    seq: integer('seq').notNull(),
+    prNumbers: text('pr_numbers', { mode: 'json' }).$type<number[]>().notNull(),
+    committedAt: integer('committed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    shaUx: uniqueIndex('release_history_commits_account_repo_sha').on(t.accountId, t.repoId, t.sha),
+    seqIdx: index('release_history_commits_account_repo_seq_idx').on(t.accountId, t.repoId, t.seq),
+    repoAccountFk: foreignKey({
+      name: 'release_history_commits_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// THE LIGHT RECORD of a PR in a release range: what the history pass read with the commit (no full
+// PR sync). Enough for ticket detection (title + head branch, THE detection rule), the bot rule and
+// the notes. A PR also stored in `pull_requests` keeps its full row; this one is per (repo, number).
+//   is_bot  GitHub typed the author a Bot, or the login is known automation (sync/bot-detection.ts).
+export const releaseRangePrs = sqliteTable(
+  'release_range_prs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    number: integer('number').notNull(),
+    title: text('title').notNull(),
+    headRefName: text('head_ref_name'),
+    authorLogin: text('author_login'),
+    isBot: integer('is_bot', { mode: 'boolean' }).notNull().default(false),
+    mergedAt: integer('merged_at', { mode: 'timestamp' }),
+    mergeSha: text('merge_sha'),
+    url: text('url').notNull(),
+    seenAt: integer('seen_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    numberUx: uniqueIndex('release_range_prs_account_repo_number').on(t.accountId, t.repoId, t.number),
+    repoAccountFk: foreignKey({
+      name: 'release_range_prs_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// A ticket's STATUS read in a BATCH (tracker/ticket-status.ts), per (account, workspace, ident) — no PR
+// needed (`tracker_tickets` is keyed per PR). The release check reads it beside the PR rows and the
+// sprint rows; the freshest successful read wins.
+//   state     'ok' | 'not_found' | 'no_access' | 'failed'
+//   attempts  failed reads in a row (a transient failure is "checking" until RELEASE_TICKET_FAILS_HOLD).
+export const trackerTicketStatus = sqliteTable(
+  'tracker_ticket_status',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    provider: text('provider').notNull(),
+    apiRoot: text('api_root').notNull(),
+    issueKey: text('issue_key').notNull(),
+    ident: text('ident').notNull(),
+    state: text('state', { enum: ['ok', 'not_found', 'no_access', 'failed'] }).notNull(),
+    statusName: text('status_name'),
+    statusCategory: text('status_category'),
+    title: text('title'),
+    url: text('url'),
+    attempts: integer('attempts').notNull().default(0),
+    fetchedAt: integer('fetched_at', { mode: 'timestamp' }),
+    checkedAt: integer('checked_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    identUx: uniqueIndex('tracker_ticket_status_account_ws_ident').on(t.accountId, t.workspaceId, t.ident),
+    workspaceAccountFk: foreignKey({
+      name: 'tracker_ticket_status_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
   }),
 );

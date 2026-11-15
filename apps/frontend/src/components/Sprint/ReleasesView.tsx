@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import type { ReleaseCheckPr, ReleaseCheckResult, ReleaseRepoCheck, ReleaseTicketCheck } from '@pierre-review/shared';
 import { useRefreshReleases, useReleases } from '../../hooks/useReleases.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
+import { safeExternalUrl } from '../../lib/ui.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
@@ -288,6 +289,17 @@ function PrList({ label, prs, check }: { label: string; prs: ReleaseCheckPr[]; c
 function PrLink({ pr, check, short = false }: { pr: ReleaseCheckPr; check: ReleaseCheckResult; short?: boolean }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
   const repo = check.repos.find((r) => r.repoId === pr.repoId);
+  const className = `min-w-0 max-w-full truncate rounded-ui text-left text-ui-ink hover:underline ${short ? 'text-meta' : ''} ${FOCUS_RING}`;
+  // A PR older than the synced history is only a light record: it opens on GitHub.
+  if (pr.prId == null) {
+    return (
+      <a href={safeExternalUrl(pr.url)} target="_blank" rel="noreferrer noopener" title={short ? pr.title : undefined} className={className}>
+        #{pr.number}
+        {short ? '' : ` ${pr.title}`}
+      </a>
+    );
+  }
+  const prId = pr.prId;
   return (
     <button
       type="button"
@@ -295,7 +307,7 @@ function PrLink({ pr, check, short = false }: { pr: ReleaseCheckPr; check: Relea
       onClick={() =>
         openPrDetailTab(
           {
-            id: pr.id,
+            id: prId,
             number: pr.number,
             title: pr.title,
             repoFullName: repo?.fullName ?? '',
@@ -306,7 +318,7 @@ function PrLink({ pr, check, short = false }: { pr: ReleaseCheckPr; check: Relea
           { fromActivity: true },
         )
       }
-      className={`min-w-0 max-w-full truncate rounded-ui text-left text-ui-ink hover:underline ${short ? 'text-meta' : ''} ${FOCUS_RING}`}
+      className={className}
     >
       #{pr.number}
       {short ? '' : ` ${pr.title}`}

@@ -1,6 +1,7 @@
 import {
   releaseBlockerShort,
   releaseBlockerText,
+  releaseProgressPercent,
   releasesChecking,
   type ReleaseBlocker,
   type ReleaseCheckPr,
@@ -64,7 +65,10 @@ export function repoFirstBlocker(repo: Pick<ReleaseRepoCheck, 'firstBlocker'>): 
  *   candidate  "Release 0.388.0 → 0.388.0-rc"
  *   blocked    "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)"
  *              "No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains BMD-127 (In Progress)"
- *   checking   "Checking…" (the progress line and bar sit under it)
+ *   checking   "Candidate at most 0.388.0 — checking older history (40%)" (NEWEST FIRST: the tag just
+ *              before the oldest held tag found so far, or the latest), "Checking — 0.390.0 and later
+ *              cannot be released" (the tag before it is not read yet), or "Checking…" (the progress
+ *              line and bar sit under it)
  *   nothing    "Nothing new since 0.390.0-rc" / "No version tags on main yet"
  */
 export function repoRowText(repo: ReleaseRepoCheck): string {
@@ -75,7 +79,16 @@ export function repoRowText(repo: ReleaseRepoCheck): string {
     if (repo.nothingNewReason === 'no_tags') return 'No version tags on main yet';
     return repo.baseline != null ? `Nothing new since ${repo.baseline.name}` : 'Nothing new';
   }
-  if (repo.status === 'checking') return 'Checking…';
+  if (repo.status === 'checking') {
+    if (repo.upperLimit != null) {
+      const p = repo.progress;
+      const doing = p == null ? 'checking' : p.step === 'history' ? 'checking older history' : 'reading tickets';
+      const pct = p != null && p.total > 0 ? ` (${releaseProgressPercent(p)}%)` : '';
+      return `Candidate at most ${repo.upperLimit.name} — ${doing}${pct}`;
+    }
+    if (repo.heldFrom != null) return `Checking — ${repo.heldFrom} and later cannot be released`;
+    return 'Checking…';
+  }
   const at = repo.firstBlocked ?? repo.firstVersion?.name ?? null;
   const b = repo.firstBlocker;
   if (at == null) return 'No tag can be released';

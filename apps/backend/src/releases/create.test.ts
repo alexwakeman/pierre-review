@@ -190,11 +190,15 @@ function deps(over: Partial<ReleaseWriteDeps> = {}): ReleaseWriteDeps {
       const inp = only(input(), repoIds);
       return { result: foldReleaseCheck(inp), repoNames: new Map(inp.repos.map((r) => [r.repoId, { owner: 'acme', name: r.name }])) };
     },
-    async rereadTicket(_accountId, t) {
-      w.calls.reread.push(t.key);
-      if (w.unreadable.has(t.key)) return false;
-      w.stored[t.key] = w.tracker[t.key]!.done;
-      return true;
+    async rereadTickets(_accountId, _workspaceId, tickets) {
+      const answered = new Set<string>();
+      for (const t of tickets) {
+        w.calls.reread.push(t.key);
+        if (w.unreadable.has(t.key)) continue;
+        w.stored[t.key] = w.tracker[t.key]!.done;
+        answered.add(t.ident);
+      }
+      return answered;
     },
     github: async () => github,
     async postComment(_accountId, a) {

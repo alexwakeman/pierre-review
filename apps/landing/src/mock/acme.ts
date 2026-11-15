@@ -590,8 +590,8 @@ export const SPRINT_RELEASES = {
     {
       name: REPOS.api,
       candidate: false,
-      text: 'Checking…',
-      progress: { share: 0.44, line: "Matching v2.3.0's commits to pull requests (tag 61 of 140)" },
+      text: 'Candidate at most v2.3.0 — checking older history (44%)',
+      progress: { share: 0.44, line: "Reading main's history: 2,380 of 5,400 commits" },
       tags: [],
     },
     { name: 'acme/docs-site', candidate: false, text: 'Nothing new since v4.1.0-rc', tags: [] },

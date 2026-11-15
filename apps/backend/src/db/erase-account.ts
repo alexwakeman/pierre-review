@@ -145,6 +145,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.releases).where(eq(schema.releases.accountId, accountId)).execute();
     await tx.delete(schema.repoTagRanges).where(eq(schema.repoTagRanges.accountId, accountId)).execute();
     await tx.delete(schema.repoTags).where(eq(schema.repoTags.accountId, accountId)).execute();
+    // The one history pass (migration 0202): its walk, commits, light PR records and batched ticket statuses.
+    await tx.delete(schema.releaseHistoryCommits).where(eq(schema.releaseHistoryCommits.accountId, accountId)).execute();
+    await tx.delete(schema.releaseHistoryScans).where(eq(schema.releaseHistoryScans.accountId, accountId)).execute();
+    await tx.delete(schema.releaseRangePrs).where(eq(schema.releaseRangePrs.accountId, accountId)).execute();
+    await tx.delete(schema.trackerTicketStatus).where(eq(schema.trackerTicketStatus.accountId, accountId)).execute();
     // Releasable repositories (migration 0199).
     await tx.delete(schema.workspaceReleaseRepos).where(eq(schema.workspaceReleaseRepos.accountId, accountId)).execute();
     // Story chats (migration 0192): turns first (their FK names the chat), then the chats.
@@ -563,6 +568,11 @@ export function accountScopedTables(): {
     { name: 'releaseTicketComments', col: schema.releaseTicketComments.accountId, table: schema.releaseTicketComments },
     // Releasable repositories (migration 0199).
     { name: 'workspaceReleaseRepos', col: schema.workspaceReleaseRepos.accountId, table: schema.workspaceReleaseRepos },
+    // The one history pass (migration 0202).
+    { name: 'releaseHistoryScans', col: schema.releaseHistoryScans.accountId, table: schema.releaseHistoryScans },
+    { name: 'releaseHistoryCommits', col: schema.releaseHistoryCommits.accountId, table: schema.releaseHistoryCommits },
+    { name: 'releaseRangePrs', col: schema.releaseRangePrs.accountId, table: schema.releaseRangePrs },
+    { name: 'trackerTicketStatus', col: schema.trackerTicketStatus.accountId, table: schema.trackerTicketStatus },
     // Story chats (migration 0192): the reader's questions and the answers.
     { name: 'storyChats', col: schema.storyChats.accountId, table: schema.storyChats },
     { name: 'storyChatTurns', col: schema.storyChatTurns.accountId, table: schema.storyChatTurns },

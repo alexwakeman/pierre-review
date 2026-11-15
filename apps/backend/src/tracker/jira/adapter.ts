@@ -2,6 +2,7 @@ import { jiraApiRoot } from '@pierre-review/shared';
 import type { TrackerAdapter } from '../types.js';
 import { detectPrefixKeys, isPrefixKey, normalizePrefixKey } from '../detect.js';
 import { fetchJiraIssue, jiraErrorMessage } from './client.js';
+import { readJiraStatuses } from './statuses.js';
 
 // JIRA — the first adapter, and the one with a reader. Identity is the shared `jiraApiRoot` fold
 // (the ONE copy; the SPA folds a browse link onto the same root). Detection is the prefix-key rule
@@ -19,6 +20,8 @@ export const jiraAdapter: TrackerAdapter = {
   reader: {
     credential: 'token',
     fetchTicket: (call, key) => fetchJiraIssue(call, key),
+    // Many statuses in one search per 100 keys (./statuses.ts): the release scan and Refresh.
+    readStatuses: (call, keys) => readJiraStatuses(call, keys),
     errorMessage: (err) => jiraErrorMessage(err),
   },
 };

@@ -1,26 +1,3 @@
-// THE TAGS STEP of the default-branch snapshot (docs/RELEASES.md § Invariants): the tag sync
-// (sync/repo-tags.ts), then — for a RELEASABLE repo — THE RELEASE SCAN: ancestry, ranges
-// (sync/tag-ranges.ts), the range PRs not stored yet and their tickets (sync/release-scan.ts).
-// STRICTLY NON-FATAL — no half throws, and the caller (sync/sync-repo.ts, after `syncBranchStatus`)
-// wraps it once more.
-//
-// The settle sweep reaches it too (`scheduleTagSync`): a tag push is updatedAt-silent, so the sweep
-// compares GitHub's tag signature with `repos.tags_signature` and, on a difference, starts this step
-// in the background — ONE per repo at a time, a synchronous claim released in a `finally`.
-//
-// RELEASABLE REPOS ONLY get the scan (docs/RELEASES.md § Implementation → Automatic candidate): a repo
-// some workspace releases ("Released from this workspace", db/release-repos.ts `releaseRangeViews`)
-// reads up to REPO_TAGS_READ_CAP_RELEASABLE tags and checks the WHOLE history: every tag's ancestry,
-// every range after the baseline (or every tag with none), every range PR, every ticket. No count caps
-// but per-run TIME BOXES (the walk's tail WALK_RUN_MS, a background run SCAN_RUN_MS; within one, the
-// ranges get RANGES_SHARE of it so the range PRs of the oldest tags are fetched in the same run) and the
-// account's rate budget (paused, never an error). Work left after a run that made progress ⇒ the step
-// runs again in the background after QUICK_RERUN_MS ("quickly while work remains"); work left with no
-// progress (the budget, a failure) ⇒ the settle sweep's CATCH-UP after CATCH_UP_DELAY_MS
-// (`takeTagCatchUp`). A re-run within TAG_READ_MIN_INTERVAL_MS skips the tag read and asks about
-// ancestry against the head it read last. Any other repo's tags still sync (the hotfix bases read
-// them), with no ancestry and no range. An EXTERNAL repo (pinned cold, no trunk snapshot) runs the step
-// only when it is releasable. Ticking a repo marks it for catch-up (`markTagCatchUp`, no GitHub call).
 import { getAccessToken } from '../auth/account.js';
 import { db, schema } from '../db/client.js';
 import { and, eq } from 'drizzle-orm';
@@ -28,16 +5,8 @@ import type { ReleaseRangeView } from '@pierre-review/shared';
 import { releaseRangeViews } from '../db/release-repos.js';
 import { endScanStep, noteScanStep } from '../releases/scan-state.js';
 import { isPinnedCold } from './adaptive.js';
-import {
-  ANCESTRY_CHECKS_RELEASABLE,
-  REPO_TAGS_READ_CAP_RELEASABLE,
-  runAncestryChecks,
-  syncRepoTagsSafe,
-  type RepoTagSyncResult,
-  type TagSyncLogger,
-} from './repo-tags.js';
-import { fetchMissingRangePrs, queueRangeTickets, type FetchRangePrsResult } from './release-scan.js';
-import { computeTagRanges, type TagRangesResult } from './tag-ranges.js';
+import { REPO_TAGS_READ_CAP_RELEASABLE, syncRepoTagsSafe, type RepoTagSyncResult, type TagSyncLogger } from './repo-tags.js';
+import { walkReleaseHistory, type WalkHistoryResult } from './release-history.js';
 
 const { repos } = schema;
 
@@ -57,6 +26,11 @@ export interface TagsStepOptions {
   external?: boolean;
   /** This run's time box for the release scan (default WALK_RUN_MS). */
   runMs?: number;
+  /** Test seams. */
+  deps?: {
+    walk?: typeof walkReleaseHistory;
+    tickets?: (a: { accountId: number; repoId: number; views: readonly ReleaseRangeView[]; log?: TagSyncLogger }) => Promise<TicketStepResult>;
+  };
 }
 
 /** How often a walk's tail re-reads the tags (1 point a page) when the settle sweep saw no tag change. */
@@ -65,8 +39,6 @@ export const TAG_READ_MIN_INTERVAL_MS = 15 * 60_000;
 export const WALK_RUN_MS = 20_000;
 /** The release scan's time box in a background run. */
 export const SCAN_RUN_MS = 45_000;
-/** The share of a run the ranges may use before the range PRs are fetched. */
-export const RANGES_SHARE = 0.6;
 /** Work left after a run that made progress: the next background run starts this soon. */
 export const QUICK_RERUN_MS = 3_000;
 /** Work left and no progress (the budget, a failure): the settle sweep runs the step after this. */
@@ -77,7 +49,7 @@ export const QUICK_RERUN_MAX = 400;
 const inFlight = new Set<number>();
 /** repoId → when the catch-up is due (ms). Bounded by the number of releasable repos. */
 const catchUp = new Map<number, number>();
-/** repoId → the default branch head and name the last tag read saw (a quick re-run's ancestry). */
+/** repoId → the default branch head and name the last tag read saw (a quick re-run's walk). */
 const lastHead = new Map<number, { headSha: string; branch: string | null }>();
 const quickTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const quickRuns = new Map<number, number>();
@@ -105,24 +77,62 @@ async function viewsOf(opts: TagsStepOptions): Promise<ReleaseRangeView[]> {
   }
 }
 
-export interface TagsStepResult {
-  tags: RepoTagSyncResult | null;
-  ranges: TagRangesResult | null;
-  prs?: FetchRangePrsResult | null;
+export interface TicketStepResult {
+  /** Keys asked of the tracker this run, across the releasing workspaces. */
+  asked: number;
+  /** Keys that got an answer (ok, not found, no access). */
+  answered: number;
+  /** Tracker requests made. */
+  calls: number;
+  /** Keys left for a later run (a reader read one by one past its cap). */
+  left: number;
 }
 
-/** What one run of the scan leaves: GitHub work left, and whether the run moved anything. Pure. */
+export interface TagsStepResult {
+  tags: RepoTagSyncResult | null;
+  history?: WalkHistoryResult | null;
+  tickets?: TicketStepResult | null;
+}
+
+/** What one run of the scan leaves: GitHub / tracker work left, and whether the run moved anything.
+ *  Pure. */
 export function scanNext(r: {
-  ancestryLeft: number;
-  ancestryChecked: number;
-  ranges: Pick<TagRangesResult, 'pending' | 'computed' | 'paused'> | null;
-  prs: Pick<FetchRangePrsResult, 'left' | 'fetched' | 'failed' | 'paused'> | null;
+  history: Pick<WalkHistoryResult, 'complete' | 'walked' | 'paused'> | null;
+  tickets: Pick<TicketStepResult, 'left' | 'answered'> | null;
 }): 'done' | 'quick' | 'catch_up' {
-  const left = r.ancestryLeft > 0 || (r.ranges?.pending ?? 0) > 0 || (r.prs?.left ?? 0) > 0;
+  const left = (r.history != null && !r.history.complete) || (r.tickets?.left ?? 0) > 0;
   if (!left) return 'done';
-  const moved = r.ancestryChecked > 0 || (r.ranges?.computed ?? 0) > 0 || (r.prs?.fetched ?? 0) + (r.prs?.failed ?? 0) > 0;
-  const paused = r.ranges?.paused === true || r.prs?.paused === true;
-  return moved && !paused ? 'quick' : 'catch_up';
+  const moved = (r.history?.walked ?? 0) > 0 || (r.tickets?.answered ?? 0) > 0;
+  return moved && r.history?.paused !== true ? 'quick' : 'catch_up';
+}
+
+/** THE TICKET STEP: per releasing workspace, the keys owed a read (not read yet, failed and due, older
+ *  than the TTL) read in a batch. Never throws. */
+async function readRangeTickets(a: { accountId: number; repoId: number; views: readonly ReleaseRangeView[]; log?: TagSyncLogger }): Promise<TicketStepResult> {
+  const out: TicketStepResult = { asked: 0, answered: 0, calls: 0, left: 0 };
+  try {
+    // LAZY: tracker/runtime.ts opens the database at import.
+    const [{ releaseTicketKeysOwed }, { trackerContext }, { readTicketStatuses }] = await Promise.all([
+      import('../db/release-check.js'),
+      import('../tracker/runtime.js'),
+      import('../tracker/ticket-status.js'),
+    ]);
+    for (const v of a.views) {
+      if (v.workspaceId == null) continue;
+      const owed = await releaseTicketKeysOwed(a.accountId, v.workspaceId, a.repoId, v.settings);
+      if (owed.keys.length === 0) continue;
+      noteScanStep(a.repoId, { step: 'tickets', done: 0, total: owed.keys.length, paused: false });
+      const r = await readTicketStatuses(trackerContext(), a.accountId, v.workspaceId, owed.keys);
+      out.asked += r.asked;
+      out.answered += r.answered.size;
+      out.calls += r.calls;
+      out.left += r.left;
+    }
+    endScanStep(a.repoId, 'tickets');
+  } catch (err) {
+    a.log?.warn(`release scan: reading ticket statuses failed (non-fatal): ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`);
+  }
+  return out;
 }
 
 /**
@@ -130,29 +140,17 @@ export function scanNext(r: {
  * running for the repo does nothing (both read the same GitHub state).
  */
 export async function runTagsStep(opts: TagsStepOptions): Promise<TagsStepResult> {
-  if (inFlight.has(opts.repoId)) return { tags: null, ranges: null };
+  if (inFlight.has(opts.repoId)) return { tags: null };
   inFlight.add(opts.repoId);
   let next: 'done' | 'quick' | 'catch_up' = 'done';
   try {
     const views = await viewsOf(opts);
     const releasable = views.length > 0;
-    if (opts.external === true && !releasable) return { tags: null, ranges: null };
-    const start = Date.now();
-    const runMs = opts.runMs ?? WALK_RUN_MS;
-    const deadline = start + runMs;
-    const rangeDeps = { views: () => views };
-    const scanOpts = {
-      ancestryCap: releasable ? ANCESTRY_CHECKS_RELEASABLE : 0,
-      readCap: releasable ? REPO_TAGS_READ_CAP_RELEASABLE : undefined,
-      deadline,
-      onAncestry: (p: { done: number; total: number; paused: boolean }) =>
-        noteScanStep(opts.repoId, { step: 'ancestry', done: p.done, total: p.total, paused: p.paused }),
-    };
+    if (opts.external === true && !releasable) return { tags: null };
+    const deadline = Date.now() + (opts.runMs ?? WALK_RUN_MS);
 
     let tags: RepoTagSyncResult | null = null;
-    let ancestryLeft = 0;
-    let ancestryChecked = 0;
-    let branch: string | null = null;
+    let head: { headSha: string; branch: string | null } | null = null;
     let skipRead = false;
     if (opts.minIntervalMs != null) {
       const row = (
@@ -163,49 +161,42 @@ export async function runTagsStep(opts: TagsStepOptions): Promise<TagsStepResult
           .execute()
       )[0];
       skipRead = row?.at != null && Date.now() - row.at.getTime() < opts.minIntervalMs;
-      // A releasable repo with no head in memory (a restart) reads, so its ancestry can go on.
+      // A releasable repo with no head in memory (a restart) reads, so its walk can go on.
       if (skipRead && releasable && !lastHead.has(opts.repoId)) skipRead = false;
     }
     if (!skipRead) {
-      tags = await syncRepoTagsSafe({ ...opts, ...scanOpts });
+      const { deps: _deps, ...tagOpts } = opts;
+      tags = await syncRepoTagsSafe({ ...tagOpts, ...(releasable ? { readCap: REPO_TAGS_READ_CAP_RELEASABLE } : {}) });
       if (tags == null || !tags.read) {
         if (releasable) markTagCatchUp(opts.repoId, Date.now() + CATCH_UP_DELAY_MS);
-        return { tags, ranges: null };
+        return { tags };
       }
-      if (tags.headSha != null) lastHead.set(opts.repoId, { headSha: tags.headSha, branch: tags.defaultBranchName });
-      ancestryLeft = tags.ancestryLeft;
-      ancestryChecked = tags.ancestryChecked;
-      branch = tags.defaultBranchName;
-    } else if (releasable) {
-      const head = lastHead.get(opts.repoId);
-      if (head != null) {
-        const a = await runAncestryChecks({ ...opts, ...scanOpts }, head.headSha);
-        ancestryLeft = a.left;
-        ancestryChecked = a.checked;
-        branch = head.branch;
+      if (tags.headSha != null) {
+        head = { headSha: tags.headSha, branch: tags.defaultBranchName };
+        lastHead.set(opts.repoId, head);
       }
-    }
-    if (ancestryLeft === 0) endScanStep(opts.repoId, 'ancestry');
-    if (!releasable) {
-      // No range for a repo no workspace releases (the stored ones are dropped).
-      return { tags, ranges: await computeTagRanges({ ...opts, defaultBranchName: branch, deps: rangeDeps }) };
-    }
+    } else head = lastHead.get(opts.repoId) ?? null;
+    if (!releasable || head == null || head.branch == null) return { tags };
 
-    // RANGES, oldest first, within their share of the run; then the range PRs; then the tickets.
-    const rangeDeadline = ancestryLeft > 0 ? Date.now() : Math.min(deadline, start + runMs * RANGES_SHARE);
-    const ranges = await computeTagRanges({
-      ...opts,
-      defaultBranchName: branch,
-      deps: rangeDeps,
-      deadline: rangeDeadline,
-      onProgress: (p) =>
-        noteScanStep(opts.repoId, { step: 'ranges', done: p.done, total: p.total, tagName: p.tagName, tagIndex: p.position, paused: p.paused }),
+    // THE ONE HISTORY PASS, then the tickets of the tags it has walked.
+    const walk = opts.deps?.walk ?? walkReleaseHistory;
+    const history = await walk({
+      owner: opts.owner,
+      name: opts.name,
+      repoId: opts.repoId,
+      accountId: opts.accountId,
+      token: opts.token,
+      headSha: head.headSha,
+      defaultBranch: head.branch,
+      views,
+      deadline,
+      ...(opts.log != null ? { log: opts.log } : {}),
+      onProgress: (p) => noteScanStep(opts.repoId, { step: 'history', done: p.done, total: p.total, paused: p.paused }),
     });
-    if (ranges.pending === 0) endScanStep(opts.repoId, 'ranges');
-    const prs = await fetchMissingRangePrs({ ...opts, deadline: Math.max(deadline, Date.now() + 5_000) });
-    await queueRangeTickets({ accountId: opts.accountId, repoId: opts.repoId, log: opts.log });
-    next = scanNext({ ancestryLeft, ancestryChecked, ranges, prs });
-    return { tags, ranges, prs };
+    if (history.complete) endScanStep(opts.repoId, 'history');
+    const tickets = await (opts.deps?.tickets ?? readRangeTickets)({ accountId: opts.accountId, repoId: opts.repoId, views, log: opts.log });
+    next = scanNext({ history, tickets });
+    return { tags, history, tickets };
   } finally {
     inFlight.delete(opts.repoId);
     if (next === 'quick') scheduleQuickRerun(opts.accountId, opts.repoId, opts.log);

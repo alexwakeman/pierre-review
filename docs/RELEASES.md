@@ -55,11 +55,11 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
   every tag the tag read returns, beyond the 90-day PR sync). There is no start tag (removed 2026-11-15:
   the app works out the starting point itself).
 - **Range of a version tag** — the PRs merged INTO THE DEFAULT BRANCH after the previous version tag (or the
-  baseline) up to and including that tag's commit (commit → PR by the stored merge commit oid, the stored PR
-  commits, then GraphQL `associatedPullRequests` for every unmatched commit). The OLDEST tag with no base:
-  the PRs merged into the default branch at or before its commit, read from GitHub (the merged-PR list) and
-  the stored PRs. PRs and tickets not stored yet are FETCHED into the normal handling (the single-PR sync,
-  the tracker worker).
+  baseline) up to and including that tag's commit. Read in ONE pass over the default branch's FIRST-PARENT
+  history, newest first (GraphQL `history` with each commit's `associatedPullRequests`): each commit belongs
+  to the nearest tag at or above it; a commit with no PR is a direct push. The OLDEST tag with no base: every
+  first-parent commit down to the root. Each range PR is kept as a LIGHT record (title, head branch, author,
+  merge) — no full PR sync; tickets are read in BATCHES (§ Implementation → One history pass).
 - **Done** — the ticket is in the workspace's Complete stage and nothing else (`stage === 'done'`,
   `SPRINT_STAGES`; with automatic buckets: the tracker's `done` category minus the names that read as
   cancelled). ⚠ **A Cancelled ticket ("Won't do", "Duplicate", "Closed as not planned") is NOT Done and
@@ -89,17 +89,24 @@ no "open work"). Authorship never changes a block.
 - A bot PR with no ticket: no warning; listed under "Dependency and bot changes" in the notes.
 - A bot PR naming a not-done ticket: BLOCKS.
 - Commits with no PR (direct pushes): a note on their tag only.
-- Work not done yet — a tag whose ancestry is unknown, a range not computed, a range PR not fetched yet, a
+- Work not done yet — a tag whose place on `main` is unknown, a range the history pass has not finished, a
   ticket not read yet — is CHECKING, never a blocker: the walk stops there. A candidate proven before it
   stands ("Still reading later tags"); with none the row reads "Checking…". (A ticket "not read yet" in a
   workspace whose tracker cannot read at all holds instead — it would never be read.)
+- **Newest first, an early upper limit.** The history pass reads `main` newest first, so the newest tags are
+  known first. H = the oldest held tag found so far (tags are cumulative: every tag at or after H is held).
+  Until the pass reaches the baseline (or the root) the candidate is not confirmed, and the row reads
+  "Candidate at most 0.388.0 — checking older history (40%)", 0.388.0 being the tag just before H (the latest
+  tag when none is held yet). When the pass is complete and every ticket read, the candidate is the tag just
+  before the OLDEST held tag (or the latest).
 - No version tag after the baseline: "Nothing new" — not in the release.
 - A PR into a hotfix branch is in no range (merged or open) — it is a separate line.
 - Tags after the first held tag keep being read, so each shows its own reason.
 
-The fold is pure and DB-only on a view (tags, ranges and ticket rows are synced/stored, the scan's live
-progress is in memory); it never fetches on mount. THE SCAN (the tags step, the background) fetches
-everything the walk needs, oldest tag first, within the rate budget.
+The fold is pure and DB-only on a view (tags, the walked history, light PR records and ticket statuses are
+synced/stored, the scan's live progress is in memory); it never fetches on mount. THE SCAN (the tags step,
+the background) reads `main`'s history once, newest first, and the tickets in batches, within the rate
+budget, and keeps what it read: the next scan reads only the commits newer than the walked head.
 
 ## Releases tab (This Sprint → Releases, the 4th inner tab, key `4`)
 
@@ -109,9 +116,9 @@ everything the walk needs, oldest tag first, within the rate budget.
      "6 tickets · 1 warning";
    - none: "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)", or with a
      baseline "No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains BMD-127 (In Progress)";
-   - checking: "Checking…" with a PROGRESS BAR and ONE short line of what the scan is doing now — "Checking
-     which tags are on main: 140 of 212", "Matching 0.389.0's commits to pull requests (tag 61 of 140)",
-     "Fetching pull requests: 35 of 80", "Reading tickets from Jira: 12 of 30" (the workspace's tracker). A
+   - checking: "Candidate at most 0.388.0 — checking older history (40%)" (the early upper limit), or
+     "Checking…", with a PROGRESS BAR and ONE short line of what the scan is doing now — "Reading main's
+     history: 1,200 of 5,400 commits", "Reading tickets from Jira: 300 of 420" (the workspace's tracker). A
      candidate already proven while later tags are still read shows the candidate AND a small "Still reading
      later tags" bar;
    - "Nothing new since 0.390.0-rc" / "No version tags on main yet".
@@ -193,13 +200,15 @@ worker  no release yet — read only
 ## Invariants this feature adds
 
 - Tag sync is part of the default-branch snapshot step: STRICTLY NON-FATAL, found by the settle sweep
-  (tag pushes are updatedAt-silent). The RELEASE SCAN (ancestry, ranges, range PRs, their tickets) runs for
-  RELEASABLE repos only, over the WHOLE reachable history (no count caps; time-boxed runs, budget-aware,
-  paused on the rate budget), oldest tag first, and ranges only for tags after the baseline. A version tag's
-  range is computed once per (repo, tag, sha) and stored; a tag MOVED to another sha is re-computed and
-  flagged.
-- A range PR not stored is synced through the existing single-PR path (an ordinary stored PR); its tickets
-  are read by the tracker worker (a priority set, missing-only) — read when RECEIVED, never when viewed.
+  (tag pushes are updatedAt-silent). The RELEASE SCAN runs for RELEASABLE repos only: ONE pass over the
+  default branch's first-parent history, NEWEST FIRST, back to each releasing workspace's baseline or the
+  root (time-boxed runs, budget-aware, paused on the rate budget, resumable from a stored cursor), then the
+  tickets in batches. The walked commits are stored; which tag a commit belongs to (and whether a tag is on
+  `main`) is DERIVED on read, so a new or MOVED tag needs no GitHub call. A head that moved is walked only
+  down to the walked head; rewritten history is walked again from scratch.
+- A range PR is a LIGHT record from the history read (`release_range_prs`) — never a full PR sync; its
+  tickets are found by THE detection rule and read in batches by the scan (Jira: one search per 100 keys) —
+  read when RECEIVED, never when viewed.
 - `pullRequests.mergeCommitOid` is cleared only on a positive statement from GitHub.
 - New tracker write: the release comment (the reader's press). Added to the tracker-writes list.
 - New GitHub writes: release tags, pre-releases, the hotfix base branch — each a reader's press,
@@ -238,9 +247,10 @@ Automatic start, checking, each repo on its own
 16. OLDEST-TAG BLOCKER SENTENCE: the oldest tag holds → "No tag can be released: the oldest tag, 0.12.0,
     already contains BMD-127 (In Progress)"; with a release → "No tag can be released since 0.380.0-rc: the
     next tag, 0.381.0, contains BMD-127 (In Progress)".
-17. PROGRESS WHILE CHECKING: while ancestry, a range, a range PR or a ticket is not read yet, the row reads
-    "Checking…" with a progress bar and one line of what the scan is doing, never a ticket blocker; a
-    candidate proven before it shows with "Still reading later tags". More commits than can be read → holds.
+17. PROGRESS WHILE CHECKING: while the history pass or a ticket is not read yet, the row reads "Checking…" (or
+    the upper limit, 43) with a progress bar and one line of what the scan is doing ("Reading main's history:
+    1,200 of 5,400 commits", "Reading tickets from Jira: 300 of 420"), never a ticket blocker; a candidate
+    proven before it shows with "Still reading later tags".
 18. An unticked repository is ignored entirely (no row, no block, no warning). A Done ticket ships in one
     repository whatever its PRs elsewhere; another repository's held tag, or an open PR, holds nothing.
 
@@ -279,17 +289,29 @@ Port report
     beside Push; Push still works and sends no outcome line. No report reads "No report from the agent".
 
 History, fetching, polling
-38. HISTORY BEYOND THE 90-DAY SYNC IS FETCHED: every tag the tag read reaches (paged, up to 1000) gets an
-    ancestry check with no count cap, every version tag after the baseline (or every tag) gets a range, and
-    the oldest tag's range lists merged PRs from GitHub, not only stored ones.
-39. MISSING PRS SYNCED AND THEIR TICKETS READ: a range PR number with no stored row is synced through the
-    single-PR path (bounded per run, budget-aware) and becomes an ordinary stored PR; its tickets are read by
-    the tracker worker first (the release priority set, any reading tracker); until then the repo is
-    checking.
-40. A range PR GitHub could not give holds its tag ("Pull request #88 could not be read from GitHub.").
+38. HISTORY BEYOND THE 90-DAY SYNC IS READ: every tag the tag read reaches (paged, up to 1000); the history
+    pass reads `main` back to the baseline, or to the root with no release; the oldest tag's range is every
+    first-parent commit down to the root.
+39. RANGE PRS FROM THE HISTORY READ: a range PR with no `pull_requests` row is read from its LIGHT record
+    (title + head branch through THE detection rule, the same tickets a stored PR with that title and branch
+    names); its ticket is read in the scan's next batch; until then the repo is checking.
+40. A ticket the tracker did not answer is checking and retried; after three failed reads in a row it holds
+    ("BMD-12 could not be read: the tracker did not answer.").
 41. The tab polls `GET /api/releases` every ~3 s while any repo is checking, and stops when none is.
 42. Every tag after the candidate is listed with its own reason; tags after the first held one also say
     "Also contains BMD-127 (from 0.312.0)."
+
+Fast scan (the one history pass, 2026-11-15)
+43. NEWEST FIRST, AN EARLY UPPER LIMIT: part way through the pass, with 0.390.0 held and 0.388.0 before it, the
+    row reads "Candidate at most 0.388.0 — checking older history (40%)"; nothing held yet → at most the latest
+    tag; the pass complete and every ticket read → the candidate is the tag before the OLDEST held tag.
+44. INCREMENTAL RESCAN: after a complete pass, a new commit on `main` costs one REST compare and one history
+    page (only the new commits are read); a force-pushed `main` (the walked head is not an ancestor) is walked
+    again from scratch.
+45. BATCHED TICKET READS: 600 Jira tickets are read in 6 searches (`key in (…)`, ≤ 100 keys); a key that does
+    not exist splits its batch, never fails the rest; Refresh and Confirm read their tickets in one batch too.
+46. NO FULL PR SYNCS: the scan creates no `pull_requests` row; PRs already stored still lend their links,
+    author and PR tab.
 
 ## Implementation
 
@@ -670,6 +692,10 @@ the tickets panel said "released" for PRs older than the checked history. The re
 
 ### Automatic candidate (2026-11-15, second rework)
 
+> ⚠ SUPERSEDED in part by § One history pass below: the scan (ancestry compares, per-tag compare ranges, the
+> 'history' closed-PR list, the missing-PR full syncs, the PR fetch failures, the worker's priority set) and
+> its progress steps (`ancestry` / `ranges` / `prs`) are REPLACED. The fold's rules stand.
+
 The owner: no "Start from this tag" — the app works out the starting point; check the WHOLE history it can
 reach, fetch what it does not have, and show what it is doing.
 
@@ -730,3 +756,98 @@ reach, fetch what it does not have, and show what it is doing.
   worker's existing mapping); the PR fetch failures and live progress are in memory (a restart re-asks); tags past
   1000 are not read (logged); the 'history' range treats "merged no later than the tag's commit date" as "at or
   before it", as before.
+
+### One history pass (2026-11-15, the fast scan)
+
+> Supersedes, in § Automatic candidate: the per-tag ancestry compares, the per-tag REST compare ranges, the
+> 'history' range's closed-PR list, the missing-PR full syncs, the PR fetch failures and the tracker worker's
+> release priority set.
+
+On real repos (hundreds of tags, thousands of PRs, no release yet) the scan made one REST call per tag for
+ancestry, one compare per tag, a full single-PR sync per old PR (≤ 120 a burst) and read tickets one by one
+(~40 a worker pass). Now:
+
+- **Migration `0202_release_history_pass`** (registered in the journal): `release_history_scans` (one row per
+  repo: the deep segment's cursor / expected commit / index / estimate, the tip segment's, `top_sha`,
+  `max_base`), `release_history_commits` (one row per first-parent commit walked: `seq`, `pr_numbers`,
+  `committed_at`), `release_range_prs` (the LIGHT record per (repo, number)), `tracker_ticket_status` (a
+  batched status read per (workspace, ident): state, status, title, url, `attempts`, `fetched_at`). All
+  account-scoped, composite FKs (repos / workspaces, cascading), `accountScopedTables()`, erased explicitly;
+  `deleteRepo` drops the first three, `deleteWorkspace` the fourth. `repo_tag_ranges` and
+  `repo_tags.on_default_branch` / `ancestry_head_sha` are DORMANT (no writer; kept, never dropped).
+- **The walk** (`sync/release-history.ts` `walkReleaseHistory`): GraphQL `RELEASE_HISTORY_QUERY`
+  (`github/tag-queries.ts`) — `object(oid: <segment start>) { history(first: 100, after:) }`, each commit with
+  `parents(first: 1)` and `associatedPullRequests(first: 2)` (merged, base = the default branch, this repo:
+  `releases/history-fold.ts` `historyPrsOf`), plus `sinceCount` (commits since the newest release tag's date,
+  for the estimate). `walkHistoryPage` keeps the FIRST-PARENT chain (a commit is taken only when it is the
+  expected next one, so a merged branch's own commits are passed over). Two segments: DEEP from the first head
+  ever read, back until every releasing workspace's baseline commit is met (it PAUSES there, cursor kept, and
+  goes on if a baseline moves older) or the root; TIP when the head moved — one REST compare `top...head`:
+  `ahead` → the new commits down to `top_sha`, newest first, before the deep segment goes on; anything else
+  (or a 404) → everything stored is dropped and the walk starts again. `seq`: deep `-idx`; each tip
+  `max_base + 1e9 - idx`, so newer commits sort above. Each page is ONE transaction (commits, light records,
+  cursor). Time box + budget pre-emption as before; never throws.
+- **The assignment** (`releases/history-fold.ts` `historyView`, pure, on READ in `db/release-check.ts`): the
+  commits from this workspace's floor (the newest walked release tag's `seq`) up, newest first; every commit
+  takes the tag group most recently passed (the newest tagged commit at or after it); a tag's increment is
+  complete once the walk passed the next tagged commit below it (or reached the root); tags on one commit:
+  the first in `compareTagOrder` takes the increment, the others are empty. On `main` = walked; off it = not
+  walked though the walk covers its date (and no newer head is pending); else unknown. Ranges reach the fold
+  as before (method `'walk'`), so the fold's walk is unchanged; `history: {done, total, complete}` is new.
+- **The fold** (shared `release-check.ts`): `ReleaseScanStep` is `'history' | 'tickets'`; `releaseScanLine`
+  ("Reading main's history: 1,200 of 5,400 commits", "Reading tickets from Jira: 300 of 420", thousands
+  separated by `releaseCount`); `releaseProgressPercent`; per repo `upperLimit` and `heldFrom` (the early upper
+  limit); a held first tag is `blocked` only once the pass is complete; `ReleaseCheckPr.prId` (the stored PR,
+  or null); `unreadablePrNumbers` removed (`pr_unreadable` / `too_large` are no longer produced; kept in the
+  type for the words).
+- **The DB half** (`db/release-check.ts` `loadReleaseCheck`): PRs from the light records (id = the record's
+  id; `prId` when a `pull_requests` row exists); tickets by `releasePrDetectInput` → `detectKeysWithAccess`
+  (the stored row when there is one, else the light record — ONE function) plus a stored PR's own
+  `tracker_tickets` rows; each ticket's reads from the PR rows, the status rows and the sprint rows through
+  `bestTicketRead` (freshest success wins; a batched read that failed fewer than
+  `RELEASE_TICKET_FAILS_HOLD` (3) times in a row is "not read yet"). `releaseTicketKeysOwed` /
+  `ticketKeysOwed`: not read, failed and due after `RELEASE_TICKET_RETRY_MS` (2 min), or older than
+  `RELEASE_TICKET_TTL_MS` (10 min). Bot-ness: the light record's own rule (`historyAuthorIsBot`: GitHub typed a
+  Bot, `isLikelyBot`, a vendor login) or `globalAutomationUserIds` (the stored author, or the login's user row).
+- **Tickets** (`tracker/ticket-status.ts` `readTicketStatuses`; docs/TRACKERS.md § Batched status reads): the
+  reader's optional `readStatuses` (Jira: `tracker/jira/statuses.ts`, one search per ≤ 100 keys), else
+  one by one through `fetchTicket` (≤ 40 a call). Refresh and Confirm use it (`ReleaseWriteDeps.rereadTickets`,
+  `rereadTicketStatuses`; Refresh now reads up to 500 tickets in one batch).
+- **The tags step** (`sync/tags-step.ts`): tag read → `walkReleaseHistory` → the ticket step per releasing
+  workspace; `scanNext({history, tickets})`. **Removed**: `sync/tag-ranges.ts`, `sync/release-scan.ts`, the
+  ancestry half of `sync/repo-tags.ts` (`ancestryTargets`, `inheritedAncestry`, `ancestryFromCompareStatus`,
+  `runAncestryChecks`, the caps), `db/repo-tags.ts` `getTagRanges`, the PR-failure half of
+  `releases/scan-state.ts`, `fetchClosedPrsPage` / `buildCommitPrsQuery`, `tracker/worker.ts`
+  `queueReleaseTicketReads` / `kickReleaseTicketReads` and the release priority set, `releaseTicketsOwed`.
+- **Notes**: `releases/notes.ts` `storySummaryInputs` takes `{title, prId}` per story PR — the light record's
+  title, and a body only for a PR also stored.
+- **Frontend**: `releasesModel.ts` `repoRowText` ("Candidate at most … — checking older history (40%)",
+  "Checking — 0.390.0 and later cannot be released"); a PR with no stored row links to GitHub
+  (`ReleasesView.tsx` `PrLink`, `safeExternalUrl`). Landing mock: the checking row reads the upper limit.
+- **Calls per scan** for a 5,000-commit / 400-tag / 1,500-PR / 600-ticket repo with no release, first scan
+  (before → after): tag read 4 GraphQL pages → 4 (unchanged); ancestry 400 REST compares → 0; ranges ≈ 400
+  REST compares + ≈ 100 GraphQL fallback queries (unmatched commits, 50 a query) + 15 closed-PR list pages →
+  50 history pages (~3 points each); range PRs up to 1,500 single-PR syncs (≤ 120 a run) → 0; tickets 600
+  one-ticket reads over ≥ 15 worker passes → 6 Jira searches. In all ≈ 2,400 GitHub calls → 54 (55 with the
+  compare on a moved head); 600 tracker calls → 6. (A repo that merges with merge commits has more history
+  pages: GitHub's `history` lists the merged branches' commits too.) A later scan with 20 new commits: 1 REST
+  compare + 1 history page, and every 10 minutes 6 Jira searches; no new commit: nothing beyond the tag read.
+- **Tests**: `releases/history-fold.test.ts` (the PRs that count; first-parent past a merge commit; the tip
+  stop and the baseline pause; linear assignment, tags on one commit, a tag off main, commits above the newest
+  tag, a partial walk, a pending tip), `sync/release-history.test.ts` (250 commits in 3 pages; the baseline
+  pause and going on; resuming from the cursor; the incremental rescan: one compare + one page; rewritten
+  history restarts; the notes builder reading light records), `tracker/jira/statuses.test.ts` (600 keys → 6
+  searches; v3 → v2; a missing key split out; missing / 401 / 5xx / malformed), `db/release-check.test.ts`
+  (acceptance 43 on the fold; the DB half over walked commits and light records; detection parity;
+  `bestTicketRead`, `ticketKeysOwed`; the live overlay; Refresh in one batch), `sync/tags-step.test.ts`
+  (`scanNext`, the walk then the tickets), `apps/frontend/test/releasesModel.test.ts` (the upper-limit row),
+  `verify:isolation`.
+- **Decisions / deferrals**: FIRST-PARENT only — a tag on a commit merged in from a side branch is "not on
+  main". Increments are assigned in walk order but chained by `compareTagOrder` (commit date), so a tag whose
+  commit date disagrees with its place on `main` can shift PRs between neighbouring tags. The estimate counts
+  every reachable commit (GitHub's `history` totalCount), so on a repo with merge commits the bar moves faster
+  near the end. Light records read no links: in a GitHub Issues workspace (links are the whole answer) a PR
+  known only from the history read has no ticket, so it warns as untracked. Increments never hold as "too
+  large" any more (the pass reads them whole). Ticket statuses read in a batch are per workspace; an External
+  repo's tickets are read through the releasing workspace's tracker. The walked commits of a repo that is
+  unticked stay (cheap; a re-tick walks only what is new).

@@ -254,40 +254,38 @@ not watched — only its recent project PRs and ticket-linked PRs are read from 
 Right after `syncBranchStatus`, `sync-repo.ts` runs `runTagsStep` (`sync/tags-step.ts`; [RELEASES.md](RELEASES.md)),
 in its own non-fatal guard. RELEASABLE REPOS FIRST: only a repo some workspace releases ("Released from this
 workspace", `db/release-repos.ts` `releaseRangeViews` — ticked, still a member, both suffixes set) gets the
-ancestry checks and ranges; any other repo's tags still sync (the hotfix bases read them) with no ancestry
-and no range (its stored ranges are dropped). An EXTERNAL repo runs the step only when releasable.
+release scan; any other repo's tags still sync (the hotfix bases read them) with no scan. An EXTERNAL repo
+runs the step only when releasable.
 
 - **The tag read** (`sync/repo-tags.ts`, 1 point a page): the newest `REPO_TAGS_READ_CAP` (100) tags by
   `TAG_COMMIT_DATE` — a RELEASABLE repo pages on (`after`) up to `REPO_TAGS_READ_CAP_RELEASABLE` (1000,
   ≤ 10 points); tags past the cap are logged as not read. At most once per `TAG_READ_MIN_INTERVAL_MS`
   (15 min) from a walk or a quick re-run — the settle sweep starts it sooner on a tag push. Writes
-  `repo_tags` (insert / refresh / MOVE / delete-on-a-positive-statement) and `repos.tags_signature`.
-- **THE RELEASE SCAN** (releasable repos only; [RELEASES.md](RELEASES.md) § Implementation → Automatic
-  candidate). NO count caps — each run is TIME-BOXED (`WALK_RUN_MS` 20 s in a walk's tail,
-  `SCAN_RUN_MS` 45 s in the background; the ranges take `RANGES_SHARE` of it) and stops when the
-  account's budget is low or limited (paused, never an error). In order, oldest tag first:
-  1. **ancestry** — every tag: is it on the default branch? (REST compare `tag...head`, `per_page=1`;
-     never-asked first; `ANCESTRY_CHECKS_RELEASABLE` = no cap; a quick re-run asks against the head it
-     read last). No ranges are planned while ancestry is left.
-  2. **ranges** (`sync/tag-ranges.ts`) — per releasing workspace, every tag after its BASELINE (the
-     newest release tag on main), or EVERY tag with none (shared `tagRangeKeepFrom`; the oldest baseline
-     of all releasing workspaces decides), OLDEST FIRST: the PRs between each and the tag before it —
-     REST compare base...tag with full pagination (≤ `TAG_RANGE_MAX_COMMITS` 10,000 commits; past it
-     `truncated`, which holds the tag), each commit → PR by `merge_commit_oid`, then stored PR commits,
-     then GraphQL `associatedPullRequests` for every commit still unmatched (2 points per 50); only PRs
-     merged INTO THE DEFAULT BRANCH. The OLDEST tag (no base) is `'history'`: the closed PRs into the
-     default branch from GitHub (REST list, 100 per call, oldest created first, stopped past the tag's
-     date; ≤ `HISTORY_MAX_PRS` 10,000) plus the stored ones. Once per (tag sha, base sha); a failed
-     compare is retried next run. Ranges before the baseline are dropped.
-  3. **prs** (`sync/release-scan.ts`) — a range PR number with no `pull_requests` row is synced through
-     `syncOnePr` (an ordinary stored PR, any age), ≤ `RELEASE_PR_FETCH_PER_RUN` (120) per run, 3 at a
-     time; one GitHub does not give is remembered (`releases/scan-state.ts`): it holds its tag and is
-     asked again after 10 min.
-  4. **tickets** — the range PRs whose tickets are not read yet are queued for the tracker worker's
-     priority read ([TRACKERS.md](TRACKERS.md) § Release-range PRs).
-  Progress per step goes to `releases/scan-state.ts` (in memory) for `GET /api/releases`.
-- **Re-runs**: work left after a run that made progress ⇒ the step runs again in the background after
-  `QUICK_RERUN_MS` (3 s); work left and no progress (the budget) ⇒ marked for the settle sweep's catch-up
+  `repo_tags` (insert / refresh / MOVE / delete-on-a-positive-statement) and `repos.tags_signature`. No
+  ancestry call (removed 2026-11-15).
+- **THE RELEASE SCAN** (releasable repos only; [RELEASES.md](RELEASES.md) § Implementation → One history
+  pass). Each run is TIME-BOXED (`WALK_RUN_MS` 20 s in a walk's tail, `SCAN_RUN_MS` 45 s in the background)
+  and stops when the account's budget is low or limited (paused, never an error). In order:
+  1. **history** (`sync/release-history.ts` `walkReleaseHistory`) — ONE pass over the default branch's
+     FIRST-PARENT history, NEWEST FIRST: GraphQL `history(first: 100, after:)` pinned to a segment's start
+     commit, each commit with `parents(first: 1)` and `associatedPullRequests(first: 2)` (~3 points a page).
+     The walked commits (`release_history_commits`) and a LIGHT record per PR merged into the default branch
+     (`release_range_prs`) are stored page by page with the cursor (`release_history_scans`), so a run
+     stopped by its time box or the budget resumes there. The deep segment goes back to every releasing
+     workspace's BASELINE commit (the newest release tag on main — it pauses there) or the root. When the
+     head moved: ONE REST compare `top...head` — a fast-forward walks only the new commits (the tip
+     segment), anything else (rewritten history) drops the stored walk and starts again. Which tag a commit
+     belongs to, and which tags are on main, are derived on READ (`releases/history-fold.ts`), so a tag push
+     or a moved tag costs no GitHub call. No `pull_requests` row is created (the old single-PR syncs of
+     range PRs are gone).
+  2. **tickets** — per releasing workspace, the tickets in the walked tags that are not read yet, failed
+     and due (2 min), or read more than 10 min ago (`db/release-check.ts` `releaseTicketKeysOwed`) are read
+     in a BATCH ([TRACKERS.md](TRACKERS.md) § Batched status reads; Jira: one search per 100 keys).
+  Progress goes to `releases/scan-state.ts` (in memory) for `GET /api/releases`; the walk's own row is the
+  derived progress.
+- **Re-runs**: work left (history not complete, or tickets past a reader's one-by-one cap) after a run that
+  made progress ⇒ the step runs again in the background after `QUICK_RERUN_MS` (3 s); work left and no
+  progress (the budget) ⇒ marked for the settle sweep's catch-up
   (`markTagCatchUp`, `CATCH_UP_DELAY_MS` 60 s, `takeTagCatchUp`). Ticking a repo marks it too (that route
   never calls GitHub). While work is left the Releases tab reads "Checking…" and polls.
 

@@ -98,7 +98,7 @@ export async function setReleaseRepos(
 /**
  * Every view the TAG SYNC serves for one repo: each workspace that ticks it (and still holds it) with
  * BOTH suffixes set. Empty = not releasable anywhere: the tags may
- * still sync, but no ancestry check or range is computed for it.
+ * still sync, but no history pass or ticket read runs for it.
  */
 export async function releaseRangeViews(accountId: number, repoId: number): Promise<ReleaseRangeView[]> {
   const rows = await db

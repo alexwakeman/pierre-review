@@ -16,21 +16,26 @@
 //        • more commits than can be read (`too_large`)
 //      HOLDS ITSELF AND EVERY LATER TAG (tags are cumulative).
 //   3. The CANDIDATE is the tag just before it; nothing holds ⇒ the latest version tag.
-//   Work not done yet — a tag whose ancestry is unknown, an increment not computed, a range PR not
-//   fetched, a ticket not read yet — is CHECKING, never a blocker: the walk stops there, so a candidate
-//   proven so far is shown with "Still reading later tags", and with none the row says "Checking…".
+//   Work not done yet — a tag whose place on the default branch is unknown, an increment the history
+//   pass has not finished, a ticket not read yet — is CHECKING, never a blocker: the walk stops there,
+//   so a candidate proven so far is shown with "Still reading later tags", and with none the row says
+//   "Checking…". NEWEST FIRST, AN EARLY UPPER LIMIT: the history pass reads the default branch newest
+//   first, so before it reaches the baseline (or the root) the newest tags are known first. H = the
+//   oldest HELD tag found so far (tags are cumulative: every tag at or after H is held) ⇒ the
+//   candidate can be at most the tag just before H (`upperLimit`; the latest tag when none is held).
+//   Once the pass is complete and every ticket read, the candidate is confirmed.
 //   A ticket "not read yet" while the workspace's tracker cannot read at all is unreadable (it holds).
 //   Authorship never changes a block (a bot PR on a not-done ticket blocks). A human PR with no ticket
 //   is a WARNING; a bot PR with no ticket is listed under "Dependency and bot changes"; commits with no
 //   PR (direct pushes) are a note. A PR into any other branch (a hotfix branch) is in no stored range.
 //
-// RANGES are the stored per-tag INCREMENTS (previous default-branch tag, tag] (backend
-// sync/tag-ranges.ts). An increment missing or stale (its tag moved, or its base is no longer the
-// previous tag) is pending.
+// RANGES are the per-tag INCREMENTS (previous default-branch tag, tag], derived from the history pass's
+// walked commits (backend releases/history-fold.ts). An increment missing (the pass has not passed the
+// tag below it yet) or stale (its tag moved, or its base is no longer the previous tag) is pending.
 //
 // PROGRESS. The fold derives, from the same stored rows, what is left per repository (`progress`: the
-// first unfinished step of ancestry → ranges → prs → tickets, with `releaseScanLine`'s words); the
-// backend overlays the scan's live step (sync/release-scan.ts) when it is fresher.
+// first unfinished step of history → tickets, with `releaseScanLine`'s words); the backend overlays the
+// scan's live step (sync/release-history.ts) when it is fresher.
 //
 // The fold never reads the clock and never fetches. Timestamps come in as Date and go out as ISO-8601.
 import { tagKind, releaseTagName, type ReleaseSettings, type TagKind } from './releases.js';
@@ -45,7 +50,7 @@ export interface TagOrderKey {
 }
 
 /** Oldest first: commit date, then tag date (a lightweight tag sorts first), then name. Pure. THE ONE
- *  tag order — the range planner (backend sync/tag-ranges.ts) and the release check share it. */
+ *  tag order — the history view (backend releases/history-fold.ts) and the release check share it. */
 export function compareTagOrder(a: TagOrderKey, b: TagOrderKey): number {
   const ca = a.committedAt?.getTime() ?? 0;
   const cb = b.committedAt?.getTime() ?? 0;
@@ -106,9 +111,10 @@ export function latestReleaseTag<T extends TagOrderKey>(tags: readonly T[], sett
 
 // ── Progress ────────────────────────────────────────────────────────────────────────────────────
 
-/** The scan's steps, in the order they run for a repository. */
-export type ReleaseScanStep = 'ancestry' | 'ranges' | 'prs' | 'tickets';
-export const RELEASE_SCAN_STEPS: readonly ReleaseScanStep[] = ['ancestry', 'ranges', 'prs', 'tickets'];
+/** The scan's steps, in the order they run for a repository: ONE pass over the default branch's
+ *  history, then the tickets (read in batches). */
+export type ReleaseScanStep = 'history' | 'tickets';
+export const RELEASE_SCAN_STEPS: readonly ReleaseScanStep[] = ['history', 'tickets'];
 
 /** What the scan of one repository is doing now: one step, its counts and ONE short line. */
 export interface ReleaseScanProgress {
@@ -122,10 +128,7 @@ export interface ReleaseScanLineInput {
   step: ReleaseScanStep;
   done: number;
   total: number;
-  /** ranges: the tag whose commits are being matched, and its place among the tags to read. */
-  tagName?: string | null;
-  tagIndex?: number | null;
-  /** ancestry: the default branch's name ("main"). */
+  /** history: the default branch's name ("main"). */
   branch?: string | null;
   /** tickets: the workspace's tracker ("Jira"). */
   tracker?: string | null;
@@ -133,28 +136,26 @@ export interface ReleaseScanLineInput {
   paused?: boolean;
 }
 
-/** The ONE line for a scan step. Pure. */
+/** A count with thousands separators ("5,400"). Pure (no locale). */
+export function releaseCount(n: number): string {
+  return String(Math.max(0, Math.round(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** The ONE line for a scan step: "Reading main's history: 1,200 of 5,400 commits", "Reading tickets
+ *  from Jira: 300 of 420". Pure. */
 export function releaseScanLine(p: ReleaseScanLineInput): string {
-  const done = Math.min(p.done, p.total);
-  let line: string;
-  switch (p.step) {
-    case 'ancestry':
-      line = `Checking which tags are on ${p.branch ?? 'the default branch'}: ${done} of ${p.total}`;
-      break;
-    case 'ranges':
-      line =
-        p.tagName != null
-          ? `Matching ${p.tagName}'s commits to pull requests (tag ${Math.min(p.tagIndex ?? done + 1, p.total)} of ${p.total})`
-          : `Matching commits to pull requests: ${done} of ${p.total} tags`;
-      break;
-    case 'prs':
-      line = `Fetching pull requests: ${done} of ${p.total}`;
-      break;
-    case 'tickets':
-      line = `Reading tickets from ${p.tracker ?? 'the tracker'}: ${done} of ${p.total}`;
-      break;
-  }
+  const done = releaseCount(Math.min(p.done, p.total));
+  const total = releaseCount(p.total);
+  const what = p.step === 'history' ? `Reading ${p.branch ?? 'the default branch'}'s history` : `Reading tickets from ${p.tracker ?? 'the tracker'}`;
+  // No total yet (the first page has not answered): the words alone.
+  const line = p.total <= 0 ? what : p.step === 'history' ? `${what}: ${done} of ${total} commits` : `${what}: ${done} of ${total}`;
   return p.paused === true ? `${line} (waiting for GitHub's rate limit)` : line;
+}
+
+/** A step's share done, 0–100 (the upper-limit line's "(40%)"). Pure. */
+export function releaseProgressPercent(p: Pick<ReleaseScanProgress, 'done' | 'total'>): number {
+  if (p.total <= 0) return 0;
+  return Math.max(0, Math.min(99, Math.floor((p.done / p.total) * 100)));
 }
 
 // ── Input ──────────────────────────────────────────────────────────────────────────────────────
@@ -172,9 +173,10 @@ export interface ReleaseCheckRangeInput {
   sha: string;
   baseTagName: string | null;
   baseSha: string | null;
-  method: 'compare' | 'history';
+  /** 'walk' = derived from the history pass; 'compare' / 'history' are the older stored kinds. */
+  method: 'compare' | 'history' | 'walk';
   prIds: number[];
-  /** PR numbers in the range that are not stored yet (fetched by the scan; checking until then). */
+  /** PR numbers in the range with no record yet (checking until there is one). */
   unresolvedPrNumbers: number[];
   unmatchedCommits: number;
   truncated: boolean;
@@ -192,12 +194,17 @@ export interface ReleaseCheckRepoInput {
   writable: boolean;
   tags: ReleaseCheckTagInput[];
   ranges: ReleaseCheckRangeInput[];
-  /** Range PR numbers GitHub could not give (the scan tried): they HOLD their tag. */
-  unreadablePrNumbers?: number[];
+  /** The history pass (commits walked of an estimate). `complete` = it reached this workspace's
+   *  baseline or the root, and no newer head is still being read. Absent = complete. */
+  history?: { done: number; total: number; complete: boolean } | null;
 }
 
 export interface ReleaseCheckPrInput {
+  /** The range PR's record id (`release_range_prs`): unique in the check. */
   id: number;
+  /** Its full `pull_requests` row, when one is stored (the PR tab opens it); null = only the light
+   *  record (the link goes to GitHub). */
+  prId?: number | null;
   repoId: number;
   number: number;
   title: string;
@@ -243,9 +250,11 @@ export interface ReleaseCheckInput {
 export type ReleaseBlocker =
   | { kind: 'not_done'; ident: string; key: string; statusName: string | null }
   | { kind: 'unreadable'; ident: string; key: string; reason: Exclude<ReleaseTicketReadState, 'ok'> }
-  /** A range PR GitHub could not give: its tickets are unknown. */
+  /** A range PR GitHub could not give: its tickets are unknown. (No longer produced since the one
+   *  history pass, which reads every PR with its commit; kept for the words.) */
   | { kind: 'pr_unreadable'; number: number }
-  /** The tag's compare has more commits than are read (`truncated`): its changes cannot be checked. */
+  /** The tag's range has more commits than are read (`truncated`): its changes cannot be checked. (No
+   *  longer produced by the history pass; kept for older rows and the words.) */
   | { kind: 'too_large'; tagName: string };
 
 export type ReleaseWarning = { kind: 'untracked_pr'; repoId: number; prId: number };
@@ -309,8 +318,14 @@ export interface ReleaseRepoCheck {
   firstBlocked: string | null;
   /** That tag's first blocker (the row's sentence). */
   firstBlocker: ReleaseBlocker | null;
-  /** Some work is left (ancestry, ranges, PRs, tickets): the tab polls while any repo is checking. */
+  /** Some work is left (the history pass, tickets): the tab polls while any repo is checking. */
   checking: boolean;
+  /** While checking with no confirmed candidate: the newest tag the candidate can still be — the tag
+   *  just before the oldest held tag found so far (`heldFrom`), or the latest version tag when none is
+   *  held. null when the tag before `heldFrom` is not known yet, or nothing is checking. */
+  upperLimit: ReleaseTagRef | null;
+  /** The oldest held version tag found so far (its own blockers): it and every later tag are held. */
+  heldFrom: string | null;
   /** What the scan is doing now (null = nothing left). */
   progress: ReleaseScanProgress | null;
   /** Version tags after the baseline, NEWEST first. */
@@ -350,7 +365,10 @@ export interface ReleaseTicketCheck {
 }
 
 export interface ReleaseCheckPr {
+  /** The range PR's record id (unique in the check). */
   id: number;
+  /** The stored `pull_requests` id (the PR tab), or null (link to `url`). */
+  prId: number | null;
   repoId: number;
   number: number;
   title: string;
@@ -384,9 +402,8 @@ interface Span {
   /** An increment in the span is missing or stale. */
   rangePending: boolean;
   prIds: number[];
-  /** Unresolved PR numbers not yet tried (checking) and tried but unreadable (hold). */
+  /** PR numbers with no record yet (checking). */
   waitingPrs: number[];
-  unreadablePrs: number[];
   unmatched: number;
   truncated: boolean;
 }
@@ -407,7 +424,7 @@ function foldRepo(
   const dated = repo.tags.filter((t) => t.committedAt != null);
   const ordered = dated.filter((t) => t.onDefaultBranch === true).sort(compareTagOrder);
   const rangeByName = new Map(repo.ranges.map((r) => [r.tagName, r]));
-  const unreadable = new Set(repo.unreadablePrNumbers ?? []);
+  const historyComplete = repo.history == null || repo.history.complete;
   const valid = (i: number): ReleaseCheckRangeInput | null => {
     const t = ordered[i]!;
     const prev = i > 0 ? ordered[i - 1]! : null;
@@ -445,7 +462,7 @@ function foldRepo(
   for (let i = firstIdx; i < ordered.length; i += 1) {
     const t = ordered[i]!;
     if (kindOf(t.name) !== 'version' || t.sha === baselineSha) continue;
-    const span: Span = { tagIdx: i, from, tooLarge: false, rangePending: false, prIds: [], waitingPrs: [], unreadablePrs: [], unmatched: 0, truncated: false };
+    const span: Span = { tagIdx: i, from, tooLarge: false, rangePending: false, prIds: [], waitingPrs: [], unmatched: 0, truncated: false };
     for (let j = from; j <= i; j += 1) {
       const r = valid(j);
       if (r == null) {
@@ -454,11 +471,7 @@ function foldRepo(
       }
       if (r.truncated) span.tooLarge = true;
       for (const id of r.prIds) if (pos.get(id) === j && !span.prIds.includes(id)) span.prIds.push(id);
-      for (const n of r.unresolvedPrNumbers) {
-        if (numberPos.get(n) !== j) continue;
-        if (unreadable.has(n)) span.unreadablePrs.push(n);
-        else span.waitingPrs.push(n);
-      }
+      for (const n of r.unresolvedPrNumbers) if (numberPos.get(n) === j) span.waitingPrs.push(n);
       span.unmatched += r.unmatchedCommits;
       span.truncated ||= r.truncated;
     }
@@ -474,7 +487,6 @@ function foldRepo(
   const ownBlockers = (span: Span): ReleaseBlocker[] => {
     const out: ReleaseBlocker[] = [];
     if (span.tooLarge) out.push({ kind: 'too_large', tagName: ordered[span.tagIdx]!.name });
-    for (const n of [...span.unreadablePrs].sort((a, b) => a - b)) out.push({ kind: 'pr_unreadable', number: n });
     for (const ident of identsOf(span)) {
       const v = verdictOf(ident);
       if (v.kind === 'held') out.push(v.blocker);
@@ -562,29 +574,25 @@ function foldRepo(
   const latestVersion = versions.length > 0 ? ref(versions[versions.length - 1]!) : null;
 
   // PROGRESS, derived from the stored rows: the first unfinished step.
-  const progress = deriveProgress({
-    repo,
-    input,
-    dated,
-    ordered,
-    firstIdx,
-    valid,
-    spans,
-    identsOf,
-    readOf,
-  });
-  const checking = progress != null || states.some((st) => st === 'checking') || unknownAfterBase.length > 0;
+  const progress = deriveProgress({ repo, input, spans, identsOf, readOf });
+  const checking = progress != null || !historyComplete || states.some((st) => st === 'checking') || unknownAfterBase.length > 0;
 
+  // The first tag after the baseline is held, and nothing older can still turn up: no tag can be released.
+  const provenBlocked = firstHeld === 0 && historyComplete && !unknownBefore(spans[0]!);
   const status: ReleaseRepoStatus =
     candidate != null
       ? 'candidate'
-      : firstHeld === 0
+      : provenBlocked
         ? 'blocked'
-        : spans.length === 0 && unknownAfterBase.length === 0
+        : spans.length === 0 && unknownAfterBase.length === 0 && historyComplete
           ? 'nothing_new'
-          : spans.length === 0 || stoppedAt >= 0 || unknownAfterBase.length > 0
+          : spans.length === 0 || stoppedAt >= 0 || unknownAfterBase.length > 0 || !historyComplete || firstHeld === 0
             ? 'checking'
             : 'blocked';
+  // THE EARLY UPPER LIMIT: H = the oldest held tag found so far; the candidate is at most the one
+  // before it (the latest when none is held).
+  const oldestHeld = states.indexOf('held');
+  const upperSpan = status !== 'checking' ? null : oldestHeld < 0 ? spans[spans.length - 1] ?? null : oldestHeld > 0 ? spans[oldestHeld - 1]! : null;
   const latestHit = latestReleaseTag(repo.tags, settings);
   const heldSpan = firstHeld >= 0 ? spans[firstHeld]! : null;
   const heldBlockers = heldSpan != null ? ownBlockers(heldSpan) : [];
@@ -604,6 +612,8 @@ function foldRepo(
     firstBlocked: heldSpan != null ? ordered[heldSpan.tagIdx]!.name : null,
     firstBlocker: heldBlockers[0] ?? null,
     checking,
+    upperLimit: upperSpan != null ? ref(ordered[upperSpan.tagIdx]!) : null,
+    heldFrom: oldestHeld >= 0 ? ordered[spans[oldestHeld]!.tagIdx]!.name : null,
     progress,
     tags: tagsOut.reverse(),
     ticketIdents,
@@ -627,46 +637,19 @@ function blockerId(b: ReleaseBlocker): string {
   }
 }
 
-/** The first unfinished step of one repository's scan, from the stored rows. Pure. */
+/** The first unfinished step of one repository's scan, from the stored rows: the history pass, then
+ *  the tickets. Pure. */
 function deriveProgress(a: {
   repo: ReleaseCheckRepoInput;
   input: ReleaseCheckInput;
-  dated: ReleaseCheckTagInput[];
-  ordered: ReleaseCheckTagInput[];
-  firstIdx: number;
-  valid: (i: number) => ReleaseCheckRangeInput | null;
   spans: Span[];
   identsOf: (span: Span) => string[];
   readOf: (ident: string) => boolean;
 }): ReleaseScanProgress | null {
-  const known = a.dated.filter((t) => t.onDefaultBranch != null).length;
-  if (known < a.dated.length) {
-    const p = { step: 'ancestry' as const, done: known, total: a.dated.length, branch: a.repo.defaultBranch ?? null };
-    return { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
-  }
-  const needed = a.ordered.length - a.firstIdx;
-  let have = 0;
-  let firstMissing: string | null = null;
-  let missingAt = 0;
-  for (let i = a.firstIdx; i < a.ordered.length; i += 1) {
-    if (a.valid(i) != null) have += 1;
-    else if (firstMissing == null) {
-      firstMissing = a.ordered[i]!.name;
-      missingAt = i - a.firstIdx + 1;
-    }
-  }
-  if (have < needed) {
-    const p = { step: 'ranges' as const, done: have, total: needed, tagName: firstMissing, tagIndex: missingAt };
-    return { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
-  }
-  let prTotal = 0;
-  let prWaiting = 0;
-  for (const s of a.spans) {
-    prTotal += s.prIds.length + s.waitingPrs.length + s.unreadablePrs.length;
-    prWaiting += s.waitingPrs.length;
-  }
-  if (prWaiting > 0) {
-    const p = { step: 'prs' as const, done: prTotal - prWaiting, total: prTotal };
+  const h = a.repo.history;
+  if (h != null && !h.complete) {
+    const total = h.total <= 0 ? 0 : Math.max(h.total, h.done + 1);
+    const p = { step: 'history' as const, done: h.done, total, branch: a.repo.defaultBranch ?? null };
     return { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
   }
   const idents = new Set<string>();
@@ -751,6 +734,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
 
   const prs: ReleaseCheckPr[] = input.prs.map((p) => ({
     id: p.id,
+    prId: p.prId ?? null,
     repoId: p.repoId,
     number: p.number,
     title: p.title,

@@ -250,6 +250,16 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
       .insert(repoTags)
       .values({ accountId: 1, repoId, name: 'v1.0.0', sha: 'a'.repeat(40), committedAt: at, onDefaultBranch: true, firstSeenAt: at, lastSeenAt: at })
       .execute();
+    // The history pass walked main to the root: every tag's commit is on it.
+    const shas = [...new Set((await client.db.select().from(repoTags).execute()).map((t: any) => t.sha as string))];
+    await client.db
+      .insert(client.schema.releaseHistoryScans)
+      .values({ accountId: 1, repoId, topSha: shas[0]!, deepStartSha: shas[0]!, deepExpectedSha: null, updatedAt: at })
+      .execute();
+    await client.db
+      .insert(client.schema.releaseHistoryCommits)
+      .values(shas.map((sha, i) => ({ accountId: 1, repoId, sha, seq: -i, prNumbers: [], committedAt: at })))
+      .execute();
     const get = async (ws: number | string) => {
       const res = await app.inject({ method: 'GET', url: `/api/releases?workspace=${ws}` });
       return { status: res.statusCode, body: res.json() as any };

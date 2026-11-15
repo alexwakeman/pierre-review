@@ -85,8 +85,9 @@ export interface ReleaseCheckLoad {
 export interface ReleaseWriteDeps {
   now(): Date;
   check(accountId: number, workspaceId: number, repoIds: readonly number[], settings: ReleaseSettings): Promise<ReleaseCheckLoad>;
-  /** Read ONE ticket again from the tracker, through the worker's own path. True = it answered. */
-  rereadTicket(accountId: number, a: { ident: string; key: string; prIds: number[] }): Promise<boolean>;
+  /** Read these tickets' statuses again from the tracker, in a batch (tracker/ticket-status.ts). The
+   *  idents that got an answer. */
+  rereadTickets(accountId: number, workspaceId: number, tickets: ReadonlyArray<{ ident: string; key: string }>): Promise<Set<string>>;
   github(accountId: number): Promise<ReleaseGithub>;
   postComment(accountId: number, a: { workspaceId: number; ident: string; wiki: string }): Promise<{ ok: true } | { ok: false; message: string }>;
   /** Settle: re-read one repo's tags (never throws). */
@@ -115,22 +116,29 @@ export async function defaultCheck(
   };
 }
 
+/** THE re-read for Refresh and Confirm: the tickets' statuses in a batch through the workspace's tracker
+ *  (tracker/ticket-status.ts — Jira: one search per 100 keys). Never throws. */
+export async function rereadTicketStatuses(
+  accountId: number,
+  workspaceId: number,
+  tickets: ReadonlyArray<{ ident: string; key: string }>,
+): Promise<Set<string>> {
+  if (tickets.length === 0) return new Set();
+  try {
+    // LAZY: tracker/runtime.ts opens the database at import.
+    const [{ trackerContext }, { readTicketStatuses }] = await Promise.all([import('../tracker/runtime.js'), import('../tracker/ticket-status.js')]);
+    const r = await readTicketStatuses(trackerContext(), accountId, workspaceId, tickets.map((t) => t.key), { perTicketMax: tickets.length });
+    return new Set(tickets.filter((t) => r.answered.has(t.key)).map((t) => t.ident));
+  } catch {
+    return new Set();
+  }
+}
+
 export function defaultReleaseWriteDeps(): ReleaseWriteDeps {
   return {
     now: () => new Date(),
     check: defaultCheck,
-    async rereadTicket(accountId, a) {
-      const prId = a.prIds[0];
-      if (prId == null) return false;
-      // LAZY: tracker/runtime.ts opens the database at import.
-      const [{ trackerContext }, { syncOnePrNow }] = await Promise.all([import('../tracker/runtime.js'), import('../tracker/worker.js')]);
-      try {
-        const stats = await syncOnePrNow(trackerContext(), accountId, prId, [a.key], { force: true });
-        return stats.fetched > 0 && stats.failed === 0;
-      } catch {
-        return false;
-      }
-    },
+    rereadTickets: rereadTicketStatuses,
     async github(accountId) {
       const [{ getAccessToken }, { releaseGithubFor }] = await Promise.all([import('../auth/account.js'), import('./github.js')]);
       return releaseGithubFor(await getAccessToken(accountId));
@@ -210,11 +218,15 @@ export async function previewRelease(
   const ai = shipped.length > 0 && (await deps.summariesAvailable());
   let summaries = new Map<string, string | null>();
   if (ai) {
-    const prsByIdent = new Map<string, number[]>();
-    for (const r of releaseNotesInputOf(result, included)) for (const st of r.stories) prsByIdent.set(st.ident, st.prs.map((p) => p.id));
+    // The range PRs are light records: their titles from the check, a body only when stored.
+    const prById = new Map(result.prs.map((p) => [p.id, p]));
+    const prsByIdent = new Map<string, Array<{ title: string; prId: number | null }>>();
+    for (const r of releaseNotesInputOf(result, included)) {
+      for (const st of r.stories) prsByIdent.set(st.ident, st.prs.map((p) => ({ title: p.title, prId: prById.get(p.id)?.prId ?? null })));
+    }
     const inputs = await storySummaryInputs(
       accountId,
-      shipped.map((t) => ({ ident: t.ident, key: t.key, title: t.title, prIds: prsByIdent.get(t.ident) ?? [] })),
+      shipped.map((t) => ({ ident: t.ident, key: t.key, title: t.title, prs: prsByIdent.get(t.ident) ?? [] })),
       await deps.trackerSite(accountId, s.workspaceId),
     );
     summaries = await storySummaries(accountId, inputs, deps.summarise ? { summarise: deps.summarise } : {});
@@ -248,30 +260,16 @@ function ticketsToReread(
   result: ReleaseCheckResult,
   included: readonly number[],
   snapshot: ReleaseSnapshot,
-): Array<{ ident: string; key: string; prIds: number[] }> {
+): Array<{ ident: string; key: string }> {
   const byIdent = new Map(result.tickets.map((t) => [t.ident, t]));
-  const out = new Map<string, { ident: string; key: string; prIds: number[] }>();
+  const out = new Map<string, { ident: string; key: string }>();
   const add = (ident: string, key: string): void => {
     if (out.has(ident)) return;
-    const t = byIdent.get(ident);
-    const prIds = t == null ? [] : [...new Set(t.repos.flatMap((r) => r.prIds))];
-    if (prIds.length === 0) {
-      for (const p of result.prs) if (p.ticketIdents.includes(ident)) prIds.push(p.id);
-    }
-    out.set(ident, { ident, key: t?.key ?? key, prIds });
+    out.set(ident, { ident, key: byIdent.get(ident)?.key ?? key });
   };
   for (const t of snapshot.tickets) add(t.ident, t.key);
   for (const t of releaseShippedTickets(result, included)) add(t.ident, t.key);
   return [...out.values()];
-}
-
-async function pool<T>(items: readonly T[], n: number, fn: (x: T) => Promise<void>): Promise<void> {
-  let next = 0;
-  await Promise.all(
-    Array.from({ length: Math.min(n, items.length) }, async () => {
-      while (next < items.length) await fn(items[next++]!);
-    }),
-  );
 }
 
 const TRACKER_WORDS: Record<string, string> = { github: 'GitHub Issues', linear: 'Linear', notion: 'Notion' };
@@ -288,10 +286,8 @@ export async function createRelease(
   // ── 1. The re-check: tickets from the tracker, then the fold, then each version tag on GitHub ──
   const before = await deps.check(accountId, s.workspaceId, s.all, s.settings);
   const toRead = ticketsToReread(before.result, s.included, snapshot);
-  const unread: Array<{ ident: string; key: string }> = [];
-  await pool(toRead, 4, async (t) => {
-    if (!(await deps.rereadTicket(accountId, t))) unread.push({ ident: t.ident, key: t.key });
-  });
+  const answered = toRead.length > 0 ? await deps.rereadTickets(accountId, s.workspaceId, toRead) : new Set<string>();
+  const unread = toRead.filter((t) => !answered.has(t.ident));
   const after = await deps.check(accountId, s.workspaceId, s.all, s.settings);
   const included = releasable(after.result, s.included);
   const gh = await deps.github(accountId);

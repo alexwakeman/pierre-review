@@ -309,7 +309,8 @@ describe('foldReleaseCheck — the automatic walk, per repo', () => {
     const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
     expect(repoOf(res, 1)).toMatchObject({ status: 'candidate', checking: true, firstBlocked: null });
     expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
-    expect(repoOf(res, 1).progress).toMatchObject({ step: 'ranges', done: 2, total: 3, line: "Matching v1.1.0's commits to pull requests (tag 2 of 3)" });
+    // The history pass says it is complete here, so no step is left: the tag is still checking.
+    expect(repoOf(res, 1).progress).toBeNull();
     expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ pending: true, blocked: true, blockers: [], state: 'checking' });
     // The first tag not read: CHECKING, not blocked.
     const first = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1], noRange: true }]);
@@ -323,15 +324,16 @@ describe('foldReleaseCheck — the automatic walk, per repo', () => {
     expect(tagOf(res2, 1, 'v1.2.0')).toMatchObject({ moved: true, pending: true });
   });
 
-  it("acceptance 17/38: a tag whose ancestry is not known yet stops the walk there; the repo says it is checking which tags are on main", () => {
+  it("acceptance 17/38: a tag whose place on main is not known yet stops the walk there; the repo says it is reading main's history", () => {
     const r = threeTags();
     r.defaultBranch = 'main';
     r.tags[1]!.onDefaultBranch = null;
+    r.history = { done: 2000, total: 5400, complete: false };
     const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
     const api = repoOf(res, 1);
     expect(api).toMatchObject({ status: 'candidate', checking: true });
     expect(api.candidate?.name).toBe('v1.0.0');
-    expect(api.progress).toEqual({ step: 'ancestry', done: 2, total: 3, line: 'Checking which tags are on main: 2 of 3' });
+    expect(api.progress).toEqual({ step: 'history', done: 2000, total: 5400, line: "Reading main's history: 2,000 of 5,400 commits" });
     // Nothing known yet: checking, never "No version tags".
     const none = threeTags();
     none.tags.forEach((t) => (t.onDefaultBranch = null));
@@ -363,20 +365,13 @@ describe('foldReleaseCheck — the automatic walk, per repo', () => {
     expect(repoOf(clear, 1).candidate?.name).toBe('v0.249.0');
   });
 
-  it('acceptance 39: a range PR not fetched yet is checking ("Fetching pull requests"); one GitHub could not give holds (40)', () => {
+  it('acceptance 39: a range PR with no record yet is checking, never a blocker', () => {
     const r = threeTags();
     r.ranges[1]!.unresolvedPrNumbers = [88];
     const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
     expect(repoOf(res, 1)).toMatchObject({ status: 'candidate', checking: true });
     expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
-    expect(repoOf(res, 1).progress).toEqual({ step: 'prs', done: 3, total: 4, line: 'Fetching pull requests: 3 of 4' });
-    expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ state: 'checking', unresolvedPrCount: 1 });
-    r.unreadablePrNumbers = [88];
-    const held = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
-    const b = tagOf(held, 1, 'v1.1.0').blockers[0]!;
-    expect(b).toEqual({ kind: 'pr_unreadable', number: 88 });
-    expect(releaseBlockerText(b)).toBe('Pull request #88 could not be read from GitHub.');
-    expect(repoOf(held, 1)).toMatchObject({ firstBlocked: 'v1.1.0', checking: false });
+    expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ state: 'checking', unresolvedPrCount: 1, blockers: [] });
   });
 
   it('acceptance 17: a truncated compare (more commits than are read) holds its tag, with a sentence', () => {
@@ -397,11 +392,7 @@ describe('foldReleaseCheck — the automatic walk, per repo', () => {
       prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3']), pr(4, 1, ['T2'], { state: 'open' })],
       tickets: [ticket('T2', { done: false, statusName: 'In review' }), ticket('T3', { readState: 'failed', done: false })],
     });
-    expect(ticketsToRefresh(res).map((t) => [t.key, t.prIds.sort()])).toEqual([
-      ['T1', [1]],
-      ['T2', [2, 4]],
-      ['T3', [3]],
-    ]);
+    expect(ticketsToRefresh(res).map((t) => t.key)).toEqual(['T1', 'T2', 'T3']);
     expect(ticketsToRefresh(res, 1).map((t) => t.key)).toEqual(['T1']);
   });
 
@@ -430,13 +421,12 @@ describe('foldReleaseCheck — the automatic walk, per repo', () => {
 
 describe('releaseScanLine and releasesChecking — the progress words and the polling switch', () => {
   it('one short line per step', () => {
-    expect(releaseScanLine({ step: 'ancestry', done: 140, total: 212, branch: 'main' })).toBe('Checking which tags are on main: 140 of 212');
-    expect(releaseScanLine({ step: 'ranges', done: 60, total: 140, tagName: '0.389.0', tagIndex: 61 })).toBe(
-      "Matching 0.389.0's commits to pull requests (tag 61 of 140)",
+    expect(releaseScanLine({ step: 'history', done: 1200, total: 5400, branch: 'main' })).toBe("Reading main's history: 1,200 of 5,400 commits");
+    expect(releaseScanLine({ step: 'history', done: 0, total: 0, branch: 'main' })).toBe("Reading main's history");
+    expect(releaseScanLine({ step: 'tickets', done: 300, total: 420, tracker: 'Jira' })).toBe('Reading tickets from Jira: 300 of 420');
+    expect(releaseScanLine({ step: 'history', done: 100, total: 5400, branch: 'main', paused: true })).toBe(
+      "Reading main's history: 100 of 5,400 commits (waiting for GitHub's rate limit)",
     );
-    expect(releaseScanLine({ step: 'prs', done: 35, total: 80 })).toBe('Fetching pull requests: 35 of 80');
-    expect(releaseScanLine({ step: 'tickets', done: 12, total: 30, tracker: 'Jira' })).toBe('Reading tickets from Jira: 12 of 30');
-    expect(releaseScanLine({ step: 'prs', done: 35, total: 80, paused: true })).toBe("Fetching pull requests: 35 of 80 (waiting for GitHub's rate limit)");
   });
   it('acceptance 41: on while any repo is checking, off when none is', () => {
     const checking = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1')] });
@@ -449,6 +439,74 @@ describe('releaseScanLine and releasesChecking — the progress words and the po
 });
 
 // ── Each repo on its own ────────────────────────────────────────────────────────────────────────
+
+describe('foldReleaseCheck — NEWEST FIRST: the early upper limit while the history pass reads', () => {
+  // v1.0.0 (not reached yet) · v1.1.0 (T1) · v1.2.0 (T2) · v1.3.0 (T3): the pass has read from the head
+  // back past v1.1.0's commit but not to v1.0.0's, so v1.1.0's own increment is not complete yet.
+  const partial = () => {
+    const r = repo(1, 'api', [
+      { name: 'v1.0.0', d: 1, prs: [] },
+      { name: 'v1.1.0', d: 3, prs: [1] },
+      { name: 'v1.2.0', d: 5, prs: [2] },
+      { name: 'v1.3.0', d: 7, prs: [3] },
+    ]);
+    r.tags[0]!.onDefaultBranch = null;
+    r.ranges = r.ranges.filter((x) => x.tagName !== 'v1.0.0' && x.tagName !== 'v1.1.0');
+    r.defaultBranch = 'main';
+    r.history = { done: 2160, total: 5400, complete: false };
+    return r;
+  };
+  const prs = () => [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])];
+
+  it('a held tag found early caps the candidate at the tag before it; nothing is confirmed yet', () => {
+    const res = run({ repos: [partial()], prs: prs(), tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In Progress' }), ticket('T3')] });
+    const api = repoOf(res, 1);
+    expect(api).toMatchObject({ status: 'checking', candidate: null, heldFrom: 'v1.2.0', checking: true });
+    expect(api.upperLimit?.name).toBe('v1.1.0');
+    expect(api.progress).toEqual({ step: 'history', done: 2160, total: 5400, line: "Reading main's history: 2,160 of 5,400 commits" });
+  });
+
+  it('nothing held yet: the upper limit is the latest tag', () => {
+    const res = run({ repos: [partial()], prs: prs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    expect(repoOf(res, 1)).toMatchObject({ status: 'checking', heldFrom: null });
+    expect(repoOf(res, 1).upperLimit?.name).toBe('v1.3.0');
+  });
+
+  it('the oldest tag read so far is held: no upper limit yet (the tag before it is not read), never "blocked"', () => {
+    const r = repo(1, 'api', [
+      { name: 'v1.0.0', d: 1, prs: [], onDefaultBranch: false },
+      { name: 'v1.1.0', d: 3, prs: [1] },
+      { name: 'v1.2.0', d: 5, prs: [2] },
+    ]);
+    r.tags[0]!.onDefaultBranch = null;
+    r.history = { done: 300, total: 5400, complete: false };
+    const res = run({ repos: [r], prs: prs(), tickets: [ticket('T1', { done: false, statusName: 'In review' }), ticket('T2')] });
+    expect(repoOf(res, 1)).toMatchObject({ status: 'checking', heldFrom: 'v1.1.0', upperLimit: null, candidate: null });
+  });
+
+  it('the pass completes: the candidate is the tag just before the OLDEST held tag', () => {
+    const done = repo(1, 'api', [
+      { name: 'v1.0.0', d: 1, prs: [] },
+      { name: 'v1.1.0', d: 3, prs: [1] },
+      { name: 'v1.2.0', d: 5, prs: [2] },
+      { name: 'v1.3.0', d: 7, prs: [3] },
+    ]);
+    done.history = { done: 5400, total: 5400, complete: true };
+    const res = run({ repos: [done], prs: prs(), tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In Progress' }), ticket('T3', { done: false })] });
+    const api = repoOf(res, 1);
+    expect(api).toMatchObject({ status: 'candidate', checking: false, upperLimit: null, firstBlocked: 'v1.2.0', heldFrom: 'v1.2.0' });
+    expect(api.candidate?.name).toBe('v1.1.0');
+  });
+
+  it('the first tag after the baseline held while the pass is still reading: checking, not blocked', () => {
+    const r = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1] }]);
+    r.history = { done: 100, total: 900, complete: false };
+    const res = run({ repos: [r], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1', { done: false })] });
+    expect(repoOf(res, 1)).toMatchObject({ status: 'checking', heldFrom: 'v1.0.0' });
+    r.history = { done: 900, total: 900, complete: true };
+    expect(repoOf(run({ repos: [r], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1', { done: false })] }), 1).status).toBe('blocked');
+  });
+});
 
 describe('foldReleaseCheck — each repo on its own (no "ships whole", no "open work")', () => {
   // api: v2.3.0 (PR 10, PLAT-100) · v2.4.0 (PR 11, PLAT-290). web: v1.8.0 (PR 20, PLAT-200).
@@ -559,10 +617,48 @@ describe('bestTicketRow', () => {
   });
 });
 
+/** The history pass's stored result for one repo: its first-parent chain NEWEST FIRST, each commit
+ *  with its PR numbers, the walk complete to the root (or not), replacing what was there. */
+async function walked(repoId: number, chain: Array<{ c: string; prs?: number[]; d: number }>, opts: { complete?: boolean } = {}) {
+  const { db, schema } = client;
+  const { eq } = await import('drizzle-orm');
+  await db.delete(schema.releaseHistoryCommits).where(eq(schema.releaseHistoryCommits.repoId, repoId)).execute();
+  await db.delete(schema.releaseHistoryScans).where(eq(schema.releaseHistoryScans.repoId, repoId)).execute();
+  await db
+    .insert(schema.releaseHistoryScans)
+    .values({
+      accountId: 1,
+      repoId,
+      topSha: sha(chain[0]!.c),
+      deepStartSha: sha(chain[0]!.c),
+      deepExpectedSha: opts.complete === false ? sha('older') : null,
+      deepNextIdx: chain.length,
+      deepEstimate: chain.length,
+      updatedAt: day(10),
+    })
+    .execute();
+  await db
+    .insert(schema.releaseHistoryCommits)
+    .values(chain.map((x, i) => ({ accountId: 1, repoId, sha: sha(x.c), seq: -i, prNumbers: x.prs ?? [], committedAt: day(x.d) })))
+    .execute();
+}
+
+/** A light record (what the history pass stores for a range PR). */
+async function light(repoId: number, number: number, title: string, extra: Record<string, unknown> = {}) {
+  const { db, schema } = client;
+  return (
+    await db
+      .insert(schema.releaseRangePrs)
+      .values({ accountId: 1, repoId, number, title, url: `https://github.com/acme/api/pull/${number}`, mergedAt: day(1), seenAt: day(10), ...extra })
+      .returning()
+      .execute()
+  )[0].id as number;
+}
+
 describe('getReleases (GET /api/releases) — stored rows only', () => {
-  it('not configured → check null; configured → the fold over stored tags, ranges, PRs and tickets', async () => {
+  it('not configured → check null; configured → the fold over the walked history, the light PR records and tickets', async () => {
     const { db, schema } = client;
-    const { repos, pullRequests, repoTags, repoTagRanges, trackerTickets, users } = schema;
+    const { repos, pullRequests, repoTags, trackerTickets, users } = schema;
     const { setReleaseSettings } = await import('./release-settings.js');
     const { resolveWorkspaceScope } = await import('./queries.js');
 
@@ -607,38 +703,27 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     const p1 = await mkPr(1, 'main');
     const p2 = await mkPr(2, 'main', { mergedAt: day(3), updatedAt: day(3) });
     const p3 = await mkPr(3, 'main', { mergedAt: day(3), updatedAt: day(3), authorId: bot.id });
+    const l1 = await light(api.id, 1, 'change 1');
+    const l2 = await light(api.id, 2, 'change 2');
+    const l3 = await light(api.id, 3, 'change 3', { authorLogin: 'renovate[bot]' });
     const tag = (name: string, d: number) => ({
       accountId: 1,
       repoId: api.id,
       name,
       sha: sha(name),
       committedAt: day(d),
-      onDefaultBranch: true,
       firstSeenAt: day(d),
       lastSeenAt: day(d),
     });
     await db.insert(repoTags).values([tag('v1.0.0', 1), tag('v1.1.0', 4)]).execute();
+    // The pass walked main newest first, down to the root: v1.1.0's commit (PR 3), a commit (PR 2),
+    // v1.0.0's commit (PR 1).
+    await walked(api.id, [
+      { c: 'v1.1.0', prs: [3], d: 4 },
+      { c: 'mid', prs: [2], d: 3 },
+      { c: 'v1.0.0', prs: [1], d: 1 },
+    ]);
     const now = day(10);
-    await db
-      .insert(repoTagRanges)
-      .values([
-        { accountId: 1, repoId: api.id, tagName: 'v1.0.0', sha: sha('v1.0.0'), method: 'history', prNumbers: [1], commitCount: 0, unmatchedCommits: 0, truncated: false, computedAt: now },
-        {
-          accountId: 1,
-          repoId: api.id,
-          tagName: 'v1.1.0',
-          sha: sha('v1.1.0'),
-          baseTagName: 'v1.0.0',
-          baseSha: sha('v1.0.0'),
-          method: 'compare',
-          prNumbers: [2, 3],
-          commitCount: 2,
-          unmatchedCommits: 0,
-          truncated: false,
-          computedAt: now,
-        },
-      ])
-      .execute();
     const tt = (prId: number, key: string, statusName: string, statusCategory: string, state = 'ok') => ({
       accountId: 1,
       workspaceId: scope.workspaceId,
@@ -664,14 +749,17 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     const res = await m.getReleases(1, String(scope.workspaceId));
     expect(res.configured).toBe(true);
     const repo = res.check!.repos.find((r) => r.repoId === api.id)!;
-    expect(repo).toMatchObject({ status: 'candidate', writable: true, fullName: 'acme/api' });
+    expect(repo).toMatchObject({ status: 'candidate', writable: true, fullName: 'acme/api', checking: false });
     expect(repo.candidate?.name).toBe('v1.0.0');
     expect(repo.firstBlocked).toBe('v1.1.0');
     const v11 = repo.tags.find((t) => t.name === 'v1.1.0')!;
+    expect(v11.prIds.sort()).toEqual([l2, l3].sort());
     expect(v11.blockers).toEqual([
       { kind: 'not_done', ident: `jira:${SITE.apiRoot}#PLAT-2`, key: 'PLAT-2', statusName: 'In review' },
     ]);
-    expect(res.check!.prs.find((p) => p.id === p3)).toMatchObject({ isBot: true, ticketIdents: [] });
+    // A light record also stored as a full PR lends its id (the PR tab) and its author (bot-ness).
+    expect(res.check!.prs.find((p) => p.id === l3)).toMatchObject({ prId: p3, isBot: true, ticketIdents: [] });
+    expect(res.check!.prs.find((p) => p.id === l1)).toMatchObject({ prId: p1, number: 1 });
 
     // The ticket is closed as "Won't Do" → Cancelled, not Complete: it still holds v1.1.0.
     const { eq } = await import('drizzle-orm');
@@ -683,185 +771,136 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
       { kind: 'not_done', ident: `jira:${SITE.apiRoot}#PLAT-2`, key: 'PLAT-2', statusName: "Won't Do" },
     ]);
 
-    // The ticket moves to Done (the worker's next read) → the candidate moves to v1.1.0; the bot PR
-    // without a ticket is listed, not warned.
+    // The ticket moves to Done → the candidate moves to v1.1.0; the bot PR without a ticket is listed,
+    // not warned.
     await db.update(trackerTickets).set({ statusName: 'Done', statusCategory: 'done' }).execute();
     const after = await m.getReleases(1, scope.workspaceId);
     const repo2 = after.check!.repos.find((r) => r.repoId === api.id)!;
     expect(repo2.candidate).toMatchObject({ name: 'v1.1.0', releaseTagName: 'v1.1.0-rc' });
-    expect(repo2.botPrIds).toEqual([p3]);
+    expect(repo2.botPrIds).toEqual([l3]);
     expect(after.check!.warnings).toEqual([]);
 
     // An unreadable ticket blocks with its reason.
     await db.update(trackerTickets).set({ state: 'no_access', fetchedAt: null }).execute();
     const unread = await m.getReleases(1, scope.workspaceId);
     expect(unread.check!.repos[0]!.tags.find((t) => t.name === 'v1.0.0')!.blockers[0]).toMatchObject({ kind: 'unreadable', reason: 'no_access' });
+    await db.update(trackerTickets).set({ state: 'ok', fetchedAt: day(10) }).execute();
 
     // An unknown workspace id falls back to the Default workspace, never a 404.
     expect((await m.getReleases(1, 'nope')).workspaceId).toBe(scope.workspaceId);
   });
 
-  it('acceptance 17/39: a range PR whose ticket is not read yet is CHECKING (queued for the worker), never untracked; a tracker that cannot read holds it', async () => {
+  it('acceptance 17/39: a LIGHT-only range PR (older than the synced history) gets its ticket from THE detection rule; not read yet is CHECKING; a tracker that cannot read holds it', async () => {
     const { db, schema } = client;
-    const { repos, pullRequests, repoTags, repoTagRanges, trackerTickets, workspaceTrackers } = schema;
+    const { repos, repoTags, workspaceTrackers } = schema;
     const { resolveWorkspaceScope } = await import('./queries.js');
     const scope = await resolveWorkspaceScope(1, undefined);
     const api = (await db.select().from(repos).execute()).find((r: any) => r.name === 'api');
-    await db.update(trackerTickets).set({ state: 'ok', fetchedAt: day(10), statusName: 'Done', statusCategory: 'done' }).execute();
     await db.insert(workspaceTrackers).values({ accountId: 1, workspaceId: scope.workspaceId, provider: 'jira', baseUrl: SITE.apiRoot }).execute();
-    const [p4] = await db
-      .insert(pullRequests)
-      .values({
-        githubNodeId: 'PR_rc_4',
-        accountId: 1,
-        repoId: api.id,
-        number: 4,
-        title: 'PLAT-310: change X',
-        headRefName: 'PLAT-310-change-x',
-        state: 'merged',
-        isDraft: false,
-        openedAt: day(5, 0),
-        updatedAt: day(5),
-        mergedAt: day(5),
-        baseRefName: 'main',
-      })
-      .returning()
-      .execute();
+    // No pull_requests row for #4: only the light record the history pass stored.
+    const l4 = await light(api.id, 4, 'PLAT-310: change X', { headRefName: 'PLAT-310-change-x' });
     await db
       .insert(repoTags)
-      .values({ accountId: 1, repoId: api.id, name: 'v1.2.0', sha: sha('v1.2.0'), committedAt: day(6), onDefaultBranch: true, firstSeenAt: day(6), lastSeenAt: day(6) })
+      .values({ accountId: 1, repoId: api.id, name: 'v1.2.0', sha: sha('v1.2.0'), committedAt: day(6), firstSeenAt: day(6), lastSeenAt: day(6) })
       .execute();
-    await db
-      .insert(repoTagRanges)
-      .values({
-        accountId: 1,
-        repoId: api.id,
-        tagName: 'v1.2.0',
-        sha: sha('v1.2.0'),
-        baseTagName: 'v1.1.0',
-        baseSha: sha('v1.1.0'),
-        method: 'compare',
-        prNumbers: [4],
-        commitCount: 1,
-        unmatchedCommits: 0,
-        truncated: false,
-        computedAt: day(10),
-      })
-      .execute();
+    await walked(api.id, [
+      { c: 'v1.2.0', prs: [4], d: 6 },
+      { c: 'v1.1.0', prs: [3], d: 4 },
+      { c: 'mid', prs: [2], d: 3 },
+      { c: 'v1.0.0', prs: [1], d: 1 },
+    ]);
     const res = await m.getReleases(1, scope.workspaceId);
     const repo = res.check!.repos.find((r) => r.repoId === api.id)!;
     expect(repo.candidate?.name).toBe('v1.1.0');
-    expect(repo.untrackedPrIds).not.toContain(p4.id);
+    expect(repo.untrackedPrIds).not.toContain(l4);
     // No credential: the tracker cannot read, so the ticket would never be read — it holds.
     expect(repo.tags.find((t) => t.name === 'v1.2.0')!.blockers).toEqual([
       { kind: 'unreadable', ident: `jira:${SITE.apiRoot}#PLAT-310`, key: 'PLAT-310', reason: 'not_read' },
     ]);
-    expect(res.check!.prs.find((p) => p.id === p4.id)?.ticketIdents).toEqual([`jira:${SITE.apiRoot}#PLAT-310`]);
-    expect(await m.releaseTicketsOwed(1, scope.workspaceId, api.id, SETTINGS)).toEqual({ prIds: [], waiting: 0 });
+    expect(res.check!.prs.find((p) => p.id === l4)).toMatchObject({ prId: null, ticketIdents: [`jira:${SITE.apiRoot}#PLAT-310`] });
+    expect(await m.releaseTicketKeysOwed(1, scope.workspaceId, api.id, SETTINGS, day(10).getTime() + 1000)).toEqual({ keys: [], waiting: 0 });
 
-    // With a credential the worker will read it: CHECKING, with the tickets step, and the scan queues it.
+    // With a credential the scan's next batch reads it: CHECKING, with the tickets step.
     await db.update(workspaceTrackers).set({ authEmail: 'ada@acme.test', authToken: 'plain:tok' }).execute();
     const res2 = await m.getReleases(1, scope.workspaceId);
     const repo2 = res2.check!.repos.find((r) => r.repoId === api.id)!;
     expect(repo2).toMatchObject({ status: 'candidate', checking: true, firstBlocked: null });
     expect(repo2.candidate?.name).toBe('v1.1.0');
     expect(repo2.tags.find((t) => t.name === 'v1.2.0')).toMatchObject({ state: 'checking', blockers: [] });
-    expect(repo2.progress).toMatchObject({ step: 'tickets', line: expect.stringMatching(/^Reading tickets from Jira: \d+ of \d+$/) });
-    expect(await m.releaseTicketsOwed(1, scope.workspaceId, api.id, SETTINGS)).toEqual({ prIds: [p4.id], waiting: 1 });
-
-    // The scan's live step is laid over the derived one while fresh (never for tickets).
-    const scan = await import('../releases/scan-state.js');
-    scan.noteScanStep(api.id, { step: 'prs', done: 35, total: 80, paused: false });
-    const res3 = await m.getReleases(1, scope.workspaceId);
-    expect(res3.check!.repos.find((r) => r.repoId === api.id)!.progress).toEqual({ step: 'prs', done: 35, total: 80, line: 'Fetching pull requests: 35 of 80' });
-    scan.__resetScanState();
+    expect(repo2.progress).toEqual({ step: 'tickets', done: 2, total: 3, line: 'Reading tickets from Jira: 2 of 3' });
+    // Owed: the unread one; the others were read a second ago (inside the TTL).
+    expect(await m.releaseTicketKeysOwed(1, scope.workspaceId, api.id, SETTINGS, day(10).getTime() + 1000)).toEqual({ keys: ['PLAT-310'], waiting: 1 });
+    // Past the TTL every ticket in the tags after the baseline is read again (in one batch).
+    expect((await m.releaseTicketKeysOwed(1, scope.workspaceId, api.id, SETTINGS, day(10).getTime() + m.RELEASE_TICKET_TTL_MS + 1)).keys).toEqual([
+      'PLAT-1',
+      'PLAT-2',
+      'PLAT-310',
+    ]);
   });
 
-  it('acceptance 40: a range PR GitHub could not give (the scan remembered it) holds its tag', async () => {
+  it('the batched status row answers a ticket; a transient failure is checking until it failed three times', async () => {
+    const { db, schema } = client;
     const { resolveWorkspaceScope } = await import('./queries.js');
+    const { eq } = await import('drizzle-orm');
     const scope = await resolveWorkspaceScope(1, undefined);
-    const { db, schema } = client;
-    const { repos, repoTagRanges } = schema;
-    const { and, eq } = await import('drizzle-orm');
-    const api = (await db.select().from(repos).execute()).find((r: any) => r.name === 'api');
-    await db.update(repoTagRanges).set({ prNumbers: [4, 77] }).where(and(eq(repoTagRanges.repoId, api.id), eq(repoTagRanges.tagName, 'v1.2.0'))).execute();
-    const scan = await import('../releases/scan-state.js');
-    // Not tried yet: checking.
-    const before = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
-    expect(before.tags.find((t) => t.name === 'v1.2.0')).toMatchObject({ state: 'checking', unresolvedPrCount: 1 });
-    scan.notePrFetchFailed(api.id, 77);
-    const after = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
-    expect(after.tags.find((t) => t.name === 'v1.2.0')!.blockers).toContainEqual({ kind: 'pr_unreadable', number: 77 });
-    scan.__resetScanState();
-    await db.update(repoTagRanges).set({ prNumbers: [4] }).where(and(eq(repoTagRanges.repoId, api.id), eq(repoTagRanges.tagName, 'v1.2.0'))).execute();
+    const ident = `jira:${SITE.apiRoot}#PLAT-310`;
+    const row = (state: string, attempts: number) => ({
+      accountId: 1,
+      workspaceId: scope.workspaceId,
+      provider: 'jira',
+      apiRoot: SITE.apiRoot,
+      issueKey: 'PLAT-310',
+      ident,
+      state,
+      attempts,
+      checkedAt: day(11),
+    });
+    await db.insert(schema.trackerTicketStatus).values(row('failed', 1)).execute();
+    const t1 = (await m.getReleases(1, scope.workspaceId)).check!.tickets.find((t) => t.ident === ident)!;
+    expect(t1).toMatchObject({ readState: 'not_read', pending: true });
+    await db.update(schema.trackerTicketStatus).set({ attempts: 3 }).where(eq(schema.trackerTicketStatus.ident, ident)).execute();
+    const t2 = (await m.getReleases(1, scope.workspaceId)).check!.tickets.find((t) => t.ident === ident)!;
+    expect(t2).toMatchObject({ readState: 'failed', blocker: { kind: 'unreadable', reason: 'failed' } });
+    await db.delete(schema.trackerTicketStatus).execute();
   });
 
-  it("the oldest tag's 'history' range also takes the stored PRs fresh: a PR stored later enters it", async () => {
+  it("the scan's live history step is laid over the derived one (its rate-limit wait)", async () => {
     const { db, schema } = client;
-    const { repos, pullRequests, repoTagRanges } = schema;
     const { resolveWorkspaceScope } = await import('./queries.js');
+    const { eq } = await import('drizzle-orm');
     const scope = await resolveWorkspaceScope(1, undefined);
-    const api = (await db.select().from(repos).execute()).find((r: any) => r.name === 'api');
-    // The stored row was computed before PR #9 (merged before v1.0.0's commit) was synced.
-    const stored = (await db.select().from(repoTagRanges).execute()).find((r: any) => r.tagName === 'v1.0.0');
-    expect(stored.prNumbers).toEqual([1]);
-    const [p9] = await db
-      .insert(pullRequests)
-      .values({
-        githubNodeId: 'PR_rc_9',
-        accountId: 1,
-        repoId: api.id,
-        number: 9,
-        title: 'backfilled change',
-        state: 'merged',
-        isDraft: false,
-        openedAt: day(0, 0),
-        updatedAt: day(0, 6),
-        mergedAt: day(0, 6),
-        baseRefName: 'main',
-      })
-      .returning()
-      .execute();
-    const res = await m.getReleases(1, scope.workspaceId);
-    const v1 = res.check!.repos.find((r) => r.repoId === api.id)!.tags.find((t) => t.name === 'v1.0.0')!;
-    expect(v1.prIds).toContain(p9.id);
+    const api = (await db.select().from(schema.repos).execute()).find((r: any) => r.name === 'api');
+    await db.update(schema.releaseHistoryScans).set({ deepExpectedSha: sha('older'), deepEstimate: 80 }).where(eq(schema.releaseHistoryScans.repoId, api.id)).execute();
+    const derived = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
+    expect(derived).toMatchObject({ status: 'checking', candidate: null });
+    expect(derived.progress).toEqual({ step: 'history', done: 4, total: 80, line: "Reading main's history: 4 of 80 commits" });
+    const scan = await import('../releases/scan-state.js');
+    scan.noteScanStep(api.id, { step: 'history', done: 35, total: 80, paused: true });
+    const live = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
+    expect(live.progress).toEqual({ step: 'history', done: 35, total: 80, line: "Reading main's history: 35 of 80 commits (waiting for GitHub's rate limit)" });
+    scan.__resetScanState();
+    await db.update(schema.releaseHistoryScans).set({ deepExpectedSha: null }).where(eq(schema.releaseHistoryScans.repoId, api.id)).execute();
   });
 
-  it('acceptance 6: Refresh (POST /api/releases/refresh) reads the held ticket again; it is Done → the candidate moves up', async () => {
+  it('acceptance 6: Refresh (POST /api/releases/refresh) reads the held tickets again in ONE batch; Done → the candidate moves up', async () => {
     const { db, schema } = client;
-    const { trackerTickets } = schema;
     const { resolveWorkspaceScope } = await import('./queries.js');
     const { refreshReleases } = await import('../releases/refresh.js');
     const scope = await resolveWorkspaceScope(1, undefined);
-    const asked: string[] = [];
+    const batches: string[][] = [];
     const res = await refreshReleases(1, scope.workspaceId, {
-      async rereadTicket(_a, t) {
-        asked.push(t.key);
-        const now = day(12);
-        await db
-          .insert(trackerTickets)
-          .values({
-            accountId: 1,
-            workspaceId: scope.workspaceId,
-            prId: t.prIds[0]!,
-            provider: 'jira',
-            issueKey: t.key,
-            detectedFrom: 'title',
-            detectOrder: 0,
-            apiRoot: SITE.apiRoot,
-            url: `${SITE.apiRoot}/browse/${t.key}`,
-            state: 'ok',
-            statusName: 'Done',
-            statusCategory: 'done',
-            fetchedAt: now,
-            checkedAt: now,
-            nextCheckAt: now,
-          })
-          .execute();
-        return true;
+      async rereadTickets(_a, ws, tickets) {
+        batches.push(tickets.map((t) => t.key));
+        for (const t of tickets) {
+          await db
+            .insert(schema.trackerTicketStatus)
+            .values({ accountId: 1, workspaceId: ws, provider: 'jira', apiRoot: SITE.apiRoot, issueKey: t.key, ident: t.ident, state: 'ok', statusName: 'Done', statusCategory: 'done', fetchedAt: day(12), checkedAt: day(12) })
+            .execute();
+        }
+        return new Set(tickets.map((t) => t.ident));
       },
     });
-    expect(asked).toEqual(['PLAT-310']);
+    expect(batches).toEqual([['PLAT-310']]);
     expect(res).toMatchObject({ reread: 1, unread: [] });
     const api = res.check!.repos.find((r) => r.name === 'api')!;
     expect(api.candidate?.name).toBe('v1.2.0');
@@ -869,7 +908,7 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
 
   it('acceptance 18: a workspace repo that is not ticked is ignored entirely (no row, no block, no ticket)', async () => {
     const { db, schema } = client;
-    const { repos, repoTags, repoTagRanges } = schema;
+    const { repos, repoTags } = schema;
     const { resolveWorkspaceScope, ensureRepoMemberships } = await import('./queries.js');
     const scope = await resolveWorkspaceScope(1, undefined);
     const [tests] = await db
@@ -880,17 +919,68 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     await ensureRepoMemberships(1);
     await db
       .insert(repoTags)
-      .values({ accountId: 1, repoId: tests.id, name: 'v9.0.0', sha: sha('t9'), committedAt: day(6), onDefaultBranch: true, firstSeenAt: day(6), lastSeenAt: day(6) })
+      .values({ accountId: 1, repoId: tests.id, name: 'v9.0.0', sha: sha('t9'), committedAt: day(6), firstSeenAt: day(6), lastSeenAt: day(6) })
       .execute();
-    await db
-      .insert(repoTagRanges)
-      .values({ accountId: 1, repoId: tests.id, tagName: 'v9.0.0', sha: sha('t9'), method: 'history', prNumbers: [], commitCount: 0, unmatchedCommits: 0, truncated: false, computedAt: day(10) })
-      .execute();
+    await walked(tests.id, [{ c: 't9', d: 6 }]);
     const res = await m.getReleases(1, scope.workspaceId);
     expect((await resolveWorkspaceScope(1, scope.workspaceId)).repoIds).toContain(tests.id);
     expect(res.check!.repos.map((r) => r.name)).toEqual(['api']);
     // Asking the loader for it directly still reads nothing of it.
     const input = await m.loadReleaseCheckInput(1, scope.workspaceId, [tests.id], SETTINGS);
     expect(input.repos).toEqual([]);
+  });
+});
+
+describe('releasePrDetectInput — a light record and a stored PR name the same tickets (ONE rule)', () => {
+  it('detects on title + head branch either way', async () => {
+    const { detectKeysWithAccess, withParsedLinks } = await import('../tracker/enricher.js');
+    const access = {
+      issue: { provider: 'jira', baseUrl: SITE.apiRoot, projectKeys: ['PLAT'], matchScope: 'title_branch' },
+      token: { state: 'none' },
+      email: null,
+      notion: null,
+    } as never;
+    const lightRec = { title: 'PLAT-12: fix the export', headRefName: 'feature/PLAT-13-more' };
+    const stored = { title: 'PLAT-12: fix the export', headRefName: 'feature/PLAT-13-more', closingIssues: null, linearLinks: null, linearLinksRoot: null };
+    type Raw = { title: string; headRefName: string | null; closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown };
+    const a = detectKeysWithAccess(access, withParsedLinks(m.releasePrDetectInput(lightRec, null) as Raw));
+    const b = detectKeysWithAccess(access, withParsedLinks(m.releasePrDetectInput(lightRec, stored) as Raw));
+    expect(a).toEqual(b);
+    expect(a?.sort()).toEqual(['PLAT-12', 'PLAT-13']);
+  });
+});
+
+describe('ticketKeysOwed / bestTicketRead', () => {
+  const at = (ms: number) => new Date(ms);
+  it('not read → owed now; read → owed past the TTL; not read but tried → after the retry wait', () => {
+    const reads = [
+      { ident: 'a', key: 'A-1', readState: 'not_read' as const, lastAt: null },
+      { ident: 'b', key: 'B-1', readState: 'ok' as const, lastAt: at(1_000) },
+      { ident: 'c', key: 'C-1', readState: 'not_read' as const, lastAt: at(1_000) },
+    ];
+    expect(m.ticketKeysOwed(reads, 2_000)).toEqual(['A-1']);
+    expect(m.ticketKeysOwed(reads, 1_000 + m.RELEASE_TICKET_RETRY_MS)).toEqual(['A-1', 'C-1']);
+    expect(m.ticketKeysOwed(reads, 1_000 + m.RELEASE_TICKET_TTL_MS)).toEqual(['A-1', 'B-1', 'C-1']);
+    expect(m.ticketKeysOwed(reads, 2_000, { force: true })).toEqual(['A-1', 'B-1', 'C-1']);
+  });
+  it('the freshest successful read wins across stores; a failed batch read is checking below the hold count', () => {
+    const c = (source: 'pr' | 'status' | 'sprint', state: string, ms: number, extra: Record<string, unknown> = {}) => ({
+      source,
+      state,
+      key: 'K-1',
+      title: null,
+      url: null,
+      statusName: state === 'ok' ? `S${ms}` : null,
+      statusCategory: null,
+      fetchedAt: state === 'ok' ? at(ms) : null,
+      checkedAt: at(ms),
+      ...extra,
+    });
+    expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'ok', 3), c('sprint', 'ok', 2)], 3).read?.statusName).toBe('S3');
+    expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'not_found', 5)], 3).readState).toBe('ok');
+    expect(m.bestTicketRead([c('status', 'not_found', 5)], 3).readState).toBe('not_found');
+    expect(m.bestTicketRead([c('status', 'failed', 5, { attempts: 2 })], 3).readState).toBe('not_read');
+    expect(m.bestTicketRead([c('status', 'failed', 5, { attempts: 3 })], 3).readState).toBe('failed');
+    expect(m.bestTicketRead([], 3)).toEqual({ read: null, readState: 'not_read' });
   });
 });

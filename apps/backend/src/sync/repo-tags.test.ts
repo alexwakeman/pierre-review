@@ -5,9 +5,8 @@
 //   1. Annotated tags are PEELED to their commit; a tag of a tree / tag-of-tag is skipped, not stored.
 //   2. The read cap: tags past it are DROPPED and counted; an incomplete read deletes only absent
 //      tags inside the read window (a positive statement), a complete one deletes every absent tag.
-//   3. A tag MOVED to another commit keeps `previous_sha`, and its ancestry is asked again.
-//   4. Ancestry: compare tag...head 'ahead'/'identical' ⇒ on the default branch; 'diverged' ⇒ off
-//      it, re-asked only when the head moves. A failed read is non-fatal and changes nothing.
+//   3. A tag MOVED to another commit keeps `previous_sha`.
+//   4. No ancestry call (the history pass derives it). A failed read is non-fatal and changes nothing.
 //   5. The settle sweep's signature, the PR walk's merge-commit write rule.
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -137,48 +136,6 @@ describe('planTagWrites', () => {
   });
 });
 
-describe('ancestry', () => {
-  it('reads compare tag...head: ahead or identical is on the default branch', () => {
-    expect(m.ancestryFromCompareStatus('ahead')).toBe(true);
-    expect(m.ancestryFromCompareStatus('identical')).toBe(true);
-    expect(m.ancestryFromCompareStatus('diverged')).toBe(false);
-    expect(m.ancestryFromCompareStatus('behind')).toBe(false);
-    expect(m.ancestryFromCompareStatus(undefined)).toBeUndefined();
-  });
-
-  it('asks about never-asked tags first, then off-branch tags only once the head moved, newest first', () => {
-    const t = (name: string, onDefaultBranch: boolean | null, ancestryHeadSha: string | null, day: number) => ({
-      name,
-      sha: sha(String(day)),
-      committedAt: new Date(Date.UTC(2026, 10, day)),
-      onDefaultBranch,
-      ancestryHeadSha,
-    });
-    const tags = [t('on', true, sha('h'), 1), t('unknown', null, null, 2), t('off-same', false, sha('h'), 3), t('off-moved', false, sha('o'), 4)];
-    expect(m.ancestryTargets(tags, sha('h')).map((x) => x.name)).toEqual(['unknown', 'off-moved']);
-    expect(m.ancestryTargets(tags, sha('h'), 1).map((x) => x.name)).toEqual(['unknown']);
-  });
-
-  it('a fresh release tag is reached past 20+ newer off-branch tags that are asked again every sync', () => {
-    const t = (name: string, onDefaultBranch: boolean | null, s: string, day: number) => ({
-      name,
-      sha: sha(s),
-      committedAt: new Date(Date.UTC(2026, 9, day)),
-      onDefaultBranch,
-      ancestryHeadSha: onDefaultBranch === false ? sha('old-head') : null,
-    });
-    const hotfixes = Array.from({ length: 25 }, (_, i) => t(`v2.3.${i}-hotfix`, false, `hf${i}`, 10 + i));
-    const tags = [t('v2.4.0', true, 'rel', 1), t('v2.4.0-rc', null, 'rel', 1), t('v2.5.0', null, 'new', 2), ...hotfixes];
-    // The release tag shares its version tag's commit: on the branch with no request.
-    expect(m.inheritedAncestry(tags)).toEqual([{ name: 'v2.4.0-rc', sha: sha('rel') }]);
-    // The never-asked tag is asked before any re-ask of the 25 off-branch ones; the inherited one is not asked.
-    const targets = m.ancestryTargets(tags, sha('h'));
-    expect(targets[0]).toEqual({ name: 'v2.5.0', sha: sha('new') });
-    expect(targets.map((x) => x.name)).not.toContain('v2.4.0-rc');
-    expect(targets).toHaveLength(20);
-  });
-});
-
 describe('syncRepoTags (DB)', () => {
   const tagRows = async () =>
     (
@@ -188,8 +145,7 @@ describe('syncRepoTags (DB)', () => {
         .execute()
     ).sort((a: any, b: any) => (a.name < b.name ? -1 : 1));
 
-  it('stores the tags, their ancestry and the signature', async () => {
-    const compared: string[] = [];
+  it('stores the tags and the signature — no ancestry call (derived from the history pass)', async () => {
     const res = await m.syncRepoTags({
       owner: 'acme',
       name: 'api',
@@ -203,26 +159,20 @@ describe('syncRepoTags (DB)', () => {
             annotated('v1.1.0', sha('t'), sha('b'), '2026-11-02T00:00:00Z', '2026-11-02T01:00:00Z'),
             light('v1.0.0', sha('a'), '2026-11-01T00:00:00Z'),
           ]),
-        compare: async (base) => {
-          compared.push(base);
-          return { status: base === sha('9') ? 'diverged' : 'ahead' };
-        },
       },
     });
-    expect(res).toMatchObject({ read: true, inserted: 3, moved: 0, deleted: 0, ancestryChecked: 3, headSha: sha('f') });
-    expect(compared).toEqual([sha('9'), sha('b'), sha('a')]);
+    expect(res).toMatchObject({ read: true, inserted: 3, moved: 0, deleted: 0, headSha: sha('f') });
     const rows = await tagRows();
     expect(rows.map((r: any) => [r.name, r.onDefaultBranch, r.tagObjectOid != null])).toEqual([
-      ['v1.0.0', true, false],
-      ['v1.0.0-hotfix', false, false],
-      ['v1.1.0', true, true],
+      ['v1.0.0', null, false],
+      ['v1.0.0-hotfix', null, false],
+      ['v1.1.0', null, true],
     ]);
     const [repo] = await client.db.select().from(client.schema.repos).execute();
     expect(repo.tagsSignature).toBe(`3|v1.0.0-hotfix|${sha('9')}`);
   });
 
-  it('flags a moved tag, forgets its ancestry and re-asks; a deleted tag goes', async () => {
-    const compared: string[] = [];
+  it('flags a moved tag; a deleted tag goes', async () => {
     const res = await m.syncRepoTags({
       owner: 'acme',
       name: 'api',
@@ -235,18 +185,12 @@ describe('syncRepoTags (DB)', () => {
             light('v1.0.0-hotfix', sha('9'), '2026-11-05T00:00:00Z'),
             light('v1.1.0', sha('c'), '2026-11-03T00:00:00Z'),
           ]),
-        compare: async (base) => {
-          compared.push(base);
-          return { status: 'ahead' };
-        },
       },
     });
     expect(res).toMatchObject({ inserted: 0, moved: 1, deleted: 1 });
-    // The hotfix tag was off the branch against the SAME head: not asked again.
-    expect(compared).toEqual([sha('c')]);
     const rows = await tagRows();
     const moved = rows.find((r: any) => r.name === 'v1.1.0');
-    expect(moved).toMatchObject({ sha: sha('c'), previousSha: sha('b'), tagObjectOid: null, onDefaultBranch: true });
+    expect(moved).toMatchObject({ sha: sha('c'), previousSha: sha('b'), tagObjectOid: null });
     expect(moved.movedAt).not.toBeNull();
     expect(rows.map((r: any) => r.name)).toEqual(['v1.0.0-hotfix', 'v1.1.0']);
   });
@@ -275,7 +219,7 @@ describe('syncRepoTags (DB)', () => {
 });
 
 describe('syncRepoTags — a RELEASABLE repo reads the whole history (acceptance 38)', () => {
-  it('pages past 100 tags up to the read cap, asks ancestry for every one with no count cap, and tells its progress', async () => {
+  it('pages past 100 tags up to the read cap', async () => {
     const [repo2] = await client.db
       .insert(client.schema.repos)
       .values({ accountId: 1, owner: 'acme', name: 'paged', githubNodeId: 'R_tags_paged', defaultBranchName: 'main' })
@@ -285,7 +229,6 @@ describe('syncRepoTags — a RELEASABLE repo reads the whole history (acceptance
       light(`v0.${211 - i}.0`, sha(`p${211 - i}`), new Date(Date.UTC(2026, 0, 1, 0, 211 - i)).toISOString()),
     );
     const pages: Array<string | null> = [];
-    const told: Array<[number, number]> = [];
     const res = await m.syncRepoTags({
       owner: 'acme',
       name: 'paged',
@@ -293,8 +236,6 @@ describe('syncRepoTags — a RELEASABLE repo reads the whole history (acceptance
       accountId: 1,
       token: 't',
       readCap: m.REPO_TAGS_READ_CAP_RELEASABLE,
-      ancestryCap: m.ANCESTRY_CHECKS_RELEASABLE,
-      onAncestry: (p) => told.push([p.done, p.total]),
       deps: {
         readTags: async (after) => {
           pages.push(after);
@@ -304,13 +245,10 @@ describe('syncRepoTags — a RELEASABLE repo reads the whole history (acceptance
           r.repository!.refs!.pageInfo = { hasNextPage: from + 100 < all.length, endCursor: String(from + 100) };
           return r;
         },
-        compare: async () => ({ status: 'ahead' }),
       },
     });
     expect(pages).toEqual([null, '100', '200']);
-    expect(res).toMatchObject({ read: true, inserted: 212, dropped: 0, ancestryChecked: 212, ancestryLeft: 0 });
-    expect(told[0]).toEqual([0, 212]);
-    expect(told.at(-1)![1]).toBe(212);
+    expect(res).toMatchObject({ read: true, inserted: 212, dropped: 0 });
     // One page only for a repo no workspace releases (the old cap): the rest is dropped and logged.
     const one = await m.syncRepoTags({
       owner: 'acme',
@@ -318,7 +256,6 @@ describe('syncRepoTags — a RELEASABLE repo reads the whole history (acceptance
       repoId: repo2.id,
       accountId: 1,
       token: 't',
-      ancestryCap: 0,
       deps: {
         readTags: async () => {
           const r = response(all.slice(0, 100), all.length);

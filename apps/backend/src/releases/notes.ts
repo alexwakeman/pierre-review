@@ -132,22 +132,23 @@ export async function storySummaries(
   return out;
 }
 
-/** The stored ticket text (best successful row) and the stored PR titles + bodies, this account only. */
+/** The stored ticket text (best successful row) and the PR titles (+ bodies for PRs also stored in
+ *  `pull_requests`; a range PR is often only a LIGHT record from the history pass), this account only. */
 export async function storySummaryInputs(
   accountId: number,
-  stories: ReadonlyArray<{ ident: string; key: string; title: string | null; prIds: number[] }>,
+  stories: ReadonlyArray<{ ident: string; key: string; title: string | null; prs: ReadonlyArray<{ title: string; prId: number | null }> }>,
   site: { provider: string; apiRoot: string } | null,
 ): Promise<StorySummaryInput[]> {
-  const prIds = [...new Set(stories.flatMap((s) => s.prIds))];
+  const prIds = [...new Set(stories.flatMap((s) => s.prs.map((p) => p.prId)).filter((id): id is number => id != null))];
   const prRows =
     prIds.length === 0
       ? []
       : await db
-          .select({ id: pullRequests.id, title: pullRequests.title, body: pullRequests.body })
+          .select({ id: pullRequests.id, body: pullRequests.body })
           .from(pullRequests)
           .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, prIds)))
           .execute();
-  const prById = new Map(prRows.map((p) => [p.id, p]));
+  const bodyById = new Map(prRows.map((p) => [p.id, p.body]));
   const keys = [...new Set(stories.map((s) => s.key))];
   const descByKey = new Map<string, string>();
   if (site != null && keys.length > 0) {
@@ -177,9 +178,6 @@ export async function storySummaryInputs(
     key: s.key,
     title: s.title,
     description: descByKey.get(s.key) ?? null,
-    prs: s.prIds
-      .map((id) => prById.get(id))
-      .filter((p): p is { id: number; title: string; body: string | null } => p != null)
-      .map((p) => ({ title: p.title, body: p.body })),
+    prs: s.prs.map((p) => ({ title: p.title, body: p.prId != null ? (bodyById.get(p.prId) ?? null) : null })),
   }));
 }

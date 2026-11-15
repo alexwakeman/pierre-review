@@ -76,13 +76,9 @@ import {
 //     makes no Jira call; the rest join the pass's per-(workspace, key) dedup. Merged-only tickets
 //     queue after new open tickets and before TTL refreshes, inside the same budget.
 //
-// RELEASE-RANGE PRs (docs/RELEASES.md § Implementation → Automatic candidate; docs/TRACKERS.md). The
-// release scan (sync/release-scan.ts) stores merged PRs of ANY age (a tag's range can reach years
-// back, past the 90-day window) and names the ones whose tickets are not read yet:
-// `queueReleaseTicketReads` puts them in a per-account PRIORITY set, read FIRST in the next pass in the
-// same missing-only mode (a key with no row is read, nothing else — no TTL refresh, no prune), inside
-// the same per-pass budget; a PR leaves the set once settled. `kickReleaseTicketReads` starts that pass
-// WITHOUT re-opening the account's merged windows. The TTL rules of every other PR are unchanged.
+// RELEASE-RANGE TICKETS are NOT read here (since the one history pass, 2026-11-15): the release scan
+// reads their statuses in BATCHES with no PR row (tracker/ticket-status.ts; docs/TRACKERS.md § Batched
+// status reads). The priority set this worker kept for them is removed.
 //
 // TRIGGERS: a `*/2` cron tick (TTL refresh, and PRs that arrive by webhook or the per-PR refresh,
 // which never pass through a repo walk — sync/scheduler.ts), a kick after every repo sync
@@ -936,27 +932,6 @@ function reopenMergedWindow(accountId: number, repoId: number | null): void {
   reopenDatesBackfill(accountId);
 }
 
-// Per account: release-range merged PRs whose tickets the release check is waiting for (read FIRST).
-const releasePriority = new Map<number, Set<number>>();
-/** At most this many PRs wait in one account's priority set (the scan names them again next run). */
-export const RELEASE_PRIORITY_MAX = 2000;
-
-/** The release scan's PRs whose tickets are not read yet: read first in the next pass (missing-only). */
-export function queueReleaseTicketReads(accountId: number, prIds: readonly number[]): number {
-  const set = releasePriority.get(accountId) ?? new Set<number>();
-  releasePriority.set(accountId, set);
-  for (const id of prIds) {
-    if (set.size >= RELEASE_PRIORITY_MAX) break;
-    set.add(id);
-  }
-  return set.size;
-}
-
-/** Test seam / the scan's view: the PRs waiting in the priority set. */
-export function releaseTicketQueue(accountId: number): number[] {
-  return [...(releasePriority.get(accountId) ?? [])];
-}
-
 /** One bounded pass over an account's open PRs, and its merged PRs owed a row, in reading workspaces. */
 export async function runAccountPass(
   ctx: TrackerContext,
@@ -968,11 +943,7 @@ export async function runAccountPass(
   const repoIds = await readingRepoIds(ctx, accountId, ws.map((w) => w.workspaceId), opts.repoId ?? null);
   const prIds = await openPrIdsFor(ctx, accountId, repoIds);
   const merged = await mergedCandidates(ctx, accountId, repoIds, nowMs);
-  // Release-range PRs first (missing-only, like every merged PR; not part of the windows' bookkeeping).
-  const prio = [...(releasePriority.get(accountId) ?? [])].filter((id) => !merged.repoOf.has(id));
-  const stats = await syncPrTickets(ctx, accountId, prIds, { ...opts, mergedPrIds: [...prio, ...merged.ids] });
-  const waiting = releasePriority.get(accountId);
-  if (waiting != null) for (const id of prio) if (!stats.mergedUnsettled.has(id)) waiting.delete(id);
+  const stats = await syncPrTickets(ctx, accountId, prIds, { ...opts, mergedPrIds: merged.ids });
   noteMergedSettled(accountId, merged, stats.mergedUnsettled, nowMs);
   // THE TICKET-DATES NUDGE (./dates-backfill.ts): the cron tick's pass only (`datesNudge`, never a
   // repo-walk kick — those passes sit outside `MAX_PER_TICK`), only when the pass left nothing due,
@@ -1019,7 +990,6 @@ export function resetTrackerWorker(): void {
   reopenAsked.clear();
   mergedSettled.clear();
   mergedOwed.clear();
-  releasePriority.clear();
   resetDatesBackfill();
   accountRunning.clear();
   accountAgain.clear();
@@ -1068,16 +1038,6 @@ export function kickTrackerSync(
     transport: opts.transport,
     ...(opts.now != null ? { now: opts.now } : {}),
   });
-}
-
-/**
- * A pass for the release scan's queued PRs (`queueReleaseTicketReads`), fire-and-forget. Unlike
- * `kickTrackerSync` it does NOT re-open the account's merged windows (no rescan cost). Never throws; a
- * no-op while the worker is not enabled.
- */
-export function kickReleaseTicketReads(ctx: TrackerContext, accountId: number): Promise<void> {
-  if (!enabled || (releasePriority.get(accountId)?.size ?? 0) === 0) return Promise.resolve();
-  return runGuarded(ctx, accountId, {});
 }
 
 // Targeted kicks (the ticket-links route): one in flight per account; a second is dropped — the

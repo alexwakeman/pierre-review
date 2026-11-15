@@ -62,11 +62,16 @@ export default function Page(): JSX.Element {
           release it reads &ldquo;No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains …&rdquo;.
         </li>
         <li>
-          &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Checking
-          which tags are on main: 140 of 212&rdquo;, &ldquo;Matching 0.389.0&rsquo;s commits to pull requests (tag 61 of
-          140)&rdquo;, &ldquo;Fetching pull requests: 35 of 80&rdquo; or &ldquo;Reading tickets from Jira: 12 of
-          30&rdquo;. A candidate already found while later tags are still being read shows with a small &ldquo;Still
-          reading later tags&rdquo; bar. The tab updates by itself until every repository is checked.
+          &ldquo;Candidate at most 0.388.0 — checking older history (40%)&rdquo;, with a progress bar. Ensemble reads the
+          history of main newest first, so it knows early which tag the candidate can be at most: the tag just before the
+          oldest held tag found so far. The candidate is confirmed when the reading reaches your last release (or the
+          first commit) and every ticket is read.
+        </li>
+        <li>
+          &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Reading
+          main&rsquo;s history: 1,200 of 5,400 commits&rdquo; or &ldquo;Reading tickets from Jira: 300 of 420&rdquo;. A
+          candidate already found while later tags are still being read shows with a small &ldquo;Still reading later
+          tags&rdquo; bar. The tab updates by itself until every repository is checked.
         </li>
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
@@ -79,10 +84,11 @@ export default function Page(): JSX.Element {
       </p>
       <H3 id="the-whole-history">The whole history</H3>
       <p>
-        There is nothing to pick. The first check of a repository reads every version tag it can reach, beyond the 90
-        days Ensemble normally syncs. Pull requests it does not have yet are fetched from GitHub, and their tickets are
-        read from your tracker, so a long history takes a while the first time. It works within your GitHub rate limit
-        and waits when the limit is low.
+        There is nothing to pick. The first check of a repository reads the history of main once, from the newest
+        commit back to your last release (or the first commit), with each commit&rsquo;s pull request — beyond the 90
+        days Ensemble normally syncs. The tickets are then read from your tracker in batches (Jira: up to 100 in one
+        request). Later checks read only the commits that are new since the last one. It works within your GitHub rate
+        limit and waits when the limit is low.
       </p>
       <H3 id="warnings">Warnings</H3>
       <p>A pull request with no ticket is listed as a warning. It never holds a release back.</p>
@@ -94,10 +100,10 @@ export default function Page(): JSX.Element {
           do&rdquo;, is not Done, so it holds the release back like any other unfinished ticket.
         </li>
         <li>
-          A ticket that could not be read from the tracker, or a pull request that could not be read from GitHub, holds
-          the release back, with the reason. A ticket that is simply not read yet only keeps the row checking.
+          A ticket the tracker could not find, or has no access to, holds the release back, with the reason. A ticket
+          that is not read yet only keeps the row checking; if the tracker does not answer three times in a row, it
+          holds the release back too.
         </li>
-        <li>A tag with more commits than can be read holds the release back.</li>
         <li>Commits with no pull request are noted on their tag. They hold nothing back.</li>
         <li>
           Only the ticket counts. Its pull requests in other repositories, and its open pull requests, hold nothing

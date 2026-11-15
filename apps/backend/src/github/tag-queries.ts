@@ -1,18 +1,15 @@
-// TAGS (docs/RELEASES.md) — READ only: the repo's tags (GraphQL), the commits between two commits
-// (REST compare), and the PRs a handful of commits came from (GraphQL, the fallback for a commit
-// no stored PR's `merge_commit_oid` names).
+// TAGS (docs/RELEASES.md) — READ only: the repo's tags (GraphQL), a REST compare (does the new head
+// descend from the walked one?) and THE HISTORY PASS (GraphQL `history` with each commit's PRs).
 //
 // COST.
 //   • REPO_TAGS_QUERY: one `refs(first: 100)` page with no child connection ⇒ 1 point. A RELEASABLE
 //     repo pages on (`after`) up to REPO_TAGS_READ_CAP_RELEASABLE tags (≤ 10 points per read).
 //   • The settle sweep adds `refs(first: 1)` per repo to its own query (github/settle-query.ts):
 //     one node, no measurable change to its ~1 point per repo.
-//   • compareCommits: REST (the core REST budget, not GraphQL points), one call per page of 100
-//     commits; ancestry asks for ONE commit (per_page=1).
-//   • fetchClosedPrsPage: REST list of closed PRs into the default branch, 100 per call — the oldest
-//     tag's 'history' range (sync/tag-ranges.ts), read oldest first and stopped at the tag's date.
-//   • buildCommitPrsQuery: ≤ COMMIT_PRS_ALIAS_CAP aliases × associatedPullRequests(first: 3) ⇒
-//     ≤ 150 nodes ⇒ 2 points.
+//   • fetchComparePage: REST (the core REST budget), per_page=1 — ONE call when the default branch
+//     head moved, to tell a fast-forward from rewritten history.
+//   • RELEASE_HISTORY_QUERY: 100 commits a page, each with parents(first: 1) and
+//     associatedPullRequests(first: 2) ⇒ about 3 points a page.
 //
 // Nullability: everything a tolerant partial (`graphqlTolerant`) can null is optional below.
 import { ghRestGetFor, withGithubRetry } from './client.js';
@@ -126,80 +123,106 @@ export async function fetchComparePage(
   return withGithubRetry(() => ghRestGetFor<RestCompareResponse>(token, path));
 }
 
-// ---- Closed PRs into a branch (the oldest tag's history) ----------------------------------------
+// ---- The default branch's history (the release scan's ONE pass, sync/release-history.ts) ----------
 
-export interface RestPullListItem {
-  number?: unknown;
-  created_at?: unknown;
-  merged_at?: unknown;
-  merge_commit_sha?: unknown;
-  base?: { ref?: unknown } | null;
-}
+/** Commits per history page. */
+export const HISTORY_PAGE = 100;
+/** PRs asked per commit (a squash or merge commit has one; a rebased commit can share it). */
+export const HISTORY_COMMIT_PRS = 2;
 
-/** Closed PRs listed per call. */
-export const CLOSED_PRS_PAGE = 100;
-
-/** One page of `GET /repos/{owner}/{name}/pulls?state=closed&base=<base>`, OLDEST CREATED first. */
-export async function fetchClosedPrsPage(
-  token: string,
-  args: { owner: string; name: string; base: string; page: number },
-): Promise<RestPullListItem[]> {
-  const path =
-    `/repos/${encodeURIComponent(args.owner)}/${encodeURIComponent(args.name)}/pulls` +
-    `?state=closed&base=${encodeURIComponent(args.base)}&sort=created&direction=asc&per_page=${CLOSED_PRS_PAGE}&page=${args.page}`;
-  const out = await withGithubRetry(() => ghRestGetFor<unknown>(token, path));
-  return Array.isArray(out) ? (out as RestPullListItem[]) : [];
-}
-
-// ---- The commit → PR fallback -------------------------------------------------------------------
-
-/** Commits asked about in one request. */
-export const COMMIT_PRS_ALIAS_CAP = 50;
-
-/** One aliased `object(oid:)` per commit sha; the shas travel as VARIABLES (`s<i>`). */
-export function buildCommitPrsQuery(count: number): string {
-  const vars = Array.from({ length: count }, (_, i) => `$s${i}: GitObjectID!`).join(', ');
-  const aliases = Array.from(
-    { length: count },
-    (_, i) => `      c${i}: object(oid: $s${i}) {
-        ... on Commit {
-          associatedPullRequests(first: 3) {
-            nodes {
-              number
-              merged
-              baseRefName
-              repository {
-                nameWithOwner
-              }
-            }
-          }
-        }
-      }`,
-  ).join('\n');
-  return `query CommitPrs($owner: String!, $name: String!${count > 0 ? `, ${vars}` : ''}) {
+/**
+ * One page of a commit's `history` (git log order from that commit: every reachable commit, newest
+ * first; the walk keeps the FIRST-PARENT chain by following `parents(first: 1)`), each with the PRs it
+ * came from. Pinned to the segment's START commit (`$oid`), so a cursor stays valid while the branch
+ * moves. `sinceCount`: the commits since a date (the newest release tag's), for the progress bar.
+ * Cost: 100 commits × (parents + PRs) ≈ 3 points a page.
+ */
+export const RELEASE_HISTORY_QUERY = /* GraphQL */ `
+  query ReleaseHistory($owner: String!, $name: String!, $oid: GitObjectID!, $first: Int!, $after: String, $since: GitTimestamp!) {
     rateLimit {
       cost
       remaining
       resetAt
     }
     repository(owner: $owner, name: $name) {
-${aliases}
+      object(oid: $oid) {
+        ... on Commit {
+          sinceCount: history(first: 1, since: $since) {
+            totalCount
+          }
+          history(first: $first, after: $after) {
+            totalCount
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              oid
+              committedDate
+              parents(first: 1) {
+                nodes {
+                  oid
+                }
+              }
+              associatedPullRequests(first: ${HISTORY_COMMIT_PRS}) {
+                nodes {
+                  number
+                  title
+                  url
+                  headRefName
+                  baseRefName
+                  merged
+                  mergedAt
+                  mergeCommit {
+                    oid
+                  }
+                  author {
+                    __typename
+                    login
+                  }
+                  repository {
+                    nameWithOwner
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
-  }`;
+  }
+`;
+
+export interface GqlHistoryPr {
+  number?: number | null;
+  title?: string | null;
+  url?: string | null;
+  headRefName?: string | null;
+  baseRefName?: string | null;
+  merged?: boolean | null;
+  mergedAt?: string | null;
+  mergeCommit?: { oid?: string | null } | null;
+  author?: { __typename?: string | null; login?: string | null } | null;
+  repository?: { nameWithOwner?: string | null } | null;
 }
 
-export interface GqlCommitPrsNode {
-  associatedPullRequests?: {
-    nodes?: Array<{
-      number?: number | null;
-      merged?: boolean | null;
-      baseRefName?: string | null;
-      repository?: { nameWithOwner?: string | null } | null;
-    } | null> | null;
-  } | null;
+export interface GqlHistoryCommit {
+  oid?: string | null;
+  committedDate?: string | null;
+  parents?: { nodes?: Array<{ oid?: string | null } | null> | null } | null;
+  associatedPullRequests?: { nodes?: Array<GqlHistoryPr | null> | null } | null;
 }
 
-export interface CommitPrsResponse {
+export interface ReleaseHistoryResponse {
   rateLimit?: { cost?: number | null; remaining?: number | null; resetAt?: string | null } | null;
-  repository?: Record<string, GqlCommitPrsNode | null | undefined> | null;
+  repository?: {
+    object?: {
+      sinceCount?: { totalCount?: number | null } | null;
+      history?: {
+        totalCount?: number | null;
+        pageInfo?: { hasNextPage?: boolean | null; endCursor?: string | null } | null;
+        nodes?: Array<GqlHistoryCommit | null> | null;
+      } | null;
+    } | null;
+  } | null;
 }

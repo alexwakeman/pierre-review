@@ -2917,15 +2917,16 @@ or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE 
 (`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick). REPO-ORIENTED (no
 tickets panel): one row per releasable repo (`repoRowText`: "Release 0.388.0 → 0.388.0-rc", "No tag can
 be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)" / "… since 0.380.0-rc: the
-next tag, 0.381.0, contains …", "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main
-yet"), "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts
+next tag, 0.381.0, contains …", "Candidate at most 0.388.0 — checking older history (40%)" (the early
+upper limit, `upperLimit`), "Checking — 0.390.0 and later cannot be released" (`heldFrom`, the tag before it
+not read yet), "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"), "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts
 (`repoRowCounts`), and the scan's progress (`repoProgress`): a bar (`Activity/SprintProgressBar`, a share)
-with ONE line from the server (`progress.line`: "Fetching pull requests: 35 of 80"), or a small bar with
+with ONE line from the server (`progress.line`: "Reading main's history: 1,200 of 5,400 commits"), or a small bar with
 "Still reading later tags" when a candidate (or a held row) already stands. A row expands to
 `expandedTags` — every tag after the candidate, newest first, then the candidate — each with
 `tagExplainer` (its own blockers' sentences; "Also contains BMD-127 (from 0.312.0)."; "Still being read.")
 and `tagContents` (the tickets with `ticketMark` — "not read yet" included — the PRs with no ticket, bot
-PRs, the direct-commit note). "Released" is never said of a ticket.
+PRs, the direct-commit note). A PR known only from the history read (`prId` null) links to GitHub. "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
 fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
 (`showCreateRelease`). The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only

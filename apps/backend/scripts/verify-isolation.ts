@@ -5047,8 +5047,8 @@ check(
   check("getReleaseRepos(A, B's workspace) reads nothing", (await rr.getReleaseRepos(1, homeB)).size === 0);
   const tickB = await rr.setReleaseRepos(2, homeB, [B.repoId]);
   check("setReleaseRepos(B, B's repo) ticks it (mutation check)", tickB?.ok === true && (await rr.getReleaseRepos(2, homeB)).has(B.repoId));
-  const owedA = await rc.releaseTicketsOwed(1, homeB, B.repoId, settings);
-  check("releaseTicketsOwed(A, B's workspace, B's repo) names no PR", owedA.prIds.length === 0);
+  const owedA = await rc.releaseTicketKeysOwed(1, homeB, B.repoId, settings);
+  check("releaseTicketKeysOwed(A, B's workspace, B's repo) names no ticket", owedA.keys.length === 0);
   check("releaseRangeViews(A, B's repo) is empty", (await rr.releaseRangeViews(1, B.repoId)).length === 0);
   const viaB = await rc.getReleases(1, homeB);
   check("getReleases(A, B's workspace id) answers A's Default, never B's", viaB.workspaceId === defaultA);

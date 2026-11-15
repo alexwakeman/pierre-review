@@ -836,6 +836,11 @@ export async function deleteWorkspace(
       .delete(schema.workspaceReleaseRepos)
       .where(and(eq(schema.workspaceReleaseRepos.accountId, accountId), eq(schema.workspaceReleaseRepos.workspaceId, id)))
       .execute();
+    // Its batched ticket statuses (migration 0202) were read against ITS tracker: dropped too.
+    await tx
+      .delete(schema.trackerTicketStatus)
+      .where(and(eq(schema.trackerTicketStatus.accountId, accountId), eq(schema.trackerTicketStatus.workspaceId, id)))
+      .execute();
     await tx
       .delete(workspaceExternalRepos)
       .where(and(eq(workspaceExternalRepos.accountId, accountId), eq(workspaceExternalRepos.workspaceId, id)))
@@ -10053,6 +10058,10 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       .delete(schema.repoTags)
       .where(and(eq(schema.repoTags.repoId, id), eq(schema.repoTags.accountId, accountId)))
       .execute();
+    // The one history pass (migration 0202): the repo's walk, commits and light PR records.
+    for (const t of [schema.releaseHistoryCommits, schema.releaseHistoryScans, schema.releaseRangePrs]) {
+      await tx.delete(t).where(and(eq(t.repoId, id), eq(t.accountId, accountId))).execute();
+    }
     await tx
       .delete(schema.releaseItems)
       .where(and(eq(schema.releaseItems.repoId, id), eq(schema.releaseItems.accountId, accountId)))

@@ -717,29 +717,41 @@ Sprint → Releases is the reader's press, and it does two tracker things:
 
 - **Confirm's re-read — a deliberate exception to "read when received, never when viewed".** Before
   anything is written, EVERY ticket the release ships (the dialog's snapshot ∪ what the check ships now)
-  is read again from the tracker through the worker's own path (`syncOnePrNow`, `force: true`, on one of
-  the ticket's PRs, ≤ 4 at once), so the rows the check reads are the tracker's answer at the press. A
-  ticket that does not answer (`fetched === 0`) is a change; any change (a ticket left Done, a moved
+  is read again from the tracker in ONE batch (§ Batched status reads — Jira: one search per 100 keys;
+  `releases/create.ts` `rereadTicketStatuses`), so the rows the check reads are the tracker's answer at the
+  press. A ticket that does not answer is a change; any change (a ticket left Done, a moved
   candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
   the Releases tab and the dialog's preview read the stored rows (a view still never calls a reader).
 - **Refresh's re-read** (`POST /api/releases/refresh`, `releases/refresh.ts`) — the same exception, the
   tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable) or still
-  waits for (not read yet), ≤ 30, through the same `syncOnePrNow(force)`. Needed because the worker is MISSING-ONLY for a merged
-  PR (it never TTL-refreshes one), so a ticket moved to Done after its PRs merged would otherwise hold its
-  tag for good. Tier `search`.
-- **RELEASE-RANGE PRs — read when RECEIVED, by the release scan** (`sync/release-scan.ts`; owner
-  decision 2026-11-15). The automatic check walks every version tag on main, so a range can name merged
-  PRs of ANY age — past the worker's 90-day merged window, often stored only just now by the scan's
-  single-PR sync. A range PR whose key THE detection rule finds (`detectKeysWithAccess`, DB only) but
-  with no stored row on the workspace's site is `not_read`: the check says "checking", never a blocker,
-  and the scan names it (`db/release-check.ts` `releaseTicketsOwed`) to the worker: `queueReleaseTicketReads`
-  puts it in a per-account PRIORITY set (≤ 2000) read FIRST in the next pass, in the same MISSING-ONLY mode
-  as any merged PR (a key with no row is read; no TTL refresh, no prune), inside the same per-pass budget;
-  it leaves the set once settled. `kickReleaseTicketReads` starts that pass without re-opening the
-  account's merged windows; the `*/2` tick reads what is left. Any reading tracker (Jira, GitHub Issues,
-  Linear). The TTL rules of every other PR are unchanged. A tracker FAILURE (`not_found` / `no_access` /
-  `failed`) holds the tag with the reason; a workspace whose tracker cannot read at all (no reader, no
-  credential) holds a `not_read` ticket ("the tracker cannot read it") rather than checking forever.
+  waits for (not read yet), ≤ 500, in ONE batch (§ Batched status reads). Needed because the worker is
+  MISSING-ONLY for a merged PR (it never TTL-refreshes one), so a ticket moved to Done after its PRs merged
+  would otherwise wait for the scan's TTL. Tier `search`.
+- **RELEASE-RANGE TICKETS — read in BATCHES when the scan RECEIVES the range** (owner decision 2026-11-15,
+  the one history pass). A range can name merged PRs of ANY age, and most are only LIGHT records from the
+  history read (`release_range_prs`, no `pull_requests` row), so the worker (keyed per PR) does not read
+  them: its release priority set is REMOVED. THE detection rule (`detectKeysWithAccess` over
+  `db/release-check.ts` `releasePrDetectInput` — the stored row when there is one, else the light record's
+  title + head branch) names the keys; the scan reads the statuses of those not read yet, failed and due,
+  or older than 10 min (`releaseTicketKeysOwed`) through § Batched status reads, into
+  `tracker_ticket_status`. A ticket with no read yet is `not_read`: "checking", never a blocker. `not_found`
+  / `no_access` hold the tag with the reason; a batched read that FAILED is retried and stays "checking"
+  until 3 failures in a row (`RELEASE_TICKET_FAILS_HOLD`), then holds. A workspace whose tracker cannot
+  read at all (no reader, no credential) holds a `not_read` ticket ("the tracker cannot read it") rather
+  than checking forever.
+- **Batched status reads** (`tracker/ticket-status.ts` `readTicketStatuses`) — many tickets' STATUS for one
+  workspace with no PR in hand, through the workspace's access and `prepareTrackerCall` (the sealed token).
+  A reader with the optional `readStatuses` reads in bulk — JIRA (`tracker/jira/statuses.ts`): `GET
+  /rest/api/3/search/jql` (404 → `/rest/api/2/search` for the rest), JQL `key in (A-1, B-2, …)` with ≤ 100
+  keys, `fields=status,summary,issuetype`, through `jiraGetJson`; Jira refuses the whole JQL (400) when
+  one key does not exist, so the batch is SPLIT in two down to that key (`not_found`); a key absent from a
+  good answer (moved project) is read on its own. 401 / 403 → `no_access`; any other failure → `failed`.
+  Status names and categories go through the same `statusOf`; Done is decided by the workspace's stage
+  buckets on read, as for every ticket. A reader with no bulk lookup (Linear, GitHub Issues, Notion) is read
+  one by one through its `fetchTicket`, ≤ 40 a call, 4 at a time (the rest on the next scan). One row per
+  `(account, workspace, ident)` (`state`, `status_name`, `status_category`, `title`, `url`, `attempts`,
+  `fetched_at`, `checked_at`); the release check takes the freshest SUCCESSFUL read across the PR rows,
+  these rows and the sprint rows (`bestTicketRead`). Never inside a transaction.
 - **The comment** — one per shipped ticket whose repos ALL tagged in this release, through the same
   `postTicketComment` (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind `statusGate`, under the
   reader's Jira login). Exactly three lines (shared `releaseCommentWiki`): "Approved for release by <name>

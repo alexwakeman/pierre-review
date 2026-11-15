@@ -43,8 +43,6 @@ import {
   OK_TTL_MS,
   REFUSED_TTL_MS,
   resetTrackerWorker,
-  queueReleaseTicketReads,
-  releaseTicketQueue,
   runAccountPass,
   runTrackerTick,
 } from './worker.js';
@@ -703,25 +701,6 @@ describe('8. merged pull requests', () => {
     await pass();
     expect(calls).toHaveLength(0);
     expect(await rows(A, [20, 21])).toEqual([]);
-  });
-
-  it('acceptance 39: a release-range PR merged long before the 90-day window is read FIRST once queued, then leaves the queue', async () => {
-    setPr(10, 'No ticket', null);
-    merge(21, 'ENG-42 ancient', MERGED_WINDOW_MS + 200 * DAY);
-    await pass();
-    expect(calls).toHaveLength(0);
-    // The release scan names it: the next pass reads it (missing-only), and it is settled.
-    expect(queueReleaseTicketReads(A, [21])).toBe(1);
-    await pass();
-    expect(keysRead()).toEqual(['ENG-42']);
-    expect((await rows(A, [21]))[0]).toMatchObject({ issueKey: 'ENG-42', state: 'ok' });
-    expect(releaseTicketQueue(A)).toEqual([]);
-    // Missing-only: never TTL-refreshed afterwards.
-    calls.length = 0;
-    clock += OK_TTL_MS + 1000;
-    queueReleaseTicketReads(A, [21]);
-    await pass();
-    expect(calls).toHaveLength(0);
   });
 
   it('ONE read per ticket: merged PRs share the pass read, or copy a stored row with no call', async () => {
