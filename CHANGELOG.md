@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.37] - 2026-11-15
+
 ### Added
 
 - This Sprint → Releases: per repository, the newest version tag whose pull requests link only to Done tickets,
@@ -25,6 +27,7 @@ no internals.
 - Implement → a hotfix build ends with a port report per repository: "Applied to both", "Applied to both, adapted for
   main" or "Not applied to main", with the agent's reason. When main does not need the fix, Push opens only the pull
   request into `hotfix/<tag>`. The build tab says when the report and the two diffs disagree.
+
 ## [1.0.36] - 2026-11-15
 
 ### Added
