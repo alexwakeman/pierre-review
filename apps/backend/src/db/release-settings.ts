@@ -30,6 +30,19 @@ export async function getReleaseSettings(accountId: number, workspaceId: number)
   };
 }
 
+/** Every workspace's settings of this account that has BOTH suffixes set (the range planner keeps
+ *  every range after the oldest baseline any of them gives). */
+export async function configuredReleaseSettings(accountId: number): Promise<ReleaseSettings[]> {
+  const rows = await db
+    .select({ releaseSuffix: workspaces.releaseSuffix, hotfixSuffix: workspaces.hotfixSuffix })
+    .from(workspaces)
+    .where(eq(workspaces.accountId, accountId))
+    .execute();
+  return rows
+    .map((r) => ({ releaseSuffix: normaliseReleaseSuffix(r.releaseSuffix), hotfixSuffix: normaliseReleaseSuffix(r.hotfixSuffix) }))
+    .filter(releaseSettingsConfigured);
+}
+
 /**
  * Replace both suffixes (an empty string stores NULL). Returns false when the workspace is not this
  * account's. Does NOT validate — the caller already ran `validateReleaseSettings`.

@@ -28,6 +28,11 @@ import { tagKind, releaseTagName, type ReleaseSettings, type TagKind } from './r
 /** A ticket's read state, as `tracker_tickets.state` stores it; `not_read` = no row on the site. */
 export type ReleaseTicketReadState = 'ok' | 'not_found' | 'no_access' | 'failed' | 'not_read';
 
+/** The newest tags on the default branch that always get a stored range (sync/tag-ranges.ts). The
+ *  sync ALSO computes every range after a workspace's baseline; with no baseline, a tag older than
+ *  this window is treated like a PR older than the synced history (not checked). */
+export const TAG_RANGE_WINDOW = 40;
+
 export interface TagOrderKey {
   name: string;
   committedAt: Date | null;
@@ -44,6 +49,26 @@ export function compareTagOrder(a: TagOrderKey, b: TagOrderKey): number {
   const tb = b.taggedAt?.getTime() ?? 0;
   if (ta !== tb) return ta - tb;
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+/**
+ * The oldest index of `ordered` (default-branch tags, oldest first by `compareTagOrder`) that must
+ * have a stored range: the window's start, or earlier — just after the OLDEST baseline any of these
+ * workspaces' suffixes give, so a baseline more than the window behind still gets every range after
+ * it. Pure.
+ */
+export function tagRangeKeepFrom(
+  ordered: readonly TagOrderKey[],
+  settingsList: readonly ReleaseSettings[],
+  window: number = TAG_RANGE_WINDOW,
+): number {
+  let from = Math.max(0, ordered.length - window);
+  for (const st of settingsList) {
+    let b = -1;
+    for (let i = 0; i < ordered.length; i += 1) if (tagKind(ordered[i]!.name, st) === 'release') b = i;
+    if (b >= 0) from = Math.min(from, b + 1);
+  }
+  return from;
 }
 
 /**
@@ -149,7 +174,9 @@ export type ReleaseBlocker =
        *  null = merged but in no version tag yet. */
       missing: Array<{ repoId: number; prId: number; tagName: string | null }>;
     }
-  | { kind: 'range_pending'; tagName: string };
+  /** The tag's changes are not all read yet; `too_large` = its compare has more commits than are
+   *  read (`truncated`), so they cannot be checked at all. */
+  | { kind: 'range_pending'; tagName: string; reason?: 'too_large' };
 
 export type ReleaseWarning =
   | { kind: 'untracked_pr'; repoId: number; prId: number }
@@ -260,6 +287,8 @@ const ref = (t: ReleaseCheckTagInput): ReleaseTagRef => ({ name: t.name, sha: t.
 /** One version tag after the baseline and the ordered indexes its increment spans. */
 interface Span {
   tagIdx: number;
+  /** A compare in the span was truncated: its PRs cannot all be known (holds, like `pending`). */
+  tooLarge: boolean;
   /** Ordered indexes (prevVersionOrBaseline, tagIdx]. */
   from: number;
   pending: boolean;
@@ -309,17 +338,23 @@ function prepRepo(repo: ReleaseCheckRepoInput, settings: ReleaseSettings): RepoP
   const baselineSha = baselineIdx >= 0 ? ordered[baselineIdx]!.sha : null;
 
   const spans: Span[] = [];
+  const windowStart = ordered.length - TAG_RANGE_WINDOW;
   let from = baselineIdx + 1;
   for (let i = baselineIdx + 1; i < ordered.length; i += 1) {
     const t = ordered[i]!;
     if (kindOf(t.name) !== 'version' || t.sha === baselineSha) continue;
-    const span: Span = { tagIdx: i, from, pending: false, prIds: [], unmatched: 0, truncated: false, unresolved: 0 };
+    const span: Span = { tagIdx: i, from, tooLarge: false, pending: false, prIds: [], unmatched: 0, truncated: false, unresolved: 0 };
     for (let j = from; j <= i; j += 1) {
       const r = valid(j);
       if (r == null) {
+        // Older than the stored ranges' window with no baseline: like a PR older than the synced
+        // history, not checked (the no-baseline line says so). With a baseline the sync computes
+        // every range after it, so a missing one is only not read YET.
+        if (baselineIdx < 0 && j < windowStart) continue;
         span.pending = true;
         continue;
       }
+      if (r.truncated) span.tooLarge = true;
       for (const id of r.prIds) if (pos.get(id) === j && !span.prIds.includes(id)) span.prIds.push(id);
       span.unmatched += r.unmatchedCommits;
       span.truncated ||= r.truncated;
@@ -415,6 +450,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
         const span = prep.spans[s]!;
         const held =
           span.pending ||
+          span.tooLarge ||
           span.prIds.some((id) => (prById.get(id)?.ticketIdents ?? []).some((ident) => blocked.has(ident)));
         if (held) break;
         spanIdx = s;
@@ -475,6 +511,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       const t = ordered[span.tagIdx]!;
       const blockers: ReleaseBlocker[] = [];
       if (span.pending) blockers.push({ kind: 'range_pending', tagName: t.name });
+      else if (span.tooLarge) blockers.push({ kind: 'range_pending', tagName: t.name, reason: 'too_large' });
       const named = new Set<string>();
       const idents: string[] = [];
       for (const id of span.prIds) {
@@ -683,7 +720,9 @@ export function releaseBlockerText(b: ReleaseBlocker, ctx: ReleaseWordsContext):
   };
   switch (b.kind) {
     case 'range_pending':
-      return `The changes in ${b.tagName} are not read yet.`;
+      return b.reason === 'too_large'
+        ? `${b.tagName} has more commits than can be read, so its changes cannot be checked.`
+        : `The changes in ${b.tagName} are not read yet.`;
     case 'not_done':
       return b.statusName != null ? `${b.key} is not done (${b.statusName}).` : `${b.key} is not done.`;
     case 'unreadable':
@@ -719,4 +758,11 @@ export interface ReleasesResponse {
   /** The newest release or hotfix tag across the workspace's repos, by its commit date. */
   latestReleaseTagAt: string | null;
   check: ReleaseCheckResult | null;
+}
+
+/** POST /api/releases/refresh?workspace=<id> — Refresh: the held tickets read again from the tracker
+ *  (the reader's press), then the check. `unread` = tickets the tracker did not answer for. */
+export interface ReleasesRefreshResponse extends ReleasesResponse {
+  reread: number;
+  unread: string[];
 }

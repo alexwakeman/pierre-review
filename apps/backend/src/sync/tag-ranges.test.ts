@@ -93,6 +93,25 @@ describe('planTagRanges', () => {
   });
 });
 
+describe('planTagRanges — the window reaches back to every baseline', () => {
+  it('50 version tags after a release tag 45 back: every range after the baseline is kept and computed, not just the newest 40', () => {
+    const at = (i: number) => new Date(Date.UTC(2026, 10, 1, 0, i));
+    const tags = Array.from({ length: 50 }, (_, i) => tag(`v0.0.${i}`, `c${i}`, 1, { committedAt: at(i) }));
+    // v0.0.4 was released (its release tag shares the commit).
+    tags.push(tag('v0.0.4-rc', 'c4', 1, { committedAt: at(4), taggedAt: day(9) }));
+    const settings = [{ releaseSuffix: '-rc', hotfixSuffix: '-hotfix' }];
+    const plan = m.planTagRanges(tags, [], { perSync: Number.MAX_SAFE_INTEGER, settings });
+    const names = new Set(plan.work.map((w) => w.tag.name));
+    // Everything after the baseline (the release tag at ordered index 5) has a range.
+    for (let i = 5; i < 50; i += 1) expect(names.has(`v0.0.${i}`)).toBe(true);
+    // Without the settings only the newest 40 do.
+    expect(m.planTagRanges(tags, [], { perSync: Number.MAX_SAFE_INTEGER }).work).toHaveLength(40);
+    // A stored row after the baseline is NOT deleted as out of the window.
+    const kept = m.planTagRanges(tags, [{ tagName: 'v0.0.6', sha: sha('c6'), baseTagName: 'v0.0.5', baseSha: sha('c5') }], { settings });
+    expect(kept.deleteTagNames).toEqual([]);
+  });
+});
+
 describe('rangePrNumbersFromAssociated', () => {
   it('keeps merged PRs of this repo into the default branch only (acceptance 13: hotfix PRs are not in it)', () => {
     expect(
@@ -243,6 +262,39 @@ describe('computeTagRanges (DB)', () => {
     expect(await run()).toMatchObject({ computed: 1 });
     const r = await ranges();
     expect(r['v1.2.0']).toMatchObject({ sha: sha('c7'), movedFromSha: sha('m5'), prIds: [5, 6].map((n) => prIdByNumber.get(n)) });
+  });
+
+  it('a range whose fallback pauses for the budget is NOT stored (a stored range is final) and is retried next sync', async () => {
+    const { repoTags } = client.schema;
+    const { and, eq } = await import('drizzle-orm');
+    const { __resetRateBudget } = await import('../github/rate-budget.js');
+    await client.db
+      .insert(repoTags)
+      .values({ accountId: 1, repoId, name: 'v1.4.0', sha: sha('c9'), committedAt: day(9), onDefaultBranch: true, firstSeenAt: day(9), lastSeenAt: day(9) })
+      .execute();
+    // 60 commits with no stored PR: two GraphQL chunks; the first answer says the budget is nearly gone.
+    const shas = Array.from({ length: 60 }, (_, i) => sha(`u${i}`));
+    let asked = 0;
+    const paused = {
+      ...deps,
+      compare: async () => ({ status: 'ahead', total_commits: shas.length, commits: shas.map((x) => ({ sha: x })) }),
+      commitPrs: async (part: string[]) => {
+        asked += 1;
+        const repository: Record<string, any> = {};
+        part.forEach((_s, i) => (repository[`c${i}`] = { associatedPullRequests: { nodes: [] } }));
+        return { rateLimit: { cost: 1, remaining: 5, resetAt: new Date(Date.now() + 3_600_000).toISOString() }, repository };
+      },
+    };
+    try {
+      const res = await m.computeTagRanges({ owner: 'acme', name: 'web', repoId, accountId: 1, token: 't', defaultBranchName: 'main', deps: paused });
+      expect(asked).toBe(1);
+      expect(res).toMatchObject({ computed: 0, failed: 0 });
+      expect(res.pending).toBeGreaterThan(0);
+      expect((await ranges())['v1.4.0']).toBeUndefined();
+    } finally {
+      __resetRateBudget();
+      await client.db.delete(repoTags).where(and(eq(repoTags.repoId, repoId), eq(repoTags.name, 'v1.4.0'))).execute();
+    }
   });
 
   it('a failed compare is non-fatal and leaves the stored range', async () => {

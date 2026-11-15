@@ -28,15 +28,21 @@ export function hotfixDiffTargets(r: Pick<StoryBuildRepo, 'hasPatch' | 'hotfix'>
   return [...(r.hasPatch ? (['release'] as const) : []), ...(r.hotfix.mainHasPatch ? (['main'] as const) : [])];
 }
 
-/** The line under a repository whose `hotfix/<tag>` had moved past the release commit when Push ran; null
- *  when it had not. Names the open PRs already on it. */
+/** The line under a repository whose `hotfix/<tag>` already existed when Push ran: moved past the
+ *  release commit, or still at it with pull requests already open on it (an earlier hotfix off the
+ *  same release). Names those pull requests. Null when the branch was made by this push, or was there
+ *  untouched with nothing open on it. */
 export function hotfixMovedLine(branch: StoryBuildHotfixBranch | null | undefined): string | null {
-  if (branch?.movedToSha == null) return null;
-  const head = `${branch.name} has moved past the release, so your pull request targets the branch as it is now.`;
-  if (branch.prs.length === 0) return `${head} No other pull request is open on it.`;
+  if (branch == null || branch.created) return null;
   const shown = branch.prs.slice(0, 5).map((p) => `#${p.number}${p.title ? ` ${p.title}` : ''}`);
   const more = branch.prs.length > shown.length ? ` and ${branch.prs.length - shown.length} more` : '';
-  return `${head} Already on it: ${shown.join(', ')}${more}.`;
+  const already = `Already on it: ${shown.join(', ')}${more}.`;
+  if (branch.movedToSha == null) {
+    return branch.prs.length === 0 ? null : `${branch.name} already exists. ${already}`;
+  }
+  const head = `${branch.name} has moved past the release, so your pull request targets the branch as it is now.`;
+  if (branch.prs.length === 0) return `${head} No other pull request is open on it.`;
+  return `${head} ${already}`;
 }
 
 /** The push button of a hotfix repository: both pull requests at once, or the one left. */

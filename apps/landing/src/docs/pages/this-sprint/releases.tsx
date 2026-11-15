@@ -41,7 +41,7 @@ export default function Page(): JSX.Element {
       <p>
         &ldquo;Latest release: none&rdquo; or the date of the latest release, for example &ldquo;Latest release: 12
         Nov&rdquo;. <Ui>View notes</Ui> opens the latest release made here: its steps and its notes.{' '}
-        <Ui>Refresh</Ui> reads the sprint&rsquo;s tickets from the tracker again and checks again.
+        <Ui>Refresh</Ui> reads the tickets that hold a version tag back from the tracker again, then checks again.
       </p>
       <H3 id="repository-rows">Repository rows</H3>
       <ul>

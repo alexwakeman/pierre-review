@@ -903,8 +903,10 @@ reader/writer `db/release-settings.ts`, validated by shared `validateReleaseSett
   `stopped`), `finished_at`. Unique `(id, account_id)` is the children's FK parent.
 - **`release_items`** — one row per `(release, repo)`: `version_tag`, `sha`, `release_tag_name`,
   `notes_markdown` (the pre-release body), `tag_state` (`pending`→`claimed`→`done`|`failed`|`refused`),
-  `tag_object_oid`, `prerelease_state` (…|`skipped`), `github_release_id` / `_url`, `error`. ⚠ UNIQUE
-  `(account_id, repo_id, release_tag_name)` across releases — the claim that a tag is written once.
+  `tag_object_oid`, `prerelease_state` (…|`skipped`), `github_release_id` / `_url`, `error`. ⚠ PARTIAL
+  UNIQUE `(account_id, repo_id, release_tag_name) WHERE tag_state IN ('pending','claimed','done')` across
+  releases (migration 0194, in the .sql ONLY) — the claim that a tag is written once; a `failed` /
+  `refused` row holds no name, so a later press is a new claim on a new row.
 - **`release_ticket_comments`** — one row per `(release, ticket_key)`: `tracker_kind`, `state`
   (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
 

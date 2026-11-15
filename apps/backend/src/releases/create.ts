@@ -16,9 +16,13 @@
 //
 // ⚠ CLAIM BEFORE WRITE, NEVER RETRIED: every write's row is moved 'pending' → 'claimed' by
 // compare-and-set BEFORE the network call, and its outcome recorded; a failure stays failed. The
-// UNIQUE (account, repo, release_tag_name) index on release_items makes a second press for the same
-// tag a no-op (the claim is the row), and a ticket is commented on only when its repos tagged in THIS
-// release — so pressing again writes nothing new.
+// PARTIAL UNIQUE (account, repo, release_tag_name) index on release_items' LIVE rows (pending /
+// claimed / done, migration 0194) makes a second press for the same tag a no-op (the claim is the
+// row), and a ticket is commented on only when its repos tagged in THIS release — so pressing again
+// writes nothing new. A FAILED or REFUSED row holds no name: a later press (a reader's press, never an
+// automatic retry) is a new claim on a new row. A press where no repo gets a row records no release.
+// ⚠ The check is folded over the WHOLE workspace, the selection applied after (`releasable`,
+// `releaseShippedTickets`, `releaseSelectionProblems`) — a ticket's other repos must be seen.
 // ⚠ One failure never undoes the steps that worked.
 // ⚠ No transaction spans a network call: `runTransaction` only for the rows written before the writes.
 import { and, asc, eq, inArray } from 'drizzle-orm';
@@ -163,6 +167,9 @@ interface Scoped {
   workspaceId: number;
   settings: ReleaseSettings;
   included: number[];
+  /** Every repo of the workspace: the check ALWAYS folds over all of them (the ships-whole and
+   *  open-work rules must see a ticket's other repos); the selection is applied after. */
+  all: number[];
 }
 
 async function scoped(accountId: number, rawWorkspace: string | number | undefined | null, repoIds: readonly number[]): Promise<Scoped> {
@@ -174,7 +181,7 @@ async function scoped(accountId: number, rawWorkspace: string | number | undefin
   const members = new Set(scope.repoIds);
   const included = [...new Set(repoIds)].filter((id) => members.has(id));
   if (included.length === 0) throw new ReleaseRequestError(400, 'NothingToRelease', 'Choose at least one repository to release.');
-  return { workspaceId: scope.workspaceId, settings, included };
+  return { workspaceId: scope.workspaceId, settings, included, all: [...scope.repoIds] };
 }
 
 /** The repos of the selection that can be released: a candidate and write access. */
@@ -192,7 +199,7 @@ export async function previewRelease(
   deps: ReleaseWriteDeps = defaultReleaseWriteDeps(),
 ): Promise<ReleasePreviewResponse> {
   const s = await scoped(accountId, rawWorkspace, body.repoIds);
-  const { result } = await deps.check(accountId, s.workspaceId, s.included, s.settings);
+  const { result } = await deps.check(accountId, s.workspaceId, s.all, s.settings);
   const included = releasable(result, s.included);
   const shipped = releaseShippedTickets(result, included);
   const ai = shipped.length > 0 && (await deps.summariesAvailable());
@@ -275,13 +282,13 @@ export async function createRelease(
   const snapshot = body.snapshot;
 
   // ── 1. The re-check: tickets from the tracker, then the fold, then each version tag on GitHub ──
-  const before = await deps.check(accountId, s.workspaceId, s.included, s.settings);
+  const before = await deps.check(accountId, s.workspaceId, s.all, s.settings);
   const toRead = ticketsToReread(before.result, s.included, snapshot);
   const unread: Array<{ ident: string; key: string }> = [];
   await pool(toRead, 4, async (t) => {
     if (!(await deps.rereadTicket(accountId, t))) unread.push({ ident: t.ident, key: t.key });
   });
-  const after = await deps.check(accountId, s.workspaceId, s.included, s.settings);
+  const after = await deps.check(accountId, s.workspaceId, s.all, s.settings);
   const included = releasable(after.result, s.included);
   const gh = await deps.github(accountId);
   const liveShaChanged: Array<{ repoId: number; tagName: string }> = [];
@@ -332,6 +339,11 @@ export async function createRelease(
   const sectionOf = new Map(facts.map((f) => [f.repoId, edited.get(f.repoId) ?? releaseNotesSection(f)]));
   const login = (await db.select({ login: accounts.githubLogin }).from(accounts).where(eq(accounts.id, accountId)).execute())[0]?.login ?? null;
   const earlier: string[] = [];
+  const ITEM_WORDS: Record<string, string> = {
+    done: 'was already made by an earlier release',
+    claimed: 'is being made by an earlier release, or that release stopped part way (check GitHub)',
+    pending: 'is being made by an earlier release',
+  };
   const releaseId = await runTransaction(async (tx) => {
     const [rel] = await tx
       .insert(releases)
@@ -346,7 +358,36 @@ export async function createRelease(
       })
       .returning({ id: releases.id })
       .execute();
+    let inserted = 0;
     for (const r of repoChecks) {
+      // The tag name is in an EARLIER release's LIVE row (pending / claimed / done — the partial unique
+      // index, migration 0194): that press owns it (claimed, never retried) — nothing is recorded for
+      // it here. A failed or refused row holds no name, so a new press is a new claim on a new row.
+      const livePrior = async (): Promise<string | null> =>
+        (
+          await tx
+            .select({ tagState: releaseItems.tagState })
+            .from(releaseItems)
+            .where(
+              and(
+                eq(releaseItems.accountId, accountId),
+                eq(releaseItems.repoId, r.repoId),
+                eq(releaseItems.releaseTagName, r.candidate!.releaseTagName),
+                inArray(releaseItems.tagState, ['pending', 'claimed', 'done']),
+              ),
+            )
+            .limit(1)
+            .execute()
+        )[0]?.tagState ?? null;
+      const owned = (state: string | null): void => {
+        const words = ITEM_WORDS[state ?? 'done'] ?? ITEM_WORDS.done!;
+        earlier.push(`${r.name} ${r.candidate!.releaseTagName} ${words}. Nothing was written for it.`);
+      };
+      const prior = await livePrior();
+      if (prior != null) {
+        owned(prior);
+        continue;
+      }
       const got = await tx
         .insert(releaseItems)
         .values({
@@ -365,11 +406,17 @@ export async function createRelease(
         .onConflictDoNothing()
         .returning({ id: releaseItems.id })
         .execute();
-      // The tag name is in an EARLIER release's row: that press owns it (claimed, never retried).
-      if (got.length === 0) earlier.push(`${r.name} ${r.candidate!.releaseTagName} was already made by an earlier release. Nothing was written for it.`);
+      if (got.length === 0) owned(await livePrior());
+      else inserted += 1;
+    }
+    // Nothing of this press holds a row: no release is recorded (it would become the tab's "latest").
+    if (inserted === 0) {
+      await tx.delete(releases).where(and(eq(releases.id, rel!.id), eq(releases.accountId, accountId))).execute();
+      return null;
     }
     return rel!.id;
   });
+  if (releaseId == null) return { workspaceId: s.workspaceId, outcome: 'stopped', changes: earlier, release: null };
 
   const items = await db
     .select()

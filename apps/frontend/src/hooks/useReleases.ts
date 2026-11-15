@@ -5,6 +5,7 @@ import type {
   ReleaseDetail,
   ReleasePreviewResponse,
   ReleaseSettingsResponse,
+  ReleasesRefreshResponse,
   ReleasesResponse,
   SetReleaseSettingsBody,
 } from '@pierre-review/shared';
@@ -33,6 +34,23 @@ export function useReleases(workspaceId: number | null) {
     queryKey: releasesKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.releases(workspaceId),
     staleTime: 30_000,
+  });
+}
+
+/** Refresh: `POST /api/releases/refresh` (the held tickets read again from the tracker — a reader's
+ *  press, never a mount), and the answer becomes the check. */
+export function useRefreshReleases(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<ReleasesRefreshResponse, Error, void>({
+    mutationKey: ['releases-refresh', workspaceKey(workspaceId)],
+    mutationFn: () => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.refreshReleases(workspaceId);
+    },
+    onSuccess: (data) => {
+      const { reread: _r, unread: _u, ...rest } = data;
+      qc.setQueryData<ReleasesResponse>(releasesKey(data.workspaceId), rest);
+    },
   });
 }
 

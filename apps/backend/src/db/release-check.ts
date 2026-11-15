@@ -9,9 +9,11 @@
 //     ticket of a tracker the workspace no longer uses: not a link). The best row per ticket is the
 //     newest successful read; a fresher `sprint_tickets` row's status wins. DONE = the This Sprint
 //     stage resolver (`sprintStageOf` over `sprintLayoutFor`) says Complete — never a second resolver.
+//     A range PR with a ticket key THE detection rule finds but no stored row yet is `not_read` (blocks).
+//   • A 'history' range (the oldest tag) is read fresh from the stored PRs, never from its frozen row.
 //   • Bot-ness: `globalAutomationUserIds`, never the hidden-bots list.
 //   • Accepted repos: `sprint_ticket_repos` (the reader's accepted repos per ticket).
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
 import {
   foldReleaseCheck,
   releaseSettingsConfigured,
@@ -77,6 +79,64 @@ export function bestTicketRow<R extends Pick<TicketRow, 'state' | 'fetchedAt' | 
   return [...rows].sort((a, b) => ms(b.checkedAt) - ms(a.checkedAt))[0] ?? null;
 }
 
+/**
+ * THE ONE detection rule (tracker/enricher.ts `detectKeysWithAccess`: title + head branch + stored
+ * links) over these PRs, against the WORKSPACE's tracker: prId → keys. DB only (no tracker call). A
+ * key detected on a range PR with no stored row is a ticket the worker has not read yet — it BLOCKS
+ * (`not_read`), never passes as an untracked PR.
+ */
+async function detectedKeysByPr(accountId: number, workspaceId: number, prIds: readonly number[]): Promise<Map<number, string[]>> {
+  const out = new Map<number, string[]>();
+  if (prIds.length === 0) return out;
+  // LAZY: tracker/runtime.ts opens the database at import.
+  const [{ trackerContext }, { readWorkspaceTrackerRow, trackerAccessOf }, { detectKeysWithAccess, withParsedLinks, prLinkColumns }] =
+    await Promise.all([import('../tracker/runtime.js'), import('../tracker/settings.js'), import('../tracker/enricher.js')]);
+  const ctx = trackerContext();
+  const access = trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, accountId, workspaceId));
+  for (const part of chunks(prIds)) {
+    const rows = await db
+      .select({ id: pullRequests.id, title: pullRequests.title, headRefName: pullRequests.headRefName, ...prLinkColumns(pullRequests) })
+      .from(pullRequests)
+      .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, part)))
+      .execute();
+    for (const r of rows) {
+      const keys = detectKeysWithAccess(access, withParsedLinks(r as typeof r & { closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown }));
+      if (keys != null && keys.length > 0) out.set(r.id, keys);
+    }
+  }
+  return out;
+}
+
+/**
+ * A 'history' range (the oldest tag: no base) is read FRESH from the stored PRs, never from its frozen
+ * row: PRs the deep backfill brings in after the row was computed must enter it. Merged into the
+ * default branch no later than the tag's commit (or by the tag's own commit). prIds per tag name.
+ */
+async function historyPrIds(
+  accountId: number,
+  repoId: number,
+  defaultBranch: string,
+  tag: { sha: string; committedAt: Date },
+): Promise<number[]> {
+  const rows = await db
+    .select({ id: pullRequests.id })
+    .from(pullRequests)
+    .where(
+      and(
+        eq(pullRequests.accountId, accountId),
+        eq(pullRequests.repoId, repoId),
+        eq(pullRequests.state, 'merged'),
+        eq(pullRequests.baseRefName, defaultBranch),
+        or(
+          eq(pullRequests.mergeCommitOid, tag.sha),
+          and(isNotNull(pullRequests.mergedAt), lte(pullRequests.mergedAt, tag.committedAt)),
+        ),
+      ),
+    )
+    .execute();
+  return [...new Set(rows.map((r) => r.id))].sort((a, b) => a - b);
+}
+
 /** Every stored input of the fold for one workspace (the caller checked the settings are set). */
 export async function loadReleaseCheckInput(
   accountId: number,
@@ -100,7 +160,18 @@ export async function loadReleaseCheckInput(
           .where(and(eq(repos.accountId, accountId), inArray(repos.id, [...repoIds])))
           .execute();
   const ids = repoRows.map((r) => r.id);
-  const [tags, ranges] = await Promise.all([getRepoTags(accountId, ids), getTagRanges(accountId, ids)]);
+  const [tags, storedRanges] = await Promise.all([getRepoTags(accountId, ids), getTagRanges(accountId, ids)]);
+  const repoRowById = new Map(repoRows.map((r) => [r.id, r]));
+  const ranges = await Promise.all(
+    storedRanges.map(async (r) => {
+      if (r.method !== 'history') return r;
+      const tag = tags.find((t) => t.repoId === r.repoId && t.name === r.tagName);
+      const row = repoRowById.get(r.repoId);
+      const def = row?.defaultBranch ?? row?.defaultBranchName ?? null;
+      if (tag == null || tag.sha !== r.sha || tag.committedAt == null || def == null) return r;
+      return { ...r, prIds: await historyPrIds(accountId, r.repoId, def, { sha: tag.sha, committedAt: tag.committedAt }), unresolvedPrNumbers: [] };
+    }),
+  );
 
   // The workspace's tracker site (LAZY: db/stories.ts reaches the tracker runtime).
   const { workspaceSite } = await import('./stories.js');
@@ -108,6 +179,7 @@ export async function loadReleaseCheckInput(
 
   const rangePrIds = [...new Set(ranges.flatMap((r) => r.prIds))];
   const ticketRows: TicketRow[] = [];
+  const detectedOnly = new Map<number, string[]>();
   const ticketSelect = {
     prId: trackerTickets.prId,
     issueKey: trackerTickets.issueKey,
@@ -136,8 +208,15 @@ export async function loadReleaseCheckInput(
           .execute()),
       );
     }
+    // Keys the detection rule finds on a range PR but no stored row answers for that PR yet.
+    const rowKeys = new Map<number, Set<string>>();
+    for (const r of ticketRows) rowKeys.set(r.prId, (rowKeys.get(r.prId) ?? new Set()).add(r.issueKey));
+    for (const [prId, keys] of await detectedKeysByPr(accountId, workspaceId, rangePrIds)) {
+      const missing = keys.filter((k) => !(rowKeys.get(prId)?.has(k) ?? false));
+      if (missing.length > 0) detectedOnly.set(prId, missing);
+    }
     // Every PR on those tickets (the ticket's other repos, its open work).
-    const keys = [...new Set(ticketRows.map((r) => r.issueKey))];
+    const keys = [...new Set([...ticketRows.map((r) => r.issueKey), ...[...detectedOnly.values()].flat()])];
     const have = new Set(ticketRows.map((r) => `${r.prId}#${r.issueKey}`));
     for (const part of chunks(keys)) {
       const more = await db
@@ -201,6 +280,17 @@ export async function loadReleaseCheckInput(
     identsByPr.set(r.prId, list);
     rowsByIdent.set(ident, [...(rowsByIdent.get(ident) ?? []), r]);
   }
+  /** Detected on a range PR, no stored row anywhere on the site: ident → key (read state `not_read`). */
+  const unreadKeys = new Map<string, string>();
+  for (const [prId, keys] of detectedOnly) {
+    for (const key of keys) {
+      const ident = identOf(key);
+      const list = identsByPr.get(prId) ?? [];
+      if (!list.includes(ident)) list.push(ident);
+      identsByPr.set(prId, list);
+      if (!rowsByIdent.has(ident)) unreadKeys.set(ident, key);
+    }
+  }
 
   const repoById = new Map(repoRows.map((r) => [r.id, r]));
   const defaultOf = (repoId: number): string | null => {
@@ -225,7 +315,7 @@ export async function loadReleaseCheckInput(
   });
 
   // The tickets: best stored read, a fresher sprint read's status wins, Done by the stage resolver.
-  const idents = [...rowsByIdent.keys()];
+  const idents = [...rowsByIdent.keys(), ...unreadKeys.keys()];
   const sprintByIdent = new Map<string, { statusName: string | null; statusCategory: string | null; fetchedAt: Date; title: string; url: string | null }>();
   const accepted: Array<{ ident: string; repoId: number }> = [];
   for (const part of chunks(idents)) {
@@ -259,6 +349,21 @@ export async function loadReleaseCheckInput(
   }
   const layout = idents.length > 0 ? await sprintLayoutFor(accountId, workspaceId) : null;
   const tickets: ReleaseCheckTicketInput[] = idents.map((ident) => {
+    const unreadKey = unreadKeys.get(ident);
+    if (unreadKey != null) {
+      // A sprint read of it is a real read of the ticket; with none, it is not read yet (blocks).
+      const sprint = sprintByIdent.get(ident);
+      if (sprint == null) return { ident, key: unreadKey, title: null, url: null, statusName: null, done: false, readState: 'not_read' };
+      return {
+        ident,
+        key: unreadKey,
+        title: sprint.title,
+        url: sprint.url,
+        statusName: sprint.statusName,
+        done: ticketIsDone(layout, sprint.statusName, sprint.statusCategory),
+        readState: 'ok',
+      };
+    }
     const rows = rowsByIdent.get(ident)!;
     const best = bestTicketRow(rows)!;
     const readState: ReleaseTicketReadState =

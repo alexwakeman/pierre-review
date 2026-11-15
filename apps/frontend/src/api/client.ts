@@ -259,6 +259,7 @@ import type {
   FlowSettings,
   FlowActorView,
   ReleaseSettingsResponse,
+  ReleasesRefreshResponse,
   ReleasesResponse,
   ReleasePreviewBody,
   ReleasePreviewResponse,
@@ -658,6 +659,11 @@ export const api = {
     ),
   // This Sprint → Releases: the release check over stored tags, ranges and tickets (DB only).
   releases: (workspaceId: number) => get<ReleasesResponse>(withQuery('/api/releases', workspaceParam(workspaceId))),
+  // Refresh (a reader's press): the held tickets read again from the tracker, then the check.
+  refreshReleases: (workspaceId: number) =>
+    fetch(withQuery('/api/releases/refresh', workspaceParam(workspaceId)), { method: 'POST' }).then((r) =>
+      handle<ReleasesRefreshResponse>(r),
+    ),
   // "Create release…": the dialog's preview (notes + comment), Confirm (the writes), one stored release.
   releasePreview: (workspaceId: number, body: ReleasePreviewBody) =>
     fetch(withQuery('/api/releases/preview', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>

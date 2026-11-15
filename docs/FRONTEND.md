@@ -2899,8 +2899,8 @@ in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHAR
 one here. "Create release…" is HIDDEN unless a writable repo has a candidate (`showCreateRelease`). The
 dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only while open, re-checks unticks
 through shared `releaseSelectionProblems` (`confirmStops`, Confirm HIDDEN in its place), sends
-`releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = the This Sprint tracker
-read (`useSprintRefresh`) + a re-read of the check. Ticket chips → `useOpenStory()`; PRs →
+`releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = `useRefreshReleases`
+(`POST /api/releases/refresh`: the held tickets re-read from the tracker, the answer becomes the check). Ticket chips → `useOpenStory()`; PRs →
 `openPrDetailTab`. Settings → Releases is `settings/ReleasesSection.tsx` (the shared validator; the
 suffix-change warning `releasesSectionModel.ts`).
 

@@ -85,7 +85,20 @@ describe('the repository card (acceptance 27, 28, 29)', () => {
       'hotfix/v2.4.0-rc has moved past the release, so your pull request targets the branch as it is now. Already on it: #12 PLAT-201: Fix the totals.',
     );
     expect(hotfixMovedLine({ ...branch, prs: [] })).toContain('No other pull request is open on it.');
-    expect(hotfixMovedLine({ ...branch, movedToSha: null })).toBeNull();
+    expect(hotfixMovedLine({ ...branch, movedToSha: null, prs: [] })).toBeNull();
+    expect(hotfixMovedLine({ ...branch, created: true, movedToSha: null, prs: [] })).toBeNull();
     expect(hotfixMovedLine(null)).toBeNull();
+  });
+
+  it('29: a second hotfix off the same release, with the first still open, names the PR on the branch', () => {
+    const branch = {
+      name: 'hotfix/v2.4.0-rc',
+      releaseSha: 'b'.repeat(40),
+      created: false,
+      movedToSha: null,
+      prs: [{ number: 50, title: 'PLAT-201: Fix the totals', url: null }],
+      at: '2026-11-15T09:00:00.000Z',
+    };
+    expect(hotfixMovedLine(branch)).toBe('hotfix/v2.4.0-rc already exists. Already on it: #50 PLAT-201: Fix the totals.');
   });
 });

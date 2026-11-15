@@ -703,6 +703,14 @@ Sprint → Releases is the reader's press, and it does two tracker things:
   ticket that does not answer (`fetched === 0`) is a change; any change (a ticket left Done, a moved
   candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
   the Releases tab and the dialog's preview read the stored rows (a view still never calls a reader).
+- **Refresh's re-read** (`POST /api/releases/refresh`, `releases/refresh.ts`) — the same exception, the
+  tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable, never read),
+  ≤ 30, through the same `syncOnePrNow(force)`. Needed because the worker is MISSING-ONLY for a merged
+  PR (it never TTL-refreshes one), so a ticket moved to Done after its PRs merged would otherwise hold its
+  tag for good. Tier `search`.
+- **A range PR with no stored row** (merged between worker passes) is found by the ONE detection rule
+  (`detectKeysWithAccess`, DB only) in `db/release-check.ts` and holds its tag as `not_read` — it never
+  passes as an untracked PR.
 - **The comment** — one per shipped ticket whose repos ALL tagged in this release, through the same
   `postTicketComment` (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind `statusGate`, under the
   reader's Jira login). Exactly three lines (shared `releaseCommentWiki`): "Approved for release by <name>

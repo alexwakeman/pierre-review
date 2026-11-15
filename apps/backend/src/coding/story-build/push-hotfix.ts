@@ -222,7 +222,9 @@ async function pushClaimed(ctx: AgentContext, a: PushRepoArgs, build: StoryBuild
       if (live == null) return fail('BRANCH_NOT_CREATED', `${targets.release.base} could not be read on ${fullName}. Try again.`);
     }
     const moved = hotfixBranchState(live, releaseSha) === 'moved';
-    const prs = moved ? await deps.openPrsOnBase(token, owner, name, targets.release.base).catch(() => []) : [];
+    // The branch was already there (an earlier hotfix off this release): name the PRs open on it,
+    // whether or not it has moved — an open, unmerged PR 1 leaves it at the release commit.
+    const prs = !created ? await deps.openPrsOnBase(token, owner, name, targets.release.base).catch(() => []) : [];
     const record: StoryBuildHotfixBranch = { name: targets.release.base, releaseSha, created, movedToSha: moved ? live : null, prs, at: deps.now().toISOString() };
     await updateStoryBuildRepo(ctx, a.accountId, repo.id, { hotfixBranchJson: record });
 

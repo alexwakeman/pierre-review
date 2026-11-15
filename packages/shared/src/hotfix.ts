@@ -116,7 +116,7 @@ export interface StoryBuildHotfixBranch {
   created: boolean;
   /** The branch's tip when it had MOVED past the release commit; null when at the release commit. */
   movedToSha: string | null;
-  /** The open PRs already on the branch when it had moved (by number), so the tab can name them. */
+  /** The open PRs already on the branch when it was already there (moved or not), so the tab can name them. */
   prs: Array<{ number: number; title: string; url: string | null }>;
   /** ISO. */
   at: string;

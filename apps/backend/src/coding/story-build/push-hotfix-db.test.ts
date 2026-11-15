@@ -246,6 +246,16 @@ describe('push a hotfix repository (acceptance 28, 29, 31)', () => {
     expect(wire.hotfix?.branch?.prs[0]?.number).toBe(12);
   });
 
+  it('29: a second hotfix off the same release, with the first PR still open (branch at the release), names that PR', async () => {
+    const s = await hotfixSession();
+    G.branches.set('hotfix/v2.4.0-rc', REL);
+    G.onBase = [{ number: 50, title: 'PLAT-201: Fix the totals', url: 'https://github.com/acme/api/pull/50' }];
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });
+    expect(G.creates).toEqual([]);
+    const row = await P.getStoryBuildRepoRow(ctx, 1, s.id, repo.api);
+    expect(row!.hotfixBranchJson).toMatchObject({ created: false, movedToSha: null, prs: [{ number: 50 }] });
+  });
+
   it('only a release fix: one PR, no pair line, no body edit', async () => {
     const s = await hotfixSession({ mainPatch: null });
     await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });

@@ -625,6 +625,7 @@ describe('tierFor — GitHub quota spenders', () => {
     // re-reads the tickets (tracker quota) and writes tags, pre-releases and comments (GitHub writes).
     expect(tiers('GET', '/api/releases/12')).toEqual(['read']);
     expect(tiers('POST', '/api/releases/preview')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/releases/refresh')).toEqual(['search']);
     expect(tiers('POST', '/api/releases')).toEqual(['search', 'github_write']);
     expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
     // The story view's status picker — a tracker write: Jira quota on both.

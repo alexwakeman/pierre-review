@@ -429,3 +429,47 @@ The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
   "Read docs/SECURITY.md before …" sentence moved into the doc map row ("AI routes").
 - **Deferred**: the release tables are still not in `GET /api/me/export` (they are erased); no Playwright
   spec for the Releases tab or a hotfix build; no landing mock of a hotfix build.
+
+### Fix stage — review findings
+
+- **The range window reaches back to every baseline.** `planTagRanges(tags, stored, {settings})` keeps (and
+  computes) every range after the OLDEST baseline any configured workspace gives, not just the newest
+  `TAG_RANGE_WINDOW` (now shared, 40); shared `tagRangeKeepFrom`; `db/release-settings.ts`
+  `configuredReleaseSettings`. With NO baseline, the fold treats a tag older than the window like a PR older
+  than the synced history (not checked; the no-baseline line says so) instead of `range_pending` forever.
+- **A stored range is final, so it must be complete.** The GraphQL fallback now asks about EVERY unmatched
+  commit (`COMMIT_PR_FALLBACK_MAX` = `TAG_RANGE_MAX_COMMITS`); one that pauses for the budget is NOT stored
+  (counted `pending`, retried next sync). A TRUNCATED compare now HOLDS its tag: `range_pending` with
+  `reason: 'too_large'` ("v1.1.0 has more commits than can be read, so its changes cannot be checked.").
+  Commits the fallback confirmed have no PR (direct pushes) still only show as a note.
+- **The 'history' range is read fresh** (`db/release-check.ts` `historyPrIds`): PRs the deep backfill stores
+  after the row was computed enter it.
+- **A range PR whose ticket the worker has not read** (no `tracker_tickets` row) is found with THE detection
+  rule (`detectKeysWithAccess` over title + head branch + stored links, DB only) and BLOCKS as `not_read`
+  (a sprint read of it counts as a read). Confirm re-reads it like any other ticket.
+- **Refresh** is `POST /api/releases/refresh?workspace=` (`releases/refresh.ts` `refreshReleases`, pure
+  `ticketsToRefresh`; tier `search`): the tickets the check holds by their OWN state (not Done, unreadable),
+  at most 30, read again from the tracker through `syncOnePrNow(force)` — the worker never re-reads a MERGED
+  PR's ticket on a TTL. A reader's press (docs/TRACKERS.md exception), never a view. Client
+  `api.refreshReleases`, hook `useRefreshReleases`; the tab names tickets the tracker did not answer for.
+- **Preview and Confirm fold the check over the WHOLE workspace** and apply the selection after
+  (`releasable`, `releaseShippedTickets`, `releaseSelectionProblems`), so a ticket's other repos are always
+  seen. The test fake now honours the repo ids it is given.
+- **A failed or refused release tag no longer holds its name.** Migration `0194_release_items_live_tag`
+  replaces the full unique with a PARTIAL unique on live rows (`tag_state IN ('pending','claimed','done')`,
+  in the .sql only). A later press is a new claim on a new row; a live earlier row is named by its state
+  ("was already made…", "is being made by an earlier release, or that release stopped part way…"). A press
+  where no repo gets a row records NO release (answered `stopped`, nothing written).
+- **Ancestry**: never-asked tags are asked before re-asks of off-branch tags, one request per commit, and a
+  tag on the commit of a tag known on the branch inherits it (`inheritedAncestry`) — a fresh release tag is
+  never starved by older hotfix tags.
+- **Hotfix push** names the PRs open on `hotfix/<tag>` whenever the branch already existed, moved or not
+  (acceptance 29); the tab says "hotfix/v2.4.0-rc already exists. Already on it: #50 …".
+- **Not changed:** `summariesAvailable` already answers for the ACTIVE provider (`detectClaudeAuth` is the
+  per-provider pre-flight despite its name) and `cheapUsage` prices a Codex answer as Codex.
+- **Tests:** `db/release-check.test.ts` (the 50-tag window, a truncated compare, Refresh's picks, the
+  not-read detected ticket, the fresh history range, acceptance 6 through `refreshReleases`),
+  `sync/tag-ranges.test.ts` (the window reaches the baseline, the budget-paused range not stored),
+  `sync/repo-tags.test.ts` (never-asked first, inherited ancestry), `releases/create.test.ts` (whole-workspace
+  check, failed-tag re-press, a claimed earlier row, no empty release), `coding/story-build/push-hotfix-db.test.ts`
+  and `apps/frontend/test/hotfixBuild.test.ts` (acceptance 29 at the release commit), `rate-limit.test.ts`.

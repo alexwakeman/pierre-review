@@ -490,6 +490,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/releases') return [TIERS.read];
   // GET /api/releases/:id — one stored release (its notes and step results). DB only.
   if (!mutating && /^\/api\/releases\/\d+$/.test(path)) return [TIERS.read];
+  // POST /api/releases/refresh — Refresh: re-reads the held tickets from the tracker (the customer's
+  // quota, as every tracker call → `search`). No GitHub call.
+  if (method === 'POST' && path === '/api/releases/refresh') return [TIERS.search];
   // POST /api/releases/preview — the "Create release…" dialog: a model summary per story when AI is on
   // (model dollars, the reader's click) → `ai` + `ai_hourly`; no GitHub or tracker call.
   if (method === 'POST' && path === '/api/releases/preview') return [TIERS.ai, TIERS.aiHourly];

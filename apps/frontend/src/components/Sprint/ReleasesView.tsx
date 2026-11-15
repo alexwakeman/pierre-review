@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { releaseBlockerText, type ReleaseCheckPr, type ReleaseCheckResult, type ReleaseRepoCheck, type ReleaseTicketCheck } from '@pierre-review/shared';
-import { useReleases } from '../../hooks/useReleases.js';
-import { useSprintRefresh } from '../../hooks/useSprintStories.js';
+import { useRefreshReleases, useReleases } from '../../hooks/useReleases.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
@@ -31,39 +30,18 @@ import {
 //     version tags after the release, newest first, with their pull requests and ticket chips.
 //   • The tickets panel (per ticket, per repo) and the warnings, which never block.
 //
-// ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB only). Refresh asks the tracker for the sprint again
-// (the This Sprint read) and re-reads the check. ⚠ Nothing renders while `workspaceId` is null.
+// ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB only). Refresh (a press) reads the held tickets again
+// from the tracker (POST /api/releases/refresh) and shows the check it answers with. ⚠ Nothing renders while `workspaceId` is null.
 // ⚠ A ticket chip opens the story through `useOpenStory()`; a pull request opens its PR tab.
-
-const REFRESH_REREAD_MS = 8_000;
 
 export function ReleasesView(): JSX.Element | null {
   const workspaceId = useFilters((s) => s.workspaceId);
   const q = useReleases(workspaceId);
-  const refresh = useSprintRefresh(workspaceId);
+  const refresh = useRefreshReleases(workspaceId);
   const openSettings = useSettingsModal((s) => s.openSettings);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewRelease, setViewRelease] = useState<number | null>(null);
-  const { refetch } = q;
-
-  // Refresh: the tracker read runs in the background, so the check is read now and once more shortly.
-  const [rereadAt, setRereadAt] = useState<number | null>(null);
-  useEffect(() => {
-    if (rereadAt == null) return;
-    const t = window.setTimeout(() => {
-      setRereadAt(null);
-      void refetch();
-    }, Math.max(0, rereadAt - Date.now()));
-    return () => window.clearTimeout(t);
-  }, [rereadAt, refetch]);
-  const onRefresh = useCallback(() => {
-    refresh.mutate(undefined, {
-      onSettled: () => {
-        void refetch();
-        setRereadAt(Date.now() + REFRESH_REREAD_MS);
-      },
-    });
-  }, [refresh, refetch]);
+  const onRefresh = useCallback(() => refresh.mutate(), [refresh]);
 
   if (workspaceId == null) return null;
   if (q.isLoading) return <p className="py-6 text-body text-ui-mute">Loading releases…</p>;
@@ -86,7 +64,7 @@ export function ReleasesView(): JSX.Element | null {
     );
   }
   const check = data.check;
-  const busy = refresh.isPending || rereadAt != null || q.isFetching;
+  const busy = refresh.isPending || q.isFetching;
   const noBaseline = check.repos.filter((r) => r.noBaseline && r.status !== 'nothing_new');
 
   return (
@@ -124,6 +102,11 @@ export function ReleasesView(): JSX.Element | null {
           )}
         </div>
       </div>
+
+      {refresh.isError && <p className="text-meta text-ui-danger">Couldn’t refresh. Try again.</p>}
+      {refresh.data != null && refresh.data.unread.length > 0 && (
+        <p className="text-meta text-ui-mute">The tracker did not answer for {refresh.data.unread.join(', ')}.</p>
+      )}
 
       {noBaseline.length > 0 && (
         <p className="text-meta text-ui-mute">

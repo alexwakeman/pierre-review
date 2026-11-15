@@ -56,7 +56,7 @@ export function shortBlocker(b: ReleaseBlocker, ctx: ReleaseWordsContext): strin
     case 'not_whole':
       return `${b.key} (not in every repository yet)`;
     case 'range_pending':
-      return 'changes not read yet';
+      return b.reason === 'too_large' ? 'too many commits to check' : 'changes not read yet';
   }
 }
 

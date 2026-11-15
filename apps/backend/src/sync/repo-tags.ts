@@ -188,19 +188,41 @@ export function planTagWrites(stored: StoredTag[], read: TagRead): TagWritePlan 
 }
 
 /**
- * The tags whose ancestry to ask about now, newest first, at most `cap`: never asked, or asked and
- * found OFF the default branch against a head that has since moved. A `true` stands. Pure.
+ * The tags whose ancestry to ask about now, at most `cap`: NEVER ASKED first, then those asked and
+ * found OFF the default branch against a head that has since moved — newest commit first within each.
+ * A `true` stands. A never-asked tag on the commit of a tag already known ON the branch is not asked
+ * (`inheritedAncestry` answers it), and one commit is asked about once. Pure.
  */
 export function ancestryTargets(
   tags: Array<Pick<StoredTag, 'name' | 'sha' | 'committedAt' | 'onDefaultBranch' | 'ancestryHeadSha'>>,
   headSha: string,
   cap = ANCESTRY_CHECKS_PER_SYNC,
 ): Array<{ name: string; sha: string }> {
-  return tags
-    .filter((t) => t.onDefaultBranch == null || (t.onDefaultBranch === false && t.ancestryHeadSha !== headSha))
-    .sort((a, b) => (b.committedAt?.getTime() ?? 0) - (a.committedAt?.getTime() ?? 0))
-    .slice(0, cap)
-    .map((t) => ({ name: t.name, sha: t.sha }));
+  const onBranch = new Set(tags.filter((t) => t.onDefaultBranch === true).map((t) => t.sha));
+  const newest = (a: { committedAt: Date | null }, b: { committedAt: Date | null }): number =>
+    (b.committedAt?.getTime() ?? 0) - (a.committedAt?.getTime() ?? 0);
+  const never = tags.filter((t) => t.onDefaultBranch == null && !onBranch.has(t.sha)).sort(newest);
+  const again = tags.filter((t) => t.onDefaultBranch === false && t.ancestryHeadSha !== headSha).sort(newest);
+  const seen = new Set<string>();
+  const out: Array<{ name: string; sha: string }> = [];
+  for (const t of [...never, ...again]) {
+    if (out.length >= cap) break;
+    if (seen.has(t.sha)) continue;
+    seen.add(t.sha);
+    out.push({ name: t.name, sha: t.sha });
+  }
+  return out;
+}
+
+/**
+ * Never-asked tags on the SAME commit as a tag known ON the default branch: on it too (a release tag
+ * on its version tag's commit is on the branch exactly when the version tag is), no request. Pure.
+ */
+export function inheritedAncestry(
+  tags: Array<Pick<StoredTag, 'name' | 'sha' | 'onDefaultBranch'>>,
+): Array<{ name: string; sha: string }> {
+  const onBranch = new Set(tags.filter((t) => t.onDefaultBranch === true).map((t) => t.sha));
+  return tags.filter((t) => t.onDefaultBranch == null && onBranch.has(t.sha)).map((t) => ({ name: t.name, sha: t.sha }));
 }
 
 /**
@@ -395,7 +417,28 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
     .from(repoTags)
     .where(and(eq(repoTags.accountId, accountId), eq(repoTags.repoId, repoId)))
     .execute();
+  const write = async (t: { name: string; sha: string }, onBranch: boolean): Promise<void> => {
+    await db
+      .update(repoTags)
+      .set({ onDefaultBranch: onBranch, ancestryHeadSha: headSha, lastSeenAt: now })
+      // The sha in the predicate: a tag moved since the read is not given the old commit's answer.
+      .where(
+        and(
+          eq(repoTags.accountId, accountId),
+          eq(repoTags.repoId, repoId),
+          eq(repoTags.name, t.name),
+          eq(repoTags.sha, t.sha),
+        ),
+      )
+      .execute();
+  };
+  for (const t of inheritedAncestry(rows)) await write(t, true);
   const targets = ancestryTargets(rows, headSha);
+  // Every tag on an asked commit takes the answer (one request per commit).
+  const sameCommit = (sha: string): Array<{ name: string; sha: string }> =>
+    rows
+      .filter((r) => r.sha === sha && (r.onDefaultBranch == null || (r.onDefaultBranch === false && r.ancestryHeadSha !== headSha)))
+      .map((r) => ({ name: r.name, sha: r.sha }));
   let checked = 0;
   for (const t of targets) {
     if (isLimited(accountId) || isBudgetLow(accountId)) break;
@@ -419,19 +462,7 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
     }
     if (onBranch === undefined) continue;
     checked += 1;
-    await db
-      .update(repoTags)
-      .set({ onDefaultBranch: onBranch, ancestryHeadSha: headSha, lastSeenAt: now })
-      // The sha in the predicate: a tag moved since the read is not given the old commit's answer.
-      .where(
-        and(
-          eq(repoTags.accountId, accountId),
-          eq(repoTags.repoId, repoId),
-          eq(repoTags.name, t.name),
-          eq(repoTags.sha, t.sha),
-        ),
-      )
-      .execute();
+    for (const same of sameCommit(t.sha)) await write(same, onBranch);
   }
   return checked;
 }

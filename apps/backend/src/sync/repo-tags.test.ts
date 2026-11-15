@@ -146,7 +146,7 @@ describe('ancestry', () => {
     expect(m.ancestryFromCompareStatus(undefined)).toBeUndefined();
   });
 
-  it('asks about unknown tags, and about off-branch tags only once the head moved, newest first', () => {
+  it('asks about never-asked tags first, then off-branch tags only once the head moved, newest first', () => {
     const t = (name: string, onDefaultBranch: boolean | null, ancestryHeadSha: string | null, day: number) => ({
       name,
       sha: sha(String(day)),
@@ -155,8 +155,27 @@ describe('ancestry', () => {
       ancestryHeadSha,
     });
     const tags = [t('on', true, sha('h'), 1), t('unknown', null, null, 2), t('off-same', false, sha('h'), 3), t('off-moved', false, sha('o'), 4)];
-    expect(m.ancestryTargets(tags, sha('h')).map((x) => x.name)).toEqual(['off-moved', 'unknown']);
-    expect(m.ancestryTargets(tags, sha('h'), 1).map((x) => x.name)).toEqual(['off-moved']);
+    expect(m.ancestryTargets(tags, sha('h')).map((x) => x.name)).toEqual(['unknown', 'off-moved']);
+    expect(m.ancestryTargets(tags, sha('h'), 1).map((x) => x.name)).toEqual(['unknown']);
+  });
+
+  it('a fresh release tag is reached past 20+ newer off-branch tags that are asked again every sync', () => {
+    const t = (name: string, onDefaultBranch: boolean | null, s: string, day: number) => ({
+      name,
+      sha: sha(s),
+      committedAt: new Date(Date.UTC(2026, 9, day)),
+      onDefaultBranch,
+      ancestryHeadSha: onDefaultBranch === false ? sha('old-head') : null,
+    });
+    const hotfixes = Array.from({ length: 25 }, (_, i) => t(`v2.3.${i}-hotfix`, false, `hf${i}`, 10 + i));
+    const tags = [t('v2.4.0', true, 'rel', 1), t('v2.4.0-rc', null, 'rel', 1), t('v2.5.0', null, 'new', 2), ...hotfixes];
+    // The release tag shares its version tag's commit: on the branch with no request.
+    expect(m.inheritedAncestry(tags)).toEqual([{ name: 'v2.4.0-rc', sha: sha('rel') }]);
+    // The never-asked tag is asked before any re-ask of the 25 off-branch ones; the inherited one is not asked.
+    const targets = m.ancestryTargets(tags, sha('h'));
+    expect(targets[0]).toEqual({ name: 'v2.5.0', sha: sha('new') });
+    expect(targets.map((x) => x.name)).not.toContain('v2.4.0-rc');
+    expect(targets).toHaveLength(20);
   });
 });
 

@@ -17,14 +17,21 @@
 //           only PRs of THIS repo merged into its default branch count. 'history': the OLDEST tag
 //           has no base, so its range is every stored PR merged into the default branch no later
 //           than its commit — PRs older than the synced history are not checked.
-//   bounds  only the newest TAG_RANGE_WINDOW tags get a range; at most TAG_RANGES_PER_SYNC are
+//   bounds  the newest TAG_RANGE_WINDOW tags get a range, and so does every tag after the oldest
+//           baseline of any workspace with both suffixes set (`tagRangeKeepFrom`); at most TAG_RANGES_PER_SYNC are
 //           computed per sync, newest first; the rest go next sync. Skipped while the account's
 //           budget is low or limited. A failed compare leaves the old row (if any) and is retried
 //           next sync.
 //   moves   a tag whose sha changed is recomputed and the row keeps `moved_from_sha`.
 import { and, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
-import { compareTagOrder as sharedCompareTagOrder } from '@pierre-review/shared';
+import {
+  TAG_RANGE_WINDOW as SHARED_TAG_RANGE_WINDOW,
+  compareTagOrder as sharedCompareTagOrder,
+  tagRangeKeepFrom,
+  type ReleaseSettings,
+} from '@pierre-review/shared';
 import { db, schema, runTransaction } from '../db/client.js';
+import { configuredReleaseSettings } from '../db/release-settings.js';
 import {
   getGraphqlClientFor,
   graphqlTolerant,
@@ -43,15 +50,17 @@ import {
 
 const { repos, repoTags, repoTagRanges, pullRequests, commits } = schema;
 
-/** Tags (newest first, on the default branch) that get a range at all. */
-export const TAG_RANGE_WINDOW = 40;
+/** Tags (newest first, on the default branch) that always get a range (shared, the fold reads it too).
+ *  Every tag after a configured workspace's baseline gets one as well (`tagRangeKeepFrom`). */
+export const TAG_RANGE_WINDOW = SHARED_TAG_RANGE_WINDOW;
 /** Ranges computed per sync. */
 export const TAG_RANGES_PER_SYNC = 10;
 /** Commits read from one compare (10 pages of 100). */
 export const TAG_RANGE_MAX_COMMITS = 1000;
 const COMPARE_PAGE = 100;
-/** Unmatched commits asked about through GraphQL per range. */
-export const COMMIT_PR_FALLBACK_MAX = 100;
+/** Unmatched commits asked about through GraphQL per range: every one read (an unasked commit could
+ *  hide a PR, and a range is never recomputed once stored). */
+export const COMMIT_PR_FALLBACK_MAX = TAG_RANGE_MAX_COMMITS;
 
 export interface RangeTag {
   name: string;
@@ -95,12 +104,15 @@ export function compareTagOrder(a: RangeTag, b: RangeTag): number {
 export function planTagRanges(
   tags: RangeTag[],
   stored: StoredRange[],
-  opts: { window?: number; perSync?: number } = {},
+  opts: { window?: number; perSync?: number; settings?: readonly ReleaseSettings[] } = {},
 ): RangePlan {
   const window = opts.window ?? TAG_RANGE_WINDOW;
   const perSync = opts.perSync ?? TAG_RANGES_PER_SYNC;
   const ordered = tags.filter((t) => t.onDefaultBranch === true && t.committedAt != null).sort(compareTagOrder);
-  const inWindow = new Set(ordered.slice(Math.max(0, ordered.length - window)).map((t) => t.name));
+  // The window, extended back to just after the oldest baseline of any configured workspace: the
+  // release check sums EVERY increment after its baseline, so none of them may be left out.
+  const keepFrom = tagRangeKeepFrom(ordered, opts.settings ?? [], window);
+  const inWindow = new Set(ordered.slice(keepFrom).map((t) => t.name));
   const storedByName = new Map(stored.map((s) => [s.tagName, s]));
   const work: RangeWork[] = [];
   for (let i = ordered.length - 1; i >= 0; i -= 1) {
@@ -160,6 +172,8 @@ export interface TagRangeDeps {
   compare?: (base: string, head: string, page: number) => Promise<RestCompareResponse>;
   commitPrs?: (shas: string[]) => Promise<CommitPrsResponse>;
   now?: () => number;
+  /** The configured workspaces' suffixes (default: read from the DB). */
+  settings?: () => ReleaseSettings[];
 }
 
 export interface ComputeTagRangesOptions {
@@ -275,13 +289,17 @@ async function historyRange(
   };
 }
 
-/** The 'compare' range. Null when GitHub could not be read (retried next sync). Throws on a rate limit. */
+/** The fallback could not ask about every unmatched commit (the budget ran low): not stored, retried
+ *  next sync — a stored range is final, so it must not be missing a PR. */
+const BUDGET_PAUSED = 'budget' as const;
+
+/** The 'compare' range. 'budget' when the fallback paused (retried next sync). Throws on a rate limit. */
 async function compareRange(
   opts: ComputeTagRangesOptions,
   defaultBranch: string,
   base: RangeTag,
   tag: RangeTag,
-): Promise<ComputedRange | null> {
+): Promise<ComputedRange | typeof BUDGET_PAUSED> {
   const { owner, name, accountId, repoId, token } = opts;
   const fullName = `${owner}/${name}`;
   if (base.sha === tag.sha) {
@@ -324,7 +342,7 @@ async function compareRange(
   const ask = unmatched.slice(-COMMIT_PR_FALLBACK_MAX);
   const stillUnmatched = new Set(unmatched);
   for (const part of chunks(ask, COMMIT_PRS_ALIAS_CAP)) {
-    if (isLimited(accountId) || isBudgetLow(accountId)) break;
+    if (isLimited(accountId) || isBudgetLow(accountId)) return BUDGET_PAUSED;
     const resp =
       (await opts.deps?.commitPrs?.(part)) ??
       (await withGithubRetry(() =>
@@ -347,7 +365,7 @@ async function compareRange(
       const node = resp.repository?.[`c${i}`] as GqlCommitPrsNode | null | undefined;
       const found = rangePrNumbersFromAssociated(node?.associatedPullRequests?.nodes, fullName, defaultBranch);
       for (const n of found) numbers.add(n);
-      // Still unmatched = no PR of this repo into its default branch (a direct push), or not asked.
+      // Still unmatched = no PR of this repo into its default branch (a direct push).
       if (found.length > 0) stillUnmatched.delete(sha);
     });
   }
@@ -405,7 +423,8 @@ export async function computeTagRanges(
       .from(repoTagRanges)
       .where(and(eq(repoTagRanges.accountId, accountId), eq(repoTagRanges.repoId, repoId)))
       .execute();
-    const full = planTagRanges(tags, stored, { perSync: Number.MAX_SAFE_INTEGER });
+    const settings = opts.deps?.settings != null ? opts.deps.settings() : await configuredReleaseSettings(accountId);
+    const full = planTagRanges(tags, stored, { perSync: Number.MAX_SAFE_INTEGER, settings });
     const plan = { work: full.work.slice(0, TAG_RANGES_PER_SYNC), deleteTagNames: full.deleteTagNames };
     result.pending = full.work.length - plan.work.length;
 
@@ -428,7 +447,7 @@ export async function computeTagRanges(
         result.pending += 1;
         continue;
       }
-      let range: ComputedRange | null;
+      let range: ComputedRange | typeof BUDGET_PAUSED;
       try {
         range =
           w.base == null
@@ -445,8 +464,8 @@ export async function computeTagRanges(
         log?.warn(`tag ranges ${fullName}: ${w.tag.name} not computed (non-fatal): ${errMsg(err)}`);
         continue;
       }
-      if (range == null) {
-        result.failed += 1;
+      if (range === BUDGET_PAUSED) {
+        result.pending += 1;
         continue;
       }
       const now = new Date(opts.deps?.now?.() ?? Date.now());

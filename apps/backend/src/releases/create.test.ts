@@ -82,6 +82,8 @@ beforeEach(async () => {
     calls: { tag: [], prerelease: [], comment: [], reread: [] },
     linear: new Set(),
   };
+  extraPrs = [];
+  dropPrs = new Set();
   // Each test starts with no release rows (the unique tag index spans releases).
   const { releases, releaseItems, releaseTicketComments } = client.schema;
   await client.db.delete(releaseTicketComments).execute();
@@ -131,7 +133,13 @@ function input(): ReleaseCheckInput {
   return {
     settings: { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' },
     repos: [repo(API, 'api', [10, 11]), repo(WEB, 'web', [20, 21])],
-    prs: [pr(10, API, 'Login via SSO', ['PLAT-1']), pr(11, API, 'Rate limit the export', ['PLAT-2']), pr(20, WEB, 'SSO button', ['PLAT-1']), pr(21, WEB, 'Dark mode', ['PLAT-3'])],
+    prs: [
+      pr(10, API, 'Login via SSO', ['PLAT-1']),
+      pr(11, API, 'Rate limit the export', ['PLAT-2']),
+      pr(20, WEB, 'SSO button', ['PLAT-1']),
+      pr(21, WEB, 'Dark mode', ['PLAT-3']),
+      ...extraPrs,
+    ].filter((p) => !dropPrs.has(p.id)),
     tickets: Object.keys(w.stored).map((key) => ({
       ident: identOf(key),
       key,
@@ -144,6 +152,16 @@ function input(): ReleaseCheckInput {
     acceptedRepos: [],
   };
 }
+
+/** The loader's narrowing: only these repos and their PRs. */
+function only(inp: ReleaseCheckInput, repoIds: readonly number[]): ReleaseCheckInput {
+  const ids = new Set(repoIds);
+  return { ...inp, repos: inp.repos.filter((r) => ids.has(r.repoId)), prs: inp.prs.filter((p) => ids.has(p.repoId)) };
+}
+
+/** Extra PRs a test adds to the world (an open PR opened after the dialog, …). */
+let extraPrs: ReleaseCheckInput['prs'] = [];
+let dropPrs = new Set<number>();
 
 const github: ReleaseGithub = {
   async readTagSha(_owner, name, tag) {
@@ -165,8 +183,9 @@ const github: ReleaseGithub = {
 function deps(over: Partial<ReleaseWriteDeps> = {}): ReleaseWriteDeps {
   return {
     now: () => new Date(2026, 10, 14, 12),
-    async check() {
-      const inp = input();
+    // Honours the repoIds it is given, like the real loader: only those repos' tags, ranges and PRs.
+    async check(_accountId, _workspaceId, repoIds) {
+      const inp = only(input(), repoIds);
       return { result: foldReleaseCheck(inp), repoNames: new Map(inp.repos.map((r) => [r.repoId, { owner: 'acme', name: r.name }])) };
     },
     async rereadTicket(_accountId, t) {
@@ -298,6 +317,17 @@ describe('createRelease — the writes, in order, each claimed', () => {
     expect(w.calls.tag).toEqual([]);
   });
 
+  it('the check folds over the WHOLE workspace: an open web PR for PLAT-2 opened after the dialog stops an api-only Confirm', async () => {
+    dropPrs = new Set([20]); // PLAT-1 is api-only here, so api alone ships whole
+    const snap = await snapshot([API]);
+    expect(snap.tickets.map((t) => t.key)).toEqual(['PLAT-1', 'PLAT-2']);
+    extraPrs = [{ id: 30, repoId: WEB, number: 30, title: 'More export work', url: 'https://github.com/acme/web/pull/30', isBot: false, intoDefaultBranch: true, state: 'open', mergedAt: null, ticketIdents: [ident('PLAT-2')] }];
+    const res = await m.createRelease(1, workspaceId, { repoIds: [API], snapshot: snap }, deps());
+    expect(res.outcome).toBe('stopped');
+    expect(res.changes.join(' ')).toContain('PLAT-2');
+    expect(w.calls.tag).toEqual([]);
+  });
+
   it('acceptance 22: a repo fails to tag → its tickets get no comment; tickets only in other repos do; the result says so', async () => {
     w.failTag.add('web');
     const res = await create([API, WEB]);
@@ -323,26 +353,52 @@ describe('createRelease — the writes, in order, each claimed', () => {
     const counts = { tag: w.calls.tag.length, pre: w.calls.prerelease.length, comment: w.calls.comment.length };
     // The same press again (the stored rows not caught up): every name is taken — nothing is written.
     const again = await m.createRelease(1, workspaceId, { repoIds: [API, WEB], snapshot: snap }, deps({ check: stale }));
-    expect(again.outcome).toBe('written');
+    // Every name is owned by the first press: nothing is recorded either (no empty "latest release").
+    expect(again.outcome).toBe('stopped');
+    expect(again.changes).toContain('api v1.0.0-rc was already made by an earlier release. Nothing was written for it.');
     expect({ tag: w.calls.tag.length, pre: w.calls.prerelease.length, comment: w.calls.comment.length }).toEqual(counts);
-    expect(again.release!.state).toBe('failed');
   });
 
-  it('a tag claimed by an earlier press is never written again, even when GitHub forgot it (claim before write, never retried)', async () => {
+  it('a FAILED tag holds no name: a later press is a new claim on a new row, and the failed row stays as history', async () => {
     w.failTag.add('web');
     const snap = await snapshot([API, WEB]);
     await create([API, WEB], snap);
     const webCalls = () => w.calls.tag.filter((t) => t.startsWith('web')).length;
     expect(webCalls()).toBe(1);
     w.failTag.clear();
-    // GitHub has no web release tag; the earlier press's FAILED row still owns the name.
     const again = await m.createRelease(1, workspaceId, { repoIds: [API, WEB], snapshot: snap }, deps({ check: stale }));
-    expect(webCalls()).toBe(1);
-    expect(again.release!.steps).toContainEqual({ ok: false, text: 'web v1.0.0-rc was already made by an earlier release. Nothing was written for it.' });
-    // The failed row stays failed.
+    expect(again.outcome).toBe('written');
+    expect(webCalls()).toBe(2);
     const { releaseItems } = client.schema;
     const rows = await client.db.select().from(releaseItems).execute();
-    expect(rows.filter((r: any) => r.releaseTagName === 'v1.0.0-rc' && r.repoId === WEB).map((r: any) => r.tagState)).toEqual(['failed']);
+    expect(rows.filter((r: any) => r.releaseTagName === 'v1.0.0-rc' && r.repoId === WEB).map((r: any) => r.tagState).sort()).toEqual(['done', 'failed']);
+    // A third press: the DONE row owns the name — nothing is written, and no empty release is recorded.
+    const before = (await client.db.select().from(client.schema.releases).execute()).length;
+    const third = await m.createRelease(1, workspaceId, { repoIds: [API, WEB], snapshot: snap }, deps({ check: stale }));
+    expect(webCalls()).toBe(2);
+    expect(third.outcome).toBe('stopped');
+    expect(third.changes).toContain('web v1.0.0-rc was already made by an earlier release. Nothing was written for it.');
+    expect((await client.db.select().from(client.schema.releases).execute()).length).toBe(before);
+  });
+
+  it('a tag CLAIMED by an earlier press (it stopped part way) is never written again, and says so', async () => {
+    const snap = await snapshot([API, WEB]);
+    const { releaseItems, releases } = client.schema;
+    const [rel] = await client.db
+      .insert(releases)
+      .values({ accountId: 1, workspaceId, createdAt: new Date(), releaseSuffix: '-rc', notesMarkdown: '', state: 'writing' })
+      .returning()
+      .execute();
+    await client.db
+      .insert(releaseItems)
+      .values({ accountId: 1, releaseId: rel.id, repoId: WEB, versionTag: 'v1.0.0', sha: 'x', releaseTagName: 'v1.0.0-rc', tagState: 'claimed', updatedAt: new Date() })
+      .execute();
+    const res = await create([API, WEB], snap);
+    expect(w.calls.tag.filter((t) => t.startsWith('web'))).toHaveLength(0);
+    expect(res.release!.steps).toContainEqual({
+      ok: false,
+      text: 'web v1.0.0-rc is being made by an earlier release, or that release stopped part way (check GitHub). Nothing was written for it.',
+    });
   });
 
   it('another tracker: the comment is skipped with "not supported yet", per ticket', async () => {
@@ -370,8 +426,12 @@ describe('createRelease — the writes, in order, each claimed', () => {
 });
 
 /** The check as it read BEFORE the release tags were stored (the repeat-press race). */
-async function stale(): Promise<ReturnType<ReleaseWriteDeps['check']> extends Promise<infer R> ? R : never> {
-  const inp = input();
+async function stale(
+  _accountId?: number,
+  _workspaceId?: number,
+  repoIds: readonly number[] = [API, WEB],
+): Promise<ReturnType<ReleaseWriteDeps['check']> extends Promise<infer R> ? R : never> {
+  const inp = only(input(), repoIds);
   for (const r of inp.repos) {
     r.tags = r.tags.filter((t) => !t.name.endsWith('-rc'));
     r.ranges = r.ranges.filter((x) => !x.tagName.endsWith('-rc'));

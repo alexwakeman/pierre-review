@@ -5555,7 +5555,10 @@ export const releaseItems = sqliteTable(
   },
   (t) => ({
     releaseRepoUx: uniqueIndex('release_items_account_release_repo').on(t.accountId, t.releaseId, t.repoId),
-    tagNameUx: uniqueIndex('release_items_account_repo_tag').on(t.accountId, t.repoId, t.releaseTagName),
+    // ⚠ The tag-name UNIQUE is PARTIAL — only a live row (pending / claimed / done) holds the name, so
+    // a failed or refused write does not block a later press. It lives in migration 0194 ONLY
+    // (`release_items_account_repo_tag_live`); this is its plain lookup index.
+    tagNameIdx: index('release_items_account_repo_tag_idx').on(t.accountId, t.repoId, t.releaseTagName),
     releaseAccountFk: foreignKey({
       name: 'release_items_release_account_fk',
       columns: [t.releaseId, t.accountId],

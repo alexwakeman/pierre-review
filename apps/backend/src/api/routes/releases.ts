@@ -5,11 +5,13 @@ import {
   validateReleaseSettings,
   type CreateReleaseBody,
   type ReleasePreviewBody,
+  type ReleasesRefreshResponse,
   type ReleasesResponse,
   type SetReleaseSettingsBody,
 } from '@pierre-review/shared';
 import { ReleaseRequestError, createRelease, getReleaseDetail, previewRelease } from '../../releases/create.js';
 import { getReleases } from '../../db/release-check.js';
+import { refreshReleases } from '../../releases/refresh.js';
 import { getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 
@@ -25,6 +27,9 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                              `foldReleaseCheck` over db/release-check.ts's stored
 //                                              inputs), the newest release, whether both suffixes are
 //                                              set. DB only, NEVER a GitHub or tracker call; tier `read`.
+//   POST /api/releases/refresh?workspace=<id>  Refresh (a reader's press): the tickets the check holds by
+//                                              their own state read again from the tracker
+//                                              (releases/refresh.ts), then the check. Tier `search`.
 //   POST /api/releases/preview?workspace=<id>  "Create release…" opening: `{repoIds}` → the snapshot,
 //                                              the notes (a model summary per story when AI is on — a
 //                                              reader's click, never refused by the spend gate) and the
@@ -91,6 +96,11 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
     }
     throw err;
   };
+
+  app.post('/api/releases/refresh', async (req): Promise<ReleasesRefreshResponse> => {
+    const q = req.query as { workspace?: string };
+    return refreshReleases(accountIdOf(req), q.workspace);
+  });
 
   app.post(
     '/api/releases/preview',
