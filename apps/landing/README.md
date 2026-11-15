@@ -18,7 +18,7 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (the Spiral and the Quartet, Goethe's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
+| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (the Chain and the Quartet, Goethe's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
 | `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
 | `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
 | `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
@@ -41,8 +41,8 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 
 **EVERY OTHER PICTURE IS DRAWN IN CODE** from one motif, the banded quarter-circle
 (`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
-`Arcs.tsx` draws a composition; `pieces.tsx` holds the Spiral, Quartet, Orchestra and Combo;
-`arcMotion.ts` draws them out and opens them up on scroll, started by `useReveal`, off under
+`Arcs.tsx` draws a composition; `pieces.tsx` holds the Chain, Quartet, Orchestra and Combo;
+`arcMotion.ts` draws them out and brings them together as the reader scrolls down, started by `useReveal`, off under
 reduced motion). No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
 `public/og-image.png` are generated (`node scripts/make-favicons.mjs`, `node scripts/make-og-image.mjs`):
 the mark from `packages/shared/src/brand-mark.ts`, the one definition the app's Wordmark also draws. The voice tiles carry a quarter in their corner

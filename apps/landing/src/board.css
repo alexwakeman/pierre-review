@@ -106,17 +106,9 @@
   /* the ember fill: kept to its warm, light end so dark text holds 7:1 */
   --g-gold: linear-gradient(120deg, var(--orange) 0%, var(--amber) 45%, var(--yellow) 100%);
   --g-ember: linear-gradient(90deg, var(--run-ember));
-  --g-spectrum: linear-gradient(
-    90deg,
-    var(--red),
-    var(--orange),
-    var(--yellow),
-    var(--lime),
-    var(--mint),
-    var(--azure),
-    var(--violet),
-    var(--pink)
-  );
+  /* THE RULE — the one straight gradient (current nav link, footer): the warm end of
+     ember only, three neighbouring colours, never the whole spectrum. */
+  --g-rule: linear-gradient(90deg, var(--orange), var(--amber), var(--yellow));
   --gap: 8px;
   --m: 10px;
   --step-body: clamp(1.0625rem, 1rem + 0.25vw, 1.1875rem);
@@ -261,12 +253,13 @@ body:has(.lb) {
 
 /* ---- the arcs (components/arcs) ---------------------------------------- */
 /* Two inputs, set by arcMotion.ts from the scroll position: --draw (the bands
-   draw out, innermost first, and each quarter slides home) and --spread (it
-   opens out as it leaves). The defaults are the finished, still picture. */
+   draw out, innermost first, and each quarter slides home) and --apart (how far
+   the hero's links still are from closing up). Scrolling down only ever brings a
+   picture together. The defaults are the finished, still picture. */
 .lb svg.arcs,
 .lb-foot svg.arcs {
   --draw: 1;
-  --spread: 0;
+  --apart: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -286,10 +279,9 @@ body:has(.lb) {
 .lb svg.arcs .q {
   transform-box: view-box;
   transform: translate(
-      calc(var(--dx) * (1 - var(--draw) + var(--spread) * 0.6) * 1px),
-      calc(var(--dy) * (1 - var(--draw) + var(--spread) * 0.6) * 1px)
-    )
-    scale(calc(1 + var(--spread) * 0.06));
+    calc(var(--dx) * (1 - var(--draw) + var(--apart) * 1.6) * 1px),
+    calc(var(--dy) * (1 - var(--draw) + var(--apart) * 1.6) * 1px)
+  );
 }
 .lb svg.arcs.blend .q {
   mix-blend-mode: screen;
@@ -415,10 +407,10 @@ body:has(.lb) {
 .lb-nav .links-sm a:hover {
   color: var(--amber);
 }
-/* The current page: a short spectrum underline, the site's one gradient rule. */
+/* The current page: a short warm underline, the site's one gradient rule. */
 .lb-nav a[aria-current='page'] {
   border-bottom-color: transparent;
-  border-image: var(--g-spectrum) 1;
+  border-image: var(--g-rule) 1;
 }
 .lb-nav .go {
   grid-column: span 2;
@@ -442,12 +434,12 @@ body:has(.lb) {
   padding-bottom: var(--m);
 }
 .lb-foot::before {
-  /* the footer opens on one spectrum hairline */
+  /* the footer opens on one warm hairline */
   content: '';
   display: block;
   height: 3px;
   margin-top: 64px;
-  background: var(--g-spectrum);
+  background: var(--g-rule);
 }
 .lb-foot .flinks {
   position: relative;
@@ -623,6 +615,6 @@ body:has(.lb) {
 @media (prefers-reduced-motion: reduce) {
   .lb svg.arcs {
     --draw: 1 !important;
-    --spread: 0 !important;
+    --apart: 0 !important;
   }
 }

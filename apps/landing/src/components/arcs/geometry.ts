@@ -188,53 +188,91 @@ export const RUNS: Record<RunName, readonly string[]> = {
 /** The order compositions cycle through. */
 export const RUN_ORDER: readonly RunName[] = ['ember', 'dawn', 'meadow', 'dusk', 'bloom'];
 
-// ---- the signature composition --------------------------------------------
+// ---- the signature composition: the CHAIN -----------------------------------
+// Quarters linked end to end, each joined to the last along a shared radius, so the
+// bands run on from one link into the next like a ribbon. Every link is one of two:
+//   'B' (bend)  the next centre is the far end of the shared radius: the ribbon turns
+//               the other way, and the rim of one quarter meets the core of the next
+//   'A' (arc)   the next quarter shares the centre: two links make a half-disc
+// The step string chooses the shape. The site's chain is all bends but one arc, which
+// makes it walk down the tile in a zigzag rather than stacking half-discs.
 
-// Neighbouring quarters never share a temperature: warm, cool, warm, cool …
-const SPIRAL_RUNS: readonly RunName[] = ['ember', 'dusk', 'dawn', 'bloom', 'meadow'];
+// Neighbouring links never share a temperature: warm, cool, warm, cool …
+const CHAIN_RUNS: readonly RunName[] = ['ember', 'dusk', 'dawn', 'bloom', 'meadow', 'dusk', 'ember'];
 
-/** A golden spiral, portrait (13 × 21 units of `u`), turning clockwise inward. */
-export function spiralQuarters(u: number, steps = 7, offset = 0): Quarter[] {
-  let x = 0;
-  let y = 0;
-  let w = 13;
-  let h = 21;
-  const out: Quarter[] = [];
-  for (let i = 0; i < steps; i++) {
-    const dir = i % 4; // top, right, bottom, left
-    let s: number;
-    let cx: number;
-    let cy: number;
-    let corner: Corner;
-    if (dir === 0) {
-      s = w;
-      [cx, cy, corner] = [x, y + s, 'bl'];
-      y += s;
-      h -= s;
-    } else if (dir === 1) {
-      s = h;
-      [cx, cy, corner] = [x + w - s, y, 'tl'];
-      w -= s;
-    } else if (dir === 2) {
-      s = w;
-      [cx, cy, corner] = [x + s, y + h - s, 'tr'];
-      h -= s;
+const CORNER_OF = (sx: number, sy: number): Corner =>
+  sx > 0 ? (sy > 0 ? 'tl' : 'bl') : sy > 0 ? 'tr' : 'br';
+
+/**
+ * A chain of quarters of radius `R`, starting with a quarter centred at the origin and
+ * reaching right and down. `steps` holds one letter per link after the first; the
+ * chain leaves each quarter across the radius it did not come in by, starting with
+ * `first` ('h': the horizontal radius, 'v': the vertical one). Returns the quarters
+ * shifted so the chain's box (plus `margin` radii all round) starts at (0, 0), and
+ * that box's size. Each quarter's assembly offset points away from the chain's middle.
+ */
+export function chainQuarters(
+  R: number,
+  steps: string,
+  first: 'h' | 'v' = 'v',
+  margin = 0,
+): { quarters: Quarter[]; width: number; height: number } {
+  let cx = 0;
+  let cy = 0;
+  let sx = 1;
+  let sy = 1;
+  let edge = first;
+  const raw: { cx: number; cy: number; sx: number; sy: number }[] = [{ cx, cy, sx, sy }];
+  for (const step of steps) {
+    if (edge === 'h') {
+      if (step === 'B') {
+        cx += sx * R;
+        sx = -sx;
+      }
+      sy = -sy;
     } else {
-      s = h;
-      [cx, cy, corner] = [x + s, y + s, 'br'];
-      x += s;
-      w -= s;
+      if (step === 'B') {
+        cy += sy * R;
+        sy = -sy;
+      }
+      sx = -sx;
     }
-    out.push({
-      cx: cx * u,
-      cy: cy * u,
-      R: s * u,
-      corner,
-      run: SPIRAL_RUNS[(i + offset) % SPIRAL_RUNS.length] as RunName,
-      n: Math.max(3, Math.round(4 + (12 * s) / 13)),
-    });
-    if (w <= 0 || h <= 0) break;
+    raw.push({ cx, cy, sx, sy });
+    edge = edge === 'h' ? 'v' : 'h';
   }
-  return out;
+  const xs = raw.flatMap((q) => [q.cx, q.cx + q.sx * R]);
+  const ys = raw.flatMap((q) => [q.cy, q.cy + q.sy * R]);
+  // a margin all round, so the links still fit while they are apart
+  const m = margin * R;
+  const x0 = Math.min(...xs) - m;
+  const y0 = Math.min(...ys) - m;
+  const w = Math.max(...xs) - Math.min(...xs);
+  const h = Math.max(...ys) - Math.min(...ys);
+  const mx = Math.min(...xs) + w / 2;
+  const my = Math.min(...ys) + h / 2;
+  return {
+    quarters: raw.map((q, i) => {
+      // each link waits OUTWARD from the chain's middle and closes in along that line,
+      // so no two links cross on their way home
+      const ux = q.cx + (q.sx * R) / 2 - mx;
+      const uy = q.cy + (q.sy * R) / 2 - my;
+      const len = Math.hypot(ux, uy) || 1;
+      return {
+        cx: q.cx - x0,
+        cy: q.cy - y0,
+        R,
+        corner: CORNER_OF(q.sx, q.sy),
+        run: CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName,
+        dx: Math.round((ux / len) * R * 0.16 * 100) / 100,
+        dy: Math.round((uy / len) * R * 0.16 * 100) / 100,
+      };
+    }),
+    width: w + 2 * m,
+    height: h + 2 * m,
+  };
 }
 
+/** The site's chain (the hero and the share image): it zigzags down a portrait box of
+ *  3 × 4 radii. A chain that stacks half-discs on one centre line is avoided on purpose:
+ *  that is the reference artwork's own figure. */
+export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.3 } as const;
