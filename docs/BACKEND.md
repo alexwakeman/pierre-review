@@ -15,9 +15,10 @@ the platform (`bindPlatform`, `platform/context.ts` → `registerPlatform`), sta
 and the scheduler, listens, then starts the worktree sweep in the background (§ Worktree cleanup). There is one synthesized account (id 1): `ensureLocalAccount()`
 shells out to `gh api user` at startup, caches the identity on the `accounts` row (refreshed
 ~daily; non-fatal offline — you lose "my turn" triage). Right after it, the boot awaits
+`renameLegacyLimnBotLabels` (stored "Limn · alice" bot names → "Ensemble · alice", once) and
 `reconcileLimnFindingAuthors` (`db/limn-bots.ts`, DB only, never fails the boot): it moves stored
-Limn finding comments to their poster's `limn:` bot (or back to the person), and writes their
-severity labels ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are bots). API calls use `gh auth token`
+Ensemble finding comments to their poster's `limn:` bot (or back to the person), and writes their
+severity labels ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ensemble findings are bots). API calls use `gh auth token`
 (`getAccessToken`); SQLite opens `journal_mode=WAL` + `foreign_keys=ON`. There is no sign-in,
 no session and no hosted mode.
 
@@ -34,9 +35,9 @@ docs-check shortlist) goes through `cheapComplete`, and every one takes THE ONE 
 2. else **`ANTHROPIC_API_KEY`** from the environment → the Anthropic API directly
    (`@anthropic-ai/sdk`, loaded through `ai/runtime.ts` `loadAnthropicSdk`).
 
-"Use my API keys first" (Settings → AI, or `LIMN_AI_USE_API_KEY=true`/`false`, which wins) puts the key first. No caller passes a key or a route
+"Use my API keys first" (Settings → AI, or `ENSEMBLE_AI_USE_API_KEY=true`/`false`, which wins) puts the key first. No caller passes a key or a route
 (`SUMMARY_ANTHROPIC_API_KEY`, `apiKey`, `localRoute` are gone). With no credential the call throws
-the one auth line; under `LIMN_AI_DISABLED` it throws "Claude is switched off here." Pinned by
+the one auth line; under `ENSEMBLE_AI_DISABLED` it throws "Claude is switched off here." Pinned by
 `ai/credentials.test.ts`, `review/llm-ladder.test.ts` (incl. the platform clients) and
 `review/auth.test.ts`. Same model (Haiku 5.5) both ways.
 
@@ -185,7 +186,7 @@ kill or a failed `git worktree remove` leaves a full checkout behind. Two pieces
 - **The sweep** — `review/worktree-gc.ts` `runWorktreeSweep`, with the policy pure in
   `review/worktree-gc-policy.ts` (`decideLedgered`, `decideOrphan`; the ORDER of the rules is the
   policy, read the header). Keep: in use by a job in this process (`liveWorktrees` — identity,
-  never age); made by another LIVE Limn process and not idle (`WORKTREE_IDLE_DAYS`, 3); holding a
+  never age); made by another LIVE Ensemble process and not idle (`WORKTREE_IDLE_DAYS`, 3); holding a
   fix the reader has not pushed (`ai_fixes` succeeded with a patch, not pushed — kept until pushed
   or discarded, at most `WORKTREE_PIN_DAYS`, 14), or a story build's repository the reader has not
   pushed. "Implement story" ledgers two kinds: `story_plan` (the plan pass's read-only checkouts,
@@ -370,34 +371,34 @@ board, while a repo added later still starts clean at its add time.
 - The same mark opens Pending's summary window (`PENDING_SUMMARY_DAYS` from the earliest marked
   add; docs/FRONTEND.md § Pending on the first landing). Pinned by `db/pending-first-landing.test.ts`.
 
-### Everything Limn does on your behalf is not you (2026-11-08)
+### Everything Ensemble does on your behalf is not you (2026-11-08)
 
-The owner's rule: **Limn's whole cycle is bot activity, and a PR the reader never PERSONALLY touched is
-never My Turn.** Limn's reviews, findings, replies, story checks, pushes and merges are stored under
-the poster's `limn:` bot, the person in a `limn_*_by_user_id` column (CLAUDE-REVIEW.md § Limn's
+The owner's rule: **Ensemble's whole cycle is bot activity, and a PR the reader never PERSONALLY touched is
+never My Turn.** Ensemble's reviews, findings, replies, story checks, pushes and merges are stored under
+the poster's `limn:` bot, the person in a `limn_*_by_user_id` column (CLAUDE-REVIEW.md § Ensemble's
 actions are bots), so every "what did you last do" clock (`lastActionClocks`), the comment-reply
 candidates, the approval-answers-a-thread rule and the Feed's participation (`feed/my-turn.ts`) see
 only what the reader did in person. ⚠ Never OR `limn_posted_by_user_id` / `limn_merged_for_user_id`
-back into them. Like every bot action, a Limn action never returns the ball either.
+back into them. Like every bot action, an Ensemble action never returns the ball either.
 
-- **Threads.** The reader's thread set is the reader ALONE: a person replying to the reader's Limn
-  finding does NOT summon them. A Limn-rooted thread the reader replied in, in person, is S3(d) like
-  any other. (On the reader's OWN PR their Limn's untouched finding is still not an "unanswered
+- **Threads.** The reader's thread set is the reader ALONE: a person replying to the reader's Ensemble
+  finding does NOT summon them. An Ensemble-rooted thread the reader replied in, in person, is S3(d) like
+  any other. (On the reader's OWN PR their Ensemble's untouched finding is still not an "unanswered
   thread" — `ownPrNoteOpeners`.)
-- **A review request only Limn answered still stands** (`db/limn-discharged-requests.ts`). GitHub
-  drops the request when Limn's review is submitted under the reader's login. The `review_request`
+- **A review request only Ensemble answered still stands** (`db/limn-discharged-requests.ts`). GitHub
+  drops the request when Ensemble's review is submitted under the reader's login. The `review_request`
   card is kept when the reader's newest request event is a `requested` one, no `review_requests`
-  row exists, a Limn review posted for them came at or after it, and no review of theirs in person
+  row exists, an Ensemble review posted for them came at or after it, and no review of theirs in person
   did; its clock is the request. The Feed counts it as `requested`.
-- **A PR Limn OPENED for the reader is "Your PRs"** (`prOwnerId` / `trueAuthorId`:
+- **A PR Ensemble OPENED for the reader is "Your PRs"** (`prOwnerId` / `trueAuthorId`:
   `limn_opened_for_user_id`, else the author): its CI, conflicts, approval, readiness and threads,
   Waiting on others, the ownership tests on the Pending cards, and the Feed's `authored`. It is never
-  a "New PR". Nothing Limn does on it counts as the reader acting.
+  a "New PR". Nothing Ensemble does on it counts as the reader acting.
 
 ### Removed types (2026-11-06)
 
-`your_pr` ("new activity on your PR"), `claude_review` ("New AI review by your Limn") and
-`ai_approved_merged` ("Merged after your Limn approved") are gone from the fold, the wire, the board
+`your_pr` ("new activity on your PR"), `claude_review` ("New AI review by your Ensemble") and
+`ai_approved_merged` ("Merged after your Ensemble approved") are gone from the fold, the wire, the board
 and the CLI: none is a person waiting on you. A new AI review is the AI reviews tab's own badge
 (below). `getUnseenOwnAiReviews` and `getApprovedThenMerged` were deleted; `claude_reviews.seen_at`
 is still written by the AI Review tab (`markClaudeReviewSeen`) and served as `ClaudeReview.seenAt`,
@@ -409,14 +410,14 @@ that names a removed type is ignored on read.
 The tab (labelled **AI reviews**, key `claude`, `kinds: ['ai_review']`) is a STABLE REFERENCE list:
 one `ai_review` card (`AiReviewCard`) per PR of the workspace, open or closed — its NEWEST AI review:
 
-- the reader's own Limn: a finished full review (`kind IS NULL`, `succeeded`, not a router skip) at
+- the reader's own Ensemble: a finished full review (`kind IS NULL`, `succeeded`, not a router skip) at
   its finish time. A Claude + Codex pair is ONE review, on its first half, with the pair's one
   verdict (`pair_consolidation.verdict`), both halves' findings and the later finish;
-- a teammate's Limn: an imported `kind = 'teammate'` row with a poster, at its post time.
+- a teammate's Ensemble: an imported `kind = 'teammate'` row with a poster, at its post time.
 
 Newest first, at most `AI_REVIEWS_LIST_CAP` (100) rows (`buildAiReviewCards`, then
 `listNewestFirst`). `findingCount` leaves out praise and merged-away repeats. `ranByUserId` is null
-for the reader's own Limn, else the teammate (in `users[]`).
+for the reader's own Ensemble, else the teammate (in `users[]`).
 
 ⚠ **LOOKING NEVER REMOVES A ROW.** The workspace's **`workspaces.ai_reviews_seen_at`** stamp
 (migration 0167; NULL = never looked) only says which rows are newer than the reader's last look:
@@ -707,7 +708,7 @@ about"** (the survey, S2). PER ACCOUNT: one account is one reader, in every work
 - **Your PRs are always in My Turn and MOVE from their home tab**: `own_ci_red` (a red build),
   `own_conflicts` (a conflict, in a repo you can push to), `own_ready` (GitHub will merge it now, or
   once the branch is updated) and `own_thread` (a review thread with no reply and no later commit for
-  a day — or one a Limn, yours or a teammate's, holds STILL OPEN at the PR's current head with no
+  a day — or one an Ensemble, yours or a teammate's, holds STILL OPEN at the PR's current head with no
   reply from you since: `own.stillOpen`, `db/still-open-threads.ts`, docs/CLAUDE-REVIEW.md
   § Still-open points). Each is `direct`.
   - ⚠ **A PROMOTED CARD MOVES, IT IS NEVER LISTED TWICE.** `getWorkspaceInsights` builds
@@ -762,9 +763,9 @@ WORKING hours ("With sam · 6h"). It is READ-ONLY information.
   asked for changes after both the last push and the newest request — the author's move. A muted
   repository's PRs have no My Turn card, so they can be listed here: the reader's own ball rule
   decides.
-- **"Waiting for a teammate's Limn to review"** (2026-11-10). `limnVerdictWait: true` on a row whose
-  head the reader's own Limn review is posted at and no teammate's Limn has reviewed, when a teammate's
-  Limn ran an AUTO review in the workspace within 14 days (`db/teammate-verdict-wait.ts`; AI on only).
+- **"Waiting for a teammate's Ensemble to review"** (2026-11-10). `limnVerdictWait: true` on a row whose
+  head the reader's own Ensemble review is posted at and no teammate's Ensemble has reviewed, when a teammate's
+  Ensemble ran an AUTO review in the workspace within 14 days (`db/teammate-verdict-wait.ts`; AI on only).
   A label beside the ref, never a holder, a count or a score (docs/TEAM-REVIEW.md § 4).
 - **The clock.** Per holder: the NEWEST stored `requested` event naming them (a re-request — and a
   Nudge — restarts it), else the PR's `firstReviewRequestedAt`, else `openedAt`, clamped to the PR's

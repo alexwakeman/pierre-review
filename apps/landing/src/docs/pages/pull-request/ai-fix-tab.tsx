@@ -62,7 +62,7 @@ export default function Page(): JSX.Element {
       <H2 id="merge-conflicts">Resolve merge conflicts with AI</H2>
       <p>
         When the branch conflicts with its base, the list includes <Ui>Resolve merge conflicts</Ui>. The agent
-        merges the base first, then makes the other fixes on top. Limn checks the merge before it lets you push
+        merges the base first, then makes the other fixes on top. Ensemble checks the merge before it lets you push
         it. See <DocLink to="ai-fix/resolve-merge-conflicts">Resolve merge conflicts with AI Fix</DocLink>.
       </p>
 

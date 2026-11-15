@@ -4,14 +4,14 @@ import { DocLink, ExtLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, S
 export const meta: DocMeta = {
   title: 'Linear',
   summary:
-    'Connect Linear with a personal API key so story checks, reviews and This Sprint read your issues and the active cycle. Limn only reads Linear.',
+    'Connect Linear with a personal API key so story checks, reviews and This Sprint read your issues and the active cycle. Ensemble only reads Linear.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        With Linear as a workspace&rsquo;s tracker, Limn links each pull request to its Linear issues, reads those
+        With Linear as a workspace&rsquo;s tracker, Ensemble links each pull request to its Linear issues, reads those
         issues, and shows each team&rsquo;s active cycle on This Sprint. It reads with a personal API key you save
         in Settings, and it never changes anything in Linear.
       </p>
@@ -62,8 +62,8 @@ export default function Page(): JSX.Element {
         <SettingsRow label="Personal API key" hint="Saved" control={<TextBox value="••••••••" />} />
       </Illustration>
       <Note>
-        Limn refuses a value that is not shaped like a Linear key, so a pasted GitHub or Jira token is never saved or
-        sent. A key belongs to one Linear workspace: if it is for another workspace than the URL, Limn says so and
+        Ensemble refuses a value that is not shaped like a Linear key, so a pasted GitHub or Jira token is never saved or
+        sent. A key belongs to one Linear workspace: if it is for another workspace than the URL, Ensemble says so and
         reads nothing.
       </Note>
 
@@ -82,7 +82,7 @@ export default function Page(): JSX.Element {
         key in the Story check&rsquo;s <Ui>Add tickets</Ui>.
       </p>
 
-      <H2 id="what-limn-reads">What Limn reads</H2>
+      <H2 id="what-ensemble-reads">What Ensemble reads</H2>
       <ul>
         <li>
           For each linked issue: the identifier, title, description, state, assignee, project name, sub-issues,
@@ -102,20 +102,20 @@ export default function Page(): JSX.Element {
       </ul>
       <p>Linear has no issue types, so story checks and settings treat every issue alike.</p>
 
-      <H3 id="how-often-limn-reads">How often Limn reads</H3>
+      <H3 id="how-often-ensemble-reads">How often Ensemble reads</H3>
       <p>
         An open pull request&rsquo;s issues are read when it arrives and about every 30 minutes; its Linear links are
-        checked about every 30 minutes too. The cycle is read about every 20 minutes while This Sprint is in use. Limn
+        checked about every 30 minutes too. The cycle is read about every 20 minutes while This Sprint is in use. Ensemble
         tracks Linear&rsquo;s rate limit for your key and waits before it gets close, so you never see a limit error.
         A workspace with 100 open pull requests stays far inside the limit.
       </p>
 
-      <H2 id="what-limn-writes">What Limn writes</H2>
+      <H2 id="what-ensemble-writes">What Ensemble writes</H2>
       <p>
         One thing, only when you pick it: the assignee. In a ticket&rsquo;s{' '}
         <DocLink to="this-sprint/story-view#assign-the-ticket">story view</DocLink>, the assignee is a menu of the
         active members of the issue&rsquo;s team, and <Ui>Unassigned</Ui>. The change is made with the saved Linear
-        key, so it shows as made by the key&rsquo;s owner, and the key needs write access. Limn does not change
+        key, so it shows as made by the key&rsquo;s owner, and the key needs write access. Ensemble does not change
         states, cycles or comments.
       </p>
 

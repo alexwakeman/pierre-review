@@ -105,9 +105,9 @@ export default function Page(): JSX.Element {
         remembers which of the two tabs you last used for each repository.
       </p>
 
-      <H2 id="docs-offers">If Limn cannot read the files</H2>
+      <H2 id="docs-offers">If Ensemble cannot read the files</H2>
       <p>
-        Where the AI features are on, the status panel can add one line with no dot: "Limn can't read this
+        Where the AI features are on, the status panel can add one line with no dot: "Ensemble can't read this
         repository's files, so its docs can't be offered", with the reason (no access, an empty repository, or
         not found on GitHub). It changes no count. See{' '}
         <DocLink to="docs-library/add-documents">Add documents</DocLink>.

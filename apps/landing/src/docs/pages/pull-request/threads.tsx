@@ -90,7 +90,7 @@ export default function Page(): JSX.Element {
         <DocLink to="timeline/thread-states#likely-addressed-is-a-guess">Likely addressed is a guess</DocLink>.
       </Warning>
       <Note>
-        Each bot comment also has a severity from Limn's own scorer: nit, minor, major or critical. See{' '}
+        Each bot comment also has a severity from Ensemble's own scorer: nit, minor, major or critical. See{' '}
         <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
       </Note>
     </>

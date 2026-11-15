@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
       <p>
         The <Ui>Docs</Ui> tab holds everything about the current workspace&rsquo;s{' '}
         <DocLink to="docs-library/overview">Docs library</DocLink>: whether AI Review reads it, and the Confluence and
-        Notion connections the library uses to add pages. Documents from GitHub need no connection: Limn reads them
+        Notion connections the library uses to add pages. Documents from GitHub need no connection: Ensemble reads them
         with your GitHub sign-in. Every setting here applies to this workspace only.
       </p>
 
@@ -33,8 +33,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="confluence">Connect Confluence</H2>
       <p>
-        Limn only reads Confluence pages. When Jira is this workspace&rsquo;s tracker and the pages are on the same
-        Atlassian site, Limn uses your Jira email and token and there is nothing to set up: the section reads{' '}
+        Ensemble only reads Confluence pages. When Jira is this workspace&rsquo;s tracker and the pages are on the same
+        Atlassian site, Ensemble uses your Jira email and token and there is nothing to set up: the section reads{' '}
         <Ui>Using your Jira connection</Ui>. Choose <Ui>Use a different token</Ui> to use another one.
       </p>
       <Steps>

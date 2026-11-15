@@ -3,7 +3,7 @@ import { Chip, DocLink, FindingRow, H2, Illustration, MiniTable, Note, Steps, Ui
 
 export const meta: DocMeta = {
   title: 'Claude and Codex together',
-  summary: 'With both signed in, the two review at the same time without seeing each other, and Limn merges the findings.',
+  summary: 'With both signed in, the two review at the same time without seeing each other, and Ensemble merges the findings.',
 };
 
 function MergedPicture(): JSX.Element {
@@ -31,8 +31,8 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Two different models miss different things. When you are signed in to both Claude and Codex, Limn can run
-        both on the same commit and give you one review. In Limn's own tests, one Claude review and one Codex review,
+        Two different models miss different things. When you are signed in to both Claude and Codex, Ensemble can run
+        both on the same commit and give you one review. In Ensemble's own tests, one Claude review and one Codex review,
         merged, found about four in five known issues; either one alone found about half.
       </p>
 
@@ -55,11 +55,11 @@ export default function Page(): JSX.Element {
       <Steps>
         <li>Claude and Codex start at the same time, each on its own. Neither sees the other's findings.</li>
         <li>
-          When both have finished, the tab says <Ui>Merging the two reviews…</Ui>. Limn groups the findings that make
+          When both have finished, the tab says <Ui>Merging the two reviews…</Ui>. Ensemble groups the findings that make
           the same point and keeps one of each group. A short summary covers both.
         </li>
         <li>
-          Limn, not a model, decides which finding of a group is kept. The more severe one wins, so a blocker is
+          Ensemble, not a model, decides which finding of a group is kept. The more severe one wins, so a blocker is
           never merged into a nit. A finding already on GitHub is always the one kept.
         </li>
         <li>
@@ -68,7 +68,7 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
       <p>
-        If the merge step itself fails, Limn still gives you one review: it keeps every finding except the clear
+        If the merge step itself fails, Ensemble still gives you one review: it keeps every finding except the clear
         repeats, and joins the two summaries.
       </p>
 
@@ -92,7 +92,7 @@ export default function Page(): JSX.Element {
         ]}
       />
       <p>
-        Either way, if one asks for changes, Limn does not approve. A model may hold back an approval because it could
+        Either way, if one asks for changes, Ensemble does not approve. A model may hold back an approval because it could
         not check something, such as a binary file in the diff; strict treats that as a reason not to approve,
         relaxed does not. Open blockers and warnings count the same whichever model found them. See{' '}
         <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
@@ -101,7 +101,7 @@ export default function Page(): JSX.Element {
       <H2 id="when-one-fails">When one of them fails</H2>
       <p>
         A Claude + Codex review always gives you a result while at least one half finishes. If one half fails, is
-        stopped by its usage limit, or is never started (for example because a teammate's Limn is already reviewing
+        stopped by its usage limit, or is never started (for example because a teammate's Ensemble is already reviewing
         with that model), the half that finished is the review. The tab says{' '}
         <Ui>Only one of the two reviews finished, so this is that review.</Ui> and names why the other did not
         finish.
@@ -119,7 +119,7 @@ export default function Page(): JSX.Element {
           or "Not approved: 1 earlier Codex point was not checked."
         </li>
         <li>
-          The checking model never argues with the other model's finding. It may find it fixed, and then Limn may
+          The checking model never argues with the other model's finding. It may find it fixed, and then Ensemble may
           resolve its thread.
         </li>
       </ul>
@@ -129,7 +129,7 @@ export default function Page(): JSX.Element {
       </Note>
       <H2 id="usage-limits">When a model is at its usage limit</H2>
       <p>
-        Until the limit resets, Limn uses the other model wherever it can. Replies to the locked model's findings are
+        Until the limit resets, Ensemble uses the other model wherever it can. Replies to the locked model's findings are
         judged by the other model. Check threads, CI and ticket reviews and the review chat run on the other model. A
         Claude + Codex review you start runs the other model alone, and the menu does not offer the pair as its first
         choice. A model you pick by name still runs on that model.

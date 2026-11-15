@@ -14,7 +14,7 @@ branch (§ AI Fix sessions). The product flows are [STORY-BUILD.md](STORY-BUILD.
 
 | Section | What it says |
 |---|---|
-| § Setting up a runtime | what to install, per computer; how Limn finds it; resources; clean-up |
+| § Setting up a runtime | what to install, per computer; how Ensemble finds it; resources; clean-up |
 | § Threat model | what could go wrong, and what stops each thing |
 | § Troubleshooting | the usual failures, and what to do |
 | § Invariants | the rules the code keeps |
@@ -33,17 +33,17 @@ decision D9). Docker Desktop is optional; its licence limit is stated.
 
 | Computer | Recommended (free) | Steps | Notes |
 |---|---|---|---|
-| Mac, Apple Silicon | **microsandbox** | `curl -fsSL https://install.microsandbox.dev \| sh`, then `msb doctor` | Beta. Each sandbox is a microVM with its own kernel; the model credential never enters it. ⚠ Limn's microsandbox backend is **untested** (§ microsandbox): use Colima until it is proven. |
+| Mac, Apple Silicon | **microsandbox** | `curl -fsSL https://install.microsandbox.dev \| sh`, then `msb doctor` | Beta. Each sandbox is a microVM with its own kernel; the model credential never enters it. ⚠ Ensemble's microsandbox backend is **untested** (§ microsandbox): use Colima until it is proven. |
 | Mac, Apple Silicon or Intel | **Colima** | `brew install colima docker docker-compose`, then `colima start --cpu 4 --memory 8 --disk 60` | MIT licence. The Colima VM is a second boundary around every container. Intel Macs cannot use microsandbox. |
 | Mac (other) | Docker Desktop | Install it; Settings → Resources: at least 8 GB of memory | Free only for organisations under 250 employees AND under US$10M a year in revenue. OrbStack also works; it is paid for commercial use. |
 | Linux | **Docker Engine** or **Podman** | Your distribution's packages. Add yourself to the `docker` group, or run Podman without root (`SANDBOX_CLI=podman`) | A container on Linux shares the host kernel. Where `/dev/kvm` exists, microsandbox gives a separate kernel. ⚠ Podman is untested. |
 | Linux with KVM | microsandbox | The installer above, then `msb doctor` | Needs glibc 2.28+ and access to `/dev/kvm`. ⚠ Untested (§ microsandbox). |
-| Windows | **WSL2 + Docker Engine inside WSL**, or Podman | Install WSL2, then Docker Engine in the Linux distribution; run Limn inside WSL | microsandbox needs WHP (beta). Windows containers are refused. |
+| Windows | **WSL2 + Docker Engine inside WSL**, or Podman | Install WSL2, then Docker Engine in the Linux distribution; run Ensemble inside WSL | microsandbox needs WHP (beta). Windows containers are refused. |
 
 The build tab and Settings → Sandbox show the same steps behind **How to set up**
 (`components/StoryBuild/SandboxSetupHelp.tsx`); keep the two in step.
 
-**How Limn finds the runtime.** `GET /api/sandbox/runtime` (cached 10 s) runs the detection of
+**How Ensemble finds the runtime.** `GET /api/sandbox/runtime` (cached 10 s) runs the detection of
 § The runtime layer: the CLI on `PATH`, whether the daemon answers, and the product (Docker Desktop with
 its licence line, Colima, Podman, Rancher Desktop, OrbStack, Docker Engine). The build tab shows the
 result in one line ("Runs in Docker Desktop 29.6.2"), or what is wrong.
@@ -55,7 +55,7 @@ result in one line ("Runs in Docker Desktop 29.6.2"), or what is wrong.
 | `SANDBOX_RUNTIME=auto` (default) | microsandbox when `msb` is installed and `msb doctor` passes, else Docker. Fixed for the life of the process. |
 | `SANDBOX_RUNTIME=docker` · `=microsandbox` | Forces one backend. |
 | `SANDBOX_CLI=podman` (or an absolute path) | Another CLI with Docker's verbs, for the Docker backend. |
-| `LIMN_SANDBOX_MAX_SESSIONS` (4) · `LIMN_SANDBOX_MAX_BUILDS` (3) · `LIMN_SANDBOX_RECLAIM_IDLE_SECONDS` (60) · `LIMN_SANDBOX_IDLE_MINUTES` (15) · `LIMN_SANDBOX_TURN_MAX_MINUTES` (120) | Open sessions on this computer; build-mode turns at once (story and fix alike); how long a fix session must sit idle before a waiting fix may take its place (AI Fix's start queue); a session with nothing to do closes after this long (its sandbox is removed, its changes are kept); one agent turn running longer than the last is stopped. |
+| `ENSEMBLE_SANDBOX_MAX_SESSIONS` (4) · `ENSEMBLE_SANDBOX_MAX_BUILDS` (3) · `ENSEMBLE_SANDBOX_RECLAIM_IDLE_SECONDS` (60) · `ENSEMBLE_SANDBOX_IDLE_MINUTES` (15) · `ENSEMBLE_SANDBOX_TURN_MAX_MINUTES` (120) | Open sessions on this computer; build-mode turns at once (story and fix alike); how long a fix session must sit idle before a waiting fix may take its place (AI Fix's start queue); a session with nothing to do closes after this long (its sandbox is removed, its changes are kept); one agent turn running longer than the last is stopped. |
 | Settings → Sandbox, per workspace | CPUs, memory and disk per session (default 4 CPUs, 8 GB, 30 GB), the Claude notes to bring (found, not set: § Where the reader's clones are), services, the always-allowed hosts. |
 
 There is no Settings switch for the backend: there is no per-computer settings store.
@@ -67,24 +67,24 @@ first session pulls (or builds) the image, which takes minutes; later sessions s
 
 **Disk clean-up.** Every end of a session removes its containers, network and volumes (§ Every end
 removes the sandbox); a sweep every 5 minutes and the boot sweep remove what a failed removal or a crash
-left. Settings → Sandbox shows how many sandboxes run now, with **Stop all**. `limn sandbox prune [--dry-run]` (stop Limn first) removes every sandbox
-resource of this Limn install, built service images included. The repo store (§ The repo store) is KEPT
-by both; `limn sandbox prune --store` removes it too (the next session copies the repositories again). Limn keeps the sandbox image; remove old
+left. Settings → Sandbox shows how many sandboxes run now, with **Stop all**. `ensemble sandbox prune [--dry-run]` (stop Ensemble first) removes every sandbox
+resource of this Ensemble install, built service images included. The repo store (§ The repo store) is KEPT
+by both; `ensemble sandbox prune --store` removes it too (the next session copies the repositories again). Ensemble keeps the sandbox image; remove old
 `limn-sandbox:local-*` tags with `docker image rm` when the disk is full.
 
 ## Threat model
 
-The agent reads text Limn does not control (the ticket, pull requests, the repositories), and it has a
+The agent reads text Ensemble does not control (the ticket, pull requests, the repositories), and it has a
 shell. Treat everything it does as untrusted.
 
 | Threat | What stops it |
 |---|---|
-| Ticket, PR or repository text tells the agent to send data out | The sandbox network has NO route out (`--internal`); the only way out is Limn's proxy, with an allow-list. Every request is logged and shown in the Network panel; a blocked host is opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the proxy adds it to each request to the provider (§ Credentials). Web search and web fetch are off in Claude Code, because they run on the provider's side, past the allow-list. |
+| Ticket, PR or repository text tells the agent to send data out | The sandbox network has NO route out (`--internal`); the only way out is Ensemble's proxy, with an allow-list. Every request is logged and shown in the Network panel; a blocked host is opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the proxy adds it to each request to the provider (§ Credentials). Web search and web fetch are off in Claude Code, because they run on the provider's side, past the allow-list. |
 | The agent damages the host | No writable host mount and no Docker socket (a bind mount is read-only by type; `spec.ts` refuses the socket, `~/.ssh`, `~/.docker`, `~/.config/gh`, `/` and others as sources). Non-root, all capabilities dropped, `no-new-privileges`, CPU / memory / process caps. On Docker for Mac or Windows the VM is a second boundary; **on Linux Docker the kernel is shared** (stated here and in the setup table). microsandbox gives a separate kernel (untested). |
-| A compose file escalates | The compose policy (§ Services) refuses the WHOLE file for privileged mode, added capabilities, devices, host namespaces, host mounts (the Docker socket included), loosened security options, outside builds and images from unlisted registries; it rewrites every service onto the session network with Limn's caps. Limn runs compose on the host; the sandbox only asks. |
+| A compose file escalates | The compose policy (§ Services) refuses the WHOLE file for privileged mode, added capabilities, devices, host namespaces, host mounts (the Docker socket included), loosened security options, outside builds and images from unlisted registries; it rewrites every service onto the session network with Ensemble's caps. Ensemble runs compose on the host; the sandbox only asks. |
 | The agent's changes reach GitHub unseen | Work leaves the sandbox only as a patch per repository (an AI Fix with the merge item: as a git bundle of its commits, checked on the host — parents, conflict markers, fixes on top — and rebuilt from the checked trees; § AI Fix sessions, "The merge"); the HOST applies it and pushes, on the reader's Push press (Implement: draft by default). Two exceptions push with no press, both on AI Fix and both opt-in: an auto fix on the reader's OWN PR under the workspace's "Push automatically" (OFF by default), and dependency automation's fix of a TRUSTED bot's PR under its policy (all OFF by default; docs/MERGE-CI-TRUNK.md). Both push only the PR repository's patch to the PR's own branch, compare-and-set on the head, after the session has closed. A third, on Implement / Fill gaps: "After the build: review and fix, then open the pull request" (the reader's tick at Start or in the tab, OFF by default; THE REVIEW LOOP): the HOST pushes the branch first (no PR), then ONE NEW fast-forward commit per fix pass (the live ref checked first, never forced), then the PR — ready for review, the reader's own, under the reader's `gh` login; every write a claim row inserted before it, never retried (docs/STORY-BUILD.md § The review loop). The sandbox still holds no GitHub credential. |
-| Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `LIMN_SANDBOX_MAX_SESSIONS` open sessions; at most `LIMN_SANDBOX_MAX_BUILDS` build turns at once; idle teardown. |
-| Leftovers | Every resource carries Limn's labels; discard, the boot sweep and `limn sandbox prune` remove them. |
+| Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `ENSEMBLE_SANDBOX_MAX_SESSIONS` open sessions; at most `ENSEMBLE_SANDBOX_MAX_BUILDS` build turns at once; idle teardown. |
+| Leftovers | Every resource carries Ensemble's labels; discard, the boot sweep and `ensemble sandbox prune` remove them. |
 | Spend | Every turn of Implement and of a manual AI Fix is a reader's press. An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE build turn with Claude's `--max-budget-usd`, then closes. Each turn's usage is recorded on the ledger and the session's spend is shown. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills are copied, read-only at source, size-capped. The reader's clones only lend git OBJECTS for the base commit to the repo store, read with hooks, fsmonitor and their config off; never the working tree, index or stash. **Past sessions are never imported** (owner decision D1): no transcript is copied, resumed or written back. |
 
@@ -97,24 +97,24 @@ the summary.
 |---|---|
 | "No container runtime" / "Docker is not running" | Start the runtime (`colima start`, Docker Desktop, `sudo systemctl start docker`), then **Check again** in Settings → Sandbox. `docker info` must answer. |
 | `permission denied … docker.sock` (Linux) | Add yourself to the `docker` group (`sudo usermod -aG docker $USER`, then sign in again), or use rootless Podman. |
-| The first session waits long at "Getting the sandbox image" | The image is about 1.3 GB. When the pull fails (offline, a registry proxy), Limn builds it from the shipped Dockerfile, which takes longer. |
-| "No space left on device" | `docker system df`; then `limn sandbox prune` (stop Limn first) and remove old `limn-sandbox:local-*` images. Give Colima more disk (`colima start --disk 100`). |
+| The first session waits long at "Getting the sandbox image" | The image is about 1.3 GB. When the pull fails (offline, a registry proxy), Ensemble builds it from the shipped Dockerfile, which takes longer. |
+| "No space left on device" | `docker system df`; then `ensemble sandbox prune` (stop Ensemble first) and remove old `limn-sandbox:local-*` images. Give Colima more disk (`colima start --disk 100`). |
 | A tool in the sandbox cannot reach a host | Open the Network panel: the host is listed as blocked. Press **Allow for this session**, or **Always allow** (this workspace). A tool that ignores the per-tool proxy settings needs Settings → Sandbox → HTTP_PROXY. |
-| Behind a corporate proxy or VPN | The runtime must reach the registries to pull images, and the host must reach the model provider. Set the runtime's own proxy (Docker Desktop: Settings → Resources → Proxies; Colima: `colima start --env HTTPS_PROXY=…`). Inside the sandbox, every request still goes through Limn's proxy. |
+| Behind a corporate proxy or VPN | The runtime must reach the registries to pull images, and the host must reach the model provider. Set the runtime's own proxy (Docker Desktop: Settings → Resources → Proxies; Colima: `colima start --env HTTPS_PROXY=…`). Inside the sandbox, every request still goes through Ensemble's proxy. |
 | Services do not start | The Services panel names each refused rule or failed service. `docker compose config` on the host shows the file as compose reads it. Services do not run on microsandbox yet. |
 | microsandbox is installed but not used | `msb doctor` must pass. An Intel Mac cannot run it (Apple Silicon only); Linux needs `/dev/kvm`. `SANDBOX_RUNTIME=docker` forces Docker. |
-| A session closed by itself | Nothing happened for 15 minutes, a turn ran past 120 minutes, the agent ended, Limn stopped, or someone pressed **Stop all**. When it stored changes, it stays pushable and **Resume** starts it again. |
+| A session closed by itself | Nothing happened for 15 minutes, a turn ran past 120 minutes, the agent ended, Ensemble stopped, or someone pressed **Stop all**. When it stored changes, it stays pushable and **Resume** starts it again. |
 | Sandboxes still running after you closed the tab | A session with nothing to do closes after 15 minutes. Settings → Sandbox → **Stop all** closes every one now. |
 
 ## Invariants
 
 1. **The sandbox never holds GitHub credentials, the Docker socket, or a writable host mount.** A bind
    mount is read-only by TYPE (`BindMount` has no writable form); writable storage is a named volume
-   Limn created. `spec.ts` refuses the Docker/Podman socket, `~/.docker`, `~/.ssh`, `~/.gnupg`,
+   Ensemble created. `spec.ts` refuses the Docker/Podman socket, `~/.docker`, `~/.ssh`, `~/.gnupg`,
    `~/.config/gh`, `/`, `/proc`, `/sys`, `/dev` and `/run` as mount sources, even read-only.
 2. **On Docker, the sandbox's only route out is the proxy.** The sandbox joins ONLY the session's
    `--internal` network; the proxy joins that network and the runtime's default bridge.
-3. **Every sandbox resource carries Limn's labels** and is removed at EVERY end of its session, by the
+3. **Every sandbox resource carries Ensemble's labels** and is removed at EVERY end of its session, by the
    periodic sweep and by the boot sweep (§ Every end removes the sandbox). A kept session keeps its
    CHANGES (the stored patch), never a running container or VM.
 4. **The model credential stays on the host** (spike 3): the sandbox holds a per-session placeholder,
@@ -129,7 +129,7 @@ the summary.
    there; every review and every chat keep the no-shell rule (docs/CLAUDE-REVIEW.md § The agents' tools). The two drivers (`sandbox/drivers/`) are the
    only code that starts `claude` or `codex` in a sandbox (`provider-seam.test.ts`).
 8. **The reader's clones (found through their Claude projects, never a setting) decide the LAYOUT and which
-   notes come in; the BASE COMMIT comes from Limn's clone cache** at the bases today's rules pick. The reader's clone may only LEND OBJECTS for that commit to the
+   notes come in; the BASE COMMIT comes from Ensemble's clone cache** at the bases today's rules pick. The reader's clone may only LEND OBJECTS for that commit to the
    repo store — read-only, never its working tree, index, stash, hooks or remote credentials; a commit id
    is content-addressed, so the code is the same (§ The repo store).
 9. **One fold for everything the agent is told** (`workspace/seed.ts`), for both subjects: `CLAUDE.md`,
@@ -197,7 +197,7 @@ layers. CI publishing: docs/RELEASE.md § The sandbox image.
 
 | Label | Value |
 |---|---|
-| `limn.managed` | a short hash of the Limn DATA DIR (`appInstance`), so two Limn installs on one machine (`pnpm demo` beside the real one) never sweep each other's sessions. A test passes its own value, so the app's boot sweep never removes a test's resources, nor a test's sweep the app's. |
+| `limn.managed` | a short hash of the Ensemble DATA DIR (`appInstance`), so two Ensemble installs on one machine (`pnpm demo` beside the real one) never sweep each other's sessions. A test passes its own value, so the app's boot sweep never removes a test's resources, nor a test's sweep the app's. |
 | `limn.session` | the session id (`[a-z0-9][a-z0-9_-]{0,62}`, checked before it becomes a name) |
 | `limn.account` | the account id |
 | `limn.role` | `sandbox`, `proxy`, `service`, `setup`, `network`, `volume`, `image`, `store` |
@@ -208,12 +208,12 @@ and `sweep(liveSessions)` list each kind by the `limn.managed` filter, read each
 BY NAME (never by line position: a resource removed between the list and the inspect would shift the
 pairing), and remove containers, then networks, then volumes.
 
-**The periodic sweep** while Limn runs, and every way a session ends: § Every end removes the sandbox.
+**The periodic sweep** while Ensemble runs, and every way a session ends: § Every end removes the sandbox.
 
 **The boot sweep** (`index.ts` after listen, `sweepSandboxesAtBoot`): no session survives a restart
-(the session manager marks them failed), so every resource carrying this Limn's `limn.managed` value goes. It starts no
+(the session manager marks them failed), so every resource carrying this Ensemble's `limn.managed` value goes. It starts no
 process when no container CLI is installed, and does nothing when the daemon does not answer. Never
-awaited, never fatal. By hand: `limn sandbox prune [--dry-run]` (stop Limn first); `--store` also
+awaited, never fatal. By hand: `ensemble sandbox prune [--dry-run]` (stop Ensemble first); `--store` also
 removes the repo store (`limn-repo-store-<instance>`), by its `limn.store` label and without `--force`, so
 the daemon refuses while a sandbox mounts it. A store maintenance container is `--rm` and carries
 `limn.managed` + `limn.role=setup`, so a leftover one is swept like any other.
@@ -237,7 +237,7 @@ checkout strips the types with Node's `module.stripTypeScriptTypes`); `source.te
 | `:3128` | Forward proxy: CONNECT (end-to-end TLS) and absolute-form HTTP, by the allow-list. A refused request never opens an upstream socket (tested with an upstream that counts its connections). |
 | `:8081` | Anthropic injector: plain HTTP in, TLS out to `api.anthropic.com`. |
 | `:8082` | ChatGPT injector: the same for `chatgpt.com`. |
-| `127.0.0.1:3199` | Control (in the proxy container's own loopback): Limn sets the rules and the credentials here through `docker exec -i … node -e` with the JSON on STDIN and a per-session token. |
+| `127.0.0.1:3199` | Control (in the proxy container's own loopback): Ensemble sets the rules and the credentials here through `docker exec -i … node -e` with the JSON on STDIN and a per-session token. |
 
 **The address rule.** A listed name is resolved by the proxy and the connection goes to the vetted
 address (no second lookup). Loopback (also `localhost`), link-local (the cloud metadata address
@@ -291,7 +291,7 @@ Spike 3 proved injection for both providers, so it ships for both, and Settings 
 
 - **Claude.** The host credential comes from the ONE ladder (`resolveAiCredential`): an API key, or the
   Claude Code login's access token (`CLAUDE_CODE_OAUTH_TOKEN`, else the CLI's credentials file, else the
-  macOS Keychain item `Claude Code-credentials`). An expired login is reported, never refreshed by Limn.
+  macOS Keychain item `Claude Code-credentials`). An expired login is reported, never refreshed by Ensemble.
   The sandbox gets `ANTHROPIC_BASE_URL=http://limn-proxy:8081` and the placeholder as
   `CLAUDE_CODE_OAUTH_TOKEN` (login) or `ANTHROPIC_API_KEY` (key).
 - **Codex.** The sandbox's `auth.json` has the real file's shape and fake secrets: unsigned JWTs with
@@ -351,7 +351,7 @@ process), and ONE normalised event for both providers: packages/shared `SandboxA
   `externalSandbox` (network "restricted"), build `dangerFullAccess`, no restart. Codex's own read-only
   sandbox cannot run in ours (bubblewrap), so after every CHAT turn the driver runs `git status` in each
   repository and reports what changed (`turn_end.changedInChat`). **Stop** is `turn/interrupt`; only
-  when that is not answered in 10 s is the process ended. The config is Limn's lockdown
+  when that is not answered in 10 s is the process ended. The config is Ensemble's lockdown
   (`lockdownToml(LOCKED_SETTINGS)`) minus `features.shell_tool` (the shell is the point) and
   `project_doc_max_bytes` (the repositories' AGENTS.md are the work's), around the injected provider
   (`codexInjectedConfigToml`). ⚠ Every server REQUEST is refused, `account/chatgptAuthTokens/refresh`
@@ -403,7 +403,7 @@ session manager (WP7) calls, in order: `resolveWorkspaceLayout` (the SAME comput
 folder" settings are REMOVED, their columns `local_folder` / `start_dir` DORMANT: never read, never written,
 kept). Before, a reader who set no folder (the default) got NO memories at all, silently. Now:
 
-1. Every key under `~/.claude/projects/` (Limn's own litter skipped, ≤ 400 keys) is DECODED by walking the
+1. Every key under `~/.claude/projects/` (Ensemble's own litter skipped, ≤ 400 keys) is DECODED by walking the
    disk from `/`: a folder is entered only when its encoded name is the next part of the key, so
    `bng-fe-be` and `bng/fe/be` are told apart by what exists (≤ 400 folders read per key). Never a string
    rule: the encoding is lossy.
@@ -434,13 +434,13 @@ The check and a session run the SAME `resolveWorkspaceLayout`. Disk only, no `gi
   volume holding every repository and the seed files, which sit there OUTSIDE every repository and are
   never committed. The container's working folder is the root (Docker would create a missing start
   folder as root inside the agent's volume); the driver runs the agent with `cwd: startDir`;
-- refused as a folder: `/`, the home folder or an ancestor of it, Limn's data folder; refused as a place
+- refused as a folder: `/`, the home folder or an ancestor of it, Ensemble's data folder; refused as a place
   inside the sandbox (the layout falls back to `/workspace` with a note): the image's own trees (`/usr`,
   `/etc`, `/home/agent`, …), and `/home`, `/var`, `/tmp`, `/opt` themselves;
 - **the start folder**: the ticked project with the most memories (inside the root), else the folder. There is
   no setting: Claude Code loads the memories of the project it starts in, so this is the right default.
 
-**The base commit comes from Limn's clone cache** (plan invariant 4): `prepBranchWorktree`'s fetch and
+**The base commit comes from Ensemble's clone cache** (plan invariant 4): `prepBranchWorktree`'s fetch and
 pin rules at the base the caller chose (story-build `baseFor` rules; the base is pinned by the caller's
 ref). On Docker the repositories come from the KEPT REPO STORE (below); without it (microsandbox, a store
 that could not be made, or a store step that failed for one repository) from THE PER-SESSION COPY.
@@ -468,7 +468,7 @@ FILES under the SAME key in `/home/agent/.claude/projects/<key>/memory/`. Becaus
 path, the key Claude Code computes in the sandbox IS the reader's key, so the start project's `MEMORY.md`
 loads as on the reader's machine; the seed lists every other project's folder as files to read (each project
 is named by its folder, so the repository it belongs to is plain). Found by DECODING each key against the
-disk (§ Where the reader's clones are). Limn's own project folders (`ai/session-litter.ts`
+disk (§ Where the reader's clones are). Ensemble's own project folders (`ai/session-litter.ts`
 `litterPrefixes`) are never offered. Default ticks: every related project with memories. Pinned by
 `discover.test.ts` (two repositories, each one's memories under the key of its own sandbox path). Regular files only, symlinks skipped, ≤ 256 KB a file and 4 MB in all
 (left out and counted, never cut). Codex has no memory store: AGENTS.md lists the same files to read.
@@ -489,7 +489,7 @@ a file, 16 MB in all; an executable keeps its bit).
 `<any folder>/.claude/skills/<name>/SKILL.md` (not under `node_modules` / `vendor` / `third_party` /
 `bower_components`, ≤ 50 per repository), are in each checkout already — nothing is copied for them. Claude
 Code loads only the start folder's skills and Codex none, so the seed NAMES each one at its sandbox path
-("Read a skill's SKILL.md when its task comes up"), for both providers. Read from Limn's clone cache at the
+("Read a skill's SKILL.md when its task comes up"), for both providers. Read from Ensemble's clone cache at the
 session's base commit (`git ls-tree`, file names only, lazy fetch off); a skill's text is repository content
 and never enters the seed. The build tab's start panel counts them, with the memories, CLAUDE.md and the
 reader's skills, before Start (`GET …/sandbox/project-skills`; frontend `lib/sessionInherits.ts`).
@@ -540,7 +540,7 @@ the same `resolveWorkspaceLayout` the session runs.
 
 ## The repo store (`workspace/store.ts`, `runtime.repoStore`; Docker only)
 
-ONE named volume per Limn install, `limn-repo-store-<instance>` (labels `limn.store=<instance>`,
+ONE named volume per Ensemble install, `limn-repo-store-<instance>` (labels `limn.store=<instance>`,
 `limn.role=store`, no `limn.managed`: the sweep never sees it), holding ONE BARE REPOSITORY per
 repository (`<owner>__<name>.git`), KEPT across sessions. Every sandbox mounts it READ-ONLY at
 `/limn-store` (`sandboxMountsFor`; `/limn-store` is a refused layout place). Per repository:
@@ -552,9 +552,9 @@ repository (`<owner>__<name>.git`), KEPT across sessions. Every sandbox mounts i
    commit, `refs/limn/base`, the branch checked out, hooks folder removed; `HEAD` must equal the commit.
    Exit 75 = the store lacks it. Only the argv crosses `docker exec`.
 3. **Only then, the missing objects**, under a per-repository lock in this process: a MAINTENANCE
-   container (`storeMaintenanceArgs`: Limn's image, `--rm`, `--network none`, root with EVERY capability
+   container (`storeMaintenanceArgs`: Ensemble's image, `--rm`, `--network none`, root with EVERY capability
    dropped, `no-new-privileges`, read-only root, the store read-write) runs `git fetch --depth 1` whose
-   transport is its own stdin/stdout (`ext::`, allowed by `-c` for that one fetch). Limn connects that to
+   transport is its own stdin/stdout (`ext::`, allowed by `-c` for that one fetch). Ensemble connects that to
    `git upload-pack` run on the HOST against the SOURCE. The store sends its keep refs as `have`s, so
    only the objects it lacks cross (measured: a second base that changed one file copied 4–5 objects);
    `fetch.fsckObjects` + `transfer.fsckObjects` check every object; git writes them into a quarantine and
@@ -564,12 +564,12 @@ repository (`<owner>__<name>.git`), KEPT across sessions. Every sandbox mounts i
 `alsoAt`) AND it has the commit AND it is complete (not shallow, not partial) — no blob comes from GitHub.
 Anything else (a missing commit, a shallow, partial or broken clone, a failed copy) falls back to the clone
 cache after `prepBranchWorktree` brought the base tree's blobs in, with ONE boot-note line naming each
-repository and why ("Copied from Limn's own clone, not yours: …"). A failure after the commit is known
+repository and why ("Copied from Ensemble's own clone, not yours: …"). A failure after the commit is known
 falls back to the per-session copy for that repository.
 
 **Why fetch over the container's stdin, not a bundle or a pack file**: git's own negotiation decides what
-the store lacks (a bundle needs Limn to list prerequisites the store has, and a pack of "missing objects"
-needs Limn to compute them); thin packs are completed and every object fsck'd by the receiving git; the
+the store lacks (a bundle needs Ensemble to list prerequisites the store has, and a pack of "missing objects"
+needs Ensemble to compute them); thin packs are completed and every object fsck'd by the receiving git; the
 same code serves both sources; no file is written on the host, and nothing is mounted from it. The
 repository borrows the store's objects instead of copying them, so a session's `.git` is ~100–200 KB
 (the harness's 112 MB pack is never copied per session).
@@ -599,10 +599,10 @@ git, no daemon), whose control runs the same fetch WITHOUT the flag and must sti
 file is root's (the maintenance container runs as root; the agent is uid 1001). Pinned by
 `store-real.test.ts`.
 
-⚠ **The store is never gc'd or pruned by Limn** (`gc.auto=0`, `maintenance.auto=false`, fetch with
+⚠ **The store is never gc'd or pruned by Ensemble** (`gc.auto=0`, `maintenance.auto=false`, fetch with
 `--no-auto-maintenance`): a running sandbox borrows its objects. It only grows: the depth-1 tree of the
 first base of each repository, then only the objects each later base changed. Measured on the BNG
-workspace (9 repositories, one base each): **139 MB** (108 MB of it `bng-metric-harness`). `limn sandbox
+workspace (9 repositories, one base each): **139 MB** (108 MB of it `bng-metric-harness`). `ensemble sandbox
 prune --store` removes it whole; the daemon refuses while a sandbox mounts it.
 
 **Not on microsandbox**: it has no named volumes (its workspace is a private disk per VM), so a shared
@@ -618,7 +618,7 @@ new tips) and **7.4 s** for the next session (nothing copied). The harness alone
 
 ## Services (`apps/backend/src/sandbox/services/`; owner decision D5)
 
-Integration tests run against REAL services from the repositories' compose files. On Docker, **Limn runs
+Integration tests run against REAL services from the repositories' compose files. On Docker, **Ensemble runs
 the services; the agent asks** — there is no Docker, socket or daemon in the sandbox.
 
 | File | What it holds |
@@ -635,15 +635,15 @@ the services; the agent asks** — there is no Docker, socket or daemon in the s
 always refuses loopback (`localhost`, `127.0.0.1`), link-local and reserved addresses, allows a private
 address only for a host the reader named EXACTLY, and speaks HTTP CONNECT only — so a Postgres or Redis client
 could not use it even then. Opening a route to the reader's own containers would hand code the agent runs
-(steered by ticket and PR text Limn does not control) the reader's local data: their dev databases, queues and
+(steered by ticket and PR text Ensemble does not control) the reader's local data: their dev databases, queues and
 credentials. So every session gets its OWN throw-away services, on its own network, removed at its end.
 
 **Which files.** Settings → Sandbox `services` (`SandboxServiceStackChoice {repo, file,
-egress}`, migration 0175). Limn never runs a file the reader did not pick. **Choose compose files**
+egress}`, migration 0175). Ensemble never runs a file the reader did not pick. **Choose compose files**
 (`GET …/sandbox/compose-files`, `services/compose-files.ts`, click-gated) lists the candidates: per workspace
 repository, every path whose name is `compose*.y(a)ml` / `docker-compose*.y(a)ml` at any depth (not under
 `node_modules`, `vendor`, `third_party`, `bower_components`; ≤ 50 a repository, shallowest first), read with
-`git ls-tree` from Limn's OWN clone cache at its newest default-branch ref (`refs/pierre/ticket-default-branch`,
+`git ls-tree` from Ensemble's OWN clone cache at its newest default-branch ref (`refs/pierre/ticket-default-branch`,
 `refs/heads/*`, `refs/remotes/origin/*`, else `HEAD`). Names only, so the blobless cache answers with no
 download (`GIT_NO_LAZY_FETCH=1`); a repository with no cached copy says so (`copied: false`). The reader ticks
 several at once; a file not listed can still be typed. The reader's own checkout is never read for this. A picked file of a repository
@@ -654,16 +654,16 @@ not in the session is one line in the boot notes. `limn-svc` calls each file by 
 
 ```
  limn-svc up postgres ──unix socket /tmp/limn-svc.sock──► limn-svcd (sandbox, as the agent)
-                                                              │ stdout (docker exec, Limn's own pipe)
+                                                              │ stdout (docker exec, Ensemble's own pipe)
                                                               ▼
- Limn (host): ServicesController ── docker-compose config (IN the sandbox) ─► JSON
+ Ensemble (host): ServicesController ── docker-compose config (IN the sandbox) ─► JSON
                                  ── policeCompose ─► refused (reasons) │ runnable model
                                  ── runtime.buildImage / runtime.compose (on the host, model on stdin)
                                  ── forwards ─► limn-svcd listens on localhost:<published port>
 ```
 
-Nothing on the host listens for the sandbox: the only channel is the `docker exec` Limn started, so a
-sandbox can never connect to Limn. The agent can kill the relay (same user); Limn starts it again up to
+Nothing on the host listens for the sandbox: the only channel is the `docker exec` Ensemble started, so a
+sandbox can never connect to Ensemble. The agent can kill the relay (same user); Ensemble starts it again up to
 five times and gives it the forwards again. The request is DATA: every word is matched against the picked
 files' services, every path against the workspace root.
 
@@ -704,17 +704,17 @@ GHCR, ECR Public, MCR, Quay, GCR, registry.k8s.io: the HOST daemon pulls, so an 
   the agent (as compose does on a host). Writable binds stay writable: a service writes into the agent's
   workspace, as it would on the reader's machine (BNG's `./localstack` data, the journey tests'
   `docker/scripts/localstack` init folder, which an empty fresh volume would lose);
-- named volumes → `<project>_<key>` with Limn's labels (anonymous ones go with their container);
-- every service: Limn's labels, `no-new-privileges`, `mem_limit` = `memswap_limit`, `cpus`, `pids_limit`
+- named volumes → `<project>_<key>` with Ensemble's labels (anonymous ones go with their container);
+- every service: Ensemble's labels, `no-new-privileges`, `mem_limit` = `memswap_limit`, `cpus`, `pids_limit`
   (per service ≤ 2 GB / 2 CPUs / 1,024; a service with no limit gets 768 MB, less when 8 GB ÷ the file's containers is smaller);
   the total ≤ 8 GB across running files. `deploy.resources` is replaced;
 - a variable with NO value (`- FOO`, normalised to `FOO: null`) is DROPPED (noted): compose would fill it
-  from the environment of the process that runs it, Limn's on the host. A secret/config read from an
+  from the environment of the process that runs it, Ensemble's on the host. A secret/config read from an
   `environment:` variable is refused for the same reason; `oom_score_adj` < 0 and `oom_kill_disable` too;
 - NO proxy environment, unless the reader opted that service in (`egress`; spike 4 rule 1: CDP apps read
   `HTTP_PROXY` and ignore `NO_PROXY`);
 - project name `limn-<session>-<file>`; the model goes to `docker compose --file -` with an EMPTY project
-  directory (`--project-directory`), so no `compose.yaml` or `.env` of Limn's own folder is read.
+  directory (`--project-directory`), so no `compose.yaml` or `.env` of Ensemble's own folder is read.
 
 **Builds** (`limn-svc build`, or a `build:` section before `up`). The context is a folder INSIDE the
 workspace, streamed out of the sandbox as a tar **as the agent** (so the image holds the agent's edits;
@@ -727,7 +727,7 @@ with the builder's message, and the classic builder is deprecated upstream. `--f
 steps' containers; `--memory` caps a step at 4 GB. A service with only an `image:` (BNG's journey tests run
 the backend and frontend as images) is swapped for the built one with `limn-svc build <service> <folder>`;
 `up` then uses it (`pull_policy: never`). Tags `limn-<session>-svc-<file>-<service>:<n>`, labelled;
-`destroy` / `sweep` / `limn sandbox prune` remove them (by image ID, so an untagged older build goes too).
+`destroy` / `sweep` / `ensemble sandbox prune` remove them (by image ID, so an untagged older build goes too).
 ⚠ Two Dockerfile instructions are done by the HOST daemon, on the host's network, never through the proxy:
 `ADD <url>` (a download to any host) and `FROM` / `COPY --from=<image>` (a pull). The Dockerfile is
 therefore checked AS THE CONTEXT STREAMS (`runtime/dockerfile.ts` `DockerfileTap`: the entry is read out of
@@ -791,9 +791,9 @@ per machine and there is no per-machine setting store yet.)
 | Boundary | the container (a shared kernel on Linux) | a microVM with its own kernel |
 | Network | `--internal` network + the proxy container | `--no-net`: no network at all |
 | Way out | `limn-proxy:3128/8081/8082` on the internal network | the SAME names and ports, served by a relay in the guest (`GUEST_RELAY`, python3: Node has no `AF_VSOCK`) that pipes each connection over vsock (`--vsock <host socket>:<port>`) to the host |
-| Egress proxy | a container from the sandbox image | the SAME program (`proxy/server.ts`) as a HOST child process, on four unix sockets in a 0700 folder `<data dir>/sbx/<hash>/`; the control socket is never routed into the VM; it exits when Limn's end of its stdin closes |
+| Egress proxy | a container from the sandbox image | the SAME program (`proxy/server.ts`) as a HOST child process, on four unix sockets in a 0700 folder `<data dir>/sbx/<hash>/`; the control socket is never routed into the VM; it exits when Ensemble's end of its stdin closes |
 | Control requests | `docker exec -i` into the proxy | `proxyControl()`: a POST over the control socket (folder 0700 + the control token) |
-| Credentials | injected at the proxy | injected at the proxy: the secret lives only in Limn and the host proxy process, never in the VM (host-bound) |
+| Credentials | injected at the proxy | injected at the proxy: the secret lives only in Ensemble and the host proxy process, never in the VM (host-bound) |
 | Workspace | a named volume (`volume-nocopy`), disk cap NOT enforced | `--mount-owned <root>:kind=disk,size=<disk>` — removed with the VM, cap enforced |
 | Repositories | the kept repo store, a read-only volume the repository borrows objects from (§ The repo store) | the per-session copy (a tar of a depth-1 `.git` over exec): no named volumes to share |
 | Read-only mounts | `type=bind,…,readonly` | `-v <src>:<dst>:ro,noexec` |
@@ -804,7 +804,7 @@ per machine and there is no per-machine setting store yet.)
 | Leftovers | labels + sweep | labels on the VM (`msb ls --label limn.managed=…`, `msb rm --force`); the host proxies of this process; stale socket folders |
 
 **Why not microsandbox's own allow-list and secrets?** Its `--net-rule` host rules and `--secret`
-substitution need TLS interception with msb's CA trusted in the guest, and give Limn no per-request log
+substitution need TLS interception with msb's CA trusted in the guest, and give Ensemble no per-request log
 to show; `--proxy` sends the destination IP, not the name, so a host-name allow-list cannot work
 through it (§ Spike 5). With `--no-net` + vsock, ONE allow-list, ONE log and ONE injector serve both
 backends, and the VM has no network to misconfigure.
@@ -832,7 +832,7 @@ sessions, mounted from `registerAgenticRoutes`.
 | `manager.ts` | THE state machine: start, boot, turns, Start build, Stop, Allow, the patch extraction, close (discard, idle, the agent ending, a failed boot), resume, the restart reconcile, the wire (`sessionWire`) and the stream subscription. Every dependency is a seam (`setSessionDepsForTests`). |
 | `patches.ts` | The patch out of the sandbox (and back in, for Resume). |
 | `state.ts` | `session_json` (`SessionStateJson`), the conversation fold, the ONE wire mapper `toStoryBuildSession`. Pure. |
-| `limits.ts` | `LIMN_SANDBOX_MAX_SESSIONS` (4), `LIMN_SANDBOX_MAX_BUILDS` (3), `LIMN_SANDBOX_IDLE_MINUTES` (15), `LIMN_SANDBOX_TURN_MAX_MINUTES` (120), the patch cap, the turns per message. |
+| `limits.ts` | `ENSEMBLE_SANDBOX_MAX_SESSIONS` (4), `ENSEMBLE_SANDBOX_MAX_BUILDS` (3), `ENSEMBLE_SANDBOX_IDLE_MINUTES` (15), `ENSEMBLE_SANDBOX_TURN_MAX_MINUTES` (120), the patch cap, the turns per message. |
 | `janitor.ts` | The periodic sweep, the running count and "Stop all" (§ Every end removes the sandbox). |
 | `routes.ts` | The routes; the push and per-repository diff routes (`coding/story-build/routes-build.ts`) are registered from here. |
 | `subject.ts` | The SUBJECT contract: the machine serves Implement's story (`storySubject` in `manager.ts`) and AI Fix (`fix.ts`). |
@@ -860,9 +860,9 @@ is the egress's `refreshCredentials`). Measured live (Intel Mac, Docker Desktop,
 local, a two-file repository): ready in 4 s.
 
 **Turns.** Every turn is a reader's click (a message, Start build, Approve, a Reply) — the planning turn
-Limn sends at boot answers the reader's Implement click — except plan first's ONE repair turn (§ The plan
+Ensemble sends at boot answers the reader's Implement click — except plan first's ONE repair turn (§ The plan
 and its checks), which asks the budget gate (`review/budget-gate.ts automaticRunAllowed`) first. ONE turn per session at a time (`409 AgentBusy`) and ONE
-build-mode turns at once (`LIMN_SANDBOX_MAX_BUILDS`, 3; `409 BuildBusy` past it — one until 2026-11-12, owner decision 3 of STORY-BUILD); both claims are taken in
+build-mode turns at once (`ENSEMBLE_SANDBOX_MAX_BUILDS`, 3; `409 BuildBusy` past it — one until 2026-11-12, owner decision 3 of STORY-BUILD); both claims are taken in
 the same tick as the click's checks. Spend comes from each `turn_end`: chat turns add to
 `plan_cost_usd`, build turns to `build_cost_usd`, tokens and turns to the row; the ledger rows are the
 drivers' (`story_plan` / `story_build`).
@@ -941,13 +941,13 @@ running sandbox: Resume boots a new one on demand.
 | Push | an AI Fix push (`closeFixAfterPush`); a story's push does NOT end the session (the reader may keep working), so its idle close does | `pushed` |
 | Success of an unattended run | the subject's `afterBuildTurn` → `close` (an auto fix, dependency automation) | `built` (then its own push rules) |
 | Stop | a manual session: the turn stops, the session stays; an unattended one closes | `discarded` (cancelled) |
-| Nothing happens | the idle close: no turn and no reader action for `LIMN_SANDBOX_IDLE_MINUTES` (ONE constant, `SANDBOX_IDLE_MINUTES_DEFAULT`, 15). The browser closing is this case: nothing in a session depends on a page being open. | kept phase with work, else `failed` |
-| A turn runs too long | the turn's watchdog (`LIMN_SANDBOX_TURN_MAX_MINUTES`, 120): the turn is interrupted (its work stored as after any stop); a turn that has not ended 60 s later closes the session | the session stays; or kept / `failed` |
+| Nothing happens | the idle close: no turn and no reader action for `ENSEMBLE_SANDBOX_IDLE_MINUTES` (ONE constant, `SANDBOX_IDLE_MINUTES_DEFAULT`, 15). The browser closing is this case: nothing in a session depends on a page being open. | kept phase with work, else `failed` |
+| A turn runs too long | the turn's watchdog (`ENSEMBLE_SANDBOX_TURN_MAX_MINUTES`, 120): the turn is interrupted (its work stored as after any stop); a turn that has not ended 60 s later closes the session | the session stays; or kept / `failed` |
 | The agent process ends | `agentEnded` (a build session's work is extracted first) | kept / `failed` |
 | The boot fails | `boot`'s catch; a close DURING a boot step re-runs the removal once the step returns (`reapAfterClose`) | kept / `failed` |
 | Settings → Sandbox → **Stop all** | `stopAllSessions`: a manual session's running turn is interrupted and its work stored (up to 30 s), then it closes keeping its changes; an UNATTENDED one closes as `discarded` (a person's cancel wins: nothing is pushed) | kept / `failed` / `discarded` |
-| Limn stops (SIGTERM, SIGINT, SIGHUP) | `index.ts` → `teardownSandboxesForShutdown` (after the SIGTERM drain), bounded at 10 s, then the 'exit' fallback; no row is written | the restart reconcile settles the rows |
-| Limn crashes | the process's `'exit'` handler `destroyLeftSync` force-removes the containers / VMs of every session not yet removed (`destroySync`: `docker rm --force --volumes`, `msb rm --force`, the host proxies killed); the next boot sweep removes the rest. A SIGKILL runs nothing: the boot sweep is the only cure. | the restart reconcile |
+| Ensemble stops (SIGTERM, SIGINT, SIGHUP) | `index.ts` → `teardownSandboxesForShutdown` (after the SIGTERM drain), bounded at 10 s, then the 'exit' fallback; no row is written | the restart reconcile settles the rows |
+| Ensemble crashes | the process's `'exit'` handler `destroyLeftSync` force-removes the containers / VMs of every session not yet removed (`destroySync`: `docker rm --force --volumes`, `msb rm --force`, the host proxies killed); the next boot sweep removes the rest. A SIGKILL runs nothing: the boot sweep is the only cure. | the restart reconcile |
 
 **A removal that fails** (a daemon that refused, a timeout) is logged and the session id stays in the
 manager's `undestroyed` set. **The periodic sweep** (`janitor.ts`, every `SANDBOX_SWEEP_INTERVAL_MS`, 5
@@ -964,7 +964,7 @@ waits for it and is never swept as "not live".
 **microsandbox**: `destroy` removes only its own session's socket folder; the sweep keeps the folder of
 every live session id (not only the proxies of the runtime object that runs it).
 
-**Settings → Sandbox** (`SandboxRuntimeSection.tsx`): one line, "2 Limn sandboxes are running.", read from
+**Settings → Sandbox** (`SandboxRuntimeSection.tsx`): one line, "2 Ensemble sandboxes are running.", read from
 the runtime (`GET /api/sandbox/running` → `listSandboxes` on every installed backend that answers) when
 the section opens and on **Check again**, never polled; **Stop all** (`POST /api/sandbox/stop-all`, after
 an inline confirm) closes every session, then sweeps every leftover, and answers the new count.
@@ -987,9 +987,9 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
 - **Delivery.** Claude's chat mode is `--permission-mode plan` (no write), so the plan is the LAST
   ```` ```limn-plan ```` fenced block of the turn's final text (`plan-block.ts extractPlanBlock`; a block inside
   another fence is text; ≤ `BUILD_PLAN_MAX_BYTES`). The stored conversation item has the block replaced
-  by "(The plan went to Limn to check.)" (`stripPlanBlock`), so `session_json` never holds the plan.
+  by "(The plan went to Ensemble to check.)" (`stripPlanBlock`), so `session_json` never holds the plan.
   The live partial text hides an open block (shared `hidePartialPlanText`).
-- **ONE validator.** `BUILD_PLAN_CHECK_SOURCE` is plain ES2019 text: the checker `~/.limn/plan-check.cjs`
+- **ONE validator.** `BUILD_PLAN_CHECK_SOURCE` is plain ES2019 text: the checker `~/.ensemble/plan-check.cjs`
   embeds it (the agent pipes its plan in; it also tries each code quote against `refs/limn/base` and each
   docs quote against the copied sections — advice only) and the host compiles the SAME text. Context:
   `<root>/.limn/plan-context.json` (the refs, the repositories and their paths, the docs folder, the
@@ -998,12 +998,12 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   `stackReason` missing, > 3 PRs in a repository or > 6 in all, a contention with 0 or > 4 evidence items,
   Fill gaps: a gap marked `met`) make the plan unusable; CONTENT problems drop the item.
 - **The host's evidence check** (`plan-verify.ts verifyBuildPlan`; the agent controls the sandbox, so its
-  quotes count for nothing): `code` / `data_file` — the blob at the session's pinned base sha in Limn's
+  quotes count for nothing): `code` / `data_file` — the blob at the session's pinned base sha in Ensemble's
   clone cache (`plan-blobs.ts`: hooks and config off, the lazy fetch's token only in a process-scoped
   `insteadOf`, ≤ 2 MB, never binary); the quote, whitespace folded, in the cited lines ± 3, or EXACTLY
   once elsewhere (lines corrected); the page shows the HOST's text (≤ 40 lines / 4 KB). `data_file`'s
   label stays only on a data path. `docs` — `validateDocReferences` against the FULL built library.
-  `data_run` — a run in Limn's own log (§ Services → The run log) from a service with no internet route,
+  `data_run` — a run in Ensemble's own log (§ Services → The run log) from a service with no internet route,
   the quote in the recorded output. A point left with no evidence is dropped; `storySays` not in
   TICKET.md is cleared. Only counts and plain reasons are kept (`dropped`).
 - **No usable plan** (no block after an opening, reply, or — with no plan yet — message turn; bad JSON;
@@ -1016,7 +1016,7 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   refused `PlanNotApproved` (`buildRefused`).
 - **The build after Approve**: `planBuildInstruction` names each PR's branch (`<KEY>` (the ticket key), `-2`, `-3`, each
   made from the previous one in its repository) and asks for THE BUILD REPORT (`workspace/build-report.ts`,
-  the fix-report pattern: ONE validator text, `~/.limn/build-report-check.cjs`, read out after every build
+  the fix-report pattern: ONE validator text, `~/.ensemble/build-report-check.cjs`, read out after every build
   turn; a self-report, never a gate). Seed rule 3 says to commit each planned PR on the branch PLAN.md
   names. A build turn that hit the turn cap (`max_turns`) with work unfinished gets ≤ 2 automatic
   continuation turns (`SessionSubject.buildFollowUp`, claimed by `runTurn` in the same tick with the build
@@ -1026,7 +1026,7 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   (`EXTRACT_STACK_SCRIPT <repo> <max> <branch…>`: each planned branch's tip, uncommitted work folded into
   ONE commit through a throw-away index only when the LAST planned branch is checked out — dirty elsewhere
   is reported, never folded — and ONE bundle `refs/limn/stack/<k> ^refs/limn/base`, ≤ 8 MB, base64). On the
-  HOST, in Limn's clone cache for THAT repository only, under its lock, hooks and config off (the
+  HOST, in Ensemble's clone cache for THAT repository only, under its lock, hooks and config off (the
   `verifyMergeBundle` discipline): only the expected heads; the bundle header's prerequisites exactly the
   base; fetched with fsck into `refs/pierre/story-build/<id>/stack/<prRowId>`; base → tip 1 → … ancestors in
   turn, no merge commit, ≤ 200 commits, no gitlink, no path in `.git`; each PR's patch, numstat, tree and
@@ -1042,7 +1042,7 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
 - **Live check, 2026-11-07** (`plan-session.live.test.ts`; Docker Desktop 29, Claude Code on the
   subscription, Sonnet 5 at low effort; two throw-away repositories, a ticket whose AC2 says the API
   already exports 10000 rows while the code caps it at 500): with no reader message, the opening turn read
-  TICKET.md and both repositories and sent one block; Limn verified it as revision 1 in 37 s for
+  TICKET.md and both repositories and sent one block; Ensemble verified it as revision 1 in 37 s for
   US$ 0.19 — AC1 planned, AC2 `not_planned`, contention C1 on AC2 with code evidence the host re-read
   (`MAX_EXPORT_ROWS = 500`), one PR in the one repository it changes, nothing dropped. **Spike S1:** in
   `--permission-mode plan` the agent RAN Bash (`find`, `git show refs/limn/base:…`, the heredoc checker),
@@ -1071,13 +1071,13 @@ and never opens a PR: the host pushes each fix as a new commit (§ Invariants ho
 offered only on a ticket with NO pull request, so nothing says in advance which repositories the work
 touches, and the plan is made by reading the code. Fill gaps does the same (a gap can need a repository the
 ticket's PRs never touched). AI Fix narrows (Scope below). Loading a repository LATER, when the agent asks, is
-not built: the sandbox has no channel to Limn except the services relay (started only with services), the
+not built: the sandbox has no channel to Ensemble except the services relay (started only with services), the
 request would be untrusted agent text driving host git work mid-turn, and every per-repository row (patch,
 Push, Resume) is made after the mirror. The kept repo store makes a repeat load cheap (7 s for 9 repositories,
 § The repo store).
 
 Every AI Fix run — manual, Plan first, the unattended auto fix and dependency automation's fix — is a session
-of the SAME machine with a second subject (`subject.ts`): the caps, the build slots (`LIMN_SANDBOX_MAX_BUILDS`), boot, the idle close,
+of the SAME machine with a second subject (`subject.ts`): the caps, the build slots (`ENSEMBLE_SANDBOX_MAX_BUILDS`), boot, the idle close,
 the stream, the restart reconcile and Resume are shared with Implement. The row is the fix's own `ai_fixes`
 row (migration 0177: `session_phase`, `sandbox_ref`, `agent_ref`, `runtime`, `session_json`, `last_active_at`,
 `unattended`, `workspace_id`); `ai_fixes.status` is DERIVED from the phase by shared `aiFixStatusForPhase`
@@ -1089,7 +1089,7 @@ pushed, failed `failed`), so the banner, the Open PRs pill, the auto-fix caps, d
 |---|---|
 | **Start** (`coding/ai-fix/manager.ts` `startRun`) | provider pre-flight → instruction → ONE FIX PER PR (`claimFixPr`, same tick) → the seed (review / CI-only / plain; `NothingToFix` boots nothing) → runtime (`409 NoRuntime`, no row) → the slot: a session and, for a fix that builds at once, THE build slot (`reserveSessionSlot`, same tick) — every slot taken ⇒ THE FIX START QUEUE (`coding/ai-fix/start-queue.ts`, a reader's press and an auto fix; `202 {status:'waiting', position}`), else `409 TooManySessions` / `BuildBusy` (dependency automation) → the live head (`base_sha`) → the row → `startFixSession`. |
 | **Scope** | ONLY what the job needs (2026-11-10): the PR's repository plus the workspace repositories of the OTHER pull requests of its ticket(s) (`FixSessionDeps.relatedRepoIds`: `ticketsForPr` → `ticketPrIds` → `ticketPrs`, ≤ 3 tickets, open or merged; a failed read ⇒ the PR's alone), at the reader's layout, memories as in Implement. Not every workspace repository: each costs load time. The agent cannot ask for another one mid-session (below). The PR repository at the PR's HEAD SHA, fetched through the base repository's `refs/pull/<n>/head` (`RepoBaseRequest.remoteRef`; a fork's head too); every other repository on its default branch, "read only". Branch `limn/fix-pr-<n>`; pins `refs/pierre/ai-fix/<fixId>/<repoId>` (dropped on push, discard and a failed close). |
-| **Seed** | `FIX.md` (the PR, its fenced description, the task — review-seed.ts's fenced items or the fenced plain instruction — and the report contract), `PR.diff` (GitHub's diff, noise files out, capped at 1 MB, cuts named), `TICKET.md` for a MANUAL fix of a PR with a ticket ("For context only"), `.limn/fix-refs.json` and the checker `~/.limn/fix-report-check.cjs`. Goldens `__fixtures__/seed-fix*.md`. |
+| **Seed** | `FIX.md` (the PR, its fenced description, the task — review-seed.ts's fenced items or the fenced plain instruction — and the report contract), `PR.diff` (GitHub's diff, noise files out, capped at 1 MB, cuts named), `TICKET.md` for a MANUAL fix of a PR with a ticket ("For context only"), `.limn/fix-refs.json` and the checker `~/.ensemble/fix-report-check.cjs`. Goldens `__fixtures__/seed-fix*.md`. |
 | **Turns** | Manual: the first turn is the build turn, started the moment the agent is ready ("Start fix"). Plan first: one chat turn ("make a plan"), then the session waits; Start fix (`…/plan/approve`) switches to build. Every later message is one more turn in the SAME session; in build mode the agent rewrites the report for the whole change. Unattended: ONE build turn, then the session closes (`built`, resumable). |
 | **The report** | A JSON FILE, not a tool: the drivers run no MCP server and nothing on the host listens for the sandbox, and a file is the same for both providers. The agent writes `<root>/.limn/fix-report.json` (the `submit_fix` shape) and runs the checker until it prints OK. After every build turn the host reads it out (as the agent), checks it with the SAME validator text (`FIX_REPORT_VALIDATOR_SOURCE`), and normalises it against the extracted diff (`normalizeChangeReport`). A wrong shape ⇒ no report (every shown ref "not reported") and one notice; content problems ⇒ named, and the normaliser drops them. The old report is removed before each build turn. |
 | **The patch** | The PR repository's only, capped at `AI_FIX_PATCH_MAX_BYTES` (1 MB). Every other repository's changed files are listed in `session_json.leftOut` and one notice each ("… are left out"), never stored. |
@@ -1113,14 +1113,14 @@ one is pushed after the session closes or waits for the reader's Push.
 
 | Step | Where | What |
 |---|---|---|
-| **The commits** | host, `bases` (before the mirror) | `resolveMergePlan`: the base branch's tip NOW (Resume reuses the one picked at the start) and the merge base of it and the PR head, from Limn's clone cache; pinned as `refs/pierre/ai-fix/<fixId>/merge/{head,base,merge-base}` (dropped with the fix's other refs). No common commit ⇒ the boot fails in one line. Written to `ai_fixes.merge_json` (migration 0178). |
-| **Into the sandbox** | `afterMirror` | Both commits through the MIRROR SEAMS (`prepare` = the clone cache's depth-1 copy, the same tar stream), fetched into the PR repository as `refs/limn/merge-target` and `refs/limn/merge-base`, with `core.alternateRefsCommand=true` (⚠ § The repo store: without it a store with two keep refs fails every such fetch). A failure fails the session in one line, "Limn could not bring `<base>` into the sandbox: `<git's line>`"; it is never retried. The repository stays SHALLOW: the PR head, the base tip and the merge base, each with its whole tree, no history between (FIX.md says `git log` is cut). |
-| **Limn starts the merge** | sandbox, before the agent | `~/.limn/start-merge.sh` (`START_MERGE_SCRIPT`, also the agent's "start again"): `git merge-recursive <merge base> -- HEAD <base tip>` — git's own three-way merge with the EXPLICIT merge base (a shallow repository cannot find it, and the image's git 2.39 has no `merge-tree --merge-base`); the conflicts stay in the index and the files, `MERGE_HEAD` is the base tip, so the agent's `git commit` makes a MERGE COMMIT with parents (PR head, base tip). A snapshot of the automatic merge WITH the markers is kept (`refs/limn/auto-merge`). The conflicted files are one notice and `merge_json.conflictedFiles`. |
+| **The commits** | host, `bases` (before the mirror) | `resolveMergePlan`: the base branch's tip NOW (Resume reuses the one picked at the start) and the merge base of it and the PR head, from Ensemble's clone cache; pinned as `refs/pierre/ai-fix/<fixId>/merge/{head,base,merge-base}` (dropped with the fix's other refs). No common commit ⇒ the boot fails in one line. Written to `ai_fixes.merge_json` (migration 0178). |
+| **Into the sandbox** | `afterMirror` | Both commits through the MIRROR SEAMS (`prepare` = the clone cache's depth-1 copy, the same tar stream), fetched into the PR repository as `refs/limn/merge-target` and `refs/limn/merge-base`, with `core.alternateRefsCommand=true` (⚠ § The repo store: without it a store with two keep refs fails every such fetch). A failure fails the session in one line, "Ensemble could not bring `<base>` into the sandbox: `<git's line>`"; it is never retried. The repository stays SHALLOW: the PR head, the base tip and the merge base, each with its whole tree, no history between (FIX.md says `git log` is cut). |
+| **Ensemble starts the merge** | sandbox, before the agent | `~/.ensemble/start-merge.sh` (`START_MERGE_SCRIPT`, also the agent's "start again"): `git merge-recursive <merge base> -- HEAD <base tip>` — git's own three-way merge with the EXPLICIT merge base (a shallow repository cannot find it, and the image's git 2.39 has no `merge-tree --merge-base`); the conflicts stay in the index and the files, `MERGE_HEAD` is the base tip, so the agent's `git commit` makes a MERGE COMMIT with parents (PR head, base tip). A snapshot of the automatic merge WITH the markers is kept (`refs/limn/auto-merge`). The conflicted files are one notice and `merge_json.conflictedFiles`. |
 | **FIX.md** | seed | "First: the merge conflicts (MERGE)": the two refs and their shas, judgement over taking a side, read the lines around each hunk (nothing twice, nothing lost, no marker), `git add` + `git commit --no-edit`, never `--abort` / `--squash` / rebase / amend, how to start again, build and test, then the other fixes on top, cite MERGE. The system prompt adds one sentence. Golden: `__fixtures__/seed-fix-merge.md`. |
 | **Out of the sandbox** | after every build turn | `EXTRACT_MERGE_SCRIPT` (as the agent): `refs/limn/out` = HEAD plus ONE commit over any uncommitted change (a throw-away index); the merge commit = the oldest merge on the first-parent line since the PR head; the fix = merge..out (the row's `patch`, shown as the fix); the resolution = the merge commit against the automatic merge (`AiFix.merge.resolutionDiff`, ≤ 1 MB); a BUNDLE `refs/limn/out ^<PR head> ^<base tip>` (≤ 4 MB, else invalid, never cut) — REAL COMMITS, never a flattened patch, because GitHub sees conflicts resolved only through a merge commit. `MERGE_HEAD` still there ⇒ "not finished". |
-| **The host's check** | `verifyMergeBundle`, in the clone cache, no lazy fetch (except the review diffs below), no hooks, no config | the bundle names ONE ref, its prerequisites are the PR head and the base tip, every object fsck'd into `refs/pierre/ai-fix/<fixId>/merge/result`; ONE first-parent line whose oldest commit is a merge with parents EXACTLY (PR head, base tip) and every later one has one parent; nothing else; no conflict marker in any file that was in conflict, in the merge commit and in the last commit (a blob that is one side's own version passes; a new blob is read; one Limn cannot read fails). The sandbox's merge and result must be the checked ones. |
+| **The host's check** | `verifyMergeBundle`, in the clone cache, no lazy fetch (except the review diffs below), no hooks, no config | the bundle names ONE ref, its prerequisites are the PR head and the base tip, every object fsck'd into `refs/pierre/ai-fix/<fixId>/merge/result`; ONE first-parent line whose oldest commit is a merge with parents EXACTLY (PR head, base tip) and every later one has one parent; nothing else; no conflict marker in any file that was in conflict, in the merge commit and in the last commit (a blob that is one side's own version passes; a new blob is read; one Ensemble cannot read fails). The sandbox's merge and result must be the checked ones. |
 | **What the reader reviews** | `verifyMergeBundle` → `HostMergeView` (merge-verify.ts) | ⚠ computed ON THE HOST from the verified commits, never the sandbox's own diffs (the agent controls the sandbox's refs, config and even its `git`; a forged `refs/limn/auto-merge` could hide a change in the merge commit): the fix = `git diff merge result`, the resolution = the merge commit against the HOST's `git merge-tree --write-tree` of (PR head, base tip), whose conflicted files also join the marker check (git < 2.38: against the PR head, a superset). Lazy blob fetch is on for these diffs only (token in a process-scoped `insteadOf`). Push pins the exact `mergeSha`/`resultSha` checked after the turn (`expectedMergeSha`/`expectedResultSha`). |
-| **The verdict** | `merge_json.status` | `valid` (the bundle is kept, base64, `merge_bundle`), `invalid` (the reason; nothing kept), `missing` (no merge commit). ⚠ Only `valid` is pushable — not even the other fixes push without it (they may depend on it). Limn's verdict wins over the report: not valid ⇒ MERGE is "not addressed" with "Limn: <reason>". A follow-up message re-extracts and re-checks. |
+| **The verdict** | `merge_json.status` | `valid` (the bundle is kept, base64, `merge_bundle`), `invalid` (the reason; nothing kept), `missing` (no merge commit). ⚠ Only `valid` is pushable — not even the other fixes push without it (they may depend on it). Ensemble's verdict wins over the report: not valid ⇒ MERGE is "not addressed" with "Ensemble: <reason>". A follow-up message re-extracts and re-checks. |
 | **Push** | `push.ts` → `ctx.coding.pushMerge` (`git-ops.ts` `pushMergeResult`) | only `target: 'existing'`, never a fork's branch; the live head must still be the fix's start (HEAD_MOVED); the check again in the clone cache (fetched again if evicted); the merge commit (the merge's tree, parents PR head + base tip) and ONE fix commit (the last tree) rebuilt under the reader's name — nothing about the agent's commit objects reaches GitHub; pushed as a fast-forward, never forced; then the settle. The bundle is cleared on push, discard and a failed close. |
 | **Resume** | `restore` | the two commits come in again; the merge is NOT started again; the stored bundle is fetched back and the branch reset to it. Only a `valid` merge is resumable. |
 
@@ -1192,7 +1192,7 @@ Measured live, 2026-11-07 (`session/fix-merge-session.live.test.ts`): see § Tes
   answers) and `merge/dependency-automation-teams.test.ts` (one skip row, no claim, later ticks read
   nothing, not counted, taken over; busy writes nothing; a lost race gives the claim back; cancel wins). `session/fix-session.live.test.ts` (`live`,
   `LIMN_SANDBOX_LIVE=claude`) runs one tiny real fix.
-- **AI Fix's merge** (`slow`, real git): `coding/ai-fix/merge-verify.test.ts` runs Limn's sandbox scripts with
+- **AI Fix's merge** (`slow`, real git): `coding/ai-fix/merge-verify.test.ts` runs Ensemble's sandbox scripts with
   `sh` on a repository shaped as the sandbox makes it (shallow, three commits) — the conflict found with the
   explicit merge base, a valid merge with a fix on top and an uncommitted edit passing, its rebuilt commits'
   parents / trees / author, a push from a blobless clone being a fast-forward; refused: a marker left (also
@@ -1313,7 +1313,7 @@ the model answered. What was proven, and what was read from the 0.164 protocol s
 - **Why app-server**: one long-lived process per session like Claude's driver; **`sandboxPolicy` is per
   TURN** (`readOnly` for chat, `dangerFullAccess` for the build — no restart); `turn/interrupt
   {threadId, turnId}` and `turn/steer` exist; partial text arrives as `item/agentMessage/delta`;
-  usage as `thread/tokenUsage/updated`; rate limits as `account/rateLimits/updated`. Limn already has a
+  usage as `thread/tokenUsage/updated`; rate limits as `account/rateLimits/updated`. Ensemble already has a
   JSON-RPC client for it (`ai/codex/app-server.ts`). The cost: it is marked experimental — pin the
   CLI and keep `exec`/`exec resume` as the documented fallback. NOT YET PROVEN LIVE: deltas, usage
   notifications, interrupt, a write in a `dangerFullAccess` turn. Re-run `spike2-codex.mjs --mode
@@ -1324,7 +1324,7 @@ the model answered. What was proven, and what was read from the 0.164 protocol s
   which weakens the outer boundary — do not do that. Consequence: a Codex CHAT turn cannot be made
   read-only by Codex here (every shell command, including reads, would fail under `readOnly`).
   Recommendation: run Codex chat turns with `sandboxPolicy {type:"externalSandbox"}` (or
-  `dangerFullAccess`), tell it in the seed not to change files until Start build, and have Limn run
+  `dangerFullAccess`), tell it in the seed not to change files until Start build, and have Ensemble run
   `git status --porcelain` in each repository after every chat turn and show any change. Claude's
   plan mode is enforced by the CLI and needs none of this.
 - ⚠ **Lock Codex's extras down inside the sandbox too.** Without the lockdown it fetched the plugin
@@ -1336,7 +1336,7 @@ the model answered. What was proven, and what was read from the 0.164 protocol s
 - **Hosts Codex needs**: `chatgpt.com` only (model list, responses, account checks). `auth.openai.com`
   is needed only for a token refresh (see spike 3).
 - ⚠ **Never refresh inside the sandbox.** OpenAI refresh tokens are single-use: a refresh with a COPY
-  of the reader's `auth.json` would rotate it and sign the HOST out of Limn's Codex. Codex refreshes
+  of the reader's `auth.json` would rotate it and sign the HOST out of Ensemble's Codex. Codex refreshes
   on age; the spike refuses to run when `last_refresh` is over 5 days old. Injection (spike 3) removes
   the problem.
 
@@ -1372,7 +1372,7 @@ secret is fake: unsigned JWTs carrying only `exp`, `iat` and the `https://api.op
 model_provider = "limn"
 chatgpt_base_url = "http://limn-proxy:8082/backend-api/"
 [model_providers.limn]
-name = "OpenAI via Limn"
+name = "OpenAI via Ensemble"
 base_url = "http://limn-proxy:8082/backend-api/codex"
 wire_api = "responses"
 requires_openai_auth = true
@@ -1383,7 +1383,7 @@ Evidence: 19 requests, every one swapped or credential-free, none refused —
 `GET /backend-api/wham/settings/user 200`, plugin endpoints 200, and the model call
 `POST /backend-api/codex/responses 429` (usage limit: an authenticated answer). No sandbox file
 contained the real access token. Not yet proven: a completed turn. Token refresh stays on the HOST
-(Limn's app-server probe, `account/read {refreshToken:true}`, already refreshes `~/.limn/codex`); the
+(Ensemble's app-server probe, `account/read {refreshToken:true}`, already refreshes `~/.ensemble/codex`); the
 fake access token's `exp` is copied from the real one, so Codex inside never tries to refresh while
 the host keeps the real one fresh. If the host token lapses, Codex's refresh attempt fails at the
 proxy (auth.openai.com not allowed, placeholder refresh token) and the session shows a sign-in error.
@@ -1485,7 +1485,7 @@ container cannot resolve outside names.
   (the spike used `git archive HEAD`; WP6 needs a volume subpath or a host-side copy, since the
   workspace lives on a named volume).
 - **Node version**: the repository needs Node ≥ 24.22.1 (`.nvmrc`); the image has 22. The spike
-  downloaded it through the proxy. The image should carry a version manager, or Limn caches the
+  downloaded it through the proxy. The image should carry a version manager, or Ensemble caches the
   tarballs per version.
 - **No SSH in the sandbox.** The lockfile names `git+ssh://git@github.com/DEFRA/bng-library.git`; a git
   `url.https://github.com/.insteadOf` rule for `ssh://git@github.com/` and `git@github.com:` sends it
@@ -1511,8 +1511,8 @@ The adapter drives the CLI (no npm dependency):
 | Create | `msb create limn-sandbox:<v> --name limn-<session> --label limn.session=<id> --label limn.account=<id> -c 4 -m 8G --root-disk flat:30G,clone=auto -w <start dir> -e KEY=VALUE …` (labels must not start with `sandbox.`, `microsandbox.`, `service.`) |
 | Read-only mounts | `-v <clone-cache>/<owner>/<repo>:/limn/src/<owner>/<repo>:ro,noexec` and `-v ~/.claude/projects/<key>/memory:/limn/memory/<key>:ro` |
 | Private disk for services | `--mount-owned /var/lib/docker:kind=disk,size=20G` (removed with the sandbox) |
-| Egress allow-list | `--net-default deny --net-rule "allow@dns" --net-rule "allow@host:tcp:3128,allow@host:tcp:8081,allow@host:tcp:8082"` — i.e. allow ONLY Limn's host proxy at `host.microsandbox.internal`, and set `HTTPS_PROXY=http://host.microsandbox.internal:3128` + `ANTHROPIC_BASE_URL=http://host.microsandbox.internal:8081` in the guest. ONE allow-list, ONE log, ONE injector on both backends. |
-| Native alternative (not chosen) | `--net-rule "allow@api.anthropic.com"` (hostname rules need `--net-strict`, the default) + `--secret 'CLAUDE_CODE_OAUTH_TOKEN@api.anthropic.com'` (the guest sees `$MSB_CLAUDE_CODE_OAUTH_TOKEN`, a placeholder). Needs TLS interception with msb's CA trusted in the guest (`msb-trust.sh`, `NODE_EXTRA_CA_CERTS` for Claude, `CODEX_CA_CERTIFICATE`/`SSL_CERT_FILE` for Codex). It gives no per-request log Limn can show, so the host proxy route is preferred. ⚠ `--proxy http://IP:PORT` is NOT a substitute: msb resolves names itself and sends the destination IP in CONNECT, so a host-name allow-list cannot work through it. |
+| Egress allow-list | `--net-default deny --net-rule "allow@dns" --net-rule "allow@host:tcp:3128,allow@host:tcp:8081,allow@host:tcp:8082"` — i.e. allow ONLY Ensemble's host proxy at `host.microsandbox.internal`, and set `HTTPS_PROXY=http://host.microsandbox.internal:3128` + `ANTHROPIC_BASE_URL=http://host.microsandbox.internal:8081` in the guest. ONE allow-list, ONE log, ONE injector on both backends. |
+| Native alternative (not chosen) | `--net-rule "allow@api.anthropic.com"` (hostname rules need `--net-strict`, the default) + `--secret 'CLAUDE_CODE_OAUTH_TOKEN@api.anthropic.com'` (the guest sees `$MSB_CLAUDE_CODE_OAUTH_TOKEN`, a placeholder). Needs TLS interception with msb's CA trusted in the guest (`msb-trust.sh`, `NODE_EXTRA_CA_CERTS` for Claude, `CODEX_CA_CERTIFICATE`/`SSL_CERT_FILE` for Codex). It gives no per-request log Ensemble can show, so the host proxy route is preferred. ⚠ `--proxy http://IP:PORT` is NOT a substitute: msb resolves names itself and sends the destination IP in CONNECT, so a host-name allow-list cannot work through it. |
 | Streaming exec | `msb exec --stream -u agent -w <dir> -e … limn-<session> -- claude -p --input-format stream-json …` (stdin forwarded, output flushed as it arrives; `--timeout`, `--rlimit` available) |
 | Copy in / out | `msb copy <host> limn-<session>:<guest>` and back (seed files, patches); or `msb exec … -- git format-patch --stdout` |
 | Services | Docker INSIDE the VM: the image needs Docker Engine + compose plugin (or a `docker:<v>-dind` base), started by a root `msb exec … -- dockerd` and polled with `msb exec … -- docker info`; then `docker compose up` as the agent. The guide uses `--root-disk flat:10G`. |

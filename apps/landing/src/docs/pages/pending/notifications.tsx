@@ -10,7 +10,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn can show a notification from your browser when a new item enters your My turn list: a review
+        Ensemble can show a notification from your browser when a new item enters your My turn list: a review
         request, a reply to you, a mention, new commits to re-read, or news about your own pull request. The
         notification names the workspace the items came from. It is off until you switch it on.
       </p>
@@ -32,7 +32,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-you-are-told">What you are told about</H2>
       <ul>
         <li>
-          Only new items. When you open Limn, the items already waiting do not each send a notification.
+          Only new items. When you open Ensemble, the items already waiting do not each send a notification.
         </li>
         <li>
           Only items that involve you. A new pull request in a repository you maintain counts; a pull request
@@ -47,17 +47,17 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        When you switch on <Ui>Also show new PRs nobody asked you about</Ui>, Limn does not notify you about the
+        When you switch on <Ui>Also show new PRs nobody asked you about</Ui>, Ensemble does not notify you about the
         backlog it adds.
       </p>
 
       <Note>
-        Notifications come from the Limn tab in your browser, so Limn must be running and a Limn tab must be
-        open. They arrive when Limn's next sync brings the change in, usually within a few minutes.
+        Notifications come from the Ensemble tab in your browser, so Ensemble must be running and an Ensemble tab must be
+        open. They arrive when Ensemble's next sync brings the change in, usually within a few minutes.
       </Note>
 
       <Tip>
-        The same switch also lets Limn tell you when an AI review that you started finishes. Reviews started by
+        The same switch also lets Ensemble tell you when an AI review that you started finishes. Reviews started by
         auto review do not notify you; their results wait on the pull request.
       </Tip>
     </>

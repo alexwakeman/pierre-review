@@ -1,4 +1,4 @@
-# Writing the Limn docs
+# Writing the Ensemble docs
 
 The user documentation at **limn-review.com/docs**. It is part of the landing site
 (`apps/landing`), prerendered per page, with no runtime dependency.
@@ -81,7 +81,7 @@ export default function Page(): JSX.Element {
 - Start the body with one plain paragraph that says what the screen or feature is for.
 - Use the patterns **What you see**, **What you can do**, **Why it helps** where they fit; a
   reference page (a Settings tab, an integration) can use **What you need**, **Set it up**,
-  **What Limn reads**, **What Limn writes**, **Turn it off** instead.
+  **What Ensemble reads**, **What Ensemble writes**, **Turn it off** instead.
 - `H2` needs an `id` (lowercase, hyphens). The H2s make "On this page". Use `H3` under them.
 - **The body is HOOK-FREE.** "On this page" is read by calling the body as a function. If a
   picture needs state (a clickable mock), put the state in a small component in the same file
@@ -95,16 +95,16 @@ Plain English, as the app's own copy (`CLAUDE.md` § Product voice), leaning on 
 - Short sentences, one instruction each. Active voice. Start steps with a verb.
 - **Use the app's own words, exactly**: the label on the button, tab or chip, in `<Ui>`. Check the
   frontend source for the spelling. "Pending", not "the attention board".
-- Say what the reader sees and does, not how Limn is built: no file names, table names, internal
+- Say what the reader sees and does, not how Ensemble is built: no file names, table names, internal
   ids, environment variables or code paths. The exception is something the reader must type or set
-  (`npx limn-review`, `LIMN_AI_PROVIDER`), which goes in `<code>`.
+  (`npx ensemble-review`, `ENSEMBLE_AI_PROVIDER`), which goes in `<code>`.
 - Address the reader as "you". A developer and an engineering manager both read these pages; say
   in the text what each gets where the answer differs. No per-page "who it helps" blocks.
 - British spelling, as the rest of the site ("licence" the noun, "organisation", "colour").
 - No "Pro", "paid", "upgrade" or credits wording: every feature is free under the Ensemble License
   (free for individuals and for organisations where no more than three people use it).
-- Do not promise what Limn does not do. Where Limn guesses (Likely addressed, blast radius),
-  say it is a guess. Where Limn refuses (the benchmark), say so and why.
+- Do not promise what Ensemble does not do. Where Ensemble guesses (Likely addressed, blast radius),
+  say it is a guess. Where Ensemble refuses (the benchmark), say so and why.
 - Numbers: round them, and say what they count.
 - Quotes from a vendor's policy are exact, in `Quote`, with a link to the page they come from.
 

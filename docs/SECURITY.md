@@ -140,17 +140,17 @@ only inside a sandbox `sandbox/runtime` started: Implement on a story, and every
 and every chat keep the no-shell rule above.
 
 ⚠ **A MERGE FROM THE SANDBOX IS CHECKED, THEN REBUILT** (docs/SANDBOX.md § AI Fix sessions, "The merge"). The
-agent's commits leave as a git bundle — untrusted bytes. The host reads it only in Limn's clone cache with
+agent's commits leave as a git bundle — untrusted bytes. The host reads it only in Ensemble's clone cache with
 hooks, fsmonitor, the reader's config, replace objects and lazy fetch OFF, fetches it with every object
 fsck'd under a namespaced ref (`refs/pierre/ai-fix/<id>/merge/result`), and accepts exactly one shape: ONE
-first-parent line from the PR head whose first commit is a merge with parents (PR head, the base tip Limn
+first-parent line from the PR head whose first commit is a merge with parents (PR head, the base tip Ensemble
 pinned), nothing else, and no conflict marker in a file that was in conflict. Push never sends the agent's
 commit objects: it rebuilds the merge commit and one fix commit from the CHECKED trees under the reader's
 name, onto the PR's own branch only (never a fork), as a fast-forward of the head the fix started from.
 
 ⚠ **A PLAN'S EVIDENCE IS THE HOST'S, NOT THE AGENT'S** (plan first, docs/SANDBOX.md § The plan and its checks).
 The agent controls the sandbox, so every quote in its plan is re-read on the host: code at the pinned base
-sha in Limn's clone cache (hooks and config off), docs in the full library, data runs only from Limn's own
+sha in Ensemble's clone cache (hooks and config off), docs in the full library, data runs only from Ensemble's own
 `limn-svc run` log and never from a service the reader opened to the internet. The page shows the host's
 text. The plan leaves as text in the agent's answer (Claude's plan mode cannot write), so nothing on the
 host listens. "Implement with docs" copies a read-only, root-owned subset of the library; no host folder
@@ -173,19 +173,19 @@ blocked host simply stays blocked. Full design and per-OS setup: [SANDBOX.md](SA
 
 | Threat | What stops it |
 |---|---|
-| The text tells the agent to send data out | The sandbox's network is `--internal` (no route out); the ONLY way out is Limn's allow-list proxy, every request logged in the Network panel, a blocked host opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the sandbox holds a per-session placeholder and the proxy swaps the real one in (`sandbox/proxy/credentials.ts`). Loopback, link-local (cloud metadata), multicast and reserved addresses are always refused. Claude Code's web search and web fetch are off (they run past the proxy). |
+| The text tells the agent to send data out | The sandbox's network is `--internal` (no route out); the ONLY way out is Ensemble's allow-list proxy, every request logged in the Network panel, a blocked host opened only by the reader's Allow press. No GitHub credential is inside. The model credential stays on the host: the sandbox holds a per-session placeholder and the proxy swaps the real one in (`sandbox/proxy/credentials.ts`). Loopback, link-local (cloud metadata), multicast and reserved addresses are always refused. Claude Code's web search and web fetch are off (they run past the proxy). |
 | The agent damages the host | No writable host mount (a bind mount is read-only BY TYPE), no Docker socket (`spec.ts` refuses it, `~/.ssh`, `~/.docker`, `~/.config/gh`, `/` and others as sources, even read-only); non-root, `--cap-drop ALL`, `no-new-privileges`, CPU / memory / process caps. Docker for Mac and Windows add the VM as a second boundary; ⚠ **on Linux Docker the kernel is shared**. microsandbox (a microVM) is built but untested. |
-| A repository's compose file escalates | Limn runs compose on the HOST from a POLICED model (`sandbox/services/policy.ts`, checked on every `up`): the whole file is refused for privileged mode, capabilities, devices, host namespaces, host mounts (the socket included), loosened security options, outside builds or unlisted registries. Services join only the session network. |
-| Changes reach GitHub unseen | Work leaves the sandbox ONLY as a patch per repository; the HOST pushes on the reader's press. Implement: a NEW branch, never forced, the default branch and a stacked PR's head protected, a DRAFT PR by default; `push.ts defangGithubText` breaks closing keywords and `@mentions` in the PR body and commit message. AI Fix: only the PR repository, to the PR's own branch (`pushFix`, HEAD_MOVED refused); with no press only under the workspace's "Push automatically" (an own-PR auto fix, OFF by default) or dependency automation's policy (a trusted bot's PR, OFF by default). Implement / Fill gaps with no press only under the reader's own tick, "After the build: review and fix, then open the pull request" (OFF by default; THE REVIEW LOOP, docs/STORY-BUILD.md § The review loop): GitHub sees only the branch (pushed with no PR), one NEW commit per fix pass (fast-forward, the live ref checked first, never forced) and, at the end, the PR — ready for review, the READER'S (origin `reader`, no ledger, no trailer). The reviews, the agent's answers and the criteria verdicts stay in Limn: no comment, no GitHub review, no tracker write. Every write is a claim row inserted before it, never retried; a restart pauses and Continue re-reads the live ref before anything new. A branch override (the rename after `BRANCH_EXISTS`, on Push or on the loop's Continue) goes through the same `assertPushTarget` before any lookup. Rate tiers: Push `github_write`; `…/loop/continue` `ai` + `ai_hourly` + `github_write` (it may start reviews, a fix turn and pushes); `…/auto-push`, `…/loop/settings`, `…/loop/stop` and `GET …/loop` are DB only: `read`. |
+| A repository's compose file escalates | Ensemble runs compose on the HOST from a POLICED model (`sandbox/services/policy.ts`, checked on every `up`): the whole file is refused for privileged mode, capabilities, devices, host namespaces, host mounts (the socket included), loosened security options, outside builds or unlisted registries. Services join only the session network. |
+| Changes reach GitHub unseen | Work leaves the sandbox ONLY as a patch per repository; the HOST pushes on the reader's press. Implement: a NEW branch, never forced, the default branch and a stacked PR's head protected, a DRAFT PR by default; `push.ts defangGithubText` breaks closing keywords and `@mentions` in the PR body and commit message. AI Fix: only the PR repository, to the PR's own branch (`pushFix`, HEAD_MOVED refused); with no press only under the workspace's "Push automatically" (an own-PR auto fix, OFF by default) or dependency automation's policy (a trusted bot's PR, OFF by default). Implement / Fill gaps with no press only under the reader's own tick, "After the build: review and fix, then open the pull request" (OFF by default; THE REVIEW LOOP, docs/STORY-BUILD.md § The review loop): GitHub sees only the branch (pushed with no PR), one NEW commit per fix pass (fast-forward, the live ref checked first, never forced) and, at the end, the PR — ready for review, the READER'S (origin `reader`, no ledger, no trailer). The reviews, the agent's answers and the criteria verdicts stay in Ensemble: no comment, no GitHub review, no tracker write. Every write is a claim row inserted before it, never retried; a restart pauses and Continue re-reads the live ref before anything new. A branch override (the rename after `BRANCH_EXISTS`, on Push or on the loop's Continue) goes through the same `assertPushTarget` before any lookup. Rate tiers: Push `github_write`; `…/loop/continue` `ai` + `ai_hourly` + `github_write` (it may start reviews, a fix turn and pushes); `…/auto-push`, `…/loop/settings`, `…/loop/stop` and `GET …/loop` are DB only: `read`. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills, copied as files, size-capped, symlinks skipped. Past sessions are NEVER imported (no transcript is copied or resumed; Claude Code runs with `--no-session-persistence`). |
-| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer (Implement and AI Fix share both), idle teardown; Limn labels on every resource, swept at boot and on discard (`limn sandbox prune`). Every turn is a reader's press except an UNATTENDED fix's one build turn, which asks the spend gate first and runs under Claude's `--max-budget-usd`, and the review loop's reviews and fix turns, each of which asks the ONE spend gate first (a refusal pauses the loop; only the reader's Continue skips it, for the one step it resumes); usage recorded per turn. |
+| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer (Implement and AI Fix share both), idle teardown; Ensemble labels on every resource, swept at boot and on discard (`ensemble sandbox prune`). Every turn is a reader's press except an UNATTENDED fix's one build turn, which asks the spend gate first and runs under Claude's `--max-budget-usd`, and the review loop's reviews and fix turns, each of which asks the ONE spend gate first (a refusal pauses the loop; only the reader's Continue skips it, for the one step it resumes); usage recorded per turn. |
 
 Routes and tiers: `api/plugins/rate-limit.ts` (a session start, a message, Start build / Start fix and
 Resume `ai` + `ai_hourly`; the pushes `github_write`; the rest `read`). The removed shell-less plan and build agents
 (`coding/story-build/plan-agent.ts`, `build.ts`) and their write deny-list (`review/write-deny.ts`,
 `AgentRunSpec.protectWrites`) are gone.
 
-**The local clone cache (`~/.limn/clones`) — five fixes, and the standing invariant.**
+**The local clone cache (`~/.ensemble/clones`) — five fixes, and the standing invariant.**
 Claude Review, the merge-conflict resolver and the sandbox mirror (Implement, AI Fix and its merge check) all read this cache, so
 it went from a corner to a hot path and was hardened before the resolver was allowed to multiply the
 clone count. **The invariant: a GitHub token never reaches disk.**
@@ -305,7 +305,7 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   transport (no redirects, 10 s, 5 MB); the database URL in Settings is an identity, never fetched.
   The internal integration token rides the same sealed write-only slot, sent as `Bearer`; the PUT
   refuses a value not shaped `ntn_…` / `secret_…`. It reads only what the workspace's owner SHARED
-  with the integration. READ-ONLY: every call is a GET or a database query; Limn never writes to
+  with the integration. READ-ONLY: every call is a GET or a database query; Ensemble never writes to
   Notion. Calls with one token are spaced ≈ 3 a second and a 429's `Retry-After` is honoured without
   calling (in memory). The mapping read (`GET …/tracker/notion-schema`) is on `search` in `tierFor`.
   Page text, comments and property values are UNTRUSTED like every ticket's: rich-text links are kept
@@ -356,7 +356,7 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Wiki sources).
 - **Reference-docs web pages (`reference-docs/url-fetch.ts`) — a page address the
   reader typed, fetched by the docs build.** http/https only, no credentials in the URL,
-  **never loopback, link-local, multicast, reserved or `localhost`** (Limn's own unauthenticated
+  **never loopback, link-local, multicast, reserved or `localhost`** (Ensemble's own unauthenticated
   API), while private networks and intranet names ARE allowed (`privateNetwork: true` — the reader's
   company wiki is the point); an IP literal up front, a name at connect time through the tracker's
   `guardedLookup` with the policy's predicate, redirects followed ONLY on the same host (≤ 3, never https → http, each
@@ -376,7 +376,7 @@ clone count. **The invariant: a GitHub token never reaches disk.**
   were cleared (see Dependency posture). The site image's `Dockerfile` runs as `USER node`.
 - **`.gitignore`** is `.env*` + `!*.example` — it was `.env` + `.env.local` only.
 
-**Privacy.** Limn phones nothing home: no analytics in the SPA (GA and its cookie banner live
+**Privacy.** Ensemble phones nothing home: no analytics in the SPA (GA and its cookie banner live
 only on the website, `apps/landing`, consent-gated), and **the brand font is SELF-HOSTED**
 (`src/fonts/*.woff2`, relative `url()` so Vite base-prefixes it to `/app/`) — the Google Fonts
 `<link>` leaked every viewer's IP to Google and forced an inline `onload` handler that would

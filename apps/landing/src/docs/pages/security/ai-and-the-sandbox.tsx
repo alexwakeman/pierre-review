@@ -23,14 +23,14 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn&rsquo;s AI reads text written by other people: pull request descriptions, comments, tickets, and the code
-        itself. Any of it could try to give the AI instructions. Limn therefore treats everything an agent reads from a
+        Ensemble&rsquo;s AI reads text written by other people: pull request descriptions, comments, tickets, and the code
+        itself. Any of it could try to give the AI instructions. Ensemble therefore treats everything an agent reads from a
         pull request or ticket as untrusted, and limits what each agent can do. Most agents can only read. The two that
         can run commands, AI Fix and Implement story, run inside a sandbox that holds none of your credentials.
       </p>
 
       <H2 id="what-each-agent-can-do">What each agent can do</H2>
-      <Illustration label="A table of Limn's AI features: reviews and chats read only, AI Fix and Implement run commands in the sandbox." caption="Only two features can run commands, and only in the sandbox.">
+      <Illustration label="A table of Ensemble's AI features: reviews and chats read only, AI Fix and Implement run commands in the sandbox." caption="Only two features can run commands, and only in the sandbox.">
         <MiniTable cols={AGENT_COLS} rows={AGENT_ROWS} />
       </Illustration>
       <H3>Reviews and chats: read only</H3>
@@ -41,9 +41,9 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Codex is locked down further</H3>
       <p>
-        When Codex runs a review, Limn turns off its shell, web access, images, plugins and memories, and gives it only
-        Limn&rsquo;s own read-only file tools. Limn also checks that its safety check really runs before each run, and
-        refuses to start if it cannot prove it. Codex uses Limn&rsquo;s own Codex folder, never yours.
+        When Codex runs a review, Ensemble turns off its shell, web access, images, plugins and memories, and gives it only
+        Ensemble&rsquo;s own read-only file tools. Ensemble also checks that its safety check really runs before each run, and
+        refuses to start if it cannot prove it. Codex uses Ensemble&rsquo;s own Codex folder, never yours.
       </p>
 
       <H2 id="the-sandbox">The sandbox</H2>
@@ -57,11 +57,11 @@ export default function Page(): JSX.Element {
           <b>No GitHub credentials.</b> The sandbox holds no GitHub token or sign-in of any kind.
         </li>
         <li>
-          <b>No AI credentials.</b> The sandbox holds only a stand-in. Limn&rsquo;s network filter puts the real Claude
+          <b>No AI credentials.</b> The sandbox holds only a stand-in. Ensemble&rsquo;s network filter puts the real Claude
           or Codex credential on the request as it leaves, so the AI cannot read it.
         </li>
         <li>
-          <b>No way out but Limn&rsquo;s network filter.</b> The sandbox can reach only the hosts allowed for it. Every
+          <b>No way out but Ensemble&rsquo;s network filter.</b> The sandbox can reach only the hosts allowed for it. Every
           request shows in the session&rsquo;s <Ui>Network</Ui> list, and a blocked host opens only when you press{' '}
           <Ui>Allow for this session</Ui> or <Ui>Always allow</Ui>. Local, cloud metadata and other reserved addresses are
           always refused.
@@ -82,14 +82,14 @@ export default function Page(): JSX.Element {
 
       <H2 id="how-work-leaves">How work leaves the sandbox</H2>
       <p>
-        Work leaves only as a patch for each repository. Limn checks it on your computer, then pushes it with your
+        Work leaves only as a patch for each repository. Ensemble checks it on your computer, then pushes it with your
         GitHub access when you press <Ui>Push</Ui>:
       </p>
       <ul>
         <li>AI Fix pushes only to the pull request&rsquo;s own branch, and never forces a push.</li>
         <li>Implement story pushes a new branch and opens a draft pull request by default.</li>
         <li>
-          A merge made in the sandbox is checked and rebuilt by Limn before it is pushed: the AI&rsquo;s own commits are
+          A merge made in the sandbox is checked and rebuilt by Ensemble before it is pushed: the AI&rsquo;s own commits are
           never sent.
         </li>
       </ul>
@@ -104,7 +104,7 @@ export default function Page(): JSX.Element {
       </Warning>
       <H2 id="when-a-sandbox-is-removed">When a sandbox is removed</H2>
       <p>
-        A sandbox runs only while its session is open. When the session ends, Limn stops and removes its container or
+        A sandbox runs only while its session is open. When the session ends, Ensemble stops and removes its container or
         virtual machine, its proxy, its services, its network and its storage. A session ends when:
       </p>
       <ul>
@@ -116,16 +116,16 @@ export default function Page(): JSX.Element {
         <li>
           you select <Ui>Stop all</Ui> in <DocLink to="settings/sandbox">Settings → Sandbox</DocLink>;
         </li>
-        <li>Limn stops, or restarts.</li>
+        <li>Ensemble stops, or restarts.</li>
       </ul>
       <p>
         Changes the session stored are kept: you can push them, or resume the session, which starts a new sandbox.
-        Every few minutes, and when it starts, Limn also removes any sandbox of its own that no open session uses. It
-        never removes a sandbox of another Limn on the same computer, or anything it did not create.
+        Every few minutes, and when it starts, Ensemble also removes any sandbox of its own that no open session uses. It
+        never removes a sandbox of another Ensemble on the same computer, or anything it did not create.
       </p>
       <Note>
-        If Limn was killed without warning, its sandboxes are removed the next time it starts. Run{' '}
-        <code>limn sandbox prune</code> with Limn stopped to remove them at once.
+        If Ensemble was killed without warning, its sandboxes are removed the next time it starts. Run{' '}
+        <code>ensemble sandbox prune</code> with Ensemble stopped to remove them at once.
       </Note>
     </>
   );

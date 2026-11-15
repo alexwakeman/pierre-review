@@ -3,14 +3,14 @@ import { Btn, DocLink, H2, Illustration, Note, Pill, SettingsRow, Steps, Thread,
 
 export const meta: DocMeta = {
   title: 'Severity scoring',
-  summary: 'Limn scores each bot comment as nit, minor, major or critical with a model that runs on your computer.',
+  summary: 'Ensemble scores each bot comment as nit, minor, major or critical with a model that runs on your computer.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Bots label their own comments, and most of them label too much as important. Limn reads each review comment a
+        Bots label their own comments, and most of them label too much as important. Ensemble reads each review comment a
         bot leaves and gives it its own severity, <Ui>Nit</Ui>, <Ui>Minor</Ui>, <Ui>Major</Ui> or{' '}
         <Ui>Critical</Ui>, and up to eight categories, such as correctness, security or testing. A small model does
         this on your computer. It is not a large language model, it sends nothing anywhere, and it never reads the
@@ -42,23 +42,23 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
       <p>
-        You can also run <code>npx limn-review ml install</code> in a terminal, and{' '}
-        <code>npx limn-review ml status</code> to check it.
+        You can also run <code>npx ensemble-review ml install</code> in a terminal, and{' '}
+        <code>npx ensemble-review ml status</code> to check it.
       </p>
 
       <H2 id="it-will-not-slow-your-computer">It will not slow your computer</H2>
       <p>
         Scoring runs in the background at low priority, one comment at a time, using at most half of one processor
         core. It pauses while your laptop is on battery. A large backlog of old comments therefore takes a while. If
-        you want it faster, or want it to carry on on battery, start Limn with <code>LIMN_ML_CPU_SHARE=1</code> or{' '}
-        <code>LIMN_ML_ON_BATTERY=run</code>. To turn scoring off, start Limn with{' '}
-        <code>LIMN_ML_DISABLED=true</code>.
+        you want it faster, or want it to carry on on battery, start Ensemble with <code>ENSEMBLE_ML_CPU_SHARE=1</code> or{' '}
+        <code>ENSEMBLE_ML_ON_BATTERY=run</code>. To turn scoring off, start Ensemble with{' '}
+        <code>ENSEMBLE_ML_DISABLED=true</code>.
       </p>
 
       <H2 id="where-you-see-it">Where you see it</H2>
       <Illustration
-        label="A CodeRabbit thread with Limn's severity Minor and the note: bot said Critical"
-        caption="Limn’s severity on a bot comment. When the bot’s own label disagrees, it is shown beside it."
+        label="A CodeRabbit thread with Ensemble's severity Minor and the note: bot said Critical"
+        caption="Ensemble’s severity on a bot comment. When the bot’s own label disagrees, it is shown beside it."
       >
         <Thread
           file="refunds/policy.py:41"
@@ -81,16 +81,16 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        When a bot labels its own comment, Limn shows that label beside its own as “bot said …”, with an arrow when
+        When a bot labels its own comment, Ensemble shows that label beside its own as “bot said …”, with an arrow when
         the two disagree. The <Ui>Inflation</Ui> column on the ROI table counts how often each bot graded a finding
-        worse than Limn did. A bot that labels nothing shows a dash: no label is silence, not agreement.
+        worse than Ensemble did. A bot that labels nothing shows a dash: no label is silence, not agreement.
       </p>
       <Note title="How accurate it is">
-        On a held-out sample judged by people, Limn’s label agreed 70% of the time; the bots’ own labels agreed 47%
+        On a held-out sample judged by people, Ensemble’s label agreed 70% of the time; the bots’ own labels agreed 47%
         of the time. The model rarely calls something critical, so read major and critical together as “high”.
       </Note>
       <Note>
-        Limn’s own review findings are not scored by this model. Their severity is the one the review gave them. Some
+        Ensemble’s own review findings are not scored by this model. Their severity is the one the review gave them. Some
         older comments cannot be scored, because their text was not stored and GitHub no longer has it; they are left
         out of every figure.
       </Note>

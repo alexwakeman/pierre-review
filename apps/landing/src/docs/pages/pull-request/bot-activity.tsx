@@ -68,7 +68,7 @@ export default function Page(): JSX.Element {
           <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>: how serious each bot comment is.
         </li>
         <li>
-          <DocLink to="feed/people-and-bots">People or bots</DocLink>: how Limn decides who is a bot.
+          <DocLink to="feed/people-and-bots">People or bots</DocLink>: how Ensemble decides who is a bot.
         </li>
       </ul>
     </>

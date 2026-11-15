@@ -3,14 +3,14 @@ import { DocLink, H2, Illustration, MiniTable, Note, Stat, Steps, Ui } from '../
 
 export const meta: DocMeta = {
   title: 'AI usage',
-  summary: 'What Limn\'s AI runs cost you this week: share of your subscription or US dollars on an API key.',
+  summary: 'What Ensemble\'s AI runs cost you this week: share of your subscription or US dollars on an API key.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        <Ui>AI usage</Ui>, the last tab of Reports, shows where Limn’s own AI runs went for this workspace in the{' '}
+        <Ui>AI usage</Ui>, the last tab of Reports, shows where Ensemble’s own AI runs went for this workspace in the{' '}
         <DocLink to="reports/reporting-window">reporting window</DocLink>: reviews, story reviews, AI Fix, chat,
         diagrams and the rest. It also lists ways to use fewer tokens, worked out from your runs. The tab appears only
         while AI is on.
@@ -65,7 +65,7 @@ export default function Page(): JSX.Element {
         <li>
           <Ui>Ways to use fewer tokens</Ui>: suggestions with an estimate of what each would have saved in this
           window, and a link to the setting it changes, such as <Ui>Auto review settings</Ui> or{' '}
-          <Ui>Effort settings</Ui>. Limn works these out from your runs; no AI writes them.
+          <Ui>Effort settings</Ui>. Ensemble works these out from your runs; no AI writes them.
         </li>
       </ul>
 
@@ -73,7 +73,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <strong>Claude on a subscription</strong> (your Claude Code sign-in): the share of a week’s allowance,
-          estimated from your plan. Limn never shows US dollars for a subscription.
+          estimated from your plan. Ensemble never shows US dollars for a subscription.
         </li>
         <li>
           <strong>Claude on an API key:</strong> US dollars.
@@ -83,7 +83,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <Note>
-        Runs that Limn skipped because the AI spend limit was reached are not recorded, so they are not counted here.
+        Runs that Ensemble skipped because the AI spend limit was reached are not recorded, so they are not counted here.
         To change the limit, see <DocLink to="settings/ai-usage-and-spend">AI usage and spend</DocLink>.
       </Note>
 
@@ -98,7 +98,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="why-it-helps">Why it helps</H2>
       <p>
-        AI review runs on your own Claude or Codex account. This tab shows you what Limn spends of it, per feature and
+        AI review runs on your own Claude or Codex account. This tab shows you what Ensemble spends of it, per feature and
         per pull request, so you can turn down what is not worth it rather than guess.
       </p>
     </>

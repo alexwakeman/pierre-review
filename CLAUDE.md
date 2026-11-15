@@ -4,11 +4,11 @@ A **single-page dashboard for tracking a team's GitHub activity across multiple
 repositories** — built for sprint situational-awareness: at a glance, who's doing what,
 which PRs are stalled, which review threads sit untouched, and what needs _your_ attention.
 
-It ships to npm as **Limn** (`npx limn-review`) and runs **only on your machine**: SQLite, no
+It ships to npm as **Ensemble** (`npx ensemble-review`) and runs **only on your machine**: SQLite, no
 hosted backend, no sign-in, no stored GitHub credentials (it shells out to your logged-in `gh`).
 **Every feature is free** under the Ensemble License 1.0 (`LICENSE`: free for individuals and for
 organisations where ≤ 3 people use it; a commercial licence above that, via the contact form; no
-competing use). The agentic features run on the reader's own Claude or Codex (`LIMN_AI_PROVIDER`,
+competing use). The agentic features run on the reader's own Claude or Codex (`ENSEMBLE_AI_PROVIDER`,
 or Settings → AI). The website is a separate service, `apps/site`.
 
 > **How to use this file.** The mental model, commands, invariants and landmines to know BEFORE
@@ -40,7 +40,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
-| [`apps/site/README.md`](apps/site/README.md) · [`apps/landing/README.md`](apps/landing/README.md) | the website service + contact form · the landing and its HTML mocks |
+| [site](apps/site/README.md) · [landing](apps/landing/README.md) READMEs | the website service + contact form · the landing and its HTML mocks |
 
 ---
 
@@ -50,7 +50,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
  gh auth token ─┐
                 ▼
    GitHub API ──► sync pipeline ──► SQLite ──► Fastify API ──► React SPA
-  (GraphQL+REST)  (adaptive tick,   (~/.limn)  (lean /timeline,  (vis-timeline,
+  (GraphQL+REST)  (adaptive tick,  (~/.ensemble) (lean /timeline,  (vis-timeline,
                    idempotent)                  detail on demand) zustand, RQ)
 ```
 
@@ -85,11 +85,12 @@ The load-bearing concept is **derived thread state** (below).
   it wraps a manual BEGIN/COMMIT) — and its block must await ONLY in-process DB work, never a
   `fetch`, or it holds the single write lock across network latency. `rawSqlite` is for DDL in
   `platform/migrate.ts` only.
-- Data lives in `~/.limn` (`LIMN_DATA_DIR`); `DATABASE_URL` overrides the SQLite path. Config
-  comes from `.env` (repo root) then `apps/backend/.env`.
+- Data lives in `~/.ensemble` (`ENSEMBLE_DATA_DIR`); `DATABASE_URL` overrides the SQLite path. Config
+  comes from `.env` (repo root) then `apps/backend/.env`. ⚠ User-set `ENSEMBLE_X` goes through
+  `env-name.ts` `readEnv` (`LIMN_X` fallback; list new ones in `USER_ENV_NAMES`).
 
 **Removed 2026-10-22 — do not reintroduce:** cloud mode, Postgres, the Pro entitlement layer,
-credits, Stripe billing, the cloud benchmark collection ([docs/BACKEND.md](docs/BACKEND.md)). Their tables stay dormant, never dropped.
+credits, Stripe billing, the cloud benchmark collection (docs/BACKEND.md). Their tables stay dormant, never dropped.
 
 ---
 
@@ -135,7 +136,7 @@ All from the repo root unless noted.
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
 
-**`PIERRE_ML_HTTP=1` runs the Python severity-api instead** ([docs/ML-NODE-PORT.md](docs/ML-NODE-PORT.md);
+**`PIERRE_ML_HTTP=1` runs the Python severity-api instead** (docs/ML-NODE-PORT.md;
 ⚠ it exports `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL`).
 
 ---
@@ -147,8 +148,8 @@ All from the repo root unless noted.
 
 ### Sync pipeline (`src/sync/`)
 
-Mechanics: [docs/BACKEND.md](docs/BACKEND.md) · [docs/SYNC.md](docs/SYNC.md) ·
-[docs/REALTIME-SYNC.md](docs/REALTIME-SYNC.md). The rules:
+Mechanics: docs/BACKEND.md · docs/SYNC.md ·
+docs/REALTIME-SYNC.md. The rules:
 
 - **Adaptive polling is THE strategy** (`syncAdaptive` defaults `true`): a 10s *tick*, one at a
   time; `isDue()` gates free 304 probes by bucket; a probe's 2xx (never an error status) walks
@@ -193,7 +194,7 @@ Before changing the heuristic, add a fixture to `src/sync/__fixtures__/threads/`
 `pro_*` tables. Per-table contracts and the automation vocabulary (`ReviewerRole` — SIX members,
 EXACTLY ONE of which, `'review'`, is the reviewer cohort · `AutomatedReviewerKind` ·
 `AUTOMATION_VENDORS`, the ONE table every per-family login set is DERIVED from ·
-`REVIEW_BOT_KINDS`) live in [docs/DATA-MODEL.md](docs/DATA-MODEL.md). Without opening it:
+`REVIEW_BOT_KINDS`) live in docs/DATA-MODEL.md. Without opening it:
 
 - Timestamps are unix-epoch ints read as `Date`. GitHub node ids are the identity. Triage fields
   are computed on read, never stored.
@@ -215,7 +216,7 @@ EXACTLY ONE of which, `'review'`, is the reviewer cohort · `AutomatedReviewerKi
 ### HTTP API
 
 JSON wire, ISO-8601 timestamps; payload types in `packages/shared`; one file per resource in
-`api/routes/`, each mapping to a `client.ts` method. **Consult [docs/API.md](docs/API.md) before
+`api/routes/`, each mapping to a `client.ts` method. **Consult docs/API.md before
 changing a route's shape.**
 
 - **`?workspace=<integer>` is THE scope parameter.** Absent / unknown / unparseable ⇒ the
@@ -257,7 +258,7 @@ survives a reload: PR, focus, story and build tabs only), **URL** mirrored by
 sidebar (`components/shell/` `goTo`), never unmounted. Pending is `?activityRepo=attention`; the Insights rail entry is
 labelled **"Reports"** (store/URL value stays `'insights'`). The only gates are
 `me.ai.enabled` (agentic) and `me.mlSeverity` (ML queries).
-Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
+Read docs/FRONTEND.md before touching any of:
 
 - **Bots are HIDDEN by default on the Timeline; the Feed is People OR Bots, never mixed**, both by
   the UNION `hiddenBotUserIds` (a manual "human" judgement wins BOTH directions). ⚠
@@ -290,10 +291,10 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 - **Board freshness is ONE batched sweep, `POST /api/attention/liveness`** (mergeability for ≤ 25
   ids — 50 502s). ⚠ An observed `unknown` never demotes a known merge state. ⚠ **It returns
   COUNTS, never cards**: refetch `['attention-cards']` + `['daily-brief']` together.
-- **MY TURN IS THE BALL RULE, STATE-DERIVED** ([docs/BACKEND.md](docs/BACKEND.md) § My Turn): a
+- **MY TURN IS THE BALL RULE, STATE-DERIVED** (docs/BACKEND.md § My Turn): a
   card exists only while the reader owes an action not taken since the last RELATED event. ⚠ The
   one stored thing is a per-SUBJECT DISMISSAL timestamp, applied inside `getMyTurn`. ⚠ **No bot
-  action (Limn's too, a push too) returns the ball or counts as the reader's**; bot-ness via `globalAutomationUserIds`, NEVER
+  action (Ensemble's too, a push too) returns the ball or counts as the reader's**; bot-ness via `globalAutomationUserIds`, NEVER
   `hiddenBotUserIds`. ⚠ **Filter the SEED list, never the built array** (drafts and muted repos
   too). FIXED groups (Waiting on you, Re-review, Your PRs — always on; `MY_TURN_ORDER`), oldest
   first, "Older" past 14 days; one card per PR (`onePerPr`). The ONE setting is the opt-in survey.
@@ -307,7 +308,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
   permanently forgets the choice.
 - **BLAST RADIUS is ONE resolver, `blastRadius()`** (shared `blast-radius.ts`); the wire carries
   SIGNALS, never a level, and the level never moves onto sync. Its unknown-is-not-zero rules:
-  [docs/BLAST-RADIUS.md](docs/BLAST-RADIUS.md).
+  docs/BLAST-RADIUS.md.
 - **Timeline vertical scroll is GATED** — every programmatic scroll goes through
   `setVisScrollTop` and claims the gate; copy `centerShowTarget`.
 - **PR tabs: Overview · Activity · Threads · Changes …** Activity (`pr/PrActivityTab.tsx`) is the
@@ -333,7 +334,7 @@ Read [docs/FRONTEND.md](docs/FRONTEND.md) before touching any of:
 
 ## Merge, CI logs & trunk status (no AI)
 
-Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
+Full detail: docs/MERGE-CI-TRUNK.md. The invariants:
 
 - **Every "can this land?" surface resolves through the pure `mergeVerdict()`** (`lib/ui.ts`);
   lead with `mergeStateStatus`. ⚠ **`unstable` IS mergeable**; `behind` is not.
@@ -344,7 +345,7 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 - **Withdraw approval** dismisses the viewer's own latest APPROVED review (read live). PR action
   buttons hide behind one "Show actions" reveal; facts never hide.
 - **GitHub's merge queue**: membership synced and stamped via `db/pr-merge-queue-stamp.ts` (NOT
-  `db/merge-queue.ts`, Limn's own landing order); position/ETA live-only.
+  `db/merge-queue.ts`, Ensemble's own landing order); position/ETA live-only.
 - **Auto-merge (`merge/auto-merge-runner.ts`) is consent-anchored** — never GitHub's
   `enablePullRequestAutoMerge`. Arming pins `expectedHeadOid`; compare-and-set + permission
   re-check at LAND time. ⚠ **`behindBy > 0` is normal** — only `mergeStateStatus === 'behind'`
@@ -352,7 +353,7 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   never while queued.
 - **Dependency automation** (Settings → Dependencies): all ON (off: a stored false); ONE policy;
   approve/resolve/AI fix need a TRUSTED bot (default: Dependabot, Renovate). ⚠ Claim before write,
-  never retry; `limn/deps` ledgered like review claims; a cancel wins; no runtime ⇒ ONE skip row.
+  never retry; `ensemble/deps` ledgered like review claims; a cancel wins; no runtime ⇒ ONE skip row.
 - **A repo's armed intents land ONE AT A TIME** (`db/merge-queue.ts`; `queued_local` ≠
   `queued`). ⚠ Rules 1–4 still run for every intent; `freshenedIntents` is once per TURN.
 - **Conflicts: TWO ways** — by hand in the resolver (`src/conflict/`, `components/conflicts/`; the doc's
@@ -361,8 +362,8 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
   fold change**; the commit is HARD BLOCKED until every decidable region is decided.
 - CI logs are live ranged reads of the signed Actions blob URL — **NEVER returned to a client**.
 - Trunk status (`/api/branch-status`) is **informational only** — no counts, badges or My Turn.
-- ⚠ **`limn/` commit statuses (team claims) are NEVER CI** — every CI read filters them via shared
-  `isLimnStatusContext` / `rollupStateWithoutLimn` (docs/CLAUDE-REVIEW.md § Team claims).
+- ⚠ **`ensemble/` commit statuses (team claims; older `limn/` still read) are NEVER CI** — filter
+  via shared `isLimnStatusContext` / `rollupStateWithoutLimn`; compare via `sameStatusContext`.
 
 ---
 
@@ -370,10 +371,10 @@ Full detail: [docs/MERGE-CI-TRUNK.md](docs/MERGE-CI-TRUNK.md). The invariants:
 
 Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
 design diagrams, Check threads), AI Fix (+ Plan first), the reference-docs
-library, sprint briefs/paths and every one-shot completion, on Claude or Codex. Details: [docs/CLAUDE-REVIEW.md](docs/CLAUDE-REVIEW.md) (§ Codex, the second provider) ·
-history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
+library, sprint briefs/paths and every one-shot completion, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md (§ Codex, the second provider) ·
+history: docs/CODEX-PLAN.md. Non-negotiables:
 
-- **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
+- **ONE switch, `config.aiEnabled` = `ENSEMBLE_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
   registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth` / `provider` /
   `providerSetting` / `providers` / `kinds` (the pre-flight per run kind); no credential swaps the Run button for ONE
   line, never hides the feature.
@@ -381,7 +382,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `cheapComplete` calls `.complete`. ONLY `ai/providers/claude.ts` (+ `ai/runtime.ts`) calls
   `query`/loads an SDK, adding the path guard, own-tools hook and isolation (`provider-seam.test.ts`).
   Every system prompt gets the WRITING RULES (`ai/writing-rules.ts`, ASD-STE100).
-  The DEFAULT provider is `activeProviderId` (`LIMN_AI_PROVIDER` = `claude`|`codex`|`auto`, else
+  The DEFAULT provider is `activeProviderId` (`ENSEMBLE_AI_PROVIDER` = `claude`|`codex`|`auto`, else
   Settings → AI; `auto` = Claude when both are signed in): it runs every AUTOMATIC run and every
   surface without a model menu. A MANUAL picker run (AI Review, AI Fix) names `{provider, model}`
   (`ai/run-choice.ts`). A job resolves its provider ONCE; row label, follow-up chain, ledger and
@@ -389,7 +390,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   `aiRunLabel`; ⚠ a stored model fed to a new run goes through `requestModelOf`.
 - **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
   Claude Code login first (a `claude` session or `CLAUDE_CODE_OAUTH_TOKEN`), else the
-  environment's `ANTHROPIC_API_KEY`; a Settings tick (`LIMN_AI_USE_API_KEY` wins) puts it first. Agent runs pass
+  environment's `ANTHROPIC_API_KEY`; a Settings tick (`ENSEMBLE_AI_USE_API_KEY` wins) puts it first. Agent runs pass
   the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never sees the
   key); `cheapComplete` takes the Agent SDK on the login and the Anthropic API on the key. **No
   caller picks its own credential; no key stored.** Copy never promises subscription
@@ -401,10 +402,10 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
 - **CLAUDE + CODEX IS THE DEFAULT REVIEW** (both signed in): halves run AT ONCE, blind, merged at
   the end. ⚠ One half failing never hides the other's findings (it IS the review).
 - **CODEX** (every agent kind) runs the pinned CLI directly — `codex exec --json --strict-config` —
-  in Limn's OWN Codex home `~/.limn/codex` (`limn ai login codex` or Settings; a ChatGPT sign-in only
+  in Ensemble's OWN Codex home `~/.ensemble/codex` (`ensemble ai login codex` or Settings; a ChatGPT sign-in only
   — an OpenAI API key is REFUSED until it can be priced). ⚠ The reader's `~/.codex` is NEVER read or
   written. The lockdown is ONE list (`ai/codex/config.ts` `LOCKED_SETTINGS`: no shell, web, images,
-  plugins or memories; `project_doc_max_bytes=0`); files are read ONLY through Limn's workspace MCP
+  plugins or memories; `project_doc_max_bytes=0`); files are read ONLY through Ensemble's workspace MCP
   server. ⚠ Codex skips an untrusted hook SILENTLY, so every run refuses unless `verifyHookTrusted`
   proves the PreToolUse ALLOW-list hook runs. Results are strict JSON Schemas fed to the SAME handlers
   (docs/CLAUDE-REVIEW.md § The Codex runner). ⚠ A Codex change leaves Claude's
@@ -423,7 +424,7 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   the workspace session (below). Every host run sits behind the PATH GUARD (`review/path-guard.ts`).
   Anything an agent reads from a PR is UNTRUSTED.
 - **Nothing is posted or pushed until the reader presses the button**, except the per-workspace
-  auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Limn threads when addressed"
+  auto-post (ON; NULL = on) / Push automatically (OFF) / "Resolve my Ensemble threads when addressed"
   (ON; own PRs, any run, still `ownOnly`) switches, Implement's opt-in tick (below) and AI Fix's "Push
   when done" (own PR, clean report). Auto-posting is
   AUTO runs plus a manual "Review and post" press, under the reader's account, ONE review,
@@ -431,11 +432,11 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   ONCE per (PR, head)); ⚠ the `auto_post` record is CLAIMED (compare-and-set) BEFORE any GitHub
   write; a failure is recorded, NEVER retried. Every posted body carries the hidden marker so
   `isLimnPostedComment` holds.
-- ⚠ **ALL LIMN WRITES ARE A BOT** (`limn:<login>`): writes take an `origin`, Limn's are ledgered;
+- ⚠ **ALL ENSEMBLE WRITES ARE A BOT** (`limn:<login>`): writes take an `origin`, Ensemble's are ledgered;
   own-post checks read `trueAuthorId`. EXCEPT Implement's push: the READER'S PR (no ledger, no trailer).
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
   re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
-  never Limn's own. A FAILED auto run is retried by that rule only when TRANSIENT (caps and "Run auto
+  never Ensemble's own. A FAILED auto run is retried by that rule only when TRANSIENT (caps and "Run auto
   reviews now": docs/CLAUDE-REVIEW.md); a succeeded one on the reader's own PR may start an AUTO FIX
   (`workspaces.auto_fix_enabled`, OFF by default).
 - ⚠ **A replies pass (`claude_reviews.kind = 'replies'`) is a run row, NOT a review**: every "latest
@@ -452,31 +453,33 @@ history: [docs/CODEX-PLAN.md](docs/CODEX-PLAN.md). Non-negotiables:
   commits (a bundle); the host checks parents + markers; only a VALID merge pushes. Auto fix: only
   if `include.conflicts` (OFF).
 - **Moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform's.
-- **SonarCloud** and **reference docs** ([docs/SONARCLOUD.md](docs/SONARCLOUD.md),
-  [docs/REFERENCE-DOCS.md](docs/REFERENCE-DOCS.md)): sealed write-only tokens; a Sonar snapshot is
+- **SonarCloud** and **reference docs** (docs/SONARCLOUD.md,
+  docs/REFERENCE-DOCS.md): sealed write-only tokens; a Sonar snapshot is
   kept only when SonarCloud analysed THIS head; the docs crawl is same-host, LINEAR scanners over
   untrusted text, every doc link through `resolveDocLink`.
 
 ## Implement story and AI Fix — the workspace session
 
-[docs/STORY-BUILD.md](docs/STORY-BUILD.md) · [docs/SANDBOX.md](docs/SANDBOX.md). A Claude Code / Codex agent WITH
+docs/STORY-BUILD.md · docs/SANDBOX.md. A Claude Code / Codex agent WITH
 a shell, ONLY inside a sandbox `sandbox/runtime` started. The shell-less agents are REMOVED — never a
 fallback. AI Fix pushes ONLY the PR repository, to the PR's branch.
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
   leaves ONLY as a patch per repo; the HOST pushes on the reader's press — or by the opt-in REVIEW
   LOOP (`story-build/loop/`: branch, review rounds, fast-forward fixes, then the PR; claimed, never retried).
-- ⚠ **On Docker its only way out is Limn's allow-list proxy**; the model credential stays on the host.
-- **The base commit comes from Limn's clone cache**; the reader's clone only LENDS OBJECTS (never its
+- ⚠ **On Docker its only way out is Ensemble's allow-list proxy**; the model credential stays on the host.
+- **The base commit comes from Ensemble's clone cache**; the reader's clone only LENDS OBJECTS (never its
   tree, index or hooks) to the KEPT read-only repo store. **Memories only, never past sessions.** ONE fold
-  for what the agent is told (`sandbox/workspace/seed.ts`). Every resource carries Limn labels (swept at
+  for what the agent is told (`sandbox/workspace/seed.ts`). Every resource carries Ensemble labels (swept at
   boot and on discard; the repo store is kept).
+- **TEAM CLAIM** `ensemble/build` (STORY-BUILD.md § The team claim): only the story view reads it;
+  `storyBuildOffered` stays pure (fed `claim`); Push replaces only a free placeholder, with a lease.
 
 ## Platform features (formerly Pro)
 
 The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting, Bots
 Monitoring, Slack.
-[docs/PLATFORM.md](docs/PLATFORM.md).
+docs/PLATFORM.md.
 
 - **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE `ProContext`
   (`platform/contract.ts`) and calls `registerPlatform`. Platform modules read the host ONLY
@@ -504,21 +507,21 @@ Monitoring, Slack.
 
 ## Period reporting, Chronology, This Sprint
 
-- **Period reporting** ([docs/PERIOD-REPORTING.md](docs/PERIOD-REPORTING.md)): metrics are core
+- **Period reporting** (docs/PERIOD-REPORTING.md): metrics are core
   (`db/period-metrics.ts` and siblings). Reports is CODE ONLY: ONE chart, the DB-only series
   (`buildPeriodSeries`, one repo set). Every metric is **WINDOW-PURE** (`[fromMs, toMs)` on every column; an explicit `toMs`
   reaches every fold). History is **COVERAGE-BIASED**: a series line is ONE repo set,
   never a mix. A metric is RENAMED, never redefined. Grain (sprint vs month) is a READING choice,
   never stored. Every reading setting is PER WORKSPACE, no inheritance.
-- **Chronology** ([docs/BOTTLENECKS.md](docs/BOTTLENECKS.md), `db/pr-intervals.ts`): every open
+- **Chronology** (docs/BOTTLENECKS.md, `db/pr-intervals.ts`): every open
   hour belongs to a court (reviewer / author / landing). ⚠ Who moves the ball is the per-workspace
   VIEW ("People" / "People + bots"); bot-authored PRs are not measured; flag only LOPSIDED *AND* SLOW; NO person is named (except the
   new-contributor marker). `getFlowCourts` stays account-row-free (`verify:isolation` calls it).
-- **This Sprint** (fixed tab, `?view=sprint`; [docs/FRONTEND.md](docs/FRONTEND.md) § This Sprint):
+- **This Sprint** (fixed tab, `?view=sprint`; docs/FRONTEND.md § This Sprint):
   `GET /api/sprint-graph` is DB only, ONE fold (`db/sprint-graph-fold.ts`). Briefs, themes, "needs
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
-- **Trackers** ([docs/TRACKERS.md](docs/TRACKERS.md)): ONE per workspace; read when a PR is
+- **Trackers** (docs/TRACKERS.md): ONE per workspace; read when a PR is
   RECEIVED, never when VIEWED (exception: the sprint list read). ⚠ **The ONLY tracker writes are the
   reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion), and "Build end
   to end"'s update + comment (`tracker/*`, `end-to-end.ts`). Customer-typed hosts use `tracker/jira/fetch.ts`. Idents only via
@@ -527,10 +530,10 @@ Monitoring, Slack.
 ## ML severity/category on bot comments (no LLM)
 
 Every bot-authored comment / review body gets a **severity** (`nit`·`minor`·`major`·`critical`) and
-categories. [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) · [docs/ML-NODE-PORT.md](docs/ML-NODE-PORT.md).
+categories. docs/ML-SEVERITY.md · docs/ML-NODE-PORT.md.
 
 - **TWO SCORERS, ONE SEAM (`ml/scorer.ts`)**: the in-process model (onnxruntime-node in a CHILD
-  PROCESS; first use downloads ~240 MB: "Set up" / `limn ml install`, imported ONLY by
+  PROCESS; first use downloads ~240 MB: "Set up" / `ensemble ml install`, imported ONLY by
   `ml/runtime.ts`) or the HTTP `severity-api` (`SEVERITY_API_URL`). ⚠ Availability changes at run
   time — ask `isMlScoringAvailable()`. ⚠ The Node port matches the Python BYTE FOR BYTE
   (`packages/ml/data/parity`). ⚠ **It must never slow the
@@ -546,7 +549,7 @@ categories. [docs/ML-SEVERITY.md](docs/ML-SEVERITY.md) · [docs/ML-NODE-PORT.md]
 
 ## Security & privacy
 
-Read [docs/SECURITY.md](docs/SECURITY.md) before touching `app.ts`, CORS/CSP, rate limiting or an
+Read docs/SECURITY.md before touching `app.ts`, CORS/CSP, rate limiting or an
 AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard, the host guard —
 421 on a non-loopback `Host`, against DNS rebinding) and `api/plugins/rate-limit.ts`.
 
@@ -601,7 +604,7 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 `pnpm dev:scratch`; deep-link with `?pr=<id>`, `?repos=<ids>` on `/app/`.
 New id-routes: `verify:isolation`.
 
-⚠ **The reader's Limn is `pnpm dev` in the MAIN checkout (tsx watch): agents edit in a git worktree
+⚠ **The reader's Ensemble is `pnpm dev` in the MAIN checkout (tsx watch): agents edit in a git worktree
 and test on `pnpm dev:scratch`, never there.** One backend per data dir is enforced; a scratch backend
 blocks every write in code (docs/TESTING.md § Scratch stack).
 
@@ -613,12 +616,13 @@ gap shows as a BLANK PAGE (no error boundary). Add a fixture with every boot-tim
 
 ## Packaging & publishing
 
-Ships to npm as `limn-review` (bin `limn`; the deprecated `pierre-review` stub forwards — ⚠ never
-re-add that bin to limn-review). An existing `~/.pierre-review` is moved to `~/.limn` ONCE by a
-single rename (`data-dir.ts`), never clobbering. Internal identifiers (`pierre*`, the DB file
-name, `pro_*` tables, `/api/pro/*`) stay. **The release ships the backend + SPA only — no landing.**
+Ships to npm as `ensemble-review` (bin `ensemble`; renamed Pierre → Limn → Ensemble, the `limn-review`
+/ `pierre-review` stubs forward — ⚠ never re-add their bins). The newest old data dir (`~/.limn`, else
+`~/.pierre-review`) moves to `~/.ensemble` ONCE by one rename (`data-dir.ts`), never clobbering.
+Internal identifiers (`pierre*`, `limn*`, the `limn:` prefix, the hidden marker, the DB file, `pro_*`,
+`/api/pro/*`) stay; old GitHub wording is still parsed. **The release ships the backend + SPA only — no landing.**
 Publishing is CI-only — **never `npm publish`/`npm login` here**.
-[docs/PACKAGING.md](docs/PACKAGING.md) · [docs/RELEASE.md](docs/RELEASE.md).
+docs/PACKAGING.md · docs/RELEASE.md.
 
 - **`@pierre-review/shared` is VENDORED** at `release/dist/shared` (it holds real code, e.g. the
   conflict fold, that both sides must agree on to the byte); every emitted specifier is rewritten
@@ -644,7 +648,7 @@ Publishing is CI-only — **never `npm publish`/`npm login` here**.
 
 ## Migrations
 
-Read [docs/MIGRATIONS.md](docs/MIGRATIONS.md) before writing ANY migration.
+Read docs/MIGRATIONS.md before writing ANY migration.
 
 - **The journal is hand-maintained** (`db/migrations/meta/_journal.json`, entries `"version":
   "6"`). An unregistered file **SILENTLY SKIPS** — the boot looks fine and queries fail on a

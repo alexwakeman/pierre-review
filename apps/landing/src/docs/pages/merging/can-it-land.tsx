@@ -3,17 +3,17 @@ import { CheckRow, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Ui, Wa
 
 export const meta: DocMeta = {
   title: 'Can it land?',
-  summary: 'How Limn decides if a pull request can merge, and what each blocker means.',
+  summary: 'How Ensemble decides if a pull request can merge, and what each blocker means.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Every place in Limn that tells you whether a pull request can merge gives the same answer: the Open pull
-        requests list, the Pending board, the Timeline and the pull request’s own Overview tab. Limn reads it from
+        Every place in Ensemble that tells you whether a pull request can merge gives the same answer: the Open pull
+        requests list, the Pending board, the Timeline and the pull request’s own Overview tab. Ensemble reads it from
         GitHub’s own merge state, which takes your branch protection rules into account, and turns it into one plain
-        status. When GitHub only says “blocked”, Limn lists the likely reasons.
+        status. When GitHub only says “blocked”, Ensemble lists the likely reasons.
       </p>
 
 
@@ -38,25 +38,25 @@ export default function Page(): JSX.Element {
             m: 'The repository requires branches to be up to date. Update the branch first.',
             c: 'No',
           },
-          { _key: 'blocked', s: 'blocked', m: 'Required checks or reviews are not satisfied. Limn lists the likely reasons.', c: 'No' },
+          { _key: 'blocked', s: 'blocked', m: 'Required checks or reviews are not satisfied. Ensemble lists the likely reasons.', c: 'No' },
           { _key: 'conflicts', s: 'conflicts', m: 'It conflicts with the base branch. Resolve the conflicts first.', c: 'No' },
           { _key: 'draft', s: 'draft', m: 'Mark it ready for review to merge.', c: 'No' },
           { _key: 'lands', s: 'lands after #N', m: 'It targets the branch of another open pull request, #N, which must merge first.', c: 'No' },
           { _key: 'queue', s: 'in merge queue', m: 'GitHub’s merge queue has it and will merge it in turn.', c: 'Queued' },
-          { _key: 'armed', s: 'auto-merge armed', m: 'Limn will merge it once the blockers clear.', c: 'Armed' },
+          { _key: 'armed', s: 'auto-merge armed', m: 'Ensemble will merge it once the blockers clear.', c: 'Armed' },
           { _key: 'unknown', s: 'mergeability unknown', m: 'GitHub has not worked it out yet. It usually knows within a minute.', c: '—' },
         ]}
       />
       <Note title="A red check is not always a blocker">
         <Ui>checks failing</Ui> means only checks your branch protection does not require are red. GitHub’s own merge
-        button merges it, and so does Limn. A required check that is red makes the pull request <Ui>blocked</Ui>.
+        button merges it, and so does Ensemble. A required check that is red makes the pull request <Ui>blocked</Ui>.
       </Note>
 
       <H2 id="why-is-it-blocked">Why is it blocked?</H2>
       <p>
         GitHub folds many different rules into the one word “blocked” and does not say which one applies. Most people
         cannot read a repository’s branch protection settings either. So on the pull request’s Overview tab, the{' '}
-        <Ui>Blocked</Ui> row lists the likely causes from what Limn already knows, the surest first:
+        <Ui>Blocked</Ui> row lists the likely causes from what Ensemble already knows, the surest first:
       </p>
       <Illustration
         label="The Overview tab's Status and Blocked rows: blocked, with two reasons: required reviews aren't in yet, and CI is red on the head commit"
@@ -76,13 +76,13 @@ export default function Page(): JSX.Element {
           reported yet, or review threads not resolved on GitHub (with how many of them look addressed).
         </li>
         <li>
-          When none of these explains it, Limn says so, rather than leaving “blocked” on its own. Other rules, such
+          When none of these explains it, Ensemble says so, rather than leaving “blocked” on its own. Other rules, such
           as signed commits or required deployments, may be the cause.
         </li>
       </ul>
       <p>
-        Limn never states that unresolved threads are the blocker. Many repositories do not require threads to be
-        resolved, and Limn cannot see that setting.
+        Ensemble never states that unresolved threads are the blocker. Many repositories do not require threads to be
+        resolved, and Ensemble cannot see that setting.
       </p>
 
       <H2 id="what-you-can-do">What you can do</H2>
@@ -118,7 +118,7 @@ export default function Page(): JSX.Element {
         press. A pull request already in a merge queue never shows <Ui>Merge</Ui>.
       </p>
       <Warning title="Merging writes to GitHub">
-        A merge goes out under your GitHub account. Limn shows a button only where you can push to the repository; if
+        A merge goes out under your GitHub account. Ensemble shows a button only where you can push to the repository; if
         you cannot, the button is not shown.
       </Warning>
       <p>
@@ -128,7 +128,7 @@ export default function Page(): JSX.Element {
       <H2 id="why-it-helps">Why it helps</H2>
       <p>
         GitHub’s “mergeable” only means “no conflicts”. A pull request with failing required checks is still
-        “mergeable”. Limn’s status uses the state that respects branch protection, says it the same way everywhere,
+        “mergeable”. Ensemble’s status uses the state that respects branch protection, says it the same way everywhere,
         and tells you what to do next. For failing checks, see <DocLink to="merging/ci-logs">Read CI logs</DocLink>.
       </p>
     </>

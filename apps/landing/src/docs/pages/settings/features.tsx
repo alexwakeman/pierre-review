@@ -37,7 +37,7 @@ export default function Page(): JSX.Element {
           <DocLink to="reports/overview">Reports</DocLink>.
         </li>
         <li>
-          <Ui>This Sprint</Ui>: shows once a Jira, Linear or Notion tracker is set up, or Limn finds a GitHub milestone
+          <Ui>This Sprint</Ui>: shows once a Jira, Linear or Notion tracker is set up, or Ensemble finds a GitHub milestone
           with a due date or a current Projects iteration. See <DocLink to="this-sprint/overview">This Sprint</DocLink>.
         </li>
         <li>
@@ -52,11 +52,11 @@ export default function Page(): JSX.Element {
       <H2 id="what-hiding-does">What hiding a page does</H2>
       <p>
         Hiding is about what you see, nothing more. A page switched off leaves the sidebar and the search menu. A link
-        to it still opens it, and Limn keeps syncing and scoring as before, so the page is up to date if you switch it
+        to it still opens it, and Ensemble keeps syncing and scoring as before, so the page is up to date if you switch it
         back on.
       </p>
       <p>
-        The Timeline is different: off means off. Limn does not load the board, a link to it opens{' '}
+        The Timeline is different: off means off. Ensemble does not load the board, a link to it opens{' '}
         <Ui>Open pull requests</Ui>, <Kbd>g</Kbd> <Kbd>t</Kbd> does nothing, and the Focus and{' '}
         <Ui>Show on the timeline</Ui> buttons are hidden.
       </p>

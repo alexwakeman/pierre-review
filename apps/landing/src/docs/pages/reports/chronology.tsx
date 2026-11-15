@@ -45,7 +45,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           Choose a view. In <Ui>People</Ui>, only people’s reviews and comments move a pull request on; work only a bot
-          reviewed counts as merged without a review. In <Ui>People + bots</Ui>, a review or comment by Limn or by an
+          reviewed counts as merged without a review. In <Ui>People + bots</Ui>, a review or comment by Ensemble or by an
           AI review bot such as CodeRabbit also counts. Compare the two to see what your review bots change. The
           choice is saved for the workspace.
         </li>
@@ -157,7 +157,7 @@ export default function Page(): JSX.Element {
         it without anything changing in how people work. Check the repository markers before you quote it.
       </Warning>
       <Note>
-        Chronology is worked out from your stored GitHub history. History older than Limn keeps is not counted, so the
+        Chronology is worked out from your stored GitHub history. History older than Ensemble keeps is not counted, so the
         earliest weeks may be thin.
       </Note>
 

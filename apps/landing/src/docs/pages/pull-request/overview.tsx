@@ -10,9 +10,9 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Every pull request in Limn opens in the same view: a header with its state, then tabs. You can read the
+        Every pull request in Ensemble opens in the same view: a header with its state, then tabs. You can read the
         conversation, the threads and the diff, see whether it can land, run an AI review or an AI fix, and
-        review, approve, merge or close it, without going to GitHub. Limn refreshes a pull request every few
+        review, approve, merge or close it, without going to GitHub. Ensemble refreshes a pull request every few
         seconds while you have it open.
       </p>
 
@@ -168,7 +168,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <Ui>Approve</Ui> (with an optional comment) and <Ui>Request changes</Ui>. After you approve, you can
-          withdraw your approval; Limn asks first.
+          withdraw your approval; Ensemble asks first.
         </li>
         <li>
           <Ui>Merge</Ui>, <Ui>Merge when ready</Ui> and <Ui>Update branch</Ui>, where the pull request allows them and
@@ -182,7 +182,7 @@ export default function Page(): JSX.Element {
         Every action here writes to GitHub under your own account. Your teammates see it as yours.
       </Warning>
       <Note>
-        After a write, Limn checks GitHub until the change shows. If a comment you posted does not show at once,
+        After a write, Ensemble checks GitHub until the change shows. If a comment you posted does not show at once,
         it is already on GitHub: wait, do not post it again.
       </Note>
     </>

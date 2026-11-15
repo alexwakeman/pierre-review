@@ -21,7 +21,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <b>Each entry has a mark</b> that names its type: a comment, approved, changes requested, a review, a
-          commit, opened, ready, reopened, merged, closed, or Limn's own work.
+          commit, opened, ready, reopened, merged, closed, or Ensemble's own work.
         </li>
         <li>
           <b>A commit</b> shows its short id (with a copy button) and the first line of its message.
@@ -31,12 +31,12 @@ export default function Page(): JSX.Element {
           all.
         </li>
         <li>
-          <b>A resolved thread</b> is an entry at the time Limn first saw it resolved, with who resolved it. A
-          thread that was already resolved when Limn first synced it has no time, so it is listed only on the
+          <b>A resolved thread</b> is an entry at the time Ensemble first saw it resolved, with who resolved it. A
+          thread that was already resolved when Ensemble first synced it has no time, so it is listed only on the
           Threads tab.
         </li>
         <li>
-          <b>Limn's own reviews and findings</b> carry a <Ui>Limn</Ui> chip. The newest auto review adds{' '}
+          <b>Ensemble's own reviews and findings</b> carry an <Ui>Ensemble</Ui> chip. The newest auto review adds{' '}
           <Ui>Auto review · latest</Ui>.
         </li>
       </ul>

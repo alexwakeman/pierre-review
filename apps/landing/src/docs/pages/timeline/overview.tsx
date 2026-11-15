@@ -60,7 +60,7 @@ export default function Page(): JSX.Element {
         <Ui>Show on the timeline</Ui> buttons come back.
       </p>
       <p>
-        While it is off, Limn does not load the board, a link to the Timeline opens <Ui>Open pull requests</Ui>,
+        While it is off, Ensemble does not load the board, a link to the Timeline opens <Ui>Open pull requests</Ui>,
         and a pull request opens in its own tab instead of a Focus tab.
       </p>
 
@@ -121,7 +121,7 @@ export default function Page(): JSX.Element {
           marks someone who has merged a pull request in that repository.
         </li>
         <li>
-          <b>Collapse a row</b> with the arrow beside a person's name. Limn remembers it.
+          <b>Collapse a row</b> with the arrow beside a person's name. Ensemble remembers it.
         </li>
       </ul>
       <Tip>

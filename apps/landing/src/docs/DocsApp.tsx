@@ -280,10 +280,10 @@ function DocsHome(): JSX.Element {
   return (
     <>
       <article className="dx-article dx-home" aria-labelledby="dx-title">
-        <h1 id="dx-title">Limn documentation</h1>
+        <h1 id="dx-title">Ensemble documentation</h1>
         <p className="dx-lead">
-          How to use Limn, screen by screen: what each page shows, what you can do there, and how it helps a developer or an
-          engineering manager. Limn runs on your own computer; everything here is free for up to three people.
+          How to use Ensemble, screen by screen: what each page shows, what you can do there, and how it helps a developer or an
+          engineering manager. Ensemble runs on your own computer; everything here is free for up to three people.
         </p>
         <div className="dx-start">
           <Link to={docRoute('getting-started/introduction')} className="btn">
@@ -378,7 +378,7 @@ export function DocsApp({ path }: { path: string }): JSX.Element {
           Contents
         </button>
         <Link to={DOCS_ROOT} className="dx-bar-title">
-          Limn documentation
+          Ensemble documentation
         </Link>
         <Link to={docRoute('changelog/changelog')} className="dx-ver" title="What changed in each release">
           Version {LIMN_VERSION}

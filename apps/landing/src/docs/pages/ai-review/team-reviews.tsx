@@ -4,36 +4,36 @@ import { ClaimLinesMock } from '../../../components/mock/teams';
 
 export const meta: DocMeta = {
   title: 'Reviewing as a team',
-  summary: 'When several teammates run Limn, GitHub keeps the score: one review per commit per provider, and one list of findings.',
+  summary: 'When several teammates run Ensemble, GitHub keeps the score: one review per commit per provider, and one list of findings.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Every person runs their own Limn on their own computer, signed in to GitHub as themselves. There is no Limn
-        server and no shared account. GitHub is the only meeting place: each Limn reads what the others wrote there,
-        and writes only as its own person. This page explains how several Limns share the review work without
+        Every person runs their own Ensemble on their own computer, signed in to GitHub as themselves. There is no Ensemble
+        server and no shared account. GitHub is the only meeting place: each Ensemble reads what the others wrote there,
+        and writes only as its own person. This page explains how several copies of Ensemble share the review work without
         repeating each other.
       </p>
 
       <H2 id="three-rules">Three rules</H2>
       <ol>
         <li>
-          <b>A Limn only knows what reached GitHub.</b> A review someone kept in Limn is invisible to the team.
+          <b>An Ensemble only knows what reached GitHub.</b> A review someone kept in Ensemble is invisible to the team.
         </li>
         <li>
-          <b>Every write is a person's on GitHub, and Limn's inside Limn.</b> A Limn post is that person's review, so
-          GitHub's own rules apply. Inside Limn it is shown as the bot "Limn · alex", never as alex, so it never
+          <b>Every write is a person's on GitHub, and Ensemble's inside Ensemble.</b> An Ensemble post is that person's review, so
+          GitHub's own rules apply. Inside Ensemble it is shown as the bot "Ensemble · alex", never as alex, so it never
           counts as alex's own action.
         </li>
         <li>
-          <b>Each Limn decides alone</b>, from what it reads. Nothing coordinates two machines except the status lines
+          <b>Each Ensemble decides alone</b>, from what it reads. Nothing coordinates two machines except the status lines
           and hidden markers they leave on GitHub.
         </li>
       </ol>
       <p>
-        Costs, settings, drafts, reviews kept in Limn and chats never travel between Limns. Code goes only to the
+        Costs, settings, drafts, reviews kept in Ensemble and chats never travel between copies. Code goes only to the
         model provider each person chose.
       </p>
 
@@ -41,38 +41,42 @@ export default function Page(): JSX.Element {
       <ClaimLinesMock />
       <p>
         The rule is one automatic review per model per commit, across the whole team. Each automatic review
-        posts a status line on the pull request's latest commit, <b>limn/review-claude</b> or <b>limn/review-codex</b>:
-        "alex is reviewing with Claude", then "alex reviewed · 3 comments". Another teammate's Limn reads the line and
+        posts a status line on the pull request's latest commit, <b>ensemble/review-claude</b> or <b>ensemble/review-codex</b>:
+        "alex is reviewing with Claude", then "alex reviewed · 3 comments". Another teammate's Ensemble reads the line and
         skips that model on that commit. A different model still reviews it. This is always on; there is no setting.
       </p>
       <p>
-        On your own pull request, a teammate's Limn reviewing it with Claude is enough: your Limn runs nothing at that
+        On your own pull request, a teammate's Ensemble reviewing it with Claude is enough: your Ensemble runs nothing at that
         commit, not even Codex. Their findings show in your <Ui>AI Review</Ui> tab, and your replies are still judged.
-        On a teammate's own pull request, their Limn never holds the commit, so your Claude still reviews it and does
+        On a teammate's own pull request, their Ensemble never holds the commit, so your Claude still reviews it and does
         not post again what they already posted.
       </p>
       <ul>
-        <li>If two Limns claim at nearly the same moment, the earlier claim wins and the other stands down.</li>
-        <li>A review that does not finish frees its line, so another Limn can take the commit.</li>
+        <li>If two copies claim at nearly the same moment, the earlier claim wins and the other stands down.</li>
+        <li>A review that does not finish frees its line, so another Ensemble can take the commit.</li>
         <li>A claim that is not renewed lapses after 25 minutes, for example when a laptop is closed mid-review.</li>
         <li>A new commit starts the race again.</li>
         <li>
-          Claiming needs write access to the repository. Without it, GitHub refuses the line and Limn reviews without
+          A teammate still on Limn, the earlier name, writes <b>limn/review-claude</b> lines. Ensemble reads those the same
+          way.
+        </li>
+        <li>
+          Claiming needs write access to the repository. Without it, GitHub refuses the line and Ensemble reviews without
           one. Nothing is shown, and the review is not held up.
         </li>
       </ul>
       <Warning>
-        Do not make <b>limn/</b> lines required checks in branch protection. A line that is still pending would block
-        merges. Limn never counts its own lines as CI.
+        Do not make <b>ensemble/</b> lines required checks in branch protection. A line that is still pending would block
+        merges. Ensemble never counts its own lines as CI.
       </Warning>
       <p>
         Only automatic reviews claim. A review you start yourself never waits and is never refused. The tab names a
         teammate who is reviewing, or has reviewed, the same commit with the same model ("Robin Dunn is reviewing this
-        commit with Claude"), and your run goes ahead. When you post it, your Limn writes the "reviewed" line, so
+        commit with Claude"), and your run goes ahead. When you post it, your Ensemble writes the "reviewed" line, so
         teammates' automatic reviews step aside for that model.
       </p>
 
-      <H2 id="what-you-see">What you see when your Limn steps aside</H2>
+      <H2 id="what-you-see">What you see when your Ensemble steps aside</H2>
       <ul>
         <li>
           On the <Ui>AI Review</Ui> tab: "Robin Dunn is reviewing this commit with Claude", or "…reviewed this commit
@@ -80,16 +84,16 @@ export default function Page(): JSX.Element {
           that looks stuck.
         </li>
         <li>On Open pull requests: "Being reviewed by @robin" or "Reviewed by @robin".</li>
-        <li>No run is recorded and no daily allowance is spent. Your Limn looks again later, or at once on a new commit.</li>
+        <li>No run is recorded and no daily allowance is spent. Your Ensemble looks again later, or at once on a new commit.</li>
         <li>
-          Replies on your own Limn's findings are still judged: your Limn runs a replies pass at that commit. See{' '}
+          Replies on your own Ensemble's findings are still judged: your Ensemble runs a replies pass at that commit. See{' '}
           <DocLink to="ai-review/replies-pass">Replies to findings</DocLink>.
         </li>
       </ul>
 
-      <H2 id="a-teammates-review">A teammate's review in your Limn</H2>
+      <H2 id="a-teammates-review">A teammate's review in your Ensemble</H2>
       <p>
-        A teammate's posted Limn review is brought into your <Ui>AI Review</Ui> tab as their review, read-only. Each
+        A teammate's posted Ensemble review is brought into your <Ui>AI Review</Ui> tab as their review, read-only. Each
         finding says who raised it: "You", "Robin", or "You and Robin" when both found the same point, which is shown
         once. You cannot reword or ignore their finding. The one thing you can do is <Ui>Post reminder</Ui>, which
         posts the point again as you, linked to the first comment. On your own pull request, no finding offers it.
@@ -97,43 +101,43 @@ export default function Page(): JSX.Element {
       <p>
         <Ui>Where this PR stands</Ui> lists the verdict GitHub holds for each person (approved, changes requested,
         withdrawn), or their newest review when GitHub holds none, with the date, time and commit. An approval from a
-        replies check counts. If a teammate runs a much older Limn, one line suggests they update.
+        replies check counts. If a teammate runs a much older Ensemble, one line suggests they update.
       </p>
 
       <H2 id="author-and-reviewer">Author and reviewer</H2>
       <MiniTable
         cols={[
           { key: 'k', label: '' },
-          { key: 'a', label: "Author's Limn (own pull request)" },
-          { key: 'r', label: "Reviewer's Limn" },
+          { key: 'a', label: "Author's Ensemble (own pull request)" },
+          { key: 'r', label: "Reviewer's Ensemble" },
         ]}
         rows={[
           { _key: '1', k: 'Approve or request changes', a: 'Never: always a comment.', r: 'Yes, within the workspace rules.' },
-          { _key: '2', k: 'Holds the commit against others', a: 'No: other Limns ignore its lines.', r: 'Yes.' },
+          { _key: '2', k: 'Holds the commit against others', a: 'No: other copies ignore its lines.', r: 'Yes.' },
           { _key: '3', k: 'Resolves its own fixed threads', a: 'Yes, on by default.', r: 'Yes, on its automatic runs while posting is on.' },
           { _key: '4', k: 'Auto AI Fix', a: 'Optional, off by default.', r: 'Never on someone else’s pull request.' },
           { _key: '5', k: 'Resolves a teammate’s thread', a: 'Never.', r: 'Never.' },
         ]}
       />
       <p>
-        A reviewer's Limn follows up the author's own Limn review when it is the latest one, and posts nothing the
-        author already raised. When the reviewer's posted review finds one of the author's Limn findings fixed at the
-        latest commit, the author's Limn resolves that thread ("Addressed in 1234abc (checked by Alex's Limn)"). The
-        author does nothing. Limn acts on such a word only when it comes from a person with write access to the
+        A reviewer's Ensemble follows up the author's own Ensemble review when it is the latest one, and posts nothing the
+        author already raised. When the reviewer's posted review finds one of the author's Ensemble findings fixed at the
+        latest commit, the author's Ensemble resolves that thread ("Addressed in 1234abc (checked by Alex's Ensemble)"). The
+        author does nothing. Ensemble acts on such a word only when it comes from a person with write access to the
         repository.
       </p>
 
       <H2 id="a-teammates-verdict">A teammate's verdict on your own review</H2>
       <p>
-        Your Limn's review of your own pull request can never approve it: GitHub does not let an author approve. So a
-        teammate's Limn picks it up and gives the verdict. Their Limn queues it ahead of its other automatic reviews,
-        and first when your Limn would have approved. One teammate takes it, through the usual status line on the
-        commit. If that teammate's Limn stops renewing its line for 25 minutes, another teammate's Limn takes over.
+        Your Ensemble's review of your own pull request can never approve it: GitHub does not let an author approve. So a
+        teammate's Ensemble picks it up and gives the verdict. Their Ensemble queues it ahead of its other automatic reviews,
+        and first when your Ensemble would have approved. One teammate takes it, through the usual status line on the
+        commit. If that teammate's Ensemble stops renewing its line for 25 minutes, another teammate's Ensemble takes over.
       </p>
       <ul>
         <li>
-          On your side, the <Ui>Waiting on others</Ui> row says <Ui>Waiting for a teammate’s Limn to review</Ui>.
-          When the teammate's review lands, its verdict shows in <Ui>Where this PR stands</Ui>. Limn says this only when a teammate's Limn has run
+          On your side, the <Ui>Waiting on others</Ui> row says <Ui>Waiting for a teammate’s Ensemble to review</Ui>.
+          When the teammate's review lands, its verdict shows in <Ui>Where this PR stands</Ui>. Ensemble says this only when a teammate's Ensemble has run
           automatic reviews in the workspace in the last two weeks. It cannot see your teammates' settings, so
           otherwise it says nothing.
         </li>
@@ -146,37 +150,37 @@ export default function Page(): JSX.Element {
           spend budget, like every automatic review.
         </li>
         <li>
-          Your Limn "would approve" only when your own <Ui>Approve or request changes for me</Ui> is on and your
-          workspace lets Limn approve at the pull request's impact level.
+          Your Ensemble "would approve" only when your own <Ui>Approve or request changes for me</Ui> is on and your
+          workspace lets Ensemble approve at the pull request's impact level.
         </li>
         <li>
-          The teammate's Limn posts the verdict even when its <Ui>Which PRs</Ui> setting is the default (their own
+          The teammate's Ensemble posts the verdict even when its <Ui>Which PRs</Ui> setting is the default (their own
           PRs, and PRs they are asked to review or took part in).
         </li>
       </ul>
 
       <H2 id="lifting-changes-requested">Lifting "changes requested"</H2>
       <p>
-        Your own Limn's <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. A teammate's Limn{' '}
-        <Ui>Request changes</Ui> is lifted the same way, with no setting: this is how Limn works. Every review a Limn
-        posts says, in its hidden marker, that a teammate's Limn may lift it, unless its comments do not show every
+        Your own Ensemble's <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. A teammate's Ensemble{' '}
+        <Ui>Request changes</Ui> is lifted the same way, with no setting: this is how Ensemble works. Every review an Ensemble
+        posts says, in its hidden marker, that a teammate's Ensemble may lift it, unless its comments do not show every
         blocker behind it.
       </p>
       <p>
         When your run at the latest commit finds every point behind their block fixed and no blocker of its own,
-        your Limn posts its review and dismisses theirs, once, with a message such as "Limn (alex) checked all 3 points
+        your Ensemble posts its review and dismisses theirs, once, with a message such as "Ensemble (alex) checked all 3 points
         are addressed at 70cc9b5." Whether your review approves is decided by the usual rules, including the impact
         boxes. A review someone wrote by hand is never dismissed. Dismissing needs write access, and branch protection can restrict it.
       </p>
-      <H3>When the teammate's Limn is away</H3>
+      <H3>When the teammate's Ensemble is away</H3>
       <p>
-        A review from an older Limn, or one whose comments do not show every blocker, does not carry that word. Your
-        Limn still dismisses such a teammate's Limn <Ui>Request changes</Ui> when all of these hold:
-        your review approves the latest commit; their block came from their Limn's automatic run; every point in every
-        Limn review of theirs on the pull request is fixed at that commit; their Limn has not reviewed or claimed that
-        commit; and they have done nothing on GitHub that Limn has seen for 4 hours, by hand or through their Limn. A
+        A review from an older Ensemble, or one whose comments do not show every blocker, does not carry that word. Your
+        Ensemble still dismisses such a teammate's Ensemble <Ui>Request changes</Ui> when all of these hold:
+        your review approves the latest commit; their block came from their Ensemble's automatic run; every point in every
+        Ensemble review of theirs on the pull request is fixed at that commit; their Ensemble has not reviewed or claimed that
+        commit; and they have done nothing on GitHub that Ensemble has seen for 4 hours, by hand or through their Ensemble. A
         review they sent with <Ui>Post</Ui> is never dismissed this way. The message says why, for
-        example "Limn (alex) checked all 3 points are addressed at 70cc9b5. robin's Limn has not reviewed it and has
+        example "Ensemble (alex) checked all 3 points are addressed at 70cc9b5. robin's Ensemble has not reviewed it and has
         been away for 5 hours." It needs <Ui>Approve or request changes for me</Ui>, and runs only on an automatic
         review or <Ui>Review and post</Ui>. It happens once per review and is never retried.
       </p>
@@ -185,19 +189,19 @@ export default function Page(): JSX.Element {
       <p>
         When a posted review finds an earlier comment valid and not addressed, it says so on the thread with one{' '}
         <Ui>Still open:</Ui> reply per commit. A thread resolved without a fix is reopened once, ever; after that, a
-        warning or blocker gets one new thread that links the old one. Just before writing, Limn reads the thread on
-        GitHub again, so two Limns do not both reply. The author sees a "Robin's Limn: still open" pill on the
+        warning or blocker gets one new thread that links the old one. Just before writing, Ensemble reads the thread on
+        GitHub again, so two copies do not both reply. The author sees a "Robin's Ensemble: still open" pill on the
         thread and a card in My Turn. See <DocLink to="ai-review/follow-ups#still-open">Follow-up reviews</DocLink>.
       </p>
 
       <H2 id="whose-turn">Whose turn it is</H2>
       <p>
         An unanswered thread waits on the pull request's author. A review request waits on the person asked, until they
-        review in person: a review only their Limn posted still leaves it in their My Turn. Nothing Limn does for you
+        review in person: a review only their Ensemble posted still leaves it in their My Turn. Nothing Ensemble does for you
         counts as your own action. See <DocLink to="pending/my-turn">My Turn</DocLink>.
       </p>
 
-      <H2 id="what-limn-never-does">What Limn never does</H2>
+      <H2 id="what-ensemble-never-does">What Ensemble never does</H2>
       <ul>
         <li>Approve or request changes on your own pull request.</li>
         <li>Override a review you gave by hand, or anything sent with the Post button.</li>
@@ -205,12 +209,12 @@ export default function Page(): JSX.Element {
         <li>Edit or delete a teammate's comment, or resolve a teammate's or a person's thread.</li>
         <li>Reopen a thread more than once, or push back more than once on a thread.</li>
         <li>Retry a GitHub write that failed, except its own status lines and a refused verdict, which is sent once more as a plain comment.</li>
-        <li>Show a teammate anything that was kept in Limn.</li>
+        <li>Show a teammate anything that was kept in Ensemble.</li>
       </ul>
       <H3>Mixed versions</H3>
       <Note>
-        Every rule is written so a teammate on an older Limn stays safe, but older versions behave as they did. Ask the
-        team to keep Limn up to date; the <Ui>AI Review</Ui> tab says when a teammate's review came from an old one.
+        Every rule is written so a teammate on an older Ensemble stays safe, but older versions behave as they did. Ask the
+        team to keep Ensemble up to date; the <Ui>AI Review</Ui> tab says when a teammate's review came from an old one.
       </Note>
     </>
   );

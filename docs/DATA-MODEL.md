@@ -164,7 +164,7 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   `commit_pushed`/`review_dismissed`). Only *substantive* reviews emit an event (an empty `commented` review is
   suppressed so it doesn't duplicate inline markers). `review_dismissed` (migration `0183`) is one
   GitHub ReviewDismissedEvent: dedupeKey `review_dismissed:<event node id>`, refTable `reviews`, the
-  actor the person who dismissed it (the Limn bot for Limn's own "Limn withdrew…" / lift messages).
+  actor the person who dismissed it (the Ensemble bot for Ensemble's own "Ensemble withdrew…" / lift messages).
 - **`reviews.dismissed_at` / `dismissed_by_user_id` / `dismissal_message`** (migration `0183`): when,
   by whom and why a review was dismissed, from the PR walk's `reviewDismissals` (the newest 10
   ReviewDismissedEvents). Set only from a received event, never cleared; NULL = none seen. The
@@ -199,7 +199,7 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   default**; only a stored false is off (`autoReviewOf`, `diagramsSwitchedOnForPr`). Off stops only
   the automatic draw (review/diagrams/trigger.ts); Draw / Redraw still works. The ONE writer is
   `setWorkspaceAutoReview`; docs/CLAUDE-REVIEW.md § Design diagrams.
-- **WITHDRAWING LIMN'S APPROVAL** (docs/CLAUDE-REVIEW.md § Auto-posting): the claim and outcome of
+- **WITHDRAWING ENSEMBLE'S APPROVAL** (docs/CLAUDE-REVIEW.md § Auto-posting): the claim and outcome of
   each withdrawal ride the approving run's `claudeReviews.autoPost` JSON (`approvalWithdrawal`).
   ⚠ `workspaces.withdrawApprovalOnPush` (`withdraw_approval_on_push`, migration `0165`) is **DORMANT
   since 2026-11-05**: it gated the PUSH path, which was removed (GitHub's own "dismiss stale
@@ -209,7 +209,7 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   kept, never dropped) and `claudeReviews.teamClaim` (`team_claim`, JSON
   `ClaudeTeamClaimRecord {context, state: 'marked'|'unmarked', reason, lastLine, at}`: the GitHub status
   line an AUTO run posted, or why it ran without one; NULL = no claim attempted — a manual run, or the
-  switch off). A SKIPPED auto run (a teammate's Limn holds the head) writes NO run row: the skip lives in
+  switch off). A SKIPPED auto run (a teammate's Ensemble holds the head) writes NO run row: the skip lives in
   memory (team-claim.ts, per provider) and, for the AI Review tab, in `teamClaimSeen` (`team_claim_seen`,
   migration `0159`: one row per `(accountId, prId, headSha, provider)` — kind `reviewing|reviewed`, the
   teammate's login and line; no FK, both delete paths and the erasure delete it).
@@ -218,21 +218,21 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   Pending → AI reviews; NULL = never (the last 7 days). Moved only by `markAiReviewsSeen`, never back.
 - **THE SKIPPED LINE** (`teamClaimSkipLines`, `team_claim_skip_lines`, migration `0166`;
   docs/CLAUDE-REVIEW.md § Team claims → The skipped line): one row per `(accountId, prId, headSha,
-  provider, reason)` (unique `team_claim_skip_lines_key`) — an auto review this Limn did not start
+  provider, reason)` (unique `team_claim_skip_lines_key`) — an auto review this Ensemble did not start
   (reason `budget|daily_cap|usage_limit|not_ready`) and said so on the head; `state
   'posting'|'posted'|'failed'|'not_needed'`, `description`, `lastError`. Inserted BEFORE the GitHub
   write (once, never retried). No FK on `pr_id`: both delete paths (`db/team-claim-lines-delete.ts`) and
   the erasure delete it; in `accountScopedTables()`.
 - **TEAMMATES' POSTED REVIEWS** (migration `0160`, docs/CLAUDE-REVIEW.md § Teammates' reviews): a
-  review a teammate's Limn posted to GitHub is a `claudeReviews` row with `kind = 'teammate'`,
+  review a teammate's Ensemble posted to GitHub is a `claudeReviews` row with `kind = 'teammate'`,
   `sourceUserId` (the teammate), `sourceReviewNodeId` (the GitHub review; partial unique with
   `(accountId, prId)`) and `teammate` (JSON `TeammateReviewRecord`); its findings carry
   `sourceCommentNodeId` (partial unique with `reviewId`). ⚠ Not a run of the reader's: every own-runs
   reader filters `kind IS NULL` or `ownRunsOnly` (`db/teammate-reviews.ts`). The PR AUTHOR'S such review
   may anchor a run's follow-up (`follow_up.teammate`; docs/CLAUDE-REVIEW.md § The author's own review).
-  `teammateLift` (migration `0164`, JSON `TeammateLiftRecord`) on such a row is the reader's Limn's ONE
+  `teammateLift` (migration `0164`, JSON `TeammateLiftRecord`) on such a row is the reader's Ensemble's ONE
   claimed attempt to dismiss its standing Request changes (docs/CLAUDE-REVIEW.md § Lifting a
-  teammate's block — with the teammate's consent, or `why: 'away'` when their Limn is away); the
+  teammate's block — with the teammate's consent, or `why: 'away'` when their Ensemble is away); the
   import never writes it.
 - **THE PUSH SUMMARY** (`claudeReviews.pushSummary` + `pushSummaryFromSha`, migration `0172`): a FULL
   review's ≤ 600-char plain-text summary of the pushes it covers, from `pushSummaryFromSha` EXCLUSIVE
@@ -252,9 +252,20 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   lines still need releasing, from the row's own `owner`/`name`; `db/team-claim-lines-delete.ts`), the
   erasure takes all; in `accountScopedTables()`. The reconciler reads only rows with `releaseAttempts`
   under the cap.
+- **THE STORY-BUILD CLAIM LEDGER** (`storyBuildClaimLines`, `story_build_claim_lines`, migration `0194`;
+  docs/STORY-BUILD.md § The team claim): the same contract for a story build's lines — `(accountId, buildId,
+  workspaceId, ident, kind 'build'|'review', context, owner, name, branch, headSha, provider, whose, state
+  'claiming'|'pending'|'finished'|'released', login, lastDescription, finalDescription, lastPostedAt,
+  releaseAttempts, lastError, createdAt, updatedAt)`. ⚠ Written 'claiming' BEFORE the line (and a build's
+  placeholder) goes up. Kind `build`: the `ensemble/build` claim; `headSha` is '' until the placeholder is made,
+  then FOLLOWS the ticket branch (every commit this machine pushes onto it); `lastPostedAt` is the renewal
+  clock. Kind `review`: the review loop's `ensemble/review-<provider>` line at one branch head (`provider`). A
+  teammate row (`whose 'teammate'`, always 'released') is a Clear or a take of their lapsed claim, posted once.
+  The heads of this machine's OPEN build rows are left out of the fold (`ownBuildHeads`). No FK on `buildId`;
+  in `accountScopedTables()`, erased with the account.
 - **THE DEPENDENCY CLAIM LEDGER** (`depsClaimLines`, `deps_claim_lines`, migration `0193`;
   docs/MERGE-CI-TRUNK.md § Team claims for dependency work → The ledger and its reconciler): the same
-  contract for the `limn/deps` lines — `(accountId, prId, repoId, owner, name, headSha, action
+  contract for the `ensemble/deps` lines — `(accountId, prId, repoId, owner, name, headSha, action
   ∈ approve|rebase_request|ai_resolve|ai_fix|arm_merge|ai_pushed (+ 'release' on a teammate row), whose,
   state 'claiming'|'pending'|'armed'|'finished'|'released', login, lastDescription, finalDescription,
   lastPostedAt, releaseAttempts, lastError, createdAt, updatedAt)`. ⚠ Written 'claiming' BEFORE the line
@@ -316,7 +327,7 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   merge_landed) the dependency automation TOOK (`ai_resolve` = the conflict run — since 2026-11-07 an
   unattended AI Fix session with the MERGE item, the name kept for the log and the cap); unique `daa_account_pr_head_action` IS the claim
   (inserted `running` before the GitHub write; settled `done` / `failed` + `detail`, never retried).
-  `skipped` (0162) = a teammate's `limn/deps` line held the head (`teammate_login`,
+  `skipped` (0162) = a teammate's `ensemble/deps` line held the head (`teammate_login`,
   `teammate_handled`): not an attempt, so the claim's `onConflictDoUpdate … setWhere state =
   'skipped'` TAKES IT OVER (an `arm_merge` row: any non-running state). `merge_landed` is written
   only from the auto-merge watcher's merged outcome. `result_sha` = the commit an AI conflict run or
@@ -494,7 +505,7 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   removed mute feature; `bot_inhouse_detect` / `bot_auto_tag` / `bot_login_allowlist` /
   `bot_deep_detect` / `bot_ai_tiebreak` backed the removed "Detection" settings (which had no
   consumer — CORE's classifier cannot read a plugin table); `bot_tag_pierre` / `bot_pierre_footer`
-  backed the removed "Limn attribution" settings (the marker is now unconditional). The
+  backed the removed "Ensemble attribution" settings (the marker is now unconditional). The
   policy columns `ai_update_mode` / `ai_interval_minutes` are dormant on the same terms. See
   **Bot-Triage Platform** below. (The old `botMuteRules` table / `/api/bot-mute-rules` mute +
   auto-triage-cron feature was **removed** — see the note below; migration `0029` still creates
@@ -542,16 +553,18 @@ contract: [ML-SEVERITY.md](ML-SEVERITY.md).
 
 
 
-## Limn finding bots — `limn:` users and `limn_posted_by_user_id` (CORE; migration `0151`)
+## Ensemble finding bots — `limn:` users and `limn_posted_by_user_id` (CORE; migration `0151`)
 
-A Limn finding comment is a bot comment ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are
+An Ensemble finding comment is a bot comment ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ensemble findings are
 bots). Two storage facts carry it:
 
 - **`users` rows with login `limn:<login>`**, one per poster: `is_bot = 1`, `is_bot_overridden = 1`,
-  `github_node_id` NULL, display name "Limn · <login>". Global like every user. ⚠ The login is never
-  sent to GitHub, and the node-id branch of the user resolver never matches it.
+  `github_node_id` NULL, display name "Ensemble · <login>". Global like every user. ⚠ The login is never
+  sent to GitHub, and the node-id branch of the user resolver never matches it. ⚠ The `limn:` prefix
+  STAYS after the rename (it is stored, never shown); an older install's stored "Limn · <login>" names
+  (and untouched auto `workspace_reviewers.label`s) are rewritten once by `renameLegacyLimnBotLabels`.
 - **`review_comments.limn_posted_by_user_id` / `pr_comments.limn_posted_by_user_id`** (nullable FK
-  to `users`, indexed): set ONLY on a Limn finding, to the person who posted it; `author_id` is then
+  to `users`, indexed): set ONLY on an Ensemble finding, to the person who posted it; `author_id` is then
   the bot. NULL everywhere else. ⚠ A check about "did this person post it" reads
   `coalesce(limn_posted_by_user_id, author_id)` (`db/limn-bots.ts` `trueAuthorId`), never
   `author_id` alone.
@@ -563,23 +576,23 @@ No new account-scoped table, so `accountScopedTables()` is unchanged (the column
 
 ## `limn_actions` and the `limn_*` provenance columns (CORE; migration `0180`)
 
-EVERY row Limn writes under a person's account is a bot row ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
-Limn's actions are bots), not only findings.
+EVERY row Ensemble writes under a person's account is a bot row ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
+Ensemble's actions are bots), not only findings.
 
-- **`limn_actions`** — the provenance ledger, ONE row per GitHub write Limn made or tried: `kind`
+- **`limn_actions`** — the provenance ledger, ONE row per GitHub write Ensemble made or tried: `kind`
   (shared `LimnActionKind`: review, review_wrapper, pr_comment, review_comment, reply, push, merge,
   enqueue, dequeue, open_pr, resolve, reaction, request_reviewers, branch_update, dismiss, status,
   pr_body, close, reopen, rerun), `claim_key` (unique with `(account_id, kind)` — every upsert targets
   it), `status` (`claimed` before the call · `done` · `failed`, kept), `origin` (`auto` · `policy` ·
   `reader_pressed`), GitHub's `github_node_id` / `github_database_id` / `review_database_id` /
   `commit_sha`, `on_behalf_user_id`, `source_table` + `source_id` (the run), `pr_number`, `at`.
-  `pr_id` is NULL while a PR Limn opened is not stored yet; sync links it (`linkLimnActionsToPr`).
+  `pr_id` is NULL while a PR Ensemble opened is not stored yet; sync links it (`linkLimnActionsToPr`).
   Composite FKs onto `repos` and `pull_requests` `(id, account_id)`, cascade; in
   `accountScopedTables()`, `deleteRepo` (every repo row, unlinked ones too) and `deletePrSubtree`.
   Written ONLY by `github/write-origin.ts` (`limnWrite`, `recordLimnWrite`, `recordLimnPush`).
 - **`reviews.limn_posted_by_user_id`**, **`commits.limn_pushed_by_user_id`**,
   **`pull_requests.limn_merged_for_user_id`** / **`limn_opened_for_user_id`** (nullable FKs to
-  `users`): the person behind a Limn review / commit / merge / opened PR; `author_id` / `merged_by_id`
+  `users`): the person behind an Ensemble review / commit / merge / opened PR; `author_id` / `merged_by_id`
   then hold the `limn:` bot. Read through `trueAuthorId(table)` / `trueMergerId` (`db/true-author.ts`).
   Written by sync (`config.limnAttributeAll`, on by default) and by `reattributeLimnRows`.
 - **`review_comments.review_database_id`**: GitHub's id of the review a comment belongs to (the
@@ -624,7 +637,7 @@ because two teams in two zones in one account work different hours. Written only
 ## `workspaces.flow_view` (CORE — Chronology's view, migration `0181`)
 
 `text`, NULL = the default. `'people'` or `'people_bots'` (shared `FlowActorView`): who moves the ball
-on Reports → Chronology — people only, or people plus Limn and the AI review bots
+on Reports → Chronology — people only, or people plus Ensemble and the AI review bots
 ([BOTTLENECKS.md](BOTTLENECKS.md) § Two views). A READING setting per workspace, no inheritance; it
 changes what is measured, never what is stored. Read once per request by `db/flow-settings.ts`
 `getWorkspaceFlowView`, written only by `PUT /api/workspaces/:id/flow-view` (`setWorkspaceFlowView`).
@@ -642,7 +655,7 @@ row). Per ACCOUNT, not per workspace: one account is one reader. Written only by
 [BACKEND.md](BACKEND.md) § My Turn — The fixed shape and the one switch.
 
 `accounts.approved_merged_since` (migration `0169`) is DORMANT since the same day: it gated the
-removed "Merged after your Limn approved" My Turn type. Nothing reads or writes it; never dropped.
+removed "Merged after your Ensemble approved" My Turn type. Nothing reads or writes it; never dropped.
 
 ## `repos.first_onboarding` + `accounts.review_suggestion_dismissed_at` (CORE — Pending's first landing)
 
@@ -807,7 +820,7 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   and on a dormant pasted-story run (a `manual:` ident, a feature removed 2026-11-10: its rows and
   `ticket_snapshot` stay, never listed or re-checked; no column was dropped).
 - **THE AUTOMATIC STORY CHECK'S STORED CLOCK** (migration `0182`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
-  § The automatic story check's clock). `pull_requests.head_seen_at` — when Limn SAW the synced head
+  § The automatic story check's clock). `pull_requests.head_seen_at` — when Ensemble SAW the synced head
   move (`sync/upsert.ts`, only when a KNOWN stored head differs; an insert stamps `opened_at`; never the
   commit's committedAt). `pull_requests.head_burst_at` — where the PR's current run of pushes began
   (kept while each move is under `TICKET_AUTO_GRACE_MS` after the last). `tracker_tickets.linked_at` —
@@ -860,7 +873,7 @@ the ONE writer `setRepoMembership`). ⚠ **READ ONLY THROUGH `db/external-repos.
   (`accountBoardScope`), unchanged otherwise.
 - **No automatic action.** `automationAllowedForPr/Repo` is asked by every automatic path (pinned by
   `db/external-automation-gate.test.ts`); `readWorkspaceAutoPostForPr` reads auto-post, auto verdict and
-  "Resolve my Limn threads" OFF and `autoReviewOn` false, so every automatic GitHub write that reads it is
+  "Resolve my Ensemble threads" OFF and `autoReviewOn` false, so every automatic GitHub write that reads it is
   off. A reader's press is never refused ("Review and post" posts as COMMENT).
 - **Sync light** ([SYNC.md](SYNC.md) § External repos), not in ML scoring, and `sprintProjectKeys` reads
   keys from WATCHED repos only.
@@ -888,7 +901,7 @@ move). ⚠ READ ONLY THROUGH `db/external-repos.ts` (`externalRepoIds(account, w
   `'watched'` here = home: set the mode; elsewhere: the home MOVES here Maintained and the old home keeps
   the repo as an extra External row (Maintained in one workspace at most). `'external'` elsewhere: add an
   extra row. `null`: an extra row goes; the home: the OLDEST extra row becomes the home (External); no other
-  membership ⇒ `'last_membership'` (the route 409s; the client removes the repo from Limn instead).
+  membership ⇒ `'last_membership'` (the route 409s; the client removes the repo from Ensemble instead).
   `assignReposToWorkspace` (a move of the home), `rehomeReposToDefault` and `deleteWorkspace` delete the
   target's extra row for the repos they move; `deleteWorkspace` drops the deleted workspace's extra rows.
 
@@ -1029,8 +1042,8 @@ found through their Claude projects; never read or written, kept, exported),
 `memory_projects_json` (NULL = the default, every related project found with memories; else a JSON array of
 the ticked project folders), `user_claude_md` (default on), `user_skills` (default off), `start_dir` (DORMANT
 likewise: the agent starts where the default rule says),
-`global_proxy_env` (default off), `cpus` / `memory_gb` / `disk_gb` (NULL = Limn's default), `services_json`
-(migration `0175`; NULL = no compose files; else JSON `[{repo, file, egress}]`, the files Limn may run for a
+`global_proxy_env` (default off), `cpus` / `memory_gb` / `disk_gb` (NULL = Ensemble's default), `services_json`
+(migration `0175`; NULL = no compose files; else JSON `[{repo, file, egress}]`, the files Ensemble may run for a
 session, [SANDBOX.md](SANDBOX.md) § Services). Per workspace,
 nothing inherited; PUT replaces the whole row. The ONE reader/writer is `db/sandbox-settings.ts`
 ([SANDBOX.md](SANDBOX.md) § The workspace mirror). Composite FK onto `workspaces (id, account_id)`,
@@ -1038,7 +1051,7 @@ cascade; erased and exported with the account.
 
 ## `claude_still_open_posts` — the still-open claim record (CORE; migration `0170`)
 
-ONE row per GitHub write a posted Limn review makes about an earlier point it holds open
+ONE row per GitHub write a posted Ensemble review makes about an earlier point it holds open
 ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Still-open points): `claim_key` `reply:<thread node>:<head>`
 (one "Still open:" reply per thread per head), `reopen:<thread node>` (unresolve — ONCE per thread,
 ever), `escalate:<thread node>` (a new thread continuing it — once, ever). The unique `(account_id,
@@ -1080,7 +1093,7 @@ reference within the pair, no FK, like `prior_finding_id`; only an UNPOSTED find
 count, the Open PRs fold, My Turn's card; the follow-up follows up the kept one instead.
 
 `claude_reviews.kind` (migration `0136`): `'replies'` on a REPLIES PASS — a run that judged only
-people's replies on Limn's own posted findings ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies
+people's replies on Ensemble's own posted findings ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies
 pass): no findings, its `follow_up` items shaped like a review's, its `verdict` the outcome the
 replies point to, its `auto_post` the record of that outcome's ONE review. NULL = a full review. ⚠ A
 pass is NOT a review: every "latest review" / "run at this head" reader filters `kind IS NULL`.
@@ -1582,5 +1595,5 @@ workspace calls the actor automated.
 
 `story_chats` (account, workspace, `ticket_ident`, `title` = the first question) and `story_chat_turns`
 (question, answer, `status` running|done|failed|stopped, provider, model, cost, tokens), the
-turns FK'd by `(chat_id, account_id)`. Limn's own record of the reader's questions — never an import of
+turns FK'd by `(chat_id, account_id)`. Ensemble's own record of the reader's questions — never an import of
 their agent sessions. Erased and exported with the account. [STORY-CHAT.md](STORY-CHAT.md).

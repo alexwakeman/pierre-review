@@ -87,12 +87,12 @@ export default function Page(): JSX.Element {
         <li>
           <b>Set up.</b> Above <Ui>Start</Ui>, one line counts what the agent gets beside the code: your Claude
           memories and the projects they come from, your CLAUDE.md and the skills. <Ui>Change</Ui> opens Settings →
-          Sandbox. Press <Ui>Start</Ui>. Limn starts the sandbox. It takes seconds once
+          Sandbox. Press <Ui>Start</Ui>. Ensemble starts the sandbox. It takes seconds once
           the sandbox image is on your computer; the first time it downloads it, which takes minutes. While the
           repositories load, the line counts them: <Ui>Loading repositories 3/7</Ui> and the repository&rsquo;s name.
         </li>
         <li>
-          <b>Talk.</b> The agent reads the story, the code and the data, and submits a plan. Limn checks every piece of
+          <b>Talk.</b> The agent reads the story, the code and the data, and submits a plan. Ensemble checks every piece of
           evidence in it. You answer each point to settle and talk to the agent; it does not change files yet. See{' '}
           <DocLink to="implement-story/plan">Plan the work</DocLink>.
         </li>
@@ -102,22 +102,51 @@ export default function Page(): JSX.Element {
           criterion. You can stop it or message it.
         </li>
         <li>
-          <b>Push.</b> You review one diff per pull request and press <Ui>Push</Ui>. Limn pushes a new branch and opens a
+          <b>Push.</b> You review one diff per pull request and press <Ui>Push</Ui>. Ensemble pushes a new branch and opens a
           new pull request, a draft by default. Or tick <Ui>After the build: review and fix, then open the pull request</Ui>:
-          Limn pushes the branch, reviews it in rounds while the agent answers every point, then opens the pull request,
+          Ensemble pushes the branch, reviews it in rounds while the agent answers every point, then opens the pull request,
           ready for review. See <DocLink to="implement-story/push#review-and-fix">Review and fix</DocLink>.
         </li>
       </Steps>
       <p>
-        Tick <Ui>Approve the plan automatically</Ui> as well, and <Ui>Start</Ui> is the only press: Limn agrees with every
+        Tick <Ui>Approve the plan automatically</Ui> as well, and <Ui>Start</Ui> is the only press: Ensemble agrees with every
         change the plan proposes, builds it, reviews it and opens the pull request. The Start panel remembers both boxes.
         See <DocLink to="implement-story/plan#approve-automatically">Approve automatically</DocLink>.
       </p>
       <Warning>
         Nothing is pushed, posted or written to your tracker before you press a button, except the branch commits and the pull request you chose with{' '}
-        <Ui>After the build: review and fix, then open the pull request</Ui>. The tracker is written only by{' '}
+        <Ui>After the build: review and fix, then open the pull request</Ui>. <Ui>Start</Ui> also marks the ticket on
+        GitHub for your teammates (below). The tracker is written only by{' '}
         <Ui>Update ticket</Ui> on a Jira ticket, which you press yourself, and by <Ui>Build end to end</Ui>, below.
       </Warning>
+
+      <H2 id="teammates">When a teammate is building it</H2>
+      <p>
+        Each person runs Ensemble on their own computer, so Ensemble marks the ticket on GitHub when you press{' '}
+        <Ui>Start</Ui>: it pushes the ticket&rsquo;s branch, for example <b>PAY-142</b>, with one empty commit, and puts an{' '}
+        <b>ensemble/build</b> status on it that reads &ldquo;alex is building PAY-142&rdquo;. When your build pushes its work
+        to that branch, the work replaces the empty commit.
+      </p>
+      <ul>
+        <li>
+          A teammate&rsquo;s story view then shows <b>alex is building this</b> in place of <Ui>Implement</Ui> or{' '}
+          <Ui>Fill gaps</Ui>, and their <Ui>Start</Ui> is refused.
+        </li>
+        <li>
+          Ensemble renews the mark while your session is open and clears it when the session closes or you discard it.
+          Once the pull request is open, the status reads &ldquo;alex built PAY-142 · pull request opened&rdquo;.
+        </li>
+        <li>
+          If your computer goes away, the mark runs out after 30 minutes. Your teammate then sees{' '}
+          <b>alex stopped building this</b> and a <Ui>Clear</Ui> button. Your own mark from another computer can be cleared at
+          once.
+        </li>
+        <li>
+          If two people press <Ui>Start</Ui> at the same moment, the one who started first keeps the ticket. The other
+          build stops and says who has it.
+        </li>
+        <li>If GitHub cannot be read or written, the build starts without a mark.</li>
+      </ul>
 
       <H2 id="build-end-to-end">Build end to end</H2>
       <p>
@@ -125,17 +154,17 @@ export default function Page(): JSX.Element {
         from one press. The build tab opens and starts by itself:
       </p>
       <Steps>
-        <li>The agent plans. Limn approves the plan, taking every open point as Agree.</li>
+        <li>The agent plans. Ensemble approves the plan, taking every open point as Agree.</li>
         <li>
-          The agent builds. Limn reviews the work and the agent fixes it, for up to 4 rounds. It stops early when a round
+          The agent builds. Ensemble reviews the work and the agent fixes it, for up to 4 rounds. It stops early when a round
           finds nothing open.
         </li>
         <li>
-          Limn opens the pull request, ready for review. If something is still open after the last round, the pull
+          Ensemble opens the pull request, ready for review. If something is still open after the last round, the pull
           request opens anyway and lists it.
         </li>
         <li>
-          On a Jira ticket, Limn updates the description and acceptance criteria the plan changed, and comments on the
+          On a Jira ticket, Ensemble updates the description and acceptance criteria the plan changed, and comments on the
           ticket as you, in plain English for anyone who reads the ticket: links to the pull requests, a short summary
           of what changed and why, and the lines removed and added. It never changes the ticket&rsquo;s status. The earlier text is in the ticket&rsquo;s history
           in Jira.
@@ -154,7 +183,7 @@ export default function Page(): JSX.Element {
           { key: 'd', label: 'Details' },
         ]}
         rows={[
-          { _key: 'r', w: 'Every repository in the workspace', d: 'At the same paths as your own clones, which Limn finds through the folders where you use Claude Code, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
+          { _key: 'r', w: 'Every repository in the workspace', d: 'At the same paths as your own clones, which Ensemble finds through the folders where you use Claude Code, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
           { _key: 't', w: 'The ticket in full', d: 'Description, numbered acceptance criteria and open points.' },
           { _key: 'n', w: 'Your Claude notes', d: 'The notes of each repository’s clone (untick one in Settings → Sandbox), your CLAUDE.md and, if you allow, skills. Copied in; the originals are never changed. Each repository’s own CLAUDE.md and AGENTS.md are in its code. Past sessions are never brought in.' },
           { _key: 'k', w: 'Skills', d: 'Skills your repositories keep in .claude/skills come with the code, and the agent is told where each one is. Your own ~/.claude/skills come only if you allow it in Settings → Sandbox.' },
@@ -164,7 +193,7 @@ export default function Page(): JSX.Element {
       />
       <p>
         The agent has a shell inside the sandbox, but no GitHub credentials, no Docker access and no way to change your
-        own files. Its only way to the network is Limn's allow-list; see{' '}
+        own files. Its only way to the network is Ensemble's allow-list; see{' '}
         <DocLink to="security/ai-and-the-sandbox">AI and the sandbox</DocLink>. Set up the folder, notes and services in{' '}
         <DocLink to="settings/sandbox">Settings → Sandbox</DocLink>.
       </p>

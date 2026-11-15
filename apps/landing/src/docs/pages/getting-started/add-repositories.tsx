@@ -4,22 +4,22 @@ import { DocLink, H2, H3, Note, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Add your repositories',
-  summary: 'Choose the repositories Limn follows. The first sync brings in two weeks of history quickly, then fills in the rest.',
+  summary: 'Choose the repositories Ensemble follows. The first sync brings in two weeks of history quickly, then fills in the rest.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn follows only the repositories you add. Each one you add is synced from GitHub to your computer,
+        Ensemble follows only the repositories you add. Each one you add is synced from GitHub to your computer,
         and every page in the app reads that copy. You can add any repository your GitHub CLI sign-in can
         read: your own, your organisation's, or a public one.
       </p>
 
 
-      <H2 id="the-first-run">The first time you open Limn</H2>
+      <H2 id="the-first-run">The first time you open Ensemble</H2>
       <p>
-        With no repositories yet, Limn opens <Ui>Add the repos you work on</Ui>. It lists the repositories
+        With no repositories yet, Ensemble opens <Ui>Add the repos you work on</Ui>. It lists the repositories
         you were active in recently, with their open pull requests, and ticks the top five.
       </p>
       <Steps>
@@ -45,7 +45,7 @@ export default function Page(): JSX.Element {
       </figure>
 
       <Note>
-        If you choose more than ten repositories, Limn says the first sync will take longer. It still adds all
+        If you choose more than ten repositories, Ensemble says the first sync will take longer. It still adds all
         of them.
       </Note>
 
@@ -75,13 +75,13 @@ export default function Page(): JSX.Element {
           Most pages are useful after this part.
         </li>
         <li>
-          <b>Then up to 90 days of history.</b> Limn fills in the older activity in the background. Reports and
+          <b>Then up to 90 days of history.</b> Ensemble fills in the older activity in the background. Reports and
           Chronology become more complete as it does.
         </li>
       </ol>
       <p>
-        After that, Limn keeps each repository up to date by itself. It checks busy repositories more often
-        than quiet ones, and a pull request you have open in Limn is refreshed every few seconds.
+        After that, Ensemble keeps each repository up to date by itself. It checks busy repositories more often
+        than quiet ones, and a pull request you have open in Ensemble is refreshed every few seconds.
       </p>
 
       <H3>What shows first on Pending</H3>
@@ -95,11 +95,11 @@ export default function Page(): JSX.Element {
       <H2 id="sync-state">See the sync state</H2>
       <ul>
         <li>
-          The foot of the sidebar says when Limn last synced, for example <Ui>Synced 2m ago</Ui>, or{' '}
+          The foot of the sidebar says when Ensemble last synced, for example <Ui>Synced 2m ago</Ui>, or{' '}
           <Ui>Sync error</Ui>. Choose it to sync every repository now.
         </li>
         <li>
-          If GitHub's hourly limit for your account is near, Limn waits instead of failing, and says{' '}
+          If GitHub's hourly limit for your account is near, Ensemble waits instead of failing, and says{' '}
           <Ui>Paused — resuming ~HH:MM</Ui> with the time it will carry on.
         </li>
         <li>
@@ -120,7 +120,7 @@ export default function Page(): JSX.Element {
         and confirm.
       </p>
       <Warning>
-        Removing a repository deletes everything Limn stored for it on your computer. Nothing changes on GitHub.
+        Removing a repository deletes everything Ensemble stored for it on your computer. Nothing changes on GitHub.
         You can add it again, and the sync brings the GitHub data back.
       </Warning>
     </>

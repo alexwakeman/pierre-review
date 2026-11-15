@@ -177,7 +177,8 @@ export default function Build(): JSX.Element {
           <p>
             The review uses your workspace&rsquo;s AI review setting. With Claude and Codex, both review at once,
             without seeing each other&rsquo;s findings. The agent may say a criterion does not apply; the next check
-            judges that. Nothing is posted on GitHub but the commits and the pull request.
+            judges that. GitHub gets only the commits, one status per round and the pull request; a teammate&rsquo;s{' '}
+            {SITE_NAME} shows that you are building the ticket.
           </p>
         </div>
         <div className="tile bd-txt bd-third rise">

@@ -1,11 +1,11 @@
 # @pierre-review/landing
 
-Public marketing site for Limn (limn-review.com). Built independently — it shares no
+Public marketing site for Ensemble (limn-review.com). Built independently — it shares no
 runtime code with the timeline SPA — and served at `/` by the small site service in
 [`apps/site`](../site/README.md), which also serves the contact form's API.
 
-**Limn is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
-so the site's call to action is the npm command (`npx limn-review`). There is no hosted demo:
+**Ensemble is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
+so the site's call to action is the npm command (`npx ensemble-review`). There is no hosted demo:
 the product pictures are clickable HTML mocks (below). The one limit — free for individuals and for
 organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Every feature, free" tiers, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
@@ -38,7 +38,7 @@ page-scoped file under that root: `pages/reporting.css`, `teams.css`,
 cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
 `pages/home.css`).
 
-**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Limn UI. They are built from one kit,
+**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Ensemble UI. They are built from one kit,
 `components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,
 CheckRow, CourtBar, MiniTable, Diff, Log, Stat, and the settings controls Section / Field /
 SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx`, `teams.tsx`, and
@@ -74,7 +74,7 @@ are the app's own; never invent a feature for a mock.
 | `home.tsx` MergeWhenReadyMock | `/` Ship | `components/MergeWhenReadyControl.tsx` |
 | `home.tsx` TrunkMock | `/` Ship | the trunk strip (`/api/branch-status`) |
 | `home.tsx` ChronologyMiniMock, BotsWorthMock | `/` See | `Activity/BottlenecksPanel.tsx`, Bots Monitoring |
-| `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Limn" label, "passed" / "running"), the `limn/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
+| `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Ensemble" label, "passed" / "running"), the `ensemble/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
 | `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingRow`, the grid of "Reviews on this PR"), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`, `shortDayTime`) |
 | `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
 | `reports.tsx` PeriodReportMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` + `PeriodSeriesChart.tsx` (Grain, Show as) |
@@ -142,7 +142,7 @@ commit; a removed feature removes its docs.
 - **The layout** (`DocsApp.tsx`, `docs.css`): a left-hand contents list whose sections stay
   collapsed until pressed (the current section opens by itself), a drawer below 961px, search over
   titles and summaries, breadcrumbs, "On this page", previous / next, "Edit this page" and
-  "Report a problem". The header shows the current Limn version (`apps/backend/package.json`,
+  "Report a problem". The header shows the current Ensemble version (`apps/backend/package.json`,
   read at build time) and links to the changelog.
 - **The changelog** (`/docs/changelog`) is `CHANGELOG.md` at the repository root, parsed at build
   time. The release workflow moves its Unreleased entries under the new version

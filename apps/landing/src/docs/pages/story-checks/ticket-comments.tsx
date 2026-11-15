@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         The real scope of a ticket often lives in its comments: &ldquo;we agreed to drop the export&rdquo;,
-        &ldquo;the ledger setting is switched on in production now&rdquo;. Limn reads the comments of every ticket it
+        &ldquo;the ledger setting is switched on in production now&rdquo;. Ensemble reads the comments of every ticket it
         reads, shows them in the story view, and gives them to the story check as the team&rsquo;s discussion of the
         ticket.
       </p>
@@ -54,7 +54,7 @@ export default function Page(): JSX.Element {
       <H2 id="how-the-check-uses-them">How the story check uses them</H2>
       <ul>
         <li>
-          Before every story check, Limn reads the ticket&rsquo;s comments from the tracker again, so the check sees
+          Before every story check, Ensemble reads the ticket&rsquo;s comments from the tracker again, so the check sees
           the latest ones. It does not re-read the rest of the ticket at that moment.
         </li>
         <li>
@@ -83,7 +83,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <p>
         It counts as done, is never posted as a gap and is never given to Fill gaps. Counts name it apart, for
-        example &ldquo;4 met + 1 outside code of 6&rdquo;. Limn keeps the verdict only when the comment it cites is a
+        example &ldquo;4 met + 1 outside code of 6&rdquo;. Ensemble keeps the verdict only when the comment it cites is a
         real comment by a person on the ticket, and the check did not say the work belongs in code.
       </p>
 
@@ -97,7 +97,7 @@ export default function Page(): JSX.Element {
         on the ticket&rdquo;.
       </p>
       <Note>
-        Limn reads comments when it reads the ticket in the background and again before each story check. Opening
+        Ensemble reads comments when it reads the ticket in the background and again before each story check. Opening
         the story view does not call the tracker. On Notion, the integration needs the &ldquo;read comments&rdquo;
         capability; see <DocLink to="integrations/notion">Notion</DocLink>.
       </Note>

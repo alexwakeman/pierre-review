@@ -3,16 +3,16 @@ import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui 
 
 export const meta: DocMeta = {
   title: 'AI',
-  summary: 'Choose the provider, sign in, set the effort, the spend budget and the disk space Limn may use.',
+  summary: 'Choose the provider, sign in, set the effort, the spend budget and the disk space Ensemble may use.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The <Ui>AI</Ui> tab sets up the AI that runs Limn&rsquo;s reviews, fixes and summaries. Limn runs on your own
-        Claude or Codex account: there is no Limn AI service in between. This tab says which provider runs by
-        default, whether each one is ready and signed in, how hard the AI works, how much of your plan Limn may use on
+        The <Ui>AI</Ui> tab sets up the AI that runs Ensemble&rsquo;s reviews, fixes and summaries. Ensemble runs on your own
+        Claude or Codex account: there is no Ensemble AI service in between. This tab says which provider runs by
+        default, whether each one is ready and signed in, how hard the AI works, how much of your plan Ensemble may use on
         its own, and how much disk space AI runs take. Every setting here applies to you in every workspace.
       </p>
 
@@ -33,13 +33,13 @@ export default function Page(): JSX.Element {
         keeps the name of the provider and model that ran it.
       </p>
       <Note>
-        If the choice is greyed out with <Ui>Set by LIMN_AI_PROVIDER.</Ui>, whoever started Limn fixed the provider
-        with that setting. Start Limn without it to choose here.
+        If the choice is greyed out with <Ui>Set by ENSEMBLE_AI_PROVIDER.</Ui>, whoever started Ensemble fixed the provider
+        with that setting. Start Ensemble without it to choose here.
       </Note>
 
       <H2 id="sign-in">Set up and sign in</H2>
       <p>
-        Limn downloads Claude and Codex by itself the first time it starts. Signing in is the only step. The tab shows
+        Ensemble downloads Claude and Codex by itself the first time it starts. Signing in is the only step. The tab shows
         one line for each provider:
       </p>
       <Illustration label="The provider lines: Claude signed in, Codex not signed in." caption="Each provider's status line.">
@@ -48,15 +48,15 @@ export default function Page(): JSX.Element {
       </Illustration>
       <H3>Claude</H3>
       <p>
-        Limn uses your Claude Code login on this computer. Run <code>claude</code> in a terminal and sign in there.
-        When there is no login, Limn uses an Anthropic API key set as <code>ANTHROPIC_API_KEY</code> when Limn starts.
+        Ensemble uses your Claude Code login on this computer. Run <code>claude</code> in a terminal and sign in there.
+        When there is no login, Ensemble uses an Anthropic API key set as <code>ANTHROPIC_API_KEY</code> when Ensemble starts.
         The line then reads <Ui>Signed in to Claude Code.</Ui> or <Ui>Using ANTHROPIC_API_KEY.</Ui>, or asks you to
         sign in. Full details:{' '}
         <DocLink to="integrations/claude">Claude (Anthropic)</DocLink>.
       </p>
       <H3>Codex</H3>
       <p>
-        Codex signs in with your ChatGPT account, in Limn&rsquo;s own folder. Your own Codex setup is not used, and
+        Codex signs in with your ChatGPT account, in Ensemble&rsquo;s own folder. Your own Codex setup is not used, and
         neither is an OpenAI API key.
       </p>
       <Steps>
@@ -72,25 +72,25 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
       <p>
-        <Ui>Sign out</Ui> removes Limn&rsquo;s Codex sign-in. Full details:{' '}
+        <Ui>Sign out</Ui> removes Ensemble&rsquo;s Codex sign-in. Full details:{' '}
         <DocLink to="integrations/codex">Codex (OpenAI)</DocLink>.
       </p>
       <Tip>
         If a download failed, the line says why and shows <Ui>Retry</Ui>. The terminal command{' '}
-        <code>limn ai install</code> does the same.
+        <code>ensemble ai install</code> does the same.
       </Tip>
 
       <H2 id="api-keys">Use my API keys first</H2>
       <p>
-        Tick <Ui>Use my API keys first</Ui> to pay for AI runs with an API key instead of your subscription. Limn reads
+        Tick <Ui>Use my API keys first</Ui> to pay for AI runs with an API key instead of your subscription. Ensemble reads
         the keys from the environment it started in (your shell, or the <code>.env</code> file), and never stores one.
         The line under the box says which keys are set.
       </p>
       <ul>
         <li>
           <b>Claude</b> reads <code>ANTHROPIC_API_KEY</code>. With the box ticked and the key set, every Claude run uses
-          the key, even while you are signed in to Claude Code. Anthropic bills it per token, and Limn shows its spend
-          in US$. With the box not ticked, Limn uses your Claude Code sign-in, and the key only when you are not signed
+          the key, even while you are signed in to Claude Code. Anthropic bills it per token, and Ensemble shows its spend
+          in US$. With the box not ticked, Ensemble uses your Claude Code sign-in, and the key only when you are not signed
           in.
         </li>
         <li>
@@ -99,7 +99,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        Starting Limn with <code>LIMN_AI_USE_API_KEY=true</code> or <code>false</code> decides it from the
+        Starting Ensemble with <code>ENSEMBLE_AI_USE_API_KEY=true</code> or <code>false</code> decides it from the
         environment, and the box shows that value, locked.
       </p>
 
@@ -121,24 +121,24 @@ export default function Page(): JSX.Element {
       </ul>
       <p>Each run shows the effort it used beside its model.</p>
       <Note>
-        If the menu is greyed out with <Ui>Set by REVIEW_EFFORT.</Ui>, the effort was fixed when Limn started.
+        If the menu is greyed out with <Ui>Set by REVIEW_EFFORT.</Ui>, the effort was fixed when Ensemble started.
       </Note>
 
       <H2 id="ai-spend">AI spend</H2>
       <p>
-        <Ui>AI spend</Ui> limits the runs Limn starts by itself, so they use only a share of your week. It is on by
+        <Ui>AI spend</Ui> limits the runs Ensemble starts by itself, so they use only a share of your week. It is on by
         default at 50% of the week on a subscription. Your own runs are never limited. The full explanation is on{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>
 
       <H2 id="disk-space">Disk space</H2>
       <p>
-        Limn keeps one copy of each repository an AI run has read, and checks a pull request out for each run. A run
-        removes its checkout when it ends. <Ui>Disk space</Ui> shows how much space this takes and how much Limn freed
+        Ensemble keeps one copy of each repository an AI run has read, and checks a pull request out for each run. A run
+        removes its checkout when it ends. <Ui>Disk space</Ui> shows how much space this takes and how much Ensemble freed
         in the last 30 days.
       </p>
       <p>
-        A checkout left behind by a crash, or for a pull request that has merged or closed, is removed when Limn starts
+        A checkout left behind by a crash, or for a pull request that has merged or closed, is removed when Ensemble starts
         and when a new run begins. A checkout that holds a fix you have not pushed is kept until you push or discard it,
         for up to 14 days.
       </p>

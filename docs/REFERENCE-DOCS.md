@@ -2,7 +2,7 @@
 
 A workspace's reference material (PDF, Word, text, markdown, web pages, Confluence and Notion pages), turned into a markdown tree
 that an agent navigates by REASONING over contents, not by embedding search. CORE and agentic
-(registered by `registerAgenticRoutes`, absent under `LIMN_AI_DISABLED`). Sonnet 5
+(registered by `registerAgenticRoutes`, absent under `ENSEMBLE_AI_DISABLED`). Sonnet 5
 does the content building. Code: `apps/backend/src/reference-docs/`. Wire types:
 `packages/shared/src/reference-docs.ts`. Routes: [API.md](API.md) § Reference docs.
 
@@ -40,17 +40,17 @@ grounding check are unchanged. Local embeddings are measured and deferred: [DOCS
 ```
 
 `docsDir` = `config.docsDir`, **ONE ROOT PER DATABASE** (`data-dir.ts` `defaultDocsDir`;
-`LIMN_DOCS_DIR` overrides): the data directory's own database (`~/.limn/pierre-review.sqlite`, the
-installed CLI) keeps `~/.limn/docs`; any other database (`pnpm dev`'s `apps/backend/data/…`, a
-worktree's dev server, a `--db`) gets `~/.limn/docs/db-<12 hex of sha256(absolute DB path)>`. The
+`ENSEMBLE_DOCS_DIR` overrides): the data directory's own database (`~/.ensemble/pierre-review.sqlite`, the
+installed CLI) keeps `~/.ensemble/docs`; any other database (`pnpm dev`'s `apps/backend/data/…`, a
+worktree's dev server, a `--db`) gets `~/.ensemble/docs/db-<12 hex of sha256(absolute DB path)>`. The
 `db-` prefix is non-numeric, so the default root's janitor — which walks only `<accountId>` folders, in
 every version — never enters it. ⚠ **Under vitest the root is a temp folder** unless a suite sets one
 (`setDocsRootForTest`): `erase-account.test.ts` erases account 1 of a scratch DB, and without that
-guard it would delete the developer's own `~/.limn/docs/1`.
+guard it would delete the developer's own `~/.ensemble/docs/1`.
 
 ### Ownership (`owner.ts`) — why two databases cannot wipe each other's library
 
-Until 2026-10-28 every database on the machine shared `~/.limn/docs`, and account/workspace ids are
+Until 2026-10-28 every database on the machine shared `~/.ensemble/docs`, and account/workspace ids are
 small integers every database reuses. The boot janitor deletes what ITS rows do not account for, so a
 second backend on another DB (a worktree's `pnpm dev`, the installed CLI) deleted the first one's
 library folders; the rows survived and INDEX.md (rendered from rows) still listed documents that no
@@ -66,11 +66,11 @@ longer opened. Two layers stop it:
    `removeDocFiles`, `removeWorkspaceDocs` and `removeAccountDocs` skip a foreign-marked folder too.
 
 **The one-time move** (`migrateLegacyDocs`, at boot before the janitor): a database whose root is not
-the shared `~/.limn/docs` moves each of ITS workspace folders out of it with ONE `renameSync`, when the
+the shared `~/.ensemble/docs` moves each of ITS workspace folders out of it with ONE `renameSync`, when the
 target does not exist yet (never clobbers) and the folder is provably its own — `.owner` is its id,
 or it is unmarked, holds at least one document folder and EVERY document folder is a slug this
 database has a row for in that workspace. Anything else stays where it is and is logged
-(`foreign_owner` / `unproven` / `rename_failed`). Never under `LIMN_DOCS_DIR` or a test root.
+(`foreign_owner` / `unproven` / `rename_failed`). Never under `ENSEMBLE_DOCS_DIR` or a test root.
 
 ⚠ **EVERY FILE A LINK CAN POINT AT IS WRITTEN BY THE SERVER** (`render.ts`), from data it holds:
 INDEX.md from the stored rows (`renderIndex`, deterministic, title order — never a model), CONTENTS.md
@@ -116,7 +116,7 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
 - **Web page**: `POST /api/docs/url`. The page is fetched by the BUILD (its converting stage), so the
   route answers at once and a Rebuild re-fetches. `url-fetch.ts`: http/https only, no `user:pass@`;
   **never loopback, link-local (cloud metadata), multicast, reserved or `localhost`**
-  (`localhost` is Limn's own unauthenticated API); **private networks — RFC1918, CGNAT,
+  (`localhost` is Ensemble's own unauthenticated API); **private networks — RFC1918, CGNAT,
   unique-local — and intranet names (`.local`, single-label) are allowed**
   (`defaultPagePolicy()` → `privateNetwork: true`; the reader's company wiki is the point).
   Judged up front for an IP literal and AT CONNECT TIME through the tracker's `guardedLookup` with the
@@ -135,7 +135,7 @@ NULs) — then the NAME tells markdown (`.md`/`.markdown`/`.mdx`) from HTML (`.h
   downloaded for the build) becomes a FIGURE (§ Figures), else `[Image: alt]` (never the base64); a
   link that is not http(s)/mailto/# keeps its text and loses its target.
   **PDF is not converted**: Claude reads it natively in the build (the Read tool, ≤ 20 pages a call).
-  ⚠ **The three converters are NOT npm dependencies** of `limn-review`: they ride the AI runtime
+  ⚠ **The three converters are NOT npm dependencies** of `ensemble-review`: they ride the AI runtime
   download (`AI_RUNTIME_PACKAGES`, pins in `limnAiRuntime`, loaded ONLY through `ai/runtime.ts`
   `loadMammoth`/`loadTurndown`/`loadTurndownGfm`; the build-release guard greps for them). A runtime
   installed before they existed is STALE, not absent (`AI_RUNTIME_LATER_PACKAGES`): every agent still
@@ -372,7 +372,7 @@ branch at the time it was added (`scope.repo.branch`).
 
 ### Docs offered from your repositories (`repo-offers.ts`, `repo-offers-store.ts`, `repo-offers-routes.ts`; migration `0155`)
 
-The workspace's repositories often hold their own docs. Limn FINDS them by itself and ADDS them only after
+The workspace's repositories often hold their own docs. Ensemble FINDS them by itself and ADDS them only after
 the reader says yes: building a document runs the AI, so ⚠ **nothing is built before the reader presses Add**.
 
 - **When it looks.** After a repository's walk (`sync/walk-listeners.ts`: a first sync's foreground pass,
@@ -426,7 +426,7 @@ the reader says yes: building a document runs the AI, so ⚠ **nothing is built 
   short-lived cache), ≤ `DOCS_FROM_REPOS_SCAN_MAX` (20) per check, oldest first, the rest counted as
   `notLookedAt` (and looked at by the next check). It lists every row not in the library, WHATEVER its state
   (`listRepoFolders`) — a declined folder, and an added one whose document was removed — and, after the list,
-  one line per repository whose files can't be read (`unreadable`, the STORED failures: "acme/legacy: Limn
+  one line per repository whose files can't be read (`unreadable`, the STORED failures: "acme/legacy: Ensemble
   can't read its files (no access)."). Its Add is the offer's Add with `from: 'wizard'`.
 - **A repository whose files can't be read** (migration `0158`: `repos.docs_offer_failed_at` +
   `repos.docs_offer_failure`). The scan runs after EVERY walk, so a repository whose tree read fails used to
@@ -438,7 +438,7 @@ the reader says yes: building a document runs the AI, so ⚠ **nothing is built 
   failing. ⚠ The stamp of the last SUCCESSFUL look (`docs_offer_scanned_at`) and its offers stand; the next
   look that succeeds clears the failure (`stampRepoScanned`). ⚠ **The PR sync is never touched** — the walk
   never reads these columns. Surfaced from the STORED state only, nothing fetches for it: the repository's
-  page (the repo status panel, from `GET /api/activity`'s `docsUnreadable`) prints one undotted line, "Limn
+  page (the repo status panel, from `GET /api/activity`'s `docsUnreadable`) prints one undotted line, "Ensemble
   can't read this repository's files, so its docs can't be offered: no access." (`repoDocsUnreadableLine`,
   shown only on `me.ai.enabled`), and the wizard's "From your repositories" lists it (above). ⚠ **Only a
   LASTING reason is shown** — `no_access`, `empty`, `not_found` — decided ONCE by shared
@@ -643,14 +643,14 @@ workspace folders whose `.owner` is this database only (§ Ownership). A deleted
 removed by the delete route (its rows go with the workspace cascade); erasure removes
 `<docsDir>/<accountId>/` after the rows, skipping a workspace folder another database owns.
 
-**On Codex** (`LIMN_AI_PROVIDER=codex`, kind `docs_build`; docs/CODEX-PLAN.md § Phase 3 stream (d)).
-A `'sections'` build runs through the same `runAgent`, reading the staging folder through Limn's
-workspace server (read-only, the same folder the path guard allows). Codex has no tools of Limn's own,
+**On Codex** (`ENSEMBLE_AI_PROVIDER=codex`, kind `docs_build`; docs/CODEX-PLAN.md § Phase 3 stream (d)).
+A `'sections'` build runs through the same `runAgent`, reading the staging folder through Ensemble's
+workspace server (read-only, the same folder the path guard allows). Codex has no tools of Ensemble's own,
 so `record_sections` and `finish_document` arrive as ONE final answer, `submit_document` (the two shapes
 side by side), judged by the SAME `judgeRecord` then `judgeFinish`. Codex gets two answers (its one
 retry), so its retry is the build's LAST finish attempt (`finishAttempts` starts at
 `MAX_FINISH_ATTEMPTS - 2`). ⚠ A PDF REFUSES on Codex before anything is written or run
-(`CODEX_PDF_MESSAGE`): its pages are read through Claude's own `Read`, and Limn's `read_file` shows no
+(`CODEX_PDF_MESSAGE`): its pages are read through Claude's own `Read`, and Ensemble's `read_file` shows no
 binary file. The "Summarising sections (n of m)" count moves only when the answer arrives. Codex writes
 its own ledger row (`usageRecord`, provider `codex`), so the manager records none for it.
 
@@ -686,7 +686,7 @@ found 0.6; ~3 ms a query.
 
 The reader's search box over the SAME FTS5 index (§ Retrieval). DB only, no model. `GET
 /api/docs/search?workspace=&q=&sort=relevance|newest&page=` (docs/API.md § Reference docs), tier `read`,
-registered with the other docs routes (absent under `LIMN_AI_DISABLED`; the sidebar entry is on the same
+registered with the other docs routes (absent under `ENSEMBLE_AI_DISABLED`; the sidebar entry is on the same
 `me.ai.enabled` gate as Docs, because the library itself is).
 
 - **The query is UNTRUSTED** and never carries FTS5 syntax: `searchClauses` cuts it into plain word
@@ -1032,7 +1032,7 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   held answers `already_running` with its id BEFORE the cap or any preflight. A wall-clock
   `STORY_DOCS_TIMEOUT_MS` (10 min) aborts a wedged run ("Claude took too long. Run it again."), freeing the
   claim and the slot. A restart fails every
-  in-flight run ("Stopped when Limn restarted. Run it again."). Usage: `story_docs_shortlist` (seam
+  in-flight run ("Stopped when Ensemble restarted. Run it again."). Usage: `story_docs_shortlist` (seam
   `summary`) + `story_docs_alignment` (seam `agent`); the row's `cost_usd` is both.
 
 ## Tests

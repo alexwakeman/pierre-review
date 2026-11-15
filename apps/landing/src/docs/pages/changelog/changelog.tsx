@@ -8,7 +8,7 @@ import { LIMN_VERSION } from '../../version';
 
 export const meta: DocMeta = {
   title: 'Changelog',
-  summary: 'What changed in each release of Limn, newest first. Run npx limn-review to get the newest release.',
+  summary: 'What changed in each release of Ensemble, newest first. Run npx ensemble-review to get the newest release.',
 };
 
 /** `code` and **bold**, nothing else. */
@@ -29,7 +29,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        You are reading the docs for Limn {LIMN_VERSION}. <code>npx limn-review</code> always runs the newest release. Changes
+        You are reading the docs for Ensemble {LIMN_VERSION}. <code>npx ensemble-review</code> always runs the newest release. Changes
         under <strong>Unreleased</strong> are on their way and arrive with the next release.
       </p>
       {CHANGELOG.map((r) => {
@@ -37,7 +37,7 @@ export default function Page(): JSX.Element {
         if (r.version === 'Unreleased' && empty) return null;
         return (
           <section key={r.version} className="dx-release">
-            <H2 id={anchor(r.version)}>{r.version === 'Unreleased' ? 'Unreleased' : `Limn ${r.version}`}</H2>
+            <H2 id={anchor(r.version)}>{r.version === 'Unreleased' ? 'Unreleased' : `Ensemble ${r.version}`}</H2>
             {r.date ? <p className="dx-release-date">{fmtDate(r.date)}</p> : null}
             {empty ? <p>No changes you would notice.</p> : null}
             {r.groups.map((g) =>
@@ -55,7 +55,7 @@ export default function Page(): JSX.Element {
           </section>
         );
       })}
-      <Note>This changelog starts with Limn 1.0.14. Earlier releases are in the repository&rsquo;s history.</Note>
+      <Note>This changelog starts with Ensemble 1.0.14. Earlier releases are in the repository&rsquo;s history.</Note>
     </>
   );
 }

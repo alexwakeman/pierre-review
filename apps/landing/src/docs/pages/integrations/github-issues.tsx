@@ -4,22 +4,22 @@ import { DocLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, Steps, Tex
 export const meta: DocMeta = {
   title: 'GitHub Issues',
   summary:
-    "Use GitHub Issues as the workspace's tracker, with no extra sign-in. Limn reads the issues each pull request closes, and GitHub Projects iterations or milestones for This Sprint.",
+    "Use GitHub Issues as the workspace's tracker, with no extra sign-in. Ensemble reads the issues each pull request closes, and GitHub Projects iterations or milestones for This Sprint.",
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        If your team keeps its tickets in GitHub Issues, Limn can use them as the workspace&rsquo;s tracker. There is
-        nothing to type in: Limn reads issues with the same <code>gh</code> sign-in it uses for everything else. It
+        If your team keeps its tickets in GitHub Issues, Ensemble can use them as the workspace&rsquo;s tracker. There is
+        nothing to type in: Ensemble reads issues with the same <code>gh</code> sign-in it uses for everything else. It
         only reads GitHub Issues; it never changes an issue.
       </p>
 
       <H2 id="what-you-need">What you need</H2>
       <ul>
         <li>
-          Your <code>gh</code> sign-in, which Limn already uses. It must be able to read the repositories that hold
+          Your <code>gh</code> sign-in, which Ensemble already uses. It must be able to read the repositories that hold
           the issues.
         </li>
         <li>
@@ -48,7 +48,7 @@ export default function Page(): JSX.Element {
         <p className="muted">Uses the issues each PR closes or links. Nothing to set up.</p>
         <p className="muted">Picked automatically: acme/payments uses GitHub Issues.</p>
       </Illustration>
-      <Note>To stop Limn using GitHub Issues, set Provider to <Ui>None</Ui> and save. A saved choice always wins over the automatic one.</Note>
+      <Note>To stop Ensemble using GitHub Issues, set Provider to <Ui>None</Ui> and save. A saved choice always wins over the automatic one.</Note>
 
       <H2 id="how-pull-requests-link-to-issues">How pull requests link to issues</H2>
       <p>Linking is exact: a pull request&rsquo;s tickets are the issues GitHub says it closes.</p>
@@ -65,7 +65,7 @@ export default function Page(): JSX.Element {
         <code>acme/api#12</code> or the issue&rsquo;s link.
       </p>
 
-      <H2 id="what-limn-reads">What Limn reads</H2>
+      <H2 id="what-ensemble-reads">What Ensemble reads</H2>
       <ul>
         <li>
           For each linked issue: the title, body, state (Open or Closed), issue type, first assignee, sub-issues,
@@ -98,20 +98,20 @@ export default function Page(): JSX.Element {
         finds the iteration.
       </Tip>
 
-      <H2 id="how-often-limn-reads">How often Limn reads</H2>
+      <H2 id="how-often-ensemble-reads">How often Ensemble reads</H2>
       <p>
-        Limn reads which issues an open pull request closes when the pull request changes, and about every 30
+        Ensemble reads which issues an open pull request closes when the pull request changes, and about every 30
         minutes while it is open. It reads each linked issue about every 30 minutes, and the sprint about every 20
         minutes while This Sprint is in use. These reads use your GitHub API allowance, a point or so each. When the
-        allowance runs low, Limn waits rather than fail.
+        allowance runs low, Ensemble waits rather than fail.
       </p>
 
-      <H2 id="what-limn-writes">What Limn writes</H2>
+      <H2 id="what-ensemble-writes">What Ensemble writes</H2>
       <p>
         One thing, only when you pick it: the assignee. In a ticket&rsquo;s{' '}
         <DocLink to="this-sprint/story-view#assign-the-ticket">story view</DocLink>, the assignee is a menu of the
         people GitHub lets you assign in the issue&rsquo;s repository, and <Ui>Unassigned</Ui>. The person you pick
-        becomes the issue&rsquo;s only assignee, set as you. Limn does not change an issue&rsquo;s status or labels:
+        becomes the issue&rsquo;s only assignee, set as you. Ensemble does not change an issue&rsquo;s status or labels:
         the status in the story view is shown, not changed, and a plan&rsquo;s draft ticket update can be copied but
         not written back.
       </p>
@@ -133,7 +133,7 @@ export default function Page(): JSX.Element {
         ]}
       />
       <p>
-        More about how Limn uses your GitHub sign-in: <DocLink to="integrations/github">GitHub</DocLink>.
+        More about how Ensemble uses your GitHub sign-in: <DocLink to="integrations/github">GitHub</DocLink>.
       </p>
     </>
   );

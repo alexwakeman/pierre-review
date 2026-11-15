@@ -22,7 +22,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The <Ui>Reports and sprint</Ui> tab tells Limn how the current workspace works: when the team is at work, how
+        The <Ui>Reports and sprint</Ui> tab tells Ensemble how the current workspace works: when the team is at work, how
         long each kind of wait should take, and how long a sprint is. Reports and Chronology measure against these
         settings. Every setting here applies to this workspace only; other workspaces set their own.
       </p>
@@ -86,7 +86,7 @@ export default function Page(): JSX.Element {
       </p>
       <Warning title="Changing the sprint length moves the boundaries">
         Saving a new length or start date moves this workspace&rsquo;s period boundaries. Reports already made are kept
-        unchanged and stay readable under <Ui>Earlier cadences</Ui> at the bottom of Reports. Limn warns you before you
+        unchanged and stay readable under <Ui>Earlier cadences</Ui> at the bottom of Reports. Ensemble warns you before you
         save.
       </Warning>
       <Note>

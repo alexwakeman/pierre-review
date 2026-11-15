@@ -10,7 +10,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The reporting window is the stretch of time that Reports measures. Each workspace has one. Limn works it out
+        The reporting window is the stretch of time that Reports measures. Each workspace has one. Ensemble works it out
         once for each page you open, and every headline figure on that page uses it: the flow metrics, the two
         repository cards, the first option in Chronology, Stories and AI usage. Its name is printed beside each
         figure that uses it, so you never have to guess which dates a number covers.
@@ -76,7 +76,7 @@ export default function Page(): JSX.Element {
           <Ui>Custom…</Ui>), or <Ui>No sprint — this workspace doesn’t run one</Ui>.
         </li>
         <li>
-          Set the <Ui>Start date</Ui> to any day one of your sprints began. Limn counts forwards and backwards from it
+          Set the <Ui>Start date</Ui> to any day one of your sprints began. Ensemble counts forwards and backwards from it
           to find every sprint boundary, so it does not need to be the first sprint.
         </li>
         <li>

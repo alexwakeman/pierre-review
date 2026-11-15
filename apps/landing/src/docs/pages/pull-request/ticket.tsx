@@ -58,8 +58,8 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <Note>
-        The tab is listed only when the pull request names a ticket Limn can open, and the workspace has a tracker
-        connected. Limn reads the ticket from what it stored when the pull request arrived; opening the tab does
+        The tab is listed only when the pull request names a ticket Ensemble can open, and the workspace has a tracker
+        connected. Ensemble reads the ticket from what it stored when the pull request arrived; opening the tab does
         not call the tracker. See <DocLink to="settings/integrations">Settings → Integrations</DocLink>.
       </Note>
     </>

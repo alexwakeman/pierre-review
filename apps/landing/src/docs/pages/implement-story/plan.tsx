@@ -40,7 +40,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         Every Implement session starts with a plan. The agent reads the ticket, the code, the data and the reference
-        documents that help with the ticket (it says which it used), and says what it will build, where, and where it thinks the story is wrong or unclear. Limn
+        documents that help with the ticket (it says which it used), and says what it will build, where, and where it thinks the story is wrong or unclear. Ensemble
         checks every piece of evidence in the plan before you see it. Nothing is built until you approve the plan.
       </p>
 
@@ -68,12 +68,12 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
 
-      <H2 id="evidence">Evidence Limn checks</H2>
+      <H2 id="evidence">Evidence Ensemble checks</H2>
       <p>
-        <Ui>Limn checks every piece of evidence itself. A point it cannot check is left out.</Ui> Evidence can be lines in
+        <Ui>Ensemble checks every piece of evidence itself. A point it cannot check is left out.</Ui> Evidence can be lines in
         the code as they were when the session started, a section of a reference document, a data file (a fixture, seed
-        data, a schema or a migration) or a query the agent ran against a sandbox service and Limn saw run. Nothing comes
-        from production. When Limn removes something, one line says how much, for example "Limn left out 1 point it could
+        data, a schema or a migration) or a query the agent ran against a sandbox service and Ensemble saw run. Nothing comes
+        from production. When Ensemble removes something, one line says how much, for example "Ensemble left out 1 point it could
         not check."
       </p>
 
@@ -93,12 +93,12 @@ export default function Page(): JSX.Element {
       <p>
         The heading counts your answers, for example <Ui>Points to settle (2 of 3 answered)</Ui>. You can also talk to the
         agent freely in the conversation: <Ui>Ask a question, or tell the agent what to change in the plan.</Ui> When a
-        reply changes the plan, Limn says <Ui>The plan changed. Look at the new revision.</Ui> Earlier revisions stay
+        reply changes the plan, Ensemble says <Ui>The plan changed. Look at the new revision.</Ui> Earlier revisions stay
         readable. Your answers carry to a new revision while the point is unchanged.
       </p>
       <Note>
         In this stage the agent reads and runs commands but does not change files. If the plan cannot be used, the tab
-        says <Ui>The plan did not pass Limn's checks.</Ui> and the agent is asked once to repair it.
+        says <Ui>The plan did not pass Ensemble's checks.</Ui> and the agent is asked once to repair it.
       </Note>
 
       <H2 id="update-the-ticket">Update the ticket</H2>
@@ -125,7 +125,7 @@ export default function Page(): JSX.Element {
       <Steps>
         <li>Answer every point to settle.</li>
         <li>
-          Press <Ui>Approve and start</Ui>. Limn reads the ticket again and the agent switches to building.
+          Press <Ui>Approve and start</Ui>. Ensemble reads the ticket again and the agent switches to building.
         </li>
         <li>
           Watch the build. <Ui>The agent then builds to the end. You can stop it or message it.</Ui>
@@ -134,7 +134,7 @@ export default function Page(): JSX.Element {
       <H3 id="approve-automatically">Approve automatically</H3>
       <p>
         Tick <Ui>Approve the plan automatically</Ui> at Start, or in the build tab before the plan is ready. When the plan
-        is ready, Limn takes every point as <Ui>Agree</Ui>, approves it and starts the build. The agent builds the plan as
+        is ready, Ensemble takes every point as <Ui>Agree</Ui>, approves it and starts the build. The agent builds the plan as
         revised, its acceptance criteria included.
       </p>
       <ul>
@@ -153,7 +153,7 @@ export default function Page(): JSX.Element {
         When the build ends, <Ui>The agent says</Ui> gives, per pull request, <Ui>Done</Ui>, <Ui>Partly done</Ui> or{' '}
         <Ui>Not done</Ui>, a summary, and the checks it ran (<Ui>Passed</Ui>, <Ui>Failed</Ui> or <Ui>Not run</Ui>), and per
         criterion whether it is met. This is the agent's own account, not a gate: read the diff. If the agent ran out of
-        steps with work unfinished, Limn asks it to carry on, at most twice.
+        steps with work unfinished, Ensemble asks it to carry on, at most twice.
       </p>
       <p>
         Then push the result: see <DocLink to="implement-story/push">Push the result</DocLink>.

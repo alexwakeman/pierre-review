@@ -21,7 +21,7 @@ export default function Page(): JSX.Element {
       <p>
         Each card has an icon for its kind (a comment, a pull request event, or commits), the person, the pull
         request and the time. A review thread card shows its state. A card where it is your turn has a coloured
-        bar and says <Ui>My Turn</Ui>. Limn's own posts are named as Limn's.
+        bar and says <Ui>My Turn</Ui>. Ensemble's own posts are named as Ensemble's.
       </p>
 
       <Illustration

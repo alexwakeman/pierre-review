@@ -10,9 +10,9 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn can post a digest of a workspace’s Pending board to a Slack channel, once or twice a day, with a short
+        Ensemble can post a digest of a workspace’s Pending board to a Slack channel, once or twice a day, with a short
         sprint summary. It can also post when an auto review finishes and when a pull request merges. The digest is
-        about the team’s work, so it never includes your own My turn list. Limn posts through a Slack incoming
+        about the team’s work, so it never includes your own My turn list. Ensemble posts through a Slack incoming
         webhook; it needs no Slack app permissions beyond that.
       </p>
 
@@ -23,10 +23,10 @@ export default function Page(): JSX.Element {
           A Slack incoming webhook for the channel. Create one at{' '}
           <ExtLink href="https://api.slack.com/apps">api.slack.com/apps</ExtLink> → Incoming Webhooks.
         </li>
-        <li>Limn running on your computer at the times the digest is due.</li>
+        <li>Ensemble running on your computer at the times the digest is due.</li>
       </ul>
       <Warning title="One person per channel">
-        Limn runs on each person’s own computer. If two teammates point their Limn at the same channel, both post, and
+        Ensemble runs on each person’s own computer. If two teammates point their Ensemble at the same channel, both post, and
         the channel gets two copies. Agree who sets it up.
       </Warning>
 
@@ -78,7 +78,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-the-digest-says">What the digest says</H2>
       <Illustration
         label="A Slack digest: Needs fixing with two pull requests, Waiting on review with one, Ready to land with one, then a sprint summary"
-        caption="A digest: the team’s Pending tabs, then a short sprint summary. Links open Limn."
+        caption="A digest: the team’s Pending tabs, then a short sprint summary. Links open Ensemble."
       >
         <Card title="acme · Pending">
           <FindingRow chip="Needs fixing" tone="red">
@@ -117,7 +117,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <Ui>Post when a pull request merges</Ui>: the pull request and who merged it. Sent once per pull request,
-          only for merges Limn sees as they happen, not for old merges found in a sync.
+          only for merges Ensemble sees as they happen, not for old merges found in a sync.
         </li>
       </ul>
       <p>Both are off until you tick them. Each message is sent once and never retried.</p>

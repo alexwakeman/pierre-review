@@ -4,17 +4,17 @@ import { DocLink, ExtLink, H2, Illustration, MiniTable, Note, SettingsRow, Steps
 export const meta: DocMeta = {
   title: 'Confluence',
   summary:
-    'Add Confluence Cloud pages, or a whole space, to the docs library. Limn reads them with an Atlassian API token, keeps them current, and never changes a page.',
+    'Add Confluence Cloud pages, or a whole space, to the docs library. Ensemble reads them with an Atlassian API token, keeps them current, and never changes a page.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Many teams keep their specifications, runbooks and decisions in Confluence. Limn can add a Confluence page and
+        Many teams keep their specifications, runbooks and decisions in Confluence. Ensemble can add a Confluence page and
         every page below it, or a whole space, to the workspace&rsquo;s{' '}
         <DocLink to="docs-library/overview">docs library</DocLink>. From there, reviews, story checks and the docs
-        chat can use them. Limn reads Confluence only; it never edits, comments on or creates a page.
+        chat can use them. Ensemble reads Confluence only; it never edits, comments on or creates a page.
       </p>
 
       <H2 id="what-you-need">What you need</H2>
@@ -55,14 +55,14 @@ export default function Page(): JSX.Element {
       <Steps>
         <li>
           On the Docs page, press <Ui>+</Ui> and choose <Ui>Confluence</Ui>. You can also paste a Confluence address
-          into <Ui>Web page or site</Ui>; Limn notices and switches.
+          into <Ui>Web page or site</Ui>; Ensemble notices and switches.
         </li>
         <li>
           Paste a page address. A space&rsquo;s home page, or the space&rsquo;s own address, adds the whole space; any
           other page adds it and every page below it, never its siblings or parents.
         </li>
         <li>
-          Limn counts the pages first (&ldquo;This will add 12 pages from Payments handbook.&rdquo;). Press{' '}
+          Ensemble counts the pages first (&ldquo;This will add 12 pages from Payments handbook.&rdquo;). Press{' '}
           <Ui>Start</Ui>.
         </li>
       </Steps>
@@ -72,7 +72,7 @@ export default function Page(): JSX.Element {
         full address.
       </p>
 
-      <H2 id="what-limn-reads">What Limn reads</H2>
+      <H2 id="what-ensemble-reads">What Ensemble reads</H2>
       <ul>
         <li>The pages&rsquo; titles, their place in the page tree, their text and their version.</li>
         <li>
@@ -80,22 +80,22 @@ export default function Page(): JSX.Element {
           text.
         </li>
         <li>
-          Images and diagrams: Mermaid and PlantUML as their source; draw.io and Gliffy as an outline where Limn can
+          Images and diagrams: Mermaid and PlantUML as their source; draw.io and Gliffy as an outline where Ensemble can
           read one; others as a named placeholder.
         </li>
         <li>Navigation macros, such as a table of contents, are left out.</li>
       </ul>
 
-      <H2 id="how-often-limn-reads">How often Limn reads</H2>
+      <H2 id="how-often-ensemble-reads">How often Ensemble reads</H2>
       <p>
-        Limn checks each Confluence document for changes about every three hours while the workspace&rsquo;s library
+        Ensemble checks each Confluence document for changes about every three hours while the workspace&rsquo;s library
         is in use, and just before a review or story check reads it. It asks Confluence which pages changed and
         reads only those, then summarises only the sections whose text changed. Press <Ui>Refresh now</Ui> in the
         document&rsquo;s menu to check at once, or <Ui>Rebuild</Ui> to read every page again.
       </p>
 
-      <H2 id="what-limn-writes">What Limn writes</H2>
-      <p>Nothing. Limn never edits, comments on or creates a Confluence page.</p>
+      <H2 id="what-ensemble-writes">What Ensemble writes</H2>
+      <p>Nothing. Ensemble never edits, comments on or creates a Confluence page.</p>
 
       <H2 id="troubleshooting">Troubleshooting</H2>
       <MiniTable
@@ -113,7 +113,7 @@ export default function Page(): JSX.Element {
           { _key: '3', m: 'Only the first 100 pages fit in one document.', f: 'Add the rest of the space as separate sections.' },
         ]}
       />
-      <Tip>Limn waits out Confluence&rsquo;s rate limit by itself and tries the check again later; there is nothing to do.</Tip>
+      <Tip>Ensemble waits out Confluence&rsquo;s rate limit by itself and tries the check again later; there is nothing to do.</Tip>
       <p>
         Where the token is kept: <DocLink to="security/data-and-storage">Data and storage</DocLink>.
       </p>

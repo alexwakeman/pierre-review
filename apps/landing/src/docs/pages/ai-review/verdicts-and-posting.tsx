@@ -3,14 +3,14 @@ import { Chip, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Thread, Ui
 
 export const meta: DocMeta = {
   title: 'Verdicts and posting to GitHub',
-  summary: 'What the verdict means, when Limn posts the review for you, and when it approves.',
+  summary: 'What the verdict means, when Ensemble posts the review for you, and when it approves.',
 };
 
 function NotApproved(): JSX.Element {
   return (
     <Illustration
-      label="A comment review posted by Limn on pull request 612. It lists two warnings and ends with the line: Not approved: 2 warnings are still open."
-      caption="When Limn does not approve, the review ends with one line that says why."
+      label="A comment review posted by Ensemble on pull request 612. It lists two warnings and ends with the line: Not approved: 2 warnings are still open."
+      caption="When Ensemble does not approve, the review ends with one line that says why."
       title="#612 Partial refunds"
       meta="Posted automatically · 2 min ago"
     >
@@ -20,7 +20,7 @@ function NotApproved(): JSX.Element {
       <Thread
         comments={[
           {
-            who: 'Limn · priya',
+            who: 'Ensemble · priya',
             bot: true,
             text: 'Two warnings on the refund retry path. Not approved: 2 warnings are still open.',
           },
@@ -34,12 +34,12 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Every review ends with a verdict: <Ui>Approve</Ui>, <Ui>Comment</Ui> or <Ui>Request changes</Ui>. In Limn it is
-        a suggestion. On GitHub it becomes your review, posted under your account. This page explains when Limn posts,
+        Every review ends with a verdict: <Ui>Approve</Ui>, <Ui>Comment</Ui> or <Ui>Request changes</Ui>. In Ensemble it is
+        a suggestion. On GitHub it becomes your review, posted under your account. This page explains when Ensemble posts,
         what it posts, and the rules it follows before it approves or asks for changes for you.
       </p>
 
-      <H2 id="when-limn-posts">When Limn posts</H2>
+      <H2 id="when-ensemble-posts">When Ensemble posts</H2>
       <MiniTable
         cols={[
           { key: 'how', label: 'How the review started' },
@@ -48,18 +48,18 @@ export default function Page(): JSX.Element {
         rows={[
           { _key: 'r', how: 'You pressed Review only', post: 'No. You post it yourself with Post to GitHub.' },
           { _key: 'p', how: 'You pressed Review and post', post: 'Yes, when it finishes, under the rules on this page.' },
-          { _key: 'a', how: 'Auto review', post: 'Yes, unless the workspace says Keep it in Limn.' },
+          { _key: 'a', how: 'Auto review', post: 'Yes, unless the workspace says Keep it in Ensemble.' },
         ]}
       />
       <p>
         Merged, closed and draft pull requests are never posted on automatically, nor pull requests opened by bots. By
         default, automatic reviews post only on your own pull requests and on ones you are asked to review or have
-        reviewed or commented on. A review request to a GitHub team does not count, because Limn does not know which
+        reviewed or commented on. A review request to a GitHub team does not count, because Ensemble does not know which
         teams you are in.
       </p>
       <Warning>
         A posted review is your review on GitHub. It counts towards branch rules like any review you write. It is
-        marked as Limn's with a footer and a hidden marker, and inside Limn it is shown as the bot "Limn · you", never
+        marked as Ensemble's with a footer and a hidden marker, and inside Ensemble it is shown as the bot "Ensemble · you", never
         as you.
       </Warning>
 
@@ -106,11 +106,11 @@ export default function Page(): JSX.Element {
           <b>Your own pull request.</b> GitHub never lets an author approve or request changes, so it posts a comment.
         </li>
         <li>
-          <b>Your own standing review.</b> If you approved or requested changes by hand, Limn never overrides you.
+          <b>Your own standing review.</b> If you approved or requested changes by hand, Ensemble never overrides you.
         </li>
         <li>
           <b>Impact.</b> <Ui>Approve by impact</Ui> can allow approval at High, Medium and Low impact (all ticked by
-          default). An unticked level gets a comment instead. A pull request whose impact Limn could not measure
+          default). An unticked level gets a comment instead. A pull request whose impact Ensemble could not measure
           counts as High. Requesting changes is never limited by impact. See{' '}
           <DocLink to="pull-request/blast-radius">Blast radius</DocLink>.
         </li>
@@ -145,17 +145,17 @@ export default function Page(): JSX.Element {
       />
       <p>
         The reasons about your own pull request, your own standing review, an unreadable GitHub and a refusal show in
-        Limn only. If a review has nothing else to post, the line goes out alone as one short comment, at most once per
+        Ensemble only. If a review has nothing else to post, the line goes out alone as one short comment, at most once per
         pull request and commit, and never while you still have an open review request on it.
       </p>
 
-      <H2 id="withdrawn-approvals">When Limn takes its approval back</H2>
+      <H2 id="withdrawn-approvals">When Ensemble takes its approval back</H2>
       <ul>
-        <li>A push alone never makes Limn withdraw anything. The repository's own branch rule decides whether GitHub dismisses an approval after a push.</li>
+        <li>A push alone never makes Ensemble withdraw anything. The repository's own branch rule decides whether GitHub dismisses an approval after a push.</li>
         <li>
-          When a later automatic run, or a <Ui>Review and post</Ui> run, does not approve, Limn first dismisses its own
-          earlier automatic approval, once, with a message such as "Limn withdrew its approval: 2 warnings found at
-          951c4aa." This happens even with <Ui>Keep it in Limn</Ui>.
+          When a later automatic run, or a <Ui>Review and post</Ui> run, does not approve, Ensemble first dismisses its own
+          earlier automatic approval, once, with a message such as "Ensemble withdrew its approval: 2 warnings found at
+          951c4aa." This happens even with <Ui>Keep it in Ensemble</Ui>.
         </li>
         <li>A <Ui>Review only</Ui> run never writes. An approval you gave by hand, or sent with the Post button, is never touched.</li>
         <li>
@@ -164,19 +164,19 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        Your own Limn's earlier <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. Lifting a
+        Your own Ensemble's earlier <Ui>Request changes</Ui> is lifted by your next run that finds no blocker. Lifting a
         teammate's needs both of you to agree; see{' '}
         <DocLink to="ai-review/team-reviews#lifting-changes-requested">Reviewing as a team</DocLink>.
       </p>
 
       <H2 id="failures">When a post fails</H2>
       <p>
-        Every automatic post is recorded before Limn writes to GitHub, and it is never retried, so nothing is posted
+        Every automatic post is recorded before Ensemble writes to GitHub, and it is never retried, so nothing is posted
         twice. If a post fails, the <Ui>AI Review</Ui> tab says so and the Post button stays, so you can post it
         yourself.
       </p>
       <Note>
-        If a post reached GitHub but does not show in Limn yet, Limn says it will show up shortly. Do not post again:
+        If a post reached GitHub but does not show in Ensemble yet, Ensemble says it will show up shortly. Do not post again:
         it is already there.
       </Note>
     </>

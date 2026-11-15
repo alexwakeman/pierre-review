@@ -51,7 +51,7 @@ export default function Page(): JSX.Element {
         <li>
           <strong>A colour bar.</strong> The row&rsquo;s tickets by column. Hover over it, or move to it with the
           keyboard, to read the counts, for example &ldquo;2 In progress, 3 Product review, 8 Complete&rdquo; and
-          &ldquo;4 with a pull request, 9 without&rdquo;. Limn counts these, not AI.
+          &ldquo;4 with a pull request, 9 without&rdquo;. Ensemble counts these, not AI.
         </li>
         <li>
           <strong>Row order.</strong> Rows with the most pull requests come first. Each row header says its count,

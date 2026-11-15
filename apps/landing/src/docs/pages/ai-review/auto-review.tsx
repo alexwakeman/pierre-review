@@ -17,7 +17,7 @@ import {
 
 export const meta: DocMeta = {
   title: 'Auto review',
-  summary: 'Let Limn review new pull requests and new commits by itself, within your spend budget.',
+  summary: 'Let Ensemble review new pull requests and new commits by itself, within your spend budget.',
 };
 
 function SettingsPicture(): JSX.Element {
@@ -40,7 +40,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        With auto review on, Limn reviews each new pull request a person opens in the workspace, and reviews it again
+        With auto review on, Ensemble reviews each new pull request a person opens in the workspace, and reviews it again
         when new commits arrive. You do not press anything. It uses the same models and the same rules as a review
         you start, and it runs on your own AI sign-in, so it is off until you switch it on.
       </p>
@@ -59,7 +59,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           Choose <Ui>When an auto review finishes</Ui>: <Ui>Post to GitHub</Ui> (the default) or{' '}
-          <Ui>Keep it in Limn</Ui>.
+          <Ui>Keep it in Ensemble</Ui>.
         </li>
         <li>
           With posting on, choose <Ui>Which PRs</Ui> its reviews post on: <Ui>Your own PRs, and PRs you are asked to
@@ -68,7 +68,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <Warning>
         With <Ui>Post to GitHub</Ui>, automatic reviews post under your GitHub account as soon as they finish. To
-        read them first, choose <Ui>Keep it in Limn</Ui>; you can then post each one yourself from the{' '}
+        read them first, choose <Ui>Keep it in Ensemble</Ui>; you can then post each one yourself from the{' '}
         <Ui>AI Review</Ui> tab. What posts and which verdict is allowed are explained in{' '}
         <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
       </Warning>
@@ -81,7 +81,7 @@ export default function Page(): JSX.Element {
       <MiniTable
         cols={[
           { key: 'what', label: 'What happens on GitHub' },
-          { key: 'then', label: 'What Limn does' },
+          { key: 'then', label: 'What Ensemble does' },
         ]}
         rows={[
           { _key: 'open', what: 'A person opens a pull request', then: 'Reviews it within about a minute. A draft waits until it is marked ready.' },
@@ -92,7 +92,7 @@ export default function Page(): JSX.Element {
           },
           {
             _key: 'reply',
-            what: "A reply on one of your Limn's posted findings",
+            what: "A reply on one of your Ensemble's posted findings",
             then: 'A short replies pass after 5 quiet minutes, at most 5 a day per pull request.',
           },
           {
@@ -102,7 +102,7 @@ export default function Page(): JSX.Element {
           },
           {
             _key: 'none',
-            what: "A thread is resolved, CI finishes, a deploy bot comments, your Limn posts",
+            what: "A thread is resolved, CI finishes, a deploy bot comments, your Ensemble posts",
             then: 'Nothing.',
           },
         ]}
@@ -115,14 +115,14 @@ export default function Page(): JSX.Element {
       </p>
       <H3 id="first-in-the-queue">First in the queue: a verdict a teammate is waiting for</H3>
       <p>
-        Some pull requests go ahead of the rest. A teammate reviewed their own pull request with their Limn, which can
-        never approve it, so your Limn gives the verdict; one their Limn would have approved goes first. Also first: new
-        commits on a pull request that only teammates' Limns reviewed before. Never your own pull requests. See{' '}
+        Some pull requests go ahead of the rest. A teammate reviewed their own pull request with their Ensemble, which can
+        never approve it, so your Ensemble gives the verdict; one their Ensemble would have approved goes first. Also first: new
+        commits on a pull request that only teammates' copies of Ensemble reviewed before. Never your own pull requests. See{' '}
         <DocLink to="ai-review/team-reviews#a-teammates-verdict">Reviewing as a team</DocLink>.
       </p>
       <H3 id="after-a-break">After a break</H3>
       <p>
-        When Limn starts, or your computer wakes after five minutes or more, auto review waits until your repositories
+        When Ensemble starts, or your computer wakes after five minutes or more, auto review waits until your repositories
         have synced, so it never reviews a commit that has since moved. It waits 30 minutes at most. Then it reviews
         what changed while you were away, the verdicts teammates wait for first, within the daily limit and the spend
         budget.
@@ -148,7 +148,7 @@ export default function Page(): JSX.Element {
           per commit (after an hour, then four hours, or when your usage limit resets).
         </li>
         <li>
-          <b>Teammates</b>: when a teammate's Limn is already reviewing a commit with the same model, yours steps aside
+          <b>Teammates</b>: when a teammate's Ensemble is already reviewing a commit with the same model, yours steps aside
           and spends nothing. See <DocLink to="ai-review/team-reviews">Reviewing as a team</DocLink>.
         </li>
         <li>Reviews you start yourself always go first.</li>

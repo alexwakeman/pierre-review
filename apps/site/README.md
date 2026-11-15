@@ -1,7 +1,7 @@
 # @pierre-review/site
 
 The one small Node service behind limn-review.com. Plain `node:http`, no runtime
-dependencies. Limn itself is local-only (`npx limn-review`), so this serves the website and
+dependencies. Ensemble itself is local-only (`npx ensemble-review`), so this serves the website and
 nothing else:
 
 | Path | What |

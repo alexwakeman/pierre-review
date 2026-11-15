@@ -10,10 +10,10 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        If your team uses <ExtLink href="https://sonarcloud.io">SonarCloud</ExtLink>, Limn can read its analysis of each
+        If your team uses <ExtLink href="https://sonarcloud.io">SonarCloud</ExtLink>, Ensemble can read its analysis of each
         pull request: the quality gate, issues, security hotspots and SonarCloud’s advice on how to fix them. AI Review
-        uses them as evidence, the AI Review tab lists them, AI Fix can fix them, and Limn can post them to the pull
-        request as one GitHub review. Limn only reads from SonarCloud; it never changes anything there.
+        uses them as evidence, the AI Review tab lists them, AI Fix can fix them, and Ensemble can post them to the pull
+        request as one GitHub review. Ensemble only reads from SonarCloud; it never changes anything there.
       </p>
 
 
@@ -65,9 +65,9 @@ export default function Page(): JSX.Element {
         type a new one and save. It is sent only to sonarcloud.io.
       </Note>
 
-      <H2 id="what-limn-reads">What Limn reads</H2>
+      <H2 id="what-ensemble-reads">What Ensemble reads</H2>
       <p>
-        For each pull request, Limn reads SonarCloud’s analysis when a review runs, when you press <Ui>Refresh</Ui>,
+        For each pull request, Ensemble reads SonarCloud’s analysis when a review runs, when you press <Ui>Refresh</Ui>,
         and when AI Fix opens. Opening a tab never calls SonarCloud; it shows what was read before.
       </p>
       <ul>
@@ -77,7 +77,7 @@ export default function Page(): JSX.Element {
       </ul>
       <Warning title="Only an analysis of this exact commit is used">
         SonarCloud often finishes its analysis a few minutes after a push. Until it has analysed the commit you are
-        looking at, Limn shows nothing for it, rather than the previous commit’s issues. Press <Ui>Refresh</Ui> a
+        looking at, Ensemble shows nothing for it, rather than the previous commit’s issues. Press <Ui>Refresh</Ui> a
         little later.
       </Warning>
 
@@ -121,14 +121,14 @@ export default function Page(): JSX.Element {
         GitHub: 12 on the changed lines, 5 in the summary, 3 already there from an earlier commit.”
       </p>
       <p>
-        With auto-posting on, Limn posts SonarCloud’s findings after each auto review, unless you turn that off. When
-        SonarCloud finishes after the review, Limn posts them when the analysis lands, for up to 2 hours. See{' '}
+        With auto-posting on, Ensemble posts SonarCloud’s findings after each auto review, unless you turn that off. When
+        SonarCloud finishes after the review, Ensemble posts them when the analysis lands, for up to 2 hours. See{' '}
         <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting</DocLink>.
       </p>
 
       <H2 id="turn-it-off">Turn it off</H2>
       <p>
-        In <Ui>Settings → Integrations → SonarCloud</Ui>, remove the token and press <Ui>Save</Ui>. Limn stops reading
+        In <Ui>Settings → Integrations → SonarCloud</Ui>, remove the token and press <Ui>Save</Ui>. Ensemble stops reading
         SonarCloud for that workspace. Each workspace has its own setting.
       </p>
     </>

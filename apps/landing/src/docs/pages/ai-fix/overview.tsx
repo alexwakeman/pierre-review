@@ -130,7 +130,7 @@ export default function Page(): JSX.Element {
         <DocLink to="ai-fix/push-and-auto-fix">Push the fix, and auto fix</DocLink>.
       </p>
       <Warning>
-        The fix is pushed as it is. Limn does not build or test it again before the push; the agent's own test runs in
+        The fix is pushed as it is. Ensemble does not build or test it again before the push; the agent's own test runs in
         the sandbox are the only ones. Your CI runs on the pushed commit as usual.
       </Warning>
 
@@ -146,7 +146,7 @@ export default function Page(): JSX.Element {
           services you picked for integration tests (<Ui>Settings → Sandbox</Ui>).
         </li>
         <li>
-          It has no GitHub credentials and no way to change your own files. The only way out to the network is Limn's
+          It has no GitHub credentials and no way to change your own files. The only way out to the network is Ensemble's
           allow-list. A blocked host shows in the <Ui>Network</Ui> panel, where you can allow it.
         </li>
         <li>

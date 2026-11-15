@@ -36,8 +36,8 @@ export default function Page(): JSX.Element {
     <>
       <p>
         When a pull request conflicts with its base branch, GitHub will not merge it and its own editor handles only
-        simple cases. Limn’s conflict resolver lets you settle the conflicts inside Limn. You see your version, the
-        base branch’s changes and the result side by side, decide each conflicting region, and commit the merge. Limn
+        simple cases. Ensemble’s conflict resolver lets you settle the conflicts inside Ensemble. You see your version, the
+        base branch’s changes and the result side by side, decide each conflicting region, and commit the merge. Ensemble
         never picks a side for you, and nothing is pushed until you press the button.
       </p>
 

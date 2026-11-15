@@ -43,7 +43,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The story view is Limn&rsquo;s page for one ticket. It brings together what the tracker says, what the
+        The story view is Ensemble&rsquo;s page for one ticket. It brings together what the tracker says, what the
         team said in the comments, what the pull requests deliver, and what is still missing. It works for any
         ticket on the workspace&rsquo;s tracker, including a ticket with no pull request yet.
       </p>
@@ -152,11 +152,11 @@ export default function Page(): JSX.Element {
       <H2 id="change-the-status-in-jira">Change the status in Jira</H2>
       <p>
         On a Jira ticket the status chip is a menu. Opening it asks Jira which statuses the ticket can move to from
-        here. Pick one and Jira changes the ticket at once; Limn then reads the status back and shows it everywhere.
+        here. Pick one and Jira changes the ticket at once; Ensemble then reads the status back and shows it everywhere.
       </p>
       <Warning>
         This writes to Jira as the owner of the workspace&rsquo;s Jira token. There is no confirm step: the change is
-        made when you pick the status. Limn lists only statuses it can make without Jira&rsquo;s own form, and says
+        made when you pick the status. Ensemble lists only statuses it can make without Jira&rsquo;s own form, and says
         &ldquo;Your Jira token cannot change this issue.&rdquo; when the token may not. On GitHub Issues, Linear and
         Notion the status is shown and not changed.
       </Warning>
@@ -165,19 +165,19 @@ export default function Page(): JSX.Element {
         On Jira, GitHub Issues and Linear the assignee is a menu. Opening it asks your tracker who can be assigned
         this ticket: on Jira the people assignable in the ticket&rsquo;s project, on GitHub the people assignable in
         the issue&rsquo;s repository, on Linear the active members of the ticket&rsquo;s team. Type to find a person,
-        or pick <Ui>Unassigned</Ui>. The ticket changes at once; Limn then reads the assignee back and shows it
+        or pick <Ui>Unassigned</Ui>. The ticket changes at once; Ensemble then reads the assignee back and shows it
         everywhere, including the People board. If the tracker refuses, the menu shows the person you had before and
         says why in one line.
       </p>
       <Warning>
         This writes to your tracker: on Jira as the owner of the workspace&rsquo;s Jira token, on GitHub as you, on
         Linear as the owner of the saved Linear key. There is no confirm step. On GitHub, the person you pick becomes
-        the issue&rsquo;s only assignee. Limn keeps the list of people for 10 minutes, so a new team member can take
-        that long to appear. On Notion the assignee is shown and not changed: Limn only reads Notion.
+        the issue&rsquo;s only assignee. Ensemble keeps the list of people for 10 minutes, so a new team member can take
+        that long to appear. On Notion the assignee is shown and not changed: Ensemble only reads Notion.
       </Warning>
       <Note>
-        The story view reads what Limn has already stored. Opening it does not call your tracker. Limn reads the
-        tracker in the background; see <DocLink to="integrations/jira#how-often-limn-reads">How often Limn reads</DocLink>.
+        The story view reads what Ensemble has already stored. Opening it does not call your tracker. Ensemble reads the
+        tracker in the background; see <DocLink to="integrations/jira#how-often-ensemble-reads">How often Ensemble reads</DocLink>.
       </Note>
 
       <H2 id="ask-about-this-story">Ask about this story</H2>

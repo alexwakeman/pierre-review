@@ -237,10 +237,10 @@ it needs a CORE home. Classifications live in the CORE account-scoped
 who posted (their token) is NEVER reclassified**. The hidden marker `<!-- pierre:claude-review v=1 -->`
 is stamped **UNCONDITIONALLY** in `review/post-seam.ts` and dogfooded through the same fingerprint
 detector. ⚠ **It used to be a setting (`pro_settings bots.tagPierreReviews`) and must never be one
-again**: the marker is how Limn's own posts are recognised (`isLimnPostedComment`) and, with a severity
-lead, what makes a finding a per-poster "Limn · <login>" bot (docs/CLAUDE-REVIEW.md § Limn findings
+again**: the marker is how Ensemble's own posts are recognised (`isLimnPostedComment`) and, with a severity
+lead, what makes a finding a per-poster "Ensemble · <login>" bot (docs/CLAUDE-REVIEW.md § Ensemble findings
 are bots) — switching it off would turn those bots, the verbatim-vs-curated provenance and the
-`bot_only_review` risk flag dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Limn +
+`bot_only_review` risk flag dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Ensemble +
 Claude") appeared in NO detector and is DELETED. `PostReviewArgs.pierreMarker?`/`pierreFooter?` stay
 DECLARED on the contract but nothing passes them. **Bot-ROI** (`getBotAnalytics(accountId,
 window, scope)`, a core fold) → per-kind volume/actedOn%/untouched/`overdueUntouched`/`medianAddressedMs`/oldest/humanFollowThrough/noiseRatio/`verdict`
@@ -299,7 +299,7 @@ still creates an orphan table; `pro_settings.bot_auto_resolve*` columns are now 
 Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** the account-wide
 "Review bots" section (`BotSection`) is **DELETED**. Its last knob, the "Slack bot digest" toggle, moved to the per-workspace Slack section with the
 flag itself in platform 0033 (`WorkspaceSlackTargetUpdate.botDigest`), which left the section holding only an explainer
-pointing at the Bots rail — a signpost, not a setting. Its "Detection" and "Limn attribution"
+pointing at the Bots rail — a signpost, not a setting. Its "Detection" and "Ensemble attribution"
 sections were removed earlier (above); every one of those `pro_settings` columns is left DORMANT,
 like `bot_auto_resolve*`, with no migration — `ProSettings.bots.slackDigest` survives on the wire as
 a husk that always reads `false`. ⚠ **`data-testid="bot-settings-section"` IS GONE WITH IT** — shot
@@ -428,7 +428,7 @@ considered and overruled.
   — the derivation always runs and `persist` declines only the halves a human owns.
 - **The division now:** *is this login a bot, who is it, and what does it cost* are all per
   **WORKSPACE**. There is no longer an account-wide *counterpart*: detection takes no configuration
-  and the Limn marker is unconditional, and the Slack bot-digest toggle became a field on the
+  and the Ensemble marker is unconditional, and the Slack bot-digest toggle became a field on the
   DELIVERY row in platform 0033 — so `BotSection` in the Settings modal is DELETED outright. Price is
   edited INLINE on the reviewer card
   (`DetectedReviewersTable`) and its label reads **"Price for this Workspace"** — not a bare "Price",
@@ -542,8 +542,8 @@ after that thread's last comment, carrying the addressed threads inline (`affect
 `commitCount` + `changeSummary` — "pushed N commits · addressed M threads"); plain
 (non-thread-touching) pushes stay excluded. **Each item carries `isMyTurn`** — true when it's an
 event on a PR the viewer PARTICIPATES in (authored / requested reviewer / previously reviewed or
-commented) AND the actor isn't the viewer — and the item is not LIMN'S OWN WORK (`limn`: a
-`limn:` bot actor or a Limn hidden marker in the body, `markLimnItems`; labelled "Limn"). That flag **replaces the old two-source (`my_turn` vs
+commented) AND the actor isn't the viewer — and the item is not ENSEMBLE'S OWN WORK (`limn`: a
+`limn:` bot actor or an Ensemble hidden marker in the body, `markLimnItems`; labelled "Ensemble"). That flag **replaces the old two-source (`my_turn` vs
 `feed`) synthesis + its dedup** — there is now exactly one row per underlying event, which killed
 the duplication. **My Turn / "FYI" is CORE** — it was moved back out of the plugin early on (the `feedMyTurn`
 capability and the `registerFyiProvider` seam were removed; `feed/fyi-provider.ts` is gone). The participation compute lives in the core module **`src/feed/my-turn.ts`** (`enrichMyTurn`
@@ -885,9 +885,9 @@ The host hands the platform `host.appWebUrl` (the SPA's browser-facing base) for
 and posted to this channel; no row ⇒ nothing.
 
 Slack is a TEAM feature: no personal tab, no card ABOUT the configuring account, never its name.
-⚠ **ONE PERSON PER CHANNEL.** Limn runs on each reader's machine, so two teammates who point
+⚠ **ONE PERSON PER CHANNEL.** Ensemble runs on each reader's machine, so two teammates who point
 their digest at the same channel BOTH post — nothing de-duplicates across machines. The Slack
-section says so in one visible line ("Only one person per channel should set this up — each Limn
+section says so in one visible line ("Only one person per channel should set this up — each Ensemble
 posts its own copy."); docs/TEAM-REVIEW.md § 13, gap 9.
 (Until 2026-10-22 it was strictly Pro, `slackDigest`, 402 on every route; it is ungated now.)
 
@@ -1003,10 +1003,10 @@ link move together — `scripts/demo-stack.mjs` passes it (`:5273`) for the same
 `apps/backend/src/config-app-web-url.test.ts` (6 cases, mutation-checked: 4 go red if the
 `serverServesSpa` branch is removed). The message carries a footer workspace link
 (`?view=activity&workspace=<id>&activityRepo=feed`), per-repo heading links
-(`&activityRepo=<repoId>`) and per-PR links. **Every link in the message points into Limn.** A PR
+(`&activityRepo=<repoId>`) and per-PR links. **Every link in the message points into Ensemble.** A PR
 reference is `?workspace=<id>&view=pr-detail%3A<prId>`: the SPA's own tab-key vocabulary, built from
 the LOCAL `prId` the resolved ref carries, and pinned by a source scan in `slack-pr-links.test.ts`.
-The github.com rule was reversed at the user's request. A reader with no access to this Limn gets
+The github.com rule was reversed at the user's request. A reader with no access to this Ensemble gets
 an unreachable host. Absent the seam every builder returns null
 and every link is plain text — never a GitHub fallback.
 
@@ -1060,7 +1060,7 @@ merged `#8250df` purple · good `#1f883d` green · bad `#cf222e` red · waiting 
 
 Two per-workspace switches on the delivery row, **both OFF by default**, sent to the same webhook
 (`slack/signals.ts`); `cadence: 'off'` pauses the digest, not these.
-- **"Claude Review ran"** (`notify_reviews`) — PR link (Limn + GitHub), author, verdict and the run's
+- **"Claude Review ran"** (`notify_reviews`) — PR link (Ensemble + GitHub), author, verdict and the run's
   own `summary`, trimmed to 700 characters. Never the findings. Only a SUCCEEDED run, never a
   `skip`-routed one. ⚠ **AUTO REVIEWS ONLY** (since 2026-10-27): a run the reader started is never
   posted — the event's `trigger` AND the stored `claude_reviews.trigger` must both be `'auto'`,
@@ -1909,7 +1909,7 @@ quiet plain push the reader did not click; `autoResolve` and `model` are ignored
 **`review/llm.ts` `cheapComplete` — the one-shot model seam.** Core-owned, so the platform adds
 no Anthropic dependency of its own. It takes THE ONE CREDENTIAL LADDER like every agent run — the
 Claude Code login through the Agent SDK (single turn, no tools), else `ANTHROPIC_API_KEY` through
-the Anthropic API — and refuses under `LIMN_AI_DISABLED` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+the Anthropic API — and refuses under `ENSEMBLE_AI_DISABLED` ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
 § The credential ladder). Any new one-shot caller goes through it, never a client of its own.
 (The grounded "addressed" check, its anchor-hunk hydration and its root-anchored evidence window,
 described here before, were removed with the comment annotations; `GithubSeam.fetchCompareDiff` /

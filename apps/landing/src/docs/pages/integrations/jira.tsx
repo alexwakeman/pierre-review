@@ -18,7 +18,7 @@ import {
 export const meta: DocMeta = {
   title: 'Jira',
   summary:
-    'Connect Jira Cloud or Jira Data Center so story checks, reviews and This Sprint read your tickets, and use the two writes Limn makes only when you press.',
+    'Connect Jira Cloud or Jira Data Center so story checks, reviews and This Sprint read your tickets, and use the two writes Ensemble makes only when you press.',
 };
 
 function JiraSettings(): JSX.Element {
@@ -43,9 +43,9 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        With Jira as a workspace&rsquo;s issue tracker, Limn links each pull request to the Jira tickets it names,
+        With Jira as a workspace&rsquo;s issue tracker, Ensemble links each pull request to the Jira tickets it names,
         reads those tickets, and uses them in the story check, the ticket view, This Sprint and the AI review&rsquo;s
-        open points. Limn reads Jira with a token you save in Settings. It writes to Jira in exactly three places, and
+        open points. Ensemble reads Jira with a token you save in Settings. It writes to Jira in exactly three places, and
         only when you press the button.
       </p>
 
@@ -65,8 +65,8 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        The token acts as you. It needs to be able to browse the projects whose tickets you want Limn to read. To
-        change a status from Limn, it also needs permission to transition those issues; to assign one, permission to
+        The token acts as you. It needs to be able to browse the projects whose tickets you want Ensemble to read. To
+        change a status from Ensemble, it also needs permission to transition those issues; to assign one, permission to
         assign them; to update a ticket&rsquo;s text, permission to edit them.
       </p>
 
@@ -90,11 +90,11 @@ export default function Page(): JSX.Element {
           Under <Ui>Jira API access (optional)</Ui>, type your <Ui>Email</Ui> (Cloud only) and{' '}
           <Ui>API token</Ui>, and press <Ui>Check connection</Ui>.
         </li>
-        <li>Save. Limn starts reading the tickets of open pull requests in the background.</li>
+        <li>Save. Ensemble starts reading the tickets of open pull requests in the background.</li>
       </Steps>
       <JiraSettings />
       <Note>
-        Without a token, Limn still finds ticket keys and links them to Jira, but it cannot read the tickets: no
+        Without a token, Ensemble still finds ticket keys and links them to Jira, but it cannot read the tickets: no
         story check, no ticket text and no sprint. Each workspace has its own tracker. If another workspace already
         has Jira set up, use <Ui>Copy from another workspace</Ui>; the token is copied without passing through your
         browser, and later changes in either workspace do not affect the other.
@@ -103,10 +103,10 @@ export default function Page(): JSX.Element {
       <H2 id="how-pull-requests-link-to-tickets">How pull requests link to tickets</H2>
       <ul>
         <li>
-          Limn looks for keys like <code>PAY-142</code> in the pull request title and, with project keys set, in the
+          Ensemble looks for keys like <code>PAY-142</code> in the pull request title and, with project keys set, in the
           branch name. Commit messages are never read.
         </li>
-        <li>Without project keys, Limn looks in the title only, and is careful about things that look like keys but are not.</li>
+        <li>Without project keys, Ensemble looks in the title only, and is careful about things that look like keys but are not.</li>
         <li>
           You can add a ticket by hand from a pull request&rsquo;s Story check: open <Ui>Add tickets</Ui> and paste
           the ticket&rsquo;s link or key. Board links and issue links both work. See{' '}
@@ -117,16 +117,16 @@ export default function Page(): JSX.Element {
       <H2 id="choose-the-ticket-fields">Choose the ticket fields</H2>
       <p>
         Jira sites often have several fields called &ldquo;Acceptance Criteria&rdquo;, and each issue type can use a
-        different one. Once Limn has read some tickets, <Ui>Ticket fields</Ui> under the Issue tracker section is a
+        different one. Once Ensemble has read some tickets, <Ui>Ticket fields</Ui> under the Issue tracker section is a
         table: one row per issue type, with a <Ui>Criteria</Ui> column and an <Ui>Open points</Ui> column:
       </p>
       <ul>
         <li>
-          <Ui>Criteria</Ui>: the field that holds the acceptance criteria. <Ui>Limn picks</Ui> uses the field whose
+          <Ui>Criteria</Ui>: the field that holds the acceptance criteria. <Ui>Ensemble picks</Ui> uses the field whose
           name best matches &ldquo;Acceptance Criteria&rdquo;.
         </li>
         <li>
-          <Ui>Open points</Ui>: where the ticket&rsquo;s undecided points are. <Ui>Limn picks</Ui> uses a field
+          <Ui>Open points</Ui>: where the ticket&rsquo;s undecided points are. <Ui>Ensemble picks</Ui> uses a field
           named like &ldquo;Open points&rdquo;, else an &ldquo;Open points&rdquo; section of the description.{' '}
           <Ui>Description only</Ui> reads just that section.
         </li>
@@ -136,7 +136,7 @@ export default function Page(): JSX.Element {
         list says &ldquo;No Jira tickets read yet.&rdquo;
       </p>
 
-      <H2 id="what-limn-reads">What Limn reads</H2>
+      <H2 id="what-ensemble-reads">What Ensemble reads</H2>
       <ul>
         <li>
           For each ticket a pull request names: the title, description, acceptance criteria, issue type, status,
@@ -149,7 +149,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
 
-      <H3 id="how-often-limn-reads">How often Limn reads</H3>
+      <H3 id="how-often-ensemble-reads">How often Ensemble reads</H3>
       <MiniTable
         cols={[
           { key: 'w', label: 'What' },
@@ -165,18 +165,18 @@ export default function Page(): JSX.Element {
         ]}
       />
       <p>
-        Opening a page in Limn never calls Jira, so pages stay fast and your Jira rate limit is spent only on
-        background reads. Saving the tracker settings starts a read at once. If Jira refuses the token, Limn pauses reading for that workspace for 30
+        Opening a page in Ensemble never calls Jira, so pages stay fast and your Jira rate limit is spent only on
+        background reads. Saving the tracker settings starts a read at once. If Jira refuses the token, Ensemble pauses reading for that workspace for 30
         minutes rather than retry again and again; saving a new token ends the pause at once.
       </p>
 
-      <H2 id="what-limn-writes">What Limn writes</H2>
-      <p>Limn writes to Jira in exactly three places. Each happens only when you press, and none is ever retried.</p>
+      <H2 id="what-ensemble-writes">What Ensemble writes</H2>
+      <p>Ensemble writes to Jira in exactly three places. Each happens only when you press, and none is ever retried.</p>
       <H3 id="change-a-status">Change a status</H3>
       <p>
         In a ticket&rsquo;s <DocLink to="this-sprint/story-view#change-the-status-in-jira">story view</DocLink>, the
         status chip is a menu. Opening it asks Jira which statuses the ticket can move to; picking one makes that
-        transition at once. Limn lists only transitions it can make without Jira&rsquo;s own form.
+        transition at once. Ensemble lists only transitions it can make without Jira&rsquo;s own form.
       </p>
       <H3 id="assign-a-ticket">Assign a ticket</H3>
       <p>
@@ -188,15 +188,15 @@ export default function Page(): JSX.Element {
       <p>
         When you plan a build with <DocLink to="implement-story/plan">Implement story</DocLink>, the plan can include
         a draft update to the ticket&rsquo;s description and criteria. You can edit it, then press{' '}
-        <Ui>Update ticket</Ui>; Limn asks once before it replaces the text in Jira. Update ticket writes the description
+        <Ui>Update ticket</Ui>; Ensemble asks once before it replaces the text in Jira. Update ticket writes the description
         and the acceptance criteria field, in that field&rsquo;s own format, or the criteria section of the description
-        when the ticket keeps them there. When you change only the criteria in the description, Limn replaces only
+        when the ticket keeps them there. When you change only the criteria in the description, Ensemble replaces only
         that section and leaves the rest of the description exactly as it is in Jira. A criteria field that Jira does
-        not let Limn edit, or that is not a text field, is left as it is, and Limn says so.
+        not let Ensemble edit, or that is not a text field, is left as it is, and Ensemble says so.
       </p>
       <Warning>
         All three writes are made with the workspace&rsquo;s Jira token, so they show in Jira as made by that
-        token&rsquo;s owner. Nothing else in Limn writes to Jira: no background job, no automation and no comment.
+        token&rsquo;s owner. Nothing else in Ensemble writes to Jira: no background job, no automation and no comment.
       </Warning>
 
       <H2 id="troubleshooting">Troubleshooting</H2>
@@ -231,7 +231,7 @@ export default function Page(): JSX.Element {
           {
             _key: '7',
             m: 'A pasted ticket is refused',
-            f: "Limn reads only this workspace's Jira site. A ticket on another site needs that workspace's tracker.",
+            f: "Ensemble reads only this workspace's Jira site. A ticket on another site needs that workspace's tracker.",
           },
         ]}
       />

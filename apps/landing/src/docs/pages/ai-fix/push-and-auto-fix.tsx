@@ -36,8 +36,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="push-when-done">Push when done</H2>
       <p>
-        <Ui>Push when done</Ui>, beside <Ui>Start fix</Ui>, is ticked by default, and Limn remembers your choice in this
-        browser. When the fix finishes on your own pull request, Limn pushes it to the pull request&rsquo;s branch the
+        <Ui>Push when done</Ui>, beside <Ui>Start fix</Ui>, is ticked by default, and Ensemble remembers your choice in this
+        browser. When the fix finishes on your own pull request, Ensemble pushes it to the pull request&rsquo;s branch the
         same way as <Ui>Push</Ui>, and the session ends.
       </p>
       <p>
@@ -69,10 +69,10 @@ export default function Page(): JSX.Element {
       <Warning>
         Push writes to GitHub under your name. It is never forced, and it is refused if the branch moved since the fix
         started. Only the pull request's repository is pushed; edits the agent made in other repositories are shown
-        under <Ui>Left out</Ui> and dropped. Limn does not build or test the fix again before the push.
+        under <Ui>Left out</Ui> and dropped. Ensemble does not build or test the fix again before the push.
       </Warning>
       <p>
-        After the push, Limn syncs the pull request, so the new commit shows at once. If auto review is on, the new
+        After the push, Ensemble syncs the pull request, so the new commit shows at once. If auto review is on, the new
         commit is reviewed, which checks the fix. A fix that includes the merge item pushes only to the pull request's
         own branch; see <DocLink to="ai-fix/resolve-merge-conflicts">Resolve merge conflicts with AI Fix</DocLink>.
       </p>
@@ -84,7 +84,7 @@ export default function Page(): JSX.Element {
           running.
         </li>
         <li>
-          A sandbox with nothing to do closes after an hour, or when Limn restarts. The tab says{' '}
+          A sandbox with nothing to do closes after an hour, or when Ensemble restarts. The tab says{' '}
           <Ui>The sandbox is closed. The changes are kept: push them, or resume.</Ui>
         </li>
         <li>
@@ -98,7 +98,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="auto-fix">Auto fix</H2>
       <p>
-        With <Ui>Auto AI Fix on your own PRs</Ui> on, Limn prepares a fix on a pull request you opened whenever there is
+        With <Ui>Auto AI Fix on your own PRs</Ui> on, Ensemble prepares a fix on a pull request you opened whenever there is
         something to fix: the findings of an auto review, or CI failures the CI review explained. It is set per workspace in <Ui>Settings → AI review</Ui>, and it is off by default. It runs only while
         auto review is on.
       </p>
@@ -122,12 +122,12 @@ export default function Page(): JSX.Element {
           merge conflicts). It never fixes ticket gaps, and it never plans first.
         </li>
         <li>
-          <Ui>Limn&rsquo;s findings</Ui> are every finding of the review, from Claude, Codex or both. When one half of a
+          <Ui>Ensemble&rsquo;s findings</Ui> are every finding of the review, from Claude, Codex or both. When one half of a
           Claude + Codex review fails, what the other found still open of its earlier findings counts too.
         </li>
         <li>
           With <Ui>Merge conflicts with the base branch</Ui> ticked, a pull request that conflicts with its base is
-          merged first, then fixed on top. Limn checks the merge before any push: two parents and no conflict markers
+          merged first, then fixed on top. Ensemble checks the merge before any push: two parents and no conflict markers
           left. A merge that fails the check is never pushed. <Ui>Push automatically</Ui> still decides whether a good
           one is pushed or waits for you.
         </li>
@@ -171,7 +171,7 @@ export default function Page(): JSX.Element {
         auto AI Fix off.
       </p>
       <p>
-        When the sandbox is busy or the AI spend limit is reached, Limn tries again by itself. The rest wait until the
+        When the sandbox is busy or the AI spend limit is reached, Ensemble tries again by itself. The rest wait until the
         pull request changes.
       </p>
 
@@ -182,8 +182,8 @@ export default function Page(): JSX.Element {
       </p>
       <Warning>
         With Push automatically on, code an agent wrote reaches your branch with no person reading it first, and it is
-        not built or tested by Limn before the push. Your CI and the next auto review are the checks. If the push fails,
-        the <Ui>AI Fix</Ui> tab says <Ui>Automatic push failed</Ui> and Limn does not try again; you can push by hand.
+        not built or tested by Ensemble before the push. Your CI and the next auto review are the checks. If the push fails,
+        the <Ui>AI Fix</Ui> tab says <Ui>Automatic push failed</Ui> and Ensemble does not try again; you can push by hand.
       </Warning>
       <Note>
         Limits stop a loop of fix, review, fix: at most 3 automatic fixes per pull request a day, no new one while a fix

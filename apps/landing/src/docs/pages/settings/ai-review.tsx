@@ -31,7 +31,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="auto-review">Auto review</H2>
       <p>
-        When <Ui>Review new PRs automatically</Ui> is on, Limn reviews each new pull request a person
+        When <Ui>Review new PRs automatically</Ui> is on, Ensemble reviews each new pull request a person
         opens in this workspace, with the provider chosen under <Ui>Auto reviews use</Ui>. It is off until you turn it on.
       </p>
       <AutoReviewPicture />
@@ -40,7 +40,7 @@ export default function Page(): JSX.Element {
         <li>Drafts wait until they are marked ready.</li>
         <li>
           A reviewed pull request is reviewed again when new commits are pushed, or when a person or a review bot adds
-          review comments. Limn&rsquo;s own comments never start a review. Pushes and comments that arrive close
+          review comments. Ensemble&rsquo;s own comments never start a review. Pushes and comments that arrive close
           together wait until the pull request has been quiet for 5 minutes (20 minutes at most).
         </li>
         <li>
@@ -54,11 +54,11 @@ export default function Page(): JSX.Element {
 
       <H3 id="status-on-github">Status on GitHub</H3>
       <p>
-        Each auto review puts a status on the pull request&rsquo;s latest commit, such as <Ui>limn/review-claude</Ui>.
-        A teammate&rsquo;s Limn then skips a commit someone is already reviewing with the same provider. This is
-        always on. Without write access to the repository, Limn reviews without a status.
+        Each auto review puts a status on the pull request&rsquo;s latest commit, such as <Ui>ensemble/review-claude</Ui>.
+        A teammate&rsquo;s Ensemble then skips a commit someone is already reviewing with the same provider. This is
+        always on. Without write access to the repository, Ensemble reviews without a status.
       </p>
-      <Warning>Do not make <Ui>limn/</Ui> statuses required checks. A pending status would block merges.</Warning>
+      <Warning>Do not make <Ui>ensemble/</Ui> statuses required checks. A pending status would block merges.</Warning>
 
       <H3>Auto reviews use</H3>
       <p>
@@ -77,7 +77,7 @@ export default function Page(): JSX.Element {
           <Ui>Relaxed: approve if one approves and the other raises nothing that blocks</Ui>.
         </li>
       </ul>
-      <p>Either way, if one asks for changes, Limn does not approve.</p>
+      <p>Either way, if one asks for changes, Ensemble does not approve.</p>
 
       <H2 id="posting">What happens when a review finishes</H2>
       <p>
@@ -85,7 +85,7 @@ export default function Page(): JSX.Element {
       </p>
       <ul>
         <li>
-          <Ui>Keep it in Limn</Ui>: read it in the AI Review tab and post it yourself if you want.
+          <Ui>Keep it in Ensemble</Ui>: read it in the AI Review tab and post it yourself if you want.
         </li>
         <li>
           <Ui>Post to GitHub</Ui> (on by default): as soon as it finishes. Reviews you start yourself post only when you
@@ -93,7 +93,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <Warning title="Posts are made as you">
-        Limn posts with your GitHub account, as one review. On GitHub it counts as your review. Nothing is posted twice,
+        Ensemble posts with your GitHub account, as one review. On GitHub it counts as your review. Nothing is posted twice,
         and merged, closed and draft pull requests, and pull requests opened by bots, are never posted on.
       </Warning>
       <H3>Which PRs</H3>
@@ -105,7 +105,7 @@ export default function Page(): JSX.Element {
           <Ui>Every PR auto review covers</Ui>.
         </li>
       </ul>
-      <p>A review request to a team does not make a pull request yours: Limn does not know which teams you are in.</p>
+      <p>A review request to a team does not make a pull request yours: Ensemble does not know which teams you are in.</p>
       <H3>What to post</H3>
       <p>Tick what goes into the posted review. Ticked by default unless marked:</p>
       <ul>
@@ -142,7 +142,7 @@ export default function Page(): JSX.Element {
         <li>
           <Ui>Approve</Ui>: tick <Ui>High impact PRs</Ui>, <Ui>Medium impact PRs</Ui> and <Ui>Low impact PRs</Ui>.
           Impact is the blast radius chip. A pull request at an impact you untick gets a comment-only review. A pull
-          request whose impact Limn could not measure counts as High. See{' '}
+          request whose impact Ensemble could not measure counts as High. See{' '}
           <DocLink to="settings/pull-requests">Pull requests</DocLink>.
         </li>
         <li>
@@ -158,20 +158,20 @@ export default function Page(): JSX.Element {
       <H2 id="resolving">Resolving threads</H2>
       <ul>
         <li>
-          While posting is on, when a later auto review finds a posted comment fixed, Limn replies and resolves its
+          While posting is on, when a later auto review finds a posted comment fixed, Ensemble replies and resolves its
           thread. This is always on.
         </li>
         <li>
-          <Ui>Resolve my Limn threads when addressed</Ui> (on by default): on your own pull requests, drafts too, when
-          any review you run finds one of your Limn&rsquo;s comments fixed, Limn replies &ldquo;Addressed in&rdquo; and
-          the commit, then resolves the thread. It never touches a person&rsquo;s thread or a teammate&rsquo;s Limn
+          <Ui>Resolve my Ensemble threads when addressed</Ui> (on by default): on your own pull requests, drafts too, when
+          any review you run finds one of your Ensemble&rsquo;s comments fixed, Ensemble replies &ldquo;Addressed in&rdquo; and
+          the commit, then resolves the thread. It never touches a person&rsquo;s thread or a teammate&rsquo;s Ensemble
           thread.
         </li>
       </ul>
-      <H3>Teammates&rsquo; Limn &ldquo;changes requested&rdquo;</H3>
+      <H3>Teammates&rsquo; Ensemble &ldquo;changes requested&rdquo;</H3>
       <p>
-        When a teammate&rsquo;s Limn posted &ldquo;changes requested&rdquo;, every point is fixed at the latest commit
-        and your own review finds no blocker, your Limn dismisses that review and posts its own. This is always on.
+        When a teammate&rsquo;s Ensemble posted &ldquo;changes requested&rdquo;, every point is fixed at the latest commit
+        and your own review finds no blocker, your Ensemble dismisses that review and posts its own. This is always on.
         Whether your review approves is still decided by <Ui>Approve or request changes for me</Ui> and the impact
         boxes. A review someone wrote by hand is never dismissed. See{' '}
         <DocLink to="ai-review/team-reviews#lifting-changes-requested">Reviewing as a team</DocLink>.
@@ -187,13 +187,13 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <Ui>Always include</Ui>: choose what the fix works on: <Ui>Merge conflicts with the base branch</Ui> (off by
-          default), <Ui>Limn&rsquo;s findings</Ui> (from Claude, Codex or both), earlier findings not fixed yet,{' '}
+          default), <Ui>Ensemble&rsquo;s findings</Ui> (from Claude, Codex or both), earlier findings not fixed yet,{' '}
           <Ui>Threads my agent says to fix</Ui>, threads nobody has answered, CI failure reasons, SonarCloud issues, and
           style bot comments (off by default).
         </li>
         <li>
           With <Ui>Merge conflicts with the base branch</Ui> ticked, a pull request that conflicts with its base is
-          merged first. Limn checks the merge before any push: two parents and no conflict markers left. A merge that
+          merged first. Ensemble checks the merge before any push: two parents and no conflict markers left. A merge that
           fails the check is never pushed.
         </li>
         <li>

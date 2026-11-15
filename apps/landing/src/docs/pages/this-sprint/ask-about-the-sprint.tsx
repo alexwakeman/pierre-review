@@ -49,7 +49,7 @@ export default function Page(): JSX.Element {
       </Steps>
 
       <H2 id="what-it-knows">What it knows</H2>
-      <p>The answer comes only from what Limn already holds about this sprint:</p>
+      <p>The answer comes only from what Ensemble already holds about this sprint:</p>
       <ul>
         <li>each ticket&rsquo;s title, column, status, assignee, epic, one-paragraph summary and criteria count;</li>
         <li>the ticket&rsquo;s pull requests and their state;</li>

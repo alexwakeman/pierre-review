@@ -2,26 +2,26 @@ import type { DocMeta } from '../../types';
 import { AppShell, DocLink, H2, Illustration, Note, PrRow, Pill, Tabs, Ui } from '../../kit';
 
 export const meta: DocMeta = {
-  title: 'What Limn is',
-  summary: 'Limn is a dashboard for a team\'s GitHub pull requests that runs on your own computer. This page says what it does, who it is for and how it is different.',
+  title: 'What Ensemble is',
+  summary: 'Ensemble is a dashboard for a team\'s GitHub pull requests that runs on your own computer. This page says what it does, who it is for and how it is different.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn shows your team's pull requests across many GitHub repositories on one screen. It tells you
+        Ensemble shows your team's pull requests across many GitHub repositories on one screen. It tells you
         what is waiting on you, which pull requests are stuck, which review threads nobody has answered,
         and what can land now. It also runs AI reviews and AI fixes on your own Claude or Codex sign-in,
         checks pull requests against their tickets and your reference documents, and measures the review
-        bots you already use. Limn runs on your computer. There is no Limn server and no Limn account.
+        bots you already use. Ensemble runs on your computer. There is no Ensemble server and no Ensemble account.
       </p>
 
 
-      <H2 id="what-it-does">What Limn does</H2>
+      <H2 id="what-it-does">What Ensemble does</H2>
       <ul>
         <li>
-          <b>Collects the activity.</b> Limn reads pull requests, reviews, comments, commits and checks from
+          <b>Collects the activity.</b> Ensemble reads pull requests, reviews, comments, commits and checks from
           GitHub through your own GitHub CLI sign-in, and keeps a copy on your computer.
         </li>
         <li>
@@ -52,7 +52,7 @@ export default function Page(): JSX.Element {
       </ul>
 
       <Illustration
-        label="The Limn app: the sidebar on the left with Pending selected, and the My turn tab listing two pull requests."
+        label="The Ensemble app: the sidebar on the left with Pending selected, and the My turn tab listing two pull requests."
         caption="The sidebar, with Pending open on the My turn tab."
       >
         <AppShell active="Pending">
@@ -64,7 +64,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="who-it-is-for">Who it is for</H2>
       <p>
-        Limn is for developers and engineering managers in small teams, and in teams inside larger
+        Ensemble is for developers and engineering managers in small teams, and in teams inside larger
         organisations, who work across several repositories. It is most useful when more than one person
         reviews code, when review bots comment on your pull requests, or when you want AI review without
         giving a third party your code or your GitHub credentials.
@@ -73,21 +73,21 @@ export default function Page(): JSX.Element {
       <H2 id="how-it-is-different">How it is different</H2>
       <ul>
         <li>
-          <b>It runs on your machine.</b> Your data stays in a local database in your home folder. Limn uses
+          <b>It runs on your machine.</b> Your data stays in a local database in your home folder. Ensemble uses
           the GitHub CLI you have already signed in to, and stores no GitHub token of its own. See{' '}
-          <DocLink to="security/runs-on-your-machine">Limn runs on your machine</DocLink>.
+          <DocLink to="security/runs-on-your-machine">Ensemble runs on your machine</DocLink>.
         </li>
         <li>
           <b>AI on your terms.</b> The AI features use your own Claude or ChatGPT subscription, or your own
           Anthropic API key. You choose the provider, the effort and a spend budget.
         </li>
         <li>
-          <b>It works with the bots you already have.</b> Limn does not replace CodeRabbit, Copilot or other
+          <b>It works with the bots you already have.</b> Ensemble does not replace CodeRabbit, Copilot or other
           review bots. It sorts what they say, scores how serious each comment is, and shows which of their
           threads still need a person.
         </li>
         <li>
-          <b>It is honest about guesses.</b> Where Limn guesses (for example, Likely addressed or the blast
+          <b>It is honest about guesses.</b> Where Ensemble guesses (for example, Likely addressed or the blast
           radius chip), it says so.
         </li>
       </ul>
@@ -101,7 +101,7 @@ export default function Page(): JSX.Element {
       <H2 id="next-steps">Next steps</H2>
       <ul>
         <li>
-          <DocLink to="getting-started/install-and-run">Install and run Limn</DocLink>.
+          <DocLink to="getting-started/install-and-run">Install and run Ensemble</DocLink>.
         </li>
         <li>
           <DocLink to="getting-started/add-repositories">Add your repositories</DocLink>.

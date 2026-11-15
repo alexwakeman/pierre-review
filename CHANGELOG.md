@@ -1,20 +1,36 @@
 # Changelog
 
-What changed in each release of Limn (`npx limn-review`), newest first.
+What changed in each release of Ensemble (`npx ensemble-review`), newest first.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the
 npm package. Every push to `main` publishes a patch release; the release workflow moves everything
 under "Unreleased" to the new version's heading in the same commit as the version bump
 (`docs/RELEASE.md` § The changelog).
 
-How to write an entry: one line per change a person using Limn would notice, in plain English,
+How to write an entry: one line per change a person using Ensemble would notice, in plain English,
 under Added, Changed, Fixed or Removed. Name the screen in the app's own words. No file names,
 no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Implement and Fill gaps on a team: when a teammate is building a ticket, the story view says "robin is building
+  this" instead of offering the button. Ensemble marks the ticket on GitHub when you press Start (an empty commit
+  on the ticket's branch with an "ensemble/build" status), keeps the mark while your build runs, and clears it
+  when the build ends. A mark whose computer went away for 30 minutes shows Clear.
+- The review loop ("After the build: review and fix, then open the pull request") now shows each review round as
+  a status on the branch: "alex is reviewing with Claude", then "alex reviewed · kept in Ensemble".
+
 ### Changed
 
+- Limn is now called Ensemble. Run it with `npx ensemble-review`, or `ensemble` once installed; the old
+  `limn-review` command still works and points you to the new one.
+- Your data moves from `~/.limn` to `~/.ensemble` the first time Ensemble starts.
+- Settings you set as `LIMN_…` environment variables still work. The new names start with `ENSEMBLE_`
+  (for example `ENSEMBLE_AI_PROVIDER`), and win when both are set.
+- Teams: your Ensemble still sees the claims of teammates on Limn. Limn does not read Ensemble's new
+  `ensemble/` status lines, so update the whole team together.
 - Settings → Dependencies: every switch is now on by default — Merge them automatically, Approve them
   automatically, Resolve their conflicts and Fix them with AI. This also turns them on in workspaces where they
   were off before, so check the tab if you want any of them off. Switching one off now stays off.
@@ -23,7 +39,7 @@ no internals.
 
 ### Fixed
 
-- Dependency updates on a team: when Ensemble stops partway through an action, its "limn/deps" status on the commit
+- Dependency updates on a team: when Ensemble stops partway through an action, its "ensemble/deps" status on the commit
   is cleared the next time it starts, instead of holding teammates back for half an hour. A status GitHub did not
   accept is sent again.
 - Dependency updates on a team: a teammate's Ensemble that armed a merge no longer holds it for ever. Its status is

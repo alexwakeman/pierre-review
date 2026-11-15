@@ -30,7 +30,7 @@ export default function Page(): JSX.Element {
         <li>
           <Ui>GitHub Issues</Ui>: a pull request&rsquo;s tickets are the issues it closes (&ldquo;Fixes #12&rdquo;) or an
           issue linked in its Development panel. Nothing to set up. When a repository uses GitHub Issues and no choice
-          is saved, Limn picks it automatically and says so. See{' '}
+          is saved, Ensemble picks it automatically and says so. See{' '}
           <DocLink to="integrations/github-issues">GitHub Issues</DocLink>.
         </li>
         <li>
@@ -54,7 +54,7 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Reading the tickets</H3>
       <p>
-        To show a ticket&rsquo;s title, status, assignee, description and acceptance criteria, Limn needs read access:
+        To show a ticket&rsquo;s title, status, assignee, description and acceptance criteria, Ensemble needs read access:
       </p>
       <ul>
         <li>
@@ -75,7 +75,7 @@ export default function Page(): JSX.Element {
       <p>
         Jira sites often have several fields called &ldquo;Acceptance Criteria&rdquo;, and each issue type can use a
         different one. Once a token is saved, a table lists each issue type with a <Ui>Criteria</Ui> menu and an{' '}
-        <Ui>Open points</Ui> menu. <Ui>Limn picks</Ui> uses the field
+        <Ui>Open points</Ui> menu. <Ui>Ensemble picks</Ui> uses the field
         whose name best matches. <Ui>Open points</Ui> are what the ticket left undecided; a review lists them with the
         code that depends on them, and they never block it. A change applies at once to every stored ticket of that
         type. See <DocLink to="story-checks/acceptance-criteria">Acceptance criteria</DocLink>.
@@ -83,8 +83,8 @@ export default function Page(): JSX.Element {
       <Note>
         When another workspace already has a tracker, <Ui>Copy from another workspace</Ui> copies its settings here.
       </Note>
-      <Note title="What Limn writes to your tracker">
-        Limn only reads trackers, with these exceptions, each made only when you pick or press: assigning a ticket
+      <Note title="What Ensemble writes to your tracker">
+        Ensemble only reads trackers, with these exceptions, each made only when you pick or press: assigning a ticket
         (Jira, GitHub Issues and Linear), and on Jira changing a ticket&rsquo;s status and updating a ticket from a
         plan. See <DocLink to="this-sprint/story-view#assign-the-ticket">Assign the ticket</DocLink>.
       </Note>
@@ -94,7 +94,7 @@ export default function Page(): JSX.Element {
         Feed SonarCloud&rsquo;s findings into AI Review and AI Fix. Create a token in SonarCloud under My Account →
         Security, then enter the <Ui>Organization key</Ui> and the token. Each repository&rsquo;s project key defaults
         to SonarCloud&rsquo;s own; type one only if yours differs. Select <Ui>Test connection</Ui>: each repository
-        shows <Ui>Found</Ui> or <Ui>Not found</Ui>. Limn only reads. See{' '}
+        shows <Ui>Found</Ui> or <Ui>Not found</Ui>. Ensemble only reads. See{' '}
         <DocLink to="integrations/sonarcloud">SonarCloud</DocLink>.
       </p>
 
@@ -123,7 +123,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <Warning>
-        Only one person per channel should set this up. Limn runs on each person&rsquo;s computer, so each Limn posts
+        Only one person per channel should set this up. Ensemble runs on each person&rsquo;s computer, so each Ensemble posts
         its own copy.
       </Warning>
       <p>

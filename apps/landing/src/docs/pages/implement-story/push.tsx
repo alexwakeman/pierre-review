@@ -73,7 +73,7 @@ export default function Page(): JSX.Element {
         The tab lists the pull requests in plan order, each with its status (<Ui>Ready to push</Ui>,{' '}
         <Ui>No changes</Ui>, <Ui>Failed</Ui> or <Ui>Pushed</Ui>), the criteria it covers and its diff. Each pull request's
         diff is against the one before it, so you review only its own changes. Edits the agent made in a repository with no
-        planned pull request are listed under <Ui>What Limn left out</Ui>.
+        planned pull request are listed under <Ui>What Ensemble left out</Ui>.
       </p>
       <p>
         Not happy? Tell the agent in the conversation: <Ui>Ask for a change. It is a build turn: the agent may edit and
@@ -96,14 +96,16 @@ export default function Page(): JSX.Element {
       </Steps>
       <Warning>
         Push writes to GitHub under your name: a new branch, one commit by you, and a new pull request. It never pushes to
-        your default branch and never forces. If the branch already exists on GitHub, Push refuses and says so.
+        your default branch and never forces. If the branch already exists on GitHub, Push refuses and says so. The one
+        exception is the empty commit Ensemble put on the branch when you pressed <Ui>Start</Ui> (see{' '}
+        <DocLink to="implement-story/overview#teammates">When a teammate is building it</DocLink>): your work replaces it.
       </Warning>
 
       <H2 id="branch-exists">When the branch already exists</H2>
       <p>
         An earlier session may have pushed the same branch, for example <b>PAY-142</b>. Push then says so, and the
         pull request shows a <Ui>New branch</Ui> field in place of the button, filled in with a free name such as{' '}
-        <b>PAY-142-v2</b>. Change it if you like and press <Ui>Push</Ui>. Limn checks the name and still never
+        <b>PAY-142-v2</b>. Change it if you like and press <Ui>Push</Ui>. Ensemble checks the name and still never
         overwrites a branch. In a stack, the pull requests after it build on the new branch.
       </p>
 
@@ -115,9 +117,9 @@ export default function Page(): JSX.Element {
         4 by default) beside it.
       </p>
       <Steps>
-        <li>When the build finishes, Limn pushes the branch to GitHub. It does not open a pull request yet.</li>
+        <li>When the build finishes, Ensemble pushes the branch to GitHub. It does not open a pull request yet.</li>
         <li>
-          Limn reviews the branch the way it reviews a pull request, with the AI review setting of your workspace (Claude,
+          Ensemble reviews the branch the way it reviews a pull request, with the AI review setting of your workspace (Claude,
           or Claude and Codex). It also checks the work against the ticket&apos;s acceptance criteria, across all
           repositories.
         </li>
@@ -126,15 +128,17 @@ export default function Page(): JSX.Element {
           answers, or pushes back with a reason. It can say a criterion does not apply to this work; the next check
           judges that.
         </li>
-        <li>Limn pushes each fix as a new commit on the branch, then reviews again.</li>
+        <li>Ensemble pushes each fix as a new commit on the branch, then reviews again.</li>
         <li>
-          When nothing is left, or after the last round, Limn opens the pull request, ready for review. Its description
+          When nothing is left, or after the last round, Ensemble opens the pull request, ready for review. Its description
           sums up the rounds.
         </li>
       </Steps>
       <p>
         The tab shows each round: the findings per repository, what the agent did with each one, and which criteria are
-        met. The review stays in Limn: nothing is posted on GitHub except the commits and the pull request.
+        met. The review stays in Ensemble: nothing is posted on GitHub except the commits, the pull request and one
+        status per round on the branch, such as &ldquo;alex is reviewing with Claude&rdquo;, then &ldquo;alex reviewed · kept
+        in Ensemble&rdquo;.
       </p>
       <ul>
         <li>
@@ -143,7 +147,7 @@ export default function Page(): JSX.Element {
           <Ui>Continue</Ui> to go on.
         </li>
         <li>
-          If a push fails, or Limn restarts, the rounds pause and say why. <Ui>Continue</Ui> tries once more. A branch
+          If a push fails, or Ensemble restarts, the rounds pause and say why. <Ui>Continue</Ui> tries once more. A branch
           that already exists gets a <Ui>New branch</Ui> field first.
         </li>
         <li>
@@ -151,7 +155,7 @@ export default function Page(): JSX.Element {
           when you want.
         </li>
         <li>
-          The pull request is yours. Limn keeps its last review on it, so auto review does not review the same commit
+          The pull request is yours. Ensemble keeps its last review on it, so auto review does not review the same commit
           again.
         </li>
       </ul>
@@ -172,7 +176,7 @@ export default function Page(): JSX.Element {
           ticket built in one repository is closed by its last pull request.
         </li>
       </ul>
-      <p>What is pushed is exactly what you reviewed: Limn checks the commit matches the reviewed change before it pushes.</p>
+      <p>What is pushed is exactly what you reviewed: Ensemble checks the commit matches the reviewed change before it pushes.</p>
 
       <H2 id="stacks">Pushing a stack</H2>
       <p>
@@ -190,7 +194,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="after-the-push">After the push</H2>
       <ul>
-        <li>Limn syncs each new pull request and links it to the ticket.</li>
+        <li>Ensemble syncs each new pull request and links it to the ticket.</li>
         <li>The sprint card's mark becomes <Ui>Pushed</Ui> once every planned pull request is pushed.</li>
         <li>
           Review the new pull requests like any other: see <DocLink to="ai-review/run-a-review">Run a review</DocLink>.

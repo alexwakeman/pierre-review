@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
       <p>
         The <Ui>AI reviews</Ui> tab on <Ui>Pending</Ui> lists the newest AI review on each pull request in the
         workspace, open or closed, newest first: reviews you ran, reviews auto review ran, and reviews your
-        teammates ran with their own Limn and posted. It is a reference list. Nothing here is scored, and
+        teammates ran with their own Ensemble and posted. It is a reference list. Nothing here is scored, and
         looking at it never removes a row.
       </p>
 
@@ -24,7 +24,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>the pull request (choose it to open its <DocLink to="pull-request/ai-review-tab">AI Review tab</DocLink>);</li>
         <li>
-          who ran the review: <Ui>Your Limn</Ui>, <Ui>Your Limn, auto review</Ui>, or a teammate's Limn with
+          who ran the review: <Ui>Your Ensemble</Ui>, <Ui>Your Ensemble, auto review</Ui>, or a teammate's Ensemble with
           their name and picture;
         </li>
         <li>
@@ -50,9 +50,9 @@ export default function Page(): JSX.Element {
             { key: 'n', label: 'Findings', num: true },
           ]}
           rows={[
-            { _key: 'a', pr: <>#612 Partial refunds <Pill tone="blue">New</Pill></>, by: 'Your Limn, auto review', v: <Pill tone="red">Request changes</Pill>, n: '3' },
-            { _key: 'b', pr: <>#482 Retry budget <Pill tone="blue">New</Pill></>, by: 'Priya’s Limn', v: <Pill tone="green">Approve</Pill>, n: '0' },
-            { _key: 'c', pr: '#1184 Checkout redesign', by: 'Your Limn', v: <Pill>Comment</Pill>, n: '2' },
+            { _key: 'a', pr: <>#612 Partial refunds <Pill tone="blue">New</Pill></>, by: 'Your Ensemble, auto review', v: <Pill tone="red">Request changes</Pill>, n: '3' },
+            { _key: 'b', pr: <>#482 Retry budget <Pill tone="blue">New</Pill></>, by: 'Priya’s Ensemble', v: <Pill tone="green">Approve</Pill>, n: '0' },
+            { _key: 'c', pr: '#1184 Checkout redesign', by: 'Your Ensemble', v: <Pill>Comment</Pill>, n: '2' },
           ]}
         />
       </Illustration>
@@ -66,7 +66,7 @@ export default function Page(): JSX.Element {
       </p>
       <Note>
         The seen groups are kept in this browser. Another browser, or a review seen before you used this tab,
-        shows without a group heading. The New count itself is kept by Limn for each workspace.
+        shows without a group heading. The New count itself is kept by Ensemble for each workspace.
       </Note>
 
       <H2 id="where-else">Where else AI reviews show</H2>

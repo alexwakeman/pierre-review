@@ -66,7 +66,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <Ui>Severity mix</Ui>, <Ui>High</Ui>, <Ui>Nits</Ui>, <Ui>Not addressed by severity</Ui> and{' '}
-          <Ui>Inflation</Ui>: from Limn’s own severity model (see{' '}
+          <Ui>Inflation</Ui>: from Ensemble’s own severity model (see{' '}
           <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>). These columns appear once comments
           have been scored.
         </li>

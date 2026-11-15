@@ -24,7 +24,7 @@ loop while iterating, and the plain form is the check before pushing.
 
 - **`fast`** — every backend test file not listed in `SLOW_TESTS` or `LIVE_TESTS`.
 - **`slow`** — `SLOW_TESTS` in `vitest.workspace.ts`: the files whose time goes on STARTING
-  PROCESSES, not on running Limn's code.
+  PROCESSES, not on running Ensemble's code.
   - Real `git`: `conflict/land*.test.ts`, `conflict/model*.test.ts`, `conflict/janitor`,
     `review/clone-hygiene`, `review/worktree-gc`, `coding/git` (`applyPatchToWorktree`),
     `coding/merge`, `coding/story-build/{push-branch,base-refs,plan-verify-git,stack-verify,push-stack-db}`,
@@ -149,8 +149,8 @@ CLI and its files into a temp directory at run time (nothing on disk in the repo
 
 ## Scratch stack (`pnpm dev:scratch`)
 
-The reader's own Limn is `pnpm dev` in the MAIN checkout: `tsx watch` on `apps/backend/data/pierre-review.sqlite`,
-data dir `~/.limn`. An edit in that checkout restarts it. So **an agent edits in a git worktree and checks
+The reader's own Ensemble is `pnpm dev` in the MAIN checkout: `tsx watch` on `apps/backend/data/pierre-review.sqlite`,
+data dir `~/.ensemble`. An edit in that checkout restarts it. So **an agent edits in a git worktree and checks
 its work on `pnpm dev:scratch` from that worktree**, never on the main checkout's servers.
 
 `scripts/dev-scratch.mjs` (seeding: `scripts/lib/scratch-seed.mjs`):
@@ -160,19 +160,19 @@ its work on `pnpm dev:scratch` from that worktree**, never on the main checkout'
 | `--seed demo\|copy\|empty` | `demo` | `demo`: the fictional acme/* data of `pnpm demo`. `copy`: a snapshot of the real dev DB (below). `empty`: migrations only. |
 | `--slot N` | `0` | ports `4200+10N` (API) / `5373+10N` (SPA); folder `<repo>/.scratch/<N>/` (gitignored). |
 | `--github off\|read\|write` | `off`; `read` for `copy` | `off`: a failing `gh` first on the PATH, no token variable. `read`: the reader's `gh` token, every write blocked in code. `write`: real writes; ask the reader each time. |
-| `--sync` | off | the scheduler (sync, auto review, tracker, Slack). It spends the SAME hourly GitHub budget as the real Limn. |
-| `--codex` | off | allow Codex; sign in again into the scratch Codex home (Settings → AI). `~/.limn/codex` is never shared: a token refresh could sign the real Limn out. |
-| `--ml` | off | ML scoring, with `~/.limn`'s downloaded model linked in. |
+| `--sync` | off | the scheduler (sync, auto review, tracker, Slack). It spends the SAME hourly GitHub budget as the real Ensemble. |
+| `--codex` | off | allow Codex; sign in again into the scratch Codex home (Settings → AI). `~/.ensemble/codex` is never shared: a token refresh could sign the real Ensemble out. |
+| `--ml` | off | ML scoring, with `~/.ensemble`'s downloaded model linked in. |
 | `--reseed` · `--keep-tracker` · `--no-frontend` | | replace the DB · keep tracker/Sonar/wiki tokens in a copy · API only |
 
-Claude is on: `<slot>/ai-runtime` links to `~/.limn/ai-runtime` and the machine's Claude login is used.
-`LIMN_AI_AUTO_INSTALL=false`, so the scratch stack never writes the linked runtime.
+Claude is on: `<slot>/ai-runtime` links to `~/.ensemble/ai-runtime` and the machine's Claude login is used.
+`ENSEMBLE_AI_AUTO_INSTALL=false`, so the scratch stack never writes the linked runtime.
 
 **The backend's own guards** (they apply however the process starts, with `LIMN_SCRATCH=1`):
 
 - `config.ts` loads ONLY `<repo>/.env.scratch` (never `.env`, which can name the real DB or
-  `ENCRYPTION_KEY`) and REFUSES TO START (`scratch.ts` `scratchRefusal`) on a DB under `~/.limn`,
-  `~/.pierre-review` or any checkout's `apps/backend/data/`, a data dir that is or is inside `~/.limn`,
+  `ENCRYPTION_KEY`) and REFUSES TO START (`scratch.ts` `scratchRefusal`) on a DB under `~/.ensemble`,
+  `~/.pierre-review` or any checkout's `apps/backend/data/`, a data dir that is or is inside `~/.ensemble`,
   a clone or docs dir outside the data dir, port 4000 or frontend port 5173. Paths are compared after
   `realpath`, so a symlink does not get past it.
 - Unless `--github write`, the WRITE GUARD (`scratch-guard.ts`) answers every write with a 403 it never
@@ -184,13 +184,13 @@ Claude is on: `<slot>/ai-runtime` links to `~/.limn/ai-runtime` and the machine'
 
 **One backend per data dir, every mode** (`instance-lock.ts`): `start()` takes `<dataDir>/server.lock`
 (pid, port, DB) before any sweep. A live holder refuses the start and names itself; a dead pid's lock
-(a crash, a SIGKILL) is taken over; the lock goes on exit. So a forgotten `LIMN_DATA_DIR` can no longer
+(a crash, a SIGKILL) is taken over; the lock goes on exit. So a forgotten `ENSEMBLE_DATA_DIR` can no longer
 let one backend's boot sweeps (sandbox labels, worktree GC) delete another's live work. ⚠ The installed
-`limn` next to `pnpm dev` now refuses: both default to `~/.limn`.
+`ensemble` next to `pnpm dev` now refuses: both default to `~/.ensemble`.
 
 **The copy seed**: the source is the `.sqlite` the `:4000` process has open (`lsof`), else the main
 checkout's `apps/backend/data/pierre-review.sqlite`. It is opened READ-ONLY and copied with SQLite's
-online backup (consistent while the real Limn writes). Then a scrub turns off auto review, auto post
+online backup (consistent while the real Ensemble writes). Then a scrub turns off auto review, auto post
 (and its verdict / resolve), auto fix and Push automatically, auto diagrams, team claims, dependency
 automation; deletes armed merges and Slack targets; and nulls the tracker, Sonar and wiki tokens
 (`--keep-tracker` keeps them; they stay sealed without `.env`'s key). Each statement runs alone, so a
@@ -224,7 +224,7 @@ every PR that can affect it, and in full on main and nightly); it never leaves t
 | The runtime CLI never gets a credential | `sandbox/runtime/host-env.test.ts` | fast |
 | The conflict resolver (no marker reaches a blob, the wand never picks a side, the commit blocked until every decidable region is decided) | `conflict/*` | slow |
 | AI Fix as a sandboxed session (start at once, the report file, left-out repos, Plan first, unattended runs, no runtime, caps) | `sandbox/session/fix-session-flow-db.test.ts`, `sandbox/workspace/fix-report.test.ts`, `coding/ai-fix/auto-fix.test.ts`, `merge/dependency-automation-teams.test.ts` | fast |
-| Every Limn finding reaches the fix seed: a failed pair half's cover pass joins the follow-up (`P` items) | `coding/ai-fix/cover-seed.test.ts` | fast |
+| Every Ensemble finding reaches the fix seed: a failed pair half's cover pass joins the follow-up (`P` items) | `coding/ai-fix/cover-seed.test.ts` | fast |
 | AI Fix's MERGE: only a merge with parents (PR head, base tip), no marker left and fixes on top is pushable; the item in an auto fix only with `include.conflicts` (OFF by default) | `coding/ai-fix/merge-verify.test.ts`, `sandbox/session/fix-merge-session-flow-db.test.ts` (slow), `coding/ai-fix/review-seed.test.ts`, `merge/dependency-automation-ai.test.ts` (fast) | both |
 | The worktree sweep keeps a tree a live job uses | `review/worktree-gc-policy.test.ts` (fast), `review/worktree-gc.test.ts` (slow) | both |
 | `isRetryableGithubError` keeps 403/429 out | `github/client.test.ts` | fast |

@@ -1,6 +1,6 @@
 # Third-party notices
 
-Limn includes material from the projects below. Each is used under the licence shown.
+Ensemble includes material from the projects below. Each is used under the licence shown.
 
 ## Material Icon Theme
 

@@ -4,14 +4,14 @@ import { DocLink, H2, H3, Illustration, Note, Steps, TextBox, Thread, Ui } from 
 export const meta: DocMeta = {
   title: 'Read and ask',
   summary:
-    'Read any document in Limn, section by section, or ask a question and get an answer that links and quotes the sections it comes from.',
+    'Read any document in Ensemble, section by section, or ask a question and get an answer that links and quotes the sections it comes from.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Once a document is built you can read it in Limn, and you can ask questions about the whole library in plain
+        Once a document is built you can read it in Ensemble, and you can ask questions about the whole library in plain
         words. The answers come from your documents only, and each point links to the section it used.
       </p>
 
@@ -30,7 +30,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <p>
         Each section starts with a trail (document › chapter › section) and <Ui>Previous</Ui> /{' '}
-        <Ui>Contents</Ui> / <Ui>Next</Ui> links. Links between sections open in Limn. A document from the web or a
+        <Ui>Contents</Ui> / <Ui>Next</Ui> links. Links between sections open in Ensemble. A document from the web or a
         wiki keeps a link to its source, through <Ui>Open the source</Ui>. <Ui>All documents</Ui> shows the whole
         library with a summary of each document.
       </p>
@@ -66,13 +66,13 @@ export default function Page(): JSX.Element {
       <H3 id="what-the-answer-is-built-from">What the answer is built from</H3>
       <ul>
         <li>
-          Limn first finds the sections that best match your question and gives them to AI to start from. AI can
+          Ensemble first finds the sections that best match your question and gives them to AI to start from. AI can
           then open other sections of the library.
         </li>
         <li>AI is told to answer from the library only, and to say so when the library does not cover the question.</li>
         <li>When two documents disagree, it cites both.</li>
         <li>
-          Limn keeps a link only when it names a real section of a built document in this workspace, and keeps a
+          Ensemble keeps a link only when it names a real section of a built document in this workspace, and keeps a
           quote only when the words are really in that section. Anything else is dropped.
         </li>
       </ul>

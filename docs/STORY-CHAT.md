@@ -46,17 +46,17 @@ idle 10 min ─► the reaper: session closed, worktrees removed, temp folder de
   write tool denied (`ai/providers/claude.ts` `SESSION_TOOLS` / `SESSION_DENIED_TOOLS`), and the path
   guard treats every root as read-only. Codex runs under its usual lockdown (no shell) with no write
   roots. `settingSources: []`: the repository's own `.claude` settings are not applied.
-- **One live chat per (account, workspace, ticket)**, at most `LIMN_STORY_CHAT_MAX_LIVE` (default 3);
+- **One live chat per (account, workspace, ticket)**, at most `ENSEMBLE_STORY_CHAT_MAX_LIVE` (default 3);
   the least recently used idle one is closed to make room. A chat answering is never reaped or evicted.
 - **Warm start.** The agent process is up before the question (measured: ~1 s to the first words warm,
   ~4 s more cold). Preparing makes no model call.
-- **The checkouts** are the story's PRs (open first, then the newest merged; at most 6) from Limn's
+- **The checkouts** are the story's PRs (open first, then the newest merged; at most 6) from Ensemble's
   clone cache. The cache is BLOBLESS, so a checkout's history is partial: each PR's change is GitHub's
   own diff, written into the chat's temp folder (`/tmp/limn-q-<install hash>-XXXXXX`) and named in the
   seed. A crash leaves the worktrees to the worktree sweep (`review/worktree-gc.ts`) and the temp
   folders to the boot sweep (`sweepAtBoot`), which also marks cut-off turns failed.
 - **The ready-made questions** (`STORY_CHAT_PRESETS`): How to test, Integration, Risks, Criteria check.
-- **Saved chats.** `story_chats` + `story_chat_turns` (migration 0192). Limn's OWN record — never an
+- **Saved chats.** `story_chats` + `story_chat_turns` (migration 0192). Ensemble's OWN record — never an
   import of the reader's Claude or Codex sessions (`persistSession: false`). Continuing a saved chat on
   a fresh agent puts its earlier turns in the system prompt (`seed.ts` `earlierText`, newest kept).
 - **Per-turn cost** is the session's running total minus the previous total; Claude's is recorded
@@ -81,7 +81,7 @@ read-only folder per (repository, commit): `<dataDir>/chat-trees/<owner>__<name>
   built in the background. A repository no chat has read is never cloned for this.
 - **Prune**: a tree goes when a newer one is complete and no live chat holds it (in-memory holds, released
   when a chat closes). At boot (`sweepAtBoot`): unfinished trees, all but the newest per repository, and
-  repositories Limn no longer has.
+  repositories Ensemble no longer has.
 - **Disk**: one copy of each repository's files per repository a chat has read, kept between chats.
 
 ## Routes

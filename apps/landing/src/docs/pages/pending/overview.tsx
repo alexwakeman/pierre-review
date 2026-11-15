@@ -175,7 +175,7 @@ export default function Page(): JSX.Element {
       </ul>
 
       <Note title="Nothing on Pending fetches when you look">
-        Pending reads what Limn has already synced. Opening a card, or selecting a row, does not call GitHub.
+        Pending reads what Ensemble has already synced. Opening a card, or selecting a row, does not call GitHub.
         Live merge options are read only when you press a merge button. The board refreshes the merge state of
         the pull requests it shows in one batch, in the background.
       </Note>

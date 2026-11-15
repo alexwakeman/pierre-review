@@ -3,14 +3,14 @@ import { DocLink, H2, Illustration, MiniTable, Note, Thread, Ui, Warning } from 
 
 export const meta: DocMeta = {
   title: 'Replies to findings',
-  summary: 'When somebody replies to a finding, Limn reads the reply and says whether the finding still stands.',
+  summary: 'When somebody replies to a finding, Ensemble reads the reply and says whether the finding still stands.',
 };
 
 function ReplyPicture(): JSX.Element {
   return (
     <Illustration
-      label="A thread on refunds/policy.py. Limn's warning says the amount can be negative. Dana replies that the API already rejects negative amounts. The replies pass accepted the reply."
-      caption="A person answers a Limn finding; the replies pass judges the answer without a full review."
+      label="A thread on refunds/policy.py. Ensemble's warning says the amount can be negative. Dana replies that the API already rejects negative amounts. The replies pass accepted the reply."
+      caption="A person answers an Ensemble finding; the replies pass judges the answer without a full review."
       title="#612 Partial refunds"
       meta="Replies to the review"
     >
@@ -19,7 +19,7 @@ function ReplyPicture(): JSX.Element {
         state="Reply accepted"
         tone="green"
         comments={[
-          { who: 'Limn · priya', bot: true, text: 'Warning: amount can be negative here, which would pay the customer.' },
+          { who: 'Ensemble · priya', bot: true, text: 'Warning: amount can be negative here, which would pay the customer.' },
           { who: 'Dana Wu', when: '10:12', text: 'The API rejects negative amounts before this runs: see validate_refund().' },
         ]}
       />
@@ -31,16 +31,16 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        When someone answers one of your Limn's findings on GitHub, that answer deserves a reply, not another full
-        review. The replies pass reads just the replies to Limn's own findings, at the current commit, and decides
+        When someone answers one of your Ensemble's findings on GitHub, that answer deserves a reply, not another full
+        review. The replies pass reads just the replies to Ensemble's own findings, at the current commit, and decides
         for each one whether the finding still stands. It is short and cheap: a smaller model with a firm cost cap.
       </p>
 
       <H2 id="what-it-judges">What it judges</H2>
       <ReplyPicture />
       <p>
-        Only replies by a person on a thread or comment of one of your Limn's posted findings, newer than that
-        finding's last judgement. Your own replies count. Replies from bots, and anything Limn posted, do not. A
+        Only replies by a person on a thread or comment of one of your Ensemble's posted findings, newer than that
+        finding's last judgement. Your own replies count. Replies from bots, and anything Ensemble posted, do not. A
         thread that was resolved after the reply is still judged: resolving alone does not settle a point.
       </p>
       <p>
@@ -97,17 +97,17 @@ export default function Page(): JSX.Element {
       <p>With posting on for the workspace, it may write:</p>
       <ul>
         <li>
-          <b>One pushback per thread, ever</b>, in the model's own words, on an open thread. Limn never resolves a
+          <b>One pushback per thread, ever</b>, in the model's own words, on an open thread. Ensemble never resolves a
           thread after pushing back. On a resolved thread it posts a <Ui>Still open:</Ui> reply instead.
         </li>
         <li>
-          <b>A one-sentence acknowledgement, then a resolve</b>, for an accepted reply, where Limn is allowed to resolve:
+          <b>A one-sentence acknowledgement, then a resolve</b>, for an accepted reply, where Ensemble is allowed to resolve:
           your own pull request, or another pull request after an automatic review while posting is on. Otherwise nothing
-          is posted and the finding is settled in Limn only.
+          is posted and the finding is settled in Ensemble only.
         </li>
       </ul>
       <Warning>
-        Both writes go to GitHub under your account, marked as Limn's. Each is recorded before it is written and never
+        Both writes go to GitHub under your account, marked as Ensemble's. Each is recorded before it is written and never
         retried.
       </Warning>
 
@@ -117,7 +117,7 @@ export default function Page(): JSX.Element {
         <li>A disputed blocker can turn the verdict into <Ui>Request changes</Ui>.</li>
         <li>
           Once nothing blocking is left, and nothing your workspace's approval rules forbid, it can approve. The
-          approval is held, with a reason, if a teammate's Limn has since judged one of the settled points still open.
+          approval is held, with a reason, if a teammate's Ensemble has since judged one of the settled points still open.
         </li>
       </ul>
       <p>
@@ -132,8 +132,8 @@ export default function Page(): JSX.Element {
           { key: 'c', label: 'Check threads' },
         ]}
         rows={[
-          { _key: 'w', k: 'Judges', r: "Replies on your Limn's own findings", c: "Everyone else's threads: people, review bots, teammates' Limn" },
-          { _key: 's', k: 'Starts', r: 'A reply on a Limn finding (by itself)', c: 'A new comment in an open thread; or Check threads' },
+          { _key: 'w', k: 'Judges', r: "Replies on your Ensemble's own findings", c: "Everyone else's threads: people, review bots, teammates' copies of Ensemble" },
+          { _key: 's', k: 'Starts', r: 'A reply on an Ensemble finding (by itself)', c: 'A new comment in an open thread; or Check threads' },
           { _key: 'c', k: 'Daily limit (automatic)', r: '5 per pull request', c: '30 per workspace' },
           { _key: 'p', k: 'Posts', r: 'With posting on: one pushback per thread, or an acknowledgement and a resolve', c: 'Nothing' },
           { _key: 'v', k: 'Verdict', r: 'Can request changes or approve', c: 'Changes no verdict by itself' },
@@ -142,7 +142,7 @@ export default function Page(): JSX.Element {
       <Note>
         See <DocLink to="ai-review/check-threads">Check threads</DocLink> and{' '}
         <DocLink to="ai-review/team-reviews">Reviewing as a team</DocLink> for how replies and pushback work when
-        several teammates run Limn.
+        several teammates run Ensemble.
       </Note>
     </>
   );

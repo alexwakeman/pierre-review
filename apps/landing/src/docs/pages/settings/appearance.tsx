@@ -6,8 +6,8 @@ export const meta: DocMeta = {
   summary: 'Choose the colour scheme.',
 };
 
-const SCHEMES_LIGHT = ['Limn Light', 'Solarized Light', 'GitHub Light', 'Gruvbox Light'];
-const SCHEMES_DARK = ['Limn Dark', 'Solarized Dark', 'Dracula', 'Nord', 'Tokyo Night'];
+const SCHEMES_LIGHT = ['Ensemble Light', 'Solarized Light', 'GitHub Light', 'Gruvbox Light'];
+const SCHEMES_DARK = ['Ensemble Dark', 'Solarized Dark', 'Dracula', 'Nord', 'Tokyo Night'];
 
 export default function Page(): JSX.Element {
   return (
@@ -39,7 +39,7 @@ export default function Page(): JSX.Element {
       </Note>
       <Note title="Tabs that need AI">
         The <Ui>AI</Ui>, <Ui>AI review</Ui>, <Ui>Docs</Ui> and <Ui>Sandbox</Ui> tabs show only when the AI features
-        are on. They are on unless whoever started Limn turned them off.
+        are on. They are on unless whoever started Ensemble turned them off.
       </Note>
 
       <H2 id="colour-scheme">Choose a colour scheme</H2>
@@ -48,10 +48,10 @@ export default function Page(): JSX.Element {
         it before you choose. The app changes at once. There is no Save button.
       </p>
       <Illustration
-        label="The Appearance tab with the Colour scheme list showing Limn Light."
+        label="The Appearance tab with the Colour scheme list showing Ensemble Light."
         caption="The scheme setting. Each name in the list shows that scheme's own colours."
       >
-        <SettingsRow label="Colour scheme" hint="Saved in this browser." control={<Pill tone="grey">Limn Light</Pill>} />
+        <SettingsRow label="Colour scheme" hint="Saved in this browser." control={<Pill tone="grey">Ensemble Light</Pill>} />
       </Illustration>
       <p>There are nine schemes:</p>
       <ul>
@@ -66,7 +66,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="where-it-is-saved">Where the choice is saved</H2>
       <p>
-        The scheme is saved in this browser only. Limn does not keep it with your other settings. If you open Limn in a
+        The scheme is saved in this browser only. Ensemble does not keep it with your other settings. If you open Ensemble in a
         second browser or a private window, choose the scheme there too.
       </p>
     </>

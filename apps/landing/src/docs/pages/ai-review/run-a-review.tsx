@@ -33,7 +33,7 @@ function RunControls(): JSX.Element {
         <Chip>Model: Claude + Codex</Chip>
         <Btn tone="go">Review only ▾</Btn>
       </Toolbar>
-      <FindingRow chip="Review only">Kept in Limn</FindingRow>
+      <FindingRow chip="Review only">Kept in Ensemble</FindingRow>
       <FindingRow chip="Review and post">Posts when done</FindingRow>
     </Illustration>
   );
@@ -58,7 +58,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         You start a review from the pull request's <Ui>AI Review</Ui> tab. You choose who reviews and whether the
-        result stays in Limn or goes to GitHub when it is done. This page walks through one review from start to
+        result stays in Ensemble or goes to GitHub when it is done. This page walks through one review from start to
         post.
       </p>
 
@@ -70,7 +70,7 @@ export default function Page(): JSX.Element {
           <DocLink to="settings/ai">Settings → AI</DocLink>.
         </li>
         <li>
-          The first time, Limn downloads the AI runtimes in the background. Signing in is the only step for you.
+          The first time, Ensemble downloads the AI runtimes in the background. Signing in is the only step for you.
         </li>
       </ul>
 
@@ -86,7 +86,7 @@ export default function Page(): JSX.Element {
           Claude and Codex signed in, <Ui>Claude + Codex</Ui> is last in the list and is the default.
         </li>
         <li>
-          Press <Ui>Review only</Ui> to keep the result in Limn. To post it when it finishes, open the caret beside
+          Press <Ui>Review only</Ui> to keep the result in Ensemble. To post it when it finishes, open the caret beside
           the button and choose <Ui>Review and post</Ui>. The button remembers your last choice.
         </li>
       </Steps>
@@ -108,14 +108,14 @@ export default function Page(): JSX.Element {
         A status line says what the reviewer is doing (for example <Ui>Fetching the diff</Ui>,{' '}
         <Ui>Cloning the worktree</Ui>, <Ui>Reviewing</Ui>, <Ui>Saving findings</Ui>) and how long it has taken. Under
         it, a short log shows what the reviewer is reading. When it finishes, the tokens it used and its cost are
-        behind the ⓘ beside the review's summary. Limn charges nothing.
+        behind the ⓘ beside the review's summary. Ensemble charges nothing.
       </p>
       <p>
         Press <Ui>Stop</Ui> to end the run. You can leave the tab or open another pull request while it runs. A
         Claude + Codex review says which half is running, then <Ui>Merging the two reviews…</Ui> at the end.
       </p>
       <Note>
-        If a teammate's Limn is already reviewing the same commit with the same model, the tab names them. Your
+        If a teammate's Ensemble is already reviewing the same commit with the same model, the tab names them. Your
         review still goes ahead. See <DocLink to="ai-review/team-reviews">Reviewing as a team</DocLink>.
       </Note>
 
@@ -187,7 +187,7 @@ export default function Page(): JSX.Element {
         <Ui>Re-review and post</Ui>. A re-review follows up the earlier findings rather than starting over.
       </p>
       <p>
-        If you run a review on a commit that already has one, Limn says <Ui>This commit is already reviewed.</Ui> and
+        If you run a review on a commit that already has one, Ensemble says <Ui>This commit is already reviewed.</Ui> and
         asks you to press <Ui>Run anyway</Ui> or <Ui>Cancel</Ui>.
       </p>
       <H3>Earlier reviews</H3>

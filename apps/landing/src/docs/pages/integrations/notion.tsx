@@ -4,17 +4,17 @@ import { DocLink, ExtLink, H2, H3, Illustration, MiniTable, Note, SettingsRow, S
 export const meta: DocMeta = {
   title: 'Notion',
   summary:
-    "Use a Notion database as the workspace's issue tracker, or add Notion pages to the docs library. Limn only reads Notion; it never changes a page.",
+    "Use a Notion database as the workspace's issue tracker, or add Notion pages to the docs library. Ensemble only reads Notion; it never changes a page.",
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn uses Notion in two separate ways. A Notion <strong>database</strong> can be the workspace&rsquo;s issue
+        Ensemble uses Notion in two separate ways. A Notion <strong>database</strong> can be the workspace&rsquo;s issue
         tracker, where each page is a ticket. Notion <strong>pages</strong> can be added to the{' '}
         <DocLink to="docs-library/overview">docs library</DocLink>. Each use has its own token in Settings, and you
-        can use the same Notion integration for both. Either way, Limn only reads.
+        can use the same Notion integration for both. Either way, Ensemble only reads.
       </p>
 
       <H2 id="create-an-integration">Create a Notion integration</H2>
@@ -25,19 +25,19 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           Give it the capabilities <strong>Read content</strong>, <strong>Read comments</strong> and{' '}
-          <strong>Read user information</strong>. Limn needs no insert or update capability.
+          <strong>Read user information</strong>. Ensemble needs no insert or update capability.
         </li>
         <li>
           Copy its token. A token starts with <code>ntn_</code> (or <code>secret_</code> for an older one).
         </li>
         <li>
-          In Notion, share each database or page you want Limn to read with the integration: the page&rsquo;s •••
+          In Notion, share each database or page you want Ensemble to read with the integration: the page&rsquo;s •••
           menu → <strong>Connections</strong>. Child pages are shared with it too.
         </li>
       </Steps>
       <Note>
         Notion answers &ldquo;not found&rdquo; both for a page that does not exist and for one not shared with the
-        integration. If Limn cannot find a page, check the Connections menu first.
+        integration. If Ensemble cannot find a page, check the Connections menu first.
       </Note>
 
       <H2 id="notion-as-an-issue-tracker">Notion as an issue tracker</H2>
@@ -45,7 +45,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>One database that holds your tickets, shared with the integration.</li>
         <li>
-          A <strong>Unique ID</strong> property with a prefix, so tickets have keys like <code>ENG-123</code>. Limn
+          A <strong>Unique ID</strong> property with a prefix, so tickets have keys like <code>ENG-123</code>. Ensemble
           finds a ticket by that key in the pull request title or branch. A database without a prefixed Unique ID
           cannot be used.
         </li>
@@ -65,7 +65,7 @@ export default function Page(): JSX.Element {
           Under <Ui>Notion as an issue tracker</Ui>, paste the <Ui>Integration token</Ui> and save.
         </li>
         <li>
-          Press <Ui>Read database</Ui>. Limn reads the database&rsquo;s properties and suggests a mapping.
+          Press <Ui>Read database</Ui>. Ensemble reads the database&rsquo;s properties and suggests a mapping.
         </li>
         <li>
           Check each property in the mapping, then save. Until you do, the section says &ldquo;Not mapped yet. Nothing
@@ -74,7 +74,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <Illustration
         label="The Notion mapping form: keys look like ENG-123, with Status, Assignee, Sprint, Type, Acceptance criteria and Blocked by mapped to database properties"
-        caption="The mapping: which database property Limn reads for each part of a ticket."
+        caption="The mapping: which database property Ensemble reads for each part of a ticket."
         title="Settings"
         meta="Notion as an issue tracker"
       >
@@ -93,7 +93,7 @@ export default function Page(): JSX.Element {
         ]}
         rows={[
           { _key: 's', p: 'Status', w: 'A status property (its To-do, In progress and Complete groups), or a select where you say which option is which.' },
-          { _key: 'a', p: 'Assignee', w: 'A people property. Limn uses the first person.' },
+          { _key: 'a', p: 'Assignee', w: 'A people property. Ensemble uses the first person.' },
           {
             _key: 'sp',
             p: 'Sprint',
@@ -105,7 +105,7 @@ export default function Page(): JSX.Element {
         ]}
       />
 
-      <H3 id="what-limn-reads-as-a-tracker">What Limn reads</H3>
+      <H3 id="what-ensemble-reads-as-a-tracker">What Ensemble reads</H3>
       <ul>
         <li>For each ticket a pull request names: its properties as mapped, the page body (as text), its blockers and its comments.</li>
         <li>For This Sprint: the pages in the current sprint.</li>
@@ -113,7 +113,7 @@ export default function Page(): JSX.Element {
       <p>
         Tickets are read when a pull request arrives and about every 30 minutes while it is open; the sprint about
         every 20 minutes while This Sprint is in use. Notion allows about three requests a second per integration,
-        and Limn spaces its calls to stay under that.
+        and Ensemble spaces its calls to stay under that.
       </p>
       <Tip>
         The mapping belongs to one database. Pointing the Database URL at another database clears the mapping, but
@@ -133,13 +133,13 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
       <p>
-        Limn checks the pages for changes about every three hours while the library is in use, and reads only the
+        Ensemble checks the pages for changes about every three hours while the library is in use, and reads only the
         pages that changed. See <DocLink to="docs-library/add-documents">Add documents</DocLink>.
       </p>
 
-      <H2 id="what-limn-writes">What Limn writes</H2>
+      <H2 id="what-ensemble-writes">What Ensemble writes</H2>
       <p>
-        Nothing. Limn only reads Notion. It never changes a page, a property or a comment, and the status and the
+        Nothing. Ensemble only reads Notion. It never changes a page, a property or a comment, and the status and the
         assignee in the story view are shown, not changed.
       </p>
 

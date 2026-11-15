@@ -141,7 +141,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-does-not-count">What does not put a card here</H2>
       <ul>
         <li>
-          <b>Bots.</b> No bot action returns the ball to you, not even a push. Limn's own posts do not either.
+          <b>Bots.</b> No bot action returns the ball to you, not even a push. Ensemble's own posts do not either.
         </li>
         <li>
           <b>Side comments.</b> A comment that is not an answer to you, such as a comment in a thread you never
@@ -195,7 +195,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <Note>
         A dismissal hides the card everywhere: the tab, its count, the notifications and{' '}
-        <code>limn status</code>. If the job ends on its own (you acted, or the pull request closed), the
+        <code>ensemble status</code>. If the job ends on its own (you acted, or the pull request closed), the
         dismissal ends with it, so a later request starts fresh.
       </Note>
 

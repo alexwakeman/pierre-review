@@ -10,7 +10,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn is one page with one sidebar. The sidebar takes you to every part of the app, lists your
+        Ensemble is one page with one sidebar. The sidebar takes you to every part of the app, lists your
         repositories and the tabs you have open, and shows the sync state at its foot. <Ui>Search or jump</Ui>{' '}
         finds a page, a setting, a pull request or a ticket by name.
       </p>
@@ -66,7 +66,7 @@ export default function Page(): JSX.Element {
       </ol>
 
       <Illustration
-        label="The Limn sidebar with its eight pages, Open pull requests selected."
+        label="The Ensemble sidebar with its eight pages, Open pull requests selected."
         caption="The pages in the sidebar. Library and Insights group the last four."
       >
         <AppShell active="Open pull requests">
@@ -118,7 +118,7 @@ export default function Page(): JSX.Element {
         <li>every Settings tab, and actions such as sync, theme and notifications;</li>
         <li>your open tabs, and every open pull request;</li>
         <li>
-          after two characters, a search of the pull requests, comments and tickets Limn has stored. Choose{' '}
+          after two characters, a search of the pull requests, comments and tickets Ensemble has stored. Choose{' '}
           <Ui>Search everything</Ui> to see all the results in a tab.
         </li>
       </ul>

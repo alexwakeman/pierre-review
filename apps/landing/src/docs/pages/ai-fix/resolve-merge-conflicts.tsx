@@ -3,7 +3,7 @@ import { Btn, Chip, Diff, DocLink, FindingRow, Group, H2, Illustration, Note, St
 
 export const meta: DocMeta = {
   title: 'Resolve merge conflicts with AI Fix',
-  summary: 'The agent merges the default branch, resolves the conflicts and Limn checks the result before it can push.',
+  summary: 'The agent merges the default branch, resolves the conflicts and Ensemble checks the result before it can push.',
 };
 
 function MergePicture(): JSX.Element {
@@ -36,7 +36,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         When a pull request conflicts with its base branch, AI Fix can merge the base branch in and resolve the
-        conflicts, then fix the other items on top. Limn checks the merge itself before anything can be pushed. You
+        conflicts, then fix the other items on top. Ensemble checks the merge itself before anything can be pushed. You
         review how each conflict was resolved, apart from the other changes.
       </p>
 
@@ -56,7 +56,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="what-the-agent-does">What the agent does</H2>
       <Steps>
-        <li>Limn starts the merge of the base branch's latest commit in the sandbox, before the agent starts.</li>
+        <li>Ensemble starts the merge of the base branch's latest commit in the sandbox, before the agent starts.</li>
         <li>
           The agent resolves each conflict with judgement, not by taking one side. It reads the lines around each
           conflict, so nothing is repeated, nothing is lost and no conflict marker is left.
@@ -64,20 +64,20 @@ export default function Page(): JSX.Element {
         <li>It makes the merge commit, builds and tests, then fixes the other ticked items on top.</li>
       </Steps>
 
-      <H2 id="limns-check">Limn's check</H2>
+      <H2 id="ensembles-check">Ensemble's check</H2>
       <p>
-        After each build turn, Limn checks the agent's commits on your computer, outside the sandbox: the merge commit
+        After each build turn, Ensemble checks the agent's commits on your computer, outside the sandbox: the merge commit
         must join exactly the pull request and the base branch, no conflict marker may remain, and the fixes must come
-        after the merge. The result is shown from Limn's own copy of those commits, not from anything the agent says.
+        after the merge. The result is shown from Ensemble's own copy of those commits, not from anything the agent says.
       </p>
       <ul>
         <li>
           When the merge passes, the tab says <Ui>The merge commit matches git's own merge outside the conflicts.</Ui>
         </li>
         <li>
-          When it fails, the merge item is <Ui>Not addressed</Ui> with Limn's reason, the tab shows{' '}
+          When it fails, the merge item is <Ui>Not addressed</Ui> with Ensemble's reason, the tab shows{' '}
           <Ui>Merge not valid</Ui>, and nothing can be pushed, not even the other fixes:{' '}
-          <Ui>The merge did not pass Limn’s check, so nothing can be pushed. Ask for more, or discard.</Ui>
+          <Ui>The merge did not pass Ensemble’s check, so nothing can be pushed. Ask for more, or discard.</Ui>
         </li>
       </ul>
 
@@ -101,7 +101,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="by-hand-instead">By hand instead</H2>
       <p>
-        You can always resolve conflicts yourself in Limn's resolver, region by region, with nothing applied until you
+        You can always resolve conflicts yourself in Ensemble's resolver, region by region, with nothing applied until you
         press a button. See <DocLink to="merging/resolve-conflicts">Resolve conflicts</DocLink>.
       </p>
       <Note>

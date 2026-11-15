@@ -10,7 +10,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        <Ui>Open pull requests</Ui> is the page Limn opens on. It lists every open pull request in the
+        <Ui>Open pull requests</Ui> is the page Ensemble opens on. It lists every open pull request in the
         workspace, drafts included, one row each, across every repository. Each row shows whether the pull
         request can land, its checks, its review, its open threads and its AI review. Select a row to see the
         rest in a side panel. The <DocLink to="open-pull-requests/trunk-strip">default branch strip</DocLink>{' '}
@@ -89,8 +89,8 @@ export default function Page(): JSX.Element {
         done come first, then the most recently updated.
       </p>
       <p>
-        Choose <Ui>Group by ticket</Ui> or <Ui>List</Ui> to switch. Limn remembers your choice in this browser.
-        On a slow tracker, Limn shows the plain list after a few seconds and offers to regroup when the
+        Choose <Ui>Group by ticket</Ui> or <Ui>List</Ui> to switch. Ensemble remembers your choice in this browser.
+        On a slow tracker, Ensemble shows the plain list after a few seconds and offers to regroup when the
         tickets arrive.
       </p>
 
@@ -120,7 +120,7 @@ export default function Page(): JSX.Element {
       <p>
         Where the AI features are on, the menu also has <Ui>Start review</Ui>. It starts an AI review with the
         same choice the <Ui>AI Review</Ui> tab opens on: <Ui>Claude + Codex</Ui> when both are signed in, else your
-        default provider. It keeps the review in Limn and posts nothing. It is greyed out, with the reason beside
+        default provider. It keeps the review in Ensemble and posts nothing. It is greyed out, with the reason beside
         it, while AI is not set up or signed in, while a review of that pull request is starting, queued or
         running, and when the last review is on the latest commit. See{' '}
         <DocLink to="open-pull-requests/ai-review-column">The AI review column</DocLink>.

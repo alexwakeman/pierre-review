@@ -3,25 +3,25 @@ import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Ui } fro
 
 export const meta: DocMeta = {
   title: 'Codex (OpenAI)',
-  summary: 'Sign in to Codex with ChatGPT, and how Limn keeps Codex locked down.',
+  summary: 'Sign in to Codex with ChatGPT, and how Ensemble keeps Codex locked down.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Codex, made by OpenAI, is the second AI provider Limn can use. Limn runs the Codex program on your computer, on
-        your own ChatGPT sign-in. It can run every AI feature Limn has. When both Claude and Codex are signed in, Limn
+        Codex, made by OpenAI, is the second AI provider Ensemble can use. Ensemble runs the Codex program on your computer, on
+        your own ChatGPT sign-in. It can run every AI feature Ensemble has. When both Claude and Codex are signed in, Ensemble
         reviews each pull request with both at once, and merges the two into one review.
       </p>
 
       <H2 id="what-you-need">What you need</H2>
       <ul>
         <li>A ChatGPT account whose plan includes Codex.</li>
-        <li>Nothing else to install: Limn downloads the Codex program (about 360 MB) the first time it starts.</li>
+        <li>Nothing else to install: Ensemble downloads the Codex program (about 360 MB) the first time it starts.</li>
       </ul>
       <Note title="No API keys yet">
-        Limn runs Codex only on a ChatGPT sign-in. An OpenAI API key is refused for now, because Limn cannot yet show
+        Ensemble runs Codex only on a ChatGPT sign-in. An OpenAI API key is refused for now, because Ensemble cannot yet show
         what its runs cost.
       </Note>
 
@@ -45,25 +45,25 @@ export default function Page(): JSX.Element {
         <SettingsRow label="Codex" hint="Signed in with ChatGPT." control={<Pill tone="grey">Sign out</Pill>} />
       </Illustration>
       <p>
-        From a terminal, <code>limn ai login codex</code> does the same (add <code>--device-auth</code> on a computer
-        with no browser), and <code>limn ai logout codex</code> signs out.
+        From a terminal, <code>ensemble ai login codex</code> does the same (add <code>--device-auth</code> on a computer
+        with no browser), and <code>ensemble ai logout codex</code> signs out.
       </p>
 
       <H2 id="your-own-codex">Your own Codex is left alone</H2>
       <p>
-        Limn keeps its Codex sign-in in its own folder, <code>~/.limn/codex</code>. Your own Codex settings and sign-in
+        Ensemble keeps its Codex sign-in in its own folder, <code>~/.ensemble/codex</code>. Your own Codex settings and sign-in
         in <code>~/.codex</code> are never read or changed, and neither is an <code>OPENAI_API_KEY</code> in your
         environment.
       </p>
 
-      <H2 id="locked-down">How Limn locks Codex down</H2>
-      <p>For reviews, chats and summaries, Limn starts Codex with almost everything switched off:</p>
+      <H2 id="locked-down">How Ensemble locks Codex down</H2>
+      <p>For reviews, chats and summaries, Ensemble starts Codex with almost everything switched off:</p>
       <ul>
         <li>No shell, no web access, no images, no plugins and no memories.</li>
         <li>No project instruction files are read.</li>
-        <li>Files are read only through Limn&rsquo;s own read-only tools, limited to the repository under review.</li>
+        <li>Files are read only through Ensemble&rsquo;s own read-only tools, limited to the repository under review.</li>
         <li>
-          A safety check approves every tool Codex calls. Limn proves the check is running before each run, and refuses
+          A safety check approves every tool Codex calls. Ensemble proves the check is running before each run, and refuses
           to start if it cannot.
         </li>
       </ul>
@@ -75,8 +75,8 @@ export default function Page(): JSX.Element {
       <H2 id="using-codex">Using Codex</H2>
       <H3>As the default</H3>
       <p>
-        Choose <Ui>Codex</Ui> under <Ui>Automatic runs and default</Ui> on the AI tab, or start Limn with{' '}
-        <code>LIMN_AI_PROVIDER=codex</code>. <Ui>Auto</Ui> uses Claude when both are signed in.
+        Choose <Ui>Codex</Ui> under <Ui>Automatic runs and default</Ui> on the AI tab, or start Ensemble with{' '}
+        <code>ENSEMBLE_AI_PROVIDER=codex</code>. <Ui>Auto</Ui> uses Claude when both are signed in.
       </p>
       <H3>Beside Claude</H3>
       <p>
@@ -91,7 +91,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="limits">Limits and your data</H2>
       <p>
-        ChatGPT reports how much of its weekly limit, and five-hour limit where there is one, your account has used. Limn&rsquo;s automatic runs
+        ChatGPT reports how much of its weekly limit, and five-hour limit where there is one, your account has used. Ensemble&rsquo;s automatic runs
         stop at their share (50% of the week by default), shown in percentages. See{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>

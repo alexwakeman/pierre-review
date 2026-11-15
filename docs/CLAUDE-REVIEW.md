@@ -15,12 +15,12 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
 
 - **ON BY DEFAULT and ALWAYS VISIBLE.** Claude Review (with its follow-up, ticket check, auto
   review and chat) and AI Fix's fixer are core — no plan, no opt-in flag. They run on the user's
-  OWN Claude Code login or `ANTHROPIC_API_KEY`; Limn stores no key and charges nothing. ONE switch,
-  `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`; `ENABLE_CLAUDE_REVIEW`,
+  OWN Claude Code login or `ANTHROPIC_API_KEY`; Ensemble stores no key and charges nothing. ONE switch,
+  `config.aiEnabled` = `ENSEMBLE_AI_DISABLED !== 'true'`; `ENABLE_CLAUDE_REVIEW`,
   `PRO_ADVANCED_AI_ENABLED` and its alias `PRO_CLAUDE_REVIEW_ENABLED` are DELETED as gates (the
   manager's second-guard constant, once `CLAUDE_REVIEW_ENABLED`, is `AGENTIC_AI_ENABLED` =
   `config.aiEnabled`).
-  - `LIMN_AI_DISABLED=true` is the kill switch for a team that forbids AI tooling: no agentic
+  - `ENSEMBLE_AI_DISABLED=true` is the kill switch for a team that forbids AI tooling: no agentic
     route registers (`registerAgenticRoutes`, `review/agentic.ts`), `cheapComplete` refuses on
     every rung, and `MeResponse.ai.enabled` is false, so every AI surface hides.
   - `MeResponse.ai` (top-level): `enabled`, `runtime` (the one-time SDK download,
@@ -39,7 +39,7 @@ With Codex as the provider the same review runs on Codex instead (§ Codex, the 
 
 ### The credential ladder
 
-ONE ladder for EVERY model call Limn makes — the agent runs (Claude Review, AI Fix, the ticket /
+ONE ladder for EVERY model call Ensemble makes — the agent runs (Claude Review, AI Fix, the ticket /
 CI reviews, diagrams, sprint paths, the docs build and chat, every chat) AND
 the one-shot completions (`review/llm.ts` `cheapComplete`, which the sprint briefs/themes, story
 labels, docs ranking, sprint Ask and every platform feature — period reports, synthesis,
@@ -55,9 +55,9 @@ go through). It lives in **`ai/credentials.ts`** and nowhere else:
 
 "Use my API keys first" (Settings → AI; `accounts.ai_use_api_key`, migration 0184, held in memory by
 `ai/credentials.ts` and written by `PUT /api/ai/api-key`) flips the order when a key is set; an explicitly
-set `LIMN_AI_USE_API_KEY` (`true` / `false`) wins and locks the box. `MeResponse.ai.apiKeySetting` carries
+set `ENSEMBLE_AI_USE_API_KEY` (`true` / `false`) wins and locks the box. `MeResponse.ai.apiKeySetting` carries
 the tick and WHETHER `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` are set, never a value. Codex: the box never
-moves a ChatGPT sign-in onto the refused key route. `LIMN_AI_DISABLED=true` refuses
+moves a ChatGPT sign-in onto the refused key route. `ENSEMBLE_AI_DISABLED=true` refuses
 everything (checked by the callers; the ladder answers only "which credential"). Nothing is
 stored; the ladder is read at call time, so an env change takes effect on the next call.
 
@@ -137,7 +137,7 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
     serious first — and no list when there are no issues; no headings or tables. The ticket review's
     `summary` does NOT: at most three short sentences of 20 words, no list (§ Ticket review).
     Older plain-prose summaries render unchanged.
-  - **PR references in every piece of model text link to that PR in Limn** — one batched, DB-only
+  - **PR references in every piece of model text link to that PR in Ensemble** — one batched, DB-only
     `POST /api/prs/resolve` (`read` tier, account-scoped, ≤ `PR_REF_RESOLVE_MAX` refs, 400 over)
     for whatever the screen cannot resolve itself. Contract in docs/FRONTEND.md § The agentic AI
     surfaces.
@@ -219,13 +219,13 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
 - **Packaging (NO AI SDK in the npm manifest):** the AI SDKs (`@anthropic-ai/claude-agent-sdk`,
   `@anthropic-ai/sdk`, `@modelcontextprotocol/sdk`, `zod`) are NOT dependencies of the published
   package; the first boot downloads exact pinned versions into `<dataDir>/ai-runtime` by itself
-  (`ai/auto-install.ts`; Retry is `POST /api/ai/runtime/install`, or `limn ai install`), and ONE loader module,
+  (`ai/auto-install.ts`; Retry is `POST /api/ai/runtime/install`, or `ensemble ai install`), and ONE loader module,
   `apps/backend/src/ai/runtime.ts`, value-imports them. [PACKAGING.md](PACKAGING.md) owns the
   details and the guardrail. The product modules import no SDK themselves.
 
 ### The AI spend budget (on by default, one per machine)
 
-A limit that PAUSES Limn's AUTOMATIC model runs before they use up the reader's Claude
+A limit that PAUSES Ensemble's AUTOMATIC model runs before they use up the reader's Claude
 allowance or API bill. ON BY DEFAULT on a subscription at 50% of the week (a NULL row reads as on);
 the reader may change the share (1–100%) or switch it off in Settings → AI spend, and a stored
 `enabled: false` stays off. On an API key a never-set row applies NO US$ cap (`budgetSettingsInForce`:
@@ -237,8 +237,8 @@ the estimate table: `packages/shared/src/ai-budget.ts`; the decision, the readin
 
 The credential route picks the mode (`decideAiBudget`, pure):
 
-- **Subscription (the login): Limn's SHARE of the week and of the 5-hour session.**
-  `weekSharePct` (whole number 1–50, default 5). Share = Limn's OWN `ai_usage.cost_usd` in the
+- **Subscription (the login): Ensemble's SHARE of the week and of the 5-hour session.**
+  `weekSharePct` (whole number 1–50, default 5). Share = Ensemble's OWN `ai_usage.cost_usd` in the
   current week ÷ `SUBSCRIPTION_ESTIMATES[sub].week` (ESTIMATES with their source comment — Anthropic
   publishes no figure). Over when the share ≥ `weekSharePct`. The week is `[reset − 7 days, reset)`
   when Claude's weekly reset has been read and is still ahead (then `resumesAt` = the reset),
@@ -249,7 +249,7 @@ The credential route picks the mode (`decideAiBudget`, pure):
   setting `fiveHourSharePct` is NULL by default = it FOLLOWS `weekSharePct` ("5% a week → 5% a
   session" — a guess, stated as one); a number (1–50) sets it separately, `null` returns it to
   following. Over EITHER share pauses automatic runs: `limitedBy` names which (`'week'` when both),
-  `resumesAt` is the later clearing, and the reason is "Limn has used its share of this 5-hour
+  `resumesAt` is the later clearing, and the reason is "Ensemble has used its share of this 5-hour
   session." for the 5-hour one. ⚠ **The 5-hour window is DETECTED, never assumed** (Anthropic dropped
   it for some plans, 2026-11): shared `hasFiveHourWindow(reading, now)` is true only while a
   `five_hour` window was observed within `AI_FIVE_HOUR_WINDOW_RECENT_MS` (12 h — the ONE constant; a
@@ -283,25 +283,25 @@ The credential route picks the mode (`decideAiBudget`, pure):
   failure keeps the last reading. ⚠ No shared "≤ 1 means a fraction" guess anywhere. Any throw or
   shape mismatch = no reading.
 - **The header's usage view** (`usage` on the same response, shared `aiUsageView`): Claude's own
-  windows (a window whose reset has passed is dropped; unknown is absent, never 0), Limn's runs and
-  tokens in the budget's week, Limn's week / 5-hour shares on a known subscription (budget on or
+  windows (a window whose reset has passed is dropped; unknown is absent, never 0), Ensemble's runs and
+  tokens in the budget's week, Ensemble's week / 5-hour shares on a known subscription (budget on or
   off), and on an API key the US$ for the week, the last 5 hours and today (since local midnight).
   `usage.limn` names each window it counted (`weekFrom`/`fiveHourFrom`, `window`/`fiveHourWindow`,
   `weekResetsAt`/`fiveHourResetsAt`): the PROVIDER's own week and session when its reset is known
   (Claude: the `rate_limit_event` tap and the usage probe; Codex: `account/rateLimits/read`, its
   300- and 10080-minute windows), else the rolling last 7 days / 5 hours — never a calendar week.
 - **EVERY PROVIDER IN USE IS SHOWN** (2026-10-28). The plain `GET /api/ai/budget` (and the PUT) adds
-  `others`: each provider other than the default that holds a credential or that Limn ran on in its
+  `others`: each provider other than the default that holds a credential or that Ensemble ran on in its
   week (`aiBudgetOthers`, shared `aiProviderWorthShowing`), with its OWN status and usage view — its
   reading, its ledger rows, the machine's one set of settings. Still the ONE `['ai-budget']` query;
   the header popover draws a block per provider. The probe runs for each signed-in provider under the
   same 5-minute floor. ⚠ The gate is unchanged: automatic runs ask the DEFAULT provider's budget.
   A signed-out default (route `none`) hands the header's figure to the first signed-in other and drops
   its own block when it has no runs this week (`headerUsageOf` / `usageDetailsOf`); no credential
-  anywhere = no item. The ⓘ sits on the first block that shows a Limn share row (`hasLimnShare`),
+  anywhere = no item. The ⓘ sits on the first block that shows an Ensemble share row (`hasLimnShare`),
   never on an API key block.
-- **A bar with no limit set.** The popover's Limn share bars run to the reader's limit, or with the
-  budget off to `AI_BUDGET_SHARE_MAX` (50%, the most Limn can be given; shared `limnShareScale`).
+- **A bar with no limit set.** The popover's Ensemble share bars run to the reader's limit, or with the
+  budget off to `AI_BUDGET_SHARE_MAX` (50%, the most Ensemble can be given; shared `limnShareScale`).
   There is no enforced 50% cap: with the budget off nothing pauses, and the ⓘ says so. An API key
   has no allowance, so its rows draw a bar only against a set weekly US$ budget.
 - **A run's cost on a subscription is a share of the week, never US$.** Run payloads still carry
@@ -348,7 +348,7 @@ the plan). Phase 3 is complete: every agent kind runs on Codex and `codexRunnabl
 
 ### Reports → AI usage (the ledger read back)
 
-Where Limn's own runs went: Reports → "AI usage" (`Activity/AiUsageView.tsx`, `GET /api/ai/usage-report`,
+Where Ensemble's own runs went: Reports → "AI usage" (`Activity/AiUsageView.tsx`, `GET /api/ai/usage-report`,
 core `db/ai-usage-report.ts`; contract in [API.md](API.md)). It reads the SAME `ai_usage` ledger the
 budget sums, plus `claude_reviews` / `ticket_reviews` for what the ledger lacks (status, trigger, diff
 size, cache reads). It never runs a model and never starts the usage probe.
@@ -393,25 +393,25 @@ size, cache reads). It never runs a model and never starts the usage probe.
 - **NO SESSION FILES** (2026-11-07): every Agent SDK `query()` sends `persistSession: false`
   (`ai/agent-isolation.ts` `NO_SESSION_FILES`, spread at each call site in `ai/providers/claude.ts`
   AND forced by the runtime's tapped `query`, `withoutSessionFiles`; `provider-seam.test.ts` pins
-  both). Limn never resumes an SDK session, and the default wrote one folder per run under
+  both). Ensemble never resumes an SDK session, and the default wrote one folder per run under
   `~/.claude/projects` (its runs work in throw-away worktrees and temp dirs): ~2,000 folders /
   3.5 GB on one machine. Measured with a real run: with it, no folder; without it, one.
   ⚠ **THE OLD LITTER IS CLEANED ONCE** (`ai/session-litter.ts`): at boot (after listen, in the
   background, bounded at 2 minutes; a complete run writes `<dataDir>/claude-sessions-cleaned.json`,
   versioned by `SESSION_CLEANUP_VERSION`, so later boots do not rescan; a timed-out or failed run
-  writes none and the next boot carries on) and as `limn ai clean-sessions [--dry-run]`. It deletes
+  writes none and the next boot carries on) and as `ensemble ai clean-sessions [--dry-run]`. It deletes
   a folder ONLY when its name starts with the encoded data dir + `-` (also the legacy
   `~/.pierre-review`; refused when the data dir is `/`, the home dir or an ancestor of it or of the
   temp dir) or the encoded temp dir (`os.tmpdir()` and its realpath) + `-limn-` / `-pierre-` — the
-  prefixes of every temp dir Limn's runs get. Never a symlink, never anything else
+  prefixes of every temp dir Ensemble's runs get. Never a symlink, never anything else
   (`$TMPDIR/stories-agent-*` and the reader's projects stay). Bump the version with any rule change.
 - **`ai/provider-setting.ts`** answers "which provider?" for the registry and the pre-flight alike
-  (it sits apart to avoid an import cycle). `LIMN_AI_PROVIDER` = `claude` | `codex` | `auto`
+  (it sits apart to avoid an import cycle). `ENSEMBLE_AI_PROVIDER` = `claude` | `codex` | `auto`
   (unset or unknown ⇒ `auto`). Without it, Settings → AI (`components/settings/AiProviderSection.tsx`,
   `PUT /api/ai/provider`) stores the choice in `accounts.ai_provider` (sqlite `0128`; read and written
   by `ai/provider-store.ts`, loaded at boot) and `aiProviderSetting()` holds it in memory, so a switch
   reaches the next run with no restart. ⚠ The environment WINS: the route answers `409` and the
-  Settings control is disabled while `LIMN_AI_PROVIDER` is set. `activeProviderId()`:
+  Settings control is disabled while `ENSEMBLE_AI_PROVIDER` is set. `activeProviderId()`:
   `codex` ⇒ Codex, `claude` ⇒ Claude, `auto` ⇒ `pickAutoProvider` — Claude when both are signed in
   and when neither is; Codex only when it ALONE is signed in (with ChatGPT) and can run every kind.
   An OpenAI API key alone never makes `auto` pick Codex.
@@ -473,7 +473,7 @@ ideally be able to pick from any of the models available if I'm signed into both
 I would pick a preference for auto-review in settings."
 
 - **Settings → AI is the DEFAULT** ("Automatic runs and default: Auto / Claude / Codex";
-  `LIMN_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
+  `ENSEMBLE_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
   auto fix, the CI and ticket auto runs, every scheduled one-shot, and every surface without a model
   menu (Check threads, ticket and CI reviews, diagrams, the docs library, the
   Open PRs table's one-click review), and it is the menu's opening choice. ⚠ One exception: the
@@ -515,7 +515,7 @@ I would pick a preference for auto-review in settings."
 
 The user asked: "allow me to run reviews with BOTH codex and Claude if they're both available … they
 must not duplicate. They can run sequentially with … Claude running first so one can feed into the next
-to dedupe results." Then (2026-10-28): "a consolidated view in Limn so we don't have to switch between
+to dedupe results." Then (2026-10-28): "a consolidated view in Ensemble so we don't have to switch between
 views to see both … the outcome should be always merged as a final step … avoiding duplicates is
 paramount … we should still get a review outcome if at least one agent ran ok." Code:
 `review/claude-review/pair.ts` (the pure half), `manager.ts` (the two runs), `pair-consolidate.ts`
@@ -590,7 +590,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   - **One half succeeded ⇒ that half IS the review** (`how: 'single'`): its findings, summary and
     verdict, and `failedHalf {provider, reason}` — the other's stored error's first sentence, "it was
     stopped", or why it never started (`notStartedHalf`: "the spend budget is used up", "a teammate's
-    Limn is reviewing with Codex"). No pass. **Neither ⇒ nothing is written**: the pair failed.
+    Ensemble is reviewing with Codex"). No pass. **Neither ⇒ nothing is written**: the pair failed.
   - ⚠ **THE VERDICT IS CODE** (`pairCodeVerdict` = `autoVerdictFor(pairVerdict(a, b, strictness), the
     kept findings, leftovers)`), never the model's — folded by the WORKSPACE'S rules
     (`readVerdictRulesForPr`, read once when the pair is consolidated: strict / relaxed, what may stay
@@ -600,7 +600,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     but every read of a run's findings leaves it out (`getClaudeReviewById`, `isMergedAway`): it is
     never shown, posted (the single-finding route answers `409 MergedDuplicate`), counted in a verdict
     (auto-post, the replies-pass outcome, My Turn, the Open PRs column, the "unposted blockers of
-    Limn's block" check that gates a lift) or sent to AI Fix. ⚠ **THE NEXT FOLLOW-UP**: a SINGLE run
+    Ensemble's block" check that gates a lift) or sent to AI Fix. ⚠ **THE NEXT FOLLOW-UP**: a SINGLE run
     of its provider follows up the KEPT finding instead (`loadPriorReviewForFollowUp` carries it into
     that provider's chain), so a still-open point is re-raised against the kept finding
     (`priorFindingId` = the kept id), never as new. ⚠ **A PAIR HALF does NOT carry it** (`inPair`):
@@ -640,7 +640,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   - ⚠ **A FAILED HALF IS COVERED — BEFORE THE POST** (decided 2026-11-09; the user's rule: in a
     pair where both halves succeed neither checks the other, but whenever only one provider ran,
     that one follows up every still-open finding the other left). When one half fails or never starts
-    (`coverTarget`: not when the reader stopped the pair, nor when a teammate's Limn holds the other
+    (`coverTarget`: not when the reader stopped the pair, nor when a teammate's Ensemble holds the other
     half), the half that succeeded runs a SHORT follow-up-only COVER PASS once the pair's seat is
     released (`startPairCover` → replies-check.ts `runCoverCheck`; `finishInterruptedPairs` does the
     same for a half a restart interrupted): `startCoverCheck`, through the replies lane, the same
@@ -668,7 +668,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     `not_checked` ones, or — with no succeeded cover row (it failed, the budget gate skipped it, the
     lane was busy or refused it) — every warning-or-above finding of the failed provider not yet
     settled, are `unchecked`: they hold the APPROVAL only (never a request for changes), and an
-    unchecked blocker also blocks lifting a Limn block. The pair always posts. The reason names them
+    unchecked blocker also blocks lifting an Ensemble block. The pair always posts. The reason names them
     apart (`findingsNotApproved`'s `cover`): "Not approved: 2 earlier Codex points are still open." /
     "Not approved: 1 earlier Codex point was not checked." Both halves succeeded ⇒ no cover, no wait,
     no extra cost. Pinned by `pair-pipeline.test.ts` (the cover runs before the one post),
@@ -744,7 +744,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   then the one still running ("Codex reviewing…"), then "Merging the two reviews…" (`pairRunningLabel`,
   the last half's `merging` phase).
 - **USAGE LIMITS ARE A LOCKOUT** (2026-11-02, `ai/usage-lockout.ts`). Real: PR 199965 at `0a3526d2` —
-  a teammate's Limn held the Claude half, so the auto review ran Codex alone, which answered "You've
+  a teammate's Ensemble held the Claude half, so the auto review ran Codex alone, which answered "You've
   hit your usage limit … try again at 8:54 PM" three times a minute apart (runs 1056–1058; the retry
   rule saw "the default provider changed" and retried at once). Now a provider's usage-limit failure
   (`isUsageLockoutError`: "usage limit", "hit your … limit" (never "hit your rate limit"), "out of usage credits", "quota exceeded" —
@@ -761,7 +761,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     failure — the sweeper re-derives it). ⚠ The SWEEP asks the gate with `provider: null` (the budget
     only): asking for the default would stop the whole sweep while the default is locked, and its items
     could never move to Claude. The pair's second half and Codex's specialists ask for THEIR provider;
-  - ⚠ **THE DEFAULT MOVES** (2026-11-11; the owner: "if my Codex usage has run out … Limn should
+  - ⚠ **THE DEFAULT MOVES** (2026-11-11; the owner: "if my Codex usage has run out … Ensemble should
     revert to the AI service that does have capacity — especially for reply checks"):
     `activeProviderId()` is the chosen provider (`chosenProviderId`: the setting / `auto` rule) unless
     it is locked out and the other is signed in, can run and is not locked (`withCapacity`, pure) —
@@ -797,16 +797,16 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   each half's row counts towards `AUTO_RETRY_MAX_ATTEMPTS` (3), so a failed pair leaves one retry; the
   "default provider changed" and usage-reset tests read the second half's provider and error.
 - **With team claims** (§ Team claims): each half of an AUTO pair claims ITS OWN provider's context
-  (`limn/review-claude`, `limn/review-codex`) when that half starts. A half a teammate's Limn holds is a
+  (`ensemble/review-claude`, `ensemble/review-codex`) when that half starts. A half a teammate's Ensemble holds is a
   half that never started — no row: a held first half ⇒ Codex runs ALONE (an ordinary run, which
   claims its own context); a held second half ⇒ the pair ends on its first half. ⚠ **ON THE READER'S OWN
   PR a held first half stands the WHOLE pair down** (2026-11-11, `startAutoItem` → team-claim.ts
   `readerIsPrAuthor`; the owner: "my teammate has already run Claude, so I don't need to … if it's my PR,
   do nothing and flag the issues, plus do a replies check"): no Codex half alone, no row. The teammate's
   findings show on the AI Review tab (§ Teammates' reviews), the remembered skip holds the PR in the
-  sweeper, and the reader's replies on their own Limn findings get a replies pass at the held head
+  sweeper, and the reader's replies on their own Ensemble findings get a replies pass at the held head
   (auto.ts) — on Claude while Codex is locked out (above). On a teammate's PR nothing changes: the
-  author's own Limn never holds a head, so the reader's Claude half runs and follows up the author's
+  author's own Ensemble never holds a head, so the reader's Claude half runs and follows up the author's
   review (§ The author's own review), and auto-post's dedupe skips any point the author already posted. The combined post uses
   what ran. The first half's line is renewed until the PAIR ends, then each half's final line counts
   only its own findings in the one post (`finishAutoRunClaim`).
@@ -852,7 +852,7 @@ Default, Low, Medium, High, Extra high, Max.
   picking Medium (what Default already runs Opus at) dropped Opus's diff-only reviews to low.
 - **Who it reaches** (`ai/effort.ts` `agenticRunEffort`, read ONCE at the run's start): the PR review
   (`review/agent.ts`: the lead, Claude's specialists through the SDK's per-agent `effort` — sent only
-  when a level is chosen — and Codex's Limn-run specialists), its follow-up re-reviews (same runner),
+  when a level is chosen — and Codex's Ensemble-run specialists), its follow-up re-reviews (same runner),
   AI Fix and Plan first (`coding/ai-fix/manager.ts` decides it, `GenerateFixArgs.effort` /
   `GeneratePlanArgs.effort` carry it), and "Implement story"'s workspace session (`story_plan` chat turns, `story_build` build turns; read
   once by `sandbox/drivers/index.ts` `resolveSandboxAgentChoice`, docs/SANDBOX.md § Agent drivers). Claude gets it as `spec.claude.effort`
@@ -905,15 +905,15 @@ pushed").
   stdin. Not the SDK: it cannot pass `--strict-config` and hides stderr, where Codex writes its
   refusals. `--strict-config` makes an unknown `-c` key an error, so a typo cannot unlock anything.
   No `--ephemeral` (the retry needs the session file), no `--ignore-user-config` (the config is
-  Limn's own), no `--dangerously-bypass-hook-trust`.
-- **Locked settings**: ONE list, `LOCKED_SETTINGS`, written into Limn's `config.toml` AND passed as
+  Ensemble's own), no `--dangerously-bypass-hook-trust`.
+- **Locked settings**: ONE list, `LOCKED_SETTINGS`, written into Ensemble's `config.toml` AND passed as
   `-c` on every `codex exec` and app-server start: `approval_policy="never"`,
   `forced_login_method="chatgpt"`, no shell, no image reads, no web search, no history, no
   analytics, no subagents, `project_doc_max_bytes=0` (the only thing that keeps a PR's own
   `AGENTS.md` out of the prompt), `skills.include_instructions=false`, and every plugin, app,
   connector, memory and goal feature off. Writes use `sandbox_mode="workspace-write"` with the
   write roots only, no network, and `/tmp` and `$TMPDIR` excluded; everything else is `read-only`.
-- **Reads: Limn's workspace MCP server** (`ai/codex/workspace-mcp.ts`, `workspace-files.ts`). With
+- **Reads: Ensemble's workspace MCP server** (`ai/codex/workspace-mcp.ts`, `workspace-files.ts`). With
   the shell off, `read_file`, `list_files` and `search` are the run's only way to see files. Every
   path is placed by the same rule as the Claude path guard (`realPathFor`) and refused outside the
   read roots. Globs and search use a linear-time matcher (`linear-regex.ts`). Node built-ins only,
@@ -921,7 +921,7 @@ pushed").
 - **The PreToolUse hook** (`ai/codex/hook.ts`, rule in `hook-rule.ts`) is an ALLOW-list with matcher
   `.*`: write tools only inside the write roots, `mcp__workspace__*` only inside the read roots,
   `update_plan`; every other tool is denied. It fails closed. ⚠ Codex skips an untrusted hook
-  WITHOUT A WORD, so every run (and every `complete()`) first writes the trust entry into Limn's
+  WITHOUT A WORD, so every run (and every `complete()`) first writes the trust entry into Ensemble's
   home and refuses unless `verifyHookTrusted` sees it trusted with our hash AND it denies a canary
   call. The roots travel in `LIMN_CODEX_GUARD`, so the command and its hash are the same for every
   run.
@@ -931,7 +931,7 @@ pushed").
   so every server-side check (`validateDesign`, the fix's shown-ref check, the digit gate, …)
   stays where it is. A rejected answer gets ONE retry on the same thread (`codex exec resume`);
   then the run fails.
-- **Specialists are run by Limn**, not by Codex subagents (`ai/codex/specialists.ts`): up to the
+- **Specialists are run by Ensemble**, not by Codex subagents (`ai/codex/specialists.ts`): up to the
   same cap, chosen in code (`pickCodexSpecialists`), each its own read-only run in parallel, before
   the lead; their reports reach the lead fenced, and a skipped or failed one is named. An automatic
   review asks the spend gate before each.
@@ -942,7 +942,7 @@ pushed").
   standard = medium, fast = low, and a diff-only review one step lower (`ai/effort.ts`
   `defaultRunEffort`; `codexReviewEffort` for the chat and Check threads). Default agent timeout 45
   minutes; a stop signals the whole process group.
-- **Clean-up.** Codex keeps every run twice in Limn's home (the rollout file and its own sqlite
+- **Clean-up.** Codex keeps every run twice in Ensemble's home (the rollout file and its own sqlite
   rows), and both hold PR text. Once a run's usage is recorded, its thread is queued
   (`ai/codex/threads.ts`): one app-server per drain calls `thread/delete`, the rollout file is
   removed whatever that answers, and the log rows go by `thread_id`. Anything older than a day is
@@ -951,15 +951,15 @@ pushed").
 
 ### Sign-in, models and cost
 
-- **Limn's own Codex home, `~/.limn/codex`** (`ai/codex/home.ts`). Every Codex process Limn starts
+- **Ensemble's own Codex home, `~/.ensemble/codex`** (`ai/codex/home.ts`). Every Codex process Ensemble starts
   gets `CODEX_HOME` pointed there. ⚠ The reader's `~/.codex` is never read or written, and its
   `auth.json` is never copied (a ChatGPT refresh token rotates, so two copies would sign one out).
-  Sign in with `limn ai login codex` (`--device-auth` on a headless machine) or from Settings
-  (`/api/ai/codex/login`, driven through `codex app-server`); `limn ai logout codex` signs out.
+  Sign in with `ensemble ai login codex` (`--device-auth` on a headless machine) or from Settings
+  (`/api/ai/codex/login`, driven through `codex app-server`); `ensemble ai logout codex` signs out.
 - **ChatGPT sign-in only.** The OpenAI API-key route is REFUSED ("Codex with an OpenAI API key is
   not available yet — sign in with ChatGPT") until `CODEX_PRICES_PER_MTOK` holds real prices,
   because an unpriced run would record US$ 0 and no US$ cap would trip. Codex itself enforces it
-  (`forced_login_method="chatgpt"`), and Limn checks the sign-in KIND before every run; a sign-in
+  (`forced_login_method="chatgpt"`), and Ensemble checks the sign-in KIND before every run; a sign-in
   whose kind is not yet confirmed does not run.
 - **Models per role** (`CODEX_MODEL_FOR_ROLE`, pinned for `@openai/codex` 0.164.0): deep =
   `gpt-6.1-sol` (the default), standard = `gpt-6.1-terra`, fast = `gpt-6-luna`. ⚠ `gpt-6-astra` was
@@ -974,14 +974,14 @@ pushed").
   are never added on top. Per-run `budget.usd` and turn caps are Claude's; a Codex run is bounded
   by its timeout.
 - **The ChatGPT budget share is TOKEN-WEIGHTED** (`packages/shared/src/ai-budget.ts`
-  `codexWindowSharePct`): Limn's tokens in the window ÷ the account's tokens in the window × the
+  `codexWindowSharePct`): Ensemble's tokens in the window ÷ the account's tokens in the window × the
   window's `usedPercent`. The windows (5-hour and weekly, whole percent, with resets) come from
   `account/rateLimits/read`, the account's tokens from `account/usage/read`, read by a background
   probe at most every 5 minutes. Both counts cover the SAME span. Unknown account tokens leave
-  Limn's share unknown, which never blocks. The share is coarse (whole percent); the copy says so
+  Ensemble's share unknown, which never blocks. The share is coarse (whole percent); the copy says so
   behind the ⓘ.
 - **Install.** The Codex CLI is downloaded on the first boot with Claude's packages into
-  `~/.limn/ai-runtime` (`ai/auto-install.ts`; by hand, `limn ai install codex`); `LIMN_CODEX_PATH` points at a codex program of your own.
+  `~/.ensemble/ai-runtime` (`ai/auto-install.ts`; by hand, `ensemble ai install codex`); `ENSEMBLE_CODEX_PATH` points at a codex program of your own.
   See [PACKAGING.md](PACKAGING.md).
 
 ## Related repos (2026-10-26)
@@ -1170,7 +1170,7 @@ rows and they are never deleted — but every read the SPA, the chat, posting an
 through HIDES them (`isShownFinding` in `claude-review/persist.ts`: `getClaudeReviewById`, the
 states fold, `getFindingPostContext` 404s one). Follow-up and the AI Fix seed already excluded
 praise; My Turn's "unposted finding" test skips it. NOT applied to `ownPostedCommentsForPrs`: a
-praise comment already on GitHub is still Limn's own comment. The ticket review never had praise.
+praise comment already on GitHub is still Ensemble's own comment. The ticket review never had praise.
 
 ## Models
 
@@ -1328,7 +1328,7 @@ of this.
 - ⚠ **SETTLED BY A REPLY ⇒ OUT OF THE FOLLOW-UP, AND NEVER RAISED AGAIN** (`settled-by-reply.ts`,
   pure; loader `persist.ts` `loadSettledByReplyFindings`, over EVERY earlier succeeded review of the
   PR, account-scoped). A posted finding is settled ONLY when an earlier review ACCEPTED a person's
-  reply on its thread (`reply_accepted`, § Replies to Limn's findings). Then: it is filtered out of
+  reply on its thread (`reply_accepted`, § Replies to Ensemble's findings). Then: it is filtered out of
   `loadPriorReviewForFollowUp` (own AND carried, after the carry bookkeeping), so it is never a P
   item, never on the stored `follow_up` record, never an open earlier finding in the pane and
   never an AI Fix `P` seed item; the prompt lists it (up to 30) under **Settled in an earlier
@@ -1343,7 +1343,7 @@ of this.
   be handled later"), marked "settled in an earlier review".
   ⚠ **RETIRED (2026-10): "resolved + someone else replied + code unchanged ⇒ settled on sight".**
   Resolving is a click, so a RESOLVED thread with a person's reply is now JUDGED exactly like an open
-  one (§ Replies to Limn's findings). ⚠ **A thread resolved with NO reply is unchanged** — followed up
+  one (§ Replies to Ensemble's findings). ⚠ **A thread resolved with NO reply is unchanged** — followed up
   on the code and re-raised as before. ⚠ **Backward compatibility:** a finding the retired rule
   settled in an earlier run left the chain WITHOUT being judged, and nothing would bring it back.
   `persist.ts` `loadUnjudgedReplyFindings` (pure rule `unjudgedReplyCandidateIds`) finds earlier
@@ -1453,9 +1453,9 @@ reviews as if it were the first run on the PR (manager.ts `QueueItem.fresh`).
 
 ### The author's own review (2026-11-03)
 
-When the PR AUTHOR'S Limn reviewed their own PR and posted it (imported as a `kind = 'teammate'` row,
+When the PR AUTHOR'S Ensemble reviewed their own PR and posted it (imported as a `kind = 'teammate'` row,
 § Teammates' reviews), the reader's run follows up on THAT review. The author cannot approve their own
-PR, so the reader's Limn checks each of the author's findings is dealt with, raises anything new, and
+PR, so the reader's Ensemble checks each of the author's findings is dealt with, raises anything new, and
 may still approve under the workspace's auto verdict. Code: `review/claude-review/teammate-anchor.ts`,
 wired in `manager.ts` beside `loadPriorReviewForFollowUp`; test `teammate-anchor-pipeline.test.ts`.
 
@@ -1465,7 +1465,7 @@ wired in `manager.ts` beside `loadPriorReviewForFollowUp`; test `teammate-anchor
   (`isFollowUpEligible`: an imported finding is POSTED). A newer review of the reader's own anchors as
   before. A NON-author teammate's posted review never anchors; while its Request changes stands, its
   findings join as carried items (§ Teammates' reviews → A teammate's standing block). A
-  kept-in-Limn review posted nothing, so there is nothing to import: a normal review.
+  kept-in-Ensemble review posted nothing, so there is nothing to import: a normal review.
 - **What is sent.** The author's findings as the previous review's own (head = their review's head),
   then the reader's own previous review (`loadPriorReviewForFollowUp`, with its carries) as CARRIED, once
   per id; settled ids are out of both (`mergeAuthorAnchor`). On the same head every author finding is
@@ -1477,7 +1477,7 @@ wired in `manager.ts` beside `loadPriorReviewForFollowUp`; test `teammate-anchor
   Post reply / Resolve on it.
 - ⚠ **NEVER A WRITE ON THE AUTHOR'S THREADS.** Auto resolve, the automatic pushback and "Post reply"
   find a thread's owner through `loadThreadOwners(…, { ownOnly: true })`, which never returns a
-  teammate row: Limn does not reply on or resolve a teammate's thread (the author's Limn resolves its
+  teammate row: Ensemble does not reply on or resolve a teammate's thread (the author's Ensemble resolves its
   own). The judgements show on the reader's tab; the verdict counts them (a re-raise the server left
   out because the comment is already on GitHub still counts).
 - **No duplicate comments**: auto-post's dedupe reads the teammate's findings as on GitHub (§
@@ -1488,14 +1488,14 @@ wired in `manager.ts` beside `loadPriorReviewForFollowUp`; test `teammate-anchor
 - **The severity chip** (`limn-finding-severity.ts`) reads a teammate's labelled findings; an
   UNLABELLED one (`teammate.unlabelled`) gets no chip — GitHub shows no label.
 - **Replies on the author's threads** are judged as on the reader's own (`attachFindingThreads`); a
-  Limn-marked reply by any login (the author's Limn pushback) is Limn context, never a person's answer
+  Ensemble-marked reply by any login (the author's Ensemble pushback) is Ensemble context, never a person's answer
   (`humanReplies`).
 - **The next run** follows up the reader's run as usual: its items carry the author's findings
   forward by id (they share one id space).
 
-### Replies to Limn's findings (accept, or push back once)
+### Replies to Ensemble's findings (accept, or push back once)
 
-When someone REPLIES on the GitHub thread of one of Limn's own posted findings — whether the
+When someone REPLIES on the GitHub thread of one of Ensemble's own posted findings — whether the
 thread is still open OR was resolved after the reply — the re-review judges the reply instead of
 re-raising the finding blind. Other
 reviewers' threads are unchanged (next section). Code: `claude-review/finding-replies.ts` (loader +
@@ -1506,9 +1506,9 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   `prior_finding_id` (`loadThreadOwners`, shared with auto resolve) and the ONE matcher
   (`finding-thread.ts`). Every comment after the root counts when it has text and its author is a
   known login that is NOT automation (`users.is_bot`, `github_type='Bot'`, the login seeds). A
-  Limn-posted reply (the account's login AND the `<!-- pierre:claude-review` marker — a "Post reply"
+  Ensemble-posted reply (the account's login AND the `<!-- pierre:claude-review` marker — a "Post reply"
   from the tab or an earlier auto reply) is KEPT as context, marker stripped and labelled "posted
-  from Limn", so the conversation reads whole; only the OTHER replies can be judged
+  from Ensemble", so the conversation reads whole; only the OTHER replies can be judged
   (`judgeableReplies`, which gates both statuses and picks the quoted reply). The reader's OWN
   unmarked replies count. The last 5, each clipped to 1,500 characters, ride INSIDE that finding's
   nonce fence as data (and in the collision scan). A read failure costs the replies only.
@@ -1554,8 +1554,8 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
 - **GitHub writes — AUTO runs only** (except the own-PR resolve below), same claim-before-write /
   never-retry / footer + marker rules: accepted + auto-posting on ⇒ auto resolve (always on) posts the
   acknowledgement, then resolves (outcome `reply_accepted` + `acceptKind`; an already-resolved
-  thread is a no-op). On the reader's OWN PR a MANUAL pass resolves too, under "Resolve my Limn
-  threads when addressed" (§ Auto-posting → Resolve my Limn threads); its pushback stays auto-only. Disputed + auto-posting on
+  thread is a no-op). On the reader's OWN PR a MANUAL pass resolves too, under "Resolve my Ensemble
+  threads when addressed" (§ Auto-posting → Resolve my Ensemble threads); its pushback stays auto-only. Disputed + auto-posting on
   ⇒ `auto-pushback.ts` posts ONE reply (footer + `PUSHBACK_REPLY_MARKER`), never resolves, recorded
   on the owner row's `claude_review_findings.pushback` (`FindingPushbackRecord`, migration `0092`). ⚠ **AT MOST ONE PUSHBACK PER THREAD, EVER**: the record is claimed from NULL, and a
   pushback marker already on the thread (posted by hand) blocks it too. A later run may still accept.
@@ -1564,7 +1564,7 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   one; plus "Resolve" through the ordinary `/resolve` route). ⚠ **"Post reply" goes through ITS OWN
   ROUTE, `POST /api/claude-reviews/:reviewId/follow-up/:priorFindingId/reply`
   (`manual-reply.ts`, `github_write` tier), never the plain thread-reply route** — it builds the
-  body (text + Limn's marker, the pushback one for a pushback; no auto footer) and CLAIMS the same
+  body (text + Ensemble's marker, the pushback one for a pushback; no auto footer) and CLAIMS the same
   owner-row record the auto run claims (`pushback`, or `auto_resolve` with `manual: true`) BEFORE
   writing, under a synchronous in-process slot. So a second click, a remount, a later run
   disputing the same thread, or an auto run racing it can never post twice: whoever claims first
@@ -1575,7 +1575,7 @@ which replies count), `follow-up.ts` (`judgeReplyReport`, the gate), `auto-resol
   the reply posted" and offers nothing. Only a clearly refused record may be re-claimed, and only
   by hand. The prompt's "already pushed back" line uses the same rule (`pushbackMayBePosted`).
 - The row reads the thread OWNER's record, which an earlier run may have written: a record whose
-  `byReviewId` is another review says "Limn already pushed back / replied on this thread earlier"
+  `byReviewId` is another review says "Ensemble already pushed back / replied on this thread earlier"
   and hides this run's (never posted) text. The wire carries `threadId` / `threadFindingId` on the
   item (stored at run time) and, derived on read, `threadResolved`, `autoResolve`, `pushback`.
 - Open PRs cards: "Earlier: N fixed · N settled · N still open" — accepted is settled, disputed is
@@ -1595,7 +1595,7 @@ read threads; a PR comment has none. Now a PR-level finding has the same lifecyc
   schema change.
 - **Replies = the PR conversation after it** (`loadFindingConversations`, pure fold
   `reply-text.ts` `buildConversationPool`): every later PR comment AND non-empty review body by a
-  person — never automation, never Limn's (a `limn:` attribution or ANY login's marker), the reader's
+  person — never automation, never Ensemble's (a `limn:` attribution or ANY login's marker), the reader's
   own unmarked ones count — after the finding comment's GitHub time. ONE pool per PR with refs
   `C1…Cn` (oldest first), so a comment answering two findings is sent ONCE (`### PR conversation`,
   its own nonce fence). Per finding: the ones that LINK (`issuecomment-<id>`) or QUOTE it (title or
@@ -1609,13 +1609,13 @@ read threads; a PR comment has none. Now a PR-level finding has the same lifecyc
   blocker is still refused. The item stores `replyRef`, `reply {author, excerpt, url}` and
   `prComment {findingId, commentId, url}`.
 - **It starts a replies pass** like a reply on a thread: `newestPrLevelReplyTimes`
-  (db/review-threads-for-review.ts) — a person's PR comment or review body after one of Limn's PR-level
+  (db/review-threads-for-review.ts) — a person's PR comment or review body after one of Ensemble's PR-level
   findings (own or a teammate's imported one) — is folded into `newestOwn` (`foldPrLevelReply`, never
   a Check threads input). Same 5-minute settle, daily cap and budget gate; the pass runs on the
   owner's provider; coverage counts the comment's time.
 - **GitHub writes** (`pr-level-writes.ts`), each a NEW PR comment that links the finding and carries
-  `<!-- pierre:claude-review-followup on=<finding comment id> act=still_open|ack -->` (Limn-posted for
-  every reader; any Limn's marker counts as said). Claim before write, never retried by a run, own
+  `<!-- pierre:claude-review-followup on=<finding comment id> act=still_open|ack -->` (Ensemble-posted for
+  every reader; any Ensemble's marker counts as said). Claim before write, never retried by a run, own
   findings only (`ownOnly`; a teammate's are judged and shown, never written on):
   - **Addressed / no longer applies / accepted** — under the auto-resolve switches (path A or B):
     ONE acknowledgement ("Addressed in abc1234: <how>", or the answer to the reply), THEN the finding
@@ -1623,7 +1623,7 @@ read threads; a PR comment has none. Now a PR-level finding has the same lifecyc
     owner's `auto_resolve` (`minimized: true`).
   - **Still open / disputed** — ONE "**Still open:** <reason>" PR comment, **AT MOST ONCE PER
     FINDING, EVER**: the owner's `pushback` record (shared by the pushback of a disputed reply on an
-    auto run, `still-open.ts` on a posted review, and the tab's buttons) and any Limn's
+    auto run, `still-open.ts` on a posted review, and the tab's buttons) and any Ensemble's
     `act=still_open` marker.
 - **The panel.** A PR-level row shows "PR comment" (the finding's comment), "@who commented: …"
   (linked), the status chip and the how, with "Post reply" / "Post still open" (the same route) and
@@ -1635,21 +1635,21 @@ read threads; a PR comment has none. Now a PR-level finding has the same lifecyc
 ### The replies pass (judge just the replies, 2026-10-27)
 
 **THE TEAM HOLD** (user decision 2026-11-09, PR 221270): the pass's APPROVE is HELD — a COMMENT with
-the reason, through the usual held-approval path — when a teammate's Limn review posted AFTER the full
+the reason, through the usual held-approval path — when a teammate's Ensemble review posted AFTER the full
 review the outcome rests on judged a point this pass settled (`j=<id>:n` or `:o` on the finding
 comment of an accepted reply) as still open, and no newer teammate judgement settled it
-(replies-pass.ts `teammateStillOpenHold`, `heldReason: 'team_open'`: "Not approved: robin-dunn’s Limn
+(replies-pass.ts `teammateStillOpenHold`, `heldReason: 'team_open'`: "Not approved: robin-dunn’s Ensemble
 judged a point still open."). Two machines disagreeing about one thread never leave an approval in
 force on the word of one of them.
 
-A reply on one of Limn's posted findings used to wait for the next full review. A REPLIES PASS judges
+A reply on one of Ensemble's posted findings used to wait for the next full review. A REPLIES PASS judges
 JUST the replies, cheaply, at the current head. Pure half `claude-review/replies-pass.ts`; I/O
 `replies-check.ts` (+ `-agent`, `-prompt`, `-schema`, `-routes`); the outcome `replies-outcome.ts`.
 
 - **What it judges.** The findings the NEXT full review would follow up (`loadPriorReviewForFollowUp`
   over the latest full review: own + carried, minus the settled), with their threads
   (`attachFindingThreads`), whose newest JUDGEABLE reply (`judgeableReplies`: a person, not
-  automation, not Limn-marked) is newer than the finding's latest judgement (`judgedThroughFor`: the
+  automation, not Ensemble-marked) is newer than the finding's latest judgement (`judgedThroughFor`: the
   full review's start or `comments_through`, else a later pass that gave it a REPLY status —
   `not_checked` is not a judgement). Nothing to judge ⇒ refused `nothing_to_check`, no row, no model.
   ⚠ **A CLAUDE + CODEX PAIR judged each finding in ONE half**: a finding's base is the half whose
@@ -1671,7 +1671,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   never needed the same head: it reads the code at the current head. Pinned by
   `team-claim-replies.test.ts`.
 - **Who starts it.** AUTO: the sweeper (auto.ts `commentBurstRoute` → `'replies'`) when a same-head
-  reply on a Limn finding is newer than what the full reviews AND the replies passes at that head
+  reply on an Ensemble finding is newer than what the full reviews AND the replies passes at that head
   covered (the candidate read's `repliesCoveredMs`), on a workspace with auto review on, after the
   usual 5-quiet-minutes settle (one pass covers a burst on several threads). ⚠ The other half of the
   burst (any other thread) goes to Check threads as before (`newestOtherCommentAtMs`); a same-head
@@ -1695,7 +1695,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   finding's hunk), Bash denied (`repliesCheckToolPolicy`), connectors isolated. Per thread the prompt
   carries the finding (severity, title, body, path:line), the code around that line AT THE CURRENT
   HEAD (±15 lines, read from the checkout, never outside it), the conversation (the loader's rules:
-  last 5 replies, 1,500 characters each, Limn's own marked as context) and whether Limn already
+  last 5 replies, 1,500 characters each, Ensemble's own marked as context) and whether Ensemble already
   pushed back — every block NONCE-FENCED as data. Result tool `submit_replies` (Codex: its strict
   schema in `ai/result-schemas.ts`): `reply_accepted` (+ `acceptKind`) / `reply_disputed` /
   `not_checked`, each through THE SAME GATE, `judgeReplyReport` (a deferred blocker is disputed…).
@@ -1707,8 +1707,8 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   `owner/name#N`, `name#N` (the PR's owner) or `#N` (the PR's repo). ⚠ The reply is UNTRUSTED: a
   bounded prefix (`LINK_SCAN_CHARS`) read by patterns whose every quantifier is bounded (linear), at
   most `LINKS_PER_REPLY` per reply; a link counts only in the PR's OWN repo or a repo RELATED to it in
-  its current workspace (`relatedRepoScope`, the one reading of the relation), only for a PR Limn has
-  STORED, never the PR itself — Limn never fetches an arbitrary repository. Open ⇒ a worktree at its
+  its current workspace (`relatedRepoScope`, the one reading of the relation), only for a PR Ensemble has
+  STORED, never the PR itself — Ensemble never fetches an arbitrary repository. Open ⇒ a worktree at its
   HEAD; merged ⇒ THE BRANCH IT WAS MERGED INTO (its stored `baseRefName`, `LinkedPr.mergedInto`,
   `linkedLandedBranch`), the DEFAULT BRANCH only when that base is unknown or IS the default branch;
   closed unmerged ⇒ ignored. ⚠ Never assume a merged PR reached the default branch: a stacked PR
@@ -1764,9 +1764,9 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   (no blocker, no warning) WOULD have approved and the leftovers rule or a pair half held it.
   AUTO with auto-posting on: `maybePostRepliesOutcome` runs it through the
   auto-post gates exactly (the `autoVerdict` switch, `autoPostEligibility`, the LIVE PR, the impact
-  gate, the reader's standing review read live — a person's holds it, Limn's own block is superseded
+  gate, the reader's standing review read live — a person's holds it, Ensemble's own block is superseded
   by an APPROVE and a second request is held `already_requested` — and the lift: no blocker left ⇒
-  Limn's own block is dismissed when no APPROVE lands). ONE short review, no comments ("Replies
+  Ensemble's own block is dismissed when no APPROVE lands). ONE short review, no comments ("Replies
   checked: the remaining points are settled." / "Replies checked: “<title>” is still a blocker.") +
   the auto footer + the marker, CLAIMED on the pass row's `auto_post` (compare-and-set from NULL)
   before any write, never retried. ⚠ AN APPROVAL IT COMPUTED AND SOMETHING HELD (the leftovers rule, a
@@ -1774,7 +1774,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   COMMENT review (the reason + the footer naming whoever ran the review — `PAIR_AUTO_POST_FOOTER` for
   a pair — + the marker), at most ONCE per (PR, head) (`reasonPostedAtHead`; recorded `reasonPosted` +
   `reasonOnly`); any other held verdict is recorded `skipped` with why and nothing posts. Its
-  `githubReviewId` + REQUEST_CHANGES make it Limn's own block for later lifts
+  `githubReviewId` + REQUEST_CHANGES make it Ensemble's own block for later lifts
   (`loadLimnAutoBlockIds`).
 - **The tab**: `ClaudeReviewResponse.repliesCheck {unjudged, live, latest}` (DB-only + the in-memory
   phase): the status line + Cancel while a pass runs (the tab re-reads every 5 s), and "Replies check
@@ -1785,8 +1785,8 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
 ## Other reviewers' threads (people and review bots)
 
 Every run that reads code (diff-only or deep) also judges **every review thread on the PR —
-RESOLVED ones too (2026-10-18) — that is not rooted on one of Limn's own posted findings** — comments from people and from other
-review bots (CodeRabbit, Copilot, …). Limn's own posted findings stay in the follow-up above. After
+RESOLVED ones too (2026-10-18) — that is not rooted on one of Ensemble's own posted findings** — comments from people and from other
+review bots (CodeRabbit, Copilot, …). Ensemble's own posted findings stay in the follow-up above. After
 a run the reader has the PR against the user stories, Claude's findings, the follow-up AND every
 other open comment, so "Generate fix from this review" can produce one fix for all of it.
 
@@ -1800,16 +1800,16 @@ other open comment, so "Generate fix from this review" can produce one fix for a
   `globalAutomationUserIds`, time, body), a github.com link, and how many synced commits are dated
   after its first and its latest comment — the "has the code moved since this comment" evidence.
 - ⚠ **OWN-COMMENT EXCLUSION IS ONE PREDICATE**, `isLimnPostedComment`, shared by the loader and
-  the auto re-review trigger. Limn posts AS THE READER, so TWO facts must hold together: the
+  the auto re-review trigger. Ensemble posts AS THE READER, so TWO facts must hold together: the
   comment's author is the ACCOUNT'S OWN login (`accounts.github_login`, case-insensitive), AND it
-  carries Limn's provenance. Provenance is the hidden `<!-- pierre:claude-review` marker — every
+  carries Ensemble's provenance. Provenance is the hidden `<!-- pierre:claude-review` marker — every
   finding comment, inline or PR-level, now ends with `<!-- pierre:claude-review-finding v=1 -->`
   (`FINDING_COMMENT_MARKER`, post-review.ts), which survives an edit on GitHub — or, for comments
   posted before that marker, a posted finding's `github_comment_id` or a text that STARTS WITH a
-  posted finding's resolved body. ⚠ The marker under someone else's login (a teammate's own Limn,
+  posted finding's resolved body. ⚠ The marker under someone else's login (a teammate's own Ensemble,
   pasted text) is ANOTHER reviewer's comment; an unknown author is never own. The marker's
   `pierre:claude-review` prefix is deliberate — it is the 'pierre' fingerprint, so a single posted
-  comment is attributed to Limn too. A thread rooted on such a comment is the
+  comment is attributed to Ensemble too. A thread rooted on such a comment is the
   follow-up's; a person's REPLY inside it still counts as a new comment for the trigger.
 - **Prompt** (`claude-review/threads.ts` `pushReviewThreadsSection`): a "Review threads" section
   after the previous review, one `---BEGIN REVIEW THREAD Rn <nonce>---` fence per thread (the
@@ -1847,19 +1847,19 @@ other open comment, so "Generate fix from this review" can produce one fix for a
   threads `isThreadToFix` keeps are its `T` items (see § AI Fix). One fix covers the findings and
   the other reviewers' comments.
 
-### Limn findings are not review threads (2026-11-04)
+### Ensemble findings are not review threads (2026-11-04)
 
-A thread whose ROOT comment is a Limn finding — the reader's own post OR a teammate's Limn — is a
+A thread whose ROOT comment is an Ensemble finding — the reader's own post OR a teammate's Ensemble — is a
 FINDING, and the Findings list already shows it (the reader's own through the follow-up, a
 teammate's through § Teammates' reviews → One review). Listing it again under "Review threads" said
-the same point twice (PR 591: two of Robin's Limn warnings in both lists).
+the same point twice (PR 591: two of Robin's Ensemble warnings in both lists).
 
 - **Which threads** (`thread-judgements.ts` `limnFindingThreadIdsForPrs`, DB-only, account-scoped,
   one read per request): the thread's ROOT (oldest comment, then lowest id — the loader's order) has
   `limn_posted_by_user_id` set (sync's `limnFindingPost(body, {threadRoot:true})` verdict, stored
   under the `limn:` bot), or — a poster sync could not attribute — its body passes that same shared
   predicate. Never a client-side text guess.
-- **Judged, not displayed.** The reader's OWN Limn threads are never sent to the model (the loader's
+- **Judged, not displayed.** The reader's OWN Ensemble threads are never sent to the model (the loader's
   `isLimnPostedComment`, above). A TEAMMATE'S still are — the review run and Check threads judge
   them like any other reviewer's thread — because the team fold settles the teammate finding from
   that judgement. Only the DISPLAY leaves them out: `GET /api/prs/:id/claude-review`
@@ -1868,7 +1868,7 @@ the same point twice (PR 591: two of Robin's Limn warnings in both lists).
   section, its count pills and the rail's thread counts no longer list them. The STORED
   `thread_assessments` keep them.
 - **Where the judgement shows instead**: the teammate finding's state in Findings
-  (`foldAllTeamFindings` `stateOf`, fed `teamThreadJudgements(current)` — EVERY judgement, Limn
+  (`foldAllTeamFindings` `stateOf`, fed `teamThreadJudgements(current)` — EVERY judgement, Ensemble
   threads included): `not_addressed` / `partly_addressed` keep it **Open**; `addressed` moves it to
   **"Resolved or addressed"** with "Your review found it addressed · <day>". ⚠ Each judgement is
   dated by the run that MADE it (`CurrentThreadAssessments.judgedAtByThread`: a later Check threads
@@ -1877,8 +1877,8 @@ the same point twice (PR 591: two of Robin's Limn warnings in both lists).
   (dated by the review alone, it was older than the raise and ignored), and a failed latest run no
   longer hides the judgements that still stand. `unclear` / `not_checked` change nothing.
 - **Left as they were, on purpose**: the Changes tab's thread cards still wear the judgement on a
-  teammate's Limn thread (`POST /api/claude-review/thread-judgements` — a label on the thread
-  itself, not a second list); AI Fix's seed still offers a teammate's Limn thread judged to fix as a
+  teammate's Ensemble thread (`POST /api/claude-review/thread-judgements` — a label on the thread
+  itself, not a second list); AI Fix's seed still offers a teammate's Ensemble thread judged to fix as a
   `T` item (its only way into a fix — the seed carries no teammate findings); Check threads' "Checking
   N threads" counts what it really sends; and the Open PRs / Pending / PR overview "N threads to fix"
   (`ClaudeReviewStateSummary.threadAssessments`) still counts them — those surfaces show only the
@@ -1941,11 +1941,11 @@ CODE, not by prompt:
   (`getThreadJudgements`), the Claude Review tab (`currentThreadAssessments` on
   `GET /api/prs/:id/claude-review`), the next REVIEW's carry (`manager.ts`, `beforeReviewId`), the
   next check's plan, and AI Fix's seed when the named review is the latest. Never read
-  `review.threadAssessments` for "what Claude says now". ⚠ The tab's copy leaves Limn finding
-  threads out (§ Limn findings are not review threads); the team fold reads them all.
+  `review.threadAssessments` for "what Claude says now". ⚠ The tab's copy leaves Ensemble finding
+  threads out (§ Ensemble findings are not review threads); the team fold reads them all.
 - **AUTO** (when the workspace's auto review is on): a SAME-HEAD comment burst — the code has not
   moved — now starts a CHECK, not a full re-review (`commentBurstRoute`, auto.ts), under the same
-  settle rule. ⚠ A reply on one of Limn's OWN posted findings newer than what the reviews (and the
+  settle rule. ⚠ A reply on one of Ensemble's OWN posted findings newer than what the reviews (and the
   replies passes) at this head saw starts a REPLIES PASS instead (§ The replies pass; it used to keep
   the full review); the burst's other comments still come here. A check row at the head
   whose `comments_through` reaches the burst covers it (any status, one attempt per burst). A moved
@@ -1977,7 +1977,7 @@ under its own "Claude judged" chip (shown only when one exists), never under the
 card no longer displays — a "Likely addressed" chip listing cards that read "Claude: not addressed"
 contradicted itself. The file-group and Changes-tab count chips (`rollupCounts`) still count the
 derived states.
-- ⚠ **CLAUDE'S OWN FINDINGS ON THEIR THREADS (2026-10-19).** A thread rooted on one of Limn's posted
+- ⚠ **CLAUDE'S OWN FINDINGS ON THEIR THREADS (2026-10-19).** A thread rooted on one of Ensemble's posted
   findings is never a thread judgement, so its card used to show only "Resolved" — nothing of what
   the later reviews found. `getThreadJudgements` now adds, per such thread, the NEWEST succeeded
   review's follow-up item naming it (`item.threadId`; `not_checked` skipped, so an older word is not
@@ -1993,11 +1993,11 @@ derived states.
   line under "Not addressed · Resolved" says what is still needed. The templated line is the fallback
   only for a judgement with no words at all.
 - ⚠ **THE NEWEST WORD MOVES THE PILL (owner decision 2026-11-09; docs/TEAM-REVIEW.md D5).** On a
-  thread of the reader's own Limn finding, a teammate's Limn word (`j=`, imported) NEWER than the
+  thread of the reader's own Ensemble finding, a teammate's Ensemble word (`j=`, imported) NEWER than the
   reader's newest own follow-up (its review's `finished_at` vs the teammate post) replaces the
   outcome (`teammateFindingJudgement`: addressed / no longer applies as is, still open or not
   addressed → `not_addressed`), with `finding.judgedBy` naming the teammate; the pill reads
-  "Robin’s Limn: addressed" (`claudeFindingWords`), its line the teammate's how (or still-open reason),
+  "Robin’s Ensemble: addressed" (`claudeFindingWords`), its line the teammate's how (or still-open reason),
   its head the teammate's; the reader's older explanation is dropped. Ties: the reader's own. Pinned
   by `thread-judgement-how.test.ts` and `apps/frontend/test/claudeThreadMarker.test.ts`.
 
@@ -2020,7 +2020,7 @@ thing still needed; reply accepted → the accepted reason (reply disputed → w
   (`FollowUpRow`, only when the field is set: an older row's explanation opens with the same sentence).
 - **Posted** after "Addressed in abc1234:" (auto resolve, § Auto-posting), carried in `jr=` (§ Judgements
   travel with a post), and used as the "Still open:" reason (`stillOpenCandidates`).
-- **Not addressed on a thread the reader resolved: Limn writes nothing by itself** (still-open.ts
+- **Not addressed on a thread the reader resolved: Ensemble writes nothing by itself** (still-open.ts
   `resolvedByReader`, from `review_threads.resolved_by_login`; docs/TEAM-REVIEW.md D4). The row offers
   **Post still open** (`stillOpenPostable`), the same `POST …/follow-up/:priorFindingId/reply` route
   (manual-reply.ts `postStillOpenByHand`): ONE "Still open: \<how\>" reply with no footer, claimed in
@@ -2529,7 +2529,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   (`auto-inputs.ts` `loadTicketAutoState`) — the sweeper acts on it and the states route shows it
   (`TicketReviewState.autoCheck`), so the time the reader is promised is the time kept, across a
   restart. THE GRACE WINDOW: due `TICKET_AUTO_GRACE_MS` (2 min, shared) after the newest change — a
-  push to ANY member (`pull_requests.head_seen_at`, when Limn SAW the head move; never the commit's
+  push to ANY member (`pull_requests.head_seen_at`, when Ensemble SAW the head move; never the commit's
   committedAt, which can be old for a late push), a PR joining (`tracker_tickets.linked_at`), a member
   merging, the ticket changing (`changed_at`: story text, a PR leaving). Every change restarts it, and a
   FIRST check waits too (the tracker links a ticket's PRs minutes apart: on 2026-11-09 five of the
@@ -2538,7 +2538,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   after the latest run; one column only holds a PR's newest push, so `pull_requests.head_burst_at`
   keeps where its run of pushes began. NO CI hold. THE LIMITS: the per-workspace
   `TICKET_REVIEW_DAILY_CAP` (60), counted from rows (an automatic run writes its row when queued) —
-  ⚠ never for a ticket with a PR the READER owns (author, or the person a Limn-opened PR is for) — and
+  ⚠ never for a ticket with a PR the READER owns (author, or the person an Ensemble-opened PR is for) — and
   the spend budget. ⚠ **NO PER-TICKET LIMIT** (removed 2026-11-09): the old "3 push re-checks per
   ticket per day" counted every `cascade` row, so a PR joining and two story edits used it up and ten
   real pushes waited until midnight; the grace window now folds a burst into one check and the spend
@@ -2846,7 +2846,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   auto run. `AutoSweepResult.reQueued` counts them.
 - ⚠ **RE-REVIEW ON NEW REVIEW COMMENTS.** The same read also offers a PR whose head has NOT moved
   but whose unresolved review threads gained a QUALIFYING comment — a PERSON's or a CODE-REVIEW
-  bot's, never Limn's own (`isLimnPostedComment`, § Other reviewers' threads, so posting a review
+  bot's, never Ensemble's own (`isLimnPostedComment`, § Other reviewers' threads, so posting a review
   never re-triggers it) — newer than what every run at that head covered: its
   `claude_reviews.comments_through` (migration `0076`; the newest qualifying comment the run
   saw, written when it loads the threads), else its `created_at` (older rows, or a run that failed
@@ -2958,7 +2958,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   sweeper never disagree. ⚠ The count must stay the reader's OWN auto runs: a review row imported
   from a teammate must be filtered out of `autoToday` (it would spend the reader's cap).
 - ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled`; under
-  LIMN_AI_DISABLED neither the job nor the auto-review routes are registered.
+  ENSEMBLE_AI_DISABLED neither the job nor the auto-review routes are registered.
 - **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
   review ready" card for the account whose workspace switched it on, exactly like a manual run —
   there is NO author / requested-reviewer audience test (an earlier cut had one and dropped auto
@@ -2973,20 +2973,20 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
 
 ### A teammate's verdict, first (2026-11-10)
 
-The plain-English design is docs/TEAM-REVIEW.md § 4 ("A teammate's verdict"). An author's own Limn
-review is never a verdict (GitHub forbids self-approval), so another Limn must give one.
+The plain-English design is docs/TEAM-REVIEW.md § 4 ("A teammate's verdict"). An author's own Ensemble
+review is never a verdict (GitHub forbids self-approval), so another Ensemble must give one.
 
 - **THE MARKER'S `ov=`** (shared `limnReviewMarker` / `parseLimnReviewMarker`, `LimnReviewMeta.ownPrVerdict`).
   Auto-posting on the reader's OWN PR writes the verdict it WOULD have sent off the PR —
   `APPROVE` or `REQUEST_CHANGES` (`ownPrVerdictOf`): only with "Approve or request changes for me"
   on, and an APPROVE only at an impact level the workspace's `approveImpact` allows (unknown =
   high). A switched-off author or a held approve writes no `ov=`, so no teammate reads "would
-  approve" the author's own settings would not have sent. The import keeps it on `TeammateReviewRecord.ownPrVerdict`. An older Limn ignores
+  approve" the author's own settings would not have sent. The import keeps it on `TeammateReviewRecord.ownPrVerdict`. An older Ensemble ignores
   the key; a post without it still triggers the pick-up, it only sorts after a held APPROVE.
 - **THE LIST** (`db/teammate-verdict-pickup.ts` `verdictPickupCandidates`, PURE; fed by
   `getAutoReviewCandidates` as `verdictNeeded`). Never the reader's own PR (`prOwnerId`; no proven
   reader ⇒ empty). `'author_review'`: an imported review by the PR's owner at the current head,
-  posted at or after `auto_review_enabled_at`. `'moved'`: the head moved past every Limn review on
+  posted at or after `auto_review_enabled_at`. `'moved'`: the head moved past every Ensemble review on
   the PR, all of them a teammate's, posted since the floor (the reader's own history stays the
   ordinary moved-head re-review). Settled by: any reader run at the head (any status — a failed auto
   run is § Retries'), a reader run in flight, a NON-author teammate's review at the head. Order: held
@@ -3009,7 +3009,7 @@ review is never a verdict (GitHub forbids self-approval), so another Limn must g
   left out of the fold, the earliest live claim wins, a claimer silent past the 25-minute lease is
   taken over. Nothing new is written for coordination.
 - **POSTING SCOPE.** Under "Which PRs: mine", `AutoPostPrFacts.authorLimnAtHead` (an imported
-  review by the PR's owner at the head) or `limnMovedNoVerdict` (teammates' Limn reviews only at
+  review by the PR's owner at the head) or `limnMovedNoVerdict` (teammates' Ensemble reviews only at
   older heads, none by a non-author at the head: the `'moved'` case) makes the PR the reader's to
   answer, so the verdict reaches GitHub. ⚠ Without the second, a `'moved'` pick-up ran first, posted
   nothing for a reader not requested and not taking part, and its "reviewed" line still held the
@@ -3018,11 +3018,11 @@ review is never a verdict (GitHub forbids self-approval), so another Limn must g
   skipped lines ask it, so a boot before the runtime is installed says nothing on a head read
   before the break.
 - **THE AUTHOR'S SIDE** (`db/teammate-verdict-wait.ts`). On the reader's own open PR: their posted
-  review at the head, no teammate's Limn review there, AND a teammate's Limn AUTO review seen in the
+  review at the head, no teammate's Ensemble review there, AND a teammate's Ensemble AUTO review seen in the
   same workspace within `TEAMMATE_AUTO_SEEN_MS` (14 days). Then `ClaudeReviewResponse.teammateVerdictWait`
-  and `WaitingOnOthersCard.limnVerdictWait` ("Waiting for a teammate’s Limn to review" — on the Pending
+  and `WaitingOnOthersCard.limnVerdictWait` ("Waiting for a teammate’s Ensemble to review" — on the Pending
   "Waiting on others" row only; the AI Review tab no longer prints it, 2026-11-10). Without that
-  evidence it says nothing: Limn cannot read a teammate's settings, so "no teammate has auto review
+  evidence it says nothing: Ensemble cannot read a teammate's settings, so "no teammate has auto review
   on" is not knowable.
 
 ### Catch-up on return (2026-11-10)
@@ -3043,11 +3043,11 @@ review is never a verdict (GitHub forbids self-approval), so another Limn must g
 
 ## Team claims (2026-10-27; ALWAYS ON since 2026-11-10)
 
-For teams where more than one person runs Limn with auto review on the same repos. ⚠ **ALWAYS ON since
+For teams where more than one person runs Ensemble with auto review on the same repos. ⚠ **ALWAYS ON since
 2026-11-10, NO SETTING** (the owner: "we should always be doing this, and it's not optional"): the
 "Mark auto reviews on GitHub" switch is gone from Settings, the route and the wire, and
 `workspaces.team_claims_enabled` is DORMANT (never read or written; `teamClaimsOnForPr` is deleted, and
-so are the `'off'` outcomes of the claim, the manual reads and the skip lines). The `limn/deps` lines
+so are the `'off'` outcomes of the claim, the manual reads and the skip lines). The `ensemble/deps` lines
 (docs/MERGE-CI-TRUNK.md § Dependency automation) followed it: always on. ⚠ **A REFUSED WRITE NEVER
 STOPS A REVIEW**: GitHub refusing the status (403/404, no write access) runs the review without a line,
 as before, logs it ONCE per repo per process (`logRefusedOnce`, info level) and shows the reader
@@ -3070,56 +3070,61 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   ⚠ A pair drops a half LOCKED OUT by its usage limit even on "Run auto reviews now", while the other
   can run (`startAutoItem` `pick`): it would fail at once. Only when every provider is locked does a
   press run anyway.
-- **ONE CONTEXT PER PROVIDER FAMILY**, keyed by the RUN's provider: `limn/review-claude`,
-  `limn/review-codex`. A teammate reviewing with Claude never holds the head for a Codex run.
+- **ONE CONTEXT PER PROVIDER FAMILY**, keyed by the RUN's provider: `ensemble/review-claude`,
+  `ensemble/review-codex` (`teamClaimContext`). A teammate reviewing with Claude never holds the head for
+  a Codex run. ⚠ **THE RENAME (Limn → Ensemble)**: lines are WRITTEN under `ensemble/` only; every read
+  takes `ensemble/X` and the older `limn/X` as ONE context (shared `sameStatusContext`; `listLines`
+  stamps each line's `context`), and a RELEASE goes on the context its settled line was read under
+  (`releaseContextOf`), so a teammate's `limn/` claim is cleared where it lives. Limn reads no
+  `ensemble/` line: a team on both names may double-review (docs/TEAM-REVIEW.md § 12).
 - **THE LINES** (≤ 140 characters, plain English, naming the GitHub login):
   pending "alex is reviewing with Claude" (the claim, re-posted every 8 min while the run goes) →
   success "alex reviewed · 4 comments" (`target_url` = the auto-posted GitHub review, built from our
   own stored ids and validated), "· approved" / "· approved · 2 comments" / "· changes requested · 3
   comments" (the verdict GitHub took leads; a COMMENT adds nothing), "· no comments", or "alex reviewed
-  · kept in Limn" → ⚠ **"kept in Limn" ONLY when the run put NOTHING on GitHub** (2026-11-05, gap 12;
+  · kept in Ensemble" → ⚠ **"kept in Ensemble" ONLY when the run put NOTHING on GitHub** (2026-11-05, gap 12;
   `reviewedLineSummary`): a review that went out — an approval with only nits, a reason-only comment, a
   pair's one review holding only the other half's findings — is a "reviewed" success that holds the
   commit, with this run's posted-finding count (0 ⇒ "no comments"). Before, any run with none of ITS
-  findings posted read "kept in Limn", so teammates reviewed the commit again. A run with nothing to
-  say at all still reads "no comments", posted or not. The fold still reads an old "kept in Limn" as
-  free. →
+  findings posted read "kept in Ensemble", so teammates reviewed the commit again. A run with nothing to
+  say at all still reads "no comments", posted or not. The fold still reads an old "kept in Ensemble" as
+  free, and an older install's "kept in Limn" the same (`KEPT_PHRASES`). →
   on a failure, a Stop or a dropped run, SUCCESS "Cleared by alex: review didn't finish · free to
   claim" (the RELEASE line; ⚠ never 'error'/'failure' — red reads as broken CI — and, since 2026-10-28,
   never pending either: the owner chose pending-on-failure on 2026-10-27, and a pending line held every
   PR whose run died, so it was superseded). "Cleared by alex" (success) is the reader's Clear; "Cleared
   by alex: bob's claim expired" (success) is a teammate's stale line this machine released.
-  ⚠ **EVERY FREE SUCCESS LINE STARTS "Cleared by "**: a teammate still on an older Limn reads any other
+  ⚠ **EVERY FREE SUCCESS LINE STARTS "Cleared by "**: a teammate still on an older Ensemble reads any other
   success by someone else as "already reviewed", and would skip the commit for good. The fold also still
   reads a success "… free to claim" or "Released: …" (an unreleased 2026-10-28 build's wording) as free.
 - **THE ONE FOLD** (`decideTeamClaim`, pure, unit-tested) over the context's history. WHO and WHEN come
   from GitHub (`creator.login`, `created_at`), never from the description; only the FREE phrases
-  ("Cleared by" — every free success line —, "free to claim" — a success, or an older Limn's pending —
+  ("Cleared by" — every free success line —, "free to claim" — a success, or an older Ensemble's pending —
   and "Released:") are read back.
   The newest line settles it: a success by someone else ⇒ skip "already reviewed by @x" (mine, or a
-  free line, is free) — ⚠ EXCEPT their "· kept in Limn" (2026-11-03): it put nothing on GitHub, so it
-  is free (robin-dunn's kept-in-Limn Claude reviews held six PRs; our pair fell back to a locked-out
+  free line, is free) — ⚠ EXCEPT their "· kept in Ensemble" (2026-11-03): it put nothing on GitHub, so it
+  is free (robin-dunn's kept-in-Ensemble Claude reviews held six PRs; our pair fell back to a locked-out
   Codex and nobody got a review); failure/error ⇒ free. Under a pending
   line, the claimants since the last settling line race: those whose NEWEST line is inside the
   25-minute lease are live, and the one whose FIRST line is earliest (created_at, then id) holds the
   head ⇒ skip "being reviewed by @x" (or mine ⇒ free to re-claim).
   ⚠ **THE PR AUTHOR'S OWN LINES ARE LEFT OUT OF THE FOLD** (2026-11-03; `decideTeamClaim`'s `author`,
   read from the synced PR by `prAuthorLogin` unless the target names it): the author cannot approve
-  their own PR, so their Limn reviewing it — pending or done — never holds the head; the reader's run
+  their own PR, so their Ensemble reviewing it — pending or done — never holds the head; the reader's run
   follows up on the author's posted review (§ Follow-up on the previous review → The author's own
   review). A non-author teammate's lines hold as before. When the reader IS the author nothing is left
   out. `staleTeammateLine` still sees the author's live line (it is never released as expired), and the
   reconciler's tab refresh folds with the author too, so no "Carol reviewed this commit" row is kept.
   ⚠ **A HOLDER WHOSE REVIEW IS ALREADY ON GITHUB HAS FINISHED** (2026-11-05; `decideTeamClaim`'s
   `posted`, `withPostedReviews`). Real: PR 207914 (DEFRA/bng-metric-backend#592, head 9fbcc68) —
-  robin-dunn's Limn POSTED its review at 12:02 but never wrote its "reviewed" line, so our Limn waited
-  for the lease until 12:27. Now a teammate's Limn review AT THIS HEAD for this provider that sync has
+  robin-dunn's Ensemble POSTED its review at 12:02 but never wrote its "reviewed" line, so our Ensemble waited
+  for the lease until 12:27. Now a teammate's Ensemble review AT THIS HEAD for this provider that sync has
   already imported (`postedTeammateReviewsAtHead`: `claude_reviews.kind = 'teammate'`, the marker's own
   `h=` — never an inferred head —, `runs` naming the provider, a pair covering both; DB only, no GitHub
   call) counts as their success line when it was posted at or after their OPEN claim began (their
   pending lines since their own last settling line). It is placed after the later of the post and
   their newest line, so the fold reads "already reviewed by @x" — the SAME consequence as their real
-  success line: our Limn stands down at once (it does not run, it does not wait), and the tab says
+  success line: our Ensemble stands down at once (it does not run, it does not wait), and the tab says
   "Robin Dunn reviewed this commit with Claude · posted on GitHub" (`postedReviewLine`). Chosen over
   "free" because their review IS the team's review of that head, exactly as if their final line had
   landed; over "keep waiting" because the review is provably done. Unchanged: the PR author's lines
@@ -3140,7 +3145,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     waits for that read at most 1.5 s (`MANUAL_SEEN_WAIT_MS`), so the tab's refetch sees it. When the run
     ends, only a stored "is reviewing" line is read again (`refreshTeammateLinesAfterRun`).
   - **POSTED.** A review the READER posted — "Review and post" (`runEnded`, on the auto-post outcome) or
-    the Post button (`postReviewHandler`, any run, an auto run kept in Limn included) — writes the same
+    the Post button (`postReviewHandler`, any run, an auto run kept in Ensemble included) — writes the same
     success line per model in it (`markPostedReviewLines`): "<login> reviewed · approved · 2 comments",
     `target_url` the posted review. Teammates' automatic runs then step aside for that model at that
     commit. ⚠ Never a pending line; never over a teammate's success or live claim (`teammateHolds`); never
@@ -3149,7 +3154,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 - **CLAIM, THEN RE-READ.** Free ⇒ post the pending line, re-read, fold again. A loser stands down and
   re-posts the winner's description, so GitHub's displayed latest line names the winner.
 - **THE TEAMMATE'S LINE ON THE TAB** (2026-11-02, migration 0159, `team-claim-seen.ts`). Real: PR
-  199965 — our Limn stood down for robin-dunn's Claude review, then its Codex half claimed freely and
+  199965 — our Ensemble stood down for robin-dunn's Claude review, then its Codex half claimed freely and
   FORGOT the Claude skip (the memory was one entry per PR), so the tab showed only Codex's failure and
   looked as if Claude never ran. Now the skip memory is PER PROVIDER, and every skip is also written to
   `team_claim_seen` (one row per (account, PR, head, provider): kind, login, their line's description),
@@ -3167,21 +3172,21 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   `ClaudeReviewStatesResponse.teamClaimSkips`). The sweeper holds such a PR (no lane place) until the
   holder's lease ends + 30 s ("reviewing") or 30 min ("reviewed"), unless the synced head moved; a
   reader's press reads GitHub afresh. A restart forgets it and re-reads once.
-- **THE SKIPPED LINE** (2026-11-04, migration 0166, `team-claim-skip.ts`). When the reader's Limn does
+- **THE SKIPPED LINE** (2026-11-04, migration 0166, `team-claim-skip.ts`). When the reader's Ensemble does
   NOT start an auto review of a head it would otherwise review, for a reason other than a teammate's
   claim (already visible), it says so ONCE on that head, under the provider's own context, state
   **success** (green, settled — never pending, failure or error):
   "Cleared by alex: auto review skipped · AI budget used" / "· daily auto-review limit reached" /
   "· Codex over its usage limit until 15:40" (the reader's clock; the weekday when not today) /
   "· Claude not signed in" ("not set up" when the runtime is missing).
-  - ⚠ **IT STARTS "Cleared by "** like every free success line, so every teammate's Limn — an older one
+  - ⚠ **IT STARTS "Cleared by "** like every free success line, so every teammate's Ensemble — an older one
     too — reads it as FREE (it reviewed nothing); the fold also reads any success carrying " skipped · "
-    as free (`isFreeLine`, so a future bare "alex skipped · …" stays free). A limn/ context: never CI.
+    as free (`isFreeLine`, so a future bare "alex skipped · …" stays free). An `ensemble/` or `limn/` context: never CI.
   - **WHEN.** The sweeper's tick: over the spend budget (asked once per account per tick) or AI not
     ready (`agenticRunReady`, once per tick), a READ-ONLY pass (`dueHeadsHeld`) lists the heads the tick
     would have started — first reviews, and MOVED heads whose start rule says go, read without touching
     a clock — never one waiting in the lane, held for a teammate, a retry, or a same-head comment burst
-    (its head already carries this Limn's own line); past the workspace's daily cap, the capped first
+    (its head already carries this Ensemble's own line); past the workspace's daily cap, the capped first
     reviews and moved heads (the first-review loop now notes each capped PR instead of stopping). At most
     `AUTO_SKIP_LINES_PER_TICK` (25) PRs a tick. The lane (`startAutoItem`): an item dropped before its row
     — AI went away, every provider over its usage limit (each locked provider's line, with its end), or
@@ -3213,7 +3218,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
 - **THE FINAL LINE IS NEVER POSTED BLIND** (2026-11-05, gap 5; `finishTeamClaim` →
   `supersedingTeammate` → pure `teammateHolds`). A run that slept or crashed may end long after its
   lease. Before its "reviewed" or "didn't finish" line, the run's end reads the context: when the fold
-  (as this Limn reads it, the author left out) says a teammate reviewed it (their success is newest) or
+  (as this Ensemble reads it, the author left out) says a teammate reviewed it (their success is newest) or
   holds the live claim, NOTHING is posted — the ledger row is closed with `lastError 'superseded'`
   ('finished' or 'released') and the record reads `lastLine 'superseded'`. A loser's stand-down line
   (pending, naming us, posted later) does not count: the fold still finds us earliest. A teammate's
@@ -3223,23 +3228,23 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   `'superseded'` = a teammate's line is newer, `state 'unmarked'` + `reason 'no_access'`). Served, NOT
   shown: the tab's "Marked on GitHub" line was removed 2026-11-10.
 - **CLEAR** (`POST /api/prs/:id/claude-review/team-claim/clear {provider}`, tier `github_write`): shown
-  when a pending Limn line sits on the PR's head — a teammate's live claim (the skip memory, else ⚠
+  when a pending Ensemble line sits on the PR's head — a teammate's live claim (the skip memory, else ⚠
   the STORED `team_claim_seen` "is reviewing" row at the head — 2026-11-05, gap 6: the button survives a
   restart; the next read rewrites or forgets the row; ⚠ only while `lineAt + TEAM_CLAIM_LEASE_MS > now`,
   since nothing re-reads it until a new run on the PR), or this machine's OPEN
-  ledger row there while no run is going ("Your auto review didn't finish. Limn releases its pending
+  ledger row there while no run is going ("Your auto review didn't finish. Ensemble releases its pending
   GitHub line on its own."; the reconciler does it within a tick, Clear does it now). ⚠ READS the
   context's lines first and posts "Cleared by <login>" at the current synced head ONLY when the newest
   is still a pending, non-free claim — a teammate who finished since ("robin reviewed · 3 comments")
-  is never overwritten by a free line (that re-opens the commit to every Limn, gap 12). Nothing to
+  is never overwritten by a free line (that re-opens the commit to every Ensemble, gap 12). Nothing to
   clear still forgets the skip, the stored line and the ledger rows (the button goes); an unreadable
   history posts nothing and errors. It closes every open ledger row there for that provider. ⚠ A teammate's LIVE claim clears only after
   a confirm naming them ("@bob is reviewing this now. Clear anyway?") — clearing it frees the commit for
   a second review while theirs runs; this machine's own unfinished line clears in one press. A new commit also frees the PR (claims are
   per commit).
 - **RELEASING STALE LINES** (2026-10-28; the owner: "clear the pending line if a review for the PR is
-  not running … Limn restarts and a review is dropped, or the agent could not finish … keep the manual
-  button too, but Limn must do it itself"):
+  not running … Ensemble restarts and a review is dropped, or the agent could not finish … keep the manual
+  button too, but Ensemble must do it itself"):
   - **THE LEDGER** (`team_claim_lines`, migration 0138, `team-claim-ledger.ts`): one row per line this
     machine holds. ⚠ Written as 'claiming' BEFORE the pending line is posted (no row ⇒ no line: the run
     goes ahead unmarked), 'pending' once it is up, then 'finished' (the success line) or 'released' (the
@@ -3249,7 +3254,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     take keeps the row open, with the success line it meant (`final_description` / `final_target_url`)
     so the reconciler posts THAT, not "didn't finish". Migration 0138 backfilled, from the last 14 days,
     every (PR, head, context) whose newest auto run's record still read pending (`reviewing` /
-    `unfinished`), so older Limn's pending lines are released at the first boot. `whose 'teammate'`
+    `unfinished`), so older Ensemble's pending lines are released at the first boot. `whose 'teammate'`
     rows record a teammate's line this machine released, so it is posted ONCE.
   - **THE RECONCILER** (`team-claim-release.ts releaseStaleTeamClaims`): once at boot (background,
     after the startup reconcile; never fails or delays the boot) and after every auto-review tick.
@@ -3273,7 +3278,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     limit ⇒ the row waits and the pass stops (`noteLimited` told the budget). ⚠ It never reads the
     team-claims switch: a workspace switched OFF after claiming still has its lines released. The row
     carries the repo's owner/name, and BOTH delete paths keep this machine's OPEN rows
-    (`db/team-claim-lines-delete.ts`), so a line is still released after its PR or repo left Limn. One
+    (`db/team-claim-lines-delete.ts`), so a line is still released after its PR or repo left Ensemble. One
     pass at a time (a module flag).
   - **AN UNMARKED CLAIM WITH A ROW** (its pending POST failed in a way that may have landed): the run's
     end posts nothing, but a review that SUCCEEDED stores its reviewed line on the row
@@ -3282,10 +3287,10 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   - **TEAMMATES' STALE LINES** (`releaseExpiredTeammateLines`): a remembered "being reviewed by @bob"
     skip whose lease has ended, on a PR the sweeper did not take back (`reviewHeldForPr`), in a
     workspace with team claims on: re-read the head; if its newest line is still bob's PENDING one
-    (past the lease, or an older Limn's pending "free to claim" — `staleTeammateLine`), post success
+    (past the lease, or an older Ensemble's pending "free to claim" — `staleTeammateLine`), post success
     "Cleared by alex: bob's claim expired" once and record it (a refusal is recorded too, never retried). A
-    Limn about to claim the head itself needs none of this: its own pending line replaces bob's.
-- **DEPENDENCY WORK HAS ITS OWN LINE** (2026-11-03): `limn/deps`, posted before every dependency
+    Ensemble about to claim the head itself needs none of this: its own pending line replaces bob's.
+- **DEPENDENCY WORK HAS ITS OWN LINE** (2026-11-03): `ensemble/deps`, posted before every dependency
   automation action (approve, rebase ask, AI conflict run, AI fix, arming a merge) under the SAME
   workspace switch; its own fold (`merge/deps-claim.ts` `decideDepsClaim`: a 30-minute TTL, a
   teammate's finished action holds its family only, an armed merge on a renewed 2-hour lease). Since
@@ -3295,32 +3300,39 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   and released when its intent ends unlanded), and a teammate's expired claim released once ("Cleared
   by alex: robin's claim expired"). docs/MERGE-CI-TRUNK.md § Dependency automation → Team claims for
   dependency work.
-- ⚠ **LIMN'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`limn/` prefix)
+- **IMPLEMENT HAS ITS OWN LINE TOO** (2026-11-15): `ensemble/build`, on the head of the ticket branch (a
+  placeholder commit until the build pushes), with its own fold (`coding/story-build/build-claim.ts`
+  `decideBuildClaim`: only a pending line holds, a 30-minute lease renewed while the session runs, the
+  earliest live claim wins), ledger (`story_build_claim_lines`) and reconciler. The REVIEW LOOP's rounds post
+  THIS section's per-provider lines on the branch head they review (`loop/review-lines.ts`: `reviewingLine`,
+  then `reviewedLine(login, null)` — kept, nothing went to GitHub), read by the ONE fold once the PR opens
+  (the author's lines still hold nothing for a teammate). docs/STORY-BUILD.md § The team claim.
+- ⚠ **ENSEMBLE'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`ensemble/` or the older `limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
   My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge
   verdict), the `ci_status_events` failing set, the auto-merge runner's live rollup
   (`fetchPrHeadCheckRollup`, now selecting contexts), the CI review's checks (`fetchCommitChecks`) and
   trunk's failing set (`failingChecksFrom`) all leave them out. The PR details pane still LISTS them
-  (`CheckRun.limnOwned`, a small "Limn" label) and never counts them.
+  (`CheckRun.limnOwned`, a small "Ensemble" label) and never counts them.
   - ⚠ **NEVER GUESS GREEN**: every contexts read selects `pageInfo { hasNextPage }`; on an incomplete
     page (> 100 checks) `rollupStateWithoutLimn` keeps GitHub's state.
   - **MERGEABILITY**: GitHub reports `mergeStateStatus` UNSTABLE for ANY non-required non-passing
-    status, Limn's included. Shared `mergeStateWithoutLimn` takes an UNSTABLE back to CLEAN when the CI
-    without Limn's lines is green (or there is no other CI) — where the column is WRITTEN (`persistPr`,
+    status, Ensemble's included. Shared `mergeStateWithoutLimn` takes an UNSTABLE back to CLEAN when the CI
+    without Ensemble's lines is green (or there is no other CI) — where the column is WRITTEN (`persistPr`,
     `applyPrLiveness` from the stored `ci_status`; a stored CLEAN over 'unknown' CI is not flipped back)
     and on the live merge options — so the merge verdict, the Pending headings and the merge caveat
-    never say "checks failing" for a Limn line.
+    never say "checks failing" for an Ensemble line.
   - **COMMIT HISTORY** (`sync/limn-ci.ts`): the trunk snapshot, its history backfill and the one-time
     PR CI-history backfill read a rollup STATE only, so each also selects the commit's legacy status
-    NAMES (`LIMN_MARK_FIELDS`, a plain list: zero cost). A commit carrying a Limn line in SUCCESS or
-    PENDING (Limn posts nothing else) has its state recomputed from its contexts
-    (`fetchRollupsWithoutLimn`, ≤ 10 commits a call); a commit with only Limn's lines has no CI. Trunk:
+    NAMES (`LIMN_MARK_FIELDS`, a plain list: zero cost). A commit carrying an Ensemble line in SUCCESS or
+    PENDING (Ensemble posts nothing else) has its state recomputed from its contexts
+    (`fetchRollupsWithoutLimn`, ≤ 10 commits a call); a commit with only Ensemble's lines has no CI. Trunk:
     ≤ 10 such commits per page, else GitHub's state stands; the PR backfill: under `MAX_DETAIL_SHAS`,
     else nothing is synthesized for the commit.
-- If a team marks `limn/review-*` as REQUIRED in branch protection, a lapsed or unfinished line blocks
-  merges — don't. Limn does not read the repo's branch rules (no call reads them today, and none is
-  added for this), so it cannot warn per repo: the claims setting's ⓘ says "Don't make limn/ lines
-  required checks." (docs/TEAM-REVIEW.md § 13, gap 11).
+- If a team marks `ensemble/review-*` as REQUIRED in branch protection, a lapsed or unfinished line blocks
+  merges — don't. Ensemble does not read the repo's branch rules (no call reads them today, and none is
+  added for this), so it cannot warn per repo: the claims setting's ⓘ says "Don’t make ensemble/
+  statuses required checks." (docs/TEAM-REVIEW.md § 13, gap 11).
 
 ## The Slack "Claude Review ran" signal
 
@@ -3389,15 +3401,15 @@ auto-posting: claim before any GitHub write, never retried.
     write, a failure recorded and NEVER retried). ⚠ THE PRESS IS THE CONSENT: step 0 (the
     workspace switch) and the scope / bot-author part of step 1 are skipped
     (`isPressedPost` / `pressedPostEligibility`); open and not a draft still apply, synced and live.
-    Auto resolve (except the own-PR path, § Resolve my Limn threads), auto pushback, Sonar's
+    Auto resolve (except the own-PR path, § Resolve my Ensemble threads), auto pushback, Sonar's
     comment and auto fix stay AUTO-only. A pair a restart
     interrupted still posts when the boot ends it (`finishInterruptedPairs` reads `postOnFinish` off
     the first half); a single run a restart interrupted fails, like an auto run. The footer is the
-    auto footer ("Posted automatically by Limn's … review"). Its REQUEST_CHANGES is recorded in
-    `auto_post`, so a later auto run may LIFT it like any of Limn's automatic blocks (decided: the
-    verdict was Limn's rule, not the reader's own judgement). The tab says "Posts to GitHub when
+    auto footer ("Posted automatically by Ensemble's … review"). Its REQUEST_CHANGES is recorded in
+    `auto_post`, so a later auto run may LIFT it like any of Ensemble's automatic blocks (decided: the
+    verdict was Ensemble's rule, not the reader's own judgement). The tab says "Posts to GitHub when
     done." while it runs, and "Nothing new to post." (or why not) when it skipped.
-  - **"Review only"** is the old behaviour, kept in Limn. When such a run SUCCEEDS its summary
+  - **"Review only"** is the old behaviour, kept in Ensemble. When such a run SUCCEEDS its summary
     PRE-FILLS the summary box (`summaryPrefillOf` → `nextSummaryPrefill`), only when the box is empty
     or still holds the earlier pre-fill unchanged — ⚠ never over text the reader typed, and never on a
     run whose draft (`userBody`) was saved — an EMPTY saved draft included (the reader cleared the
@@ -3421,7 +3433,7 @@ auto-posting: claim before any GitHub write, never retried.
   OFF. Praise never; a legacy story finding never (stories are the ticket review's).
 - **THE REVIEW.** Event `'COMMENT'` unless AUTO VERDICT (below) lets a verdict through. Body = the
   summary's first plain paragraph, whole up to 3,000 chars and then cut at a sentence end (else "N comments from Claude.") + `AUTO_POST_FOOTER` ("_Posted automatically
-  by Limn’s Claude review._"); every comment ends with the same footer (`PostReviewFinding.footer`),
+  by Ensemble’s Claude review._"); every comment ends with the same footer (`PostReviewFinding.footer`),
   then the hidden `<!-- pierre:claude-review` marker, so `isLimnPostedComment` classifies it as ours
   and an auto re-review is NOT triggered by it. It reuses `ctx.review.postReview` / `postFinding`
   (`post-seam.ts`): the same head pin, anchoring and off-diff fallback as the button.
@@ -3434,8 +3446,8 @@ auto-posting: claim before any GitHub write, never retried.
   COMMENT. ⚠ **EARLIER POINTS STILL OPEN COUNT TOO** (decision D1, 2026-11-05;
   `review/claude-review/earlier-open.ts` `earlierOpenOf` / `earlierOpenForRuns`): an earlier point the
   run judges still open (shared `isStillOpenFollowUp` / `isStillOpenThread`) whose severity is KNOWN —
-  a follow-up item's own severity, or a thread judgement's ROOT comment when it is a Limn finding
-  (any Limn's, the lead read by `limnFindingPost`) — holds the verdict like a finding: an earlier
+  a follow-up item's own severity, or a thread judgement's ROOT comment when it is an Ensemble finding
+  (any Ensemble's, the lead read by `limnFindingPost`) — holds the verdict like a finding: an earlier
   blocker ⇒ REQUEST_CHANGES (same gates), an earlier warning ⇒ never APPROVE, earlier nits /
   questions ⇒ the leftovers rule. A person's comment or another bot's has no severity: it counts
   only in the "1 earlier point is still open." tail. ⚠ A follow-up item RE-RAISED as a finding of the
@@ -3448,7 +3460,7 @@ auto-posting: claim before any GitHub write, never retried.
   self-approval → `own_pr`) and (b) when the reader has no STANDING verdict — read LIVE
   (`GET …/pulls/:n/reviews`, the synced table can lag; `ownStandingReview`): their latest DECISIVE
   review (APPROVED / CHANGES_REQUESTED / DISMISSED). ⚠ A COMMENTED review never supersedes one on
-  GitHub, and EVERY thread reply — Limn's auto-resolve and pushback replies included — is a COMMENTED
+  GitHub, and EVERY thread reply — Ensemble's auto-resolve and pushback replies included — is a COMMENTED
   review, so the old "latest review of any kind" read let an automatic APPROVE out over a person's
   standing request for changes after a single reply. A latest DISMISSED stands for nothing (GitHub's
   meaning too — so a person's review the author dismissed no longer holds it). A person's standing
@@ -3484,7 +3496,7 @@ auto-posting: claim before any GitHub write, never retried.
     Claude and Codex are signed in (`pairReviewReady`): "When Claude and Codex disagree", two radios,
     the ⓘ saying a model may hold back when it cannot check something (a binary file).
   - **`approveLeftovers`** (`workspaces.approve_leftovers`; wire `autoPost.approveLeftovers`): what may
-    still be open when Limn approves, after every check (follow-up judgements, accepted replies,
+    still be open when Ensemble approves, after every check (follow-up judgements, accepted replies,
     merged duplicates): 'none' / 'nits' / 'nits_questions' (NULL, the default — today's rule).
     Blockers and warnings ALWAYS hold; praise never counts (`leftoverAllowed`). Read by
     `autoVerdictFor` (single runs and pairs) and `repliesVerdict`. Settings: "Approve with open
@@ -3494,9 +3506,9 @@ auto-posting: claim before any GitHub write, never retried.
   earlier point held open, no unmet ticket criterion (`nothingOpen`) — is read as APPROVE
   (`promotedModelVerdict`, applied by each single-run caller of `autoVerdictFor`: the auto post, the
   posting-off withdrawal, `findingsNotApproved`). It then goes through EVERY gate: impact, own PR,
-  the reader's standing review; a held one gets the gate's reason (own PR stays in Limn). ⚠ Never a
+  the reader's standing review; a held one gets the gate's reason (own PR stays in Ensemble). ⚠ Never a
   PAIR: its two verdicts fold by the workspace's strictness, and 'strict' means both halves
-  approved. ⚠ REQUEST_CHANGES and no verdict are never promoted. Such a run never withdraws Limn's
+  approved. ⚠ REQUEST_CHANGES and no verdict are never promoted. Such a run never withdraws Ensemble's
   earlier approval. The review prompt now states the verdict rule (both providers, one shared
   text): APPROVE when no blocker or warning remains; REQUEST_CHANGES only with a blocker; COMMENT
   only with a warning, a nit or question to answer, or a one-sentence reason in the summary.
@@ -3535,33 +3547,33 @@ auto-posting: claim before any GitHub write, never retried.
   marker — CLAIMED before the write (the run's own `auto_post`, `reasonPosted` + `reasonOnly`
   recorded from the claim on), never retried, at most ONCE per (PR, head): any record at this head
   (full review or replies pass) with `reasonPosted` ⇒ nothing more (`reasonPostedAtHead`).
-  ⚠ **LIMN-ONLY REASONS** (`reasonMayPost`): a held APPROVE's `own_pr` (an author can never approve
+  ⚠ **ENSEMBLE-ONLY REASONS** (`reasonMayPost`): a held APPROVE's `own_pr` (an author can never approve
   their own PR — it would go out on every head), `prior_review` (the reader's own review still stands,
   under the same account — "not approved" would only confuse), `reviews_unreadable` (a transient read failure) and
-  `refused` are shown in Limn, never posted (no body line, no reason-only review, `reasonPosted` not
+  `refused` are shown in Ensemble, never posted (no body line, no reason-only review, `reasonPosted` not
   set, so the head's one post is not used up). ⚠ **A REASON-ONLY REVIEW CONSUMES A REVIEW REQUEST**:
   it goes out under the reader's account, and any review the reader submits answers their pending
   request on GitHub (it leaves My Turn's "Awaiting your review"). So it is never sent while a request
   of the reader is OPEN (`AutoPostPrFacts.openRequestOfMe`, the synced `review_requests` row); the
-  reason stays in Limn. (A review carrying findings already answered the request before 0145.) The
+  reason stays in Ensemble. (A review carrying findings already answered the request before 0145.) The
   tab keeps `autoVerdictLine` for a held REQUEST_CHANGES (its `reasonText` is the findings', not the
   hold's); only a held APPROVE's line yields to the reason. This
   supersedes "a held verdict with nothing to post is a skip" for this one case only. Model text is
   made safe first (`safeReasonText`: no @-pings, no `<!--`, one line). Pinned by
   `verdict-strictness.test.ts`, `auto-post.test.ts`, `replies-check-pipeline.test.ts` and the SPA's
   `test/verdictStrictness.test.ts`.
-- ⚠ **LIMN LIFTS ITS OWN AUTOMATIC BLOCK** (`loadLimnAutoBlockIds`, `LIFT_BLOCK_MESSAGE`). An
+- ⚠ **ENSEMBLE LIFTS ITS OWN AUTOMATIC BLOCK** (`loadLimnAutoBlockIds`, `LIFT_BLOCK_MESSAGE`). An
   automatic REQUEST_CHANGES is posted under the reader's account, so GitHub cannot tell it from the
   reader's own — and the gate used to hold every later APPROVE as `prior_review`, leaving a PR
-  "changes requested" by Limn after Limn itself had judged the blockers fixed (PR 530, 2026-10-22). Now:
-  - Limn's own block is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
+  "changes requested" by Ensemble after Ensemble itself had judged the blockers fixed (PR 530, 2026-10-22). Now:
+  - Ensemble's own block is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
     whose `verdict.submitted` is REQUEST_CHANGES — ⚠ NEVER by the marker or body: a review the reader
     sent with the Post button carries the same marker and is THEIR judgement, never lifted.
   - While it is the reader's standing verdict: a wanted APPROVE goes out over it (GitHub supersedes
     the same user's request; `liftedBlock.how: 'superseded'`); a wanted REQUEST_CHANGES is held as
     `already_requested` ("Changes already requested by Claude’s earlier review.").
   - A run with NO blocker (`autoVerdictFor ≠ REQUEST_CHANGES`, computed whatever the auto-verdict
-    switch says NOW — switching it off must not freeze a block Limn left) that does not land an
+    switch says NOW — switching it off must not freeze a block Ensemble left) that does not land an
     APPROVE (held by impact, only warnings left, verdict switched off, a refused approve) DISMISSES it
     with "Claude's blocking findings are fixed." — after the run's review, inside the same claim, at
     the reviewed head, once, never retried. Success stamps the local review row `dismissed` and
@@ -3577,34 +3589,34 @@ auto-posting: claim before any GitHub write, never retried.
     supersede the block is held as `already_requested`.
   - Cost: a DB pre-check (any earlier auto REQUEST_CHANGES on this PR?) gates the extra live review
     read, so an ordinary run reads nothing more.
-- ⚠ **WITHDRAWING LIMN'S APPROVAL** (2026-11-04; `review/claude-review/approval-withdraw.ts`). An
+- ⚠ **WITHDRAWING ENSEMBLE'S APPROVAL** (2026-11-04; `review/claude-review/approval-withdraw.ts`). An
   automatic APPROVE judges ONE head; it used to stay in force after a push and after a later run found
   problems (PR #591: approved at 312c22e, 3 warnings at 91482c8 posted as COMMENT, the approval stood
   until withdrawn by hand). Now a later RUN withdraws it; a push alone never does (below):
-  - Limn's own approval is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
+  - Ensemble's own approval is identified EXACTLY by an earlier run's stored `auto_post.githubReviewId`
     whose `verdict.submitted` is APPROVE (`loadLimnAutoApprovals`, the twin of `loadLimnAutoBlockIds`;
     a pair's claim row is the half without `viaPairReviewId`) — ⚠ NEVER by marker or body: a hand
     approval, or one sent with the Post button, is the reader's own and is never touched. Only while it
     is still the reader's standing review LIVE (`ownStandingReview` → `LIMN_AUTO_APPROVED`).
-  - **Posting off ("Keep it in Limn") still withdraws** (gap 7, 2026-11-05;
+  - **Posting off ("Keep it in Ensemble") still withdraws** (gap 7, 2026-11-05;
     `auto-post.ts` `withdrawApprovalWhenKept`): an AUTO run with the workspace's auto-posting off posts
     nothing, but when it is at a NEW head, does not approve (the same `autoVerdictFor`, earlier points
-    included), the PR is open, not a draft and still at that head, and Limn's own approval is the
+    included), the PR is open, not a draft and still at that head, and Ensemble's own approval is the
     reader's live standing review, it withdraws it — the same claim, message and once-only rule, then
-    `settlePrAfterWrite`. The run itself keeps no `auto_post` record (it stays kept in Limn); the
+    `settlePrAfterWrite`. The run itself keeps no `auto_post` record (it stays kept in Ensemble); the
     approving run's `approvalWithdrawal` carries `byReviewId`. ⚠ A manual "Review only" run never writes.
   - **The run path (always on)**: a run (auto, or "Review and post") at a NEW head whose verdict is not
     APPROVE (`autoVerdictFor`, whatever the auto-verdict switch says now) dismisses it BEFORE its own
-    review, with "Limn withdrew its approval: 3 warnings found at 91482c8." (blockers and warnings
+    review, with "Ensemble withdrew its approval: 3 warnings found at 91482c8." (blockers and warnings
     counted; none ⇒ "not approved at …"), then posts as before. The gate reads `LIMN_AUTO_APPROVED` as
     not the reader's: a REQUEST_CHANGES goes out, a new APPROVE supersedes it. A run at the SAME head
     never withdraws. Recorded on the later run as `withdrewApproval` (`withdrawn` / `withdraw_failed`);
     a run whose only write is the withdrawal is `posted` / `failed` by it alone, and `skipped` when an
     earlier claim already holds it.
-  - ⚠ **THERE IS NO PUSH PATH** (removed 2026-11-05). A push alone NEVER withdraws Limn's approval:
+  - ⚠ **THERE IS NO PUSH PATH** (removed 2026-11-05). A push alone NEVER withdraws Ensemble's approval:
     GitHub's own rule (a ruleset's `dismiss_stale_reviews_on_push`, or classic branch protection's
     "Dismiss stale pull request approvals when new commits are pushed") does that per repo/branch,
-    and Limn must not override a repo that keeps approvals. The switch "Withdraw Limn's approval when
+    and Ensemble must not override a repo that keeps approvals. The switch "Withdraw Ensemble's approval when
     new commits are pushed" is gone; `workspaces.withdraw_approval_on_push` (0165) is DORMANT. Old
     `approvalWithdrawal` records with `why: 'push'` still read and render.
   - ⚠ **THE CLAIM**: `approvalWithdrawal` on the APPROVING run's `auto_post` JSON
@@ -3612,16 +3624,16 @@ auto-posting: claim before any GitHub write, never retried.
     written by a `json_set` compare-and-set guarded by `json_extract(…) IS NULL` BEFORE the GitHub
     write. Whichever run claims first dismisses; another does nothing. A refusal (403/422) is
     recorded in GitHub's words and NEVER retried. Both fields ride the wire
-    (`ClaudeAutoPostWire`); the tab prints the message (approving run) or "Withdrew Limn’s earlier
+    (`ClaudeAutoPostWire`); the tab prints the message (approving run) or "Withdrew Ensemble’s earlier
     approval." / "Couldn’t withdraw …: <why>" (`approvalWithdrawLines`). The replies pass does not
     withdraw (it runs at the same head). Pinned by `approval-withdraw.test.ts`.
 - **AUTO RESOLVE** also answers an accepted REPLY (`reply_accepted`: the acknowledgement, then the
-  resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Limn's findings.
+  resolve) and **AUTO PUSHBACK** posts one reply on a disputed one — § Replies to Ensemble's findings.
 - **AUTO RESOLVE** (`claude-review/auto-resolve.ts`, called from `maybeAutoPostReview` after the post,
   whatever it did). ⚠ **ALWAYS ON since 2026-11-10, NO SETTING** — path A runs on every AUTO run while
-  auto-posting is on (it was `autoResolve`, "Resolve Limn's threads once fixed", OFF by default; the
+  auto-posting is on (it was `autoResolve`, "Resolve Ensemble's threads once fixed", OFF by default; the
   JSON key is DORMANT: never read, dropped on the next write). ⚠ The ONE automatic resolve, a deliberate
-  exception to bot-triage's "user-initiated only", scoped to LIMN'S OWN threads: an earlier finding
+  exception to bot-triage's "user-initiated only", scoped to ENSEMBLE'S OWN threads: an earlier finding
   posted INLINE whose thread root is by the account's login AND carries the marker (found by the stored
   comment id, else by path + the finding's text — a finding posted inside a review keeps no comment
   id), which THIS run's follow-up judged `addressed` / `no_longer_applies`, on an eligible PR. ⚠ The
@@ -3635,27 +3647,27 @@ auto-posting: claim before any GitHub write, never retried.
   retried. A thread not synced yet records nothing. ⚠ **THE HOW (2026-11-09)**: the reply reads
   "Addressed in abc1234: \<how\>" when the item has a one-line how (§ The one-line how), made safe by
   shared `stillOpenReasonText`. ⚠ **A thread the person ALREADY RESOLVED**: an `addressed` /
-  `no_longer_applies` item with a how gets the REPLY ONLY (no resolve, footer "Checked by Limn's …
-  review."), and only while no Limn reply (any Limn's marker) follows the person's last comment there
+  `no_longer_applies` item with a how gets the REPLY ONLY (no resolve, footer "Checked by Ensemble's …
+  review."), and only while no Ensemble reply (any Ensemble's marker) follows the person's last comment there
   (`limnRepliedAfterLastPerson`); same claim, record `alreadyResolved: true`. Anything else on a
   resolved thread records nothing.
-- **RESOLVE MY LIMN THREADS WHEN ADDRESSED** (`autoPost.resolveOwnPrs` in the same overrides JSON,
+- **RESOLVE MY ENSEMBLE THREADS WHEN ADDRESSED** (`autoPost.resolveOwnPrs` in the same overrides JSON,
   no column; ⚠ ON BY DEFAULT — absent reads on, a stored false is off; Settings → Auto review, outside
   the dimmed auto-post block). The SAME writer (`auto-resolve.ts`, path B) on the reader's OWN PR
   (`authorIsMe`, open, a draft too) after ANY succeeded run of theirs: auto, "Review and post"
   (both through `maybeAutoPostReview`), a manual "Review only" run (`runEnded`, fire-and-forget, both
   halves of a pair) and a replies pass of either trigger (`afterPass`). Independent of auto-posting
   and of auto resolve; path A (the workspace's auto resolve) wins when both hold. ⚠ Still
-  `ownOnly`: never a teammate's Limn thread on the reader's PR, never a person's. Same statuses
+  `ownOnly`: never a teammate's Ensemble thread on the reader's PR, never a person's. Same statuses
   (`addressed` / `no_longer_applies` / `reply_accepted`), same claim of
   `claude_review_findings.auto_resolve` BEFORE the reply (shared with "Post reply", so never two
   replies), same never-retry, same settle + PR change signal (the open pane's live refresh
-  re-reads the tab). The record carries `why: 'own_pr'`; the reply's footer is "Resolved by Limn's
+  re-reads the tab). The record carries `why: 'own_pr'`; the reply's footer is "Resolved by Ensemble's
   Claude review." (not the auto footer) above the finding marker, so `isLimnPostedComment` holds and
   it never counts as a person's answer. Not a model run: no budget gate, no route, no tier. Pinned by
   `auto-post.test.ts` (own PRs) and `replies-check-pipeline.test.ts`.
 - **ON A TEAMMATE'S WORD** (gap 13, 2026-11-05; `claude-review/teammate-resolve.ts`): the same
-  setting closes the reader's own fixed Limn threads while the reader's Limn STEPS ASIDE (a teammate
+  setting closes the reader's own fixed Ensemble threads while the reader's Ensemble STEPS ASIDE (a teammate
   holds the commit). After each import of a PR's teammate reviews, sync KICKS (never awaits;
   `sync/teammate-review-hooks.ts`, bound at boot in `startAgenticBackground`) `maybeResolveOnTeammateWord`:
   the PR is the reader's own, open, not bot-authored, `resolveOwnPrs` on; an imported teammate review
@@ -3665,12 +3677,12 @@ auto-posting: claim before any GitHub write, never retried.
   after the post; the thread is rooted on the reader's own posted inline finding (`ownRunsOnly`,
   `findFindingThread`, followed into the reader's own continuation) and unresolved; the finding has
   no `auto_resolve`. Same claim-before-write, never-retry, one reply per thread then the resolve,
-  stamp, settle + change signal. The reply: "Addressed in abc1234 (checked by Robin’s Limn)." /
-  "No longer applies as of abc1234 (checked by Robin’s Limn)." — or, when that Limn's marker sent a
-  how (`jr=`), "Addressed in abc1234 (checked by Robin’s Limn): \<how\>" — + "_Resolved by Limn._" + the finding
+  stamp, settle + change signal. The reply: "Addressed in abc1234 (checked by Robin’s Ensemble)." /
+  "No longer applies as of abc1234 (checked by Robin’s Ensemble)." — or, when that Ensemble's marker sent a
+  how (`jr=`), "Addressed in abc1234 (checked by Robin’s Ensemble): \<how\>" — + "_Resolved by Ensemble._" + the finding
   marker; the name is the teammate's first name (else login), reduced to letters, digits and spaces.
   The record carries `why: 'teammate'`, `checkedBy: <login>`, `byReviewId` = the imported teammate
-  review; the tab reads "Resolved automatically (checked by robin’s Limn)". ⚠ **THE TRUST GATE**
+  review; the tab reads "Resolved automatically (checked by robin’s Ensemble)". ⚠ **THE TRUST GATE**
   (rule 2b): the import is display-only and accepts any marker, so the WRITE path accepts an `a` / `x`
   word only from a reviewer who is not a bot (`users.is_bot`, then `isAutomation` for the workspace)
   AND has write access, read LIVE (`GET /repos/{o}/{r}/collaborators/{login}/permission` is `admin` /
@@ -3701,13 +3713,13 @@ auto-posting: claim before any GitHub write, never retried.
   body — every summary-less review was the bare marker — can never be adopted and have this attempt's
   findings stamped onto it; every marker reader matches the PREFIX), and a 422 "internal error" is never a
   verdict refusal (`isVerdictRefusal`), so it is never retried; (2) on read, an unposted finding
-  whose text is on a comment of Limn's (own login + marker) made since its run started and owned by
+  whose text is on a comment of Ensemble's (own login + marker) made since its run started and owned by
   no posted finding is STAMPED posted — ⚠ matched on the ANCHOR too: an inline thread's current line
   must be the finding's (skipped when GitHub reports none, or the comment sat on the file's first change
   with the fallback note), a PR-level comment must name `path:line`, so the same words on another line
   ("Unused import." twice) are another finding — (auto when the comment has the footer), and a `failed` /
   `partial` record is corrected to what GitHub took (`landedAutoPosts`); (3) an unposted finding
-  whose chain has a posted finding, or whose text AND anchor match an older comment of Limn's that no
+  whose chain has a posted finding, or whose text AND anchor match an older comment of Ensemble's that no
   sibling in its own run owns, carries
   `ClaudeFinding.earlierPost` (derived, never stored — stamping a re-raise would hand two rows one
   thread): the SPA shows it posted and linked (`effectivePost`), single Post answers `409
@@ -3721,7 +3733,7 @@ auto-posting: claim before any GitHub write, never retried.
   double-posts by accident); with it on an unposted finding → `409 NotPosted`. The reminder's comment
   opens on `**Reminder:** first raised [on 12 Oct 2026](<permalink of the earlier comment>).`
   (`posted-state.ts` `reminderLead` / `findingCommentUrl`, riding as the comment's LEAD before any story
-  lead), then the finding's text, the footer when there is one and Limn's hidden marker — so
+  lead), then the finding's text, the footer when there is one and Ensemble's hidden marker — so
   `isLimnPostedComment` holds. It is RECORDED BESIDE the original, never instead of it:
   `claude_review_findings.reminder` (migration `0110`, `ClaudeFindingReminder`; the latest one,
   earlier reminders' comment ids kept in `earlierCommentIds`, stored only) → the tab adds "Reminder posted
@@ -3729,7 +3741,7 @@ auto-posting: claim before any GitHub write, never retried.
   chain, auto resolve and pushback keep reading the original thread; ⚠ every reminder comment is CLAIMED
   in `posted-state.ts`, or it would be stamped as the next run's re-raise's "lost post" (same text, same
   line, made after that run started). Bulk "Post review" and auto-posting still skip the finding. A reply
-  on the reminder's own thread is not followed up (Limn's marker keeps it out of "other reviewers'
+  on the reminder's own thread is not followed up (Ensemble's marker keeps it out of "other reviewers'
   threads" too).
 - ⚠ **THE CLAIM BEFORE ANY WRITE, AND NO RETRY.** `claude_reviews.auto_post` is written by a
   compare-and-set from NULL (`status:'posting'`, the finding ids it will try) before GitHub is
@@ -3764,7 +3776,7 @@ auto-posting: claim before any GitHub write, never retried.
 
 ## Severity labels on posted findings (2026-10-27)
 
-Every comment Limn posts for a finding LEADS with the finding's severity as a bold word:
+Every comment Ensemble posts for a finding LEADS with the finding's severity as a bold word:
 `**Blocker**`, `**Warning**`, `**Nit**`, `**Question**` (praise is never posted, so it has none).
 
 - **Inline comment:** the word on its own line, then the body (`**Warning**\n\n<body>…`).
@@ -3777,31 +3789,31 @@ Every comment Limn posts for a finding LEADS with the finding's severity as a bo
 - **One owner each** (`packages/shared/src/limn-severity.ts`): `limnSeverityLabel` (the word),
   `limnSeverityLead(severity, {tag?, ref?})` (the line; `tag` is an extra part such as a provider
   name on a paired post: `**Warning** · Codex`), and **`severityForPostedFinding(finding)`**: the
-  review's own severity, and nothing else. ⚠ It is never ML-graded (§ Limn findings are bots).
+  review's own severity, and nothing else. ⚠ It is never ML-graded (§ Ensemble findings are bots).
   The builders (`post-review.ts` `findingCommentBody` /
   `prLevelFindingBody`) take `severity` on the finding (`PostReviewFinding.severity`, optional) and
   call the seam. Replies (accept, pushback, resolve, manual reply) get no label.
 - **The reply note** (2026-11-08): every INLINE finding comment (`findingCommentBody`, the first
-  comment of a Limn thread, auto or manual) ends with `THREAD_REPLY_NOTE` ("_Replies will be picked up
-  in the next Limn check._") after the footer, before the marker. PR-level finding comments and every
-  reply Limn writes inside a thread never carry it. `parsePostedLimnFinding` strips it as one of its
+  comment of an Ensemble thread, auto or manual) ends with `THREAD_REPLY_NOTE` ("_Replies will be picked up
+  in the next Ensemble check._") after the footer, before the marker. PR-level finding comments and every
+  reply Ensemble writes inside a thread never carry it. `parsePostedLimnFinding` strips it as one of its
   italic notes. Comments posted before it are never edited.
 - ⚠ **Matching comments posted before and after the label.** `finding-thread.ts` compares a thread
   root's START with the finding's text; it accepts the start with or without a leading severity line
   (`stripLimnSeverityLead`). `posted-state.ts`'s PR-level match needs the backticked `path:line`,
   which both shapes carry. Everything else matches on the marker or the stored comment id.
-- **In Limn:** the PR details pane shows the same word as a chip (`LimnSeverityChip`, the ML badge's
-  shape, `vendorInk` colours) on a thread that is one of Limn's posted findings (the Changes tab's
+- **In Ensemble:** the PR details pane shows the same word as a chip (`LimnSeverityChip`, the ML badge's
+  shape, `vendorInk` colours) on a thread that is one of Ensemble's posted findings (the Changes tab's
   collapsed pill, every `ThreadCard` header incl. the Threads tab) and on such a PR-level
   comment (Activity tab). It reads `ThreadDetail.limnSeverity` / `PrCommentDetail.limnSeverity` from
   GET `/api/prs/:id` (`db/limn-finding-severity.ts`: the finding's stored comment id = the thread's
   ROOT comment or the PR comment, its latest reminder's comment, else `findFindingThread`; severity
   through the same seam). No request of its own, no migration.
 
-## Limn findings are bots (2026-11-01)
+## Ensemble findings are bots (2026-11-01)
 
-Limn posts findings under the reader's own GitHub account. Those comments are counted as a BOT,
-one per poster ("Limn · alice"), beside CodeRabbit and Copilot, and never as the person's own
+Ensemble posts findings under the reader's own GitHub account. Those comments are counted as a BOT,
+one per poster ("Ensemble · alice"), beside CodeRabbit and Copilot, and never as the person's own
 activity.
 
 - **What counts** (shared `limnFindingPost(body)`, `packages/shared/src/limn-severity.ts`): the
@@ -3811,24 +3823,24 @@ activity.
   finding posted before leads existed (2026-10-27) — the bot's, with NO severity. NOT a finding:
   replies (never a root), pushback, review bodies and auto verdicts, CI, Sonar, dependency and ticket
   "story check" posts, and a lead-less PR-level comment.
-- **Limn's REPLIES are the bot's too** (gap 1, 2026-11-05; shared `isLimnThreadReply(body)`): a
-  review-thread REPLY carrying ANY Limn marker (`<!-- pierre:claude-review…`) outside a quoted `>`
+- **Ensemble's REPLIES are the bot's too** (gap 1, 2026-11-05; shared `isLimnThreadReply(body)`): a
+  review-thread REPLY carrying ANY Ensemble marker (`<!-- pierre:claude-review…`) outside a quoted `>`
   line — a pushback, an acknowledgement / resolve reply, a "Still open:" reply, a "Post reply" of a
   drafted answer — is stored under the poster's `limn:` bot like a finding (sync `attribute`, the boot
-  reconcile, and `upsertLocalReply`'s instant row via `limnReplyAttribution`). Every Limn reply writer
+  reconcile, and `upsertLocalReply`'s instant row via `limnReplyAttribution`). Every Ensemble reply writer
   emits a marker (auto-resolve + manual "Post reply": the finding marker; pushback: the pushback
-  marker; still-open: finding + still-open). So no Limn reply is a person's reply in My Turn (bot set),
+  marker; still-open: finding + still-open). So no Ensemble reply is a person's reply in My Turn (bot set),
   derived thread state (`derive-thread-state.ts`, fixture 10), the replies pass (`humanReplies`
   already flags it `fromLimn`), or the re-review trigger (`newestReviewCommentTimes` /
-  `loadReviewThreadsForReview` skip a non-root Limn reply — a teammate's "Still open:" never starts
+  `loadReviewThreadsForReview` skip a non-root Ensemble reply — a teammate's "Still open:" never starts
   another review). A thread ROOT's author is unchanged by a reply. Everything else on GitHub (review
   bodies, PR-level non-finding posts, a person's own reply) stays the person's.
 - **Identity**: a synthetic `users` row per poster, login `limn:<login>` (`:` is impossible in a
   GitHub login, so it never collides and is NEVER sent to GitHub), `is_bot` pinned, no node id,
-  display name "Limn · <login>" (`db/limn-bots.ts` `ensureLimnBotUser`). Its `workspace_reviewers`
-  row is kind `'pierre'` (vendor label "Limn"), role `'review'`, automated, written once with `DO NOTHING`
+  display name "Ensemble · <login>" (`db/limn-bots.ts` `ensureLimnBotUser`). Its `workspace_reviewers`
+  row is kind `'pierre'` (vendor label "Ensemble"), role `'review'`, automated, written once with `DO NOTHING`
   (`ensureLimnReviewerRow`); `classifyReviewer` step 0 gives a `limn:` login the same verdict.
-  ⚠ `REVIEW_BOT_KINDS` never gains `'pierre'` (the benchmark never ships Limn).
+  ⚠ `REVIEW_BOT_KINDS` never gains `'pierre'` (the benchmark never ships Ensemble).
 - **The true poster**: sync stores the comment under the bot (`author_id`) and keeps the person in
   `limn_posted_by_user_id` (migration `0151`). The event actor, search author and thread root
   (`original_commenter_id`) follow the bot. A body edited to drop the marker goes back to its person
@@ -3838,42 +3850,42 @@ activity.
   author_id)`): `isLimnPostedComment`, finding replies, posted state, `findFindingThread`, the
   severity chip, auto-post's "did I take part". (NOT My Turn or the Feed: they count only what the
   reader did in person — BACKEND.md § My Turn.) So auto-resolve, pushback and
-  reminders keep working, and the reader's OWN Limn posts still never trigger their auto review. A
-  teammate's Limn findings are a review bot's comments, so they DO count for a re-review.
+  reminders keep working, and the reader's OWN Ensemble posts still never trigger their auto review. A
+  teammate's Ensemble findings are a review bot's comments, so they DO count for a re-review.
 - **A bot everywhere**: never moves the ball in My Turn or in Chronology's "People" view (it does in
   "People + bots", BOTTLENECKS.md § Two views), the Bots side of the Feed, hidden on the Timeline, a
   `u<id>` row in Bots Monitoring with its own `bot-detail:<id>` tab. Since 2026-11-08 a person's
-  reply in a thread rooted on your Limn finding does NOT summon you (your thread set is you alone).
-- **Severity** is the lead's, never the scorer's: ML-SEVERITY.md § Limn findings.
-- **Bulk bot-thread resolve** (`getResolvableBotThreads*`) leaves Limn threads out; auto-resolve owns
+  reply in a thread rooted on your Ensemble finding does NOT summon you (your thread set is you alone).
+- **Severity** is the lead's, never the scorer's: ML-SEVERITY.md § Ensemble findings.
+- **Bulk bot-thread resolve** (`getResolvableBotThreads*`) leaves Ensemble threads out; auto-resolve owns
   them.
-- ⚠ **A person is never classed a bot by Limn's marker**: `reviewerEvidence` drops Limn-marked text
+- ⚠ **A person is never classed a bot by Ensemble's marker**: `reviewerEvidence` drops Ensemble-marked text
   before fingerprinting, and a `'pierre'` fingerprint is ignored for any non-`limn:` login. The boot
   reconcile deletes untouched `'pierre'` rows on real people.
 - **In the SPA**: a `limn:` login is never a profile link (`profileUrl` returns null); its name reads
-  "Limn · alice" and its card names the poster. The severity badge on a Limn label says "From
-  Limn's review." with no confidence. The old single `'pierre'` row in Bots Monitoring is gone (the
+  "Ensemble · alice" and its card names the poster. The severity badge on an Ensemble label says "From
+  Ensemble's review." with no confidence. The old single `'pierre'` row in Bots Monitoring is gone (the
   vendor drill-down routes answer 400 for it).
 
-## Limn's actions are bots (2026-11-08)
+## Ensemble's actions are bots (2026-11-08)
 
-Owner rule: **"Everything Limn does on my behalf is not me."** The finding rule above is now the rule
-for EVERY GitHub write Limn makes under a person's account: reviews and approvals, the empty wrapper
+Owner rule: **"Everything Ensemble does on my behalf is not me."** The finding rule above is now the rule
+for EVERY GitHub write Ensemble makes under a person's account: reviews and approvals, the empty wrapper
 review GitHub makes around a reply or a standalone comment, story-check / CI / Sonar comments, the
 "@dependabot rebase" request, AI Fix / conflict / Implement commits, auto-merge and Dependencies
-merges, and PRs Limn opens. Each is the poster's `limn:<login>` bot; the person is kept beside it.
+merges, and PRs Ensemble opens. Each is the poster's `limn:<login>` bot; the person is kept beside it.
 ⚠ **One exception (owner decision 2026-11-11): Implement story / Fill gaps.** Its push writes as the
-READER (no ledger row, no `Limn-Run:` trailer), so the PR and its commit are the reader's own and count
+READER (no ledger row, no `Ensemble-Run:` trailer), so the PR and its commit are the reader's own and count
 like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "The reader's PR").
 
 - **Whose is a write (`github/write-origin.ts`)**: every exported write in `github/mutations.ts`, the
-  Limn posts in `review/post-review.ts`, the git push (`coding/git.ts` `PushTarget.origin` +
+  Ensemble posts in `review/post-review.ts`, the git push (`coding/git.ts` `PushTarget.origin` +
   `limnCommits`) and the team-claim status take a REQUIRED `origin: WriteOrigin` — `'reader'` (a plain
   button with the reader's own words or decision: Approve, Merge now, a typed reply, a reaction,
   "Update branch", "Merge all") or a `LimnWriteOrigin` (`limn`: `auto` · `policy` · `reader_pressed`,
-  the account, repo, PR, the person, the source run). A Limn write runs through `limnWrite`, which
+  the account, repo, PR, the person, the source run). An Ensemble write runs through `limnWrite`, which
   CLAIMS a ledger row before the call and settles it `done` with GitHub's ids (or `failed`) after. The
-  content rule: a plain comment route posting a body with a Limn marker is Limn's (`originForPostedBody`).
+  content rule: a plain comment route posting a body with an Ensemble marker is Ensemble's (`originForPostedBody`).
   The seam's posts carry `PostReviewArgs.limn` / `PostFindingArgs.limn` (`LimnPostContext`).
 - **The ledger, `limn_actions`** (migration `0180`; DATA-MODEL.md): one row per write, `kind` shared
   `LimnActionKind`, unique `(account_id, kind, claim_key)`. The review id of a reply's wrapper comes
@@ -3881,13 +3893,13 @@ like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "Th
   `pull_request_review_id`. AI Fix, Implement and the conflict resolver record the commits they push
   (one `push` row per sha); a rebase records none (rebased commits keep their authors). GitHub's
   update-branch merge commit is recorded when the auto-merge runner adopts it (`isOurUpdateMerge`).
-- **The commit trailer**: every commit Limn creates ends `Limn-Run: <ref>` (`ai-fix/12`,
+- **The commit trailer**: every commit Ensemble creates ends `Ensemble-Run: <ref>` (`ai-fix/12`,
   `story-build/4`, `conflict/<session>`, `auto-merge/7`; shared `withLimnRunTrailer`), so any install
   knows it.
 - **ONE resolver** (`db/limn-bots.ts`: `commentIsLimn`, `reviewIsLimn`, `commitIsLimn`,
-  `prLimnRoles`): a row is Limn's when (a) its id / sha is in the ledger, (b) its body has a Limn
+  `prLimnRoles`): a row is Ensemble's when (a) its id / sha is in the ledger, (b) its body has an Ensemble
   marker outside quoted lines, (c) it is an EMPTY COMMENTED review whose every inline comment is
-  Limn's (`review_comments.review_database_id`, from the fat query's `pullRequestReview`), or (d) a
+  Ensemble's (`review_comments.review_database_id`, from the fat query's `pullRequestReview`), or (d) a
   commit carries the trailer. A merge / an opening moves only when GitHub names the same person the
   ledger does.
 - **Where the person goes**: `reviews.limn_posted_by_user_id`, `commits.limn_pushed_by_user_id`,
@@ -3896,7 +3908,7 @@ like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "Th
   the bot. ⚠ "Is this mine" reads `trueAuthorId(table)` / `trueMergerId` (`db/true-author.ts`,
   DB-free): team standings, the teammate import, own-PR gates (auto fix, auto post, claims, story build).
   `isLimnPostedComment` also takes the reader's own `limn:` login as theirs.
-- **The `limn` lane** (shared `ActorLane`, label "Limn"): `resolveActorLanes` puts every `limn:` bot
+- **The `limn` lane** (shared `ActorLane`, label "Ensemble"): `resolveActorLanes` puts every `limn:` bot
   there first. `PERIOD_METRICS_SCHEMA_VERSION` = 3.
 - ⚠ **SWITCHED BY `config.limnAttributeAll`, ON by default since 2026-11-08 (`LIMN_ATTRIBUTE_ALL=false` only for a fresh test DB — never turn it off on a database it has run on).** Off, sync
   keeps the finding-era rule (findings and marked replies only) and writes no `limn_*` column; the
@@ -3906,7 +3918,7 @@ like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "Th
   Fix commits (no sha stored then) are never guessed.
 - **The history backfill** (`db/limn-history-backfill.ts`; boot job `kickLimnHistoryBackfill`, after
   listen, never awaited, ONLY with the flag on — off, the narrow rule would hand the rows back):
-  1. it SEEDS the ledger from the records Limn kept — `claude_reviews.posted_review_id` (review),
+  1. it SEEDS the ledger from the records Ensemble kept — `claude_reviews.posted_review_id` (review),
      `claude_review_findings.github_comment_id`, `ticket_review_items.posted_comment_id`,
      `claude_still_open_posts.comment_id`, `auto_merge_requests` 'merged' + Dependencies
      `merge_landed` (ONE merge row per PR), Dependencies `result_sha` and Implement's
@@ -3914,12 +3926,12 @@ like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "Th
      Dependencies `rebase_request` matched to the reader's exact "@dependabot rebase" comment on that
      PR within 2 minutes. Claim key `history:…` (a push `sha:<sha>`, the live key), `detail` 'history';
   2. the WRAPPER RULE BY TIMING: an empty COMMENTED review of the READER's whose id no stored comment
-     names, with a Limn comment of theirs on the PR within ±2 s and none of their own words in that
+     names, with an Ensemble comment of theirs on the PR within ±2 s and none of their own words in that
      window, gets a `review_wrapper` row (a teammate's wrappers wait for sync's exact rule);
   3. `reattributeLimnRows` in batches of 100 PRs with a yield between them.
   Done is recorded in `instance_meta` (`limn_history_backfill:v1:<accountId>`); a run past its 10-minute
   limit records nothing and the next boot carries on. On a copy of the dev DB (8 s): 2,725 ledger rows;
-  1,071 reviews moved (596 of the reader's marked, 51 of a teammate's Limn, 424 wrappers — 346 beside a
+  1,071 reviews moved (596 of the reader's marked, 51 of a teammate's Ensemble, 424 wrappers — 346 beside a
   marked comment, 78 beside an unmarked finding the ledger names), 322 comments, 161 merges, 1 commit;
   the three My Turn "pushed since" cards (#444, #449, #455) went; a second run moved nothing.
 - **Not yet**: the instant local stamps (`upsertLocalReview`, `markPrMergedLocally`) still write the
@@ -3927,20 +3939,20 @@ like any PR of theirs, auto review included (docs/STORY-BUILD.md § Push → "Th
 
 ## Teammates' reviews (2026-11-03)
 
-The reader and a teammate both run Limn on the same repos. A review the TEAMMATE'S Limn **posted to
+The reader and a teammate both run Ensemble on the same repos. A review the TEAMMATE'S Ensemble **posted to
 GitHub** (summary + finding comments) joins the reader's AI Review tab as part of ONE review (below,
-§ One review). A review a teammate kept in their own Limn never reaches GitHub, so it is never shown.
+§ One review). A review a teammate kept in their own Ensemble never reaches GitHub, so it is never shown.
 
 - **The tab's team layout** (2026-11-04; SPA only, `lib/teamReview.ts` + `components/TeamReviewLayout.tsx`;
   docs/FRONTEND.md § The AI Review tab → Team layout). On NOW (never on a past review):
-  - **Where this PR stands** (`standingRows` over `teamView.standings`): one row per Limn reviewer,
+  - **Where this PR stands** (`standingRows` over `teamView.standings`): one row per Ensemble reviewer,
     newest first, in the same columns as Reviews on this PR — "You · Request changes · 3 Nov 10:00 ·
     8a8ec14", "Robin · Approve · 9 Nov 14:04 · abd62e3". ⚠ The row reads WHAT GITHUB HOLDS: the verdict
     in force (`inForce`) when there is one, even under a newer Comment of the same person; a dismissed
-    one "Approve (withdrawn)"; else the newest review. PR 221269 (2026-11-10): robin-dunn's Limn
+    one "Approve (withdrawn)"; else the newest review. PR 221269 (2026-11-10): robin-dunn's Ensemble
     commented, then its replies pass APPROVED; a replies pass is never imported as a teammate row, so
     `latest` stayed the Comment and the row read "Comment" while GitHub held an approval. The loader
-    now reads the commit of a Limn review from its marker (`StandingGithubReview.markerHead`,
+    now reads the commit of an Ensemble review from its marker (`StandingGithubReview.markerHead`,
     `inForce.headSha`, `ClaudeReviewWithdrawal.headSha`). No note after the verdict (2026-11-10). A
     blocking row is flagged. It replaces the single verdict: the summary shows none while it is on
     screen.
@@ -3963,7 +3975,7 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
   - **The newest review leads** — the summary heading the tab; the VERDICT shown follows § Standing
     verdicts (a Request changes still in force outranks a newer, milder review). A teammate review posted after the reader's latest run finished (or
     with no run of the reader's) heads the tab: "Robin's review", its verdict, "Posted on GitHub", its
-    summary (without Limn's "_Posted automatically by Limn’s … review._" footer,
+    summary (without Ensemble's "_Posted automatically by Ensemble’s … review._" footer,
     `withoutAutoPostFooter`). The PR tab label carries no verdict pill. A run of the reader's that is queued or running is the newest work. A FAILED run or a
     skip (`review_mode = 'skip'`) reviewed nothing, so the reader's latest run that DID review
     competes in its place (`lastReviewedAt`; none ⇒ the teammate leads) — the tab
@@ -3992,7 +4004,7 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
     (PR-level, or a comment that mapped to no thread) also drops out when the reader's latest
     SUCCEEDED, non-skip review ran after it, at a DIFFERENT head, and does not raise it again —
     otherwise a non-author teammate's PR-level point (never in the follow-up's prior set) could
-    never leave. The same head means the reader's Limn only disagreed: the point stands. Each is
+    never leave. The same head means the reader's Ensemble only disagreed: the point stands. Each is
     labelled with the teammate's name and avatar.
   - **The same point shows once, naming both**: one of the reader's latest-review findings that
     re-raises it (`prior_finding_id` chain), or sits on the same path within 3 lines with a similar
@@ -4003,14 +4015,14 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
     Teammate findings are never rewritten: no Post, Re-post, Reword or Ignore; Reply / Resolve are on
     the GitHub thread (the path opens it in Changes). The ONE write is the reader's own reminder.
   - **The review count** (`teamReviewCount`, pure; `teamView.reviewCount`): ONE line in the run
-    section (the right-hand column when wide), "4 Limn reviews so far · 1 by Robin". FULL reviews
+    section (the right-hand column when wide), "4 Ensemble reviews so far · 1 by Robin". FULL reviews
     only: the reader's own SUCCEEDED runs (`kind IS NULL`; a skip ran no review and is left out; a
     Claude + Codex pair counts ONCE, by `pair_id`) plus every imported teammate review, per poster.
     A replies pass never counts; a run in flight or failed does not either.
 
 - **The hidden metadata** (shared `packages/shared/src/limn-review-meta.ts`): every posted review
   summary ends in ONE marker, `<!-- pierre:claude-review v=1 a=<nonce> h=<head> k=auto|manual|replies
-  [s=pair] p=<provider>[,<provider>] m=<model>[,<model>] e=<effort|->[,…] d=<verdict> lv=<Limn version>
+  [s=pair] p=<provider>[,<provider>] m=<model>[,<model>] e=<effort|->[,…] d=<verdict> lv=<Ensemble version>
   [j=<comment id>:<a|n|x|o>,…] [lift=1] -->` (`j=`: § Judgements travel with a post, `o`: § Still-open
   points; `lift=1`: § Lifting a teammate's block).
   Built ONLY by `limnReviewMarker` in `review/post-seam.ts` (head, verdict and version filled there;
@@ -4026,15 +4038,15 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
   status `succeeded`, `trigger` always `'manual'`, cost and tokens NULL, `posted_review_id` NULL (the
   provenance readers key on it), `posted_at` = submitted time, `source_user_id` = the teammate,
   `source_review_node_id` = the GitHub review (the idempotency key; partial unique index), `teammate`
-  JSON (`TeammateReviewRecord`: run kind, pair, runs, Limn version, the GitHub review id,
+  JSON (`TeammateReviewRecord`: run kind, pair, runs, Ensemble version, the GitHub review id,
   `headInferred`, `unlabelled`). Summary = body without the marker; verdict = `d=`, else the review
   state; provider/model/effort from the first run (`model` `''` on a legacy post). Its findings are
-  the teammate's Limn FINDING comments (`limn_posted_by_user_id` = the teammate, a thread root or a
+  the teammate's Ensemble FINDING comments (`limn_posted_by_user_id` = the teammate, a thread root or a
   PR-level comment, never a reminder or a reply), keyed on the comment node id: severity from the
   lead (none ⇒ stored `warning`, named in `teammate.unlabelled`, served as null), path/line from the
   thread (inline) or the lead's reference (PR-level), body without lead, notes, footer and marker
   (`parsePostedLimnFinding`), `included` false, `posted_at` / `github_comment_id` /
-  `posted_comment_kind` from the comment. A comment belongs to the poster's Limn review submitted at or
+  `posted_comment_kind` from the comment. A comment belongs to the poster's Ensemble review submitted at or
   just before it (+60 s); a comment no longer there leaves the review. The head is `h=`; on a legacy
   post, the PR's newest synced commit at the post time (`headInferred`). A legacy post with no text
   and no finding is skipped.
@@ -4066,21 +4078,21 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
   reminder). The point carries the card's fields (`side`, `diffAnchorId`, `suggestion`, `postedAt`,
   comment id/kind, `reminder`, `remindable`; docs/API.md § Team review), all from the import's rows —
   no GitHub call. A teammate's title / body: the comment text split at its first sentence
-  (`postedFindingDisplay`; Limn posts a finding's body, never its title).
-- **A teammate on an old Limn** (2026-11-05; docs/TEAM-REVIEW.md § 12): the `lv=` each import stores
+  (`postedFindingDisplay`; Ensemble posts a finding's body, never its title).
+- **A teammate on an old Ensemble** (2026-11-05; docs/TEAM-REVIEW.md § 12): the `lv=` each import stores
   (`ClaudeTeammateReview.limnVersion`) is read by ONE rule — shared `isLimnBelowTeamMinimum` against
   `MIN_TEAM_LIMN_VERSION` (`limn-review-meta.ts`, semver order by `compareLimnVersions`; prerelease <
   release). For each teammate's NEWEST review on the PR that is older, the tab's status slot shows one
   line (`lib/teammateReviews.ts` `teammateVersionLines`, `TeamReviewLayout.tsx`
-  `TeammateVersionNotes`): "Robin is on Limn 0.1.188 — update for still-open replies and claim
-  fixes."; no `lv=` or an unreadable one reads "an older Limn". Words only — nothing acts on the
-  version. Raise the constant when a release changes how Limns on one team cooperate.
+  `TeammateVersionNotes`): "Robin is on Ensemble 0.1.188 — update for still-open replies and claim
+  fixes."; no `lv=` or an unreadable one reads "an older Ensemble". Words only — nothing acts on the
+  version. Raise the constant when a release changes how Ensemble installs on one team cooperate.
 
 ### A reminder of a teammate's finding (2026-11-04)
 
 "Post reminder" on a teammate's OPEN point (`POST /api/claude-findings/:id/post {reminder: true}` with
 the teammate finding's id; `review/claude-review/teammate-reminder.ts` `postTeammateReminder`) posts the
-point again AS THE READER: their own Limn finding comment (finding marker, severity lead, so
+point again AS THE READER: their own Ensemble finding comment (finding marker, severity lead, so
 `isLimnPostedComment` holds and sync re-attributes it to `limn:<reader>`), led by the SAME line as the
 reader's own reminders (`reminderLead`: "**Reminder:** first raised [on 4 Nov 2026](<teammate's
 comment>)."). The teammate's comment and thread are never edited, replied to or resolved.
@@ -4102,13 +4114,13 @@ comment>)."). The teammate's comment and thread are never edited, replied to or 
 ### Standing verdicts (2026-11-04)
 
 The VERDICT the Open PRs card, the Pending card and the AI Review tab pill show follows GitHub's own
-rule, not "newest review leads". Per Limn reviewer (the reader, each teammate whose Limn posted):
+rule, not "newest review leads". Per Ensemble reviewer (the reader, each teammate whose Ensemble posted):
 
 - Their **verdict in force** is their newest DECISIVE synced review (`reviews.state` approved /
   changes_requested; commented and pending never replace one; a dismissed newest one stands for
-  nothing) — when that review is a Limn review (it carries the summary marker, or it is one of the
+  nothing) — when that review is an Ensemble review (it carries the summary marker, or it is one of the
   reader's posted runs by `posted_review_id` / `auto_post.githubReviewId`). A later decisive review of
-  theirs that is not Limn's replaced the Limn verdict. A teammate's Comment never lifts the reader's
+  theirs that is not Ensemble's replaced the Ensemble verdict. A teammate's Comment never lifts the reader's
   Request changes; neither does the reader's newer UNPOSTED run (GitHub still holds the old one).
 - The surface shows the **strictest in force** (`blocking`: the newest Request changes still
   standing, anyone's) when the review it leads with is not that one, and names **who reviewed last**
@@ -4121,20 +4133,20 @@ rule, not "newest review leads". Per Limn reviewer (the reader, each teammate wh
   `leadFinishedAt`, `leadCurrency`, `reviewTabPill`). Own-only readers (auto holds, caps, posting,
   the reader's own `summary` counts) are unchanged.
 - Example (PR 203001): the reader's Claude + Codex pair asked for changes on 3 Nov and it was
-  posted; Robin's Limn commented on 4 Nov. Shown: "Request changes" with "Latest: Robin · Comment ·
+  posted; Robin's Ensemble commented on 4 Nov. Shown: "Request changes" with "Latest: Robin · Comment ·
   4 Nov". Dismissing the reader's review on GitHub lifts it.
 - **A WITHDRAWN VERDICT STAYS VISIBLE** (2026-11-09, PR 221270; migration 0183). `withdrawnVerdict`
-  (pure, beside `teamStandings`): a reviewer's most recent DECISIVE Limn review — Approve / Request
+  (pure, beside `teamStandings`): a reviewer's most recent DECISIVE Ensemble review — Approve / Request
   changes, or a dismissed one — when it was DISMISSED, even after a later Comment became their newest
   (`dismissed` stays "the newest was dismissed"). Its verdict comes from the dismissed body's marker
   `d=` (never the GitHub state, never guessed: no `d=` ⇒ null); its time, who and reason from the
   synced ReviewDismissedEvent (`reviews.dismissed_*`); its commit from the marker's `h=`. →
   `ClaudeReviewStanding.withdrawn`; the tab's row reads "Approve (withdrawn)" ("dismissed" when a person
   did it or it is unknown; lib/teamReview.ts `standingRow` → `reviewOutcomeWord`; the reason is on
-  GitHub, no note on the row since 2026-11-10). ⚠ Limn reviews only: a person's own
-  dismissed review is never read as Limn's.
+  GitHub, no note on the row since 2026-11-10). ⚠ Ensemble reviews only: a person's own
+  dismissed review is never read as Ensemble's.
 - **DECISIONS NO ROW SHOWS** (`teamDecisions` / `loadTeamDecisions` → `teamView.decisions`): every
-  synced Limn review that is a DECISIVE replies pass (marker `k=replies` + `d=APPROVE` /
+  synced Ensemble review that is a DECISIVE replies pass (marker `k=replies` + `d=APPROVE` /
   `REQUEST_CHANGES`; a Comment never) or DISMISSED, with the list row it belongs to (the reader's run
   by GitHub review id, a teammate's imported review by node id) and its withdrawal. "Reviews on this
   PR" marks that row "Approve (withdrawn)", gives the reader's replies pass its verdict, and lists a
@@ -4144,16 +4156,16 @@ rule, not "newest review leads". Per Limn reviewer (the reader, each teammate wh
 ### Judgements travel with a post (2026-11-04)
 
 A posted review's marker carries `j=<comment id>:<a|n|x|o>,…` (≤ `LIMN_META_MAX_JUDGED` = 50 ids; a =
-addressed, n = not addressed, x = no longer applies, o = still open — § Still-open points): what this review found about earlier Limn
+addressed, n = not addressed, x = no longer applies, o = still open — § Still-open points): what this review found about earlier Ensemble
 findings ON GITHUB, keyed by the finding comment's databaseId. Built by `post-meta.ts`
 `loadJudgedForPost` (DB only, never throws) for the manual Post and auto-posting, from the run's
 follow-up items whose prior finding is posted (the reader's own and a teammate's; `reply_accepted`
 counts as addressed, `partly_addressed` / `reply_disputed` as not, `not_checked` is left out) and
-from its thread judgements of threads ROOTED on a Limn finding (`addressed` / not; `unclear` left
+from its thread judgements of threads ROOTED on an Ensemble finding (`addressed` / not; `unclear` left
 out) — and, since 2026-11-05, a STILL-OPEN judgement (`o`) of any thread, a person's too (§ Still-open
 points). The follow-up wins for the same comment. The import stores the parsed list on the teammate
 row (`teammate.judged`, no migration: it is part of the marker record) and serves it as
-`ClaudeTeammateReview.judged`. Without it, the reader's Limn learns of a teammate's judgement only
+`ClaudeTeammateReview.judged`. Without it, the reader's Ensemble learns of a teammate's judgement only
 when the thread is resolved or replied to. An older post has no `j=`: nothing is assumed.
 
 **The how travels too (`jr=`, 2026-11-09).** Beside `j=`, `jr=<comment id>:<base64>,…` carries each
@@ -4162,7 +4174,7 @@ judgement's `reason`), UTF-8 then standard base64 without padding — an alphabe
 comment — only for ids `j=` names, within `LIMN_META_JUDGED_REASONS_CHARS` (6,000; later reasons are
 left out whole). Shared `limnJudgedReasonsValue` / `parseLimnJudgedReasons`; the parse is tolerant
 (a malformed entry is dropped, never the outcome) and the text is untrusted: one line, ≤ 120
-characters, made safe again before any post. A Limn from before it ignores the key. Stored as
+characters, made safe again before any post. An Ensemble from before it ignores the key. Stored as
 `teammate.judged[].reason`. Pinned by `limn-review-meta.test.ts`.
 
 ### Every finding (2026-11-04)
@@ -4181,10 +4193,10 @@ reviewers (the chain, the same thread, or the same spot) is ONE entry, the reade
 ### A teammate's standing block (2026-11-04)
 
 Besides the PR author's review (§ Follow-up on the previous review → The author's own review), the
-reader's run follows up EVERY teammate's Limn review whose Request changes is still in force
+reader's run follows up EVERY teammate's Ensemble review whose Request changes is still in force
 (`teammate-anchor.ts` `loadStandingBlockAnchors`, through `teamStandings`). Its findings — a pair's
 Codex half's too, they are in the posted comments — join the follow-up as CARRIED items
-(`mergeStandingBlocks`), less those the reader's Limn already settled. With no previous review at all,
+(`mergeStandingBlocks`), less those the reader's Ensemble already settled. With no previous review at all,
 the newest block anchors (`follow_up.teammate` names its poster). The writers never act on those
 threads (`ownOnly`), and the run's post carries its judgements back (`j=`). Team claims are per commit,
 so a teammate's standing block never holds a NEW head; the same head stays held as before. A failed
@@ -4192,27 +4204,27 @@ read costs the block only.
 
 ### Lifting a teammate's block (2026-11-04)
 
-Once the reader's Limn finds every point behind a teammate's standing Limn Request changes settled, it
+Once the reader's Ensemble finds every point behind a teammate's standing Ensemble Request changes settled, it
 may DISMISS that review and post its own (`review/claude-review/teammate-lift.ts`, wired into
 `auto-post.ts`, so it runs for an AUTO run and a manual "Review and post" — never the Post button).
 The reader's OWN block is the other path (§ Auto-posting, the lift).
 
-- **ALWAYS ON since 2026-11-10, NO SETTING** (the owner: "this is how Limn works fundamentally. We
+- **ALWAYS ON since 2026-11-10, NO SETTING** (the owner: "this is how Ensemble works fundamentally. We
   limit approves based on impact anyway"). Before, two opt-ins per workspace, both OFF by default
   (`teamLiftConsent` / `liftTeammateBlocks` in `workspaces.auto_post_settings`; both JSON keys are now
   DORMANT: never read, dropped on the next write). What stays: (a) THE BLOCKED SIDE'S CONSENT —
   `lift=1` in the marker of a review that reader's AUTO-POSTING sends (an auto run, or "Review and
-  post": Limn's own computed verdict), imported as `teammate.liftConsent`; written on every such post
+  post": Ensemble's own computed verdict), imported as `teammate.liftConsent`; written on every such post
   now. ⚠ The manual Post button NEVER writes it: the person chose that verdict and body, and a review a
   person chose is never dismissed. ⚠ Nor does a post whose comments leave out a BLOCKER its verdict
   counts (`blockersAllInPost`: the blocker was already on GitHub from an earlier post, so the re-post
   omits it yet still requests changes): the other side reads the points from the post's own comments
   only. A post from before 2026-11-10 made without the opt-in carries no consent: only THE AWAY PATH
-  lifts it. (b) The lifting side's setting is gone: every reader's Limn lifts a consented block.
+  lifts it. (b) The lifting side's setting is gone: every reader's Ensemble lifts a consented block.
 - **The rule** (`teammateLiftHold`, pure, first failure decides): not the reader's own PR; the
   block is a teammate's (never the reader's — standings `you: false` AND the live login); still in
   force (DB standings, then the LIVE review list: the poster's newest decisive review is this
-  CHANGES_REQUESTED); never tried before (`teammate_lift` NULL); the LIVE body carries LIMN'S SUMMARY
+  CHANGES_REQUESTED); never tried before (`teammate_lift` NULL); the LIVE body carries ENSEMBLE'S SUMMARY
   MARKER (a person's typed review is never dismissed) and `lift=1`; the reader's run has no blocker and
   no own earlier blocker left unjudged; the run is at the PR's CURRENT head (the live head; a moved
   head fails the post); and EVERY POINT is settled.
@@ -4230,10 +4242,10 @@ The reader's OWN block is the other path (§ Auto-posting, the lift).
   made at that commit (§ A teammate's standing block).
 - **The writes**, inside the run's auto-post claim: the reader's review goes out — APPROVE when the
   auto verdict and its gate allow it (§ Auto-posting, rule 3), else COMMENT; always sent, because its
-  `j=` carries the judgements to the teammate's Limn. Then, only once it LANDED: ⚠ **CLAIM BEFORE WRITE**
+  `j=` carries the judgements to the teammate's Ensemble. Then, only once it LANDED: ⚠ **CLAIM BEFORE WRITE**
   — `claude_reviews.teammate_lift` on the teammate's imported row (migration 0164, JSON
   `TeammateLiftRecord`) goes NULL → `dismissing` by compare-and-set, so one teammate review is
-  dismissed at most once by any run; then the REST dismissal with "Limn (alex) checked all 3 points are
+  dismissed at most once by any run; then the REST dismissal with "Ensemble (alex) checked all 3 points are
   addressed at 70cc9b5." (`teammateLiftMessage`); then `dismissed` (the local `reviews` row stamped
   dismissed) or `failed` with GitHub's words. ⚠ **NEVER RETRIED** — a 403 (no write access, dismissal
   restricted by branch protection) stays `failed`. The run's record copies it
@@ -4247,9 +4259,9 @@ The reader's OWN block is the other path (§ Auto-posting, the lift).
   TEAMMATE IS AWAY (`teammateAwayHold`, pure): no teammate review of theirs at the head
   (`claude_reviews.kind='teammate'`, `source_user_id`) and no `team_claim_seen` line of theirs there
   (`teammateSeenAtHead` — a block posted AT the head is itself "reviewed this commit"), and the newest
-  thing seen from THEM (`teammateLastSeenMs`: imported Limn reviews' `posted_at`; `reviews` /
+  thing seen from THEM (`teammateLastSeenMs`: imported Ensemble reviews' `posted_at`; `reviews` /
   `review_comments` / `pr_comments` with `author_id` = them (by hand) OR `limn_posted_by_user_id` = them
-  (their Limn), on any PR of the account; `team_claim_seen.line_at` by login; account-scoped — a person
+  (their Ensemble), on any PR of the account; `team_claim_seen.line_at` by login; account-scoped — a person
   active by hand is not away) is older than **`TEAMMATE_AWAY_AFTER_MS` (4 h, the one constant)**. LIVE, before
   any write: `liveLiftCheck(…, nowMs)` with `why: 'away'` skips the consent read but requires
   `k=auto` in the LIVE marker (`not_auto` otherwise; the DB side reads the imported
@@ -4257,43 +4269,43 @@ The reader's OWN block is the other path (§ Auto-posting, the lift).
   never dismissed this way — and holds
   (`teammate_active`) on any COMMENTED review of theirs after the block inside the window (no
   `submittedAt` = recent; `AutoPostDeps.liveReviews` now carries it), and `AutoPostDeps.liveTeamLines`
-  reads both `limn/review-*` contexts at the head — any line by them, or an unreadable read (null; the
+  reads both `ensemble/review-*` contexts at the head — any line by them, or an unreadable read (null; the
   default returns null under VITEST), holds it. After the verdict gate an away candidate survives only
   when `verdict.submitted === 'APPROVE'`, and the dismissal runs only when the APPROVE LANDED as one (a
   refused approve re-sent as a COMMENT dismisses nothing). Same claim (`teammate_lift`, now with
   `why: 'away'`), same never-retried write, same settle. ⚠ THE AWAY PATH'S POINTS are every counted
   finding (`countedFindings`: blocker, warning, unlabelled, and leftovers not allowed) across ALL of the
-  poster's imported Limn reviews on the PR (`kind='teammate'`, same `source_user_id`), unioned with the
+  poster's imported Ensemble reviews on the PR (`kind='teammate'`, same `source_user_id`), unioned with the
   block's own (whose `pointsBehindBlock` fail-safe still applies): the consent path leans on the poster's
   `blockersAllInPost` for a block resting on an earlier blocker, and the away path has no poster side.
-  `loadStandingBlockAnchors` therefore also sends the poster's EARLIER Limn reviews' findings to the
-  follow-up, so each can be judged. Message `teammateAwayLiftMessage`: "Limn (alex)
-  checked all 3 points are addressed at 70cc9b5. robin's Limn has not reviewed it and has been away for 5
-  hours." — the "Limn (x) checked " lead keeps `isLimnDismissalMessage` true on every Limn, an older one
+  `loadStandingBlockAnchors` therefore also sends the poster's EARLIER Ensemble reviews' findings to the
+  follow-up, so each can be judged. Message `teammateAwayLiftMessage`: "Ensemble (alex)
+  checked all 3 points are addressed at 70cc9b5. robin's Ensemble has not reviewed it and has been away for 5
+  hours." — the "Ensemble (x) checked " lead keeps `isLimnDismissalMessage` true on every Ensemble, an older one
   included. The run's record carries `liftedTeammateBlocks[].why = 'away'`; the tab says "Dismissed
-  robin's request for changes: every point is addressed and robin's Limn is away."
+  robin's request for changes: every point is addressed and robin's Ensemble is away."
 
 ## Still-open points (2026-11-05)
 
-**Why (PR DEFRA/bng-metric-frontend#454, local 207912):** a teammate's Limn auto review posted COMMENT
+**Why (PR DEFRA/bng-metric-frontend#454, local 207912):** a teammate's Ensemble auto review posted COMMENT
 with "Not approved: Claude didn’t approve. The change is sound and close to ready to merge, with one
 open point from the previous review." Its marker judged all 9 earlier comments `:a`, it posted no
 inline comment and reopened nothing — the PR author could not find the "open point" anywhere. RULE:
-every open point a Limn review holds is LOCATABLE: recorded, said on its thread, and listed for the
+every open point an Ensemble review holds is LOCATABLE: recorded, said on its thread, and listed for the
 author. And the prose may not name an open point that is not recorded.
 
 - **A PR-LEVEL finding** (posted as a PR comment, no thread) gets ONE "**Still open:** <reason>" PR
   comment linking it, at most once per finding EVER (§ Replies → PR-level findings).
 - **THE JUDGEMENT** (shared `still-open.ts`, ONE rule): a follow-up item `not_addressed` /
-  `partly_addressed` / `reply_disputed` on an earlier Limn finding (`isStillOpenFollowUp`), or a thread
+  `partly_addressed` / `reply_disputed` on an earlier Ensemble finding (`isStillOpenFollowUp`), or a thread
   judgement whose comment holds up (`valid` / `partly_valid`) and is `not_addressed` /
   `partly_addressed` (`isStillOpenThread`) holds a point OPEN. The reason is the judgement's own
   (`reason`, else the first sentence of `explanation`). Nothing new is stored on the run: it is
   derived from `follow_up` and `thread_assessments`.
 - **THE MARKER: `o`** (`limn-review-meta.ts`). A posted review's `j=` carries a still-open judgement of
-  ANY thread's root comment — a person's too, not only a Limn finding — as `o` (`post-meta.ts`
-  `judgedOutcomeOfFollowUp` / `judgedOutcomeOfThread`; other outcomes stay Limn-finding-only).
-  ⚠ **BACKWARD COMPATIBLE BY CONSTRUCTION:** it is written as TWO tokens, `<id>:n,<id>:o`. Every Limn
+  ANY thread's root comment — a person's too, not only an Ensemble finding — as `o` (`post-meta.ts`
+  `judgedOutcomeOfFollowUp` / `judgedOutcomeOfThread`; other outcomes stay Ensemble-finding-only).
+  ⚠ **BACKWARD COMPATIBLE BY CONSTRUCTION:** it is written as TWO tokens, `<id>:n,<id>:o`. Every Ensemble
   before it parses `^(\d{1,20}):([anx])$` and keeps the FIRST entry per id, so it reads `n` (not
   addressed — what it already understood; a person's comment id matches none of its findings and is
   ignored) and skips the `o` token; the new parser lets `o` upgrade that `n` (never an `a`/`x`) and
@@ -4301,46 +4313,46 @@ author. And the prose may not name an open point that is not recorded.
   travel in the marker (its alphabet is too small): it is the "Still open:" reply on the thread.
 - **ON GITHUB** (`review/claude-review/still-open.ts` `maybePostStillOpen`, called by
   `maybeAutoPostReview` when the run went down the posting path — `stillOpenAfterPost`: posted /
-  partial, or skipped `nothing_new` / `already_posted`; a run kept in Limn, an ineligible PR, a moved
+  partial, or skipped `nothing_new` / `already_posted`; a run kept in Ensemble, an ineligible PR, a moved
   head or a failed post writes nothing). It acts only when the PR's synced head is the reviewed head.
   WHICH THREADS (`stillOpenCandidates`): a follow-up item with a thread (`item.threadId`), the reader's
-  own or a teammate's Limn finding — `reply_disputed` ONLY on a RESOLVED thread (gap 2,
+  own or a teammate's Ensemble finding — `reply_disputed` ONLY on a RESOLVED thread (gap 2,
   `candidate.disputed`): on an unresolved one the ONE pushback reply (auto-pushback.ts) answers it, and
-  pushback never writes on a resolved one, so there it is said like any other open point; a thread judgement of a PERSON'S thread or a teammate's Limn thread —
-  never another review bot's (`authorIsBot` and no Limn root). A pair: both halves, the later half's
+  pushback never writes on a resolved one, so there it is said like any other open point; a thread judgement of a PERSON'S thread or a teammate's Ensemble thread —
+  never another review bot's (`authorIsBot` and no Ensemble root). A pair: both halves, the later half's
   word wins. THE PER-THREAD RULE (`planStillOpen`, pure):
   - **unresolved** → ONE reply, as the reader: `**Still open:** <reason>` (≤ 240 chars, two sentences
     at most, no pings, no HTML comment — `stillOpenReasonText`) + the auto-post footer + the FINDING
     marker + `<!-- pierre:claude-review-still-open v=1 h=<head> [r=1] [c=<id>] -->`. At most one per
-    thread per HEAD: this account's `reply:<node>:<head>` claim, or ANY Limn's marker with `h=` = this head.
+    thread per HEAD: this account's `reply:<node>:<head>` claim, or ANY Ensemble's marker with `h=` = this head.
   - **resolved, never reopened** → the reply (unless one is there at this head), then `unresolveReviewThread`
     (the manual unresolve's mutation), `stampThreadResolved(…, false)`. ⚠ **REOPEN AT MOST ONCE PER
     THREAD, EVER**: this account's `reopen:<node>` claim, AND any comment on the thread whose marker says
-    `r=1` — so a SECOND Limn (a teammate's, or the reader's on another machine) sees the first reopen on
+    `r=1` — so a SECOND Ensemble (a teammate's, or the reader's on another machine) sees the first reopen on
     GitHub and never reopens it again. ⚠ A failed reply leaves the thread RESOLVED (the reopen claim is
-    spent: `failed`, "The reply failed…") — Limn never reopens a thread without saying why.
+    spent: `failed`, "The reply failed…") — Ensemble never reopens a thread without saying why.
   - **resolved, reopened once already** → a WARNING or BLOCKER starts ONE new inline thread about the
     same point (`ctx.review.postFinding`: on the thread's line when not outdated, else the re-raise's
     anchored line, else the seam's file-first-change / PR-level fallback), led by its severity: "This
     point is still open. It continues [an earlier thread](…#discussion_r<root>), which was reopened once
     already." + the reason + `c=<root comment id>`. Once per thread, ever: the `escalate:<node>` claim,
-    or ANY Limn comment on the PR whose marker carries that `c=`. A nit, a question, or a point with no
+    or ANY Ensemble comment on the PR whose marker carries that `c=`. A nit, a question, or a point with no
     known severity (a person's comment) is left as it is — no reply spam. A new thread refused because
     the head moved wrote nothing: its claim is released. ⚠ A CONTINUATION (its own root carries `c=`)
     is never continued again (`escalatedBefore`): one new thread per point, ever.
   - ⚠ **THE READER'S OWN PR (decision D2, `facts.ownPr` = `prAuthorIsAccount`)**: never `unresolve`,
     never a new thread. The reply only: once per head on an unresolved thread, ONCE EVER on a resolved
-    one (`repliedBefore`: any Limn's still-open marker on the thread, or any `reply:<node>:*` claim).
+    one (`repliedBefore`: any Ensemble's still-open marker on the thread, or any `reply:<node>:*` claim).
   - ⚠ **A THREAD THE READER RESOLVED (decision D4, 2026-11-09; `facts.resolvedByReader`, from
     `review_threads.resolved_by_login` = the account's login, kept only while GitHub's live read still
     says resolved)**: NOTHING — no reply, no reopen, no new thread, on any PR. The reader's resolve is
-    their decision; Limn shows what is still needed and the row's "Post still open" posts it (§ The
+    their decision; Ensemble shows what is still needed and the row's "Post still open" posts it (§ The
     one-line how). The reason posted anywhere is the item's how first, its explanation on an older row.
   - ⚠ **READ GITHUB LIVE BEFORE WRITING (gap 3)**: when the synced facts plan a write, ONE small GraphQL
     read of that thread (`deps.liveThread`: `node(id)` → `isResolved`, its last 100 comments, and the
     PR's thread roots for `c=`), outside any transaction, is folded in (`mergeLiveFacts`: reply-at-head,
     reopen and continuation are the UNION of both readings; `resolved` is GitHub's live word) and the
-    plan is made again — so two Limns at one head that have not synced each other do not both reply,
+    plan is made again — so two Ensemble installs at one head that have not synced each other do not both reply,
     reopen or continue. A disputed point found UNRESOLVED live is left to the pushback. ⚠ A FAILED read
     writes nothing: a `read:<node>:<head>` row, `failed`, "Nothing written: couldn't read the thread on
     GitHub first (…)", and that thread is not tried again at that head (`result.unread`).
@@ -4349,19 +4361,19 @@ author. And the prose may not name an open point that is not recorded.
     (the unique index IS the compare-and-set), then `posted` (+ `comment_id`) / `failed` (+ GitHub's
     words). Composite FK onto `pull_requests` (cascade); erased; in `accountScopedTables()`. No
     transaction spans a fetch. After any write: the PR change signal + `settlePrAfterWrite`.
-  - The reply is Limn's word, never the person's: shared `limnFindingPost` reads the `**Still open:**`
+  - The reply is Ensemble's word, never the person's: shared `limnFindingPost` reads the `**Still open:**`
     lead as `{stillOpen: true}`, so sync stores it under the `limn:<poster>` bot (it never counts as a
     person's answer and never returns the ball); the teammate import skips it (never a finding);
     `deriveThreadState` ignores a still-open-marked comment as a reply (fixture
     `09-limn-still-open-reply-is-not-a-reply.json`). The NEW thread IS a finding (severity lead +
-    finding marker): a teammate's Limn imports it as one.
+    finding marker): a teammate's Ensemble imports it as one.
   - **CONTINUATIONS ARE FOLLOWED (gap 8).** THE MAPPING lives on GitHub: the new thread's ROOT carries
     `c=<earlier root comment id>` (this account's `escalate:<node>` row also keeps the new root's
     `comment_id`). ONE pure reader, shared `continuationThreadMap(comments)` → earlier thread id → its
     continuation (thread roots only, the oldest continuation wins, chains followed). Its readers:
     finding-replies.ts `loadFindingThreadContexts` (the follow-up of the reader's own finding) and
     auto-resolve / auto-pushback follow the reader's OWN continuation (`followOwnContinuation`: root by
-    the account's login with Limn's marker) — a teammate's continuation is their Limn's thread, judged as
+    the account's login with Ensemble's marker) — a teammate's continuation is their Ensemble's thread, judged as
     one; db/review-threads-for-review.ts sends a continued non-own thread ONCE, as its continuation
     (its id, place and state; the earlier thread's comments, then the continuation's — an own-rooted
     continuation included); `getThreadJudgements` moves a still-open word from the earlier thread to its
@@ -4390,26 +4402,26 @@ author. And the prose may not name an open point that is not recorded.
   /api/claude-review/thread-judgements`, `getThreadJudgements`): each judgement may carry
   `stillOpen: ClaudeThreadStillOpen {by, reason, at, headSha, severity, path, line, threadResolved}` —
   the NEWER of the reader's own word (the fold's thread judgement, or the newest follow-up item on a
-  Limn finding) and a TEAMMATE'S (`teammateStillOpenWordsForPrs`: every imported teammate review's
-  `j=` entry matched to the thread's ROOT comment databaseId, its reason from that Limn's newest
+  Ensemble finding) and a TEAMMATE'S (`teammateStillOpenWordsForPrs`: every imported teammate review's
+  `j=` entry matched to the thread's ROOT comment databaseId, its reason from that Ensemble's newest
   "Still open:" reply on the thread). A teammate's later `a` lifts the reader's older still-open and
-  the reverse (`newerStillOpenWord`). A thread only a teammate's Limn judged is listed with
+  the reverse (`newerStillOpenWord`). A thread only a teammate's Ensemble judged is listed with
   `teammateOnly: true` (validity/addressed read valid / not addressed). ⚠ `currentThreadAssessmentsForPrs`
   itself is NOT changed: it feeds the next run's carry and the check's plan, which must never adopt a
   teammate's word as the reader's own; the teammate layer is applied on read, for display.
-  - **Threads tab + Changes**: a teammate's still-open wears ONE pill "Robin’s Limn: still open"
+  - **Threads tab + Changes**: a teammate's still-open wears ONE pill "Robin’s Ensemble: still open"
     (`claudeThreadMarker.ts` `stillOpenLabel`, `ClaudeThreadPills`) and its reason line reads "Robin’s
-    Limn: still open — <reason>". The reader's own still-open reads in the existing pills.
+    Ensemble: still open — <reason>". The reader's own still-open reads in the existing pills.
   - **PR Overview → AI review card**: "Still open (N)" (`PrOverviewAiReview` `StillOpenList`,
     `stillOpenPoints`), unresolved first: path:line (a link through PrDetail `showThread`), whose
-    Limn, "resolved on GitHub" when it was resolved again, and the reason. ⓘ explains.
+    Ensemble, "resolved on GitHub" when it was resolved again, and the reason. ⓘ explains.
   - **My Turn** (`db/still-open-threads.ts`, joined into the `own_thread` promotion in `getMyTurn`):
-    on the reader's OWN open PR, a thread a Limn holds open becomes the `own_thread` card (it replaces
+    on the reader's OWN open PR, a thread an Ensemble holds open becomes the `own_thread` card (it replaces
     an "Unanswered thread" card for the same thread — one card per thread, and `onePerPr` still
-    applies), `since` = the judgement, `own.stillOpen {by, reason, severity}`, heading "Robin’s Limn:
+    applies), `since` = the judgement, `own.stillOpen {by, reason, severity}`, heading "Robin’s Ensemble:
     still open on src/x.ts", the reason on the card. THE BALL RULE, state-derived
     (`stillOpenOwesAuthor`): only while the judgement was made at the PR's CURRENT head, the thread is
-    unresolved, and the author has not replied on it since (a Limn post never counts). Dismissible like
+    unresolved, and the author has not replied on it since (an Ensemble post never counts). Dismissible like
     every My Turn row (subject: the thread). Gated on `config.aiEnabled`.
 
 ## Chat about a review
@@ -4593,7 +4605,7 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
 - **THE PER-CHANGE REPORT** (`sandbox/workspace/fix-report.ts`). The agent writes ONE JSON FILE,
   `<root>/.limn/fix-report.json`, in the `submit_fix` shape (`coding/schema.ts`): `summary`,
   `commitMessage`, `changes: [{path, summary, refs}]` (one per changed file, 1–3 sentences) and
-  `unaddressed: [{ref, reason}]`, and runs the checker Limn copied in (`node ~/.limn/fix-report-check.cjs`)
+  `unaddressed: [{ref, reason}]`, and runs the checker Ensemble copied in (`node ~/.ensemble/fix-report-check.cjs`)
   until it prints OK. A FILE, not a tool: the sandbox drivers run no MCP server, nothing on the host
   listens for the sandbox, and a file is the same on both providers. After every build turn the host reads
   it, checks it with the SAME validator text the checker carries (`FIX_REPORT_VALIDATOR_SOURCE`), then
@@ -4648,8 +4660,8 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   ⚠ **WHAT IT CARRIES** is the workspace's
   "Always include" sections (`workspaces.auto_fix_settings.include`, overrides only, resolved by
   `resolveAutoFixSettings`; default every section but style bots and merge conflicts; never ticket
-  items) — the same selection reaches the rule-6 seed and the start. ⚠ **EVERY LIMN FINDING COUNTS**
-  (2026-11-10): "Limn's findings" are the WHOLE review — a pair's two halves (`getReviewView`) — and,
+  items) — the same selection reaches the rule-6 seed and the start. ⚠ **EVERY ENSEMBLE FINDING COUNTS**
+  (2026-11-10): "Ensemble's findings" are the WHOLE review — a pair's two halves (`getReviewView`) — and,
   when one half failed, the other half's COVER PASS (a `kind = 'replies'` row with `followUp.cover`,
   at the review's head, before the PR's next full review) joins the follow-up, so the failed
   provider's earlier findings it found still open are `P` items (`coding/ai-fix/manager.ts`
@@ -4704,8 +4716,8 @@ session, so a reader who wants to talk first unticks it. An automatic fix never 
 
 ### The fix start queue (`coding/ai-fix/start-queue.ts`, 2026-11-12)
 
-Up to `LIMN_SANDBOX_MAX_BUILDS` (3) fixes BUILD at once (story builds share the slots; the open-session cap,
-`LIMN_SANDBOX_MAX_SESSIONS`, is 4). Before, a second fix was refused (`409 BuildBusy`) and an auto fix skipped
+Up to `ENSEMBLE_SANDBOX_MAX_BUILDS` (3) fixes BUILD at once (story builds share the slots; the open-session cap,
+`ENSEMBLE_SANDBOX_MAX_SESSIONS`, is 4). Before, a second fix was refused (`409 BuildBusy`) and an auto fix skipped
 `sandbox_busy` until the next sweep. Now a start that finds every slot taken WAITS IN LINE (`StartFixInput
 .queueIfBusy`, set by the reader's press and the auto fix; never dependency automation) and starts the moment
 a slot frees — `onSessionSlotFreed` (sandbox/session/manager.ts: a reservation released, a build turn ended, a
@@ -4723,7 +4735,7 @@ session closed), plus the auto fix queue's minute sweep as a backstop.
   current head); an auto entry asks `evaluateAutoFix` again.
 - **ROOM**: an unattended fix closes its sandbox after its turn, but a reader's fix session stays open for
   follow-ups. When every SANDBOX is open and a fix waits, the longest-idle FIX session (idle ≥
-  `LIMN_SANDBOX_RECLAIM_IDLE_SECONDS`, 60) is closed with its work kept (`reclaimIdleFixSession`, built and
+  `ENSEMBLE_SANDBOX_RECLAIM_IDLE_SECONDS`, 60) is closed with its work kept (`reclaimIdleFixSession`, built and
   resumable, "Closed to make room for another fix that was waiting."); never a story session. Nothing idle
   yet ⇒ the pump looks again every 30 s.
 - **In memory**: a restart drops the line (an auto fix is asked again by the sweep; a reader presses again).
@@ -4745,7 +4757,7 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
    1½. the latest fix was PUSHED from the synced head ⇒ `push_settling` until the sync sees the new head
    (else that head's review and CI causes would be fixed a second time);
 2. the head's CI jobs STILL RUN ⇒ `ci_running`, at most `AUTO_FIX_CI_WAIT_MAX_MS` (45 min). A LIVE read
-   (`github/mutations.ts fetchPrHeadCheckCounts`, the rollup query counted per context, Limn's lines out),
+   (`github/mutations.ts fetchPrHeadCheckCounts`, the rollup query counted per context, Ensemble's lines out),
    asked only when the synced `ci_status` is pending / expected / failure / error: the synced rollup reads
    FAILURE as soon as ONE job fails while others run;
 3. CI failed and the CI review of this head is running, or due (none yet, auto review on) ⇒ `ci_review`, at
@@ -4808,12 +4820,12 @@ FIRST and TICKED whenever the PR conflicts with its base on its synced merge sta
 and the reader can push (`pr-context.ts` `getFixMergeOffer`). It is rendered as a row like the others and
 needs no AI review and no CI item (alone, its seed reads "Resolve the merge conflicts below (ref MERGE).
 Change nothing else."; with other items, one line says to merge first). It runs INSIDE the sandboxed
-session with the picked agent (Claude Code or Codex), together with every other ticked item: Limn starts the
+session with the picked agent (Claude Code or Codex), together with every other ticked item: Ensemble starts the
 merge of the base tip before the agent starts, FIX.md's "First: the merge conflicts" section says how to
 finish it (judgement, no duplicated or dropped lines, `git commit` makes the merge commit, then the other
 fixes on top), and the host checks the agent's commits before anything can push ([SANDBOX.md](SANDBOX.md)
-§ AI Fix sessions, "The merge"). Limn's check wins over the report: a merge that fails it is MERGE "not
-addressed" with Limn's reason, and the fix does not push at all. The reader reviews the resolution
+§ AI Fix sessions, "The merge"). Ensemble's check wins over the report: a merge that fails it is MERGE "not
+addressed" with Ensemble's reason, and the fix does not push at all. The reader reviews the resolution
 (`AiFix.merge.resolutionDiff`) apart from the fix on top (`AiFix.patch`). ⚠ **In an AUTO fix only with
 the workspace's `AutoFixInclude.conflicts`** ("Merge conflicts with the base branch" under Always include,
 OFF by default; 2026-11-10 — it was never, by one constant, `AUTO_FIX_RESOLVES_CONFLICTS`, now deleted).
@@ -5256,25 +5268,25 @@ design diagrams, Check threads), AI Fix (+ Plan first), Resolve with Claude (rem
 reference-docs library, sprint briefs/paths and every one-shot completion. Details:
 [docs/CLAUDE-REVIEW.md](CLAUDE-REVIEW.md). Non-negotiables:
 
-- **ONE switch, `config.aiEnabled` = `LIMN_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
+- **ONE switch, `config.aiEnabled` = `ENSEMBLE_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
   registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth`; no
   credential swaps the Run button for ONE line, never hides the feature.
 - **ONE CREDENTIAL LADDER FOR EVERY MODEL CALL** (`ai/credentials.ts` `resolveAiCredential`): the
   reader's Claude Code login first (a `claude` session on disk or `CLAUDE_CODE_OAUTH_TOKEN`), else
-  the environment's `ANTHROPIC_API_KEY`; `LIMN_AI_USE_API_KEY=true` puts the key first. Agent runs
+  the environment's `ANTHROPIC_API_KEY`; `ENSEMBLE_AI_USE_API_KEY=true` puts the key first. Agent runs
   pass the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never
   sees the key); one-shot `cheapComplete` (review/llm.ts) takes the Agent SDK on the login and the
   Anthropic API on the key. **No caller picks its own credential, and nothing is stored.** Copy
   says "runs on your own Claude Code login or Anthropic API key", never promises subscription
   billing. Per-review budget: `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded
   (`recordAiUsage`), never metered.
-- **No AI SDK in the npm manifest** — downloaded on the first boot (`ai/auto-install.ts`) / `limn ai install`
+- **No AI SDK in the npm manifest** — downloaded on the first boot (`ai/auto-install.ts`) / `ensemble ai install`
   and value-imported ONLY by `ai/runtime.ts` (`loadAgentSdk`/`loadAnthropicSdk`/`loadZod`);
   `build-release.mjs` asserts it.
 - **THE CLAUDE SPEND BUDGET** (optional, per machine, `ai/budget.ts`): ⚠ **every AUTOMATIC model
   run asks the ONE gate first** (`review/budget-gate.ts` `automaticRunAllowed` / `ctx.aiBudget`) and
   is SKIPPED, never queued, when over; a reader's click is never refused (the SPA asks). On a
-  subscription it is a share of the week and of the 5-hour session (Limn's own spend ÷ the estimated
+  subscription it is a share of the week and of the 5-hour session (Ensemble's own spend ÷ the estimated
   allowance; the 5-hour share follows the weekly one unless set) shown in PERCENTAGES ONLY — no US$
   on a subscription anywhere; the header item reads the SAME `['ai-budget']` query. Claude's usage
   reading (from the
@@ -5288,7 +5300,7 @@ reference-docs library, sprint briefs/paths and every one-shot completion. Detai
   (`review/path-guard.ts`). Anything an agent reads from a PR is UNTRUSTED.
   ⚠ **THE ONE SHELL EXCEPTION: the workspace session** ("Implement story", docs/SANDBOX.md). Its Claude
   Code or Codex agent has a full shell, ONLY inside a sandbox `sandbox/runtime` started (no GitHub
-  credential, no Docker socket, no writable host mount, the only way out Limn's allow-list proxy). It
+  credential, no Docker socket, no writable host mount, the only way out Ensemble's allow-list proxy). It
   does NOT go through `ai/provider.ts` `runAgent`: the two drivers (`sandbox/drivers/claude.ts`
   `claude -p --input-format stream-json`, `sandbox/drivers/codex.ts` `codex app-server`) are the only
   code that starts either CLI in a sandbox, and neither picks its own model or effort (both come from
@@ -5306,7 +5318,7 @@ reference-docs library, sprint briefs/paths and every one-shot completion. Detai
   `isLimnPostedComment` holds.
 - **Auto review is OFF per workspace until switched on**; ONE start rule (`autoReviewDue`); it
   re-reviews once per new HEAD; only a PERSON's or a REVIEW bot's (`=== 'review'`) comments count,
-  never Limn's own. A succeeded auto run on the reader's own PR may start an AUTO FIX (≤ 3 per PR
+  never Ensemble's own. A succeeded auto run on the reader's own PR may start an AUTO FIX (≤ 3 per PR
   per 24h, `workspaces.auto_fix_enabled` OFF by default).
 - **Thread judgements**: "what Claude says now" is ONE fold, `currentThreadAssessmentsForPrs`
   (latest review + later Check threads, newer wins); words only from `lib/claudeThreadMarker.ts`.
@@ -5339,8 +5351,8 @@ Reviews vary run to run (sampling with no temperature control, model-chosen expl
 specialists, the confirm-or-drop threshold). To compare setups, `scripts/review-eval.mjs` runs N
 FRESH reviews per PR through the local API and scores each against a hand-written list of KNOWN
 issues: per-issue hit rate, recall per run, unmatched findings, words and cost. The cases file lives
-OUTSIDE the repo (`~/.limn/review-eval/cases.json`: it describes a team's private code); results go to
-`~/.limn/review-eval/results/`. `--score <results.json>` re-scores saved runs after a pattern is
+OUTSIDE the repo (`~/.ensemble/review-eval/cases.json`: it describes a team's private code); results go to
+`~/.ensemble/review-eval/results/`. `--score <results.json>` re-scores saved runs after a pattern is
 refined. A manual run never posts, but each becomes that PR's latest review in the app.
 
 **First results (2026-11-01, 18 known issues on 5 PRs, fresh runs):** Claude Opus alone 46% mean

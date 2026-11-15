@@ -1,6 +1,6 @@
 # SonarCloud
 
-CORE. A workspace can save a SonarCloud token; Limn then reads each pull request's
+CORE. A workspace can save a SonarCloud token; Ensemble then reads each pull request's
 SonarCloud analysis and feeds it to Claude Review, AI Fix and one GitHub review per commit. Code: `apps/backend/src/sonar/`
 (server), `apps/frontend/src/components/ClaudeReviewSonar.tsx` + `components/settings/SonarSection.tsx`
 (SPA), shared types in `packages/shared/src/sonar.ts`.
@@ -166,15 +166,15 @@ default since 2026-11-04) and the PR passes `autoPostEligibility` (open, not a d
 `mine` yours). A decision NOT to post writes nothing, so a person can still post by hand.
 ⚠ **THE LATE POST** (2026-11-11, `sonar/late-post.ts`): the run-end try usually finds "not analysed
 yet" — the review starts on the push, SonarCloud lands minutes later — and before this nothing tried
-again, so no Limn ever posted that commit's issues while AI Fix listed them. A per-minute sweep
+again, so no Ensemble ever posted that commit's issues while AI Fix listed them. A per-minute sweep
 (`SONAR_LATE_CRON`, registered where auto review can run) lists, from rows, each head this account's
-Limn AUTO-reviewed (succeeded, `kind IS NULL`) in the last `SONAR_LATE_WINDOW_MS` (2 h) that is still the
+Ensemble AUTO-reviewed (succeeded, `kind IS NULL`) in the last `SONAR_LATE_WINDOW_MS` (2 h) that is still the
 open PR's synced head, in a workspace with SonarCloud saved, whose snapshot is missing or read
 `not_analyzed` / `error` and is due a re-read by snapshot.ts's own clocks (`lateSonarDue`), at most
 `SONAR_LATE_PER_TICK` (10) a tick, and hands each to `maybeAutoPostSonar` — the SAME decision as at
 the run's end (switch, `sonar` kind, eligibility, claim before the write). An `ok` read leaves the list
 whether or not it posted; a state waiting cannot change (`no_project`, `unauthorized`, …) never joins it.
-A head this Limn did not auto-review (a manual run, a teammate's claim held it) is not posted
+A head this Ensemble did not auto-review (a manual run, a teammate's claim held it) is not posted
 automatically: its "Post SonarCloud findings" button is the way.
 
 The post route registers **locally only**: it posts through the reader's `gh` session, like every

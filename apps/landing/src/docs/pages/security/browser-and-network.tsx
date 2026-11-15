@@ -3,7 +3,7 @@ import { DocLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Browser and network protections',
-  summary: 'Why only your own browser can reach Limn, and what Limn sends over the network.',
+  summary: 'Why only your own browser can reach Ensemble, and what Ensemble sends over the network.',
 };
 
 const OUT_COLS = [
@@ -12,7 +12,7 @@ const OUT_COLS = [
   { key: 'when', label: 'When' },
 ];
 const OUT_ROWS = [
-  { _key: 'gh', to: 'GitHub', what: 'Reads of your repositories; the writes you press or switch on', when: 'Always, while Limn runs' },
+  { _key: 'gh', to: 'GitHub', what: 'Reads of your repositories; the writes you press or switch on', when: 'Always, while Ensemble runs' },
   { _key: 'ai', to: 'Anthropic or OpenAI', what: 'Code, diffs, pull request and ticket text, docs sections for each AI run', when: 'When an AI run starts' },
   { _key: 'tracker', to: 'Jira, Linear, Notion or GitHub Issues', what: 'Reads of linked tickets; two Jira writes you press', when: 'Once a tracker is set up' },
   { _key: 'wiki', to: 'Confluence or Notion', what: 'Reads of the pages you add to Docs', when: 'When you add or refresh a document' },
@@ -25,31 +25,31 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn has no sign-in of its own, so it protects itself a different way: only your own computer can reach it,
-        and only Limn&rsquo;s own pages can use it. This page explains those protections in plain terms, and lists
-        everything Limn sends over the network.
+        Ensemble has no sign-in of its own, so it protects itself a different way: only your own computer can reach it,
+        and only Ensemble&rsquo;s own pages can use it. This page explains those protections in plain terms, and lists
+        everything Ensemble sends over the network.
       </p>
 
-      <H2 id="only-your-computer">Only your computer can reach Limn</H2>
+      <H2 id="only-your-computer">Only your computer can reach Ensemble</H2>
       <H3>It listens on this computer only</H3>
       <p>
-        Limn listens on your computer&rsquo;s own internal address (localhost), not on your network. Other computers on
+        Ensemble listens on your computer&rsquo;s own internal address (localhost), not on your network. Other computers on
         your Wi-Fi or office network cannot open it.
       </p>
       <H3>Other websites cannot read it</H3>
       <p>
-        A web page you have open in another tab could try to talk to Limn in the background. Limn answers only pages
+        A web page you have open in another tab could try to talk to Ensemble in the background. Ensemble answers only pages
         served from your own computer, so another site cannot read your data. It also refuses any request from another
         site that would change something, such as posting a comment or merging.
       </p>
       <H3>Disguised addresses are refused</H3>
       <p>
-        A hostile site can try to reach Limn through a web address that secretly points at your computer. Limn refuses
+        A hostile site can try to reach Ensemble through a web address that secretly points at your computer. Ensemble refuses
         any request that does not use a local address, so that trick fails too.
       </p>
       <H3>The app loads nothing from elsewhere</H3>
       <p>
-        The app&rsquo;s pages run only Limn&rsquo;s own scripts and fonts, and cannot be shown inside another site.
+        The app&rsquo;s pages run only Ensemble&rsquo;s own scripts and fonts, and cannot be shown inside another site.
         Images in comments are the one exception: they load from wherever their author put them, as they do on GitHub.
       </p>
       <H3>Costly actions are rate limited</H3>
@@ -58,15 +58,15 @@ export default function Page(): JSX.Element {
         cannot run them in a loop.
       </p>
       <Warning>
-        These protections assume Limn is reached at localhost. Do not put Limn behind a tunnel, a reverse proxy or a
+        These protections assume Ensemble is reached at localhost. Do not put Ensemble behind a tunnel, a reverse proxy or a
         shared server: it has no sign-in, so anyone who can reach it can read your data and act as you.
       </Warning>
 
       <H2 id="what-leaves-your-computer">What leaves your computer</H2>
-      <p>Limn talks only to the services below, and only to the ones you use:</p>
+      <p>Ensemble talks only to the services below, and only to the ones you use:</p>
       <MiniTable cols={OUT_COLS} rows={OUT_ROWS} />
       <p>
-        Limn sends nothing to its author. What each AI provider does with the work it
+        Ensemble sends nothing to its author. What each AI provider does with the work it
         receives is on <DocLink to="settings/how-providers-treat-your-work">How Anthropic and OpenAI treat your work</DocLink>
         .
       </p>

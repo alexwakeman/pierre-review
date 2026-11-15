@@ -19,7 +19,7 @@ before the spike:
 
 Everything ran on Linux: a Firecracker VM with kernel 6.18, running as root, using
 `srt` 0.0.83, bubblewrap 0.9.0, socat and Claude Code 2.1.323. The example repo is this repo.
-The example story is "LIMN-42", the Jira end-to-end comment change at `c7f6268`.
+The example story is "ENSEMBLE-42", the Jira end-to-end comment change at `c7f6268`.
 
 1. `spike.mjs` drives the `srt` library directly. It opens a chat, probes the boundary, times
    the commands and checks the reaper.
@@ -84,12 +84,12 @@ Turn 1 ("test strategy for this story's PR"):
 ## Findings that change the design
 
 1. **`srt` passes the host environment through.** Without an allow-list, `GH_TOKEN`,
-   `GITHUB_TOKEN` and AWS keys were visible inside the sandbox. Limn must spawn the agent, and
+   `GITHUB_TOKEN` and AWS keys were visible inside the sandbox. Ensemble must spawn the agent, and
    so every sandboxed command, with an ALLOW-LISTED environment. Keep PATH, HOME, locale and CA
    variables, plus the provider's sign-in variables. Never the reader's whole shell.
 2. **Unix socket path limit.** On Linux, `srt` keeps its proxy bridge sockets under `TMPDIR`. A
    long `TMPDIR` (over about 108 bytes) makes start-up fail with "Failed to create bridge
-   sockets". Chat roots must be SHORT, for example `~/.limn/q/<6-char id>`, and on Linux
+   sockets". Chat roots must be SHORT, for example `~/.ensemble/q/<6-char id>`, and on Linux
    preferably under `/tmp` or `$XDG_RUNTIME_DIR`.
 3. **`NO_PROXY` leaks into `srt`'s own proxy.** When the host's `NO_PROXY` names a host,
    `srt`'s upstream goes direct for that host, and inside the sandbox curl bypasses the proxy and
@@ -107,7 +107,7 @@ Turn 1 ("test strategy for this story's PR"):
    a worktree that git still listed after its folder had gone. `spike.mjs --reap-only` now
    removes any worktree under the chat root that has no activity stamp.
 7. **The repo's own `.claude/settings.local.json` is picked up** through the worktree (it was
-   ignored as untrusted). Limn must decide whether a chat honours the repo's project settings.
+   ignored as untrusted). Ensemble must decide whether a chat honours the repo's project settings.
    It should load CLAUDE.md (the project memory), but never the permission allow-lists.
 
 ## Proposed design (for discussion)
@@ -115,7 +115,7 @@ Turn 1 ("test strategy for this story's PR"):
 ```
 Story view ──"Ask"──► quick-chat manager (backend)
                          │ 1. open: worktree per repo at the PR head (or default branch),
-                         │    node_modules linked, short root ~/.limn/q/<id>
+                         │    node_modules linked, short root ~/.ensemble/q/<id>
                          │ 2. seed: the SAME fold as builds (sandbox/workspace/seed.ts):
                          │    ticket, PRs + diffs, CI, story-check verdicts, memories
                          │ 3. agent: one warm `claude` (stream-json) / `codex app-server`,
@@ -128,9 +128,9 @@ Story view ──"Ask"──► quick-chat manager (backend)
 - **Pre-warming.** Opening a story view prepares the chat: the worktree is opened and the agent
   process is started, at most N at a time. "Ask" then answers in about a second. This could also
   be done on hover, or for the stories in This Sprint.
-- **Saved chats.** Turns are stored in Limn's DB against the ticket. Reopening resumes the
+- **Saved chats.** Turns are stored in Ensemble's DB against the ticket. Reopening resumes the
   provider's own session: Claude `--resume`, which was tested here, or a Codex thread. The
-  sessions live in a Limn-owned config folder, so this is Limn's history and never an import of
+  sessions live in an Ensemble-owned config folder, so this is Ensemble's history and never an import of
   the reader's. "Pin to story" turns an answer into a note that later builds and Fill gaps read.
 - **Cleanup: the 10-minute rule.**
   - Every turn and every keep-alive from an open story view touches `.limn-last-active`.

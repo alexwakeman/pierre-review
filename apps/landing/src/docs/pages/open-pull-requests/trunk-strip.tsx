@@ -35,7 +35,7 @@ export default function Page(): JSX.Element {
       </ul>
       <p>
         Each row also says which pull request the latest commit came from, and how long ago. Choose the
-        pull request's number to open it in Limn.
+        pull request's number to open it in Ensemble.
       </p>
 
       <Illustration
@@ -60,7 +60,7 @@ export default function Page(): JSX.Element {
             <Ui>Trunk CI · daily</Ui>
           </b>
           : one cell per day, coloured by how the branch's checks went, with the number of pull requests merged
-          that day above the cells. Hover a cell for its counts. It covers the days Limn keeps history for.
+          that day above the cells. Hover a cell for its counts. It covers the days Ensemble keeps history for.
         </li>
         <li>
           <b>

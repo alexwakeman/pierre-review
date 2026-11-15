@@ -14,7 +14,7 @@
 > [settle sweep](#settle-sweep) in place of the blind 30-minute re-walk floor, and a 3h insurance
 > walk. Idle cost on a 9-repo workspace: ~270 → ~100 GraphQL points/hour ([§ Cost](#free-cadence-cost)).
 >
-> **No webhooks.** Limn runs on the reader's machine, behind NAT, with no public endpoint for
+> **No webhooks.** Ensemble runs on the reader's machine, behind NAT, with no public endpoint for
 > GitHub to deliver to, and most tracked repos are ones the reader could not install a webhook
 > on anyway (an installation or a repo webhook needs admin). Adaptive polling needs no
 > cooperation from anyone and is simultaneously *fresher* on active repos and *cheaper* on
@@ -68,7 +68,7 @@ Local can't be a webhook target: it sits behind NAT, and the official `gh webhoo
 extension
 ([docs](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/using-the-github-cli-to-forward-webhooks-for-testing),
 [cli/gh-webhook](https://github.com/cli/gh-webhook)) requires **admin** on each repo to
-create the webhook (Limn monitors repos you often don't own), is **"dev/testing only,
+create the webhook (Ensemble monitors repos you often don't own), is **"dev/testing only,
 not production"**, and locks to **one user per repo**. So the lever is cheaper, adaptive
 polling — not push.
 
@@ -253,11 +253,11 @@ nodes { isResolved } }`, plus the default branch's head oid. **Measured 2026-10-
   (`nodes.length !== totalCount`), a nulled repo, a partial list (more pages than read) — each
   compares as equal / infers nothing. The sweep writes no column itself: `persistPr` and
   `applyPrLiveness` keep their "cleared only on a positive statement" guards.
-- ⚠ **LIMN'S OWN `limn/…` LINES ARE NOT CI.** A head carrying one (seen in the free legacy status
+- ⚠ **ENSEMBLE'S OWN `ensemble/…` LINES ARE NOT CI.** A head carrying one (seen in the free legacy status
   list) is judged on `fetchRollupsWithoutLimn` (~1 point per 10 heads) only when the raw state
-  could hide a change: PENDING always (a pending Limn line masks CI finishing), SUCCESS whenever
+  could hide a change: PENDING always (a pending Ensemble line masks CI finishing), SUCCESS whenever
   the stored CI is not `success` — a stored `unknown` included (a head persisted before any check
-  registered: green-Limn-over-nothing and CI-that-passed look the same raw). A failed recompute
+  registered: green-Ensemble-over-nothing and CI-that-passed look the same raw). A failed recompute
   leaves that CI unjudged.
 - ⚠ **LOOP-PROOF.** Each re-sync that LANDED (`syncOnePr` → true) remembers the observation it
   acted on (`actedOn`, bounded); the same answer is never paid for twice, so a field `persistPr`
@@ -288,7 +288,7 @@ more "every 5 minutes / next sync" countdown — every repo has its own cadence)
 | Insurance walk (3h) | — | 9 × ~20 pts ÷ 3h ≈ 60/h |
 | Settle sweep (all cold: 4/h) | — | ~9 pts × 4 ≈ 36/h (a hot/warm repo: ~1 pt per 5 min) |
 | Trunk-moved recheck | after our own merges | + 2 pts per observed trunk move with open PRs |
-| Limn-free CI recompute | — | ~1 pt per 10 PENDING heads carrying a `limn/` line, per sweep |
+| Ensemble-free CI recompute | — | ~1 pt per 10 PENDING heads carrying an `ensemble/` or `limn/` line, per sweep |
 
 **Idle total ≈ 96-110 points/hour** (was ~270), an estimate from the code and the measured
 per-query costs. Activity adds a walk (~15-20 pts) per changed repo at most once a minute, and ~1
