@@ -5,9 +5,10 @@
 // compositor. Elsewhere it reproduces the same two mappings, writing only a
 // transform per layer per frame (rAF, passive listener):
 //   lead     apart = 1 − scrollY / (0.6 × viewport height)
-//   others   apart = 1 − progress from "contain 0%" to "contain 30%" of its own view
-//            timeline: from its bottom edge reaching the viewport's bottom (wholly
-//            on screen), over the next 30% of (viewport height − its height).
+//   others   apart = 1 − progress from "entry 0%" to "contain 30%" of its own view
+//            timeline: from its top edge reaching the viewport's bottom, through
+//            its own height, and 30% of (viewport height − its height) more.
+// A swirl picture turns and scales instead: rotate(−180° × apart), scale(1 + 0.8 × apart).
 // CSS already paints every layer apart, so nothing flashes before this runs.
 // ---------------------------------------------------------------------------
 
@@ -17,6 +18,7 @@ interface Track {
   el: HTMLElement;
   layers: SVGSVGElement[];
   lead: boolean;
+  swirl: boolean;
   last: number;
 }
 
@@ -27,6 +29,7 @@ export function startArcMotion(root: HTMLElement): () => void {
     el,
     layers: Array.from(el.querySelectorAll<SVGSVGElement>('.layer')),
     lead: el.classList.contains('lead'),
+    swirl: el.classList.contains('swirl'),
     last: -1,
   }));
   if (tracks.length === 0) return () => undefined;
@@ -39,14 +42,19 @@ export function startArcMotion(root: HTMLElement): () => void {
     const aparts = tracks.map((t) => {
       if (t.lead) return clamp(1 - window.scrollY / (vh * 0.6));
       const r = t.el.getBoundingClientRect();
-      // contain 0% = bottom at the viewport's bottom; contain 30% = 30% of (vh − height) later
-      return clamp(1 - (vh - r.bottom) / (Math.max(vh - r.height, 1) * 0.3));
+      // entry 0% = top at the viewport's bottom; contain 30% = its height + 30% of (vh − height) later
+      return clamp(1 - (vh - r.top) / (r.height + Math.max(vh - r.height, 0) * 0.3 || 1));
     });
     tracks.forEach((t, i) => {
       const a = aparts[i] ?? 0;
       if (Math.abs(a - t.last) < 0.0005) return;
       t.last = a;
-      const tf = a === 0 ? 'none' : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
+      const tf =
+        a === 0
+          ? 'none'
+          : t.swirl
+            ? `rotate(${(-180 * a).toFixed(2)}deg) scale(${(1 + 0.8 * a).toFixed(4)})`
+            : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
       for (const l of t.layers) l.style.transform = tf;
     });
   };
