@@ -3,10 +3,11 @@ import { INSTALL_COMMAND, SITE_NAME } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
 
 // ---------------------------------------------------------------------------
-// The hero: the claim, the command, and the site's lead picture, the QUARTET
-// (components/arcs): four quarters facing one centre that close in as the reader
-// scrolls, an ensemble as a conversation, which is what a review is. Under the claim,
-// the CHAIN (quarters linked end to end) beside Poincaré's line on the ensemble and the details.
+// The hero: the claim, the command, and the site's big picture, the CHAIN
+// (components/arcs): quarters linked end to end whose links start mirrored across
+// the tile and cross through each other into place as the reader scrolls. Under the
+// claim, the QUARTET (four quarters facing one centre, closing in) beside Poincaré's
+// line on the ensemble and the details. Both are lead pictures (always drawn).
 //
 // ⚠ "Fully local, no added service" is the claim, and it is exact: the app runs on each
 // person's machine and talks only to GitHub, their tracker and their own AI provider.
@@ -30,7 +31,7 @@ export function Hero(): JSX.Element {
         </div>
       </div>
       <div className="tile art p1">
-        <Chain lead label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />
+        <Quartet lead label="Four banded quarter-circles in four colours, facing one centre" />
       </div>
       <figure className="tile motto">
         <blockquote>
@@ -49,7 +50,7 @@ export function Hero(): JSX.Element {
         </figcaption>
       </figure>
       <div className="tile art hand">
-        <Quartet lead label="Four banded quarter-circles in four colours, facing one centre" />
+        <Chain lead label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />
       </div>
     </section>
   );

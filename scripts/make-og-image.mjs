@@ -6,8 +6,8 @@
 //
 // WHY A CARD, NOT A SCREENSHOT. The landing shows no product screenshots (every picture of the app
 // is a clickable HTML mock), so the preview a link unfurls to is the hero itself: the same claim,
-// the same Quartet picture, the same tiles, fonts and spectrum as the board (apps/landing/src/board.css).
-// The Quartet is drawn by the landing's own arc geometry (components/arcs/geometry.ts, imported with
+// the same Chain picture, the same tiles, fonts and spectrum as the board (apps/landing/src/board.css).
+// The Chain is drawn by the landing's own arc geometry (components/arcs/geometry.ts, imported with
 // Node's type stripping) and the mark by packages/shared brand-mark.ts, so neither can drift.
 // ⚠ The words here are the hero's (components/board/Hero.tsx). Change them in the same commit.
 //
@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { quartersToSvg, quartetQuarters } from '../apps/landing/src/components/arcs/geometry.ts';
+import { chainQuarters, quartersToSvg, SITE_CHAIN } from '../apps/landing/src/components/arcs/geometry.ts';
 import { brandMarkSvg } from '../packages/shared/src/brand-mark.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,10 +27,10 @@ const data = (path, type) => `data:${type};base64,${readFileSync(join(landing, p
 const font = (w) => `@font-face { font-family: 'Albert Sans'; font-weight: ${w};
   src: url(${data(`src/fonts/albert-sans-latin-${w}-normal.woff2`, 'font/woff2')}) format('woff2'); }`;
 
-// The hero's own Quartet (geometry.ts quartetQuarters), so the card cannot drift from the page.
-function quartetSvg() {
-  const q = quartetQuarters(4);
-  return quartersToSvg(q.viewBox, q.quarters);
+// The hero's own Chain (geometry.ts SITE_CHAIN), assembled, so the card cannot drift from the page.
+function chainSvg() {
+  const c = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross);
+  return quartersToSvg(`0 0 ${c.width} ${c.height}`, c.quarters);
 }
 
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -63,7 +63,7 @@ code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background
   <p class="lead">From ticket to merged pull request with your own Claude or Codex. It runs fully on your team’s own machines, with no added service.</p>
   <div class="foot"><code>npx ensemble-review</code><span class="url">ensemble.ac</span></div>
 </div>
-<div class="tile art">${quartetSvg()}</div>
+<div class="tile art">${chainSvg()}</div>
 <div class="tile motto"><p>“It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once both the ensemble and the details.”</p><span>Henri Poincaré, <i>Science and Method</i>, 1908</span></div>
 </body></html>`;
 

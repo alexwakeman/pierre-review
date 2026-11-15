@@ -287,7 +287,7 @@ export function chainQuarters(
   };
 }
 
-/** The site's chain (the hero's small tile): it zigzags down a portrait box of
+/** The site's chain (the hero's big picture and the share image): it zigzags down a portrait box of
  *  3 × 4 radii, and its links cross through each other on their way in. A chain that stacks half-discs on one centre line is avoided on purpose:
  *  that is the reference artwork's own figure. */
 export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0, cross: true } as const;

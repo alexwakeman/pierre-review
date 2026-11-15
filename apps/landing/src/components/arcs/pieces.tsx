@@ -6,13 +6,13 @@ import type { Corner, Quarter, RunName } from './geometry';
 // The compositions. Every picture on the site is one of these, drawn from the same
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
-//   Quartet    the hero's lead picture: four equal quarters facing one centre,
-//              "four sensible people conversing". Its quarters start apart and
+//   Quartet    four equal quarters facing one centre, "four sensible people
+//              conversing" (the hero's small tile). Its quarters start apart and
 //              close in as the reader scrolls down.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
-//              on from link to link (the small tile beside Poincaré's line). Also a
-//              lead picture: its links start mirrored across the tile and cross
-//              through each other into place as the reader scrolls down.
+//              on from link to link (the hero's big picture). Its links start
+//              mirrored across the tile and cross through each other into place as
+//              the reader scrolls down.
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -42,7 +42,7 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   );
 }
 
-// The hero's lead picture: the margin keeps the apart state inside the tile.
+// The margin keeps the apart state inside the tile.
 const QUARTET = quartetQuarters(22);
 
 export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
