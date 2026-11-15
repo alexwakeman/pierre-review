@@ -5,9 +5,9 @@
 // compositor. Elsewhere it reproduces the same two mappings, writing only a
 // transform per layer per frame (rAF, passive listener):
 //   lead     apart = 1 − scrollY / (0.6 × viewport height)
-//   others   apart = 1 − progress from "entry 0%" to "cover 60%" of its own view
-//            timeline: the top meeting the viewport's bottom, to 60% of the way
-//            through the viewport.
+//   others   apart = 1 − progress from "contain 0%" to "contain 30%" of its own view
+//            timeline: from its bottom edge reaching the viewport's bottom (wholly
+//            on screen), over the next 30% of (viewport height − its height).
 // CSS already paints every layer apart, so nothing flashes before this runs.
 // ---------------------------------------------------------------------------
 
@@ -39,8 +39,8 @@ export function startArcMotion(root: HTMLElement): () => void {
     const aparts = tracks.map((t) => {
       if (t.lead) return clamp(1 - window.scrollY / (vh * 0.6));
       const r = t.el.getBoundingClientRect();
-      // entry 0% = top at the viewport's bottom; cover 60% = 60% of (vh + height) later
-      return clamp(1 - (vh - r.top) / ((vh + r.height) * 0.6));
+      // contain 0% = bottom at the viewport's bottom; contain 30% = 30% of (vh − height) later
+      return clamp(1 - (vh - r.bottom) / (Math.max(vh - r.height, 1) * 0.3));
     });
     tracks.forEach((t, i) => {
       const a = aparts[i] ?? 0;

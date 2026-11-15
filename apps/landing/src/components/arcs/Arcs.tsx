@@ -16,7 +16,7 @@ import type { Quarter } from './geometry';
 // (--ax, --ay) from the very first paint and a CSS scroll-driven animation
 // brings it home, on the compositor:
 //   lead     the hero's picture: over the first 60vh of page scroll
-//   others   over their own way into view (a view timeline, entry → 60% cover)
+//   others   once wholly on screen (a view timeline, contain 0% → 30%)
 // Browsers without scroll-driven animations get the same mappings from
 // arcMotion.ts. No JS (a <noscript> style) and reduced motion: home, still.
 // Nothing is ever redrawn: the bands are painted once, only layers move.
