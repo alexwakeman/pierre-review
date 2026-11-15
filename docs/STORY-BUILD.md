@@ -773,6 +773,12 @@ row per such build through the ONE fold, shared `storyBuildActivityOf` (`story-b
   step not closed). A build neither running nor at a gate is not listed.
 - The cluster opens the panel; a row opens that build's tab (`useOpenStoryBuild`). Polled every 5 s while a
   build runs, 30 s otherwise, and refetched after every build action (`invalidateBuild`).
+- **A FAILED row has an X** (2026-11-15; `lib/storyBuildDismiss.ts`): a failed build stays on `active` until
+  it is discarded, so without it the alert circle stayed forever. The dismissal is CLIENT-SIDE, per BUILD ID
+  (every new attempt is a new row, so a later failure of the same story shows), in localStorage
+  (`limn:story-build-failed-dismissed`, ≤ 200 ids), applied to every poll's answer. A dismissed id the server
+  lists again NOT failed is pruned, so should it fail again it shows. Only `failed` is dismissable — the other
+  gates wait for a real action. When every row left is a failure, the job's line carries the X too (all of them).
 
 ## Limits
 

@@ -15,6 +15,7 @@ no internals.
 
 ### Fixed
 
+- Builds: you can now dismiss a failed build from the builds circle in the corner, and it stays dismissed.
 - Repos & workspaces: adding a repo from the search no longer resizes the window, and the search list no longer jumps to show more results after you add one.
 
 ## [1.0.40] - 2026-11-15
