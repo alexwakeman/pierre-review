@@ -46,11 +46,15 @@ export default function Page(): JSX.Element {
         <code>npx ensemble-review ml status</code> to check it.
       </p>
 
-      <H2 id="leave-a-repository-out">Leave a repository out</H2>
+      <H2 id="choose-repositories">Choose the repositories to score</H2>
       <p>
-        Every repository is scored. To leave one out, open <Ui>Repos &amp; workspaces</Ui> and switch off its{' '}
-        <Ui>Bot scoring</Ui> switch. Its new bot comments are not scored; labels it already has stay. To stop scoring
-        everywhere, switch off <Ui>Bot comment analysis</Ui> in Settings → Features.
+        No repository is scored until you switch it on. Open <Ui>Repos &amp; workspaces</Ui>, click the repository,
+        and switch on <Ui>Score bot comments</Ui> in its panel. The panel then shows how many of its bot comments
+        are scored. Switch it off to stop; labels it already has stay. External repositories are never scored.
+      </p>
+      <p>
+        If the model is not downloaded, the panel says so and links to Settings → Features. To stop scoring
+        everywhere, switch off <Ui>Bot comment analysis</Ui> there.
       </p>
 
       <H2 id="it-will-not-slow-your-computer">It will not slow your computer</H2>

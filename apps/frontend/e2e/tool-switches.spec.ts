@@ -1,18 +1,18 @@
 import { test, expect, type Page } from '@playwright/test';
-import { resolveToolSwitch, type MeResponse, type Repo, type ToolSwitchesResponse } from '@pierre-review/shared';
+import { resolveToolSwitch, type MeResponse, type ToolSwitchesResponse } from '@pierre-review/shared';
 import { installMockApi, ME_RESPONSE } from './mock-api.js';
 
-// SETTINGS → FEATURES, AI AND BOT COMMENT ANALYSIS (components/settings/ToolsSection.tsx), and a repo left
-// out of bot scoring (Repos & workspaces). The ONE place the app downloads either tool:
+// SETTINGS → FEATURES, AI AND BOT COMMENT ANALYSIS (components/settings/ToolsSection.tsx). The ONE place the
+// app downloads either tool:
 //   · a tool already downloaded says so, naming what is installed;
 //   · switching ON a tool that is not downloaded ASKS first: Cancel leaves it off and downloads nothing,
 //     Download stores the switch and starts the download;
-//   · with bot comment analysis on, each repo row offers "Bot scoring", which saves at once.
+//   · (each repo's Bot scoring switch lives in its panel: repo-panel.spec.ts)
 
 const AI_FOUND = ['Claude Agent SDK 0.2.1', 'Claude Code: the copy that came with the download'];
 
-async function setup(page: Page, botInstalled: boolean): Promise<{ puts: unknown[]; mlInstalls: number; repoPuts: unknown[] }> {
-  const seen = { puts: [] as unknown[], mlInstalls: 0, repoPuts: [] as unknown[] };
+async function setup(page: Page, botInstalled: boolean): Promise<{ puts: unknown[]; mlInstalls: number }> {
+  const seen = { puts: [] as unknown[], mlInstalls: 0 };
   await installMockApi(page);
   const me: MeResponse = {
     ...ME_RESPONSE,
@@ -38,11 +38,6 @@ async function setup(page: Page, botInstalled: boolean): Promise<{ puts: unknown
   await page.route('**/api/ml/install', (route) => {
     seen.mlInstalls += 1;
     return route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"type":"done"}\n\n' });
-  });
-  await page.route('**/api/repos/*/bot-scoring', (route) => {
-    const body = route.request().postDataJSON() as { excluded: boolean };
-    seen.repoPuts.push(body);
-    return route.fulfill({ json: { id: 10, botScoringExcluded: body.excluded } as unknown as Repo });
   });
   return seen;
 }
@@ -91,7 +86,7 @@ test('switching on a tool that is not downloaded asks first; Cancel and Escape d
   expect(seen.puts).toEqual([{ id: 'botAnalysis', on: true }]);
 });
 
-test('an installed model is named, switching it off asks nothing, and each repo offers Bot scoring', async ({ page }) => {
+test('an installed model is named, and switching it off asks nothing', async ({ page }) => {
   const seen = await setup(page, true);
   const settings = await openFeatures(page);
   const bot = settings.getByTestId('tool-switch-botAnalysis');
@@ -102,25 +97,4 @@ test('an installed model is named, switching it off asks nothing, and each repo 
   await bot.click({ force: true });
   await expect(page.getByRole('dialog', { name: /Download/ })).toHaveCount(0);
   await expect.poll(() => seen.puts).toEqual([{ id: 'botAnalysis', on: false }]);
-  await page.keyboard.press('Escape');
-
-  // Back on (it is installed, so no question), then the repo row's switch.
-  await page.route('**/api/me', (route) =>
-    route.fulfill({
-      json: {
-        ...ME_RESPONSE,
-        mlSeverity: true,
-        ml: { state: 'ready', message: null },
-        tools: { ai: resolveToolSwitch(null, true, AI_FOUND), botAnalysis: resolveToolSwitch(null, true, []) },
-      } satisfies MeResponse,
-    }),
-  );
-  await page.reload();
-  await page.getByRole('button', { name: /^Workspace:/ }).click();
-  await page.getByText('Manage repos & workspaces').click();
-  const row = page.getByTestId('manager-repo-row').first();
-  const repoSwitch = row.getByTestId('manager-repo-bot-scoring');
-  await expect(repoSwitch).toBeChecked();
-  await repoSwitch.click({ force: true });
-  await expect.poll(() => seen.repoPuts).toEqual([{ excluded: true }]);
 });

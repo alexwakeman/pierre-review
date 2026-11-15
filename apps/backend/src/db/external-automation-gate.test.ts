@@ -20,7 +20,9 @@ const GATES: Array<{ file: string; token: string; what: string }> = [
   { file: 'review/diagrams/trigger.ts', token: 'automationAllowedForPr(accountId, prId, ctx)', what: 'automatic diagrams' },
   { file: 'platform/event-hooks.ts', token: 'automationAllowedForRepo(e.accountId, e.repoId)', what: 'Slack merge signal' },
   { file: 'platform/event-hooks.ts', token: 'automationAllowedForPr(e.accountId, e.prId)', what: 'Slack review signal' },
-  { file: 'sync/ml-enrichment.ts', token: 'externalRepoIds', what: 'ML scoring' },
+  // ML scoring: the rule (opt-in AND not External) lives with the switch, and the worker calls it.
+  { file: 'db/repo-bot-scoring.ts', token: 'externalRepoIds', what: 'ML scoring rule' },
+  { file: 'sync/ml-enrichment.ts', token: 'scoreableRepoIds(workspace', what: 'ML scoring' },
 ];
 
 describe('every automatic path asks the external-repo gate', () => {

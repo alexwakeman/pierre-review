@@ -38,7 +38,7 @@ import {
 import { ChevronIcon, CloseIcon } from '../Icons.js';
 import { IconButton, cx, FOCUS_RING, useIsPhone } from '../ui/index.js';
 import { useShell } from '../../store/shell.js';
-import { escapeOwnedByControl } from '../../lib/escapeOwner.js';
+import { dialogOverModalOpen, escapeOwnedByControl } from '../../lib/escapeOwner.js';
 import { closeActivePopover, hasActivePopover } from '../../lib/activePopover.js';
 import { focusReturner } from '../../lib/focusReturn.js';
 import { useSettingsModal, type SettingsFocus } from '../../store/settingsModal.js';
@@ -186,6 +186,8 @@ export function SettingsModal({
       // and the modal stays. Capture on window runs before the control's own handler, so this
       // must step aside.
       if (escapeOwnedByControl(e.target)) return;
+      // A dialog open over Settings (a download question) owns it too, even before focus reaches it.
+      if (dialogOverModalOpen()) return;
       // So does an open Select or Menu inside it (they hold the one popover slot, lib/activePopover.ts).
       if (hasActivePopover()) return;
       e.stopImmediatePropagation();

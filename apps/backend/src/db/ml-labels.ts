@@ -19,6 +19,7 @@
 // candidate only once it has been classified. That is fine BECAUSE this is a pull-based
 // worker: it re-derives the bot set every tick, so a newly-classified or newly-marked bot's
 // whole backlog is picked up on the next pass with no backfill trigger of its own.
+import { botScoringEnabledRepoIds, scoreableRepoIds } from './repo-bot-scoring.js';
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, sql } from 'drizzle-orm';
 import type { AnyColumn } from 'drizzle-orm';
 import type {
@@ -1617,11 +1618,15 @@ export interface MlBacklog {
  */
 export async function getMlBacklogForAccount(accountId: number): Promise<MlBacklog> {
   const workspaces = await listWorkspaces(accountId);
+  // Only repos switched ON for bot scoring (opt-in, db/repo-bot-scoring.ts): the worker scores
+  // nothing else, so counting other repos would report work nobody is doing.
+  const enabled = await botScoringEnabledRepoIds(accountId);
   let pending = 0;
   let unscorable = 0;
   for (const ws of workspaces) {
-    if (ws.repoIds.length === 0) continue;
-    const scope: BotScope = { workspaceId: ws.id, repoIds: ws.repoIds };
+    const repoIds = scoreableRepoIds(ws, enabled);
+    if (repoIds.length === 0) continue;
+    const scope: BotScope = { workspaceId: ws.id, repoIds };
     const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'all');
     if (automatedIds.length === 0) continue;
     pending += await countUnlabelledBotText(accountId, scope, automatedIds);
@@ -1635,6 +1640,32 @@ export async function getMlBacklogForAccount(accountId: number): Promise<MlBackl
     .execute();
 
   return { pending, unscorable, labelled: Number(labelledRows[0]?.n ?? 0) };
+}
+
+/**
+ * ONE REPO's scoring counts, for its panel in Repos & workspaces: labels stored for it, and (while
+ * it is switched on) its bot text still to score. The bot set is its HOME workspace's, the
+ * worker's own grain. `pending` is 0 while the repo is off, or External (the worker skips both).
+ */
+export async function getMlBacklogForRepo(
+  accountId: number,
+  repoId: number,
+  enabled: boolean,
+): Promise<{ pending: number; labelled: number }> {
+  const labelledRows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(mlCommentLabels)
+    .where(and(eq(mlCommentLabels.accountId, accountId), eq(mlCommentLabels.repoId, repoId)))
+    .execute();
+  const labelled = Number(labelledRows[0]?.n ?? 0);
+  if (!enabled) return { pending: 0, labelled };
+  // The HOME workspace: the one where it is a member and not External (a repo has exactly one).
+  const home = (await listWorkspaces(accountId)).find((w) => scoreableRepoIds(w, new Set([repoId])).length > 0);
+  if (home == null) return { pending: 0, labelled };
+  const automatedIds = await automatedReviewerUserIds(accountId, home.id, 'all');
+  if (automatedIds.length === 0) return { pending: 0, labelled };
+  const pending = await countUnlabelledBotText(accountId, { workspaceId: home.id, repoIds: [repoId] }, automatedIds);
+  return { pending, labelled };
 }
 
 // ── "What the bots are flagging" — the drill-down behind the ML totals strip ─────────────────

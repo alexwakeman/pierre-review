@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type {
   RepoBotScoringBody,
+  RepoOverviewResponse,
   BranchStatusResponse,
   BranchTrendsResponse,
   CreateRepoBody,
@@ -29,7 +30,8 @@ import {
   type ViewerReposGqlResponse,
 } from '../../github/queries.js';
 import { upsertRepo } from '../../sync/upsert.js';
-import { setRepoBotScoringExcluded } from '../../db/repo-bot-scoring.js';
+import { setRepoBotScoring } from '../../db/repo-bot-scoring.js';
+import { getRepoOverview } from '../../db/repo-overview.js';
 import {
   enqueueSyncForRepo,
   getSyncStatus,
@@ -464,9 +466,9 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     return getRepo(repoId, accountId);
   });
 
-  // PUT /api/repos/:id/bot-scoring — leave this repo out of bot comment scoring, or put it back
-  // (Repos & workspaces; db/repo-bot-scoring.ts). The scoring worker reads it on its next tick; labels
-  // already stored stay. Echoes the repo. Rate tier `read` (pinned in rate-limit.test.ts).
+  // PUT /api/repos/:id/bot-scoring — score this repo's bot comments (OPT-IN), or stop (Repos &
+  // workspaces → the repo's panel; db/repo-bot-scoring.ts). The scoring worker reads it on its next tick;
+  // labels already stored stay. Echoes the repo. Rate tier `read` (pinned in rate-limit.test.ts).
   app.put(
     '/api/repos/:id/bot-scoring',
     {
@@ -474,23 +476,35 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
         params: idParamSchema.params,
         body: {
           type: 'object',
-          required: ['excluded'],
+          required: ['enabled'],
           additionalProperties: false,
-          properties: { excluded: { type: 'boolean' } },
+          properties: { enabled: { type: 'boolean' } },
         },
       },
     },
     async (req, reply) => {
       const { id } = req.params as { id: number };
-      const { excluded } = req.body as RepoBotScoringBody;
+      const { enabled } = req.body as RepoBotScoringBody;
       const accountId = accountIdOf(req);
-      if (!(await setRepoBotScoringExcluded(accountId, id, excluded))) {
+      if (!(await setRepoBotScoring(accountId, id, enabled))) {
         reply.status(404);
         return { error: 'NotFound', message: `Repo ${id} not found` };
       }
       return getRepo(id, accountId);
     },
   );
+
+  // GET /api/repos/:id/overview — the repo's panel in Repos & workspaces (db/repo-overview.ts): pull
+  // requests synced by state, authors, and its bot scoring counts. DB only. Rate tier `read`.
+  app.get('/api/repos/:id/overview', { schema: idParamSchema }, async (req, reply): Promise<RepoOverviewResponse | { error: string; message: string }> => {
+    const { id } = req.params as { id: number };
+    const overview = await getRepoOverview(accountIdOf(req), id);
+    if (overview == null) {
+      reply.status(404);
+      return { error: 'NotFound', message: `Repo ${id} not found` };
+    }
+    return overview;
+  });
 
   // NOTE: there is no `PATCH /api/repos/:id`. Its only body was `{ inboxWatch }`, and the
   // "watched" axis is gone — a repo is either in a workspace (fully live) or removed. Moving

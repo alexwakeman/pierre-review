@@ -1,9 +1,9 @@
-// A REPO LEFT OUT OF BOT COMMENT SCORING, AND THE TOOL SWITCHES' STORAGE (migration 0199), on a THROWAWAY
-// sqlite DB (the ai-reviews-seen.test.ts pattern).
+// BOT COMMENT SCORING, OPT-IN PER REPO (migration 0201), THE REPO'S OVERVIEW, AND THE TOOL SWITCHES' STORAGE
+// (migration 0200), on a THROWAWAY sqlite DB (the ai-reviews-seen.test.ts pattern).
 //
 // WHAT THIS PINS:
-//   1. Migration 0199 applies: every repo starts INCLUDED; the switch is stored per repo, account-scoped,
-//      and listed on the Repo wire shape (`botScoringExcluded`).
+//   1. Every repo starts NOT scored (opt-in); the switch is stored per repo, account-scoped, and listed on
+//      the Repo wire shape (`botScoring`). The overview counts the repo's synced PRs by state.
 //   2. The tool switches store ONE switch at a time, overrides only: `null` puts it back to its default
 //      and an empty object is stored as NULL.
 //
@@ -51,30 +51,62 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
-describe('a repo left out of bot comment scoring', () => {
-  it('starts included', async () => {
-    expect([...(await mod.botScoringExcludedRepoIds(1))]).toEqual([]);
+describe('bot comment scoring, opt-in per repo', () => {
+  it('starts off for every repo', async () => {
+    expect([...(await mod.botScoringEnabledRepoIds(1))]).toEqual([]);
     const listed = await q.listRepos(1);
-    expect(listed.map((r) => r.botScoringExcluded)).toEqual([false, false]);
+    expect(listed.map((r) => r.botScoring)).toEqual([false, false]);
   });
 
-  it('is left out once switched, and only that repo', async () => {
-    expect(await mod.setRepoBotScoringExcluded(1, repoIds[0]!, true)).toBe(true);
-    expect([...(await mod.botScoringExcludedRepoIds(1))]).toEqual([repoIds[0]]);
+  it('is on once switched, and only for that repo', async () => {
+    expect(await mod.setRepoBotScoring(1, repoIds[0]!, true)).toBe(true);
+    expect([...(await mod.botScoringEnabledRepoIds(1))]).toEqual([repoIds[0]]);
     const listed = await q.listRepos(1);
-    expect(listed.find((r) => r.id === repoIds[0])?.botScoringExcluded).toBe(true);
-    expect(listed.find((r) => r.id === repoIds[1])?.botScoringExcluded).toBe(false);
+    expect(listed.find((r) => r.id === repoIds[0])?.botScoring).toBe(true);
+    expect(listed.find((r) => r.id === repoIds[1])?.botScoring).toBe(false);
   });
 
-  it('is put back', async () => {
-    expect(await mod.setRepoBotScoringExcluded(1, repoIds[0]!, false)).toBe(true);
-    expect([...(await mod.botScoringExcludedRepoIds(1))]).toEqual([]);
+  it('is switched off again', async () => {
+    expect(await mod.setRepoBotScoring(1, repoIds[0]!, false)).toBe(true);
+    expect([...(await mod.botScoringEnabledRepoIds(1))]).toEqual([]);
   });
 
   it('refuses a repo that is not this account’s', async () => {
-    expect(await mod.setRepoBotScoringExcluded(2, repoIds[0]!, true)).toBe(false);
-    expect(await mod.setRepoBotScoringExcluded(1, 999_999, true)).toBe(false);
-    expect([...(await mod.botScoringExcludedRepoIds(1))]).toEqual([]);
+    expect(await mod.setRepoBotScoring(2, repoIds[0]!, true)).toBe(false);
+    expect(await mod.setRepoBotScoring(1, 999_999, true)).toBe(false);
+    expect([...(await mod.botScoringEnabledRepoIds(1))]).toEqual([]);
+  });
+
+  it('scores only repos switched on, never an External one', () => {
+    const ws = { repoIds: [1, 2, 3], externalRepoIds: [3] };
+    expect(mod.scoreableRepoIds(ws, new Set())).toEqual([]);
+    expect(mod.scoreableRepoIds(ws, new Set([2, 3]))).toEqual([2]);
+  });
+});
+
+describe('the repo overview', () => {
+  it('counts synced pull requests by state and their authors; null for a foreign repo', async () => {
+    const { getRepoOverview } = await import('./repo-overview.js');
+    const [u1] = await db.insert(schema.users).values({ githubNodeId: 'U_a', githubLogin: 'ana' }).returning().execute();
+    const [u2] = await db.insert(schema.users).values({ githubNodeId: 'U_b', githubLogin: 'ben' }).returning().execute();
+    const now = new Date();
+    const pr = (n: number, state: string, authorId: number) => ({
+      accountId: 1,
+      repoId: repoIds[1]!,
+      githubNodeId: `PR_${n}`,
+      number: n,
+      title: `PR ${n}`,
+      state,
+      authorId,
+      openedAt: now,
+      updatedAt: now,
+    });
+    await db.insert(schema.pullRequests).values([pr(1, 'open', u1.id), pr(2, 'merged', u1.id), pr(3, 'merged', u2.id), pr(4, 'closed', u2.id)]).execute();
+    const o = await getRepoOverview(1, repoIds[1]!);
+    expect(o?.prs).toEqual({ total: 4, open: 1, merged: 2, closed: 1 });
+    expect(o?.authors).toBe(2);
+    expect(o?.botScoring).toEqual({ enabled: false, labelled: 0, pending: 0 });
+    expect(await getRepoOverview(2, repoIds[1]!)).toBeNull();
   });
 });
 

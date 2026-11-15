@@ -114,13 +114,13 @@ export function WorkspacesMock(): JSX.Element {
     );
   const [selected, setSelected] = useState(ws[0]?.id ?? '');
   const [mem, setMem] = useState<Record<string, Record<string, Mode>>>(initial);
-  // Bot scoring per repository (Repos & workspaces → Bot scoring): every repository is scored by default.
-  const [unscored, setUnscored] = useState<string[]>([]);
+  // Bot scoring per repository (Repos & workspaces → the repo's panel): OPT-IN, off until switched on.
+  const [scored, setScored] = useState<string[]>([]);
   const sel = ws.find((w) => w.id === selected) ?? ws[0];
   const nameOf = (id: string): string => ws.find((w) => w.id === id)?.name ?? id;
   const count = (id: string): number => Object.values(mem).filter((m) => m[id] != null).length;
   const inSel = (mode: Mode) => SETUP_WORKSPACES.repos.filter((r) => mem[r.name]?.[selected] === mode);
-  const changed = JSON.stringify(mem) !== JSON.stringify(initial()) || unscored.length > 0;
+  const changed = JSON.stringify(mem) !== JSON.stringify(initial()) || scored.length > 0;
   const options = ws.map((w) => ({ id: w.id, label: w.name }));
 
   const setMode = (repo: string, wsId: string, mode: Mode): void =>
@@ -169,10 +169,10 @@ export function WorkspacesMock(): JSX.Element {
         <button
           type="button"
           className="mk-toggle"
-          aria-pressed={!unscored.includes(r.name)}
+          aria-pressed={scored.includes(r.name)}
           aria-label={`Score bot comments in ${r.name}`}
           onClick={() =>
-            setUnscored((u) => (u.includes(r.name) ? u.filter((n) => n !== r.name) : [...u, r.name]))
+            setScored((u) => (u.includes(r.name) ? u.filter((n) => n !== r.name) : [...u, r.name]))
           }
         >
           <b style={{ background: 'currentColor' }} aria-hidden="true" />
@@ -190,7 +190,7 @@ export function WorkspacesMock(): JSX.Element {
         changed || selected !== ws[0]?.id
           ? () => {
               setMem(initial());
-              setUnscored([]);
+              setScored([]);
               setSelected(ws[0]?.id ?? '');
             }
           : null

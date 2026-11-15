@@ -168,8 +168,8 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
             battery, so a large backlog of old comments takes a while. To score faster, start Ensemble
             with <Code>ENSEMBLE_ML_CPU_SHARE=1</Code>; to keep scoring on battery,{' '}
             <Code>ENSEMBLE_ML_ON_BATTERY=run</Code>. Switch it off in Settings → Features to stop scoring
-            new comments (the labels already shown stay). To leave one repository out, switch off its bot
-            scoring in Repos &amp; workspaces.
+            new comments (the labels already shown stay). Scoring is off for each repository until you switch
+            on its Bot scoring: click the repository in Repos &amp; workspaces.
             Check it with <Code>npx ensemble-review ml status</Code>.
           </Section>
 

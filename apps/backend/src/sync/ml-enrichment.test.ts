@@ -176,14 +176,14 @@ function hasLoneSurrogate(text: string): boolean {
   return Buffer.from(text, 'utf8').toString('utf8') !== text;
 }
 
-describe('scoreableRepoIds — which repos the scoring worker reads', () => {
-  it('scores every repo by default', () => {
-    expect(scoreableRepoIds({ repoIds: [1, 2, 3] }, new Set())).toEqual([1, 2, 3]);
+describe('scoreableRepoIds — which repos the scoring worker reads (opt-in)', () => {
+  it('scores no repo until one is switched on', () => {
+    expect(scoreableRepoIds({ repoIds: [1, 2, 3] }, new Set())).toEqual([]);
   });
-  it('leaves out a repo switched out of bot scoring in Repos & workspaces', () => {
-    expect(scoreableRepoIds({ repoIds: [1, 2, 3] }, new Set([2]))).toEqual([1, 3]);
+  it('scores only the repos switched on in Repos & workspaces', () => {
+    expect(scoreableRepoIds({ repoIds: [1, 2, 3] }, new Set([2]))).toEqual([2]);
   });
-  it('still leaves out external repos, and both rules together', () => {
-    expect(scoreableRepoIds({ repoIds: [1, 2, 3, 4], externalRepoIds: [4] }, new Set([1]))).toEqual([2, 3]);
+  it('never scores an External repo, even switched on', () => {
+    expect(scoreableRepoIds({ repoIds: [1, 2, 3, 4], externalRepoIds: [4] }, new Set([1, 4]))).toEqual([1]);
   });
 });

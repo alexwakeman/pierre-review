@@ -69,7 +69,23 @@ export interface ToolSwitchesResponse {
   tools: ToolSwitchesStatus;
 }
 
-/** Body of PUT /api/repos/:id/bot-scoring: leave the repo's bot comments out of scoring, or put it back. */
+/** Body of PUT /api/repos/:id/bot-scoring: score this repo's bot comments (opt-in), or stop. */
 export interface RepoBotScoringBody {
-  excluded: boolean;
+  enabled: boolean;
+}
+
+/** GET /api/repos/:id/overview: the Repos & workspaces panel for one repo. DB only. */
+export interface RepoOverviewResponse {
+  repoId: number;
+  /** Pull requests synced (the last 90 days), by state. */
+  prs: { total: number; open: number; merged: number; closed: number };
+  /** People and bots who opened those pull requests. */
+  authors: number;
+  botScoring: {
+    enabled: boolean;
+    /** This repo's bot comments with a stored label. */
+    labelled: number;
+    /** This repo's bot comments still to score (0 while scoring is off). */
+    pending: number;
+  };
 }

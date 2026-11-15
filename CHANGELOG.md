@@ -13,6 +13,18 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Repos & workspaces: click a repository to open its panel, with its first sync of the last 90 days while it runs, how many pull requests were synced, and its Bot scoring switch. A repository you add opens there.
+
+### Changed
+
+- Bot scoring is now off for every repository until you switch it on in its panel. Switched on, the panel shows how many of its bot comments are scored. If the bot comment model is not downloaded, the panel says so and links to Settings → Features.
+
+### Fixed
+
+- Settings → Features: pressing Escape right after a download question opens now closes only the question, not Settings.
+
 ## [1.0.43] - 2026-11-15
 
 ### Added

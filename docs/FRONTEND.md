@@ -696,8 +696,13 @@ download and the CLI). Switching ON a tool not installed opens a confirm (`InfoM
 closes only it), then stores `true` and starts the download; OFF stores without asking. A value equal to
 `defaultOn` is stored as null. Every other "Set up" place is `SetUpInFeatures` (`AiSetup.tsx`, opens
 `openSettings('tools')`); `SettingsModal` is keyed on its focus so a deep link from inside Settings re-lands.
-The per-repo **Bot scoring** switch is on each WorkspaceManager list row (not the grid), shown while
-`me.tools.botAnalysis` is installed and on.
+**THE REPO PANEL** (`Activity/RepoPanel.tsx`): clicking a repo's name in WorkspaceManager (list or grid)
+opens it in the right-hand column, and adding a repo opens the new one; closing it shows the sync-round panel
+again when one is open. It reads `GET /api/repos/:id/sync-status` (the first full sync's bar) and
+`GET /api/repos/:id/overview` (PRs synced by state, authors, scoring counts; DB only), polling only while
+the sync runs or scoring is pending. **Bot scoring is OPT-IN per repo** (off until switched on there).
+Without the model it shows one line and `SetUpInFeatures beforeOpen={close the manager}` — Settings
+would otherwise open BEHIND the manager (both are modals).
 
 ### Features shown — Settings → Features (`nav.ts` `isDestinationShown`, shared `features.ts`)
 

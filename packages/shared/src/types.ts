@@ -2504,9 +2504,9 @@ export interface Repo {
   // judgements while the server re-derives from the PR's workspace Y — an offer the server refuses,
   // i.e. a dead button with an unchanged count.
   workspaceId: number;
-  // True when this repo is left out of bot comment scoring (Repos & workspaces; `repos.bot_scoring_excluded`).
-  // Optional: an older server sends none (= included).
-  botScoringExcluded?: boolean;
+  // True when this repo's bot comments are scored (opt-in: Repos & workspaces → the repo's panel;
+  // `repos.bot_scoring_enabled`). Optional: an older server sends none (= not scored).
+  botScoring?: boolean;
   // Server-side time (ISO) any board-visible PR column in this repo last changed; in-memory, so absent after a restart.
   lastPrChangeAt?: string;
   // Server-side time (ISO) GitHub last answered for this repo — a free change probe, a scheduled

@@ -99,11 +99,21 @@ export function AiAuthLine({ kind, provider }: { kind?: AiRunKind; provider?: Ai
 }
 
 /** "Set up in Settings → Features": the ONE place in the app that downloads AI (or bot comment analysis). */
-export function SetUpInFeatures({ label = 'Set up in Settings → Features' }: { label?: string }): JSX.Element {
+export function SetUpInFeatures({
+  label = 'Set up in Settings → Features',
+  beforeOpen,
+}: {
+  label?: string;
+  /** Runs first: a surface inside another modal closes it, or Settings would open behind it. */
+  beforeOpen?: () => void;
+}): JSX.Element {
   return (
     <button
       type="button"
-      onClick={() => useSettingsModal.getState().openSettings('tools')}
+      onClick={() => {
+        beforeOpen?.();
+        useSettingsModal.getState().openSettings('tools');
+      }}
       className="hit bg-ui-raise rounded-ui px-2 py-1 text-meta hover:bg-ui-hover"
     >
       {label}

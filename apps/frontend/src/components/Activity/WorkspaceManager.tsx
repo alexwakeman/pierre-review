@@ -1,4 +1,4 @@
-import { Select, Switch } from '../ui/index.js';
+import { Select } from '../ui/index.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Repo, Workspace, WorkspaceRepoMode } from '@pierre-review/shared';
@@ -6,8 +6,6 @@ import { api, ApiError } from '../../api/client.js';
 import { useClickOutside } from '../../hooks/useClickOutside.js';
 import { ACTIVITY_QUERY_KEYS } from '../../hooks/useActivity.js';
 import { useRepos } from '../../hooks/useTimeline.js';
-import { useMe } from '../../hooks/useTriage.js';
-import { useSetRepoBotScoring } from '../../hooks/useToolSwitches.js';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { getSyncRoundActions, useFilters } from '../../store/filters.js';
 import { RepoSearch } from '../RepoSearch.js';
@@ -15,6 +13,7 @@ import { CloseIcon, PencilIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { DeepSyncIcon, EmbeddedSyncPanel } from '../SyncProgressPanel.js';
 import { membershipsOf, nextGridState } from './workspaceMembership.js';
+import { RepoPanel } from './RepoPanel.js';
 
 // Repo/workspace management: create/rename/delete workspaces, add repos, set how each workspace
 // holds each repo, and remove repos. Opened from the WorkspaceSelector's "Manage repos &
@@ -67,11 +66,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   const qc = useQueryClient();
   const { data: workspaces } = useWorkspaces();
   const { data: repos } = useRepos();
-  // BOT SCORING PER REPO: offered only while bot comment analysis is installed and switched on
-  // (Settings → Features). Off = this repo's bot comments are not scored; labels already shown stay.
-  const botTool = useMe().data?.tools?.botAnalysis;
-  const offerBotScoring = botTool?.installed === true && botTool.on;
-  const setBotScoring = useSetRepoBotScoring();
+  // ONE REPO's PANEL (RepoPanel.tsx): its first sync, what was synced and its Bot scoring switch. Opened
+  // by clicking a repo, and on its own when one is added. It takes the right-hand column; closing it
+  // brings back the sync progress panel when a sync round is open.
+  const [openRepoId, setOpenRepoId] = useState<number | null>(null);
   const activeWorkspaceId = useFilters((s) => s.workspaceId);
   const setWorkspace = useFilters((s) => s.setWorkspace);
   const {
@@ -304,6 +302,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   // A brand-new repo lands in Default server-side, Maintained. Put it where the reader asked, then
   // follow it: filing it into a workspace the reader isn't viewing would land the data out of sight.
   const onRepoAdded = (repo: Repo): void => {
+    setOpenRepoId(repo.id);
     if (selected == null) return;
     const targetId = selected.id;
     const mode = addMode;
@@ -332,10 +331,17 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
       >
         <div className="flex min-h-9 items-center gap-2 text-meta">
           {state != null && <Spinner />}
-          <span className="min-w-0 flex-1 truncate" title={r.fullName}>
+          <button
+            type="button"
+            onClick={() => setOpenRepoId(r.id)}
+            aria-pressed={openRepoId === r.id}
+            title={`Show ${r.fullName}: sync, pull requests and Bot scoring`}
+            data-testid="manager-repo-open"
+            className="hit min-w-0 flex-1 truncate rounded-ui text-left hover:underline"
+          >
             <span className="text-ui-faint">{r.owner}/</span>
             <span className="font-medium text-ui-ink">{r.name}</span>
-          </span>
+          </button>
           {state === 'removing' ? (
             <span className="shrink-0 text-ui-mute">Removing…</span>
           ) : (
@@ -374,22 +380,6 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                 }}
                 options={MODE_OPTIONS}
               />
-              {offerBotScoring && (
-                <Switch
-                  className="shrink-0"
-                  label="Bot scoring"
-                  aria-label={`Score bot comments in ${r.fullName}`}
-                  title={
-                    r.botScoringExcluded === true
-                      ? `${r.fullName}'s bot comments are not scored`
-                      : `${r.fullName}'s bot comments are scored on this machine`
-                  }
-                  data-testid="manager-repo-bot-scoring"
-                  checked={r.botScoringExcluded !== true}
-                  disabled={setBotScoring.isPending && setBotScoring.variables?.repoId === r.id}
-                  onChange={(e) => setBotScoring.mutate({ repoId: r.id, excluded: !e.target.checked })}
-                />
-              )}
               <button
                 type="button"
                 onClick={() => confirmDeepResyncRepo(r)}
@@ -511,10 +501,17 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                   <td className="max-w-[18rem] border-t border-ui-line px-2 py-1">
                     <span className="flex items-center gap-2">
                       {removing && <Spinner />}
-                      <span className="min-w-0 truncate" title={r.fullName}>
+                      <button
+                        type="button"
+                        onClick={() => setOpenRepoId(r.id)}
+                        aria-pressed={openRepoId === r.id}
+                        title={`Show ${r.fullName}: sync, pull requests and Bot scoring`}
+                        data-testid="manager-repo-open"
+                        className="hit min-w-0 truncate rounded-ui text-left hover:underline"
+                      >
                         <span className="text-ui-faint">{r.owner}/</span>
                         <span className="font-medium text-ui-ink">{r.name}</span>
-                      </span>
+                      </button>
                       {removing && <span className="shrink-0 text-ui-mute">Removing…</span>}
                     </span>
                     {err && <span className="block text-ui-danger">{err}</span>}
@@ -686,6 +683,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
     </InfoButton>
   );
 
+  // The repo whose panel is open (null once it is removed), else the sync round's panel, else nothing.
+  const openRepo = openRepoId != null ? (repos ?? []).find((r) => r.id === openRepoId) ?? null : null;
+  const sideOpen = openRepo != null || syncRound.open;
+
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 p-4 pt-12">
       <div
@@ -757,10 +758,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
         <div
           className={`grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-b-ui ${
             view === 'workspace'
-              ? syncRound.open
+              ? sideOpen
                 ? 'md:grid-cols-[15rem_1fr_20rem]'
                 : 'md:grid-cols-[15rem_1fr]'
-              : syncRound.open
+              : sideOpen
                 ? 'md:grid-cols-[1fr_20rem]'
                 : ''
           }`}
@@ -825,7 +826,10 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                     fullWidth
                     autoFocus={noReposYet}
                     placeholder="Type to find a repo on GitHub…"
-                    onAdded={(repo) => useFilters.getState().showRepo(repo.id)}
+                    onAdded={(repo) => {
+                      setOpenRepoId(repo.id);
+                      useFilters.getState().showRepo(repo.id);
+                    }}
                   />
                 </div>
                 <span className="text-meta text-ui-mute">
@@ -836,10 +840,20 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
             </div>
           )}
 
-          {syncRound.open && (
+          {sideOpen && (
             <div className="flex min-h-0 flex-col border-t border-ui-line md:border-l md:border-t-0">
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                <EmbeddedSyncPanel />
+                {openRepo != null ? (
+                  <RepoPanel
+                    key={openRepo.id}
+                    repo={openRepo}
+                    mode={view === 'workspace' && selected != null ? (membershipsOf(openRepo.id, list).find((m) => m.workspaceId === selected.id)?.state ?? null) : null}
+                    onClose={() => setOpenRepoId(null)}
+                    onOpenSettings={onClose}
+                  />
+                ) : (
+                  <EmbeddedSyncPanel />
+                )}
               </div>
             </div>
           )}

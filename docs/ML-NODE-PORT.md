@@ -211,7 +211,7 @@ that version would keep the old bytes. In dev nothing is downloaded: `pnpm dev` 
   `POST /api/ml/install` (SSE, `sync` tier).
 - **SPA:** Settings → Features → "Bot comment analysis" (`settings/ToolsSection.tsx`, the tool switch;
   docs/FRONTEND.md). The AI download no longer chains into it (2026-11-15). Per repo: Repos & workspaces →
-  Bot scoring (`PUT /api/repos/:id/bot-scoring`).
+  the repo's panel → Bot scoring, OPT-IN (`PUT /api/repos/:id/bot-scoring`).
 
 ### 6. Shadow run, then cut over (1 day + elapsed time)
 
