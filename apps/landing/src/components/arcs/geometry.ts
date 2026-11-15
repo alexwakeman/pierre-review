@@ -215,13 +215,21 @@ const CORNER_OF = (sx: number, sy: number): Corner =>
  * chain leaves each quarter across the radius it did not come in by, starting with
  * `first` ('h': the horizontal radius, 'v': the vertical one). Returns the quarters
  * shifted so the chain's box (plus `margin` radii all round) starts at (0, 0), and
- * that box's size. Each quarter's assembly offset points away from the chain's middle.
+ * that box's size.
+ *
+ * Each quarter's assembly offset (dx, dy) is either OUTWARD from the chain's middle
+ * (a short slide home), or, with `cross`, the MIRROR of its place through that middle:
+ * every link starts on the far side of the box and travels through the middle, past
+ * the others, into place. The mirror of a link lies inside the same box, so a crossing
+ * chain needs no margin and fills its tile. The offsets assume the CSS factor of 1.6
+ * that board.css applies to --apart.
  */
 export function chainQuarters(
   R: number,
   steps: string,
   first: 'h' | 'v' = 'v',
   margin = 0,
+  cross = false,
 ): { quarters: Quarter[]; width: number; height: number } {
   let cx = 0;
   let cy = 0;
@@ -269,8 +277,9 @@ export function chainQuarters(
         R,
         corner: CORNER_OF(q.sx, q.sy),
         run: CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName,
-        dx: Math.round((ux / len) * R * 0.16 * 100) / 100,
-        dy: Math.round((uy / len) * R * 0.16 * 100) / 100,
+        // crossing: start at the mirror image, -2u, which the CSS reaches at 1.6 × dx
+        dx: Math.round((cross ? (-2 * ux) / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
+        dy: Math.round((cross ? (-2 * uy) / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
       };
     }),
     width: w + 2 * m,
@@ -278,10 +287,10 @@ export function chainQuarters(
   };
 }
 
-/** The site's chain (the hero and the share image): it zigzags down a portrait box of
- *  3 × 4 radii. A chain that stacks half-discs on one centre line is avoided on purpose:
+/** The site's chain (the hero's small tile): it zigzags down a portrait box of
+ *  3 × 4 radii, and its links cross through each other on their way in. A chain that stacks half-discs on one centre line is avoided on purpose:
  *  that is the reference artwork's own figure. */
-export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.3 } as const;
+export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0, cross: true } as const;
 
 /**
  * The QUARTET: four equal quarters centred on the corners of a 100-unit square, facing
