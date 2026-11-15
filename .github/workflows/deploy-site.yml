@@ -54,8 +54,12 @@ on:
       - 'package.json'
       - '.github/workflows/deploy-site.yml'
 
+# ONE deploy at a time, the newest winning — EXCEPT a workflow_run whose Release did not
+# succeed. Its jobs skip (see `test`'s `if:`), so it must not join the shared group:
+# it used to start seconds after a push deploy, CANCEL it, then skip itself, and the
+# merged change never reached ensemble.ac. It gets a group of its own instead.
 concurrency:
-  group: deploy-site
+  group: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' && format('deploy-site-skip-{0}', github.run_id) || 'deploy-site' }}
   cancel-in-progress: true
 
 permissions:

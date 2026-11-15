@@ -8,7 +8,6 @@
 //   others   apart = 1 − progress from "entry 0%" to "contain 30%" of its own view
 //            timeline: from its top edge reaching the viewport's bottom, through
 //            its own height, and 30% of (viewport height − its height) more.
-// A swirl picture turns and scales instead: rotate(−180° × apart), scale(1 + 0.8 × apart).
 // CSS already paints every layer apart, so nothing flashes before this runs.
 // ---------------------------------------------------------------------------
 
@@ -18,7 +17,6 @@ interface Track {
   el: HTMLElement;
   layers: SVGSVGElement[];
   lead: boolean;
-  swirl: boolean;
   last: number;
 }
 
@@ -29,7 +27,6 @@ export function startArcMotion(root: HTMLElement): () => void {
     el,
     layers: Array.from(el.querySelectorAll<SVGSVGElement>('.layer')),
     lead: el.classList.contains('lead'),
-    swirl: el.classList.contains('swirl'),
     last: -1,
   }));
   if (tracks.length === 0) return () => undefined;
@@ -49,12 +46,7 @@ export function startArcMotion(root: HTMLElement): () => void {
       const a = aparts[i] ?? 0;
       if (Math.abs(a - t.last) < 0.0005) return;
       t.last = a;
-      const tf =
-        a === 0
-          ? 'none'
-          : t.swirl
-            ? `rotate(${(-180 * a).toFixed(2)}deg) scale(${(1 + 0.8 * a).toFixed(4)})`
-            : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
+      const tf = a === 0 ? 'none' : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
       for (const l of t.layers) l.style.transform = tf;
     });
   };

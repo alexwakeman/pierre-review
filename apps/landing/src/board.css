@@ -311,10 +311,6 @@ body:has(.lb) {
     transform: translate(var(--ax), var(--ay));
     will-change: transform;
   }
-  /* a swirl swings in: half a turn round the centre, 1.8× larger */
-  .lb .arcs.swirl .layer {
-    transform: rotate(-180deg) scale(1.8);
-  }
   @supports (animation-timeline: scroll()) {
     /* the hero: over the first 60vh of page scroll */
     .lb .arcs.lead .layer {
@@ -331,17 +327,6 @@ body:has(.lb) {
       animation-timeline: view(block);
       animation-range: entry 0% contain 30%;
     }
-    .lb .arcs.swirl:not(.lead) .layer {
-      animation-name: arc-swirl;
-    }
-  }
-}
-@keyframes arc-swirl {
-  from {
-    transform: rotate(-180deg) scale(1.8);
-  }
-  to {
-    transform: none;
   }
 }
 @keyframes arc-gather {
