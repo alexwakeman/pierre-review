@@ -88,6 +88,8 @@ export interface Quarter {
   dy?: number;
   /** Inner radius of the first band (default: the hole, 12% of R). */
   inner?: number;
+  /** A player's dot of this radius at the quarter's centre; it moves with the quarter. */
+  dot?: number;
   /** Paint the bands as seats (dashes) instead of solid lines. */
   seats?: boolean;
 }
@@ -109,6 +111,8 @@ export interface LaidOutQuarter {
   ox: number;
   oy: number;
   paths: { d: string; w: number; k: number; dash?: string }[];
+  /** The player's dot, at the quarter's true centre, if it has one. */
+  dot?: { cx: number; cy: number; r: number };
 }
 
 export function layoutQuarter(q: Quarter): LaidOutQuarter {
@@ -131,6 +135,7 @@ export function layoutQuarter(q: Quarter): LaidOutQuarter {
       // seats are dashes in user units (a chair every ~1.4 band widths)
       dash: q.seats ? `${round(b.t * 1.5)} ${round(b.t * 0.9)}` : undefined,
     })),
+    dot: q.dot ? { cx: q.cx, cy: q.cy, r: q.dot } : undefined,
   };
 }
 
@@ -148,6 +153,7 @@ export function quartersToSvg(viewBox: string, quarters: Quarter[], extra = '', 
     body +=
       `<g fill="none" stroke="url(#g${i})">` +
       l.paths.map((p) => `<path d="${p.d}" stroke-width="${p.w}"${p.dash ? ` stroke-dasharray="${p.dash}"` : ''}/>`).join('') +
+      (l.dot ? `<circle cx="${l.dot.cx}" cy="${l.dot.cy}" r="${l.dot.r}" fill="#f1f1ef" stroke="none"/>` : '') +
       '</g>';
   });
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" preserveAspectRatio="${fit}"><defs>${defs}</defs>${body}${extra}</svg>`;
@@ -276,3 +282,29 @@ export function chainQuarters(
  *  3 × 4 radii. A chain that stacks half-discs on one centre line is avoided on purpose:
  *  that is the reference artwork's own figure. */
 export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.3 } as const;
+
+/**
+ * The QUARTET: four equal quarters centred on the corners of a 100-unit square, facing
+ * one centre, each with a player's dot at its corner. Each waits OUTWARD (away from the
+ * middle) and closes in. `margin` (in units) is added round the square so the apart
+ * state fits; the returned viewBox includes it.
+ */
+export function quartetQuarters(margin = 0): { quarters: Quarter[]; viewBox: string } {
+  const R = 50;
+  const away = R * 0.2;
+  const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => ({
+    cx,
+    cy,
+    R,
+    corner,
+    run,
+    n: 11,
+    dot: 3.2,
+    dx: cx === 0 ? -away : away,
+    dy: cy === 0 ? -away : away,
+  });
+  return {
+    quarters: [q(0, 0, 'tl', 'ember'), q(100, 0, 'tr', 'dawn'), q(100, 100, 'br', 'dusk'), q(0, 100, 'bl', 'bloom')],
+    viewBox: `${-margin} ${-margin} ${100 + 2 * margin} ${100 + 2 * margin}`,
+  };
+}

@@ -5,7 +5,7 @@
 
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
-     hero       .hero > .say (.kick, h1, .lead, .cmd) · .art.p1 (Quartet) · figure.motto · .art.hand (Chain)
+     hero       .hero > .say (.kick, h1, .lead, .cmd) · .art.p1 (Chain) · figure.motto · .art.hand (Quartet)
      flow       .board.flow > ol.flow-steps > li.tile (.flow-n, h3, p) · p.flow-loop · p.flow-more
      ensemble   .board.ensemble > .tile.circle (svg.circle-svg) · .ens-points > .tile (h3, p) · p.ens-more
      bots       .board.bots > .tile (h3, p, p.more)
@@ -448,7 +448,7 @@
     grid-row: auto;
   }
   .lb.home .hero .hand {
-    aspect-ratio: 3 / 4;
+    aspect-ratio: 1;
   }
   .lb.home .why4 > .tile {
     grid-column: span 6;
