@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.41] - 2026-11-15
+
 ### Fixed
 
 - Repos & workspaces: adding a repo from the search no longer resizes the window, and the search list no longer jumps to show more results after you add one.
