@@ -1,13 +1,14 @@
 import { Arcs } from './Arcs';
-import { spiralQuarters } from './geometry';
+import { chainQuarters, SITE_CHAIN } from './geometry';
 import type { Corner, Quarter, RunName } from './geometry';
 
 // ---------------------------------------------------------------------------
 // The compositions. Every picture on the site is one of these, drawn from the same
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
-//   Spiral     the signature: a golden spiral of quarters, each a different voice,
-//              that only reads as one shape together (the hero)
+//   Chain      the signature: quarters linked end to end, each a different voice,
+//              whose bands run on from link to link (the hero). It closes up as
+//              the reader scrolls down.
 //   Quartet    four equal quarters facing one centre: "four sensible people
 //              conversing" (beside Goethe's line)
 //   Orchestra  the seating plan from above: rows of chairs in sections around
@@ -16,19 +17,20 @@ import type { Corner, Quarter, RunName } from './geometry';
 //              sound overlapping and mixing in the middle
 // ---------------------------------------------------------------------------
 
-/** A golden spiral, portrait (13 × 21 units of `u`), turning clockwise inward. */
 interface PieceProps {
   className?: string;
   label?: string;
   lead?: boolean;
 }
 
-export function Spiral({ className, label, lead }: PieceProps): JSX.Element {
+const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin);
+
+export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   return (
     <Arcs
       lead={lead}
-      viewBox="0 0 130 210"
-      quarters={spiralQuarters(10)}
+      viewBox={`0 0 ${CHAIN.width} ${CHAIN.height}`}
+      quarters={CHAIN.quarters}
       className={className}
       label={label}
       preserveAspectRatio="xMidYMid meet"

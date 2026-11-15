@@ -1,10 +1,10 @@
-import { Quartet, Spiral } from '../arcs/pieces';
+import { Chain, Quartet } from '../arcs/pieces';
 import { INSTALL_COMMAND, SITE_NAME } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
 
 // ---------------------------------------------------------------------------
-// The hero: the claim, the command, and the site's signature picture, the SPIRAL
-// (components/arcs): quarters in five colours that only read as one shape together.
+// The hero: the claim, the command, and the site's signature picture, the CHAIN
+// (components/arcs): quarters linked end to end that close up as the reader scrolls.
 // Under the claim, the QUARTET (four quarters facing one centre) beside Goethe's line
 // on the string quartet: an ensemble as a conversation, which is what a review is.
 //
@@ -39,7 +39,7 @@ export function Hero(): JSX.Element {
         <figcaption>Goethe, on the string quartet, in a letter to Zelter, 1829</figcaption>
       </figure>
       <div className="tile art hand">
-        <Spiral lead label="A golden spiral of banded quarter-circles, each in its own run of colour" />
+        <Chain lead label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />
       </div>
     </section>
   );
