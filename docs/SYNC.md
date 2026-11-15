@@ -252,19 +252,30 @@ not watched — only its recent project PRs and ticket-linked PRs are read from 
 ## Tags (the default-branch snapshot's second half)
 
 Right after `syncBranchStatus`, `sync-repo.ts` runs `runTagsStep` (`sync/tags-step.ts`; [RELEASES.md](RELEASES.md)),
-in its own non-fatal guard, skipped for external repos:
+in its own non-fatal guard. RELEASABLE REPOS FIRST: only a repo some workspace releases ("Released from this
+workspace", `db/release-repos.ts` `releaseRangeViews` — ticked, still a member, both suffixes set) gets
+ancestry checks and ranges; any other repo's tags still sync (the hotfix bases read them) with no ancestry
+and no range (its stored ranges are dropped). An EXTERNAL repo runs the step only when releasable.
 
 - **The tag read** (`sync/repo-tags.ts`, 1 point): the newest `REPO_TAGS_READ_CAP` (100) tags by
   `TAG_COMMIT_DATE`; tags past the cap are logged as not read. At most once per
   `TAG_READ_MIN_INTERVAL_MS` (15 min) from a walk — the settle sweep starts it sooner on a tag push.
   Writes `repo_tags` (insert / refresh / MOVE / delete-on-a-positive-statement) and
-  `repos.tags_signature`, then asks up to `ANCESTRY_CHECKS_PER_SYNC` (20) tags whether they are on the
-  default branch (REST compare `tag...head`, `per_page=1`), newest first, while the budget allows.
-- **The ranges** (`sync/tag-ranges.ts`): for the newest `TAG_RANGE_WINDOW` (40) tags on the default
-  branch, the PRs between each and the tag before it — REST compare base...tag (≤ 1000 commits), each
-  commit → PR by `merge_commit_oid`, then stored PR commits, then GraphQL `associatedPullRequests`
-  (≤ 100 commits, 2 points); only PRs merged INTO THE DEFAULT BRANCH. ≤ `TAG_RANGES_PER_SYNC` (10)
-  per sync; once per (tag sha, base sha); a failed compare is retried next sync.
+  `repos.tags_signature`, then — releasable repos only — asks up to `ANCESTRY_CHECKS_RELEASABLE` (every
+  tag read, 100) tags whether they are on the default branch (REST compare `tag...head`, `per_page=1`),
+  never-asked first, newest first, while the budget allows (`ancestryCap`; 0 for any other repo).
+- **The ranges** (`sync/tag-ranges.ts`, releasable repos only): per releasing workspace, every tag after
+  its BASELINE (the newer of the newest release tag and the reader's start tag), or the newest
+  `TAG_RANGE_WINDOW` (40) tags with no baseline (shared `tagRangeKeepFrom`; the oldest baseline of all
+  releasing workspaces decides): the PRs between each and the tag before it — REST compare base...tag
+  (≤ 1000 commits), each commit → PR by `merge_commit_oid`, then stored PR commits, then GraphQL
+  `associatedPullRequests` (2 points per 100); only PRs merged INTO THE DEFAULT BRANCH. ≤
+  `TAG_RANGES_PER_SYNC` (40 — the whole window) per run; once per (tag sha, base sha); a failed compare is
+  retried next run. Ranges before the baseline are dropped.
+- **The catch-up**: a releasable repo left with work (ranges or ancestry, or the budget ran low) is marked
+  (`markTagCatchUp`, in memory); the settle sweep starts the step again after `CATCH_UP_DELAY_MS` (60 s,
+  `takeTagCatchUp`) rather than at the next walk. Ticking a repo and setting a start tag mark it too (those
+  routes never call GitHub). While ranges are pending the Releases tab reads "Reading changes…".
 
 ## Incremental updates (every subsequent sync)
 

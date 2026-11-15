@@ -792,12 +792,48 @@
   margin: 0;
   padding: 0;
 }
-.lb .rp-releases .repos li {
+.lb .rp-releases .repos > li {
+  padding: 6px 0;
+  border-top: 1px solid #26272c;
+}
+.lb .rp-releases .repos .row {
   display: grid;
   grid-template-columns: 130px minmax(0, 1fr);
   gap: 8px;
-  padding: 6px 0;
-  border-top: 1px solid #26272c;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lb .rp-releases small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .rp-releases .tags {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0 2px 16px;
+}
+.lb .rp-releases .tags .start {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .rp-releases .tags .tn {
+  font-weight: 600;
+}
+.lb .rp-releases .tags .held {
+  color: #e0b860;
+}
+.lb .rp-releases .tags .tickets li {
+  border-top: 0;
+  padding: 2px 0;
+  font-size: 12px;
 }
 .lb .rp-releases .repos .name {
   font-weight: 600;

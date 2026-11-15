@@ -1,15 +1,25 @@
 import { useEffect, useId, useState } from 'react';
-import { normaliseReleaseSuffix, RELEASE_SUFFIX_MAX, validateReleaseSettings } from '@pierre-review/shared';
-import { useReleaseSettings, useSetReleaseSettings } from '../../hooks/useReleases.js';
+import {
+  RELEASE_SUFFIX_MAX,
+  RELEASE_SUFFIX_PREFIX,
+  suffixFromTyped,
+  suffixTypedPart,
+  validateReleaseSettings,
+  type ReleaseSettingsResponse,
+} from '@pierre-review/shared';
+import { useReleaseSettings, useSetReleaseRepos, useSetReleaseSettings } from '../../hooks/useReleases.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { CheckInput, Field, SaveButton, SectionShell, inputCls } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
-import { releaseSuffixChangeWarning } from './releasesSectionModel.js';
+import { releaseReposDirty, releaseSuffixChangeWarning } from './releasesSectionModel.js';
 
 // SETTINGS → RELEASES (docs/RELEASES.md § Terms and settings): the workspace's release suffix and
-// hotfix suffix. BOTH are required before This Sprint → Releases (or the hotfix option) does
-// anything, and there is NO default — the fields start empty.
+// hotfix suffix, and which repositories are RELEASED FROM THIS WORKSPACE. BOTH suffixes and at least one
+// ticked repository are required before This Sprint → Releases (or the hotfix option) does anything;
+// there is NO default — the fields start empty and no repository is ticked.
 //
+// ⚠ THE HYPHEN IS FIXED: the reader types `rc`, the stored suffix is `-rc`. The "-" sits BESIDE the box
+// (an adornment), never in it; `suffixTypedPart` / `suffixFromTyped` convert.
 // ⚠ ONE VALIDATOR: the shared `validateReleaseSettings`, the same function the PUT route runs, so
 // the sentence under the fields is the sentence a 400 would carry.
 // ⚠ A SUFFIX CHANGE AFTER RELEASES EXIST IS DISCLOSED BEFORE THE SAVE: older tags stop counting as
@@ -18,31 +28,61 @@ import { releaseSuffixChangeWarning } from './releasesSectionModel.js';
 export function ReleasesSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const query = useReleaseSettings(workspaceId);
-  const save = useSetReleaseSettings(workspaceId);
   const data = query.data;
-  const releaseId = useId();
-  const hotfixId = useId();
-
-  const [release, setRelease] = useState('');
-  const [hotfix, setHotfix] = useState('');
-  // Re-seeded on the STORED values (and the workspace), never on the response object: a background
-  // refetch must not throw away a half-typed suffix.
-  const signature = `${workspaceId ?? 'none'}:${data?.releaseSuffix ?? ''}:${data?.hotfixSuffix ?? ''}`;
-  useEffect(() => {
-    if (data == null) return;
-    setRelease(data.releaseSuffix ?? '');
-    setHotfix(data.hotfixSuffix ?? '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
-
   if (workspaceId == null || data == null) {
     return <ScopePendingSection title="Release tags" failed={query.isError} />;
   }
+  return (
+    <>
+      <SuffixSection workspaceId={workspaceId} data={data} />
+      <ReleasableReposSection workspaceId={workspaceId} data={data} />
+    </>
+  );
+}
 
-  const next = { releaseSuffix: normaliseReleaseSuffix(release), hotfixSuffix: normaliseReleaseSuffix(hotfix) };
+function SuffixInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }): JSX.Element {
+  return (
+    <div className="flex items-stretch sm:w-60">
+      <span
+        aria-hidden="true"
+        className="inline-flex items-center rounded-l-ui bg-ui-surface px-2.5 text-body text-ui-mute ring-1 ring-inset ring-ui-line"
+      >
+        {RELEASE_SUFFIX_PREFIX}
+      </span>
+      <input
+        id={id}
+        className={`${inputCls} rounded-l-none`}
+        value={value}
+        maxLength={RELEASE_SUFFIX_MAX + 8}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function SuffixSection({ workspaceId, data }: { workspaceId: number; data: ReleaseSettingsResponse }): JSX.Element {
+  const save = useSetReleaseSettings(workspaceId);
+  const releaseId = useId();
+  const hotfixId = useId();
+  // The TYPED parts (the fixed hyphen is beside the box).
+  const [release, setRelease] = useState(() => suffixTypedPart(data.releaseSuffix));
+  const [hotfix, setHotfix] = useState(() => suffixTypedPart(data.hotfixSuffix));
+  // Re-seeded on the STORED values (and the workspace), never on the response object: a background
+  // refetch must not throw away a half-typed suffix.
+  const signature = `${workspaceId}:${data.releaseSuffix ?? ''}:${data.hotfixSuffix ?? ''}`;
+  useEffect(() => {
+    setRelease(suffixTypedPart(data.releaseSuffix));
+    setHotfix(suffixTypedPart(data.hotfixSuffix));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  const next = { releaseSuffix: suffixFromTyped(release), hotfixSuffix: suffixFromTyped(hotfix) };
   const dirty = next.releaseSuffix !== data.releaseSuffix || next.hotfixSuffix !== data.hotfixSuffix;
   const problem = dirty ? validateReleaseSettings(next) : null;
   const warning = dirty && problem == null ? releaseSuffixChangeWarning(data, next) : null;
+  const example = (typed: string, fallback: string): string => `v2.4.0${RELEASE_SUFFIX_PREFIX}${typed.trim() === '' ? fallback : typed}`;
 
   return (
     <SectionShell
@@ -52,41 +92,69 @@ export function ReleasesSection(): JSX.Element {
         <InfoButton title="Release tags">
           <p>
             A version tag on the default branch, such as v2.4.0, is released by adding a tag with the release
-            suffix on the same commit: v2.4.0 plus the suffix.
+            suffix on the same commit: v2.4.0-rc for the suffix rc.
           </p>
           <p>A hotfix tag ends in the hotfix suffix. Your team creates those by hand on a hotfix branch.</p>
           <p>
-            The two suffixes must be different, and one cannot end with the other. Each is 1 to {RELEASE_SUFFIX_MAX}{' '}
-            characters that git allows in a tag name.
+            The hyphen is always added. Type the rest: 1 to {RELEASE_SUFFIX_MAX} characters that git allows in a tag
+            name. The two suffixes must be different, and one cannot end with the other.
           </p>
         </InfoButton>
       }
     >
-      <Field label="Release suffix" htmlFor={releaseId}>
-        <input
-          id={releaseId}
-          className={`${inputCls} sm:w-60`}
-          value={release}
-          maxLength={RELEASE_SUFFIX_MAX + 8}
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(e) => setRelease(e.target.value)}
-        />
+      <Field label="Release suffix" htmlFor={releaseId} hint={example(release, 'rc')}>
+        <SuffixInput id={releaseId} value={release} onChange={setRelease} />
       </Field>
-      <Field label="Hotfix suffix" htmlFor={hotfixId}>
-        <input
-          id={hotfixId}
-          className={`${inputCls} sm:w-60`}
-          value={hotfix}
-          maxLength={RELEASE_SUFFIX_MAX + 8}
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(e) => setHotfix(e.target.value)}
-        />
+      <Field label="Hotfix suffix" htmlFor={hotfixId} hint={example(hotfix, 'hotfix')}>
+        <SuffixInput id={hotfixId} value={hotfix} onChange={setHotfix} />
       </Field>
       {problem != null && <p className="text-meta text-ui-danger">{problem}</p>}
       {warning != null && <p className="rounded-ui bg-ui-raise px-2 py-1.5 text-meta text-ui-warn">{warning}</p>}
       <SaveButton dirty={dirty && problem == null} saving={save.isPending} onClick={() => save.mutate(next)} />
+      {save.isError && <p className="text-meta text-ui-danger">{save.error.message}</p>}
+    </SectionShell>
+  );
+}
+
+function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; data: ReleaseSettingsResponse }): JSX.Element {
+  const save = useSetReleaseRepos(workspaceId);
+  const stored = data.repos.filter((r) => r.releasable).map((r) => r.repoId);
+  const [ticked, setTicked] = useState<number[]>(stored);
+  const signature = `${workspaceId}:${stored.join(',')}`;
+  useEffect(() => {
+    setTicked(stored);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+  const dirty = releaseReposDirty(stored, ticked);
+  const toggle = (id: number): void => setTicked((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+
+  return (
+    <SectionShell
+      title="Released from this workspace"
+      desc="Only ticked repositories are checked, tagged and used as hotfix bases."
+      info={
+        <InfoButton title="Released from this workspace">
+          <p>Tick the repositories your team releases. Releases ignores the others: no rows, no blocks, no warnings.</p>
+          <p>In a hotfix build, a repository that is not ticked is read only.</p>
+        </InfoButton>
+      }
+    >
+      {data.repos.length === 0 ? (
+        <p className="text-meta text-ui-mute">This workspace has no repositories.</p>
+      ) : (
+        <ul className="space-y-1.5" data-testid="release-repos">
+          {data.repos.map((r) => (
+            <li key={r.repoId}>
+              <label className="flex items-center gap-2 text-body">
+                <CheckInput checked={ticked.includes(r.repoId)} onChange={() => toggle(r.repoId)} disabled={save.isPending} />
+                <span className="min-w-0 truncate">{r.fullName}</span>
+                {r.external && <span className="text-meta text-ui-mute">External</span>}
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+      <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate({ repoIds: ticked })} />
       {save.isError && <p className="text-meta text-ui-danger">{save.error.message}</p>}
     </SectionShell>
   );

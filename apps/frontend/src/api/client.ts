@@ -267,6 +267,8 @@ import type {
   CreateReleaseResponse,
   ReleaseDetail,
   SetReleaseSettingsBody,
+  SetReleaseReposBody,
+  SetReleaseStartTagBody,
   FlowPointersResponse,
   SandboxComposeFiles,
   SandboxFolderCheck,
@@ -664,6 +666,14 @@ export const api = {
   setReleaseSettings: (id: number, body: SetReleaseSettingsBody) =>
     fetch(`/api/workspaces/${id}/release-settings`, jsonBody('PUT', body)).then((r) =>
       handle<ReleaseSettingsResponse>(r),
+    ),
+  // Settings → Releases: the WHOLE set of repos ticked "Released from this workspace" (DB only).
+  setReleaseRepos: (id: number, body: SetReleaseReposBody) =>
+    fetch(`/api/workspaces/${id}/release-repos`, jsonBody('PUT', body)).then((r) => handle<ReleaseSettingsResponse>(r)),
+  // "Start from this tag" for one releasable repo (tagName null clears). DB only; answers the check.
+  setReleaseStartTag: (workspaceId: number, body: SetReleaseStartTagBody) =>
+    fetch(withQuery('/api/releases/start-tag', workspaceParam(workspaceId)), jsonBody('PUT', body)).then((r) =>
+      handle<ReleasesResponse>(r),
     ),
   // This Sprint → Releases: the release check over stored tags, ranges and tickets (DB only).
   releases: (workspaceId: number) => get<ReleasesResponse>(withQuery('/api/releases', workspaceParam(workspaceId))),

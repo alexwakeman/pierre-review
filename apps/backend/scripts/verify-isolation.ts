@@ -5031,6 +5031,17 @@ check(
   )[0]!.workspaceId;
   await rs.setReleaseSettings(1, defaultA, settings);
   await rs.setReleaseSettings(2, homeB, settings);
+  // RELEASABLE REPOS (db/release-repos.ts): A cannot tick B's repo, in A's workspace or in B's.
+  const rr = await import('../src/db/release-repos.js');
+  const tickInA = await rr.setReleaseRepos(1, defaultA, [B.repoId]);
+  check("setReleaseRepos(A, A's workspace, B's repo) is refused (not a member)", tickInA != null && !tickInA.ok);
+  check("setReleaseRepos(A, B's workspace) is not found", (await rr.setReleaseRepos(1, homeB, [])) == null);
+  check("getReleaseRepos(A, B's workspace) reads nothing", (await rr.getReleaseRepos(1, homeB)).size === 0);
+  const tickB = await rr.setReleaseRepos(2, homeB, [B.repoId]);
+  check("setReleaseRepos(B, B's repo) ticks it (mutation check)", tickB?.ok === true && (await rr.getReleaseRepos(2, homeB)).has(B.repoId));
+  const startA = await rr.setReleaseStartTag(1, homeB, settings, B.repoId, null, 'a');
+  check("setReleaseStartTag(A, B's workspace, B's repo) is refused", !startA.ok);
+  check("releaseRangeViews(A, B's repo) is empty", (await rr.releaseRangeViews(1, B.repoId)).length === 0);
   const viaB = await rc.getReleases(1, homeB);
   check("getReleases(A, B's workspace id) answers A's Default, never B's", viaB.workspaceId === defaultA);
   check("getReleases(A, B's workspace id) never lists B's repo", (viaB.check?.repos ?? []).every((r) => r.repoId !== B.repoId));
@@ -5057,12 +5068,13 @@ check(
   try {
     await rcw.createRelease(1, homeB, { repoIds: [B.repoId], snapshot: { repos: [], tickets: [] } });
   } catch (err) {
-    refused = err instanceof rcw.ReleaseRequestError && err.code === 'NothingToRelease';
+    refused = err instanceof rcw.ReleaseRequestError && err.code === 'NotReleasable';
   }
   check("createRelease(A, B's repo id) is refused before any read or write", refused);
   await db.delete(schema.releaseItems).where(eq(schema.releaseItems.releaseId, relB!.id)).execute();
   await db.delete(schema.releases).where(eq(schema.releases.id, relB!.id)).execute();
 
+  await rr.setReleaseRepos(2, homeB, []);
   await rs.setReleaseSettings(1, defaultA, { releaseSuffix: null, hotfixSuffix: null });
   await rs.setReleaseSettings(2, homeB, { releaseSuffix: null, hotfixSuffix: null });
 }

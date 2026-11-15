@@ -7,7 +7,9 @@ import type {
   ReleaseSettingsResponse,
   ReleasesRefreshResponse,
   ReleasesResponse,
+  SetReleaseReposBody,
   SetReleaseSettingsBody,
+  SetReleaseStartTagBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { workspaceKey } from './useActivity.js';
@@ -75,6 +77,38 @@ export function useSetReleaseSettings(workspaceId: number | null) {
       qc.setQueryData(releaseSettingsKey(data.workspaceId), data);
       // A suffix change re-classifies every tag: the check is read again.
       void qc.invalidateQueries({ queryKey: releasesKey(data.workspaceId) });
+    },
+  });
+}
+
+/** Settings → Releases: the ticked "Released from this workspace" repos (the WHOLE set). */
+export function useSetReleaseRepos(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<ReleaseSettingsResponse, Error, SetReleaseReposBody>({
+    mutationKey: ['release-repos-save', workspaceKey(workspaceId)],
+    mutationFn: (body) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.setReleaseRepos(workspaceId, body);
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(releaseSettingsKey(data.workspaceId), data);
+      // Only ticked repos are checked: the check is read again.
+      void qc.invalidateQueries({ queryKey: releasesKey(data.workspaceId) });
+    },
+  });
+}
+
+/** "Start from this tag" (a press in the repo row; `tagName` null clears it). The answer is the check. */
+export function useSetReleaseStartTag(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<ReleasesResponse, Error, SetReleaseStartTagBody>({
+    mutationKey: ['release-start-tag', workspaceKey(workspaceId)],
+    mutationFn: (body) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.setReleaseStartTag(workspaceId, body);
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<ReleasesResponse>(releasesKey(data.workspaceId), data);
     },
   });
 }

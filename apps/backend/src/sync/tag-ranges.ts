@@ -17,21 +17,24 @@
 //           only PRs of THIS repo merged into its default branch count. 'history': the OLDEST tag
 //           has no base, so its range is every stored PR merged into the default branch no later
 //           than its commit — PRs older than the synced history are not checked.
-//   bounds  the newest TAG_RANGE_WINDOW tags get a range, and so does every tag after the oldest
-//           baseline of any workspace with both suffixes set (`tagRangeKeepFrom`); at most TAG_RANGES_PER_SYNC are
-//           computed per sync, newest first; the rest go next sync. Skipped while the account's
-//           budget is low or limited. A failed compare leaves the old row (if any) and is retried
-//           next sync.
+//   bounds  ONLY A RELEASABLE REPO gets ranges (ticked "Released from this workspace" in a workspace
+//           with both suffixes set, db/release-repos.ts `releaseRangeViews`); any other repo's stored
+//           ranges are dropped. Per such workspace: every tag after its BASELINE (the newer of the
+//           newest release tag and the reader's start tag), or the newest TAG_RANGE_WINDOW tags with
+//           no baseline (`tagRangeKeepFrom`). At most TAG_RANGES_PER_SYNC are computed per run, newest
+//           first; the rest go next run (the settle sweep asks again soon, `needsTagCatchUp`). Skipped
+//           while the account's budget is low or limited. A failed compare leaves the old row (if
+//           any) and is retried next run.
 //   moves   a tag whose sha changed is recomputed and the row keeps `moved_from_sha`.
 import { and, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
 import {
   TAG_RANGE_WINDOW as SHARED_TAG_RANGE_WINDOW,
   compareTagOrder as sharedCompareTagOrder,
   tagRangeKeepFrom,
-  type ReleaseSettings,
+  type ReleaseRangeView,
 } from '@pierre-review/shared';
 import { db, schema, runTransaction } from '../db/client.js';
-import { configuredReleaseSettings } from '../db/release-settings.js';
+import { releaseRangeViews } from '../db/release-repos.js';
 import {
   getGraphqlClientFor,
   graphqlTolerant,
@@ -50,11 +53,12 @@ import {
 
 const { repos, repoTags, repoTagRanges, pullRequests, commits } = schema;
 
-/** Tags (newest first, on the default branch) that always get a range (shared, the fold reads it too).
- *  Every tag after a configured workspace's baseline gets one as well (`tagRangeKeepFrom`). */
+/** With no baseline, the newest tags on the default branch that get a range (shared, the fold reads it
+ *  too). With a baseline, every tag after it (`tagRangeKeepFrom`). */
 export const TAG_RANGE_WINDOW = SHARED_TAG_RANGE_WINDOW;
-/** Ranges computed per sync. */
-export const TAG_RANGES_PER_SYNC = 10;
+/** Ranges computed per run (a releasable repo is the only one that gets any): the whole window, so a
+ *  repo with no baseline catches up in one run when the budget allows. */
+export const TAG_RANGES_PER_SYNC = SHARED_TAG_RANGE_WINDOW;
 /** Commits read from one compare (10 pages of 100). */
 export const TAG_RANGE_MAX_COMMITS = 1000;
 const COMPARE_PAGE = 100;
@@ -99,19 +103,22 @@ export function compareTagOrder(a: RangeTag, b: RangeTag): number {
 /**
  * Which ranges to (re)compute and which stored rows to drop. A range is (re)computed when it is
  * missing, its tag moved, or its base changed (another tag was cut between, or the base moved).
- * Newest first, at most `perSync`. Pure.
+ * Newest first, at most `perSync`. `views` = every workspace releasing this repo (its suffixes and
+ * start tag): ranges after each one's baseline, or the window without one; NO view ⇒ no range at all
+ * (every stored one dropped). `views` left out ⇒ the window alone (the planner's own tests). Pure.
  */
 export function planTagRanges(
   tags: RangeTag[],
   stored: StoredRange[],
-  opts: { window?: number; perSync?: number; settings?: readonly ReleaseSettings[] } = {},
+  opts: { window?: number; perSync?: number; views?: readonly ReleaseRangeView[] } = {},
 ): RangePlan {
   const window = opts.window ?? TAG_RANGE_WINDOW;
   const perSync = opts.perSync ?? TAG_RANGES_PER_SYNC;
   const ordered = tags.filter((t) => t.onDefaultBranch === true && t.committedAt != null).sort(compareTagOrder);
-  // The window, extended back to just after the oldest baseline of any configured workspace: the
-  // release check sums EVERY increment after its baseline, so none of them may be left out.
-  const keepFrom = tagRangeKeepFrom(ordered, opts.settings ?? [], window);
+  // From just after the OLDEST baseline any releasing workspace gives (the release check sums EVERY
+  // increment after its baseline, so none may be left out), or the window for one with none.
+  const keepFrom =
+    opts.views == null ? Math.max(0, ordered.length - window) : tagRangeKeepFrom(ordered, tags, opts.views, window);
   const inWindow = new Set(ordered.slice(keepFrom).map((t) => t.name));
   const storedByName = new Map(stored.map((s) => [s.tagName, s]));
   const work: RangeWork[] = [];
@@ -172,8 +179,8 @@ export interface TagRangeDeps {
   compare?: (base: string, head: string, page: number) => Promise<RestCompareResponse>;
   commitPrs?: (shas: string[]) => Promise<CommitPrsResponse>;
   now?: () => number;
-  /** The configured workspaces' suffixes (default: read from the DB). */
-  settings?: () => ReleaseSettings[];
+  /** The workspaces releasing this repo (default: read from the DB, `releaseRangeViews`). */
+  views?: () => ReleaseRangeView[];
 }
 
 export interface ComputeTagRangesOptions {
@@ -380,7 +387,8 @@ async function compareRange(
 
 /**
  * Compute the missing / stale ranges for one repo. NEVER THROWS. Needs the repo's default branch
- * name (the tag sync's `defaultBranchName`, else the stored one).
+ * name (the tag sync's `defaultBranchName`, else the stored one). A repo no workspace releases gets
+ * none (its stored ones are dropped). `pending` = ranges left for the next run.
  */
 export async function computeTagRanges(
   opts: ComputeTagRangesOptions & { defaultBranchName?: string | null },
@@ -423,8 +431,8 @@ export async function computeTagRanges(
       .from(repoTagRanges)
       .where(and(eq(repoTagRanges.accountId, accountId), eq(repoTagRanges.repoId, repoId)))
       .execute();
-    const settings = opts.deps?.settings != null ? opts.deps.settings() : await configuredReleaseSettings(accountId);
-    const full = planTagRanges(tags, stored, { perSync: Number.MAX_SAFE_INTEGER, settings });
+    const views = opts.deps?.views != null ? opts.deps.views() : await releaseRangeViews(accountId, repoId);
+    const full = planTagRanges(tags, stored, { perSync: Number.MAX_SAFE_INTEGER, views });
     const plan = { work: full.work.slice(0, TAG_RANGES_PER_SYNC), deleteTagNames: full.deleteTagNames };
     result.pending = full.work.length - plan.work.length;
 

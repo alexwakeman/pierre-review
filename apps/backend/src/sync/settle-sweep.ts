@@ -73,7 +73,7 @@ import { fetchRollupsWithoutLimn } from './limn-ci.js';
 import { syncOnePr } from './sync-one-pr.js';
 import { runUnsettledPrBackstop, scheduleTrunkMovedRecheck } from './unsettled-prs.js';
 import { tagSignature } from './repo-tags.js';
-import { scheduleTagSync } from './tags-step.js';
+import { markTagCatchUp, scheduleTagSync, takeTagCatchUp } from './tags-step.js';
 import { ciStatusFrom, reviewDecisionFrom } from './upsert.js';
 import type { Logger } from './sync-repo.js';
 
@@ -560,12 +560,16 @@ async function judgeRepo(
     scheduleTrunkMovedRecheck(accountId, repo.id, log);
   }
   // A TAG PUSH (docs/RELEASES.md): GitHub's tag signature differs from the stored one → the tags
-  // step runs in the background (sync/tags-step.ts). Once per distinct observation.
+  // step runs in the background (sync/tags-step.ts). Once per distinct observation. A RELEASABLE repo
+  // with work left (ranges, ancestry), just ticked, or given a start tag is CAUGHT UP the same way.
   if (tagSyncDue(repo.tagsSignature, read.tagSig, tagActed.get(repo.id))) {
     if (scheduleTagSync(accountId, repo.id, log)) {
       result.tagSyncs += 1;
       rememberTagActed(repo.id, read.tagSig!);
     }
+  } else if (takeTagCatchUp(repo.id)) {
+    if (scheduleTagSync(accountId, repo.id, log)) result.tagSyncs += 1;
+    else markTagCatchUp(repo.id);
   }
   const observed = read.prs.map(foldSettlePr).filter((o): o is SettleObservedPr => o != null);
   const stored = await getSettleStoredPrs(

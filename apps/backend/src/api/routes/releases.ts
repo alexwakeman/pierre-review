@@ -7,12 +7,19 @@ import {
   type ReleasePreviewBody,
   type ReleasesRefreshResponse,
   type ReleasesResponse,
+  type SetReleaseReposBody,
   type SetReleaseSettingsBody,
+  type SetReleaseStartTagBody,
 } from '@pierre-review/shared';
+import { eq } from 'drizzle-orm';
+import { db, schema } from '../../db/client.js';
+import { getReleaseRepos, setReleaseRepos, setReleaseStartTag } from '../../db/release-repos.js';
+import { resolveWorkspaceScope } from '../../db/queries.js';
+import { markTagCatchUp } from '../../sync/tags-step.js';
 import { ReleaseRequestError, createRelease, getReleaseDetail, previewRelease } from '../../releases/create.js';
 import { getReleases } from '../../db/release-check.js';
 import { refreshReleases } from '../../releases/refresh.js';
-import { getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
+import { getReleaseSettings, getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // RELEASES (docs/RELEASES.md; docs/API.md § Releases). CORE, always registered.
@@ -21,8 +28,17 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                              set; there is no default), `configured` (both set) and
 //                                              `hasReleases` (the form warns before a change).
 //   PUT /api/workspaces/:id/release-settings   the WHOLE setting: `{ releaseSuffix, hotfixSuffix }`,
-//                                              null or "" clears one. 400 with the SAME sentence
+//                                              null or "" clears one; a suffix without the fixed
+//                                              leading hyphen gets one. 400 with the SAME sentence
 //                                              shared `validateReleaseSettings` gives the Settings form.
+//   PUT /api/workspaces/:id/release-repos      the WHOLE set of repos ticked "Released from this
+//                                              workspace": `{ repoIds }` (members only, else 400).
+//                                              DB only; newly ticked repos are marked for the tag
+//                                              sync's catch-up (the settle sweep reads GitHub, not this
+//                                              route). Answers the settings.
+//   PUT /api/releases/start-tag?workspace=<id> "Start from this tag": `{ repoId, tagName }` (null
+//                                              clears). DB only, nothing written to GitHub. Answers
+//                                              the check (GET /api/releases's shape).
 //   GET /api/releases?workspace=<id>           This Sprint → Releases: the release check (shared
 //                                              `foldReleaseCheck` over db/release-check.ts's stored
 //                                              inputs), the newest release, whether both suffixes are
@@ -39,8 +55,8 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                              Tracker reads + GitHub writes: tier `search` + `github_write`.
 //   GET  /api/releases/:id                     one stored release (its notes and per-step results).
 //
-// Both are DB only — the workspace-CRUD `read` tier (api/plugins/rate-limit.ts). 404 on a workspace
-// that is not this account's, like every id-addressed workspace route.
+// The settings routes and the start tag are DB only — the `read` tier (api/plugins/rate-limit.ts). 404
+// on a workspace that is not this account's, like every id-addressed workspace route.
 
 const idParamSchema = {
   type: 'object',
@@ -163,6 +179,75 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
     }
     return detail;
   });
+
+  app.put(
+    '/api/releases/start-tag',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['repoId', 'tagName'],
+          additionalProperties: false,
+          properties: { repoId: { type: 'integer' }, tagName: { type: ['string', 'null'], minLength: 1, maxLength: 300 } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const q = req.query as { workspace?: string };
+      const body = req.body as SetReleaseStartTagBody;
+      const scope = await resolveWorkspaceScope(accountId, q.workspace);
+      const settings = (await getReleaseSettings(accountId, scope.workspaceId)) ?? { releaseSuffix: null, hotfixSuffix: null };
+      const login =
+        (await db.select({ login: schema.accounts.githubLogin }).from(schema.accounts).where(eq(schema.accounts.id, accountId)).execute())[0]
+          ?.login ?? null;
+      const out = await setReleaseStartTag(accountId, scope.workspaceId, settings, body.repoId, body.tagName, login);
+      if (!out.ok) {
+        reply.status(out.status);
+        return { error: out.code, message: out.message };
+      }
+      // A new baseline needs only the ranges after it: ask the tag sync to catch up soon.
+      markTagCatchUp(body.repoId);
+      return getReleases(accountId, scope.workspaceId);
+    },
+  );
+
+  app.put(
+    '/api/workspaces/:id/release-repos',
+    {
+      schema: {
+        params: idParamSchema,
+        body: {
+          type: 'object',
+          required: ['repoIds'],
+          additionalProperties: false,
+          properties: { repoIds: { type: 'array', maxItems: 500, items: { type: 'integer' } } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const accountId = accountIdOf(req);
+      const { id } = req.params as { id: number };
+      const body = req.body as SetReleaseReposBody;
+      const before = new Set((await getReleaseRepos(accountId, id)).keys());
+      const out = await setReleaseRepos(accountId, id, body.repoIds);
+      if (out == null) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      if (!out.ok) {
+        reply.status(400);
+        return { error: 'NotAMember', message: 'Only repositories of this workspace can be released from it.' };
+      }
+      for (const repoId of body.repoIds) if (!before.has(repoId)) markTagCatchUp(repoId);
+      const res = await getReleaseSettingsResponse(accountId, id);
+      if (!res) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Workspace ${id} not found` };
+      }
+      return res;
+    },
+  );
 
   app.get('/api/workspaces/:id/release-settings', { schema: { params: idParamSchema } }, async (req, reply) => {
     const accountId = accountIdOf(req);

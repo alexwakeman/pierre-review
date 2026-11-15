@@ -1,8 +1,10 @@
 // HOTFIX BUILDS — the pure half (docs/RELEASES.md § Hotfix, docs/STORY-BUILD.md § Hotfix builds).
 //
-// "Treat as a hotfix" is an Implement option. Each workspace repository with a LATEST RELEASE (the newest
-// release OR hotfix tag, `latestReleaseTag`) gets a RELEASE checkout at that tag's commit and a MAIN checkout
-// at the default branch's head, in the same sandbox; a repository without one is READ ONLY for the build.
+// "Treat as a hotfix" is an Implement option. Each RELEASABLE workspace repository ("Released from this
+// workspace", Settings → Releases) with a LATEST RELEASE (the newest release OR hotfix tag,
+// `latestReleaseTag`) gets a RELEASE checkout at that tag's commit and a MAIN checkout
+// at the default branch's head, in the same sandbox; any other repository (not released from this workspace,
+// or no release yet) is READ ONLY for the build.
 // Push opens two pull requests per changed repository:
 //
 //   PR 1  `<KEY>`       → `hotfix/<latest release tag>` (made at the release commit when it is missing)
@@ -29,10 +31,11 @@ export function hotfixMainBranchName(branch: string): string {
 /** The one sentence a refused review loop / end-to-end start on a hotfix build answers. */
 export const HOTFIX_NO_LOOP_LINE = 'A hotfix build opens its pull requests when you press Push. The review loop and Build end to end are off for it.';
 /** The one sentence a hotfix start answers when the option is not offered. */
-export const HOTFIX_NOT_OFFERED_LINE = 'A hotfix needs the release and hotfix suffixes in Settings → Releases and at least one repository with a release.';
+export const HOTFIX_NOT_OFFERED_LINE =
+  'A hotfix needs the release and hotfix suffixes in Settings → Releases and at least one repository released from this workspace with a release.';
 /** The line a read-only repository's refused change gets (the session goes on). */
 export const hotfixReadOnlyLine = (fullName: string): string =>
-  `${fullName} has no release yet, so it is read only in this hotfix build. Its changes were not kept.`;
+  `${fullName} has no release here, so it is read only in this hotfix build. Its changes were not kept.`;
 
 // ── The bases ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -45,6 +48,8 @@ export interface HotfixBaseRepoInput {
   /** `owner/name`. */
   fullName: string;
   defaultBranch: string | null;
+  /** Ticked "Released from this workspace". An unticked repository is read only (its tags are ignored). */
+  releasable: boolean;
   tags: readonly HotfixBaseTagInput[];
 }
 
@@ -53,7 +58,9 @@ export interface StoryBuildHotfixBase {
   repoId: number;
   fullName: string;
   defaultBranch: string | null;
-  /** The latest release; null ⇒ no release yet, the repository is READ ONLY for the build. */
+  /** Ticked "Released from this workspace" (Settings → Releases). False ⇒ READ ONLY, whatever its tags. */
+  releasable: boolean;
+  /** The latest release; null ⇒ not releasable or no release yet: the repository is READ ONLY for the build. */
   release: { tagName: string; sha: string; kind: 'release' | 'hotfix'; committedAt: string | null } | null;
   /** `hotfix/<tag>`; null on a read-only repository. */
   hotfixBranch: string | null;
@@ -70,8 +77,8 @@ export interface StoryBuildHotfixBasesResponse {
 }
 
 /**
- * THE BASES of a hotfix build (pure): per repository its latest release (release checkout at that commit),
- * else read only. `offered` only when both suffixes are set and at least one repository has a release.
+ * THE BASES of a hotfix build (pure): per RELEASABLE repository its latest release (release checkout at that
+ * commit); every other repository read only. `offered` only when both suffixes are set and at least one repository has a release.
  * Repositories are ordered by name.
  */
 export function hotfixBasesOf(
@@ -82,11 +89,12 @@ export function hotfixBasesOf(
   const out: StoryBuildHotfixBase[] = [...repos]
     .sort((a, b) => (a.fullName < b.fullName ? -1 : a.fullName > b.fullName ? 1 : a.repoId - b.repoId))
     .map((r) => {
-      const hit = configured ? latestReleaseTag(r.tags, settings) : null;
+      const hit = configured && r.releasable ? latestReleaseTag(r.tags, settings) : null;
       return {
         repoId: r.repoId,
         fullName: r.fullName,
         defaultBranch: r.defaultBranch,
+        releasable: r.releasable,
         release: hit ? { tagName: hit.tag.name, sha: hit.tag.sha, kind: hit.kind, committedAt: hit.tag.committedAt?.toISOString() ?? null } : null,
         hotfixBranch: hit ? hotfixBranchName(hit.tag.name) : null,
       };

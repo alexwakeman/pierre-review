@@ -18,9 +18,11 @@ export function hotfixDayWords(iso: string | null | undefined): string | null {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 }
 
-/** One base line of the Start panel: "from v2.4.0-rc (12 Nov) → PRs into hotfix/v2.4.0-rc and main", or
- *  "no release yet — read only". The repository's name is shown beside it. */
-export function hotfixBaseLine(b: Pick<StoryBuildHotfixBase, 'release' | 'hotfixBranch' | 'defaultBranch'>): string {
+/** One base line of the Start panel: "from v2.4.0-rc (12 Nov) → PRs into hotfix/v2.4.0-rc and main",
+ *  "not released from this workspace — read only" or "no release yet — read only". The repository's name
+ *  is shown beside it. */
+export function hotfixBaseLine(b: Pick<StoryBuildHotfixBase, 'release' | 'hotfixBranch' | 'defaultBranch'> & { releasable?: boolean }): string {
+  if (b.releasable === false) return 'not released from this workspace — read only';
   if (b.release == null || b.hotfixBranch == null) return 'no release yet — read only';
   const day = hotfixDayWords(b.release.committedAt);
   return `from ${b.release.tagName}${day != null ? ` (${day})` : ''} → PRs into ${b.hotfixBranch} and ${b.defaultBranch ?? 'the default branch'}`;

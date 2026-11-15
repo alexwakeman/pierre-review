@@ -1,10 +1,12 @@
 // THE RELEASE CHECK'S DB HALF (docs/RELEASES.md § The release check) — gathers the stored inputs of
 // shared `foldReleaseCheck` and answers GET /api/releases. DB ONLY: never a GitHub or tracker call.
 //
-//   • Repos: the workspace's members (`resolveWorkspaceScope`), their stored tags and range increments
-//     (db/repo-tags.ts), `writable` from the synced `viewerPermission` (the ONE WRITE_PERMISSIONS set).
-//   • PRs: every PR in a stored range, plus every PR (in the workspace's repos) on a ticket one of them
-//     names — the ships-whole and open-work rules need the ticket's PRs everywhere.
+//   • Repos: the workspace's RELEASABLE repos only (db/release-repos.ts: ticked "Released from this
+//     workspace", ∩ its current membership — unticked repos are ignored entirely), their start tags,
+//     their stored tags and range increments (db/repo-tags.ts), `writable` from the synced
+//     `viewerPermission` (the ONE WRITE_PERMISSIONS set).
+//   • PRs: every PR in a stored range (each repository is judged on its own: a ticket's PRs elsewhere
+//     do not count).
 //   • Tickets: `tracker_tickets` rows ON THE WORKSPACE'S TRACKER SITE only (a row of another site is a
 //     ticket of a tracker the workspace no longer uses: not a link). The best row per ticket is the
 //     newest successful read; a fresher `sprint_tickets` row's status wins. DONE = the This Sprint
@@ -12,7 +14,6 @@
 //     A range PR with a ticket key THE detection rule finds but no stored row yet is `not_read` (blocks).
 //   • A 'history' range (the oldest tag) is read fresh from the stored PRs, never from its frozen row.
 //   • Bot-ness: `globalAutomationUserIds`, never the hidden-bots list.
-//   • Accepted repos: `sprint_ticket_repos` (the reader's accepted repos per ticket).
 import { and, desc, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
 import {
   foldReleaseCheck,
@@ -31,11 +32,12 @@ import {
 import { globalAutomationUserIds } from './automation-ids.js';
 import { db, schema } from './client.js';
 import { WRITE_PERMISSIONS, resolveWorkspaceScope } from './queries.js';
+import { getReleaseRepos } from './release-repos.js';
 import { getReleaseSettings } from './release-settings.js';
 import { getRepoTags, getTagRanges } from './repo-tags.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
 
-const { repos, pullRequests, trackerTickets, sprintTickets, sprintTicketRepos, releases } = schema;
+const { repos, pullRequests, trackerTickets, sprintTickets, releases } = schema;
 
 const CHUNK = 400;
 
@@ -137,13 +139,16 @@ async function historyPrIds(
   return [...new Set(rows.map((r) => r.id))].sort((a, b) => a - b);
 }
 
-/** Every stored input of the fold for one workspace (the caller checked the settings are set). */
+/** Every stored input of the fold for one workspace (the caller checked the settings are set). Only the
+ *  RELEASABLE repos among `repoIds` are read (an unticked id is dropped here, whoever asks). */
 export async function loadReleaseCheckInput(
   accountId: number,
   workspaceId: number,
-  repoIds: readonly number[],
+  requestedRepoIds: readonly number[],
   settings: ReleaseSettings,
 ): Promise<ReleaseCheckInput> {
+  const ticked = await getReleaseRepos(accountId, workspaceId);
+  const repoIds = [...new Set(requestedRepoIds)].filter((id) => ticked.has(id));
   const repoRows =
     repoIds.length === 0
       ? []
@@ -215,7 +220,8 @@ export async function loadReleaseCheckInput(
       const missing = keys.filter((k) => !(rowKeys.get(prId)?.has(k) ?? false));
       if (missing.length > 0) detectedOnly.set(prId, missing);
     }
-    // Every PR on those tickets (the ticket's other repos, its open work).
+    // The same tickets' rows on OTHER PRs: a ticket read through another PR is read (its status counts),
+    // though those PRs are not in this check.
     const keys = [...new Set([...ticketRows.map((r) => r.issueKey), ...[...detectedOnly.values()].flat()])];
     const have = new Set(ticketRows.map((r) => `${r.prId}#${r.issueKey}`));
     for (const part of chunks(keys)) {
@@ -235,8 +241,8 @@ export async function loadReleaseCheckInput(
     }
   }
 
-  // The PRs, within the workspace's repos only.
-  const prIdSet = [...new Set([...rangePrIds, ...ticketRows.map((r) => r.prId)])];
+  // The PRs: the ranges' only, within the releasable repos.
+  const prIdSet = rangePrIds;
   type PrRow = {
     id: number;
     repoId: number;
@@ -317,10 +323,8 @@ export async function loadReleaseCheckInput(
   // The tickets: best stored read, a fresher sprint read's status wins, Done by the stage resolver.
   const idents = [...rowsByIdent.keys(), ...unreadKeys.keys()];
   const sprintByIdent = new Map<string, { statusName: string | null; statusCategory: string | null; fetchedAt: Date; title: string; url: string | null }>();
-  const accepted: Array<{ ident: string; repoId: number }> = [];
   for (const part of chunks(idents)) {
-    const [srows, arows] = await Promise.all([
-      db
+    const srows = await db
         .select({
           ident: sprintTickets.ident,
           statusName: sprintTickets.statusName,
@@ -331,21 +335,8 @@ export async function loadReleaseCheckInput(
         })
         .from(sprintTickets)
         .where(and(eq(sprintTickets.accountId, accountId), eq(sprintTickets.workspaceId, workspaceId), inArray(sprintTickets.ident, part)))
-        .execute(),
-      db
-        .select({ ident: sprintTicketRepos.ident, repoId: sprintTicketRepos.repoId })
-        .from(sprintTicketRepos)
-        .where(
-          and(
-            eq(sprintTicketRepos.accountId, accountId),
-            eq(sprintTicketRepos.workspaceId, workspaceId),
-            inArray(sprintTicketRepos.ident, part),
-          ),
-        )
-        .execute(),
-    ]);
+        .execute();
     for (const s of srows) sprintByIdent.set(s.ident, s);
-    accepted.push(...arows.filter((a) => repoById.has(a.repoId)));
   }
   const layout = idents.length > 0 ? await sprintLayoutFor(accountId, workspaceId) : null;
   const tickets: ReleaseCheckTicketInput[] = idents.map((ident) => {
@@ -401,6 +392,7 @@ export async function loadReleaseCheckInput(
         fullName: `${r.owner}/${r.name}`,
         name: r.name,
         writable: WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
+        startTag: ticked.get(r.id)?.startTag ?? null,
         tags: (tagsByRepo.get(r.id) ?? []).map((t) => ({
           name: t.name,
           sha: t.sha,
@@ -423,11 +415,11 @@ export async function loadReleaseCheckInput(
       })),
     prs,
     tickets,
-    acceptedRepos: accepted,
   };
 }
 
-/** GET /api/releases. `rawWorkspace` absent / unknown / unparseable ⇒ the Default workspace. */
+/** GET /api/releases. `rawWorkspace` absent / unknown / unparseable ⇒ the Default workspace. With no
+ *  releasable repo the check is null (the tab's setup line). */
 export async function getReleases(accountId: number, rawWorkspace: string | number | undefined | null): Promise<ReleasesResponse> {
   const scope = await resolveWorkspaceScope(accountId, rawWorkspace);
   const workspaceId = scope.workspaceId;
@@ -448,8 +440,10 @@ export async function getReleases(accountId: number, rawWorkspace: string | numb
     hotfixSuffix: settings.hotfixSuffix,
     latestRelease: latest != null ? { id: latest.id, createdAt: latest.createdAt.toISOString(), state: latest.state } : null,
   };
-  if (!base.configured) return { ...base, latestReleaseTagAt: null, check: null };
-  const input = await loadReleaseCheckInput(accountId, workspaceId, scope.repoIds, settings);
+  const releasable = [...(await getReleaseRepos(accountId, workspaceId)).keys()];
+  const withRepos = { ...base, hasReleasableRepos: releasable.length > 0 };
+  if (!base.configured || releasable.length === 0) return { ...withRepos, latestReleaseTagAt: null, check: null };
+  const input = await loadReleaseCheckInput(accountId, workspaceId, releasable, settings);
   let latestTagMs: number | null = null;
   for (const r of input.repos) {
     for (const t of r.tags) {
@@ -460,7 +454,7 @@ export async function getReleases(accountId: number, rawWorkspace: string | numb
     }
   }
   return {
-    ...base,
+    ...withRepos,
     latestReleaseTagAt: latestTagMs == null ? null : new Date(latestTagMs).toISOString(),
     check: foldReleaseCheck(input),
   };

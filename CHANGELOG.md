@@ -13,6 +13,25 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Releases → "Released from this workspace": tick the repositories you release. Releases checks, tags
+  and offers hotfix bases for those only, and ignores the rest. Nothing is ticked at first.
+- This Sprint → Releases → "Start from this tag": treat a version tag on main, and everything before it, as
+  accepted, so only later tags are checked. Change or clear it from the repository row. Nothing is written to GitHub.
+
+### Changed
+
+- This Sprint → Releases: one row per repository with the latest version tag and the candidate ("Latest 0.394.0 ·
+  candidate 0.390.0 → 0.390.0-rc"). Open a row to see each tag's tickets and status. The separate tickets list is gone.
+- This Sprint → Releases: a version tag is held back only by its own tickets that are not Done or could not be read.
+  A ticket's pull requests in other repositories, and open pull requests, no longer hold anything back.
+- This Sprint → Releases: tags whose changes are still being read say "Reading changes…" instead of holding the
+  release back, and repositories you release catch up much sooner.
+- Settings → Releases: the hyphen before each suffix is fixed. Type `rc`, and the tag is `v2.4.0-rc`. A suffix saved
+  without a hyphen now has one.
+- Implement → "Treat as a hotfix": a repository not released from this workspace is read only.
+
 ## [1.0.40] - 2026-11-15
 
 ### Changed

@@ -17,15 +17,18 @@ import {
   defaultTickedRepoIds,
   editedSections,
   latestReleaseLine,
+  noBaselineLine,
   releaseTagsLine,
   releaseWarningText,
-  releaseWordsContext,
+  repoReadingNote,
+  repoRowCounts,
   repoRowText,
   showCreateRelease,
-  ticketRepoMark,
-  ticketsPanelRows,
+  startTagLine,
+  tagContents,
+  ticketMark,
 } from '../src/components/Sprint/releasesModel.js';
-import { releaseSuffixChangeWarning } from '../src/components/settings/releasesSectionModel.js';
+import { releaseReposDirty, releaseSuffixChangeWarning } from '../src/components/settings/releasesSectionModel.js';
 
 const SETTINGS = { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' };
 const day = (d: number, h = 12) => new Date(Date.UTC(2026, 10, d, h));
@@ -36,6 +39,7 @@ interface TagSpec {
   d: number;
   prs?: number[];
   commit?: string;
+  noRange?: boolean;
 }
 
 function repo(repoId: number, name: string, specs: TagSpec[], writable = true): ReleaseCheckRepoInput {
@@ -48,9 +52,10 @@ function repo(repoId: number, name: string, specs: TagSpec[], writable = true): 
     moved: false,
   }));
   const sorted = tags.map((t, i) => ({ t, s: specs[i]! })).sort((a, b) => a.t.committedAt.getTime() - b.t.committedAt.getTime());
-  const ranges = sorted.map(({ t, s }, i) => {
+  const ranges = sorted.flatMap(({ t, s }, i) => {
     const base = i > 0 ? sorted[i - 1]!.t : null;
-    return {
+    if (s.noRange) return [];
+    return [{
       tagName: t.name,
       sha: t.sha,
       baseTagName: base?.name ?? null,
@@ -60,7 +65,7 @@ function repo(repoId: number, name: string, specs: TagSpec[], writable = true): 
       unresolvedPrNumbers: [],
       unmatchedCommits: 0,
       truncated: false,
-    };
+    }];
   });
   return { repoId, fullName: `acme/${name}`, name, writable, tags, ranges };
 }
@@ -86,7 +91,7 @@ function ticket(key: string, extra: Partial<ReleaseCheckTicketInput> = {}): Rele
 }
 
 function run(parts: Partial<ReleaseCheckInput>): ReleaseCheckResult {
-  return foldReleaseCheck({ settings: SETTINGS, repos: [], prs: [], tickets: [], acceptedRepos: [], ...parts });
+  return foldReleaseCheck({ settings: SETTINGS, repos: [], prs: [], tickets: [], ...parts });
 }
 
 const threeTags = (writable = true) =>
@@ -112,35 +117,51 @@ describe('the header line', () => {
   });
 });
 
-describe('repo rows', () => {
-  it('acceptance 4: all Done → "v1.2.0 → v1.2.0-rc · 3 tickets", and Create release is shown', () => {
-    const res = run({ repos: [threeTags()], prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])], tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+describe('repo rows — the pair: the latest version tag on main, and the candidate', () => {
+  const all = () => ({ prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])], tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+
+  it('acceptance 4: all Done → "Latest v1.2.0 is the candidate → v1.2.0-rc", and Create release is shown', () => {
+    const res = run({ repos: [threeTags()], ...all() });
     const api = res.repos[0]!;
-    expect(repoRowText(api, releaseWordsContext(res))).toBe('v1.2.0 → v1.2.0-rc · 3 tickets');
+    expect(repoRowText(api)).toBe('Latest v1.2.0 is the candidate → v1.2.0-rc');
+    expect(repoRowCounts(api)).toBe('3 tickets');
     expect(showCreateRelease(res)).toBe(true);
     expect(defaultTickedRepoIds(res)).toEqual([1]);
   });
 
-  it('acceptance 5: an In review ticket in v1.1.0 → "v1.0.0 → v1.0.0-rc", and a fully held repo names the blocker', () => {
+  it('acceptance 5: an In PO Review ticket in v1.1.0 → "Latest v1.2.0 · candidate v1.0.0 → v1.0.0-rc"; a fully held repo names the blocker', () => {
     const res = run({
       repos: [threeTags()],
-      prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])],
-      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' }), ticket('T3')],
+      prs: all().prs,
+      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In PO Review' }), ticket('T3')],
     });
-    expect(repoRowText(res.repos[0]!, releaseWordsContext(res))).toBe('v1.0.0 → v1.0.0-rc · 1 ticket');
+    expect(repoRowText(res.repos[0]!)).toBe('Latest v1.2.0 · candidate v1.0.0 → v1.0.0-rc');
+    expect(repoRowCounts(res.repos[0]!)).toBe('1 ticket');
     const held = run({
       repos: [threeTags()],
-      prs: [pr(1, 1, ['PLAT-301']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])],
-      tickets: [ticket('PLAT-301', { done: false, statusName: 'In review' }), ticket('T2'), ticket('T3')],
+      prs: [pr(1, 1, ['BMD-1048']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])],
+      tickets: [ticket('BMD-1048', { done: false, statusName: 'In PO Review' }), ticket('T2'), ticket('T3')],
     });
     expect(held.repos[0]!.status).toBe('blocked');
-    expect(repoRowText(held.repos[0]!, releaseWordsContext(held))).toBe('No candidate: v1.0.0 held by PLAT-301 (In review)');
+    expect(repoRowText(held.repos[0]!)).toBe('No candidate: v1.0.0 held by BMD-1048 (In PO Review)');
+    expect(repoRowCounts(held.repos[0]!)).toBeNull();
     expect(showCreateRelease(held)).toBe(false);
+  });
+
+  it('changes not read yet read as "Reading changes…", never as a ticket blocker', () => {
+    const first = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1], noRange: true }, { name: 'v1.1.0', d: 3, prs: [2] }]);
+    const res = run({ repos: [first], ...all() });
+    expect(repoRowText(res.repos[0]!)).toBe('Latest v1.1.0 · Reading changes…');
+    expect(repoReadingNote(res.repos[0]!)).toBeNull();
+    const later = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1] }, { name: 'v1.1.0', d: 3, prs: [2], noRange: true }]);
+    const res2 = run({ repos: [later], ...all() });
+    expect(repoRowText(res2.repos[0]!)).toBe('Latest v1.1.0 · candidate v1.0.0 → v1.0.0-rc');
+    expect(repoReadingNote(res2.repos[0]!)).toBe('Reading changes…');
   });
 
   it('acceptance 7: an untracked human PR → still a candidate, a warning naming the PR', () => {
     const res = run({ repos: [threeTags()], prs: [pr(1, 1, ['T1']), pr(2, 1, []), pr(3, 1, ['T3'])], tickets: [ticket('T1'), ticket('T3')] });
-    expect(repoRowText(res.repos[0]!, releaseWordsContext(res))).toBe('v1.2.0 → v1.2.0-rc · 2 tickets · 1 warning');
+    expect(repoRowCounts(res.repos[0]!)).toBe('2 tickets · 1 warning');
     expect(res.warnings.map((w) => releaseWarningText(w, res))).toEqual(['api #2 has no ticket: change 2.']);
   });
 
@@ -151,9 +172,9 @@ describe('repo rows', () => {
     ]);
     const res = run({ repos: [r], prs: [pr(3, 1, ['T3'])], tickets: [ticket('T3')] });
     expect(res.repos[0]!.status).toBe('nothing_new');
-    expect(repoRowText(res.repos[0]!, releaseWordsContext(res))).toBe('Nothing new since v1.2.0-rc');
+    expect(repoRowText(res.repos[0]!)).toBe('Nothing new since v1.2.0-rc');
     expect(showCreateRelease(res)).toBe(false);
-    expect(repoRowText(run({ repos: [repo(2, 'web', [])] }).repos[0]!, releaseWordsContext(res))).toBe('No version tags yet');
+    expect(repoRowText(run({ repos: [repo(2, 'web', [])] }).repos[0]!)).toBe('No version tags on main yet');
   });
 
   it('Create release… is HIDDEN when the only candidate is in a repo without push access', () => {
@@ -162,55 +183,60 @@ describe('repo rows', () => {
     expect(showCreateRelease(res)).toBe(false);
     expect(showCreateRelease(null)).toBe(false);
   });
+
+  it('no release and no start tag: ONE line names the repos', () => {
+    const res = run({ repos: [threeTags()], ...all() });
+    expect(noBaselineLine(res.repos, 40)).toBe('No release or start tag yet in api: only the newest 40 tags are checked. Pick a start tag to check fewer.');
+  });
 });
 
-describe('across repos — the tickets panel and the dialog', () => {
-  const api = () =>
-    repo(1, 'api', [
-      { name: 'v2.3.0', d: 1, prs: [10] },
-      { name: 'v2.4.0', d: 5, prs: [11] },
+describe('the expanded row: tags, tickets, the start tag', () => {
+  it('each tag lists its tickets (Done or not) and its PRs with no ticket; nothing says "released"', () => {
+    const res = run({
+      repos: [threeTags()],
+      prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, []), pr(4, 1, [], { isBot: true })],
+      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' })],
+    });
+    const v11 = res.repos[0]!.tags.find((t) => t.name === 'v1.1.0')!;
+    const c = tagContents(res, v11);
+    expect(c.tickets.map((x) => [x.ticket.key, ticketMark(x.ticket), x.prs.map((p) => p.number)])).toEqual([
+      ['T2', { tone: 'bad', text: 'In review' }, [2]],
     ]);
-  const web = (withV19: boolean) =>
-    repo(2, 'web', [{ name: 'v1.8.0', d: 2, prs: [20] }, ...(withV19 ? [{ name: 'v1.9.0', d: 8, prs: [21] }] : [])]);
-  const prs = () => [
-    pr(10, 1, ['PLAT-100']),
-    pr(11, 1, ['PLAT-290'], { mergedAt: day(4) }),
-    pr(20, 2, ['PLAT-200']),
-    pr(21, 2, ['PLAT-290'], { mergedAt: day(6) }),
-  ];
-  const tickets = () => [ticket('PLAT-100'), ticket('PLAT-200'), ticket('PLAT-290')];
-
-  it('acceptance 14: PLAT-290 is held first in the panel, marked "merged after candidate" in both repos', () => {
-    const res = run({ repos: [api(), web(false)], prs: prs(), tickets: tickets() });
-    const rows = ticketsPanelRows(res);
-    expect(rows[0]!.key).toBe('PLAT-290');
-    expect(rows[0]!.repos.map((r) => ticketRepoMark(r.state))).toEqual([
-      { tone: 'bad', text: 'merged after candidate' },
-      { tone: 'bad', text: 'merged after candidate' },
-    ]);
-    expect(rows.slice(1).map((t) => t.key)).toEqual(['PLAT-100', 'PLAT-200']);
+    const v10 = tagContents(res, res.repos[0]!.tags.find((t) => t.name === 'v1.0.0')!);
+    expect(ticketMark(v10.tickets[0]!.ticket)).toEqual({ tone: 'ok', text: 'Done' });
+    const v12 = tagContents(res, res.repos[0]!.tags.find((t) => t.name === 'v1.2.0')!);
+    expect(v12.untracked.map((p) => p.number)).toEqual([3]);
+    expect(ticketMark({ done: false, readState: 'no_access', statusName: null })).toEqual({ tone: 'warn', text: 'could not be read' });
   });
 
-  it('acceptance 15: after the web tag, PLAT-290 reads "in candidate" in both', () => {
-    const res = run({ repos: [api(), web(true)], prs: prs(), tickets: tickets() });
-    const t = ticketsPanelRows(res).find((x) => x.key === 'PLAT-290')!;
-    expect(t.repos.map((r) => ticketRepoMark(r.state).text)).toEqual(['in candidate', 'in candidate']);
+  it('the start tag line: used, superseded by a newer release, moved, gone', () => {
+    const r = threeTags();
+    r.startTag = { name: 'v1.1.0', sha: sha('v1.1.0'), setBy: 'ada', setAt: day(9) };
+    const res = run({ repos: [r] });
+    expect(startTagLine(res.repos[0]!)).toBe('Starts from v1.1.0');
+    expect(res.repos[0]!.tags.map((t) => t.name)).toEqual(['v1.2.0']);
+    r.startTag = { name: 'v1.1.0', sha: sha('old'), setBy: null, setAt: null };
+    expect(startTagLine(run({ repos: [r] }).repos[0]!)).toBe('Start tag v1.1.0 moved to another commit, so it is not used.');
+    r.startTag = { name: 'v0.9.0', sha: sha('v0.9.0'), setBy: null, setAt: null };
+    expect(startTagLine(run({ repos: [r] }).repos[0]!)).toBe('Start tag v0.9.0 is no longer a version tag on main, so it is not used.');
+    expect(startTagLine({ startTag: null, baseline: null })).toBeNull();
+    expect(
+      startTagLine({
+        startTag: { name: 'v1.0.0', sha: 'x', setBy: null, setAt: null, problem: null },
+        baseline: { name: 'v1.1.0-rc', sha: 'y', committedAt: null, kind: 'release' },
+      }),
+    ).toBe('Starts from v1.1.0-rc, the last release');
+  });
+});
+
+describe('the dialog: each repo on its own', () => {
+  it('unticking a repo stops nothing; none ticked hides Confirm', () => {
+    const api = repo(1, 'api', [{ name: 'v2.4.0', d: 5, prs: [11] }]);
+    const web = repo(2, 'web', [{ name: 'v1.9.0', d: 8, prs: [21] }]);
+    const res = run({ repos: [api, web], prs: [pr(11, 1, ['PLAT-290']), pr(21, 2, ['PLAT-290'])], tickets: [ticket('PLAT-290')] });
+    expect(confirmStops([1])).toEqual([]);
+    expect(confirmStops([])).toEqual(['Tick at least one repository.']);
     expect(releaseTagsLine(res, [1, 2])).toBe('api v2.4.0-rc · web v1.9.0-rc');
-  });
-
-  it('acceptance 17: a linked repo with no PR → a warning mark and sentence, never a stop', () => {
-    const worker = repo(3, 'worker', [{ name: 'v0.1.0', d: 1, prs: [] }]);
-    const res = run({ repos: [api(), web(true), worker], prs: prs(), tickets: tickets(), acceptedRepos: [{ ident: 'PLAT-290', repoId: 3 }] });
-    expect(ticketRepoMark('linked_no_pr')).toEqual({ tone: 'warn', text: 'linked, no PR' });
-    expect(res.warnings.map((w) => releaseWarningText(w, res))).toEqual(['PLAT-290 is linked to worker, which has no pull request for it.']);
-    expect(confirmStops(res, [1, 2])).toEqual([]);
-  });
-
-  it('acceptance 18: unticking web when PLAT-290 needs it → Confirm stopped, PLAT-290 named', () => {
-    const res = run({ repos: [api(), web(true)], prs: prs(), tickets: tickets() });
-    expect(confirmStops(res, [1, 2])).toEqual([]);
-    expect(confirmStops(res, [1])).toEqual(['PLAT-290 needs web too: it would ship in part.']);
-    expect(confirmStops(res, [])).toEqual(['Tick at least one repository.']);
   });
 });
 
@@ -228,6 +254,15 @@ describe('the dialog sends only edited, ticked sections', () => {
     ]);
     expect(editedSections(preview, [1], edits)).toEqual([{ repoId: 1, markdown: '## api\n\nEdited.' }]);
     expect(editedSections(preview, [1, 2], new Map([[1, '## api']]))).toEqual([]);
+  });
+});
+
+describe('Settings → Releases: the ticked repositories', () => {
+  it('dirty only when the set changes (order does not count)', () => {
+    expect(releaseReposDirty([1, 2], [2, 1])).toBe(false);
+    expect(releaseReposDirty([1], [1, 2])).toBe(true);
+    expect(releaseReposDirty([1, 2], [1])).toBe(true);
+    expect(releaseReposDirty([], [])).toBe(false);
   });
 });
 

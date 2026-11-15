@@ -26,9 +26,9 @@ const d = (s: string): Date => new Date(`${s}T12:00:00Z`);
 const tag = (name: string, sha: string, day: string, taggedAt: string | null = null) => ({ name, sha: sha.repeat(40).slice(0, 40), committedAt: d(day), taggedAt: taggedAt ? d(taggedAt) : null });
 
 const REPOS: HotfixBaseRepoInput[] = [
-  { repoId: 2, fullName: 'acme/web', defaultBranch: 'main', tags: [tag('v1.8.1', 'c', '2026-11-01'), tag('v1.8.2', 'd', '2026-11-10'), tag('v1.8.2-rc', 'd', '2026-11-12')] },
-  { repoId: 1, fullName: 'acme/api', defaultBranch: 'main', tags: [tag('v2.3.0-rc', 'a', '2026-10-01'), tag('v2.4.0', 'b', '2026-11-11'), tag('v2.4.0-rc', 'b', '2026-11-12')] },
-  { repoId: 3, fullName: 'acme/worker', defaultBranch: 'trunk', tags: [tag('v0.1.0', 'e', '2026-11-01')] },
+  { repoId: 2, fullName: 'acme/web', defaultBranch: 'main', releasable: true, tags: [tag('v1.8.1', 'c', '2026-11-01'), tag('v1.8.2', 'd', '2026-11-10'), tag('v1.8.2-rc', 'd', '2026-11-12')] },
+  { repoId: 1, fullName: 'acme/api', defaultBranch: 'main', releasable: true, tags: [tag('v2.3.0-rc', 'a', '2026-10-01'), tag('v2.4.0', 'b', '2026-11-11'), tag('v2.4.0-rc', 'b', '2026-11-12')] },
+  { repoId: 3, fullName: 'acme/worker', defaultBranch: 'trunk', releasable: true, tags: [tag('v0.1.0', 'e', '2026-11-01')] },
 ];
 
 describe('hotfix bases (acceptance 25)', () => {
@@ -53,6 +53,13 @@ describe('hotfix bases (acceptance 25)', () => {
     expect(hotfixBasesOf([REPOS[2]!], SETTINGS).offered).toBe(false);
   });
 
+  it('a repository not released from this workspace is read only, whatever its tags', () => {
+    const r = hotfixBasesOf([{ ...REPOS[1]!, releasable: false }, REPOS[0]!], SETTINGS);
+    expect(r.repos[0]).toMatchObject({ fullName: 'acme/api', releasable: false, release: null, hotfixBranch: null });
+    expect(r.repos[1]).toMatchObject({ fullName: 'acme/web', releasable: true, release: { tagName: 'v1.8.2-rc' } });
+    expect(hotfixBasesOf([{ ...REPOS[1]!, releasable: false }], SETTINGS).offered).toBe(false);
+  });
+
   it('30: a hand-pushed hotfix tag on the hotfix branch becomes the latest release; the next hotfix bases on it', () => {
     const api = { ...REPOS[1]!, tags: [...REPOS[1]!.tags, tag('v2.4.1-hotfix', 'f', '2026-11-14')] };
     const r = hotfixBasesOf([api], SETTINGS);
@@ -72,7 +79,7 @@ describe('read-only refusal at extraction (acceptance 25)', () => {
     expect(hotfixPatchVerdict({ readOnly: true, patch: 'diff --git a/x b/x\n' })).toBe('refused');
     expect(hotfixPatchVerdict({ readOnly: true, patch: '' })).toBe('empty');
     expect(hotfixPatchVerdict({ readOnly: false, patch: 'diff --git a/x b/x\n' })).toBe('store');
-    expect(hotfixReadOnlyLine('acme/worker')).toBe('acme/worker has no release yet, so it is read only in this hotfix build. Its changes were not kept.');
+    expect(hotfixReadOnlyLine('acme/worker')).toBe('acme/worker has no release here, so it is read only in this hotfix build. Its changes were not kept.');
   });
 });
 
@@ -141,7 +148,7 @@ describe('the seed (one fold, sandbox/workspace/seed.ts)', () => {
     },
     bases: new Map([
       [1, { sha: 'b'.repeat(40), label: 'the release v2.4.0-rc', note: null }],
-      [3, { sha: 'e'.repeat(40), label: 'main', note: 'Read only in this hotfix build: no release yet.' }],
+      [3, { sha: 'e'.repeat(40), label: 'main', note: 'Read only in this hotfix build: no release here.' }],
     ]),
     branch: 'PLAT-290',
     ticket: {

@@ -5,16 +5,16 @@ import { DocLink, H2, H3, Kbd, Note, Steps, Ui, Warning } from '../../kit';
 export const meta: DocMeta = {
   title: 'Release safe version tags',
   summary:
-    'The Releases tab says, per repository, which version tag is safe to release, and tags it with your release suffix in one press.',
+    'The Releases tab says, for each repository you release, which version tag is safe to release, and tags it with your release suffix in one press.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        <Ui>This Sprint → Releases</Ui> (press <Kbd>4</Kbd> on This Sprint) checks each repository&rsquo;s version tags
-        against your tickets. For each repository it finds the newest version tag on the default branch whose pull
-        requests link only to Done tickets. That tag is the <strong>candidate</strong>. One press then tags every
+        <Ui>This Sprint → Releases</Ui> (press <Kbd>4</Kbd> on This Sprint) checks the version tags of each repository you
+        release against your tickets. For each one it finds the newest version tag on the default branch whose pull
+        requests link only to Done tickets. Each repository is checked on its own. That tag is the <strong>candidate</strong>. One press then tags every
         candidate as a release, publishes the release notes and comments on each ticket.
       </p>
       <p>
@@ -27,6 +27,10 @@ export default function Page(): JSX.Element {
         <li>
           A release suffix and a hotfix suffix, in <DocLink to="settings/releases">Settings → Releases</DocLink>. Until
           both are set, the tab shows one line and a <Ui>Set up in Settings</Ui> button.
+        </li>
+        <li>
+          The repositories you release, ticked under <Ui>Released from this workspace</Ui> in the same settings. Only
+          those are checked. Test and docs repositories you never release stay unticked and are ignored.
         </li>
         <li>
           An issue tracker for the workspace, so pull requests can be joined to tickets. See{' '}
@@ -44,42 +48,40 @@ export default function Page(): JSX.Element {
         <Ui>Refresh</Ui> reads the tickets that hold a version tag back from the tracker again, then checks again.
       </p>
       <H3 id="repository-rows">Repository rows</H3>
+      <p>One row for each repository you release. It shows the latest version tag on the default branch and the candidate:</p>
       <ul>
-        <li>
-          A candidate: &ldquo;api ★ v2.4.0 → v2.4.0-rc · 6 tickets · 1 warning&rdquo;. The second name is the release
-          tag the press would create.
-        </li>
-        <li>
-          Nothing to release: &ldquo;Nothing new since v2.3.0-rc&rdquo;. This repository is left out of the release.
-        </li>
-        <li>
-          Held back: &ldquo;No candidate: v0.3.0 held by PLAT-301 (In review)&rdquo;.
-        </li>
+        <li>&ldquo;Latest 0.394.0 is the candidate → 0.394.0-rc&rdquo;. The last name is the release tag the press would create.</li>
+        <li>&ldquo;Latest 0.394.0 · candidate 0.390.0 → 0.390.0-rc&rdquo;. A later tag is held back.</li>
+        <li>&ldquo;No candidate: 0.391.0 held by BMD-1048 (In PO Review)&rdquo;. The first tag after the last release is held back.</li>
+        <li>&ldquo;Latest 0.394.0 · Reading changes…&rdquo;. Ensemble is still reading which pull requests are in the tags.</li>
+        <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
       </ul>
       <p>
-        Select a row to see its version tags since the last release, newest first, with their pull requests and
-        tickets. The candidate has a star, and a held tag says why. Select a pull request to open it, or a ticket to
-        open its story.
+        Select a row to see its version tags since the last release, newest first. Each tag lists its tickets, with their
+        status, and its pull requests with no ticket. The candidate has a star, and the first tag held back is marked.
+        Select a pull request to open it, or a ticket to open its story.
       </p>
-      <H3 id="tickets">Tickets</H3>
+      <H3 id="start-from-a-tag">Start from a tag</H3>
       <p>
-        Each ticket in the release, or holding it back, with its state in each repository: in candidate, released,
-        merged after candidate, open PR, or linked with no PR.
+        With no release yet, only the newest 40 tags are checked, and an old ticket that is not Done can hold every one of
+        them. Press <Ui>Start from this tag</Ui> beside a version tag to treat it, and everything before it, as accepted.
+        Only the tags after it are checked. The row then says &ldquo;Starts from 0.380.0&rdquo;, with <Ui>Change</Ui> to
+        pick another version tag and <Ui>Clear</Ui> to remove it. Nothing is written to GitHub.
+      </p>
+      <p>
+        If that tag later moves to another commit or is deleted, the row says so and the check goes back to the last
+        release. A release newer than the start tag always counts from the release.
       </p>
       <H3 id="warnings">Warnings</H3>
-      <p>
-        A pull request with no ticket, and a ticket linked to a repository that has no pull request for it, are
-        listed as warnings. They never hold a release back.
-      </p>
+      <p>A pull request with no ticket is listed as a warning. It never holds a release back.</p>
 
       <H2 id="the-rules">The rules</H2>
       <ul>
         <li>A ticket counts as Done when it is in your Complete column. &ldquo;Won&rsquo;t do&rdquo; counts as Done.</li>
         <li>A ticket that could not be read from the tracker holds the release back, with the reason.</li>
-        <li>An open pull request into the default branch for a ticket holds it back.</li>
         <li>
-          A ticket ships whole. If it has a merged pull request in another repository that is not in a version tag
-          yet, it holds back the tag it is in, and the row says to cut a tag in that repository.
+          Only the ticket counts. Its pull requests in other repositories, and its open pull requests, hold nothing
+          back.
         </li>
         <li>Pull requests into a hotfix branch never count.</li>
         <li>A bot pull request with no ticket is listed under dependency and bot changes, with no warning.</li>
@@ -90,7 +92,7 @@ export default function Page(): JSX.Element {
         <Ui>Create release…</Ui> shows only when a repository you can push to has a candidate.
       </p>
       <Steps>
-        <li>Untick any repository you do not want to release. If a ticket would then ship in part, the dialog names it and Confirm is not shown.</li>
+        <li>Untick any repository you do not want to release now. The others are released as they are.</li>
         <li>Read the release notes, one section per repository, and change them if you want.</li>
         <li>Read the comment each ticket will get.</li>
         <li>

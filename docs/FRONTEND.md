@@ -2894,15 +2894,27 @@ FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky
 **Releases — the 4th tab (2026-11-15, docs/RELEASES.md).** `?sprintTab=releases`, key `4`; NOT a lane
 board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`. ONE fetch on mount,
 `GET /api/releases` (`hooks/useReleases.ts`, key `['releases', ws:<id>]`); nothing renders while
-`workspaceId` is null; not configured ⇒ ONE setup line (`openSettings('releases')`). The words are pure
-in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED fold, never a second
-one here. "Create release…" is HIDDEN unless a writable repo has a candidate (`showCreateRelease`). The
-dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only while open, re-checks unticks
-through shared `releaseSelectionProblems` (`confirmStops`, Confirm HIDDEN in its place), sends
-`releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = `useRefreshReleases`
-(`POST /api/releases/refresh`: the held tickets re-read from the tracker, the answer becomes the check). Ticket chips → `useOpenStory()`; PRs →
-`openPrDetailTab`. Settings → Releases is `settings/ReleasesSection.tsx` (the shared validator; the
-suffix-change warning `releasesSectionModel.ts`).
+`workspaceId` is null; not configured, or NO repo ticked "Released from this workspace"
+(`hasReleasableRepos`) ⇒ ONE setup line (`openSettings('releases')`). REPO-ORIENTED (no tickets panel):
+one row per releasable repo showing the PAIR (`repoRowText`: "Latest 0.394.0 · candidate 0.390.0 →
+0.390.0-rc", "Latest 0.394.0 is the candidate → 0.394.0-rc", "No candidate: 0.391.0 held by BMD-1048 (In PO
+Review)", "Latest 0.394.0 · Reading changes…", "Nothing new since 0.390.0-rc"), counts beside it
+(`repoRowCounts`). A row expands to its version tags after the baseline, newest first (`tagContents`: the
+tickets with `ticketMark`, the PRs with no ticket, bot PRs), the candidate starred, the first held tag
+marked, "Start from this tag" on each, and the start-tag line (`startTagLine`: "Starts from 0.380.0 ·
+Change · Clear"; Change = a `Select` over `versionTags`) — `useSetReleaseStartTag` (`PUT
+/api/releases/start-tag`, a press; the answer becomes the check). "Released" is never said of a ticket.
+The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
+fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
+(`showCreateRelease`). The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only
+while open; each repo is judged on its own, so only "none ticked" hides Confirm (`confirmStops`); it
+sends `releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = `useRefreshReleases`
+(`POST /api/releases/refresh`: the held tickets re-read from the tracker, the answer becomes the check).
+Ticket chips → `useOpenStory()`; PRs → `openPrDetailTab`. Settings → Releases is
+`settings/ReleasesSection.tsx`: the two suffix boxes with the FIXED "-" beside them (`suffixTypedPart` /
+`suffixFromTyped`; the shared validator), the suffix-change warning (`releasesSectionModel.ts`), and
+"Released from this workspace" — a tick per member repo (home + External), saved WHOLE
+(`useSetReleaseRepos`, `PUT /api/workspaces/:id/release-repos`; `releaseReposDirty`).
 
 **GitHub Projects scope line.** When a GitHub Issues read fell back to milestones because the gh login
 lacks `read:project`, the source carries `projectsAccess: 'needs_scope'` and the toolbar is followed by ONE

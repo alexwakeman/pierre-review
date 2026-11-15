@@ -6,7 +6,7 @@
 //     refused, a reason required for adapted / not_needed, bad entries dropped and named; the host's clip;
 //   • the checker runs in Node as the agent runs it;
 //   • the seed: the port report's files and wording only in a hotfix build (an ordinary seed unchanged);
-//   • the release check: a hotfix ticket with no default-branch PR in a linked repo reads `hotfix_only`, no warning.
+//   • the release check: a hotfix ticket's hotfix-branch PR is in no range — no warning, no block.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -236,7 +236,7 @@ describe('what the agent is told (hotfix only)', () => {
 });
 
 describe('the release check: a hotfix not needed on main', () => {
-  it('a linked repository with only a hotfix-branch PR reads hotfix_only — no warning, no block', () => {
+  it('a repository with only a hotfix-branch PR for the ticket: no warning, no block (each repo is judged on its own)', () => {
     const at = (d: number): Date => new Date(Date.UTC(2026, 10, d, 12));
     const sha = (c: string): string => c.repeat(40);
     const tag = (name: string, c: string, d: number) => ({ name, sha: sha(c), committedAt: at(d), taggedAt: null, onDefaultBranch: true, moved: false });
@@ -279,15 +279,11 @@ describe('the release check: a hotfix not needed on main', () => {
       // api: the main PR, merged and in v1.1.0. worker: the release fix only (into hotfix/…), main not needed.
       prs: [pr(10, 1, true, 'merged'), pr(20, 2, false, 'open')],
       tickets: [{ ident: 'PLAT-1', key: 'PLAT-1', title: 't', url: null, statusName: 'Done', done: true, readState: 'ok' }],
-      acceptedRepos: [
-        { ident: 'PLAT-1', repoId: 1 },
-        { ident: 'PLAT-1', repoId: 2 },
-      ],
     });
     const t = r.tickets.find((x) => x.key === 'PLAT-1')!;
     expect(t.blocker).toBeNull();
     expect(t.repos.find((x) => x.repoId === 1)?.state).toBe('in_candidate');
-    expect(t.repos.find((x) => x.repoId === 2)).toMatchObject({ state: 'hotfix_only', prIds: [20] });
-    expect(r.warnings.filter((w) => w.kind === 'linked_no_pr')).toEqual([]);
+    expect(t.repos.find((x) => x.repoId === 2)).toBeUndefined();
+    expect(r.warnings).toEqual([]);
   });
 });

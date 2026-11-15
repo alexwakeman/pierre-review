@@ -910,8 +910,9 @@ move). ⚠ READ ONLY THROUGH `db/external-repos.ts` (`externalRepoIds(account, w
 [RELEASES.md](RELEASES.md). New columns: `pull_requests.merge_commit_oid` (the commit a PR landed as —
 GraphQL `mergeCommit { oid }`; cleared only on a positive statement: `sync/upsert.ts`
 `mergeCommitOidToWrite` writes null only for a PR GitHub says is not merged; indexed with
-`(account_id, repo_id)`), `workspaces.release_suffix` / `hotfix_suffix` (NULL = not set, NO default; ONE
-reader/writer `db/release-settings.ts`, validated by shared `validateReleaseSettings`) and
+`(account_id, repo_id)`), `workspaces.release_suffix` / `hotfix_suffix` (NULL = not set, NO default; a set
+one ALWAYS starts with the fixed hyphen — `-rc`, the reader types `rc`; migration `0199` prefixed older
+values; ONE reader/writer `db/release-settings.ts`, validated by shared `validateReleaseSettings`) and
 `repos.tags_signature` / `tags_synced_at` (what the last complete tag read saw; the settle sweep compares).
 
 - **`repo_tags`** — one row per `(account_id, repo_id, name)`: `sha` (the tagged COMMIT, annotated tags
@@ -938,9 +939,18 @@ reader/writer `db/release-settings.ts`, validated by shared `validateReleaseSett
   `refused` row holds no name, so a later press is a new claim on a new row.
 - **`release_ticket_comments`** — one row per `(release, ticket_key)`: `tracker_kind`, `state`
   (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
+- **`workspace_release_repos`** (migration `0199`) — one row per `(account_id, workspace_id, repo_id)`
+  the reader ticked "Released from this workspace" (Settings → Releases; default: none). ONLY these are
+  folded by the release check, tagged, ranged by the tag sync and offered as hotfix bases; no row = ignored
+  entirely. `start_tag_name` / `start_tag_sha` ("Start from this tag": a version tag on the default branch
+  and the commit it was at; NULL = none), `start_set_by_login`, `start_set_at`, `created_at`. Composite FKs
+  to `workspaces` and `repos`, both cascading; `deleteWorkspace` deletes the workspace's rows (a tick is
+  that workspace's choice, never re-homed); `deleteRepo` deletes the repo's. Unticking deletes the row (its
+  start tag with it). ONE reader/writer `db/release-repos.ts`; every read is intersected with the
+  workspace's CURRENT membership (home + External), so a row of a repo that left is inert.
 
-All five carry `account_id`, composite FKs `(…, account_id)` with cascade, sit in `accountScopedTables()`
-and are erased explicitly; `deleteRepo` deletes a repo's tags, ranges and release items. The three
+All six carry `account_id`, composite FKs `(…, account_id)` with cascade, sit in `accountScopedTables()`
+and are erased explicitly; `deleteRepo` deletes a repo's tags, ranges, release items and ticks. The three
 release tables have ONE writer, `releases/create.ts` (Confirm): rows inserted in one `runTransaction`
 (an item whose tag name an earlier release already holds is `onConflictDoNothing` — that press owns
 it), then each state moved by compare-and-set from `pending` before its network call, never back. A

@@ -22,7 +22,8 @@ export interface ReleaseSnapshot {
   tickets: Array<{ ident: string; key: string }>;
 }
 
-/** The tickets a release of these repos ships: ready, and in an included repo's candidate. Pure. */
+/** The tickets a release of these repos ships: ready, and wholly in an included repo's candidate
+ *  (each repository is judged on its own). Pure. */
 export function releaseShippedTickets(
   result: Pick<ReleaseCheckResult, 'tickets'>,
   includedRepoIds: readonly number[],
@@ -306,8 +307,6 @@ export interface ReleasePreviewResponse {
   notesMarkdown: string;
   /** The tracker comment one ticket would get (plain text; the link is filled in after the writes). */
   commentPreview: string | null;
-  /** Tickets that would ship in part with this selection (Confirm is blocked). */
-  problems: Array<{ ident: string; key: string; missingRepoIds: number[] }>;
   /** Stories with a model summary / without one. */
   summaries: { written: number; missing: number; ai: boolean };
 }

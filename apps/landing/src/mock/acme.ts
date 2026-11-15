@@ -518,42 +518,61 @@ export const SPRINT = {
 
 export type ReleaseMark = 'ok' | 'bad' | 'warn';
 
-/** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`. */
+export interface ReleaseMockTag {
+  name: string;
+  candidate?: boolean;
+  /** The first tag held back. */
+  held?: boolean;
+  tickets: Array<{ key: string; title: string; tone: ReleaseMark; status: string }>;
+  /** PRs with no ticket. */
+  untracked?: string[];
+}
+
+/** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`.
+ *  One row per repository released from this workspace, showing the latest version tag and the candidate. */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
   action: 'Create release…',
   /** The dialog's ticked repositories (Sprint/ReleaseDialog.tsx). */
   dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
   repos: [
-    { name: REPOS.payments, candidate: true, text: 'v3.2.0 → v3.2.0-rc · 3 tickets · 1 warning' },
-    { name: REPOS.web, candidate: true, text: 'v1.8.2 → v1.8.2-rc · 1 ticket' },
-    { name: REPOS.ledger, candidate: false, text: 'No candidate: v0.9.0 held by PAY-146 (In progress)' },
-    { name: REPOS.api, candidate: false, text: 'Nothing new since v2.3.0-rc' },
-  ],
-  tickets: [
-    { key: 'PAY-146', title: 'Rename ledger tables', marks: [{ repo: REPOS.ledger, tone: 'bad', text: 'open PR' }] },
     {
-      key: 'PAY-131',
-      title: 'Card retries back off',
-      marks: [
-        { repo: REPOS.payments, tone: 'ok', text: 'in candidate' },
-        { repo: REPOS.web, tone: 'ok', text: 'in candidate' },
+      name: REPOS.payments,
+      candidate: true,
+      text: 'Latest v3.2.0 is the candidate → v3.2.0-rc',
+      counts: '2 tickets · 1 warning',
+      tags: [
+        {
+          name: 'v3.2.0',
+          candidate: true,
+          tickets: [{ key: 'PAY-134', title: 'Payout dates in the export', tone: 'ok', status: 'Done' }],
+          untracked: ['#605 Tidy the refund logs'],
+        },
+        { name: 'v3.1.0', tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done' }] },
       ],
     },
-    { key: 'PAY-134', title: 'Payout dates in the export', marks: [{ repo: REPOS.payments, tone: 'ok', text: 'in candidate' }] },
     {
-      key: 'PAY-137',
-      title: 'Refund webhook names the reason',
-      marks: [
-        { repo: REPOS.payments, tone: 'ok', text: 'in candidate' },
-        { repo: REPOS.api, tone: 'warn', text: 'linked, no PR' },
+      name: REPOS.web,
+      candidate: true,
+      text: 'Latest v1.9.0 · candidate v1.8.2 → v1.8.2-rc',
+      counts: '1 ticket',
+      tags: [
+        { name: 'v1.9.0', held: true, tickets: [{ key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review' }] },
+        { name: 'v1.8.2', candidate: true, tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done' }] },
       ],
     },
-  ] as Array<{ key: string; title: string; marks: Array<{ repo: string; tone: ReleaseMark; text: string }> }>,
-  warnings: [
-    'acme/payments #605 has no ticket: Tidy the refund logs.',
-    'PAY-137 is linked to acme/api, which has no pull request for it.',
-  ],
+    {
+      name: REPOS.ledger,
+      candidate: false,
+      text: 'No candidate: v0.9.0 held by PAY-146 (In progress)',
+      start: 'Starts from v0.8.0',
+      tags: [
+        { name: 'v0.9.0', held: true, tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'In progress' }] },
+      ],
+    },
+    { name: REPOS.api, candidate: false, text: 'Nothing new since v2.3.0-rc', tags: [] },
+  ] as Array<{ name: string; candidate: boolean; text: string; counts?: string; start?: string; tags: ReleaseMockTag[] }>,
+  warnings: ['acme/payments #605 has no ticket: Tidy the refund logs.'],
 };
 
 // ---- the docs' Getting started: first run and Repos & workspaces ----------------
