@@ -5,7 +5,7 @@
 
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
-     hero       .hero > .say (.kick, h1, .lead, .cmd) · .ph.p1 · figure.motto · .ph.hand
+     hero       .hero > .say (.kick, h1, .lead, .cmd) · .art.p1 (Quartet) · figure.motto · .art.hand (Spiral)
      flow       .board.flow > ol.flow-steps > li.tile (.flow-n, h3, p) · p.flow-loop · p.flow-more
      ensemble   .board.ensemble > .tile.circle (svg.circle-svg) · .ens-points > .tile (h3, p) · p.ens-more
      bots       .board.bots > .tile (h3, p, p.more)
@@ -31,7 +31,7 @@
   color: var(--muted);
 }
 .lb.home .gold .k {
-  color: #4a3a18;
+  color: #2a1d05;
 }
 .lb.home .lapis .k {
   color: #d3ddef;
@@ -95,8 +95,8 @@
   grid-column: 1 / 3;
   grid-row: 2;
 }
-.lb.home .hero .p1 img {
-  object-position: center 30%;
+.lb.home .hero .p1 {
+  min-height: 150px;
 }
 .lb.home .hero .motto {
   grid-column: 3 / 8;
@@ -124,8 +124,8 @@
   grid-column: 8 / 13;
   grid-row: 1 / 3;
 }
-.lb.home .hero .hand img {
-  object-position: 30% 60%;
+.lb.home .hero .hand {
+  padding: clamp(20px, 3vw, 44px);
 }
 
 /* ---- works with ---------------------------------------------------------- */
@@ -448,7 +448,7 @@
     grid-row: auto;
   }
   .lb.home .hero .hand {
-    aspect-ratio: 930 / 843;
+    aspect-ratio: 13 / 16;
   }
   .lb.home .why4 > .tile {
     grid-column: span 6;
@@ -609,16 +609,24 @@
   font-size: 12px;
 }
 .lb.home .circle-svg .c-node-0 {
-  fill: var(--lapis);
+  fill: var(--deep-dusk);
+  stroke: var(--azure);
+  stroke-width: 3;
 }
 .lb.home .circle-svg .c-node-1 {
-  fill: var(--verdigris);
+  fill: var(--deep-meadow);
+  stroke: var(--mint);
+  stroke-width: 3;
 }
 .lb.home .circle-svg .c-node-2 {
-  fill: var(--madder);
+  fill: var(--deep-bloom);
+  stroke: var(--pink);
+  stroke-width: 3;
 }
 .lb.home .circle-svg .c-node-3 {
-  fill: var(--lapis-2);
+  fill: var(--deep-dusk);
+  stroke: var(--violet);
+  stroke-width: 3;
 }
 .lb.home .circle-svg .c-name {
   font-size: 18px;

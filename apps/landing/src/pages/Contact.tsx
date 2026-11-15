@@ -3,7 +3,7 @@ import { seoFor } from '../lib/routes';
 import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { ContactForm } from '../components/ContactForm';
-import cantata from '../assets/board/img/bach-bwv56.jpg';
+import { Combo } from '../components/arcs/pieces';
 import './contact.css';
 
 // ---------------------------------------------------------------------------
@@ -48,8 +48,8 @@ export default function Contact(): JSX.Element {
             </a>
           </p>
         </div>
-        <div className="tile ph c-pic">
-          <img src={cantata} width={700} height={722} alt="The first page of Bach's handwritten score of the cantata Ich will den Kreuzstab gerne tragen, 1726" />
+        <div className="tile art c-pic">
+          <Combo label="A jazz band of four players drawn as banded quarter-circles, their colours mixing where they overlap" />
         </div>
         <div className="tile verdigris c-say">
           <p>

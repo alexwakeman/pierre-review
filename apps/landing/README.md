@@ -18,7 +18,7 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (Bach's hand and the Adagio, Goethe's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
+| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (the Spiral and the Quartet, Goethe's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
 | `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
 | `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
 | `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
@@ -28,7 +28,8 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 | `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Ensemble License and defer to it |
 
 **THE DESIGN IS ONE DARK "BOARD OF TILES"**, on every page. `src/board.css` holds the
-tokens (the dark ground, the four pigments lapis / verdigris / madder / gold), the self-hosted
+tokens (the dark ground, the SPECTRUM and its five colour runs, and the four voice tiles still named
+lapis / verdigris / madder / gold), the self-hosted
 Albert Sans face, the shared header (`.lb-nav`) and footer (`.lb-foot`), and the tile grid; its
 header comment lists the classes. Every page renders a root `<div className="lb <page>">`
 with `useReveal` (`components/board/useReveal.ts`, which lifts `.rise` tiles in as they
@@ -37,6 +38,13 @@ page-scoped file under that root: `pages/reporting.css`, `teams.css`,
 `how-we-measure.css`, `contact.css`, `legal.css`, and `components/chrome.css` for the 404, the
 cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
 `pages/home.css`).
+
+**EVERY OTHER PICTURE IS DRAWN IN CODE** from one motif, the banded quarter-circle
+(`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
+`Arcs.tsx` draws a composition; `pieces.tsx` holds the Spiral, Quartet, Orchestra and Combo;
+`arcMotion.ts` draws them out and opens them up on scroll, started by `useReveal`, off under
+reduced motion). No photographs. The voice tiles carry a quarter in their corner
+(`assets/arcs/corner.svg`, the same geometry).
 
 **PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Ensemble UI. They are built from one kit,
 `components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,

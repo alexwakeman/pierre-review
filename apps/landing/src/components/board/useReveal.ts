@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
+import { startArcMotion } from '../arcs/arcMotion';
 
 // ---------------------------------------------------------------------------
 // The board's entrance: tiles marked `.rise` lift into place as they scroll in.
@@ -9,6 +10,9 @@ import type { RefObject } from 'react';
 // what board.css keys the hidden state on (and only under
 // prefers-reduced-motion: no-preference). So with no JS, or reduced motion, or no
 // IntersectionObserver, nothing is ever hidden.
+//
+// It also starts the scroll-linked motion of every arc picture on the page
+// (components/arcs/arcMotion.ts), under the same reduced-motion rule.
 //
 // Usage: const ref = useReveal<HTMLDivElement>(); <div className="lb" ref={ref}>…
 // ---------------------------------------------------------------------------
@@ -28,6 +32,7 @@ export function useReveal<T extends HTMLElement>(): RefObject<T> {
     }
 
     root.classList.add('js-rise');
+    const stopArcs = startArcMotion(root);
 
     const io = new IntersectionObserver(
       (entries) => {
@@ -47,6 +52,7 @@ export function useReveal<T extends HTMLElement>(): RefObject<T> {
 
     return () => {
       io.disconnect();
+      stopArcs();
       // Back to the markup's state (everything visible), so a remount — StrictMode
       // runs every effect twice in dev — starts the reveal cleanly.
       root.classList.remove('js-rise');
