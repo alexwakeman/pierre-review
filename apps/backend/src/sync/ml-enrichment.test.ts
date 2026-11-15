@@ -5,7 +5,7 @@
 // budgets characters rather than items. A regression here is invisible — everything still gets
 // labelled, just several times slower — which is exactly the kind of thing a test has to catch.
 import { describe, expect, it } from 'vitest';
-import { packBatches, truncateOnCodePoint } from './ml-enrichment.js';
+import { packBatches, scoreableRepoIds, truncateOnCodePoint } from './ml-enrichment.js';
 import { SeverityApiError, severityApiAnswered } from '../ml/severity-client.js';
 import type { MlCandidate } from '../db/ml-labels.js';
 
@@ -175,3 +175,15 @@ describe('truncateOnCodePoint', () => {
 function hasLoneSurrogate(text: string): boolean {
   return Buffer.from(text, 'utf8').toString('utf8') !== text;
 }
+
+describe('scoreableRepoIds — which repos the scoring worker reads', () => {
+  it('scores every repo by default', () => {
+    expect(scoreableRepoIds({ repoIds: [1, 2, 3] }, new Set())).toEqual([1, 2, 3]);
+  });
+  it('leaves out a repo switched out of bot scoring in Repos & workspaces', () => {
+    expect(scoreableRepoIds({ repoIds: [1, 2, 3] }, new Set([2]))).toEqual([1, 3]);
+  });
+  it('still leaves out external repos, and both rules together', () => {
+    expect(scoreableRepoIds({ repoIds: [1, 2, 3, 4], externalRepoIds: [4] }, new Set([1]))).toEqual([2, 3]);
+  });
+});

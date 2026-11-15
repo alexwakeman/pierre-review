@@ -553,13 +553,13 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       return {
         runtime: 'absent',
         runtimeMessage:
-          'The Claude Code program is missing from the AI download. Set up AI again, or set ENSEMBLE_CLAUDE_PATH to your own claude.',
+          'The Claude Code program is missing from the AI download. Download AI again from Settings → Features, or set ENSEMBLE_CLAUDE_PATH to your own claude.',
       };
     }
     if (state === 'stale') {
       return {
         runtime: 'absent',
-        runtimeMessage: 'Ensemble was updated. Set up AI again to get the matching version.',
+        runtimeMessage: 'Ensemble was updated. Download AI again from Settings → Features to get the matching version.',
       };
     }
     return { runtime: 'absent', runtimeMessage: null };

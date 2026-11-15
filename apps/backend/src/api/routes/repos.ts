@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type {
+  RepoBotScoringBody,
   BranchStatusResponse,
   BranchTrendsResponse,
   CreateRepoBody,
@@ -28,6 +29,7 @@ import {
   type ViewerReposGqlResponse,
 } from '../../github/queries.js';
 import { upsertRepo } from '../../sync/upsert.js';
+import { setRepoBotScoringExcluded } from '../../db/repo-bot-scoring.js';
 import {
   enqueueSyncForRepo,
   getSyncStatus,
@@ -461,6 +463,34 @@ export async function repoRoutes(app: FastifyInstance): Promise<void> {
     reply.status(201);
     return getRepo(repoId, accountId);
   });
+
+  // PUT /api/repos/:id/bot-scoring — leave this repo out of bot comment scoring, or put it back
+  // (Repos & workspaces; db/repo-bot-scoring.ts). The scoring worker reads it on its next tick; labels
+  // already stored stay. Echoes the repo. Rate tier `read` (pinned in rate-limit.test.ts).
+  app.put(
+    '/api/repos/:id/bot-scoring',
+    {
+      schema: {
+        params: idParamSchema.params,
+        body: {
+          type: 'object',
+          required: ['excluded'],
+          additionalProperties: false,
+          properties: { excluded: { type: 'boolean' } },
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: number };
+      const { excluded } = req.body as RepoBotScoringBody;
+      const accountId = accountIdOf(req);
+      if (!(await setRepoBotScoringExcluded(accountId, id, excluded))) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Repo ${id} not found` };
+      }
+      return getRepo(id, accountId);
+    },
+  );
 
   // NOTE: there is no `PATCH /api/repos/:id`. Its only body was `{ inboxWatch }`, and the
   // "watched" axis is gone — a repo is either in a workspace (fully live) or removed. Moving

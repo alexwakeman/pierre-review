@@ -225,6 +225,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // row plus an in-process cache drop, no GitHub call and no model call. Recorded, with the same
   // EXACT `===` for the same near-miss.
   if (path === '/api/me/my-turn-settings') return [TIERS.read];
+  // PUT /api/me/tool-switches — Settings → Features, AI and Bot comment analysis. One UPDATE; downloads
+  // nothing (the install routes do, after the reader confirms). No GitHub, no model.
+  if (path === '/api/me/tool-switches') return [TIERS.read];
 
   // GET /api/my-turn/pushed-since/:prId — the expanded "N commits since you …" list on a Pushed
   // since card. FOLLOWING THE TOKEN: two DB reads over synced `commits`/`reviews`/comments, no
@@ -863,6 +866,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (mutating && /^\/api\/prs\/\d+\/refresh$/.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }
+  // PUT /api/repos/:id/bot-scoring — leave a repo out of bot comment scoring (Repos & workspaces). One
+  // UPDATE of one column, no GitHub, no model: `read`, anchored at both ends.
+  if (mutating && /^\/api\/repos\/\d+\/bot-scoring$/.test(path)) return [TIERS.read];
   if (mutating && (path === '/api/repos' || /^\/api\/repos\/\d+\/sync$/.test(path))) {
     return [TIERS.sync];
   }

@@ -16,6 +16,7 @@
 // Codex's alone (ai/runtime.ts): Claude stays set up.
 //
 // Skipped when AI is off (LIMN_AI_DISABLED=true) or LIMN_AI_AUTO_INSTALL=false.
+import { aiSwitchedOff } from './tool-switches.js';
 import { config } from '../config.js';
 import {
   getAiRuntimeStatus,
@@ -83,7 +84,8 @@ export function runAutoInstall(deps: AutoInstallDeps, attempt = 1): void {
 export function startAiAutoInstall(log: Log): void {
   try {
     runAutoInstall({
-      enabled: config.aiEnabled && config.aiAutoInstall,
+      // Not while the reader has switched AI off in Settings → Features (ai/tool-switches.ts).
+      enabled: config.aiEnabled && config.aiAutoInstall && !aiSwitchedOff(),
       claude: getAiRuntimeStatus,
       codex: getCodexRuntimeStatus,
       install: (providers) => installAiRuntime(undefined, { providers }),

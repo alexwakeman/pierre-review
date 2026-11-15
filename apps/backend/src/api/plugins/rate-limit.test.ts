@@ -448,6 +448,19 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/me/my-turn-settings')).not.toContain('ai');
   });
 
+  // PUT /api/me/tool-switches — Settings → Features, AI and Bot comment analysis. One UPDATE; it downloads
+  // nothing itself.
+  it('keeps the tool switches write on read', () => {
+    expect(tiers('PUT', '/api/me/tool-switches')).toEqual(['read']);
+    expect(tiers('PUT', '/api/me/tool-switches')).not.toContain('ai');
+  });
+
+  // PUT /api/repos/:id/bot-scoring — leave a repo out of bot comment scoring. One UPDATE.
+  it('keeps the repo bot-scoring write on read', () => {
+    expect(tiers('PUT', '/api/repos/12/bot-scoring')).toEqual(['read']);
+    expect(tiers('PUT', '/api/repos/12/bot-scoring')).not.toContain('github_write');
+  });
+
   // PUT /api/me/feature-settings — Settings → Features. DB-only, like its neighbours.
   it('keeps the Features settings write on read', () => {
     expect(tiers('PUT', '/api/me/feature-settings')).toEqual(['read']);

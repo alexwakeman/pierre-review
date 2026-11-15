@@ -17,6 +17,7 @@ import type {
 import type { FlowActorView, FlowBudgetMeasure, FlowSettings, ResolvedFlowSettings } from './flow-settings.js';
 import type { MyTurnSettings } from './my-turn-settings.js';
 import type { FeaturesStatus } from './features.js';
+import type { ToolSwitchesStatus } from './tool-switches.js';
 import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { AiEffortSettingStatus } from './ai-effort.js';
@@ -2503,6 +2504,9 @@ export interface Repo {
   // judgements while the server re-derives from the PR's workspace Y — an offer the server refuses,
   // i.e. a dead button with an unchanged count.
   workspaceId: number;
+  // True when this repo is left out of bot comment scoring (Repos & workspaces; `repos.bot_scoring_excluded`).
+  // Optional: an older server sends none (= included).
+  botScoringExcluded?: boolean;
   // Server-side time (ISO) any board-visible PR column in this repo last changed; in-memory, so absent after a restart.
   lastPrChangeAt?: string;
   // Server-side time (ISO) GitHub last answered for this repo — a free change probe, a scheduled
@@ -4064,6 +4068,9 @@ export interface MeResponse {
   // SETTINGS → FEATURES (shared features.ts): which sidebar destinations show, RESOLVED (the stored
   // switch, else the default for this install). Visibility only — a deep link still opens a hidden
   // one. Optional: an older server omits it and every destination shows.
+  // SETTINGS → FEATURES, the tool switches (shared tool-switches.ts): AI and Bot comment analysis, each
+  // resolved with what is installed. Optional: an older server sends none.
+  tools?: ToolSwitchesStatus;
   features?: FeaturesStatus;
 }
 

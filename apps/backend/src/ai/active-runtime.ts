@@ -5,7 +5,10 @@
 // held back for a missing Claude program, nor a Claude one for a missing Codex.
 import { getAiRuntimeStatus, getCodexRuntimeStatus, type AiRuntimeStatus } from './runtime.js';
 import { activeProviderId } from './provider-setting.js';
+import { withAiSwitch } from './tool-switches.js';
 
+// ⚠ AI SWITCHED OFF in Settings → Features reads as 'absent' here (ai/tool-switches.ts), so every surface
+// that asks shows the not-set-up line and every automatic run waits, with the download left on disk.
 export function activeRuntimeStatus(): AiRuntimeStatus {
-  return activeProviderId() === 'codex' ? getCodexRuntimeStatus() : getAiRuntimeStatus();
+  return withAiSwitch(activeProviderId() === 'codex' ? getCodexRuntimeStatus() : getAiRuntimeStatus());
 }
