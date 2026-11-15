@@ -42,8 +42,8 @@ const BY_HAND: FlowStep[] = [
 ];
 
 const AUTO: FlowStep[] = [
-  { who: 'You', tone: 'gold', h: 'Build end to end', p: <>One press, from the caret on <b>Implement</b> or <b>Fill gaps</b>.</> },
-  { who: SITE_NAME, tone: 'verdigris', h: 'The plan is approved', p: <>Every point to settle is taken as <b>Agree</b>.</> },
+  { who: 'You', tone: 'gold', h: 'Build end to end', p: <>One press, from the caret on <b>Implement</b> or <b>Fill gaps</b>. Nothing else.</> },
+  { who: SITE_NAME, tone: 'verdigris', h: 'The ticket is refined', p: <>The agent plans against your docs and code, and updates the criteria where they fall short. Every point to settle is taken as <b>Agree</b>.</> },
   { who: 'Agent', tone: 'lapis', h: 'It builds', p: 'As by hand. Then the branch is pushed to GitHub, with no pull request yet.' },
   { who: SITE_NAME, tone: 'verdigris', h: 'Review and check', p: 'The branch is reviewed like a pull request, and checked against the ticket’s criteria.' },
   { who: 'Agent', tone: 'lapis', h: 'Fix, answer or push back', p: 'Every point gets a fix, an answer, or a push back with a reason. Each fix is a new commit.' },
@@ -102,8 +102,9 @@ export default function Build(): JSX.Element {
         <div className="tile bd-name">
           <h1 id="bd-h1">A ticket in. A pull request out.</h1>
           <p className="bd-lead">
-            {SITE_NAME} hands a ticket to an agent, your own Claude Code or Codex, in a sandbox on your
-            machine. It plans, builds and tests. You check the work, and it becomes a pull request.
+            One press of <b>Build end to end</b>. {SITE_NAME} gives your own Claude Code or Codex the ticket, your
+            docs and your code, in a sandbox on your machine. It refines the ticket, plans, builds, reviews its own
+            work in rounds and opens the pull request.
           </p>
         </div>
         <div className="tile lapis bd-facts">
@@ -116,7 +117,7 @@ export default function Build(): JSX.Element {
           />
         </div>
         <div className="tile verdigris bd-say">
-          <p>Your machine. Your Claude or Codex. A sandbox.</p>
+          <p>One click, ticket to pull request.</p>
         </div>
         <div className="tile gold bd-go">
           <p className="btns">
@@ -132,32 +133,13 @@ export default function Build(): JSX.Element {
         <div className="tile bd-txt bd-full rise">
           <h2 id="bd-how-h">How the build works</h2>
           <p>
-            Two ways, the same agent and the same sandbox. By hand, nothing happens until you press. Automatically,
-            one press runs it to an open pull request.
+            One press runs it to an open pull request. Or step through it by hand, and nothing happens until you
+            press. The same agent and the same sandbox, either way, and no context to paste or prompt to write.
           </p>
         </div>
       </section>
 
-      <Flow id="bd-hand-h" title="By hand" steps={BY_HAND} />
-      <section className="board bd-notes">
-        <div className="tile bd-txt bd-half rise">
-          <h3>Fill gaps</h3>
-          <p>
-            A ticket already under way can still miss criteria. When its story check found gaps, the story view
-            offers <b>Fill gaps</b> in place of <b>Implement</b>. It is the same session, but the plan and the
-            build cover only those gaps.
-          </p>
-        </div>
-        <div className="tile bd-txt bd-half rise">
-          <h3>What you need</h3>
-          <p>
-            A container runtime on this computer: Docker, Podman, Colima, OrbStack or microsandbox. Claude Code
-            or Codex, signed in. An issue tracker connected to the workspace, so the ticket can be read.
-          </p>
-        </div>
-      </section>
-
-      <Flow id="bd-auto-h" title="Automatically" steps={AUTO}>
+      <Flow id="bd-auto-h" title="In one click" steps={AUTO}>
         <p className="bd-loop rise">
           <span aria-hidden="true">↺</span> Steps 4 and 5 repeat, 4 rounds by default (1 to 6). They stop early when
           a round finds nothing open.
@@ -197,6 +179,25 @@ export default function Build(): JSX.Element {
             After <b>Build end to end</b> opens the pull requests, {SITE_NAME} writes the description and criteria
             the plan changed, and comments on the ticket as you, in plain English. It never changes the
             ticket&rsquo;s status. On other trackers it writes nothing.
+          </p>
+        </div>
+      </section>
+
+      <Flow id="bd-hand-h" title="By hand" steps={BY_HAND} />
+      <section className="board bd-notes">
+        <div className="tile bd-txt bd-half rise">
+          <h3>Fill gaps</h3>
+          <p>
+            A ticket already under way can still miss criteria. When its story check found gaps, the story view
+            offers <b>Fill gaps</b> in place of <b>Implement</b>. It is the same session, but the plan and the
+            build cover only those gaps.
+          </p>
+        </div>
+        <div className="tile bd-txt bd-half rise">
+          <h3>What you need</h3>
+          <p>
+            A container runtime on this computer: Docker, Podman, Colima, OrbStack or microsandbox. Claude Code
+            or Codex, signed in. An issue tracker connected to the workspace, so the ticket can be read.
           </p>
         </div>
       </section>

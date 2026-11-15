@@ -19,7 +19,7 @@ export function Hero(): JSX.Element {
   return (
     <section className="board hero" aria-label={SITE_NAME}>
       <div className="tile say">
-        <p className="kick">{SITE_NAME} · an agentic SDLC on your machine</p>
+        <p className="kick">{SITE_NAME} · a review process and a build pipeline, on your own Claude or Codex</p>
         <h1>Refine, build and review as an ensemble.</h1>
         <p className="lead">
           From ticket to merged pull request with your own Claude or Codex. It runs fully on your team&rsquo;s own

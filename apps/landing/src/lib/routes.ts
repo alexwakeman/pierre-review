@@ -57,12 +57,12 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
     description: `${SITE_NAME} takes a ticket from your tracker, checks it against your docs and code, implements it, reviews it in rounds and opens the pull request. Each teammate reviews with their own Claude or Codex, and GitHub is the source of truth. It runs fully on your machine, with no added service. Free for up to ${FREE_TEAM_SIZE} people: npx ${NPM_PACKAGE}.`,
   },
   '/build': {
-    title: `Build — from ticket to pull request, checked against the story · ${SITE_NAME}`,
-    description: `How ${SITE_NAME} turns a ticket into a pull request on your own machine: it checks the story against your docs and code, fills the gaps, implements in a sandbox, reviews its own work in rounds and opens the PR. By hand or automatically, and how you verify the result.`,
+    title: `Build — one click from ticket to pull request · ${SITE_NAME}`,
+    description: `One click turns a ticket into a reviewed pull request on your own machine: ${SITE_NAME} checks the story against your docs and code, fills the gaps, implements in a sandbox, reviews its own work in rounds and opens the PR. By hand or automatically, and how you verify the result.`,
   },
   '/ensemble-review': {
-    title: `Ensemble review — every teammate's agent, one review · ${SITE_NAME}`,
-    description: `Each teammate reviews with their own local agent, Claude or Codex, on their own machine. There is no server between you: GitHub is the source of truth. A status line on each commit stops two people reviewing it twice, and every posted review joins one list. Free for up to ${FREE_TEAM_SIZE} people.`,
+    title: `Ensemble review — no review bot seat, one review per commit · ${SITE_NAME}`,
+    description: `No review bot seat: each teammate reviews with their own Claude or Codex, on their own machine, and each change is checked against its ticket. There is no server between you: GitHub is the source of truth. A status line on each commit stops two people reviewing it twice, and every posted review joins one list. Free for up to ${FREE_TEAM_SIZE} people.`,
   },
   '/automation': {
     title: `Automation — dependency updates, merged without you · ${SITE_NAME}`,

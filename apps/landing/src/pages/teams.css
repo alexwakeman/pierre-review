@@ -13,7 +13,7 @@
               · .tm-seq (.tm-lanes, ol.tm-steps > li.on-gh | li.on-me > .tm-n + div (.tm-k, h3, p))
      pair     .tm-pair / .tm-pair2 / .tm-claims > .tm-id (.tm-word, .tm-story) · .tm-wide
      claims   .tm-line ×3 (.tm-l1 .tm-l2 .tm-l3: h3, .tm-words, p) · .tm-fine
-     threads  .tm-threads > .tm-t-head · .tm-t ×4
+     threads  .tm-threads > .tm-t-head · .tm-t ×4 (the middle-ground section reuses it: .tm-t.tm-t3 ×3)
      split    .tm-split > .tm-left + .tm-right (7/5) · .tm-left-n + .tm-right-w (5/7)
      start    .tm-start > .gold.tm-start-main (h2, p, code.tm-cmd, .btns) · .tm-start-list
    =========================================================================== */
@@ -523,6 +523,9 @@
   gap: 12px;
   padding: 28px;
 }
+.lb.teams .tm-t.tm-t3 {
+  grid-column: span 4;
+}
 .lb.teams .tm-t h3 {
   font-size: clamp(22px, 2vw, 28px);
 }
@@ -534,6 +537,9 @@
 @media (max-width: 1100px) and (min-width: 761px) {
   .lb.teams .tm-threads .tm-t {
     grid-column: span 6;
+  }
+  .lb.teams .tm-threads .tm-t.tm-t3 {
+    grid-column: 1 / -1;
   }
 }
 @media (max-width: 760px) {

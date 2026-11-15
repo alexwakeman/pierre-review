@@ -17,21 +17,26 @@ import { SITE_NAME } from '../../lib/site';
 // ---------------------------------------------------------------------------
 
 const STEPS: { n: string; h: string; p: string; tone: string }[] = [
-  { n: '1', h: 'Connect your tracker', p: 'Jira, Linear, GitHub Issues or Notion. It reads the tickets you pick.', tone: 'lapis' },
   {
-    n: '2',
-    h: 'Assess the ticket',
-    p: 'Your agent reads the story with your docs and your code, and plans. Nothing is built until you approve the plan.',
+    n: '1',
+    h: 'Refine and plan',
+    p: 'Your agent reads the ticket against your docs and your code, updates the acceptance criteria where they fall short, and plans the change.',
     tone: 'verdigris',
   },
-  { n: '3', h: 'Implement', p: 'Your Claude or Codex writes the change in a sandbox on your machine.', tone: 'madder' },
+  { n: '2', h: 'Build', p: 'Your Claude or Codex writes the change in a sandbox on your machine.', tone: 'madder' },
   {
-    n: '4',
+    n: '3',
     h: 'Review in rounds',
-    p: 'Claude and Codex review the branch and check it against the ticket. The agent fixes what they find, and they review again.',
+    p: 'Claude and Codex review the branch against the new criteria. The agent fixes what they find, and they review again.',
     tone: 'lapis',
   },
-  { n: '5', h: 'Create the PR', p: 'In one click, with what the review found and fixed in its description.', tone: 'gold' },
+  { n: '4', h: 'Open the pull request', p: 'Its description says what the review found and what was fixed.', tone: 'gold' },
+  {
+    n: '5',
+    h: 'Update the ticket',
+    p: 'The ticket gets the new criteria, and a plain-English comment that links the pull requests.',
+    tone: 'lapis',
+  },
 ];
 
 /** The build flow: five steps, with the review loop drawn under Implement and Review. */
@@ -39,8 +44,11 @@ export function HowItWorks(): JSX.Element {
   return (
     <section id="how" className="section chapter" aria-labelledby="how-h">
       <div className="chap rise">
-        <h2 id="how-h">From ticket to pull request</h2>
-        <p>Define the work, build it and review it, on your own machine.</p>
+        <h2 id="how-h">One click from ticket to pull request</h2>
+        <p>
+          Press Build end to end. {SITE_NAME} refines the ticket, builds it, reviews it until it is clean, opens the
+          pull request and updates the ticket.
+        </p>
       </div>
       <div className="board flow">
         <ol className="flow-steps">
@@ -55,7 +63,11 @@ export function HowItWorks(): JSX.Element {
           ))}
         </ol>
         <p className="flow-loop rise">
-          <span aria-hidden="true">↺</span> Steps 3 and 4 repeat until the review is clean.
+          <span aria-hidden="true">↺</span> Steps 2 and 3 repeat until the review is clean.
+        </p>
+        <p className="flow-loop rise">
+          No context to paste, no prompt to write, no steps to remember. You review a pull request that has already
+          been reviewed.
         </p>
         <p className="flow-more rise">
           <Link to="/build">How the build works →</Link>
@@ -121,20 +133,20 @@ function Circle(): JSX.Element {
 
 const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   {
-    h: 'Local agents',
-    p: 'Each teammate reviews with their own Claude or Codex, on their own machine and their own plan.',
+    h: 'No review bot seat',
+    p: 'Each teammate reviews with their own Claude or Codex, on the plan they already have. Nothing to buy, nothing to host.',
   },
   {
-    h: 'Claude and Codex together',
-    p: 'Both review at once, without seeing each other. Their findings are merged into one review, and every comment thread is checked against the code.',
+    h: 'Checked against the ticket',
+    p: "Each change is checked against its ticket's acceptance criteria and description, and your docs. It says what is met and what is still open.",
   },
   {
-    h: 'GitHub is the source of truth',
-    p: 'A status line on the commit says who is reviewing it, so nobody reviews it twice. There is no server between you.',
+    h: 'The same review, every time',
+    p: 'Auto review runs on every push, the same way, with Claude and Codex together when you have both. No prompt to write, nothing to remember.',
   },
   {
-    h: 'In place of a review bot',
-    p: `${SITE_NAME} can replace a hosted code-review tool, and fix what it finds on your own pull requests.`,
+    h: 'Shared, and it fixes',
+    p: 'A status line on the commit says who is reviewing it, so nobody reviews it twice. Findings, red CI and SonarCloud issues are fixed on the branch.',
   },
 ];
 
@@ -144,7 +156,10 @@ export function EnsembleSection(): JSX.Element {
     <section id="ensemble" className="section chapter" aria-labelledby="ens-h">
       <div className="chap rise">
         <h2 id="ens-h">Review as an ensemble</h2>
-        <p>The team takes on the reviews together, each with their own agent. Nothing to host.</p>
+        <p>
+          The process of a review bot, on the Claude and Codex plans your team already has. Every pull request gets the
+          same review, checked against its ticket.
+        </p>
       </div>
       <div className="board ensemble">
         <div className="tile circle rise">

@@ -196,8 +196,9 @@ export default function EnsembleReview(): JSX.Element {
         <div className="tile tm-name">
           <h1 id="tm-h1">Review as an ensemble.</h1>
           <p className="tm-lead">
-            Each teammate reviews with their own agent, Claude Code or Codex, on their own machine.
-            There is no server and no shared account. GitHub is the source of truth.
+            No review bot seat. Each teammate reviews with their own Claude Code or Codex, on their own
+            machine. Every pull request gets the same review on every push, checked against its ticket.
+            GitHub is the source of truth.
           </p>
         </div>
         <Shot className="tm-hero-shot">
@@ -211,6 +212,35 @@ export default function EnsembleReview(): JSX.Element {
             <Link className="btn" to="/docs/getting-started/install-and-run">
               Set it up →
             </Link>
+          </p>
+        </div>
+      </section>
+
+      {/* ---- the middle ground ------------------------------------------- */}
+      <section className="section board tm-threads" aria-labelledby="tm-m-h">
+        <div className="tile tm-txt tm-t-head rise">
+          <h2 id="tm-m-h">Between a review bot and a prompt.</h2>
+          <p>
+            The process of a review bot, on the plans your team already has, with the ticket and your
+            docs in hand.
+          </p>
+        </div>
+        <div className="tile madder tm-t tm-t3 rise">
+          <h3>A review bot</h3>
+          <p>A seat for each person, paid for on top of the AI plans you already have.</p>
+        </div>
+        <div className="tile lapis tm-t tm-t3 rise">
+          <h3>Your agent alone</h3>
+          <p>
+            No extra cost, but a different review each time, from a prompt someone wrote. It stays on
+            one machine, and two people can do the same one.
+          </p>
+        </div>
+        <div className="tile verdigris tm-t tm-t3 rise">
+          <h3>{SITE_NAME}</h3>
+          <p>
+            The same review on every push, checked against the ticket&rsquo;s acceptance criteria and
+            description, your docs and the earlier threads. Posted to GitHub once, for the whole team.
           </p>
         </div>
       </section>
