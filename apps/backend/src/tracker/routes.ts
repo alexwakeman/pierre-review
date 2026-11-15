@@ -411,7 +411,7 @@ export function registerTrackerRoutes(
       if (row == null || !hasContent(row) || row.issueTypeId == null) {
         return reply.code(409).send({
           error: 'TicketNotRead',
-          message: `Limn has not read ${gate.key} from the tracker yet. Refresh it first.`,
+          message: `Ensemble has not read ${gate.key} from the tracker yet. Refresh it first.`,
         });
       }
       const fieldId = req.body.fieldId;
@@ -475,7 +475,7 @@ async function detectedTicketGate(
     return fail(
       reply.code(400).send({
         error: 'TicketNotDetected',
-        message: `${key} is not a ticket Limn found on this pull request.`,
+        message: `${key} is not a ticket Ensemble found on this pull request.`,
       }),
     );
   }

@@ -234,7 +234,7 @@ describe('persistPr — Limn findings are bots', () => {
     expect(bot.isBot).toBe(true);
     expect(bot.isBotOverridden).toBe(true);
     expect(bot.githubNodeId).toBeNull();
-    expect(bot.displayName).toBe('Limn · alice-dev');
+    expect(bot.displayName).toBe('Ensemble · alice-dev');
   });
 
   it('gives each bot a review row in the repo\'s workspace', async () => {
@@ -250,7 +250,7 @@ describe('persistPr — Limn findings are bots', () => {
       expect(rows[0].automated).toBe(true);
       expect(rows[0].role).toBe('review');
       expect(rows[0].kind).toBe('pierre');
-      expect(rows[0].label).toBe(`Limn · ${login.slice(5)}`);
+      expect(rows[0].label).toBe(`Ensemble · ${login.slice(5)}`);
       expect(rows[0].identitySource).toBe('auto');
     }
   });
@@ -368,5 +368,36 @@ describe('reconcileLimnFindingAuthors', () => {
       .where(and(eq(schema.workspaceReviewers.authorUserId, bobBot), eq(schema.workspaceReviewers.kind, 'pierre')))
       .execute();
     expect(kept).toHaveLength(1);
+  });
+});
+
+// THE RENAME: a bot name an older Limn stored ("Limn · bob-dev") reads "Ensemble · bob-dev"; a name
+// the reader set by hand stays; the `limn:` login never changes; a second run updates nothing.
+describe('renameLegacyLimnBotLabels', () => {
+  it('renames stored "Limn · " bot names, keeps a manual one, and is idempotent', async () => {
+    const { and, eq } = await import('drizzle-orm');
+    const bobBot = (await userId('limn:bob-dev'))!;
+    const aliceBot = (await userId('limn:alice-dev'))!;
+    await db.update(schema.users).set({ displayName: 'Limn · bob-dev' }).where(eq(schema.users.id, bobBot)).execute();
+    await db
+      .update(schema.workspaceReviewers)
+      .set({ label: 'Limn · bob-dev', identitySource: 'auto' })
+      .where(and(eq(schema.workspaceReviewers.authorUserId, bobBot), eq(schema.workspaceReviewers.kind, 'pierre')))
+      .execute();
+    await db
+      .update(schema.workspaceReviewers)
+      .set({ label: 'Limn · our alice bot', identitySource: 'manual' })
+      .where(and(eq(schema.workspaceReviewers.authorUserId, aliceBot), eq(schema.workspaceReviewers.kind, 'pierre')))
+      .execute();
+
+    expect(await limnBots.renameLegacyLimnBotLabels(1)).toBeGreaterThanOrEqual(2);
+    const bob = (await db.select().from(schema.users).where(eq(schema.users.id, bobBot)).execute())[0];
+    expect(bob.displayName).toBe('Ensemble · bob-dev');
+    expect(bob.githubLogin).toBe('limn:bob-dev');
+    const label = async (id: number) =>
+      (await db.select().from(schema.workspaceReviewers).where(and(eq(schema.workspaceReviewers.authorUserId, id), eq(schema.workspaceReviewers.kind, 'pierre'))).execute())[0].label;
+    expect(await label(bobBot)).toBe('Ensemble · bob-dev');
+    expect(await label(aliceBot)).toBe('Limn · our alice bot');
+    expect(await limnBots.renameLegacyLimnBotLabels(1)).toBe(0);
   });
 });

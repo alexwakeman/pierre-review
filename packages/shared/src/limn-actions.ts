@@ -70,13 +70,16 @@ export const LIMN_ACTION_KINDS: readonly LimnActionKind[] = [
 export type LimnActionOrigin = 'auto' | 'policy' | 'reader_pressed';
 
 // ── THE COMMIT TRAILER ────────────────────────────────────────────────────────────────────────────
-// Every commit Limn creates carries a `Limn-Run: <ref>` git trailer, so any install (a teammate's
-// too) recognises the commit as Limn's from its message alone. `<ref>` names the run, e.g.
-// `ai-fix/123`, `conflict/45`, `story-build/6`.
+// Every commit the app creates carries an `Ensemble-Run: <ref>` git trailer, so any install (a
+// teammate's too) recognises the commit as the app's from its message alone. `<ref>` names the run,
+// e.g. `ai-fix/123`, `conflict/45`, `story-build/6`. An older Limn wrote `Limn-Run:`; those commits
+// are on GitHub, so the reader accepts both keys.
 
-export const LIMN_RUN_TRAILER_KEY = 'Limn-Run';
+export const LIMN_RUN_TRAILER_KEY = 'Ensemble-Run';
+/** The trailer key an older Limn wrote. READ only, never written. */
+export const LEGACY_RUN_TRAILER_KEY = 'Limn-Run';
 
-const LIMN_RUN_TRAILER_RE = /^Limn-Run:[ \t]*\S+[ \t]*$/im;
+const LIMN_RUN_TRAILER_RE = /^(?:Ensemble|Limn)-Run:[ \t]*\S+[ \t]*$/im;
 
 /** The trailer line for one run. The run ref is reduced to `[A-Za-z0-9._/-]`. */
 export function limnRunTrailer(runRef: string): string {
@@ -91,7 +94,7 @@ export function withLimnRunTrailer(message: string, runRef: string): string {
   return `${body}\n\n${limnRunTrailer(runRef)}\n`;
 }
 
-/** Does this commit message carry a `Limn-Run:` trailer on a line of its own? Pure. */
+/** Does this commit message carry an `Ensemble-Run:` (or an older `Limn-Run:`) trailer on a line of its own? Pure. */
 export function hasLimnRunTrailer(message: string | null | undefined): boolean {
   return typeof message === 'string' && LIMN_RUN_TRAILER_RE.test(message);
 }

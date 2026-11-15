@@ -239,14 +239,14 @@ export const BUILD_PLAN_CHECK_SOURCE = String.raw`(function () {
           if (ev.quote.length > L.docsQuoteMax) { drop('a docs quote must be at most ' + L.docsQuoteMax + ' characters.'); continue; }
         } else if (ev.kind === 'data_run') {
           if (!str(ev.run, 20)) { shape.push(eat + ' must be { "kind": "data_run", "run": "svc-<n>", "quote" }.'); continue; }
-          if (ctx.runs.indexOf(ev.run.trim()) < 0) { drop('"' + ev.run + '" is not a run Limn recorded. Run the query with limn-svc run and cite the svc-<n> id it prints.'); continue; }
+          if (ctx.runs.indexOf(ev.run.trim()) < 0) { drop('"' + ev.run + '" is not a run Ensemble recorded. Run the query with limn-svc run and cite the svc-<n> id it prints.'); continue; }
         } else {
           shape.push(eat + ': "kind" must be "code", "docs", "data_file" or "data_run".');
           continue;
         }
       }
       if (bad.length > 0) droppedEvidence[ct.id] = bad;
-      if (bad.length === ct.evidence.length) content.push(ct.id + ' has no evidence left that Limn can check, so it is dropped.');
+      if (bad.length === ct.evidence.length) content.push(ct.id + ' has no evidence left that Ensemble can check, so it is dropped.');
     }
 
     // ---- ticket update ----
@@ -320,7 +320,7 @@ export interface PlanContextFile extends BuildPlanCheckContext {
 export function planCheckerSource(o: { contextFile: string }): string {
   return [
     '#!/usr/bin/env node',
-    "// Limn: checks a plan. Run: node ~/.limn/plan-check.cjs <<'EOF' … EOF",
+    "// Ensemble: checks a plan. Run: node ~/.limn/plan-check.cjs <<'EOF' … EOF",
     "'use strict';",
     "const fs = require('fs');",
     "const path = require('path');",
@@ -337,7 +337,7 @@ export function planCheckerSource(o: { contextFile: string }): string {
     'let raw;',
     "try { raw = JSON.parse(text); } catch (e) { fail(['The plan is not valid JSON: ' + e.message]); }",
     'let ctx;',
-    "try { ctx = JSON.parse(fs.readFileSync(CONTEXT, 'utf8')); } catch (e) { fail(['Limn\\'s plan context is missing: ' + CONTEXT]); }",
+    "try { ctx = JSON.parse(fs.readFileSync(CONTEXT, 'utf8')); } catch (e) { fail(['Ensemble\\'s plan context is missing: ' + CONTEXT]); }",
     'const r = LIB.validateBuildPlan(raw, ctx);',
     'const problems = r.shapeProblems.concat(r.contentProblems);',
     'if (r.plan) {',

@@ -68,17 +68,17 @@ const MIN = 60_000;
 
 // ---- the fake `limn/deps` lines: per commit (a line without `sha` shows on every commit) ----
 let lines: any[] = [];
-let posted: Array<{ state: string; description: string; sha: string }> = [];
+let posted: Array<{ state: string; description: string; sha: string; context?: string }> = [];
 let nextId = 1;
 let failPost: ((description: string) => boolean) | null = null;
 const fakeGithub = {
   async listLines(_a: number, _o: string, _n: string, sha: string) {
     return lines.filter((l) => l.sha == null || l.sha === sha).map((l) => ({ ...l }));
   },
-  async postLine(_a: number, _o: string, _n: string, sha: string, _context: string, post: any) {
+  async postLine(_a: number, _o: string, _n: string, sha: string, context: string, post: any) {
     if (failPost?.(post.description)) throw new Error('GitHub said no');
-    posted.push({ state: post.state, description: post.description, sha });
-    lines.push({ id: nextId++, state: post.state, description: post.description, createdAtMs: Date.now(), login: 'me', sha });
+    posted.push({ state: post.state, description: post.description, sha, context });
+    lines.push({ id: nextId++, state: post.state, description: post.description, createdAtMs: Date.now(), login: 'me', sha, context });
   },
   async login() {
     return 'me';
@@ -263,6 +263,18 @@ describe('(a) a line left pending, and a final line GitHub did not take', () => 
     expect(claims.decideDepsClaim(lines, 'robin', Date.now(), 'approve', { action: 'approve' })).toEqual({ kind: 'free' });
   });
 
+  // THE RENAME: new lines go up as `ensemble/deps`; a pending line an older Limn left as `limn/deps`
+  // is released on `limn/deps`, so it does not stay pending on GitHub beside the new one.
+  it('writes ensemble/deps, and releases an older limn/deps pending line on limn/deps', async () => {
+    await auto.beginDependencyAction({ log }, pr(), 'approve');
+    expect(posted[0]).toMatchObject({ state: 'pending', context: 'ensemble/deps' });
+    lines[0].context = 'limn/deps'; // as an older Limn on this machine posted it
+    restart();
+    await auto.reconcileDependencyActionsOnStartup();
+    await release.releaseStaleDepsClaims(log);
+    expect(posted.at(-1)).toMatchObject({ state: 'success', context: 'limn/deps', description: "Cleared by me: didn't finish · free to claim" });
+  });
+
   it('a newer line by a teammate: the row is closed and nothing is posted over it', async () => {
     await auto.beginDependencyAction({ log }, pr(), 'approve');
     restart();
@@ -312,12 +324,19 @@ describe('(b) a teammate’s expired pending line', () => {
     await skip();
     lines = [robin('pending', 'robin handling · approving', 31 * MIN)];
     await release.releaseStaleDepsClaims(log);
-    expect(posted).toEqual([{ state: 'success', description: "Cleared by me: robin's claim expired", sha: 'h1' }]);
+    expect(posted).toEqual([{ state: 'success', description: "Cleared by me: robin's claim expired", sha: 'h1', context: 'ensemble/deps' }]);
     await release.releaseStaleDepsClaims(log);
     restart();
     await release.releaseStaleDepsClaims(log); // durable: a restart does not post it again
     expect(posted).toHaveLength(1);
     expect((await ledger()).find((r: any) => r.whose === 'teammate')).toMatchObject({ login: 'robin', state: 'released' });
+  });
+
+  it("an older Limn's expired limn/deps line is released on limn/deps", async () => {
+    await skip();
+    lines = [{ ...robin('pending', 'robin handling · approving', 31 * MIN), context: 'limn/deps' }];
+    await release.releaseStaleDepsClaims(log);
+    expect(posted).toEqual([{ state: 'success', description: "Cleared by me: robin's claim expired", sha: 'h1', context: 'limn/deps' }]);
   });
 
   it('a live claim, or one that settled, is left alone', async () => {

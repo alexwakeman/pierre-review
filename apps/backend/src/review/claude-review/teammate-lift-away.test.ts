@@ -113,11 +113,11 @@ describe("dismissing an away teammate's Limn block", () => {
   it('the message keeps the Limn lead and says why', async () => {
     const { isLimnDismissalMessage } = await import('@pierre-review/shared');
     const m = F.lift.teammateAwayLiftMessage('alex', 'robin', 3, 'abc1234ffff', 5 * 3_600_000);
-    expect(m).toBe("Limn (alex) checked all 3 points are addressed at abc1234. robin's Limn has not reviewed it and has been away for 5 hours.");
+    expect(m).toBe("Ensemble (alex) checked all 3 points are addressed at abc1234. robin's Ensemble has not reviewed it and has been away for 5 hours.");
     expect(isLimnDismissalMessage(m)).toBe(true);
     expect(F.lift.awayFor(3 * 86_400_000)).toBe('3 days');
     expect(F.lift.teammateAwayLiftMessage('alex', 'robin', 1, 'abc1234', null)).toBe(
-      "Limn (alex) checked the 1 point is addressed at abc1234. robin's Limn has not reviewed it.",
+      "Ensemble (alex) checked the 1 point is addressed at abc1234. robin's Ensemble has not reviewed it.",
     );
   });
 
@@ -134,7 +134,7 @@ describe("dismissing an away teammate's Limn block", () => {
       'lift',
       F.prSeq,
       ghId,
-      "Limn (alice-dev) checked all 2 points are addressed at bbbbbbb. robin-dev's Limn has not reviewed it and has been away for 24 hours.",
+      "Ensemble (alice-dev) checked all 2 points are addressed at bbbbbbb. robin-dev's Ensemble has not reviewed it and has been away for 24 hours.",
     ]);
     expect(await teammateLiftOf(teammateId)).toMatchObject({ status: 'dismissed', why: 'away', points: 2 });
     expect(await autoPostOf(run)).toMatchObject({

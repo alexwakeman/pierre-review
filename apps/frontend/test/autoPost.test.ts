@@ -155,16 +155,16 @@ describe('the mounts', () => {
   it('Settings carries the master switch, the scope and every kind', () => {
     const s = src('components/settings/AutoReviewSection.tsx');
     expect(s).toContain('When an auto review finishes');
-    expect(s).toContain('Keep it in Limn');
+    expect(s).toContain('Keep it in Ensemble');
     expect(s).toContain('Post to GitHub');
     // The choice sits right under the auto review switch, above Auto AI Fix and diagrams.
-    expect(s.indexOf('Keep it in Limn')).toBeGreaterThan(s.indexOf('Review new PRs automatically'));
-    expect(s.indexOf('Keep it in Limn')).toBeLessThan(s.indexOf('Auto AI Fix on your own PRs'));
+    expect(s.indexOf('Keep it in Ensemble')).toBeGreaterThan(s.indexOf('Review new PRs automatically'));
+    expect(s.indexOf('Keep it in Ensemble')).toBeLessThan(s.indexOf('Auto AI Fix on your own PRs'));
     expect(s).toContain('Your own PRs, and PRs you are asked to review or have reviewed or commented on');
     expect(s).toContain('Approve or request changes for me');
     // Resolving Limn's own fixed threads is always on: said behind the posting ⓘ, never a switch.
-    expect(s).not.toContain('Resolve Limn’s threads once fixed');
-    expect(s).toContain('When a later review finds a posted comment fixed, Limn replies and resolves its thread.');
+    expect(s).not.toContain('Resolve Ensemble’s threads once fixed');
+    expect(s).toContain('When a later review finds a posted comment fixed, Ensemble replies and resolves its thread.');
     expect(s).toContain('Push automatically');
     expect(s).toContain('Every PR auto review covers');
     for (const k of ['blockers', 'warnings', 'nits', 'questions', 'storyGaps', 'notAskedFor']) {
@@ -188,7 +188,7 @@ describe('the mounts', () => {
     // SonarCloud issues are posted inline now: no "one PR comment" on its row.
     expect(s).toContain("{ key: 'sonar', label: 'SonarCloud issues' }");
     // Auto AI Fix rows are provider-neutral (Claude, Codex or both) and offer the merge, OFF by default.
-    expect(s).toContain("{ key: 'findings', label: 'Limn’s findings' }");
+    expect(s).toContain("{ key: 'findings', label: 'Ensemble’s findings' }");
     expect(s).toContain("{ key: 'judgedThreads', label: 'Threads my agent says to fix' }");
     expect(s).toContain("{ key: 'conflicts', label: 'Merge conflicts with the base branch' }");
     expect(s).not.toMatch(/Threads \$\{name\}|\$\{name\}’s findings/);
@@ -265,7 +265,7 @@ describe('Post reminder (a finding already on GitHub)', () => {
   });
 });
 
-describe("withdrawing Limn's own approval", () => {
+describe("withdrawing Ensemble's own approval", () => {
   it('on the approving run: the message GitHub got, or why it failed; nothing while claimed', () => {
     const w = (status: 'withdrawing' | 'withdrawn' | 'failed', error: string | null = null) => ({
       approvalWithdrawal: {
@@ -273,12 +273,12 @@ describe("withdrawing Limn's own approval", () => {
         at: '2026-11-04T12:00:00Z',
         why: 'push' as const,
         headSha: '91482c8aaaa',
-        message: 'Limn withdrew its approval: new commits since it approved (91482c8).',
+        message: 'Ensemble withdrew its approval: new commits since it approved (91482c8).',
         error,
       },
     });
     expect(approvalWithdrawLines(w('withdrawn'))).toEqual([
-      { text: 'Limn withdrew its approval: new commits since it approved (91482c8).', failed: false },
+      { text: 'Ensemble withdrew its approval: new commits since it approved (91482c8).', failed: false },
     ]);
     expect(approvalWithdrawLines(w('failed', 'Must have admin rights.'))).toEqual([
       { text: 'Couldn’t withdraw this approval: Must have admin rights.', failed: true },
@@ -291,9 +291,9 @@ describe("withdrawing Limn's own approval", () => {
     const d = (how: 'withdrawn' | 'withdraw_failed', error: string | null = null) => ({
       withdrewApproval: { reviewId: 'R1', how, message: 'm', error },
     });
-    expect(approvalWithdrawLines(d('withdrawn'))).toEqual([{ text: 'Withdrew Limn’s earlier approval.', failed: false }]);
+    expect(approvalWithdrawLines(d('withdrawn'))).toEqual([{ text: 'Withdrew Ensemble’s earlier approval.', failed: false }]);
     expect(approvalWithdrawLines(d('withdraw_failed', 'Nope.'))).toEqual([
-      { text: 'Couldn’t withdraw Limn’s earlier approval: Nope.', failed: true },
+      { text: 'Couldn’t withdraw Ensemble’s earlier approval: Nope.', failed: true },
     ]);
     expect(autoPostFailureLine({ status: 'failed', error: 'Nope.', ...d('withdraw_failed', 'Nope.') })).toBeNull();
   });
@@ -303,7 +303,7 @@ describe("withdrawing Limn's own approval", () => {
     const tab = readFileSync(join(here, '../src/components/ClaudeReviewTab.tsx'), 'utf8');
     expect(tab).toContain('approvalWithdrawLines(review.autoPost)');
     const section = readFileSync(join(here, '../src/components/settings/AutoReviewSection.tsx'), 'utf8');
-    expect(section).not.toContain('Withdraw Limn’s approval when new commits are pushed');
+    expect(section).not.toContain('Withdraw Ensemble’s approval when new commits are pushed');
     expect(section).not.toContain('withdrawApprovalOnPush');
   });
 });

@@ -81,10 +81,10 @@ export function SandboxRuntimeSection(): JSX.Element {
 
 /** "2 Limn sandboxes are running." in the reader's words. Pure. */
 export function runningLine(n: number): string {
-  if (n === 0) return "No Limn sandboxes are running.";
+  if (n === 0) return "No Ensemble sandboxes are running.";
   return n === 1
-    ? "1 Limn sandbox is running."
-    : `${n} Limn sandboxes are running.`;
+    ? "1 Ensemble sandbox is running."
+    : `${n} Ensemble sandboxes are running.`;
 }
 
 /** The count and "Stop all". Hidden while the runtime does not answer (the line above says why). */

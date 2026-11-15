@@ -85,7 +85,7 @@ export interface PlanVerifyInput {
 }
 
 /** Said when the draft held a Jira mention or macro the ticket did not: it is written as plain text. */
-export const TICKET_UPDATE_ESCAPED_LINE = 'The draft had a Jira mention or Jira markup the ticket does not have. Limn writes it as plain text.';
+export const TICKET_UPDATE_ESCAPED_LINE = 'The draft had a Jira mention or Jira markup the ticket does not have. Ensemble writes it as plain text.';
 
 /** The draft ticket update against the ticket's layout: plain problems, at most six. Never a refusal. Pure. */
 export function ticketUpdateLayoutProblems(
@@ -183,7 +183,7 @@ async function verifyFileEvidence(
   const path = cleanRepoPath(e.path);
   if (!path) return { ok: false, reason: 'cited a path outside the repository' };
   const [s0, e0] = e.lines;
-  if (!(s0 >= 1 && e0 >= s0 && e0 - s0 + 1 <= BUILD_PLAN_LIMITS.lineSpan)) return { ok: false, reason: 'cited lines Limn could not read' };
+  if (!(s0 >= 1 && e0 >= s0 && e0 - s0 + 1 <= BUILD_PLAN_LIMITS.lineSpan)) return { ok: false, reason: 'cited lines Ensemble could not read' };
   let blob: Buffer | null;
   try {
     blob = await seams.readBlob(repo, path);
@@ -205,11 +205,11 @@ async function verifyFileEvidence(
 
 function verifyRunEvidence(e: Extract<BuildPlanEvidenceRaw, { kind: 'data_run' }>, seams: PlanVerifySeams): Verdict {
   const rec = seams.run(e.run);
-  if (!rec) return { ok: false, reason: 'cited a service run Limn did not record' };
+  if (!rec) return { ok: false, reason: 'cited a service run Ensemble did not record' };
   if (rec.egress) return { ok: false, reason: 'cited a service that can reach the internet' };
   const lines = rec.output.split('\n');
   const hit = findQuote(rec.output, e.quote, 1, lines.length);
-  if (hit.at === 'none') return { ok: false, reason: 'quoted output that is not in the run Limn recorded' };
+  if (hit.at === 'none') return { ok: false, reason: 'quoted output that is not in the run Ensemble recorded' };
   // In the whole output, 'in' and 'ambiguous' cannot both be wrong: any place will do; show the first.
   const from = Math.max(1, hit.start - 3);
   const to = Math.min(lines.length, hit.end + 3, from + EVIDENCE_EXCERPT_MAX_LINES - 1);
@@ -223,7 +223,7 @@ function verifyDocsEvidence(e: Extract<BuildPlanEvidenceRaw, { kind: 'docs' }>, 
   if (!seams.library) return { ok: false, reason: 'cited a document, but no reference documents are in this session' };
   const r = validateDocReferences([{ link: e.link, quote: e.quote, verdict: 'contradicts', note: '', about }], seams.library);
   const ref = r.references[0];
-  if (!ref) return { ok: false, reason: 'quoted a document section Limn could not find the text in' };
+  if (!ref) return { ok: false, reason: 'quoted a document section Ensemble could not find the text in' };
   return { ok: true, evidence: { kind: 'docs', ...ref } };
 }
 
@@ -250,7 +250,7 @@ export async function verifyBuildPlan(input: PlanVerifyInput): Promise<PlanVerif
     for (const [i, e] of c.evidence.entries()) {
       if (skip.has(i)) {
         droppedEvidence += 1;
-        reasons.add('cited evidence Limn could not check');
+        reasons.add('cited evidence Ensemble could not check');
         continue;
       }
       let v: Verdict;

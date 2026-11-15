@@ -166,7 +166,7 @@ const defaultFixDeps: FixSessionDeps = {
         verifyMergeBundle({ gitDir, bundle: a.bundle, headSha: a.headSha, baseSha: a.baseSha, baseRef: a.baseRef, conflictedFiles: a.conflictedFiles, resultRef: aiFixMergeRef(a.fixId, 'result'), token }),
       );
     } catch {
-      return { ok: false, reason: 'Limn could not read its own copy of the repository to check the merge.' };
+      return { ok: false, reason: 'Ensemble could not read its own copy of the repository to check the merge.' };
     }
   },
   async relatedRepoIds(ctx, accountId, prId) {
@@ -620,7 +620,7 @@ function fixSubject(
         try {
           await fetchCommitIntoSandbox(l.runtime, l.container, repoPath, w.ref, source, (d) => seams.tarGitDir(d));
         } catch (err) {
-          throw new SessionFail(`Limn could not bring ${m.baseRef} into the sandbox: ${scrub(err)}`);
+          throw new SessionFail(`Ensemble could not bring ${m.baseRef} into the sandbox: ${scrub(err)}`);
         } finally {
           await source.cleanup().catch(() => {});
         }
@@ -638,8 +638,8 @@ function fixSubject(
     notice(
       l,
       n === 0
-        ? `Limn started the merge of ${m.baseRef} (${m.baseSha.slice(0, 7)}). Git found no conflicts; the agent still makes the merge commit.`
-        : `Limn started the merge of ${m.baseRef} (${m.baseSha.slice(0, 7)}): ${n === 1 ? 'one file is' : `${n} files are`} in conflict (${m.conflictedFiles.slice(0, 8).join(', ')}${n > 8 ? ', …' : ''}).`,
+        ? `Ensemble started the merge of ${m.baseRef} (${m.baseSha.slice(0, 7)}). Git found no conflicts; the agent still makes the merge commit.`
+        : `Ensemble started the merge of ${m.baseRef} (${m.baseSha.slice(0, 7)}): ${n === 1 ? 'one file is' : `${n} files are`} in conflict (${m.conflictedFiles.slice(0, 8).join(', ')}${n > 8 ? ', …' : ''}).`,
     );
   }
 
@@ -663,13 +663,13 @@ function fixSubject(
       m.resolutionFiles = ex.resolutionFiles;
       if (ex.merging) m.reason = 'The merge is not finished: the agent did not commit it.';
       else if (ex.mergeSha == null) m.reason = 'The agent made no merge commit.';
-      else if (ex.bundleTooLarge) m.reason = 'The merge is larger than Limn keeps (4 MB).';
-      else if (ex.bundle == null) m.reason = 'Limn could not read the merge out of the sandbox.';
+      else if (ex.bundleTooLarge) m.reason = 'The merge is larger than Ensemble keeps (4 MB).';
+      else if (ex.bundle == null) m.reason = 'Ensemble could not read the merge out of the sandbox.';
       else {
         const pr = facts.fullName.split('/');
         const v = await fixDeps.verifyMerge({ fixId, accountId, owner: pr[0]!, name: pr.slice(1).join('/'), prNumber: facts.number, headSha: m.headSha, baseRef: m.baseRef, baseSha: m.baseSha, bundle: ex.bundle, conflictedFiles: m.conflictedFiles });
         if (!v.ok) m.reason = v.reason;
-        else if (v.mergeSha !== ex.mergeSha || v.resultSha !== ex.outSha) m.reason = 'The commits Limn checked are not the ones in the sandbox.';
+        else if (v.mergeSha !== ex.mergeSha || v.resultSha !== ex.outSha) m.reason = 'The commits Ensemble checked are not the ones in the sandbox.';
         else if (Buffer.byteLength(v.view.fixPatch, 'utf8') > config.aiFixPatchMaxBytes) m.reason = new PatchTooLargeError(Buffer.byteLength(v.view.fixPatch, 'utf8'), config.aiFixPatchMaxBytes).message;
         else {
           m.reason = null;
@@ -683,7 +683,7 @@ function fixSubject(
           m.resolutionFiles = v.view.resolutionFiles;
           m.resolutionDiff =
             v.view.resolutionDiff.length > RESOLUTION_DIFF_MAX_CHARS
-              ? `${v.view.resolutionDiff.slice(0, RESOLUTION_DIFF_MAX_CHARS)}\n… (cut: the resolution is longer than Limn shows)\n`
+              ? `${v.view.resolutionDiff.slice(0, RESOLUTION_DIFF_MAX_CHARS)}\n… (cut: the resolution is longer than Ensemble shows)\n`
               : v.view.resolutionDiff;
           bundle = ex.bundle.toString('base64');
         }
@@ -699,7 +699,7 @@ function fixSubject(
     notice(
       l,
       m.status === 'valid'
-        ? `Limn checked the merge commit: ${m.baseRef} is merged${m.conflictedFiles.length > 0 ? ` and ${m.conflictedFiles.length === 1 ? 'the conflict is' : `the ${m.conflictedFiles.length} conflicts are`} resolved` : ''}.`
+        ? `Ensemble checked the merge commit: ${m.baseRef} is merged${m.conflictedFiles.length > 0 ? ` and ${m.conflictedFiles.length === 1 ? 'the conflict is' : `the ${m.conflictedFiles.length} conflicts are`} resolved` : ''}.`
         : `Nothing will be pushed: ${m.reason}`,
     );
     await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath }, { patch, files, gitMessage, error, merge: m });
@@ -751,7 +751,7 @@ async function storeFixTurn(
   if (read.kind === 'ok' && read.check.report) {
     report = read.check.report;
     const n = read.check.contentProblems.length;
-    if (n > 0) notice(l, `The report has ${n === 1 ? 'a problem' : `${n} problems`}, so Limn left those parts out: ${read.check.contentProblems[0]}`);
+    if (n > 0) notice(l, `The report has ${n === 1 ? 'a problem' : `${n} problems`}, so Ensemble left those parts out: ${read.check.contentProblems[0]}`);
   } else if (read.kind === 'ok') {
     notice(l, `The agent did not hand in a valid report: ${read.check.shapeProblems[0] ?? 'its shape is wrong'}`);
   } else if (read.kind === 'missing') {
@@ -764,7 +764,7 @@ async function storeFixTurn(
   if (pre && pre.merge.status !== 'valid') {
     changeReport = {
       changes: changeReport.changes.map((c) => ({ ...c, refs: c.refs.filter((r) => r !== MERGE_ITEM_REF) })),
-      unaddressed: [{ ref: MERGE_ITEM_REF, reason: `Limn: ${pre.merge.reason ?? 'the merge is not ready.'}` }, ...changeReport.unaddressed.filter((u) => u.ref !== MERGE_ITEM_REF)],
+      unaddressed: [{ ref: MERGE_ITEM_REF, reason: `Ensemble: ${pre.merge.reason ?? 'the merge is not ready.'}` }, ...changeReport.unaddressed.filter((u) => u.ref !== MERGE_ITEM_REF)],
       notReported: changeReport.notReported.filter((r) => r !== MERGE_ITEM_REF),
     };
   }

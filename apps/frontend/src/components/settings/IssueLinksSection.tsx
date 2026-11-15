@@ -137,7 +137,7 @@ export function IssueLinksSection(): JSX.Element {
         <InfoButton title="Issue tracker">
           <p>
             <strong>GitHub Issues:</strong> a PR’s tickets are the issues it closes (“Fixes #12”,
-            “Closes owner/repo#12”) or an issue linked in the PR’s Development panel. Limn reads
+            “Closes owner/repo#12”) or an issue linked in the PR’s Development panel. Ensemble reads
             them with your GitHub sign-in.
           </p>
           <p>

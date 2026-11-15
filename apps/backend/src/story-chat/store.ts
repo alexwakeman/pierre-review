@@ -127,7 +127,7 @@ export async function finishTurn(
 export async function settleRunningTurns(): Promise<number> {
   const rows = await db
     .update(t)
-    .set({ status: 'failed', error: 'Limn restarted before this answer finished.', finishedAt: new Date() })
+    .set({ status: 'failed', error: 'Ensemble restarted before this answer finished.', finishedAt: new Date() })
     .where(eq(t.status, 'running'))
     .returning({ id: t.id })
     .execute();

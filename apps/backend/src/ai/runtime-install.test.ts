@@ -117,7 +117,7 @@ await new Promise((r) => setTimeout(r, 50));
     const result = await rt.install(undefined, { npm: fakeNpm('fail') });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.message).toMatch(/limn ai install/);
+    expect(result.message).toMatch(/ensemble ai install/);
     expect(result.message).toMatch(/npm ERR!/);
     expect(rt.status()).toEqual({ runtime: 'failed', runtimeMessage: result.message });
     expect(readdirSync(dataDir)).toEqual([]);
@@ -291,7 +291,7 @@ await new Promise((r) => setTimeout(r, 50));
     const rt = runtime();
     // No Codex yet: Claude installs; Codex reports the failure and nothing else does.
     const first = await rt.install(undefined, { npm: fakeNpm('codex-fail'), providers: ['codex'] });
-    expect(first).toEqual({ ok: false, message: expect.stringMatching(/limn ai install codex/) });
+    expect(first).toEqual({ ok: false, message: expect.stringMatching(/ensemble ai install codex/) });
     expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
     expect(rt.codexStatus()).toEqual({ runtime: 'failed', runtimeMessage: (first as { message: string }).message });
     expect(readdirSync(dataDir)).toEqual(['ai-runtime']);

@@ -503,7 +503,7 @@ export function replyActions(
     const resolved = item.threadResolved === true || ar?.status === 'resolved';
     let note: string | null = null;
     if (ar != null && !mine) {
-      if (replyMayBeOn) note = `Limn already replied ${where} earlier.`;
+      if (replyMayBeOn) note = `Ensemble already replied ${where} earlier.`;
     } else if (ar != null) {
       if (ar.status === 'resolved') note = ar.replyCommentId == null && prLevel ? 'Marked resolved.' : `Replied and resolved${how}.`;
       else if (ar.status === 'resolving') note = `Replying${how}…`;
@@ -526,7 +526,7 @@ export function replyActions(
     const mayBeOn = pb != null && !(pb.status === 'failed' && pb.refused === true);
     let note: string | null = null;
     if (pb != null && !mine) {
-      if (mayBeOn) note = prLevel ? 'Limn already said this is still open.' : 'Limn already pushed back on this thread earlier.';
+      if (mayBeOn) note = prLevel ? 'Ensemble already said this is still open.' : 'Ensemble already pushed back on this thread earlier.';
     } else if (pb != null) {
       if (pb.status === 'posted') note = `Posted${how}.`;
       else if (pb.status === 'posting') note = `Posting${how}…`;

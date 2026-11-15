@@ -180,7 +180,7 @@ export function teammateLiftLines(
       return {
         text:
           l.why === 'away'
-            ? `Dismissed ${l.login}’s request for changes: every point is addressed and ${l.login}’s Limn is away.`
+            ? `Dismissed ${l.login}’s request for changes: every point is addressed and ${l.login}’s Ensemble is away.`
             : `Dismissed ${l.login}’s request for changes: every point is addressed.`,
         failed: false,
       };
@@ -206,8 +206,8 @@ export function approvalWithdrawLines(
   if (d != null) {
     out.push(
       d.how === 'withdrawn'
-        ? { text: 'Withdrew Limn’s earlier approval.', failed: false }
-        : { text: `Couldn’t withdraw Limn’s earlier approval: ${why(d.error)}`, failed: true },
+        ? { text: 'Withdrew Ensemble’s earlier approval.', failed: false }
+        : { text: `Couldn’t withdraw Ensemble’s earlier approval: ${why(d.error)}`, failed: true },
     );
   }
   return out;
@@ -220,7 +220,7 @@ export function autoResolveLabel(r: FindingAutoResolveRecord | null | undefined)
   if (r.status === 'resolved' && r.alreadyResolved === true) return 'Said how it was fixed (the thread was already resolved)';
   if (r.status === 'resolved') {
     // Resolved on a teammate's Limn's word (gap 13): their review found it fixed at this commit.
-    return r.why === 'teammate' && r.checkedBy ? `Resolved automatically (checked by ${r.checkedBy}’s Limn)` : 'Resolved automatically';
+    return r.why === 'teammate' && r.checkedBy ? `Resolved automatically (checked by ${r.checkedBy}’s Ensemble)` : 'Resolved automatically';
   }
   if (r.status === 'resolving') return 'Resolving automatically';
   const why = r.error != null && r.error.trim() !== '' ? r.error.trim() : 'GitHub did not accept it.';

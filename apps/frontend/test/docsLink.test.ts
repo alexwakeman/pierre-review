@@ -53,7 +53,7 @@ describe('docs links', () => {
 
   it('the sidebar "?" is a new-tab link to the docs, not the help sheet', () => {
     const src = readFileSync(join(__dirname, '..', 'src', 'components', 'shell', 'Sidebar.tsx'), 'utf8');
-    const i = src.indexOf('aria-label="Open the Limn docs"');
+    const i = src.indexOf('aria-label="Open the Ensemble docs"');
     expect(i).toBeGreaterThan(-1);
     const tag = src.slice(src.lastIndexOf('<a', i), src.indexOf('>', i));
     expect(tag).toContain('href={docsHref}');

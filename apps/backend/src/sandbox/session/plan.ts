@@ -62,17 +62,17 @@ import type { AfterChatTurn, FirstTurn } from './subject.js';
 
 export const PLAN_READER_LINE = 'Plan';
 export const PLAN_READER_LINE_DOCS = 'Plan with docs';
-export const PLAN_SENT_LINE = '(The plan went to Limn to check.)';
+export const PLAN_SENT_LINE = '(The plan went to Ensemble to check.)';
 export const PLAN_NOT_APPROVED_LINE = 'Approve the plan to start the build.';
-export const AUTO_APPROVED_LINE = 'Limn approved the plan, taking every point as Agree, and started the build.';
+export const AUTO_APPROVED_LINE = 'Ensemble approved the plan, taking every point as Agree, and started the build.';
 export const AUTO_APPROVE_BUDGET_LINE = 'The AI spend limit is reached, so the plan waits for you. Press Approve and start.';
 export const AUTO_APPROVE_BUSY_LINE = 'Another session is building, so the plan waits for you. Press Approve and start when it ends.';
 export const NO_PLAN_LINE = 'The agent did not submit a plan.';
 export const planReadyLine = (n: number, dropped: { contentions: number; evidence: number }): string => {
-  const left = dropped.contentions > 0 ? ` Limn left out ${dropped.contentions} ${dropped.contentions === 1 ? 'point' : 'points'} it could not check.` : '';
+  const left = dropped.contentions > 0 ? ` Ensemble left out ${dropped.contentions} ${dropped.contentions === 1 ? 'point' : 'points'} it could not check.` : '';
   return `Plan revision ${n} is ready.${left}`;
 };
-export const planFailedLine = (problem: string): string => `The plan did not pass Limn's checks: ${problem} Send the agent a message to try again.`;
+export const planFailedLine = (problem: string): string => `The plan did not pass Ensemble's checks: ${problem} Send the agent a message to try again.`;
 
 const LIMN_PLAN = '```limn-plan';
 
@@ -89,7 +89,7 @@ export function planOpeningInstruction(o: { docsDir: string | null; fillGaps: bo
     '',
     `1. Read \`${ticket}\`, then every repository of this workspace that the ticket could touch.${docs} Look at the data the code uses: fixtures, seed data, schemas and migrations. If a service helps, start it with limn-svc and query it with \`limn-svc run\`.`,
     `2. Decide which repositories you will change, and how you will meet each acceptance criterion (AC1, AC2, … in TICKET.md's numbering).${o.fillGaps ? ' Build only the gaps that TICKET.md lists. For a criterion that is already met, say which pull request meets it.' : ''}`,
-    `3. Find where the story is wrong: inaccurate, inconsistent, or in conflict with the code, ${o.docsDir ? 'the documents ' : ''}or the data. Give each point evidence that Limn can check: a code excerpt (repository, path, lines and the exact text),${o.docsDir ? ' a document section and the exact text,' : ''} a data file excerpt, or a \`limn-svc run\` output. A point you cannot show is not a point of contention: leave it out.`,
+    `3. Find where the story is wrong: inaccurate, inconsistent, or in conflict with the code, ${o.docsDir ? 'the documents ' : ''}or the data. Give each point evidence that Ensemble can check: a code excerpt (repository, path, lines and the exact text),${o.docsDir ? ' a document section and the exact text,' : ''} a data file excerpt, or a \`limn-svc run\` output. A point you cannot show is not a point of contention: leave it out.`,
     '4. Propose the pull requests. One per repository, unless splitting clearly reduces risk or review size.',
     "5. If the story needs work (every point of contention and every criterion you do not plan says it does), write the updated description and acceptance criteria in `ticketUpdate`. Keep the ticket's layout: the same headings in the same order, the same list style and GIVEN / WHEN / THEN when it uses them. When the criteria live in the description, put them in `description`.",
     `6. Check the plan with \`node ~/.limn/plan-check.cjs\` until it prints OK, then end your answer with the plan in ONE ${LIMN_PLAN} block. Before the block, say the plan in at most five sentences.${o.docsDir ? ' One of them says which document sections you used, or that none applied.' : ''}`,
@@ -124,7 +124,7 @@ export const planMessageText = (text: string, hasPlan = true): string =>
 export function planRepairInstruction(problems: readonly string[]): string {
   const shown = problems.slice(0, 20);
   return [
-    "Limn could not use your plan. Fix these problems:",
+    "Ensemble could not use your plan. Fix these problems:",
     '',
     ...shown.map((p) => `- ${p}`),
     ...(problems.length > shown.length ? [`- …and ${problems.length - shown.length} more.`] : []),
@@ -372,7 +372,7 @@ export class PlanStage {
       this.repairUsed = true;
       // An AUTOMATIC run: the gate failing to answer is a refusal (fail closed, as the build continuation).
       if (await seams.automaticAllowed(this.o.ctx, this.o.accountId, l.choice.provider).catch(() => false)) {
-        m.notice('Limn could not use the plan, so it asked the agent to fix it.');
+        m.notice('Ensemble could not use the plan, so it asked the agent to fix it.');
         return { nextPhase: null, followUp: { text: planRepairInstruction(problems), planSource: 'repair' } };
       }
     }
@@ -387,7 +387,7 @@ export class PlanStage {
   private async verify(l: PlanLive, body: string): ReturnType<typeof verifyBuildPlan> {
     const ticket = this.o.ticket();
     const mode = this.o.mode();
-    if (ticket == null) return { ok: false, problems: ['Limn has no copy of the ticket to check the plan against.'] };
+    if (ticket == null) return { ok: false, problems: ['Ensemble has no copy of the ticket to check the plan against.'] };
     const docsDir = this.docsDir(l);
     const layout = { repos: l.state.repos.map((r) => ({ fullName: r.fullName, path: r.path })) };
     const check = planContextFor({ ticket, mode, layout: layout as never, docs: docsDir ? { dir: docsDir } : null }, runsOf(l).map((r) => r.id));

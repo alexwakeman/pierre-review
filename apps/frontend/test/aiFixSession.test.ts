@@ -88,7 +88,7 @@ describe('the merge (the "Resolve merge conflicts" item)', () => {
   it('the check line names both parents, or why nothing is pushed', () => {
     expect(fixMergeLine(m('valid'), 'd'.repeat(40))).toEqual({
       tone: 'ok',
-      text: 'Limn checked the merge commit. Its parents are the PR head (ddddddd) and main (eeeeeee). No conflict markers are left in the 2 files that were in conflict.',
+      text: 'Ensemble checked the merge commit. Its parents are the PR head (ddddddd) and main (eeeeeee). No conflict markers are left in the 2 files that were in conflict.',
     });
     expect(fixMergeLine(m('invalid', 'the merge has the wrong parents.'), null)).toEqual({ tone: 'bad', text: 'Nothing will be pushed: the merge has the wrong parents.' });
     expect(fixMergeLine(m('missing'), null).tone).toBe('bad');

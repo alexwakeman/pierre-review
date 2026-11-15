@@ -87,7 +87,7 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
         <InfoButton title="Sandbox" width="lg">
           <div className="space-y-2">
             <p>
-              The code always comes from Limn’s own copy of each repository, synced from GitHub. Limn finds your own clones
+              The code always comes from Ensemble’s own copy of each repository, synced from GitHub. Ensemble finds your own clones
               through the folders where you used Claude Code. Each repository then sits at the same path inside the sandbox,
               so your Claude notes and the paths they name still work.
             </p>
@@ -212,7 +212,7 @@ function FolderCheckResult({ result }: { result: SandboxFolderCheck }): JSX.Elem
           Left out, not in this workspace: {result.outside.map((o) => o.fullName).join(', ')}.
         </p>
       )}
-      {result.truncated && <p className="text-ui-warn">The folder is large, so Limn stopped looking. Some clones may be missing.</p>}
+      {result.truncated && <p className="text-ui-warn">The folder is large, so Ensemble stopped looking. Some clones may be missing.</p>}
       {result.matched.length > 0 && (
         <p className="text-ui-mute">
           The AI starts in <span className="break-all font-mono">{result.startDir}</span>.
@@ -279,11 +279,11 @@ function ServicesEditor({
         <InfoButton title="Services">
           <div className="space-y-2">
             <p>
-              Compose files Limn may start for a session, for integration tests. The AI asks for them with <code>limn-svc up</code>; it
+              Compose files Ensemble may start for a session, for integration tests. The AI asks for them with <code>limn-svc up</code>; it
               never gets Docker itself.
             </p>
             <p>
-              The sandbox cannot reach services you already run in Docker Desktop: its only way out is Limn’s network filter, which
+              The sandbox cannot reach services you already run in Docker Desktop: its only way out is Ensemble’s network filter, which
               refuses your computer’s own addresses. Each session gets its own services, so the AI never touches your data.
             </p>
             <p>
@@ -403,7 +403,7 @@ function ComposePicker({
   const without = (repos ?? []).filter((r) => r.files.length === 0);
   return (
     <div data-testid="sandbox-compose-picker" className="space-y-2 rounded-ui bg-ui-raise p-3 text-meta">
-      {loading && repos == null && <p className="text-ui-mute">Looking in Limn’s copies of your repositories…</p>}
+      {loading && repos == null && <p className="text-ui-mute">Looking in Ensemble’s copies of your repositories…</p>}
       {failed && <p className="text-ui-danger">Could not list the compose files.</p>}
       {repos != null && withFiles.length === 0 && <p className="text-ui-mute">No compose file found.</p>}
       {withFiles.map((r) => (

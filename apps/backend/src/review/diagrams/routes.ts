@@ -58,7 +58,7 @@ const storyBody = {
 
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
-  return { error: 'NotFound', message: 'Design diagrams are off here. They run on your machine: npx limn-review' };
+  return { error: 'NotFound', message: 'Design diagrams are off here. They run on your machine: npx ensemble-review' };
 }
 
 /** What to draw and, beside it, the newest run when that is another one. `liveFp` null ⇒ not current. */

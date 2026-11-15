@@ -134,11 +134,11 @@ test.describe('AI Fix in the sandbox', () => {
     await expect(page.getByText('Pushed to')).toBeVisible();
   });
 
-  test('a merge that fails Limn’s check offers no Push and says why', async ({ page }) => {
+  test('a merge that fails Ensemble’s check offers no Push and says why', async ({ page }) => {
     await openAiFix(page, { aiFix: aiFixMerged(PR_ID, 'invalid') });
     await expect(page.getByTestId('ai-fix-merge')).toHaveAttribute('data-merge-status', 'invalid');
     await expect(page.getByTestId('ai-fix-merge-check')).toContainText('Nothing will be pushed: conflict markers are left in src/reports/limits.ts.');
-    await expect(page.getByTestId('ai-fix-session-status')).toContainText('The merge did not pass Limn’s check, so nothing can be pushed.');
+    await expect(page.getByTestId('ai-fix-session-status')).toContainText('The merge did not pass Ensemble’s check, so nothing can be pushed.');
     await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
   });
 });

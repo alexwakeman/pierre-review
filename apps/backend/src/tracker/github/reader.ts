@@ -260,7 +260,7 @@ export function githubErrorMessage(err: unknown): string {
       return 'GitHub did not accept your GitHub sign-in.';
     case 'http':
       return err instanceof JiraFetchError && err.status === 429
-        ? 'GitHub’s rate limit is used up for now. Limn will read this issue later.'
+        ? 'GitHub’s rate limit is used up for now. Ensemble will read this issue later.'
         : 'GitHub answered with an error.';
     default:
       return 'Could not reach GitHub.';

@@ -323,10 +323,10 @@ describe('Limn bots in the Bots folds', () => {
     const bobBot = await userId('limn:bob-dev');
     const alice = rollup.rows.find((r) => r.reviewerKey === `u${aliceBot}`);
     const bob = rollup.rows.find((r) => r.reviewerKey === `u${bobBot}`);
-    expect(alice?.label).toBe('Limn · alice-dev');
+    expect(alice?.label).toBe('Ensemble · alice-dev');
     expect(alice?.kind).toBe('pierre');
     expect(alice?.bySeverity).toEqual({ nit: 0, minor: 0, major: 3, critical: 1 });
-    expect(bob?.label).toBe('Limn · bob-dev');
+    expect(bob?.label).toBe('Ensemble · bob-dev');
     expect(bob?.bySeverity).toEqual({ nit: 2, minor: 1, major: 0, critical: 0 });
     expect(rollup.backends).not.toContain('limn-review');
     // The person is never a bot row.
@@ -353,7 +353,7 @@ describe('Limn bots in the Bots folds', () => {
     const aliceBot = await userId('limn:alice-dev');
     const resp = await q.getBotVendorPrs(1, { userId: aliceBot }, 'rolling_14', scope);
     expect(resp.key).toBe(`u${aliceBot}`);
-    expect(resp.label).toBe('Limn · alice-dev');
+    expect(resp.label).toBe('Ensemble · alice-dev');
     expect(resp.prs.map((p) => p.prNumber).sort()).toEqual([1, 2]);
   });
 
@@ -382,12 +382,12 @@ describe('Limn bots in the Bots folds', () => {
     expect(cell.filteredTotal).toBe(0);
   });
 
-  it('the ROI table has a u<id> row per Limn poster, labelled "Limn · <login>"', async () => {
+  it('the ROI table has a u<id> row per Limn poster, labelled "Ensemble · <login>"', async () => {
     const roi = await q.getBotAnalytics(1, 'rolling_14', scope);
     const aliceBot = await userId('limn:alice-dev');
     const row = roi.vendors.find((v) => v.key === `u${aliceBot}`);
     expect(row).toBeDefined();
-    expect(row!.label).toBe('Limn · alice-dev');
+    expect(row!.label).toBe('Ensemble · alice-dev');
     expect(row!.kind).toBe('pierre');
     // The poster herself is never a ROI row.
     const alice = await userId('alice-dev');

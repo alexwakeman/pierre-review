@@ -51,9 +51,9 @@ const JIRA_PAGE = 100;
 const GQL_PAGE = 100;
 const GQL_PAGES_MAX = 5;
 
-const MSG_NOT_HELD = 'Limn holds no such ticket in this workspace.';
+const MSG_NOT_HELD = 'Ensemble holds no such ticket in this workspace.';
 const MSG_CANNOT_ASSIGN = 'Assigning a ticket works with Jira, GitHub Issues and Linear.';
-const MSG_NOTION = 'Limn does not change Notion pages, so it cannot assign this ticket.';
+const MSG_NOTION = 'Ensemble does not change Notion pages, so it cannot assign this ticket.';
 const MSG_UNKNOWN_PERSON = 'That person cannot be assigned this ticket.';
 
 const ASSIGNEE_ID_RE = new RegExp(`^[^\\u0000-\\u001f\\u007f]{1,${TICKET_ASSIGNEE_ID_MAX}}$`);

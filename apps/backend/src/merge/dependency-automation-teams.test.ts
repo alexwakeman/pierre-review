@@ -295,8 +295,8 @@ describe('team claims on dependency work', () => {
     await auto.runDependencyAutomationTick(log);
     expect(gh.submitPrReview).toHaveBeenCalledTimes(1);
     expect(posted).toEqual([
-      { state: 'pending', description: 'me handling · approving', context: 'limn/deps' },
-      { state: 'success', description: 'me approved', context: 'limn/deps' },
+      { state: 'pending', description: 'me handling · approving', context: 'ensemble/deps' },
+      { state: 'success', description: 'me approved', context: 'ensemble/deps' },
     ]);
     const rows = await actions();
     expect(rows).toHaveLength(1);

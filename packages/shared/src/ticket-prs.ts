@@ -261,7 +261,7 @@ export const TICKET_UPDATE_NO_CRITERIA_FIELD =
 
 /** `CriteriaFieldNotEditable`: the field is not on Jira's edit screen, or not a text field. */
 export const TICKET_UPDATE_FIELD_NOT_EDITABLE =
-  "Jira does not let Limn write this ticket's acceptance criteria field. Copy the text into the ticket instead.";
+  "Jira does not let Ensemble write this ticket's acceptance criteria field. Copy the text into the ticket instead.";
 
 /** `CriteriaTooLong`: a one-line text field and a longer text. */
 export const TICKET_UPDATE_FIELD_ONE_LINE =

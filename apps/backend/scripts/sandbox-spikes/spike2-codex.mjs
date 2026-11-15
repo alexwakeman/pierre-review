@@ -35,7 +35,7 @@ const auth = JSON.parse(readFileSync(AUTH_FILE, 'utf8'));
 const secrets = [auth.tokens?.access_token, auth.tokens?.refresh_token, auth.tokens?.id_token].filter(Boolean);
 const ageDays = (Date.now() - Date.parse(auth.last_refresh)) / 86_400_000;
 if (ageDays > 5) {
-  console.error(`last_refresh is ${ageDays.toFixed(1)} days old: a run might refresh inside the sandbox and sign the host out. Let Limn refresh first.`);
+  console.error(`last_refresh is ${ageDays.toFixed(1)} days old: a run might refresh inside the sandbox and sign the host out. Let Ensemble refresh first.`);
   process.exit(1);
 }
 const MODEL = 'gpt-6-luna';
@@ -128,7 +128,7 @@ try {
         '[analytics]',
         'enabled = false',
         '[model_providers.limn]',
-        'name = "OpenAI via Limn"',
+        'name = "OpenAI via Ensemble"',
         'base_url = "http://limn-proxy:8082/backend-api/codex"',
         'wire_api = "responses"',
         'requires_openai_auth = true',
@@ -168,7 +168,7 @@ try {
     };
     const reply = (id) => (m) => m.id === id && ('result' in m || 'error' in m);
 
-    const initId = call('initialize', { clientInfo: { name: 'limn-spike', title: 'Limn spike', version: '0' } });
+    const initId = call('initialize', { clientInfo: { name: 'limn-spike', title: 'Ensemble spike', version: '0' } });
     const init = await until(reply(initId));
     notify('initialized');
     check('app-server initialize', !!init?.result, JSON.stringify(init?.error ?? Object.keys(init?.result ?? {})));

@@ -91,7 +91,7 @@ export function bridgeNetworkFor(flavour: RuntimeFlavour): string {
 /** One plain line for a CLI that answered `info` with an error. */
 export function daemonProblem(stderr: string, cliName: string): string {
   if (/permission denied/i.test(stderr)) {
-    return `${cliName} is installed, but Limn may not use it. On Linux, add your user to the docker group, or use Podman rootless.`;
+    return `${cliName} is installed, but Ensemble may not use it. On Linux, add your user to the docker group, or use Podman rootless.`;
   }
   return `${cliName} is installed but not running. Start Docker Desktop, Colima, Podman or your Docker service.`;
 }

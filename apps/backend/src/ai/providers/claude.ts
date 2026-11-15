@@ -556,7 +556,7 @@ async function detect(): Promise<ProviderStatus> {
   const route = resolveAiCredential().route;
   const runtime = getAiRuntimeStatus();
   if (runtime.runtime !== 'ready') {
-    return { id: 'claude', available: false, route, message: runtime.runtimeMessage ?? 'AI is not set up yet: limn ai install' };
+    return { id: 'claude', available: false, route, message: runtime.runtimeMessage ?? 'AI is not set up yet: ensemble ai install' };
   }
   if (route === 'none') return { id: 'claude', available: false, route, message: NO_CLAUDE_AUTH_MESSAGE };
   return { id: 'claude', available: true, route, message: null };

@@ -304,7 +304,7 @@ describe('story chat — the live agent', () => {
     expect(out.folders).toBe(1);
     expect(tmpFolders()).toHaveLength(0);
     const [turn] = await S.listTurns(1, chatId);
-    expect(turn).toMatchObject({ status: 'failed', error: 'Limn restarted before this answer finished.' });
+    expect(turn).toMatchObject({ status: 'failed', error: 'Ensemble restarted before this answer finished.' });
   });
 
   it('the stored chats are this account’s and this story’s only', async () => {

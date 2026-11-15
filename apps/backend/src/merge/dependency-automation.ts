@@ -552,7 +552,7 @@ const firstLine = (err: unknown): string =>
 export async function reconcileDependencyActionsOnStartup(): Promise<void> {
   await db
     .update(daa)
-    .set({ state: 'failed', detail: 'Limn stopped before this finished.', updatedAt: new Date() })
+    .set({ state: 'failed', detail: 'Ensemble stopped before this finished.', updatedAt: new Date() })
     .where(eq(daa.state, 'running'))
     .execute();
 }

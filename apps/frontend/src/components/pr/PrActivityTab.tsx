@@ -238,7 +238,7 @@ function ReviewStateTag({ state }: { state: ReviewState }): JSX.Element {
 export function activityMarker(e: ActivityEntry): { icon: JSX.Element; tone: string; label: string } {
   const s = 14;
   if (e.limn && (e.kind === 'review' || e.kind === 'comment')) {
-    return { icon: <SparkleIcon size={s} />, tone: 'text-ai-signal', label: 'Limn' };
+    return { icon: <SparkleIcon size={s} />, tone: 'text-ai-signal', label: 'Ensemble' };
   }
   switch (e.kind) {
     case 'opened':
@@ -302,7 +302,7 @@ function LimnChips({ e }: { e: ActivityEntry }): JSX.Element | null {
   return (
     <>
       <span className={chip} data-testid="activity-limn-chip">
-        Limn
+        Ensemble
       </span>
       {e.autoLatest && (
         <span className={chip} data-testid="activity-auto-latest">

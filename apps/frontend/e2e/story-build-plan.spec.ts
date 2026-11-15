@@ -88,7 +88,7 @@ test.describe('Implement, plan first', () => {
     await expect(plan.getByTestId('story-plan-repos')).toContainText('acme/web');
     await expect(plan.getByTestId('story-plan-criterion')).toHaveCount(3);
     await expect(plan.getByTestId('story-plan-pr')).toHaveText([/P1.*Lift the export row cap/, /P2.*Builds on P1/, /P3.*After P2/]);
-    await expect(plan.getByTestId('story-plan-dropped')).toHaveText('Limn left out 1 point it could not check.');
+    await expect(plan.getByTestId('story-plan-dropped')).toHaveText('Ensemble left out 1 point it could not check.');
 
     // The evidence: Limn's own text of the lines, the docs section, the query Limn saw run.
     const c1 = plan.locator('[data-testid="story-plan-contention"][data-id="C1"]');

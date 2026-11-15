@@ -13,7 +13,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { isLimnStatusContext, rollupStateWithoutLimn } from '@pierre-review/shared';
+import {
+  ensembleStatusContext,
+  isLimnStatusContext,
+  rollupStateWithoutLimn,
+  sameStatusContext,
+  statusContextName,
+  STATUS_CONTEXT_PREFIXES,
+} from '@pierre-review/shared';
 
 // Never the reader's database: sync/upsert.ts opens the client at import.
 process.env.DATABASE_URL = join(mkdtempSync(join(tmpdir(), 'limn-status-ci-')), 't.sqlite');
@@ -31,6 +38,36 @@ const run = (name: string, conclusion: string | null, st = 'COMPLETED') => ({
   status: st,
   conclusion,
   detailsUrl: null,
+});
+
+describe('the two prefixes (the Limn → Ensemble rename)', () => {
+  it('writes ensemble/, reads ensemble/ and limn/ as the same line', () => {
+    expect(ensembleStatusContext('review-claude')).toBe('ensemble/review-claude');
+    expect(STATUS_CONTEXT_PREFIXES).toEqual(['ensemble/', 'limn/']);
+    expect(isLimnStatusContext('ensemble/review-claude')).toBe(true);
+    expect(isLimnStatusContext('ensemble/deps')).toBe(true);
+    expect(isLimnStatusContext('Ensemble/deps')).toBe(false);
+    expect(isLimnStatusContext('ci/ensemble/build')).toBe(false);
+    expect(statusContextName('limn/deps')).toBe('deps');
+    expect(statusContextName('ensemble/deps')).toBe('deps');
+    expect(statusContextName('ci/build')).toBeNull();
+    expect(sameStatusContext('limn/review-claude', 'ensemble/review-claude')).toBe(true);
+    expect(sameStatusContext('ensemble/review-claude', 'ensemble/review-claude')).toBe(true);
+    expect(sameStatusContext('limn/review-claude', 'ensemble/review-codex')).toBe(false);
+    expect(sameStatusContext('ci/build', 'ci/build')).toBe(true);
+    expect(sameStatusContext('ci/build', 'ensemble/build')).toBe(false);
+    expect(sameStatusContext(null, 'ensemble/deps')).toBe(false);
+  });
+  it('an ensemble/ line is taken out of the rollup like a limn/ one', () => {
+    expect(
+      rollupStateWithoutLimn('PENDING', [
+        { name: 'build', state: 'success' },
+        { name: 'ensemble/review-claude', state: 'pending' },
+        { name: 'limn/review-codex', state: 'pending' },
+      ]),
+    ).toBe('SUCCESS');
+    expect(rollupStateWithoutLimn('PENDING', [{ name: 'ensemble/deps', state: 'pending' }])).toBeNull();
+  });
 });
 
 describe('isLimnStatusContext', () => {

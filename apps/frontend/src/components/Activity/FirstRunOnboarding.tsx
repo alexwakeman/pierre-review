@@ -160,7 +160,7 @@ export function FirstRunOnboarding(): JSX.Element {
           Add the repos you work on
         </h2>
         <p className="mt-1 text-body text-ui-mute">
-          Limn tracks the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
+          Ensemble tracks the repos you care about &mdash; here&rsquo;s what you&rsquo;ve been
           working on.
         </p>
       </header>

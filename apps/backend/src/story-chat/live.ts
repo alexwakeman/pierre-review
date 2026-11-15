@@ -47,6 +47,7 @@ import { chatTmpBase, chatTmpPrefix } from './tmp.js';
 import { storyChatSystemPrompt, type SeedCheckout, type SeedRepo, type SeedTurn } from './seed.js';
 import { projectSkillsIn, readerContextFor, sprintText, type ReaderContext } from './context.js';
 import * as store from './store.js';
+import { readEnv } from '../env-name.js';
 
 
 /** Most PRs a chat checks out (open ones first, then the newest merged). */
@@ -62,7 +63,7 @@ const IDLE_MS = STORY_CHAT_IDLE_MINUTES * 60_000;
 const MODEL: ModelChoice = { role: 'standard' };
 
 export function maxLive(env: NodeJS.ProcessEnv = process.env): number {
-  const n = Number(env.LIMN_STORY_CHAT_MAX_LIVE);
+  const n = Number(readEnv(env, 'STORY_CHAT_MAX_LIVE'));
   return Number.isInteger(n) && n >= 1 && n <= 10 ? n : 3;
 }
 

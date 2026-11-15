@@ -55,7 +55,7 @@ export function resolveFolder(folder: string | null, places: Pick<LayoutPlaces, 
     real = realpathSync(given);
     if (!statSync(real).isDirectory()) return { folder: null, problem: `${given} is not a folder.` };
   } catch {
-    return { folder: null, problem: `Limn cannot read ${given}.` };
+    return { folder: null, problem: `Ensemble cannot read ${given}.` };
   }
   const late = real === given ? null : localFolderProblem(real, places);
   return late ? { folder: null, problem: late } : { folder: real, problem: null };

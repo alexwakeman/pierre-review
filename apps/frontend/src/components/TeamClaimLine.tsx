@@ -28,7 +28,7 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
   const pending = data?.teamClaimPending ?? null;
   if (teammates.length === 0 && skipLine == null && pending == null) return null;
   const pendingLine =
-    pending?.mine && skip == null && allTeammates.length === 0 ? 'Your auto review didn’t finish. Limn releases its pending GitHub line on its own.' : null;
+    pending?.mine && skip == null && allTeammates.length === 0 ? 'Your auto review didn’t finish. Ensemble releases its pending GitHub line on its own.' : null;
   const refused = clear.data && !clear.data.ok ? (clear.data.message ?? 'Couldn’t clear it.') : null;
   return (
     <div className="mt-2 space-y-1 text-meta text-ui-mute">
@@ -83,7 +83,7 @@ export function TeamClaimLine({ prId, data }: { prId: number; data: ClaudeReview
               type="button"
               onClick={() => (pending.mine ? clear.mutate(pending.provider) : setConfirming(true))}
               disabled={clear.isPending}
-              title={`Replace the pending ${aiProviderName(pending.provider)} line with “Cleared by you”, so any Limn can review this commit.`}
+              title={`Replace the pending ${aiProviderName(pending.provider)} line with “Cleared by you”, so any Ensemble can review this commit.`}
               className="hit bg-ui-raise rounded-ui px-2 py-0.5 text-meta hover:bg-ui-hover disabled:opacity-50"
             >
               {clear.isPending ? 'Clearing…' : 'Clear'}

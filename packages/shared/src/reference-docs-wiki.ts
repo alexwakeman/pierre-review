@@ -407,7 +407,7 @@ export function wikiUnreachableWords(provider: WikiProviderId, reason: WikiUnrea
           ? 'Add a Notion token in Settings → Docs.'
           : `Add a ${name} API token in Settings → Docs.`;
     case 'rate_limited':
-      return `${name} asked Limn to slow down. It will try again later.`;
+      return `${name} asked Ensemble to slow down. It will try again later.`;
     case 'moved':
       return provider === 'github'
         ? 'Most of these files moved or were deleted. Add their new folder, or Rebuild to keep only what is left.'

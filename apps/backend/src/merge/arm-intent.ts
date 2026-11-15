@@ -63,7 +63,7 @@ export async function armIntentLive(a: ArmIntentArgs): Promise<ArmIntentResult> 
     return {
       ok: false,
       code: 'StaleBase',
-      message: `This PR now targets ${info.baseRef}; Limn last saw ${syncedBaseRef ?? 'no base branch'}. Sync the repository, then arm auto-merge again.`,
+      message: `This PR now targets ${info.baseRef}; Ensemble last saw ${syncedBaseRef ?? 'no base branch'}. Sync the repository, then arm auto-merge again.`,
     };
   }
   // STACKED (db/pr-stacks.ts): the live base is another OPEN PR's head branch, so the watcher would

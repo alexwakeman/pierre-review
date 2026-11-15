@@ -113,7 +113,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       await expect(codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0])).rejects.toThrow('Codex is not signed in');
     }
     expect(P.codexKindNotAvailableMessage('review')).toBe(
-      'Codex cannot run pull request reviews in this version of Limn yet. Choose Claude in Settings → AI.',
+      'Codex cannot run pull request reviews in this version of Ensemble yet. Choose Claude in Settings → AI.',
     );
     // The allow-list is the mechanism Phase 3 fills.
     expect(P.codexKindReady('review', new Set())).toBe(false);
@@ -126,7 +126,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       available: false,
       route: 'none',
       // The install sentence first (as /api/me), else CODEX_NOT_AVAILABLE_MESSAGE.
-      message: 'Codex is not set up yet. Run: limn ai install codex',
+      message: 'Codex is not set up yet. Run: ensemble ai install codex',
       installed: false,
       signedIn: false,
       plan: null,

@@ -139,7 +139,7 @@ function scriptFake(rt: import('../runtime/fake.js').FakeRuntime): void {
     const dir = join(scratch, `sb${++boots}`);
     git(scratch, 'init', '-q', dir);
     git(dir, 'config', 'user.email', 'sandbox@limn.invalid');
-    git(dir, 'config', 'user.name', 'Limn sandbox');
+    git(dir, 'config', 'user.name', 'Ensemble sandbox');
     git(dir, '-c', 'protocol.file.allow=always', 'fetch', '-q', '--depth', '1', `file://${origin}`, `${sha}:refs/limn/base`);
     git(dir, 'checkout', '-q', '-B', branch, sha);
     local.set(dest, dir);

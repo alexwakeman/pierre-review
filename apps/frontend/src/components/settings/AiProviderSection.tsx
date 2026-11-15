@@ -107,14 +107,14 @@ export function AiProviderSection(): JSX.Element | null {
       </p>
       <p className="mt-2">Auto uses Claude when Claude is signed in, and Codex when only Codex is.</p>
       <p className="mt-2">
-        Limn downloads Claude and Codex by itself the first time it starts. Signing in is the only step.
+        Ensemble downloads Claude and Codex by itself the first time it starts. Signing in is the only step.
       </p>
       <p className="mt-2">
         A change applies to the next run. A run already going finishes on the provider it started on, and every run
         keeps the name of the provider and model that ran it.
       </p>
       <p className="mt-2">
-        Codex signs in with your ChatGPT account, in Limn’s own folder (~/.limn/codex). Your own ~/.codex is not used,
+        Codex signs in with your ChatGPT account, in Ensemble’s own folder (~/.ensemble/codex). Your own ~/.codex is not used,
         and neither is an OPENAI_API_KEY.
       </p>
     </InfoButton>
@@ -144,7 +144,7 @@ export function AiProviderSection(): JSX.Element | null {
           </label>
         ))}
       </fieldset>
-      {fromEnv && <p className={`text-body ${MUTED}`}>Set by LIMN_AI_PROVIDER.</p>}
+      {fromEnv && <p className={`text-body ${MUTED}`}>Set by ENSEMBLE_AI_PROVIDER (or LIMN_AI_PROVIDER).</p>}
       {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
 
       <EffortControl setting={ai.effortSetting ?? { value: null, source: 'settings' }} />
@@ -261,17 +261,17 @@ function ApiKeyControl({ setting }: { setting: AiApiKeySettingStatus }): JSX.Ele
         </label>
         <InfoButton title="API keys">
           <p>
-            Claude: Limn looks for <code>ANTHROPIC_API_KEY</code> in the environment it started in (your shell, or the
+            Claude: Ensemble looks for <code>ANTHROPIC_API_KEY</code> in the environment it started in (your shell, or the
             .env file). When this is ticked and the key is set, every Claude run uses the key, even while you are signed in
-            to Claude Code. Anthropic bills the key per token, and Limn shows its spend in US$.
+            to Claude Code. Anthropic bills the key per token, and Ensemble shows its spend in US$.
           </p>
-          <p className="mt-2">When this is not ticked, Limn uses your Claude Code sign-in, and the key only when you are not signed in.</p>
+          <p className="mt-2">When this is not ticked, Ensemble uses your Claude Code sign-in, and the key only when you are not signed in.</p>
           <p className="mt-2">
-            Codex: Limn looks for <code>OPENAI_API_KEY</code>. Codex runs on an API key are not available yet, so Codex
+            Codex: Ensemble looks for <code>OPENAI_API_KEY</code>. Codex runs on an API key are not available yet, so Codex
             keeps using your ChatGPT sign-in.
           </p>
           <p className="mt-2">
-            Limn never stores a key. Start Limn with <code>LIMN_AI_USE_API_KEY=true</code> or <code>false</code> to
+            Ensemble never stores a key. Start Ensemble with <code>ENSEMBLE_AI_USE_API_KEY=true</code> or <code>false</code> to
             decide this from the environment.
           </p>
         </InfoButton>
@@ -279,7 +279,7 @@ function ApiKeyControl({ setting }: { setting: AiApiKeySettingStatus }): JSX.Ele
       <p className={`text-body ${MUTED}`}>
         {isSet('ANTHROPIC_API_KEY', setting.anthropicKeySet)} {isSet('OPENAI_API_KEY', setting.openaiKeySet)}
       </p>
-      {fromEnv && <p className={`text-body ${MUTED}`}>Set by LIMN_AI_USE_API_KEY.</p>}
+      {fromEnv && <p className={`text-body ${MUTED}`}>Set by ENSEMBLE_AI_USE_API_KEY (or LIMN_AI_USE_API_KEY).</p>}
       {set.isError && <p className="text-body text-ui-danger">{set.error.message}</p>}
     </div>
   );

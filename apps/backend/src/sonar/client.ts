@@ -85,7 +85,7 @@ export function sonarErrorMessage(err: unknown): string {
     case 'bad_url':
       return 'SonarCloud could not be reached.';
     case 'too_large':
-      return 'SonarCloud sent more than Limn reads at once.';
+      return 'SonarCloud sent more than Ensemble reads at once.';
     case 'not_json':
     case 'http':
     case 'network':

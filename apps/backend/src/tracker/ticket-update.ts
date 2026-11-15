@@ -45,8 +45,8 @@ import { readWorkspaceTrackerAccess } from './settings.js';
 // "Update ticket" button, or "Build end to end" (one press, one claimed ticket step: update + comment).
 // ⚠ Every failure answers a sentence Limn wrote, never Jira's body; the log carries the CODE only.
 
-const TICKET_UPDATE_DESCRIPTION_NOT_TEXT = 'Limn cannot edit this ticket’s description. Copy the criteria into the ticket instead.';
-const MSG_NOT_JIRA = 'Updating the ticket from Limn works with Jira only. Copy the draft into the ticket instead.';
+const TICKET_UPDATE_DESCRIPTION_NOT_TEXT = 'Ensemble cannot edit this ticket’s description. Copy the criteria into the ticket instead.';
+const MSG_NOT_JIRA = 'Updating the ticket from Ensemble works with Jira only. Copy the draft into the ticket instead.';
 
 /** A failed Jira call as the writer's outcome: a sentence Limn wrote, the CODE logged (never Jira's body). */
 function jiraFailed(
@@ -212,7 +212,7 @@ export function registerTicketUpdateRoutes(
       const workspaceId = await resolveRequestWorkspaceId(ctx, accountId, req.query.workspace);
       const stored = await storedTicketText(ctx, accountId, workspaceId, req.query.ident);
       if (stored == null) {
-        return reply.code(404).send({ error: 'TicketNotFound', message: 'Limn holds no copy of this ticket.' });
+        return reply.code(404).send({ error: 'TicketNotFound', message: 'Ensemble holds no copy of this ticket.' });
       }
       const access = await readWorkspaceTrackerAccess(ctx, accountId, workspaceId);
       return {

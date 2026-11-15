@@ -92,7 +92,7 @@ const LANE_META: Record<ActorLane, { label: string; note: string; hex: string }>
     hex: PALETTE.gray,
   },
   // Limn's own reviews, approvals, merges and pushes, made on a person's behalf.
-  limn: { label: 'Limn', note: 'reviews, approvals, merges and fixes Limn made for someone', hex: PALETTE.orange },
+  limn: { label: 'Ensemble', note: 'reviews, approvals, merges and fixes Ensemble made for someone', hex: PALETTE.orange },
   ai_review: { label: 'AI review', note: 'CodeRabbit, Copilot, Greptile…', hex: PALETTE.violet },
   quality_gate: {
     label: 'Quality gates & CI',

@@ -96,6 +96,16 @@ describe('commit history', () => {
     expect(needsLimnRecompute('SUCCESS', { status: { contexts: [{ context: 'ci/build' }] } })).toBe(false);
   });
 
+  it('reads a line under either prefix: ensemble/ (written now) and limn/ (an older Limn)', async () => {
+    const { needsLimnRecompute, carriesLimnLine } = await import('./limn-ci.js');
+    for (const context of ['ensemble/review-claude', 'ensemble/deps', 'limn/review-claude', 'limn/deps']) {
+      const marked = { status: { contexts: [{ context: 'ci/build' }, { context }] } };
+      expect(carriesLimnLine(marked)).toBe(true);
+      expect(needsLimnRecompute('PENDING', marked)).toBe(true);
+    }
+    expect(carriesLimnLine({ status: { contexts: [{ context: 'ensemble-ci/build' }] } })).toBe(false);
+  });
+
   it('trunk: withoutLimnStates recomputes only Limn-marked commits (no query otherwise)', async () => {
     const { withoutLimnStates } = await import('./branch-status.js');
     const client = vi.fn();

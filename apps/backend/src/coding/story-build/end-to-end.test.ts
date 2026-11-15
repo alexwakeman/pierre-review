@@ -173,7 +173,7 @@ describe('the ticket step', () => {
     const row = await P.getStoryBuildRow(ctx, 1, id);
     expect(row?.e2eTicketJson).toMatchObject({ updated: ['acceptanceCriteria'], commented: true });
     expect(row?.ticketReviewDoneAt).not.toBeNull();
-    expect(f.notices).toEqual(['Limn updated the ticket and commented on it.']);
+    expect(f.notices).toEqual(['Ensemble updated the ticket and commented on it.']);
     // THE CLAIM: never a second write.
     expect(await E.runEndToEndTicketStep(ctx, 1, id, f.deps)).toBeNull();
     expect(f.writes).toHaveLength(1);

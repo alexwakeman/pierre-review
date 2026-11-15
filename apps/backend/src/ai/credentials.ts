@@ -28,14 +28,16 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { codexSignedInCached } from './codex/app-server.js';
 import { codexHome } from './codex/home.js';
+import { readEnv } from '../env-name.js';
 
 export type AiCredential =
   | { route: 'login'; method: 'oauth_token' | 'ambient' }
   | { route: 'api_key'; method: 'api_key'; apiKey: string }
   | { route: 'none' };
 
-/** The opt-in that makes ANTHROPIC_API_KEY win over a Claude Code login. */
-export const USE_API_KEY_ENV = 'LIMN_AI_USE_API_KEY';
+/** The opt-in that makes ANTHROPIC_API_KEY win over a Claude Code login: ENSEMBLE_AI_USE_API_KEY,
+ *  else the older LIMN_AI_USE_API_KEY (env-name.ts). */
+export const USE_API_KEY_ENV = 'ENSEMBLE_AI_USE_API_KEY';
 
 function envApiKey(env: NodeJS.ProcessEnv): string | undefined {
   const k = env.ANTHROPIC_API_KEY?.trim();
@@ -56,7 +58,7 @@ export function setStoredPrefersApiKey(value: boolean): void {
 
 /** LIMN_AI_USE_API_KEY when set to `true` or `false`; null when unset, empty or anything else. */
 export function prefersApiKeyEnvSetting(env: NodeJS.ProcessEnv = process.env): boolean | null {
-  const raw = env[USE_API_KEY_ENV]?.trim().toLowerCase();
+  const raw = readEnv(env, 'AI_USE_API_KEY')?.trim().toLowerCase();
   return raw === 'true' ? true : raw === 'false' ? false : null;
 }
 

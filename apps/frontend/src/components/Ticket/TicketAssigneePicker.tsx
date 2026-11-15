@@ -159,7 +159,7 @@ export function TicketAssigneePicker({
               ))}
               {hidden > 0 && <p className="px-2 py-1 text-meta text-ui-mute">Type a name to find more people.</p>}
               {list.data?.truncated === true && (
-                <p className="px-2 py-1 text-meta text-ui-mute">{trackerLabel} has more people than Limn lists.</p>
+                <p className="px-2 py-1 text-meta text-ui-mute">{trackerLabel} has more people than Ensemble lists.</p>
               )}
             </div>
           )}

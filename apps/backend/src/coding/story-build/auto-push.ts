@@ -115,7 +115,7 @@ export function autoPushFailureLine(failed: readonly Outcome[], attempted: numbe
 /** The sentence when the automatic push pushed nothing because the reader's own press held every item. */
 export const AUTO_PUSH_TAKEN_OVER = 'Your own push was already running.';
 /** The sentence the boot reconcile records for a claim a restart cut off before it answered. */
-export const AUTO_PUSH_INTERRUPTED = 'Limn stopped before the push finished. Press Push.';
+export const AUTO_PUSH_INTERRUPTED = 'Ensemble stopped before the push finished. Press Push.';
 
 /** Run the automatic push for one build when the gate says so (see the header). Never throws. */
 export async function maybeAutoPushBuild(

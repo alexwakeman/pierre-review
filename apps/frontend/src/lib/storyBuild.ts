@@ -21,6 +21,7 @@ import {
   type TicketReviewState,
   type StoryBuild,
   type StoryBuildAction,
+  type StoryBuildTeamClaim,
   type StoryBuildErrorCode,
   type StoryBuildRepo,
   type StoryBuildRepoStatus,
@@ -123,6 +124,8 @@ export function sprintNodeBuildOf(b: Pick<StoryBuild, 'id' | 'status' | 'repos'>
 export type StoryViewBuildEntry =
   | { kind: 'open'; mark: StoryBuildMark }
   | { kind: 'offer'; action: StoryBuildAction; reviewId: number | null }
+  /** A teammate (or the reader on another computer) is building the ticket: the line, and Clear when allowed. */
+  | { kind: 'claimed'; claim: StoryBuildTeamClaim }
   | null;
 
 export function storyViewBuildEntry(n: {
@@ -131,10 +134,13 @@ export function storyViewBuildEntry(n: {
   prs: ReadonlyArray<unknown>;
   build: SprintNodeBuild | null;
   check: SprintTicketCheck | null;
+  /** The server's read of the team claim (`GET /api/story-builds/claim`); absent before it is asked. */
+  claim?: StoryBuildTeamClaim | null;
 }): StoryViewBuildEntry {
   const mark = storyBuildMark(n.build);
   if (mark != null) return { kind: 'open', mark };
   const action = storyBuildOffered(n);
+  if (action == null && n.claim != null && storyBuildOffered({ ...n, claim: null }) != null) return { kind: 'claimed', claim: n.claim };
   return action != null ? { kind: 'offer', action, reviewId: action === 'fill_gaps' ? (n.check?.reviewId ?? null) : null } : null;
 }
 
@@ -361,8 +367,9 @@ export function loopCoverage(loop: Pick<StoryBuildLoop, 'history'>): Array<{ ref
 
 // ── errors ─────────────────────────────────────────────────────────────────────────────────────
 
-/** Our sentence per code. `BadRequest` has none: the server's own sentence says what to fix. */
-export const STORY_BUILD_ERROR_WORDS: Record<Exclude<StoryBuildErrorCode, 'BadRequest'>, string> = {
+/** Our sentence per code. `BadRequest` and `TeamClaimed` have none: the server's own sentence says what to
+ *  fix (`TeamClaimed` names who is building the ticket). */
+export const STORY_BUILD_ERROR_WORDS: Record<Exclude<StoryBuildErrorCode, 'BadRequest' | 'TeamClaimed'>, string> = {
   NoClaudeAuth: 'Sign in to the AI first.',
   ModelNotOnProvider: 'That model is not available on this provider.',
   NoStory: 'Could not read this ticket’s story.',

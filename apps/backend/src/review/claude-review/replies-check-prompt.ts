@@ -94,7 +94,7 @@ export function buildRepliesPrompt(args: {
   lines.push('');
   lines.push('## Replies to judge');
   lines.push(
-    'Each thread below is one of the earlier review\'s comments, the code around its line at the CURRENT head, and the replies on GitHub (oldest first). Replies marked "posted from Limn" are earlier answers to it, shown so the conversation reads whole; judge the most recent reply that is NOT marked so.',
+    'Each thread below is one of the earlier review\'s comments, the code around its line at the CURRENT head, and the replies on GitHub (oldest first). Replies marked "posted from Ensemble" are earlier answers to it, shown so the conversation reads whole; judge the most recent reply that is NOT marked so.',
   );
   lines.push(
     "- reply_accepted: the reply is reasonable. Set `acceptKind` to 'not_valid' when it shows the finding was wrong or does not apply here, or 'deferred' when it promises a reasonable later fix (a follow-up pull request, a ticket). Put ONE short sentence acknowledging it in `reply`.",
@@ -116,7 +116,7 @@ export function buildRepliesPrompt(args: {
   }
   if (plan.sent.some((s) => s.finding.thread?.pushedBack)) {
     lines.push(
-      'Where a thread says Limn already pushed back once, Limn will not post another reply there: still judge it honestly.',
+      'Where a thread says Ensemble already pushed back once, Ensemble will not post another reply there: still judge it honestly.',
     );
   }
   const conversations = plan.sent.map((s) => s.finding.conversation);
@@ -139,7 +139,7 @@ export function buildRepliesPrompt(args: {
     } else {
       body.push('Replies on GitHub (oldest first):');
       for (const r of f.thread?.replies ?? []) {
-        body.push(r.fromLimn ? `@${r.author} (posted from Limn):` : `@${r.author}:`);
+        body.push(r.fromLimn ? `@${r.author} (posted from Ensemble):` : `@${r.author}:`);
         body.push(r.body);
       }
     }
@@ -149,7 +149,7 @@ export function buildRepliesPrompt(args: {
         `Pull requests these replies link to: ${links.map((l) => `${l.ref} (${l.repoFullName}#${l.number})`).join(', ')}. Their checkouts are listed under "Related checkouts".`,
       );
     }
-    if (f.thread?.pushedBack) body.push('(Limn already pushed back once on this thread.)');
+    if (f.thread?.pushedBack) body.push('(Ensemble already pushed back once on this thread.)');
     if (f.thread?.isResolved) {
       body.push(f.thread.resolvedBy ? `(The thread was resolved on GitHub by @${f.thread.resolvedBy}.)` : '(The thread was resolved on GitHub.)');
     }
@@ -300,7 +300,7 @@ export function buildCoverPrompt(args: {
     } else if (hasReplies(f)) {
       body.push('Replies on GitHub (oldest first):');
       for (const r of f.thread?.replies ?? []) {
-        body.push(r.fromLimn ? `@${r.author} (posted from Limn):` : `@${r.author}:`);
+        body.push(r.fromLimn ? `@${r.author} (posted from Ensemble):` : `@${r.author}:`);
         body.push(r.body);
       }
     }

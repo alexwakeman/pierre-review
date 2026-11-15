@@ -65,13 +65,13 @@ export function jiraErrorMessage(err: unknown): string {
     case 'timeout':
       return 'Jira did not answer within 10 seconds.';
     case 'blocked':
-      return 'Limn will not connect to that address. The Jira base URL must be a public https address.';
+      return 'Ensemble will not connect to that address. The Jira base URL must be a public https address.';
     case 'bad_url':
       return 'The Jira base URL in Settings is not a valid web address.';
     case 'not_json':
       return 'Jira did not answer with data. Check the base URL in Settings points at Jira.';
     case 'too_large':
-      return 'Jira sent more data than Limn accepts.';
+      return 'Jira sent more data than Ensemble accepts.';
     case 'http':
       return `Jira answered with an error${err instanceof JiraFetchError && err.status != null ? ` (${err.status})` : ''}.`;
     case 'network':

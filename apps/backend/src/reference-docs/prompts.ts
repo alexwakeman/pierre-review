@@ -43,7 +43,7 @@ const SUMMARY_RULES = `# Summaries
 const CODEX_SECTIONS_HOW = `# How to work
 1. Read the section files in order, several at a time.
 2. For every file you read, note its file name, its summary, and a better title ONLY when the heading does not say what the section is (for example "Part 3" or "Untitled").
-3. When every file has a summary, give the whole answer at once: \`sections\` (one entry per section file, in order: file, summary, title or null, depth null), \`title\` (the document's real title, or null when the file name is it), \`summary\` and \`topics\`. ${CODEX_FINAL_ANSWER_SENTENCE} If Limn refuses it, fix every point it lists and answer again with the whole answer.`;
+3. When every file has a summary, give the whole answer at once: \`sections\` (one entry per section file, in order: file, summary, title or null, depth null), \`title\` (the document's real title, or null when the file name is it), \`summary\` and \`topics\`. ${CODEX_FINAL_ANSWER_SENTENCE} If Ensemble refuses it, fix every point it lists and answer again with the whole answer.`;
 
 /** The 'sections' build's system prompt for one provider (default: the active one). */
 export function buildSectionsSystemPrompt(provider?: AgentProviderId): string {

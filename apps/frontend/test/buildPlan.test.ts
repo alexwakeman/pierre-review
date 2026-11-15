@@ -142,13 +142,13 @@ describe('the plan stage line', () => {
     expect(planStageLine(view({ status: 'ready' }))).toBeNull();
   });
 
-  it("says why the plan failed Limn's checks, in one sentence", () => {
-    expect(planStageLine(view({ status: 'failed', latest: null, problem: 'AC2 has no line.' }))).toBe("The plan did not pass Limn's checks: AC2 has no line.");
+  it("says why the plan failed Ensemble's checks, in one sentence", () => {
+    expect(planStageLine(view({ status: 'failed', latest: null, problem: 'AC2 has no line.' }))).toBe("The plan did not pass Ensemble's checks: AC2 has no line.");
   });
 
-  it('counts what Limn left out, never the claims', () => {
-    expect(droppedLine({ contentions: 1, evidence: 3, reasons: ['x'] })).toBe('Limn left out 1 point it could not check.');
-    expect(droppedLine({ contentions: 0, evidence: 2, reasons: [] })).toBe('Limn left out 2 pieces of evidence it could not check.');
+  it('counts what Ensemble left out, never the claims', () => {
+    expect(droppedLine({ contentions: 1, evidence: 3, reasons: ['x'] })).toBe('Ensemble left out 1 point it could not check.');
+    expect(droppedLine({ contentions: 0, evidence: 2, reasons: [] })).toBe('Ensemble left out 2 pieces of evidence it could not check.');
     expect(droppedLine({ contentions: 0, evidence: 0, reasons: [] })).toBeNull();
   });
 });

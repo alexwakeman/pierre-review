@@ -82,7 +82,7 @@ interface StackState {
 }
 
 export const USAGE = [
-  'limn-svc — the services Limn runs for this session',
+  'limn-svc — the services Ensemble runs for this session',
   '',
   '  limn-svc ls                       list the compose files and their services',
   '  limn-svc check [file]             check a file against the session rules',
@@ -93,7 +93,7 @@ export const USAGE = [
   '  limn-svc build <service> [folder] [--file Dockerfile] [--target stage]',
   '                                    build the service image from your code, then `up` uses it',
   '  limn-svc run <service> [command …] run a one-off container (a migration job, a query)',
-  '  limn-svc runs                      list the runs Limn recorded (svc-1, svc-2, …)',
+  '  limn-svc runs                      list the runs Ensemble recorded (svc-1, svc-2, …)',
   '',
   'A service is reached by its name. Its published ports are on localhost here too.',
 ].join('\n');

@@ -128,7 +128,7 @@ function currentRuntimeStatus(now = Date.now()): Promise<SandboxRuntimeStatus> {
         kind: null,
         label: null,
         licenceNote: null,
-        problem: 'Limn could not check the container runtime.',
+        problem: 'Ensemble could not check the container runtime.',
         cpus: null,
         memoryGb: null,
       }),

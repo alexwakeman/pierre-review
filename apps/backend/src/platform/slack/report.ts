@@ -249,7 +249,7 @@ export async function buildSlackReport(
           type: 'context',
           // `slackLink` escapes the (user-typed) workspace name, so a `|`, `>` or `<!here>` in it
           // can neither end the link early nor ping the channel.
-          elements: [mrkdwn(slackLink(wsUrl, `Open ${workspaceName} in Limn`))],
+          elements: [mrkdwn(slackLink(wsUrl, `Open ${workspaceName} in Ensemble`))],
         };
   // Backstop: never over Slack's limit (counted across the top level and every part), and never
   // at the footer's expense — body blocks go from the END. The footer closes the last part.

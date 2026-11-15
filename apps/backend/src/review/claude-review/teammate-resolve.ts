@@ -79,7 +79,7 @@ export function teammateResolveReplyBody(
   const text = stillOpenReasonText(how);
   const base = outcome === 'addressed' ? `Addressed in ${short}` : `No longer applies as of ${short}`;
   const lead = text ? `${base} (checked by ${checker}): ${text}` : `${base} (checked by ${checker}).`;
-  return `${lead}\n\n_Resolved by Limn._\n\n${FINDING_MARKER}`;
+  return `${lead}\n\n_Resolved by Ensemble._\n\n${FINDING_MARKER}`;
 }
 
 /** One teammate review at the head, as the rule reads it. */
@@ -274,7 +274,7 @@ async function resolveOnTeammateWord(
     if (!ok) untrusted.push(m.login!);
   }
   if (untrusted.length > 0) {
-    ctx.log.warn(`teammate resolve pr ${prId}: ignored the Limn word of ${untrusted.join(', ')} (a bot, or no write access)`);
+    ctx.log.warn(`teammate resolve pr ${prId}: ignored the Ensemble word of ${untrusted.join(', ')} (a bot, or no write access)`);
   }
   const words: TeammateWord[] = atHead
     .filter((m) => trusted.get(m.userId) !== false)

@@ -281,12 +281,12 @@ describe('the resolver (pure)', () => {
   });
 
   it('adds the trailer once', async () => {
-    const { withLimnRunTrailer, hasLimnRunTrailer, limnRunTrailer } = await import('@pierre-review/shared');
+    const { withLimnRunTrailer, hasLimnRunTrailer, limnRunTrailer, LIMN_RUN_TRAILER_KEY } = await import('@pierre-review/shared');
     const once = withLimnRunTrailer('Fix it', 'ai-fix/12');
-    expect(once).toBe('Fix it\n\nLimn-Run: ai-fix/12\n');
+    expect(once).toBe(`Fix it\n\n${LIMN_RUN_TRAILER_KEY}: ai-fix/12\n`);
     expect(withLimnRunTrailer(once, 'ai-fix/12')).toBe(once);
     expect(hasLimnRunTrailer(once)).toBe(true);
-    expect(limnRunTrailer('conflict/a b')).toBe('Limn-Run: conflict/a-b');
+    expect(limnRunTrailer('conflict/a b')).toBe(`${LIMN_RUN_TRAILER_KEY}: conflict/a-b`);
   });
 });
 

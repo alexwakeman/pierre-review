@@ -67,7 +67,7 @@ export function StandingsSection({
       title="Where this PR stands"
       info={
         <InfoButton title="Where this PR stands">
-          <p>The PR’s latest commit, and the verdict each person’s Limn holds on GitHub.</p>
+          <p>The PR’s latest commit, and the verdict each person’s Ensemble holds on GitHub.</p>
           <p>
             GitHub keeps a Request changes or an Approve in force until it is dismissed, or the same person
             reviews again with Request changes or Approve. A Comment does not replace it. A person with no

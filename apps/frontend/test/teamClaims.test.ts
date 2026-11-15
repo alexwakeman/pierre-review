@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { teamClaimSkipLine, teammateReviewLine } from '../src/lib/claudeAutoReview.js';
 import { checksSummaryCounts } from '../src/components/ChecksTab.js';
+import { isFailingCi } from '../src/components/CheckList.js';
 
 describe('team claim words', () => {
   it('says who holds the commit', () => {
@@ -14,7 +15,7 @@ describe('team claim words', () => {
 });
 
 describe("a teammate's reviewed line on the tab", () => {
-  it('carries the verdict from their line; an old "kept in Limn" reads "not posted on GitHub"', () => {
+  it('carries the verdict from their line; "kept in Ensemble" and the old "kept in Limn" read "not posted on GitHub"', () => {
     const t = { kind: 'reviewed' as const, login: 'robin', provider: 'claude' as const };
     expect(teammateReviewLine({ ...t, description: 'robin reviewed · approved' })).toBe('@robin reviewed this commit with Claude · approved');
     expect(teammateReviewLine({ ...t, description: 'robin reviewed · approved · 2 comments' })).toBe(
@@ -23,11 +24,14 @@ describe("a teammate's reviewed line on the tab", () => {
     expect(teammateReviewLine({ ...t, description: 'robin reviewed · kept in Limn' })).toBe(
       '@robin reviewed this commit with Claude · not posted on GitHub',
     );
+    expect(teammateReviewLine({ ...t, description: 'robin reviewed · kept in Ensemble' })).toBe(
+      '@robin reviewed this commit with Claude · not posted on GitHub',
+    );
   });
 });
 
 describe('checksSummaryCounts', () => {
-  it('never counts a Limn line', () => {
+  it('never counts an Ensemble line', () => {
     expect(
       checksSummaryCounts([
         { state: 'success' },
@@ -50,5 +54,15 @@ describe('a teammate reviewing NOW stands out', () => {
     }
     const cell = read('../src/components/Activity/ClaudeReviewCell.tsx');
     expect(cell).toMatch(/Reviewed by @\{teamClaimSkip\.login\}<\/span>/);
+  });
+});
+
+describe('isFailingCi', () => {
+  it('never takes a status line of ours for CI, on the new ensemble/ prefix or the old limn/ one', () => {
+    expect(isFailingCi({ state: 'failure', name: 'build' })).toBe(true);
+    expect(isFailingCi({ state: 'failure', name: 'ensemble/review-claude' })).toBe(false);
+    expect(isFailingCi({ state: 'error', name: 'ensemble/deps' })).toBe(false);
+    expect(isFailingCi({ state: 'failure', name: 'limn/review-codex' })).toBe(false);
+    expect(isFailingCi({ state: 'error', name: 'limn/deps' })).toBe(false);
   });
 });

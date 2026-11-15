@@ -122,7 +122,7 @@ export function MlSeverityBadge({
       : '';
 
   const title = fromLimn
-    ? `${meta.label}: ${meta.description}\nFrom Limn's review.`
+    ? `${meta.label}: ${meta.description}\nFrom Ensemble's review.`
     : `${meta.label}: ${meta.description}\n` +
     `Confidence ${confidence}%. Category: ${
       label.categories.map((c) => ML_CATEGORY_LABEL[c] ?? c).join(', ') || 'none'

@@ -99,8 +99,8 @@ function PlanHeading({ plan, viewing, setViewing }: { plan: BuildPlanView; viewi
         </span>
       )}
       <InfoButton title="The plan">
-        <p>The agent reads the ticket and the code{plan.withDocs ? ', and the reference documents Limn copied in,' : ''} and plans before it changes anything.</p>
-        <p className="mt-2">Limn checks every piece of evidence itself. A point it cannot check is left out.</p>
+        <p>The agent reads the ticket and the code{plan.withDocs ? ', and the reference documents Ensemble copied in,' : ''} and plans before it changes anything.</p>
+        <p className="mt-2">Ensemble checks every piece of evidence itself. A point it cannot check is left out.</p>
         <p className="mt-2">Nothing is built until you approve the plan.</p>
       </InfoButton>
       {earlier.length > 0 && (
@@ -252,8 +252,8 @@ function RevisionBody({
       {dropped != null && (
         <p data-testid="story-plan-dropped" className="flex items-center gap-1.5 text-meta text-ui-mute">
           {dropped}
-          <InfoButton title="What Limn left out">
-            <p>Limn keeps a point only when it can check its evidence: the lines in the code at the session's start, the section in the docs, or a query Limn saw run.</p>
+          <InfoButton title="What Ensemble left out">
+            <p>Ensemble keeps a point only when it can check its evidence: the lines in the code at the session's start, the section in the docs, or a query Ensemble saw run.</p>
             {rev.dropped.reasons.length > 0 && (
               <ul className="mt-2 list-disc space-y-0.5 pl-4">
                 {rev.dropped.reasons.map((r, i) => (
@@ -632,7 +632,7 @@ function TicketUpdate({ update }: { update: NonNullable<BuildPlanRevision['ticke
       <div className="mb-1 flex items-center gap-1.5">
         <h4 className={REVIEW_SUBHEAD}>Ticket update (draft)</h4>
         <InfoButton title="Ticket update">
-          <p>A draft of the ticket with the agent's changes, in the ticket's own style. Copy it into the ticket if you agree. Limn never changes the ticket.</p>
+          <p>A draft of the ticket with the agent's changes, in the ticket's own style. Copy it into the ticket if you agree. Ensemble never changes the ticket.</p>
         </InfoButton>
       </div>
       {update.why !== '' && <p className="mb-2 break-words text-body text-ui-ink">{update.why}</p>}

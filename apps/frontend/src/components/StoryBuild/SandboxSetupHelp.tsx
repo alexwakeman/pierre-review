@@ -29,18 +29,18 @@ export function SandboxSetupSteps(): JSX.Element {
         </div>
         <div>
           <dt className="font-semibold">Windows</dt>
-          <dd>Run Limn inside WSL2, and install Docker Engine in that Linux.</dd>
+          <dd>Run Ensemble inside WSL2, and install Docker Engine in that Linux.</dd>
         </div>
       </dl>
       <p>
         Docker Desktop works too. It is free only for organisations under 250 employees and under US$10M a year in revenue.
       </p>
       <p>
-        Limn finds the runtime by itself. To use Podman, start Limn with <code className={CODE}>SANDBOX_CLI=podman</code>. Give the
+        Ensemble finds the runtime by itself. To use Podman, start Ensemble with <code className={CODE}>SANDBOX_CLI=podman</code>. Give the
         runtime at least 8 GB of memory.
       </p>
       <p>
-        Sandboxes use disk space. <code className={CODE}>limn sandbox prune</code> removes what is left over (stop Limn first).
+        Sandboxes use disk space. <code className={CODE}>ensemble sandbox prune</code> removes what is left over (stop Ensemble first).
       </p>
     </div>
   );

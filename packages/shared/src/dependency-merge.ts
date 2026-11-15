@@ -6,6 +6,7 @@
 //     GET / PUT /api/workspaces/:id/dependency-auto-merge (ON by default since 2026-11-14).
 
 import { PENDING_LIMITS } from './pending-rules.js';
+import { ensembleStatusContext } from './limn-status.js';
 
 /** The most PRs one "Merge or arm all" request may name — the most the Dependencies tab can
  *  LIST: `boardListCap` per list group (`listGroupOf`), over the tab's two kinds
@@ -206,8 +207,10 @@ export type DependencyAutomationActionKind =
 export type DependencyAutomationActionState = 'running' | 'done' | 'failed' | 'skipped';
 
 /** GitHub's commit-status context the dependency automation's TEAM CLAIM uses
- *  (docs/MERGE-CI-TRUNK.md § Team claims for dependency work). Never CI (`isLimnStatusContext`). */
-export const DEPENDENCY_CLAIM_CONTEXT = 'limn/deps';
+ *  (docs/MERGE-CI-TRUNK.md § Team claims for dependency work). Never CI (`isLimnStatusContext`).
+ *  WRITTEN as `ensemble/deps`; an older Limn's `limn/deps` line is read as the same line
+ *  (`sameStatusContext`). */
+export const DEPENDENCY_CLAIM_CONTEXT = ensembleStatusContext('deps');
 
 export interface DependencyAutomationLogItem {
   id: number;

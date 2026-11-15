@@ -63,7 +63,7 @@ describe('storySourceOf', () => {
     ...over,
   });
 
-  it('reads the stored Jira row only when Limn can read it', () => {
+  it('reads the stored Jira row only when Ensemble can read it', () => {
     expect(storySourceOf(ref({ canFetchDetails: true }), [])).toMatchObject({ kind: 'jira' });
     expect(storySourceOf(ref(), [])).toEqual({ kind: 'none' });
   });

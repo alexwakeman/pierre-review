@@ -207,7 +207,7 @@ function BotCommentCardImpl({
         <span
           className="inline-flex shrink-0 items-center gap-1 rounded-ui px-1.5 py-0.5 text-meta font-medium"
           style={{ ...vendorInk(color), background: `${color}1a` }}
-          title={`${c.authorLabel} — an automated reviewer Limn triages`}
+          title={`${c.authorLabel} — an automated reviewer Ensemble triages`}
         >
           <BotIcon size={10} />
           {c.authorLabel}

@@ -20,6 +20,7 @@
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClaudeFindingSeverity } from '@pierre-review/shared';
+import { dismissalReasonText, isLimnDismissalMessage } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-claude-approval-withdraw.sqlite`;
@@ -197,11 +198,17 @@ beforeEach(async () => {
 
 describe('the pure pieces', () => {
   it('the messages count by severity and name the short head', () => {
-    expect(aw.withdrawMessageForRun({ blockers: 0, warnings: 3 }, H2)).toBe('Limn withdrew its approval: 3 warnings found at 91482c8.');
+    expect(aw.withdrawMessageForRun({ blockers: 0, warnings: 3 }, H2)).toBe('Ensemble withdrew its approval: 3 warnings found at 91482c8.');
     expect(aw.withdrawMessageForRun({ blockers: 1, warnings: 1 }, H2)).toBe(
-      'Limn withdrew its approval: 1 blocker and 1 warning found at 91482c8.',
+      'Ensemble withdrew its approval: 1 blocker and 1 warning found at 91482c8.',
     );
-    expect(aw.withdrawMessageForRun({ blockers: 0, warnings: 0 }, H2)).toBe('Limn withdrew its approval: not approved at 91482c8.');
+    expect(aw.withdrawMessageForRun({ blockers: 0, warnings: 0 }, H2)).toBe('Ensemble withdrew its approval: not approved at 91482c8.');
+    // Read back as our dismissal, in the new wording and an older Limn's.
+    const m = aw.withdrawMessageForRun({ blockers: 0, warnings: 3 }, H2);
+    expect(isLimnDismissalMessage(m)).toBe(true);
+    expect(dismissalReasonText(m)).toBe('3 warnings found at 91482c8');
+    expect(isLimnDismissalMessage('Limn withdrew its approval: 3 warnings found at 91482c8.')).toBe(true);
+    expect(dismissalReasonText('Limn withdrew its approval: 3 warnings found at 91482c8.')).toBe('3 warnings found at 91482c8');
   });
 
   it("the standing review is Limn's only by a stored id; the gate lets a request for changes out over it", () => {
@@ -244,7 +251,7 @@ describe('a later run withdraws it', () => {
       'api',
       expect.any(Number),
       'R1',
-      'Limn withdrew its approval: 3 warnings found at 91482c8.',
+      'Ensemble withdrew its approval: 3 warnings found at 91482c8.',
     ]);
     expect(postReview).toHaveBeenCalledTimes(1);
     expect(dismissReview.mock.invocationCallOrder[0]!).toBeLessThan(postReview.mock.invocationCallOrder[0]!);
@@ -265,7 +272,7 @@ describe('a later run withdraws it', () => {
     const b = await run(pr, H2, [{ severity: 'blocker', title: 'Null deref' }], 'REQUEST_CHANGES');
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
     expect(dismissReview).toHaveBeenCalledTimes(1);
-    expect(dismissReview.mock.calls[0]![5]).toBe('Limn withdrew its approval: 1 blocker found at 91482c8.');
+    expect(dismissReview.mock.calls[0]![5]).toBe('Ensemble withdrew its approval: 1 blocker found at 91482c8.');
     expect(postReview.mock.calls[0]![0].verdict).toBe('REQUEST_CHANGES');
     expect(await rec(b)).toMatchObject({ verdict: { submitted: 'REQUEST_CHANGES', heldReason: null }, withdrewApproval: { how: 'withdrawn' } });
   });
@@ -324,7 +331,7 @@ describe('a later run withdraws it', () => {
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
     expect(postReview).not.toHaveBeenCalled();
     expect(dismissReview).toHaveBeenCalledTimes(1);
-    expect(dismissReview.mock.calls[0]![5]).toBe('Limn withdrew its approval: not approved at 91482c8.');
+    expect(dismissReview.mock.calls[0]![5]).toBe('Ensemble withdrew its approval: not approved at 91482c8.');
     expect(await rec(b)).toMatchObject({ status: 'posted', error: null, withdrewApproval: { how: 'withdrawn' } });
   });
 
@@ -345,7 +352,7 @@ describe('the claim', () => {
     await aw.settleApprovalWithdrawal(ctx, 1, a, {
       why: 'push',
       headSha: H2,
-      message: 'Limn withdrew its approval: new commits since it approved (91482c8).',
+      message: 'Ensemble withdrew its approval: new commits since it approved (91482c8).',
       status: 'withdrawn',
       at: new Date().toISOString(),
       error: null,
@@ -386,7 +393,7 @@ describe('"keep it in Limn" still withdraws (gap 7)', () => {
     const b = await run(pr, H2, [{ severity: 'warning', title: 'W1' }, { severity: 'warning', title: 'W2' }], 'COMMENT');
     expect(await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps())).toEqual({ kind: 'off' });
     expect(dismissReview).toHaveBeenCalledTimes(1);
-    expect(dismissReview.mock.calls[0]!.slice(4)).toEqual(['R1', 'Limn withdrew its approval: 2 warnings found at 91482c8.']);
+    expect(dismissReview.mock.calls[0]!.slice(4)).toEqual(['R1', 'Ensemble withdrew its approval: 2 warnings found at 91482c8.']);
     expect(postReview).not.toHaveBeenCalled();
     // Kept in Limn: the run itself has no auto-post record; the approving run records the withdrawal.
     expect(await rec(b)).toBeNull();
@@ -514,6 +521,6 @@ describe('earlier points hold the verdict (decision D1)', () => {
     const t = await thread(pr, limnRoot('Warning'));
     const b = await run(pr, H2, [], 'APPROVE', 'auto', { threadAssessments: [judged(t)] });
     await ap.maybeAutoPostReview(ctx, { accountId: 1, prId: pr, reviewId: b }, deps());
-    expect(dismissReview.mock.calls[0]![5]).toBe('Limn withdrew its approval: 1 warning found at 91482c8.');
+    expect(dismissReview.mock.calls[0]![5]).toBe('Ensemble withdrew its approval: 1 warning found at 91482c8.');
   });
 });

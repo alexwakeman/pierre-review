@@ -487,7 +487,7 @@ export async function crawlSite(startRaw: string, depth: number, seams: CrawlSea
   const sleep = seams.sleep ?? defaultSleep;
   const started = now();
   const start = normalizeUrl(startRaw);
-  if (!start) throw new CrawlRefusal('That is not a web address Limn can read. Use an http or https address.');
+  if (!start) throw new CrawlRefusal('That is not a web address Ensemble can read. Use an http or https address.');
   const siteHost = start.url.host;
   const secure = start.url.protocol === 'https:';
   const aborted = (): boolean => seams.signal?.aborted === true;
@@ -498,7 +498,7 @@ export async function crawlSite(startRaw: string, depth: number, seams: CrawlSea
 
   const robots = await readRobots(seams, start.url.origin);
   const gapMs = robots.crawlDelayMs ?? CRAWL_POLITE_MS;
-  if (robots === DISALLOW_ALL) throw new CrawlRefusal('This site’s robots.txt did not answer, so Limn will not crawl it. Try again later.');
+  if (robots === DISALLOW_ALL) throw new CrawlRefusal('This site’s robots.txt did not answer, so Ensemble will not crawl it. Try again later.');
   if (!robotsAllows(robots, start.url.pathname + start.url.search)) {
     throw new CrawlRefusal('This site asks robots not to read that page.');
   }

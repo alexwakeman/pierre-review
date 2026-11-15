@@ -174,7 +174,7 @@ describe('a re-review reads the replies on its own findings', () => {
     expect(prompt).not.toContain(BOT);
     // Limn's own reply stays in the conversation as context, labelled, its marker stripped.
     expect(prompt).toContain(OWN);
-    expect(prompt).toContain('(posted from Limn, an earlier reply on this finding)');
+    expect(prompt).toContain('(posted from Ensemble, an earlier reply on this finding)');
     expect(prompt).not.toContain('pierre:claude-review-finding');
     const byTitle = new Map(r.followUp!.items.map((it) => [it.title, it]));
     const blocker = byTitle.get('Drops the error')!;

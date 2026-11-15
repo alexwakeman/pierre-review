@@ -387,7 +387,7 @@ export function dependencyFixInstruction(a: {
     out.push('', `Check "${f.checkName}"${f.step ? `, step "${f.step}"` : ''}:`, '~~~~ ci-log', f.excerpt.replace(/~~~~/g, '~ ~ ~ ~'), '~~~~');
   }
   if (a.otherFailing.length > 0) {
-    out.push('', `Also failing, with no log Limn could read: ${a.otherFailing.map((n) => `"${n}"`).join(', ')}.`);
+    out.push('', `Also failing, with no log Ensemble could read: ${a.otherFailing.map((n) => `"${n}"`).join(', ')}.`);
   }
   return out.join('\n');
 }

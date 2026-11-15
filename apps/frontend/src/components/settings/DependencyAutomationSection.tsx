@@ -156,21 +156,21 @@ export function DependencyAutomationSection(): JSX.Element {
   return (
     <SectionShell
       title="Dependency updates"
-      desc="What Limn does with Dependabot, Renovate and other dependency bots’ pull requests here."
+      desc="What Ensemble does with Dependabot, Renovate and other dependency bots’ pull requests here."
       info={
         <InfoButton title="Dependency updates">
           <p>
-            Limn checks every two minutes while it is running. It merges only once GitHub’s required checks pass, and
+            Ensemble checks every two minutes while it is running. It merges only once GitHub’s required checks pass, and
             approves only once all CI is green. A pull request you cancel is left alone after that.
           </p>
           <p className="mt-2">
             Approving and resolving conflicts happen under your GitHub account, and only for the bots you trust below.
-            Limn approves each new commit once and never retries a failed approval.
+            Ensemble approves each new commit once and never retries a failed approval.
           </p>
           <p className="mt-2">
-            For a conflict, Limn first asks the bot to rebase: a comment for Dependabot, the rebase checkbox for Renovate.
+            For a conflict, Ensemble first asks the bot to rebase: a comment for Dependabot, the rebase checkbox for Renovate.
             {aiEnabled
-              ? ' If the branch still conflicts 30 minutes later, or the bot can’t be asked, AI resolves the conflicts and pushes a merge commit to the branch. It pushes only when Limn’s check of the merge passes, and stops while you are over your AI spend limit. CI must pass again before Limn approves or merges.'
+              ? ' If the branch still conflicts 30 minutes later, or the bot can’t be asked, AI resolves the conflicts and pushes a merge commit to the branch. It pushes only when Ensemble’s check of the merge passes, and stops while you are over your AI spend limit. CI must pass again before Ensemble approves or merges.'
               : ' AI conflict resolution is off on this machine.'}
           </p>
           {aiEnabled && (
@@ -178,16 +178,16 @@ export function DependencyAutomationSection(): JSX.Element {
               With “Fix them with AI”, when CI fails on a trusted bot’s pull request, AI fixes the branch and pushes the
               change: for example a companion package or lock file that was not updated. It runs once per commit, at
               most twice a day per pull request, and never while you are over your AI spend limit. CI must pass again
-              before Limn approves or merges. It also handles conflicts the same way as “Resolve their conflicts”. When a pull request both conflicts and fails CI, one AI run merges first, then fixes CI on top.
+              before Ensemble approves or merges. It also handles conflicts the same way as “Resolve their conflicts”. When a pull request both conflicts and fails CI, one AI run merges first, then fixes CI on top.
             </p>
           )}
           <p className="mt-2">
-            When a teammate also runs Limn, each action first puts a “limn/deps” status on the commit, such as “alex
-            handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already did.
-            If their Limn stops, its status is cleared or runs out, and yours takes over.
+            When a teammate also runs Ensemble, each action first puts an “ensemble/deps” status on the commit, such as “alex
+            handling · fixing CI”. Ensemble skips a commit a teammate is working on, and an action a teammate already did.
+            If their Ensemble stops, its status is cleared or runs out, and yours takes over.
           </p>
           <p className="mt-2">
-            Update size is read from the version numbers in the pull request. When Limn can’t read it, only “All updates”
+            Update size is read from the version numbers in the pull request. When Ensemble can’t read it, only “All updates”
             lets it through. An ecosystem list lets a pull request through only when every ecosystem it changes is ticked.
           </p>
         </InfoButton>

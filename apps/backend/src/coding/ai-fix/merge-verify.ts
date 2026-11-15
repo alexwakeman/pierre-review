@@ -125,8 +125,8 @@ export interface VerifyMergeInput {
 
 /** Steps 1–4. Never throws: any failure is a verdict with one plain sentence. */
 export async function verifyMergeBundle(a: VerifyMergeInput): Promise<MergeVerdict> {
-  if (!SHA.test(a.headSha) || !SHA.test(a.baseSha)) return { ok: false, reason: 'Limn does not know the commits to check the merge against.' };
-  if (!a.resultRef.startsWith('refs/pierre/')) return { ok: false, reason: 'Not a ref Limn keeps.' };
+  if (!SHA.test(a.headSha) || !SHA.test(a.baseSha)) return { ok: false, reason: 'Ensemble does not know the commits to check the merge against.' };
+  if (!a.resultRef.startsWith('refs/pierre/')) return { ok: false, reason: 'Not a ref Ensemble keeps.' };
   const tmp = await mkdtemp(join(tmpdir(), 'limn-merge-check-'));
   try {
     const file = join(tmp, 'out.bundle');
@@ -137,17 +137,17 @@ export async function verifyMergeBundle(a: VerifyMergeInput): Promise<MergeVerdi
       .map((l) => l.trim())
       .filter(Boolean);
     if (heads.length !== 1 || !/^[0-9a-f]{40} refs\/limn\/out$/.test(heads[0]!)) {
-      return { ok: false, reason: 'The commits from the sandbox are not in the form Limn expects.' };
+      return { ok: false, reason: 'The commits from the sandbox are not in the form Ensemble expects.' };
     }
     const verify = await gitRun(a.gitDir, ['bundle', 'verify', '-q', file]);
-    if (verify.code !== 0) return { ok: false, reason: 'The merge does not start from the pull request\'s head and the base Limn picked.' };
+    if (verify.code !== 0) return { ok: false, reason: 'The merge does not start from the pull request\'s head and the base Ensemble picked.' };
     const fetched = await gitRun(a.gitDir, [
       '-c', 'fetch.fsckObjects=true',
       '-c', 'transfer.fsckObjects=true',
       'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--no-auto-maintenance',
       file, `+${OUT_REF}:${a.resultRef}`,
     ]);
-    if (fetched.code !== 0) return { ok: false, reason: 'Limn could not read the commits from the sandbox.' };
+    if (fetched.code !== 0) return { ok: false, reason: 'Ensemble could not read the commits from the sandbox.' };
     // Git's own merge, HERE: its conflicted files join the marker check (the sandbox's list is the agent's
     // machine's word), and its tree is the baseline of the resolution diff.
     const auto = await hostAutoMerge(a.gitDir, a.headSha, a.baseSha, a.token ?? null);
@@ -155,10 +155,10 @@ export async function verifyMergeBundle(a: VerifyMergeInput): Promise<MergeVerdi
     const shape = await checkShape({ ...a, conflictedFiles });
     if (!shape.ok) return shape;
     const view = await hostMergeView(a.gitDir, { ...shape, headSha: a.headSha }, auto, a.token ?? null).catch(() => null);
-    if (view == null) return { ok: false, reason: 'Limn could not work out the diff of the merge to show.' };
+    if (view == null) return { ok: false, reason: 'Ensemble could not work out the diff of the merge to show.' };
     return { ...shape, view: { ...view, conflictedFiles } };
   } catch {
-    return { ok: false, reason: 'Limn could not check the merge.' };
+    return { ok: false, reason: 'Ensemble could not check the merge.' };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
@@ -204,7 +204,7 @@ export async function checkShape(a: Omit<VerifyMergeInput, 'bundle'>): Promise<S
       if (oid == null) continue; // deleted, or no longer a file: nothing to hold a marker
       if (oid === (await blobAt(a.gitDir, a.headSha, path)) || oid === (await blobAt(a.gitDir, a.baseSha, path))) continue;
       const blob = await gitRun(a.gitDir, ['cat-file', 'blob', oid]);
-      if (blob.code !== 0) return { ok: false, reason: `Limn could not read ${path} to check it.` };
+      if (blob.code !== 0) return { ok: false, reason: `Ensemble could not read ${path} to check it.` };
       if (hasConflictMarkers(blob.stdout.toString('latin1'))) {
         return { ok: false, reason: `${path} still has a conflict marker${commit === merge ? ' in the merge commit' : ''}.` };
       }

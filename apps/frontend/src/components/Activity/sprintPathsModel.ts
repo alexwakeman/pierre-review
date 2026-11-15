@@ -32,7 +32,7 @@ export type SprintPathsView =
 /** The failure line: the reason, then when it is tried again. */
 export function pathsFailureLine(status: SprintPathsStatus, by: 'Claude' | 'Codex' = 'Claude'): string {
   const why = status.failure != null ? ` ${sprintPathsFailureText(status.failure, by)}` : '';
-  const when = status.failure === 'daily_cap' ? 'Limn tries again tomorrow.' : 'Limn tries again when the sprint changes.';
+  const when = status.failure === 'daily_cap' ? 'Ensemble tries again tomorrow.' : 'Ensemble tries again when the sprint changes.';
   return `Couldn’t find the critical paths.${why} ${when}`;
 }
 

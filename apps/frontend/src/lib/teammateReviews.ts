@@ -82,7 +82,7 @@ export function alsoRaisedByFinding(
  */
 export function reviewCountLine(count: ClaudeTeamReviewCount | null | undefined): string | null {
   if (count == null || count.total <= 0) return null;
-  const head = `${count.total} Limn ${count.total === 1 ? 'review' : 'reviews'} so far`;
+  const head = `${count.total} Ensemble ${count.total === 1 ? 'review' : 'reviews'} so far`;
   if (count.byTeammate.length === 0) return head;
   return [head, count.byTeammate.map((t) => `${t.count} by ${teammateName(t.poster)}`).join(', ')].join(' · ');
 }
@@ -105,7 +105,7 @@ export function teammateVersionLines(
   for (const r of [...newest.values()].sort((a, b) => b.postedAt.localeCompare(a.postedAt))) {
     if (!isLimnBelowTeamMinimum(r.limnVersion)) continue;
     const v = r.limnVersion?.trim();
-    const on = v != null && v !== '' && /^v?\d+\.\d+\.\d+/.test(v) ? `Limn ${v.replace(/^v/, '')}` : 'an older Limn';
+    const on = v != null && v !== '' && /^v?\d+\.\d+\.\d+/.test(v) ? `version ${v.replace(/^v/, '')}` : 'an older version';
     lines.push(`${teammateName(r.poster)} is on ${on} — update for still-open replies and claim fixes.`);
   }
   return lines;

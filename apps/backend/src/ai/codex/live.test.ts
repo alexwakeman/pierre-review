@@ -72,7 +72,7 @@ describe.skipIf(!LIVE)('Codex, live (LIMN_CODEX_LIVE=1)', () => {
     if (process.env.LIMN_CODEX_LIVE_BIN) process.env.LIMN_CODEX_PATH = process.env.LIMN_CODEX_LIVE_BIN;
     const { codexBinaryPath } = await import('../runtime.js');
     bin = codexBinaryPath() ?? '';
-    if (!bin) throw new Error('no Codex program: run `limn ai install codex` or set LIMN_CODEX_LIVE_BIN');
+    if (!bin) throw new Error('no Codex program: run `ensemble ai install codex` or set LIMN_CODEX_LIVE_BIN');
 
     // No sign-in file in Limn's home ⇒ not signed in, and nothing is started there (Codex would
     // create the folder). Otherwise `account/read` decides: a dead sign-in also skips the model runs.

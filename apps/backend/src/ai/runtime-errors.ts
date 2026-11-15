@@ -4,7 +4,7 @@
 // with a partial mock.
 
 export const AI_RUNTIME_MISSING_MESSAGE =
-  'AI is not set up yet. Press "Set up AI" in Limn, or run: limn ai install';
+  'AI is not set up yet. Press "Set up AI" in Ensemble, or run: ensemble ai install';
 
 /** Thrown by a loader when no source carries the package. Its message is safe to show. */
 export class AiRuntimeMissingError extends Error {

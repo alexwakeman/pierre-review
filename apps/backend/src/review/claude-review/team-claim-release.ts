@@ -42,6 +42,7 @@ import {
   newestLine,
   postedTeammateReviewsAtHead,
   prAuthorLogin,
+  releaseContextOf,
   releasedLine,
   sameGithubLogin,
   staleTeammateLine,
@@ -102,6 +103,27 @@ async function prRepo(
   return rows[0] ?? null;
 }
 
+/**
+ * The contexts (other than the newest line's) whose own newest line is the reader's PENDING one. Pure.
+ * Lines with no listed context (tests' fakes) are one context.
+ */
+export function ownPendingOnOtherContexts(lines: readonly TeamClaimLine[], newest: TeamClaimLine, me: string): string[] {
+  const byContext = new Map<string, TeamClaimLine[]>();
+  for (const l of lines) {
+    if (l.context == null) continue;
+    const list = byContext.get(l.context) ?? [];
+    list.push(l);
+    byContext.set(l.context, list);
+  }
+  const out: string[] = [];
+  for (const [context, list] of byContext) {
+    if (context === newest.context) continue;
+    const top = newestLine(list);
+    if (top && top.state === 'pending' && sameGithubLogin(top.login, me)) out.push(context);
+  }
+  return out;
+}
+
 let releasing = false;
 
 /** Test hook. */
@@ -149,14 +171,28 @@ async function releaseOne(
   if (!last) return { kind: 'closed', why: 'no line', state: 'released' };
   if (!sameGithubLogin(last.login, me)) return { kind: 'closed', why: 'superseded', state: 'released' };
   if (last.state !== 'pending') {
-    // Ours and settled already (e.g. a final write that landed though it read as failed).
+    // Ours and settled already (e.g. a final write that landed though it read as failed). ⚠ The lines
+    // are read across BOTH prefixes: an own pending line still newest on the OTHER context (an older
+    // Limn's `limn/…` beside our newer `ensemble/…` success) would stay yellow on GitHub forever, so it
+    // is settled with the SAME words as the newest line (the merged read stays what it was).
+    for (const stale of ownPendingOnOtherContexts(lines, last, me)) {
+      try {
+        await gh.postLine(row.accountId, where.owner, where.name, row.headSha, stale, {
+          state: 'success',
+          description: last.description ?? unfinishedLine(me),
+        });
+      } catch (err) {
+        return failure(err);
+      }
+    }
     return { kind: 'closed', why: 'settled', state: row.finalDescription != null ? 'finished' : 'released' };
   }
   // ⚠ Asked again after the read: a run may have started on this head meanwhile.
   if (deps.busy(row.accountId, row.prId, provider, row.headSha)) return { kind: 'busy' };
   const finalLine = row.finalDescription != null;
   try {
-    await gh.postLine(row.accountId, where.owner, where.name, row.headSha, context, {
+    // Settled on the context our pending line was read under (an older Limn's `limn/…` line included).
+    await gh.postLine(row.accountId, where.owner, where.name, row.headSha, releaseContextOf(last, context), {
       state: 'success',
       description: finalLine ? row.finalDescription! : unfinishedLine(me),
       ...(finalLine && row.finalTargetUrl ? { targetUrl: row.finalTargetUrl } : {}),
@@ -321,7 +357,8 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
       }
       let lastError: string | null = null;
       try {
-        await gh.postLine(accountId, where.owner, where.name, skip.headSha, context, {
+        // On the teammate's own context: an older Limn's `limn/…` line is settled where it reads it.
+        await gh.postLine(accountId, where.owner, where.name, skip.headSha, releaseContextOf(newestLine(lines.filter((l) => sameGithubLogin(l.login, stale.login))), context), {
           state: 'success',
           description: releasedLine(stale.login, me),
         });

@@ -34,6 +34,7 @@ import { db, schema } from '../db/client.js';
 import {
   claimErrorKind,
   newestLine,
+  releaseContextOf,
   releasedLine,
   sameGithubLogin,
   type TeamClaimGithub,
@@ -126,8 +127,10 @@ async function settleOwnRow(gh: TeamClaimGithub, row: DepsLineRow, me: string, o
     return { kind: 'failed', error: errText(err) };
   };
   const list = (): Promise<TeamClaimLine[]> => gh.listLines(row.accountId, owner, name, row.headSha, DEPENDENCY_CLAIM_CONTEXT);
-  const postLine = (description: string): Promise<void> =>
-    gh.postLine(row.accountId, owner, name, row.headSha, DEPENDENCY_CLAIM_CONTEXT, { state: 'success', description });
+  // `settles`: the line being settled — posted on ITS context, so an older Limn's `limn/deps` line
+  // is not left pending beside the new `ensemble/deps` one.
+  const postLine = (description: string, settles?: TeamClaimLine | null): Promise<void> =>
+    gh.postLine(row.accountId, owner, name, row.headSha, releaseContextOf(settles, DEPENDENCY_CLAIM_CONTEXT), { state: 'success', description });
   const posted = (description: string, state: 'armed' | 'finished' | 'released', count: 'released' | 'finished' | 'renewed'): Outcome => ({
     kind: 'done',
     patch: { state, lastDescription: description, lastPostedAt: new Date(nowMs), finalDescription: null, lastError: null, releaseAttempts: 0 },
@@ -166,7 +169,7 @@ async function settleOwnRow(gh: TeamClaimGithub, row: DepsLineRow, me: string, o
         return { kind: 'done', patch: { state: 'released', lastError: 'settled' }, count: null };
       }
       const d = armedReleaseLine(me);
-      await postLine(d);
+      await postLine(d, ours);
       return posted(d, 'released', 'released');
     }
 
@@ -178,7 +181,7 @@ async function settleOwnRow(gh: TeamClaimGithub, row: DepsLineRow, me: string, o
       return { kind: 'done', patch: { state: row.finalDescription != null ? 'finished' : 'released', lastError: 'settled' }, count: null };
     }
     const d = row.finalDescription ?? releaseLine(me, "didn't finish");
-    await postLine(d);
+    await postLine(d, last);
     if (row.action === 'arm_merge' && isArmedDoneLine(d)) return posted(d, 'armed', 'finished');
     return posted(d, row.finalDescription != null ? 'finished' : 'released', row.finalDescription != null ? 'finished' : 'released');
   } catch (err) {
@@ -220,7 +223,7 @@ export async function releaseStaleOwnDepsClaims(log: FastifyBaseLogger, deps: De
       if (attempts >= DEPS_RELEASE_MAX_ATTEMPTS) {
         log.warn(
           { prId: row.prId, action: row.action },
-          `dependency claim: gave up on the limn/deps line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${res.error})`,
+          `dependency claim: gave up on the ${DEPENDENCY_CLAIM_CONTEXT} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${res.error})`,
         );
       }
       continue;
@@ -300,7 +303,8 @@ export async function releaseExpiredTeammateDepsLines(
       const description = releasedLine(stale.login, me);
       let lastError: string | null = null;
       try {
-        await gh.postLine(r.accountId, r.owner, r.name, r.headSha, DEPENDENCY_CLAIM_CONTEXT, { state: 'success', description });
+        const theirs = newestLine(lines.filter((l) => sameGithubLogin(l.login, stale.login)));
+        await gh.postLine(r.accountId, r.owner, r.name, r.headSha, releaseContextOf(theirs, DEPENDENCY_CLAIM_CONTEXT), { state: 'success', description });
         out.released += 1;
       } catch (err) {
         const kind = claimErrorKind(err, r.accountId);

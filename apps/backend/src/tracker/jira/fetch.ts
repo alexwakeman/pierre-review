@@ -330,7 +330,7 @@ export async function jiraGetJson(
   const url = checkJiraUrl(rawUrl, policy);
   const res = await transport(
     url,
-    { accept: 'application/json', 'user-agent': 'Limn', ...headers },
+    { accept: 'application/json', 'user-agent': 'Ensemble', ...headers },
     {
       lookup: policy.cloud ? guardedLookup() : undefined,
       timeoutMs: JIRA_TIMEOUT_MS,
@@ -390,7 +390,7 @@ async function jiraSendJson(
   const url = checkJiraUrl(rawUrl, policy);
   const res = await transport(
     url,
-    { accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'Limn', ...headers },
+    { accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'Ensemble', ...headers },
     {
       lookup: policy.cloud ? guardedLookup() : undefined,
       timeoutMs: JIRA_TIMEOUT_MS,

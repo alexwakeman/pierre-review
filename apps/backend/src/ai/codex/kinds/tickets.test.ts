@@ -332,7 +332,7 @@ describe('ticket_review on Codex', () => {
     scenario({ first: { ...strict, alignment: 'kind_of' }, resume: 'not json' });
     const { res } = await run({ docsDir: null });
     expect(res).toMatchObject({ submitted: false, payload: null, aborted: false });
-    expect(res.failureReason).toContain("did not pass Limn's checks");
+    expect(res.failureReason).toContain("did not pass Ensemble's checks");
     expect(T.recorded).toHaveLength(1);
   });
 

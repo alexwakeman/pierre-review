@@ -131,7 +131,7 @@ export async function confluenceGetJson(url: string, opts: WikiCallOptions, deps
     try {
       res = await transport(
         checked,
-        { accept: 'application/json', 'user-agent': 'Limn', authorization: authHeader(opts.credential) },
+        { accept: 'application/json', 'user-agent': 'Ensemble', authorization: authHeader(opts.credential) },
         { lookup: guardedLookup(), timeoutMs: CONFLUENCE_TIMEOUT_MS, maxBytes: CONFLUENCE_MAX_BYTES },
       );
     } catch (err) {
@@ -177,7 +177,7 @@ export async function confluenceGetBytes(url: string, opts: WikiCallOptions, sin
   try {
     const res = await transport(
       checked,
-      { accept: '*/*', 'user-agent': 'Limn', authorization: authHeader(opts.credential) },
+      { accept: '*/*', 'user-agent': 'Ensemble', authorization: authHeader(opts.credential) },
       { lookup: guardedLookup(), timeoutMs: CONFLUENCE_TIMEOUT_MS, maxBytes: sink.maxBytes },
     );
     if (res.status >= 300 && res.status < 400 && res.headers?.location) {

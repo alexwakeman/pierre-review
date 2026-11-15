@@ -8,7 +8,7 @@
 //     Dependencies.
 //   • THE WRITTEN SUMMARIES (bot themes, Chronology pointers, a drill-down's clusters) through their
 //     real POST routes, with the model answered by a FAKE Anthropic Messages endpoint in this process
-//     (127.0.0.1, an ephemeral port): a placeholder `ANTHROPIC_API_KEY` with `LIMN_AI_USE_API_KEY=true`
+//     (127.0.0.1, an ephemeral port): a placeholder `ANTHROPIC_API_KEY` with `ENSEMBLE_AI_USE_API_KEY=true`
 //     sends those calls down the ladder's raw API-key rung even when a Claude login exists (never the
 //     developer's real login), and `ANTHROPIC_BASE_URL` points that rung here. All three are restored
 //     afterwards. Each answer is built from the request's own JSON (the ids it may cite), so the
@@ -212,12 +212,12 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
   // The API-key rung, FIRST even over a Claude login (ai/credentials.ts), pointed at the fake server.
   const prevEnv = {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-    LIMN_AI_USE_API_KEY: process.env.LIMN_AI_USE_API_KEY,
+    ENSEMBLE_AI_USE_API_KEY: process.env.ENSEMBLE_AI_USE_API_KEY,
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
   };
   process.env.ANTHROPIC_BASE_URL = fake2.url;
   process.env.ANTHROPIC_API_KEY = 'sk-ant-demo-not-a-key';
-  process.env.LIMN_AI_USE_API_KEY = 'true';
+  process.env.ENSEMBLE_AI_USE_API_KEY = 'true';
 
   const { buildApp } = await import('../src/app.js');
   const { bindPlatform } = await import('../src/platform/context.js');

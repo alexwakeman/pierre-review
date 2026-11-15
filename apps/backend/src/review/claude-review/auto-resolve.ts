@@ -114,9 +114,9 @@ export function autoResolveReplyBody(
         : addressedLead(outcome, headSha, how);
   // Path B is the reader's own run, not an automatic post: the footer says what Limn did.
   const footer = alreadyResolved
-    ? `_Checked by Limn’s ${by} review._`
+    ? `_Checked by Ensemble’s ${by} review._`
     : why === 'own_pr'
-      ? `_Resolved by Limn’s ${by} review._`
+      ? `_Resolved by Ensemble’s ${by} review._`
       : autoPostFooter(by);
   return `${lead}\n\n${footer}\n\n${FINDING_MARKER}`;
 }
@@ -275,7 +275,7 @@ async function autoResolve(
       want.outcome === 'reply_accepted'
         ? (want.response ?? '').trim() || 'Thanks, that settles it.'
         : addressedLead(want.outcome, review.headSha, want.how);
-    const footer = why === 'own_pr' ? `_Resolved by Limn’s ${aiRunProviderName(review)} review._` : autoPostFooter(aiRunProviderName(review));
+    const footer = why === 'own_pr' ? `_Resolved by Ensemble’s ${aiRunProviderName(review)} review._` : autoPostFooter(aiRunProviderName(review));
     const r = await closePrLevelFinding(
       ctx,
       {

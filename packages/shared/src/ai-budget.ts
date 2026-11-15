@@ -858,22 +858,22 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
       apiKey: { weeklyUsd: settings.weeklyUsd, usedUsd: round2(usedUsd) },
       overBudget: over,
       limitedBy: over ? 'week' : null,
-      reason: over ? 'Limn has used its weekly budget.' : null,
+      reason: over ? 'Ensemble has used its weekly budget.' : null,
       resumesAt: over ? isoOf(resumesAtMs) : null,
     };
   }
   const { sub, overWeek, overFiveHour, weekResumesAtMs, fiveHourResumesAtMs } = subscriptionStatus(input);
   const over = overWeek || overFiveHour;
   let reason: string | null = null;
-  if (overWeek) reason = 'Limn has used its share of your week.';
-  else if (overFiveHour) reason = 'Limn has used its share of this 5-hour session.';
+  if (overWeek) reason = 'Ensemble has used its share of your week.';
+  else if (overFiveHour) reason = 'Ensemble has used its share of this 5-hour session.';
   else if (input.provider === 'codex') {
-    if (sub.usedSharePct == null && sub.fiveHourUsedSharePct == null) reason = 'Limn has not read your Codex usage yet.';
+    if (sub.usedSharePct == null && sub.fiveHourUsedSharePct == null) reason = 'Ensemble has not read your Codex usage yet.';
   } else if (sub.subscription == null) {
     reason =
       sub.reportedSubscription?.trim().toLowerCase() === 'max'
-        ? 'Pick Max 5x or Ultra so Limn can work out its share.'
-        : 'Pick your Claude subscription so Limn can work out its share.';
+        ? 'Pick Max 5x or Ultra so Ensemble can work out its share.'
+        : 'Pick your Claude subscription so Ensemble can work out its share.';
   }
   // Runs resume once EVERY window that is over has cleared: the later of the two.
   const resumes = [overWeek ? weekResumesAtMs : null, overFiveHour ? fiveHourResumesAtMs : null].filter(

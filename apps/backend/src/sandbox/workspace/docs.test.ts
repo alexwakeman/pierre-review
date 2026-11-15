@@ -25,7 +25,7 @@ describe('planDocsCopy', () => {
     expect(c.files.every((f) => f.mode === 0o444)).toBe(true);
     expect(c.sections).toEqual(['billing/sections/02-part-2.md']);
     expect(String(c.files.at(-1)!.content)).toMatch(/full-text search; no model chose them[\s\S]*Billing handbook › Part 2/);
-    expect(c.docsMd).toMatch(/Limn has no current docs check for this ticket/);
+    expect(c.docsMd).toMatch(/Ensemble has no current docs check for this ticket/);
   });
   it('caps the sections by count and by size, naming what was left out', () => {
     const many = planDocsCopy(lib(40), 'i', { source: 'whole', sections: Array.from({ length: 40 }, (_, i) => sec('billing', i + 1).path) });

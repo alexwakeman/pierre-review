@@ -13,7 +13,7 @@ Totals were in square metres.
 
 ## First: the merge conflicts (MERGE)
 
-Limn has started a merge of `main` at bbbbbbb (`refs/limn/merge-target`) into `limn/fix-pr-77` in `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend`. `git status` lists the files in conflict. Finish this merge BEFORE any other item.
+Ensemble has started a merge of `main` at bbbbbbb (`refs/limn/merge-target`) into `limn/fix-pr-77` in `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend`. `git status` lists the files in conflict. Finish this merge BEFORE any other item.
 
 1. Resolve each conflict with judgement. Read both sides and the common ancestor `refs/limn/merge-base` (ccccccc): `git diff refs/limn/merge-base refs/limn/merge-target -- <file>` shows what `main` changed, `git diff refs/limn/merge-base refs/limn/base -- <file>` what the pull request changed. Keep what both sides meant. Take one side whole only when that is right.
 2. After each file, read the lines around every hunk you resolved. No line may be there twice, no line either side added may be lost, and no conflict marker (`<<<<<<<`, `=======`, `>>>>>>>`) may stay.
@@ -22,7 +22,7 @@ Limn has started a merge of `main` at bbbbbbb (`refs/limn/merge-target`) into `l
 5. Then fix the other items in NEW commits on top of the merge commit (or leave them in the working tree).
 6. In the report, cite MERGE in `changes` for each file you resolved, or list MERGE in `unaddressed` with the reason.
 
-The history here is cut: `git log` shows only the PR head, the base and their common ancestor. Limn checks the merge commit before anything is pushed. When the merge fails a check, nothing is pushed.
+The history here is cut: `git log` shows only the PR head, the base and their common ancestor. Ensemble checks the merge commit before anything is pushed. When the merge fails a check, nothing is pushed.
 
 ## What to fix
 

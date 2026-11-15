@@ -102,7 +102,7 @@ describe('decideCodexToolCall', () => {
       expect(d.allow, JSON.stringify(input)).toBe(false);
       return (d as { reason: string }).reason;
     };
-    expect(out(patch('*** Add File: ../outside/pwned.txt'))).toMatch(/^Limn path guard: refused: \.\.\/outside\/pwned\.txt is outside/);
+    expect(out(patch('*** Add File: ../outside/pwned.txt'))).toMatch(/^Ensemble path guard: refused: \.\.\/outside\/pwned\.txt is outside/);
     expect(out(patch('*** Add File: /tmp/pwned.txt'))).toMatch(/outside the folders this run may change/);
     expect(out(patch('*** Add File: escape/pwned.txt'))).toMatch(/outside/);
     expect(out(patch('*** Update File: src/a.ts', '*** Move to: ../outside/a.ts'))).toMatch(/outside/);
@@ -122,14 +122,14 @@ describe('decideCodexToolCall', () => {
     expect(decideCodexToolCall('mcp__workspace__list_files', {}, ro(), wt)).toEqual({ allow: true });
     expect(decideCodexToolCall('mcp__workspace__read_file', { path: '../outside/secret.env' }, ro(), wt)).toMatchObject({ allow: false });
     expect(decideCodexToolCall('mcp__workspace__read_file', { path: 'escape/secret.env' }, ro(), wt)).toMatchObject({ allow: false });
-    expect(decideCodexToolCall('mcp__railway__deploy', {}, ro(), wt)).toMatchObject({ allow: false, reason: expect.stringMatching(/only Limn's workspace tools/) });
+    expect(decideCodexToolCall('mcp__railway__deploy', {}, ro(), wt)).toMatchObject({ allow: false, reason: expect.stringMatching(/only Ensemble's workspace tools/) });
     expect(decideCodexToolCall('mcp__workspaceX__read', {}, ro(), wt)).toMatchObject({ allow: false });
   });
 
   it('is an ALLOW-list: a tool nobody listed is DENIED; only the known-harmless built-ins pass', () => {
     expect(decideCodexToolCall('update_plan', { plan: [] }, ro(), wt)).toEqual({ allow: true });
     for (const tool of ['clock__curr_time', 'shell', 'exec_command', 'view_image', 'read_mcp_resource', 'list_mcp_resources', 'spawn_agent', '']) {
-      expect(decideCodexToolCall(tool, {}, rw(), wt), tool).toMatchObject({ allow: false, reason: expect.stringMatching(/is not one Limn allows/) });
+      expect(decideCodexToolCall(tool, {}, rw(), wt), tool).toMatchObject({ allow: false, reason: expect.stringMatching(/is not one Ensemble allows/) });
     }
   });
 
@@ -162,7 +162,7 @@ describe('decideCodexToolCall', () => {
     expect(writePaths(recorded)).toEqual(['../outside/pwned.txt']);
     expect(decideCodexToolCall('apply_patch', recorded, rw(), wt)).toEqual({
       allow: false,
-      reason: 'Limn path guard: refused: ../outside/pwned.txt is outside the folders this run may change.',
+      reason: 'Ensemble path guard: refused: ../outside/pwned.txt is outside the folders this run may change.',
     });
     expect(decideCodexToolCall('apply_patch', { command: '*** Begin Patch\n*** Add File: ok.txt\n+fine\n*** End Patch' }, rw(), wt)).toEqual({ allow: true });
   });

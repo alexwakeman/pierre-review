@@ -114,7 +114,7 @@ describe('services argv', () => {
     expect(argv.at(-1)).toBe('-');
     const base = { sessionId: 's1', accountId: 1, from: { container: 'c', dir: '/w' }, network: 'n', proxyUrl: 'p', memoryBytes: 1 };
     expect(() => serviceBuildArgv({ ...base, tag: 'limn-s1-x:1', dockerfile: '../Dockerfile' }, {})).toThrow(/inside the build folder/);
-    expect(() => serviceBuildArgv({ ...base, tag: 'evil.example.com/x:1', dockerfile: 'Dockerfile' }, {})).toThrow(/Limn service image tag/);
+    expect(() => serviceBuildArgv({ ...base, tag: 'evil.example.com/x:1', dockerfile: 'Dockerfile' }, {})).toThrow(/Ensemble service image tag/);
   });
 });
 

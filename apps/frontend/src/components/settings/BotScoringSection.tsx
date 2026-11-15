@@ -32,7 +32,7 @@ export function BotScoringSection(): JSX.Element | null {
           </p>
           <p className="mt-2">
             Setting it up downloads the model and the program that runs it, about 240 MB, once. You can also run{' '}
-            <code>limn ml install</code>.
+            <code>ensemble ml install</code>.
           </p>
         </InfoButton>
       }

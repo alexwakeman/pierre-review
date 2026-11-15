@@ -323,7 +323,7 @@ describe('Claude Review on Codex', () => {
     const cs = calls();
     expect(cs).toHaveLength(2);
     expect(cs[1].argv).toContain('resume');
-    expect(cs[1].stdin).toMatch(/Limn could not accept your final answer:[\s\S]*verdict/);
+    expect(cs[1].stdin).toMatch(/Ensemble could not accept your final answer:[\s\S]*verdict/);
     // The resumed turn reports the THREAD's total (1500): the run's tokens are that, not 2500.
     expect(T.recorded).toEqual([expect.objectContaining({ inputTokens: 1500, outputTokens: 150, provider: 'codex' })]);
   });
@@ -331,7 +331,7 @@ describe('Claude Review on Codex', () => {
   it('a second refusal fails the review with the reason, still billed', async () => {
     const res = await runReview(reviewArgs('REVIEWBADALWAYS'));
     expect(res.submitted).toBe(false);
-    expect(res.failureReason).toMatch(/did not pass Limn's checks/);
+    expect(res.failureReason).toMatch(/did not pass Ensemble's checks/);
     expect(res.usageRecorded).toBe(true);
     expect(T.recorded).toHaveLength(1);
   });

@@ -236,7 +236,7 @@ export async function withoutLimnStates(
   if (targets.length === 0) return { nodes, cost: 0 };
   try {
     const r = await fetchRollupsWithoutLimn(client, owner, name, targets, (errors) =>
-      log?.warn(`branch-status ${owner}/${name}: partial GraphQL on Limn-marked commits`, errors),
+      log?.warn(`branch-status ${owner}/${name}: partial GraphQL on Ensemble-marked commits`, errors),
     );
     return {
       nodes: nodes.map((n) =>
@@ -246,7 +246,7 @@ export async function withoutLimnStates(
     };
   } catch (err) {
     log?.warn(
-      `branch-status ${owner}/${name}: Limn-line recompute failed (non-fatal): ` +
+      `branch-status ${owner}/${name}: Ensemble-line recompute failed (non-fatal): ` +
         `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
     );
     return { nodes, cost: 0 };

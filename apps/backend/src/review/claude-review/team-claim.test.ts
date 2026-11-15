@@ -3,6 +3,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sameStatusContext } from '@pierre-review/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
@@ -40,14 +41,14 @@ const line = (login: string | null, state: string, atMs: number, description = `
 
 describe('wording', () => {
   it('names the login, says the fact, stays within 140 characters', () => {
-    expect(teamClaimContext('claude')).toBe('limn/review-claude');
-    expect(teamClaimContext('codex')).toBe('limn/review-codex');
+    expect(teamClaimContext('claude')).toBe('ensemble/review-claude');
+    expect(teamClaimContext('codex')).toBe('ensemble/review-codex');
     expect(reviewingLine('alex', 'claude')).toBe('alex is reviewing with Claude');
     expect(reviewingLine('alex', 'codex')).toBe('alex is reviewing with Codex');
     expect(reviewedLine('alex', 4)).toBe('alex reviewed · 4 comments');
     expect(reviewedLine('alex', 1)).toBe('alex reviewed · 1 comment');
     expect(reviewedLine('alex', 0)).toBe('alex reviewed · no comments');
-    expect(reviewedLine('alex', null)).toBe('alex reviewed · kept in Limn');
+    expect(reviewedLine('alex', null)).toBe('alex reviewed · kept in Ensemble');
     expect(unfinishedLine('alex')).toBe("Cleared by alex: review didn't finish · free to claim");
     expect(clearedLine('alex')).toBe('Cleared by alex');
     expect(releasedLine('bob', 'alex')).toBe("Cleared by alex: bob's claim expired");
@@ -72,8 +73,10 @@ describe('decideTeamClaim (the one fold)', () => {
       atMs: NOW - 5 * MIN,
       description: 'bob reviewed · 2 comments',
     });
-    expect(decideTeamClaim([line('me', 'success', NOW - 5 * MIN, 'me reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
-    // A teammate's review kept in Limn put nothing on GitHub: it holds nothing.
+    expect(decideTeamClaim([line('me', 'success', NOW - 5 * MIN, 'me reviewed · kept in Ensemble')], 'me', NOW).kind).toBe('free');
+    // A teammate's review kept in Ensemble put nothing on GitHub: it holds nothing.
+    expect(decideTeamClaim([line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · kept in Ensemble')], 'me', NOW).kind).toBe('free');
+    // An older Limn's wording reads the same.
     expect(decideTeamClaim([line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
     expect(decideTeamClaim([line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · no comments')], 'me', NOW).kind).toBe('reviewed');
     expect(decideTeamClaim([line('bob', 'success', NOW - 9 * MIN, 'bob reviewed'), line('carol', 'success', NOW - MIN, 'Cleared by carol')], 'me', NOW).kind).toBe(
@@ -242,7 +245,11 @@ function fakeGh(opts: { readFails?: unknown; postFails?: unknown; login?: string
   const gh: TeamClaimGithub = {
     async listLines(_a, _o, _n, _sha, context) {
       if (opts.readFails) throw opts.readFails;
-      return [...(lines[context] ?? [])].reverse();
+      // Like the real adapter: either prefix is the same line, and each line says its context.
+      return Object.entries(lines)
+        .filter(([c]) => sameStatusContext(c, context))
+        .flatMap(([c, ls]) => ls.map((l) => ({ ...l, context: c })))
+        .reverse();
     },
     async postLine(_a, _o, _n, _sha, context, post) {
       if (opts.postFails) throw opts.postFails;
@@ -350,13 +357,13 @@ describe('claimBeforeAutoRun', () => {
     expect(r.kind).toBe('run');
     if (r.kind !== 'run') return;
     expect(r.handle.marked).toBe(true);
-    expect(r.handle.record).toMatchObject({ context: 'limn/review-claude', state: 'marked', lastLine: 'reviewing' });
-    expect(f.posts).toEqual([{ context: 'limn/review-claude', state: 'pending', description: 'me is reviewing with Claude' }]);
+    expect(r.handle.record).toMatchObject({ context: 'ensemble/review-claude', state: 'marked', lastLine: 'reviewing' });
+    expect(f.posts).toEqual([{ context: 'ensemble/review-claude', state: 'pending', description: 'me is reviewing with Claude' }]);
   });
 
   it("a teammate's live claim ⇒ skip with NO line, remembered; the next try reads nothing until the lease ends", async () => {
     const f = fakeGh();
-    f.seed('limn/review-claude', line('bob', 'pending', NOW - 5 * MIN));
+    f.seed('ensemble/review-claude', line('bob', 'pending', NOW - 5 * MIN));
     let reads = 0;
     const counting: TeamClaimGithub = { ...f.gh, listLines: async (...a) => (reads++, f.gh.listLines(...a)) };
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, counting);
@@ -375,16 +382,46 @@ describe('claimBeforeAutoRun', () => {
     expect(codex.kind).toBe('run');
   });
 
+  // THE RENAME: a teammate still on an older Limn writes `limn/review-claude`. Their line holds the
+  // head exactly as before, and this machine's own claim is written under `ensemble/`.
+  it("an older Limn's limn/ claim holds the head; a free one lets us claim under ensemble/", async () => {
+    const f = fakeGh();
+    f.seed('limn/review-claude', line('bob', 'pending', NOW - 5 * MIN));
+    const held = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
+    expect(held).toMatchObject({ kind: 'skip', skip: { kind: 'reviewing', login: 'bob', provider: 'claude' } });
+    expect(f.posts).toEqual([]);
+    tc.forgetTeamClaimSkip(1, prId, 'claude');
+    const g = fakeGh();
+    g.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
+    expect(await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, g.gh)).toMatchObject({ kind: 'skip', skip: { kind: 'reviewed', login: 'bob' } });
+    tc.forgetTeamClaimSkip(1, prId, 'claude');
+    const h = fakeGh();
+    h.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'Cleared by bob'));
+    const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, h.gh);
+    expect(r.kind).toBe('run');
+    expect(h.posts).toEqual([{ context: 'ensemble/review-claude', state: 'pending', description: 'me is reviewing with Claude' }]);
+  });
+
+  it('releaseContextOf settles a line on the context it was read under', () => {
+    const l = (context?: string) => ({ id: 1, state: 'pending', description: null, createdAtMs: NOW, login: 'me', ...(context ? { context } : {}) });
+    expect(tc.releaseContextOf(l('limn/review-claude'), 'ensemble/review-claude')).toBe('limn/review-claude');
+    expect(tc.releaseContextOf(l('ensemble/review-claude'), 'ensemble/review-claude')).toBe('ensemble/review-claude');
+    expect(tc.releaseContextOf(l(), 'ensemble/review-claude')).toBe('ensemble/review-claude');
+    expect(tc.releaseContextOf(null, 'ensemble/review-claude')).toBe('ensemble/review-claude');
+    // Never a different line's context.
+    expect(tc.releaseContextOf(l('limn/review-codex'), 'ensemble/review-claude')).toBe('ensemble/review-claude');
+  });
+
   it("a teammate's finished review ⇒ skip 'already reviewed'", async () => {
     const f = fakeGh();
-    f.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
+    f.seed('ensemble/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(r).toMatchObject({ kind: 'skip', skip: { kind: 'reviewed', login: 'bob' } });
   });
 
   it("a teammate's live claim whose review is already imported ⇒ 'already reviewed' at once, even over a remembered wait", async () => {
     const f = fakeGh();
-    f.seed('limn/review-claude', line('robin', 'pending', NOW - 12 * MIN));
+    f.seed('ensemble/review-claude', line('robin', 'pending', NOW - 12 * MIN));
     // First: no review yet ⇒ "being reviewed", held until the lease ends.
     const first = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(first).toMatchObject({ kind: 'skip', skip: { kind: 'reviewing', login: 'robin' } });
@@ -432,14 +469,14 @@ describe('claimBeforeAutoRun', () => {
 
   it("the PR author's own line ⇒ runs and claims (their own review never holds a head)", async () => {
     const f = fakeGh();
-    f.seed('limn/review-claude', line('carol', 'success', NOW - 5 * MIN, 'carol reviewed · 3 comments'));
+    f.seed('ensemble/review-claude', line('carol', 'success', NOW - 5 * MIN, 'carol reviewed · 3 comments'));
     const r = await tc.claimBeforeAutoRun(ctx, { ...target(), authorLogin: 'carol' }, { nowMs: () => NOW }, f.gh);
     expect(r.kind).toBe('run');
     expect(f.posts.map((p) => p.description)).toEqual(['me is reviewing with Claude']);
     expect(tc.teamClaimSkipFor(1, prId, 'head1')).toBeNull();
     // A non-author teammate's finished review still holds.
     const g = fakeGh();
-    g.seed('limn/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
+    g.seed('ensemble/review-claude', line('bob', 'success', NOW - 5 * MIN, 'bob reviewed · 3 comments'));
     expect((await tc.claimBeforeAutoRun(ctx, { ...target(), authorLogin: 'carol' }, { nowMs: () => NOW }, g.gh)).kind).toBe('skip');
   });
 
@@ -451,7 +488,7 @@ describe('claimBeforeAutoRun', () => {
       expect(await tc.prAuthorLogin(ctx, 1, prId)).toBe('carol-tc');
       expect(await tc.prAuthorLogin(ctx, 2, prId)).toBeNull(); // another account's PR
       const f = fakeGh();
-      f.seed('limn/review-claude', line('carol-tc', 'pending', NOW - 2 * MIN));
+      f.seed('ensemble/review-claude', line('carol-tc', 'pending', NOW - 2 * MIN));
       expect((await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh)).kind).toBe('run');
     } finally {
       await db.update(schema.pullRequests).set({ authorId: null }).where(eq(schema.pullRequests.id, prId)).execute();
@@ -468,7 +505,7 @@ describe('claimBeforeAutoRun', () => {
         if (!first) return f.gh.listLines(...a);
         first = false;
         const out = await f.gh.listLines(...a);
-        f.seed('limn/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW, login: 'bob' });
+        f.seed('ensemble/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW, login: 'bob' });
         return out;
       },
     };
@@ -512,7 +549,7 @@ describe('finish and clear', () => {
       f.gh,
     );
     expect(f.posts.at(-1)).toEqual({
-      context: 'limn/review-claude',
+      context: 'ensemble/review-claude',
       state: 'success',
       description: 'me reviewed · 2 comments',
       targetUrl: 'https://github.com/acme/api/pull/7#pullrequestreview-9',
@@ -526,9 +563,9 @@ describe('finish and clear', () => {
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     if (r.kind !== 'run') throw new Error('expected a run');
     await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'unfinished' }, f.gh);
-    expect(f.posts.at(-1)).toEqual({ context: 'limn/review-claude', state: 'success', description: "Cleared by me: review didn't finish · free to claim" });
+    expect(f.posts.at(-1)).toEqual({ context: 'ensemble/review-claude', state: 'success', description: "Cleared by me: review didn't finish · free to claim" });
     // Another Limn reads that success line as FREE (not "already reviewed").
-    expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-claude'), 'bob', NOW + MIN).kind).toBe('free');
+    expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-claude'), 'bob', NOW + MIN).kind).toBe('free');
     const row = await ledgerRow(r.handle.ledgerId!);
     expect(row).toMatchObject({ state: 'released', reviewId, login: 'me', provider: 'claude', headSha: 'head1' });
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toBeNull();
@@ -550,13 +587,13 @@ describe('finish and clear', () => {
 
   it("Clear over a teammate's claim forgets the skip; a refused write says why", async () => {
     const f = fakeGh();
-    f.seed('limn/review-claude', line('bob', 'pending', NOW - MIN));
+    f.seed('ensemble/review-claude', line('bob', 'pending', NOW - MIN));
     await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false)).toEqual({ provider: 'claude', login: 'bob', mine: false });
     expect(await tc.clearTeamClaim(ctx, target(), f.gh)).toEqual({ ok: true });
     expect(tc.teamClaimSkipFor(1, prId, 'head1')).toBeNull();
     const refused = fakeGh({ postFails: Object.assign(new Error('404'), { status: 404 }) });
-    refused.seed('limn/review-claude', line('bob', 'pending', NOW - MIN));
+    refused.seed('ensemble/review-claude', line('bob', 'pending', NOW - MIN));
     expect(await tc.clearTeamClaim(ctx, target(), refused.gh)).toMatchObject({ ok: false, error: 'no_access' });
   });
 });
@@ -574,8 +611,8 @@ describe("a teammate's line on the tab (team_claim_seen, migration 0159)", () =>
       .onConflictDoNothing()
       .execute();
     const f = fakeGh();
-    f.seed('limn/review-claude', { id: 1, state: 'pending', description: 'robin-dunn is reviewing with Claude', createdAtMs: NOW - 20 * MIN, login: 'robin-dunn' });
-    f.seed('limn/review-claude', { id: 2, state: 'success', description: 'robin-dunn reviewed · no comments', createdAtMs: NOW - 2 * MIN, login: 'robin-dunn' });
+    f.seed('ensemble/review-claude', { id: 1, state: 'pending', description: 'robin-dunn is reviewing with Claude', createdAtMs: NOW - 20 * MIN, login: 'robin-dunn' });
+    f.seed('ensemble/review-claude', { id: 2, state: 'success', description: 'robin-dunn reviewed · no comments', createdAtMs: NOW - 2 * MIN, login: 'robin-dunn' });
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(r.kind).toBe('skip');
     // The Codex half claims freely at the same head — and the Claude skip is NOT forgotten (per provider).
@@ -630,7 +667,7 @@ describe("a teammate's line on the tab (team_claim_seen, migration 0159)", () =>
   });
 });
 
-describe('gap 12: "kept in Limn" only when NOTHING reached GitHub', () => {
+describe('gap 12: "kept in Ensemble" only when NOTHING reached GitHub', () => {
   const done = (githubReviewId: string | null, posted: number[], submitted?: 'APPROVE' | 'COMMENT' | 'REQUEST_CHANGES') =>
     ({
       kind: 'done',
@@ -651,9 +688,9 @@ describe('gap 12: "kept in Limn" only when NOTHING reached GitHub', () => {
     expect(reviewedLine('alex', 2, 'APPROVE')).toBe('alex reviewed · approved · 2 comments');
     expect(reviewedLine('alex', 3, 'REQUEST_CHANGES')).toBe('alex reviewed · changes requested · 3 comments');
     expect(reviewedLine('alex', 0, 'COMMENT')).toBe('alex reviewed · no comments');
-    expect(reviewedLine('alex', null, 'APPROVE')).toBe('alex reviewed · kept in Limn');
+    expect(reviewedLine('alex', null, 'APPROVE')).toBe('alex reviewed · kept in Ensemble');
   });
-  it('an approval with only nits (nothing of ours posted) holds the commit: "approved", not "kept in Limn"', () => {
+  it('an approval with only nits (nothing of ours posted) holds the commit: "approved", not "kept in Ensemble"', () => {
     const s = tc.reviewedLineSummary(done('55', [], 'APPROVE'), run);
     expect(s).toEqual({ comments: 0, verdict: 'APPROVE', onGithub: true });
     const d = reviewedLine('bob', s.comments, s.verdict);
@@ -664,12 +701,13 @@ describe('gap 12: "kept in Limn" only when NOTHING reached GitHub', () => {
     expect(tc.reviewedLineSummary(done('57', [99], 'COMMENT'), run)).toMatchObject({ comments: 0, onGithub: true });
     expect(tc.reviewedLineSummary(done('58', [2], 'COMMENT'), run)).toMatchObject({ comments: 1, onGithub: true });
   });
-  it('no review on GitHub (auto-post off, skipped, failed) ⇒ "kept in Limn" (free); nothing to say ⇒ "no comments"', () => {
+  it('no review on GitHub (auto-post off, skipped, failed) ⇒ "kept in Ensemble" (free); nothing to say ⇒ "no comments"', () => {
     expect(tc.reviewedLineSummary(done(null, []), run).comments).toBeNull();
     expect(tc.reviewedLineSummary({ kind: 'off' }, run).comments).toBeNull();
     expect(tc.reviewedLineSummary(null, run).comments).toBeNull();
     expect(tc.reviewedLineSummary(null, { findings: [{ id: 3, severity: 'praise' }] }).comments).toBe(0);
-    // An old "kept in Limn" line still reads free.
+    // A new "kept in Ensemble" line and an older Limn's "kept in Limn" line both read free.
+    expect(decideTeamClaim([line('bob', 'success', NOW - MIN, 'bob reviewed · kept in Ensemble')], 'me', NOW).kind).toBe('free');
     expect(decideTeamClaim([line('bob', 'success', NOW - MIN, 'bob reviewed · kept in Limn')], 'me', NOW).kind).toBe('free');
   });
 });
@@ -684,8 +722,8 @@ describe('gap 5: a late final line is never posted blind', () => {
     if (r.kind !== 'run') throw new Error('expected a run');
     const before = f.posts.length;
     // The laptop slept: the lease ran out, bob claimed and finished.
-    f.seed('limn/review-claude', line('bob', 'pending', NOW + 30 * MIN));
-    f.seed('limn/review-claude', line('bob', 'success', NOW + 40 * MIN, 'bob reviewed · 2 comments'));
+    f.seed('ensemble/review-claude', line('bob', 'pending', NOW + 30 * MIN));
+    f.seed('ensemble/review-claude', line('bob', 'success', NOW + 40 * MIN, 'bob reviewed · 2 comments'));
     await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'unfinished' }, f.gh, () => NOW + 45 * MIN);
     expect(f.posts.length).toBe(before);
     expect(await ledgerRow(r.handle.ledgerId!)).toMatchObject({ state: 'released', lastError: 'superseded' });
@@ -698,7 +736,7 @@ describe('gap 5: a late final line is never posted blind', () => {
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     if (r.kind !== 'run') throw new Error('expected a run');
     const before = f.posts.length;
-    f.seed('limn/review-claude', line('bob', 'pending', NOW + 30 * MIN));
+    f.seed('ensemble/review-claude', line('bob', 'pending', NOW + 30 * MIN));
     await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'succeeded', comments: 1, reviewUrl: null }, f.gh, () => NOW + 35 * MIN);
     expect(f.posts.length).toBe(before);
     expect(await ledgerRow(r.handle.ledgerId!)).toMatchObject({ state: 'finished', lastError: 'superseded' });
@@ -708,13 +746,13 @@ describe('gap 5: a late final line is never posted blind', () => {
     const f = fakeGh();
     const r = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     if (r.kind !== 'run') throw new Error('expected a run');
-    f.seed('limn/review-claude', line('bob', 'pending', NOW + MIN, 'me is reviewing with Claude'));
+    f.seed('ensemble/review-claude', line('bob', 'pending', NOW + MIN, 'me is reviewing with Claude'));
     await tc.finishTeamClaim(ctx, r.handle, reviewId, { kind: 'succeeded', comments: 0, reviewUrl: null, verdict: 'APPROVE' }, f.gh, () => NOW + 2 * MIN);
     expect(f.posts.at(-1)).toMatchObject({ state: 'success', description: 'me reviewed · approved' });
     const g = fakeGh();
     const r2 = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, g.gh);
     if (r2.kind !== 'run') throw new Error('expected a run');
-    g.seed('limn/review-claude', line('bob', 'success', NOW + MIN, 'Cleared by bob: auto review skipped · AI budget used'));
+    g.seed('ensemble/review-claude', line('bob', 'success', NOW + MIN, 'Cleared by bob: auto review skipped · AI budget used'));
     await tc.finishTeamClaim(ctx, r2.handle, reviewId, { kind: 'unfinished' }, g.gh, () => NOW + 2 * MIN);
     expect(g.posts.at(-1)?.description).toBe("Cleared by me: review didn't finish · free to claim");
   });
@@ -751,8 +789,8 @@ describe("gap 6: Clear for a teammate's claim survives a restart", () => {
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false, NOW + tc.TEAM_CLAIM_LEASE_MS)).toBeNull();
     // The Clear forgets it; the teammate has finished since, so the Clear reads that and posts nothing.
     const done = fakeGh();
-    done.seed('limn/review-codex', line('robin-dunn', 'pending', NOW - MIN));
-    done.seed('limn/review-codex', { ...line('robin-dunn', 'success', NOW), description: 'robin-dunn reviewed · 3 comments' });
+    done.seed('ensemble/review-codex', line('robin-dunn', 'pending', NOW - MIN));
+    done.seed('ensemble/review-codex', { ...line('robin-dunn', 'success', NOW), description: 'robin-dunn reviewed · 3 comments' });
     expect(await tc.clearTeamClaim(ctx, { ...target(), provider: 'codex' }, done.gh)).toEqual({ ok: true });
     expect(done.posts).toEqual([]);
     expect(await tc.teamClaimPendingFor(ctx, 1, prId, 'head1', false, NOW + MIN)).toBeNull();
@@ -785,12 +823,12 @@ describe('gap 4: manual reviews and team claims', () => {
     const m = await import('./team-claim-manual.js');
     const seen = await import('./team-claim-seen.js');
     const f = fakeGh();
-    f.seed('limn/review-claude', line('robin-dunn', 'pending', NOW - MIN));
+    f.seed('ensemble/review-claude', line('robin-dunn', 'pending', NOW - MIN));
     expect(await m.readTeammateLinesForManualRun(ctx, mt(), ['claude', 'codex'], f.gh, () => NOW)).toBe('read');
     expect(f.posts).toEqual([]);
     expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toMatchObject([{ provider: 'claude', kind: 'reviewing', login: 'robin-dunn' }]);
     // The teammate finished: the run's end reads again and the line follows.
-    f.seed('limn/review-claude', line('robin-dunn', 'success', NOW + MIN, 'robin-dunn reviewed · 2 comments'));
+    f.seed('ensemble/review-claude', line('robin-dunn', 'success', NOW + MIN, 'robin-dunn reviewed · 2 comments'));
     await m.refreshTeammateLinesAfterRun(ctx, mt(), f.gh);
     expect(await seen.teammateLinesAtHead(ctx, 1, prId, 'head1')).toMatchObject([{ kind: 'reviewed', description: 'robin-dunn reviewed · 2 comments' }]);
     expect(f.posts).toEqual([]);
@@ -808,10 +846,10 @@ describe('gap 4: manual reviews and team claims', () => {
     );
     expect(out).toEqual({ claude: 'posted', codex: 'posted' });
     expect(f.posts.map((p) => [p.context, p.state, p.description])).toEqual([
-      ['limn/review-claude', 'success', 'me reviewed · approved · 2 comments'],
-      ['limn/review-codex', 'success', 'me reviewed · approved'],
+      ['ensemble/review-claude', 'success', 'me reviewed · approved · 2 comments'],
+      ['ensemble/review-codex', 'success', 'me reviewed · approved'],
     ]);
-    expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-codex'), 'bob', NOW).kind).toBe('reviewed');
+    expect(decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-codex'), 'bob', NOW).kind).toBe('reviewed');
     // Never twice.
     const again = await m.markPostedReviewLines(ctx, mt(), { runs: [{ provider: 'claude', comments: 2 }], verdict: 'APPROVE', reviewUrl: null }, f.gh, () => NOW);
     expect(again).toEqual({ claude: 'already' });
@@ -821,8 +859,8 @@ describe('gap 4: manual reviews and team claims', () => {
   it("never over a teammate's success or live claim; never on the reader's own PR; never when claims are off", async () => {
     const m = await import('./team-claim-manual.js');
     const f = fakeGh();
-    f.seed('limn/review-claude', line('bob', 'pending', NOW - MIN));
-    f.seed('limn/review-codex', line('bob', 'success', NOW - MIN, 'bob reviewed · 1 comment'));
+    f.seed('ensemble/review-claude', line('bob', 'pending', NOW - MIN));
+    f.seed('ensemble/review-codex', line('bob', 'success', NOW - MIN, 'bob reviewed · 1 comment'));
     const out = await m.markPostedReviewLines(
       ctx,
       mt(),

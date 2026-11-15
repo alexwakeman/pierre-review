@@ -69,7 +69,7 @@ vi.mock('./team-claim.js', () => ({
         login: 'me',
         marked: true,
         timer: null,
-        record: { context: `limn/review-${t.provider}`, state: 'marked', reason: null, lastLine: 'reviewing', at: '' },
+        record: { context: `ensemble/review-${t.provider}`, state: 'marked', reason: null, lastLine: 'reviewing', at: '' },
       },
     };
   },
@@ -135,7 +135,7 @@ describe('team claims on a Claude + Codex pair', () => {
     expect(finished).toEqual([]);
     runs.shift()!.release(); // Codex's half ends: the pair ends
     await flush();
-    expect(finished.map((f) => f.context).sort()).toEqual(['limn/review-claude', 'limn/review-codex']);
+    expect(finished.map((f) => f.context).sort()).toEqual(['ensemble/review-claude', 'ensemble/review-codex']);
     expect(finished.every((f) => f.kind === 'unfinished')).toBe(true);
   });
 
@@ -148,7 +148,7 @@ describe('team claims on a Claude + Codex pair', () => {
     runs.shift()!.release();
     await flush();
     expect(inserted).toHaveLength(1);
-    expect(finished).toEqual([{ reviewId: 1, context: 'limn/review-codex', kind: 'unfinished' }]);
+    expect(finished).toEqual([{ reviewId: 1, context: 'ensemble/review-codex', kind: 'unfinished' }]);
   });
 
   it('a second half a teammate holds gets no row: the pair ends on its first half', async () => {
@@ -160,7 +160,7 @@ describe('team claims on a Claude + Codex pair', () => {
     expect(claimCalls).toEqual(['62:claude', '62:codex']);
     expect(inserted).toHaveLength(1);
     expect(runs).toHaveLength(0);
-    expect(finished).toEqual([{ reviewId: 1, context: 'limn/review-claude', kind: 'unfinished' }]);
+    expect(finished).toEqual([{ reviewId: 1, context: 'ensemble/review-claude', kind: 'unfinished' }]);
   });
 
   it('both held: nothing runs and no row is written', async () => {

@@ -17,6 +17,7 @@
 // the written PR's repo only — never a neighbour, never on a refusal, never for another tenant.
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WITHDRAW_APPROVAL_MESSAGE } from '@pierre-review/shared';
 
 const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-write-change-signal-test.sqlite`;
 process.env.DATABASE_URL = DB_PATH;
@@ -316,7 +317,7 @@ describe('PR write routes raise the change signal before replying', () => {
     const res = await inject('POST', `/api/prs/${openPr}/withdraw-approval`);
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ state: 'dismissed' });
-    expect(dismissPrReview).toHaveBeenCalledWith('tok', expect.anything(), expect.anything(), expect.anything(), 77, 'Approval withdrawn in Limn.', 'reader');
+    expect(dismissPrReview).toHaveBeenCalledWith('tok', expect.anything(), expect.anything(), expect.anything(), 77, WITHDRAW_APPROVAL_MESSAGE, 'reader');
     expect(fetchViewerLatestDecisiveReview.mock.calls[0]![4]).toBe(VIEWER_LOGIN);
     const rows = await db.select().from(schema.reviews).where(eq(schema.reviews.githubNodeId, 'PRR_wd')).execute();
     expect(rows.map((r: any) => r.state)).toEqual(['dismissed']);

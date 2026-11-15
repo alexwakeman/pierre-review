@@ -301,11 +301,11 @@ export async function runEndToEndTicketStep(
 }
 
 function noticeLine(r: StoryBuildEndToEndTicket): string {
-  if (r.skipped === 'not_jira') return 'Limn did not update the ticket: it writes to Jira only.';
+  if (r.skipped === 'not_jira') return 'Ensemble did not update the ticket: it writes to Jira only.';
   const parts: string[] = [];
   if (r.updated.length > 0) parts.push('updated the ticket');
   if (r.commented) parts.push('commented on it');
-  const did = parts.length > 0 ? `Limn ${parts.join(' and ')}.` : 'Limn made no change to the ticket.';
+  const did = parts.length > 0 ? `Ensemble ${parts.join(' and ')}.` : 'Ensemble made no change to the ticket.';
   return r.error != null ? `${did} ${r.error}` : did;
 }
 
@@ -332,7 +332,7 @@ async function doStep(
   if (tu != null) {
     const current = await deps.currentTicket(ctx, accountId, row.workspaceId, row.ident);
     if (current == null) {
-      error = 'Limn holds no copy of this ticket, so it could not update it.';
+      error = 'Ensemble holds no copy of this ticket, so it could not update it.';
       ticket = { failed: error };
     } else {
       const body = ticketUpdateBody(ticketReviewSeed(tu, current), current);

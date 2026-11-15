@@ -264,7 +264,7 @@ describe('buildSlackReport — every link points into Limn', () => {
     const footer = blocks[blocks.length - 1]!;
     expect(footer.type).toBe('context');
     expect(footer.elements?.[0]?.text).toBe(
-      '<https://limn.example/app/?view=activity&workspace=3&activityRepo=feed|Open Team &lt;A&gt;¦B in Limn>',
+      '<https://limn.example/app/?view=activity&workspace=3&activityRepo=feed|Open Team &lt;A&gt;¦B in Ensemble>',
     );
     expect(msg!.text).toContain('Team &lt;A&gt;|B');
   });

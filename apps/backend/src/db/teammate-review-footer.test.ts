@@ -13,4 +13,13 @@ describe('withoutAutoPostFooter', () => {
     expect(withoutAutoPostFooter(`${AUTO_POST_FOOTER}\n\nMore text.`)).toBe(`${AUTO_POST_FOOTER}\n\nMore text.`);
     expect(withoutAutoPostFooter('_A note in italics._')).toBe('_A note in italics._');
   });
+
+  it('drops the footer under either name: Ensemble, and an older Limn', () => {
+    for (const name of ['Ensemble', 'Limn']) {
+      for (const tail of ['’s Claude review._', '’s Codex review._', '’s Claude and Codex reviews._', "'s Claude review._"]) {
+        expect(withoutAutoPostFooter(`Looks fine.\n\n_Posted automatically by ${name}${tail}`)).toBe('Looks fine.');
+      }
+    }
+    expect(withoutAutoPostFooter('Looks fine.\n\n_Posted automatically by Someone’s review._')).toContain('Someone');
+  });
 });

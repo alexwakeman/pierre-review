@@ -389,8 +389,8 @@ export function MergeControl({
           {/* Honest about the mechanism: this is a watcher in THIS server, not a GitHub setting. */}
           <div className="mt-0.5 text-meta text-ui-faint">
             {armed.viaMergeQueue
-              ? 'Limn adds it to the merge queue while the app is running; GitHub lands it from there.'
-              : 'Limn merges it while the app is running.'}{' '}
+              ? 'Ensemble adds it to the merge queue while the app is running; GitHub lands it from there.'
+              : 'Ensemble merges it while the app is running.'}{' '}
             A new commit on the branch disarms it — you re-arm to merge the new code. Expires{' '}
             {dateTime(armed.expiresAt)}.
           </div>

@@ -1245,7 +1245,7 @@ export function PrDetail({
           {armedIntent != null && pr.state === 'open' && (
             <span
               className="inline-flex shrink-0 items-center gap-1 text-ui-ink"
-              title="Auto-merge is armed — Limn updates it from trunk if needed and merges when checks pass, while the app is running. Cancel from Overview → Actions."
+              title="Auto-merge is armed — Ensemble updates it from trunk if needed and merges when checks pass, while the app is running. Cancel from Overview → Actions."
             >
               <TimerIcon size={13} aria-hidden />
               Auto-merge armed

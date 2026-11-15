@@ -210,7 +210,7 @@ export function createDockerRuntime(opts: DockerRuntimeOptions = {}): SandboxRun
       storeReady ??= (async () => {
         const have = await run(['volume', 'inspect', '--format', `{{index .Labels "${LABEL_STORE}"}}`, storeVolume], { timeoutMs: LIST_TIMEOUT });
         if (have.code === 0) {
-          if (lines(have.stdout)[0] !== instance) throw new Error(`The volume ${storeVolume} is not Limn's repo store.`);
+          if (lines(have.stdout)[0] !== instance) throw new Error(`The volume ${storeVolume} is not Ensemble's repo store.`);
           return storeVolume;
         }
         await must(['volume', 'create', ...labelArgs(storeLabels(instance, extraLabels)), storeVolume], 'Creating the repo store');

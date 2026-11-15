@@ -526,7 +526,7 @@ test.describe('Implement story', () => {
     await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
     const view = page.getByTestId('story-build-overlay');
     const step = view.getByTestId('story-build-ticket-step');
-    await expect(step).toContainText('Limn approved the plan for you and did not change the ticket.');
+    await expect(step).toContainText('Ensemble approved the plan for you and did not change the ticket.');
     await expect(step.getByTestId('story-plan-ticket-update')).toBeVisible();
     // The toast counts it as waiting for the reader.
     await expect(page.getByTestId('story-builds-toast')).toHaveAttribute('data-alert', 'true');

@@ -265,7 +265,7 @@ function BranchTrends({
         ones, split by their share of the day. A darker cell had more commits.
       </p>
       <p>The line above the cells is pull requests merged that day.</p>
-      <p>It covers the days Limn keeps history for. Hover a cell for its counts.</p>
+      <p>It covers the days Ensemble keeps history for. Hover a cell for its counts.</p>
     </InfoButton>
   );
 

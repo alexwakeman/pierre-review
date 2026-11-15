@@ -92,8 +92,8 @@ export function withdrawMessageForRun(counts: { blockers: number; warnings: numb
   if (counts.blockers > 0) parts.push(counts.blockers === 1 ? '1 blocker' : `${counts.blockers} blockers`);
   if (counts.warnings > 0) parts.push(counts.warnings === 1 ? '1 warning' : `${counts.warnings} warnings`);
   return parts.length > 0
-    ? `Limn withdrew its approval: ${parts.join(' and ')} found at ${shortSha(headSha)}.`
-    : `Limn withdrew its approval: not approved at ${shortSha(headSha)}.`;
+    ? `Ensemble withdrew its approval: ${parts.join(' and ')} found at ${shortSha(headSha)}.`
+    : `Ensemble withdrew its approval: not approved at ${shortSha(headSha)}.`;
 }
 
 /**

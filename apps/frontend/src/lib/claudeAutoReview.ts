@@ -24,7 +24,7 @@ export const AUTO_REVIEW_WAITING_LABEL: Record<ClaudeAutoReviewWaiting, string> 
 /** Why a queued auto review went ahead of the rest (a teammate's verdict), or null. */
 export function autoReviewWhyLine(why: ClaudeAutoReviewWhy | null | undefined): string | null {
   if (why == null) return null;
-  if (why.reason === 'moved') return 'Queued: needs a verdict (new commits since the last Limn review)';
+  if (why.reason === 'moved') return 'Queued: needs a verdict (new commits since the last Ensemble review)';
   const who = why.authorLogin != null ? `${why.authorLogin}’s` : 'the author’s';
   if (why.authorVerdict === 'APPROVE') return `Queued: needs a verdict (${who} own review would approve)`;
   if (why.authorVerdict === 'REQUEST_CHANGES') return `Queued: needs a verdict (${who} own review would ask for changes)`;
@@ -32,7 +32,7 @@ export function autoReviewWhyLine(why: ClaudeAutoReviewWhy | null | undefined): 
 }
 
 /** The reader's own PR waits for a teammate's Limn verdict (the server only says so with evidence). */
-export const TEAMMATE_VERDICT_WAIT_LINE = 'Waiting for a teammate’s Limn to review';
+export const TEAMMATE_VERDICT_WAIT_LINE = 'Waiting for a teammate’s Ensemble to review';
 
 // A SKIP is shown only when it is a fault the reader can fix on this computer (2026-11-10: the routine
 // skips — off, nothing to fix, a fix already waiting, the daily cap, new commits — said nothing the
@@ -132,7 +132,8 @@ export function teamClaimSkipLine(skip: Pick<ClaudeTeamClaimSkip, 'kind' | 'logi
  * A TEAMMATE'S LINE this Limn stood down for (`ClaudeReviewResponse.teamClaimTeammates`, durable):
  * "Robin Dunn reviewed this commit with Claude · no comments" / "Robin Dunn is reviewing this commit
  * with Claude". The name from the synced users table, else @login. The detail is the part of their
- * own line after " · " ("no comments", "4 comments"); "kept in Limn" (nothing posted) reads "not
+ * own line after " · " ("no comments", "4 comments"); "kept in Ensemble" or the older "kept in Limn"
+ * (nothing posted) reads "not
  * posted on GitHub".
  */
 export function teammateReviewLine(
@@ -143,6 +144,7 @@ export function teammateReviewLine(
   if (t.kind === 'reviewing') return `${who} is reviewing this commit with ${by}`;
   const dot = (t.description ?? '').indexOf(' · ');
   const raw = dot >= 0 ? (t.description ?? '').slice(dot + 3).trim() : '';
-  const detail = raw === 'kept in Limn' ? 'not posted on GitHub' : raw;
+  // Both wordings: an older app wrote "kept in Limn".
+  const detail = raw === 'kept in Ensemble' || raw === 'kept in Limn' ? 'not posted on GitHub' : raw;
   return `${who} reviewed this commit with ${by}${detail !== '' ? ` · ${detail}` : ''}`;
 }

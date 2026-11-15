@@ -119,7 +119,7 @@ describe('decideAiBudget — Limn’s share of the week (subscription)', () => {
     const over = decide({ reading: r, ledger: [{ atMs: NOW - 6 * H, usd: 8.5 }] });
     expect(over.overBudget).toBe(true);
     expect(over.limitedBy).toBe('week');
-    expect(over.reason).toBe('Limn has used its share of your week.');
+    expect(over.reason).toBe('Ensemble has used its share of your week.');
     // Reset-anchored: automatic runs resume at the reset.
     expect(over.resumesAt).toBe(new Date(NOW + 2 * D).toISOString());
     // The reader's share is the line.
@@ -236,7 +236,7 @@ describe('decideAiBudget — Limn’s share of a 5-hour session (subscription)',
     expect(s.subscription!.usedSharePct).toBeLessThan(5); // the week is fine
     expect(s.overBudget).toBe(true);
     expect(s.limitedBy).toBe('five_hour');
-    expect(s.reason).toBe('Limn has used its share of this 5-hour session.');
+    expect(s.reason).toBe('Ensemble has used its share of this 5-hour session.');
     expect(s.resumesAt).toBe(new Date(NOW + 2 * H).toISOString());
     // The weekly share moves it too, while it follows.
     expect(decide({ settings: on({ weekSharePct: 20 }), reading: five(NOW + 2 * H), ledger: [{ atMs: NOW - H, usd: 0.8 }] }).overBudget).toBe(false);
@@ -274,7 +274,7 @@ describe('decideAiBudget — Limn’s share of a 5-hour session (subscription)',
   it('both over: the week is named, and runs resume when BOTH have cleared (the later time)', () => {
     const s = decide({ reading: five(NOW + 2 * H), ledger: [{ atMs: NOW - H, usd: 9 }] });
     expect(s.limitedBy).toBe('week');
-    expect(s.reason).toBe('Limn has used its share of your week.');
+    expect(s.reason).toBe('Ensemble has used its share of your week.');
     expect(s.resumesAt).toBe(new Date(NOW + 2 * D).toISOString());
   });
 
@@ -580,7 +580,7 @@ describe('decideAiBudget — API key', () => {
     expect(s.subscription).toBeNull();
     expect(s.apiKey).toEqual({ weeklyUsd: 25, usedUsd: 25 });
     expect(s.overBudget).toBe(true);
-    expect(s.reason).toBe('Limn has used its weekly budget.');
+    expect(s.reason).toBe('Ensemble has used its weekly budget.');
     // Dropping the oldest row ($15) brings it under: it rolls out 7 days after it was spent.
     expect(s.resumesAt).toBe(new Date(NOW - 6 * D + B.WEEK_MS).toISOString());
     expect(decide({ settings: on({ weeklyUsd: 30 }), route: 'api_key', ledger }).overBudget).toBe(false);

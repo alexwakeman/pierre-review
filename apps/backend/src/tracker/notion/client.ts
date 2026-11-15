@@ -139,7 +139,7 @@ export async function notionRequest<T = unknown>(
     {
       accept: 'application/json',
       ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
-      'user-agent': 'Limn',
+      'user-agent': 'Ensemble',
       'notion-version': NOTION_VERSION,
       authorization: `Bearer ${token}`,
     },
@@ -175,15 +175,15 @@ export function notionErrorMessage(err: unknown): string {
     case 'bad_url':
       return 'The Notion database URL in Settings is not a Notion database link.';
     case 'redirect':
-      return 'Notion answered with a redirect, which Limn does not follow.';
+      return 'Notion answered with a redirect, which Ensemble does not follow.';
     case 'timeout':
       return 'Notion took too long to answer.';
     case 'not_json':
     case 'too_large':
-      return 'Notion sent an answer Limn could not read.';
+      return 'Notion sent an answer Ensemble could not read.';
     case 'http':
       return err instanceof JiraFetchError && err.status === 429
-        ? 'Notion’s rate limit is used up for now. Limn will read this ticket later.'
+        ? 'Notion’s rate limit is used up for now. Ensemble will read this ticket later.'
         : 'Notion answered with an error.';
     default:
       return 'Could not reach Notion.';

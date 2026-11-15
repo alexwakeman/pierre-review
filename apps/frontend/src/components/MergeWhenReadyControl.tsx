@@ -136,10 +136,10 @@ export function MergeWhenReadyControl({
           className="inline-flex items-center gap-1.5 text-meta font-medium text-ui-ink"
           title={
             inQueue
-              ? 'Limn added this PR to the merge queue — GitHub lands it from here. Cancelling also removes it from the queue.'
+              ? 'Ensemble added this PR to the merge queue — GitHub lands it from here. Cancelling also removes it from the queue.'
               : armed.viaMergeQueue
-                ? 'Limn updates it from trunk if needed and adds it to the merge queue when required reviews are in — while the app is running. A new commit on the branch disarms it.'
-                : 'Limn updates it from trunk if needed and merges when checks pass — while the app is running. A new commit on the branch disarms it.'
+                ? 'Ensemble updates it from trunk if needed and adds it to the merge queue when required reviews are in — while the app is running. A new commit on the branch disarms it.'
+                : 'Ensemble updates it from trunk if needed and merges when checks pass — while the app is running. A new commit on the branch disarms it.'
           }
         >
           <TimerIcon />
@@ -183,7 +183,7 @@ export function MergeWhenReadyControl({
           type="button"
           onClick={() => dispatchArmDraft(prId, { type: 'ask' })}
           className="hit inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-2 h-7 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
-          title="Check whether Limn's watcher can land this for you — it asks GitHub for the live merge state"
+          title="Check whether Ensemble's watcher can land this for you — it asks GitHub for the live merge state"
         >
           <TimerIcon size={11} />
           Merge when ready
@@ -267,8 +267,8 @@ export function MergeWhenReadyControl({
             the confirm step is deliberate, not decoration. */}
         <span className="text-meta text-ui-mute">
           {queueEnabled
-            ? 'Updates from trunk if needed and adds it to the merge queue when required reviews are in — while Limn is running.'
-            : 'Updates from trunk if needed and merges when checks pass — while Limn is running.'}
+            ? 'Updates from trunk if needed and adds it to the merge queue when required reviews are in — while Ensemble is running.'
+            : 'Updates from trunk if needed and merges when checks pass — while Ensemble is running.'}
         </span>
         <button
           type="button"
@@ -314,8 +314,8 @@ export function MergeWhenReadyControl({
       className="hit inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-ui bg-ui-raise px-2 h-7 text-meta font-medium text-ui-ink hover:bg-ui-hover disabled:cursor-not-allowed disabled:opacity-50 touch:h-10 touch:px-3"
       title={
         (queueEnabled
-          ? "Arm Limn's watcher: it updates from trunk if needed and adds the PR to the merge queue when required reviews are in — while the app is running"
-          : "Arm Limn's watcher: it updates from trunk if needed and merges when checks pass — while the app is running") +
+          ? "Arm Ensemble's watcher: it updates from trunk if needed and adds the PR to the merge queue when required reviews are in — while the app is running"
+          : "Arm Ensemble's watcher: it updates from trunk if needed and merges when checks pass — while the app is running") +
         // What it will be waiting out, in the SAME words the Overview's Blocked row uses. Only
         // for `blocked` — 'behind' and 'unknown' already say everything in their own label, and
         // the verdict carries a blocker list for nothing else.

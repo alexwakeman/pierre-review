@@ -70,14 +70,14 @@ export function NotionTrackerSetup({
         <h4 className="text-body font-semibold text-ui-ink">Notion</h4>
         <InfoButton title="Notion as an issue tracker">
           <p>
-            Each ticket is a page in this database. Limn finds a ticket by its Unique ID, such as ENG-123, in the PR
+            Each ticket is a page in this database. Ensemble finds a ticket by its Unique ID, such as ENG-123, in the PR
             title or branch, so the database needs a Unique ID property with a prefix.
           </p>
           <p>
             Create an internal integration at notion.so/my-integrations with read content, read comments and read
             user information, then share the database (and a Sprints database, if you use one) with it.
           </p>
-          <p>Limn only reads Notion. It never changes a page.</p>
+          <p>Ensemble only reads Notion. It never changes a page.</p>
         </InfoButton>
       </div>
 

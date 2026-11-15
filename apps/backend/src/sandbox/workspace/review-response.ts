@@ -92,7 +92,7 @@ export function validateReviewResponse(raw: unknown, shown: readonly string[]): 
 export function reviewResponseCheckerSource(o: { reportFile: string; refsFile: string }): string {
   return [
     '#!/usr/bin/env node',
-    '// Limn: checks your answers to the review. Run: node ~/.limn/review-response-check.cjs',
+    '// Ensemble: checks your answers to the review. Run: node ~/.limn/review-response-check.cjs',
     "'use strict';",
     "const fs = require('fs');",
     `const REPORT = ${JSON.stringify(o.reportFile)};`,

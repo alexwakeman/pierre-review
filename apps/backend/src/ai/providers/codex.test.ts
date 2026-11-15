@@ -334,7 +334,7 @@ describe('complete()', () => {
 
   it('an auth.json whose kind is NOT known: the run waits for ONE fresh probe, and refuses when it still is not known', async () => {
     writeFileSync(join(T.home, 'auth.json'), '{ not json');
-    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Limn could not check the Codex sign-in yet');
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Ensemble could not check the Codex sign-in yet');
     expect(T.confirms.n).toBe(1);
     expect(calls()).toEqual([]);
     expect(T.recorded).toEqual([]);
@@ -343,7 +343,7 @@ describe('complete()', () => {
     process.env.LIMN_CODEX_PATH = T.bin;
     try {
       const d = await C.codexProvider.detect();
-      expect(d).toMatchObject({ available: false, message: 'Limn could not check the Codex sign-in yet — try again in a moment' });
+      expect(d).toMatchObject({ available: false, message: 'Ensemble could not check the Codex sign-in yet — try again in a moment' });
     } finally {
       delete process.env.LIMN_CODEX_PATH;
     }
@@ -380,7 +380,7 @@ describe('complete()', () => {
     T.cached.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
     T.probeAnswer.value = { signedIn: true, type: 'chatgpt', plan: 'plus' };
     writeFileSync(join(T.home, 'auth.json'), STORED_KEY_AUTH);
-    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Limn could not check the Codex sign-in yet');
+    await expect(C.codexProvider.complete({ prompt: 'COMPLETE' })).rejects.toThrow('Ensemble could not check the Codex sign-in yet');
     expect(T.rechecks.n).toBe(1);
     expect(calls()).toEqual([]);
     expect(T.recorded).toEqual([]);
@@ -421,7 +421,7 @@ describe('complete()', () => {
     const err = await C.codexProvider.complete({ prompt: 'COMPLETE' }).catch((e: unknown) => e);
     const { AiRuntimeMissingError } = await import('../runtime.js');
     expect(err).toBeInstanceOf(AiRuntimeMissingError);
-    expect((err as Error).message).toBe('Codex is not set up yet. Run: limn ai install codex');
+    expect((err as Error).message).toBe('Codex is not set up yet. Run: ensemble ai install codex');
     expect(await C.runAgentUnchecked(spec('GOOD')).catch((e: unknown) => e)).toBeInstanceOf(AiRuntimeMissingError);
     expect(calls()).toEqual([]);
   });
@@ -573,7 +573,7 @@ describe('runAgentUnchecked() — one read-only run', () => {
 
   it('fails after the one retry, with the handler’s reason, and still records the tokens it spent', async () => {
     await expect(C.runAgentUnchecked(spec('BADALWAYS'))).rejects.toThrow(
-      'Codex\'s answer did not pass Limn\'s checks: answer must not be "wrong"',
+      'Codex\'s answer did not pass Ensemble\'s checks: answer must not be "wrong"',
     );
     expect(calls()).toHaveLength(2);
     expect(calls()[1].stdin).toContain('answer must not be "wrong"');

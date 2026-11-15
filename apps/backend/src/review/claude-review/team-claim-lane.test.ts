@@ -70,7 +70,7 @@ vi.mock('./team-claim.js', () => ({
         login: 'me',
         marked: true,
         timer: null,
-        record: { context: 'limn/review-claude', state: 'marked', reason: null, lastLine: 'reviewing', at: '' },
+        record: { context: 'ensemble/review-claude', state: 'marked', reason: null, lastLine: 'reviewing', at: '' },
       },
     };
   },

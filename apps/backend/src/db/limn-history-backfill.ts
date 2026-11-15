@@ -649,7 +649,7 @@ export async function limnHistoryCandidatePrIds(accountId: number): Promise<numb
           sql`exists (select 1 from reviews r where r.pr_id = ${pullRequests.id} and (r.limn_posted_by_user_id is not null or r.body like ${MARKER_LIKE} or (r.state = 'commented' and coalesce(trim(r.body), '') = '')))`,
           sql`exists (select 1 from review_comments c where c.pr_id = ${pullRequests.id} and (c.limn_posted_by_user_id is not null or c.body like ${MARKER_LIKE}))`,
           sql`exists (select 1 from pr_comments c where c.pr_id = ${pullRequests.id} and (c.limn_posted_by_user_id is not null or c.body like ${MARKER_LIKE}))`,
-          sql`exists (select 1 from ${commits} c where c.pr_id = ${pullRequests.id} and (c.limn_pushed_by_user_id is not null or c.message like '%Limn-Run:%'))`,
+          sql`exists (select 1 from ${commits} c where c.pr_id = ${pullRequests.id} and (c.limn_pushed_by_user_id is not null or c.message like '%Limn-Run:%' or c.message like '%Ensemble-Run:%'))`,
         ),
       ),
     )

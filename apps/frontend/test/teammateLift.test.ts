@@ -27,10 +27,10 @@ describe('teammateLiftLines', () => {
     ]);
   });
 
-  it('says when the teammate’s Limn was away', () => {
+  it('says when the teammate’s Ensemble was away', () => {
     expect(
       teammateLiftLines({ liftedTeammateBlocks: [{ teammateReviewId: 1, login: 'robin', status: 'dismissed', error: null, why: 'away' }] }),
-    ).toEqual([{ text: 'Dismissed robin’s request for changes: every point is addressed and robin’s Limn is away.', failed: false }]);
+    ).toEqual([{ text: 'Dismissed robin’s request for changes: every point is addressed and robin’s Ensemble is away.', failed: false }]);
   });
 });
 
@@ -39,9 +39,9 @@ describe('the settings', () => {
   it('always on (2026-11-10): no switch, said once behind the posting ⓘ', () => {
     expect(src).not.toContain('teamLiftConsent');
     expect(src).not.toContain('liftTeammateBlocks');
-    expect(src).not.toContain('Limn block');
-    expect(src).toContain('When a teammate’s Limn requested changes and every point is fixed');
+    expect(src).not.toContain('Ensemble block');
+    expect(src).toContain('When a teammate’s Ensemble requested changes and every point is fixed');
     // The away path is explained in the same ⓘ.
-    expect(src).toContain('their Limn has not looked at the latest commit or done anything on GitHub for 4 hours');
+    expect(src).toContain('their Ensemble has not looked at the latest commit or done anything on GitHub for 4 hours');
   });
 });

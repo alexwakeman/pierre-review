@@ -306,7 +306,7 @@ export async function mirrorRepos(
     if ('ok' in x) out.repos.push(x.ok);
     else out.failed.push(x.failed);
   }
-  if (skippedLocal.length > 0) out.notes.push(`Copied from Limn's own clone, not yours: ${skippedLocal.join(', ')}.`);
+  if (skippedLocal.length > 0) out.notes.push(`Copied from Ensemble's own clone, not yours: ${skippedLocal.join(', ')}.`);
   return out;
 }
 

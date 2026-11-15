@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // faked: the detail is set per test, and stream (a)'s file is made to carry 'review' — as if that
 // stream had ported it — so a kind Codex can run and one it cannot are both exercised.
 const codex = vi.hoisted(() => ({
-  detail: { runnable: false, message: 'Codex is not set up yet. Run: limn ai install codex' as string | null },
+  detail: { runnable: false, message: 'Codex is not set up yet. Run: ensemble ai install codex' as string | null },
 }));
 vi.mock('../ai/codex/detect.js', async (orig) => ({
   ...(await orig<typeof import('../ai/codex/detect.js')>()),
@@ -218,9 +218,9 @@ describe('detectClaudeAuth — LIMN_AI_PROVIDER=codex', () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
     process.env.LIMN_AI_PROVIDER = 'codex';
     // Not set up: the runnable kinds answer Codex's own sentence; the others name themselves.
-    codex.detail = { runnable: false, message: 'Codex is not set up yet. Run: limn ai install codex' };
-    expect(detectClaudeAuth('review')).toEqual({ status: 'none', message: 'Codex is not set up yet. Run: limn ai install codex' });
-    expect(detectClaudeAuth('complete')).toEqual({ status: 'none', message: 'Codex is not set up yet. Run: limn ai install codex' });
+    codex.detail = { runnable: false, message: 'Codex is not set up yet. Run: ensemble ai install codex' };
+    expect(detectClaudeAuth('review')).toEqual({ status: 'none', message: 'Codex is not set up yet. Run: ensemble ai install codex' });
+    expect(detectClaudeAuth('complete')).toEqual({ status: 'none', message: 'Codex is not set up yet. Run: ensemble ai install codex' });
     expect(detectClaudeAuth('fix')).toEqual({ status: 'none', message: codexKindNotAvailableMessage('fix') });
     // Installed and signed in with ChatGPT.
     codex.detail = { runnable: true, message: null };
@@ -231,6 +231,6 @@ describe('detectClaudeAuth — LIMN_AI_PROVIDER=codex', () => {
     expect(detectClaudeAuth()).toEqual({ status: 'none', message: CODEX_NOT_AVAILABLE_MESSAGE });
     // Not runnable for want of a known ChatGPT sign-in, with no sentence of its own: the sign-in line.
     codex.detail = { runnable: false, message: null };
-    expect(detectClaudeAuth('complete')).toEqual({ status: 'none', message: 'Sign in to Codex with ChatGPT: limn ai login codex' });
+    expect(detectClaudeAuth('complete')).toEqual({ status: 'none', message: 'Sign in to Codex with ChatGPT: ensemble ai login codex' });
   });
 });

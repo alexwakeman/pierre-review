@@ -585,7 +585,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // LOCAL ONLY; paths: shared STORY_BUILD_API + SANDBOX_SESSION_API). The whole family DECIDED here, by
   // exact shape, FOLLOWING THE TOKEN — it sits under no prefix the rules below would catch, so without
   // these lines every route (the agent turns AND the GitHub pushes) would fall to the 600/min blanket:
-  //   POST /api/story-builds                               boots a sandbox + the agent          → ai + ai_hourly
+  //   POST /api/story-builds                               boots a sandbox + the agent, and writes the
+  //                                                        team claim (a branch + one status)  → ai + ai_hourly + github_write
+  //   GET /api/story-builds/claim                          the team claim, read live from GitHub → pr_detail
+  //   POST /api/story-builds/claim/clear                   Clear: one status                    → github_write
   //   POST …/:id/messages · …/:id/build · …/:id/resume     one agent turn / a sandbox boot     → ai + ai_hourly
   //   POST …/:id/plan/reply · …/:id/plan/approve            a plan revision turn / the build turn → ai + ai_hourly
   //   POST …/:id/repos/:repoId/push · …/:id/push · …/:id/prs/:prId/push   branch push + PR create → github_write
@@ -612,7 +615,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return [TIERS.read];
   }
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
-    if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly];
+    // The start also writes the TEAM CLAIM on GitHub (a placeholder branch + one status).
+    if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly, TIERS.githubWrite];
+    // THE TEAM CLAIM: the story view's live read of the ticket branch (GitHub quota) and Clear (one status).
+    if (!mutating && path === '/api/story-builds/claim') return [TIERS.prDetail];
+    if (mutating && path === '/api/story-builds/claim/clear') return [TIERS.githubWrite];
     if (mutating && /^\/api\/story-builds\/\d+\/(messages|build|resume)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
     // Plan first: a Reply is a revision turn, Approve the build turn. Agree / Keep the story are DB only (read).
     if (mutating && /^\/api\/story-builds\/\d+\/plan\/(reply|approve)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];

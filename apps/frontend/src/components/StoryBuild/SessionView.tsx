@@ -29,7 +29,7 @@ const STORY_WORDS: SessionWords = {
 /** A PLAN-FIRST session (`session.plan` set): the agent plans on its own; the build starts from the plan
  *  panel's "Approve and start", never from the composer. */
 const PLAN_WORDS: Pick<SessionWords, 'empty' | 'chatPlaceholder' | 'buildPlaceholder'> = {
-  empty: 'The agent is reading the ticket and the code. Its plan shows above once Limn has checked it.',
+  empty: 'The agent is reading the ticket and the code. Its plan shows above once Ensemble has checked it.',
   chatPlaceholder: 'Ask a question, or tell the agent what to change in the plan.',
   buildPlaceholder: 'Ask for a change. It is a build turn: the agent may edit and test.',
 };

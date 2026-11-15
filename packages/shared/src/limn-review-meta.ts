@@ -541,12 +541,12 @@ export function isLimnBelowTeamMinimum(version: string | null | undefined, min: 
  *  findings are fixed.", auto-post.ts `liftBlockMessage`). Pure. */
 export function isLimnDismissalMessage(message: string | null | undefined): boolean {
   const m = (message ?? '').trim();
-  return m.startsWith('Limn withdrew its approval') || /^Limn \([^)]+\) checked /.test(m) || /^(Claude|Codex)['’]s blocking findings are fixed\.$/.test(m);
+  return /^(?:Ensemble|Limn) withdrew its approval/.test(m) || /^(?:Ensemble|Limn) \([^)]+\) checked /.test(m) || /^(Claude|Codex)['’]s blocking findings are fixed\.$/.test(m);
 }
 
 /** A dismissal message as the tab says it after "withdrawn: " — Limn's lead words and the final full
  *  stop dropped ("3 warnings found at 951c4aa"). null when empty. Pure. */
 export function dismissalReasonText(message: string | null | undefined): string | null {
-  const m = (message ?? '').replace(/\s+/g, ' ').trim().replace(/^Limn withdrew its approval:\s*/, '').replace(/\.$/, '').trim();
+  const m = (message ?? '').replace(/\s+/g, ' ').trim().replace(/^(?:Ensemble|Limn) withdrew its approval:\s*/, '').replace(/\.$/, '').trim();
   return m === '' ? null : m;
 }

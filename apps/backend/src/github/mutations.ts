@@ -1746,3 +1746,104 @@ async function setReactionNow(
     viewerCanReact: subject.viewerCanReact === true,
   };
 }
+
+// ---- Git data writes (the Implement build claim's placeholder branch) ----
+// Raw git-data REST writes live here, with the other guarded writes (write-origin.test.ts). The
+// placeholder belongs to the reader's Implement build, so its caller passes the reader's origin.
+
+/** POST git/commits: a commit object on `tree` with the given parents. Returns its sha. */
+export async function createGitCommit(
+  token: string,
+  owner: string,
+  name: string,
+  commit: { message: string; treeOid: string; parentOids: string[] },
+  origin: WriteOrigin,
+): Promise<string> {
+  return limnWrite(
+    origin,
+    'push',
+    {},
+    async () => {
+      const made = await ghRestPostFor<{ sha: string }>(token, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/git/commits`, {
+        message: commit.message,
+        tree: commit.treeOid,
+        parents: commit.parentOids,
+      });
+      return made.sha;
+    },
+    (sha) => ({ commitSha: sha }),
+  );
+}
+
+/** POST git/refs: create `refs/heads/<branch>` at `sha`. GitHub answers 422 when the ref exists (thrown with `status`). */
+export async function createGitBranchRef(
+  token: string,
+  owner: string,
+  name: string,
+  branch: string,
+  sha: string,
+  origin: WriteOrigin,
+): Promise<void> {
+  return limnWrite(
+    origin,
+    'push',
+    {},
+    async () => {
+      await ghRestPostFor(token, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/git/refs`, { ref: `refs/heads/${branch}`, sha });
+    },
+    () => ({ commitSha: sha }),
+  );
+}
+
+const branchRefPath = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/');
+
+/** PATCH git/refs/heads/<branch> to `sha` with `force: false` (a fast-forward only). Returns the HTTP outcome. */
+export async function fastForwardGitBranchRef(
+  token: string,
+  owner: string,
+  name: string,
+  branch: string,
+  sha: string,
+  origin: WriteOrigin,
+): Promise<{ ok: boolean; status: number }> {
+  return limnWrite(
+    origin,
+    'push',
+    {},
+    async () => {
+      const res = await ghRestPatchStatus(
+        token,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/git/refs/heads/${branchRefPath(branch)}`,
+        { sha, force: false },
+      );
+      return { ok: res.ok, status: res.status };
+    },
+    (r) => (r.ok ? { commitSha: sha } : { failed: `HTTP ${r.status}` }),
+  );
+}
+
+/** DELETE git/refs/heads/<branch>. true when GitHub deleted it. */
+export async function deleteGitBranchRef(
+  token: string,
+  owner: string,
+  name: string,
+  branch: string,
+  origin: WriteOrigin,
+): Promise<boolean> {
+  return limnWrite(
+    origin,
+    'push',
+    {},
+    async () => {
+      const res = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/git/refs/heads/${branchRefPath(branch)}`,
+        {
+          method: 'DELETE',
+          headers: { authorization: `token ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+        },
+      );
+      return res.ok;
+    },
+    (ok) => (ok ? { detail: `deleted ${branch}` } : { failed: `delete ${branch} refused` }),
+  );
+}

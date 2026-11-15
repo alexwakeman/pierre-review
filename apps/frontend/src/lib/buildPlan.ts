@@ -95,7 +95,7 @@ export function planStageLine(plan: Pick<BuildPlanView, 'status' | 'problem' | '
     case 'revising':
       return 'The agent is revising the plan.';
     case 'failed':
-      return plan.problem != null && plan.problem !== '' ? `The plan did not pass Limn's checks: ${plan.problem.replace(/\.$/, '')}.` : "The plan did not pass Limn's checks.";
+      return plan.problem != null && plan.problem !== '' ? `The plan did not pass Ensemble's checks: ${plan.problem.replace(/\.$/, '')}.` : "The plan did not pass Ensemble's checks.";
     case 'ready':
     case 'approved':
       return null;
@@ -110,8 +110,8 @@ export function contentionsHeading(contentions: readonly BuildPlanContention[], 
 
 /** What Limn removed from the agent's plan, in one line; null when nothing. Counts only, never the claims. */
 export function droppedLine(d: BuildPlanRevision['dropped']): string | null {
-  if (d.contentions > 0) return `Limn left out ${plural(d.contentions, 'point')} it could not check.`;
-  if (d.evidence > 0) return `Limn left out ${plural(d.evidence, 'piece', 'pieces')} of evidence it could not check.`;
+  if (d.contentions > 0) return `Ensemble left out ${plural(d.contentions, 'point')} it could not check.`;
+  if (d.evidence > 0) return `Ensemble left out ${plural(d.evidence, 'piece', 'pieces')} of evidence it could not check.`;
   return null;
 }
 

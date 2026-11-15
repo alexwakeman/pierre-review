@@ -28,7 +28,7 @@ export const START_PREFS_DEFAULT: StartPrefs = { autoApprovePlan: false, autoPus
 export function AutoApproveInfo(): JSX.Element {
   return (
     <InfoButton title="Approve automatically">
-      <p>Limn agrees with every change the plan proposes, approves it and starts the build. You are not asked.</p>
+      <p>Ensemble agrees with every change the plan proposes, approves it and starts the build. You are not asked.</p>
       <p className="mt-2">
         The ticket is not changed. After the pull request opens, the build shows the ticket changes the plan suggested, so you
         can update the ticket or leave it.
@@ -47,7 +47,7 @@ export function AutoApproveSetting({ build }: { build: StoryBuild }): JSX.Elemen
       <CheckboxBox checked={on} disabled={set.isPending} onChange={(e) => set.mutate({ id: build.id, on: e.target.checked })} />
       {AUTO_APPROVE_LABEL}
       <InfoButton title="Approve automatically">
-        <p>When the next plan is ready, Limn agrees with every change it proposes, approves it and starts the build.</p>
+        <p>When the next plan is ready, Ensemble agrees with every change it proposes, approves it and starts the build.</p>
         <p className="mt-2">A plan that is already waiting is not approved by this: press Approve and start.</p>
         <p className="mt-2">The ticket is not changed. After the pull request opens, the build shows the ticket changes.</p>
       </InfoButton>

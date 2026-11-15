@@ -217,9 +217,9 @@ describe.skipIf(!daemon)('an AI Fix session that resolves a merge conflict, live
     console.log('[live merge fix] evidence', JSON.stringify({ notes, merge: { ...built.merge, resolutionDiff: built.merge?.resolutionDiff?.slice(0, 2000) }, report: built.changeReport, merged: merged0, error: built.error, tools: built.session!.conversation.filter((c) => c.kind === 'tool').map((c) => (c as { summary: string }).summary).slice(0, 40) }));
     // The PR repository came through the repo store; the two merge commits through the mirror seams.
     expect(prepared.map((p) => p.baseSha)).toEqual([baseSha, mergeBase]);
-    expect(notes).toContain(`Limn started the merge of main (${baseSha.slice(0, 7)}): one file is in conflict (src/config.js).`);
+    expect(notes).toContain(`Ensemble started the merge of main (${baseSha.slice(0, 7)}): one file is in conflict (src/config.js).`);
     expect(built.merge).toMatchObject({ baseRef: 'main', baseSha, conflictedFiles: ['src/config.js'], status: 'valid', reason: null });
-    expect(notes).toContain('Limn checked the merge commit: main is merged and the conflict is resolved.');
+    expect(notes).toContain('Ensemble checked the merge commit: main is merged and the conflict is resolved.');
     expect(built.status).toBe('succeeded');
 
     // The commits themselves, out of the stored bundle: the merge's parents and its file.

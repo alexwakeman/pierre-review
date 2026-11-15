@@ -142,7 +142,7 @@ describe('the posted body', () => {
   });
 
   it('names the stored copy when the tickets could not be read again', () => {
-    expect(openPointsPostBlock({ ...op, fresh: false })).toContain("From Limn's stored copy of the ticket (read 2026-11-06).");
+    expect(openPointsPostBlock({ ...op, fresh: false })).toContain("From Ensemble's stored copy of the ticket (read 2026-11-06).");
   });
 
   it('is nothing without points; appended to a manual body; before the auto footer', () => {

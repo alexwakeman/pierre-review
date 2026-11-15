@@ -56,7 +56,7 @@ export function LinearApiAccess({
       <div>
         <h4 className="text-body font-semibold text-ui-ink">Linear API key</h4>
         <p className="mt-0.5 text-meta text-ui-mute">
-          Lets Limn read the Linear issues each PR is linked to: title, status, assignee, description
+          Lets Ensemble read the Linear issues each PR is linked to: title, status, assignee, description
           and acceptance criteria. A saved key is never shown again.
         </p>
       </div>

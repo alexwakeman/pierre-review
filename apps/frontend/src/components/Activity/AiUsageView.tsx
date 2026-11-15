@@ -70,7 +70,7 @@ function UsageInfo(): JSX.Element {
   return (
     <>
       <p>
-        Every AI run Limn made for this workspace in this window: reviews, story reviews, AI Fix, chat,
+        Every AI run Ensemble made for this workspace in this window: reviews, story reviews, AI Fix, chat,
         diagrams and the rest. Runs not tied to a repository, such as the sprint view, docs and
         summaries, count in every workspace.
       </p>

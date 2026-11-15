@@ -176,7 +176,7 @@ describe('refusals', () => {
     git(box, 'bundle', 'create', '-q', file, 'refs/limn/stack/1', 'refs/heads/evil', '^refs/limn/base');
     const ex: StackExtract = { tips: new Map([[1, tip]]), missing: new Map(), dirty: [], tooLargeBytes: null, bundle: execFileSync('cat', [file]) };
     const v = await verify([K], ex);
-    expect(v.prs[0]!.error).toBe('The commits from the sandbox are not in the form Limn expects.');
+    expect(v.prs[0]!.error).toBe('The commits from the sandbox are not in the form Ensemble expects.');
     expect(() => git(cache, 'rev-parse', '-q', '--verify', 'refs/heads/evil')).toThrow();
   });
 
@@ -199,7 +199,7 @@ describe('refusals', () => {
     git(box, 'add', 'vendor/lib');
     git(box, 'commit', '-qm', 'Add a submodule');
     const v = await verify([K], extract([K]));
-    expect(v.prs[0]!.error).toBe('P1 changes a submodule (vendor/lib). Limn does not push submodule changes.');
+    expect(v.prs[0]!.error).toBe('P1 changes a submodule (vendor/lib). Ensemble does not push submodule changes.');
   });
 
   it('over the size limit: never cut, every PR of the repository fails', async () => {
@@ -209,13 +209,13 @@ describe('refusals', () => {
     expect(ex.bundle).toBeNull();
     const v = await verify([K], ex);
     expect(v.prs[0]!.status).toBe('failed');
-    expect(v.prs[0]!.error).toMatch(/more than Limn takes from the sandbox/);
+    expect(v.prs[0]!.error).toMatch(/more than Ensemble takes from the sandbox/);
   });
 
   it('a tip the script claims but the bundle lacks', async () => {
     commit(box, 'a.txt', 'one\nP1\n', 'P1 work');
     const ex = extract([K]);
     const v = await verify([K], { ...ex, bundle: null });
-    expect(v.prs[0]!.error).toBe('Limn did not get the commits of P1 from the sandbox.');
+    expect(v.prs[0]!.error).toBe('Ensemble did not get the commits of P1 from the sandbox.');
   });
 });

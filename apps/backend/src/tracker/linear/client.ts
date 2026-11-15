@@ -132,7 +132,7 @@ export async function linearGraphql<T>(
     {
       accept: 'application/json',
       'content-type': 'application/json',
-      'user-agent': 'Limn',
+      'user-agent': 'Ensemble',
       // ⚠ NO "Bearer": Linear refuses a personal API key sent as a bearer token.
       authorization: token,
     },
@@ -427,15 +427,15 @@ export function linearErrorMessage(err: unknown): string {
     case 'bad_url':
       return 'The saved Linear key belongs to a different Linear workspace than the URL in Settings.';
     case 'redirect':
-      return 'Linear answered with a redirect, which Limn does not follow.';
+      return 'Linear answered with a redirect, which Ensemble does not follow.';
     case 'timeout':
       return 'Linear took too long to answer.';
     case 'not_json':
     case 'too_large':
-      return 'Linear sent an answer Limn could not read.';
+      return 'Linear sent an answer Ensemble could not read.';
     case 'http':
       return err instanceof JiraFetchError && err.status === 429
-        ? 'Linear’s rate limit is used up for now. Limn will read this ticket later.'
+        ? 'Linear’s rate limit is used up for now. Ensemble will read this ticket later.'
         : 'Linear answered with an error.';
     default:
       return 'Could not reach Linear.';

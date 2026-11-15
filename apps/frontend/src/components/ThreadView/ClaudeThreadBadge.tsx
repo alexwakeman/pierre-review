@@ -118,13 +118,13 @@ export function ClaudeThreadPills({
           {marker.stale && <p>The pull request has new commits since.</p>}
           {marker.stillOpen != null && (
             <p>
-              {marker.stillOpen.label}: a teammate’s Limn review found this point not addressed. When
+              {marker.stillOpen.label}: a teammate’s Ensemble review found this point not addressed. When
               it posted, it said so on the thread, and reopened the thread if it was resolved.
             </p>
           )}
           {teammateOnly ? null : marker.finding != null && marker.findingBy ? (
             <p>
-              {by} posted this comment. {marker.findingBy} checked it after your Limn did, and the
+              {by} posted this comment. {marker.findingBy} checked it after your Ensemble did, and the
               newest check wins. Resolved is GitHub’s own state.
             </p>
           ) : marker.finding != null ? (

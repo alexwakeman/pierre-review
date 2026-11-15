@@ -183,9 +183,9 @@ export function CheckRow({
           {check.limnOwned && (
             <span
               className="shrink-0 rounded-ui bg-ui-raise px-1 text-meta font-medium text-ui-mute"
-              title="Posted by Limn to mark an auto review. Not CI."
+              title="Posted by Ensemble to mark an auto review. Not CI."
             >
-              Limn
+              Ensemble
             </span>
           )}
           <span className="ml-auto shrink-0 text-meta text-ui-faint">{m.label}</span>

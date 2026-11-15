@@ -230,6 +230,18 @@ describe('the story view\'s entry (owner decision 4; shared `storyBuildOffered`)
     expect(entryOf(started({ stage: 'done' }))).toBeNull();
   });
 
+  it("THE TEAM CLAIM: a teammate building the ticket replaces the offer with their line — never an open session's mark", () => {
+    const claim = { login: 'robin', mine: false, live: true, since: '2026-11-15T10:00:00.000Z', leaseEndsAt: '2026-11-15T10:30:00.000Z', repo: 'acme/api' };
+    const n = node();
+    expect(storyViewBuildEntry({ ...n, build: null, check: null, claim })).toEqual({ kind: 'claimed', claim });
+    expect(storyViewBuildEntry({ ...started(), build: started().build ?? null, check: started().check ?? null, claim })).toEqual({ kind: 'claimed', claim });
+    // Nothing would be offered anyway (a PR, no check): no claim line either.
+    expect(storyViewBuildEntry({ ...node({ prs: [PR] }), build: null, check: null, claim })).toBeNull();
+    // The reader's own open session still opens.
+    expect(storyViewBuildEntry({ ...n, build: { id: 3, status: 'ready', readyRepos: 1, pushedRepos: 0 }, check: null, claim })).toEqual({ kind: 'open', mark: 'ready_to_push' });
+    expect(storyViewBuildEntry({ ...n, build: null, check: null, claim: null })).toEqual({ kind: 'offer', action: 'implement', reviewId: null });
+  });
+
   it('opens the session instead once one is open, with its mark', () => {
     expect(entryOf(node({ build: { id: 3, status: 'ready', readyRepos: 1, pushedRepos: 0 } }))).toEqual({ kind: 'open', mark: 'ready_to_push' });
     expect(entryOf(started({ build: { id: 3, status: 'planning', readyRepos: 0, pushedRepos: 0 } }))).toEqual({ kind: 'open', mark: 'building' });

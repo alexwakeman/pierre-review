@@ -69,7 +69,7 @@ describe('the lines', () => {
   });
 
   it('is never CI: the context is a Limn line', () => {
-    expect(DEPENDENCY_CLAIM_CONTEXT).toBe('limn/deps');
+    expect(DEPENDENCY_CLAIM_CONTEXT).toBe('ensemble/deps');
     expect(isLimnStatusContext(DEPENDENCY_CLAIM_CONTEXT)).toBe(true);
   });
 });
@@ -212,7 +212,7 @@ describe('the lifecycle (fake GitHub)', () => {
     expect(posted).toEqual([]);
   });
 
-  it('free → pending, then the done line, on limn/deps', async () => {
+  it('free → pending, then the done line, on ensemble/deps', async () => {
     const { g, posted } = fakeGithub('alex', []);
     setDepsClaimGithubForTest(g);
     const read = await readDepsClaim(target, log);
@@ -221,8 +221,8 @@ describe('the lifecycle (fake GitHub)', () => {
     expect(hold).toBeNull();
     await endDepsClaim(handle, { outcome: 'done', pushedSha: 'abcdef123' }, log);
     expect(posted).toEqual([
-      { state: 'pending', description: 'alex handling · fixing CI', context: 'limn/deps' },
-      { state: 'success', description: 'alex fixed CI · pushed abcdef1', context: 'limn/deps' },
+      { state: 'pending', description: 'alex handling · fixing CI', context: 'ensemble/deps' },
+      { state: 'success', description: 'alex fixed CI · pushed abcdef1', context: 'ensemble/deps' },
     ]);
   });
 

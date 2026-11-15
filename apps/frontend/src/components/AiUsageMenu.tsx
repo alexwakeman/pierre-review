@@ -191,17 +191,17 @@ export function AiUsageMenu({ variant = 'header' }: { variant?: 'header' | 'side
 /** What Limn's share means, and what its bar is drawn against. */
 function LimnShareInfo(): JSX.Element {
   return (
-    <InfoButton title="Limn’s share">
+    <InfoButton title="Ensemble’s share">
       <p>
-        The share of your plan’s allowance that Limn’s own runs used this week, and this 5-hour session when your
-        plan has one. The windows are your provider’s own and reset when it says; when Limn has not read a reset time
+        The share of your plan’s allowance that Ensemble’s own runs used this week, and this 5-hour session when your
+        plan has one. The windows are your provider’s own and reset when it says; when Ensemble has not read a reset time
         yet it counts the last 7 days and the last 5 hours.
       </p>
       <p>
-        The bar runs to Limn’s limit, {AI_BUDGET_DEFAULTS.weekSharePct}% of the week unless you change it in AI spend
+        The bar runs to Ensemble’s limit, {AI_BUDGET_DEFAULTS.weekSharePct}% of the week unless you change it in AI spend
         settings; past it, automatic runs pause. Switch the limit off there and the bar runs to your whole allowance.
       </p>
-      <p>Claude’s share is an estimate from Anthropic’s unpublished limits. Codex’s is your account’s figure, weighted by Limn’s tokens.</p>
+      <p>Claude’s share is an estimate from Anthropic’s unpublished limits. Codex’s is your account’s figure, weighted by Ensemble’s tokens.</p>
     </InfoButton>
   );
 }

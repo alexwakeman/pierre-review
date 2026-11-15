@@ -24,7 +24,7 @@ export function FeaturesSection(): JSX.Element | null {
         <InfoButton title="Features">
           <p>
             A page switched off leaves the sidebar and the search menu. A link to it still opens it, and
-            Limn keeps syncing and scoring as before.
+            Ensemble keeps syncing and scoring as before.
           </p>
           <p>
             The Timeline is off until you switch it on. While it is off, a link to it opens Open pull

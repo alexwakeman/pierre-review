@@ -74,7 +74,7 @@ export function AutoFixQueuePanel({ prId }: { prId: number }): JSX.Element | nul
       <div className="flex flex-wrap items-center gap-1.5">
         <h4 className="text-meta font-medium text-ui-ink">Auto fix</h4>
         <InfoButton title="Auto fix">
-          <p>On your own pull requests, Limn starts a fix by itself when there is something to fix.</p>
+          <p>On your own pull requests, Ensemble starts a fix by itself when there is something to fix.</p>
           <ul className="mt-2 list-disc space-y-1 pl-4">
             <li>It waits for the CI jobs on the latest commit to finish (at most {minutes(AUTO_FIX_CI_WAIT_MAX_MS)} minutes).</li>
             <li>When CI fails, it waits for the CI review to explain why (at most {minutes(AUTO_FIX_CI_REVIEW_WAIT_MS)} minutes).</li>

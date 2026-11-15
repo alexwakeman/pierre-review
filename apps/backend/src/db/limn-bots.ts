@@ -218,7 +218,41 @@ export async function ensureLimnReviewerRow(
     .execute();
 }
 
-export const LIMN_BOT_REASON = 'posts Limn review findings';
+export const LIMN_BOT_REASON = 'posts Ensemble review findings';
+
+/** The display-name lead an older Limn stored for its bots ("Limn · alice"). */
+const LEGACY_BOT_LABEL_PREFIX = 'Limn · ';
+
+/**
+ * THE RENAME (Limn → Ensemble): the bot names an older Limn STORED ("Limn · alice", in
+ * `users.display_name` and an untouched `workspace_reviewers.label`) now read "Ensemble · alice".
+ * A label the reader set by hand (`identity_source = 'manual'`) stays. The `limn:` login is never
+ * touched. Idempotent: a second run updates nothing. DB only.
+ */
+export async function renameLegacyLimnBotLabels(accountId: number, exec: Executor = db): Promise<number> {
+  const legacyLike = `${LEGACY_BOT_LABEL_PREFIX}%`;
+  const n = LEGACY_BOT_LABEL_PREFIX.length;
+  const people = await exec
+    .update(users)
+    .set({ displayName: sql`${limnBotLabel('')} || substr(${users.displayName}, ${n + 1})` })
+    .where(and(like(users.githubLogin, LIMN_LOGIN_LIKE), like(users.displayName, legacyLike)))
+    .returning({ id: users.id })
+    .execute();
+  const rows = await exec
+    .update(workspaceReviewers)
+    .set({ label: sql`${limnBotLabel('')} || substr(${workspaceReviewers.label}, ${n + 1})` })
+    .where(
+      and(
+        eq(workspaceReviewers.accountId, accountId),
+        eq(workspaceReviewers.kind, 'pierre'),
+        eq(workspaceReviewers.identitySource, 'auto'),
+        like(workspaceReviewers.label, legacyLike),
+      ),
+    )
+    .returning({ id: workspaceReviewers.id })
+    .execute();
+  return people.length + rows.length;
+}
 
 /** Every `limn:` bot user id (global, like `users`). */
 export async function limnBotUserIds(exec: Executor = db): Promise<number[]> {
@@ -622,6 +656,7 @@ export async function reattributeLimnRows(
         or(
           isNotNull(commits.limnPushedByUserId),
           like(commits.message, '%Limn-Run:%'),
+          like(commits.message, '%Ensemble-Run:%'), // the trailer under either name
           sql`lower(${commits.sha}) in (select lower(la.commit_sha) from limn_actions la where la.account_id = ${accountId} and la.commit_sha is not null)`,
         ),
       ),

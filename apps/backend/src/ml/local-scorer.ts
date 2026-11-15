@@ -15,6 +15,7 @@ import { esmEntryOf, findPackageDir } from '../ai/runtime.js';
 import type { ScoreItem, ScoreResult } from './decode.js';
 import type { ScorerInit, ScorerReply } from './scorer-process.js';
 import { cpuShareFrom, threadsFrom } from './throttle.js';
+import { readEnv } from '../env-name.js';
 
 export interface LocalBatch {
   results: ScoreResult[];
@@ -32,7 +33,7 @@ export class LocalScorerError extends Error {
   }
 }
 
-const IDLE_MS = Number(process.env.LIMN_ML_IDLE_MS) > 0 ? Number(process.env.LIMN_ML_IDLE_MS) : 10 * 60_000;
+const IDLE_MS = Number(readEnv(process.env, 'ML_IDLE_MS')) > 0 ? Number(readEnv(process.env, 'ML_IDLE_MS')) : 10 * 60_000;
 const TASKPOLICY = '/usr/sbin/taskpolicy';
 
 // dist/ml/local-scorer.js runs scorer-process.js; from source (tsx dev, vitest) this file is .ts
@@ -100,8 +101,8 @@ function lowerPriority(pid: number | undefined): void {
 function startChild(modelsDir: string): ChildProcess {
   const init: ScorerInit = {
     modelsDir,
-    intraOpThreads: threadsFrom(process.env.LIMN_ML_THREADS),
-    cpuShare: cpuShareFrom(process.env.LIMN_ML_CPU_SHARE),
+    intraOpThreads: threadsFrom(readEnv(process.env, 'ML_THREADS')),
+    cpuShare: cpuShareFrom(readEnv(process.env, 'ML_CPU_SHARE')),
   };
   const nodeArgs = childNodeArgs();
   // taskpolicy EXECs node in place, so the pid, the IPC channel and every flag carry through.
