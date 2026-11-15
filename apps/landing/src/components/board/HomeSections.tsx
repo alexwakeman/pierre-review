@@ -2,8 +2,8 @@ import { Link } from '../../router';
 import { SITE_NAME } from '../../lib/site';
 
 // ---------------------------------------------------------------------------
-// The home page's three sections after the hero: how it works (the build flow), review
-// as an ensemble (the team circle) and dependency updates (bot automation). Each one
+// The home page's three sections after the hero: review as an ensemble (the team
+// circle), how it works (the build flow) and dependency updates (bot automation). Each one
 // ends on a link to the page that tells it in full (/build, /ensemble-review,
 // /automation).
 //

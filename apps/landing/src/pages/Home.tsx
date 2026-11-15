@@ -8,8 +8,8 @@ import './home.css';
 
 // ---------------------------------------------------------------------------
 // The home page, in the board design (src/board.css): the claim, then the three things
-// the product is — build (ticket to pull request), ensemble review (each teammate's own
-// agent, GitHub as the source of truth) and dependency automation — each ending on a
+// the product is — ensemble review (each teammate's own agent, GitHub as the source of
+// truth), build (ticket to pull request) and dependency automation — each ending on a
 // link to its own page. Everything else lives on /everything-else.
 //
 // useReveal puts `js-rise` on the root from an effect and reveals each `.rise`
@@ -23,8 +23,8 @@ export default function Home(): JSX.Element {
   return (
     <div className="lb home" ref={ref}>
       <Hero />
-      <HowItWorks />
       <EnsembleSection />
+      <HowItWorks />
       <BotsSection />
       <Close />
     </div>
