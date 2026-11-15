@@ -185,7 +185,7 @@ const WORKSPACE: Workspace = {
   createdAt: iso(60),
 };
 
-const WORKSPACES: WorkspacesResponse = { workspaces: [WORKSPACE] };
+export const WORKSPACES: WorkspacesResponse = { workspaces: [WORKSPACE] };
 
 const REPO: Repo = {
   id: 10,

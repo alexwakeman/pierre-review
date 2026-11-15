@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { installMockApi } from './mock-api.js';
+import { installMockApi, WORKSPACES } from './mock-api.js';
 import { CHRONOLOGY_FLOW, DENSE_FLOW_TREND } from './chronology-fixtures.js';
 
 // Reports → Chronology → "Over time", at a real workspace's density (chronology-fixtures.ts):
@@ -207,12 +207,24 @@ test('the People + bots / People toggle saves the view and re-reads the panel an
     if (u.pathname === '/api/flow-findings' || u.pathname === '/api/flow-trend') reads.push(`${u.pathname}?${u.searchParams.get('view')}`);
   });
   await openChronology(page);
-  // Registered after the mock, so it answers first.
+  // Registered after the mock, so they answer first. The saved view is STORED: the hook refetches the
+  // workspace list once the PUT settles, and a list that forgot the view would flip the toggle back.
+  let savedView: string | null = null;
   await page.route(
     (u) => /^\/api\/workspaces\/\d+\/flow-view$/.test(u.pathname),
     async (r) => {
-      puts.push(r.request().postDataJSON());
+      const body = r.request().postDataJSON() as { view: string };
+      puts.push(body);
+      savedView = body.view;
       await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ workspace: {} }) });
+    },
+  );
+  await page.route(
+    (u) => u.pathname === '/api/workspaces',
+    async (r) => {
+      if (r.request().method() !== 'GET' || savedView == null) return r.fallback();
+      const body = { ...WORKSPACES, workspaces: WORKSPACES.workspaces.map((w) => ({ ...w, flowView: savedView })) };
+      await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     },
   );
   const toggle = page.getByTestId('chronology-view');
