@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.43] - 2026-11-15
+
 ### Added
 
 - Settings → Features: switches for AI (Claude and Codex) and Bot comment analysis. Switching one on that is not downloaded asks first, then downloads it; an installed one lists what was found. Switched off, AI features show how to set them up again and nothing runs automatically, and no new bot comments are scored. Nothing is deleted.
