@@ -460,7 +460,7 @@ export function teammateStillOpenHold(
   const open = [...newest.values()].filter((v) => v.outcome === 'not_addressed' || v.outcome === 'still_open');
   if (open.length === 0) return null;
   const who = [...new Set(open.map((o) => o.login))].sort();
-  const name = who.length === 1 ? `${who[0]}’s Limn` : 'a teammate’s Limn';
+  const name = who.length === 1 ? `${who[0]}’s Ensemble` : 'a teammate’s Ensemble';
   return {
     heldReason: 'team_open',
     text: `Not approved: ${name} judged ${open.length === 1 ? 'a point' : `${open.length} points`} still open.`,

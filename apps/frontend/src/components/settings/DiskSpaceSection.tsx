@@ -26,12 +26,12 @@ export function DiskSpaceSection(): JSX.Element | null {
       info={
         <InfoButton title="Disk space">
           <p>
-            Limn keeps one copy of each repository an AI run has read, and checks a pull request out
+            Ensemble keeps one copy of each repository an AI run has read, and checks a pull request out
             for each run. A run removes its checkout when it ends.
           </p>
           <p>
             A checkout left behind by a crash, or for a pull request that has merged or closed, is
-            removed when Limn starts and when a new run begins. A checkout holding a fix you have not
+            removed when Ensemble starts and when a new run begins. A checkout holding a fix you have not
             pushed is kept until you push or discard it, for up to 14 days.
           </p>
         </InfoButton>

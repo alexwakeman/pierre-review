@@ -159,6 +159,9 @@ export interface AccountExport {
   storyBuildStoryChecks: Record<string, unknown>[];
   storyBuildAcResponses: Record<string, unknown>[];
   storyBuildLoopPushes: Record<string, unknown>[];
+  /** Story chats (migration 0192): the reader's questions and the answers. */
+  storyChats: Record<string, unknown>[];
+  storyChatTurns: Record<string, unknown>[];
 }
 
 /** A stored story-build patch is exported up to this many characters. */
@@ -631,6 +634,13 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       .execute(),
   ]);
 
+  const storyChatRows = await db.select().from(schema.storyChats).where(eq(schema.storyChats.accountId, accountId)).limit(EXPORT_ROW_CAP + 1).execute();
+  const storyChatTurnRows = await db
+    .select()
+    .from(schema.storyChatTurns)
+    .where(eq(schema.storyChatTurns.accountId, accountId))
+    .limit(EXPORT_ROW_CAP + 1)
+    .execute();
   const extraExternalRows = await db
     .select({ workspaceId: workspaceExternalRepos.workspaceId, repoId: workspaceExternalRepos.repoId })
     .from(workspaceExternalRepos)
@@ -708,5 +718,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     storyBuildStoryChecks: capped('storyBuildStoryChecks', storyBuildStoryCheckRows),
     storyBuildAcResponses: capped('storyBuildAcResponses', storyBuildAcResponseRows),
     storyBuildLoopPushes: capped('storyBuildLoopPushes', storyBuildLoopPushRows),
+    storyChats: capped('storyChats', storyChatRows),
+    storyChatTurns: capped('storyChatTurns', storyChatTurnRows),
   };
 }

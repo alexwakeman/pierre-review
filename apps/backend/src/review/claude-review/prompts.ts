@@ -312,7 +312,7 @@ function pushPreviousReviewSection(
     lines.push(
       words.branch
         ? 'Some findings below have "The build agent\'s answers": the agent that wrote the code says what it did, or why it did not change the code. Judge the most recent answer. For those findings ONLY, when the code has not dealt with the finding, judge the answer instead, on the code:'
-        : 'Some findings below have "Replies on GitHub": people answering that comment. Replies marked "posted from Limn" are earlier replies on this finding, shown so the conversation reads whole; judge the most recent reply that is NOT marked so. For those findings ONLY, when the code has not dealt with the finding, judge the reply instead, on the code:',
+        : 'Some findings below have "Replies on GitHub": people answering that comment. Replies marked "posted from Ensemble" are earlier replies on this finding, shown so the conversation reads whole; judge the most recent reply that is NOT marked so. For those findings ONLY, when the code has not dealt with the finding, judge the reply instead, on the code:',
     );
     lines.push(
       "- reply_accepted: the reply is reasonable. Set `acceptKind` to 'not_valid' when it shows the finding was wrong or does not apply here, or 'deferred' when it promises a reasonable later fix (a follow-up pull request, a ticket). Put ONE short sentence acknowledging it in `reply`, for example 'Fair point, a follow-up PR works.'",
@@ -387,7 +387,7 @@ function pushPreviousReviewSection(
     } else if (hasReplies(f)) {
       body.push(words.branch ? "The build agent's answers (oldest first):" : 'Replies on GitHub (oldest first):');
       for (const r of f.thread!.replies) {
-        body.push(words.branch ? `${r.author}:` : r.fromLimn ? `@${r.author} (posted from Limn, an earlier reply on this finding):` : `@${r.author}:`);
+        body.push(words.branch ? `${r.author}:` : r.fromLimn ? `@${r.author} (posted from Ensemble, an earlier reply on this finding):` : `@${r.author}:`);
         body.push(r.body);
       }
       if (f.thread!.pushedBack) body.push('(An earlier review already replied once to push back on this thread.)');
@@ -454,7 +454,7 @@ export function pushConversationPool(
 export function conversationLine(c: FindingConversation): string {
   const linked = new Set(c.linked);
   const refs = c.replies.map((r) => (linked.has(r.ref) ? `${r.ref} (links to or quotes this finding)` : r.ref));
-  const tail = c.pushedBack ? ' Limn already said once on GitHub that this is still open.' : '';
+  const tail = c.pushedBack ? ' Ensemble already said once on GitHub that this is still open.' : '';
   return `Posted as a PR comment. PR conversation since then: ${refs.join(', ')}.${tail}`;
 }
 

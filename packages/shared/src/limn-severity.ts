@@ -197,7 +197,7 @@ export function limnPosterOf(botLogin: string | null | undefined): string | null
   return isLimnBotLogin(botLogin) ? botLogin!.slice(LIMN_BOT_LOGIN_PREFIX.length) : null;
 }
 
-/** The bot's display name: "Limn · alice". */
+/** The bot's display name: "Ensemble · alice". */
 export function limnBotLabel(posterLogin: string): string {
   return `${PRODUCT_NAME} · ${posterLogin}`;
 }

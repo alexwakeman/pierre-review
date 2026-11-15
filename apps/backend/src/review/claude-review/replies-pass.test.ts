@@ -218,9 +218,9 @@ describe('the prompt', () => {
     const p = buildRepliesPrompt({ ...args, provider: 'claude' });
     expect(p).toContain('---BEGIN THREAD T1 n0nce---');
     expect(p).toContain('---END THREAD T1 n0nce---');
-    expect(p).toContain('@me (posted from Limn):');
+    expect(p).toContain('@me (posted from Ensemble):');
     expect(p).toContain('Code at the current head (from line 5):');
-    expect(p).toContain('(Limn already pushed back once on this thread.)');
+    expect(p).toContain('(Ensemble already pushed back once on this thread.)');
     expect(p).toContain('(The thread was resolved on GitHub by @alice.)');
     expect(p).toContain('Call submit_replies once with { replies }.');
   });

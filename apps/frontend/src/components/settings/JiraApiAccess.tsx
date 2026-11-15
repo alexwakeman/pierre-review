@@ -72,7 +72,7 @@ export function JiraApiAccess({
           Jira API access (optional)
         </h4>
         <p className="mt-0.5 text-meta text-ui-mute">
-          Lets Limn read each ticket a PR names: its title, status and assignee, its description
+          Lets Ensemble read each ticket a PR names: its title, status and assignee, its description
           and acceptance criteria. A saved token is never shown again.
         </p>
       </div>

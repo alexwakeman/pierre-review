@@ -17,7 +17,7 @@
 // ⚠ CLAIM BEFORE WRITE, NEVER RETRIED: every write's row is moved 'pending' → 'claimed' by
 // compare-and-set BEFORE the network call, and its outcome recorded; a failure stays failed. The
 // PARTIAL UNIQUE (account, repo, release_tag_name) index on release_items' LIVE rows (pending /
-// claimed / done, migration 0194) makes a second press for the same tag a no-op (the claim is the
+// claimed / done, migration 0197) makes a second press for the same tag a no-op (the claim is the
 // row), and a ticket is commented on only when its repos tagged in THIS release — so pressing again
 // writes nothing new. A FAILED or REFUSED row holds no name: a later press (a reader's press, never an
 // automatic retry) is a new claim on a new row. A press where no repo gets a row records no release.
@@ -361,7 +361,7 @@ export async function createRelease(
     let inserted = 0;
     for (const r of repoChecks) {
       // The tag name is in an EARLIER release's LIVE row (pending / claimed / done — the partial unique
-      // index, migration 0194): that press owns it (claimed, never retried) — nothing is recorded for
+      // index, migration 0197): that press owns it (claimed, never retried) — nothing is recorded for
       // it here. A failed or refused row holds no name, so a new press is a new claim on a new row.
       const livePrior = async (): Promise<string | null> =>
         (

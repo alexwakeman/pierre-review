@@ -1,17 +1,29 @@
 // ---------------------------------------------------------------------------
 // THE PRODUCT NAME, and the three labels that compose it.
 //
-// The app is called Limn. It used to be called Pierre, and the rename was staged:
-// every user-visible string moved, while the published/runtime identifiers stayed
-// on the old spelling because they are migrations rather than text edits.
-// The npm package (`limn-review`, bin `limn`) and the data dir (`~/.limn`, moved once
-// from `~/.pierre-review` on first boot) have since moved too. The
-// canonical statement of that split lives at apps/landing/src/lib/site.ts (which
-// has its own SITE_NAME and deliberately imports nothing from here — the landing
-// bundle does not depend on this package). Short version of what is STILL
-// `pierre` on purpose, and must never be swept:
+// The app is called Ensemble. It was called Pierre, then Limn; each rename moved every user-visible
+// string and left the stored and published identifiers on the old spelling, because changing those
+// is a migration, not a text edit.
 //
-//   · the domain, the `pierre_session` / `pierre_oauth_state` cookies
+// THE LIMN → ENSEMBLE RENAME (2026-11). What moved: every string a person reads (SPA copy, CLI output,
+// server sentences, text written to GitHub and Slack, prompts that name the product), the npm package
+// (`ensemble-review`, bin `ensemble`; `limn-review` and `pierre-review` are forwarding stubs), the data
+// dir (`~/.ensemble`, moved ONCE from `~/.limn` or `~/.pierre-review`), the commit-status prefix
+// (`ensemble/`, written; `limn/` still read — limn-status.ts) and the user-set environment variables
+// (`ENSEMBLE_X` wins, `LIMN_X` still read — backend env-name.ts). What STAYS `limn`, on purpose, and
+// must never be swept:
+//
+//   · identifiers: function, type and file names (`limnWrite`, `isLimnStatusContext`, limn-status.ts)
+//   · the stored bot login prefix `limn:<login>` (local DB only; only its DISPLAY says "Ensemble · alice")
+//   · the `limn.*` localStorage keys, DB tables and columns, migrations, `/api/pro/*` paths
+//   · test-only environment variables (`LIMN_TEST_RUN_DIR`, `LIMN_SCRATCH*`, `LIMN_SANDBOX_LIVE` …)
+//   · git namespaces (`refs/limn/…`, `limn/…` branches), cookie names
+// Every PARSER of text an older Limn wrote (status lines, PR-body headings, footers, bot names)
+// reads both the old and the new wording.
+//
+// Still `pierre`, from the first rename (never swept either):
+//
+//   · the `pierre_session` / `pierre_oauth_state` cookies
 //   · the ~20 `pierre:*` localStorage keys
 //   · the AutomatedReviewerKind `'pierre'` — a persisted DB value AND a
 //     400-validated API path segment
@@ -19,16 +31,15 @@
 //   · `<!-- pierre:claude-review v=1 -->`, already stamped into GitHub review
 //     bodies we do not control
 //
-// So the name is a STRING, never an identifier. Use PRODUCT_NAME wherever the
-// name is composed into a sentence or a label; the ~30 plain "Limn" literals
-// already in the SPA are left alone on purpose (rewriting files nobody is
-// otherwise touching buys churn, not safety).
+// The landing has its own SITE_NAME (apps/landing/src/lib/site.ts) and imports nothing from here.
+// So the name is a STRING, never an identifier. Use PRODUCT_NAME wherever the name is composed
+// into a sentence or a label.
 // ---------------------------------------------------------------------------
 
 import type { GenericReviewerKind } from './types.js';
 
 /** The product name, as a reader sees it. */
-export const PRODUCT_NAME = 'Limn';
+export const PRODUCT_NAME = 'Ensemble';
 
 /**
  * Display labels for the three UNBRANDED automated-reviewer kinds.
@@ -54,6 +65,6 @@ export const PRODUCT_NAME = 'Limn';
 export const GENERIC_REVIEWER_LABELS: Readonly<Record<GenericReviewerKind, string>> = {
   in_house: 'In-house / custom',
   vendor: 'Vendor',
-  // The vendor of every per-poster Limn bot ("Limn · alice" is the bot's own label).
+  // The vendor of every per-poster bot of ours ("Ensemble · alice" is the bot's own label).
   pierre: PRODUCT_NAME,
 };

@@ -6,6 +6,7 @@ import { pruneOldData } from '../db/retention.js';
 import { getScheduledJobs } from './scheduled-jobs.js';
 import { AUTO_MERGE_CRON, runAutoMergeTick } from '../merge/auto-merge-runner.js';
 import { runDependencyPolicyTick } from '../merge/dependency-policy.js';
+import { releaseStaleDepsClaims } from '../merge/deps-claim-release.js';
 import {
   reconcileDependencyActionsOnStartup,
   runDependencyAutomationTick,
@@ -72,17 +73,20 @@ export function startScheduler(log: FastifyBaseLogger): void {
   // catches internally, so a bad tenant never crashes the loop. Runs in BOTH modes: local is
   // the common case (the app is open on the developer's machine) and cloud arms per account.
   if (cron.validate(AUTO_MERGE_CRON)) {
-    // A dependency action left `running` by the last process is recorded failed, never retried.
-    void reconcileDependencyActionsOnStartup().catch((err) =>
-      log.warn({ err }, 'dependency automation: startup reconcile failed'),
-    );
+    // A dependency action left `running` by the last process is recorded failed, never retried; then
+    // the `limn/deps` ledger's reconciler releases the lines that process left pending.
+    void reconcileDependencyActionsOnStartup()
+      .catch((err) => log.warn({ err }, 'dependency automation: startup reconcile failed'))
+      .finally(() => releaseStaleDepsClaims(log));
     autoMergeTask = cron.schedule(AUTO_MERGE_CRON, () => {
-      // Dependency automation first (approve, resolve conflicts — OFF unless a workspace switched
-      // it on), then the dependency auto-merge sweep arms (an approval may be what lets it land),
-      // so a fresh policy intent is evaluated by the same tick. All three never throw.
+      // Dependency automation first (approve, resolve conflicts — ON unless a workspace switched it
+      // off), then the dependency auto-merge sweep arms (an approval may be what lets it land),
+      // so a fresh policy intent is evaluated by the same tick; then the watcher; LAST the
+      // `limn/deps` reconciler (it sees every intent the watcher just ended). All four never throw.
       void runDependencyAutomationTick(log)
         .finally(() => runDependencyPolicyTick(log))
-        .finally(() => runAutoMergeTick(log));
+        .finally(() => runAutoMergeTick(log))
+        .finally(() => releaseStaleDepsClaims(log));
     });
     log.info(`auto-merge watcher started (cron "${AUTO_MERGE_CRON}")`);
   }

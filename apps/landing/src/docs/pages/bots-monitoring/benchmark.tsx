@@ -4,7 +4,7 @@ import { DocLink, H2, H3, MiniTable, Note, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Benchmark',
-  summary: 'How your bots compare with the same bots in similar-sized repositories, and when Limn refuses to compare.',
+  summary: 'How your bots compare with the same bots in similar-sized repositories, and when Ensemble refuses to compare.',
 };
 
 export default function Page(): JSX.Element {
@@ -14,14 +14,14 @@ export default function Page(): JSX.Element {
         The <Ui>Benchmark</Ui> tab of Bots Monitoring compares each of your review bots with the same bot running in
         other teams’ repositories of a similar size. It answers questions your own data cannot: is CodeRabbit this
         noisy for everyone, or only for us? Do other teams act on more of what Copilot says? Where a fair comparison
-        is not possible, Limn says so and shows no number.
+        is not possible, Ensemble says so and shows no number.
       </p>
 
 
       <H2 id="where-the-comparison-comes-from">Where the comparison comes from</H2>
       <p>
-        The comparison data ships inside Limn. It was measured from about 2,200 other repositories and is grouped by
-        bot and by repository size (how many pull requests a repository merges in 14 days). Limn places your
+        The comparison data ships inside Ensemble. It was measured from about 2,200 other repositories and is grouped by
+        bot and by repository size (how many pull requests a repository merges in 14 days). Ensemble places your
         repositories in those groups on your computer. Nothing about your repositories is sent anywhere to make the
         comparison.
       </p>
@@ -56,7 +56,7 @@ export default function Page(): JSX.Element {
 
       <H3>Findings that stand out</H3>
       <p>
-        Limn raises a finding only when a figure is far from typical <em>and</em> the gap is large, so a healthy
+        Ensemble raises a finding only when a figure is far from typical <em>and</em> the gap is large, so a healthy
         repository is not flagged just for being at one end of the range. The findings are:
       </p>
       <ul>
@@ -67,9 +67,9 @@ export default function Page(): JSX.Element {
       </ul>
       <p>Each finding comes with a suggested action. No AI writes them.</p>
 
-      <H2 id="when-limn-refuses">When Limn refuses to compare</H2>
+      <H2 id="when-ensemble-refuses">When Ensemble refuses to compare</H2>
       <p>
-        A comparison against the wrong group is worse than none, so Limn shows a reason instead of a number. The
+        A comparison against the wrong group is worse than none, so Ensemble shows a reason instead of a number. The
         reasons you may see include:
       </p>
       <MiniTable
@@ -81,7 +81,7 @@ export default function Page(): JSX.Element {
           { _key: 'v', r: 'We have never measured this bot', m: 'The comparison data has no record of this product.' },
           { _key: 'f', r: 'Too few teams run this bot to compare against', m: 'The group is too small to be fair.' },
           { _key: 'c', r: 'No team we measured runs this bot on a repo this size', m: 'There is no group of your size for it.' },
-          { _key: 'n', r: 'This repo is too new to compare', m: 'Limn has watched it for under 14 days, so its figures would be too low.' },
+          { _key: 'n', r: 'This repo is too new to compare', m: 'Ensemble has watched it for under 14 days, so its figures would be too low.' },
           { _key: 'i', r: 'Nothing merged here recently', m: 'There is no recent work to measure.' },
           { _key: 'p', r: 'Price entered, but the seat count is missing', m: 'A per-seat price needs the number of seats to give a monthly cost.' },
         ]}
@@ -92,7 +92,7 @@ export default function Page(): JSX.Element {
       </p>
       <Note title="The comparison data ages">
         The data is a snapshot. As it ages the tab says <Ui>Comparison data is getting old</Ui>, then{' '}
-        <Ui>Comparison data is out of date</Ui>, then <Ui>Comparison data has expired</Ui>. Updating Limn brings a
+        <Ui>Comparison data is out of date</Ui>, then <Ui>Comparison data has expired</Ui>. Updating Ensemble brings a
         newer snapshot when one is released.
       </Note>
 
@@ -108,7 +108,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <Note title="Money is per workspace">
         Cost is worked out for the whole workspace only. The same subscription may also cover repositories outside
-        this workspace, which Limn cannot see, and the card says so.
+        this workspace, which Ensemble cannot see, and the card says so.
       </Note>
 
       <H2 id="why-it-helps">Why it helps</H2>

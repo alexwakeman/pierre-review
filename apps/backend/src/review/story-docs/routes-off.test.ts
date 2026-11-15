@@ -24,7 +24,7 @@ describe('story docs routes with agentic AI off', () => {
     expect((await app.inject({ method: 'GET', url: `/api/docs/story-alignment?ident=${ident}` })).statusCode).toBe(404);
     const post = await app.inject({ method: 'POST', url: '/api/docs/story-alignment', payload: { ident: 'jira:https://acme.atlassian.net#ABC-1' } });
     expect(post.statusCode).toBe(404);
-    expect(post.json().message).toMatch(/npx limn-review/);
+    expect(post.json().message).toMatch(/npx ensemble-review/);
     await app.close();
   });
 });

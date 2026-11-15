@@ -92,7 +92,7 @@ async function pushFixHeld(
 
   if (merge != null) {
     if (merge.mergeSha == null || merge.resultSha == null) {
-      return { ok: false, code: 'not_pushable', message: 'Nothing is pushed: Limn has not checked the merge.' };
+      return { ok: false, code: 'not_pushable', message: 'Nothing is pushed: Ensemble has not checked the merge.' };
     }
     if (input.target !== 'existing') {
       return { ok: false, code: 'not_pushable', message: "A fix with a merge pushes only to the pull request's own branch." };

@@ -96,11 +96,11 @@ export default function Page(): JSX.Element {
           from the description (and says so).
         </li>
         <li>
-          With a small library, AI reads all of it. With a large one, Limn first finds the sections that share words
+          With a small library, AI reads all of it. With a large one, Ensemble first finds the sections that share words
           with the ticket, AI picks up to eight of them, and then reads only those.
         </li>
         <li>
-          Every point must quote a section of your library, and Limn checks that the quote is really there. A point
+          Every point must quote a section of your library, and Ensemble checks that the quote is really there. A point
           with no checked quote is dropped, never shown. So the check can say less than AI wrote, but never
           something your docs do not say.
         </li>

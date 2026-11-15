@@ -17,7 +17,7 @@ export interface ReleaseSettingsResponse extends ReleaseSettings {
   /** Both suffixes are set: the Releases tab and the hotfix option work. */
   configured: boolean;
   /**
-   * A release already exists in this workspace (a release Limn made, or a stored tag that ends in
+   * A release already exists in this workspace (a release Ensemble made, or a stored tag that ends in
    * the current release suffix). The form warns before a suffix change: older tags stop counting.
    */
   hasReleases: boolean;

@@ -1,9 +1,11 @@
-// The request handler for limn-review.com.
+// The request handler for ensemble.ac.
 //
 //   /                  the prerendered landing (apps/landing/dist)
 //   /demo, /demo/...   302 to / (the static demo is gone; old links land on the home page)
 //   /getting-started   301 to the docs' Install and run page (the page was folded into the
 //                      docs), with its old aliases /for-developers and /features
+//   /teams             301 to /ensemble-review; /reporting and /how-we-measure 301 to their
+//                      sections of /everything-else (MOVED)
 //   /api/health        liveness, for Railway's health check
 //   /api/contact/...   the contact form (contact.ts)
 //
@@ -24,9 +26,12 @@ import { cachePolicyFor, fileAt, safeJoin, sendFile } from './static.js';
 
 /**
  * Retired landing pages whose content now lives in the docs: path → where it lives now.
- * A 301: these pages are gone for good. Mirrors MOVED_TO_DOCS in apps/landing src/App.tsx.
+ * A 301: these pages are gone for good. Mirrors MOVED in apps/landing src/App.tsx.
  */
-export const MOVED_TO_DOCS: Readonly<Record<string, string>> = {
+export const MOVED: Readonly<Record<string, string>> = {
+  '/teams': '/ensemble-review',
+  '/reporting': '/everything-else#reporting',
+  '/how-we-measure': '/everything-else#how-we-measure',
   '/getting-started': '/docs/getting-started/install-and-run',
   '/for-developers': '/docs/getting-started/install-and-run',
   '/features': '/docs/getting-started/install-and-run',
@@ -45,7 +50,7 @@ export interface SiteOptions {
   contactWebhookUrl: string;
   /** CONTACT_TICKET_SECRET. Null ⇒ a per-process random key. */
   ticketSecret: string | null;
-  /** SITE_URL, e.g. https://limn-review.com. Enables the www → apex redirect. */
+  /** SITE_URL, e.g. https://ensemble.ac. Enables the www → apex redirect. */
   canonicalOrigin: string | null;
   /** REDIRECT_HOSTS: other hosts 301'd to canonicalOrigin (the old domain). */
   redirectHosts?: readonly string[];
@@ -315,12 +320,15 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
     }
     // An own-property lookup only: a path such as /constructor must not match Object.prototype.
     const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path;
-    const moved = Object.hasOwn(MOVED_TO_DOCS, trimmed) ? MOVED_TO_DOCS[trimmed] : undefined;
+    const moved = Object.hasOwn(MOVED, trimmed) ? MOVED[trimmed] : undefined;
     if (moved) {
       // Keep the query string (campaign tags); the fragment never reaches the server.
       const query = url.includes('?') ? url.slice(url.indexOf('?')) : '';
       res.statusCode = 301;
-      res.setHeader('Location', `${moved}${query}`);
+      // A target with a fragment (#reporting) takes the query BEFORE the fragment.
+      const hash = moved.indexOf('#');
+      const location = hash < 0 ? `${moved}${query}` : `${moved.slice(0, hash)}${query}${moved.slice(hash)}`;
+      res.setHeader('Location', location);
       res.end();
       return;
     }

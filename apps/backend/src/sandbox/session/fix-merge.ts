@@ -185,17 +185,17 @@ export async function fetchCommitIntoSandbox(
  */
 export const START_MERGE_SCRIPT = [
   '#!/bin/sh',
-  '# Limn: start the merge of the pull request\'s base into its branch. Run: sh <this file> <repository> <base name>',
+  '# Ensemble: start the merge of the pull request\'s base into its branch. Run: sh <this file> <repository> <base name>',
   'set -e',
   'cd "$1"',
   'label="${2:-the base}"',
-  `target=$(git rev-parse -q --verify '${MERGE_TARGET_REF}^{commit}') || { echo "Limn: the base commit is missing." >&2; exit 3; }`,
-  `git rev-parse -q --verify '${MERGE_BASE_REF}^{commit}' >/dev/null || { echo "Limn: the merge base is missing." >&2; exit 3; }`,
+  `target=$(git rev-parse -q --verify '${MERGE_TARGET_REF}^{commit}') || { echo "Ensemble: the base commit is missing." >&2; exit 3; }`,
+  `git rev-parse -q --verify '${MERGE_BASE_REF}^{commit}' >/dev/null || { echo "Ensemble: the merge base is missing." >&2; exit 3; }`,
   'gd=$(git rev-parse --git-dir)',
   `again="To start again: git reset --hard ${SANDBOX_BASE_REF} && sh ${START_MERGE_FILE} $1 $label"`,
-  '[ ! -f "$gd/MERGE_HEAD" ] || { echo "Limn: a merge is in progress already. $again" >&2; exit 4; }',
-  `[ "$(git rev-parse HEAD)" = "$(git rev-parse ${SANDBOX_BASE_REF})" ] || { echo "Limn: HEAD is not the pull request's head. $again" >&2; exit 4; }`,
-  '{ git diff --quiet && git diff --cached --quiet; } || { echo "Limn: there are uncommitted changes. $again" >&2; exit 4; }',
+  '[ ! -f "$gd/MERGE_HEAD" ] || { echo "Ensemble: a merge is in progress already. $again" >&2; exit 4; }',
+  `[ "$(git rev-parse HEAD)" = "$(git rev-parse ${SANDBOX_BASE_REF})" ] || { echo "Ensemble: HEAD is not the pull request's head. $again" >&2; exit 4; }`,
+  '{ git diff --quiet && git diff --cached --quiet; } || { echo "Ensemble: there are uncommitted changes. $again" >&2; exit 4; }',
   'set +e',
   `env "GITHEAD_$target=$label" git merge-recursive ${MERGE_BASE_REF} -- HEAD "$target" >"$gd/limn-merge.log" 2>&1`,
   'rc=$?',
@@ -210,7 +210,7 @@ export const START_MERGE_SCRIPT = [
   'GIT_INDEX_FILE="$idx" git read-tree HEAD',
   'GIT_INDEX_FILE="$idx" git add -A',
   't=$(GIT_INDEX_FILE="$idx" git write-tree)',
-  `git update-ref ${AUTO_MERGE_REF} "$(git commit-tree "$t" -p HEAD -m "Limn: git's automatic merge, with the conflict markers")"`,
+  `git update-ref ${AUTO_MERGE_REF} "$(git commit-tree "$t" -p HEAD -m "Ensemble: git's automatic merge, with the conflict markers")"`,
   'git diff --name-only --diff-filter=U',
 ].join('\n');
 
@@ -355,7 +355,7 @@ export async function extractMergeTurn(
   const res = await read(RESOLUTION_FILE, RESOLUTION_DIFF_MAX_CHARS * 4);
   let resolutionDiff = res == null ? null : res.toString('utf8');
   if (resolutionDiff != null && resolutionDiff.length > RESOLUTION_DIFF_MAX_CHARS) {
-    resolutionDiff = `${resolutionDiff.slice(0, RESOLUTION_DIFF_MAX_CHARS)}\n… (cut: the resolution is longer than Limn shows)\n`;
+    resolutionDiff = `${resolutionDiff.slice(0, RESOLUTION_DIFF_MAX_CHARS)}\n… (cut: the resolution is longer than Ensemble shows)\n`;
   }
   const bundle = await read(BUNDLE_FILE, MERGE_BUNDLE_MAX_BYTES);
   const tooLarge = bundle != null && bundle.length > MERGE_BUNDLE_MAX_BYTES;

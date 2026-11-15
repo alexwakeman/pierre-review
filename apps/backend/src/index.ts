@@ -75,7 +75,8 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     // idempotent; a no-op pass is one indexed scan. Never fails the boot.
     if (me?.id != null) {
       try {
-        const { reconcileLimnFindingAuthors } = await import('./db/limn-bots.js');
+        const { reconcileLimnFindingAuthors, renameLegacyLimnBotLabels } = await import('./db/limn-bots.js');
+        await renameLegacyLimnBotLabels(me.id);
         const r = await reconcileLimnFindingAuthors(me.id);
         if (r.comments > 0 || r.repairedReviewerRows > 0) {
           console.log(`limn: re-attributed ${r.comments} finding comment(s), repaired ${r.repairedReviewerRows} reviewer row(s)`);
@@ -161,7 +162,7 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     .then((r) => {
       if (r && r.removed > 0) {
         console.log(
-          `claude sessions: removed ${r.removed} old Limn session folders from ~/.claude/projects` +
+          `claude sessions: removed ${r.removed} old Ensemble session folders from ~/.claude/projects` +
             (r.timedOut ? ' (stopped at the time limit; the next start carries on)' : ''),
         );
       }

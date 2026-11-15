@@ -105,10 +105,10 @@ describe('the AI reviews tab', () => {
 
   it('says who ran it and what it found in plain words', () => {
     const robin: User = { id: 7, githubLogin: 'robin', displayName: 'Robin', avatarUrl: null, isBot: false };
-    expect(aiReviewRanBy({ ranByUserId: null, auto: false }, undefined)).toBe('Your Limn');
-    expect(aiReviewRanBy({ ranByUserId: null, auto: true }, undefined)).toBe('Your Limn, auto review');
-    expect(aiReviewRanBy({ ranByUserId: 7, auto: false }, robin)).toBe('Robin’s Limn');
-    expect(aiReviewRanBy({ ranByUserId: 7, auto: false }, undefined)).toBe('A teammate’s Limn');
+    expect(aiReviewRanBy({ ranByUserId: null, auto: false }, undefined)).toBe('Your Ensemble');
+    expect(aiReviewRanBy({ ranByUserId: null, auto: true }, undefined)).toBe('Your Ensemble, auto review');
+    expect(aiReviewRanBy({ ranByUserId: 7, auto: false }, robin)).toBe('Robin’s Ensemble');
+    expect(aiReviewRanBy({ ranByUserId: 7, auto: false }, undefined)).toBe('A teammate’s Ensemble');
     expect(aiReviewFindings(0)).toBe('No findings');
     expect(aiReviewFindings(1)).toBe('1 finding');
     expect(aiReviewFindings(4)).toBe('4 findings');

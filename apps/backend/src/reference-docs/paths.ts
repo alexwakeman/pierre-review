@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { config } from '../config.js';
+import { readEnv } from '../env-name.js';
 
 // WHERE A WORKSPACE'S REFERENCE LIBRARY LIVES, and the ONE check that a path a request names is a
 // file of it (docs/REFERENCE-DOCS.md § On disk).
@@ -30,7 +31,7 @@ export function setDocsRootForTest(dir: string | null): void {
 // on a scratch DB whose account 1 is NOT the developer's) would otherwise `rm -rf` the developer's
 // own `~/.limn/docs/1`. A suite that wants a library sets one with `setDocsRootForTest`.
 const vitestRoot = (): string | null =>
-  process.env.VITEST && !process.env.LIMN_DOCS_DIR ? join(tmpdir(), `limn-docs-vitest-${process.pid}`) : null;
+  process.env.VITEST && !readEnv(process.env, 'DOCS_DIR') ? join(tmpdir(), `limn-docs-vitest-${process.pid}`) : null;
 
 export function docsRoot(): string {
   return resolve(rootOverride ?? vitestRoot() ?? config.docsDir);

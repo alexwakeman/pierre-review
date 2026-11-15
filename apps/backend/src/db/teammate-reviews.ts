@@ -12,9 +12,10 @@ const { users, reviewComments, commits, pullRequests, repos } = schema;
 const cr = schema.claudeReviews;
 const crf = schema.claudeReviewFindings;
 
-// Limn's "_Posted automatically by Limn’s … review(s)._" footer closes an auto-posted summary on
-// GitHub. In the app it is noise: the review is already labelled as the teammate's.
-const AUTO_POST_FOOTER_RE = /\n*_Posted automatically by Limn[’'][^_\n]*_\s*$/;
+// The "_Posted automatically by Ensemble’s … review(s)._" footer closes an auto-posted summary on
+// GitHub. In the app it is noise: the review is already labelled as the teammate's. An older Limn
+// wrote "by Limn’s …": both are read.
+const AUTO_POST_FOOTER_RE = /\n*_Posted automatically by (?:Ensemble|Limn)[’'][^_\n]*_\s*$/;
 
 /** A posted review summary without Limn's auto-post footer. Pure. */
 export function withoutAutoPostFooter(summary: string): string {

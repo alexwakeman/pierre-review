@@ -424,7 +424,7 @@ function MlTotalsStrip({
         <h3 className="text-body font-semibold">What the bots are flagging</h3>
         <InfoButton title="What the bots are flagging">
           <p>
-            Each bot comment, except Limn’s own findings, is given a severity (nit, minor, major,
+            Each bot comment, except Ensemble’s own findings, is given a severity (nit, minor, major,
             critical) and up to eight categories by a small model that runs on our side. It is not an LLM, and it never reads
             the bot’s own severity badge.
           </p>
@@ -436,7 +436,7 @@ function MlTotalsStrip({
             Severity shares count findings only. Walkthrough summaries and praise are left out.
           </p>
           <p>
-            Limn’s own findings are not scored. Their severity is the one the review gave them.
+            Ensemble’s own findings are not scored. Their severity is the one the review gave them.
           </p>
           <p>Every figure covers the window picked above.</p>
           <p>
@@ -445,7 +445,7 @@ function MlTotalsStrip({
           </p>
         </InfoButton>
         <span className="text-meta text-ui-mute">
-          {(ml.limnLabelled ?? 0) > 0 ? 'model-scored; Limn’s from its review' : 'model-scored'}
+          {(ml.limnLabelled ?? 0) > 0 ? 'model-scored; Ensemble’s from its review' : 'model-scored'}
         </span>
         {ml.pending > 0 && (
           <span className="ml-auto text-meta text-ui-faint tabular-nums">

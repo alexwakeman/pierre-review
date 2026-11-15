@@ -4,8 +4,8 @@ import { runningLine } from '../src/components/settings/SandboxRuntimeSection.js
 
 describe('runningLine', () => {
   it('says the count in plain words', () => {
-    expect(runningLine(0)).toBe('No Limn sandboxes are running.');
-    expect(runningLine(1)).toBe('1 Limn sandbox is running.');
-    expect(runningLine(3)).toBe('3 Limn sandboxes are running.');
+    expect(runningLine(0)).toBe('No Ensemble sandboxes are running.');
+    expect(runningLine(1)).toBe('1 Ensemble sandbox is running.');
+    expect(runningLine(3)).toBe('3 Ensemble sandboxes are running.');
   });
 });

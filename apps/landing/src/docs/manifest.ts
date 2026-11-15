@@ -34,7 +34,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Getting started',
     group: 'Start here',
     writer: 'W1',
-    blurb: 'Install Limn, add your repositories and find your way around.',
+    blurb: 'Install Ensemble, add your repositories and find your way around.',
     pages: [
       { slug: 'introduction' },
       { slug: 'install-and-run' },
@@ -259,7 +259,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Settings',
     group: 'Settings',
     writer: 'W5',
-    blurb: 'Every Settings tab, and how Limn uses your AI subscription.',
+    blurb: 'Every Settings tab, and how Ensemble uses your AI subscription.',
     pages: [
       { slug: 'appearance' },
       { slug: 'pull-requests' },
@@ -283,7 +283,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Integrations',
     group: 'Integrations',
     writer: 'W5',
-    blurb: 'One page for each service Limn connects to.',
+    blurb: 'One page for each service Ensemble connects to.',
     pages: [
       { slug: 'github', writer: 'W4' },
       { slug: 'claude', writer: 'W5' },
@@ -301,9 +301,9 @@ const SECTION_DEFS: readonly SectionDef[] = [
   {
     id: 'security',
     title: 'Security and running locally',
-    group: 'Running Limn',
+    group: 'Running Ensemble',
     writer: 'W5',
-    blurb: 'What runs where, what is stored, and how Limn protects your code.',
+    blurb: 'What runs where, what is stored, and how Ensemble protects your code.',
     pages: [
       { slug: 'runs-on-your-machine' },
       { slug: 'data-and-storage' },
@@ -318,7 +318,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Licence',
     group: 'Reference',
     writer: 'W5',
-    blurb: 'The Limn License in plain English.',
+    blurb: 'The Ensemble License in plain English.',
     pages: [
       { slug: 'licence' },
     ],

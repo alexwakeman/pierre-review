@@ -65,6 +65,7 @@ describe('wiring', () => {
   it('every section the nav lists is marked where it renders', () => {
     const marks: Record<string, string> = {
       story: 'components/Activity/TicketStorySection.tsx',
+      'criteria-map': 'components/Activity/CriteriaMap.tsx',
       design: 'components/Activity/StoryDesignSection.tsx',
       missing: 'components/TicketReviewParts.tsx',
       'not-asked': 'components/TicketReviewParts.tsx',

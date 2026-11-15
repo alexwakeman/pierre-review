@@ -67,7 +67,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="which-accounts-are-bots">Which accounts count as bots</H2>
       <p>
-        Limn recognises most bots by their GitHub account and how they behave, and gives each one a category:{' '}
+        Ensemble recognises most bots by their GitHub account and how they behave, and gives each one a category:{' '}
         <Ui>Review bot</Ui>, <Ui>Quality check</Ui>, <Ui>Dependency updates</Ui>, <Ui>Code agent</Ui>,{' '}
         <Ui>Release automation</Ui> or <Ui>Housekeeping</Ui>. Only review bots are measured on the ROI table; quality
         checks are listed apart, because nobody is meant to reply to them. To change a bot’s category, mark an
@@ -76,7 +76,7 @@ export default function Page(): JSX.Element {
       </p>
       <Note title="Price is per workspace">
         A bot’s price is set for each workspace. If the same bot works for two workspaces, each holds its own price,
-        and Limn never adds them together.
+        and Ensemble never adds them together.
       </Note>
 
       <H2 id="what-you-can-do">What you can do</H2>

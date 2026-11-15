@@ -374,7 +374,7 @@ export async function workspaceRoutes(app: FastifyInstance): Promise<void> {
       }
       if (outcome === 'last_membership') {
         reply.status(409);
-        return { error: 'LastMembership', message: 'This is the repository\'s only workspace. Remove it from Limn instead.' };
+        return { error: 'LastMembership', message: 'This is the repository\'s only workspace. Remove it from Ensemble instead.' };
       }
       await refreshExternalRepoCadence(req.log);
       const workspace = await findWorkspace(accountId, id);

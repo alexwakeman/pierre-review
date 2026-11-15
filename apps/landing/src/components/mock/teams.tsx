@@ -5,14 +5,14 @@ import { CheckRow, Chip, Group, MockFrame } from './kit';
 // pictures: what they show is a state GitHub holds, not something the reader clicks.
 // The app surfaces they mirror are listed in apps/landing/README.md.
 
-/** The checks on a teammate's pull request: CI, then one Limn line per provider. */
+/** The checks on a teammate's pull request: CI, then one Ensemble line per provider. */
 export function ClaimLinesMock(): JSX.Element {
   const c = TEAM.claims;
   return (
     <MockFrame
       title={prLabel(c.pr)}
       meta={`Checks on ${c.sha}`}
-      label={`Checks on pull request ${c.pr.num}: build and test-web passed; limn/review-claude says sam reviewed it with 2 comments; limn/review-codex says dana is reviewing with Codex. The Limn lines are not CI.`}
+      label={`Checks on pull request ${c.pr.num}: build and test-web passed; ensemble/review-claude says sam reviewed it with 2 comments; ensemble/review-codex says dana is reviewing with Codex. The Ensemble lines are not CI.`}
     >
       {c.checks.map((k) => (
         <CheckRow
@@ -22,7 +22,7 @@ export function ClaimLinesMock(): JSX.Element {
               {k.name}
               {k.limn ? (
                 <span className="mk-limn" title={c.limnTitle}>
-                  Limn
+                  Ensemble
                 </span>
               ) : null}
             </>

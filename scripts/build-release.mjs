@@ -158,7 +158,7 @@ const staticVersion = backendPkg.dependencies['@fastify/static'] ?? '^9.1.3';
 //
 // Claude Review, the review chat and AI Fix are FREE and ship in this package — but the four SDKs
 // they run on do NOT. The Agent SDK carries a ~110 MB native binary per platform, so they are
-// installed ON FIRST USE ("Set up AI" in the app, or `limn ai install`) into ~/.limn/ai-runtime
+// installed ON FIRST USE ("Set up AI" in the app, or `ensemble ai install`) into ~/.ensemble/ai-runtime
 // by apps/backend/src/ai/runtime.ts, which reads the EXACT versions to download from this field.
 //
 // GENERATED, never typed: each pin is the version the workspace actually installed (what the test
@@ -317,10 +317,19 @@ const sandboxImage = { recipe: sandboxRecipe.recipe, buildArgs: sandboxBuildArgs
   }
 }
 
+// The published package and its ONE command (plus the package-named alias npx needs).
+const RELEASE_PACKAGE = 'ensemble-review';
+const RELEASE_BINS = ['ensemble', RELEASE_PACKAGE];
+// The renamed packages: each is a forwarding stub in scripts/<dir>/ that depends on RELEASE_PACKAGE.
+const DEPRECATED_STUBS = [
+  { dir: 'deprecated-limn-review', name: 'limn-review', bins: ['limn', 'limn-review'] },
+  { dir: 'deprecated-pierre-review', name: 'pierre-review', bins: ['pierre-review', 'pierre'] },
+];
+
 const manifest = {
-  // Renamed from `pierre-review` (same release that made Claude Review and AI Fix free). The old
-  // package gets a deprecation stub — scripts/deprecated-pierre-review/ — published by hand.
-  name: 'limn-review',
+  // Renamed `pierre-review` → `limn-review` → `ensemble-review`. Each old package gets a forwarding
+  // stub — scripts/deprecated-pierre-review/, scripts/deprecated-limn-review/ — published by hand.
+  name: RELEASE_PACKAGE,
   version: backendPkg.version,
   description:
     "Dashboard for tracking your team's GitHub PR activity across repos. Runs on your machine with your gh login.",
@@ -333,22 +342,22 @@ const manifest = {
   homepage: 'https://github.com/alexwakeman/pierre-review#readme',
   bugs: { url: 'https://github.com/alexwakeman/pierre-review/issues' },
   bin: {
-    limn: 'dist/cli.js',
-    // ⚠ LOAD-BEARING FOR `npx limn-review`. With more than one bin, npx runs the one named after
+    ensemble: 'dist/cli.js',
+    // ⚠ LOAD-BEARING FOR `npx ensemble-review`. With more than one bin, npx runs the one named after
     // the PACKAGE and errors ("could not determine executable to run") when none is — so the
-    // README's `npx limn-review` needs this entry, not just `limn`.
-    'limn-review': 'dist/cli.js',
-    // ⚠ NO `pierre-review` BIN HERE. The deprecated alias lives in the forwarding stub
-    // (scripts/deprecated-pierre-review/), which still owns that name. Declaring it here too made
-    // `npm install -g limn-review` fail with EEXIST for everyone who had installed pierre-review
-    // globally: npm refuses to link a global bin another package owns. The CLI still prints the
-    // rename notice when the stub starts it under the old name.
+    // README's `npx ensemble-review` needs this entry, not just `ensemble`.
+    'ensemble-review': 'dist/cli.js',
+    // ⚠ NO `limn` / `limn-review` / `pierre-review` BIN HERE. The deprecated names live in the
+    // forwarding stubs (scripts/deprecated-limn-review/, scripts/deprecated-pierre-review/), which
+    // own them. Declaring one here too made `npm install -g` fail with EEXIST for everyone who had
+    // installed the old package globally: npm refuses to link a global bin another package owns.
+    // The CLI still prints the rename notice when a stub starts it under an old name.
   },
   files: ['dist', 'public', 'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'],
   engines: { node: '>=22' },
   // NO AI SDK IS A DEPENDENCY. The agentic features ship as code, but the four SDKs they run on
   // (@anthropic-ai/claude-agent-sdk, @anthropic-ai/sdk, @modelcontextprotocol/sdk, zod) are
-  // installed ON FIRST USE into ~/.limn/ai-runtime, at the exact versions in `limnAiRuntime`
+  // installed ON FIRST USE into ~/.ensemble/ai-runtime, at the exact versions in `limnAiRuntime`
   // below, and loaded ONLY through dist/ai/runtime.js. See the AI_DEPS and dist-grep guardrails
   // at the bottom of this file and CLAUDE.md "Packaging & publishing".
   dependencies: {
@@ -368,7 +377,7 @@ const manifest = {
     'cli',
     'team',
   ],
-  // Source-available under the Limn License 1.0: free for individuals and for organisations
+  // Source-available under the Ensemble License 1.0: free for individuals and for organisations
   // where at most 3 people use it, a commercial licence above that, no competing product, and
   // no conversion to MIT. The full text ships as LICENSE (copied below). npm's
   // documented form for a non-SPDX license is "SEE LICENSE IN <file>".
@@ -402,6 +411,31 @@ cpSync(noticesSrc, join(releaseDir, 'THIRD_PARTY_NOTICES.md'));
 
 // 9. Sanity asserts.
 log('verifying release contents');
+// The bins: exactly the new command and the package-named alias, never an old name (a stub owns
+// each old name; see the manifest's `bin` comment). And every stub forwards to THIS package's CLI.
+{
+  const bins = Object.keys(manifest.bin).sort();
+  if (bins.join(',') !== [...RELEASE_BINS].sort().join(',')) {
+    fail(`release bins must be exactly ${RELEASE_BINS.join(', ')}, got ${bins.join(', ')}`);
+  }
+  for (const stub of DEPRECATED_STUBS) {
+    const stubDir = join(scriptDir, stub.dir);
+    const stubPkg = JSON.parse(readFileSync(join(stubDir, 'package.json'), 'utf8'));
+    if (stubPkg.name !== stub.name) fail(`${stub.dir}/package.json is named ${stubPkg.name}, expected ${stub.name}`);
+    if (!stubPkg.dependencies?.[RELEASE_PACKAGE]) fail(`${stub.dir}/package.json does not depend on ${RELEASE_PACKAGE}`);
+    const stubBins = Object.keys(stubPkg.bin ?? {}).sort();
+    if (stubBins.join(',') !== [...stub.bins].sort().join(',')) {
+      fail(`${stub.dir}/package.json bins must be ${stub.bins.join(', ')}, got ${stubBins.join(', ')}`);
+    }
+    for (const b of stubBins) {
+      if (RELEASE_BINS.includes(b)) fail(`${stub.dir} declares the bin ${b}, which ${RELEASE_PACKAGE} owns`);
+    }
+    const stubCli = readFileSync(join(stubDir, 'cli.js'), 'utf8');
+    if (!stubCli.includes(`import('${RELEASE_PACKAGE}/dist/cli.js')`)) {
+      fail(`${stub.dir}/cli.js does not forward to ${RELEASE_PACKAGE}/dist/cli.js`);
+    }
+  }
+}
 const mustExist = [
   'dist/cli.js',
   'dist/index.js',
@@ -478,7 +512,7 @@ for (const rel of mustExist) {
     encoding: 'utf8',
     timeout: 20_000,
   });
-  if (hook.status !== 2 || !/Limn path guard/.test(hook.stderr ?? '')) {
+  if (hook.status !== 2 || !/(?:Ensemble|Limn) path guard/.test(hook.stderr ?? '')) {
     fail(`release path-guard hook did not deny a foreign MCP call (exit ${hook.status}): ${hook.stderr}`);
   }
 }
@@ -709,4 +743,4 @@ console.log('');
 console.log('Next steps (run these yourself — this script never publishes):');
 console.log('  cd release');
 console.log('  npm pack --dry-run   # inspect the tarball contents');
-console.log('  npm publish          # public by default for the unscoped name (limn-review)');
+console.log(`  npm publish          # public by default for the unscoped name (${RELEASE_PACKAGE})`);

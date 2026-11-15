@@ -3,7 +3,7 @@ import { DocLink, H2, Kbd, Note, Tip, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Keyboard shortcuts',
-  summary: 'Move around Limn without the mouse: the g keys, Search or jump, and the shortcut sheet.',
+  summary: 'Move around Ensemble without the mouse: the g keys, Search or jump, and the shortcut sheet.',
 };
 
 function Row({ keys, does }: { keys: JSX.Element; does: string }): JSX.Element {
@@ -19,7 +19,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Every part of Limn can be reached from the keyboard. Press <Kbd>?</Kbd> anywhere to see the shortcut
+        Every part of Ensemble can be reached from the keyboard. Press <Kbd>?</Kbd> anywhere to see the shortcut
         sheet, which lists the keys for the pages you have. Keys do nothing while you type in a text box.
         Shortcuts are not printed on buttons; the sheet and <Ui>Search or jump</Ui> list them. The{' '}
         <Ui>?</Ui> button at the foot of the sidebar opens these docs, not the sheet; the{' '}

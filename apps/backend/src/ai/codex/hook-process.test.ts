@@ -48,7 +48,7 @@ describe('the hook process (dev entry under tsx)', () => {
   it('exits 2 with the reason on stderr for a write outside', () => {
     const r = run({ hook_event_name: 'PreToolUse', tool_name: 'apply_patch', tool_input: { input: '*** Begin Patch\n*** Add File: ../outside/p.txt\n+x\n*** End Patch' }, cwd: wt }, env());
     expect(r.code).toBe(2);
-    expect(r.stderr).toMatch(/^Limn path guard: refused: \.\.\/outside\/p\.txt is outside/);
+    expect(r.stderr).toMatch(/^Ensemble path guard: refused: \.\.\/outside\/p\.txt is outside/);
   });
 
   it('exits 0 for a write inside', () => {

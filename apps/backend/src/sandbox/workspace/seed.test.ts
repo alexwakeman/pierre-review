@@ -203,7 +203,7 @@ describe('the seed', () => {
 
   it('renders a ticket with no numbered list, no criteria, and a stale copy', () => {
     const t = ticketMarkdown({ ...ticket, criteria: [], fresh: false, readAt: '2026-11-01T00:00:00.000Z', openPoints: [] }, 'implement');
-    expect(t).toContain("This is Limn's stored copy from 2026-11-01T00:00:00.000Z.");
+    expect(t).toContain("This is Ensemble's stored copy from 2026-11-01T00:00:00.000Z.");
     expect(t).toContain('Number the criteria in the text below AC1, AC2');
     expect(t).toContain('Totals in hectares.');
     expect(t).toMatch(/## Open points \(not decided yet\)\n\n_None._/);

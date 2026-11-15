@@ -88,12 +88,12 @@ describe('aiCapabilitiesOf', () => {
 });
 
 describe('the pre-flight PER RUN KIND (`me.ai.kinds`)', () => {
-  const NOT_YET = 'Codex cannot run AI Fix in this version of Limn yet.';
+  const NOT_YET = 'Codex cannot run AI Fix in this version of Ensemble yet.';
   // Codex as active: the top-level answer stays 'none' (not every kind runs), one kind is ported.
   const CODEX: MeResponse['ai'] = {
     ...READY,
     auth: 'none',
-    authMessage: 'Codex is not available in this version of Limn yet.',
+    authMessage: 'Codex is not available in this version of Ensemble yet.',
     provider: 'codex',
     kinds: {
       ...aiKindsAll({ auth: 'none', message: NOT_YET }),
@@ -110,7 +110,7 @@ describe('the pre-flight PER RUN KIND (`me.ai.kinds`)', () => {
     expect(aiReadyFor(ai, 'fix')).toBe(false);
     expect(aiAuthFor(ai, 'fix')).toEqual({ auth: 'none', message: NOT_YET });
     // No kind named: the top-level answer and sentence.
-    expect(aiAuthFor(ai, undefined)).toEqual({ auth: 'none', message: 'Codex is not available in this version of Limn yet.' });
+    expect(aiAuthFor(ai, undefined)).toEqual({ auth: 'none', message: 'Codex is not available in this version of Ensemble yet.' });
   });
 
   it('on Claude every kind repeats the top-level answer; an older server with no map falls back to it', () => {

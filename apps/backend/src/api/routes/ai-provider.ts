@@ -15,6 +15,7 @@ import { activeProviderId, aiProviderEnvSetting, aiProviderSettingStatus } from 
 import { writeStoredAiEffort, writeStoredAiProvider, writeStoredPrefersApiKey } from '../../ai/provider-store.js';
 import { apiKeySettingStatus, prefersApiKeyEnvSetting } from '../../ai/credentials.js';
 import { aiEffortEnvSetting, aiEffortSettingStatus } from '../../ai/effort.js';
+import { envName, envNameSet } from '../../env-name.js';
 
 // THE AI PROVIDER CHOICE (Settings → AI; docs/CODEX-PLAN.md Phase 4). One per machine, like the spend
 // budget. The read side is `/api/me` (`ai.provider` + `ai.providerSetting`); this is the one writer.
@@ -48,7 +49,7 @@ export async function aiProviderRoutes(app: FastifyInstance): Promise<void> {
     if (aiProviderEnvSetting() != null) {
       return reply
         .code(409)
-        .send({ error: 'SetByEnvironment', message: 'LIMN_AI_PROVIDER is set, so it decides the provider.' });
+        .send({ error: 'SetByEnvironment', message: `${envNameSet(process.env, 'AI_PROVIDER') ?? envName('AI_PROVIDER')} is set, so it decides the provider.` });
     }
     await writeStoredAiProvider(value, accountId);
     const body: AiProviderSettingResponse = { setting: aiProviderSettingStatus(), provider: activeProviderId() };
@@ -79,7 +80,7 @@ export async function aiProviderRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'BadRequest', message: 'value must be true or false.' });
     }
     if (prefersApiKeyEnvSetting() != null) {
-      return reply.code(409).send({ error: 'SetByEnvironment', message: 'LIMN_AI_USE_API_KEY is set, so it decides.' });
+      return reply.code(409).send({ error: 'SetByEnvironment', message: `${envNameSet(process.env, 'AI_USE_API_KEY') ?? envName('AI_USE_API_KEY')} is set, so it decides.` });
     }
     await writeStoredPrefersApiKey(value, accountId);
     const res: AiApiKeySettingResponse = { setting: apiKeySettingStatus() };

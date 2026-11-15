@@ -1350,28 +1350,49 @@
       "idx": 192,
       "version": "6",
       "when": 1793347200000,
-      "tag": "0192_releases",
+      "tag": "0192_story_chats",
       "breakpoints": true
     },
     {
       "idx": 193,
       "version": "6",
       "when": 1793433600000,
-      "tag": "0193_story_build_hotfix",
+      "tag": "0193_dependency_automation_on",
       "breakpoints": true
     },
     {
       "idx": 194,
       "version": "6",
       "when": 1793520000000,
-      "tag": "0194_release_items_live_tag",
+      "tag": "0194_story_build_claims",
       "breakpoints": true
     },
     {
       "idx": 195,
       "version": "6",
       "when": 1793606400000,
-      "tag": "0195_story_build_port_report",
+      "tag": "0195_releases",
+      "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "6",
+      "when": 1793692800000,
+      "tag": "0196_story_build_hotfix",
+      "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "6",
+      "when": 1793779200000,
+      "tag": "0197_release_items_live_tag",
+      "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "6",
+      "when": 1793865600000,
+      "tag": "0198_story_build_port_report",
       "breakpoints": true
     }
   ]

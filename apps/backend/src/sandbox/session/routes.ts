@@ -37,6 +37,8 @@ import {
   type SandboxSessionStreamEvent,
   type StoryBuild,
   type StoryBuildDiscardResponse,
+  type StoryBuildClaimClearBody,
+  type StoryBuildClaimResponse,
   type StoryBuildErrorCode,
   type StoryBuildForTicketResponse,
   type StoryBuildStartResponse,
@@ -45,6 +47,9 @@ import { preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
 import { getStoryBuildRow, listStoryBuildRepoRows, listStoryBuildRowsFor, storyBuildRepoNames, toStoryBuildSummary } from '../../coding/story-build/persist.js';
 import { registerStoryBuildBuildRoutes } from '../../coding/story-build/routes-build.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
+import { clearTicketClaim, forgetTicketClaimView, readTicketClaim, takeTicketClaim, teamClaimedMessage, ticketClaimForView } from '../../coding/story-build/build-claim-flow.js';
+import { toStoryBuildTeamClaim } from '../../coding/story-build/build-claim.js';
+import { noteBuildClaimAttempted, workspaceRepoNames } from '../../coding/story-build/build-claim-release.js';
 import type { AgentContext } from '../../review/agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../../review/claude-review/manager.js';
 import { resolveSandboxAgentChoice } from '../drivers/index.js';
@@ -77,7 +82,7 @@ const fail = (reply: FastifyReply, status: number, error: ErrorCode, message: st
   return { error, message };
 };
 
-const featureOff = (reply: FastifyReply): ErrorBody => fail(reply, 404, 'NotFound', 'Implementing a story runs on your machine: npx limn-review');
+const featureOff = (reply: FastifyReply): ErrorBody => fail(reply, 404, 'NotFound', 'Implementing a story runs on your machine: npx ensemble-review');
 const notFound = (reply: FastifyReply): ErrorBody => fail(reply, 404, 'NotFound', 'Not found.');
 
 const isTrackerIdent = (ident: string): boolean => {
@@ -141,6 +146,59 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       const { workspaceId } = await resolveWorkspaceScope(accountId, workspace ?? null);
       const [latest, ...earlier] = await listStoryBuildRowsFor(ctx, accountId, workspaceId, ident, 20);
       return { workspaceId, build: latest != null ? await sessionWire(ctx, accountId, latest) : null, earlier: earlier.map(toStoryBuildSummary) };
+    },
+  );
+
+  // ---- THE TEAM CLAIM (docs/STORY-BUILD.md § The team claim): a teammate building the ticket, and Clear ----
+  // A live GitHub read (cached 30 s), asked by the story view only when it would otherwise offer Implement or
+  // Fill gaps — never by the sprint board or the Pending board.
+  const ticketTarget = async (accountId: number, workspace: unknown, ident: string) => {
+    const scope = await resolveWorkspaceScope(accountId, typeof workspace === 'number' || typeof workspace === 'string' ? workspace : null, null, { members: 'all' });
+    // The key the session's branch is named after (DB only), else the ident's own key.
+    const inputs = await sessionStoryInputs(ctx, accountId, scope.workspaceId, ident).catch(() => null);
+    const ticketKey = inputs?.ticketKey ?? parseTicketIdent(ident)?.key ?? ident;
+    const repos = await workspaceRepoNames(accountId, scope.repoIds);
+    return { workspaceId: scope.workspaceId, target: { accountId, workspaceId: scope.workspaceId, ident, ticketKey, repos } };
+  };
+  app.get(
+    STORY_BUILD_API.claim,
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          required: ['ident'],
+          properties: { ident: { type: 'string', minLength: 1, maxLength: TICKET_IDENT_MAX_CHARS }, workspace: { type: 'string' } },
+        },
+      },
+    },
+    async (req, reply): Promise<StoryBuildClaimResponse | ErrorBody> => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const { ident, workspace } = req.query as { ident: string; workspace?: string };
+      if (!isTrackerIdent(ident)) return fail(reply, 400, 'BadRequest', 'Not a tracker ticket.');
+      const { workspaceId, target } = await ticketTarget(ctx.accountIdOf(req), workspace, ident);
+      return { workspaceId, claim: await ticketClaimForView(target, { info: (m) => ctx.log.info(m), warn: (m) => ctx.log.warn(m) }) };
+    },
+  );
+  app.post(
+    STORY_BUILD_API.claimClear,
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['ident'],
+          additionalProperties: false,
+          properties: { workspaceId: {}, ident: { type: 'string', minLength: 1, maxLength: TICKET_IDENT_MAX_CHARS } },
+        },
+      },
+    },
+    async (req, reply): Promise<StoryBuildClaimResponse | ErrorBody> => {
+      if (!AGENTIC_AI_ENABLED) return featureOff(reply);
+      const body = req.body as StoryBuildClaimClearBody;
+      if (!isTrackerIdent(body.ident)) return fail(reply, 400, 'BadRequest', 'Not a tracker ticket.');
+      const { workspaceId, target } = await ticketTarget(ctx.accountIdOf(req), body.workspaceId, body.ident);
+      const r = await clearTicketClaim(target, { info: (m) => ctx.log.info(m), warn: (m) => ctx.log.warn(m) });
+      if (!r.ok) return fail(reply, r.error === 'NotReady' ? 409 : 502, r.error === 'NotReady' ? 'NotReady' : 'TeamClaimed', r.message);
+      return { workspaceId, claim: await ticketClaimForView(target) };
     },
   );
 
@@ -267,6 +325,15 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       // workspace's library has a built one, and the agent decides whether they help (the plan says which
       // it used). `body.docs` is ignored (kept on the wire for an older SPA).
       const withDocs = await sessionDocsAvailable(accountId, scope.workspaceId);
+      // THE TEAM CLAIM, RE-CHECKED (docs/STORY-BUILD.md § The team claim): a teammate building this ticket
+      // right now (or the reader on another computer) ⇒ 409, nothing starts. GitHub unreadable ⇒ go ahead.
+      const log = { info: (m: string) => ctx.log.info(m), warn: (m: string) => ctx.log.warn(m) };
+      const claimTarget = { accountId, workspaceId: scope.workspaceId, ident: body.ident, ticketKey: inputs.ticketKey, repos: await workspaceRepoNames(accountId, scope.repoIds) };
+      forgetTicketClaimView(accountId, scope.workspaceId, body.ident);
+      const before = await readTicketClaim(claimTarget, log);
+      if (before?.decision.kind === 'held' && before.decision.claim.live) {
+        return fail(reply, 409, 'TeamClaimed', teamClaimedMessage(toStoryBuildTeamClaim(before.decision)));
+      }
       const r = await startSession(ctx, {
         accountId,
         workspaceId: scope.workspaceId,
@@ -286,6 +353,15 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);
       if (r.outcome === 'too_many') return fail(reply, 409, 'TooManySessions', r.message);
+      if (r.outcome === 'started') {
+        // CLAIM, THEN READ AGAIN: the placeholder branch and the pending line; the earliest live claim wins.
+        noteBuildClaimAttempted(r.id);
+        const took = await takeTicketClaim({ ...claimTarget, buildId: r.id }, log);
+        if (took.kind === 'lost') {
+          await discardSession(ctx, accountId, r.id).catch(() => {});
+          return fail(reply, 409, 'TeamClaimed', teamClaimedMessage(took.claim));
+        }
+      }
       reply.status(r.outcome === 'started' ? 202 : 200);
       return { outcome: r.outcome, buildId: r.id };
     },

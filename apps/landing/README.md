@@ -1,30 +1,31 @@
 # @pierre-review/landing
 
-Public marketing site for Limn (limn-review.com). Built independently — it shares no
+Public marketing site for Ensemble (ensemble.ac). Built independently — it shares no
 runtime code with the timeline SPA — and served at `/` by the small site service in
 [`apps/site`](../site/README.md), which also serves the contact form's API.
 
-**Limn is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
-so the site's call to action is the npm command (`npx limn-review`). There is no hosted demo:
+**Ensemble is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
+so the site's call to action is the npm command (`npx ensemble-review`). There is no hosted demo:
 the product pictures are clickable HTML mocks (below). The one limit — free for individuals and for
 organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Every feature, free" tiers, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
-`src/lib/site.ts` (which mirrors the Limn License at the repository root).
+`src/lib/site.ts` (which mirrors the Ensemble License at the repository root).
 
 ## Structure
 
-A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Five content routes** (home, `/reporting`, `/teams`, `/how-we-measure`, `/contact`)
-plus the three legal ones and the docs:
+A small, dependency-free multi-page site (React + Vite; Tailwind only for its preflight reset). **Six content routes** (home, `/build`, `/ensemble-review`, `/automation`, `/everything-else`, `/contact`)
+plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `/ensemble-review`; `/reporting` and `/how-we-measure` 301 to their sections of `/everything-else` — `apps/site` `MOVED`, mirrored in `App.tsx`.)
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Your team writes more code than it can review": the hero (with the Pending board), works with, the proof figures, the Review / Fix / Ship / See chapters, Why Limn, every feature free, questions and the close |
-| `/reporting` | `pages/Reporting.tsx` | Reporting and metrics: the one window, period reports, Chronology, 26 weeks, where the work is happening, what bots are worth, This Sprint |
-| `/teams` | `pages/Teams.tsx` | For teams: several teammates each running Limn, with GitHub as the go-between — team claims (one review per commit per provider), the author can't approve their own PR, one review across teammates, Waiting on others, what it never does, and the licence above the free size |
-| `/how-we-measure` | `pages/HowWeMeasure.tsx` | The two ML models in plain English — what each is for, how it was built, how we know it works |
+| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (Bach's hand and the Adagio, Goethe's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
+| `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
+| `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
+| `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
+| `/everything-else` | `pages/EverythingElse.tsx` | The Review / Fix / Ship / See chapters, works with, proof, `#reporting` (`ReportingSection`) and `#how-we-measure` (`HowWeMeasureSection`), Why, tiers and questions |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
 | `/docs` and `/docs/**` | `docs/DocsApp.tsx` + `docs/pages/**` | **The user documentation** (below): every screen of the app, AI review, AI Fix, Implement story, merging, every Settings tab, one page per integration, security, licence, FAQ, troubleshooting, the changelog |
-| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Limn License and defer to it |
+| `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Ensemble License and defer to it |
 
 **THE DESIGN IS ONE DARK "BOARD OF TILES"**, on every page. `src/board.css` holds the
 tokens (the dark ground, the four pigments lapis / verdigris / madder / gold), the self-hosted
@@ -37,7 +38,7 @@ page-scoped file under that root: `pages/reporting.css`, `teams.css`,
 cookie banner and the lightbox. The home page's sections are `components/board/*` (layout in
 `pages/home.css`).
 
-**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Limn UI. They are built from one kit,
+**PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Ensemble UI. They are built from one kit,
 `components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,
 CheckRow, CourtBar, MiniTable, Diff, Log, Stat, and the settings controls Section / Field /
 SelectBox / CheckLine / TextBox; the mocks themselves in `home.tsx`, `reports.tsx`, `teams.tsx`, and
@@ -73,13 +74,15 @@ are the app's own; never invent a feature for a mock.
 | `home.tsx` MergeWhenReadyMock | `/` Ship | `components/MergeWhenReadyControl.tsx` |
 | `home.tsx` TrunkMock | `/` Ship | the trunk strip (`/api/branch-status`) |
 | `home.tsx` ChronologyMiniMock, BotsWorthMock | `/` See | `Activity/BottlenecksPanel.tsx`, Bots Monitoring |
-| `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Limn" label, "passed" / "running"), the `limn/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
+| `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Ensemble" label, "passed" / "running"), the `ensemble/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
 | `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingRow`, the grid of "Reviews on this PR"), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`, `shortDayTime`) |
 | `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
 | `reports.tsx` PeriodReportMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` + `PeriodSeriesChart.tsx` (Grain, Show as) |
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx` (the People + bots / People view in the meta line), `ChronologyTrend.tsx` (Show markers) |
 | `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
 | `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
+| `build.tsx` CriteriaMapMock | `/build` | `Activity/CriteriaMap.tsx` ("How the code meets each criterion", the story view) |
+| `build.tsx` TicketDesignMock, TicketCheckMock, LoopBodyMock | `/build` | `components/FlowDiagram.tsx` + `StoryDesignSection.tsx` ("Ticket design"), the story check in `ClaudeReviewTab.tsx` / `StoryLayout.tsx`, the loop's PR body (`coding/story-build/loop/pr-body.ts`) |
 | `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
 | `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
 | `reports.tsx` SprintLanesMock (`initialView="releases"` on `/docs/this-sprint/releases`) | `/reporting`, `/docs/this-sprint/overview`, `/docs/this-sprint/releases` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` (the four tabs); the Releases tab: `Sprint/ReleasesView.tsx`, `Sprint/releasesModel.ts` (`repoRowText`, `ticketRepoMark`, `releaseWarningText`) |
@@ -140,7 +143,7 @@ commit; a removed feature removes its docs.
 - **The layout** (`DocsApp.tsx`, `docs.css`): a left-hand contents list whose sections stay
   collapsed until pressed (the current section opens by itself), a drawer below 961px, search over
   titles and summaries, breadcrumbs, "On this page", previous / next, "Edit this page" and
-  "Report a problem". The header shows the current Limn version (`apps/backend/package.json`,
+  "Report a problem". The header shows the current Ensemble version (`apps/backend/package.json`,
   read at build time) and links to the changelog.
 - **The changelog** (`/docs/changelog`) is `CHANGELOG.md` at the repository root, parsed at build
   time. The release workflow moves its Unreleased entries under the new version
@@ -184,6 +187,12 @@ sips -c 130 130 logo.png --out /tmp/sq.png            # crop to a centred square
 for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s.png; done
 # then rename: favicon-16/32/48.png, apple-touch-icon.png (180), icon-192/512.png
 ```
+
+## Social preview card
+
+`public/og-image.png` (2400x1260) is the hero as a card, not an app screenshot. After a change to
+the hero's words or picture, run `node scripts/make-og-image.mjs` (`CHROMIUM_PATH=…` to use a Chrome
+other than Playwright's own).
 
 ## Screenshots
 

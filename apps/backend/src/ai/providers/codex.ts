@@ -380,7 +380,7 @@ async function complete(req: CompleteRequest): Promise<CompleteResult> {
     const failure = failureOf(res);
     if (failure) throw new CodexRunError(failure, res.cancelled);
     const text = res.finalResponse.trim();
-    if (!text) throw new Error('Codex returned no text. Check the Codex sign-in: limn ai login codex');
+    if (!text) throw new Error('Codex returned no text. Check the Codex sign-in: ensemble ai login codex');
     return {
       text,
       // ⚠ Reasoning tokens are a SUBSET of output tokens: never added on top.
@@ -447,9 +447,9 @@ export function _resetCodexTrustCacheForTest(): void {
 }
 
 export const HOOK_NOT_TRUSTED_MESSAGE =
-  "Limn's path guard is not active for Codex, so Codex may not run here. Set up Codex again: limn ai install codex";
+  "Ensemble's path guard is not active for Codex, so Codex may not run here. Set up Codex again: ensemble ai install codex";
 
-export const CODEX_SIGN_IN_MESSAGE = 'Codex is not signed in. Sign in with: limn ai login codex';
+export const CODEX_SIGN_IN_MESSAGE = 'Codex is not signed in. Sign in with: ensemble ai login codex';
 
 // ---- writes, from git ---------------------------------------------------------------------------
 
@@ -522,7 +522,7 @@ const inside = (root: string, p: string): boolean => {
 
 function retryPrompt(reason: string): string {
   return [
-    'Limn could not accept your final answer:',
+    'Ensemble could not accept your final answer:',
     reason,
     '',
     'Answer again with ONE JSON object in the same shape, correcting only that. Do not repeat your work.',
@@ -646,7 +646,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
         let verdict = await judge(z, resultTool, toolSchema, first.finalResponse);
         if (!verdict.ok) {
           if (!first.threadId) {
-            failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
+            failure = `Codex's answer did not pass Ensemble's checks: ${verdict.reason}`;
           } else {
             spec.onProgress?.({ kind: 'status', text: 'Correcting the answer', retry: true });
             const retry = await runCodexExec(toResumeArgs(args, first.threadId), {
@@ -664,7 +664,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
             failure = failureOf(retry);
             if (!failure) {
               verdict = await judge(z, resultTool, toolSchema, retry.finalResponse);
-              if (!verdict.ok) failure = `Codex's answer did not pass Limn's checks: ${verdict.reason}`;
+              if (!verdict.ok) failure = `Codex's answer did not pass Ensemble's checks: ${verdict.reason}`;
             }
           }
         }
@@ -710,7 +710,7 @@ export async function runAgentUnchecked(spec: AgentRunSpec): Promise<AgentRunRes
       } catch (err) {
         // What Codex left on disk cannot be read, so the run cannot be trusted.
         failedOutcome();
-        throw new CodexRunError(`Limn could not read what Codex changed (${(err as Error).message}); the run is not used.`, cancelled);
+        throw new CodexRunError(`Ensemble could not read what Codex changed (${(err as Error).message}); the run is not used.`, cancelled);
       }
       if (before.some((b) => b.top === null) || after.some((a) => a.top === null)) {
         filesChanged = null; // not a repo: cannot verify (a write run's worktree always is one)

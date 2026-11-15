@@ -14,7 +14,7 @@ describe('loopBodySection', () => {
       stillOpen: [{ severity: 'warning', path: 'src/a.ts', title: 'Fixes #12 for @alice' }],
       criteria: { met: 5, notApplicable: [{ ref: 'AC4', why: 'Emails are another team.' }], notMet: 0 },
     });
-    expect(s).toContain('## Review in Limn');
+    expect(s).toContain('## Review in Ensemble');
     expect(s).toContain('Reviewed 3 times by Claude and Codex before this pull request opened.');
     expect(s).toContain('Fixed: 9 · Answered: 3 · Pushed back and accepted: 2 · Still open: 1');
     expect(s).toContain('Acceptance criteria: 5 met, 1 not applicable (AC4: Emails are another team.), 0 not met.');
@@ -41,10 +41,10 @@ describe('loopBodySection', () => {
   });
 
   it('ends the PR body, with no "Built with Limn" footer', () => {
-    const body = storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null, review: '## Review in Limn\n\nReviewed once by Claude before this pull request opened.' });
-    expect(body.indexOf('## Review in Limn')).toBeGreaterThan(0);
+    const body = storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null, review: '## Review in Ensemble\n\nReviewed once by Claude before this pull request opened.' });
+    expect(body.indexOf('## Review in Ensemble')).toBeGreaterThan(0);
     expect(body.trimEnd().endsWith('Reviewed once by Claude before this pull request opened.')).toBe(true);
     expect(body).not.toContain('Built with');
-    expect(storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null })).not.toContain('Review in Limn');
+    expect(storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null })).not.toContain('Review in Ensemble');
   });
 });

@@ -87,7 +87,7 @@ describe('whole-percent coarseness', () => {
     expect(at5.subscription?.usedSharePct).toBe(5);
     expect(at5.overBudget).toBe(true);
     expect(at5.limitedBy).toBe('week');
-    expect(at5.reason).toBe('Limn has used its share of your week.');
+    expect(at5.reason).toBe('Ensemble has used its share of your week.');
     expect(at5.resumesAt).toBe(new Date(NOW + 3 * D).toISOString());
   });
   it('half the tokens at a 9% window is 4.5% — under a 5% share', () => {
@@ -205,7 +205,7 @@ describe('the decision and the header view on Codex', () => {
     expect(s.provider).toBe('codex');
     expect(s.mode).toBe('subscription');
     expect(s.overBudget).toBe(false);
-    expect(s.reason).toBe('Limn has not read your Codex usage yet.');
+    expect(s.reason).toBe('Ensemble has not read your Codex usage yet.');
     expect(s.subscription?.pickFrom).toBeNull();
     expect(s.subscription?.subscription).toBeNull();
   });

@@ -82,12 +82,12 @@ export function ReviewLoopSection({ build }: { build: StoryBuild }): JSX.Element
       info={
         <InfoButton title="Review rounds">
           <p>
-            Each round, Limn reviews the pushed branch the way it reviews a pull request, and checks it against the ticket. The
+            Each round, Ensemble reviews the pushed branch the way it reviews a pull request, and checks it against the ticket. The
             agent then fixes, answers or pushes back on every point, and each fix is pushed as a new commit.
           </p>
           <p className="mt-2">
-            After {loop.rounds} {loop.rounds === 1 ? 'round' : 'rounds'}, or sooner when nothing is left, Limn opens the pull
-            request. The review stays in Limn.
+            After {loop.rounds} {loop.rounds === 1 ? 'round' : 'rounds'}, or sooner when nothing is left, Ensemble opens the pull
+            request. The review stays in Ensemble.
           </p>
         </InfoButton>
       }
@@ -149,7 +149,7 @@ function LoopStatus({ build, loop }: { build: StoryBuild; loop: StoryBuildLoop }
             {loop.next}
           </span>
         )}
-        {loop.state == null && loop.next == null && <span className="text-body text-ui-mute">Limn starts when the build finishes.</span>}
+        {loop.state == null && loop.next == null && <span className="text-body text-ui-mute">Ensemble starts when the build finishes.</span>}
       </div>
       {loop.pauseLine != null && loop.pauseLine !== loop.next && (
         <p data-testid="story-build-loop-pause" className={`mt-1.5 text-body ${pauseTone}`}>

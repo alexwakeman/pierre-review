@@ -119,7 +119,10 @@ describe('tierFor — ticket review', () => {
 // must never sit on the 600/min blanket.
 describe('tierFor — implement story', () => {
   it('bills a session start as AI generation', () => {
-    expect(tiers('POST', '/api/story-builds')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/story-builds')).toEqual(['ai', 'ai_hourly', 'github_write']);
+    // The team claim: a live GitHub read, and Clear (one status).
+    expect(tiers('GET', '/api/story-builds/claim')).toEqual(['pr_detail']);
+    expect(tiers('POST', '/api/story-builds/claim/clear')).toEqual(['github_write']);
     // The removed plan/build routes are no longer billed (nothing answers them).
     expect(tiers('POST', '/api/story-builds/7/accept')).toEqual(['read']);
     expect(tiers('POST', '/api/story-builds/7/repos/3/retry')).toEqual(['read']);

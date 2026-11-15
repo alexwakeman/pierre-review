@@ -64,6 +64,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveDataDir } from '../data-dir.js';
 import { AiRuntimeMissingError } from './runtime-errors.js';
+import { readEnv } from '../env-name.js';
 
 export const AI_RUNTIME_PACKAGES = [
   '@anthropic-ai/claude-agent-sdk',
@@ -516,7 +517,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
   // "Claude Code executable not found" — so 'ready' requires the binary, unless the user's own
   // `claude` is configured right now.
   function binaryOk(fromDir: string): boolean {
-    if (env.LIMN_CLAUDE_PATH?.trim()) return true;
+    if (readEnv(env, 'CLAUDE_PATH')?.trim()) return true;
     const sdkDir = findPackageDir(AGENT_SDK, fromDir);
     if (!sdkDir) return false;
     const exe = process.platform === 'win32' ? 'claude.exe' : 'claude';
@@ -552,20 +553,20 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       return {
         runtime: 'absent',
         runtimeMessage:
-          'The Claude Code program is missing from the AI download. Set up AI again, or set LIMN_CLAUDE_PATH to your own claude.',
+          'The Claude Code program is missing from the AI download. Set up AI again, or set ENSEMBLE_CLAUDE_PATH to your own claude.',
       };
     }
     if (state === 'stale') {
       return {
         runtime: 'absent',
-        runtimeMessage: 'Limn was updated. Set up AI again to get the matching version.',
+        runtimeMessage: 'Ensemble was updated. Set up AI again to get the matching version.',
       };
     }
     return { runtime: 'absent', runtimeMessage: null };
   }
 
   function codexOverride(): string | null {
-    const raw = env.LIMN_CODEX_PATH?.trim();
+    const raw = readEnv(env, 'CODEX_PATH')?.trim();
     if (!raw) return null;
     return isAbsolute(raw) ? raw : resolve(raw);
   }
@@ -583,11 +584,11 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     if (state === 'no_binary') {
       return {
         runtime: 'absent',
-        runtimeMessage: 'The Codex program is missing from the AI download. Run: limn ai install codex',
+        runtimeMessage: 'The Codex program is missing from the AI download. Run: ensemble ai install codex',
       };
     }
     if (state === 'stale') {
-      return { runtime: 'absent', runtimeMessage: 'Limn was updated. Set up Codex again: limn ai install codex' };
+      return { runtime: 'absent', runtimeMessage: 'Ensemble was updated. Set up Codex again: ensemble ai install codex' };
     }
     return { runtime: 'absent', runtimeMessage: null };
   }
@@ -676,7 +677,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         {
           name: 'limn-ai-runtime',
           private: true,
-          description: 'The AI runtime Limn downloads on first use. Safe to delete; Limn can download it again.',
+          description: 'The AI runtime Ensemble downloads on first use. Safe to delete; Ensemble can download it again.',
           dependencies,
         },
         null,
@@ -783,7 +784,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     try {
       writeStagingManifest(codexStaging, { [CODEX_PACKAGE]: codexWant });
       // ⚠ Never --omit=optional: Codex's platform program IS an optional dependency.
-      error = await npmInto(codexStaging, npm, { omitOptional: false, timeoutMs, retry: 'limn ai install codex' });
+      error = await npmInto(codexStaging, npm, { omitOptional: false, timeoutMs, retry: 'ensemble ai install codex' });
     } catch (err) {
       error = `Could not write to ${dataDir}: ${(err as Error).message}`;
     }
@@ -791,9 +792,9 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       emit({ phase: 'verifying', message: 'Checking the download.' });
       const codexDir = findPackageDirIn(CODEX_PACKAGE, codexStaging);
       if (!codexDir || installedVersion(codexDir) !== codexWant) {
-        error = `The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`;
+        error = `The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: ensemble ai install codex`;
       } else if (!codexBinaryIn(codexStaging)) {
-        error = `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install codex`;
+        error = `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: ensemble ai install codex`;
       }
     }
     if (!error) {
@@ -837,13 +838,13 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     const want = pins();
     if (!want) {
       return failWith(
-        'This copy of Limn does not list which AI runtime versions to download. Update Limn and try again.',
+        'This copy of Ensemble does not list which AI runtime versions to download. Update Ensemble and try again.',
       );
     }
     const codexWant = codexRequested ? codexPin() : null;
     if (codexRequested && !codexWant) {
       // A Codex problem: Claude's state is not touched.
-      return codexOnlyFailure('This copy of Limn does not list which Codex version to download. Update Limn and try again.');
+      return codexOnlyFailure('This copy of Ensemble does not list which Codex version to download. Update Ensemble and try again.');
     }
     const npm = installOpts.npm ?? resolveNpm(env);
     if (!npm) {
@@ -880,9 +881,9 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     // Using your own `claude`: skip the SDK's bundled ~110 MB binary (its optional dependencies). Codex
     // is staged apart, so this no longer depends on whether Codex comes too.
     const claudeError = await npmInto(staging, npm, {
-      omitOptional: !!env.LIMN_CLAUDE_PATH?.trim(),
+      omitOptional: !!readEnv(env, 'CLAUDE_PATH')?.trim(),
       timeoutMs,
-      retry: 'limn ai install',
+      retry: 'ensemble ai install',
     });
     if (claudeError) {
       rmSync(staging, { recursive: true, force: true });
@@ -896,14 +897,14 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       if (!dir || have !== want[name] || !esmEntryOf(dir, ENTRY_SUBPATH[name])) {
         rmSync(staging, { recursive: true, force: true });
         return failWith(
-          `The download finished but ${name} ${want[name]} is missing from it. Try again: limn ai install`,
+          `The download finished but ${name} ${want[name]} is missing from it. Try again: ensemble ai install`,
         );
       }
     }
     if (!binaryOk(staging)) {
       rmSync(staging, { recursive: true, force: true });
       return failWith(
-        `The download finished but the Claude Code program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install. Or set LIMN_CLAUDE_PATH to your own claude.`,
+        `The download finished but the Claude Code program for ${process.platform}-${process.arch} is missing from it. Try again: ensemble ai install. Or set ENSEMBLE_CLAUDE_PATH to your own claude.`,
       );
     }
 
@@ -916,16 +917,16 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       try {
         writeStagingManifest(codexStaging, { [CODEX_PACKAGE]: codexWant });
         // ⚠ Never --omit=optional: Codex's platform program IS an optional dependency.
-        codexError = await npmInto(codexStaging, npm, { omitOptional: false, timeoutMs, retry: 'limn ai install codex' });
+        codexError = await npmInto(codexStaging, npm, { omitOptional: false, timeoutMs, retry: 'ensemble ai install codex' });
       } catch (err) {
         codexError = `Could not write to ${dataDir}: ${(err as Error).message}`;
       }
       if (!codexError) {
         const codexDir = findPackageDirIn(CODEX_PACKAGE, codexStaging);
         if (!codexDir || installedVersion(codexDir) !== codexWant) {
-          codexError = `The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: limn ai install codex`;
+          codexError = `The download finished but ${CODEX_PACKAGE} ${codexWant} is missing from it. Try again: ensemble ai install codex`;
         } else if (!codexBinaryIn(codexStaging)) {
-          codexError = `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: limn ai install codex`;
+          codexError = `The download finished but the Codex program for ${process.platform}-${process.arch} is missing from it. Try again: ensemble ai install codex`;
         }
       }
     }
@@ -940,7 +941,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         if (v) writeStagingManifest(staging, { ...want, [CODEX_PACKAGE]: v });
       } catch (err) {
         // Codex could not be carried: Claude is still set up; only Codex reports it.
-        codexError ??= `Codex could not be kept while AI was set up again (${(err as Error).message}). Run: limn ai install codex`;
+        codexError ??= `Codex could not be kept while AI was set up again (${(err as Error).message}). Run: ensemble ai install codex`;
       }
     }
     if (codexStaging) rmSync(codexStaging, { recursive: true, force: true });
@@ -1139,7 +1140,7 @@ export const loadTurndownGfm = async (): Promise<TurndownGfmModule> =>
 export function claudeExecutableOptions(
   env: NodeJS.ProcessEnv = process.env,
 ): { pathToClaudeCodeExecutable?: string } {
-  const raw = env.LIMN_CLAUDE_PATH?.trim();
+  const raw = readEnv(env, 'CLAUDE_PATH')?.trim();
   if (!raw) return {};
   return { pathToClaudeCodeExecutable: isAbsolute(raw) ? raw : resolve(raw) };
 }

@@ -10,11 +10,14 @@ import { CODEX_DOCS_KINDS } from './codex/kinds/docs.js';
 import { CODEX_FIX_KINDS } from './codex/kinds/fix.js';
 import { CODEX_REVIEW_KINDS } from './codex/kinds/review.js';
 import { CODEX_STORY_BUILD_KINDS } from './codex/kinds/story-build.js';
+import { CODEX_STORY_CHAT_KINDS } from './codex/kinds/story-chat.js';
 import { CODEX_TICKETS_KINDS } from './codex/kinds/tickets.js';
 import type { AgentKind } from './provider.js';
 import { isLockedOut } from './usage-lockout.js';
+import { envNameSet, readEnv } from '../env-name.js';
 
-export const AI_PROVIDER_ENV = 'LIMN_AI_PROVIDER';
+/** ENSEMBLE_AI_PROVIDER, else the older LIMN_AI_PROVIDER (env-name.ts). */
+export const AI_PROVIDER_ENV = 'ENSEMBLE_AI_PROVIDER';
 
 export type { AiProviderSetting };
 
@@ -23,7 +26,7 @@ export type { AiProviderSetting };
  * kind is ported (Phase 3 complete); kept for a build that ships a kind Codex cannot run yet.
  */
 export const CODEX_NOT_AVAILABLE_MESSAGE =
-  'Codex cannot run every AI feature in this version of Limn. Choose Claude in Settings → AI.';
+  'Codex cannot run every AI feature in this version of Ensemble. Choose Claude in Settings → AI.';
 
 // ---- the choice: LIMN_AI_PROVIDER, else Settings → AI (docs/CODEX-PLAN.md Phase 4) ---------------
 //
@@ -48,7 +51,7 @@ export function setStoredAiProviderSetting(value: AiProviderSetting | null): voi
 
 /** `LIMN_AI_PROVIDER` when it is set to a known value; null when unset, empty or unknown. */
 export function aiProviderEnvSetting(env: NodeJS.ProcessEnv = process.env): AiProviderSetting | null {
-  const raw = env[AI_PROVIDER_ENV]?.trim().toLowerCase();
+  const raw = readEnv(env, 'AI_PROVIDER')?.trim().toLowerCase();
   return isAiProviderSetting(raw) ? raw : null;
 }
 
@@ -79,6 +82,8 @@ export const CODEX_AGENT_KINDS: ReadonlySet<AgentKind> = new Set<AgentKind>([
   ...CODEX_DOCS_KINDS,
   // "Implement story" (listed from its contract commit — see that file's header).
   ...CODEX_STORY_BUILD_KINDS,
+  // Story chat: read-only on Codex (that file's header).
+  ...CODEX_STORY_CHAT_KINDS,
 ]);
 
 /** Can Codex run this agent kind in this version? (`allow` is for tests.) */
@@ -102,6 +107,7 @@ const KIND_WORDS: Record<AgentKind, string> = {
   docs_chat: 'the docs chat',
   story_plan: 'story plans',
   story_build: 'story builds',
+  story_chat: 'the story chat',
 };
 
 /** Every agent kind (the KIND_WORDS keys, so a new kind cannot be missed: the Record is exhaustive). */
@@ -121,12 +127,12 @@ export function codexRunnable(allow: ReadonlySet<AgentKind> = CODEX_AGENT_KINDS)
  * or `LIMN_AI_PROVIDER` when that is what chose Codex. Read at call time.
  */
 function chooseClaudeSentence(): string {
-  return aiProviderEnvSetting() ? 'Set LIMN_AI_PROVIDER to claude to use Claude.' : 'Choose Claude in Settings → AI.';
+  return aiProviderEnvSetting() ? `Set ${envNameSet(process.env, 'AI_PROVIDER') ?? AI_PROVIDER_ENV} to claude to use Claude.` : 'Choose Claude in Settings → AI.';
 }
 
 /** The one sentence a not-yet-ported agent kind answers on Codex. */
 export function codexKindNotAvailableMessage(kind: AgentKind): string {
-  return `Codex cannot run ${KIND_WORDS[kind] ?? 'this'} in this version of Limn yet. ${chooseClaudeSentence()}`;
+  return `Codex cannot run ${KIND_WORDS[kind] ?? 'this'} in this version of Ensemble yet. ${chooseClaudeSentence()}`;
 }
 
 /** Every run kind a pre-flight answers for: every agent kind, then the one-shot `complete`. */

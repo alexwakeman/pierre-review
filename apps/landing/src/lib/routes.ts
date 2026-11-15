@@ -16,9 +16,10 @@ import { FREE_TEAM_SIZE, NPM_PACKAGE, SITE_NAME } from './site';
 // The product name comes from lib/site.ts, never a literal, so a rename does not
 // have to be re-applied across nine strings here.
 //
-// The site lives at limn-review.com (moved from the old pierre-review.com on 2026-10-23).
+// The site lives at ensemble.ac (moved from limn-review.com on 2026-11-15, which had moved from
+// pierre-review.com on 2026-10-23; both old domains 301 here through REDIRECT_HOSTS).
 
-export const SITE_URL = 'https://limn-review.com';
+export const SITE_URL = 'https://ensemble.ac';
 export const OG_IMAGE = `${SITE_URL}/og-image.png`;
 
 export type RouteSeo = {
@@ -31,17 +32,17 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS FIVE CONTENT PAGES plus the three legal ones (and the docs, whose
- * routes come from the docs manifest): home, Reporting and metrics, For teams
- * (/teams: how reviews work when several teammates run Limn), How we measure and
- * Contact. The earlier feature-area pages (/features, /bots, /pro, /pricing,
+ * THE SITE IS SIX CONTENT PAGES plus the three legal ones (and the docs, whose
+ * routes come from the docs manifest): home, Build, Ensemble review, Automation,
+ * Everything else and Contact. (2026-11: /teams 301s to /ensemble-review, and
+ * /reporting and /how-we-measure 301 to their sections of /everything-else.) The earlier feature-area pages (/features, /bots, /pro, /pricing,
  * /how-it-works, /arcade) and then the two role pages (/for-developers,
  * /for-managers) were retired; their URLs survive as aliases. The Getting started
  * page was folded into the docs (/docs/getting-started/…): /getting-started,
  * /for-developers and /features now 301 there (apps/site src/app.ts).
  *
  * /contact is load-bearing, and it is load-bearing rather than courtesy: an
- * organisation where more than FREE_TEAM_SIZE people use Limn needs a licence,
+ * organisation where more than FREE_TEAM_SIZE people use Ensemble needs a licence,
  * and this is where it asks. See src/pages/Contact.tsx.
  *
  * Legacy aliases for the removed routes are handled in App.tsx and by the
@@ -52,24 +53,28 @@ export type RouteSeo = {
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — your team writes more code than it can review`,
-    description: `${SITE_NAME} reviews every pull request against its story and your docs on your own Claude or Codex, shows each person what needs them next, and fixes what it finds: findings, red CI and merge conflicts. Every feature is free for up to ${FREE_TEAM_SIZE} people, on your machine: npx ${NPM_PACKAGE}.`,
+    title: `${SITE_NAME} — define, build, and review as an ensemble`,
+    description: `${SITE_NAME} takes a ticket from your tracker, checks it against your docs and code, implements it, reviews it in rounds and opens the pull request. Each teammate reviews with their own Claude or Codex, and GitHub is the source of truth. It runs fully on your machine, with no added service. Free for up to ${FREE_TEAM_SIZE} people: npx ${NPM_PACKAGE}.`,
   },
-  '/reporting': {
-    title: `Reporting and metrics — where the work is and where it waits · ${SITE_NAME}`,
-    description: `${SITE_NAME} Reports' headline figures cover one stated window, and anything else says so in its heading. A report per sprint or month, Chronology for where every hour of review goes, 26 weeks of history, where the work is happening across your repositories, and what your review bots are worth. It runs on your own machine.`,
+  '/build': {
+    title: `Build — from ticket to pull request, checked against the story · ${SITE_NAME}`,
+    description: `How ${SITE_NAME} turns a ticket into a pull request on your own machine: it checks the story against your docs and code, fills the gaps, implements in a sandbox, reviews its own work in rounds and opens the PR. By hand or automatically, and how you verify the result.`,
+  },
+  '/ensemble-review': {
+    title: `Ensemble review — every teammate's agent, one review · ${SITE_NAME}`,
+    description: `Each teammate reviews with their own local agent, Claude or Codex, on their own machine. There is no server between you: GitHub is the source of truth. A status line on each commit stops two people reviewing it twice, and every posted review joins one list. Free for up to ${FREE_TEAM_SIZE} people.`,
+  },
+  '/automation': {
+    title: `Automation — dependency updates, merged without you · ${SITE_NAME}`,
+    description: `${SITE_NAME} handles Dependabot and Renovate pull requests end to end on your machine: it approves, fixes, resolves conflicts and merges when checks pass, and claims each one on GitHub so only one teammate acts.`,
+  },
+  '/everything-else': {
+    title: `Everything else — review, fix, ship, reports and how we measure · ${SITE_NAME}`,
+    description: `The rest of ${SITE_NAME}: reviewing, fixing and shipping across every repository, reports per sprint or month, Chronology, what your review bots are worth, and the two models behind the numbers. It runs on your own machine.`,
   },
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,
     description: `${SITE_NAME} is free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it. More users than that need a licence: ask for one here. Questions and bug reports are welcome too.`,
-  },
-  '/teams': {
-    title: `Reviewing as a team — GitHub keeps the score · ${SITE_NAME}`,
-    description: `How reviews work when several teammates run ${SITE_NAME}: no server between you, so GitHub keeps the score. A status line on each commit stops two people reviewing it with the same AI provider, the author's own review never counts as approval, and every teammate's posted review joins one list. Free for up to ${FREE_TEAM_SIZE} people; a licence above that.`,
-  },
-  '/how-we-measure': {
-    title: `How we measure — the two models, in plain English · ${SITE_NAME}`,
-    description: `Almost everything ${SITE_NAME} shows you is counted, not predicted. Two questions resist counting and have a model each: how serious a review-bot comment is, and whether your bots are doing well compared with the same bots in comparable repositories. What each one is for, how it was built, and how we know it works.`,
   },
   '/privacy': {
     title: `Privacy policy — ${SITE_NAME}`,
@@ -81,7 +86,7 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/terms': {
     title: `Terms and conditions — ${SITE_NAME}`,
-    description: `The terms for this website and the ${SITE_NAME} software: a summary of the Limn License (free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it), the frontier models the AI tools support, what we do against leaks and prompt injection, and why the software is provided as is.`,
+    description: `The terms for this website and the ${SITE_NAME} software: a summary of the Ensemble License (free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it), the frontier models the AI tools support, what we do against leaks and prompt injection, and why the software is provided as is.`,
   },
 };
 

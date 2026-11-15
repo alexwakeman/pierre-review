@@ -179,16 +179,16 @@ export function wikiErrorMessage(providerName: string, err: unknown): string {
         ? 'Notion has no such page, or the page is not shared with the integration.'
         : `${providerName} has no such page, or the saved token cannot see it.`;
     case 'rate_limited':
-      return `${providerName} asked Limn to slow down. Try again in a few minutes.`;
+      return `${providerName} asked Ensemble to slow down. Try again in a few minutes.`;
     case 'blocked':
     case 'bad_url':
-      return `Limn does not read ${providerName} at that address. Use the page's https address.`;
+      return `Ensemble does not read ${providerName} at that address. Use the page's https address.`;
     case 'redirect':
       return `${providerName} answered with a redirect. Use the page's own address.`;
     case 'timeout':
       return `${providerName} took too long to answer.`;
     case 'too_large':
-      return `${providerName} sent more than Limn reads for one page.`;
+      return `${providerName} sent more than Ensemble reads for one page.`;
     case 'not_json':
     case 'http':
       return `${providerName} answered with an error${err instanceof WikiSourceError && err.status != null ? ` (${err.status})` : ''}.`;

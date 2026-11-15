@@ -467,7 +467,7 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
         <p>
           {name} picks up to five <strong>critical paths</strong> &mdash; the chains of tickets that most put the sprint at risk, riskiest
           first, each in the order the work must happen &mdash; and up to three call-outs, after a sprint read that changed something.
-          Limn builds the map {name} reads and counts every number; {name}&rsquo;s words carry none.
+          Ensemble builds the map {name} reads and counts every number; {name}&rsquo;s words carry none.
         </p>
       )}
       <p>
@@ -479,7 +479,7 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
         pull request merged and none open), sit in a Product review bucket, or are in a bucket that means Complete. Open
         dependencies counts the links from an unfinished ticket to another unfinished one.
       </p>
-      <p>Limn writes some call-outs itself, from what it has stored:</p>
+      <p>Ensemble writes some call-outs itself, from what it has stored:</p>
       <ul className="list-disc space-y-1 pl-5">
         <li>
           <strong>Since you last looked</strong>: tickets that changed section, tickets added and pull requests merged since your last

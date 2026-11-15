@@ -11,7 +11,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         <Ui>Unanswered threads</Ui> lists review comments with no reply and no later commit to their file, older
-        than 24 hours. In Limn's words these threads are <Ui>Untouched</Ui>. Each card quotes the opening
+        than 24 hours. In Ensemble's words these threads are <Ui>Untouched</Ui>. Each card quotes the opening
         comment. Items are ordered by score.
       </p>
 

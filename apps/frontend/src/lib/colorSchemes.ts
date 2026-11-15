@@ -15,11 +15,11 @@
 export type SchemeMode = 'light' | 'dark';
 
 export const COLOR_SCHEMES = [
-  { id: 'light', label: 'Limn Light', mode: 'light' },
+  { id: 'light', label: 'Ensemble Light', mode: 'light' },
   { id: 'solarized-light', label: 'Solarized Light', mode: 'light' },
   { id: 'github-light', label: 'GitHub Light', mode: 'light' },
   { id: 'gruvbox-light', label: 'Gruvbox Light', mode: 'light' },
-  { id: 'dark', label: 'Limn Dark', mode: 'dark' },
+  { id: 'dark', label: 'Ensemble Dark', mode: 'dark' },
   { id: 'solarized-dark', label: 'Solarized Dark', mode: 'dark' },
   { id: 'dracula', label: 'Dracula', mode: 'dark' },
   { id: 'nord', label: 'Nord', mode: 'dark' },

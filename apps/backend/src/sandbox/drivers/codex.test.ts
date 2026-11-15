@@ -78,7 +78,7 @@ describe('the Codex driver', () => {
   it('chat, Start build, Stop: one thread, the policy per turn, the ledger rows', async () => {
     const t = setup();
     // The seed file is in the sandbox already (the workspace step wrote it).
-    await t.fake.copyIn('limn-s2-sandbox', [{ path: '/home/agent/.limn/seed.md', content: 'You are in a Limn session.' }]);
+    await t.fake.copyIn('limn-s2-sandbox', [{ path: '/home/agent/.limn/seed.md', content: 'You are in an Ensemble session.' }]);
     const d = await startCodexDriver(t.opts);
     expect(d.agentRef()).toBe(T);
 
@@ -96,7 +96,7 @@ describe('the Codex driver', () => {
       model: 'gpt-6.1-sol',
       approvalPolicy: 'never',
       sandbox: 'danger-full-access',
-      developerInstructions: 'You are in a Limn session.',
+      developerInstructions: 'You are in an Ensemble session.',
     });
 
     const r1 = await d.send('look at the code first');
@@ -141,7 +141,7 @@ describe('the Codex driver', () => {
     const d = await startCodexDriver(t.opts);
     await d.send('hi');
     const reply = t.log.find((m) => m.id === 900);
-    expect(reply).toMatchObject({ id: 900, error: { message: 'Not available in a Limn session.' } });
+    expect(reply).toMatchObject({ id: 900, error: { message: 'Not available in an Ensemble session.' } });
     expect(reply && 'result' in reply).toBe(false);
     await d.close();
   });

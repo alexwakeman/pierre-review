@@ -25,7 +25,7 @@ nothing. Plan usage after all 14 runs: 5-hour window **1%**, weekly window **0%*
 | 4 | Writes | `apply_patch` edits the fixture. **With only `writable_roots`, a write OUTSIDE the fixture SUCCEEDED**, because `workspace-write` also makes `/tmp` and `$TMPDIR` writable by default. With `exclude_slash_tmp=true` and `exclude_tmpdir_env_var=true` it is refused. A refused or failed patch produces **no JSON event**: only stderr and the agent's own words. | runs 7, 8 | Add both exclude keys. Do not trust the event stream to report refusals. |
 | 5 | Hooks per run | A `-c hooks.PreToolUse=[…]` hook loads as source `sessionFlags`, but it is **untrusted**. An untrusted hook is **silently skipped** (no warning; the denied file was written). It runs with `--dangerously-bypass-hook-trust`, OR without that flag if a PRIVATE `CODEX_HOME/config.toml` holds `hooks.state."<key>".trusted_hash`. Exit 2 blocks the call. The hook fires for `apply_patch` AND the MCP tools. Auth works in a private `CODEX_HOME` only if that folder has its own `auth.json`. | runs 7–10, `hooks/list` | Decision 4 resolves: per-run hooks work. Prefer a private `CODEX_HOME` with a trust entry. |
 | 6 | Usage and rate limits | Per run: `turn.completed.usage` = `input_tokens`, `cached_input_tokens`, `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens`. `exec --json` carries **no** rate-limit data. Windows come from `codex app-server` → `account/rateLimits/read` (`primary` 300 min, `secondary` 10080 min, `usedPercent` **integer**, `resetsAt` Unix seconds, `planType`), and from the session file's `token_count.rate_limits` (also whole numbers). Primary moved 0 → 1 after 10 runs. | app-server reads before/after; rollout | Usage reads go through the app-server. The 1% resolution needs a design change (below). |
-| 7 | SDK vs CLI | The SDK has no option for `--ignore-user-config`, `--ephemeral` or `--strict-config`. It works with a `codexPathOverride` wrapper that inserts them after `exec`. `config` serialises nested objects (including `mcp_servers`). `env` replaces the whole environment. | runs 5, 6, 12; wrapper argv log | **Direct CLI** for Limn (as the plan says). Use the SDK's `index.d.ts` as the event reference only. |
+| 7 | SDK vs CLI | The SDK has no option for `--ignore-user-config`, `--ephemeral` or `--strict-config`. It works with a `codexPathOverride` wrapper that inserts them after `exec`. `config` serialises nested objects (including `mcp_servers`). `env` replaces the whole environment. | runs 5, 6, 12; wrapper argv log | **Direct CLI** for Ensemble (as the plan says). Use the SDK's `index.d.ts` as the event reference only. |
 | 8 | Models | Plus catalog: `gpt-6-astra` (frontier), `gpt-6.1-sol` (workhorse, the CLI default), `gpt-6-sol`, `gpt-6-luna` (fast), plus older `gpt-5.6-*` and `gpt-5.5`. Efforts: `low`…`max`/`ultra` (luna has no `ultra`). The catalog lists no `minimal`, but the config accepts it. | `codex debug models`; run 14 | deep = `gpt-6-astra`, standard = `gpt-6.1-sol`, fast = `gpt-6-luna`. |
 | 9 | Cancellation | SDK `AbortSignal`: rejects with `AbortError` at once, and no process is left. CLI `SIGTERM`: exits 0 in about 20 ms, and no process is left. **Neither reports usage for the cancelled turn** (no `turn.completed`). | runs 12, 13 | A cancelled run records "tokens unknown". The window reading still catches its cost. |
 | 10 | Timing | Same review question, `gpt-6-luna` at low effort: MCP reads **15.1 s, 79k input tokens**; shell reads in a read-only sandbox **7.6 s, 28k input tokens**. With the shell on, the agent ran `cat ../outside/secret.env` and **read the secret**: the read-only sandbox does not limit reads. | runs 4, 11 | The MCP route costs about 2× time and 3× tokens on a tiny repo. The shell route is not safe. Keep MCP. |
@@ -99,7 +99,7 @@ The server is `scripts/workspace-mcp.mjs`: hand-rolled newline JSON-RPC with no 
 - Nested schema (`findings[]` of objects with an inner `evidence` object, nullable fields, enums).
   The final `agent_message` text was valid JSON matching the schema, every time (runs 3, 4, 5, 6,
   11). OpenAI's strict mode needs `additionalProperties: false` and every property listed in
-  `required` (use `["x","null"]` for optional), so Limn's schema generator must emit that form.
+  `required` (use `["x","null"]` for optional), so Ensemble's schema generator must emit that form.
 - Second turn: the SDK `thread.run()` twice (run 5, then run 6) spawns `exec … resume <id>`. Turn 2
   obeyed the "validation error" and returned the corrected JSON. Turn 2's usage was
   `input 16603 / output 86`, which is the THREAD TOTAL; the session file shows `last_token_usage`
@@ -107,7 +107,7 @@ The server is `scripts/workspace-mcp.mjs`: hand-rolled newline JSON-RPC with no 
 - CLI: `codex exec resume <id> --output-schema … "<error>"`. After an `--ephemeral` run, this fails:
   `thread/resume failed: no rollout found for thread id …`.
 - So a validation retry needs either (a) a non-ephemeral first run whose session files go to a
-  Limn-owned `CODEX_HOME` (never the user's `~/.codex/sessions`), or (b) a fresh ephemeral run
+  Ensemble-owned `CODEX_HOME` (never the user's `~/.codex/sessions`), or (b) a fresh ephemeral run
   whose prompt carries the bad answer and the error (this costs the base prompt again).
 
 ### 4. Writes
@@ -117,14 +117,14 @@ The server is `scripts/workspace-mcp.mjs`: hand-rolled newline JSON-RPC with no 
 -c sandbox_workspace_write.exclude_tmpdir_env_var=true`, shell off.
 
 - Run 7 (no exclude keys): `/tmp/limn-codex-spike/outside/pwned.txt` **was created**. `/tmp` is
-  writable by default in `workspace-write`. Limn's worktrees under `os.tmpdir()` or the clone
+  writable by default in `workspace-write`. Ensemble's worktrees under `os.tmpdir()` or the clone
   cache would sit inside that default.
 - Run 8 (with the exclude keys): `math.ts` was edited (a zero guard). The outside write was
   refused ("patch rejected: writing outside of the project; rejected by user approval settings",
   stderr only).
 - Events for a successful edit: `item.type = "file_change"`, `changes[{path, kind: add|update|delete}]`,
   `status`. A refused, hook-denied or failed patch emits **no item**. It appears only on stderr
-  (`codex_core::tools::router: error=…`) and in the agent's message. Limn should verify the result
+  (`codex_core::tools::router: error=…`) and in the agent's message. Ensemble should verify the result
   with `git diff` and not trust the stream.
 
 ### 5. Hooks per run
@@ -146,16 +146,16 @@ The hook given with `-c` was accepted by `--strict-config`:
   `[hooks.state."/<session-flags>/config.toml:pre_tool_use:0:0"] trusted_hash = "sha256:…"`
   (run 9, no bypass flag, no `--ignore-user-config`): the hook ran and denied the call. A trust
   entry given with `-c` does NOT count, and a trust entry is ignored under `--ignore-user-config`.
-- Deny: exit 2 with a stderr reason blocks the call ("Command blocked by PreToolUse hook: Limn path
+- Deny: exit 2 with a stderr reason blocks the call ("Command blocked by PreToolUse hook: Ensemble path
   guard: refused"), and the agent sees the reason.
 - Payload on stdin: `session_id`, `turn_id`, `cwd`, `hook_event_name`, `model`, `permission_mode`,
   `tool_name` (`apply_patch`, `mcp__workspace__read_file`), `tool_input` (the full patch text, or
   the MCP arguments), `tool_use_id`. The hook fired for MCP tool calls too.
 - Auth in a private `CODEX_HOME`: an empty one gives `401 Missing bearer`. The login lives in
   `CODEX_HOME/auth.json` (file storage on this machine; `secret_auth_storage` is off). A copied
-  `auth.json` worked. Limn must NOT copy the user's file in production: the refresh token rotates,
+  `auth.json` worked. Ensemble must NOT copy the user's file in production: the refresh token rotates,
   so two copies would log one of them out. Two options:
-  - (a) Limn's own sign-in: `CODEX_HOME=~/.limn/codex codex login`, once.
+  - (a) Ensemble's own sign-in: `CODEX_HOME=~/.ensemble/codex codex login`, once.
   - (b) Use `~/.codex` with `--ignore-user-config` and `--dangerously-bypass-hook-trust`.
 
 ### 6. Usage and rate limits
@@ -178,10 +178,10 @@ The hook given with `-c` was accepted by `--strict-config`:
     `used_percent` as a float, but the values seen were whole numbers (`1.0`).
 - Before: primary 0%, weekly 0%. After 10 runs (about 380k input tokens, mostly cached): primary
   1%, weekly 0%. After 14 runs: still 1% / 0%.
-- **The resolution is one whole percent.** A small run moves nothing. "Limn's share = the sum of the
+- **The resolution is one whole percent.** A small run moves nothing. "Ensemble's share = the sum of the
   rise across each run" would round most runs to 0. The share must be measured over a SPAN instead:
-  the rise in `usedPercent` from when Limn's first run of a period started to now, with no one else
-  using Codex during that span. Or the share can be token-weighted: Limn's tokens divided by the
+  the rise in `usedPercent` from when Ensemble's first run of a period started to now, with no one else
+  using Codex during that span. Or the share can be token-weighted: Ensemble's tokens divided by the
   account's total tokens for that window (from `account/usage/read`) and multiplied by the window's
   `usedPercent`. The weekly window is coarser still.
 
@@ -268,12 +268,12 @@ user's home (skills and other extras).
 
 **§ 3.3 (MCP + hook)**:
 
-- The hook is feasible per run. Prefer a **Limn-owned `CODEX_HOME`** (`~/.limn/codex`) that holds:
+- The hook is feasible per run. Prefer a **Ensemble-owned `CODEX_HOME`** (`~/.ensemble/codex`) that holds:
   - its own `codex login`;
   - a `config.toml` with only the `hooks.state` trust entry for the session-flag hook (its hash is
     the handler's content hash, computed at build time or read from `hooks/list`);
   - session files for validation retries.
-- This drops `--ignore-user-config`, because the config is Limn's own, and avoids
+- This drops `--ignore-user-config`, because the config is Ensemble's own, and avoids
   `--dangerously-bypass-hook-trust`.
 - Fallback: the user's `~/.codex` with `--ignore-user-config --dangerously-bypass-hook-trust`.
 - ⚠ An untrusted hook is skipped SILENTLY. The runner must check `hooks/list` (or a canary deny)
@@ -283,22 +283,22 @@ user's home (skills and other extras).
 
 - Schemas must be in strict form (`additionalProperties:false`, all keys required, nullable for
   optional).
-- A validation retry is `exec resume` in the Limn `CODEX_HOME` (non-ephemeral), or a fresh run
+- A validation retry is `exec resume` in the Ensemble `CODEX_HOME` (non-ephemeral), or a fresh run
   carrying the error.
 
 **§ 3.6 / § 8.1 (budget)**:
 
 - Read the windows from `codex app-server` `account/rateLimits/read` (primary 300 min, secondary
   10080 min, integer `usedPercent`, `resetsAt` Unix seconds).
-- The 1% resolution rules out per-run rise sums. Measure Limn's share over a span, or weight the
-  window's `usedPercent` by Limn's share of `account/usage/read` tokens.
+- The 1% resolution rules out per-run rise sums. Measure Ensemble's share over a span, or weight the
+  window's `usedPercent` by Ensemble's share of `account/usage/read` tokens.
 - A cancelled run has no token figure, so the ledger stores null tokens for it.
 - `account/read {refreshToken:true}` is the sign-in check for `detect()`, not `login status`.
 
 **§ 6 (decisions)**:
 
-- Decision 4 is resolved: per-run hooks work (Limn-owned `CODEX_HOME`, or the bypass flag).
-- New decision: should Limn have its OWN Codex sign-in (`~/.limn/codex`, one extra `codex login`),
+- Decision 4 is resolved: per-run hooks work (Ensemble-owned `CODEX_HOME`, or the bypass flag).
+- New decision: should Ensemble have its OWN Codex sign-in (`~/.ensemble/codex`, one extra `codex login`),
   or run against the user's `~/.codex` with the bypass flag?
 - Decision 3 changes: a ChatGPT budget can only be a percentage of the window, measured in whole
   percent. A per-run token ceiling is not enforceable mid-run, only by cancelling.

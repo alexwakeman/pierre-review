@@ -155,7 +155,7 @@ Maintained/External picker, the other memberships beside the name) and **Grid** 
 cycles none → External → Maintained → none, `nextGridState`; a repo's ONLY membership never cycles to none).
 ⚠ Every write is pending PER ROW / PER CELL (`busy`, keyed by repo or `repo:workspace`) — never one
 mutation's `isPending` across rows (that blocked every other ✕ during a slow `DELETE /api/repos/:id`).
-Taking a repo out of its last workspace removes it from Limn, after a confirm. The repo search
+Taking a repo out of its last workspace removes it from Ensemble, after a confirm. The repo search
 (`RepoSearch`) shows its curated suggestions ONLY to an account with no repos yet; otherwise nothing until
 the reader types. Its pager dims the list under a spinner until the page lands (`paging`).
 
@@ -190,8 +190,8 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   § below), and the
   foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
   the bell, "?", the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
-  The "?" is a LINK, not a dialog: it opens the public docs (limn-review.com/docs) in a new tab on
-  the page for the current location (`lib/docsLink.ts` `docsUrlForView`; ⌘K "Open the Limn docs"
+  The "?" is a LINK, not a dialog: it opens the public docs (ensemble.ac/docs) in a new tab on
+  the page for the current location (`lib/docsLink.ts` `docsUrlForView`; ⌘K "Open the Ensemble docs"
   uses the same). The SPA never imports the landing, so the page keys are hard-coded there; the
   landing's `test/docs.test.ts` fails if one is not a real docs page. `HelpModal` is reached only
   from ⌘K ("Help and keyboard shortcuts"); the `?` KEY still opens the key sheet.
@@ -984,14 +984,14 @@ nested. A check with no log stays one whole link.
   nobody — the log does not know who), commits (short sha + copy, first line of the message), reviews,
   PR comments, merged (by `mergedById`) or closed. **The composer is at the TOP.** One continuous
   vertical rail down the left (git-history style) with a marker disc per entry whose icon names the
-  event type (`activityMarker`: comment, approved, changes requested, review, Limn — the sparkle in
+  event type (`activityMarker`: comment, approved, changes requested, review, Ensemble — the sparkle in
   `text-ai-signal` —, commit, opened, ready, reopened, merged, closed; every glyph from `Icons.tsx`,
-  `PullRequestClosedIcon` / `ActivityIcon` added for this). Every Limn review (stored kind `pierre` or
-  the summary marker) and every Limn PR-level finding wears a small **"Limn"** chip; the NEWEST Limn
+  `PullRequestClosedIcon` / `ActivityIcon` added for this). Every Ensemble review (stored kind `pierre` or
+  the summary marker) and every Ensemble PR-level finding wears a small **"Ensemble"** chip; the NEWEST Ensemble
   AUTO review (marker `k=auto`, else the auto-post footer on an older post) adds **"Auto review ·
   latest"**. No per-row timeline magnifier and no per-row GitHub link.
   - **PUSH SUMMARIES** (`components/PushSummary.tsx`, `hooks/usePushSummaries.ts`; docs/CLAUDE-REVIEW.md
-    § Push summaries): under the commit a full Limn review ran at, one AI-tinted block — "Since the last
+    § Push summaries): under the commit a full Ensemble review ran at, one AI-tinted block — "Since the last
     review · N commits" (or "Since the pull request opened") and the review's ≤ 2 sentences / ≤ 4
     bullets about the pushes since the review before. Placed by shared `placePushSummaries` (the head
     commit's sha; a pair's two rows are one; a head a force-push rewrote is not placed; an unknown
@@ -1001,15 +1001,15 @@ nested. A check with no log stays one whole link.
     commit-run card shows the same block for each summary whose head the run holds
     (`FeedItem.pushSummaries`, attached server-side in the commit-run builder), under the same gate.
   - **A RESOLVED THREAD is an entry of its own** (`kind: 'resolved'`, `ResolveIcon`), at
-    `ThreadDetail.resolvedAt` — when Limn first SAW it resolved (GitHub keeps no resolve time), by
+    `ThreadDetail.resolvedAt` — when Ensemble first SAW it resolved (GitHub keeps no resolve time), by
     `resolvedByLogin` (matched to a user by login, else shown as `@login`). ⚠ A thread already resolved
     when first synced has no time and is LEFT OUT (never placed at a guessed time); it stays on the
     Threads tab. It draws `pr/ResolvedThreadCard.tsx`, deliberately light: collapsed it is PLAIN TEXT
-    only (`threadHeading`: a Limn finding's title, else the first comment's first line without markdown;
+    only (`threadHeading`: an Ensemble finding's title, else the first comment's first line without markdown;
     `path:line`; the reply count) — the comments' Markdown mounts only when opened, with "Show in
     Threads" (PrDetail `showThreadInList`, the Threads tab with it selected) and View on GitHub.
   - A PR comment or a review with a body is a **card**: the header (avatar, name, state pill, chips,
-    time, New, Limn severity, ML badge, Copy, the expand chevron) and the body as **Markdown clamped
+    time, New, Ensemble severity, ML badge, Copy, the expand chevron) and the body as **Markdown clamped
     to ~6 lines** (`max-h-[7.5rem]`, a fade when it overflows; images such as SonarCloud's render
     through the ONE `Markdown` sanitiser). A click on the preview (not on a link in it) or the chevron
     opens the card in place: the full body, `ReactionBar` (mounted ONLY on an open card, so a long PR
@@ -1065,7 +1065,7 @@ there is nothing to migrate. No backend link names a PR tab (Slack's `prLink` op
 **THE STORY TAB** (`?prTab=story`, `components/pr/PrStoryTab.tsx`, 2026-10-31): the story view of the
 PR's linked ticket, INSIDE the PR — the ONE `StoryViewBody` (§ The story view), never a copy, so its
 reads are the story view's own two DB reads (`ticket-prs`, `ticket-story`), made when the tab is
-OPENED, never on mount of the PR. Listed only while the PR names a ticket Limn can open as a story
+OPENED, never on mount of the PR. Listed only while the PR names a ticket Ensemble can open as a story
 (`TicketRef.ident` — the SAME `storyTickets` the header's "Open story" menu item and ⌘K's "Open the KEY
 story" read; no ident, no tab, no fetch), and LAST in the strip so the 1–9 keys of the tabs before it
 never move. A stale `?prTab=story` on a PR naming none renders Overview, DERIVED (`effectiveTab`). Each tab
@@ -1120,10 +1120,10 @@ rail still flows (no `sticky`). The slots:
     scratch", depth ("Deep review") or cost chip anywhere on the tab (the cost and the models are in the
     run's ⓘ, `runCostLine` / `metaLine`, through `useRunCostText`);
   - `run` (in place when narrow): the whole "Run a review" section — model picker, Run / Re-review in
-    its `AiRunGate`, the same-commit confirm, auto-review holds, team claims (a teammate's Limn
+    its `AiRunGate`, the same-commit confirm, auto-review holds, team claims (a teammate's Ensemble
     reviewing the commit NOW, Clear — never "Marked on GitHub", never a teammate's FINISHED review
     ("@robin reviewed this commit with Claude · approved", "Auto review skipped: already reviewed by
-    …") and never "Waiting for a teammate's Limn to review": all removed 2026-11-10, the standings
+    …") and never "Waiting for a teammate's Ensemble to review": all removed 2026-11-10, the standings
     hold the teammate's verdict; Pending's "Waiting on others" row keeps its line), live progress + Stop (no live token
     or cost readout), failures, an auto fix that STARTED or failed on a fault the reader can fix
     (`autoFixOutcomeLine`: `not_started` / `over_budget` / `no_sandbox`; routine skips such as "auto AI
@@ -1132,7 +1132,7 @@ rail still flows (no `sticky`). The slots:
     disclosure, each with Open → the AI Fix tab; docs/CLAUDE-REVIEW.md § The auto fix queue), the replies pass ONLY while it runs (status + Cancel) or when the newest
     one failed (`RepliesCheckLine`; NO "Check replies" button, removed 2026-11-10 — the pass starts by
     itself); its ⓘ ("Review only, or review and post") sits beside the section
-    title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Limn reviews so far ·
+    title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Ensemble reviews so far ·
     1 by Robin", `reviewCountLine` over `teamView.reviewCount`) and one row per review (§ Team layout),
     IN COLUMNS, the newest 10 only (§ Team layout);
   - NO "In this review" counts (`ReviewRailCounts` and its `counts` slot removed 2026-11-10);
@@ -1284,10 +1284,10 @@ late arrival never shifts the 1–9 keys of the tabs before it):
   thread NOW (a GitHub fact). No judgement ⇒ the derived pill, unchanged. Every surface — ThreadCard,
   the Timeline popover, the Feed's collapsed row and the Changes tab's inline pill (both inside a
   button, so `noInfo` drops the ⓘ), the Claude Review tab's Review threads rows — prints these words. ⚠ **STILL OPEN (2026-11-05):** a judgement may carry `stillOpen`; a TEAMMATE'S
-  Limn's adds ONE pill "Robin’s Limn: still open" and leads the reason line ("… — <reason>"); a thread
-  only a teammate's Limn judged (`teammateOnly`) wears that pill alone. The PR Overview's AI review card
+  Ensemble's adds ONE pill "Robin’s Ensemble: still open" and leads the reason line ("… — <reason>"); a thread
+  only a teammate's Ensemble judged (`teammateOnly`) wears that pill alone. The PR Overview's AI review card
   lists them as "Still open (N)" (`StillOpenList`, links through `showThread`); the `own_thread` Pending
-  card says "Robin’s Limn: still open on <path>" with the reason (docs/CLAUDE-REVIEW.md § Still-open
+  card says "Robin’s Ensemble: still open on <path>" with the reason (docs/CLAUDE-REVIEW.md § Still-open
   points).
   The state chips put an UNRESOLVED judged thread under "Claude judged"; a resolved one stays under
   Resolved. **Check threads** (`CheckThreadsButton`, above the list and in the Claude Review tab's
@@ -1363,7 +1363,7 @@ late arrival never shifts the 1–9 keys of the tabs before it):
     - ⚠ **Untrusted content.** The `Markdown` component's sanitizer (raw HTML allowlisted, no
       script/handlers/style), plus: links through `markdownFileLinkHref` (`safeExternalUrl` AND an
       absolute http(s) URL — a repository-relative link prints as its text, it would resolve against
-      Limn's own server) and `rehypeDropRelativeImages` (a relative `<img>` becomes its alt text).
+      Ensemble's own server) and `rehypeDropRelativeImages` (a relative `<img>` becomes its alt text).
       Pinned in `test/markdownFile.test.ts` + `e2e/changes-markdown.spec.ts`.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
@@ -1886,13 +1886,13 @@ auto review, the review chat), AI Fix, the docs library — AND the one-shot
 ones — Bot themes (the Bots Themes sub-tab is ABSENT while AI is off), the synthesis cards,
 Chronology pointers and the period-report write-up. They
 run on the reader's own Claude Code login or `ANTHROPIC_API_KEY` (the one credential ladder,
-docs/CLAUDE-REVIEW.md § The credential ladder); Limn stores no key and charges nothing. Copy reads
+docs/CLAUDE-REVIEW.md § The credential ladder); Ensemble stores no key and charges nothing. Copy reads
 "your own Claude Code login or Anthropic API key". There is no `me.pro`, no `useProCapabilities`,
 no `ProGate` (`ProBadge` / `ProLockPanel` / `useProGateState`) and no AI-credit meter ("Track
 usage") — all removed 2026-10-22; `test/aiGating.test.ts` fails if a capability, a lock or a meter
 reappears.
 
-- **VISIBILITY IS `ai.enabled` ALONE** (`LIMN_AI_DISABLED !== 'true'`). Locally the tabs, the Open
+- **VISIBILITY IS `ai.enabled` ALONE** (`ENSEMBLE_AI_DISABLED !== 'true'`). Locally the tabs, the Open
   PRs column, the Feed's Claude pill and the Settings switch ALWAYS render. ⚠ Never
   hide a surface on `runtime`/`auth`: hiding it until a credential is detected hides it from exactly
   the people who have not set one up, and the detection is a heuristic (the run is the real check).
@@ -1908,13 +1908,13 @@ reappears.
   OPENS the PR's Claude Review tab while `ai.ready` is false.
 - **The install is ONE per page** — a module-level store in `useAiCapabilities.ts`, so two Retry
   buttons show one progress line and cannot start two downloads; a download the SERVER reports
-  (`runtime: 'installing'`: the automatic one, or `limn ai install` in a terminal) is watched by
+  (`runtime: 'installing'`: the automatic one, or `ensemble ai install` in a terminal) is watched by
   polling `['me']`, its step in `runtimeMessage`. Settings → AI shows each provider's download line
   (`providers.claude.runtimeMessage` / `providers.codex.runtimeMessage`) before its sign-in.
-- **`LIMN_AI_DISABLED=true`**: the agentic tabs are not listed and the one-shot blocks do not
+- **`ENSEMBLE_AI_DISABLED=true`**: the agentic tabs are not listed and the one-shot blocks do not
   render; nothing prints in their place.
 - **Money, not credits.** Runs show US$ (`formatUsd` in `lib/ui.ts`) — a credit figure would invent
-  a Limn price for the reader's own spend.
+  an Ensemble price for the reader's own spend.
 - **ONE STATUS LINE FOR EVERY AGENTIC PASS** — `components/AiStatusLine.tsx`: the stage in words,
   an optional "N of M", and the elapsed clock; no spinner, and it fetches nothing (each surface feeds
   it what it has: Claude Review's SSE phase, Check threads' poll, the sprint read's `briefs` +
@@ -2103,7 +2103,7 @@ reappears.
 - **Claude's summary (and a ticket review's) is MARKDOWN** — the prompts ask for one lead sentence
   then a "- " bullet per main issue, only when there are issues. Rendered through `<Markdown prRefs>`,
   so an older plain-prose summary renders as one paragraph, unchanged.
-- **EVERY PR REFERENCE IN THE REVIEW TAB OPENS THAT PR IN LIMN** (pure `lib/reviewPrRefs.ts`, React
+- **EVERY PR REFERENCE IN THE REVIEW TAB OPENS THAT PR IN ENSEMBLE** (pure `lib/reviewPrRefs.ts`, React
   `components/ReviewPrRefs.tsx`). "owner/repo#N", "repo#N" and a bare "#N" (= the viewed PR's repo)
   in model prose (summary, findings, threads, CI, follow-up, story check, chat) and in the ticket
   review's member labels ("Done in api#88", "Belongs in", evidence, "Post on") become a button calling
@@ -2118,11 +2118,11 @@ reappears.
   pure rules in `lib/teamReview.ts`, teammate pieces in `components/TeammateReviews.tsx`;
   docs/CLAUDE-REVIEW.md § Teammates' reviews → The tab's team layout). State: `shown: ShownReview |
   null` (null = now). On NOW the tab reads the server's fold, `ClaudeReviewResponse.teamView`:
-  - **Where this PR stands** (`StandingsSection`, `standingRows`): one row per Limn reviewer, newest
+  - **Where this PR stands** (`StandingsSection`, `standingRows`): one row per Ensemble reviewer, newest
     first, IN THE SAME GRID AS "Reviews on this PR" (`REVIEW_ROW_GRID` + `ReviewGridCells`, 2026-11-10):
     avatar · who · day and time · commit · outcome. ⚠ THE OUTCOME IS WHAT GITHUB HOLDS: the verdict IN
     FORCE (`inForce`) when there is one — a teammate's replies-pass Approve included, which no imported
-    review row carries (PR 221269: robin's Limn commented, then its replies pass approved; the row read
+    review row carries (PR 221269: robin's Ensemble commented, then its replies pass approved; the row read
     "Comment" from `latest`); else a dismissed one, "Approve (withdrawn)" / "(dismissed)"
     (`reviewOutcomeWord`); else the newest review's verdict. Its day and commit are that review's (the
     commit from the marker's `h=` for a replies pass). No explanatory note after it (removed
@@ -2233,12 +2233,12 @@ reappears.
 - **Auto review** is `AutoReviewSection` over the CORE `GET`/`PUT /api/workspaces/:id/auto-review`
   (`hooks/useWorkspaceAutoReview.ts`), mounted on `ai.enabled`. OFF per workspace until switched on.
   - ⚠ **ALWAYS ON, NO SWITCH (2026-11-10)**: the team claim status lines (was "Mark auto reviews on
-    GitHub"), resolving Limn's own threads once fixed (was "Resolve Limn’s threads once fixed") and
-    lifting a teammate's Limn "changes requested" (was the two "Teammates’ Limn “changes requested”"
+    GitHub"), resolving Ensemble's own threads once fixed (was "Resolve Ensemble’s threads once fixed") and
+    lifting a teammate's Ensemble "changes requested" (was the two "Teammates’ Ensemble “changes requested”"
     boxes). Each is SAID ONCE behind the ⓘ it belongs to (the section's own ⓘ for the status lines,
     "Posting automatically" for the other two) — never a disabled checkbox. Their wire fields are gone.
   - ⚠ **PROVIDER-NEUTRAL WORDS**: an auto review may be Claude's, Codex's or both, so the section never
-    names one provider for what the review found: "Limn reviews each new PR…", "Limn’s findings",
+    names one provider for what the review found: "Ensemble reviews each new PR…", "Ensemble’s findings",
     "Threads my agent says to fix". A provider is named only where one is meant ("Claude only" in the
     provider menu, "When Claude and Codex disagree"). The MANUAL fix picker still names the run that
     made the review (`pickerSectionLabel(section, by)`): there one provider is meant.
@@ -2302,23 +2302,23 @@ while the tab is visible), feeds every surface below; the decision is the server
 
 - **The header usage item** (`components/AiUsageMenu.tsx`, beside the light/dark button; shown while
   `me.ai.enabled` and `usage.route !== 'none'`): ONE figure from `headerUsageOf` — budget on (subscription):
-  Limn's used share ÷ its limit, the week or the 5-hour session, whichever is closer (the title says
+  Ensemble's used share ÷ its limit, the week or the 5-hour session, whichever is closer (the title says
   which; over budget, the one the server's `limitedBy` names); budget off: Claude's own whole-account
   weekly figure; API key: % of the weekly US$ budget, or this week's US$ with none set. Each figure has
-  its own label ("AI quota for Limn:" for a budget, "Claude this week:" for the account figure, "Limn AI,
+  its own label ("AI quota for Ensemble:" for a budget, "Claude this week:" for the account figure, "Ensemble AI,
   last 7 days:" for unbudgeted API spend) — never a bare "Claude", which read as Claude's own quota. The label is
   screen-reader only (and in the title): the item SHOWS just the icon and the figure, at every width. Click → a `role="dialog"` popover (Escape / outside click close it;
   a click inside the ⓘ's portalled popover does not)
   built by `usageDetailsOf`: ONE BLOCK PER PROVIDER IN USE — the default's (`status` + `usage`), then
   each of the response's `others` (every other provider signed in or run this week), each from
-  `usageDetailOf` and laid out the same: the heading ("Claude Ultra", "Codex · ChatGPT Plus"), Limn's
+  `usageDetailOf` and laid out the same: the heading ("Claude Ultra", "Codex · ChatGPT Plus"), Ensemble's
   share of this 5-hour session (only while `usage.fiveHourLimit`: the plan has one) and of this week, runs and tokens this week, the provider's own account
   windows as used / left / resets, "Updated N min ago"; one link to Settings → AI spend at the foot.
-  Each share or window row has a bar under its text (`UsageRow.barPct`): Limn's rows fill against the
+  Each share or window row has a bar under its text (`UsageRow.barPct`): Ensemble's rows fill against the
   reader's LIMIT, or — no limit set — against 50% (`limnShareScale`; `AI_BUDGET_SHARE_MAX`, the most
-  Limn can be given; the value reads "· max 50%", the ⓘ beside the first heading says nothing pauses
+  Ensemble can be given; the value reads "· max 50%", the ⓘ beside the first heading says nothing pauses
   until a limit is set); the account rows show the provider's own % used; amber from 80%, red at 100%;
-  counts (runs, tokens) have none. Limn's rows carry one note under the bar (`UsageRow.note`,
+  counts (runs, tokens) have none. Ensemble's rows carry one note under the bar (`UsageRow.note`,
   `windowNote`): "Resets Thu 09:00" when the provider told us the reset, else "Last 7 days" / "Last 5
   hours". The popover scrolls past the viewport height. ⚠ Unknown pieces are LEFT OUT, never shown as
   0; a subscription block carries no US$ (an API-key block keeps its US$ rows and draws a bar only
@@ -2331,17 +2331,17 @@ while the tab is visible), feeds every surface below; the decision is the server
   Claude run's cost directly. Bot prices and Chronology's hourly cost are not Claude runs and keep US$.
 
 - **The meter** (`AiBudgetMeter`, mounted by `AiRunGate` beside every Run button while the budget is
-  on): "Limn: 2% of your week · limit 5%" on a subscription, "This week $4.10 of $25" on an API key,
-  "Limn: pick your subscription" while it is unknown. ⚠ A subscription is worded in percentages
+  on): "Ensemble: 2% of your week · limit 5%" on a subscription, "This week $4.10 of $25" on an API key,
+  "Ensemble: pick your subscription" while it is unknown. ⚠ A subscription is worded in percentages
   only — never a US$ figure.
-- **The toast** (`AiBudgetToast`, in the ONE header strip): "Limn has used its share of your week.
+- **The toast** (`AiBudgetToast`, in the ONE header strip): "Ensemble has used its share of your week.
   Automatic runs resume <day, time>." (`limitedBy: 'five_hour'`: "…its share of this 5-hour
   session…"; API key: "…its weekly budget…").
 - **The second press** (`OverBudgetConfirm`): over budget, only the gate's RUN control (`data-ai-run`,
   else the only button) is held once and armed for 15 s; an ⓘ / Discard beside it works as usual.
 - **Settings → AI spend** (`ClaudeSpendSection`): subscription = the share (1–50 %), the
   subscription (shown when Claude's report settles it; else a picker of `status.subscription.pickFrom`
-  — the Max pair for a reported "max"), "Limn has used X% of your week" and "about N automatic
+  — the Max pair for a reported "max"), "Ensemble has used X% of your week" and "about N automatic
   reviews a working day" (the SAVED share's figure; hidden while the share is edited). The 5-hour
   share FOLLOWS the weekly one: a collapsed `<details>` "Set a separate 5-hour limit" (open when one
   is stored) holds its box; empty = `fiveHourSharePct: null` = same as weekly, "Use the weekly share"
@@ -2407,7 +2407,7 @@ sessions.
   plain row, "Resolve merge conflicts with <base>" (`conflict:merge`, ticked by default; the server
   decides when it is offered). There is NO other AI conflict path — no `ConflictAiCard`, no "Also
   resolve" box, and the resolver's entry (`ResolveConflictsButton`) is the plain manual button. A fix
-  with `fix.merge` draws `MergeResult` ABOVE the fix diff: Limn's check (`fixMergeLine`: both parents
+  with `fix.merge` draws `MergeResult` ABOVE the fix diff: Ensemble's check (`fixMergeLine`: both parents
   by short sha, or "Nothing will be pushed: <reason>"), the files that were in conflict, and the
   RESOLUTION diff (`merge.resolutionDiff`: the merge commit against git's own merge with markers) apart
   from "Fixes on top of the merge". ⚠ Push shows only when `fixPushable` (a VALID merge; without a
@@ -3045,7 +3045,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
      the one sentence of advice; its tickets on their columns, every arrow on it critical. A ticket
      outside the sprint sits faint in "Outside the sprint". The state line (`sprintPathsView`, the server's
      `pathsStatus`): "Working out the critical paths…" with a small bar while `writing`; when they will
-     come (`queued` / `waiting`) or why they could not ("Couldn't find the critical paths. <reason> Limn
+     come (`queued` / `waiting`) or why they could not ("Couldn't find the critical paths. <reason> Ensemble
      tries again …"); AI off → "Claude is off here, so there are no critical paths."; none found → the
      heading reads "No critical paths in this sprint."; fewer than 4 sprint tickets → "Critical paths need
      at least 4 tickets in the sprint."; no Claude credential / runtime → the `AiRunGate` line; any other
@@ -3053,7 +3053,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
      tickets is on today's map draws no lane, and the board mounts only with a card on it. A column's
      header count is DISTINCT tickets (`BoardCardDef.unit`): a ticket on two paths is two cards, one
      ticket. ⚠ STALE paths are ALWAYS shown, with "Updating" or the failure line.
-  3. **Call-outs** — Claude's (≤ 3, "Call-out") then Limn's own code cards from `signals` ("Since you last
+  3. **Call-outs** — Claude's (≤ 3, "Call-out") then Ensemble's own code cards from `signals` ("Since you last
      looked", "Out of step", "Blocked outside the sprint"; "Pace" is the strip, so it is not repeated),
      each with its ticket keys as buttons that open the story view.
   4. **The count table** (`countTable`) — every sprint ticket once, by theme (+ No theme) and column,
@@ -3214,7 +3214,7 @@ convention this file has to remember.
     run's client methods (`api.startStoryLabelRun` etc.) remain with no screen calling them.
 - **AI usage** (`?insightsTab=ai-usage`, `AiUsageView.tsx` + pure `aiUsageModel.ts`,
   `test/aiUsageModel.test.ts`; `GET /api/ai/usage-report`, `useAiUsageReport`, key
-  `['ai-usage-report','ws:<id>']`) — where Limn's own AI runs went over the REPORTING WINDOW: totals,
+  `['ai-usage-report','ws:<id>']`) — where Ensemble's own AI runs went over the REPORTING WINDOW: totals,
   "Tokens over time" (a stacked `BarChart` by feature, By day | By week — the week fold is the SPA's),
   "Where it goes" (`RepoRows`: tokens split Claude | Codex, runs, and the cost column only when the
   response has a unit), "Top pull requests" (each opens its PR tab) and "Top stories" (each opens its
@@ -3590,8 +3590,8 @@ Dependencies (plus My turn for a direct summons); the server contract is [BACKEN
   `lib/aiReviewsSeen.ts`; server: [BACKEND.md](BACKEND.md) § The AI reviews list). A STABLE
   REFERENCE: the tab's `ai_review` cards, in the server's order, drawn by their own block (never by
   `AttentionCards`, never "Do next"): one row per PR — the PR (opens its AI Review tab,
-  `openClaudeReview`), who ran its newest review ("Your Limn", "Your Limn, auto review" or "Robin's
-  Limn" with their avatar), the verdict pill, the findings count and when. The heading is "Latest AI
+  `openClaudeReview`), who ran its newest review ("Your Ensemble", "Your Ensemble, auto review" or "Robin's
+  Ensemble" with their avatar), the verdict pill, the findings count and when. The heading is "Latest AI
   review on each pull request" with its ⓘ. ⚠ **LOOKING NEVER REMOVES A ROW.** A row newer than the
   stamp the VISIT started with (`aiReviewsSeenAt` on the first settled response with the tab on
   screen) wears a small "New" tag (`isNewAiReview`; never looked = every row), and keeps it until
@@ -4385,10 +4385,15 @@ pills):
    sprint read's text (`storyFallbackTicket`, for a ticket with no PR). ⚠ It passes
    `withComments={false}`: the comments are 4, never twice (a Story check block's disclosure,
    TicketCoverage, keeps its own collapsed copy).
-3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
+3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists; on the review path after the criteria map), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
    and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
-   (the server's `too_few_prs`). When the last finished review skipped drawing it on a limit, the
+   (the server's `too_few_prs`). ⚠ **ONE PR** (the story read's `soloPr` while `memberCount` is 1,
+   `soloDesignPr` in `lib/sequenceDiagrams.ts`): the slot is THAT PR's design (`usePrSequenceDiagrams`,
+   `SoloDesignSection`, `data-story-design="pr"`), headed "Pull request design" + the PR's ref, its ⓘ
+   saying the ticket has one PR; the heading's Draw / Redraw design is THAT PR's redraw
+   (`useRedrawPrDiagram`). When the last finished review skipped drawing it on a limit, the
    slot's `autoSkipped` is the status line (`autoSkippedLine`, `lib/sequenceDiagrams.ts`).
+   - **The criteria map** comes first, between the criteria and the design (review path only) — below.
 4. **Comments** — `StoryComments` (`components/TicketComments.tsx`, pure half `lib/ticketComments.ts`,
    test/storyComments.test.ts), the LAST thing in the Ticket box, OPEN: "Comments (n)", the newest
    `STORY_COMMENTS_SHOWN` (3) in stored order (oldest first), "Show all n"; author · relative date (full
@@ -4442,6 +4447,32 @@ docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the 
 - **Every reference is the existing in-app opener**, `DocLink` (now exported from
   `components/DocReferences.tsx`): plain click ⇒ `openDocsSection(ref.workspaceId, path, anchor)`, modified
   click ⇒ the `docsDeepLink` href, with the quote as the same italic blockquote beneath. Never a raw href.
+
+### The criteria map ("How the code meets each criterion", `Activity/CriteriaMap.tsx`)
+
+On the REVIEW path of the Story section only, right under the criteria (`afterCriteria`, before the
+design); `data-story-section="criteria-map"` (nav "Code per criterion"). NO request of its own: shared
+`criteriaMap` (docs/CLAUDE-REVIEW.md § Ticket review → THE CRITERIA MAP) over the review ALREADY LOADED —
+its criteria and status, each member's card at its current commit. Absent when the run has no criteria
+or no members (`criteriaMapOffered`); every member without a card ⇒ ONE line, "No pull request has a
+description at its current commit yet."
+- **Shape**: criteria boxes on the left (status chip — the check's measured `TICKET_CRITERION_STATUS_CLASS`,
+  ref, text), the PRs on the right (`memberLabel`, title without its ticket key, "n criteria", a merged mark),
+  ordered by the mean row of their links (`orderMapPrs`, `lib/criteriaMapLayout.ts`; unlinked next,
+  card-less last). Each link is a row in its criterion's box — the PR's ref and the card's "how" — and,
+  with files, a ChevronIcon disclosure listing them; a file opens that PR's Changes tab
+  (`useOpenMemberFile`). An SVG layer (`aria-hidden`) draws one curve per link from the criterion box's
+  right edge at its row to the PR box (entries spread over the box's middle half, `entryY`); hovering a
+  PR or a link (or focusing a link) lights its lines in the accent and dims the rest.
+- ⚠ **UNKNOWN IS NEVER ZERO**: an unclaimed criterion is a DASHED box saying "No pull request claims
+  this."; a PR with no current card is a DASHED box saying "No description at its current commit." and
+  has no line; card lines matching no criterion sit under their PR ("Not matched to a criterion (n)").
+- **Two columns from `CRITERIA_MAP_TWO_COLUMN_MIN_PX` (560) of ITS OWN width** (ResizeObserver; never the
+  window), else ONE stacked list with a "Pull requests" list under it and no lines — each link already
+  names its PR in words (`data-layout` `columns` / `stacked`).
+- The honesty line is said ONCE, behind the heading's ⓘ: the descriptions are AI-written from each PR's
+  changes at its current commit, the status is the story check's. Model text through `PrRefText`.
+- Pinned by test/criteriaMap.test.ts and e2e/story-criteria-map.spec.ts (wide, phone, the one-PR design).
 
 ## The build tab — "Implement story" (`kind: 'story-build'`, docs/STORY-BUILD.md)
 
@@ -4557,7 +4588,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   default 3, its ⓘ) under it once ticked; under the header, `AutoPushOption.tsx` `AutoPushLine`: the switch and
   the rounds (`useStoryBuildLoopSettings`, `POST …/loop/settings`, its OWN mutation key — a DB write, never
   blocked by a turn; optimistic) while `loopEditable` (the wire's `loop.editable`; with no `loop` on the wire,
-  the old `autoPushEditable`), "Limn starts when the next build finishes." when the build already settled. A
+  the old `autoPushEditable`), "Ensemble starts when the next build finishes." when the build already settled. A
   build of the RETIRED automatic push (no `loop`) keeps its "Pushing…" / recorded `autoPushError` lines. After
   `BRANCH_EXISTS` — keyed on the press's `code`, else the row's stored `pushErrorCode`, NEVER on the
   sentence (`branchExistsFor`) — the card's Push becomes `RenameBranch` (a name prefilled by shared
@@ -4610,11 +4641,11 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     (`planStageLine`: planning / revising / the checks' one-line failure), the summary, Repositories,
     the criteria checklist (story view numbering; a ref scrolls to the Ticket panel), **Points to
     settle** — one card per contention with the story's words, the problem, "If you agree" / "If you
-    keep the story", its EVIDENCE (code and data files as Limn's own numbered excerpt in plain mono —
+    keep the story", its EVIDENCE (code and data files as Ensemble's own numbered excerpt in plain mono —
     NOT the syntax highlighter, so no new code ground for `codeTokens.test.ts` — with a GitHub link at
     the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
     time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
-    the dropped line ("Limn left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
+    the dropped line ("Ensemble left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
     order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket review** — on the latest
     revision ALWAYS (and after Approve until the first build turn ends), `StoryBuild/TicketUpdatePanel.tsx`
     `TicketReview`: the WHOLE ticket in two boxes (Description, Acceptance criteria — "(in the
@@ -4652,7 +4683,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   / Waiting for you (the agent waits) / Ready to push / Pushed.
 - **Settings → Sandbox** (`settings/SandboxRuntimeSection.tsx` GLOBAL + `settings/SandboxSection.tsx`
   per WORKSPACE; `SettingsFocus 'sandbox'`, AI-only tab): the runtime line + Check again + How to set
-  up; the running count ("2 Limn sandboxes are running.", `useSandboxRunning`: read on open and on Check
+  up; the running count ("2 Ensemble sandboxes are running.", `useSandboxRunning`: read on open and on Check
   again, NEVER polled) + **Stop all** (inline confirm; hidden at 0; docs/SANDBOX.md § Every end removes
   the sandbox); then "Your clones and Claude notes" and its **Find** (CLICK-GATED: bounded walks of the
   reader's Claude projects and clones — there is NO folder or starting-folder field since 2026-11-10;
@@ -4660,7 +4691,7 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   starts), the Claude notes to bring (the check's projects; the first change turns the default into an
   explicit list, `sandboxSettingsForm.ts sandboxMemoryTicks`), ~/.claude/CLAUDE.md and skills, the
   services (**Choose compose files**, CLICK-GATED `useSandboxComposeFiles`: every compose file found in
-  Limn's own copies, ticked several at once, `addComposePicks`; "Another file" types one in; + the
+  Ensemble's own copies, ticked several at once, `addComposePicks`; "Another file" types one in; + the
   services allowed online), the always-allowed hosts (saved at once, through the
   proxy's parser), the proxy-variables switch and the resources. ⚠ The PUT REPLACES the setting, so
   Save sends the WHOLE draft (`sandboxBodyOf`).
@@ -4907,7 +4938,7 @@ only thing announcing a section's grain was a `— acme-web` suffix on its own t
 | AI review | — | `AutoReviewSection` (auto review, auto-post, auto fix, diagrams), `ReferenceDocsSection`, `RelatedReposSection` | tab shown only with `me.ai.enabled` |
 | Reports and sprint | — | `FlowSettingsSection` (working hours and budgets), `SprintSection` (cadence + comparison window) | none |
 | Integrations | — | `IssueLinksSection` (tracker + Jira API access, shown whenever the SAVED tracker is Jira with a base URL — not behind `me.ai.enabled`), `SonarSection`, `SlackSection` (the "Claude review ran" switch only with `me.ai.enabled`) | none |
-| Bots | `BotScoringSection` (renders nothing under `LIMN_ML_DISABLED`) | — | none |
+| Bots | `BotScoringSection` (renders nothing under `ENSEMBLE_ML_DISABLED`) | — | none |
 
 (`GithubAppInstallSection`, `BenchmarkConsentSection` and `YourDataSection` were removed
 2026-10-22 with the hosted mode; so was every `caps.*` / `proReady` gate — the modal opens with no
@@ -5004,7 +5035,7 @@ the source.
 
 ## Colour schemes (`lib/colorSchemes.ts`, Settings → Appearance)
 
-Nine schemes: the two defaults (Limn Light, Limn Dark) and seven named ones — LIGHT: Solarized
+Nine schemes: the two defaults (Ensemble Light, Ensemble Dark) and seven named ones — LIGHT: Solarized
 Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo Night.
 
 - **One CSS block per scheme** in `index.css`, `[data-scheme='<id>'] { --ui-*: …; --ai-*: …; }` —
@@ -5028,7 +5059,7 @@ Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo N
   `textContrast.test.ts` measures its muted pairings on every page of the mode too.
 - **Grounds that were raw hexes are tokens now** — the vis-timeline's dark lines/labels, the sticky
   repo header, the chart axes (`fill-ui-faint`) and the chart veils (`fill-ui-bg`). A new `.dark`
-  hex that paints a ground or text shows Limn Dark's colour on Nord; use a `--ui-*` token.
+  hex that paints a ground or text shows Ensemble Dark's colour on Nord; use a `--ui-*` token.
 - **Storage is per browser** (`localStorage`): `theme` keeps its old meaning (`'light'` |
   `'dark'`, absent = dark — the mode), plus `theme-scheme-light` / `theme-scheme-dark` (the last
   scheme used in each mode). The sidebar's sun/moon and ⌘K's theme command flip the MODE, so they
@@ -5934,7 +5965,7 @@ branch)` — the dot and the panel cannot disagree.
   `/api/branch-status` key the sidebar already holds. Nothing to report → ONE calm line.
 - **One more line, with NO dot — the repository's files can't be read.** When the docs offers' look
   at the repository's tree failed (`ActivityRepo.docsUnreadable`, the STORED reason from
-  `repos.docs_offer_failure`, read by `getActivity` in the same request), the panel adds "Limn can't
+  `repos.docs_offer_failure`, read by `getActivity` in the same request), the panel adds "Ensemble can't
   read this repository's files, so its docs can't be offered: no access." (shared
   `repoDocsUnreadableLine`: no access / the repository is empty / not found on GitHub), for a LASTING
   reason only (shared `isRepoDocsUnreadableShown`; a transient `unavailable` is never shown, though it
@@ -6167,7 +6198,8 @@ test/designGrid.test.ts).
 `ClaudesReview` after SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR
 ticket's "Story design" slot through `DiagramSlotView`; `Activity/StoryDesignSection.tsx` shows the
 story slot as the last part of the story view's Story section (only with `me.ai` and a PR on the ticket, and it draws
-only when the ticket has 2+ pull requests or a stored design; its Draw / Redraw button sits in the Story
+only when the ticket has 2+ pull requests or a stored design — with exactly ONE pull request it draws THAT
+PR's own design instead, its Draw / Redraw the PR's; its Draw / Redraw button sits in the Story
 heading row). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
 POLLING: the reads poll every 5 s only while a run is queued or running, and the PR read also for 90 s
 after the shown review's `finishedAt` while nothing is stored at the current head for the PR OR for
@@ -6324,11 +6356,11 @@ shorter form of each rule; this is the full wording.
   Settings → Bots (since 2026-11-03). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
   all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
   needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
-- **LIMN'S OWN WORK is labelled "Limn" and is never My Turn** (2026-11-08): the backend marks an item
-  `limn` (`feed/my-turn.ts markLimnItems`: a `limn:` bot actor, or a body with a Limn hidden marker — a
+- **ENSEMBLE'S OWN WORK is labelled "Ensemble" and is never My Turn** (2026-11-08): the backend marks an item
+  `limn` (`feed/my-turn.ts markLimnItems`: a `limn:` bot actor, or a body with an Ensemble hidden marker — a
   review summary, a CI review or a story check posted under a person's account) and `enrichMyTurn`
-  skips it. The card shows a "Limn" label (`feed-limn-label`) unless the actor's own bot tag already
-  reads "Limn · alice".
+  skips it. The card shows a "Ensemble" label (`feed-limn-label`) unless the actor's own bot tag already
+  reads "Ensemble · alice".
 
 ### "Where the work is happening"
 
@@ -6460,3 +6492,11 @@ removed from the card; it moved one click (or Enter) away.
   repo header's compact `BranchStatusPanel`; 2026-11-01, was the workspace's Open PRs); a red head no local PR names → its GitHub checks page (`safeExternalUrl`,
   new tab); a reviewer's load has nowhere to go → the panel. Pinned in
   `test/pendingDestination.test.ts`. It reads only the card; nothing fetches before the reader acts.
+
+## The story view → Ask about this story
+
+`components/Ticket/StoryChat.tsx`, mounted at the end of `StoryViewBody` (all three hosts), gated on
+`me.ai.enabled` and its Ask on `AiRunGate kind="story_chat"`. Read-only answers. It keeps the story's agent ready with
+`POST /api/story-chats/prepare` at mount and every 3 minutes while visible (in the PR view's Story tab:
+only once the box is focused), and polls quickly only while preparing or answering
+(`hooks/useStoryChat.ts`). [STORY-CHAT.md](STORY-CHAT.md).

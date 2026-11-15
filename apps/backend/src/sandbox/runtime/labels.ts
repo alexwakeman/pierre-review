@@ -15,7 +15,9 @@
 // `limn sandbox prune --store` removes it by its own label.
 
 import { createHash } from 'node:crypto';
-import { resolveDataDir } from '../../data-dir.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { DATA_DIR_NAME, resolveDataDir } from '../../data-dir.js';
 
 export const LABEL_MANAGED = 'limn.managed';
 export const LABEL_SESSION = 'limn.session';
@@ -26,9 +28,15 @@ export const LABEL_STORE = 'limn.store';
 /** Where the repo store sits: read-write in a maintenance container, read-only in a sandbox. */
 export const STORE_MOUNT = '/limn-store';
 
-/** The `limn.managed` value for the Limn whose data dir this is. */
-export function appInstance(env: NodeJS.ProcessEnv = process.env): string {
-  return `d${createHash('sha256').update(resolveDataDir(env)).digest('hex').slice(0, 12)}`;
+/**
+ * The `limn.managed` value for the install whose data dir this is. ⚠ PINNED across the `~/.limn` →
+ * `~/.ensemble` move: the default dir hashes as `~/.limn`, so the move never orphans the resources
+ * and the kept repo store an older install labelled (the sweep, prune and store name all read this).
+ */
+export function appInstance(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const dir = resolveDataDir(env, home);
+  const hashed = dir === join(home, DATA_DIR_NAME) ? join(home, '.limn') : dir;
+  return `d${createHash('sha256').update(hashed).digest('hex').slice(0, 12)}`;
 }
 
 export type ResourceRole = 'sandbox' | 'proxy' | 'service' | 'setup' | 'network' | 'volume' | 'image' | 'store';

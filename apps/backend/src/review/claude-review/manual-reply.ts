@@ -197,7 +197,7 @@ async function post(
   const { accountId, reviewId, review, status, text, owner } = a;
   const disputed = status === 'reply_disputed';
   if (disputed ? pushbackMayBePosted(owner.pushback) : resolveReplyMayBePosted(owner.autoResolve)) {
-    return conflict('AlreadyPosted', disputed ? 'Limn already pushed back on this thread.' : 'Limn already replied on this thread.');
+    return conflict('AlreadyPosted', disputed ? 'Ensemble already pushed back on this thread.' : 'Ensemble already replied on this thread.');
   }
   const { threads, comments } = await loadPrThreads(ctx, review.prId);
   const login = await accountLoginOf(ctx, accountId);
@@ -206,11 +206,11 @@ async function post(
   const list = comments.filter((c) => c.threadId === thread.id);
   if (disputed) {
     // ⚠ ONE PUSHBACK PER THREAD, EVER — whoever posted it.
-    if (threadHasPushback(list, login)) return conflict('AlreadyPosted', 'Limn already pushed back on this thread.');
+    if (threadHasPushback(list, login)) return conflict('AlreadyPosted', 'Ensemble already pushed back on this thread.');
   } else {
     if (thread.isResolved) return conflict('AlreadyResolved', 'The thread is already resolved.');
     if (list.slice(1).some((c) => sameLogin(c.authorLogin, login) && FINDING_REPLY_RE.test(c.body ?? ''))) {
-      return conflict('AlreadyPosted', 'Limn already replied on this thread.');
+      return conflict('AlreadyPosted', 'Ensemble already replied on this thread.');
     }
   }
 
@@ -239,7 +239,7 @@ async function post(
 
   if (disputed) {
     const rec: FindingPushbackRecord = { status: 'posting', at: nowIso(), byReviewId: reviewId, commentId: null, error: null, manual: true };
-    if (!(await claimed(rec))) return conflict('AlreadyPosted', 'Limn already pushed back on this thread.');
+    if (!(await claimed(rec))) return conflict('AlreadyPosted', 'Ensemble already pushed back on this thread.');
     try {
       const { commentId } = await deps.reply(accountId, threadRef, body);
       await record({ ...rec, status: 'posted', at: nowIso(), commentId });
@@ -263,7 +263,7 @@ async function post(
     error: null,
     manual: true,
   };
-  if (!(await claimed(rec))) return conflict('AlreadyPosted', 'Limn already replied on this thread.');
+  if (!(await claimed(rec))) return conflict('AlreadyPosted', 'Ensemble already replied on this thread.');
   let commentId: string | null;
   try {
     ({ commentId } = await deps.reply(accountId, threadRef, body));
@@ -333,7 +333,7 @@ async function postStillOpenByHand(
     .onConflictDoNothing({ target: [sop.accountId, sop.claimKey] })
     .returning({ id: sop.id })
     .execute()) as Array<{ id: number }>;
-  if (rows.length === 0) return conflict('AlreadyPosted', 'Limn already said this is still open at this commit.');
+  if (rows.length === 0) return conflict('AlreadyPosted', 'Ensemble already said this is still open at this commit.');
   const claimId = rows[0]!.id;
   const settle = async (status: 'posted' | 'failed', commentId: string | null, error: string | null): Promise<void> => {
     await ctx.db
@@ -397,16 +397,16 @@ async function postPrLevelByHand(
         acceptKind: item.acceptKind ?? null,
         headSha: review.headSha,
       }),
-      'Limn already replied about this comment.',
+      'Ensemble already replied about this comment.',
     );
   } else if (item.status === 'reply_disputed') {
     const text = (item.response ?? '').trim();
     if (!text) return conflict('NothingToPost', 'There is no reply to post.');
-    out = prLevelOutcome(await postPrLevelStillOpen(ctx, { ...common, reason: text }), 'Limn already said this is still open.');
+    out = prLevelOutcome(await postPrLevelStillOpen(ctx, { ...common, reason: text }), 'Ensemble already said this is still open.');
   } else if (item.status === 'not_addressed' || item.status === 'partly_addressed') {
     const how = judgementHowOf(item);
     if (!how) return { kind: 'not_found' };
-    out = prLevelOutcome(await postPrLevelStillOpen(ctx, { ...common, reason: how }), 'Limn already said this is still open.');
+    out = prLevelOutcome(await postPrLevelStillOpen(ctx, { ...common, reason: how }), 'Ensemble already said this is still open.');
   } else {
     return { kind: 'not_found' };
   }
@@ -428,7 +428,7 @@ export async function markPrLevelResolved(
   const item = review.followUp?.items.find((it) => it.priorFindingId === priorFindingId);
   if (!item || item.prComment == null) return { kind: 'not_found' };
   const owner = (await loadPrLevelOwners(ctx, accountId, review.prId, [priorFindingId], { ownOnly: true })).get(priorFindingId);
-  if (!owner) return conflict('NoComment', 'This is not your Limn’s comment.');
+  if (!owner) return conflict('NoComment', 'This is not your Ensemble’s comment.');
   if (inFlight.has(owner.id)) return conflict('InProgress', 'Already resolving this comment.');
   inFlight.add(owner.id);
   try {

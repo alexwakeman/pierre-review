@@ -3,13 +3,13 @@ import { Btn, Chip, DocLink, H2, Illustration, MiniTable, Note, Thread, Ui } fro
 
 export const meta: DocMeta = {
   title: 'Check threads',
-  summary: 'Ask Limn whether each open review thread was addressed by later commits.',
+  summary: 'Ask Ensemble whether each open review thread was addressed by later commits.',
 };
 
 function ThreadPills(): JSX.Element {
   return (
     <Illustration
-      label="A review thread by Priya on api/routes.py, judged by Limn: the comment Holds up and the code is Partly addressed, with one line saying what is still needed."
+      label="A review thread by Priya on api/routes.py, judged by Ensemble: the comment Holds up and the code is Partly addressed, with one line saying what is still needed."
       caption="A judged thread: does the comment hold up, and where does the code stand."
       title="Review threads"
       meta="#612 Partial refunds"
@@ -34,7 +34,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         Check threads is a light pass over the review threads that other people left on a pull request: teammates,
-        review bots, and teammates' Limn. For each thread it answers two questions: does the comment hold up, and does
+        review bots, and teammates' copies of Ensemble. For each thread it answers two questions: does the comment hold up, and does
         the code now deal with it? It reads only the threads that changed since they were last judged, so it is quick
         and cheap.
       </p>
@@ -49,7 +49,7 @@ export default function Page(): JSX.Element {
         <li>new commits arrived since.</li>
       </ul>
       <p>
-        Resolved threads are judged too, because resolving is only a click. Threads on your own Limn's findings are
+        Resolved threads are judged too, because resolving is only a click. Threads on your own Ensemble's findings are
         not part of this pass; a follow-up review or the replies pass looks after those. See{' '}
         <DocLink to="ai-review/follow-ups">Follow-up reviews</DocLink> and{' '}
         <DocLink to="ai-review/replies-pass">Replies to findings</DocLink>.
@@ -68,9 +68,9 @@ export default function Page(): JSX.Element {
       />
       <p>
         Under the pills, one line says how the point was dealt with, or the one thing still needed. A thread with no
-        judgement keeps Limn's own guess from the commits: <Ui>Likely addressed</Ui>, <Ui>Replied</Ui> or{' '}
+        judgement keeps Ensemble's own guess from the commits: <Ui>Likely addressed</Ui>, <Ui>Replied</Ui> or{' '}
         <Ui>Untouched</Ui> (see <DocLink to="timeline/thread-states">Thread states</DocLink>). The newest judgement wins,
-        whichever review or check made it, and it shows on every thread card in Limn: the <Ui>Threads</Ui> tab, the{' '}
+        whichever review or check made it, and it shows on every thread card in Ensemble: the <Ui>Threads</Ui> tab, the{' '}
         <Ui>Changes</Ui> tab, the Feed and Pending.
       </p>
 
@@ -78,7 +78,7 @@ export default function Page(): JSX.Element {
       <p>
         Press <Ui>Check threads</Ui> beside <Ui>Review threads</Ui> on the <Ui>AI Review</Ui> tab, or on the pull
         request's <Ui>Threads</Ui> tab. A status line says what it is doing (<Ui>Reading the threads</Ui>, then
-        "Checking 3 threads"), with <Ui>Cancel</Ui>. If there is nothing to check, Limn says so:
+        "Checking 3 threads"), with <Ui>Cancel</Ui>. If there is nothing to check, Ensemble says so:
       </p>
       <ul>
         <li>
@@ -88,11 +88,11 @@ export default function Page(): JSX.Element {
           <Ui>This pull request has no review threads to check.</Ui>
         </li>
         <li>
-          <Ui>Every thread here is one of Limn’s own review comments. An AI review follows those up.</Ui>
+          <Ui>Every thread here is one of Ensemble’s own review comments. An AI review follows those up.</Ui>
         </li>
       </ul>
       <p>
-        A full review judges the threads itself, so you do not need both. A review you start that Limn skips (no code
+        A full review judges the threads itself, so you do not need both. A review you start that Ensemble skips (no code
         changed) starts a thread check in its place.
       </p>
 
@@ -106,7 +106,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-it-changes">What it changes</H2>
       <p>
         A thread check posts nothing to GitHub. Its judgements are used by the next review: a still-open point from a
-        teammate's Limn can stop an approval, and a posted review may reply <Ui>Still open:</Ui> on a thread it judges
+        teammate's Ensemble can stop an approval, and a posted review may reply <Ui>Still open:</Ui> on a thread it judges
         valid and not addressed. A person's comment has no severity, so it never stops an approval by itself; the
         "Not approved" line names it. See <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting to GitHub</DocLink>.
       </p>

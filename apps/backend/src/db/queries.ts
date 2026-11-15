@@ -822,7 +822,7 @@ export async function deleteWorkspace(
     // 1b. EXTRA External memberships (migration 0191). The deleted workspace's own rows go (the
     //     FK cascades too); a repo re-homed to Default by step 1 loses any extra row it had THERE,
     //     because a repo is never External in its own home.
-    // RELEASES (migration 0192): the workspace's releases follow its repos to Default — a release is
+    // RELEASES (migration 0195): the workspace's releases follow its repos to Default — a release is
     // history of those repos' tags, and the cascade would delete it.
     await tx
       .update(schema.releases)
@@ -10036,7 +10036,7 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
     // nothing else, but a surviving row would keep this repo's file paths after the repo is gone
     // AND, on Postgres, block the `repos` delete outright.
     await tx.delete(schema.repoFileCoupling).where(eq(schema.repoFileCoupling.repoId, id)).execute();
-    // RELEASES (migration 0192): the repo's tags, their ranges and its release items (the release
+    // RELEASES (migration 0195): the repo's tags, their ranges and its release items (the release
     // rows themselves are the workspace's and stay). Their repo FKs cascade; explicit all the same.
     await tx
       .delete(schema.repoTagRanges)

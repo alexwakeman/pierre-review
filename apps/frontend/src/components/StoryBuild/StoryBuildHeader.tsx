@@ -66,7 +66,7 @@ export function StoryBuildHeader({
       info={
       <InfoButton title={fill ? 'Fill the gaps in this ticket' : 'Implement this ticket'}>
         <p>
-          Limn starts a sandbox on this computer with every repository in this workspace, the ticket and your Claude notes for
+          Ensemble starts a sandbox on this computer with every repository in this workspace, the ticket and your Claude notes for
           these folders. The AI there has a full shell, but no GitHub access and no route to the internet except the hosts the
           Network panel shows.
         </p>

@@ -21,7 +21,7 @@ export default function Page(): JSX.Element {
           <b>
             <Ui>Status</Ui>
           </b>
-          : Limn's verdict, for example ready to merge, blocked, behind base, conflicts, draft, or in the merge
+          : Ensemble's verdict, for example ready to merge, blocked, behind base, conflicts, draft, or in the merge
           queue. See <DocLink to="merging/can-it-land">Can it land?</DocLink>
         </li>
         <li>
@@ -54,7 +54,7 @@ export default function Page(): JSX.Element {
 
       <H3 id="blocked">Why a pull request is blocked</H3>
       <p>
-        GitHub says "blocked" for many different reasons and does not say which. Limn lists the facts it can see,
+        GitHub says "blocked" for many different reasons and does not say which. Ensemble lists the facts it can see,
         the ones GitHub itself confirms first:
       </p>
       <ul>
@@ -66,7 +66,7 @@ export default function Page(): JSX.Element {
         <li>or "nothing we can see explains it", when none of these applies.</li>
       </ul>
       <Note>
-        Limn cannot read a repository's branch protection rules without admin access, so apart from the review
+        Ensemble cannot read a repository's branch protection rules without admin access, so apart from the review
         decision these are facts, not proof of the cause. Which one GitHub is enforcing is for you to judge.
       </Note>
 
@@ -81,7 +81,7 @@ export default function Page(): JSX.Element {
       <H2 id="checks">Checks</H2>
       <p>
         A short summary of the checks, which opens to the full list. Choose a check's name to read its log in
-        Limn; the small link beside it opens the run on GitHub. A check marked <Ui>Flaky</Ui> has both passed and
+        Ensemble; the small link beside it opens the run on GitHub. A check marked <Ui>Flaky</Ui> has both passed and
         failed on the same commit. See <DocLink to="merging/ci-logs">CI logs</DocLink>.
       </p>
       <Illustration
@@ -102,7 +102,7 @@ export default function Page(): JSX.Element {
           <Ui>Requested</Ui>: who has been asked and not yet reviewed.
         </li>
         <li>
-          <Ui>Suggested</Ui>: reviewers Limn suggests from the code owners and the repository's history, each with{' '}
+          <Ui>Suggested</Ui>: reviewers Ensemble suggests from the code owners and the repository's history, each with{' '}
           <Ui>Assign</Ui>.
         </li>
         <li>

@@ -36,14 +36,14 @@ describe('sprintPathsView', () => {
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('failed', { failure: 'refused' }) })).toEqual({
       kind: 'message',
       writing: false,
-      text: 'Couldn’t find the critical paths. Claude’s answer did not pass Limn’s checks. Limn tries again when the sprint changes.',
+      text: 'Couldn’t find the critical paths. Claude’s answer did not pass Ensemble’s checks. Ensemble tries again when the sprint changes.',
     });
     // On Codex, a failed pass names Codex, never Claude.
     expect(
       sprintPathsView({ aiEnabled: true, paths: null, status: st('failed', { failure: 'error' }), providerName: 'Codex' }),
     ).toMatchObject({ text: expect.stringContaining('The call to Codex failed.') });
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('failed', { failure: 'daily_cap' }) })).toMatchObject({
-      text: expect.stringContaining('Limn tries again tomorrow.'),
+      text: expect.stringContaining('Ensemble tries again tomorrow.'),
     });
     expect(sprintPathsView({ aiEnabled: true, paths: null, status: st('none') })).toEqual({ kind: 'none' });
     // Too few tickets is said, never a heading with nothing under it.

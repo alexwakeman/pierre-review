@@ -220,13 +220,13 @@ export interface ClaudeThreadStillOpen {
 
 /** "You", "Robin" — the owner of a still-open judgement, for a label. */
 export function stillOpenByName(by: ClaudeStillOpenBy): string {
-  if (by.you) return 'Your Limn';
+  if (by.you) return 'Your Ensemble';
   const n = (by.name ?? '').trim();
   const first = n !== '' ? n.split(/\s+/)[0]! : by.login;
-  return `${first}’s Limn`;
+  return `${first}’s Ensemble`;
 }
 
-/** The one label a still-open thread wears: "Robin’s Limn: still open". */
+/** The one label a still-open thread wears: "Robin’s Ensemble: still open". */
 export function stillOpenLabel(by: ClaudeStillOpenBy): string {
   return `${stillOpenByName(by)}: still open`;
 }

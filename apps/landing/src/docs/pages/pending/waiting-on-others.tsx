@@ -49,7 +49,7 @@ export default function Page(): JSX.Element {
       <H3>Ask someone else</H3>
       <p>
         <Ui>Ask someone else</Ui> finds one other person to ask: someone the code owners and the repository's
-        history suggest, who is not already asked, with the fewest reviews waiting on them. Limn names them and
+        history suggest, who is not already asked, with the fewest reviews waiting on them. Ensemble names them and
         asks only when you confirm. It adds a reviewer; it removes nobody.
       </p>
 

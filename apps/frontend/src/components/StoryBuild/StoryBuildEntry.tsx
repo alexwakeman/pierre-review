@@ -1,9 +1,18 @@
 import { createContext, useContext, useMemo, useRef, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { STORY_BUILD_END_TO_END_LABEL, STORY_BUILD_MARK_WORDS, type SprintGraphNode, type SprintGraphResponse, type TicketReviewState } from '@pierre-review/shared';
+import {
+  STORY_BUILD_END_TO_END_LABEL,
+  STORY_BUILD_MARK_WORDS,
+  storyBuildClaimClearable,
+  storyBuildClaimLine,
+  type SprintGraphNode,
+  type SprintGraphResponse,
+  type StoryBuildTeamClaim,
+  type TicketReviewState,
+} from '@pierre-review/shared';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { sprintGraphKey } from '../../hooks/useSprintStories.js';
-import { useStoryBuildFor } from '../../hooks/useStoryBuild.js';
+import { useClearStoryBuildClaim, useStoryBuildClaim, useStoryBuildFor } from '../../hooks/useStoryBuild.js';
 import { useTicketReviewById } from '../../hooks/useTicketReview.js';
 import type { CardTicket } from '../../lib/cardTickets.js';
 import {
@@ -41,6 +50,11 @@ import { useRegisterCommands, type Command } from '../ui/commands.js';
 //            view's ticket-check state and its latest run (the Story section reads that run already —
 //            same query key); and the session from ONE cheap DB read, GET /api/story-builds?ident=.
 //            Nothing shows until that read answers, so Implement never flashes over an open build.
+//   THE TEAM CLAIM (docs/STORY-BUILD.md § The team claim): only when the gate would offer Implement / Fill
+//            gaps, ONE more read — GET /api/story-builds/claim, the ticket branch on GitHub — and a teammate's
+//            claim (or the reader's own on another computer) shows "<login> is building this" instead of the
+//            button, with Clear once the claim lapsed (at once for the reader's own). The button waits for that
+//            read too; a failed read shows the button (the start re-checks on the server).
 
 /** What the story view knows that the Story section does not: the board's node (the tray) and the PR count. */
 export interface StoryBuildEntryFacts {
@@ -85,18 +99,25 @@ function Entry({
   const runQ = useTicketReviewById(node == null ? (state?.latestRunId ?? null) : null);
   const openBuild = useOpenStoryBuild();
 
-  let entry: StoryViewBuildEntry = null;
-  if (node != null) entry = storyViewBuildEntry({ ...node, build: node.build ?? null, check: node.check ?? null });
+  let inputs: Parameters<typeof storyViewBuildEntry>[0] | null = null;
+  if (node != null) inputs = { ...node, build: node.build ?? null, check: node.check ?? null };
   else if (buildQ.data != null) {
     const cached = qc.getQueryData<SprintGraphResponse>(sprintGraphKey(workspaceId))?.nodes.find((n) => n.ident === ticket.ident) ?? null;
-    entry = storyViewBuildEntry({
+    inputs = {
       ghost: cached?.ghost ?? false,
       stage: cached != null ? cached.stage : storyStageOfCategory(ticket.statusCategory),
       prs: Array.from({ length: facts.prTotal }),
       build: sprintNodeBuildOf(buildQ.data.build),
       check: storyViewCheck(state, runQ.data),
-    });
+    };
   }
+  const base: StoryViewBuildEntry = inputs != null ? storyViewBuildEntry(inputs) : null;
+  // The team claim: asked only when the gate would offer a build.
+  const wantsClaim = base?.kind === 'offer';
+  const claimQ = useStoryBuildClaim(workspaceId, ticket.ident, wantsClaim);
+  const claimPending = wantsClaim && claimQ.isPending && claimQ.fetchStatus !== 'idle';
+  const entry: StoryViewBuildEntry =
+    claimPending ? null : wantsClaim && inputs != null && claimQ.data?.claim != null ? storyViewBuildEntry({ ...inputs, claim: claimQ.data.claim }) : base;
 
   const title = ticket.title != null && ticket.title !== '' ? ticket.title : null;
   const open = (endToEnd = false): void => {
@@ -114,13 +135,13 @@ function Entry({
   const canEndToEnd = entry?.kind === 'offer';
 
   const words =
-    entry == null
+    entry == null || entry.kind === 'claimed'
       ? null
       : entry.kind === 'open'
         ? { label: `Open ${ticket.key}'s build: ${STORY_BUILD_MARK_WORDS[entry.mark]}`, title: 'Open the build' }
         : storyBuildActionLabel(entry.action, ticket.key);
   const icon = entry?.kind === 'offer' && entry.action === 'fill_gaps' ? <FillGapsIcon size={12} /> : <WrenchIcon size={12} />;
-  const commandKind = entry == null ? null : entry.kind === 'open' ? `open:${entry.mark}` : entry.action;
+  const commandKind = entry == null || entry.kind === 'claimed' ? null : entry.kind === 'open' ? `open:${entry.mark}` : entry.action;
   const label = words?.label ?? null;
 
   // ⌘K: the same action, while this story view is on screen.
@@ -147,6 +168,7 @@ function Entry({
   }, [label, commandKind, ticket.ident, ticket.key, title, canEndToEnd]);
   useRegisterCommands(`story-build-entry:${ticket.ident}`, commands);
 
+  if (entry?.kind === 'claimed') return <ClaimedLine claim={entry.claim} workspaceId={workspaceId} ident={ticket.ident} />;
   if (entry == null || words == null) return null;
   if (entry.kind === 'open') {
     return (
@@ -189,5 +211,25 @@ function Entry({
     >
       {verb}
     </SplitButton>
+  );
+}
+
+/** "<login> is building this", with Clear once the claim lapsed (at once for the reader's own). */
+function ClaimedLine({ claim, workspaceId, ident }: { claim: StoryBuildTeamClaim; workspaceId: number | null; ident: string }): JSX.Element {
+  const clear = useClearStoryBuildClaim(workspaceId, ident);
+  const since = new Date(claim.since);
+  const at = Number.isFinite(since.getTime()) ? since.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  return (
+    <span className="inline-flex items-center gap-2" data-testid="story-build-claim" data-live={claim.live ? 'true' : 'false'}>
+      <span className="text-meta text-ui-mute" title={at != null ? `Since ${at}, on ${claim.repo}` : `On ${claim.repo}`}>
+        {storyBuildClaimLine(claim)}
+      </span>
+      {storyBuildClaimClearable(claim) ? (
+        <Button size="sm" data-testid="story-build-claim-clear" busy={clear.isPending} onClick={() => clear.mutate()} title="Free this ticket so it can be built here">
+          Clear
+        </Button>
+      ) : null}
+      {clear.error != null ? <span className="text-meta text-ui-danger">{clear.error instanceof Error ? clear.error.message : 'Clear failed.'}</span> : null}
+    </span>
   );
 }

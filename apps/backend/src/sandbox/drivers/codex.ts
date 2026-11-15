@@ -112,7 +112,7 @@ export async function startCodexDriver(o: SandboxAgentStartOptions): Promise<San
     if (typeof v.method !== 'string') return;
     // A REQUEST from the server (approvals, user input, a token refresh): refused, always.
     if ('id' in v && (typeof v.id === 'number' || typeof v.id === 'string')) {
-      write({ jsonrpc: '2.0', id: v.id, error: { code: -32601, message: 'Not available in a Limn session.' } });
+      write({ jsonrpc: '2.0', id: v.id, error: { code: -32601, message: 'Not available in an Ensemble session.' } });
       return;
     }
     const r = fold.feed(v.method, v.params);
@@ -140,7 +140,7 @@ export async function startCodexDriver(o: SandboxAgentStartOptions): Promise<San
   };
 
   try {
-    await call('initialize', { clientInfo: { name: 'limn', title: 'Limn', version: '1' } }, o.startTimeoutMs ?? 90_000);
+    await call('initialize', { clientInfo: { name: 'limn', title: 'Ensemble', version: '1' } }, o.startTimeoutMs ?? 90_000);
     write({ jsonrpc: '2.0', method: 'initialized' });
     let developerInstructions: string | null = o.systemPrompt ?? null;
     if (o.systemPromptFile) {

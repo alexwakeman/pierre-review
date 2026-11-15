@@ -149,6 +149,24 @@ describe('sweep and destroy', () => {
     expect(appInstance({ LIMN_DATA_DIR: '/a' })).not.toBe(appInstance({ LIMN_DATA_DIR: '/b' }));
   });
 
+  it('the ~/.limn -> ~/.ensemble move keeps the app instance (old resources and the repo store stay swept)', async () => {
+    const { appInstance } = await import('./labels.js');
+    const { mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const home = mkdtempSync(join(tmpdir(), 'labels-home-'));
+    try {
+      mkdirSync(join(home, '.limn'));
+      const before = appInstance({}, home);
+      expect(before).toBe(appInstance({ ENSEMBLE_DATA_DIR: join(home, '.limn') }, home));
+      rmSync(join(home, '.limn'), { recursive: true });
+      mkdirSync(join(home, '.ensemble'));
+      expect(appInstance({}, home)).toBe(before);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('lists the RUNNING sandboxes of this install only (role sandbox, its own label value)', async () => {
     const cli = scripted([[/^ps --filter label=limn\.managed=1 --filter label=limn\.role=sandbox/, { stdoutText: 'limn-a-sandbox\ta\nlimn-b-sandbox\tb\n' }]]);
     expect(await createDockerRuntime({ runner: cli, instance: '1' }).listSandboxes()).toEqual([
@@ -239,7 +257,7 @@ describe('the repo store', () => {
     expect(creates[0]!.args).toEqual(['volume', 'create', '--label', 'limn.store=d1', '--label', 'limn.role=store', 'limn-repo-store-d1']);
 
     const foreign = scripted([[/^volume inspect/, { stdoutText: '\n' }]]);
-    await expect(createDockerRuntime({ runner: foreign, instance: 'd1' }).repoStore!.ensure()).rejects.toThrow(/not Limn's repo store/);
+    await expect(createDockerRuntime({ runner: foreign, instance: 'd1' }).repoStore!.ensure()).rejects.toThrow(/not Ensemble's repo store/);
   });
 
   it('removes the store only by its own label, never with --force; the sweep never lists it', async () => {

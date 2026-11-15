@@ -125,7 +125,7 @@ export function validateFixReport(raw: unknown, shown: readonly string[], change
 export function fixReportCheckerSource(o: { reportFile: string; refsFile: string; repoPath: string }): string {
   return [
     '#!/usr/bin/env node',
-    '// Limn: checks the AI Fix report. Run: node ~/.limn/fix-report-check.cjs',
+    '// Ensemble: checks the AI Fix report. Run: node ~/.limn/fix-report-check.cjs',
     "'use strict';",
     "const fs = require('fs');",
     "const cp = require('child_process');",

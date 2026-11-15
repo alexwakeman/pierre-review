@@ -296,7 +296,7 @@ function FixerSection({
             </p>
             <p>
               When the PR conflicts with its base branch, Resolve merge conflicts is ticked too. {pickedName}{' '}
-              merges the base first and resolves each conflict, then fixes the other items on top. Limn checks
+              merges the base first and resolves each conflict, then fixes the other items on top. Ensemble checks
               the merge commit before Push. You can still resolve conflicts by hand with Resolve conflicts.
             </p>
             <p>
@@ -398,7 +398,7 @@ function FixerSection({
                       <CheckboxBox checked={pushWhenDone} disabled={fixStarting} onChange={(e) => setPushWhenDone(e.target.checked)} />
                       Push when done
                       <InfoButton title="Push when done">
-                        <p>When the fix finishes on your own pull request, Limn pushes it to the pull request's branch. You do not press Push.</p>
+                        <p>When the fix finishes on your own pull request, Ensemble pushes it to the pull request's branch. You do not press Push.</p>
                         <p className="mt-2">
                           It waits for your press instead when the agent says something is not fixed, its report does not cover
                           every item, or the pull request is someone else's. The session says which.
@@ -789,8 +789,8 @@ function MergeResult({ merge, headSha }: { merge: AiFixMerge; headSha: string | 
         Merge of <span className="font-mono">{merge.baseRef}</span>
         <InfoButton title="How the conflicts were resolved">
           <p>
-            The agent merged {merge.baseRef} into the PR in the sandbox and made a merge commit. Limn then
-            checked it: the merge commit's parents must be the PR head and the {merge.baseRef} commit Limn
+            The agent merged {merge.baseRef} into the PR in the sandbox and made a merge commit. Ensemble then
+            checked it: the merge commit's parents must be the PR head and the {merge.baseRef} commit Ensemble
             picked, no conflict markers may be left in the files that were in conflict, and every other change
             must sit on top of the merge.
           </p>

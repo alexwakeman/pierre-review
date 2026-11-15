@@ -6,12 +6,24 @@
 // a line whose family can't be read holds them all); the reader's own lines hold only the SAME action
 // (another of their machines did it); an AI-pushed head holds the merge until CI is green; a
 // race goes to the claimant whose pending run started first, and the loser stands down.
+// 2026-11-14: an ARMED merge holds on a lease from its poster's newest armed line and is freed by their
+// release line; a rebase ask "open to teammates" holds only the ask; a teammate's expired pending line
+// is found (`staleTeammateDepsLine`); and the lifecycle writes the LEDGER before every line and keeps
+// a line GitHub did not take for the reconciler (the final line, the armed line, the AI-pushed line).
 import { afterEach, describe, expect, it } from 'vitest';
 import { isLimnStatusContext, DEPENDENCY_CLAIM_CONTEXT } from '@pierre-review/shared';
 import type { TeamClaimGithub, TeamClaimLine } from '../review/claude-review/team-claim.js';
 import {
+  DEPS_ARMED_LEASE_MS,
   DEPS_CLAIM_TTL_MS,
   actionOfLine,
+  armedReleaseLine,
+  depsClaimLive,
+  markAiPushedHead,
+  rebaseOpenLine,
+  staleTeammateDepsLine,
+  type DepsClaimLedger,
+  type DepsLedgerPatch,
   aiPushedLine,
   _resetDepsClaimsForTest,
   decideDepsClaim,
@@ -57,7 +69,7 @@ describe('the lines', () => {
   });
 
   it('is never CI: the context is a Limn line', () => {
-    expect(DEPENDENCY_CLAIM_CONTEXT).toBe('limn/deps');
+    expect(DEPENDENCY_CLAIM_CONTEXT).toBe('ensemble/deps');
     expect(isLimnStatusContext(DEPENDENCY_CLAIM_CONTEXT)).toBe(true);
   });
 });
@@ -200,7 +212,7 @@ describe('the lifecycle (fake GitHub)', () => {
     expect(posted).toEqual([]);
   });
 
-  it('free → pending, then the done line, on limn/deps', async () => {
+  it('free → pending, then the done line, on ensemble/deps', async () => {
     const { g, posted } = fakeGithub('alex', []);
     setDepsClaimGithubForTest(g);
     const read = await readDepsClaim(target, log);
@@ -209,8 +221,8 @@ describe('the lifecycle (fake GitHub)', () => {
     expect(hold).toBeNull();
     await endDepsClaim(handle, { outcome: 'done', pushedSha: 'abcdef123' }, log);
     expect(posted).toEqual([
-      { state: 'pending', description: 'alex handling · fixing CI', context: 'limn/deps' },
-      { state: 'success', description: 'alex fixed CI · pushed abcdef1', context: 'limn/deps' },
+      { state: 'pending', description: 'alex handling · fixing CI', context: 'ensemble/deps' },
+      { state: 'success', description: 'alex fixed CI · pushed abcdef1', context: 'ensemble/deps' },
     ]);
   });
 
@@ -246,5 +258,147 @@ describe('the lifecycle (fake GitHub)', () => {
     expect(depsHeldNow(1, 8, 'h1', 'approve', NOW)).toBe(true);
     expect(depsHeldNow(1, 8, 'h1', 'merge', NOW)).toBe(false);
     expect(depsHeldNow(1, 8, 'h1', null, NOW)).toBe(false);
+  });
+});
+
+describe('an armed merge holds on a lease (gap c)', () => {
+  it('holds the merge family while its newest armed line is inside the lease; a renewal extends it', () => {
+    const armed = (ago: number) => line('robin', 'success', doneLine('robin', 'arm_merge'), ago);
+    expect(decideDepsClaim([armed(10 * MIN)], 'alex', NOW, 'merge')).toMatchObject({ kind: 'handled', login: 'robin' });
+    // A machine that went away: its line expires and a teammate may arm.
+    expect(decideDepsClaim([armed(DEPS_ARMED_LEASE_MS + MIN)], 'alex', NOW, 'merge')).toEqual({ kind: 'free' });
+    // Renewed: the newest armed line decides, so an old one does not matter.
+    expect(decideDepsClaim([armed(DEPS_ARMED_LEASE_MS + 60 * MIN), armed(5 * MIN)], 'alex', NOW, 'merge').kind).toBe('handled');
+    // It never held another family.
+    expect(decideDepsClaim([armed(MIN)], 'alex', NOW, 'approve')).toEqual({ kind: 'free' });
+  });
+
+  it('the release line ("merge not armed any more") frees the poster’s armed line at once', () => {
+    const lines = [
+      line('robin', 'success', doneLine('robin', 'arm_merge'), 20 * MIN),
+      line('robin', 'success', armedReleaseLine('robin'), MIN),
+    ];
+    expect(armedReleaseLine('robin')).toBe('Cleared by robin: merge not armed any more · free to claim');
+    expect(decideDepsClaim(lines, 'alex', NOW, 'merge')).toEqual({ kind: 'free' });
+    // A re-arm after the release holds again.
+    lines.push(line('robin', 'success', doneLine('robin', 'arm_merge'), 0));
+    expect(decideDepsClaim(lines, 'alex', NOW, 'merge').kind).toBe('handled');
+    // The reader's other machine: its own armed line is held on the same lease.
+    const own = [line('alex', 'success', doneLine('alex', 'arm_merge'), DEPS_ARMED_LEASE_MS + MIN)];
+    expect(decideDepsClaim(own, 'alex', NOW, 'merge', { action: 'arm_merge' })).toEqual({ kind: 'free' });
+  });
+});
+
+describe('a rebase ask open to teammates (gap d)', () => {
+  it('holds the ask only; the AI conflict step is free for a teammate', () => {
+    expect(rebaseOpenLine('robin')).toBe('robin asked the bot to rebase · AI step open to teammates');
+    expect(actionOfLine(rebaseOpenLine('robin'), 'robin')).toBe('rebase_request');
+    const open = [line('robin', 'success', rebaseOpenLine('robin'), 40 * MIN)];
+    expect(decideDepsClaim(open, 'alex', NOW, 'conflicts', { action: 'rebase_request' })).toMatchObject({
+      kind: 'handled',
+      login: 'robin',
+      onlyAction: 'rebase_request',
+    });
+    expect(decideDepsClaim(open, 'alex', NOW, 'conflicts', { action: 'ai_resolve' })).toEqual({ kind: 'free' });
+    // The plain ask (the asker will run the AI step) still holds the whole family.
+    const plain = [line('robin', 'success', doneLine('robin', 'rebase_request'), 40 * MIN)];
+    expect(decideDepsClaim(plain, 'alex', NOW, 'conflicts', { action: 'ai_resolve' }).kind).toBe('handled');
+    // Re-posted as open later: the NEWER line of the same action decides.
+    expect(decideDepsClaim([...plain, line('robin', 'success', rebaseOpenLine('robin'), MIN)], 'alex', NOW, 'conflicts', { action: 'ai_resolve' })).toEqual({
+      kind: 'free',
+    });
+  });
+
+  it('an action-only hold is remembered for that action alone', () => {
+    const at = { accountId: 1, prId: 9, headSha: 'h1', action: 'rebase_request' as const };
+    rememberDepsHold(at, { kind: 'handled', login: 'robin', atMs: NOW, description: null, onlyAction: 'rebase_request' }, NOW);
+    expect(depsHeldNow(1, 9, 'h1', 'conflicts', NOW, 'rebase_request')).toBe(true);
+    expect(depsHeldNow(1, 9, 'h1', 'conflicts', NOW, 'ai_resolve')).toBe(false);
+    expect(depsHeldNow(1, 9, 'h1', 'conflicts', NOW)).toBe(false);
+    _resetDepsClaimsForTest();
+  });
+});
+
+describe('a teammate’s expired pending line (gap b)', () => {
+  it('is the newest line, theirs, pending and past the TTL', () => {
+    const stale = [line('robin', 'pending', handlingLine('robin', 'ai_fix'), DEPS_CLAIM_TTL_MS + MIN)];
+    expect(staleTeammateDepsLine(stale, 'alex', NOW)).toEqual({ login: 'robin' });
+    expect(staleTeammateDepsLine([line('robin', 'pending', handlingLine('robin', 'ai_fix'), 5 * MIN)], 'alex', NOW)).toBeNull();
+    expect(staleTeammateDepsLine([line('alex', 'pending', handlingLine('alex', 'ai_fix'), 60 * MIN)], 'alex', NOW)).toBeNull();
+    // Settled since (any newer line): nothing to release.
+    expect(staleTeammateDepsLine([...stale, line('robin', 'success', failedLine('robin', 'ai_fix'), MIN)], 'alex', NOW)).toBeNull();
+  });
+});
+
+describe('the ledger (fake GitHub, fake ledger)', () => {
+  afterEach(() => _resetDepsClaimsForTest());
+  const log = { info: () => {}, warn: () => {} };
+  const target = { accountId: 1, prId: 7, owner: 'o', name: 'w', headSha: 'h1', action: 'arm_merge' as const };
+
+  function fakes(opts: { failPostsFrom?: number } = {}) {
+    const events: string[] = [];
+    const rows = new Map<number, DepsLedgerPatch & { action: string; headSha: string }>();
+    let posts = 0;
+    let id = 0;
+    const ledger: DepsClaimLedger = {
+      async intent(t, login) {
+        id += 1;
+        rows.set(id, { action: t.action, headSha: t.headSha, state: 'claiming' });
+        events.push(`intent ${t.action} ${login}`);
+        return id;
+      },
+      async update(rowId, patch) {
+        Object.assign(rows.get(rowId)!, patch);
+        events.push(`update ${patch.state ?? '-'}`);
+      },
+    };
+    const g: TeamClaimGithub = {
+      async listLines() {
+        return [];
+      },
+      async postLine(_a, _o, _n, _sha, _c, post) {
+        posts += 1;
+        if (opts.failPostsFrom != null && posts >= opts.failPostsFrom) throw new Error('boom');
+        events.push(`post ${post.state} ${post.description}`);
+      },
+      async login() {
+        return 'alex';
+      },
+    };
+    return { events, rows, ledger, g };
+  }
+
+  it('writes the intent BEFORE the pending line; an armed merge ends "armed" (renewed later)', async () => {
+    const f = fakes();
+    setDepsClaimGithubForTest(f.g);
+    const { handle } = await postDepsClaim('alex', target, log, Date.now, f.ledger);
+    expect(f.events.slice(0, 2)).toEqual(['intent arm_merge alex', 'post pending alex handling · arming the merge']);
+    expect(depsClaimLive(handle.ledgerId ?? null, 1, 7, 'h1')).toBe(true);
+    await endDepsClaim(handle, { outcome: 'done' }, log);
+    expect(f.rows.get(1)).toMatchObject({ state: 'armed', finalDescription: null, lastDescription: doneLine('alex', 'arm_merge') });
+    expect(depsClaimLive(1, 1, 7, 'h1')).toBe(false);
+  });
+
+  it('a final line GitHub did not take is KEPT for the reconciler (gap a)', async () => {
+    const f = fakes({ failPostsFrom: 2 });
+    setDepsClaimGithubForTest(f.g);
+    const { handle } = await postDepsClaim('alex', { ...target, action: 'approve' }, log, Date.now, f.ledger);
+    await endDepsClaim(handle, { outcome: 'done' }, log);
+    expect(f.rows.get(1)).toMatchObject({ state: 'pending', finalDescription: 'alex approved' });
+    // An armed merge whose line failed stays 'armed' with no post time: renewed at once.
+    const g = fakes({ failPostsFrom: 2 });
+    setDepsClaimGithubForTest(g.g);
+    const armed = await postDepsClaim('alex', target, log, Date.now, g.ledger);
+    await endDepsClaim(armed.handle, { outcome: 'done' }, log);
+    expect(g.rows.get(1)).toMatchObject({ state: 'armed', lastPostedAt: null });
+  });
+
+  it('an AI-pushed line GitHub did not take is ledgered on the PUSHED commit and kept (gap h)', async () => {
+    const f = fakes({ failPostsFrom: 3 });
+    setDepsClaimGithubForTest(f.g);
+    const { handle } = await postDepsClaim('alex', { ...target, action: 'ai_fix' }, log, Date.now, f.ledger);
+    await endDepsClaim(handle, { outcome: 'done', pushedSha: 'p0sh' }, log);
+    await markAiPushedHead(handle, 'p0sh', log);
+    expect(f.rows.get(2)).toMatchObject({ action: 'ai_pushed', headSha: 'p0sh', state: 'claiming', finalDescription: aiPushedLine('alex') });
   });
 });

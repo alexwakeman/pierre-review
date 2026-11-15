@@ -725,7 +725,7 @@ export function BotsWorthMock(): JSX.Element {
     <MockFrame
       live
       title="Review bots"
-      label="Review bots compared: CodeRabbit 412 comments, 38% acted on; Copilot 290, 22%; Limn 118, 71%"
+      label="Review bots compared: CodeRabbit 412 comments, 38% acted on; Copilot 290, 22%; Ensemble 118, 71%"
     >
       <MiniTable
         className="stack"

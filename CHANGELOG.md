@@ -1,13 +1,13 @@
 # Changelog
 
-What changed in each release of Limn (`npx limn-review`), newest first.
+What changed in each release of Ensemble (`npx ensemble-review`), newest first.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the
 npm package. Every push to `main` publishes a patch release; the release workflow moves everything
 under "Unreleased" to the new version's heading in the same commit as the version bump
 (`docs/RELEASE.md` § The changelog).
 
-How to write an entry: one line per change a person using Limn would notice, in plain English,
+How to write an entry: one line per change a person using Ensemble would notice, in plain English,
 under Added, Changed, Fixed or Removed. Name the screen in the app's own words. No file names,
 no internals.
 
@@ -25,6 +25,76 @@ no internals.
 - Implement → a hotfix build ends with a port report per repository: "Applied to both", "Applied to both, adapted for
   main" or "Not applied to main", with the agent's reason. When main does not need the fix, Push opens only the pull
   request into `hotfix/<tag>`. The build tab says when the report and the two diffs disagree.
+## [1.0.36] - 2026-11-15
+
+### Added
+
+- Implement and Fill gaps on a team: when a teammate is building a ticket, the story view says "robin is building
+  this" instead of offering the button. Ensemble marks the ticket on GitHub when you press Start (an empty commit
+  on the ticket's branch with an "ensemble/build" status), keeps the mark while your build runs, and clears it
+  when the build ends. A mark whose computer went away for 30 minutes shows Clear.
+- The review loop ("After the build: review and fix, then open the pull request") now shows each review round as
+  a status on the branch: "alex is reviewing with Claude", then "alex reviewed · kept in Ensemble".
+- The story view shows "How the code meets each criterion": each criterion beside the pull requests that say they
+  move it forward, with how and the files. A criterion no pull request claims says so.
+- A ticket with one pull request now shows that pull request's design in the story view, with Draw design and
+  Redraw design.
+
+### Changed
+
+- Limn is now called Ensemble. Run it with `npx ensemble-review`, or `ensemble` once installed; the old
+  `limn-review` command still works and points you to the new one.
+- Your data moves from `~/.limn` to `~/.ensemble` the first time Ensemble starts.
+- The website and the docs moved to ensemble.ac. Links to limn-review.com still work and take you there.
+- Settings you set as `LIMN_…` environment variables still work. The new names start with `ENSEMBLE_`
+  (for example `ENSEMBLE_AI_PROVIDER`), and win when both are set.
+- Teams: your Ensemble still sees the claims of teammates on Limn. Limn does not read Ensemble's new
+  `ensemble/` status lines, so update the whole team together.
+- Settings → Dependencies: every switch is now on by default — Merge them automatically, Approve them
+  automatically, Resolve their conflicts and Fix them with AI. This also turns them on in workspaces where they
+  were off before, so check the tab if you want any of them off. Switching one off now stays off.
+- Settings → Dependencies: Dependabot and Renovate are trusted by default. Any other dependency bot still needs a
+  tick under Trusted bots, and unticking Dependabot or Renovate stays unticked.
+
+### Fixed
+
+- Dependency updates on a team: when Ensemble stops partway through an action, its "ensemble/deps" status on the commit
+  is cleared the next time it starts, instead of holding teammates back for half an hour. A status GitHub did not
+  accept is sent again.
+- Dependency updates on a team: a teammate's Ensemble that armed a merge no longer holds it for ever. Its status is
+  renewed while the merge is armed, is cleared when the merge ends without landing, and runs out after two hours if
+  that computer is off, so your Ensemble can arm it.
+- Dependency updates on a team: when a teammate's Ensemble asked the bot to rebase but cannot run AI, its status now
+  says so ("AI step open to teammates") and your Ensemble resolves the conflicts after the 30-minute wait.
+- Dependency updates on a team: a teammate's claim that expired is cleared once ("Cleared by alex: robin's claim
+  expired"), and the "AI pushed this commit" status is sent again if GitHub did not accept it, so no one merges an
+  AI-written commit before its CI passes.
+
+### Changed
+
+- Implement: "After the build: review and fix, then open the pull request" is now ticked by default. Untick it at
+  Start to push by hand. Approving the plan is still yours.
+- The licence is now called the Ensemble License 1.0. Only the name changed.
+
+## [1.0.33] - 2026-11-13
+
+### Changed
+
+- Ask about this story: the agent is ready sooner. It reads each repository from one copy kept between chats and
+  brought up to date when the default branch moves.
+
+## [1.0.32] - 2026-11-13
+
+### Added
+
+- The story view: "Ask about this story". Ask how to prove the ticket is done once its pull requests are merged,
+  what is still missing, or how it fits with the rest of the system. The answer comes from the ticket, the pull
+  requests' changes and code, every repository in the workspace, the reference documents, the sprint's other
+  stories, and your Claude memory, CLAUDE.md and skills; nothing is run or changed. Chats are saved with the story.
+
+### Fixed
+
+- Build end to end: the summary in the Jira comment keeps words like "Q3" and "P1" instead of removing them.
 
 ## [1.0.31] - 2026-11-12
 

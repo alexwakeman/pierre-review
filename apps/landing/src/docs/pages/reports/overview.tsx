@@ -11,7 +11,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        <Ui>Reports</Ui> is where Limn measures how your team’s work flows. It opens on the <Ui>Overview</Ui> tab. The
+        <Ui>Reports</Ui> is where Ensemble measures how your team’s work flows. It opens on the <Ui>Overview</Ui> tab. The
         tab answers three questions for the workspace you have selected: how this window compares with the one
         before it, how the last few sprints or months compare with each other, and which repositories the work is
         in. Every figure is counted from your GitHub data. No AI writes or changes a number on this tab.
@@ -135,7 +135,7 @@ export default function Page(): JSX.Element {
       <p>
         Below the chart, <Ui>Effort vs automation</Ui> splits the selected period’s merged pull requests, review
         comments and approvals by who did them: <Ui>People</Ui>, <Ui>Code agents</Ui>, <Ui>Dependency bots</Ui>,{' '}
-        <Ui>Limn</Ui>, <Ui>AI review</Ui>, <Ui>Quality gates & CI</Ui>, <Ui>Release automation</Ui> and{' '}
+        <Ui>Ensemble</Ui>, <Ui>AI review</Ui>, <Ui>Quality gates & CI</Ui>, <Ui>Release automation</Ui> and{' '}
         <Ui>Housekeeping</Ui>. Only the groups that did something are listed. Its headline is one number, for example
         “38% of merges were automated”, which tells you how much of the throughput above is people’s work.
       </p>
@@ -148,7 +148,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="new-repositories">Why adding a repository does not move the lines</H2>
       <p>
-        History is only as complete as the repositories Limn has been tracking. If you add three repositories in
+        History is only as complete as the repositories Ensemble has been tracking. If you add three repositories in
         March, merges “go up” in March even though nobody worked faster. To stop that, every period is measured over
         the same repositories: the ones tracked since the first period shown. A line under the chip row says so, for
         example “4 of 6 repos: the ones tracked across every period.” The <Ui>Effort vs automation</Ui> panel counts

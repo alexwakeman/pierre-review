@@ -790,7 +790,7 @@ export const ACTOR_LANE_LABEL: Record<ActorLane, string> = {
   code_agent: 'Code agents',
   release: 'Release automation',
   housekeeping: 'Housekeeping',
-  limn: 'Limn',
+  limn: 'Ensemble',
 };
 
 // A BOT IS A PER-WORKSPACE OBJECT. Everything below keys on (account, WORKSPACE, actor): ONE row
@@ -862,7 +862,7 @@ export interface ReviewerClassification {
   login: string;
   automated: boolean;
   kind: AutomatedReviewerKind | null;   // null when human
-  label: string;                        // "CodeRabbit" | "In-house / custom" | "acme-ci" | "Limn · alice"
+  label: string;                        // "CodeRabbit" | "In-house / custom" | "acme-ci" | "Ensemble · alice"
   // What this automation is FOR (see ReviewerRole). Always 'review' for a human — the field is
   // meaningless when `automated` is false, and callers must gate on `automated` first rather
   // than reading a human's role. Persisted NOT NULL DEFAULT 'review', so it is never absent.
@@ -1830,7 +1830,7 @@ export interface BotOnlyPrItem {
   title: string;
   repoId: number;      // for the cross-repo drill-down's repo filter
   repoFullName: string;
-  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Limn · alice" | …)
+  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Ensemble · alice" | …)
   state: PrState;      // 'open' (mergeable) | 'merged' (in window)
   githubUrl: string;
   openedAt: string;    // ISO-8601 — the PR age (sortable)
@@ -3805,7 +3805,10 @@ export type AiAgentKind =
   // "Implement story" (docs/STORY-BUILD.md): the READ-ONLY assess + plan pass (and its chat re-plans),
   // and the per-repository WRITE build (no shell).
   | 'story_plan'
-  | 'story_build';
+  | 'story_build'
+  // Story chat (docs/STORY-CHAT.md): quick questions about one story; on Claude its commands run in a
+  // process sandbox, on Codex it reads only.
+  | 'story_chat';
 
 /**
  * What a Run gate asks about: one agent kind, or `'complete'` — the ONE-SHOT features (sprint briefs
@@ -3831,6 +3834,7 @@ export const AI_AGENT_KINDS: readonly AiAgentKind[] = [
   'docs_chat',
   'story_plan',
   'story_build',
+  'story_chat',
 ];
 
 /** Every run kind: the agent kinds, then the one-shot `complete`. */
@@ -4705,7 +4709,7 @@ export interface StoredAutoFixSettings {
 
 // The visible last line of every auto-posted comment and review body (the hidden
 // `<!-- pierre:claude-review` marker still follows it, so `isLimnPostedComment` knows it).
-export const AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude review._';
+export const AUTO_POST_FOOTER = '_Posted automatically by Ensemble’s Claude review._';
 
 // Hidden markers on Limn's replies in its own finding threads. Both start with Limn's
 // `<!-- pierre:claude-review` prefix, so `isLimnPostedComment` knows them. The PUSHBACK one also
@@ -10082,7 +10086,7 @@ export type RequestChangesResult = ReviewDetail;
 //   409 NotApproved     the viewer's latest decisive review is not an approval (nothing to withdraw)
 //   403 / 422 GitHubRefused  GitHub said no; `message` is "GitHub didn't let you withdraw this
 //                       approval: <GitHub's own words>"
-export const WITHDRAW_APPROVAL_MESSAGE = 'Approval withdrawn in Limn.';
+export const WITHDRAW_APPROVAL_MESSAGE = 'Approval withdrawn in Ensemble.';
 export interface WithdrawApprovalResult {
   // The local `reviews` row now marked dismissed.
   reviewId: number;

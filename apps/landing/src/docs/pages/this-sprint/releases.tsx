@@ -18,7 +18,7 @@ export default function Page(): JSX.Element {
         candidate as a release, publishes the release notes and comments on each ticket.
       </p>
       <p>
-        Limn never cuts a version tag and deploys nothing. Your CI, or a person, tags the default branch. The release
+        Ensemble never cuts a version tag and deploys nothing. Your CI, or a person, tags the default branch. The release
         tag is what starts your team&rsquo;s own build.
       </p>
 
@@ -94,7 +94,7 @@ export default function Page(): JSX.Element {
         <li>Read the release notes, one section per repository, and change them if you want.</li>
         <li>Read the comment each ticket will get.</li>
         <li>
-          Press <Ui>Confirm</Ui>. Limn first reads every ticket in the release again and checks each version tag. If
+          Press <Ui>Confirm</Ui>. Ensemble first reads every ticket in the release again and checks each version tag. If
           anything changed, it stops, lists what changed and writes nothing.
         </li>
       </Steps>

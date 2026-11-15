@@ -106,7 +106,7 @@ function scriptFake(rt: import('../runtime/fake.js').FakeRuntime): void {
     const dir = join(scratch, `sb${++boots}`);
     git(scratch, 'init', '-q', dir);
     git(dir, 'config', 'user.email', 'sandbox@limn.invalid');
-    git(dir, 'config', 'user.name', 'Limn sandbox');
+    git(dir, 'config', 'user.name', 'Ensemble sandbox');
     git(dir, '-c', 'protocol.file.allow=always', 'fetch', '-q', '--depth', '1', `file://${origin}`, `${sha}:refs/limn/base`);
     git(dir, 'checkout', '-q', '-B', branch, sha);
     local.set(dest, dir);
@@ -379,12 +379,12 @@ describe('a fix with the merge and a CI item', () => {
     const mdPath = copied.map((x) => x.path).filter((x) => x.endsWith('/FIX.md')).pop()!;
     const fixMd = fake.files(box).get(mdPath)?.toString('utf8') ?? '';
     expect(fixMd).toContain(`## First: the merge conflicts (MERGE)`);
-    expect(fixMd).toContain(`Limn has started a merge of \`main\` at ${B.slice(0, 7)}`);
+    expect(fixMd).toContain(`Ensemble has started a merge of \`main\` at ${B.slice(0, 7)}`);
     expect(fixMd.indexOf('## First: the merge conflicts')).toBeLessThan(fixMd.indexOf('## What to fix'));
     expect(fixMd).toContain('---BEGIN ITEM MERGE');
     expect(copied.some((x) => x.path === START_MERGE_FILE)).toBe(true);
-    expect(notices(f).some((n) => n.startsWith(`Limn started the merge of main (${B.slice(0, 7)}): one file is in conflict (config.ts).`))).toBe(true);
-    expect(notices(f)).toContain('Limn checked the merge commit: main is merged and the conflict is resolved.');
+    expect(notices(f).some((n) => n.startsWith(`Ensemble started the merge of main (${B.slice(0, 7)}): one file is in conflict (config.ts).`))).toBe(true);
+    expect(notices(f)).toContain('Ensemble checked the merge commit: main is merged and the conflict is resolved.');
     expect(f.merge).toMatchObject({ baseRef: 'main', baseSha: B, conflictedFiles: ['config.ts'], status: 'valid', reason: null, resolutionFiles: ['config.ts'] });
     expect(f.merge?.resolutionDiff).toContain('+export const limit = 25; // the API caps it');
     expect(f.patch).toContain('fix.ts');
@@ -403,7 +403,7 @@ describe('a fix with the merge and a CI item', () => {
     expect(applies).toEqual([]);
     expect(pushMerges).toHaveLength(1);
     expect(pushMerges[0]).toMatchObject({ fixId, owner: 'acme', name: 'api', prNumber: 7, headSha: H, baseRef: 'main', baseSha: B, conflictedFiles: ['config.ts'], fixMessage: 'fix: the failing test' });
-    expect(pushMerges[0].mergeMessage).toMatch(/^Merge main into this pull request\n\nConflicts resolved with Claude in Limn AI Fix\.$/);
+    expect(pushMerges[0].mergeMessage).toMatch(/^Merge main into this pull request\n\nConflicts resolved with Claude in Ensemble AI Fix\.$/);
     expect(Buffer.isBuffer(pushMerges[0].bundle) && pushMerges[0].bundle.length > 0).toBe(true);
     const after = await rowOf(fixId);
     expect(after.sessionPhase).toBe('pushed');
@@ -430,7 +430,7 @@ describe('a merge Limn refuses', () => {
     const fixId = await startFix(['conflict:merge']);
     const f = await until((x) => x.id === fixId && x.session?.phase === 'built', 'built');
     expect(f.merge).toMatchObject({ status: 'invalid', reason: 'config.ts still has a conflict marker in the merge commit.' });
-    expect(f.changeReport?.unaddressed).toEqual([{ ref: 'MERGE', reason: 'Limn: config.ts still has a conflict marker in the merge commit.' }]);
+    expect(f.changeReport?.unaddressed).toEqual([{ ref: 'MERGE', reason: 'Ensemble: config.ts still has a conflict marker in the merge commit.' }]);
     expect(f.changeReport?.changes.flatMap((c) => c.refs)).toEqual([]);
     expect(notices(f)).toContain('Nothing will be pushed: config.ts still has a conflict marker in the merge commit.');
     const p = await post(`/api/pro/ai-fixes/${fixId}/push`, { target: 'existing' });

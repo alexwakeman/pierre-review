@@ -1,20 +1,20 @@
-// The "LIMN" banner shown by the CLI on launch — drawn in solid rules, 5 lines,
-// max 30 columns, so it renders cleanly in any terminal. String.raw keeps the
-// backslashes literal.
+// The "ENSEMBLE" banner shown by the CLI on launch — figlet's plain "Big" letters, 6 lines,
+// 56 columns, so it renders cleanly in any terminal. Built from plain strings (not String.raw):
+// the N carries a backtick.
 //
-// This replaced a flowing cursive "Pierre" set in figlet's "Script" font. The
-// letterforms WERE the old identity, and there is no way to string-replace a name
-// out of ASCII art, so the banner had to be redrawn rather than edited. It is
-// square and plain on purpose: the brand is now typographic — plain Archivo plus a
-// vermilion full stop — and a handwriting-style banner would be the loudest thing
-// in a system whose whole argument is restraint.
-export const LIMN_ASCII = String.raw`
-  _      _____ __  __ _   _
- | |    |_   _|  \/  | \ | |
- | |      | | | |\/| |  \| |
- | |___  _| |_| |  | | |\  |
- |_____||_____|_|  |_|_| \_|
-`;
+// The letterforms ARE the name, so each rename redraws the banner rather than editing it (a
+// cursive "Pierre", then a square "LIMN"). The constant keeps its old identifier on purpose
+// (packages/shared/src/product.ts: identifiers are never renamed).
+export const LIMN_ASCII = [
+  '',
+  '  ______ _   _  _____ ______ __  __ ____  _      ______',
+  ' |  ____| \\ | |/ ____|  ____|  \\/  |  _ \\| |    |  ____|',
+  ' | |__  |  \\| | (___ | |__  | \\  / | |_) | |    | |__',
+  ' |  __| | . ` |\\___ \\|  __| | |\\/| |  _ <| |    |  __|',
+  ' | |____| |\\  |____) | |____| |  | | |_) | |____| |____',
+  ' |______|_| \\_|_____/|______|_|  |_|____/|______|______|',
+  '',
+].join('\n');
 
 export const TAGLINE =
   "Local-only dashboard for your team's GitHub PR activity.";

@@ -228,8 +228,8 @@ export function teammateLiftHold(f: TeammateLiftFacts): TeammateLiftHold | null 
 export function teammateLiftMessage(login: string, points: number, headSha: string): string {
   const sha = headSha.slice(0, 7);
   return points === 1
-    ? `Limn (${login}) checked the 1 point is addressed at ${sha}.`
-    : `Limn (${login}) checked all ${points} points are addressed at ${sha}.`;
+    ? `Ensemble (${login}) checked the 1 point is addressed at ${sha}.`
+    : `Ensemble (${login}) checked all ${points} points are addressed at ${sha}.`;
 }
 
 /** How long ago, in words a person reads at a glance: "5 hours", "2 days". */
@@ -247,7 +247,7 @@ export function awayFor(ms: number): string {
  */
 export function teammateAwayLiftMessage(login: string, poster: string, points: number, headSha: string, awayMs: number | null): string {
   const checked = teammateLiftMessage(login, points, headSha).replace(/\.$/, '');
-  const away = awayMs == null ? `${poster}'s Limn has not reviewed it` : `${poster}'s Limn has not reviewed it and has been away for ${awayFor(awayMs)}`;
+  const away = awayMs == null ? `${poster}'s Ensemble has not reviewed it` : `${poster}'s Ensemble has not reviewed it and has been away for ${awayFor(awayMs)}`;
   return `${checked}. ${away}.`;
 }
 

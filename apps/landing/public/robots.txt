@@ -1,6 +1,6 @@
-# https://limn-review.com
+# https://ensemble.ac
 User-agent: *
 Allow: /
 Disallow: /api/
 
-Sitemap: https://limn-review.com/sitemap.xml
+Sitemap: https://ensemble.ac/sitemap.xml

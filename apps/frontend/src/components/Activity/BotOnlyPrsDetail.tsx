@@ -141,9 +141,9 @@ function Row({
           // instead of offering a dead-end button.
           <span
             className="cursor-help rounded-ui bg-ui-raise px-1.5 py-0.5 text-meta text-ui-mute"
-            title="This review was posted via Limn with your token, so it has no bot activity to show in the Feed — open it on GitHub instead."
+            title="This review was posted via Ensemble with your token, so it has no bot activity to show in the Feed — open it on GitHub instead."
           >
-            via Limn
+            via Ensemble
           </span>
         ) : (
           <button

@@ -484,7 +484,7 @@ export function notStartedHalf(provider: AiProviderId, why: 'budget' | 'claimed'
     why === 'budget'
       ? 'the spend budget is used up'
       : why === 'claimed'
-        ? `a teammate's Limn is reviewing with ${aiProviderName(provider)}`
+        ? `a teammate's Ensemble is reviewing with ${aiProviderName(provider)}`
         : why === 'stopped'
           ? 'it was stopped'
           : "it didn't start";

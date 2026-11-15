@@ -1,13 +1,13 @@
 import { currentLocation, type DestinationId, type Location } from '../components/shell/nav.js';
 import type { Tab, TabKind } from '../store/pinnedTabs.js';
 
-// THE "?" BUTTON'S TARGET: the public docs at limn-review.com, on the page for where the reader is.
+// THE "?" BUTTON'S TARGET: the public docs at ensemble.ac, on the page for where the reader is.
 //
 // The SPA must not import the landing, so the page keys (`<section>/<slug>`) are hard-coded here.
 // They must exist in apps/landing/src/docs/manifest.ts: test/docsLink.test.ts lists them, and the
 // landing's docs test reads this file and checks each one. A key that is not mapped opens /docs.
 
-export const DOCS_SITE = 'https://limn-review.com/docs';
+export const DOCS_SITE = 'https://ensemble.ac/docs';
 
 /** Each sidebar destination's docs page. */
 export const DESTINATION_DOCS: Record<DestinationId, string> = {

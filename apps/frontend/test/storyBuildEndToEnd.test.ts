@@ -10,24 +10,24 @@ describe('endToEndTicketLine', () => {
   });
   it('names the fields written and the comment', () => {
     expect(endToEndTicketLine({ at, updated: ['description', 'acceptanceCriteria'], commented: true, skipped: null, error: null })).toEqual({
-      text: "Limn updated the ticket's description and acceptance criteria and commented on it in Jira.",
+      text: "Ensemble updated the ticket's description and acceptance criteria and commented on it in Jira.",
       bad: false,
     });
   });
   it('says when only a comment was posted', () => {
     expect(endToEndTicketLine({ at, updated: [], commented: true, skipped: null, error: null }).text).toBe(
-      'Limn commented on the ticket in Jira. The plan did not change the ticket text.',
+      'Ensemble commented on the ticket in Jira. The plan did not change the ticket text.',
     );
   });
   it('a failure reads as bad, with its sentence', () => {
     expect(endToEndTicketLine({ at, updated: [], commented: true, skipped: null, error: 'Jira refused the change.' })).toEqual({
-      text: 'Limn commented on the ticket in Jira. The plan did not change the ticket text. Jira refused the change.',
+      text: 'Ensemble commented on the ticket in Jira. The plan did not change the ticket text. Jira refused the change.',
       bad: true,
     });
   });
   it('another tracker: nothing written', () => {
     expect(endToEndTicketLine({ at, updated: [], commented: false, skipped: 'not_jira', error: null }).text).toBe(
-      'Limn updates Jira tickets only, so it did not change this one.',
+      'Ensemble updates Jira tickets only, so it did not change this one.',
     );
   });
 });

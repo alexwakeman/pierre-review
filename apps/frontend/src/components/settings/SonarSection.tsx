@@ -84,7 +84,7 @@ function SonarForm({ workspaceId, saved }: { workspaceId: number; saved: Workspa
         <InfoButton title="SonarCloud">
           <div className="space-y-2">
             <p>
-              Create a token in SonarCloud under My Account → Security. Limn uses it to read each PR’s
+              Create a token in SonarCloud under My Account → Security. Ensemble uses it to read each PR’s
               issues, security hotspots, quality gate and rule advice. It only reads.
             </p>
             <p>The token is stored sealed and is never shown again.</p>

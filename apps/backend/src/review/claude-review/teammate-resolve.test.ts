@@ -149,19 +149,19 @@ const rowOf = async (id: number) => {
 describe('pure', () => {
   it('the reply credits the teammate and is a Limn reply', () => {
     const body = tr.teammateResolveReplyBody('addressed', HEAD, tr.teammateCheckerName('robin', 'Robin Smith'));
-    expect(body.split('\n')[0]).toBe('Addressed in abcdef1 (checked by Robin’s Limn).');
+    expect(body.split('\n')[0]).toBe('Addressed in abcdef1 (checked by Robin’s Ensemble).');
     expect(body).toContain(MARK);
     expect(isLimnThreadReply(body)).toBe(true);
-    expect(tr.teammateResolveReplyBody('no_longer_applies', HEAD, 'Robin’s Limn').split('\n')[0]).toBe(
-      'No longer applies as of abcdef1 (checked by Robin’s Limn).',
+    expect(tr.teammateResolveReplyBody('no_longer_applies', HEAD, 'Robin’s Ensemble').split('\n')[0]).toBe(
+      'No longer applies as of abcdef1 (checked by Robin’s Ensemble).',
     );
     // A display name cannot carry markup or a mention.
-    expect(tr.teammateCheckerName('robin', '@evil <b>x</b>')).toBe('evil’s Limn');
+    expect(tr.teammateCheckerName('robin', '@evil <b>x</b>')).toBe('evil’s Ensemble');
   });
 
   it('the reply carries the teammate Limn\'s how (`jr=`), made safe', () => {
-    expect(tr.teammateResolveReplyBody('addressed', HEAD, 'Robin’s Limn', 'rowSelect reads rowid @bob').split('\n')[0]).toBe(
-      'Addressed in abcdef1 (checked by Robin’s Limn): rowSelect reads rowid @\u200bbob',
+    expect(tr.teammateResolveReplyBody('addressed', HEAD, 'Robin’s Ensemble', 'rowSelect reads rowid @bob').split('\n')[0]).toBe(
+      'Addressed in abcdef1 (checked by Robin’s Ensemble): rowSelect reads rowid @\u200bbob',
     );
     const w = { reviewId: 1, login: 'robin', name: null, at: 1, judged: [{ commentId: '1', outcome: 'addressed' as const, reason: 'Fixed the guard' }] };
     expect(tr.teammateResolveWords([w], null).get('1')?.how).toBe('Fixed the guard');
@@ -188,7 +188,7 @@ describe('maybeResolveOnTeammateWord', () => {
     const out = await tr.maybeResolveOnTeammateWord(ctx, { accountId: 1, prId: x.pr }, pdeps(), rdeps(), tdeps());
     expect(out).toEqual({ resolved: [x.finding.id], failed: [], untrusted: [] });
     expect(seenAtReply).toMatchObject({ status: 'resolving', why: 'teammate', checkedBy: 'robin', headSha: HEAD });
-    expect(reply).toHaveBeenCalledWith(1, x.thread.githubNodeId, expect.stringContaining('Addressed in abcdef1 (checked by Robin’s Limn).'));
+    expect(reply).toHaveBeenCalledWith(1, x.thread.githubNodeId, expect.stringContaining('Addressed in abcdef1 (checked by Robin’s Ensemble).'));
     expect(resolve).toHaveBeenCalledWith(1, x.thread.githubNodeId);
     expect(await rowOf(x.finding.id)).toMatchObject({ autoResolve: { status: 'resolved', replyCommentId: 'RPL9', why: 'teammate' } });
     expect(notePrChanged).toHaveBeenCalledWith(1, [x.pr]);

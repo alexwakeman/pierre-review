@@ -14,7 +14,7 @@ import {
 
 export const meta: DocMeta = {
   title: 'How AI review works',
-  summary: 'Limn reviews a pull request with Claude or Codex on your own account. Nothing is posted until you say so.',
+  summary: 'Ensemble reviews a pull request with Claude or Codex on your own account. Nothing is posted until you say so.',
 };
 
 function ReviewPicture(): JSX.Element {
@@ -59,7 +59,7 @@ export default function Page(): JSX.Element {
         An AI review reads a pull request the way a careful teammate would: the change, the code around it and,
         when there is one, the ticket it delivers. It then gives a verdict, a short summary and a list of findings,
         each tied to a file and a line where it can be. The review runs on your computer, with your own Claude or
-        Codex sign-in. Limn charges nothing for it.
+        Codex sign-in. Ensemble charges nothing for it.
       </p>
 
       <H2 id="where-it-lives">Where it lives</H2>
@@ -74,7 +74,7 @@ export default function Page(): JSX.Element {
       <ReviewPicture />
 
       <H2 id="what-a-review-does">What a review does</H2>
-      <p>When a review starts, Limn first decides how much reading the change needs. You do not choose this.</p>
+      <p>When a review starts, Ensemble first decides how much reading the change needs. You do not choose this.</p>
       <ul>
         <li>
           <Ui>Deep review</Ui>: the reviewer has a copy of the repository at the pull request's latest commit, so it
@@ -121,7 +121,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        Beside the review, and as separate runs, Limn can explain failing CI (
+        Beside the review, and as separate runs, Ensemble can explain failing CI (
         <DocLink to="ai-review/ci-review">CI review</DocLink>), check the pull request against its ticket (
         <DocLink to="story-checks/overview">Story checks</DocLink>) and draw how data moves through the change (
         <DocLink to="ai-review/design-diagrams">Design diagrams</DocLink>).
@@ -129,8 +129,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="claude-codex-or-both">Claude, Codex or both</H2>
       <p>
-        Limn reviews with Claude, with Codex, or with both at once. With both signed in, the default is{' '}
-        <Ui>Claude + Codex</Ui>: the two review the same commit without seeing each other, and Limn merges what they
+        Ensemble reviews with Claude, with Codex, or with both at once. With both signed in, the default is{' '}
+        <Ui>Claude + Codex</Ui>: the two review the same commit without seeing each other, and Ensemble merges what they
         found into one review. See <DocLink to="ai-review/claude-and-codex">Claude and Codex together</DocLink>. To
         sign in, see <DocLink to="integrations/claude">Claude</DocLink> and{' '}
         <DocLink to="integrations/codex">Codex</DocLink>.
@@ -138,21 +138,21 @@ export default function Page(): JSX.Element {
 
       <H2 id="nothing-posts-until-you-say-so">Nothing posts until you say so</H2>
       <p>
-        A review you start with <Ui>Review only</Ui> stays in Limn. You read it, change the wording, set findings
+        A review you start with <Ui>Review only</Ui> stays in Ensemble. You read it, change the wording, set findings
         aside and post when you are ready. A review you start with <Ui>Review and post</Ui> goes to GitHub, under your
         account, when it finishes.
       </p>
       <Warning title="The one exception: automatic reviews">
         When you switch on auto review for a workspace, its reviews post to GitHub by themselves unless you choose{' '}
-        <Ui>Keep it in Limn</Ui>. Auto review is off until you switch it on. See{' '}
+        <Ui>Keep it in Ensemble</Ui>. Auto review is off until you switch it on. See{' '}
         <DocLink to="ai-review/auto-review">Auto review</DocLink>.
       </Warning>
 
       <H2 id="what-it-costs">What it costs</H2>
       <p>
         Every review runs on your own Claude Code login or Anthropic API key, or on your own ChatGPT sign-in for
-        Codex. Limn charges nothing and stores no key. While a review runs, the tab shows the tokens used so far and,
-        on an API key, an estimate in US dollars. On a subscription, Limn shows your share of the week instead.
+        Codex. Ensemble charges nothing and stores no key. While a review runs, the tab shows the tokens used so far and,
+        on an API key, an estimate in US dollars. On a subscription, Ensemble shows your share of the week instead.
         Automatic runs stop when your spend budget is used up. See{' '}
         <DocLink to="settings/ai-usage-and-spend">AI usage and spend</DocLink>.
       </p>

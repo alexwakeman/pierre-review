@@ -29,7 +29,10 @@ import { recordUsage, sumModelUsage, sumUsageMap, type UsageTokens } from '../..
 import type {
   AgentMessage,
   AgentOutcome,
+  AgentProgress,
   AgentProvider,
+  AgentSession,
+  AgentSessionSpec,
   AgentResultMessage,
   AgentRunResult,
   AgentRunSpec,
@@ -156,6 +159,152 @@ async function runAgent(spec: AgentRunSpec): Promise<AgentRunResult> {
     }
   }
   return { outcome };
+}
+
+// ---- openSession (story chat: a LIVE, READ-ONLY agent kept between questions) ----------------
+//
+// ONE `query()` in STREAMING-INPUT mode: the prompt is an async queue, so the Claude Code process starts
+// once and answers each question as it is pushed (docs/QUICK-CHAT-SPIKE.md: ~1 s to the first words
+// when warm, ~4 s more cold). Everything a run gets (the path guard first, own-tools-only, no host
+// settings, no claude.ai connectors, no session files, the credential ladder's environment). READ-ONLY:
+// the base tool set is Read/Glob/Grep, and the shell and every write tool are denied.
+
+/** A session's tool surface: the read tools only. Exported for the test. */
+export const SESSION_TOOLS: readonly string[] = ['Read', 'Glob', 'Grep'];
+export const SESSION_DENIED_TOOLS: readonly string[] = ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Task'];
+
+async function openSession(spec: AgentSessionSpec): Promise<AgentSession> {
+  const model = resolveModel(spec.model);
+  const { query } = await loadAgentSdk();
+  // Every root is READ-ONLY for the path guard too (a second reason nothing is written).
+  const guard = createPathGuard(spec.cwd, [], { readOnlyRoots: spec.roots });
+  const extraDirs = spec.roots.filter((d) => d !== spec.cwd);
+  const disallowed = [...new Set([...SESSION_DENIED_TOOLS, ...spec.claude.disallowedTools])];
+
+  // The input queue: each ask() pushes one user message; close() ends the stream.
+  const pending: unknown[] = [];
+  let wake: (() => void) | null = null;
+  let ended = false;
+  async function* input(): AsyncGenerator<never> {
+    while (!ended) {
+      if (pending.length === 0) await new Promise<void>((r) => (wake = r));
+      while (pending.length > 0) yield pending.shift() as never;
+    }
+  }
+  const abort = new AbortController();
+  const q = query({
+    prompt: input(),
+    options: {
+      model,
+      ...sdkModelOptions(model, 'worktree'),
+      systemPrompt: withWritingRules(spec.system, writingStyleFor(spec.kind)),
+      cwd: spec.cwd,
+      ...(extraDirs.length > 0 ? { additionalDirectories: extraDirs } : {}),
+      permissionMode: 'bypassPermissions',
+      tools: [...SESSION_TOOLS],
+      allowedTools: [...SESSION_TOOLS],
+      disallowedTools: disallowed,
+      hooks: { PreToolUse: [pathGuardHook(guard), ownToolsOnlyHook([])] as never },
+      ...(spec.budgetUsd !== undefined ? { maxBudgetUsd: spec.budgetUsd } : {}),
+      settingSources: [],
+      ...ISOLATED_MCP,
+      ...NO_SESSION_FILES,
+      abortController: abort,
+      ...claudeExecutableOptions(),
+      ...agentAuthOptions(),
+    },
+  });
+
+  // ONE reader of the message stream for the session's life; the current ask() gets its messages.
+  interface Asking {
+    onProgress: (p: AgentProgress) => void;
+    resolve: (o: AgentOutcome) => void;
+    reject: (e: unknown) => void;
+    usage: Map<string, UsageTokens>;
+    steps: number;
+    /** The turn cap interrupted this answer: it ends as `error_max_turns`. */
+    capped: boolean;
+  }
+  // A holder, not a `let`: TypeScript does not see the closures assign it.
+  const st: { current: Asking | null } = { current: null };
+  let closed = false;
+  let prevCost = 0;
+  const finish = (fn: (c: Asking) => void): void => {
+    const c = st.current;
+    st.current = null;
+    if (c) fn(c);
+  };
+  void (async () => {
+    try {
+      for await (const message of q) {
+        const c = st.current;
+        if (!c) continue;
+        if (message.type === 'assistant') {
+          try {
+            recordUsage(c.usage, message);
+          } catch {
+            /* usage shape varies */
+          }
+          let lines: string[] = [];
+          try {
+            lines = describeFixBlocks(message);
+          } catch {
+            /* never let progress break the session */
+          }
+          c.steps += 1;
+          c.onProgress({ kind: 'step', lines, text: assistantText(message), usage: sumUsageMap(c.usage) });
+          // The per-question turn cap: the SDK's maxTurns counts the whole session, so it is enforced here.
+          if (c.steps > spec.turnsPerQuestion && !c.capped) {
+            c.capped = true;
+            void q.interrupt().catch(() => {});
+          }
+        } else if (message.type === 'result') {
+          const o = outcomeOf(message as AgentResultMessage);
+          // The result's US$ is the SESSION's running total: this question's share is the difference.
+          const total = o.costUsd;
+          const own = total == null ? null : total >= prevCost ? total - prevCost : total;
+          if (total != null) prevCost = Math.max(prevCost, total);
+          const outcome: AgentOutcome = { ...o, ...(c.capped ? { subtype: 'error_max_turns', text: null } : {}), costUsd: own, usage: sumUsageMap(c.usage) };
+          c.onProgress({ kind: 'outcome', outcome });
+          finish((x) => x.resolve(outcome));
+        }
+      }
+      finish((x) => x.reject(new Error('The agent stopped.')));
+    } catch (err) {
+      finish((x) => x.reject(err));
+    } finally {
+      closed = true;
+    }
+  })();
+
+  const session: AgentSession = {
+    get closed() {
+      return closed;
+    },
+    ask(text, onProgress) {
+      if (closed) return Promise.reject(new Error('The agent stopped.'));
+      if (st.current) return Promise.reject(new Error('A question is already being answered.'));
+      return new Promise<AgentOutcome>((resolve, reject) => {
+        st.current = { onProgress, resolve, reject, usage: new Map(), steps: 0, capped: false };
+        pending.push({ type: 'user', message: { role: 'user', content: text }, parent_tool_use_id: null });
+        wake?.();
+        wake = null;
+      });
+    },
+    async interrupt() {
+      if (st.current && !closed) await q.interrupt().catch(() => {});
+    },
+    close() {
+      if (closed && ended) return;
+      ended = true;
+      closed = true;
+      wake?.();
+      wake = null;
+      abort.abort();
+      finish((x) => x.reject(new Error('The chat was closed.')));
+    },
+  };
+  return session;
 }
 
 /** Claude's result message → the neutral outcome. Exported for the test. */
@@ -407,7 +556,7 @@ async function detect(): Promise<ProviderStatus> {
   const route = resolveAiCredential().route;
   const runtime = getAiRuntimeStatus();
   if (runtime.runtime !== 'ready') {
-    return { id: 'claude', available: false, route, message: runtime.runtimeMessage ?? 'AI is not set up yet: limn ai install' };
+    return { id: 'claude', available: false, route, message: runtime.runtimeMessage ?? 'AI is not set up yet: ensemble ai install' };
   }
   if (route === 'none') return { id: 'claude', available: false, route, message: NO_CLAUDE_AUTH_MESSAGE };
   return { id: 'claude', available: true, route, message: null };
@@ -469,6 +618,7 @@ async function sdkUsageProbe(): Promise<unknown> {
 export const claudeProvider: AgentProvider = {
   id: 'claude',
   resolveModel,
+  openSession,
   // THE WRITING RULES ride every system prompt (ai/writing-rules.ts) — added here, at the one door.
   runAgent: (spec) => runAgent({ ...spec, system: withWritingRules(spec.system, writingStyleFor(spec.kind)) }),
   complete: (req) => complete({ ...req, system: withWritingRules(req.system) }),

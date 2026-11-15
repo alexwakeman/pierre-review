@@ -39,6 +39,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { esmEntryOf, findPackageDir, installedVersion, resolveNpm, spawnNpm, type NpmCommand } from '../ai/runtime.js';
 import { resolveDataDir } from '../data-dir.js';
 import { headAvailable } from './onnx-head.js';
+import { readEnv } from '../env-name.js';
 
 export type OrtModule = typeof import('onnxruntime-node');
 export type TokenizersModule = typeof import('@huggingface/tokenizers');
@@ -85,7 +86,7 @@ export interface MlInstallProgress {
 export type MlInstallResult = { ok: true } | { ok: false; message: string };
 
 export const ML_MISSING_MESSAGE =
-  'Bot comment scoring is not set up yet. Press "Set up" in Limn, or run: limn ml install';
+  'Bot comment scoring is not set up yet. Press "Set up" in Ensemble, or run: ensemble ml install';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -198,7 +199,7 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
   // ---- model ----
   /** The model directory to read, in order: the override, the dev checkout, the download. */
   function modelsDir(): string | null {
-    const override = env.LIMN_ML_MODELS_DIR?.trim();
+    const override = readEnv(env, 'ML_MODELS_DIR')?.trim();
     if (override) return isRealModelDir(override) ? resolve(override) : null;
     if (devModelsDir && isRealModelDir(devModelsDir)) return devModelsDir;
     const want = modelsManifest();
@@ -296,7 +297,7 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
     failWith: (m: string) => MlInstallResult,
   ): Promise<MlInstallResult> {
     const want = pins();
-    if (!want) return failWith('This copy of Limn does not list which versions to download. Update Limn and try again.');
+    if (!want) return failWith('This copy of Ensemble does not list which versions to download. Update Ensemble and try again.');
     const npm = installOpts.npm ?? resolveNpm(env);
     if (!npm) return failWith('npm was not found. Install Node.js with npm, then try again.');
 
@@ -310,7 +311,7 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
           {
             name: 'limn-ml-runtime',
             private: true,
-            description: 'The model runtime Limn downloads on first use. Safe to delete; Limn can download it again.',
+            description: 'The model runtime Ensemble downloads on first use. Safe to delete; Ensemble can download it again.',
             dependencies: want,
           },
           null,
@@ -332,10 +333,10 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
     if (exit.error || exit.timedOut || exit.code !== 0) {
       rmSync(staging, { recursive: true, force: true });
       if (exit.error) return failWith(exit.error);
-      if (exit.timedOut) return failWith('The download took too long and was stopped. Check your network and try again: limn ml install');
+      if (exit.timedOut) return failWith('The download took too long and was stopped. Check your network and try again: ensemble ml install');
       const last = exit.tail.filter((l) => /err/i.test(l)).slice(-2).join(' ') || exit.tail.slice(-1)[0] || '';
       return failWith(
-        `The download failed (npm exit code ${exit.code}). Try again: limn ml install${last ? `. npm said: ${last.slice(0, 300)}` : ''}`,
+        `The download failed (npm exit code ${exit.code}). Try again: ensemble ml install${last ? `. npm said: ${last.slice(0, 300)}` : ''}`,
       );
     }
 
@@ -344,7 +345,7 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
       const dir = findPackageDir(name, staging);
       if (!dir || installedVersion(dir) !== want[name] || !esmEntryOf(dir)) {
         rmSync(staging, { recursive: true, force: true });
-        return failWith(`The download finished but ${name} ${want[name]} is missing from it. Try again: limn ml install`);
+        return failWith(`The download finished but ${name} ${want[name]} is missing from it. Try again: ensemble ml install`);
       }
     }
     pruneOtherPlatforms(findPackageDir('onnxruntime-node', staging)!);
@@ -368,7 +369,7 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
     failWith: (m: string) => MlInstallResult,
   ): Promise<MlInstallResult> {
     const want = modelsManifest();
-    if (!want) return failWith('This copy of Limn does not list a model to download. Update Limn and try again.');
+    if (!want) return failWith('This copy of Ensemble does not list a model to download. Update Ensemble and try again.');
     const doFetch = installOpts.fetch ?? fetch;
     const total = want.files.reduce((n, f) => n + f.size, 0);
     emit({ phase: 'starting', message: `Downloading the model (about ${Math.round(total / 1e6)} MB).` });
@@ -409,7 +410,7 @@ export function createMlRuntime(opts: MlRuntimeOptions = {}) {
       renameSync(staging, finalDir);
     } catch (err) {
       rmSync(staging, { recursive: true, force: true });
-      return failWith(`The model download failed: ${(err as Error).message}. Try again: limn ml install`);
+      return failWith(`The model download failed: ${(err as Error).message}. Try again: ensemble ml install`);
     }
     // Older versions' directories are dead weight once this one is in place.
     for (const name of readdirSafe(modelsRoot)) {

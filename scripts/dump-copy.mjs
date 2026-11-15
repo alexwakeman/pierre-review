@@ -100,7 +100,7 @@ function copyOf(html) {
   return { main: walk(body) };
 }
 
-let md = `# Limn — the copy on the site
+let md = `# Ensemble — the copy on the site
 
 Every word that renders, in page order, read out of the prerendered HTML rather than
 retyped. Rail labels ("02 / The board") and screenshot slots are marked so you can see

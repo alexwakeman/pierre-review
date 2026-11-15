@@ -88,7 +88,7 @@ const TYPE_HINT: Record<DocsSourceType, string> = {
   confluence: 'A whole space, or one page and every page below it.',
   notion: 'A whole wiki, or one page and every page below it.',
   github: 'The markdown and text documents in a repository or one of its folders.',
-  repos: 'The docs folders Limn finds in this workspace’s repositories.',
+  repos: 'The docs folders Ensemble finds in this workspace’s repositories.',
 };
 
 const STEP_TITLE: Record<DocsWizardStep, string> = {

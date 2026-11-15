@@ -345,7 +345,7 @@ export function createProxy(config: ProxyConfig): { start(): Promise<RunningProx
       url = new URL(req.url ?? '');
     } catch {
       emit({ kind: 'http', from, method: req.method ?? '', allowed: false, reason: 'bad_request', status: 400, up: 0, down: 0, ms: 0 });
-      res.writeHead(400, { 'content-type': 'text/plain' }).end('Limn proxy: send requests through it as a proxy (absolute URL).\n');
+      res.writeHead(400, { 'content-type': 'text/plain' }).end('Ensemble proxy: send requests through it as a proxy (absolute URL).\n');
       req.resume();
       return;
     }
@@ -354,7 +354,7 @@ export function createProxy(config: ProxyConfig): { start(): Promise<RunningProx
     const method = req.method ?? 'GET';
     const deny = (reason: DenyReason): void => {
       emit({ kind: 'http', from, host, port, method, allowed: false, reason, status: 403, up: 0, down: 0, ms: Date.now() - started });
-      if (!res.headersSent) res.writeHead(403, { 'content-type': 'text/plain' }).end(`Limn proxy: ${host} is not allowed (${reason}).\n`);
+      if (!res.headersSent) res.writeHead(403, { 'content-type': 'text/plain' }).end(`Ensemble proxy: ${host} is not allowed (${reason}).\n`);
       req.resume();
     };
     if (url.protocol !== 'http:') {
@@ -414,7 +414,7 @@ export function createProxy(config: ProxyConfig): { start(): Promise<RunningProx
     void vet(host, port).then((v) => {
       if (!v.allowed) {
         emit({ kind: 'connect', from, host, port, method: 'CONNECT', allowed: false, reason: v.reason, status: 403, up: 0, down: 0, ms: Date.now() - started });
-        client.end(`HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\nLimn proxy: ${host}:${port} is not allowed (${v.reason}).\n`);
+        client.end(`HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\nEnsemble proxy: ${host}:${port} is not allowed (${v.reason}).\n`);
         return;
       }
       let up = head.length;
@@ -508,7 +508,7 @@ export function createProxy(config: ProxyConfig): { start(): Promise<RunningProx
       const s = swap(headers);
       if ('refuse' in s) {
         emit({ kind: 'inject', via, from, host: upstream.host, port: upstream.port, method, path: bare, allowed: false, reason: s.refuse, status: 403, up: 0, down: 0, ms: 0 });
-        const message = s.refuse === 'unexpected_credential' ? 'This request carried a credential Limn did not give the sandbox.' : 'The sign-in for this provider is missing on the host.';
+        const message = s.refuse === 'unexpected_credential' ? 'This request carried a credential Ensemble did not give the sandbox.' : 'The sign-in for this provider is missing on the host.';
         res.writeHead(403, { 'content-type': 'application/json' }).end(JSON.stringify({ type: 'error', error: { type: 'limn_proxy', message } }));
         req.resume();
         return;

@@ -52,7 +52,7 @@ describe('the active provider’s name', () => {
 
   it('the sign-in line and the credential words are the provider’s own', () => {
     expect(aiSignInLine('claude')).toBe('Sign in to Claude Code or set ANTHROPIC_API_KEY');
-    expect(aiSignInLine('codex')).toBe('Sign in to Codex with ChatGPT (limn ai login codex)');
+    expect(aiSignInLine('codex')).toBe('Sign in to Codex with ChatGPT (ensemble ai login codex)');
     expect(aiCredentialWords('claude')).toBe('your own Claude Code login or Anthropic API key');
     expect(aiCredentialWords('codex')).toBe('your own Codex sign-in');
     expect(aiModelWords('claude', 'Haiku')).toBe('Claude Haiku');
@@ -188,7 +188,7 @@ describe('AI spend with Codex active', () => {
     const d = usageDetailOf(response(codexStatus(), codexUsage()), 0);
     expect(d.heading).toBe('Codex · ChatGPT Plus');
     const titles = d.sections.map((s) => s.title);
-    expect(titles).toEqual(['Limn’s share', 'Your Codex account']);
+    expect(titles).toEqual(['Ensemble’s share', 'Your Codex account']);
     const acct = d.sections[1]!.rows.map((r) => `${r.label}: ${r.value}`);
     expect(acct).toEqual(['5-hour session: 12% used · 88% left', 'Week: 31% used · 69% left']);
     const limn = d.sections[0]!.rows.map((r) => `${r.label}: ${r.value}`);
@@ -220,10 +220,10 @@ describe('AI spend with Codex active', () => {
       fiveHourWindow: 'rolling' as const,
       fiveHourResetsAt: null,
     };
-    expect(meterText(codexStatus({ enabled: true, mode: 'subscription', subscription: sub }))).toBe('Limn: usage not read yet');
+    expect(meterText(codexStatus({ enabled: true, mode: 'subscription', subscription: sub }))).toBe('Ensemble: usage not read yet');
     expect(
       meterText(codexStatus({ enabled: true, mode: 'subscription', subscription: { ...sub, usedSharePct: 3 } })),
-    ).toBe('Limn: 3% of your week · limit 5%');
+    ).toBe('Ensemble: 3% of your week · limit 5%');
   });
 
   it('Settings lists Codex’s windows in percent; nothing for Claude or an unread Codex', () => {
@@ -242,7 +242,7 @@ describe('AI spend with Codex active', () => {
       0,
     );
     expect(claude.heading).toBe('Claude Pro');
-    expect(claude.sections.map((s) => s.title)).toEqual(['Limn’s share', 'Your Claude account']);
+    expect(claude.sections.map((s) => s.title)).toEqual(['Ensemble’s share', 'Your Claude account']);
   });
 });
 

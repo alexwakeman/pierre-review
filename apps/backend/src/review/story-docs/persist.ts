@@ -170,7 +170,7 @@ export async function markStoryDocsFailed(ctx: Ctx, accountId: number, id: numbe
   });
 }
 
-export const RESTART_ERROR = 'Stopped when Limn restarted. Run it again.';
+export const RESTART_ERROR = 'Stopped when Ensemble restarted. Run it again.';
 
 export async function reconcileOrphanedStoryDocs(ctx: Ctx): Promise<number> {
   const d = t(ctx);

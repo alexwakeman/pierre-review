@@ -134,12 +134,15 @@ import {
   type SessionStateJson,
 } from './state.js';
 import type { AfterChatTurn, SessionKey, SessionRepoInfo, SessionRowPatch, SessionSubject, SubjectBases, SubjectLive } from './subject.js';
+import { readEnv } from '../../env-name.js';
+import { registerBuildClaimLiveProbe } from '../../coding/story-build/build-claim-flow.js';
+import { kickStoryBuildClaims } from '../../coding/story-build/build-claim-release.js';
 
 export type { SessionRepoInfo } from './subject.js';
 
 // ---- words --------------------------------------------------------------------------------------------
 
-export const RESTART_LINE = 'Limn restarted, so the sandbox closed.';
+export const RESTART_LINE = 'Ensemble restarted, so the sandbox closed.';
 export const KEPT_LINE = 'Your changes are kept: push them, or resume to keep working.';
 export const GONE_LINE = 'Nothing was built, so the work is gone. Start again to keep working.';
 export const NO_STORY_LINE = 'There is no story text or criteria to build from.';
@@ -436,7 +439,7 @@ async function idleClose(l: Live): Promise<void> {
 
 /** How long a fix session must sit idle before a waiting fix may take its place (LIMN_SANDBOX_RECLAIM_IDLE_SECONDS). */
 export function reclaimIdleMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.LIMN_SANDBOX_RECLAIM_IDLE_SECONDS?.trim();
+  const raw = readEnv(env, 'SANDBOX_RECLAIM_IDLE_SECONDS')?.trim();
   const n = raw ? Number(raw) : NaN;
   return Number.isFinite(n) && n >= 0 ? n * 1000 : 60_000;
 }
@@ -504,6 +507,14 @@ export function openSessionCount(): number {
 
 export function isSessionLive(buildId: number): boolean {
   return live.has(storyKey(buildId));
+}
+// THE TEAM CLAIM renews a build's `ensemble/build` line only while its session is live here
+// (coding/story-build/build-claim-release.ts).
+registerBuildClaimLiveProbe((buildId) => live.has(storyKey(buildId)));
+
+/** The live story sessions (the claim reconciler takes a Resume's claim). */
+export function liveStoryBuilds(): Array<{ buildId: number; accountId: number; workspaceId: number }> {
+  return [...live.values()].filter((l) => l.subject.kind === 'story').map((l) => ({ buildId: l.subject.rowId, accountId: l.accountId, workspaceId: l.workspaceId }));
 }
 
 /** The live session of a key (any subject), or null. */
@@ -1480,6 +1491,8 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
     live.delete(l.key);
     slotFreed();
     await l.subject.onClosed?.(l, o.phase).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: after its close`));
+    // The build's `ensemble/build` claim is settled now, not at the next tick (a closed session holds nothing).
+    if (l.subject.kind === 'story') kickStoryBuildClaims();
     emit(l, { type: 'done' });
     l.subs.clear();
   })();
@@ -1942,7 +1955,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         coverageJson: coverage,
         seedJson: seedJsonOf(ticket),
       });
-      return ticket.fresh ? null : 'The tracker could not be read; this is Limn’s stored copy.';
+      return ticket.fresh ? null : 'The tracker could not be read; this is Ensemble’s stored copy.';
     },
     async repoIds(memberRepoIds) {
       repoRows = await listStoryBuildRepoRows(ctx, accountId, buildId);
@@ -2114,11 +2127,11 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       if (!isStacked(l) || l.lastOutcome !== 'max_turns' || !lastUnfinished || continuations >= CONTINUATIONS_MAX) return null;
       const allowed = await deps.automaticAllowed(ctx, accountId, l.choice.provider).catch(() => false);
       if (!allowed) {
-        notice(l, 'The build stopped at the turn limit with work left. The spend limit is reached, so Limn did not ask the agent to go on. Send a message to go on.');
+        notice(l, 'The build stopped at the turn limit with work left. The spend limit is reached, so Ensemble did not ask the agent to go on. Send a message to go on.');
         return null;
       }
       continuations += 1;
-      notice(l, `The build stopped at the turn limit with work left, so Limn asked the agent to go on (${continuations} of ${CONTINUATIONS_MAX}).`);
+      notice(l, `The build stopped at the turn limit with work left, so Ensemble asked the agent to go on (${continuations} of ${CONTINUATIONS_MAX}).`);
       return CONTINUE_LINE;
     },
     followUpText(_l, text) {
@@ -2215,7 +2228,7 @@ async function extractHotfix(l: Live, buildId: number): Promise<void> {
     const got = await readPortReport(l.runtime, l.container, l.layoutRoot, { repos: hotfixNames });
     if (got.kind === 'ok') {
       claims = portClaimsOf(got.check);
-      if (got.check.problems.length > 0) notice(l, `The port report did not pass Limn's checks (${got.check.problems[0]}), so those entries are left out.`);
+      if (got.check.problems.length > 0) notice(l, `The port report did not pass Ensemble's checks (${got.check.problems[0]}), so those entries are left out.`);
     } else if (got.kind === 'unreadable') notice(l, got.reason);
     else notice(l, 'The agent wrote no port report.');
   }

@@ -16,14 +16,14 @@ check found gaps offers **Fill gaps** instead (§ Fill gaps). One click opens a 
 no ✕, kept by Close all and across a reload, until the reader unpins it) and starts a **workspace
 session** (since 2026-11-07):
 
-1. **Set up.** Limn starts a sandbox on the reader's computer with **every workspace repository** cloned
+1. **Set up.** Ensemble starts a sandbox on the reader's computer with **every workspace repository** cloned
    (at the reader's own local paths — found through their Claude projects, there is no folder setting — so
    their Claude memories still apply; the boot step counts them, "Loading repositories 3/7: owner/name"; why
    every repository and not a subset: docs/SANDBOX.md § AI Fix sessions → "Which repositories"), the **ticket in full**
    (description, numbered acceptance criteria, open points) and the reader's **own Claude notes** — never
    a past session (owner decision D1). It takes seconds once the image is local.
-2. **Plan** (§ Plan first). Limn sends the opening turn itself: the agent investigates the code, the data
-   and (with docs) the reference documents, and submits a STRUCTURED PLAN that Limn checks on the host.
+2. **Plan** (§ Plan first). Ensemble sends the opening turn itself: the agent investigates the code, the data
+   and (with docs) the reference documents, and submits a STRUCTURED PLAN that Ensemble checks on the host.
    The reader settles each point of contention (Agree / Keep the story / Reply) and talks to the agent
    in the tab; chat turns run in plan mode (the agent reads but does not change files).
 3. **Build.** **Approve and start** reads the ticket again and switches the agent to build mode. It implements,
@@ -32,12 +32,14 @@ session** (since 2026-11-07):
    repository's work is stored as a patch.
 4. **Push.** The reader reviews one diff per repository and presses **Push** (or Push all). The push runs
    on the HOST: a NEW branch and a NEW pull request, **draft** by default. Or, opted in at Start, THE
-   REVIEW LOOP runs (§ The review loop): Limn pushes the branch, reviews it and checks it against the
+   REVIEW LOOP runs (§ The review loop): Ensemble pushes the branch, reviews it and checks it against the
    ticket, the agent answers every point, each fix is a new commit, and after N rounds the PR opens.
 
 Nothing is pushed, posted or written to the tracker before the reader presses a button — the one
 exception is the opt-in "After the build: review and fix, then open the pull request" (§ The review
-loop): the reader's tick is the consent. Even then GitHub sees only the branch commits and the final PR. With no container
+loop): the reader's tick is the consent. Start itself writes the TEAM CLAIM (§ The team claim): an empty
+commit on the ticket branch and one `ensemble/build` status, so a teammate's Ensemble does not build the
+same ticket. Even then GitHub sees only the branch commits and the final PR. With no container
 runtime, the tab says what is missing in one line with "How to set up" (owner decision Q2: there is no
 fallback to the removed shell-less agents).
 
@@ -104,7 +106,7 @@ without a plan": a session whose agent never sends a usable plan can only be mes
   from the previous one" for a real stack, the reader's decisions through PLAN.md, Fill gaps "only the
   gaps", and THE BUILD REPORT (`sandbox/workspace/build-report.ts`): `<root>/.limn/build-report.json` —
   per PR status (done / partly / not_done), a summary (its PR body's opening) and the checks it ran; per
-  criterion met / partly / not_met — checked with `node ~/.limn/build-report-check.cjs` (ONE validator
+  criterion met / partly / not_met — checked with `node ~/.ensemble/build-report-check.cjs` (ONE validator
   text, the fix-report pattern; Approve copies the checker and `build-context.json` in). A SELF-REPORT:
   shown as "The agent says", never a gate; missing ⇒ the agent's last words, checks "not reported".
 - **Unattended to the end**: a build turn that hit the turn cap (`max_turns`) with work unfinished (the
@@ -115,7 +117,7 @@ without a plan": a session whose agent never sends a usable plan can only be mes
   with planned PRs, ONE git bundle of the planned branches leaves the sandbox (`stack.ts`
   `EXTRACT_STACK_SCRIPT`: `refs/limn/stack/<k>` `^refs/limn/base`, ≤ 8 MB, base64; uncommitted work folded
   into the LAST branch only when it is checked out; a repository with ONE planned PR reads HEAD, as
-  before plans) and is VERIFIED ON THE HOST in Limn's clone cache for that repository only
+  before plans) and is VERIFIED ON THE HOST in Ensemble's clone cache for that repository only
   (`coding/story-build/stack-verify.ts`: only the expected heads, the only prerequisite the base, fetched
   with fsck into `refs/pierre/story-build/<id>/stack/<prRowId>`, base → tip 1 → tip 2 … each an ancestor
   of the next, no merge commit, ≤ 200 commits, no gitlink, no path in `.git`). Each PR row gets the
@@ -138,7 +140,7 @@ From 2026-10-30, still in force:
    `fetchPrHeadInfo` per stacked PR, at boot) and falls back to the default branch with one line ("Your #n
    is from a fork, …"; a failed read falls back too). Push re-reads it and refuses `STACK_FORK`.
 2. **Draft by default** (`STORY_BUILD_PUSH_DRAFT_DEFAULT`), with a toggle to open ready for review.
-3. **Builds at once per computer: `LIMN_SANDBOX_MAX_BUILDS` (3; one until 2026-11-12)** (`409 BuildBusy` past it); chat turns in other sessions go on.
+3. **Builds at once per computer: `ENSEMBLE_SANDBOX_MAX_BUILDS` (3; one until 2026-11-12)** (`409 BuildBusy` past it); chat turns in other sessions go on.
 4. **Entry point:** the STORY VIEW's action group (§ Entry points): Implement ONLY on a story that is NOT
    STARTED or IN PROGRESS (widened 2026-11-12) and has no PRs; Fill gaps ONLY on a STARTED one whose current story check found gaps. ONE gate
    decides both: shared `storyBuildOffered` returns `'implement' | 'fill_gaps' | null`. Not Open PRs, not
@@ -152,7 +154,7 @@ From 2026-10-30, still in force:
 
 From 2026-11-06 (the workspace session; [SANDBOX.md](SANDBOX.md) has the reasons and measurements):
 D1 memories only, never past sessions · D2 talk before the build · D3 on Docker, the only way out is
-Limn's proxy · D4 Claude Code and Codex, chosen like every other run · D5 integration tests run in the
+Ensemble's proxy · D4 Claude Code and Codex, chosen like every other run · D5 integration tests run in the
 sandbox environment · D6 repositories outside the workspace are named and left out · D7 the setup is
 documented (SANDBOX.md § Setting up a runtime) · D9 every part is free. Q1 the user `CLAUDE.md` comes in,
 skills opt-in per workspace · Q2 no old fallback · Q3 the image is pulled from GHCR by digest, built
@@ -170,21 +172,22 @@ From 2026-11-12 (THE REVIEW LOOP, § The review loop):
   the Start panel and in the tab until the loop starts. Unticked = the manual flow (Push). The old "Push
   automatically" (one push when the build finishes) is RETIRED: the subject no longer calls
   `maybeAutoPushBuild`.
-- The review is Limn's OWN machinery, exactly as a PR review: the code review per target with the
+- The review is Ensemble's OWN machinery, exactly as a PR review: the code review per target with the
   providers the workspace's auto review uses (Claude + Codex pair on `both`), and ONE story check across
   every target per round (`activeProviderId()`, never a pair). Every finding — blockers, warnings, nits and
   QUESTIONS — and every open criterion goes to the agent, which fixes, answers or PUSHES BACK; it may call a
   criterion not applicable, which the next story check judges. A blocker is never settled by pushback alone.
-- Everything the reviewers and the agent say stays IN LIMN: no GitHub comment or review, no tracker write.
+- Everything the reviewers and the agent say stays IN ENSEMBLE: no GitHub comment or review, no tracker write.
   GitHub sees the branch (pushed BEFORE the first review, no PR), one NEW fast-forward commit per fix pass
-  per target (never forced), then the PR, READY FOR REVIEW, the reader's own.
+  per target (never forced), then the PR, READY FOR REVIEW, the reader's own — and, since 2026-11-15, the
+  review claim lines of each round (§ The review loop → The review lines).
 - Every automatic run asks the ONE budget gate; a refusal PAUSES with a line and Continue (a reader's press
   is never refused). Every GitHub write is claimed first and never retried; a restart pauses (never resumes
   by itself) and Continue adopts a write that did land.
 - After the PR opens, the closing review is stored as ONE non-posted `claude_reviews` row at the PR head
   (trigger `manual`), so auto review does not review the same head again.
 
-## Data model (migrations 0149, 0176, 0179, 0185, 0186, 0187)
+## Data model (migrations 0149, 0176, 0179, 0185, 0186, 0187, 0194)
 
 Four core tables, all account-scoped, on the erase checklist (`accountScopedTables`) and in the export.
 
@@ -224,6 +227,10 @@ Four core tables, all account-scoped, on the erase checklist (`accountScopedTabl
   `response_text`, `response_round` and `merged_into` for a pair's duplicates), `story_build_story_checks`
   (one per round: assessment, members, claims, claim verdicts) and `story_build_ac_responses` (the agent's
   answer per criterion and round). Ids on the wire are BUILD-LOCAL. Contracts: [DATA-MODEL.md](DATA-MODEL.md).
+- **The claim ledger** (0194; § The team claim): `story_build_claim_lines`, one row per commit status a
+  build of this machine holds or released — kind `build` (the `ensemble/build` claim; `head_sha` follows the
+  ticket branch) and kind `review` (the loop's review lines). No FK on `build_id`; erased with the account.
+  Contracts: [DATA-MODEL.md](DATA-MODEL.md).
 - The plan / docs / checks columns (`plan_json`, `docs_json`, `checks_json`, `worktree_path`, …) are
   DORMANT: only rows of the removed plan/build flow carry them (§ Rows from the old flow). Never drop
   them casually ([MIGRATIONS.md](MIGRATIONS.md)).
@@ -267,7 +274,9 @@ story.
 | `GET /api/story-builds?workspace=&ident=` | `StoryBuildForTicketResponse` | read |
 | `GET /api/story-builds/:id` | `StoryBuild` (with `session`) | read |
 | `GET /api/story-builds/:id/stream` | SSE `SandboxSessionStreamEvent` | read |
-| `POST /api/story-builds` | `SandboxSessionStartBody` → 202/200 `StoryBuildStartResponse` (409 `NoRuntime` / `TooManySessions`, 400 `NoStory`) | ai + ai_hourly |
+| `POST /api/story-builds` | `SandboxSessionStartBody` → 202/200 `StoryBuildStartResponse` (409 `NoRuntime` / `TooManySessions` / `TeamClaimed`, 400 `NoStory`); writes the team claim | ai + ai_hourly + github_write |
+| `GET /api/story-builds/claim?workspace=&ident=` | THE TEAM CLAIM: `StoryBuildClaimResponse {claim}` — a live GitHub read, cached 30 s (§ The team claim) | pr_detail |
+| `POST /api/story-builds/claim/clear` | `StoryBuildClaimClearBody {workspaceId, ident}` → `StoryBuildClaimResponse` (409 `NotReady` on a teammate's live claim) | github_write |
 | `POST …/:id/messages` · `…/:id/build` · `…/:id/resume` | one agent turn · Start build (409 `PlanNotApproved` on a plan-first session) · boot again → 202 | ai + ai_hourly |
 | `POST …/:id/plan/reply` · `…/:id/plan/approve` | a revision turn · Approve and start → 202 (409 `PlanStale` / `PlanUnanswered` / `AgentBusy` / `BuildBusy` / `NotLive`) | ai + ai_hourly |
 | `POST …/:id/plan/decisions` · `GET …/:id/plan?revision=` | Agree / Keep the story / clear → `BuildPlanView` · one older revision | read |
@@ -359,20 +368,20 @@ the session is open and that PR is not pushed, dropped with the session's refs).
 On the reader's press — or by the review loop the reader opted into (§ The review loop: `pushNewBranch` + `pushFastForward` + `openPrForBranch`, the halves of the same code). `coding/git-ops.ts applyAndPushBranch` is the NO-PR variant of AI Fix's
 stateless push: a fresh worktree at `base_sha`, the stored patch, ONE commit by the reader (the agent's
 commit messages as its message), a NEW branch `<KEY>` (the ticket key, case kept, `sessionBranch`) (`BRANCH_EXISTS` refused with a
-sentence, never forced; the default branch, the base ref and a stacked PR's head are protected and
+sentence, never forced — except the team claim's PLACEHOLDER, replaced with a lease, § The team claim; the default branch, the base ref and a stacked PR's head are protected and
 refused before any process runs), then `createPullRequest` (`draft` unless the body says `draft: false`).
 
 - **The reader's PR** (owner decision 2026-11-11): `applyAndPushBranch` writes with origin `'reader'` — no
-  `limn_actions` ledger row, no `Limn-Run:` trailer on the commit — so sync attributes the PR AND its commit
-  to the reader, never to their `limn:` bot (the one exception to "Limn's writes are a bot",
-  docs/CLAUDE-REVIEW.md § Limn's actions are bots). It is then an ordinary PR of the reader's: the
+  `limn_actions` ledger row, no `Ensemble-Run:` trailer on the commit — so sync attributes the PR AND its commit
+  to the reader, never to their `limn:` bot (the one exception to "Ensemble's writes are a bot",
+  docs/CLAUDE-REVIEW.md § Ensemble's actions are bots). It is then an ordinary PR of the reader's: the
   workspace's auto review picks it up (when on, once it is not a draft), My Turn and Reports count it.
 - **Branch** = the ticket key, case kept (`sessionBranch`: `PAY-142`; anything git rejects becomes `-`;
-  no `limn/` prefix), so Jira, Linear and GitHub link it.
+  no `ensemble/` prefix), so Jira, Linear and GitHub link it.
 - **Title** `${KEY}: ${title}` (what Jira, Linear and Notion detection read).
 - **Body:** the summary (the agent's last words in the build turn), the criteria this repository covers,
   the ticket link (http(s) only), `Stacked on #n.`, the sibling PRs this session already pushed, `Closes
-  owner/repo#n` on a single-repository GitHub Issues build only. No "Built with Limn" footer. The
+  owner/repo#n` on a single-repository GitHub Issues build only. No "Built with Ensemble" footer. The
   model- and ticket-written parts go through `defangGithubText` (a closing keyword before an issue
   reference and an `@mention` are broken with a zero-width space). The code-written `Closes` line is added
   after it.
@@ -440,6 +449,63 @@ pushed.
 - **Recorded** on the PR row; once a repository's every planned PR with changes is pushed, its repository
   row is `pushed` too (the marks and the `pushed` phase read it); once every PR is, the session's refs go.
 
+## The team claim (`coding/story-build/build-claim*.ts`; migration 0194; 2026-11-15)
+
+Teammates coordinate on Implement and Fill gaps the way auto reviews do: through GitHub, with a commit-status
+claim ([TEAM-REVIEW.md](TEAM-REVIEW.md) § Implement and Fill gaps is the plain-English design). Modules:
+`build-claim.ts` (the lines, the ONE pure fold `decideBuildClaim`, the wire mapper), `build-claim-github.ts`
+(the adapter), `build-claim-ledger.ts`, `build-claim-flow.ts` (read · take · follow · push · clear),
+`build-claim-release.ts` (the reconciler and its timer), `loop/review-lines.ts` (the loop's review lines).
+
+- **The anchor.** A claim needs a commit, and an unstarted ticket has none. So the claim is the ticket branch
+  (`sessionBranch(<KEY>)`, the name Push uses) in ONE workspace repository — the first by name the reader can
+  push to whose ticket branch is absent, or is a placeholder nobody holds — pointing at a PLACEHOLDER: the
+  default branch's head plus one EMPTY commit, "Ensemble: building <KEY>", trailer `Ensemble-Claim: build`.
+  Written by REST: `git/commits` + `git/refs` (a ref that exists is refused, so the create is itself a
+  compare-and-set); a free placeholder is replaced by a NEW placeholder whose parent is the old one, `PATCH
+  git/refs force:false` (a fast-forward of exactly the head that was read). The writes are the reader's (like
+  Implement's push: no ledger row, no trailer); the status lines go through the review claims' adapter.
+- **The line.** Context `ensemble/build` (read through `sameStatusContext`). Pending "alex is building PAY-142";
+  success "alex built PAY-142 · pull request opened"; free: "Cleared by alex: build paused / ended / discarded ·
+  free to claim", "Cleared by alex: robin is building this" (a lost race), "Cleared by alex: robin's claim
+  expired", "Cleared by alex". ONLY a pending line holds.
+- **The fold** (`decideBuildClaim`, pure): each repository's ticket-branch head and its lines; a claim = the
+  newest line pending and not free; LIVE for `BUILD_CLAIM_LEASE_MS` (30 min) after the claimant's NEWEST line;
+  the EARLIEST live claim wins (the first line of the claimant's current pending run, then the repository's
+  name); with none live, the newest lapsed one is shown. This machine's own heads (its open ledger rows) are
+  left out — the local session speaks for them.
+- **Read** (`readTicketClaim`): ONE GraphQL query for every workspace repository (`viewerPermission`, the
+  default branch's head and tree, the ticket branch's head and message; 25 repositories per query), then the
+  `ensemble/build` lines of each ticket-branch head that exists (usually none or one).
+- **The offer.** Shared `storyBuildOffered` stays PURE and takes the claim as a fact: ANY claim the server
+  answers offers nothing. The story view (`StoryBuildEntry`) asks `GET /api/story-builds/claim` only when the
+  gate would otherwise offer Implement or Fill gaps (cached 30 s on the server; refetched every 60 s while a
+  claim shows), and shows `storyBuildClaimLine` ("robin is building this", "robin stopped building this", "You
+  are building this on another computer") with **Clear** when `storyBuildClaimClearable` (a lapsed claim, or the
+  reader's own). The sprint board and the Pending board never ask (the sprint graph stays DB only).
+- **Take** (`takeTicketClaim`, inside `POST /api/story-builds`): the route reads first and refuses a LIVE claim
+  (409 `TeamClaimed`, nothing starts); after `startSession`, lapsed claims are released once (a teammate's is
+  recorded, `whose 'teammate'`), the LEDGER intent, the placeholder, the pending line, then READ AGAIN: a
+  winner that is not ours ⇒ our "Cleared by …: robin is building this", our placeholder deleted, the session
+  discarded, 409 `TeamClaimed`. A pending line GitHub refused ⇒ the placeholder goes and the build runs
+  unmarked (a claim write is never retried). No login / unreadable / no pushable repository ⇒ UNMARKED.
+- **Follow** (`noteTicketBranchMoved`, from `git-ops.ts`): a push of ours that moves the claim's branch (Push
+  over the placeholder, the review loop's round-0 push, a fast-forward fix) moves the ledger's `head_sha` to the
+  pushed commit and posts the pending line there at once — teammates read the branch HEAD.
+- **Push over the placeholder** (`pushNewBranch`): an existing branch is replaced, with `pushForceWithLease` on
+  the head that was read, only when `placeholderReplaceable` — our own placeholder (the ledger), or a placeholder
+  (the trailer) no one holds live. Anything else stays `BRANCH_EXISTS`.
+- **The reconciler** (`settleStoryBuildClaims`; at boot, every minute, and right after a session closes): a
+  build row whose session is LIVE here and not finished is RENEWED every `BUILD_CLAIM_RENEW_MS` (10 min);
+  otherwise it is SETTLED — only while the head's newest line is still our pending one — with the done line
+  (every repository pushed, or the loop `done`) or the release ("build paused" for a closed, resumable session;
+  "build discarded"; "build ended"), then our placeholder is deleted when the branch still points at it. A live
+  session with no claim (a Resume) claims ONCE; a teammate's live claim found then is one notice, never a stop.
+  Failures back off (1, 2, 4, 8 min), at most 5 times; 403/404 ⇒ closed; a rate limit stops the pass.
+- **Clear** (`clearTicketClaim`, `POST …/claim/clear`): refused on a teammate's live claim; otherwise "Cleared by
+  alex: robin's claim expired" (recorded once) or "Cleared by alex" on the reader's own.
+- **Gaps:** TEAM-REVIEW.md § 13 (gaps 17, 18).
+
 ## The review loop (`coding/story-build/loop/`)
 
 "After the build: review and fix, then open the pull request" — a SOFTWARE FACTORY with adversarial,
@@ -483,7 +549,9 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   branch. Loop runs do NOT take a PR-review slot.
 - **The story check** (`story-check.ts`): the ticket review's prompt, agent and reconcile over every
   target as a member labelled `branch <name>`, with the agent's not-applicable and answer notes as
-  `claims`; the ticket is the build's frozen seed and Limn's stored comments (never a tracker read).
+  `claims`; the ticket is the build's frozen seed and Ensemble's stored comments (never a tracker read). It saves NO
+  contribution card, so the story view's criteria map has nothing to draw for a build with no PR
+  ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket review → THE CRITERIA MAP).
 - **The fix pass**: the driver writes REVIEW.md (`seed.ts`: `F<n>` findings by severity, `AC<n>` / `M<n>`
   open criteria with the reviewer's words and a rejected claim's reason; an earlier finding still open is
   re-raised as a finding of the round, with the agent's earlier answer), the refs file and the checker,
@@ -510,8 +578,16 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   until their PR opens. ⚠ The fix commit is kept at `refs/pierre/story-loop-push/<buildId>/<kind>-<id>`,
   NEVER under `refs/pierre/story-loop/<buildId>` (the review's and the story check's checkout ref): git
   cannot hold a ref and refs below the same name.
+- **The review lines** (`review-lines.ts`, 2026-11-15): each half posts the auto review's per-provider claim
+  lines on the branch head it reviews, through the review claims' own functions (`teamClaimContext`,
+  `reviewingLine`, renewed every `TEAM_CLAIM_RENEW_MS`; then `reviewedLine(login, null)` — "reviewed · kept in
+  Ensemble", the loop posts nothing to GitHub — or `unfinishedLine`). Ledgered first (`story_build_claim_lines`
+  kind `review`); the final line reads the context first (`teammateHolds`); the reconciler releases a crashed
+  round's line once the loop is not working in this process. Never blocks the loop. Once the PR opens, the
+  ONE fold reads them: the PR author's lines never hold a commit for a teammate, so a teammate's auto review
+  still gives the verdict (TEAM-REVIEW.md § 4); the reader's other computers read the head as reviewed.
 - **Opening** (`pr-facts.ts`): the same title / base / body builders as Push, `draft: false`, origin
-  `reader` (the reader's PR, no ledger, no trailer), the body ending in "## Review in Limn" (`pr-body.ts`:
+  `reader` (the reader's PR, no ledger, no trailer), the body ending in "## Review in Ensemble" (`pr-body.ts`:
   reviews and who ran them; fixed · answered · pushed back and accepted · still open; criteria met / not
   applicable with why / not met; up to 10 still-open points; defanged, clipped). Then `markLoopReviewOnPr`
   (`review-on-pr.ts`): the closing review as ONE `claude_reviews` row at the PR head, `trigger 'manual'`,
@@ -540,7 +616,9 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
 "Approve the plan automatically", OFF by default, ticked at Start (`autoApprovePlan: true`) or in the tab
 until the plan is approved (`POST …/auto-approve`). With "After the build: review and fix, then open the
 pull request" ticked too, Implement → Start is the whole flow: planned → approved → built → reviewed and
-fixed → pull request. The Start panel REMEMBERS both boxes in the browser (`START_PREFS_KEY`); the server
+fixed → pull request. The review loop is TICKED BY DEFAULT (2026-11; `START_PREFS_DEFAULT`, key `.v2` so the
+new default reached every browser once); plan approval stays a press by default. The Start panel REMEMBERS
+both boxes in the browser (`START_PREFS_KEY`); the server
 stores each build's own choice (`story_builds.auto_approve_plan`).
 
 - **When.** After any plan turn that leaves a usable plan (`afterChatTurn`, the `ok` branch; a repair that
@@ -582,7 +660,7 @@ round the PR opens ready anyway, naming what is still open), and then THE TICKET
   `StoryBuildEndToEndTicket`, on the wire as `StoryBuild.endToEndTicket`).
   1. The approved plan's `ticketUpdate`, through the SAME diff rule (shared `ticketUpdateBody`) and the SAME
      writer (`tracker/ticket-update.ts writeTicketUpdate`) as the tab's "Update ticket": only the fields
-     that differ from the ticket as Limn holds it.
+     that differ from the ticket as Ensemble holds it.
   2. ONE comment (`postTicketComment`, Jira wiki markup, under the reader's own Jira login), in PLAIN
      ENGLISH for every reader of the ticket, technical or not: the pull requests (links + titles, internal
      references such as `AC1`/`C2` stripped by `plainTitle`), then what changed on the ticket — a SHORT
@@ -700,10 +778,10 @@ row per such build through the ONE fold, shared `storyBuildActivityOf` (`story-b
 
 | Limit | Default |
 |---|---|
-| `LIMN_SANDBOX_MAX_SESSIONS` (open sessions on this computer) | 4 |
-| `LIMN_SANDBOX_MAX_BUILDS` (build turns at once, story and fix) | 3 |
-| `LIMN_SANDBOX_IDLE_MINUTES` (a session with nothing to do closes: its sandbox is removed, its patches stay) | 15 |
-| `LIMN_SANDBOX_TURN_MAX_MINUTES` (one agent turn running longer is stopped; SANDBOX.md § Every end removes the sandbox) | 120 |
+| `ENSEMBLE_SANDBOX_MAX_SESSIONS` (open sessions on this computer) | 4 |
+| `ENSEMBLE_SANDBOX_MAX_BUILDS` (build turns at once, story and fix) | 3 |
+| `ENSEMBLE_SANDBOX_IDLE_MINUTES` (a session with nothing to do closes: its sandbox is removed, its patches stay) | 15 |
+| `ENSEMBLE_SANDBOX_TURN_MAX_MINUTES` (one agent turn running longer is stopped; SANDBOX.md § Every end removes the sandbox) | 120 |
 | `STORY_BUILD_PATCH_MAX_BYTES` (one repository's patch; larger is refused, never cut) | 4 MB |
 | The plan block (`BUILD_PLAN_MAX_BYTES`) · revisions per session (`BUILD_PLAN_MAX_REVISIONS`) | 128 KB · 12 |
 | Planned PRs per repository · in all · points of contention · evidence per point | 3 · 6 · 12 · 1–4 |

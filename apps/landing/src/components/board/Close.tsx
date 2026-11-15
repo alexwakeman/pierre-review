@@ -7,7 +7,7 @@ export function Close(): JSX.Element {
   return (
     <section id="run" className="section board close" aria-labelledby="run-h">
       <div className="tile gold mid rise">
-        <h2 id="run-h">From open pull request to merged, faster.</h2>
+        <h2 id="run-h">From ticket to merged, on your machine.</h2>
         <div className="cmd">
           <CopyCommand />
           <code>{INSTALL_COMMAND}</code>

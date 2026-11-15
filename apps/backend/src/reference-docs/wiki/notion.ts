@@ -131,7 +131,7 @@ export async function notionRequest(
         url,
         {
           accept: 'application/json',
-          'user-agent': 'Limn',
+          'user-agent': 'Ensemble',
           authorization: `Bearer ${opts.credential.token}`,
           'notion-version': NOTION_VERSION,
           ...(body !== undefined ? { 'content-type': 'application/json' } : {}),

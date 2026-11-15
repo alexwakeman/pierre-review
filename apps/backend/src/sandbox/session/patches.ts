@@ -114,7 +114,7 @@ export function parseExtractOutput(out: string): ExtractedPatch {
 
 export class PatchTooLargeError extends Error {
   constructor(readonly bytes: number, readonly max: number) {
-    super(`The change is ${(bytes / 1024 / 1024).toFixed(1)} MB, more than the ${(max / 1024 / 1024).toFixed(0)} MB Limn keeps.`);
+    super(`The change is ${(bytes / 1024 / 1024).toFixed(1)} MB, more than the ${(max / 1024 / 1024).toFixed(0)} MB Ensemble keeps.`);
     this.name = 'PatchTooLargeError';
   }
 }

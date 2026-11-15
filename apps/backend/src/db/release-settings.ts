@@ -1,5 +1,5 @@
 // RELEASE SETTINGS (docs/RELEASES.md § Terms and settings) — the ONE reader and writer of
-// `workspaces.release_suffix` / `workspaces.hotfix_suffix` (migration 0192). Per workspace, no
+// `workspaces.release_suffix` / `workspaces.hotfix_suffix` (migration 0195). Per workspace, no
 // inheritance, NO default: null until the reader sets one. Callers validate with shared
 // `validateReleaseSettings` first (the route does; the Settings form runs the same function).
 import { and, eq, inArray } from 'drizzle-orm';
@@ -66,7 +66,7 @@ export async function setReleaseSettings(
 
 /**
  * A release already exists for this workspace: a release row, or a stored tag in one of its repos
- * that ends in the CURRENT release suffix (a team may have tagged by hand before Limn). The Settings
+ * that ends in the CURRENT release suffix (a team may have tagged by hand before Ensemble). The Settings
  * form warns before a change. DB only.
  */
 export async function workspaceHasReleases(

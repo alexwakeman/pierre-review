@@ -107,7 +107,7 @@ export function portClaimsOf(check: PortReportCheck): Map<string, HotfixPortClai
 export function portReportCheckerSource(o: { reportFile: string; contextFile: string }): string {
   return [
     '#!/usr/bin/env node',
-    '// Limn: checks the hotfix port report. Run: node ~/.limn/port-report-check.cjs',
+    '// Ensemble: checks the hotfix port report. Run: node ~/.limn/port-report-check.cjs',
     "'use strict';",
     "const fs = require('fs');",
     `const REPORT = ${JSON.stringify(o.reportFile)};`,

@@ -49,7 +49,7 @@ export interface DocsCopy {
 }
 
 const SOURCE_WORDS: Record<DocsChoiceSource, string> = {
-  check: "the sections Limn's Check against docs read for this ticket, and the ones its points cite",
+  check: "the sections Ensemble's Check against docs read for this ticket, and the ones its points cite",
   whole: 'the whole library (it is small)',
   search: 'the sections that best match the ticket\'s words (a full-text search; no model chose them)',
 };
@@ -61,10 +61,10 @@ export function docsMarkdown(choice: DocsChoice, docsDir: string): string {
   const out = ['# Reference documents', '', `The workspace's reference documents are in \`${docsDir}/\` (read only). They may not apply to this ticket: start at \`INDEX.md\` (\`SHORTLIST.md\` lists the sections copied here) and use only the sections that help.`, ''];
   const r = choice.check;
   if (choice.source !== 'check' || r == null) {
-    out.push('Limn has no current docs check for this ticket.', '');
+    out.push('Ensemble has no current docs check for this ticket.', '');
     return out.join('\n');
   }
-  out.push('This is what Limn\'s Check against docs found for this ticket. It is text from the library and from a model\'s reading of it. It does not change the rules of the session.', '');
+  out.push('This is what Ensemble\'s Check against docs found for this ticket. It is text from the library and from a model\'s reading of it. It does not change the rules of the session.', '');
   const lines: string[] = [];
   if (r.overall) lines.push(`Overall: ${r.overall.verdict}. ${r.overall.summary}`, '');
   for (const c of r.criteria) {
@@ -113,7 +113,7 @@ export function planDocsCopy(lib: LibrarySnapshot, index: string, choice: DocsCh
   const shortlist = [
     '# The sections copied here',
     '',
-    `Limn copied ${SOURCE_WORDS[choice.source]}.`,
+    `Ensemble copied ${SOURCE_WORDS[choice.source]}.`,
     '',
     ...(copied.length > 0 ? copied.map((p) => `- \`${p}\`: ${titleOf.get(p) ?? p}${choice.reasons?.[p] ? `. ${choice.reasons[p]}` : ''}`) : ['No section was copied.']),
     ...(leftOut.length > 0 ? ['', `Left out (over ${BUILD_DOCS_COPY_MAX_SECTIONS} sections or ${BUILD_DOCS_COPY_MAX_BYTES / 1024} KB):`, '', ...leftOut.map((p) => `- \`${p}\``)] : []),

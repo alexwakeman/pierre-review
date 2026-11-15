@@ -233,7 +233,7 @@ async function rowCount(): Promise<number> {
 // ── Tests ───────────────────────────────────────────────────────────────────────────────────────
 
 describe('createRelease — the writes, in order, each claimed', () => {
-  it('acceptance 19: <version><release suffix>, annotated, on the version tag commit; pre-release with the notes; one comment per ticket; no Limn wording', async () => {
+  it('acceptance 19: <version><release suffix>, annotated, on the version tag commit; pre-release with the notes; one comment per ticket; no product name', async () => {
     const res = await create([API, WEB]);
     expect(res.outcome).toBe('written');
     const rel = res.release!;
@@ -249,7 +249,7 @@ describe('createRelease — the writes, in order, each claimed', () => {
       'Release notes: https://github.com/acme/api/releases/tag/v1.0.0-rc',
     ]);
     const everything = [...w.calls.tag, ...w.calls.prerelease.map((p) => p.body), ...w.calls.comment.map((c) => c.wiki)].join('\n');
-    expect(everything).not.toMatch(/limn/i);
+    expect(everything).not.toMatch(/limn|ensemble/i);
     // Every ticket in the release was read again from the tracker first.
     expect(w.calls.reread.sort()).toEqual(['PLAT-1', 'PLAT-2', 'PLAT-3']);
     // Stored and viewable again.

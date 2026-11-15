@@ -76,7 +76,7 @@ ${t.either(
     'Return the diagram as your final message: ONE JSON object { title, caption, participants, steps, noDiagram } matching the given schema, and nothing else.',
   )} 'title' is a few words naming what the change does to the data (at most ${DESIGN_TITLE_MAX} characters). 'caption' is at most two short sentences (${DESIGN_CAPTION_MAX} characters). Ids are short (letters, digits, - or _). ${t.either(
     'If submit_design answers with problems, fix every one and call it again with the whole diagram. Do not write prose outside the tool call.',
-    'If Limn refuses the diagram and lists problems, fix every one and answer again with the whole diagram.',
+    'If Ensemble refuses the diagram and lists problems, fix every one and answer again with the whole diagram.',
   )}`;
 }
 

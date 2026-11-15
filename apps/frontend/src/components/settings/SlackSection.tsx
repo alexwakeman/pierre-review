@@ -240,7 +240,7 @@ export function SlackSection(): JSX.Element {
 
       {/* Gap 9 (docs/TEAM-REVIEW.md): Limn runs on each machine, so two teammates on one channel both post. */}
       <p className="text-meta text-ui-mute" data-testid="slack-one-per-channel">
-        Only one person per channel should set this up — each Limn posts its own copy.
+        Only one person per channel should set this up — each Ensemble posts its own copy.
       </p>
 
       <Field

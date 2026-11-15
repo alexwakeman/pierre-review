@@ -185,7 +185,7 @@ export const APP_SERVER_MODEL_CATALOG = {
   models: [
     {
       slug: 'limn-app-server-no-model',
-      display_name: 'Limn app-server (no model)',
+      display_name: 'Ensemble app-server (no model)',
       base_instructions: '',
       supported_reasoning_levels: [],
       shell_type: 'default',

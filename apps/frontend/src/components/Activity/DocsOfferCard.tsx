@@ -60,7 +60,7 @@ export function DocsOfferCard({
             {offerHeading(offers.offers)}
             <InfoButton title="Docs from your repositories">
               <p>
-                Limn looked for docs folders in this workspace’s repositories: a folder named{' '}
+                Ensemble looked for docs folders in this workspace’s repositories: a folder named{' '}
                 {DOCS_OFFER_FOLDER_NAMES.join(', ')}, or any folder with five or more documents, holding at least{' '}
                 {DOCS_OFFER_MIN_FILES} documents and about {DOCS_OFFER_MIN_WORDS.toLocaleString('en')} words. A README alone
                 never counts.

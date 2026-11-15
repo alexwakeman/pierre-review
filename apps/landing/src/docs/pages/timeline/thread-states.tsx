@@ -3,14 +3,14 @@ import { DocLink, H2, H3, Illustration, Note, Thread, Ui, Warning } from '../../
 
 export const meta: DocMeta = {
   title: 'What the thread states mean',
-  summary: 'Resolved, Likely addressed, Replied and Untouched: how Limn reads each review thread, and why Likely addressed is a guess.',
+  summary: 'Resolved, Likely addressed, Replied and Untouched: how Ensemble reads each review thread, and why Likely addressed is a guess.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn gives every review thread on a pull request one of four states, from what GitHub reports and from
+        Ensemble gives every review thread on a pull request one of four states, from what GitHub reports and from
         the commits that came after the thread. The states show on the Threads tab, in the Feed, in the
         sidebar's thread bars and in the Timeline's filters. They answer one question: does this comment still
         need someone?
@@ -76,12 +76,12 @@ export default function Page(): JSX.Element {
 
       <H2 id="likely-addressed-is-a-guess">Likely addressed is a guess</H2>
       <p>
-        Limn cannot know that a commit fixed what a comment asked for. It knows only that someone changed the same
-        file after the comment. The change may be unrelated, or a rebase. So Limn calls it <Ui>Likely addressed</Ui>,
+        Ensemble cannot know that a commit fixed what a comment asked for. It knows only that someone changed the same
+        file after the comment. The change may be unrelated, or a rebase. So Ensemble calls it <Ui>Likely addressed</Ui>,
         never "addressed", and a thread in this state still counts as not resolved on GitHub.
       </p>
-      <H3>How sure Limn is</H3>
-      <p>Where it can, Limn grades a Likely addressed thread:</p>
+      <H3>How sure Ensemble is</H3>
+      <p>Where it can, Ensemble grades a Likely addressed thread:</p>
       <ul>
         <li>
           <b>High</b>: GitHub marked the commented lines as outdated and a later commit touched them, or the bot

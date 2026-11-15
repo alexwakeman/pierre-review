@@ -258,7 +258,7 @@ describe('the pure rules', () => {
     expect(ap.autoReviewBodyLead('- only bullets', 0, 'Codex')).toBe('Reviewed by Codex.');
     expect(ap.autoReviewBodyLead('- only bullets', 1, 'Codex')).toBe('One comment from Codex.');
     expect(ap.autoReviewBody('- only bullets', 3, 'Codex')).toBe(
-      '3 comments from Codex.\n\n_Posted automatically by Limn’s Codex review._',
+      '3 comments from Codex.\n\n_Posted automatically by Ensemble’s Codex review._',
     );
     expect(autoPostFooter('Claude')).toBe(AUTO_POST_FOOTER);
     expect(autoPostFooter()).toBe(AUTO_POST_FOOTER);
@@ -1857,7 +1857,7 @@ describe('auto resolve', () => {
       expect(resolve).toHaveBeenCalledWith(1, x.thread.githubNodeId);
       const body = String(reply.mock.calls[0]![2]);
       expect(body.startsWith('Addressed in abcdef1.')).toBe(true);
-      expect(body).toContain('Resolved by Limn’s Claude review.');
+      expect(body).toContain('Resolved by Ensemble’s Claude review.');
       expect(body).not.toContain(AUTO_POST_FOOTER);
       const { isLimnPostedComment } = await import('../../db/review-threads-for-review.js');
       expect(isLimnPostedComment({ body, databaseId: null, authorLogin: 'me' }, undefined, 'me')).toBe(true);

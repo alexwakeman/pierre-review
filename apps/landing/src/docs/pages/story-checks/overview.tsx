@@ -41,7 +41,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         A code review asks &ldquo;is this code right?&rdquo;. A story check asks &ldquo;does this work do what the
-        ticket asked for?&rdquo;. Limn reads the ticket from your issue tracker, reads every open and merged pull
+        ticket asked for?&rdquo;. Ensemble reads the ticket from your issue tracker, reads every open and merged pull
         request that names it, in any repository of yours, and judges each acceptance criterion against the code.
         It is one check per ticket, not per pull request, so a ticket split across three pull requests gets one
         answer.
@@ -54,7 +54,7 @@ export default function Page(): JSX.Element {
           An issue tracker for the workspace (<DocLink to="integrations/jira">Jira</DocLink>,{' '}
           <DocLink to="integrations/github-issues">GitHub Issues</DocLink>,{' '}
           <DocLink to="integrations/linear">Linear</DocLink> or <DocLink to="integrations/notion">Notion</DocLink>),
-          so Limn can find the ticket a pull request names. Every story is read from the tracker.
+          so Ensemble can find the ticket a pull request names. Every story is read from the tracker.
         </li>
         <li>
           AI set up in <DocLink to="settings/ai">Settings → AI</DocLink>, with Claude or Codex signed in.
@@ -124,7 +124,7 @@ export default function Page(): JSX.Element {
 
       <H3 id="when-the-pull-request-names-no-ticket">When the pull request names no ticket</H3>
       <p>
-        Limn finds tickets in the pull request&rsquo;s title and branch name (on GitHub Issues, in its &ldquo;Fixes
+        Ensemble finds tickets in the pull request&rsquo;s title and branch name (on GitHub Issues, in its &ldquo;Fixes
         #12&rdquo; links; on Linear, also in Linear&rsquo;s own links). If the ticket is not there:
       </p>
       <Steps>
@@ -132,27 +132,27 @@ export default function Page(): JSX.Element {
           Open <Ui>Add tickets</Ui> in the Story check section.
         </li>
         <li>
-          Paste one or more ticket links or keys, like <code>PROJ-123</code>. Limn shows a chip for each one it can
+          Paste one or more ticket links or keys, like <code>PROJ-123</code>. Ensemble shows a chip for each one it can
           read.
         </li>
         <li>
-          Press <Ui>Check</Ui>. Limn links the tickets to the pull request and starts one check per ticket.
+          Press <Ui>Check</Ui>. Ensemble links the tickets to the pull request and starts one check per ticket.
         </li>
       </Steps>
       <p>
-        A ticket on another tracker or another site is refused, because Limn only reads the workspace&rsquo;s own
+        A ticket on another tracker or another site is refused, because Ensemble only reads the workspace&rsquo;s own
         tracker with its own sign-in. Without a tracker there is no story check.
       </p>
 
       <H2 id="automatic-checks">Automatic checks</H2>
       <p>
-        When <DocLink to="ai-review/auto-review">auto review</DocLink> is on for the workspace, Limn checks a ticket
+        When <DocLink to="ai-review/auto-review">auto review</DocLink> is on for the workspace, Ensemble checks a ticket
         by itself when its pull requests change: a push, a pull request joining or merging, a change to the ticket
         text, or a new comment while a criterion is not done.
       </p>
       <ul>
         <li>
-          <strong>A two-minute wait.</strong> Limn waits until the ticket&rsquo;s pull requests have been quiet for 2
+          <strong>A two-minute wait.</strong> Ensemble waits until the ticket&rsquo;s pull requests have been quiet for 2
           minutes, so a burst of pushes, or three pull requests linked a minute apart, gets one check. Every new
           change restarts the 2 minutes. After 20 minutes of changes it starts anyway.
         </li>
@@ -163,7 +163,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <strong>Not when every criterion is met.</strong> When the latest check found every acceptance criterion
-          met, Limn does not check the ticket again by itself. The line says &ldquo;No automatic story check — the
+          met, Ensemble does not check the ticket again by itself. The line says &ldquo;No automatic story check — the
           last one found every criterion met&rdquo;. A change to the ticket text starts automatic checks again, because
           the criteria may have changed. This Sprint&rsquo;s <Ui>Refresh</Ui> skips these tickets too.
         </li>
@@ -202,14 +202,14 @@ export default function Page(): JSX.Element {
         last result stays on screen until the next one.
       </p>
       <Note>
-        A ticket with more than 30 open and merged pull requests is not checked; Limn says how many there are rather
+        A ticket with more than 30 open and merged pull requests is not checked; Ensemble says how many there are rather
         than check a sample. Closed pull requests that were not merged do not count.
       </Note>
 
       <H2 id="the-pull-request-review-and-the-ticket">The pull request review and the ticket</H2>
       <p>
         The pull request&rsquo;s own AI review does not judge the story; that is the story check&rsquo;s job. It does
-        use the ticket in one way: just before a review runs, Limn reads the ticket again and passes on its{' '}
+        use the ticket in one way: just before a review runs, Ensemble reads the ticket again and passes on its{' '}
         <strong>open points</strong>, the decisions the ticket left undecided (&ldquo;wording to be confirmed by
         design&rdquo;). The review lists them under <Ui>Open points</Ui>, marked <Ui>Not blocking</Ui>, with the code
         that depends on each. They never change the review&rsquo;s verdict. Where open points come from is set per

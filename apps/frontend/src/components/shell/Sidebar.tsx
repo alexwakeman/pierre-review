@@ -862,8 +862,8 @@ function Foot({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }): 
           href={docsHref}
           target="_blank"
           rel="noopener noreferrer"
-          aria-label="Open the Limn docs"
-          title="Open the Limn docs"
+          aria-label="Open the Ensemble docs"
+          title="Open the Ensemble docs"
           className={small}
         >
           <QuestionIcon size={SIDEBAR_ICON} />
@@ -975,7 +975,7 @@ export function Sidebar({ dark, toggleDark }: { dark: boolean; toggleDark: () =>
         )}
       >
         <div className="flex shrink-0 items-center gap-2 px-4 pb-1 pt-3">
-          <h1 className="min-w-0 flex-1" title="Limn — to depict, to make clear">
+          <h1 className="min-w-0 flex-1" title="Ensemble">
             <Wordmark className="text-title" />
           </h1>
           {drawer && (

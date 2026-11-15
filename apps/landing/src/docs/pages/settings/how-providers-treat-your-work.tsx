@@ -3,7 +3,7 @@ import { DocLink, ExtLink, H2, H3, MiniTable, Note, Quote, Ui } from '../../kit'
 
 export const meta: DocMeta = {
   title: 'How Anthropic and OpenAI treat your work',
-  summary: 'What Anthropic and OpenAI say, in their own words, about the code and prompts Limn sends on your account.',
+  summary: 'What Anthropic and OpenAI say, in their own words, about the code and prompts Ensemble sends on your account.',
 };
 
 const CHECKED = 'retrieved 2026-11-09';
@@ -63,9 +63,9 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        When Limn runs a review, a fix or a summary, it sends the work to the AI provider you chose, on your account:
+        When Ensemble runs a review, a fix or a summary, it sends the work to the AI provider you chose, on your account:
         the code and the diff, the pull request&rsquo;s text and comments, and where relevant the ticket and sections of
-        your docs. Nothing goes to a Limn server, because there is none. What happens to that work at the provider is
+        your docs. Nothing goes to an Ensemble server, because there is none. What happens to that work at the provider is
         set by the provider&rsquo;s terms for your kind of account. This page quotes those terms word for word, with a
         link to each source, so you can decide for yourself.
       </p>
@@ -77,8 +77,8 @@ export default function Page(): JSX.Element {
       <H2 id="at-a-glance">At a glance</H2>
       <MiniTable cols={SUMMARY_COLS} rows={SUMMARY_ROWS} />
       <p>
-        The rest of the page gives the exact words behind each line. For which account Limn uses, see{' '}
-        <DocLink to="settings/ai-usage-and-spend#which-account">Which account Limn uses</DocLink>.
+        The rest of the page gives the exact words behind each line. For which account Ensemble uses, see{' '}
+        <DocLink to="settings/ai-usage-and-spend#which-account">Which account Ensemble uses</DocLink>.
       </p>
 
       <H2 id="anthropic">Anthropic (Claude)</H2>
@@ -115,7 +115,7 @@ export default function Page(): JSX.Element {
       <p>
         Check the setting at{' '}
         <ExtLink href="https://claude.ai/settings/data-privacy-controls">claude.ai/settings/data-privacy-controls</ExtLink>{' '}
-        before you use Limn on code you would not want used for training.
+        before you use Ensemble on code you would not want used for training.
       </p>
 
       <H3>Training on an API key or a business plan</H3>
@@ -145,7 +145,7 @@ export default function Page(): JSX.Element {
         Transcripts shared via /feedback, or via /bug and /share, which report through the same path, are retained
         for 5 years.
       </Quote>
-      <p>Limn never sends feedback or bug reports to Anthropic on your behalf.</p>
+      <p>Ensemble never sends feedback or bug reports to Anthropic on your behalf.</p>
 
       <H3>Who owns the work</H3>
       <Quote source={A_CONSUMER_T} href={A_CONSUMER}>
@@ -168,7 +168,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="openai">OpenAI (Codex)</H2>
       <H3>Your sign-in decides the policy</H3>
-      <p>Limn runs Codex only on a ChatGPT sign-in. OpenAI says:</p>
+      <p>Ensemble runs Codex only on a ChatGPT sign-in. OpenAI says:</p>
       <Quote source={O_AUTH_T} href={O_AUTH}>
         When you sign in with ChatGPT, Codex usage follows your ChatGPT workspace permissions, role-based access control
         (RBAC), and ChatGPT Enterprise retention and residency settings.
@@ -194,12 +194,12 @@ export default function Page(): JSX.Element {
       </Quote>
       <p>
         On a personal ChatGPT plan (Free, Go, Plus or Pro), that line does not apply. Check the data controls in your
-        ChatGPT settings before you use Codex in Limn on code you would not want used for training.
+        ChatGPT settings before you use Codex in Ensemble on code you would not want used for training.
       </p>
 
       <H3>API keys, for context</H3>
       <p>
-        Limn does not run Codex on an OpenAI API key today. For comparison, OpenAI says an API key follows different
+        Ensemble does not run Codex on an OpenAI API key today. For comparison, OpenAI says an API key follows different
         settings:
       </p>
       <Quote source={O_AUTH_T} href={O_AUTH}>
@@ -217,11 +217,11 @@ export default function Page(): JSX.Element {
 
       <H2 id="your-claude-login">Using your own Claude login</H2>
       <p>
-        Limn is a program you run on your own computer. When it uses Claude, it uses the Claude Code login you made
-        yourself, through Anthropic&rsquo;s own sign-in, for your own work. Limn never sees, stores or forwards that
-        login, there is no Limn server in between, and no one else&rsquo;s requests go through your account.
+        Ensemble is a program you run on your own computer. When it uses Claude, it uses the Claude Code login you made
+        yourself, through Anthropic&rsquo;s own sign-in, for your own work. Ensemble never sees, stores or forwards that
+        login, there is no Ensemble server in between, and no one else&rsquo;s requests go through your account.
       </p>
-      <p>Anthropic&rsquo;s policy recommends API keys for products built on its Agent SDK, which Limn uses:</p>
+      <p>Anthropic&rsquo;s policy recommends API keys for products built on its Agent SDK, which Ensemble uses:</p>
       <Quote source={A_LEGAL_T} href={A_LEGAL}>
         Developers building products or services that interact with Claude&apos;s capabilities, including those using
         the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider.
@@ -229,12 +229,12 @@ export default function Page(): JSX.Element {
         route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users.
       </Quote>
       <p>
-        Limn offers no Claude sign-in of its own and routes nothing on anyone&rsquo;s behalf: each person runs Limn
+        Ensemble offers no Claude sign-in of its own and routes nothing on anyone&rsquo;s behalf: each person runs Ensemble
         with their own access. Anthropic&rsquo;s plan limits assume ordinary, individual use, and its consumer terms
         limit automated access outside an API key (<ExtLink href={A_CONSUMER}>{A_CONSUMER_T}</ExtLink>).
       </p>
       <Note title="When to choose an API key">
-        An Anthropic API key works exactly the same in Limn and is a first-class choice. Choose it when your
+        An Anthropic API key works exactly the same in Ensemble and is a first-class choice. Choose it when your
         organisation prefers commercial terms, when you want API billing kept apart from personal plans, or when you
         run a lot of automatic reviews, fixes or dependency updates. See{' '}
         <DocLink to="integrations/claude#set-it-up">Set up Claude</DocLink>.
@@ -255,7 +255,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        What Limn itself keeps, and where, is on <DocLink to="security/data-and-storage">What Limn stores</DocLink>.
+        What Ensemble itself keeps, and where, is on <DocLink to="security/data-and-storage">What Ensemble stores</DocLink>.
       </p>
     </>
   );

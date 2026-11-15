@@ -49,10 +49,11 @@ const baseEnv = {
   ...process.env,
   PATH: SAFE_PATH,
   DATABASE_URL: DB,
-  LIMN_DATA_DIR: DATA_DIR,
+  // The backend reads ENSEMBLE_X first, then LIMN_X (env-name.ts): set the new names.
+  ENSEMBLE_DATA_DIR: DATA_DIR,
   // No first-boot AI download (ai/auto-install.ts): it would hit the network and turn /api/me's
   // `ai.runtime` into 'installing' mid-shot.
-  LIMN_AI_AUTO_INSTALL: 'false',
+  ENSEMBLE_AI_AUTO_INSTALL: 'false',
   DISABLE_SCHEDULER: 'true',
   ANTHROPIC_API_KEY: 'dummy',
   // The ML severity gate IS the URL (config.severityApiUrl): without it /api/me reports
@@ -63,6 +64,7 @@ const baseEnv = {
   SEVERITY_API_URL: 'http://127.0.0.1:8799',
 };
 for (const k of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_HOST']) delete baseEnv[k];
+for (const k of ['LIMN_DATA_DIR', 'LIMN_AI_AUTO_INSTALL']) delete baseEnv[k];
 // (The agentic features are core and on by default locally — no flag; PRO_ADVANCED_AI_ENABLED is gone.)
 
 // --- helpers -------------------------------------------------------------------

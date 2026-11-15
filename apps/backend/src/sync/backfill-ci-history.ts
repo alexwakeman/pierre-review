@@ -369,7 +369,7 @@ export async function backfillPrCiHistory(
     const chunk = limnTargets.slice(i, i + COMMIT_CHECKS_ALIAS_CAP);
     const r = await fetchRollupsWithoutLimn(client, owner, name, chunk, (errors) =>
       opts.log?.warn(
-        `ci-backfill ${owner}/${name}: partial GraphQL on Limn-marked commits — synthesizing nothing for them`,
+        `ci-backfill ${owner}/${name}: partial GraphQL on Ensemble-marked commits — synthesizing nothing for them`,
         errors,
       ),
     );

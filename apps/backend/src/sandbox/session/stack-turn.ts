@@ -106,7 +106,7 @@ export async function extractApprovedStack(
   const read = await readBuildReport(l.runtime, l.container, l.layoutRoot, context);
   let report: BuildReportPayload | null = null;
   if (read.kind === 'ok' && read.check.report) report = read.check.report;
-  else if (read.kind === 'ok') m.notice(`The build report did not pass Limn's checks (${read.check.problems[0] ?? 'its shape'}), so each pull request shows the agent's last words.`);
+  else if (read.kind === 'ok') m.notice(`The build report did not pass Ensemble's checks (${read.check.problems[0] ?? 'its shape'}), so each pull request shows the agent's last words.`);
   else if (read.kind === 'unreadable') m.notice(read.reason);
   const reported = new Map((report?.prs ?? []).map((p) => [p.id, p]));
   const fallbackSummary = l.lastAgentText.trim() ? l.lastAgentText.trim().slice(0, 2_000) : null;
@@ -173,7 +173,7 @@ export async function extractApprovedStack(
         updatedAt: new Date(o.now()),
       });
       if (v.status === 'ready') parts.push(`${row.prKey} (${v.stat?.files ?? 0} ${v.stat?.files === 1 ? 'file' : 'files'})`);
-      else if (v.status === 'failed') m.notice(`${fullName} ${row.prKey}: ${v.error ?? 'Limn could not use it.'}`);
+      else if (v.status === 'failed') m.notice(`${fullName} ${row.prKey}: ${v.error ?? 'Ensemble could not use it.'}`);
     }
     if (parts.length > 0) stored.push(`${fullName} ${parts.join(', ')}`);
     if (repoRow.status !== 'pushed') {

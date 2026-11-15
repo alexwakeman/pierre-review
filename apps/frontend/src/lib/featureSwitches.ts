@@ -9,7 +9,7 @@ export const FEATURE_WORDS: Record<FeatureId, { label: string; hint: string }> =
   reports: { label: 'Reports', hint: 'Shows once your first repository has finished syncing 90 days.' },
   sprint: {
     label: 'This Sprint',
-    hint: 'Shows once a Jira, Linear or Notion tracker is set up, or Limn finds a GitHub milestone with a due date or a current Projects iteration.',
+    hint: 'Shows once a Jira, Linear or Notion tracker is set up, or Ensemble finds a GitHub milestone with a due date or a current Projects iteration.',
   },
   bots: { label: 'Bots Monitoring', hint: 'Measure what your review bots cost and catch.' },
 };

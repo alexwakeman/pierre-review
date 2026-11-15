@@ -556,7 +556,7 @@ describe('stillOpenPostable', () => {
     expect(stillOpenPostable({ ...base, how: null })).toBe(false);
   });
   // A PR-LEVEL finding (posted as a PR comment, no thread): once per finding, ever.
-  it('a PR-level finding: offered until Limn said it, or GitHub clearly refused it', () => {
+  it('a PR-level finding: offered until Ensemble said it, or GitHub clearly refused it', () => {
     const pr = { ...base, threadId: null, threadResolved: null, prComment: { findingId: 9, commentId: '1', url: null }, pushback: null };
     expect(stillOpenPostable(pr)).toBe(true);
     const rec = { at: 'x', byReviewId: 1, commentId: null, error: null };

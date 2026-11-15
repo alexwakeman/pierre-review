@@ -470,7 +470,7 @@ describe('the team hold on a replies pass’s APPROVE (decision 2026-11-09)', ()
     const settled = new Set(['4512556766']);
     expect(
       teammateStillOpenHold(settled, [{ login: 'alexwakeman', at: t('2026-11-09T13:30:00Z'), judged: [{ commentId: '4512556766', outcome: 'still_open' }] }], since),
-    ).toEqual({ heldReason: 'team_open', text: 'Not approved: alexwakeman’s Limn judged a point still open.' });
+    ).toEqual({ heldReason: 'team_open', text: 'Not approved: alexwakeman’s Ensemble judged a point still open.' });
     // Older than the full review: not a newer judgement.
     expect(
       teammateStillOpenHold(settled, [{ login: 'alexwakeman', at: t('2026-11-09T12:00:00Z'), judged: [{ commentId: '4512556766', outcome: 'not_addressed' }] }], since),

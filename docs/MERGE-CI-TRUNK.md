@@ -31,7 +31,7 @@ answer; absent (the lean timeline PR doesn't carry it) the reason stays generic,
   CI" as stricter than that. `behind` is `canMerge: false` because GitHub itself 405s the merge
   when the repo requires up-to-date branches. `queued`/`armed` are checked FIRST (the truest
   answer to "what happens next"), then conflicts, then draft.
-- ⚠ **An `unstable` only Limn's own `limn/review-*` status lines caused is stored `clean`** (shared
+- ⚠ **An `unstable` only Ensemble's own `ensemble/review-*` status lines caused is stored `clean`** (shared
   `mergeStateWithoutLimn`, applied where the column is written and on the live merge options;
   docs/CLAUDE-REVIEW.md § Team claims) — a teammate's pending review line is not "checks failing".
 - `db/triage.ts` had the identical blindness: `approved_ready` tested `mergeable === 'mergeable'`
@@ -526,11 +526,11 @@ line), and its three routes, its menu item, its "Claude" chips and its AI Fix ca
   `getFixMergeOffer`). It needs no AI review and no CI item. In an AUTO fix only with the workspace's
   `AutoFixInclude.conflicts` (Settings → Auto review → Always include, OFF by default; 2026-11-10).
 - **The run** is the fix's own sandboxed session ([SANDBOX.md](SANDBOX.md) § AI Fix sessions, "The
-  merge"): Limn starts the merge of the base tip (pinned at the start) with the explicit merge base; the
+  merge"): Ensemble starts the merge of the base tip (pinned at the start) with the explicit merge base; the
   agent resolves FIRST, commits the MERGE COMMIT, then fixes the other items on top. The commits leave as
   a git bundle; the host checks parents (the PR head, the base tip, in that order), conflict markers in
   every file that was in conflict, and that every other commit sits on top of the merge. A merge that
-  fails a check is MERGE "not addressed" with Limn's reason, and NOTHING pushes.
+  fails a check is MERGE "not addressed" with Ensemble's reason, and NOTHING pushes.
 - **Push** (`coding/ai-fix/push.ts` → `coding/git-ops.ts` `pushMergeResult`): only onto the PR's own
   branch, never a fork's; the check again in the clone cache; the merge commit and ONE fix commit
   rebuilt from the verified trees under the reader's name; a fast-forward of the head the fix started
@@ -993,7 +993,7 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   ⚠ ALWAYS GitHub's merge-in update, never the local clone rebase — a force-push onto a Dependabot /
   Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
   ONE card in the toast cluster; the SPA refetches through `invalidateAfterPrWrite`.
-- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, NULL = OFF, Settings →
+- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, NULL = ON since migration 0193, off = an explicit false, Settings →
   Dependencies; a draft + Save like every other section — ticking the box writes nothing). The
   panel's POLICY (§ Dependency automation, below) gates it like the other two switches.
   `runDependencyPolicyTick` runs on the watcher's cron just before it
@@ -1040,7 +1040,10 @@ probe stamped.
 ### Dependency automation (`merge/dependency-automation.ts` + pure `merge/dependency-rules.ts`, CORE)
 
 **Settings → Dependencies** (`DependencyAutomationSection`, its own tab; it used to be one checkbox
-under Bots) holds, per workspace and EVERY ONE OFF BY DEFAULT: merge (above), **approve**,
+under Bots) holds, per workspace and ⚠ EVERY ONE ON BY DEFAULT (owner's decision 2026-11-14, migration
+0193: the existing NULLs were set to 1 — including workspaces whose NULL meant "switched off" — and from
+then on NULL reads ON (`dependencySwitchOn`, `!== false`; the merge sweep's roster reads `IS NULL OR = 1`)
+and OFF is stored as an explicit false by the two writers): merge (above), **approve**,
 **resolve conflicts** and **fix with AI** (2026-11-03, `workspaces.dependency_auto_fix`, migration
 0162; shown only where agentic AI runs — and, stored on while the AI is off, it does NOTHING: it
 counts toward the conflict steps only while the AI can run), plus ONE **policy** that gates all four, plus the **trusted
@@ -1060,15 +1063,21 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   facts first; ONE live `GET /pulls/{n}` (`fetchPrForAutomation`) when only the size is missing,
   remembered per (PR, head) so a refused PR is not re-read every tick.
 - **TRUST** (`isTrustedDependencyBot`): approval, conflict resolution and the AI fix act ONLY on PRs whose
-  author's STORED `workspace_reviewers` row says `automated`, role `dependency`, and
-  `dependency_trusted` — the reader's mark in the panel's "Trusted bots" list (which lists exactly
-  those stored dependency rows). ⚠ Never a login guess over the stored judgement — a person can open
-  a fork PR under a bot-like login; a fork is refused anyway (live check). The merge switch keeps
-  its own wider classifier (`authorAutomationFor`), unchanged.
+  author's STORED `workspace_reviewers` row says `automated`, role `dependency`, and whose
+  `dependency_trusted` mark RESOLVES to trusted (`dependencyTrustedOf`, 2026-11-14): true = trusted,
+  false = the reader's untick (stored explicitly by `setDependencyAutomation`, so it WINS over the
+  default), NULL (untouched) = trusted ONLY for `DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS` —
+  `dependabot[bot]` and `renovate[bot]`, exact logins, case-insensitive: GitHub App identities, the
+  `[bot]` suffix is reserved, so nobody can open a PR under them. Every other bot is trusted by hand in
+  the panel's "Trusted bots" list (which lists exactly those stored dependency rows and shows the
+  resolved mark). ⚠ Never a guess from a login that LOOKS like a bot — a person can open a fork PR under
+  a bot-like login; a fork is refused anyway (live check). The limn-bots repair's `dependency_trusted IS
+  NULL` "untouched" test stays right: an untick is 0, not NULL. The merge switch keeps its own wider
+  classifier (`authorAutomationFor`), unchanged.
 - **APPROVE**: an open, non-draft, same-repo PR of a trusted bot, synced `ci_status = success`
   (GREEN, not merely not red — so a repo with no CI is never auto-approved), review decision not
   already `approved`, write access, policy admits it. The live re-read must show the SYNCED head; the
-  review is `APPROVE` pinned with `commit_id` and carries the hidden Limn marker. Then the approve
+  review is `APPROVE` pinned with `commit_id` and carries the hidden Ensemble marker. Then the approve
   route's own tail: `upsertLocalReview` → `clearOwnReviewRequest` → `resyncPrAfterWrite` →
   `schedulePrSettle(mergeStateNot:'blocked')` → `notePrChangedForPr`.
 - **RESOLVE CONFLICTS** (`conflictStep`, once per HEAD each): (1) ask the bot to rebase
@@ -1081,7 +1090,7 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   plain seed `dependencyConflictInstruction`: "resolve the merge conflicts and change nothing else; keep the
   update"; § AI resolution above). ⚠ **CONFLICTING AND RED, with "Fix them with AI" on**: that SAME one
   session also gets the CI review's fixable items at the current head (`withCi` → the CI-only seed with
-  `resolveConflicts` REQUIRED and Limn's own `dependencyMergeAndCiPreamble` above it, no PR text): the merge
+  `resolveConflicts` REQUIRED and Ensemble's own `dependencyMergeAndCiPreamble` above it, no PR text): the merge
   first, the CI fixes on top; no fixable item ⇒ merge only (the red may be the conflict's). ONE `ai_resolve`
   row, so ONE AI run against the cap and no separate CI fix at that head ("Resolve their conflicts" alone never
   fixes CI). A combined start with no MERGE item (AI Fix's own merge gate disagreed) falls back to the
@@ -1091,7 +1100,7 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   `skipped` row for `ai_resolve` at the head (`recordSandboxSkip`), never a claim, later ticks read
   nothing. ⚠ It NEVER takes over a reader: the manual resolver open on the PR (a subscriber) or
   committing, or any AI Fix holding the PR, is skipped with no claim. (4) `watchFixAndPush` waits for the
-  session and pushes through AI Fix's own Push ONLY a merge Limn's check passed (`hasWork`) — WITH NO
+  session and pushes through AI Fix's own Push ONLY a merge Ensemble's check passed (`hasWork`) — WITH NO
   CLICK, on this path only (the own-PR auto fix keeps its "Push automatically" switch; `auto-push.ts` never
   pushes a bot's PR): `pushMergeResult` re-checks the bundle and pushes the commits rebuilt from the
   verified trees, pinned to the checked merge + result shas, as a fast-forward of the head the fix started
@@ -1107,14 +1116,14 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
   - **WHEN**: a TRUSTED bot's open, non-draft, NON-conflicting PR whose SYNCED `ci_status` is
     `failure`/`error` (`aiFixEligibility`, pure, `dependency-rules.test.ts`), the policy admits it,
     the live re-read shows the synced head, and — ⚠ the failure PROVEN LIVE: one read of the head's
-    checks (`readCiInputs`, the CI review's own reader, Limn's lines left out) must show a failing
+    checks (`readCiInputs`, the CI review's own reader, Ensemble's lines left out) must show a failing
     check. Then the SPEND GATE (`automaticRunAllowed`): over ⇒ skipped, never queued, nothing claimed.
   - ⚠ **THE SANDBOX** (AI Fix runs ONLY as a sandboxed session, docs/SANDBOX.md § AI Fix sessions):
     `deps.sandbox` (`fixSandboxReadiness`: a runtime, a free session, the free build slot; never
     reserves; the runtime's answer reused 30 s) is asked twice — in the sweep BEFORE the live PR read,
     and in `startAiFix` after the failure is proven and BEFORE the claim. **No runtime** ⇒ ONE
     `skipped` row with no teammate, detail "No container runtime on this computer." (`recordSandboxSkip`,
-    refreshed only when the sentence changes): no claim, no `limn/deps` line, no cap use, and a later
+    refreshed only when the sentence changes): no claim, no `ensemble/deps` line, no cap use, and a later
     tick at a head already so recorded reads nothing; a claim takes the row over once a runtime exists.
     **Busy** ⇒ nothing written or read; a later tick decides. A start that loses the race AFTER the
     claim (`too_many` / `build_busy` / `over_budget`) gives the claim back ("didn't start"); `no_runtime`
@@ -1142,18 +1151,20 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     fixes and conflict runs together — per PR in any rolling 24 hours (rows not `skipped`, so a
     teammate's hold and a no-runtime skip never count).
 - **TEAM CLAIMS FOR DEPENDENCY WORK** (`merge/deps-claim.ts`, 2026-11-03; modelled on
-  docs/CLAUDE-REVIEW.md § Team claims). When a teammate also runs Limn with these switches on the same
+  docs/CLAUDE-REVIEW.md § Team claims). When a teammate also runs Ensemble with these switches on the same
   repos, EVERY automated action — approve, rebase request, AI conflict run, AI fix, arming the merge —
-  first reads, then posts, ONE commit status on the PR head, context **`limn/deps`**
+  first reads, then posts, ONE commit status on the PR head, context **`ensemble/deps`**
   (`DEPENDENCY_CLAIM_CONTEXT`): pending "alex handling · fixing CI" → success "alex fixed CI · pushed
   1a2b3c4" / "alex approved" / "alex armed the merge · lands when checks pass", or "alex couldn't fix
   CI" (a failed attempt is still SUCCESS — never red), or "Cleared by alex: didn't start · free to
-  claim" (nothing written). AI runs re-post the pending line every 10 min.
+  claim" (nothing written). AI runs re-post the pending line every 10 min. ⚠ Written under
+  `ensemble/deps` only; an older install's `limn/deps` lines are read as the SAME context
+  (`sameStatusContext`) and their words fold the same way (Limn never reads `ensemble/deps`).
   - **THE FOLD** (`decideDepsClaim`, pure, `deps-claim.test.ts`): a teammate's PENDING line younger than
     **30 min** (`DEPS_CLAIM_TTL_MS`, from their NEWEST line) holds the head for EVERY action ("Robin is
-    handling this"); older is stale — a crashed Limn's line frees itself, no reconciler. A teammate's
+    handling this"); older is stale (and released by the reconciler, below). A teammate's
     SUCCESS line (done OR failed: their attempt is theirs) holds only the SAME FAMILY — approve ·
-    conflicts (rebase + AI resolve) · CI fix · merge — so Robin's approval never stops Alex's Limn
+    conflicts (rebase + AI resolve) · CI fix · merge — so Robin's approval never stops Alex's Ensemble
     arming the merge; a line whose family can't be read holds every family. Free lines ("Cleared
     by …") hold nothing. The reader's own lines hold nothing on this machine (its DB row stops
     repeats) EXCEPT an own FINISHED line of the SAME action (`actionOfLine`): another of the reader's
@@ -1161,15 +1172,60 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     login ("approver-x armed the merge" is a merge). A race goes to the pending run that STARTED
     first; the loser posts "Cleared by alex: robin is handling this". A new head has no lines.
     ⚠ Two of ONE login's machines that both hold a LIVE pending line both fold to `mine` (lines carry
-    no install identity) — not yet guarded.
+    no install identity) — not yet guarded (docs/TEAM-REVIEW.md § 13 gap 16).
+    Per poster only their NEWEST finished line of an ACTION counts (`seenAction`: a re-posted armed line,
+    a rebase ask re-posted as open), so an older line of the same action never holds.
+  - ⚠ **AN ARMED MERGE HOLDS ON A LEASE** (gap c, 2026-11-14): "alex armed the merge · lands when checks
+    pass" holds the merge family only for `DEPS_ARMED_LEASE_MS` (2 h) from alex's NEWEST armed line; the
+    arming machine's reconciler RE-POSTS it every `DEPS_ARMED_RENEW_MS` (45 min, ~32 a day — GitHub keeps
+    ≤ 1,000 statuses per commit and context) while ITS intent is `armed` on that head, and when the intent
+    ends unlanded (expired, failed, `disarmed_*`, retargeted, gone, re-armed on another head) posts
+    "Cleared by alex: merge not armed any more · free to claim" (`armedReleaseLine`), which frees alex's
+    earlier armed lines in every fold at once. A landed intent (`merged`) is closed with nothing posted.
+    A machine that went away stops renewing: the lease runs out and a teammate arms. (An older Ensemble's
+    un-renewed armed line expires the same way.)
+  - ⚠ **A REBASE ASK THAT CANNOT GO ON TO AI** (gap d): the asker posts "alex asked the bot to rebase · AI
+    step open to teammates" (`rebaseOpenLine`) instead of the plain done line when, at the ask, this
+    machine can't run the AI step (`aiBlocked` — AI not bound, the cap, a fix running — or
+    `aiStepPossibleHere`: no container runtime, over budget); or RE-POSTS it once
+    (`openConflictsToTeammates`, DB first: its own `rebase_request` ledger row, `finished`, not yet open)
+    when the AI step comes and this machine can't take it (the same reasons, a busy sandbox, a start
+    that did not happen). That line holds ONLY the rebase ask (`onlyAction: 'rebase_request'`, remembered
+    under its action, `depsHeldNow(…, action)`); the AI step is free. On the teammate's machine the
+    tick counts a teammate's FINISHED rebase ask (its `skipped` row, `teammate_handled`) as the ask in
+    `conflictStep`, so it never asks the bot again, waits `REBASE_WAIT_MS` from it, then runs the AI step.
+    The plain ask still holds the whole conflicts family (the asker will run the AI step).
   - **AI-PUSHED HEADS** (`markAiPushedHead`): an AI run that pushed a commit posts "alex's AI pushed
-    this commit · merged only once CI is green" ON THAT COMMIT. Every machine's merge sweep folds it to
+    this commit · merged only once CI is green" ON THAT COMMIT — ledgered first (an `ai_pushed` row whose
+    `head_sha` is the pushed commit), so a write GitHub did not take is RETRIED by the reconciler (gap h). Every machine's merge sweep folds it to
     `awaiting_ci` until the head's synced CI is `success` (re-checked every 5 min, no skip row), so a
     teammate's AI-written head is never armed while its CI runs. It holds nothing else.
   - **HOLDS BEFORE READS**: the tick and the merge sweep check the remembered hold for the action's
     family (`depsHeldNow`) BEFORE any live PR / CI read and before spending the per-tick budget.
-  - **ORDER**: read lines → hold ⇒ a `skipped` row and stop; else the DB claim (compare-and-set) → our
-    pending line → re-read (lost ⇒ the row becomes the teammate's skip) → act → the final line.
+  - **ORDER**: read lines → hold ⇒ a `skipped` row and stop; else the DB claim (compare-and-set) → the
+    LEDGER intent → our pending line → re-read (lost ⇒ the row becomes the teammate's skip) → act → the
+    final line.
+  - **THE LEDGER AND ITS RECONCILER** (gap a + b, 2026-11-14; `deps_claim_lines`, migration 0193;
+    `merge/deps-claim-ledger.ts`, `merge/deps-claim-release.ts`; the review claims' rules, docs/CLAUDE-REVIEW.md
+    § Team claims → Releasing stale lines): every line is written to the ledger ('claiming') BEFORE it is
+    posted and moved on after every write ('pending' → 'finished' / 'released', an armed merge 'armed').
+    A line GitHub did not take is kept as `final_description`. `releaseStaleDepsClaims` runs at boot
+    (after `reconcileDependencyActionsOnStartup`) and LAST in every auto-merge cron chain (after the
+    watcher, so it sees every intent that just ended). For each OPEN own row no claim of this process
+    holds (`depsClaimLive`: the row, or any live handle at that head — an AI run in flight): a
+    'claiming' / 'pending' row posts ONLY when the head's NEWEST line is still our pending one — the
+    kept final line (or stand-down), else "Cleared by alex: didn't finish · free to claim"; a newer line
+    by someone else, one of ours settled, or no line ⇒ closed, nothing posted. 'armed' rows renew /
+    release (above); 'ai_pushed' rows post unless one of ours is on the commit. Failures back off 1, 2,
+    4, 8 min, ≤ `DEPS_RELEASE_MAX_ATTEMPTS` (5); 403/404 ⇒ closed; a rate limit stops the pass. ⚠ Only
+    status lines are retried — never the action itself.
+    TEAMMATES' EXPIRED LINES: a `skipped` row with `teammate_handled` false (the DURABLE record of a
+    teammate's pending claim — it survives a restart) on the PR's CURRENT head, whose remembered lease
+    has ended: if the head's newest line is still that teammate's pending claim past the TTL
+    (`staleTeammateDepsLine`), post "Cleared by alex: robin's claim expired" (`releasedLine`) ONCE,
+    recorded as a 'teammate' row posted or not. Settled or live ⇒ nothing, re-read after 30 min / the
+    lease. An Ensemble that claims the head itself needs none of this (its claim takes the skip row over).
+    The delete paths keep this machine's OPEN rows (claiming / pending / armed); the erasure deletes all.
   - ⚠ **A SKIP IS NOT A FAILURE**: `state 'skipped'` + `teammate_login` / `teammate_handled` (migration
     0162), written once per (PR, head, action) and refreshed only when the holder changes; it is no
     attempt — never counted by the cap or the conflict steps, and a later claim TAKES THE ROW OVER. The
@@ -1178,8 +1234,8 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     (`team_claims_enabled`, now DORMANT) is gone, and `ClaimCtx` / `readDepsClaim` lost `claimsOn`.
     ⚠ **NEVER BLOCKS ON GITHUB**: no login (always so under vitest), unreadable
     lines or a refused post ⇒ the action goes ahead unmarked (logged).
-  - ⚠ **NEVER CI**: `limn/deps` starts `limn/`, so `isLimnStatusContext` (a prefix test) takes it out
-    of every CI read, rollup and merge state, like the review lines; Limn still posts only pending and
+  - ⚠ **NEVER CI**: `ensemble/deps` (and an old `limn/deps`) is an Ensemble context, so `isLimnStatusContext` takes it out
+    of every CI read, rollup and merge state, like the review lines; Ensemble still posts only pending and
     success lines (sync/limn-ci.ts relies on that).
   - **ARMING**: `runDependencyPolicyTick` claims `arm_merge` before `armIntentLive`; nothing armed ⇒
     the claim is given back. ⚠ An `arm_merge` row that is not running is TAKEN OVER by a later claim
@@ -1240,7 +1296,7 @@ A failing check is **FLAKY** when either holds, decided by ONE pure function, `c
   'diagnosed'`). An older head's review, a failed run and a `not_checked` item never count.
 
 The failing set is the NEWEST log row at the head, only while it is red — the same row
-`prFailingChecks` names. `limn/` statuses are never CI (`isLimnStatusContext`): never failing, never
+`prFailingChecks` names. `ensemble/` (and older `limn/`) statuses are never CI (`isLimnStatusContext`): never failing, never
 flaky. The loader `prFlakyChecks` reads stored rows only (three account-scoped reads for the whole
 board, keyed on the (PR, head) PAIR because the `IN × IN` predicates over-match). Nothing fetches on
 read; nothing is stored.
@@ -1417,12 +1473,13 @@ shorter form of each rule; this is the full wording.
 
 ### Dependency auto-merge
 
-- **Dependency auto-merge** (`merge/dependency-policy.ts`): OFF by default; a policy intent merges
+- **Dependency auto-merge** (`merge/dependency-policy.ts`): ON by default (NULL = on, off stored false); a policy intent merges
   like a click; a person's cancel is never overridden; red CI backs off after ONE live-proven
   failure (`checks_failed`).
 - **Dependency automation** (`merge/dependency-automation.ts`, Settings → Dependencies): approve +
-  resolve conflicts + fix with AI, OFF by default, TRUSTED bots only (the stored row's mark); one
-  policy gates every switch; claim before write (DB + the `limn/deps` team line), never retried; ≤ 2
+  resolve conflicts + fix with AI, ON by default, TRUSTED bots only (the stored mark; untouched =
+  dependabot[bot] / renovate[bot]); one policy gates every switch; claim before write (DB + the
+  ledgered `ensemble/deps` team line, reconciled), never retried; ≤ 2
   AI runs per PR per 24 h; an AI-pushed head must be green again; "Merged" is logged only on a landing.
 
 ### Auto-merge

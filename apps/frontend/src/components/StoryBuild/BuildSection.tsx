@@ -231,7 +231,7 @@ function BuildRepoCard({
               <span className={port.outcome == null ? 'text-ui-mute' : 'text-ui-ink'}>{port.line}</span>
               <InfoButton title="The port to main">
                 <p>The agent says, for each repository, whether the fix on the release was applied to main as it is, adapted for main, or not needed on main.</p>
-                <p className="mt-2">This is the agent's own report. Limn checks it against the two diffs and says when they disagree. It does not use test results: tests may not apply to both.</p>
+                <p className="mt-2">This is the agent's own report. Ensemble checks it against the two diffs and says when they disagree. It does not use test results: tests may not apply to both.</p>
                 <p className="mt-2">When main does not need the fix, Push opens only the pull request into the hotfix branch.</p>
               </InfoButton>
             </div>

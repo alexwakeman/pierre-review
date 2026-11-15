@@ -9,7 +9,9 @@
 //     size nobody could read passes only a policy that admits majors.
 //   • DOES THE POLICY ADMIT IT — `policyVerdict`: size, security-only, ecosystems.
 //   • IS THE AUTHOR TRUSTED — `isTrustedDependencyBot`: the STORED bot row (automated, role
-//     `dependency`, and the reader's trust mark). Never a login guess over the stored judgement.
+//     `dependency`, and the reader's trust mark, `dependencyTrustedOf`: an untouched mark trusts
+//     dependabot[bot] and renovate[bot] only). The stored judgement first; the login only for the default.
+//   • IS A SWITCH ON — `dependencySwitchOn`: NULL is ON (migration 0193), only false is OFF.
 //   • HOW TO ASK IT TO REBASE — `rebaseRequestFor`, by the STORED vendor kind.
 //   • WHAT TO DO ABOUT A CONFLICT — `conflictStep`: ask the bot once per head, wait, then AI (an
 //     unattended AI Fix session with the merge item; `dependencyConflictInstruction`, or — the PR is red
@@ -20,7 +22,7 @@ import type {
   DependencyEcosystem,
   DependencyUpdateLevel,
 } from '@pierre-review/shared';
-import { DEPENDENCY_UPDATE_LEVELS } from '@pierre-review/shared';
+import { DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS, DEPENDENCY_UPDATE_LEVELS } from '@pierre-review/shared';
 
 // ── The update's size ────────────────────────────────────────────────────────────────────────
 
@@ -210,18 +212,43 @@ export function parseLevel(raw: unknown): DependencyUpdateLevel | null {
 export interface StoredBotRow {
   automated: boolean;
   role: string;
-  /** The reader's mark (`workspace_reviewers.dependency_trusted`). */
+  /** The reader's mark (`workspace_reviewers.dependency_trusted`): true, false (an explicit untick),
+   *  or null (untouched — `dependencyTrustedOf` resolves it). */
   trusted: boolean | null;
+  /** The bot's GitHub login, for the default (`DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS`). */
+  login?: string | null;
+}
+
+const DEFAULT_TRUSTED = new Set(DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS.map((l) => l.toLowerCase()));
+
+/**
+ * THE TRUST MARK, RESOLVED (owner's decision 2026-11-14): the reader's stored mark wins both ways —
+ * true is trusted, an explicit false (an untick) is NOT trusted, whatever the login. Untouched (NULL)
+ * ⇒ trusted only for the logins in `DEFAULT_TRUSTED_DEPENDENCY_BOT_LOGINS` (dependabot[bot],
+ * renovate[bot]: GitHub App identities — the `[bot]` suffix is reserved, nobody can sign up under it)
+ * and untrusted for every other bot. An exact login match, never a guess from a name that looks like one.
+ */
+export function dependencyTrustedOf(stored: boolean | null | undefined, login: string | null | undefined): boolean {
+  if (stored === true) return true;
+  if (stored === false) return false;
+  return typeof login === 'string' && DEFAULT_TRUSTED.has(login.toLowerCase());
 }
 
 /**
- * The ONE trust test behind approval and conflict resolution: the author's STORED row in this
- * workspace says automated, role `dependency`, and the reader marked it trusted. No row → not
- * trusted, whatever its login looks like — a person can open a PR from a fork under any login.
+ * The ONE trust test behind approval, conflict resolution and the AI fix: the author's STORED row in
+ * this workspace says automated, role `dependency`, and its trust mark resolves to trusted
+ * (`dependencyTrustedOf`). No row → not trusted, whatever its login looks like — a person can open a
+ * PR from a fork under any login.
  */
 export function isTrustedDependencyBot(row: StoredBotRow | null | undefined): boolean {
-  return row != null && row.automated === true && row.role === 'dependency' && row.trusted === true;
+  return (
+    row != null && row.automated === true && row.role === 'dependency' && dependencyTrustedOf(row.trusted, row.login ?? null)
+  );
 }
+
+/** A dependency switch's stored value, read (migration 0193): NULL = ON (the default), only an
+ *  explicit false is OFF. */
+export const dependencySwitchOn = (stored: boolean | null | undefined): boolean => stored !== false;
 
 // ── Asking the bot to rebase ─────────────────────────────────────────────────────────────────
 
@@ -360,7 +387,7 @@ export function dependencyFixInstruction(a: {
     out.push('', `Check "${f.checkName}"${f.step ? `, step "${f.step}"` : ''}:`, '~~~~ ci-log', f.excerpt.replace(/~~~~/g, '~ ~ ~ ~'), '~~~~');
   }
   if (a.otherFailing.length > 0) {
-    out.push('', `Also failing, with no log Limn could read: ${a.otherFailing.map((n) => `"${n}"`).join(', ')}.`);
+    out.push('', `Also failing, with no log Ensemble could read: ${a.otherFailing.map((n) => `"${n}"`).join(', ')}.`);
   }
   return out.join('\n');
 }

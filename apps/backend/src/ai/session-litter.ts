@@ -31,7 +31,7 @@ import { closeSync, existsSync, lstatSync, openSync, readFileSync, readSync, rea
 import { rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { LEGACY_DATA_DIR_NAME, resolveDataDir } from '../data-dir.js';
+import { LEGACY_DATA_DIR_NAMES, resolveDataDir } from '../data-dir.js';
 
 /** Bump when the matching rules change, so a machine cleaned under the old rules runs once more. */
 export const SESSION_CLEANUP_VERSION = 1;
@@ -77,7 +77,7 @@ function isAncestorOrSelf(a: string, b: string): boolean {
 /** Limn's data directories that are safe to match (see (a) above). */
 function safeDataDirs(p: Omit<SessionCleanupPlaces, 'projectsDir'>): string[] {
   const out: string[] = [];
-  for (const dir of [p.dataDir, join(p.home, LEGACY_DATA_DIR_NAME)]) {
+  for (const dir of [p.dataDir, ...LEGACY_DATA_DIR_NAMES.map((n) => join(p.home, n))]) {
     const d = resolve(dir);
     const unsafe =
       d === resolve('/') || isAncestorOrSelf(d, p.home) || p.tmpDirs.some((t) => isAncestorOrSelf(d, t));

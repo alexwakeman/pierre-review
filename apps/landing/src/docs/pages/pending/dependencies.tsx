@@ -3,7 +3,7 @@ import { DocLink, H2, H3, Illustration, Note, Pill, PrRow, Ui, Warning } from '.
 
 export const meta: DocMeta = {
   title: 'Dependencies',
-  summary: 'Dependency updates from bots such as Dependabot and Renovate, and what Limn can do with them.',
+  summary: 'Dependency updates from bots such as Dependabot and Renovate, and what Ensemble can do with them.',
 };
 
 export default function Page(): JSX.Element {
@@ -31,7 +31,7 @@ export default function Page(): JSX.Element {
           <b>
             <Ui>Likely security fix</Ui>
           </b>
-          : Limn infers a fix but the update does not state it in full.
+          : Ensemble infers a fix but the update does not state it in full.
         </li>
         <li>
           <b>
@@ -75,8 +75,8 @@ export default function Page(): JSX.Element {
           arms Merge when ready on the rest. It asks before it does anything.
         </li>
         <li>
-          <b>Let Limn do it.</b> Settings can merge, approve, resolve threads on, or AI-fix dependency updates by
-          themselves, for the bots you trust. All of it is off until you switch it on. What it did is listed on
+          <b>Let Ensemble do it.</b> Settings can merge, approve, resolve threads on, or AI-fix dependency updates by
+          themselves, for the bots you trust. All of it is on until you switch it off. What it did is listed on
           this tab. See <DocLink to="merging/dependency-automation">Dependency automation</DocLink> and{' '}
           <DocLink to="settings/dependencies">Settings → Dependencies</DocLink>.
         </li>

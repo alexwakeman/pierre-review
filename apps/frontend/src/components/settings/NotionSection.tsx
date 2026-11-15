@@ -59,7 +59,7 @@ export function NotionForm({ workspaceId, saved }: { workspaceId: number; saved:
           <div className="space-y-2">
             <p>
               Create an internal integration at notion.so/my-integrations with &ldquo;Read content&rdquo; only, and paste its
-              token here. Limn only reads pages.
+              token here. Ensemble only reads pages.
             </p>
             <p>Then share each page with the integration in Notion (the page&rsquo;s ••• menu → Connections). Its child pages are shared with it.</p>
             <p>The token is stored sealed and is never shown again.</p>

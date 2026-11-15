@@ -166,8 +166,8 @@ export const PENDING = {
    *  (Activity/PendingAiReviews.tsx). Read-only rows; `isNew` = since the reader last opened the tab;
    *  `seen` = the visit that first showed it ("Seen today 09:12"), one block per visit. */
   aiSeen: [
-    { pr: PRS.refunds, by: 'Your Limn', verdict: 'Request changes', tone: 'red', findings: '2 findings', when: '4 min ago', isNew: true },
-    { pr: PRS.ledgerIndex, by: 'Priya’s Limn', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false, seen: 'Seen today 09:12' },
+    { pr: PRS.refunds, by: 'Your Ensemble', verdict: 'Request changes', tone: 'red', findings: '2 findings', when: '4 min ago', isNew: true },
+    { pr: PRS.ledgerIndex, by: 'Priya’s Ensemble', verdict: 'Comment', tone: 'grey', findings: '1 finding', when: '1 hour ago', isNew: false, seen: 'Seen today 09:12' },
   ] as { pr: Pr; by: string; verdict: string; tone: Tone; findings: string; when: string; isNew: boolean; seen?: string }[],
 };
 
@@ -463,7 +463,7 @@ export const BOT_SUMMARY = [
 export const BOT_WORTH = [
   { bot: 'CodeRabbit', comments: 412, high: 60, acted: '38%', actedN: 157 },
   { bot: 'Copilot', comments: 290, high: 35, acted: '22%', actedN: 64 },
-  { bot: 'Limn', comments: 118, high: 75, acted: '71%', actedN: 84, ours: true },
+  { bot: 'Ensemble', comments: 118, high: 75, acted: '71%', actedN: 84, ours: true },
 ];
 
 export const BENCH = {
@@ -561,7 +561,7 @@ export const SPRINT_RELEASES = {
 /** First run (Activity/FirstRunOnboarding.tsx): the repositories you have been active in. */
 export const SETUP_REPOS = {
   title: 'Add the repos you work on',
-  lead: 'Limn tracks the repos you care about — here’s what you’ve been working on.',
+  lead: 'Ensemble tracks the repos you care about — here’s what you’ve been working on.',
   suggestions: [
     { name: REPOS.payments, desc: 'Card and bank payments', stars: 24, prs: 11, on: true },
     { name: REPOS.api, desc: 'Public API and webhooks', stars: 12, prs: 7, on: true },
@@ -600,8 +600,8 @@ export type TrackerProvider = '' | 'jira' | 'github' | 'linear' | 'notion';
 
 /**
  * Team claims (always on, docs/CLAUDE-REVIEW.md § Team claims): the status
- * lines each teammate's Limn posts on a commit, as the PR's checks list shows them
- * (components/CheckList.tsx: the "Limn" label, the state words "passed" / "running"). The lines'
+ * lines each teammate's Ensemble posts on a commit, as the PR's checks list shows them
+ * (components/CheckList.tsx: the "Ensemble" label, the state words "passed" / "running"). The lines'
  * own words are the backend's (review/claude-review/team-claim.ts). #1190 is Priya's pull request.
  */
 export const TEAM = {
@@ -611,11 +611,11 @@ export const TEAM = {
     checks: [
       { name: 'build', limn: false, state: 'passed', tone: 'green', note: null },
       { name: 'test-web', limn: false, state: 'passed', tone: 'green', note: null },
-      { name: 'limn/review-claude', limn: true, state: 'passed', tone: 'green', note: 'sam reviewed · 2 comments' },
-      { name: 'limn/review-codex', limn: true, state: 'running', tone: 'amber', note: 'dana is reviewing with Codex' },
+      { name: 'ensemble/review-claude', limn: true, state: 'passed', tone: 'green', note: 'sam reviewed · 2 comments' },
+      { name: 'ensemble/review-codex', limn: true, state: 'running', tone: 'amber', note: 'dana is reviewing with Codex' },
     ] as { name: string; limn: boolean; state: string; tone: Tone; note: string | null }[],
-    /** The "Limn" label's tooltip in CheckList.tsx. */
-    limnTitle: 'Posted by Limn to mark an auto review. Not CI.',
+    /** The "Ensemble" label's tooltip in CheckList.tsx. */
+    limnTitle: 'Posted by Ensemble to mark an auto review. Not CI.',
     /** The Open PRs panel's cell for the provider a teammate holds (Activity/OpenPrsAiReview.tsx). */
     skip: 'Reviewed by @sam',
   },
@@ -633,5 +633,79 @@ export const TEAM = {
       { name: 'Priya', verdict: 'Approve', day: '3 Nov 14:20', sha: '1c4bd65' },
       { name: 'You', verdict: 'Comment', day: '3 Nov 11:05', sha: '8a8ec14' },
     ] as { name: string; verdict: string; day: string; sha: string }[],
+  },
+};
+
+// ---- the build page (/build) ------------------------------------------------
+
+/**
+ * PAY-142 as the /build page shows it: the ticket across TWO pull requests (#612 in acme/payments and
+ * #1196 in acme/web), its "Ticket design" and its story check.
+ *
+ * `flow` has the shape of the app's stored `FlowDiagram` (packages/shared sequence-diagrams.ts):
+ * lanes from FLOW_LANES, step kinds from FLOW_STEP_KINDS (shown by FLOW_STEP_WORD), each lane and step
+ * tagged with the pull request that does it. The PR chips are `prBadgeTexts` for two repositories
+ * ("payments #612", "web #1196"). The flow agrees with the story check below: there is NO step that
+ * checks the 30 days (criterion 3 Not met), and the amount check does not say whole pence (the
+ * handbook finding).
+ */
+export const BUILD = {
+  ticket: STORY,
+  prs: [PRS.refunds, { num: 1196, title: 'Refund form', repo: REPOS.web }] as Pr[],
+  flow: {
+    lanes: [
+      { id: 'form', kind: 'Screen', label: 'Refund form', change: 'new', pr: 'web #1196' },
+      { id: 'route', kind: 'API route', label: 'Refunds route', change: 'changed', pr: 'payments #612' },
+      { id: 'policy', kind: 'Service', label: 'RefundPolicy', change: 'changed', pr: 'payments #612' },
+      { id: 'tables', kind: 'Database', label: 'orders, refunds tables', change: 'changed', pr: 'payments #612' },
+      { id: 'ledger', kind: 'Queue / job', label: 'Daily ledger job', change: 'unchanged', pr: null },
+      { id: 'mail', kind: 'Outside API', label: 'Email service', change: 'unchanged', pr: null },
+    ] as { id: string; kind: string; label: string; change: 'new' | 'changed' | 'unchanged'; pr: string | null }[],
+    steps: [
+      { n: 1, from: 'form', to: 'route', word: 'Call', label: 'refund amount and order id', pr: 'web #1196' },
+      { n: 2, from: 'route', to: 'route', word: 'Check', label: 'amount is above 0', pr: 'payments #612' },
+      { n: 3, from: 'route', to: 'policy', word: 'Call', label: 'the refund request', pr: 'payments #612' },
+      { n: 4, from: 'policy', to: 'tables', word: 'Read', label: 'the order and its refunds so far', pr: 'payments #612' },
+      { n: 5, from: 'policy', to: 'tables', word: 'Write', label: 'a refund row; the order stays open', pr: 'payments #612' },
+      { n: 6, from: 'policy', to: 'ledger', word: 'Emit', label: 'refund event for the daily ledger', pr: 'payments #612' },
+      { n: 7, from: 'policy', to: 'mail', word: 'Call', label: 'the refund email', pr: 'payments #612' },
+      { n: 8, from: 'policy', to: 'route', word: 'Return', label: 'the new refund total', pr: 'payments #612' },
+      { n: 9, from: 'route', to: 'form', word: 'Return', label: 'refund total and order status', pr: 'payments #612' },
+    ] as { n: number; from: string; to: string; word: string; label: string; pr: string }[],
+  },
+  /** The story check's words for the same ticket (shared TICKET_CRITERION_STATUS_LABEL, STORY_MISSING_HEADING). */
+  check: {
+    why: [
+      'Done in #612',
+      'Code in #612, the retry path still sends two',
+      'Belongs in #612',
+      'Done in #612',
+    ],
+    missing: 'An audit log entry for each partial refund',
+    notAsked: { pr: 'web #1196', text: 'A refunds filter on the orders list' },
+  },
+  /**
+   * "How the code meets each criterion" for the same ticket (the story view's criteria map,
+   * apps/frontend/src/components/Activity/CriteriaMap.tsx): one link per (criterion, pull request) a
+   * pull request's description says it moves forward, with how and the files. Criterion 3 has none,
+   * as the story check and the design agree.
+   */
+  criteriaMap: {
+    prs: [
+      { id: 'pay', label: 'payments#612', title: 'Partial refunds in RefundPolicy' },
+      { id: 'web', label: 'web#1196', title: 'Refund form' },
+    ],
+    links: [
+      { n: 1, pr: 'web', how: 'The form asks for an amount below the order total.', files: ['web/src/refunds/RefundForm.tsx'] },
+      { n: 1, pr: 'pay', how: 'RefundPolicy writes a refund row and leaves the order open.', files: ['src/refunds/policy.ts', 'src/refunds/repo.ts'] },
+      { n: 2, pr: 'pay', how: 'Sends the refund email once per refund; the retry path sends it again.', files: ['src/refunds/policy.ts', 'src/mail/refund-email.ts'] },
+      { n: 4, pr: 'pay', how: 'Emits a refund event that the daily ledger job reads.', files: ['src/refunds/events.ts'] },
+    ] as { n: number; pr: 'pay' | 'web'; how: string; files: string[] }[],
+  },
+  /** The "Review in Ensemble" section the review loop ends a pull request's description with (loop/pr-body.ts). */
+  loopBody: {
+    reviewed: 'Reviewed 3 times by Claude and Codex before this pull request opened.',
+    counts: 'Fixed: 3 · Answered: 1 · Pushed back and accepted: 1 · Still open: 0',
+    criteria: 'Acceptance criteria: 2 met, 0 not applicable, 0 not met.',
   },
 };

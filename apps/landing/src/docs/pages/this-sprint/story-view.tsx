@@ -43,7 +43,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The story view is Limn&rsquo;s page for one ticket. It brings together what the tracker says, what the
+        The story view is Ensemble&rsquo;s page for one ticket. It brings together what the tracker says, what the
         team said in the comments, what the pull requests deliver, and what is still missing. It works for any
         ticket on the workspace&rsquo;s tracker, including a ticket with no pull request yet.
       </p>
@@ -101,8 +101,17 @@ export default function Page(): JSX.Element {
           the ticket has none written. See <DocLink to="story-checks/acceptance-criteria">Acceptance criteria</DocLink>.
         </li>
         <li>
-          <strong>The design</strong>, when the ticket has two or more pull requests: a drawing of how the pieces
-          fit. <Ui>Draw design</Ui> or <Ui>Redraw design</Ui> is in the section heading.
+          <strong>How the code meets each criterion</strong>, after a story check: each criterion beside the pull
+          requests whose description says they move it forward, with how and the files (select a line to list them).
+          A criterion no pull request claims says &ldquo;No pull request claims this.&rdquo; A pull request pushed
+          since its description says &ldquo;No description at its current commit.&rdquo; until the next check. The
+          descriptions are written by AI from each pull request&rsquo;s changes; the status is the story
+          check&rsquo;s. On a narrow screen it is one list.
+        </li>
+        <li>
+          <strong>The design</strong>: with two or more pull requests, a drawing of how the pieces fit; with one,
+          that pull request&rsquo;s own design. <Ui>Draw design</Ui> or <Ui>Redraw design</Ui> is in the section
+          heading.
         </li>
         <li>
           <strong>Asked for outside the criteria</strong>: what the ticket&rsquo;s title or description asks for that
@@ -152,11 +161,11 @@ export default function Page(): JSX.Element {
       <H2 id="change-the-status-in-jira">Change the status in Jira</H2>
       <p>
         On a Jira ticket the status chip is a menu. Opening it asks Jira which statuses the ticket can move to from
-        here. Pick one and Jira changes the ticket at once; Limn then reads the status back and shows it everywhere.
+        here. Pick one and Jira changes the ticket at once; Ensemble then reads the status back and shows it everywhere.
       </p>
       <Warning>
         This writes to Jira as the owner of the workspace&rsquo;s Jira token. There is no confirm step: the change is
-        made when you pick the status. Limn lists only statuses it can make without Jira&rsquo;s own form, and says
+        made when you pick the status. Ensemble lists only statuses it can make without Jira&rsquo;s own form, and says
         &ldquo;Your Jira token cannot change this issue.&rdquo; when the token may not. On GitHub Issues, Linear and
         Notion the status is shown and not changed.
       </Warning>
@@ -165,20 +174,45 @@ export default function Page(): JSX.Element {
         On Jira, GitHub Issues and Linear the assignee is a menu. Opening it asks your tracker who can be assigned
         this ticket: on Jira the people assignable in the ticket&rsquo;s project, on GitHub the people assignable in
         the issue&rsquo;s repository, on Linear the active members of the ticket&rsquo;s team. Type to find a person,
-        or pick <Ui>Unassigned</Ui>. The ticket changes at once; Limn then reads the assignee back and shows it
+        or pick <Ui>Unassigned</Ui>. The ticket changes at once; Ensemble then reads the assignee back and shows it
         everywhere, including the People board. If the tracker refuses, the menu shows the person you had before and
         says why in one line.
       </p>
       <Warning>
         This writes to your tracker: on Jira as the owner of the workspace&rsquo;s Jira token, on GitHub as you, on
         Linear as the owner of the saved Linear key. There is no confirm step. On GitHub, the person you pick becomes
-        the issue&rsquo;s only assignee. Limn keeps the list of people for 10 minutes, so a new team member can take
-        that long to appear. On Notion the assignee is shown and not changed: Limn only reads Notion.
+        the issue&rsquo;s only assignee. Ensemble keeps the list of people for 10 minutes, so a new team member can take
+        that long to appear. On Notion the assignee is shown and not changed: Ensemble only reads Notion.
       </Warning>
       <Note>
-        The story view reads what Limn has already stored. Opening it does not call your tracker. Limn reads the
-        tracker in the background; see <DocLink to="integrations/jira#how-often-limn-reads">How often Limn reads</DocLink>.
+        The story view reads what Ensemble has already stored. Opening it does not call your tracker. Ensemble reads the
+        tracker in the background; see <DocLink to="integrations/jira#how-often-ensemble-reads">How often Ensemble reads</DocLink>.
       </Note>
+
+      <H2 id="ask-about-this-story">Ask about this story</H2>
+      <p>
+        At the bottom of the story view, ask for advice about the ticket and its pull requests. Pick a ready-made
+        question or type your own, then press <Ui>Ask</Ui>:
+      </p>
+      <ul>
+        <li>
+          <Ui>How to test</Ui>: what to do, step by step, to prove the ticket is done once its pull requests are merged,
+          and what still needs doing.
+        </li>
+        <li>
+          <Ui>Integration</Ui>: how the change fits with the other services, repositories, configuration and data.
+        </li>
+        <li>
+          <Ui>Risks</Ui> and <Ui>Criteria check</Ui>.
+        </li>
+      </ul>
+      <p>
+        The agent reads the ticket, each pull request&rsquo;s changes and code, every repository in the workspace, the
+        workspace&rsquo;s reference documents and the sprint&rsquo;s other stories. It also gets your Claude memory,
+        CLAUDE.md and skills for these projects, the same ones Implement story uses (Settings → Sandbox). It only reads:
+        it runs nothing and changes nothing. It gets ready when you open the story, so the first answer starts quickly, and closes after 10 minutes
+        without use. Chats are saved with the story: pick an earlier one in the menu to read it or ask a follow-up.
+      </p>
 
       <H2 id="why-it-helps">Why it helps</H2>
       <p>

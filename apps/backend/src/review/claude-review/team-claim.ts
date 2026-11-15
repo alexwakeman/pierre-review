@@ -63,7 +63,7 @@ import type {
   ClaudeReviewVerdict,
   ClaudeTeamClaimSkip,
 } from '@pierre-review/shared';
-import { aiProviderName } from '@pierre-review/shared';
+import { aiProviderName, ensembleStatusContext, sameStatusContext } from '@pierre-review/shared';
 import { isRateLimitError } from '../../github/client.js';
 import { noteLimited } from '../../github/rate-budget.js';
 import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
@@ -91,10 +91,23 @@ const FREE_PHRASE = 'free to claim';
 const CLEARED_PREFIX = 'Cleared by ';
 const RELEASED_PREFIX = 'Released: ';
 
-/** The status context for a provider family. */
+/** The status context WRITTEN for a provider family (`ensemble/review-<provider>`). Readers match an
+ *  older Limn's `limn/review-<provider>` line too (`sameStatusContext`, in `listLines`). */
 export function teamClaimContext(provider: AiProviderId): string {
-  return provider === 'codex' ? 'limn/review-codex' : 'limn/review-claude';
+  return ensembleStatusContext(provider === 'codex' ? 'review-codex' : 'review-claude');
 }
+
+/**
+ * The context to post a RELEASE (a success line settling a pending one) under: the context the
+ * newest line was read under, so a pending line an older Limn posted as `limn/…` is settled on that
+ * same context (else it stays pending on GitHub beside our new `ensemble/…` line). A CLAIM (pending)
+ * always posts under `teamClaimContext`.
+ */
+export function releaseContextOf(newest: TeamClaimLine | null | undefined, written: string): string {
+  return newest?.context != null && sameStatusContext(newest.context, written) ? newest.context : written;
+}
+
+const KEPT_WORDS = 'kept in Ensemble';
 
 const clamp = (s: string): string =>
   s.length <= TEAM_CLAIM_DESCRIPTION_MAX ? s : `${s.slice(0, TEAM_CLAIM_DESCRIPTION_MAX - 1)}…`;
@@ -111,7 +124,7 @@ export function reviewingLine(login: string, provider: AiProviderId): string {
  * nothing.
  */
 export function reviewedLine(login: string, comments: number | null, verdict: ClaudeReviewVerdict | null = null): string {
-  if (comments == null) return clamp(`${login} reviewed · kept in Limn`);
+  if (comments == null) return clamp(`${login} reviewed · ${KEPT_WORDS}`);
   const count = `${comments === 0 ? 'no' : comments} comment${comments === 1 ? '' : 's'}`;
   if (verdict === 'APPROVE') return clamp(`${login} reviewed · approved${comments > 0 ? ` · ${count}` : ''}`);
   if (verdict === 'REQUEST_CHANGES') return clamp(`${login} reviewed · changes requested · ${count}`);
@@ -196,6 +209,9 @@ export interface TeamClaimLine {
   description: string | null;
   createdAtMs: number;
   login: string | null; // the line's creator
+  // The context GitHub listed it under (`ensemble/…` or an older Limn's `limn/…`); absent in tests'
+  // fakes that do not set it.
+  context?: string;
 }
 
 // A FREE line: a success starting "Cleared by " (a Clear, a release of ours or of a teammate's expired
@@ -205,7 +221,8 @@ export interface TeamClaimLine {
 // A teammate's review KEPT IN LIMN put nothing on GitHub: the team got nothing from it, so it holds
 // nothing (2026-11-03 — robin-dunn's kept-in-Limn Claude reviews held six PRs, the pair fell back to a
 // Codex over its usage limit, and nobody got a review).
-const KEPT_PHRASE = ' reviewed · kept in Limn';
+// Written as "kept in Ensemble"; an older Limn's "kept in Limn" line reads the same.
+const KEPT_PHRASES = [' reviewed · kept in Ensemble', ' reviewed · kept in Limn'];
 const isFreeLine = (l: TeamClaimLine): boolean => {
   const d = l.description ?? '';
   if (l.state === 'pending') return d.includes(FREE_PHRASE);
@@ -214,7 +231,7 @@ const isFreeLine = (l: TeamClaimLine): boolean => {
     d.includes(FREE_PHRASE) ||
     d.startsWith(CLEARED_PREFIX) ||
     d.startsWith(RELEASED_PREFIX) ||
-    d.endsWith(KEPT_PHRASE) ||
+    KEPT_PHRASES.some((k) => d.endsWith(k)) ||
     d.includes(SKIPPED_PHRASE)
   );
 };
@@ -425,10 +442,11 @@ export const defaultTeamClaimGithub: TeamClaimGithub = {
         Array<{ id: number; state: string; description: string | null; context: string; created_at: string; creator: { login: string } | null }>
       >(token, `/repos/${enc(owner)}/${enc(name)}/commits/${enc(sha)}/statuses?per_page=100&page=${page}`);
       for (const r of rows) {
-        if (r.context !== context) continue;
+        // Either prefix: an older Limn's `limn/review-claude` line is the same line as ours.
+        if (!sameStatusContext(r.context, context)) continue;
         const at = Date.parse(r.created_at);
         if (!Number.isFinite(at)) continue;
-        out.push({ id: r.id, state: r.state, description: r.description, createdAtMs: at, login: r.creator?.login ?? null });
+        out.push({ id: r.id, state: r.state, description: r.description, createdAtMs: at, login: r.creator?.login ?? null, context: r.context });
       }
       if (rows.length < 100) break;
     }
@@ -1190,19 +1208,22 @@ export async function clearTeamClaim(
   const login = (await gh.login(accountId).catch(() => null)) ?? null;
   if (!login) return { ok: false, error: 'error', message: 'Your GitHub login is not known yet.' };
   let stillPending: boolean;
+  let clearContext = teamClaimContext(provider);
   try {
-    const newest = newestLine(await gh.listLines(accountId, owner, name, headSha, teamClaimContext(provider)));
+    const newest = newestLine(await gh.listLines(accountId, owner, name, headSha, clearContext));
     stillPending = newest != null && !settles(newest);
+    // An older Limn's pending `limn/…` line is cleared on its own context.
+    clearContext = releaseContextOf(newest, clearContext);
   } catch (err) {
     const kind = claimErrorKind(err, accountId);
     if (kind === 'rate_limited') {
       return { ok: false, error: 'rate_limited', message: 'GitHub rate limit reached. Try again in a few minutes.' };
     }
-    return { ok: false, error: 'error', message: `Could not read the commit's Limn lines: ${errText(err).slice(0, 160)}` };
+    return { ok: false, error: 'error', message: `Could not read the commit's Ensemble lines: ${errText(err).slice(0, 160)}` };
   }
   if (stillPending) {
     try {
-      await gh.postLine(accountId, owner, name, headSha, teamClaimContext(provider), {
+      await gh.postLine(accountId, owner, name, headSha, clearContext, {
         state: 'success',
         description: clearedLine(login),
       });
@@ -1224,7 +1245,7 @@ export async function clearTeamClaim(
     ctx.log.warn(`team claim pr ${prId}: ledger not cleared: ${errText(err)}`),
   );
   const row = (await latestClaimRecordsAtHead(ctx, accountId, prId, headSha)).find(
-    (r) => r.teamClaim.context === teamClaimContext(provider),
+    (r) => sameStatusContext(r.teamClaim.context, teamClaimContext(provider)),
   );
   if (row && stillPending) {
     await saveTeamClaimRecord(ctx, row.id, { ...row.teamClaim, lastLine: 'cleared', at: new Date().toISOString() });

@@ -38,7 +38,7 @@ export const RUN_CHECK_TOOL_NAME = 'mcp__workspace__run_check';
 
 export type HookDecision = { allow: true } | { allow: false; reason: string };
 
-const deny = (reason: string): HookDecision => ({ allow: false, reason: `Limn path guard: ${reason}` });
+const deny = (reason: string): HookDecision => ({ allow: false, reason: `Ensemble path guard: ${reason}` });
 
 /** Every string anywhere in `v` (the patch text may sit under any key, or be the input itself). */
 function strings(v: unknown, out: string[] = [], depth = 0): string[] {
@@ -124,7 +124,7 @@ export function decideCodexToolCall(toolName: string, toolInput: unknown, roots:
   if (toolName === RUN_CHECK_TOOL_NAME) return deny('refused: this run may not run checks.');
 
   if (toolName.startsWith('mcp__')) {
-    if (!toolName.startsWith(WORKSPACE_TOOL_PREFIX)) return deny(`refused: only Limn's workspace tools may run, not ${toolName}.`);
+    if (!toolName.startsWith(WORKSPACE_TOOL_PREFIX)) return deny(`refused: only Ensemble's workspace tools may run, not ${toolName}.`);
     if (readRoots.length === 0) return deny('refused: this run has no readable folders.');
     const input = toolInput && typeof toolInput === 'object' ? (toolInput as Record<string, unknown>) : {};
     const v = input.path;
@@ -137,7 +137,7 @@ export function decideCodexToolCall(toolName: string, toolInput: unknown, roots:
   }
 
   if (HARMLESS_TOOLS.has(toolName)) return { allow: true };
-  return deny(`refused: ${toolName || 'this tool'} is not one Limn allows.`);
+  return deny(`refused: ${toolName || 'this tool'} is not one Ensemble allows.`);
 }
 
 /** The roots as they travel to the hook process (the `LIMN_CODEX_GUARD` environment variable). */

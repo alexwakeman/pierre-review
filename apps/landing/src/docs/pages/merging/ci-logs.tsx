@@ -3,7 +3,7 @@ import { Btn, CheckRow, DocLink, H2, H3, Illustration, Log, Note, Pill, Steps, U
 
 export const meta: DocMeta = {
   title: 'Read CI logs',
-  summary: 'Open the failing part of a CI log without leaving Limn, and re-run failed jobs.',
+  summary: 'Open the failing part of a CI log without leaving Ensemble, and re-run failed jobs.',
 };
 
 export default function Page(): JSX.Element {
@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
       <p>
         A pull request’s checks are listed on its Overview tab, in the <Ui>Status</Ui> row. For a check that runs on
         GitHub Actions, you can open its job log right there, read the end of it where the failure usually is, and
-        re-run the failed jobs. Limn also marks checks that look flaky, so you know when a red build is probably not
+        re-run the failed jobs. Ensemble also marks checks that look flaky, so you know when a red build is probably not
         your code.
       </p>
 
@@ -50,7 +50,7 @@ export default function Page(): JSX.Element {
       </Steps>
       <p>
         Logs open for passing checks too, if you want to see what a green check actually ran. A check that does not
-        run on GitHub Actions has no log Limn can read, so it is listed with a link to where it runs.
+        run on GitHub Actions has no log Ensemble can read, so it is listed with a link to where it runs.
       </p>
 
       <H2 id="re-run">Re-run jobs</H2>
@@ -63,7 +63,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        After you press, Limn says “Re-run requested — CI updates on the next sync.” The re-run goes out under your
+        After you press, Ensemble says “Re-run requested — CI updates on the next sync.” The re-run goes out under your
         GitHub account, so you need push access to the repository.
       </p>
 

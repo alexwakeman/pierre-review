@@ -238,7 +238,7 @@ export function whyHere(card: InsightCard): string {
             : 'GitHub will merge your PR now.';
         case 'own_thread':
           if (card.own?.kind === 'thread' && card.own.stillOpen != null) {
-            return 'A Limn review found this earlier comment not addressed. It goes away when you push a fix, reply on the thread or resolve it.';
+            return 'An Ensemble review found this earlier comment not addressed. It goes away when you push a fix, reply on the thread or resolve it.';
           }
           return `A review comment on your PR has had no reply and no later commit for ${agePhrase(hoursSince(card.since))}.`;
         case 'watched_repo_pr':

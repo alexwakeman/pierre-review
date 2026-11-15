@@ -337,7 +337,7 @@ function prState(s: GqlPullRequest['state']): 'open' | 'merged' | 'closed' {
 }
 
 /**
- * The `pull_requests.merge_commit_oid` value to WRITE for a synced PR node (migration 0192;
+ * The `pull_requests.merge_commit_oid` value to WRITE for a synced PR node (migration 0195;
  * docs/RELEASES.md), per the partial-response policy:
  *   • an oid string arrived ⇒ write it;
  *   • `mergeCommit: null` on a PR GitHub says is OPEN or CLOSED ⇒ null (a positive "not merged");
@@ -892,7 +892,7 @@ export async function persistPr(
     // answer; null / undefined learn nothing and leave the column alone (spread, never assigned).
     const forkObserved: { isCrossRepository?: boolean } =
       typeof pr.isCrossRepository === 'boolean' ? { isCrossRepository: pr.isCrossRepository } : {};
-    // THE LANDED COMMIT (migration 0192): an oid when one arrives; a null only for a PR GitHub says
+    // THE LANDED COMMIT (migration 0195): an oid when one arrives; a null only for a PR GitHub says
     // is not merged. Spread, never assigned.
     const mergeCommitWrite = mergeCommitOidToWrite(pr);
     const mergeCommitObserved: { mergeCommitOid?: string | null } =

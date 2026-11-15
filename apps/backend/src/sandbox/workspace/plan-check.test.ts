@@ -129,7 +129,7 @@ describe('validateBuildPlan — content (named and dropped)', () => {
     const r = validateBuildPlan(p, CTX);
     expect(r.shapeProblems).toEqual([]);
     expect(r.droppedEvidence).toEqual({ C1: [0, 1, 2] });
-    expect(r.contentProblems.join('\n')).toMatch(/svc-9" is not a run Limn recorded/);
+    expect(r.contentProblems.join('\n')).toMatch(/svc-9" is not a run Ensemble recorded/);
     expect(r.contentProblems.join('\n')).toMatch(/no reference documents are in this session/);
   });
   it('drops a quote too short to check, an absolute or .. path, and a span over 120 lines', () => {

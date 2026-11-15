@@ -37,8 +37,8 @@ export type UrlFetchErrorCode =
   | 'too_large';
 
 export const URL_FETCH_MESSAGES: Record<UrlFetchErrorCode, string> = {
-  bad_url: 'That is not a web address Limn can read. Use an http or https address.',
-  blocked: 'Limn does not read pages at that address.',
+  bad_url: 'That is not a web address Ensemble can read. Use an http or https address.',
+  blocked: 'Ensemble does not read pages at that address.',
   redirect_off_host: 'That page redirects to another site. Add the address it redirects to instead.',
   too_many_redirects: 'That page redirects too many times.',
   timeout: 'The page took too long to answer.',
@@ -109,7 +109,7 @@ export const nodePageTransport: PageTransport = (url, opts) =>
       method: 'GET',
       headers: {
         accept: 'text/html,application/xhtml+xml,text/plain,text/markdown,application/pdf;q=0.9,*/*;q=0.1',
-        'user-agent': 'Limn reference docs',
+        'user-agent': 'Ensemble reference docs',
       },
       lookup: opts.lookup as unknown as RequestOptions['lookup'],
     };

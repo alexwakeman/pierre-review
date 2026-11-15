@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        <Ui>This Sprint</Ui> is one board for the sprint your team is working in now. Limn reads the sprint&rsquo;s
+        <Ui>This Sprint</Ui> is one board for the sprint your team is working in now. Ensemble reads the sprint&rsquo;s
         tickets from your issue tracker, joins each ticket to the pull requests that name it, and lays the tickets
         out by status. You see in one place what is not started, what is in review, what waits on another ticket
         and what is done.
@@ -29,7 +29,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <DocLink to="integrations/jira">Jira</DocLink>: the open sprint of the projects the workspace reads. Set
-          your <Ui>Project keys</Ui> so Limn knows which projects to ask about.
+          your <Ui>Project keys</Ui> so Ensemble knows which projects to ask about.
         </li>
         <li>
           <DocLink to="integrations/linear">Linear</DocLink>: each team&rsquo;s active cycle.
@@ -43,7 +43,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        When the tracker has no sprint, or none is active, Limn shows the To do and In progress tickets edited in
+        When the tracker has no sprint, or none is active, Ensemble shows the To do and In progress tickets edited in
         the workspace&rsquo;s reporting window instead, and the title says so.
       </p>
       <Note>
@@ -83,11 +83,11 @@ export default function Page(): JSX.Element {
       <H2 id="columns-and-statuses">Columns and statuses</H2>
       <p>
         The columns are <Ui>Not started</Ui>, <Ui>In progress</Ui>, <Ui>Code review</Ui>, <Ui>Product review</Ui>{' '}
-        and <Ui>Complete</Ui>. Limn puts each tracker status in a column by itself, using the status&rsquo;s
+        and <Ui>Complete</Ui>. Ensemble puts each tracker status in a column by itself, using the status&rsquo;s
         category in the tracker. If your board has its own stages, press <Ui>Statuses</Ui> to add, rename, reorder
         or remove columns, give each column a meaning, and drag each status into the column it belongs to. A switch
         in the same editor moves a ticket from Code review to Product review when all of its pull requests have
-        merged. <Ui>Reset to automatic</Ui> goes back to Limn&rsquo;s own columns. A status that is new on your
+        merged. <Ui>Reset to automatic</Ui> goes back to Ensemble&rsquo;s own columns. A status that is new on your
         board since you saved is marked &ldquo;not placed yet&rdquo;.
       </p>
       <p>
@@ -156,13 +156,13 @@ export default function Page(): JSX.Element {
 
       <H2 id="how-it-stays-current">How it stays current</H2>
       <p>
-        Limn reads the sprint in the background about every 20 minutes, but only for a workspace whose This Sprint
+        Ensemble reads the sprint in the background about every 20 minutes, but only for a workspace whose This Sprint
         page someone opened in the last 7 days. Opening the page does not call the tracker. While the page is open
         it checks once a minute whether anything changed and redraws only then, so the board does not jump while
         you read it.
       </p>
       <Tip>
-        On GitHub Issues, Limn can read a GitHub Projects iteration only when your <code>gh</code> sign-in has the{' '}
+        On GitHub Issues, Ensemble can read a GitHub Projects iteration only when your <code>gh</code> sign-in has the{' '}
         <code>read:project</code> scope. If it does not, the page uses milestones and shows the command to add the
         scope: <code>gh auth refresh -s read:project</code>.
       </Tip>

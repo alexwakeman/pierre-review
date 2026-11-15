@@ -113,7 +113,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       await expect(codex.runAgent({ kind } as Parameters<typeof codex.runAgent>[0])).rejects.toThrow('Codex is not signed in');
     }
     expect(P.codexKindNotAvailableMessage('review')).toBe(
-      'Codex cannot run pull request reviews in this version of Limn yet. Choose Claude in Settings → AI.',
+      'Codex cannot run pull request reviews in this version of Ensemble yet. Choose Claude in Settings → AI.',
     );
     // The allow-list is the mechanism Phase 3 fills.
     expect(P.codexKindReady('review', new Set())).toBe(false);
@@ -126,7 +126,7 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       available: false,
       route: 'none',
       // The install sentence first (as /api/me), else CODEX_NOT_AVAILABLE_MESSAGE.
-      message: 'Codex is not set up yet. Run: limn ai install codex',
+      message: 'Codex is not set up yet. Run: ensemble ai install codex',
       installed: false,
       signedIn: false,
       plan: null,
@@ -174,6 +174,7 @@ describe('the kinds (Phase 3 foundation)', () => {
       import('./codex/kinds/tickets.js').then((m) => m.CODEX_TICKETS_KINDS),
       import('./codex/kinds/docs.js').then((m) => m.CODEX_DOCS_KINDS),
       import('./codex/kinds/story-build.js').then((m) => m.CODEX_STORY_BUILD_KINDS),
+      import('./codex/kinds/story-chat.js').then((m) => m.CODEX_STORY_CHAT_KINDS),
     ]);
     // Each stream adds a kind to ITS file only in the commit that ports it (docs/CODEX-PLAN.md § 5).
     const own: string[][] = [
@@ -182,6 +183,7 @@ describe('the kinds (Phase 3 foundation)', () => {
       ['ticket_review', 'pr_card', 'ci_review', 'story_docs'],
       ['diagram', 'sprint_paths', 'docs_build', 'docs_chat'],
       ['story_plan', 'story_build'],
+      ['story_chat'],
     ];
     files.forEach((f, i) => expect(f.every((k) => own[i]!.includes(k)), String(i)).toBe(true));
     const all = files.flat();

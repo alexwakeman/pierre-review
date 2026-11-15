@@ -78,9 +78,9 @@ export function repoDocsUnreadableReasonText(reason: RepoDocsUnreadableReason): 
   return UNREADABLE_REASON[reason] ?? UNREADABLE_REASON.unavailable;
 }
 
-/** The repository page's line: "Limn can't read this repository's files, so its docs can't be offered: no access." */
+/** The repository page's line: "Ensemble can't read this repository's files, so its docs can't be offered: no access." */
 export function repoDocsUnreadableLine(reason: RepoDocsUnreadableReason): string {
-  return `Limn can’t read this repository’s files, so its docs can’t be offered: ${repoDocsUnreadableReasonText(reason)}.`;
+  return `Ensemble can’t read this repository’s files, so its docs can’t be offered: ${repoDocsUnreadableReasonText(reason)}.`;
 }
 
 /** One folder offered to the reader. */

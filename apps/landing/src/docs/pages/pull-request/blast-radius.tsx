@@ -49,7 +49,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="when-there-is-no-chip">When there is no chip</H2>
       <p>
-        No chip means Limn does not know. That happens when the file list has not synced, the size was never seen,
+        No chip means Ensemble does not know. That happens when the file list has not synced, the size was never seen,
         or GitHub cut the file list short and nothing in the part it sent makes the change High. A cut-short list is
         never called Low, because the missing files could only add reach.
       </p>

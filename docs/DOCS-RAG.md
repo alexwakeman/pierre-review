@@ -257,7 +257,7 @@ dropped after 10 idle minutes.
 ### The runtime (phase 2)
 
 - **The model** is one more `limnMlModels` entry (311 MB model + 17 MB tokenizer, sha256-pinned),
-  downloaded by the same "Set up" / `limn ml install` path, and only when the workspace has a built
+  downloaded by the same "Set up" / `ensemble ml install` path, and only when the workspace has a built
   document. No manifest change; `ml/runtime.ts` stays the only importer.
 - **The ML child** (`ml/scorer-process.ts`) gains an `embed` message beside `score`, with its own
   session and its own 3-minute idle unload. It keeps every existing limit: background priority, one
@@ -270,7 +270,7 @@ dropped after 10 idle minutes.
 - **Availability** is asked at run time, as for severity (the `isMlScoringAvailable` pattern). Not
   installed, paused or failed ⇒ `method: 'text'`. The SPA says nothing about it: retrieval is
   invisible, and the answer's citations are what the reader checks.
-- `LIMN_AI_DISABLED=true` ⇒ no vectors are computed (retrieval serves only agentic features).
+- `ENSEMBLE_AI_DISABLED=true` ⇒ no vectors are computed (retrieval serves only agentic features).
   Chunks and FTS are still written: they are cheap, and that keeps a later switch-on instant.
 
 ## Phases
@@ -297,7 +297,7 @@ nothing lost.
   vector row; `verify:isolation` covers every new table.
 - Story docs and story build: the fingerprint changes with the retrieval id; the INDEX/CONTENTS
   fallback is used only with no chunks; both callers go through the one function.
-- Opt-in integration (`LIMN_ML_MODELS_DIR` set): real embeddings over the eval fixture with a recall
+- Opt-in integration (`ENSEMBLE_ML_MODELS_DIR` set): real embeddings over the eval fixture with a recall
   floor. ⚠ It SKIPS in CI, so check the skipped count.
 
 ## Rejected

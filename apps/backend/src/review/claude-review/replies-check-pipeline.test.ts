@@ -376,7 +376,7 @@ describe('a manual pass on MY OWN PR ("Resolve my Limn threads when addressed")'
     // Auto-posting is off (beforeEach): only the own-PR path wrote, and only the acknowledgement.
     expect(replyCalls).toHaveLength(1);
     expect(replyCalls[0]!.body.startsWith('Fair, the form validates it.')).toBe(true);
-    expect(replyCalls[0]!.body).toContain('Resolved by Limn’s Claude review.');
+    expect(replyCalls[0]!.body).toContain('Resolved by Ensemble’s Claude review.');
     expect(postReview).not.toHaveBeenCalled();
   });
 });
@@ -425,7 +425,7 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
     const sent = postReview.mock.calls[0]![0];
     expect(sent.verdict).toBe('APPROVE');
     expect(sent.includedFindings).toEqual([]);
-    expect(sent.body).toMatch(/^Replies checked: the remaining points are settled\.\n\n_Posted automatically by Limn’s Claude review\._$/);
+    expect(sent.body).toMatch(/^Replies checked: the remaining points are settled\.\n\n_Posted automatically by Ensemble’s Claude review\._$/);
     const passId = (await passRows(pr))[0]!.id;
     const pass = (await persist.getClaudeReviewById(ctx, passId, 1))!;
     expect(pass.trigger).toBe('auto');
@@ -517,7 +517,7 @@ describe('an AUTO pass: the outcome, both ways, through the auto-post gates', ()
       expect(postReview).toHaveBeenCalledTimes(1);
       expect(postReview.mock.calls[0]![0]).toMatchObject({
         verdict: 'COMMENT',
-        body: 'Not approved: a question is still open.\n\n_Posted automatically by Limn’s Claude review._',
+        body: 'Not approved: a question is still open.\n\n_Posted automatically by Ensemble’s Claude review._',
       });
       const state = await rc.repliesCheckState(ctx, 1, pr);
       expect(state?.latest?.notApproved).toEqual({ heldReason: 'open_findings', text: 'Not approved: a question is still open.' });

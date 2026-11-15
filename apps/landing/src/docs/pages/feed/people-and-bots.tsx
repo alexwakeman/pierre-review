@@ -3,7 +3,7 @@ import { DocLink, H2, Illustration, Note, Pill, Steps, Toolbar, Ui, Warning } fr
 
 export const meta: DocMeta = {
   title: 'People or bots',
-  summary: 'The feed shows people or bots, never both at once. How Limn decides who is a bot, and how to correct it.',
+  summary: 'The feed shows people or bots, never both at once. How Ensemble decides who is a bot, and how to correct it.',
 };
 
 export default function Page(): JSX.Element {
@@ -27,7 +27,7 @@ export default function Page(): JSX.Element {
         </Toolbar>
       </Illustration>
 
-      <H2 id="who-is-a-bot">How Limn decides who is a bot</H2>
+      <H2 id="who-is-a-bot">How Ensemble decides who is a bot</H2>
       <p>An account counts as a bot when any of these is true:</p>
       <ul>
         <li>GitHub says it is a bot or an app.</li>
@@ -48,7 +48,7 @@ export default function Page(): JSX.Element {
       <H2 id="correct-it">Correct a mistake</H2>
       <p>
         If a person is treated as a bot, mark them as a person. If a bot is treated as a person, mark it as a
-        bot. A choice made here wins over Limn's own rule, in both directions.
+        bot. A choice made here wins over Ensemble's own rule, in both directions.
       </p>
       <Steps>
         <li>

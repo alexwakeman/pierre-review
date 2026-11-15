@@ -171,7 +171,7 @@ export function StartPanel({
         <p data-testid="story-build-start-docs" className="mt-3 flex w-fit items-center gap-1.5 text-body text-ui-mute">
           The agent also gets the workspace's reference documents.
           <InfoButton title="Reference documents">
-            <p>Limn copies the parts of this workspace's reference library that match the story into the sandbox, read only.</p>
+            <p>Ensemble copies the parts of this workspace's reference library that match the story into the sandbox, read only.</p>
             <p className="mt-2">
               The agent reads their index first and uses only the sections that help with this ticket. The plan says which it
               used. It can cite a document where the story does not match it.
@@ -187,7 +187,7 @@ export function StartPanel({
             <EndToEndInfo />
           </p>
           <p className="mt-1 text-body text-ui-mute">
-            Limn approves the plan, reviews and fixes the work for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds, opens the pull
+            Ensemble approves the plan, reviews and fixes the work for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds, opens the pull
             request, then updates the Jira ticket and comments on it as you.
           </p>
           <button type="button" className="hit mt-1 text-meta text-ui-ink underline" disabled={busy} onClick={() => setEndToEnd(false)}>
@@ -282,14 +282,14 @@ function InheritsLine({ workspaceId }: { workspaceId: number }): JSX.Element {
         {loading
           ? 'Counting your memories and skills…'
           : check.isError
-            ? 'Limn could not count your memories.'
+            ? 'Ensemble could not count your memories.'
             : text != null
               ? `The agent also gets ${text}.`
               : 'The agent gets none of your Claude memories or skills.'}
       </span>
       {!loading && (
         <InfoButton title="Memories and skills">
-          <p>Limn copies only your saved memories into the sandbox, never a past session.</p>
+          <p>Ensemble copies only your saved memories into the sandbox, never a past session.</p>
           {ticked.length > 0 && (
             <ul className="mt-2 space-y-0.5">
               {ticked.map((m) => (
@@ -398,10 +398,10 @@ function EndToEndInfo(): JSX.Element {
     <InfoButton title={STORY_BUILD_END_TO_END_LABEL}>
       <p>One press runs the whole build:</p>
       <ul className="mt-1 list-disc pl-5">
-        <li>The agent plans. Limn approves the plan, taking every open point as Agree.</li>
-        <li>The agent builds. Limn reviews the work and the agent fixes it, for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds; it stops early when nothing is open.</li>
-        <li>Limn opens the pull request, ready for review, even if something is still open. The pull request lists it.</li>
-        <li>Limn updates the Jira ticket from the plan and comments on it as you, saying what changed and linking the pull request. The status does not change.</li>
+        <li>The agent plans. Ensemble approves the plan, taking every open point as Agree.</li>
+        <li>The agent builds. Ensemble reviews the work and the agent fixes it, for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds; it stops early when nothing is open.</li>
+        <li>Ensemble opens the pull request, ready for review, even if something is still open. The pull request lists it.</li>
+        <li>Ensemble updates the Jira ticket from the plan and comments on it as you, saying what changed and linking the pull request. The status does not change.</li>
       </ul>
       <p className="mt-2">The ticket's earlier text is in its history in Jira.</p>
     </InfoButton>

@@ -300,7 +300,7 @@ describe("Claude's own findings on their threads", () => {
     expect(pill.marker).toMatchObject({ label: 'Not addressed · Resolved', reason: 'Check the id before the insert', findingBy: null });
   });
 
-  it("a TEAMMATE'S newer word wears its name: \"Robin’s Limn: addressed\"", () => {
+  it("a TEAMMATE'S newer word wears its name: \"Robin’s Ensemble: addressed\"", () => {
     const p = pr([
       {
         ...finding(6, 'addressed', { judgedBy: { login: 'robin-dunn', name: 'Robin Dunn' } }),
@@ -312,14 +312,14 @@ describe("Claude's own findings on their threads", () => {
     if (pill.kind !== 'claude') throw new Error('expected a Claude marker');
     expect(pill.marker).toMatchObject({
       finding: 'addressed',
-      findingBy: 'Robin’s Limn',
-      label: 'Robin’s Limn: addressed · Resolved',
+      findingBy: 'Robin’s Ensemble',
+      label: 'Robin’s Ensemble: addressed · Resolved',
       reason: 'rowSelect now reads rowid',
     });
     // No how sent (an older Limn): no line, never the templated "Claude’s comment…" about the reader’s own run.
     const bare = threadPillFor({ id: 7, derivedState: 'untouched' }, p);
     if (bare.kind !== 'claude') throw new Error('expected a Claude marker');
-    expect(bare.marker).toMatchObject({ label: 'robin-dunn’s Limn: addressed', reason: null });
+    expect(bare.marker).toMatchObject({ label: 'robin-dunn’s Ensemble: addressed', reason: null });
   });
 
   it("the same teammate's still-open is shown once (the pill already names it)", () => {
@@ -327,7 +327,7 @@ describe("Claude's own findings on their threads", () => {
     const p = pr([{ ...finding(8, 'not_addressed', { judgedBy: { login: 'robin-dunn', name: 'Robin Dunn' } }), reason: 'Add the guard', stillOpen: so }]);
     const pill = threadPillFor({ id: 8, derivedState: 'untouched' }, p);
     if (pill.kind !== 'claude') throw new Error('expected a Claude marker');
-    expect(pill.marker).toMatchObject({ label: 'Robin’s Limn: not addressed', stillOpen: null, reason: 'Add the guard' });
+    expect(pill.marker).toMatchObject({ label: 'Robin’s Ensemble: not addressed', stillOpen: null, reason: 'Add the guard' });
   });
 
   it('an ordinary judgement carries no finding pill', () => {

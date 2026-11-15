@@ -1,10 +1,8 @@
-import { useSeo } from '../lib/seo';
-import { seoFor } from '../lib/routes';
 import type { ReactNode } from 'react';
 import { INSTALL_COMMAND } from '../lib/site';
 import { useReveal } from '../components/board/useReveal';
 import { CopyCommand } from '../components/board/CopyCommand';
-import scholar from '../assets/board/img/scholar.jpg';
+import adagioDetail from '../assets/board/img/bach-bwv1001-detail.jpg';
 import {
   BenchmarkMock,
   BotsSeverityMock,
@@ -54,23 +52,23 @@ function RunIt(): JSX.Element {
   );
 }
 
-export default function Reporting(): JSX.Element {
-  useSeo(seoFor('/reporting'));
+/** Reporting and metrics: a section of Everything else (pages/EverythingElse.tsx), at #reporting. */
+export function ReportingSection(): JSX.Element {
   const ref = useReveal<HTMLDivElement>();
   return (
-    <div className="lb rep" ref={ref}>
+    <div className="lb rep" id="reporting" ref={ref}>
       {/* ---- header ---------------------------------------------------- */}
       <section className="board r-head" aria-labelledby="r-h1">
         <div className="tile r-name">
-          <h1 id="r-h1">Reporting and metrics</h1>
+          <h2 id="r-h1" className="r-title">Reporting and metrics</h2>
           <p className="r-lead">Where the work is, where it waits, and what your review bots are worth.</p>
         </div>
         <div className="tile ph r-pic">
           <img
-            src={scholar}
+            src={adagioDetail}
             width={800}
             height={919}
-            alt="Jacques de Guyse reading at his desk among his books, around 1500"
+            alt="A passage of the Adagio from Bach's first sonata for solo violin, in his own hand, 1720"
           />
         </div>
         <div className="tile verdigris r-say">
@@ -148,12 +146,12 @@ export default function Reporting(): JSX.Element {
         <div className="tile r-proof rise">
           <h3>Faster reviews, fewer bottlenecks</h3>
           <p>
-            On a nine-repository delivery team, Limn took over the reviews in October. Half of their pull requests now merge
+            On a nine-repository delivery team, Ensemble took over the reviews in October. Half of their pull requests now merge
             within an hour of working time, and twice as many land each week. It cost them nothing extra.
           </p>
           <p className="src">
-            Measured by Limn's Chronology report: merged pull requests by people, working hours, September vs October 2026 after
-            Limn auto-review introduced.
+            Measured by Ensemble's Chronology report: merged pull requests by people, working hours, September vs October 2026 after
+            Ensemble auto-review introduced.
           </p>
         </div>
         <div className="tile madder r-usd rise">
@@ -199,7 +197,7 @@ export default function Reporting(): JSX.Element {
       <section className="section board r-bots" aria-labelledby="r-bot-h">
         <div className="tile verdigris r-bclaim rise">
           <h2 id="r-bot-h">What your bots are worth</h2>
-          <p>Bot comments graded nit, minor, major or critical by Limn's own model, on your own machine.</p>
+          <p>Bot comments graded nit, minor, major or critical by Ensemble's own model, on your own machine.</p>
           <p>
             On 300 bot comments, the model agreed with an independent grader 70% of the time. CodeRabbit&rsquo;s own label
             agreed 47% of the time, on the ones it labelled.
@@ -227,7 +225,7 @@ export default function Reporting(): JSX.Element {
           <h2 id="r-sp-h">This Sprint</h2>
           <p>
             The sprint by theme, critical path or person, on your tracker's own status columns. Jira, Linear or GitHub
-            Issues. Limn writes nothing back.
+            Issues. Ensemble writes nothing back.
           </p>
           <p className="muted">Themes and critical paths are written by your own AI agent.</p>
         </div>

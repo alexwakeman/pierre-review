@@ -75,13 +75,13 @@ describe('the review count line', () => {
   const robin = { userId: 2, login: 'robin-dev', displayName: 'Robin Dunn', avatarUrl: null };
   const sam = { userId: 3, login: 'sam-dev', displayName: null, avatarUrl: null };
   it('names the total and each teammate', () => {
-    expect(reviewCountLine({ total: 4, byTeammate: [{ poster: robin, count: 1 }] })).toBe('4 Limn reviews so far · 1 by Robin');
+    expect(reviewCountLine({ total: 4, byTeammate: [{ poster: robin, count: 1 }] })).toBe('4 Ensemble reviews so far · 1 by Robin');
     expect(reviewCountLine({ total: 5, byTeammate: [{ poster: robin, count: 2 }, { poster: sam, count: 1 }] })).toBe(
-      '5 Limn reviews so far · 2 by Robin, 1 by @sam-dev',
+      '5 Ensemble reviews so far · 2 by Robin, 1 by @sam-dev',
     );
   });
   it('one review reads singular; none (or an older server) is no line', () => {
-    expect(reviewCountLine({ total: 1, byTeammate: [] })).toBe('1 Limn review so far');
+    expect(reviewCountLine({ total: 1, byTeammate: [] })).toBe('1 Ensemble review so far');
     expect(reviewCountLine({ total: 0, byTeammate: [] })).toBeNull();
     expect(reviewCountLine(undefined)).toBeNull();
   });
@@ -98,8 +98,8 @@ describe('teammateVersionLines (docs/TEAM-REVIEW.md § 12)', () => {
         { poster: sam, postedAt: '2026-11-03T10:00:00Z', limnVersion: null },
       ]),
     ).toEqual([
-      '@sam-k is on an older Limn — update for still-open replies and claim fixes.',
-      'Robin is on Limn 0.1.188 — update for still-open replies and claim fixes.',
+      '@sam-k is on an older version — update for still-open replies and claim fixes.',
+      'Robin is on version 0.1.188 — update for still-open replies and claim fixes.',
     ]);
   });
   it('says nothing when the newest review is current', () => {

@@ -1,14 +1,19 @@
 /* ===========================================================================
-   "For teams" (pages/Teams.tsx). Layout only; the tokens, tiles, pigments and
-   buttons come from src/board.css. Every rule is scoped under `.lb.teams`, so
-   nothing here reaches another page.
+   Ensemble review (pages/EnsembleReview.tsx, /ensemble-review). Layout only; the
+   tokens, tiles, pigments and buttons come from src/board.css. Every rule is
+   scoped under `.lb.teams` (the old "For teams" page's class, kept), so nothing
+   here reaches another page.
 
    CLASSES
      shared   .tm-shot (a quiet tile holding an HTML mock) · .tm-txt (h2/h3 + p)
               · .tm-list (square-marked ul) · .tm-word (a large name) · .tm-q + .tm-cols
+              · p.tm-more (a "read more" link)
      header   .tm-head > .tm-name (h1, .tm-lead) · .tm-hero-shot · .verdigris.tm-say · .gold.tm-go
-     pair     .tm-pair / .tm-claims > .tm-id (.tm-word, .tm-story) · .tm-wide
+     how      .tm-how > .tm-how-head · figure.tm-circle (svg.circle-svg, figcaption)
+              · .tm-seq (.tm-lanes, ol.tm-steps > li.on-gh | li.on-me > .tm-n + div (.tm-k, h3, p))
+     pair     .tm-pair / .tm-pair2 / .tm-claims > .tm-id (.tm-word, .tm-story) · .tm-wide
      claims   .tm-line ×3 (.tm-l1 .tm-l2 .tm-l3: h3, .tm-words, p) · .tm-fine
+     threads  .tm-threads > .tm-t-head · .tm-t ×4
      split    .tm-split > .tm-left + .tm-right (7/5) · .tm-left-n + .tm-right-w (5/7)
      start    .tm-start > .gold.tm-start-main (h2, p, code.tm-cmd, .btns) · .tm-start-list
    =========================================================================== */
@@ -302,5 +307,245 @@
   }
   .lb.teams .tm-shot {
     padding: 6px;
+  }
+}
+
+/* ---- read-more link ---------------------------------------------------- */
+.lb.teams .tm-more a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+/* ---- how it works: the circle ------------------------------------------ */
+.lb.teams .tm-how-head {
+  grid-column: 1 / -1;
+}
+.lb.teams .tm-how-head p {
+  max-width: 72ch;
+}
+.lb.teams .tm-circle {
+  grid-column: 1 / 7;
+  margin: 0;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+.lb.teams .tm-circle figcaption {
+  max-width: 48ch;
+  font-size: 16px;
+  line-height: 1.45;
+  color: var(--muted);
+  text-align: center;
+}
+.lb.teams .circle-svg {
+  width: 100%;
+  max-width: 580px;
+  height: auto;
+}
+.lb.teams .circle-svg text {
+  text-anchor: middle;
+  fill: var(--ink);
+  font-family: inherit;
+}
+.lb.teams .circle-svg .c-orbit {
+  fill: none;
+  stroke: rgba(241, 241, 239, 0.18);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 6;
+}
+.lb.teams .circle-svg .c-spoke {
+  stroke-width: 2;
+}
+.lb.teams .circle-svg .c-write {
+  stroke: var(--gold);
+  stroke-width: 3;
+}
+.lb.teams .circle-svg .c-read {
+  stroke: rgba(241, 241, 239, 0.45);
+  stroke-dasharray: 5 5;
+}
+.lb.teams .circle-svg .c-hub {
+  fill: var(--gold);
+}
+.lb.teams .circle-svg .c-hub-k {
+  fill: #3d2f12;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+}
+.lb.teams .circle-svg .c-hub-t {
+  fill: var(--dark);
+  font-size: 17px;
+  font-weight: 600;
+}
+.lb.teams .circle-svg .c-hub-s {
+  fill: #3d2f12;
+  font-size: 13px;
+}
+.lb.teams .circle-svg .c-node-0 {
+  fill: var(--lapis);
+}
+.lb.teams .circle-svg .c-node-1 {
+  fill: var(--verdigris);
+}
+.lb.teams .circle-svg .c-node-2 {
+  fill: var(--madder);
+}
+.lb.teams .circle-svg .c-node-3 {
+  fill: var(--lapis-2);
+}
+.lb.teams .circle-svg .c-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+.lb.teams .circle-svg .c-agent {
+  font-size: 13px;
+  fill: #e3e1db;
+}
+.lb.teams .circle-svg .c-tag {
+  fill: var(--dark);
+  stroke: rgba(241, 241, 239, 0.3);
+}
+.lb.teams .circle-svg .c-tag-on {
+  fill: var(--gold);
+  stroke: none;
+}
+.lb.teams .circle-svg .c-tag-t {
+  font-size: 13px;
+  fill: #e3e1db;
+}
+.lb.teams .circle-svg .c-tag-t-on {
+  fill: var(--dark);
+  font-weight: 600;
+}
+
+/* ---- how it works: the sequence ---------------------------------------- */
+.lb.teams .tm-seq {
+  grid-column: 7 / 13;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 32px;
+}
+.lb.teams .tm-lanes {
+  display: flex;
+  gap: 20px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.lb.teams .tm-lanes span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lb.teams .tm-lanes span::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  background: var(--lapis);
+}
+.lb.teams .tm-lanes span + span::before {
+  background: var(--gold);
+}
+.lb.teams .tm-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.teams .tm-steps li {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 16px;
+  padding: 14px 16px;
+  background: #ffffff0f;
+}
+.lb.teams .tm-steps li.on-me {
+  margin-right: 48px;
+}
+.lb.teams .tm-steps li.on-gh {
+  margin-left: 48px;
+}
+.lb.teams .tm-n {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 18px;
+  background: var(--gold);
+  color: var(--dark);
+}
+.lb.teams .on-me .tm-n {
+  background: var(--lapis);
+  color: var(--ink);
+}
+.lb.teams .tm-k {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.lb.teams .tm-steps h3 {
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 2px 0 4px;
+}
+.lb.teams .tm-steps p:last-child {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* ---- threads ----------------------------------------------------------- */
+.lb.teams .tm-t-head {
+  grid-column: 1 / -1;
+}
+.lb.teams .tm-t {
+  grid-column: span 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 28px;
+}
+.lb.teams .tm-t h3 {
+  font-size: clamp(22px, 2vw, 28px);
+}
+.lb.teams .tm-t p {
+  line-height: 1.45;
+}
+
+/* ---- tablet + phone (the new sections) -------------------------------- */
+@media (max-width: 1100px) and (min-width: 761px) {
+  .lb.teams .tm-threads .tm-t {
+    grid-column: span 6;
+  }
+}
+@media (max-width: 760px) {
+  .lb.teams .tm-seq,
+  .lb.teams .tm-circle,
+  .lb.teams .tm-t {
+    padding: 20px;
+  }
+  .lb.teams .tm-steps li.on-me,
+  .lb.teams .tm-steps li.on-gh {
+    margin: 0;
+  }
+  .lb.teams .tm-steps li {
+    grid-template-columns: 32px 1fr;
+    gap: 12px;
+    padding: 12px;
+  }
+  .lb.teams .tm-n {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
   }
 }

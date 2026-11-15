@@ -194,7 +194,7 @@ cannot be **called** here:
 
 1. It runs on the **diff body**, fetched through the `gh` CLI — a GitHub call per PR, and
    **nothing on the Pending board may fetch on mount**.
-2. Claude Review is off under `LIMN_AI_DISABLED`; blast radius never is.
+2. Claude Review is off under `ENSEMBLE_AI_DISABLED`; blast radius never is.
 3. Its gate is deliberately over-conservative (*any ambiguity → worktree*) because over-routing
    there only costs money. Over-routing here marks everything high and the feature stops meaning
    anything.

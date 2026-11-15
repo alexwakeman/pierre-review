@@ -155,7 +155,7 @@ describe('folder rules', () => {
     ['/', 'whole disk'],
     ['/Users/alex', 'home folder'],
     ['/Users', 'home folder'],
-    ['/Users/alex/.limn/clones', 'Limn’s own data folder'],
+    ['/Users/alex/.limn/clones', 'Ensemble’s own data folder'],
     ['/etc/repos', 'cannot place repositories'],
     ['/home/agent/x', 'cannot place repositories'],
     ['/tmp', 'cannot place repositories'],

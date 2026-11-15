@@ -54,16 +54,16 @@ describe('the Claude spend meter', () => {
     expect(meterText(status({ enabled: false, mode: 'off', subscription: null }))).toBeNull();
   });
 
-  it('subscription: Limn’s share in percentages, never US$', () => {
+  it('subscription: Ensemble’s share in percentages, never US$', () => {
     const t = meterText(status({}));
-    expect(t).toBe('Limn: 2% of your week · limit 5%');
+    expect(t).toBe('Ensemble: 2% of your week · limit 5%');
     expect(t).not.toMatch(/\$/);
-    expect(meterText(status({ subscription: sub({ usedSharePct: 0.3 }) }))).toBe('Limn: under 1% of your week · limit 5%');
+    expect(meterText(status({ subscription: sub({ usedSharePct: 0.3 }) }))).toBe('Ensemble: under 1% of your week · limit 5%');
   });
 
   it('subscription not known yet: asks for it, never reads as zero', () => {
     expect(meterText(status({ subscription: sub({ subscription: null, usedSharePct: null, reviewsPerDay: null }) }))).toBe(
-      'Limn: pick your subscription',
+      'Ensemble: pick your subscription',
     );
     expect(usedSentence(status({ subscription: sub({ subscription: null, usedSharePct: null }) }))).toBeNull();
   });
@@ -78,7 +78,7 @@ describe('the Claude spend meter', () => {
   });
 
   it('words the share, the reviews a day and the money', () => {
-    expect(usedSentence(status({}))).toBe('Limn has used 2% of your week');
+    expect(usedSentence(status({}))).toBe('Ensemble has used 2% of your week');
     expect(formatSharePct(0)).toBe('0%');
     expect(formatSharePct(4.6)).toBe('5%');
     expect(reviewsPerDayText(25)).toBe('about 25 automatic reviews a working day');
@@ -90,17 +90,17 @@ describe('the Claude spend meter', () => {
     expect(formatUsd(1650)).toBe('$1,650');
   });
 
-  it('the toast: "Limn has used its share of your week. Automatic runs resume …"', () => {
+  it('the toast: "Ensemble has used its share of your week. Automatic runs resume …"', () => {
     const now = Date.parse('2026-10-24T09:00:00');
     expect(formatResume(new Date('2026-10-24T14:30:00').toISOString(), now)).toBe('14:30');
     expect(formatResume(null, now)).toBe('');
     expect(pausedSentence(status({ overBudget: true, resumesAt: new Date('2026-10-24T14:30:00').toISOString() }), now)).toBe(
-      'Limn has used its share of your week. Automatic runs resume 14:30.',
+      'Ensemble has used its share of your week. Automatic runs resume 14:30.',
     );
     expect(pausedSentence(status({ overBudget: true, resumesAt: null }), now)).toBe(
-      'Limn has used its share of your week. Automatic runs are paused.',
+      'Ensemble has used its share of your week. Automatic runs are paused.',
     );
-    expect(pausedSentence(status({ mode: 'api_key', overBudget: true }), now)).toMatch(/^Limn has used its weekly budget\./);
+    expect(pausedSentence(status({ mode: 'api_key', overBudget: true }), now)).toMatch(/^Ensemble has used its weekly budget\./);
   });
 });
 
@@ -213,7 +213,7 @@ describe('a run of the OTHER provider is priced by its own reading', () => {
 
 describe('the 5-hour share', () => {
   it('words the session line and the paused toast by the limit that paused runs', () => {
-    expect(fiveHourUsedSentence(status({}))).toBe('This 5-hour session: Limn has used 1% (limit 5%)');
+    expect(fiveHourUsedSentence(status({}))).toBe('This 5-hour session: Ensemble has used 1% (limit 5%)');
     expect(fiveHourUsedSentence(status({ subscription: sub({ fiveHourUsedSharePct: null }) }))).toBeNull();
     const now = Date.parse('2026-10-24T09:00:00');
     expect(
@@ -221,13 +221,13 @@ describe('the 5-hour share', () => {
         status({ overBudget: true, limitedBy: 'five_hour', resumesAt: new Date('2026-10-24T11:15:00').toISOString() }),
         now,
       ),
-    ).toBe('Limn has used its share of this 5-hour session. Automatic runs resume 11:15.');
+    ).toBe('Ensemble has used its share of this 5-hour session. Automatic runs resume 11:15.');
   });
 });
 
 describe('the header usage item', () => {
-  it('budget on: the share of Limn’s week used, or the 5-hour session when that is closer', () => {
-    expect(headerUsageOf(resp({}))).toMatchObject({ label: 'AI quota for Limn:', figure: '40%', tone: 'normal' });
+  it('budget on: the share of Ensemble’s week used, or the 5-hour session when that is closer', () => {
+    expect(headerUsageOf(resp({}))).toMatchObject({ label: 'AI quota for Ensemble:', figure: '40%', tone: 'normal' });
     expect(headerUsageOf(resp({}))?.title).toMatch(/your week/);
     const five = headerUsageOf(resp({ subscription: sub({ fiveHourUsedSharePct: 4.5 }) }));
     expect(five).toMatchObject({ figure: '90%', tone: 'near' });
@@ -256,7 +256,7 @@ describe('the header usage item', () => {
 
 describe('the usage popover', () => {
   const now = Date.parse('2026-10-24T09:00:00.000Z');
-  it('subscription: Limn’s share with limits, Claude’s windows, runs and tokens; no US$', () => {
+  it('subscription: Ensemble’s share with limits, Claude’s windows, runs and tokens; no US$', () => {
     const d = usageDetailOf(resp({}), now);
     expect(d.heading).toBe('Claude Ultra');
     const flat = d.sections.flatMap((s) => s.rows.map((r) => `${r.label}: ${r.value}`));
@@ -273,7 +273,7 @@ describe('the usage popover', () => {
     expect(d.updated).toBe('Updated 4 min ago');
     expect(JSON.stringify(d)).not.toMatch(/\$/);
   });
-  it('bars: Limn rows fill against their limit, account rows show Claude’s own use; counts have none', () => {
+  it('bars: Ensemble rows fill against their limit, account rows show Claude’s own use; counts have none', () => {
     const rows = usageDetailOf(resp({}), now).sections.flatMap((s) => s.rows);
     const bar = (label: string) => rows.find((r) => r.label === label)?.barPct;
     expect(bar('This week')).toBe(40);
@@ -288,7 +288,7 @@ describe('the usage popover', () => {
     u.limn = { ...u.limn, inputTokens: null, outputTokens: null, weekSharePct: null, fiveHourSharePct: null };
     const d = usageDetailOf({ ...resp({ enabled: false, mode: 'off', subscription: null }), usage: u }, now);
     expect(d.heading).toBe('Claude');
-    expect(d.sections.map((s) => s.title)).toEqual(['Limn’s share']);
+    expect(d.sections.map((s) => s.title)).toEqual(['Ensemble’s share']);
     expect(d.sections[0]!.rows.map((r) => r.label)).toEqual(['Runs this week']);
     expect(d.updated).toBeNull();
   });
@@ -349,7 +349,7 @@ describe('the usage popover', () => {
     // Nobody signed in, nothing run: nothing shows.
     expect(headerUsageOf({ ...data, others: [] })).toBeNull();
   });
-  it('the ⓘ sits on the first block with Limn’s share, not on an API key block', async () => {
+  it('the ⓘ sits on the first block with Ensemble’s share, not on an API key block', async () => {
     const { usageDetailsOf } = await import('../src/lib/aiBudget.js');
     const codexUsage = usage({ provider: 'codex', weekPctPerUsd: null });
     const codexStatus = status({ provider: 'codex', enabled: false, mode: 'off', subscription: null });

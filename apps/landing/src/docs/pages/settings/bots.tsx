@@ -37,7 +37,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The <Ui>Bots</Ui> tab decides which accounts Limn treats as bots, what kind of bot each one is, and what it
+        The <Ui>Bots</Ui> tab decides which accounts Ensemble treats as bots, what kind of bot each one is, and what it
         costs. It also sets up bot comment scoring. These choices feed{' '}
         <DocLink to="bots-monitoring/overview">Bots Monitoring</DocLink>, the Feed and the Timeline. Bot comment scoring
         applies to the whole computer; the classification applies to the current workspace only.
@@ -51,7 +51,7 @@ export default function Page(): JSX.Element {
       </p>
       <ul>
         <li>
-          Select <Ui>Set up (one-time ~240 MB download)</Ui>, or run <code>limn ml install</code> in a terminal.
+          Select <Ui>Set up (one-time ~240 MB download)</Ui>, or run <code>ensemble ml install</code> in a terminal.
         </li>
         <li>
           When it is ready the section reads <Ui>Set up. Bot review comments are scored on this machine.</Ui>
@@ -81,7 +81,7 @@ export default function Page(): JSX.Element {
       </Illustration>
       <H3>Bot or person</H3>
       <p>
-        Select <Ui>Bot</Ui> or <Ui>Person</Ui> to correct Limn&rsquo;s guess for this workspace. Your choice wins.{' '}
+        Select <Ui>Bot</Ui> or <Ui>Person</Ui> to correct Ensemble&rsquo;s guess for this workspace. Your choice wins.{' '}
         <Ui>Reset classification</Ui> forgets it and lets detection decide again. Your other workspaces are not
         affected.
       </p>

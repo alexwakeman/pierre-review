@@ -42,7 +42,7 @@ export default function Page(): JSX.Element {
           depends on how much a person has.
         </li>
         <li>
-          <strong>The row header</strong> says how many tickets the person has and, when Limn can match the
+          <strong>The row header</strong> says how many tickets the person has and, when Ensemble can match the
           tracker&rsquo;s name to a GitHub account, how many pull-request reviews are waiting on them. When it cannot
           match the name, it says nothing rather than zero.
         </li>
@@ -58,7 +58,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <Note>
-        Names are spelled as the tracker spells them, and the same way on every view. Limn matches a tracker name to
+        Names are spelled as the tracker spells them, and the same way on every view. Ensemble matches a tracker name to
         a GitHub account only when the two clearly agree; it never guesses between two people.
       </Note>
 

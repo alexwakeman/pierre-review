@@ -4,7 +4,7 @@ import { DocLink, H2, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Group repositories into workspaces',
-  summary: 'A workspace is a named group of repositories. Every page in Limn shows one workspace at a time.',
+  summary: 'A workspace is a named group of repositories. Every page in Ensemble shows one workspace at a time.',
 };
 
 export default function Page(): JSX.Element {
@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         A workspace is a named group of repositories, for example one per team or one per product. Every page
-        in Limn shows one workspace: its pull requests, its Pending board, its Feed, its Reports and its bots.
+        in Ensemble shows one workspace: its pull requests, its Pending board, its Feed, its Reports and its bots.
         Switching the workspace changes all of them together. A repository is <Ui>Maintained</Ui> in one
         workspace at most, and can be <Ui>External</Ui> in any number of others.
       </p>
@@ -20,7 +20,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="the-default-workspace">The Default workspace</H2>
       <p>
-        Limn starts with one workspace, <Ui>Default</Ui>. New repositories land there unless you add them to
+        Ensemble starts with one workspace, <Ui>Default</Ui>. New repositories land there unless you add them to
         another workspace. You can rename Default, but you cannot delete it: when you delete another
         workspace, its repositories and its bot settings move back to Default.
       </p>
@@ -69,7 +69,7 @@ export default function Page(): JSX.Element {
         <li>To move one, choose another workspace in its workspace picker.</li>
         <li>
           To take one out of the workspace, choose <Ui>Remove</Ui> (×) on its line. When it is in no other
-          workspace, Limn asks first and then removes it and its synced data. Each line shows its own progress,
+          workspace, Ensemble asks first and then removes it and its synced data. Each line shows its own progress,
           so you can remove several at once.
         </li>
       </ul>
@@ -145,7 +145,7 @@ export default function Page(): JSX.Element {
       </ul>
 
       <Note>
-        Limn never adds figures up across workspaces. A bot's price, for example, is set per workspace, and
+        Ensemble never adds figures up across workspaces. A bot's price, for example, is set per workspace, and
         each workspace's reports use its own.
       </Note>
 

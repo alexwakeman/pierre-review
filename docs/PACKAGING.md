@@ -7,13 +7,17 @@
 
 ## Packaging & publishing
 
-Ships to npm as a **single unscoped package `limn-review`** (`npx limn-review`, or `limn`
-global; both bins → `dist/cli.js`). ⚠ The DEPRECATED `pierre-review` command is the forwarding
-stub's bin ONLY, never limn-review's: npm refuses to link a global bin another package owns, so
-declaring it in limn-review made `npm install -g limn-review` fail with EEXIST for every old global
-install. Started through the stub, the CLI prints a one-line rename notice. ⚠ The `limn-review` bin is LOAD-BEARING: with several bins, `npx` runs the one
-named after the package and errors when none is, so `npx limn-review` needs it. Renamed from `pierre-review` in the release that made Claude Review and AI Fix
-free; the old name gets a hand-published forwarding stub (`scripts/deprecated-pierre-review/`, its
+Ships to npm as a **single unscoped package `ensemble-review`** (`npx ensemble-review`, or
+`ensemble` global; both bins → `dist/cli.js`). ⚠ The DEPRECATED commands (`limn`, `limn-review`,
+`pierre-review`, `pierre`) are the forwarding stubs' bins ONLY, never ensemble-review's: npm refuses
+to link a global bin another package owns, so declaring one in the new package made `npm install -g`
+fail with EEXIST for every old global install. Started through a stub, the CLI prints a one-line
+rename notice. ⚠ The `ensemble-review` bin is LOAD-BEARING: with several bins, `npx` runs the one
+named after the package and errors when none is, so `npx ensemble-review` needs it.
+`build-release.mjs` asserts the bins are exactly `ensemble` + `ensemble-review`, and that each stub is
+named, binned and forwarding as it should. Renamed `pierre-review` → `limn-review` (the release that
+made Claude Review and AI Fix free) → `ensemble-review`; each old name gets a hand-published
+forwarding stub (`scripts/deprecated-limn-review/`, `scripts/deprecated-pierre-review/`, each
 README carries the manual `npm deprecate` step — see [RELEASE.md](RELEASE.md)). Tarball is **built artifacts only** (no
 `.ts`/src/configs/tests). CI publishing (version computation, atomic tag+commit, idempotent
 publish) is in **[RELEASE.md](RELEASE.md)** — **never run `npm publish`/`npm login`
@@ -57,7 +61,7 @@ route's own title/description/**canonical** baked in. Load-bearing details:
   per-page byte floor. `deploy-site.yml` runs the landing build before it builds the image, so
   a broken prerender fails the deploy, not the live site.
 
-**CLI** (`cli.ts` → `dist/cli.js`): the **`limn status` subcommand** (peeled off argv
+**CLI** (`cli.ts` → `dist/cli.js`): the **`ensemble status` subcommand** (peeled off argv
 BEFORE `parseArgs`, whose default case rejects bare tokens) renders the cross-repo My-Turn
 queue in the terminal via `status.ts` — one section per type in the reader's order (Settings → My
 Turn), with a dim footer naming the types switched off — OSC-8 clickable links (non-TTY falls back to
@@ -67,33 +71,41 @@ empty DB without `--sync`, one-shot `runMigrations → ensureLocalAccount → ge
 closeDb` lifecycle, env mapped before any config/db import. The server path parses
 `--no-open/--port/--db` (+ env),
 maps them to env **before** importing config, sets `NODE_ENV=production`. It first moves a
-pre-rename `~/.pierre-review` to `~/.limn` (below), then defaults the DB to
-`~/.limn/pierre-review.sqlite` (never the read-only install dir; the FILE keeps its old name so the
+pre-rename `~/.limn` (or `~/.pierre-review`) to `~/.ensemble` (below), then defaults the DB to
+`~/.ensemble/pierre-review.sqlite` (never the read-only install dir; the FILE keeps its old name so the
 move carries it and its WAL files untouched) + pre-checks `gh auth token`. Prints the banner + URL, boots via `start()` (guarded run-as-main), opens the
-browser (built-in, no dep) unless `--no-open`. **`limn ai install` / `limn ai status`** run the
-same AI-runtime download Limn starts by itself on the first boot (below); refused under
-`LIMN_AI_DISABLED=true`. `limn ai install codex` adds the Codex CLI; **`limn ai login codex`**
-(`--device-auth` on a headless machine) / **`limn ai logout codex`** sign Limn's own Codex home in and
-out (§ The Codex CLI). **`limn ai clean-sessions`** (`--dry-run` lists first) deletes the
-`~/.claude/projects` folders older Limn runs left (the same one-off cleanup the boot runs once;
-[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The provider seam). **`limn ml install`** downloads the bot-comment severity model
+browser (built-in, no dep) unless `--no-open`. **`ensemble ai install` / `ensemble ai status`** run the
+same AI-runtime download the app starts by itself on the first boot (below); refused under
+`ENSEMBLE_AI_DISABLED=true`. `ensemble ai install codex` adds the Codex CLI; **`ensemble ai login codex`**
+(`--device-auth` on a headless machine) / **`ensemble ai logout codex`** sign the app's own Codex home in
+and out (§ The Codex CLI). **`ensemble ai clean-sessions`** (`--dry-run` lists first) deletes the
+`~/.claude/projects` folders older runs left (the same one-off cleanup the boot runs once;
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The provider seam). **`ensemble ml install`** downloads the bot-comment severity model
 ([ML-SEVERITY.md](ML-SEVERITY.md)).
 
-**The data directory is `~/.limn`** (`data-dir.ts`; `LIMN_DATA_DIR` overrides; `config.dataDir`).
+**User-set environment variables are `ENSEMBLE_X`; the older `LIMN_X` is still read** (`env-name.ts`
+`readEnv(env, 'X')`: ENSEMBLE_X when set and not blank, else LIMN_X). Every user-set read goes through
+it; test-only variables and the ones the backend passes to its own children (`LIMN_PROXY`,
+`LIMN_CODEX_GUARD`, `LIMN_ML_SCORER_INIT` …) keep their one name. `vitest.config.ts` blanks every
+`ENSEMBLE_` user name (`USER_ENV_NAMES`), so a shell setting never overrides a test's `LIMN_` one.
+
+**The data directory is `~/.ensemble`** (`data-dir.ts`; `ENSEMBLE_DATA_DIR` overrides; `config.dataDir`).
 It holds the CLI's DB, the clone cache (`CLONE_DIR` overrides), `config.json` (the per-review
-budget), `ai-runtime/` and `codex/` (Limn's own Codex home: its sign-in, `config.toml` and run
+budget), `ai-runtime/` and `codex/` (the app's own Codex home: its sign-in, `config.toml` and run
 records; never the reader's `~/.codex`), and `docs/` — the reference-docs libraries, ONE ROOT PER
-DATABASE (`LIMN_DOCS_DIR` overrides): the CLI's own DB uses `docs/` itself, any other DB (`pnpm dev`,
+DATABASE (`ENSEMBLE_DOCS_DIR` overrides): the CLI's own DB uses `docs/` itself, any other DB (`pnpm dev`,
 a worktree, `--db`) `docs/db-<hash of its path>/`, and every workspace folder carries an `.owner`
 marker the janitor checks ([REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Ownership). ⚠ The clone cache
 is still SHARED by every backend on the machine (`pnpm dev` and the CLI both default to `clones/`);
 it holds no data a database owns, but a second process's boot sweep drops every
-`refs/pierre/conflict/*` and so breaks a resolver session open in the first. ⚠ **The move from `~/.pierre-review` is ONE `renameSync`, and it NEVER
-CLOBBERS**: run by the CLI before it picks the DB path and again (a no-op by then) at the top of
-`start()` for `pnpm dev`. An existing `~/.limn` means nothing moves and the old directory is left
-as it is; an explicit `LIMN_DATA_DIR` is never migrated into. No copy-then-delete exists, on
+`refs/pierre/conflict/*` and so breaks a resolver session open in the first. ⚠ **The move from the NEWEST old directory (`~/.limn`, else `~/.pierre-review`) is ONE
+`renameSync`, and it NEVER CLOBBERS**: run by the CLI before it picks the DB path and again (a no-op
+by then) at the top of `start()` for `pnpm dev`. An existing `~/.ensemble` means nothing moves and the
+old directory is left as it is; an explicit `ENSEMBLE_DATA_DIR` / `LIMN_DATA_DIR` is never migrated
+into. Until the move happens (a pinned `DATABASE_URL`/`CLONE_DIR` inside the old directory, a failed
+rename) the old directory IS the data directory. No copy-then-delete exists, on
 purpose — a half-copied SQLite file beside a deleted original is the failure it avoids.
-`data-dir.test.ts` pins all four cases over a temp home.
+`data-dir.test.ts` pins every case over a temp home, from both old directories.
 
 **Two load-bearing traps:**
 - **`@pierre-review/shared` is NOT a published dep, and is NOT types-only** — the conflict
@@ -143,22 +155,22 @@ them by default, and a dependent package cannot switch off its dependency's plat
   `ready` (absent, stale, no native program) downloads what is missing (`['claude', 'codex']`;
   `['claude']` when only Claude is; ⚠ `['codex']` ALONE over a ready Claude, which `runCodexOnly`
   stages apart and moves in WITHOUT re-downloading or swapping Claude's packages under a live run). `MeResponse.ai.autoInstall` says it is on; while it runs,
-  `runtime: 'installing'` with the current STEP in `runtimeMessage` (Limn's own words, never npm's
+  `runtime: 'installing'` with the current STEP in `runtimeMessage` (the app's own words, never npm's
   lines — `currentStep` in `ai/runtime.ts`), polled by the SPA where "Set up AI" used to be. A failure
   is retried ONCE automatically (3 min later), then left to the SPA's Retry (which re-POSTs with
-  `provider: 'codex'`, i.e. both), `limn ai install codex` or the next boot — never a loop. Skipped
-  under `LIMN_AI_DISABLED=true` and `LIMN_AI_AUTO_INSTALL=false` (the demo and recording stacks set
+  `provider: 'codex'`, i.e. both), `ensemble ai install codex` or the next boot — never a loop. Skipped
+  under `ENSEMBLE_AI_DISABLED=true` and `ENSEMBLE_AI_AUTO_INSTALL=false` (the demo and recording stacks set
   the latter: a download would turn `/api/me` into 'installing' mid-shot). Signing in to each
   provider is then the only step.
 - **The download** (`installAiRuntime`): the automatic one above, the SPA's Retry / Set up (where
   the automatic one is off) → `POST /api/ai/runtime/install` (SSE progress; registered only when
-  `config.aiEnabled`; `sync` rate-limit tier), or `limn ai install [codex]`. It writes a `package.json`
+  `config.aiEnabled`; `sync` rate-limit tier), or `ensemble ai install [codex]`. It writes a `package.json`
   carrying the pins into a STAGING dir and runs `npm install --prefix <staging> --ignore-scripts
   --no-package-lock` — npm's own `npm-cli.js` under `process.execPath`, `shell: false`, no string
   interpolation (pins are regex-checked exact versions) — verifies every package landed at its pin,
   then swaps it in at `<dataDir>/ai-runtime` (old one moved aside first, so a failure leaves one
   whole runtime, never half of two). Single-flight (a second POST joins), 10-minute timeout, and a
-  plain failure sentence naming `limn ai install`. `LIMN_CLAUDE_PATH` adds `--omit=optional`
+  plain failure sentence naming `ensemble ai install`. `ENSEMBLE_CLAUDE_PATH` adds `--omit=optional`
   (skips the bundled binary) and is passed to the SDK as `pathToClaudeCodeExecutable` — opt-in
   only, because the bundled binary is version-locked to the SDK and the user's `claude` may not be.
 - **The loader, `apps/backend/src/ai/runtime.ts`, is the ONE module that imports an AI SDK.**
@@ -205,13 +217,13 @@ package carries only what that needs:
   `node -e` (and, on microsandbox, as a host child process on unix sockets). `build-release.mjs` loads it
   through `dist/sandbox/proxy/source.js`, which refuses any import that is not a `node:` built-in.
 - **No container runtime is installed or bundled.** The reader brings Docker, Colima, Podman or
-  microsandbox (docs/SANDBOX.md § Setting up a runtime); Limn drives their CLI and adds no npm
-  dependency for it. `limn sandbox prune [--dry-run] [--store]` (`src/cli.ts`) removes leftovers (`--store`: also the kept repo store).
+  microsandbox (docs/SANDBOX.md § Setting up a runtime); the app drives their CLI and adds no npm
+  dependency for it. `ensemble sandbox prune [--dry-run] [--store]` (`src/cli.ts`) removes leftovers (`--store`: also the kept repo store).
 
 ### The Codex CLI (downloaded with Claude's packages)
 
 Codex is the second AI provider ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Codex, the second
-provider). Limn runs the Codex CLI's native program; it never imports a Codex package.
+provider). The app runs the Codex CLI's native program; it never imports a Codex package.
 
 - **The pin**: `@openai/codex` **0.164.0**, DECLARED exact in `apps/backend/package.json`'s own
   `limnAiRuntime` field. The CLI is not a workspace dependency (its native program is about 360 MB
@@ -220,21 +232,21 @@ provider). Limn runs the Codex CLI's native program; it never imports a Codex pa
   (`CODEX_MODEL_FOR_ROLE`) are pinned for this version: re-check them, and the spike's checks, on
   every bump.
 - **Downloaded on the first boot with Claude's packages** (the automatic download above), into the
-  same `~/.limn/ai-runtime`; by hand, `limn ai install codex` or the SPA's Retry
+  same `~/.ensemble/ai-runtime`; by hand, `ensemble ai install codex` or the SPA's Retry
   (`POST /api/ai/runtime/install {provider: 'codex'}`: Codex only when Claude is ready, else both). A
-  plain `limn ai install` stays Claude-only. npm brings the
+  plain `ensemble ai install` stays Claude-only. npm brings the
   platform package (`@openai/codex-<platform>`); `codexBinaryIn` finds the native program the way
   the package's own `bin/codex.js` does. ⚠ Codex is STAGED APART from Claude's packages: a Codex
   failure is recorded as Codex's alone and never fails Claude's install, and a Claude-only "Set up
   AI" carries an existing Codex over (moved, not downloaded again) and never removes it.
 - **Status** (`getCodexRuntimeStatus()` → `MeResponse.ai.providers.codex.runtime`): `ready` |
   `absent` | `installing` | `failed`. A Codex at another version (an upgrade moved the pin) reads
-  `absent` with "Set up Codex again", but still runs until replaced. `LIMN_CODEX_PATH` points at a `codex` program of the reader's own and counts as
+  `absent` with "Set up Codex again", but still runs until replaced. `ENSEMBLE_CODEX_PATH` points at a `codex` program of the reader's own and counts as
   ready.
-- **Sign-in** lives in `~/.limn/codex` (`CODEX_HOME` for every Codex process Limn starts). From the
+- **Sign-in** lives in `~/.ensemble/codex` (`CODEX_HOME` for every Codex process the app starts). From the
   app it goes through `codex app-server` (`/api/ai/codex/login`, [API.md](API.md)); from the
-  terminal, `limn ai login codex` runs `codex login` with the terminal attached. Only a ChatGPT
-  sign-in runs; an OpenAI API key is refused until Limn can price it.
+  terminal, `ensemble ai login codex` runs `codex login` with the terminal attached. Only a ChatGPT
+  sign-in runs; an OpenAI API key is refused until the app can price it.
 - **What `build-release.mjs` checks for Codex**:
   - the declared pin is an exact version, and `limnAiRuntime` declares nothing else (the other pins
     come from the workspace install);

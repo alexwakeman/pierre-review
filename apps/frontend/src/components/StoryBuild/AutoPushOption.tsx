@@ -20,12 +20,12 @@ export function AutoPushInfo(): JSX.Element {
   return (
     <InfoButton title="Review and fix">
       <p>
-        Limn pushes the branch, then reviews it the way it reviews a pull request (your workspace’s AI review setting) and
+        Ensemble pushes the branch, then reviews it the way it reviews a pull request (your workspace’s AI review setting) and
         checks it against the ticket.
       </p>
-      <p className="mt-2">The agent fixes, answers or pushes back on every point, and Limn reviews again.</p>
+      <p className="mt-2">The agent fixes, answers or pushes back on every point, and Ensemble reviews again.</p>
       <p className="mt-2">
-        The review stays in Limn. After the last round Limn opens the pull request, ready for review. Each round uses your AI
+        The review stays in Ensemble. After the last round Ensemble opens the pull request, ready for review. Each round uses your AI
         allowance.
       </p>
     </InfoButton>
@@ -57,7 +57,7 @@ export function LoopRoundsControl({
         <PlusIcon size={11} />
       </button>
       <InfoButton title="Rounds">
-        <p>Each round, Limn reviews the code and the agent answers every point. After the last round, Limn opens the pull request.</p>
+        <p>Each round, Ensemble reviews the code and the agent answers every point. After the last round, Ensemble opens the pull request.</p>
       </InfoButton>
     </span>
   );
@@ -94,7 +94,7 @@ export function AutoPushLine({ build }: { build: StoryBuild }): JSX.Element | nu
       </label>
       {on && <LoopRoundsControl value={rounds} disabled={set.isPending} onChange={(n) => set.mutate({ id: build.id, rounds: n })} />}
       {on && build.session?.phase === 'built' && build.loop?.state == null && (
-        <p className="mt-1 text-meta text-ui-mute">Limn starts when the next build finishes.</p>
+        <p className="mt-1 text-meta text-ui-mute">Ensemble starts when the next build finishes.</p>
       )}
       {err != null && <p className="mt-1 text-meta text-ui-danger">{err}</p>}
     </div>

@@ -180,7 +180,7 @@ export function reviewMessage(
 function slackActor(login: string | null | undefined): string | null {
   if (!login) return null;
   const poster = limnPosterOf(login);
-  return poster != null ? `Limn for @${escapeSlack(poster)}` : `@${escapeSlack(login)}`;
+  return poster != null ? `Ensemble for @${escapeSlack(poster)}` : `@${escapeSlack(login)}`;
 }
 
 /** Pure builder for the "Pull request merged" message. Exported for its test. */

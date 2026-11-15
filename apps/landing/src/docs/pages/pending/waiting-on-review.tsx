@@ -26,7 +26,7 @@ export default function Page(): JSX.Element {
       <H3>Needs a reviewer</H3>
       <p>
         Nobody has been asked and nobody has reviewed, and the pull request is older than four hours. For the
-        top 15 such cards, Limn suggests reviewers from the code owners and the repository's history, and you can
+        top 15 such cards, Ensemble suggests reviewers from the code owners and the repository's history, and you can
         ask one with <Ui>Assign</Ui>.
       </p>
       <H3>Reviews waiting on people</H3>

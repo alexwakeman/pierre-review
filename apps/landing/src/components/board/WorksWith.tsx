@@ -11,7 +11,7 @@ import coderabbit from '../../assets/board/logos/coderabbit.svg';
 import copilot from '../../assets/board/logos/githubcopilot.svg';
 import cursor from '../../assets/board/logos/cursor.svg';
 
-// "Works with what you have": the tools Limn reads, each with what it reads there.
+// "Works with what you have": the tools Ensemble reads, each with what it reads there.
 
 function maskStyle(src: string): CSSProperties {
   // Quoted: Vite inlines small SVGs as data URIs containing single quotes, which an
@@ -35,7 +35,7 @@ export function WorksWith(): JSX.Element {
     <section className="board strip" aria-labelledby="ww-h">
       <div className="tile lapis ww-say rise">
         <h2 id="ww-h">Works with what you have</h2>
-        <p>Nothing to migrate. Limn reads each tool where it lives.</p>
+        <p>Nothing to migrate. Ensemble reads each tool where it lives.</p>
       </div>
       <ul className="tile ww-tools rise">
         {TOOLS.map((t) => (

@@ -10,7 +10,7 @@
 //     product's name.
 //   • The TRACKER COMMENT, exactly the spec's three lines.
 //
-// ⚠ No product wording ("Limn") in anything written to GitHub or the tracker: tag messages, notes,
+// ⚠ No product wording ("Ensemble") in anything written to GitHub or the tracker: tag messages, notes,
 // pre-release bodies, comments. Pinned by the tests.
 import type { ReleaseCheckResult, ReleaseTicketCheck } from './release-check.js';
 import { releaseBlockerText } from './release-check.js';
@@ -217,13 +217,14 @@ export function releaseNotesDocument(sections: readonly string[]): string {
   return sections.map((s) => s.trim()).join('\n\n');
 }
 
-/** The longest notes section Limn writes (GitHub's release body allows 125 000 characters). */
+/** The longest notes section Ensemble writes (GitHub's release body allows 125 000 characters). */
 export const RELEASE_NOTES_SECTION_MAX = 60_000;
 
 // ── The story summary (the only model text) ─────────────────────────────────────────────────────
 
 const NUMERAL = /[\p{Nd}\p{No}\p{Nl}]/u;
-const PRODUCT = /\blimn\b/i;
+/** The product name, and the old one (Limn → Ensemble, 2026-11): never in model text we publish. */
+const PRODUCT = /\b(?:ensemble|limn)\b/i;
 
 /**
  * The model's summary, made safe: one paragraph, ≤ 600 characters, cut at a sentence. REFUSED (null)

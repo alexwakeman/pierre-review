@@ -70,7 +70,7 @@ describe('buildPrActivity', () => {
     ]);
   });
 
-  it('marks every Limn review, and only the newest AUTO review as latest', () => {
+  it('marks every Ensemble review, and only the newest AUTO review as latest', () => {
     const rows = buildPrActivity(pr());
     const by = (k: string) => rows.find((r) => r.key === k)!;
     expect(by('review:22').limn).toBe(true);
@@ -101,11 +101,17 @@ describe('buildPrActivity', () => {
   });
 });
 
-describe('Limn review detection', () => {
-  it('reads the marker, falling back to the auto-post footer for an older post', () => {
+describe('Ensemble review detection', () => {
+  it('reads the marker, falling back to the auto-post footer (new or Limn wording) for an older post', () => {
     expect(isLimnReview({ automatedKind: null, body: 'plain' })).toBe(false);
     expect(isLimnAutoReview({ automatedKind: 'pierre', body: MANUAL })).toBe(false);
     expect(isLimnAutoReview({ automatedKind: null, body: AUTO })).toBe(true);
+    expect(
+      isLimnAutoReview({
+        automatedKind: 'pierre',
+        body: '<!-- pierre:claude-review v=1 -->\n_Posted automatically by Ensemble’s Claude review._',
+      }),
+    ).toBe(true);
     expect(
       isLimnAutoReview({
         automatedKind: 'pierre',
@@ -120,7 +126,7 @@ describe('the rail markers', () => {
     const rows = buildPrActivity(pr({ mergedAt: '2026-11-02T00:00:00.000Z', mergedById: 9 }));
     const labels = rows.map((r) => activityMarker(r).label);
     expect(labels).toEqual(
-      expect.arrayContaining(['Merged', 'Comment', 'Limn', 'Approved', 'Commit', 'Reopened', 'Opened']),
+      expect.arrayContaining(['Merged', 'Comment', 'Ensemble', 'Approved', 'Commit', 'Reopened', 'Opened']),
     );
     const s = src('components/pr/PrActivityTab.tsx');
     expect(s).not.toMatch(/ShowOnTimeline|MagnifierIcon/);
@@ -159,7 +165,7 @@ describe('PrActivityTab render', () => {
     expect(html).not.toContain('View on GitHub');
   });
 
-  it('chips the Limn reviews and the latest auto review', () => {
+  it('chips the Ensemble reviews and the latest auto review', () => {
     const html = render();
     expect(html.match(/data-testid="activity-limn-chip"/g)).toHaveLength(3);
     expect(html.match(/data-testid="activity-auto-latest"/g)).toHaveLength(1);

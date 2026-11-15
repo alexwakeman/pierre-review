@@ -39,6 +39,8 @@ describe('scratchRefusal', () => {
     ['a folder inside it', { dataDir: join(home, '.limn', 'x'), cloneDir: join(home, '.limn', 'x', 'c'), docsDir: join(home, '.limn', 'x', 'd') }],
     ['the legacy data folder', { dataDir: join(home, '.pierre-review'), cloneDir: join(home, '.pierre-review', 'c'), docsDir: join(home, '.pierre-review', 'd') }],
     ['a database in ~/.limn', { dbPath: join(home, '.limn', 'pierre-review.sqlite') }],
+    ['a database in ~/.ensemble', { dbPath: join(home, '.ensemble', 'pierre-review.sqlite') }],
+    ['the data folder ~/.ensemble', { dataDir: join(home, '.ensemble'), cloneDir: join(home, '.ensemble', 'c'), docsDir: join(home, '.ensemble', 'd') }],
     ['the dev default database of ANY checkout', { dbPath: '/somewhere/pierre-review/apps/backend/data/pierre-review.sqlite' }],
     ['a clone folder outside the scratch folder', { cloneDir: join(home, '.limn', 'clones') }],
     ['a docs folder outside the scratch folder', { docsDir: '/tmp/elsewhere-docs' }],
@@ -55,7 +57,7 @@ describe('scratchRefusal', () => {
     symlinkSync(real, link);
     expect(
       scratchRefusal({ ...ok, dataDir: link, dbPath: join(link, 'db.sqlite'), cloneDir: join(link, 'c'), docsDir: join(link, 'd') }),
-    ).toMatch(/real Limn/);
+    ).toMatch(/real Ensemble/);
   });
 });
 
@@ -159,8 +161,8 @@ describe('the non-fetch write seams', () => {
       origin: 'reader' as const,
       limnCommits: [],
     };
-    await expect(pushRef(t)).rejects.toThrow(/scratch Limn/);
-    await expect(pushForceWithLease({ ...t, leaseSha: 'abc' })).rejects.toThrow(/scratch Limn/);
+    await expect(pushRef(t)).rejects.toThrow(/scratch Ensemble/);
+    await expect(pushForceWithLease({ ...t, leaseSha: 'abc' })).rejects.toThrow(/scratch Ensemble/);
   });
 
   it('the tracker transport (node:https, not fetch) refuses a Jira write without a socket', async () => {
@@ -201,7 +203,7 @@ describe('config.ts in scratch mode', () => {
   it('refuses to load on the real dev database', async () => {
     scratchEnv({ DATABASE_URL: '/Users/x/pierre-review/apps/backend/data/pierre-review.sqlite' });
     vi.resetModules();
-    await expect(import('./config.js')).rejects.toThrow(/Scratch Limn refused to start/);
+    await expect(import('./config.js')).rejects.toThrow(/Scratch Ensemble refused to start/);
   });
 
   it('refuses port 4000', async () => {
@@ -217,7 +219,7 @@ describe('config.ts in scratch mode', () => {
     expect(config.scratch).toEqual({ github: 'read' });
     const guard = await import('./scratch-guard.js');
     expect(guard.activeScratchMode()).toBe('read');
-    expect(() => guard.assertScratchWriteAllowed('x')).toThrow(/scratch Limn/);
+    expect(() => guard.assertScratchWriteAllowed('x')).toThrow(/scratch Ensemble/);
     guard.uninstallScratchFetchGuard();
   });
 

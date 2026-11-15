@@ -216,7 +216,7 @@ describe('1. not a proxy', () => {
   it('a Notion workspace cannot assign, and says why', async () => {
     const res = await listFor('notion:https://www.notion.so/0123456789abcdef0123456789abcdef#ENG-1', 4);
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toMatchObject({ error: 'CannotAssign', message: 'Limn does not change Notion pages, so it cannot assign this ticket.' });
+    expect(res.json()).toMatchObject({ error: 'CannotAssign', message: 'Ensemble does not change Notion pages, so it cannot assign this ticket.' });
   });
 
   it('a sprint-only ticket in this workspace is held', async () => {

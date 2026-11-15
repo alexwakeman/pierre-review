@@ -255,7 +255,7 @@ describe('design diagrams on Codex (kind: diagram)', () => {
     expect(first.argv).not.toContain('resume');
     expect(retry.argv).toContain('resume');
     expect(retry.argv).toContain('th-docs');
-    expect(retry.stdin).toMatch(/Limn could not accept your final answer/);
+    expect(retry.stdin).toMatch(/Ensemble could not accept your final answer/);
     expect(retry.stdin).toMatch(/steps/);
     expect(T.recorded).toHaveLength(1);
     expect(T.recorded[0]).toMatchObject({ provider: 'codex', inputTokens: 62000, outputTokens: 1100 });
@@ -565,13 +565,15 @@ describe('Claude’s prompts are BYTE-IDENTICAL to before the port', () => {
   // sha256 of each prompt as built by the code BEFORE this port (taken at ae7c8d78), over fixed inputs.
   // The four DIAGRAM hashes were re-taken DELIBERATELY on 2026-10-31, when the design grid became a
   // data-flow sequence (DESIGN_DIAGRAM_VERSION 2): Claude's new text, Codex's built through the same
-  // prompt-tools seam.
+  // prompt-tools seam. SPRINT_PATHS_SYSTEM was re-taken DELIBERATELY on 2026-11-14 for the Limn →
+  // Ensemble rename ("Ensemble shows every number itself"): the only change, checked by hashing the
+  // new text with "Ensemble" put back to "Limn", which gave the old hash.
   const BEFORE: Record<string, string> = {
     PR_DIAGRAM_SYSTEM_PROMPT: '46b2b4f64b17d1adc515fba3845ba38f6e46776f4baf73fcc9111d3139130f1e',
     STORY_DIAGRAM_SYSTEM_PROMPT: 'ee66f10f9c303cebcc7516130691bfb83d79e2f0ad3ef6107b0f2539ecb278ab',
     buildPrDiagramPrompt: 'ce36274b96152a9765fcd0d4c4adaf1d9a59c3bcc3400dfaa1473ca2b7bd78ee',
     buildStoryDiagramPrompt: '75ab850f4f650bdc9955896e20957e882a1d377784473bb66a0714f108e5d1b9',
-    SPRINT_PATHS_SYSTEM: 'c4ef79f37f75c5d9fad9e1c71376b810456d4fbc6a4d886038c6c0e8f68036b9',
+    SPRINT_PATHS_SYSTEM: '9c978e8fbcd23f079bd20f41fd6af58bf2ea2e0049cd558e621c72fd9b10bde7',
     sprintPathsPrompt: '2bec786f635ffb21a0e0276967b7f75361b9c52e6ce8bbdc48f36960450a6f93',
     BUILD_SECTIONS_SYSTEM_PROMPT: '83a03d4446782dfd2b5afd7606d5780ebebab8b23840840f4240bf6ef9aa2fb7',
     BUILD_PDF_SYSTEM_PROMPT: 'd28d6a9679e995d54a22ededb66443540764a8155d36f9c5506644d60d8ecaf8',

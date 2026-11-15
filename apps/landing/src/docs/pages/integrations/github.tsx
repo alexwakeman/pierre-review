@@ -3,16 +3,16 @@ import { DocLink, ExtLink, H2, H3, Illustration, MiniTable, Note, Steps, Thread,
 
 export const meta: DocMeta = {
   title: 'GitHub',
-  summary: 'Limn reads and writes GitHub through your own gh sign-in. What it reads, what it writes and when.',
+  summary: 'Ensemble reads and writes GitHub through your own gh sign-in. What it reads, what it writes and when.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        GitHub is Limn’s main source of data. Limn reads your repositories’ pull requests, reviews, comments, commits
+        GitHub is Ensemble’s main source of data. Ensemble reads your repositories’ pull requests, reviews, comments, commits
         and checks, and keeps a copy on your computer. It does this through the GitHub CLI, <code>gh</code>, that you
-        are already signed in to. Limn has no GitHub app, no sign-in of its own and no server in between, and it does
+        are already signed in to. Ensemble has no GitHub app, no sign-in of its own and no server in between, and it does
         not store your GitHub token.
       </p>
 
@@ -26,14 +26,14 @@ export default function Page(): JSX.Element {
           A signed-in session: run <code>gh auth login</code> once in a terminal and follow the prompts.
         </li>
         <li>Read access to the repositories you add. To merge, approve, push or post, you need write access.</li>
-        <li>Limn works with github.com.</li>
+        <li>Ensemble works with github.com.</li>
       </ul>
       <Steps>
         <li>
           Run <code>gh auth login</code> and choose GitHub.com.
         </li>
         <li>
-          Start Limn with <code>npx limn-review</code>. It asks <code>gh</code> for your token each time it needs one.
+          Start Ensemble with <code>npx ensemble-review</code>. It asks <code>gh</code> for your token each time it needs one.
         </li>
         <li>
           Add repositories (see <DocLink to="getting-started/add-repositories">Add repositories</DocLink>).
@@ -48,7 +48,7 @@ export default function Page(): JSX.Element {
         that is not enough, run <code>gh auth refresh -h github.com -s read:org</code>.
       </p>
 
-      <H2 id="what-limn-reads">What Limn reads</H2>
+      <H2 id="what-ensemble-reads">What Ensemble reads</H2>
       <ul>
         <li>Pull requests, their reviews, review threads, comments and reactions.</li>
         <li>Commits and the files they changed, and check and status results.</li>
@@ -59,26 +59,26 @@ export default function Page(): JSX.Element {
       </ul>
       <p>
         The first sync of a repository reads about the last 14 days quickly, then fills in the last 90 days in the
-        background. After that, Limn checks each repository as often as its activity calls for, and a pull request
+        background. After that, Ensemble checks each repository as often as its activity calls for, and a pull request
         you have open every few seconds. Large text, such as pull request descriptions and diff hunks, is fetched
         when you open the pull request.
       </p>
 
       <H2 id="rate-limits">Rate limits are handled for you</H2>
       <p>
-        GitHub gives each account an hourly allowance of requests. Limn plans its work around that allowance and
+        GitHub gives each account an hourly allowance of requests. Ensemble plans its work around that allowance and
         slows down before it runs out, rather than failing. When a repository has to wait, the sync panel says{' '}
         <Ui>Paused — GitHub rate limit</Ui> and when it will resume. Nothing is lost; the sync carries on from where it
         stopped.
       </p>
       <Note>
-        Limn shares your account’s allowance with everything else you use <code>gh</code> for. A very large first sync
+        Ensemble shares your account’s allowance with everything else you use <code>gh</code> for. A very large first sync
         can take a while for that reason.
       </Note>
 
-      <H2 id="what-limn-writes">What Limn writes, and when</H2>
+      <H2 id="what-ensemble-writes">What Ensemble writes, and when</H2>
       <p>
-        Limn writes to GitHub only when you press a button, or when you have switched on an automatic action. Every
+        Ensemble writes to GitHub only when you press a button, or when you have switched on an automatic action. Every
         write goes out under your own GitHub account.
       </p>
       <MiniTable
@@ -94,30 +94,30 @@ export default function Page(): JSX.Element {
           { _key: 'p', w: 'Pushes from AI Fix, Implement story and the conflict resolver', when: 'When you press Push, or if you switched on automatic pushing' },
           { _key: 'o', w: 'Open a pull request', when: 'When you press, from Implement story or the conflict resolver' },
           { _key: 'x', w: 'Re-run CI jobs, request reviewers, close or reopen', when: 'When you press the button' },
-          { _key: 's', w: 'limn/ commit statuses', when: 'On each auto review and dependency action, to tell teammates’ Limn the work is under way' },
+          { _key: 's', w: 'ensemble/ commit statuses', when: 'On each auto review and dependency action, to tell teammates’ copies of Ensemble the work is under way' },
         ]}
       />
-      <Warning title="Do not make limn/ statuses required">
-        The <code>limn/review-claude</code>, <code>limn/review-codex</code> and <code>limn/deps</code> statuses are not
-        CI. Limn leaves them out of every check count. If you make one a required check in branch protection, a status
+      <Warning title="Do not make ensemble/ statuses required">
+        The <code>ensemble/review-claude</code>, <code>ensemble/review-codex</code> and <code>ensemble/deps</code> statuses are not
+        CI. Ensemble leaves them out of every check count. If you make one a required check in branch protection, a status
         that is still pending blocks merges.
       </Warning>
 
-      <H2 id="the-limn-bot">How Limn’s own actions are shown</H2>
+      <H2 id="the-ensemble-bot">How Ensemble’s own actions are shown</H2>
       <p>
-        On GitHub, Limn’s posts appear under your name, with a hidden marker so every copy of Limn can recognise them.
-        Inside Limn they are shown as a bot that acts for you, “Limn · your login”, so they are never mistaken for
-        your own words. A teammate’s Limn is named too, for example “Robin’s Limn: addressed”.
+        On GitHub, Ensemble’s posts appear under your name, with a hidden marker so every copy of Ensemble can recognise them.
+        Inside Ensemble they are shown as a bot that acts for you, “Ensemble · your login”, so they are never mistaken for
+        your own words. A teammate’s Ensemble is named too, for example “Robin’s Ensemble: addressed”.
       </p>
       <Illustration
-        label="A review thread with a finding from Limn acting for Alex, marked as a bot"
-        caption="Inside Limn, a finding Limn posted for you is a bot comment."
+        label="A review thread with a finding from Ensemble acting for Alex, marked as a bot"
+        caption="Inside Ensemble, a finding Ensemble posted for you is a bot comment."
       >
         <Thread
           file="refunds/policy.py:41"
           comments={[
             {
-              who: 'Limn · alex',
+              who: 'Ensemble · alex',
               bot: true,
               when: '1h',
               text: 'Major: RefundPolicy.allows() never reads paid_at, so refunds after 30 days still go through.',
@@ -126,14 +126,14 @@ export default function Page(): JSX.Element {
         />
       </Illustration>
       <p>
-        Because of this, Limn’s actions never count as yours anywhere in Limn. They do not take your turn on Pending,
-        they are not your replies in thread states, and they are counted under <Ui>Limn</Ui> in Reports.
+        Because of this, Ensemble’s actions never count as yours anywhere in Ensemble. They do not take your turn on Pending,
+        they are not your replies in thread states, and they are counted under <Ui>Ensemble</Ui> in Reports.
       </p>
 
       <H2 id="turn-it-off">Remove access</H2>
       <p>
-        To stop Limn reading GitHub, stop Limn, or sign <code>gh</code> out with <code>gh auth logout</code>. To remove
-        a repository, remove it in Limn; its stored data is deleted. For how Limn stores and protects what it reads,
+        To stop Ensemble reading GitHub, stop Ensemble, or sign <code>gh</code> out with <code>gh auth logout</code>. To remove
+        a repository, remove it in Ensemble; its stored data is deleted. For how Ensemble stores and protects what it reads,
         see <DocLink to="security/github-access">GitHub access</DocLink>.
       </p>
     </>

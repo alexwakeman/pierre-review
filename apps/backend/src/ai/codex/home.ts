@@ -21,7 +21,7 @@ import type { CodexHookConfig } from './types.js';
 export const CODEX_HOME_DIR_NAME = 'codex';
 
 /** Shown wherever Codex is not set up. One sentence, the command to run. */
-export const CODEX_NOT_INSTALLED_MESSAGE = 'Codex is not set up yet. Run: limn ai install codex';
+export const CODEX_NOT_INSTALLED_MESSAGE = 'Codex is not set up yet. Run: ensemble ai install codex';
 
 /**
  * Thrown by `codexBinary` (and the provider) when the Codex program is not installed. Its message is
@@ -129,8 +129,8 @@ export function lockdownToml(settings: ReadonlyArray<readonly [string, TomlValue
  */
 export function codexHomeConfigToml(trust: ReadonlyMap<string, string>): string {
   const lines = [
-    "# Limn's own Codex home. Written by Limn (apps/backend/src/ai/codex/home.ts); edits are overwritten.",
-    '# Your own ~/.codex is never read or written by Limn.',
+    "# Ensemble's own Codex home. Written by Ensemble (apps/backend/src/ai/codex/home.ts); edits are overwritten.",
+    '# Your own ~/.codex is never read or written by Ensemble.',
     'cli_auth_credentials_store = "file"',
     'check_for_update_on_startup = false',
     ...lockdownToml(),

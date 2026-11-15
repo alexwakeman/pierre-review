@@ -28,6 +28,7 @@ export type StoryRailSlot = (typeof STORY_RAIL_SLOTS)[number];
 /** The sections the nav can reach, in page order, and their words. */
 export const STORY_SECTIONS = [
   { id: 'story', label: 'Ticket' },
+  { id: 'criteria-map', label: 'Code per criterion' },
   { id: 'design', label: 'Design' },
   { id: 'missing', label: 'Outside the criteria' },
   { id: 'not-asked', label: 'Not asked for' },

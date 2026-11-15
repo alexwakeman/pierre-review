@@ -32,7 +32,7 @@ export const SANDBOX_CREDENTIAL_MODE: Record<SandboxProvider, CredentialMode> = 
 export function credentialModeLine(provider: SandboxProvider, mode: CredentialMode = SANDBOX_CREDENTIAL_MODE[provider]): string {
   const who = provider === 'claude' ? 'Claude' : 'ChatGPT';
   return mode === 'injected'
-    ? `Your ${who} sign-in stays on this computer. Limn's proxy adds it to each request the agent makes.`
+    ? `Your ${who} sign-in stays on this computer. Ensemble's proxy adds it to each request the agent makes.`
     : `Your ${who} sign-in is copied into the sandbox. Only the allowed hosts can be reached.`;
 }
 
@@ -207,7 +207,7 @@ export function codexInjectedConfigToml(): string {
     `chatgpt_base_url = "${CHATGPT_INJECTOR_URL}/backend-api/"`,
     '',
     '[model_providers.limn]',
-    'name = "OpenAI via Limn"',
+    'name = "OpenAI via Ensemble"',
     `base_url = "${CHATGPT_INJECTOR_URL}/backend-api/codex"`,
     'wire_api = "responses"',
     'requires_openai_auth = true',

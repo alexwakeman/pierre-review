@@ -1,0 +1,7 @@
+{
+  "name": "limn-srt-spike",
+  "private": true,
+  "type": "module",
+  "description": "Spike only: quick story chats under @anthropic-ai/sandbox-runtime. Not a pnpm workspace; npm install here.",
+  "dependencies": { "@anthropic-ai/sandbox-runtime": "0.0.83" }
+}

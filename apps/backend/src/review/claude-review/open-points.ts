@@ -125,7 +125,7 @@ export function openPointsPostBlock(op: ClaudeReviewOpenPoints | null | undefine
     '#### Open points on the ticket (not blocking)',
     '',
     `Not decided when the ticket was written. They do not affect this review's outcome.${
-      op.fresh ? '' : ` From Limn's stored copy of the ticket${shortDate(op.readAt) ? ` (read ${shortDate(op.readAt)})` : ''}.`
+      op.fresh ? '' : ` From Ensemble's stored copy of the ticket${shortDate(op.readAt) ? ` (read ${shortDate(op.readAt)})` : ''}.`
     }`,
     '',
   ];
@@ -145,7 +145,7 @@ export function openPointsPostBlock(op: ClaudeReviewOpenPoints | null | undefine
     out.push(chunk);
     used += chunk.length + 1;
   }
-  if (left > 0) out.push(`- ${left} more ${left === 1 ? 'point' : 'points'} in Limn.`);
+  if (left > 0) out.push(`- ${left} more ${left === 1 ? 'point' : 'points'} in Ensemble.`);
   return out.join('\n');
 }
 

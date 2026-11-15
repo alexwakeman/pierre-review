@@ -56,7 +56,7 @@ const statesSchema = {
 
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
-  return { error: 'NotFound', message: 'CI review is off here. It runs on your machine: npx limn-review' };
+  return { error: 'NotFound', message: 'CI review is off here. It runs on your machine: npx ensemble-review' };
 }
 
 async function defaultWorkspaceId(ctx: AgentContext, accountId: number): Promise<number | null> {

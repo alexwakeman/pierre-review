@@ -52,7 +52,7 @@ async function start(over: Partial<SiteOptions> = {}): Promise<Running> {
       landingDir: landing,
       contactWebhookUrl: WEBHOOK,
       ticketSecret: 'secret',
-      canonicalOrigin: 'https://limn-review.com',
+      canonicalOrigin: 'https://ensemble.ac',
       hstsMaxAge: 31536000,
       trustProxyHops: 1,
       logger: quiet,
@@ -200,7 +200,7 @@ describe('the security headers', () => {
       // Raw request: fetch() will not let us set Host.
       const { request } = await import('node:http');
       const res = await new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
-        const req = request(`${r.base}/contact?x=1`, { headers: { host: 'www.limn-review.com' } }, (resp) => {
+        const req = request(`${r.base}/contact?x=1`, { headers: { host: 'www.ensemble.ac' } }, (resp) => {
           resolve({ status: resp.statusCode ?? 0, location: resp.headers.location });
           resp.resume();
         });
@@ -208,29 +208,29 @@ describe('the security headers', () => {
         req.end();
       });
       expect(res.status).toBe(301);
-      expect(res.location).toBe('https://limn-review.com/contact?x=1');
+      expect(res.location).toBe('https://ensemble.ac/contact?x=1');
     } finally {
       await stop(r);
     }
   });
 
   it('redirects the old domain to the canonical one, and serves only listed hosts that way', async () => {
-    const r = await start({ redirectHosts: ['pierre-review.com', 'www.pierre-review.com'] });
+    const r = await start({ redirectHosts: ['limn-review.com', 'www.limn-review.com', 'pierre-review.com'] });
     try {
       const { request } = await import('node:http');
       const hit = (host: string) =>
         new Promise<{ status: number; location: string | undefined }>((resolve, reject) => {
-          const req = request(`${r.base}/reporting`, { headers: { host } }, (resp) => {
+          const req = request(`${r.base}/contact`, { headers: { host } }, (resp) => {
             resolve({ status: resp.statusCode ?? 0, location: resp.headers.location });
             resp.resume();
           });
           req.on('error', reject);
           req.end();
         });
-      for (const host of ['pierre-review.com', 'WWW.pierre-review.com:443']) {
+      for (const host of ['limn-review.com', 'WWW.limn-review.com:443', 'pierre-review.com']) {
         const res = await hit(host);
         expect(res.status).toBe(301);
-        expect(res.location).toBe('https://limn-review.com/reporting');
+        expect(res.location).toBe('https://ensemble.ac/contact');
       }
       expect((await hit('something-else.up.railway.app')).status).not.toBe(301);
     } finally {
@@ -284,6 +284,26 @@ describe('pages moved to the docs', () => {
       }
       const head = await fetch(`${r.base}/getting-started`, { method: 'HEAD', redirect: 'manual' });
       expect(head.status).toBe(301);
+    } finally {
+      await stop(r);
+    }
+  });
+
+  it('301s the pages folded by the 2026-11 restructure, query before fragment', async () => {
+    const r = await start();
+    try {
+      const cases: [string, string][] = [
+        ['/teams', '/ensemble-review'],
+        ['/teams/', '/ensemble-review'],
+        ['/reporting', '/everything-else#reporting'],
+        ['/reporting?utm_source=x', '/everything-else?utm_source=x#reporting'],
+        ['/how-we-measure', '/everything-else#how-we-measure'],
+      ];
+      for (const [path, location] of cases) {
+        const res = await fetch(`${r.base}${path}`, { redirect: 'manual' });
+        expect(res.status, path).toBe(301);
+        expect(res.headers.get('location'), path).toBe(location);
+      }
     } finally {
       await stop(r);
     }

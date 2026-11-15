@@ -174,13 +174,14 @@ describe('the one-time flag', () => {
 
   it('the boot run cleans once, then does not rescan', async () => {
     const dataDir = join(root, 'data');
-    // The flag needs a real data dir, so the boot run's data-dir rule is the fixture's: the two
-    // ~/.limn-keyed fixtures no longer match, an entry keyed by the fixture data dir does.
+    // The flag needs a real data dir, so the boot run's data-dir rule is the fixture's: an entry keyed
+    // by the fixture data dir matches, and the ~/.limn-keyed fixtures still match (~/.limn is an old
+    // data dir, like ~/.pierre-review, after the move to ~/.ensemble).
     const own = `${projectKey(dataDir)}-clones-x`;
     mkdirSync(join(places.projectsDir, own));
     const boot = { ...places, dataDir };
     const first = await runBootSessionCleanup(boot);
-    expect(first?.removed).toBe(LIMN.length - 2 + 1);
+    expect(first?.removed).toBe(LIMN.length + 1);
     expect(sessionCleanupDone(dataDir)).toBe(true);
     mkdirSync(join(places.projectsDir, own));
     expect(await runBootSessionCleanup(boot)).toBeNull();

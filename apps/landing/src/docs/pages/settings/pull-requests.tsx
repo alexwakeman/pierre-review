@@ -10,14 +10,14 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        The <Ui>Pull requests</Ui> tab sets two judgements Limn makes about every pull request: whether it is large,
+        The <Ui>Pull requests</Ui> tab sets two judgements Ensemble makes about every pull request: whether it is large,
         and how far its change can reach (its blast radius). Both settings apply to every workspace and take effect
         everywhere as soon as you save.
       </p>
 
       <H2 id="large-pull-requests">Large pull requests</H2>
       <p>
-        Limn flags a pull request as large when it changes at least a set number of lines of code. Only lines of code
+        Ensemble flags a pull request as large when it changes at least a set number of lines of code. Only lines of code
         count. Documentation, configuration, lockfiles and generated or copied-in (vendored) files are left out, so a
         4,000-line lockfile update is not a large pull request.
       </p>

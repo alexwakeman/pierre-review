@@ -58,7 +58,7 @@ const storyBody = {
 
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
-  return { error: 'NotFound', message: 'Design diagrams are off here. They run on your machine: npx limn-review' };
+  return { error: 'NotFound', message: 'Design diagrams are off here. They run on your machine: npx ensemble-review' };
 }
 
 /** What to draw and, beside it, the newest run when that is another one. `liveFp` null ⇒ not current. */
@@ -100,6 +100,8 @@ async function storySlot(
     ident,
     ticketKey: ticketKey ?? slot.diagram?.ticketKey ?? slot.latest?.ticketKey ?? null,
     memberCount: members.length,
+    // ONE pull request is no story to draw (`too_few_prs`): the story view shows that PR's own design.
+    soloPr: members.length === 1 ? (toDiagramMembers(members)[0] ?? null) : null,
     ...slot,
   };
 }

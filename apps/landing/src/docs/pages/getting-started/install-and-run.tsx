@@ -2,15 +2,15 @@ import type { DocMeta } from '../../types';
 import { DocLink, ExtLink, H2, H3, Illustration, Log, Note, Steps, Tip, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
-  title: 'Install and run Limn',
-  summary: 'Run Limn with one command, open it in your browser, and keep it up to date.',
+  title: 'Install and run Ensemble',
+  summary: 'Run Ensemble with one command, open it in your browser, and keep it up to date.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn is an npm package that you run on your own computer. One command starts it and opens the app in
+        Ensemble is an npm package that you run on your own computer. One command starts it and opens the app in
         your browser. There is nothing to sign up for. You need Node.js and the GitHub CLI, signed in to the
         GitHub account whose repositories you want to follow.
       </p>
@@ -22,7 +22,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>The GitHub CLI</b> (<code>gh</code>), installed from{' '}
-          <ExtLink href="https://cli.github.com">cli.github.com</ExtLink> and signed in. Limn reads GitHub with
+          <ExtLink href="https://cli.github.com">cli.github.com</ExtLink> and signed in. Ensemble reads GitHub with
           the CLI's sign-in. It does not ask for, or store, a GitHub token of its own. See{' '}
           <DocLink to="integrations/github">GitHub</DocLink>.
         </li>
@@ -33,28 +33,28 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
 
-      <H2 id="start-limn">Start Limn</H2>
+      <H2 id="start-ensemble">Start Ensemble</H2>
       <Steps>
         <li>
           Sign in to the GitHub CLI, if you have not already: <code>gh auth login</code>.
         </li>
         <li>
-          Run <code>npx limn-review</code> in a terminal.
+          Run <code>npx ensemble-review</code> in a terminal.
         </li>
         <li>
-          Wait for the address to show. Limn opens your browser at <code>http://localhost:4000/app</code>.
+          Wait for the address to show. Ensemble opens your browser at <code>http://localhost:4000/app</code>.
         </li>
         <li>
-          Keep the terminal open. Limn runs while the command runs. Press <code>Ctrl</code>+<code>C</code> to
+          Keep the terminal open. Ensemble runs while the command runs. Press <code>Ctrl</code>+<code>C</code> to
           stop it.
         </li>
       </Steps>
 
       <Illustration
-        label="A terminal running npx limn-review, which prints the Limn banner and the local address."
-        caption="The terminal after you start Limn."
+        label="A terminal running npx ensemble-review, which prints the Ensemble banner and the local address."
+        caption="The terminal after you start Ensemble."
       >
-        <Log lines={['$ npx limn-review', '', '  LIMN', '  ▸ http://localhost:4000/app']} />
+        <Log lines={['$ npx ensemble-review', '', '  ENSEMBLE', '  ▸ http://localhost:4000/app']} />
       </Illustration>
 
       <Note title="If your organisation uses single sign-on">
@@ -66,7 +66,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-happens-the-first-time">What happens the first time</H2>
       <ul>
         <li>
-          Limn makes its data folder, <code>~/.limn</code>, and its local database there.
+          Ensemble makes its data folder, <code>~/.ensemble</code>, and its local database there.
         </li>
         <li>
           It reads your GitHub account through the GitHub CLI and suggests repositories you worked on
@@ -122,31 +122,31 @@ export default function Page(): JSX.Element {
       <H3>Commands</H3>
       <ul>
         <li>
-          <code>npx limn-review status</code> prints your My Turn list in the terminal, with links. Add{' '}
+          <code>npx ensemble-review status</code> prints your My Turn list in the terminal, with links. Add{' '}
           <code>--sync</code> to read GitHub first, or <code>--watch</code> to repaint it until you stop it.
         </li>
         <li>
-          <code>npx limn-review ai login codex</code> signs Limn in to Codex with your ChatGPT account. Add{' '}
+          <code>npx ensemble-review ai login codex</code> signs Ensemble in to Codex with your ChatGPT account. Add{' '}
           <code>--device-auth</code> on a machine with no browser.
         </li>
         <li>
-          <code>npx limn-review ai install</code> and <code>npx limn-review ml install</code> download the AI
-          runtimes or the comment-scoring model now, instead of when Limn first needs them.
+          <code>npx ensemble-review ai install</code> and <code>npx ensemble-review ml install</code> download the AI
+          runtimes or the comment-scoring model now, instead of when Ensemble first needs them.
         </li>
       </ul>
 
       <Tip>
-        Install it globally with <code>npm install -g limn-review</code>, then start it with <code>limn</code>.
+        Install it globally with <code>npm install -g ensemble-review</code>, then start it with <code>ensemble</code>.
       </Tip>
 
       <H2 id="set-up-the-rest">Set up the rest</H2>
       <p>
-        Limn works as soon as you add repositories. Everything else is optional. Switch on the parts you want, in
+        Ensemble works as soon as you add repositories. Everything else is optional. Switch on the parts you want, in
         this order:
       </p>
       <Steps>
         <li>
-          <b>Add your repositories.</b> Tick the ones Limn suggests, or search for any repository. See{' '}
+          <b>Add your repositories.</b> Tick the ones Ensemble suggests, or search for any repository. See{' '}
           <DocLink to="getting-started/add-repositories">Add your repositories</DocLink>.
         </li>
         <li>
@@ -155,7 +155,7 @@ export default function Page(): JSX.Element {
           <DocLink to="integrations/claude">Claude</DocLink> and <DocLink to="integrations/codex">Codex</DocLink>.
         </li>
         <li>
-          <b>Check the AI budget.</b> On a subscription, Limn may use 50% of your week for its automatic runs until
+          <b>Check the AI budget.</b> On a subscription, Ensemble may use 50% of your week for its automatic runs until
           you change it. On an API key, there is no limit until you set a weekly budget in US dollars. See{' '}
           <DocLink to="settings/ai-usage-and-spend#spend-budget">The spend budget</DocLink>.
         </li>
@@ -175,19 +175,23 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
 
-      <H2 id="update-limn">Update Limn</H2>
+      <H2 id="update-ensemble">Update Ensemble</H2>
       <p>
         <code>npx</code> can keep an older copy. To run the newest release, run{' '}
-        <code>npx limn-review@latest</code>. If you installed it globally, run{' '}
-        <code>npm install -g limn-review@latest</code>. Your data stays in <code>~/.limn</code>, and the
-        database updates itself the next time Limn starts. The{' '}
+        <code>npx ensemble-review@latest</code>. If you installed it globally, run{' '}
+        <code>npm install -g ensemble-review@latest</code>. Your data stays in <code>~/.ensemble</code>, and the
+        database updates itself the next time Ensemble starts. The{' '}
         <DocLink to="changelog/changelog">Changelog</DocLink> says what each release changed. The version
         these docs describe is shown at the top of every docs page.
       </p>
+      <Note title="Coming from Limn">
+        Ensemble was called Limn. <code>npx limn-review</code> still works and starts Ensemble. On first start, an
+        existing <code>~/.limn</code> folder is moved to <code>~/.ensemble</code>, with all your data.
+      </Note>
 
-      <Warning title="If Limn does not start">
+      <Warning title="If Ensemble does not start">
         If the terminal says the SQLite driver did not install correctly, clear the npx cache and try again:{' '}
-        <code>rm -rf ~/.npm/_npx &amp;&amp; npx limn-review@latest</code>. If it says the GitHub CLI is not
+        <code>rm -rf ~/.npm/_npx &amp;&amp; npx ensemble-review@latest</code>. If it says the GitHub CLI is not
         found or not signed in, run <code>gh auth login</code>. More fixes are in{' '}
         <DocLink to="troubleshooting/troubleshooting">Troubleshooting</DocLink>.
       </Warning>

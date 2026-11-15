@@ -39,7 +39,7 @@ import { JiraFetchError, jiraGetJson, jiraPostJson, type JiraTransport } from '.
 
 const TRANSITION_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const TRANSITIONS_MAX = 50;
-const MSG_NOT_HELD = 'Limn holds no such ticket in this workspace.';
+const MSG_NOT_HELD = 'Ensemble holds no such ticket in this workspace.';
 const MSG_NOT_JIRA = 'Changing the status works with Jira only.';
 const MSG_REFUSED = 'Jira refused this change.';
 

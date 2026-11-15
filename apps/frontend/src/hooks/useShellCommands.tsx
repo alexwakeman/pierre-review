@@ -217,7 +217,7 @@ export function useShellCommands({
       {
         id: 'limn-docs',
         group: 'Help',
-        title: 'Open the Limn docs',
+        title: 'Open the Ensemble docs',
         icon: <ExternalLinkIcon size={14} />,
         keywords: ['documentation', 'manual', 'guide', 'website'],
         run: () => {

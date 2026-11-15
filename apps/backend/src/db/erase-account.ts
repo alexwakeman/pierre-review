@@ -4,6 +4,7 @@ import { eraseCodexHistory } from '../ai/codex/rollouts.js';
 import { removeAccountDocs } from '../reference-docs/library.js';
 import { db, runTransaction, schema } from './client.js';
 import { deleteRepo } from './queries.js';
+import { readEnv } from '../env-name.js';
 
 // ---------------------------------------------------------------------------
 // Right to erasure (UK/EU GDPR Art. 17, CCPA "right to delete").
@@ -136,7 +137,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(workspaceRepos).where(eq(workspaceRepos.accountId, accountId)).execute();
     // The EXTRA External memberships (migration 0191) — same shape, same reason.
     await tx.delete(workspaceExternalRepos).where(eq(workspaceExternalRepos.accountId, accountId)).execute();
-    // RELEASES (migration 0192): child before parent (both children's composite FKs point at
+    // RELEASES (migration 0195): child before parent (both children's composite FKs point at
     // `releases`, which points at `workspaces`), then the synced tags and their ranges. The repo and
     // workspace cascades normally take them; explicit so the guarantee depends on neither.
     await tx.delete(schema.releaseTicketComments).where(eq(schema.releaseTicketComments.accountId, accountId)).execute();
@@ -144,6 +145,9 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.releases).where(eq(schema.releases.accountId, accountId)).execute();
     await tx.delete(schema.repoTagRanges).where(eq(schema.repoTagRanges.accountId, accountId)).execute();
     await tx.delete(schema.repoTags).where(eq(schema.repoTags.accountId, accountId)).execute();
+    // Story chats (migration 0192): turns first (their FK names the chat), then the chats.
+    await tx.delete(schema.storyChatTurns).where(eq(schema.storyChatTurns.accountId, accountId)).execute();
+    await tx.delete(schema.storyChats).where(eq(schema.storyChats.accountId, accountId)).execute();
     // The REPO half of the Pending mute (migration 0058 / pg 0045). Deleted BEFORE `workspaces`
     // only for tidiness — it has no FK to a workspace at all (a repo belongs to exactly one
     // workspace already, so copying that fact onto the mute row would give the account two
@@ -245,6 +249,10 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.teamClaimSeen).where(eq(schema.teamClaimSeen.accountId, accountId)).execute();
     // The skipped lines (migration 0166): heads and providers. No FK.
     await tx.delete(schema.teamClaimSkipLines).where(eq(schema.teamClaimSkipLines.accountId, accountId)).execute();
+    // The `limn/deps` ledger (migration 0193): GitHub logins and heads. No FK.
+    await tx.delete(schema.depsClaimLines).where(eq(schema.depsClaimLines.accountId, accountId)).execute();
+    // The story-build claim ledger (migration 0194): GitHub logins, heads and ticket keys. No FK.
+    await tx.delete(schema.storyBuildClaimLines).where(eq(schema.storyBuildClaimLines.accountId, accountId)).execute();
     // The worktree ledger (migration 0146): which PR / ticket a checkout on disk was for. No FK. The
     // directories themselves become unledgered orphans the worktree sweep collects by age.
     await tx.delete(schema.worktreeLedger).where(eq(schema.worktreeLedger.accountId, accountId)).execute();
@@ -384,7 +392,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
   //    home serves this one account; the sign-in, config.toml and installation_id stay (the machine's;
   //    `limn ai logout codex` removes the sign-in).
   //    ⚠ A test run never touches the REAL home: under vitest only an explicit LIMN_DATA_DIR is erased.
-  const underTest = process.env.VITEST === 'true' && !process.env.LIMN_DATA_DIR;
+  const underTest = process.env.VITEST === 'true' && !readEnv(process.env, 'DATA_DIR');
   if (!underTest) eraseCodexHistory(codexHome());
 
   return { reposDeleted };
@@ -463,6 +471,10 @@ export function accountScopedTables(): {
     { name: 'teamClaimSeen', col: schema.teamClaimSeen.accountId, table: schema.teamClaimSeen },
     // The skipped lines (migration 0166), erased explicitly above.
     { name: 'teamClaimSkipLines', col: schema.teamClaimSkipLines.accountId, table: schema.teamClaimSkipLines },
+    // The `limn/deps` ledger (migration 0193), erased explicitly above.
+    { name: 'depsClaimLines', col: schema.depsClaimLines.accountId, table: schema.depsClaimLines },
+    // The story-build claim ledger (migration 0194), erased explicitly above.
+    { name: 'storyBuildClaimLines', col: schema.storyBuildClaimLines.accountId, table: schema.storyBuildClaimLines },
     // The worktree ledger (migration 0146), erased explicitly above.
     { name: 'worktreeLedger', col: schema.worktreeLedger.accountId, table: schema.worktreeLedger },
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },
@@ -541,12 +553,15 @@ export function accountScopedTables(): {
     { name: 'workspaceRepos', col: workspaceRepos.accountId, table: workspaceRepos },
     // The EXTRA External memberships (migration 0191): a repo External in more than one workspace.
     { name: 'workspaceExternalRepos', col: workspaceExternalRepos.accountId, table: workspaceExternalRepos },
-    // RELEASES (migration 0192): the synced tags, their ranges, and every release the reader made.
+    // RELEASES (migration 0195): the synced tags, their ranges, and every release the reader made.
     { name: 'repoTags', col: schema.repoTags.accountId, table: schema.repoTags },
     { name: 'repoTagRanges', col: schema.repoTagRanges.accountId, table: schema.repoTagRanges },
     { name: 'releases', col: schema.releases.accountId, table: schema.releases },
     { name: 'releaseItems', col: schema.releaseItems.accountId, table: schema.releaseItems },
     { name: 'releaseTicketComments', col: schema.releaseTicketComments.accountId, table: schema.releaseTicketComments },
+    // Story chats (migration 0192): the reader's questions and the answers.
+    { name: 'storyChats', col: schema.storyChats.accountId, table: schema.storyChats },
+    { name: 'storyChatTurns', col: schema.storyChatTurns.accountId, table: schema.storyChatTurns },
     // The bot object, now one grain. It holds the human judgements, the human-set vendor names
     // and `monthly_cents` — the one column no classifier can regenerate — so this is the entry
     // whose omission would cost the user data they entered by hand.

@@ -567,7 +567,7 @@ export interface SprintPathsStatus {
 export function sprintPathsFailureText(f: SprintPathsFailure, by: 'Claude' | 'Codex' = 'Claude'): string {
   switch (f) {
     case 'refused':
-      return `${by}’s answer did not pass Limn’s checks.`;
+      return `${by}’s answer did not pass Ensemble’s checks.`;
     case 'no_submit':
       return `${by} finished without an answer.`;
     case 'stopped':

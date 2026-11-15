@@ -85,7 +85,7 @@ describe('the limn: bot identity', () => {
     expect(isLimnBotLogin('alice')).toBe(false);
     expect(limnPosterOf('limn:alice')).toBe('alice');
     expect(limnPosterOf('alice')).toBeNull();
-    expect(limnBotLabel('alice')).toBe('Limn · alice');
+    expect(limnBotLabel('alice')).toBe('Ensemble · alice');
   });
 
   it('maps every severity onto the ML scale', () => {

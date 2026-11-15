@@ -9,11 +9,11 @@ work lands; keep the spec sections true.
 Say, per repository, which version tag on `main` is safe to release: the newest one whose changes
 link only to Done tickets, with every ticket shipping WHOLE across all its repositories. One reader
 press tags each safe version with the workspace's release suffix (the tag is the trigger for the
-team's image build; Limn deploys nothing), publishes release notes and comments on each shipped
+team's image build; Ensemble deploys nothing), publishes release notes and comments on each shipped
 ticket. A hotfix is an Implement option that builds one fix twice: on the latest release and on
-`main`, as two PRs per repository. Limn automates nothing after those PRs open.
+`main`, as two PRs per repository. Ensemble automates nothing after those PRs open.
 
-Owner decisions: tags are cut from `main` only (by CI or by hand; Limn never cuts a version tag);
+Owner decisions: tags are cut from `main` only (by CI or by hand; Ensemble never cuts a version tag);
 nothing is in production yet; the aim is always the newest safe tag; "Done" = complete.
 
 ## Terms and settings
@@ -32,13 +32,13 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
 
 - **Version tag** — a tag pointing at a commit on `main` (reachable from the default branch head),
   ending in neither suffix.
-- **Release tag** — `<version tag><release suffix>`, annotated, on the version tag's commit. Limn
+- **Release tag** — `<version tag><release suffix>`, annotated, on the version tag's commit. Ensemble
   creates these on the reader's press.
 - **Hotfix tag** — a tag ending in the hotfix suffix. The team creates these by hand on a hotfix branch.
 - **Latest release** (per repo) — the newest release OR hotfix tag (by the tagged commit's date, ties
   by tag creation). The hotfix base.
 - **Baseline** (per repo) — the newest RELEASE tag whose commit is an ancestor of `main`. None ⇒ the
-  first release covers everything merged to `main`; PRs merged before Limn's synced history are not
+  first release covers everything merged to `main`; PRs merged before Ensemble's synced history are not
   checked, said in ONE line.
 - **Range of a version tag** — the PRs merged INTO THE DEFAULT BRANCH after the baseline, up to and
   including that tag's commit (commit → PR by the stored merge commit oid; fallback GraphQL
@@ -95,7 +95,7 @@ fetches on mount.
    4. a per-step result list. One failure never undoes the steps that worked.
 7. Afterwards the new release tags are the baseline: rows read "Nothing new" until new version tags.
 
-**No Limn wording** in tag messages, release notes, pre-release bodies or tracker comments. Comment:
+**No Ensemble wording** in tag messages, release notes, pre-release bodies or tracker comments. Comment:
 
 > Approved for release by <reader's display name> on 14 Nov 2026.
 > api v2.4.0-rc · web v1.8.2-rc
@@ -128,7 +128,7 @@ worker  no release yet — read only
 - **The port report.** The release and `main` may have diverged: the fix may not be needed on `main` (the
   code was removed) or may need to be different there. Before porting, the agent reads the `main` checkout;
   at the end it reports per repo one of **Applied to both** (the same fix), **Applied to both, adapted for
-  main** (what differs) or **Not applied to main** (why). Test passes are not the measure. Limn checks the
+  main** (what differs) or **Not applied to main** (why). Test passes are not the measure. Ensemble checks the
   claim against the two diffs (not against tests) and flags a contradiction: "Says main does not need it,
   but changed main." / "Says it was ported, but main is unchanged." No report reads "No report from the
   agent" — never inferred. The tab shows one line per repo before Push:
@@ -146,7 +146,7 @@ worker  no release yet — read only
   **Not applied to main** with an unchanged `main` checkout opens PR 1 only (no `<KEY>-main` branch), its
   body saying "Not applied to main: <reason>". Otherwise both bodies carry the one-line outcome (+ the reason
   when adapted). A repo with a contradiction flag can still be pushed; the reader decides.
-- After the PRs open, Limn writes NOTHING more for that build.
+- After the PRs open, Ensemble writes NOTHING more for that build.
 
 ## Invariants this feature adds
 
@@ -188,7 +188,7 @@ Cross-repo
 18. Unticking web when PLAT-290 needs it → Confirm blocked, PLAT-290 named.
 
 Writes
-19. Confirm creates `<version><release suffix>`, annotated, on the version tag's commit; no Limn wording.
+19. Confirm creates `<version><release suffix>`, annotated, on the version tag's commit; no Ensemble wording.
 20. An existing release tag name → refused for that repo; the others go ahead.
 21. A ticket leaves Done between opening the dialog and Confirm → Confirm stops, shows it, writes nothing.
 22. A repo fails to tag → its tickets get no comment; tickets only in other repos do; the result says so.
@@ -204,11 +204,11 @@ Hotfix
     each linking the other.
 29. A second hotfix off the same release targets the existing branch and names the PRs on it.
 30. A hand-pushed hotfix tag becomes the latest release; the next hotfix bases on it.
-31. After the PRs open, Limn writes nothing else for that build.
+31. After the PRs open, Ensemble writes nothing else for that build.
 
 Notes
 32. AI off: complete minus summaries. AI on: a summary per story, no model-written numbers.
-33. No output contains the word "Limn".
+33. No output contains the product name ("Ensemble", or the old "Limn").
 
 Port report
 34. The agent reports **Applied to both**: the tab reads "Applied to both"; Push opens two PRs, both bodies
@@ -227,7 +227,7 @@ Port report
 
 ### Slice 1 — data and sync foundation
 
-- **Settings.** `workspaces.release_suffix` / `hotfix_suffix` (migration `0192`, NULL = not set, no
+- **Settings.** `workspaces.release_suffix` / `hotfix_suffix` (migration `0195`, NULL = not set, no
   default). Shared `packages/shared/src/releases.ts`: `validateReleaseSuffix`, `validateReleaseSettings`
   (the ONE validator, route and form), `normaliseReleaseSuffix`, `releaseSettingsConfigured`, `tagKind`
   (`'release' | 'hotfix' | 'version'` by NAME; a version tag also needs `on_default_branch`),
@@ -334,7 +334,7 @@ Port report
   `POST /api/releases` (tier `search` + `github_write`), `GET /api/releases/:id` (tier `read`); client
   `api.releasePreview`, `api.createRelease`, `api.release`. docs/API.md § Releases.
 - **Tests:** `releases/release-write.test.ts` (acceptance 18/21 change lists, 22 step lines, 32 notes AI
-  off / on, 33 no "Limn", the digit gate, the comment's exact lines), `releases/create.test.ts` on a
+  off / on, 33 no "Ensemble", the digit gate, the comment's exact lines), `releases/create.test.ts` on a
   throwaway DB with fake GitHub / tracker (acceptance 18 at Confirm, 19, 20, 21, 22, 23; an unread
   ticket and a moved version tag stop Confirm; a claimed-and-failed tag is never written again; another
   tracker's "not supported yet"; edited notes reach the pre-release; preview AI off / on),
@@ -390,7 +390,7 @@ Port report
 
 The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
 
-- **Migration `0193_story_build_hotfix`** (registered in the journal): `story_builds.hotfix`; on
+- **Migration `0196_story_build_hotfix`** (registered in the journal): `story_builds.hotfix`; on
   `story_build_repos` `hotfix_tag`, `read_only`, the MAIN FIX columns `main_base_ref` / `main_base_sha` /
   `main_sandbox_path` / `main_patch` (+ sha, stat, files, commit message) / `main_status` / `main_error`, PR 2's
   push record `main_pushed_*` + `main_push_error(_code)`, and `hotfix_branch_json`. No new table (the rows are
@@ -427,7 +427,7 @@ The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
   hotfix build (1, 25–27 over the real routes and manager: the start refusals, both checkouts, the seed, both
   patches stored apart and a read-only change refused, no loop); `apps/frontend/test/hotfixBuild.test.ts`.
 - **Deferred / deviations:** acceptance 27's "conflicting port resolved by the agent" is the agent's work in
-  the sandbox (told by the seed and the build turn); Limn checks nothing about the port beyond storing both
+  the sandbox (told by the seed and the build turn); Ensemble checks nothing about the port beyond storing both
   patches, and the build report is unchanged (one entry per planned PR). A hotfix repository's PRs are not
   stacked and cannot be renamed after `BRANCH_EXISTS` (the push says so; discard and start again). The main
   checkout is a second mirror of the repository (`<path>.main`), not a git worktree: the agent ports by fetch +
@@ -481,7 +481,7 @@ The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
 - **Preview and Confirm fold the check over the WHOLE workspace** and apply the selection after
   (`releasable`, `releaseShippedTickets`, `releaseSelectionProblems`), so a ticket's other repos are always
   seen. The test fake now honours the repo ids it is given.
-- **A failed or refused release tag no longer holds its name.** Migration `0194_release_items_live_tag`
+- **A failed or refused release tag no longer holds its name.** Migration `0197_release_items_live_tag`
   replaces the full unique with a PARTIAL unique on live rows (`tag_state IN ('pending','claimed','done')`,
   in the .sql only). A later press is a new claim on a new row; a live earlier row is named by its state
   ("was already made…", "is being made by an earlier release, or that release stopped part way…"). A press
@@ -505,7 +505,7 @@ The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
 The agent's per-repository verdict on the port to the default branch, checked against the two diffs. The flow
 and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds → The port report.
 
-- **Migration `0195_story_build_port_report`** (registered in the journal): `story_build_repos.port_report_json`
+- **Migration `0198_story_build_port_report`** (registered in the journal): `story_build_repos.port_report_json`
   (shared `HotfixPortClaim`; NULL = no report). The flag and the files comparison are derived on read.
 - **Shared** `packages/shared/src/hotfix.ts`: `HotfixPortOutcome` (`same` / `adapted` / `not_needed`),
   `HotfixPortClaim`, `hotfixPortClaimOf` + `hotfixPortText` (the host's clip: one line, reason ≤ 600 characters,

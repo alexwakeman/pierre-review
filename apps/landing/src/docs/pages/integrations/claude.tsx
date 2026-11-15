@@ -3,16 +3,16 @@ import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui 
 
 export const meta: DocMeta = {
   title: 'Claude (Anthropic)',
-  summary: 'Sign in to Claude Code or use an API key, and what Limn runs on Claude.',
+  summary: 'Sign in to Claude Code or use an API key, and what Ensemble runs on Claude.',
 };
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Claude, made by Anthropic, is one of the two AI providers Limn can use. Limn runs Claude on your computer, on
-        your own Claude Code login or your own Anthropic API key. There is no Limn account in between, and Limn
-        stores no Claude credentials. When both Claude and Codex are signed in, Limn uses Claude by default and runs
+        Claude, made by Anthropic, is one of the two AI providers Ensemble can use. Ensemble runs Claude on your computer, on
+        your own Claude Code login or your own Anthropic API key. There is no Ensemble account in between, and Ensemble
+        stores no Claude credentials. When both Claude and Codex are signed in, Ensemble uses Claude by default and runs
         reviews on both.
       </p>
 
@@ -30,7 +30,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        You do not need to install anything for Limn itself: Limn downloads the Claude programs it needs (about 110 MB)
+        You do not need to install anything for Ensemble itself: Ensemble downloads the Claude programs it needs (about 110 MB)
         the first time it starts.
       </p>
 
@@ -42,23 +42,23 @@ export default function Page(): JSX.Element {
           In a terminal, run <code>claude</code> and sign in with your Claude account.
         </li>
         <li>
-          Start Limn. In <Ui>Settings → AI</Ui> the Claude line reads <Ui>Signed in to Claude Code.</Ui>
+          Start Ensemble. In <Ui>Settings → AI</Ui> the Claude line reads <Ui>Signed in to Claude Code.</Ui>
         </li>
       </Steps>
       <Tip>
         On a computer with no browser, set <code>CLAUDE_CODE_OAUTH_TOKEN</code> to a Claude Code sign-in token before
-        you start Limn.
+        you start Ensemble.
       </Tip>
       <H3>With an API key</H3>
       <Steps>
         <li>Create an API key in the Claude Console.</li>
         <li>
-          Start Limn with the key in the environment: <code>ANTHROPIC_API_KEY=… npx limn-review</code>. To make it
+          Start Ensemble with the key in the environment: <code>ANTHROPIC_API_KEY=… npx ensemble-review</code>. To make it
           permanent, export <code>ANTHROPIC_API_KEY</code> in your shell profile.
         </li>
         <li>
           If you are also signed in to Claude Code and want the key to be used, tick{' '}
-          <Ui>Use my API keys first</Ui> in Settings → AI (or add <code>LIMN_AI_USE_API_KEY=true</code> the same way).
+          <Ui>Use my API keys first</Ui> in Settings → AI (or add <code>ENSEMBLE_AI_USE_API_KEY=true</code> the same way).
         </li>
         <li>
           The Claude line reads <Ui>Using ANTHROPIC_API_KEY.</Ui>
@@ -69,12 +69,12 @@ export default function Page(): JSX.Element {
       </Illustration>
       <H3>When you have both</H3>
       <p>
-        Limn uses the login first and hides the key from those runs, so nothing is billed to the key by accident. To
+        Ensemble uses the login first and hides the key from those runs, so nothing is billed to the key by accident. To
         use the key first, tick <Ui>Use my API keys first</Ui> in Settings → AI. See{' '}
-        <DocLink to="settings/ai-usage-and-spend#which-account">Which account Limn uses</DocLink>.
+        <DocLink to="settings/ai-usage-and-spend#which-account">Which account Ensemble uses</DocLink>.
       </p>
 
-      <H2 id="what-runs-on-claude">What Limn runs on Claude</H2>
+      <H2 id="what-runs-on-claude">What Ensemble runs on Claude</H2>
       <p>Every AI feature can run on Claude:</p>
       <ul>
         <li>
@@ -94,12 +94,12 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        Limn picks a Claude model for each job (from Haiku for short summaries to Opus for deep reviews). Where
+        Ensemble picks a Claude model for each job (from Haiku for short summaries to Opus for deep reviews). Where
         a screen has a model menu, you can choose. Each run is labelled with the model and effort that ran it. Set the
         effort on the <DocLink to="settings/ai#effort">AI</DocLink> tab.
       </p>
 
-      <H2 id="what-limn-sends">What Limn sends to Anthropic</H2>
+      <H2 id="what-ensemble-sends">What Ensemble sends to Anthropic</H2>
       <p>
         For each run, the prompt and the material the run needs: code, diffs, pull request and ticket text, and docs
         sections. Every request goes from your computer straight to Anthropic. How Anthropic treats it depends on
@@ -107,8 +107,8 @@ export default function Page(): JSX.Element {
         your work</DocLink>.
       </p>
       <Note title="Your login stays yours">
-        Limn runs on your computer, for your own work, with the Claude Code login you made through Anthropic&rsquo;s
-        own sign-in. Limn never sees, stores or forwards that login, and there is no Limn server in between.
+        Ensemble runs on your computer, for your own work, with the Claude Code login you made through Anthropic&rsquo;s
+        own sign-in. Ensemble never sees, stores or forwards that login, and there is no Ensemble server in between.
         Anthropic&rsquo;s policy recommends API keys for products built on its Agent SDK, and its plan limits assume
         ordinary, individual use. If your organisation prefers that route, or you run a lot of automatic reviews and
         fixes, use an API key. See{' '}
@@ -117,7 +117,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="limits-and-spend">Limits and spend</H2>
       <p>
-        On a subscription, Limn&rsquo;s automatic runs stop at 50% of your week unless you change it, and everything is
+        On a subscription, Ensemble&rsquo;s automatic runs stop at 50% of your week unless you change it, and everything is
         shown as a share of your plan. On an API key, there is no cap until you set a weekly amount in US dollars. See{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>
@@ -126,16 +126,16 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           To use Codex instead, choose <Ui>Codex</Ui> under <Ui>Automatic runs and default</Ui> on the AI tab, or start
-          Limn with <code>LIMN_AI_PROVIDER=codex</code>.
+          Ensemble with <code>ENSEMBLE_AI_PROVIDER=codex</code>.
         </li>
         <li>
-          To turn every AI feature off, start Limn with <code>LIMN_AI_DISABLED=true</code>. The rest of Limn works as
+          To turn every AI feature off, start Ensemble with <code>ENSEMBLE_AI_DISABLED=true</code>. The rest of Ensemble works as
           before.
         </li>
       </ul>
       <Note>
         If a download fails, the AI tab shows the reason and <Ui>Retry</Ui>. You can also run{' '}
-        <code>limn ai install</code>, and <code>limn ai status</code> to check.
+        <code>ensemble ai install</code>, and <code>ensemble ai status</code> to check.
       </Note>
     </>
   );

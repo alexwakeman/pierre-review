@@ -59,6 +59,7 @@ const G = {
   files: [] as any[],
   gateAsks: [] as string[],
   halves: [] as any[],
+  lines: [] as string[],
   checks: [] as any[],
   branchFail: null as null | { code: string; message: string },
   liveSha: null as string | null,
@@ -94,7 +95,16 @@ function seams(): Partial<import('./seams.js').LoopSeams> {
       G.gateAsks.push(what);
       return G.allowed;
     },
+    // THE REVIEW CLAIM LINES (review-lines.ts): recorded per half, around the run.
+    reviewLines: {
+      start: async (t) => {
+        G.lines.push(`start:${t.name}:${t.provider}:${t.headSha}`);
+        return { target: t, login: 'u1', marked: true, ledgerId: null, timer: null };
+      },
+      end: async (line, outcome) => void G.lines.push(`end:${line?.target.name}:${outcome}`),
+    },
     runHalf: async (_c, i) => {
+      G.lines.push(`run:${i.name}`);
       G.halves.push({ round: i.round, name: i.name, provider: i.provider, head: i.headSha, prior: i.prior });
       if (G.hangReview) {
         await new Promise<void>((resolve) => i.abort.signal.addEventListener('abort', () => resolve()));
@@ -228,7 +238,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  Object.assign(G, { seq: 0, allowed: true, providers: ['claude'], branchPushes: [], ffPushes: [], opened: [], fixTurns: [], files: [], gateAsks: [], halves: [], checks: [], branchFail: null, liveSha: null, facts: null, hangReview: false, script: defaultScript() });
+  Object.assign(G, { seq: 0, allowed: true, providers: ['claude'], branchPushes: [], ffPushes: [], opened: [], fixTurns: [], files: [], gateAsks: [], halves: [], lines: [], checks: [], branchFail: null, liveSha: null, facts: null, hangReview: false, script: defaultScript() });
   D.setStoryLoopSeamsForTests(seams());
 });
 
@@ -284,7 +294,7 @@ describe('the review loop', () => {
     expect(G.ffPushes[0].message).toContain('Address review round 1');
     expect(G.opened.map((p) => p.name)).toEqual(['api', 'web']);
     expect(G.opened.every((p) => p.draft === false)).toBe(true);
-    expect(G.opened[0].body).toContain('## Review in Limn');
+    expect(G.opened[0].body).toContain('## Review in Ensemble');
     expect(G.opened[0].body).toContain('Fixed: 1');
     // The fix turn: REVIEW.md listed the finding and the criterion; the checker was copied in.
     expect(G.fixTurns).toHaveLength(1);
@@ -293,6 +303,10 @@ describe('the review loop', () => {
     expect(G.files[0].content).toContain('## AC2');
     // Round 2 re-reviewed only the target that changed or had something open (api), and fed it the answer.
     expect(G.halves.map((h) => `${h.round}:${h.name}`)).toEqual(['1:api', '1:web', '2:api']);
+    // Each half posts the auto review's claim lines on the head it reviews: pending before, the final line after.
+    expect(G.lines.slice(0, 3)).toEqual([`start:api:claude:${G.halves[0].head}`, 'run:api', 'end:api:succeeded']);
+    expect(G.lines.filter((l) => l.startsWith('start:'))).toHaveLength(3);
+    expect(G.lines.filter((l) => l.startsWith('end:'))).toHaveLength(3);
     expect(G.halves[2].prior.findings[0].thread.replies[0].body).toBe('Fixed: Done F1.');
     // Stored: the answers, the PRs on the targets, every write claimed once.
     const findings = await LP.listLoopFindings(ctx, 1, id);

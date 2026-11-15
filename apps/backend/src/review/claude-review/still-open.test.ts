@@ -114,7 +114,7 @@ describe('the marker: j= still open (o)', () => {
 
 describe('the still-open reply and its marker', () => {
   it('round-trips; the reply is a Limn post (bot), never a finding', () => {
-    const body = stillOpenReplyBody('The null case is still not handled. See line 4.', HEAD, '_Posted automatically by Limn’s Claude review._', true);
+    const body = stillOpenReplyBody('The null case is still not handled. See line 4.', HEAD, '_Posted automatically by Ensemble’s Claude review._', true);
     expect(body.startsWith('**Still open:** The null case')).toBe(true);
     expect(parseStillOpenMarker(body)).toEqual({ headSha: HEAD, reopened: true, continuesCommentId: null });
     expect(limnFindingPost(body)).toEqual({ severity: null, reminder: false, stillOpen: true });

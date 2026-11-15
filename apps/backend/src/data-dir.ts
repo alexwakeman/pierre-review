@@ -1,59 +1,77 @@
-// THE LOCAL DATA DIRECTORY — ~/.limn, and the one-time move from ~/.pierre-review.
+// THE LOCAL DATA DIRECTORY — ~/.ensemble, and the one-time move from ~/.limn or ~/.pierre-review.
 //
-// Everything Limn keeps on a user's machine lives under ONE directory: the installed CLI's SQLite
-// database, the clone cache, `config.json` (the per-review budget) and the AI runtime the agentic
-// features download on first use (`ai-runtime/`, see ai/runtime.ts). Before the npm package was
-// renamed `pierre-review` → `limn-review` that directory was `~/.pierre-review`.
+// Everything the app keeps on a user's machine lives under ONE directory: the installed CLI's SQLite
+// database, the clone cache, `config.json` (the per-review budget), Codex's own home (`codex/`), and
+// the AI and ML runtimes downloaded on first use (`ai-runtime/`, `ml-runtime/`, `ml-models/`). It was
+// `~/.pierre-review` (package `pierre-review`), then `~/.limn` (package `limn-review`), and is
+// `~/.ensemble` since the package became `ensemble-review`. Every path inside is computed from
+// `resolveDataDir`, so all of it moves with the one rename below.
 //
-// ⚠ THE MOVE IS ONE `rename`, AND IT NEVER CLOBBERS. On the first local boot after the upgrade an
-// existing `~/.pierre-review` is renamed to `~/.limn` — DB, WAL files, clones, config, everything,
-// in one atomic step on the same filesystem (both live in the home directory). If `~/.limn`
-// already exists nothing is moved and nothing is deleted: the old directory is simply left where
-// it is. A copy-then-delete would be the dangerous version (a half-copied SQLite file next to a
-// deleted original), which is why there is none.
+// ⚠ THE MOVE IS ONE `rename`, AND IT NEVER CLOBBERS. On the first local boot after the upgrade the
+// NEWEST old directory that exists (`~/.limn`, else `~/.pierre-review`) is renamed to `~/.ensemble`
+// — DB, WAL files, clones, config, everything, in one atomic step on the same filesystem (both live
+// in the home directory). If `~/.ensemble` already exists nothing is moved and nothing is deleted:
+// the old directory is simply left where it is. A copy-then-delete would be the dangerous version (a
+// half-copied SQLite file next to a deleted original), which is why there is none.
 //
-// ⚠ AN EXPLICIT LOCATION WINS AND IS NEVER MIGRATED INTO. `LIMN_DATA_DIR` names the directory; when
-// it is set this module moves nothing, because the user chose where their data lives. The finer
-// overrides keep working on top of either: `DATABASE_URL` / `--db` (the database file) and
-// `CLONE_DIR` (the clone cache).
+// ⚠ AN EXPLICIT LOCATION WINS AND IS NEVER MIGRATED INTO. `ENSEMBLE_DATA_DIR` (or the older
+// `LIMN_DATA_DIR`, env-name.ts) names the directory; when it is set this module moves nothing,
+// because the user chose where their data lives. The finer overrides keep working on top of either:
+// `DATABASE_URL` / `--db` (the database file) and `CLONE_DIR` (the clone cache).
 //
-// ⚠ A PINNED PATH INSIDE THE OLD DIRECTORY STOPS THE MOVE. The old README told people to pass
-// `--db ~/.pierre-review/pierre-review.sqlite`, so a shell profile may still say so. Moving the
-// directory out from under that value would make the next open CREATE an empty database at the old
-// path while the real one sat unseen in ~/.limn. So nothing moves (`pinned_path`), and everything
-// keeps using the old directory (below).
+// ⚠ A PINNED PATH INSIDE THE OLD DIRECTORY STOPS THE MOVE. An old README told people to pass
+// `--db ~/.pierre-review/pierre-review.sqlite`, so a shell profile may still say so (or the same
+// inside ~/.limn). Moving the directory out from under that value would make the next open CREATE
+// an empty database at the old path while the real one sat unseen in ~/.ensemble. So nothing moves
+// (`pinned_path`), and everything keeps using the old directory (below).
 //
 // ⚠ UNTIL THE MOVE HAS HAPPENED, THE OLD DIRECTORY IS THE DATA DIRECTORY. `resolveDataDir` answers
-// `~/.pierre-review` while it exists and `~/.limn` does not — after a pinned path, or a rename that
-// failed (Windows EBUSY on an open SQLite file, EXDEV, EACCES). Answering `~/.limn` there would
-// create it, fresh and empty, and from then on every boot would stop at `target_exists` with the
-// user's history stranded. Instead the next boot simply tries the move again.
+// the old directory while it exists and `~/.ensemble` does not — after a pinned path, or a rename
+// that failed (Windows EBUSY on an open SQLite file, EXDEV, EACCES). Answering `~/.ensemble` there
+// would create it, fresh and empty, and from then on every boot would stop at `target_exists` with
+// the user's history stranded. Instead the next boot simply tries the move again.
 //
-// No imports outside `node:*`, so cli.ts can load it before config.ts reads the environment.
+// No imports outside `node:*` and env-name.ts (itself import-free), so cli.ts can load it before
+// config.ts reads the environment.
 import { createHash } from 'node:crypto';
 import { existsSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { readEnv } from './env-name.js';
 
 /** The directory name under the home directory. */
-export const DATA_DIR_NAME = '.limn';
-/** The pre-rename directory name, moved once on first boot. */
-export const LEGACY_DATA_DIR_NAME = '.pierre-review';
+export const DATA_DIR_NAME = '.ensemble';
+/** The earlier directory names, NEWEST first; the newest one that exists is moved once on boot. */
+export const LEGACY_DATA_DIR_NAMES: readonly string[] = ['.limn', '.pierre-review'];
+
+/** `ENSEMBLE_DATA_DIR`, else `LIMN_DATA_DIR`, trimmed; null when neither is set. */
+function explicitDataDir(env: NodeJS.ProcessEnv): string | null {
+  return readEnv(env, 'DATA_DIR')?.trim() || null;
+}
+
+/** The newest old directory that exists, or null. */
+function existingLegacyDir(home: string): string | null {
+  for (const name of LEGACY_DATA_DIR_NAMES) {
+    const dir = join(home, name);
+    if (existsSync(dir)) return dir;
+  }
+  return null;
+}
 
 /**
- * The local data directory: `LIMN_DATA_DIR` when set; else `~/.pierre-review` while it exists and
- * `~/.limn` does not (the move has not happened yet — see the header); else `~/.limn`.
+ * The local data directory: `ENSEMBLE_DATA_DIR` / `LIMN_DATA_DIR` when set; else `~/.ensemble` when it
+ * exists; else the newest old directory that exists (the move has not happened yet — see the
+ * header); else `~/.ensemble`.
  */
 export function resolveDataDir(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
 ): string {
-  const explicit = env.LIMN_DATA_DIR?.trim();
+  const explicit = explicitDataDir(env);
   if (explicit) return resolve(explicit);
   const target = join(home, DATA_DIR_NAME);
-  const legacy = join(home, LEGACY_DATA_DIR_NAME);
-  if (existsSync(legacy) && !existsSync(target)) return legacy;
-  return target;
+  if (existsSync(target)) return target;
+  return existingLegacyDir(home) ?? target;
 }
 
 export type DataDirMigration =
@@ -64,11 +82,11 @@ export type DataDirMigration =
       error?: string;
     };
 
-/** The database file the CLI and the server open by default (the name predates the rename). */
+/** The database file the CLI and the server open by default (the name predates both renames). */
 export const DB_FILE = 'pierre-review.sqlite';
 
 /**
- * THE REFERENCE-DOCS ROOT FOR ONE DATABASE (when LIMN_DOCS_DIR is not set). ⚠ Two databases never
+ * THE REFERENCE-DOCS ROOT FOR ONE DATABASE (when ENSEMBLE_DOCS_DIR / LIMN_DOCS_DIR is not set). ⚠ Two databases never
  * share one: each one's boot janitor deletes every docs folder its own rows do not account for, so a
  * shared root let a second backend (a worktree's `pnpm dev`, the installed CLI) wipe the first one's
  * library (docs/REFERENCE-DOCS.md § On disk).
@@ -96,8 +114,8 @@ function isInside(dir: string, path: string): boolean {
 const said = new Set<string>();
 
 /**
- * Move `~/.pierre-review` to `~/.limn`, once. Safe to call on every boot: after the first move
- * there is no legacy directory left, so it is a single `existsSync`.
+ * Move the newest old directory (`~/.limn`, else `~/.pierre-review`) to `~/.ensemble`, once. Safe to
+ * call on every boot: after the first move there is no old directory left, so it is two `existsSync`.
  */
 export function migrateLegacyDataDir(
   opts: {
@@ -115,16 +133,16 @@ export function migrateLegacyDataDir(
     said.add(msg);
     opts.log?.(msg);
   };
-  if (env.LIMN_DATA_DIR?.trim()) return { moved: false, reason: 'explicit_dir' };
-  const from = join(home, LEGACY_DATA_DIR_NAME);
+  if (explicitDataDir(env)) return { moved: false, reason: 'explicit_dir' };
+  const from = existingLegacyDir(home);
   const to = join(home, DATA_DIR_NAME);
-  if (!existsSync(from)) return { moved: false, reason: 'no_legacy_dir' };
-  // Never clobber: an existing ~/.limn is the user's data too. The old directory stays as it is —
-  // but a ~/.limn with no database next to an old one that has one is worth a line.
+  if (from == null) return { moved: false, reason: 'no_legacy_dir' };
+  // Never clobber: an existing ~/.ensemble is the user's data too. The old directory stays as it
+  // is — but a ~/.ensemble with no database next to an old one that has one is worth a line.
   if (existsSync(to)) {
     if (!existsSync(join(to, DB_FILE)) && existsSync(join(from, DB_FILE))) {
       say(
-        `Your earlier Limn data is still in ${from}, and ${to} already exists, so it was not moved. To use it, stop Limn and move ${join(from, DB_FILE)} into ${to}.`,
+        `Your earlier data is still in ${from}, and ${to} already exists, so it was not moved. To use it, stop Ensemble and move ${join(from, DB_FILE)} into ${to}.`,
       );
     }
     return { moved: false, reason: 'target_exists' };
@@ -135,7 +153,7 @@ export function migrateLegacyDataDir(
     const raw = env[key]?.trim();
     if (raw && isInside(from, resolvePath(raw))) {
       say(
-        `Your data stays in ${from} because ${key} points inside it. To move it to ${to}, stop Limn, move the folder, and update ${key}.`,
+        `Your data stays in ${from} because ${key} points inside it. To move it to ${to}, stop Ensemble, move the folder, and update ${key}.`,
       );
       return { moved: false, reason: 'pinned_path' };
     }
@@ -144,12 +162,12 @@ export function migrateLegacyDataDir(
     renameSync(from, to);
   } catch (err) {
     // Leave everything where it was. `resolveDataDir` keeps answering the old directory while
-    // ~/.limn does not exist, so this boot runs on the user's real data and the next one tries
+    // ~/.ensemble does not exist, so this boot runs on the user's real data and the next one tries
     // the move again.
     const error = err instanceof Error ? err.message : String(err);
-    say(`Could not move ${from} to ${to} (${error}). Limn is using ${from} for now and will try again next time.`);
+    say(`Could not move ${from} to ${to} (${error}). Ensemble is using ${from} for now and will try again next time.`);
     return { moved: false, reason: 'rename_failed', error };
   }
-  say(`Moved your Limn data from ${from} to ${to}.`);
+  say(`Moved your data from ${from} to ${to}.`);
   return { moved: true, from, to };
 }

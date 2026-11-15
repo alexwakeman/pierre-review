@@ -60,7 +60,7 @@ describe('reply statuses', () => {
     expect(replyActions(item({ threadResolved: true }), R)).toEqual({ note: 'The thread is resolved.', showText: true, canPost: false, canResolve: false });
   });
 
-  it('never offers Post reply once a reply of Limn’s may be on the thread', () => {
+  it('never offers Post reply once a reply of Ensemble’s may be on the thread', () => {
     const ar = { at: '', outcome: 'reply_accepted' as const, byReviewId: R, headSha: 'h', error: null };
     expect(replyActions(item({ autoResolve: { ...ar, status: 'resolved', replyCommentId: 'C1' } }), R)).toEqual({
       note: 'Replied and resolved automatically.',
@@ -96,13 +96,13 @@ describe('reply statuses', () => {
   it('a record from an EARLIER review is not this run’s post: says so, hides this run’s text', () => {
     const pb = { at: '', byReviewId: 1, commentId: 'C9', error: null, status: 'posted' as const };
     expect(replyActions(item({ status: 'reply_disputed', pushback: pb }), R)).toEqual({
-      note: 'Limn already pushed back on this thread earlier.',
+      note: 'Ensemble already pushed back on this thread earlier.',
       showText: false,
       canPost: false,
       canResolve: false,
     });
     const ar = { at: '', outcome: 'addressed' as const, byReviewId: 1, headSha: 'h', error: 'x', status: 'failed' as const, replyCommentId: 'C1' };
-    expect(replyActions(item({ autoResolve: ar }), R)).toMatchObject({ note: 'Limn already replied on this thread earlier.', showText: false, canPost: false });
+    expect(replyActions(item({ autoResolve: ar }), R)).toMatchObject({ note: 'Ensemble already replied on this thread earlier.', showText: false, canPost: false });
   });
 });
 
@@ -169,7 +169,7 @@ describe('replyActions on a PR-level finding', () => {
   it('an earlier still-open comment blocks a second one', () => {
     const pb = { status: 'posted' as const, at: 'x', byReviewId: 3, commentId: '5', error: null };
     expect(replyActions(item({ ...pr, status: 'reply_disputed', response: 'No.', pushback: pb }), 7)).toMatchObject({
-      note: 'Limn already said this is still open.',
+      note: 'Ensemble already said this is still open.',
       canPost: false,
     });
   });

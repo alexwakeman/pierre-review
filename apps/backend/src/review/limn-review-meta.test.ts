@@ -151,7 +151,7 @@ describe('parsePostedLimnFinding', () => {
   const MARK = '<!-- pierre:claude-review-finding v=1 -->';
 
   it('reads an inline finding: severity from the lead, notes and footer gone', () => {
-    const body = `**Warning**\n\nThis can throw on an empty list.\nGuard it.\n\n_The line this refers to isn’t part of the PR’s diff, so it’s anchored to the file’s first change._\n\n_Posted automatically by Limn’s Claude review._\n\n${MARK}`;
+    const body = `**Warning**\n\nThis can throw on an empty list.\nGuard it.\n\n_The line this refers to isn’t part of the PR’s diff, so it’s anchored to the file’s first change._\n\n_Posted automatically by Ensemble’s Claude review._\n\n${MARK}`;
     expect(parsePostedLimnFinding(body)).toEqual({
       severity: 'warning',
       tag: null,

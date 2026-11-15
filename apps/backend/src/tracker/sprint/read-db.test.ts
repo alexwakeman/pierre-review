@@ -273,7 +273,7 @@ describe('store rules', () => {
     expect(after?.readAt?.getTime()).toBe(before?.readAt?.getTime());
     expect(after?.nextReadAt.getTime()).toBe(Math.floor((T0 + 100 * DAY + 5 * 60_000) / 1000) * 1000);
     expect((await rows(1, wsA)).length).toBe(1);
-    expect(read.sprintReadErrorMessage('jira', 'rate_limited')).toBe("Jira's rate limit is used up for now. Limn will read the sprint again in a few minutes.");
+    expect(read.sprintReadErrorMessage('jira', 'rate_limited')).toBe("Jira's rate limit is used up for now. Ensemble will read the sprint again in a few minutes.");
     expect(read.sprintReadErrorMessage('jira', 'unauthorized')).toBe(
       'Jira did not accept the saved token. Check the email and token in Settings.',
     );

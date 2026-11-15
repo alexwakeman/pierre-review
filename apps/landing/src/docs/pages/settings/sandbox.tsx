@@ -10,7 +10,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        AI Fix and Implement story are the only Limn features where the AI can run commands. They run it inside a
+        AI Fix and Implement story are the only Ensemble features where the AI can run commands. They run it inside a
         sandbox: a container on your computer that holds the workspace&rsquo;s repositories, your notes and the task.
         The AI has a full shell there, but no GitHub sign-in and no route to the internet except the hosts you allow.
         The <Ui>Sandbox</Ui> tab checks the container runtime on this computer and sets what each session gets.
@@ -32,8 +32,8 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Running sandboxes</H3>
       <p>
-        Below the runtime line, one line says how many Limn sandboxes are running now, for example{' '}
-        <Ui>2 Limn sandboxes are running.</Ui> Limn reads it when you open the tab and when you select{' '}
+        Below the runtime line, one line says how many Ensemble sandboxes are running now, for example{' '}
+        <Ui>2 Ensemble sandboxes are running.</Ui> Ensemble reads it when you open the tab and when you select{' '}
         <Ui>Check again</Ui>. <Ui>Stop all</Ui> stops and removes every one of them. Changes a session stored are kept:
         you can still push them, or resume the session. A turn that is running stops. An automatic AI Fix that is
         running is cancelled, and nothing is pushed.
@@ -43,9 +43,9 @@ export default function Page(): JSX.Element {
       <p>The rest of the tab applies to the current workspace.</p>
       <H3>Your clones and Claude notes</H3>
       <p>
-        There is nothing to set. Limn finds your own clones of the workspace&rsquo;s repositories through the folders
+        There is nothing to set. Ensemble finds your own clones of the workspace&rsquo;s repositories through the folders
         where you used Claude Code, and matches them by their git remote. Select <Ui>Find</Ui> to see what it found.
-        The code always comes from Limn&rsquo;s own copy of each repository, synced from GitHub. Your clones only
+        The code always comes from Ensemble&rsquo;s own copy of each repository, synced from GitHub. Your clones only
         decide where each repository sits inside the sandbox: at the same path, so your Claude notes and the paths
         they name still work. A repository with no clone found goes under <code>/workspace</code>.
       </p>
@@ -60,7 +60,7 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Hosts always allowed</H3>
       <p>
-        The sandbox reaches the internet only through Limn&rsquo;s network filter. Add a host here to allow it for
+        The sandbox reaches the internet only through Ensemble&rsquo;s network filter. Add a host here to allow it for
         every session in this workspace. During a session, a blocked request shows in the session&rsquo;s <Ui>Network</Ui> list with{' '}
         <Ui>Allow for this session</Ui> and <Ui>Always allow</Ui>. <Ui>Always allow</Ui> adds the host here.
       </p>
@@ -74,15 +74,15 @@ export default function Page(): JSX.Element {
       </Illustration>
       <H3>Services</H3>
       <p>
-        Compose files Limn may start for a session, for integration tests (a database, a queue). Select{' '}
-        <Ui>Choose compose files</Ui>: Limn lists every compose file in the workspace&rsquo;s repositories, from its
-        own copies. Tick the ones you want and select <Ui>Add</Ui>. The AI asks Limn to start them; it never gets
+        Compose files Ensemble may start for a session, for integration tests (a database, a queue). Select{' '}
+        <Ui>Choose compose files</Ui>: Ensemble lists every compose file in the workspace&rsquo;s repositories, from its
+        own copies. Tick the ones you want and select <Ui>Add</Ui>. The AI asks Ensemble to start them; it never gets
         Docker itself. A file that asks for privileged mode, extra system rights, host folders or the Docker socket is
         refused, and the session says why. Services reach the internet only when you name them under{' '}
         <Ui>Online</Ui>.
       </p>
       <p>
-        The sandbox cannot use services you already run in Docker Desktop. Its only way out is Limn&rsquo;s network
+        The sandbox cannot use services you already run in Docker Desktop. Its only way out is Ensemble&rsquo;s network
         filter, which refuses your computer&rsquo;s own addresses. Each session gets its own services, so the AI
         never touches your local data.
       </p>
@@ -97,7 +97,7 @@ export default function Page(): JSX.Element {
       </Warning>
       <Note>
         A sandbox is removed when its session ends, and a session with nothing to do ends after 15 minutes. To remove
-        everything, including what a crash left, stop Limn and run <code>limn sandbox prune</code>. See{' '}
+        everything, including what a crash left, stop Ensemble and run <code>ensemble sandbox prune</code>. See{' '}
         <DocLink to="security/ai-and-the-sandbox">AI agents and the sandbox</DocLink>.
       </Note>
     </>

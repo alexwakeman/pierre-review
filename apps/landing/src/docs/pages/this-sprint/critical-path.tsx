@@ -56,7 +56,7 @@ export default function Page(): JSX.Element {
       <p>
         A strip of figures, each with what it counts: the day of the sprint with a bar for time used, how many
         tickets have their code merged, how many are in Product review (when you have that column), how many are
-        complete, and how many open dependencies there are in how many chains. Limn counts all of these from the
+        complete, and how many open dependencies there are in how many chains. Ensemble counts all of these from the
         tracker and GitHub. AI does not write any number on this page.
       </p>
 
@@ -78,9 +78,9 @@ export default function Page(): JSX.Element {
         sprint.
       </p>
       <Note>
-        AI chooses the paths, their order, the titles and the advice from what Limn found: the tickets, their
+        AI chooses the paths, their order, the titles and the advice from what Ensemble found: the tickets, their
         status, their pull requests and the links between them. It is a judgement, not a schedule. The arrows,
-        columns and figures are Limn&rsquo;s own.
+        columns and figures are Ensemble&rsquo;s own.
       </Note>
 
       <H3 id="call-outs">Call-outs</H3>
@@ -90,7 +90,7 @@ export default function Page(): JSX.Element {
           Up to three from AI, marked <Ui>Call-out</Ui>.
         </li>
         <li>
-          Limn&rsquo;s own, from what it has stored: <Ui>Since you last looked</Ui> (tickets that changed column, tickets
+          Ensemble&rsquo;s own, from what it has stored: <Ui>Since you last looked</Ui> (tickets that changed column, tickets
           added and pull requests merged since your last visit), <Ui>Out of step</Ui> (the tracker and the code
           disagree: in code review with no open pull request, Complete with one still open, or Not started with one
           open) and <Ui>Blocked outside the sprint</Ui> (sprint tickets that wait on an unfinished ticket outside
@@ -123,7 +123,7 @@ export default function Page(): JSX.Element {
           When AI finds no chain worth naming, the heading reads &ldquo;No critical paths in this sprint.&rdquo;
         </li>
         <li>
-          If a run fails, the page says why and when Limn tries again. It does not try again until the sprint
+          If a run fails, the page says why and when Ensemble tries again. It does not try again until the sprint
           changes.
         </li>
       </ul>

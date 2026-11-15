@@ -83,7 +83,7 @@ if (resolve(MAIN) === resolve(ROOT)) {
   const cwd = pid ? processCwd(pid) : null;
   if (pid && cwd && isWithin(resolve(cwd), resolve(ROOT))) {
     refuse(
-      `this is the main checkout, and the Limn on :4000 (process ${pid}) runs from it.\n` +
+      `this is the main checkout, and the Ensemble on :4000 (process ${pid}) runs from it.\n` +
         '  Make a worktree and run it there:\n' +
         `    git worktree add ../pierre-review-wt/<name> -b <branch> && cd ../pierre-review-wt/<name> && pnpm install && pnpm dev:scratch`,
     );
@@ -142,25 +142,36 @@ for (const k of [
   'APP_WEB_URL',
   'LIMN_CODEX_PATH',
   'LIMN_AI_PROVIDER',
+  // The user-set names, under both prefixes (the backend reads ENSEMBLE_X first, then LIMN_X):
+  // a shell's ENSEMBLE_DATA_DIR must never point a scratch stack at real data.
+  'ENSEMBLE_DOCS_DIR',
+  'ENSEMBLE_CODEX_PATH',
+  'ENSEMBLE_AI_PROVIDER',
+  'ENSEMBLE_DATA_DIR',
+  'LIMN_DATA_DIR',
+  'ENSEMBLE_AI_AUTO_INSTALL',
+  'LIMN_AI_AUTO_INSTALL',
+  'ENSEMBLE_ML_DISABLED',
+  'LIMN_ML_DISABLED',
 ]) delete env[k];
 Object.assign(env, {
   LIMN_SCRATCH: '1',
   LIMN_SCRATCH_GITHUB: GITHUB,
-  LIMN_DATA_DIR: DIR,
+  ENSEMBLE_DATA_DIR: DIR,
   DATABASE_URL: DB,
   CLONE_DIR: join(DIR, 'clones'),
-  LIMN_DOCS_DIR: join(DIR, 'docs'),
+  ENSEMBLE_DOCS_DIR: join(DIR, 'docs'),
   PORT: String(BACKEND_PORT),
   FRONTEND_PORT: String(FRONTEND_PORT),
   BACKEND_PORT: String(BACKEND_PORT),
   // No download from a scratch stack: it would write into the linked runtime.
-  LIMN_AI_AUTO_INSTALL: 'false',
+  ENSEMBLE_AI_AUTO_INSTALL: 'false',
 });
 if (!SYNC) env.DISABLE_SCHEDULER = 'true';
 else delete env.DISABLE_SCHEDULER;
-if (!CODEX) env.LIMN_AI_PROVIDER = 'claude';
+if (!CODEX) env.ENSEMBLE_AI_PROVIDER = 'claude';
 if (!ML) {
-  env.LIMN_ML_DISABLED = 'true';
+  env.ENSEMBLE_ML_DISABLED = 'true';
   env.ML_SEVERITY_DISABLED = 'true';
 }
 if (GITHUB === 'off') {
@@ -226,12 +237,12 @@ if (FRONTEND_ON) {
 }
 
 const githubLine = {
-  off: 'off (no token; Limn shows no "you")',
-  read: 'READ-ONLY with your gh token: every write is blocked in code. Reads spend the same hourly budget as your real Limn',
+  off: 'off (no token; Ensemble shows no "you")',
+  read: 'READ-ONLY with your gh token: every write is blocked in code. Reads spend the same hourly budget as your real Ensemble',
   write: 'READ AND WRITE with your gh token: buttons post, merge and push for real',
 }[GITHUB];
 console.log(`
-✅ scratch Limn (slot ${SLOT}, seed ${SEED})
+✅ scratch Ensemble (slot ${SLOT}, seed ${SEED})
 
    App        http://localhost:${FRONTEND_ON ? FRONTEND_PORT : BACKEND_PORT}/app/
    API        http://localhost:${BACKEND_PORT}/api/health

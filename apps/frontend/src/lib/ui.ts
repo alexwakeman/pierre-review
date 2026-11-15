@@ -1453,7 +1453,7 @@ export function limnActsForLine(poster: string): string {
   return `Bot · acts for @${poster}`;
 }
 export function limnActsForTitle(poster: string): string {
-  return `Limn, acting for @${poster}: the reviews, comments, merges and pushes Limn made for them`;
+  return `Ensemble, acting for @${poster}: the reviews, comments, merges and pushes Ensemble made for them`;
 }
 
 export function profileUrl(login: string): string | null {

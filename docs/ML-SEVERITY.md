@@ -27,13 +27,13 @@ a merge of the two codebases.
 
 | | Scorer | Enrichment |
 |---|---|---|
-| **`npx limn-review`** | the LOCAL model, after a one-time ~240 MB download ("Set up" in Settings → Bot comment scoring, or `limn ml install`) | on once set up |
-| **`pnpm dev`** | the LOCAL model, read straight from `packages/ml/serving_assets` (or `LIMN_ML_MODELS_DIR`) — nothing to download | on |
-| **opt-in HTTP** | the Python `severity-api` at `SEVERITY_API_URL` (`PIERRE_ML_HTTP=1` in dev starts it on `:8799` and sets `LIMN_ML_SCORER=http`; or a rented endpoint for a large backlog) | on |
+| **`npx ensemble-review`** | the LOCAL model, after a one-time ~240 MB download ("Set up" in Settings → Bot comment scoring, or `ensemble ml install`) | on once set up |
+| **`pnpm dev`** | the LOCAL model, read straight from `packages/ml/serving_assets` (or `ENSEMBLE_ML_MODELS_DIR`) — nothing to download | on |
+| **opt-in HTTP** | the Python `severity-api` at `SEVERITY_API_URL` (`PIERRE_ML_HTTP=1` in dev starts it on `:8799` and sets `ENSEMBLE_ML_SCORER=http`; or a rented endpoint for a large backlog) | on |
 
-`ml/scorer.ts` picks: `LIMN_ML_SCORER=auto` (default) takes the local model when it is ready, else
+`ml/scorer.ts` picks: `ENSEMBLE_ML_SCORER=auto` (default) takes the local model when it is ready, else
 the HTTP service when `SEVERITY_API_URL` is set, else nothing; `local` / `http` force one.
-`LIMN_ML_DISABLED=true` turns the local scorer off; `ML_SEVERITY_DISABLED=true` drops the URL.
+`ENSEMBLE_ML_DISABLED=true` turns the local scorer off; `ML_SEVERITY_DISABLED=true` drops the URL.
 ⚠ **Availability CHANGES AT RUNTIME** (a "Set up" mid-session), so every gate asks
 `isMlScoringAvailable()` when it matters; the cron registers on `isMlScoringPossible()`. With
 nothing available `/api/me` reports `mlSeverity: false` and the SPA issues zero ML queries.
@@ -209,34 +209,34 @@ exactly the user-defined bots the feature is meant to cover.
 
 ---
 
-## Limn findings: labelled from their own lead, never scored
+## Ensemble findings: labelled from their own lead, never scored
 
-A Limn finding posted to GitHub is a bot comment (the poster's `limn:<login>` bot,
-[CLAUDE-REVIEW.md § Limn findings are bots](CLAUDE-REVIEW.md)). Its severity is the AI Review's
+An Ensemble finding posted to GitHub is a bot comment (the poster's `limn:<login>` bot,
+[CLAUDE-REVIEW.md § Ensemble findings are bots](CLAUDE-REVIEW.md)). Its severity is the AI Review's
 own, read from the lead line — never the model's.
 
 - **Writer**: `db/limn-finding-labels.ts` `syncLimnFindingLabels` writes an `ml_comment_labels`
-  row per Limn finding with a severity: `LIMN_ML_SEVERITY` (blocker→critical, warning→major,
-  nit→nit, question→minor), probability 1, `backend = 'limn-review'`, `model_version =
+  row per Ensemble finding with a severity: `LIMN_ML_SEVERITY` (blocker→critical, warning→major,
+  nit→nit, question→minor), probability 1, `backend = 'ensemble-review'`, `model_version =
   'limn-finding-v1'`, no vendor claim, categories `nitpick` for a nit else `correctness_bug`. A
   reminder without a severity gets no row. It runs in `persistPr`'s transaction (per PR) and at the
-  end of the boot reconcile; it is idempotent and deletes a Limn row whose comment stopped being a
+  end of the boot reconcile; it is idempotent and deletes an Ensemble row whose comment stopped being a
   finding.
 - ⚠ **Excluded in lockstep**: `listMlCandidates` and `countBotText` both skip
-  `limn_posted_by_user_id IS NOT NULL`, so a Limn finding is never a candidate, never pending,
+  `limn_posted_by_user_id IS NOT NULL`, so an Ensemble finding is never a candidate, never pending,
   never unscorable.
 - ⚠ **Never overwritten, never purged**: `upsertMlLabels` guards its update with `setWhere backend
-  <> 'limn-review'`; `deleteMlLabelsForRepo` (deep re-sync) and `ml:enrich --reset` skip the backend.
-- **Not a scorer**: the rollups' `backends` (the fallback banner's input) never list `limn-review`.
-- **Inflation**: no vendor badge, so a Limn bot is never "badged" — it shows the dash, never a zero.
-  The Inflation card names Limn bots apart ("its severity is the review's own"), never under
+  <> 'ensemble-review'`; `deleteMlLabelsForRepo` (deep re-sync) and `ml:enrich --reset` skip the backend.
+- **Not a scorer**: the rollups' `backends` (the fallback banner's input) never list `ensemble-review`.
+- **Inflation**: no vendor badge, so an Ensemble bot is never "badged" — it shows the dash, never a zero.
+  The Inflation card names Ensemble bots apart ("its severity is the review's own"), never under
   "badges nothing".
-- **Agreement matrices** (the flagging drill-down and the overlap clusters): a Limn row is on
+- **Agreement matrices** (the flagging drill-down and the overlap clusters): an Ensemble row is on
   neither axis — left out of the matrix and of any cell refine, kept in the list (its total still
-  equals the tile). The strip's caption says "Limn's from its review" when the window has any.
-- **Coverage**: `BotAnalyticsMlTotals.limnLabelled` counts the window's Limn labels; the Bots
+  equals the tile). The strip's caption says "Ensemble's from its review" when the window has any.
+- **Coverage**: `BotAnalyticsMlTotals.limnLabelled` counts the window's Ensemble labels; the Bots
   strip's "N of M bot comments scored" leaves them out of both sides.
-- **The badge**: `MlSeverityBadge` reads `backend === LIMN_LABEL_BACKEND` and says "From Limn's
+- **The badge**: `MlSeverityBadge` reads `backend === LIMN_LABEL_BACKEND` and says "From Ensemble's
   review." — no confidence, no fallback note, never dimmed, no vendor state.
 
 ## Data model
@@ -498,10 +498,10 @@ Comments drill-down's: ship the label INLINE on each row of ONE response, server
 
 | Var | Default | Meaning |
 |---|---|---|
-| `LIMN_ML_SCORER` | `auto` | `auto` (local when set up, else HTTP when configured) · `local` · `http` |
-| `LIMN_ML_DISABLED` | `false` | Turns the local scorer off |
-| `LIMN_ML_MODELS_DIR` | *(unset)* | Read the model from here instead of `~/.limn/ml-models` (dev falls back to `packages/ml/serving_assets`) |
-| `LIMN_ML_CPU_SHARE` | `0.5` | The local scorer's duty cycle, in cores (`ml/throttle.ts`) |
+| `ENSEMBLE_ML_SCORER` | `auto` | `auto` (local when set up, else HTTP when configured) · `local` · `http` |
+| `ENSEMBLE_ML_DISABLED` | `false` | Turns the local scorer off |
+| `ENSEMBLE_ML_MODELS_DIR` | *(unset)* | Read the model from here instead of `~/.ensemble/ml-models` (dev falls back to `packages/ml/serving_assets`) |
+| `ENSEMBLE_ML_CPU_SHARE` | `0.5` | The local scorer's duty cycle, in cores (`ml/throttle.ts`) |
 | `SEVERITY_API_URL` | *(unset)* | The OPT-IN HTTP scorer's base URL, e.g. `http://127.0.0.1:8799` |
 | `SEVERITY_API_HEADERS` | *(unset)* | JSON object of extra headers, for a rented endpoint |
 | `ML_SEVERITY_DISABLED` | `false` | Drops `SEVERITY_API_URL` |

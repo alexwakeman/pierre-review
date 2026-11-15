@@ -43,7 +43,7 @@ export function sandboxPathProblem(path: string): string | null {
   }
   const p = normalize(path);
   if (p === '/') return 'Choose a folder, not the whole disk.';
-  if (SYSTEM_TREES.some((s) => inside(s, p)) || SYSTEM_EXACT.includes(p)) return `Limn cannot place repositories at ${p} inside the sandbox. Choose a folder in your home folder.`;
+  if (SYSTEM_TREES.some((s) => inside(s, p)) || SYSTEM_EXACT.includes(p)) return `Ensemble cannot place repositories at ${p} inside the sandbox. Choose a folder in your home folder.`;
   return null;
 }
 
@@ -53,7 +53,7 @@ export function localFolderProblem(folder: string, places: { home: string; dataD
   const p = normalize(folder);
   if (p === '/') return 'Choose a folder, not the whole disk.';
   if (inside(p, places.home)) return 'Choose the folder that holds your clones, not your home folder.';
-  if (inside(places.dataDir, p) || inside(p, places.dataDir)) return 'That is Limn’s own data folder.';
+  if (inside(places.dataDir, p) || inside(p, places.dataDir)) return 'That is Ensemble’s own data folder.';
   return sandboxPathProblem(p);
 }
 

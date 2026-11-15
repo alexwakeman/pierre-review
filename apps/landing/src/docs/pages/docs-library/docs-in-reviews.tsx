@@ -71,7 +71,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>The reviewer can read the library and nothing else new. It cannot change a document.</li>
         <li>
-          Limn checks every reference before it shows it: the link must name a real section of a built document, and
+          Ensemble checks every reference before it shows it: the link must name a real section of a built document, and
           the quote must really be in that section. Anything else is dropped.
         </li>
         <li>References are not posted to GitHub; a link to your local library would mean nothing there.</li>
@@ -80,7 +80,7 @@ export default function Page(): JSX.Element {
       </ul>
       <Note>
         Reading the library makes a review a little longer, so it uses a little more of your AI allowance. Before a
-        review or story check reads a Confluence, Notion or GitHub document, Limn checks it for changes if it has not
+        review or story check reads a Confluence, Notion or GitHub document, Ensemble checks it for changes if it has not
         done so in the last 15 minutes. The run does not wait for that check.
       </Note>
 

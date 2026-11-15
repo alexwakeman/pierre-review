@@ -177,7 +177,7 @@ export function registerAcFieldSettingsRoutes(app: FastifyInstance, ctx: Tracker
       if (ws == null) return reply.code(404).send({ error: 'NotFound', message: `Workspace ${req.params.id} not found` });
       const { apiRoot, issueTypeId, fieldId } = req.body;
       const row = (await readRows(ctx, accountId, ws)).find((r) => r.apiRoot === apiRoot && r.issueTypeId === issueTypeId);
-      if (row == null) return reply.code(404).send({ error: 'UnknownIssueType', message: 'Limn has no tickets of this type in this workspace.' });
+      if (row == null) return reply.code(404).send({ error: 'UnknownIssueType', message: 'Ensemble has no tickets of this type in this workspace.' });
       let field: { id: string; name: string } | null = null;
       if (fieldId != null) {
         // Only a field this type's own tickets carry, as the per-ticket picker allowed.
@@ -219,7 +219,7 @@ export function registerAcFieldSettingsRoutes(app: FastifyInstance, ctx: Tracker
       if (ws == null) return reply.code(404).send({ error: 'NotFound', message: `Workspace ${req.params.id} not found` });
       const { apiRoot, issueTypeId, mode, fieldId } = req.body;
       const row = (await readRows(ctx, accountId, ws)).find((r) => r.apiRoot === apiRoot && r.issueTypeId === issueTypeId);
-      if (row == null) return reply.code(404).send({ error: 'UnknownIssueType', message: 'Limn has no tickets of this type in this workspace.' });
+      if (row == null) return reply.code(404).send({ error: 'UnknownIssueType', message: 'Ensemble has no tickets of this type in this workspace.' });
       let field: { id: string; name: string } | null = null;
       if (mode === 'field') {
         const f = fieldId != null && isJiraFieldId(fieldId) ? row.fields.find((x) => x.id === fieldId) : undefined;

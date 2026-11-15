@@ -147,7 +147,7 @@ describe('release notes — code-built, one section per repo', () => {
     expect(api).toMatch(/Story two\n\nExports no longer overload the service\.\n\n- \[api #11\]/);
   });
 
-  it('acceptance 33: no output contains the word "Limn"', () => {
+  it('acceptance 33: no output contains the product name', () => {
     const res = foldReleaseCheck(input());
     const facts = releaseNotesInputOf(res, [API, WEB]);
     const out = [
@@ -155,7 +155,7 @@ describe('release notes — code-built, one section per repo', () => {
       releaseTagMessage('api', 'v1.0.0-rc', 'v1.0.0'),
       releaseCommentWiki({ approverName: 'Ada', at: day(14), tags: [{ repoName: 'api', releaseTagName: 'v1.0.0-rc' }], notesUrl: 'https://github.com/x' }),
     ].join('\n');
-    expect(out).not.toMatch(/limn/i);
+    expect(out).not.toMatch(/limn|ensemble/i);
   });
 
   it('notesText escapes markdown that could link, style or embed HTML', () => {
@@ -170,6 +170,7 @@ describe('the story summary — the D4 digit gate', () => {
     expect(cleanStorySummary('Ships with Ⅻ fixes.')).toBeNull();
   });
   it('acceptance 33: a summary naming the product is refused', () => {
+    expect(cleanStorySummary('Ensemble found this.')).toBeNull();
     expect(cleanStorySummary('Limn found this.')).toBeNull();
   });
   it('one paragraph, trimmed', () => {

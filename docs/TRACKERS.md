@@ -138,7 +138,7 @@ points); neither is ever triggered by a view.
   workspace + the error CODE only.
 - **The criteria field is chosen in Settings → Integrations** ("Acceptance criteria field",
   `components/settings/JiraAcFieldSettings.tsx`, `tracker/ac-field-settings.ts`, 2026-11-06): one row
-  per issue type with stored tickets, a menu of their text fields, "Limn picks" = the name match. The
+  per issue type with stored tickets, a menu of their text fields, "Ensemble picks" = the name match. The
   story view and the Story check show "Criteria from: <field> · Change in Settings" — the per-ticket
   picker is gone (`PUT …/tracker-ticket/ac-field` stays for API callers).
 - **The criteria field is server-side**: `deriveAc` = the workspace's field for the issue type when
@@ -160,7 +160,7 @@ developer and their agent can chase it; they never move a verdict ([CLAUDE-REVIE
 
 - **DERIVED ON READ, NEVER STORED** (`open-points.ts` `deriveOpenPoints`, ONE pure rule over what the
   worker already stores — the text-field `candidates_json` and the description): (1) the issue type's
-  open-points FIELD — the field chosen in Settings, or with "Limn picks" ('auto') the field whose NAME
+  open-points FIELD — the field chosen in Settings, or with "Ensemble picks" ('auto') the field whose NAME
   reads "Open points" / "Open questions" (an exact name first); (2) when no field gives a point, or the
   type is set to "Description only" ('none'), an open-points SECTION of the description: a heading,
   bold label or "Label:" line reading Open points / Open questions / Outstanding / TBC / TBD / To be
@@ -186,7 +186,7 @@ developer and their agent can chase it; they never move a verdict ([CLAUDE-REVIE
   workspace backoff is honoured), except a row read in the last `OPEN_POINTS_FRESH_MS` (2 min — a pair's
   second half, a quick re-run). ⚠ NON-FATAL: a failed read keeps the stored content (state `ok` +
   `error_code`), the points come from that copy and are marked `fresh: false`; the review says "from
-  Limn's stored copy". Never throws. The TICKET review does not use open points yet.
+  Ensemble's stored copy". Never throws. The TICKET review does not use open points yet.
 - ⚠ **A WORKSPACE SESSION'S START READS ITS TICKET AGAIN — the same exception, for one ticket**
   (`open-points-ticket.ts` `refreshTicketForSession`, called LAZILY by `sandbox/workspace/ticket.ts`;
   [SANDBOX.md](SANDBOX.md) § The workspace mirror). A session is a RUN the reader started, never a view.
@@ -518,7 +518,7 @@ reader of `stage` works whatever the buckets are.
 
 ## The status change — A TRACKER WRITE (`tracker/status-change.ts`)
 
-Limn writes to a tracker in exactly THREE places, each a reader's press: this one and the build plan's
+Ensemble writes to a tracker in exactly THREE places, each a reader's press: this one and the build plan's
 ticket update (§ The ticket update, which passes THIS gate), both Jira; and the assignee change (§ The
 assignee change), on Jira, GitHub Issues and Linear. The status change is
 **the Jira status transition the reader picks** from
@@ -533,7 +533,7 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
   `GET /rest/api/2/issue/{key}/transitions?expand=transitions.fields` (v2, like every other call, so
   Server / Data Center work too). Only what can be made without Jira's own form is listed:
   `isAvailable: false` is dropped, and so is any transition with a REQUIRED field that has no default
-  (Limn fills no fields). Jira lists NOTHING both when the workflow has nowhere to go and when the token
+  (Ensemble fills no fields). Jira lists NOTHING both when the workflow has nowhere to go and when the token
   may not transition, so an empty list costs ONE more call (`/rest/api/2/mypermissions?…
   &permissions=TRANSITION_ISSUES`) → `canTransition: false` → "Your Jira token cannot change this
   issue." (shared `TICKET_STATUS_NO_PERMISSION`); a failed or silent check is `null` → "Jira offers no
@@ -549,7 +549,7 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
   caches at once, then refetches `ticket-prs`, `ticket-story`, the sprint graph + token, `ticket-links`
   and `jira-ticket`.
 - ⚠ **STILL NOT A TRACKER PROXY.** Both routes refuse (`404 TicketNotFound`, before any Jira call) an
-  ident that does not parse, names another site than the workspace's Jira, or names a ticket Limn holds
+  ident that does not parse, names another site than the workspace's Jira, or names a ticket Ensemble holds
   NO row for in this account (a PR's `tracker_tickets` row, or this workspace's `sprint_tickets` /
   `sprint_ref_tickets` row). A workspace whose tracker is not Jira → `400 NotJira`. `transitionId` is
   schema-checked (`^[A-Za-z0-9_-]{1,64}$`).
@@ -564,7 +564,7 @@ write-back (`tracker/write/`, `tracker_writes`) stays removed (2026-10-12, migra
 
 ## The ticket update — THE OTHER TRACKER WRITE (`tracker/ticket-update.ts`; + Build end to end's comment)
 
-Owner decisions 2026-11-08 (it replaces "Limn does NOT update the tracker" in STORY-BUILD.md § Plan
+Owner decisions 2026-11-08 (it replaces "Ensemble does NOT update the tracker" in STORY-BUILD.md § Plan
 first) and 2026-11-12 (THE WHOLE TICKET): after planning, the plan panel's ticket review
 (`StoryBuild/TicketUpdatePanel.tsx` `TicketReview`) shows the WHOLE ticket — description AND acceptance
 criteria — seeded with the plan's draft, else the current text; the reader edits it, sees what changes,
@@ -599,8 +599,8 @@ stay editable and copyable ("Updating the ticket works with Jira only. Copy the 
   text; both null → `400 NothingToUpdate`. ⚠ The body schema is a TYPE UNION (`['string','null']`),
   never `anyOf`: Fastify's coercion turns a null into `""` under `anyOf`, which would blank the field.
 - **The gate is the status change's** (`statusGate`, its not-Jira sentence swapped): this workspace's
-  Jira site, a ticket Limn holds a row for in this account, a usable token — refused before Jira is called.
-- **The description** is markdown in Limn (`jiraWikiToMarkdown` on read), so it goes back as wiki markup
+  Jira site, a ticket Ensemble holds a row for in this account, a usable token — refused before Jira is called.
+- **The description** is markdown in Ensemble (`jiraWikiToMarkdown` on read), so it goes back as wiki markup
   (`jira/text.ts markdownToJiraWiki`; the round trip is pinned by `jira/md-wiki.test.ts`).
 - **The criteria go where the ticket keeps them**:
   - **a custom field** — its FORMAT is read at press time from `GET /rest/api/2/issue/{key}/editmeta`
@@ -610,10 +610,10 @@ stay editable and copyable ("Updating the ticket works with Jira only. Copy the 
     line), over 255 characters ⇒ `400 CriteriaTooLong` (`TICKET_UPDATE_FIELD_ONE_LINE`); any other type,
     or a field not on the edit screen ⇒ `400 CriteriaFieldNotEditable` (`TICKET_UPDATE_FIELD_NOT_EDITABLE`).
     Both refusals come BEFORE the PUT. REST v2 takes wiki strings for rich-text fields on Cloud and
-    Server alike, so Limn never writes ADF (only a move to REST v3 would need it).
+    Server alike, so Ensemble never writes ADF (only a move to REST v3 would need it).
   - **the description** — with a description sent in the same press: spliced into its criteria section
     (shared `spliceAcSection`: the heading or label line kept, the body replaced, fenced code skipped) and
-    the whole description written from the reader's text. CRITERIA ONLY: ⚠ never rebuilt from Limn's
+    the whole description written from the reader's text. CRITERIA ONLY: ⚠ never rebuilt from Ensemble's
     stored copy (lossy markdown: `jiraWikiToMarkdown` drops colours, panels, images and table-cell
     breaks); ONE live `GET …/issue/{key}?fields=description`, and `jira/text.ts spliceWikiAcSection`
     replaces ONLY the criteria block of that wiki text (`findWikiAcSection`: the same section rule over
@@ -639,7 +639,7 @@ stay editable and copyable ("Updating the ticket works with Jira only. Copy the 
   ESCAPES (`neutraliseNewWikiMarkup`, a backslash) every Jira mention (`[~accountid:…]`, `[~name]`) or
   macro (`{html}`, `{panel}`, `{color}`, `{include}`, `{iframe}`) in the agent's draft that the stored
   ticket text does not already hold, and adds one line to `layoutProblems` ("The draft had a Jira mention
-  or Jira markup the ticket does not have. Limn writes it as plain text.").
+  or Jira markup the ticket does not have. Ensemble writes it as plain text.").
 
 ## The assignee change — THE THIRD TRACKER WRITE (`tracker/assignee.ts`)
 
@@ -647,7 +647,7 @@ Owner decision 2026-11-10: the story view's assignee (`components/Ticket/TicketA
 by the one stack header's `TicketPeopleAndStatus`, so the story TAB and This Sprint's story TRAY share it)
 is a menu of the people the tracker lets this ticket be assigned to, plus "Unassigned". **Jira, GitHub
 Issues and Linear** (shared `TICKET_ASSIGN_PROVIDERS` / `canAssignTickets`). ⚠ **Notion has no picker**:
-Limn writes nothing to Notion (an internal integration is usually read-only, and a people property offers
+Ensemble writes nothing to Notion (an internal integration is usually read-only, and a people property offers
 no list of who may hold it); the routes answer `400 CannotAssign` with that sentence.
 
 - **The list** — `GET /api/ticket-assignees?workspace=&ident=` → `TicketAssignablesResponse` (`{id, name,
@@ -670,14 +670,14 @@ no list of who may hold it); the routes answer `400 CannotAssign` with that sent
     `GET …?fields=assignee`.
   - GitHub: one query for the issue's node id and current assignees, then ONE mutation document
     (`removeAssigneesFromAssignable` the others + `addAssigneesToAssignable` the pick). ⚠ The pick becomes
-    the ONLY assignee (Limn shows one). The reader's own press: nothing is ledgered.
+    the ONLY assignee (Ensemble shows one). The reader's own press: nothing is ledgered.
   - Linear: `issueUpdate(id: KEY, input: {assigneeId})`; the answer carries the new assignee.
 - **SETTLE** (`writeTicketAssignee`): the assignee the tracker reported goes to every stored row of the
   ticket IN THIS ACCOUNT — `tracker_tickets` on that site (name, account id, avatar), `sprint_tickets` and
   `sprint_ref_tickets` by ident. `changed_at` does not move. A failed Jira re-read stores WHO WAS PICKED
   (the 2xx is the tracker's positive statement) and marks the PR rows due.
 - **The gate** (`assignGate`) is the status change's, for any assigning provider: the workspace's EFFECTIVE
-  tracker (the GitHub default included), the ident on its site, a row Limn holds in this account — else
+  tracker (the GitHub default included), the ident on its site, a row Ensemble holds in this account — else
   `404 TicketNotFound` before any call. Refusals are our own sentence (`502 TrackerError`): 403 → "Your
   Jira token / Your GitHub account / The saved Linear key cannot assign this issue."; a refused write →
   "<Tracker> refused this change."; else the reader's own `errorMessage`.
@@ -1084,7 +1084,7 @@ closes DNS rebinding) is what SonarCloud's fixed host is called with. Details: [
 | `GET /api/ticket-status/transitions?workspace=&ident=` | Jira's allowed transitions, on the picker's open (§ The status change) | `search` |
 | `POST /api/ticket-status?workspace=` | a tracker write: make the picked Jira transition, then settle | `search` |
 | `POST /api/ticket-update?workspace=` | the other tracker write: the build plan's edited ticket update (§ The ticket update) | `search` |
-| `GET /api/ticket-update/current?workspace=&ident=` | the ticket as Limn holds it, for the plan panel's ticket review (§ The ticket update), DB only | `read` |
+| `GET /api/ticket-update/current?workspace=&ident=` | the ticket as Ensemble holds it, for the plan panel's ticket review (§ The ticket update), DB only | `read` |
 
 ⚠ **NOT A TRACKER PROXY.** The ticket routes address a PULL REQUEST (ownership → 404), re-run
 detection on it and answer only for a key detection found. Every failure is a 502 carrying a

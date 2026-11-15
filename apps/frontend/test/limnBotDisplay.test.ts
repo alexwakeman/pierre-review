@@ -17,22 +17,22 @@ import { MlSeverityBadge } from '../src/components/MlSeverityBadge.js';
 const limnUser: User = {
   id: 77,
   githubLogin: 'limn:alice',
-  displayName: 'Limn · alice',
+  displayName: 'Ensemble · alice',
   avatarUrl: null,
   isBot: true,
 } as User;
 
-describe('a Limn bot has no GitHub profile', () => {
+describe('an Ensemble bot has no GitHub profile', () => {
   it('profileUrl is null for a limn: login and a URL for anyone else', () => {
     expect(profileUrl('limn:alice')).toBeNull();
     expect(profileUrl('alice')).toBe('https://github.com/alice');
   });
 
-  it('the timeline row label shows "Limn · alice" and never links to GitHub', () => {
+  it('the timeline row label shows "Ensemble · alice" and never links to GitHub', () => {
     const withGid = renderUserLabel(limnUser, 77, false, 'g77');
     const plain = renderUserLabel(limnUser, 77);
     for (const html of [withGid, plain]) {
-      expect(html).toContain('Limn · alice');
+      expect(html).toContain('Ensemble · alice');
       expect(html).not.toContain('github.com');
     }
     // The popover still opens from the name when the row has a gid.
@@ -40,7 +40,7 @@ describe('a Limn bot has no GitHub profile', () => {
   });
 });
 
-describe('MlSeverityBadge on a Limn finding', () => {
+describe('MlSeverityBadge on an Ensemble finding', () => {
   const label = (over: Partial<MlLabel> = {}): MlLabel => ({
     targetKind: 'review_comment',
     targetId: 1,
@@ -61,9 +61,9 @@ describe('MlSeverityBadge on a Limn finding', () => {
   const tooltip = (html: string): string =>
     (/title="([^"]*)"/.exec(html)?.[1] ?? '').replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, '&');
 
-  it("says it is from Limn's review, with no confidence and no fallback note", () => {
+  it("says it is from Ensemble's review, with no confidence and no fallback note", () => {
     const t = tooltip(render(label()));
-    expect(t).toContain("From Limn's review.");
+    expect(t).toContain("From Ensemble's review.");
     expect(t).not.toContain('Confidence');
     expect(t).not.toContain('Heuristic fallback');
   });
@@ -75,7 +75,7 @@ describe('MlSeverityBadge on a Limn finding', () => {
   });
 });
 
-describe('a reply to a Limn finding never mentions the limn: login', () => {
+describe('a reply to an Ensemble finding never mentions the limn: login', () => {
   it('mentions the person who posted the finding', () => {
     expect(buildQuotedReply('**Nit** · x', 'limn:alice')).toBe('> **Nit** · x\n\n@alice ');
     expect(buildQuotedReply('', 'limn:alice')).toBe('@alice ');

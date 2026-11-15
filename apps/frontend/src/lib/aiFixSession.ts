@@ -127,12 +127,12 @@ export function fixMergeLine(
       const markers = n === 0 ? '' : n === 1 ? ' No conflict markers are left in the file that was in conflict.' : ` No conflict markers are left in the ${n} files that were in conflict.`;
       return {
         tone: 'ok',
-        text: `Limn checked the merge commit. Its parents are the PR head${head} and ${m.baseRef} (${short(m.baseSha)}).${markers}`,
+        text: `Ensemble checked the merge commit. Its parents are the PR head${head} and ${m.baseRef} (${short(m.baseSha)}).${markers}`,
       };
     }
     case 'invalid':
     case 'missing':
-      return { tone: 'bad', text: `Nothing will be pushed: ${m.reason ?? 'the merge did not pass Limn’s check.'}` };
+      return { tone: 'bad', text: `Nothing will be pushed: ${m.reason ?? 'the merge did not pass Ensemble’s check.'}` };
     case 'pending':
       return { tone: 'pending', text: `The merge of ${m.baseRef} is not finished.` };
   }
@@ -142,5 +142,5 @@ export function fixMergeLine(
 export function fixMergeBlockedLine(m: Pick<AiFixMerge, 'status'> | null | undefined, s: Pick<StoryBuildSession, 'phase'>): string | null {
   if (m == null || s.phase !== 'built') return null;
   if (m.status !== 'invalid' && m.status !== 'missing') return null;
-  return 'The merge did not pass Limn’s check, so nothing can be pushed. Ask for more, or discard.';
+  return 'The merge did not pass Ensemble’s check, so nothing can be pushed. Ask for more, or discard.';
 }

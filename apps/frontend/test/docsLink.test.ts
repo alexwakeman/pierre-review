@@ -1,4 +1,4 @@
-// THE "?" BUTTON (lib/docsLink.ts): it opens the public docs at limn-review.com, on the page for
+// THE "?" BUTTON (lib/docsLink.ts): it opens the public docs at ensemble.ac, on the page for
 // where the reader is. The SPA does not import the landing, so the page keys are hard-coded; this
 // test lists them, and apps/landing/test/docs.test.ts checks each one is a real docs page.
 //
@@ -53,7 +53,7 @@ describe('docs links', () => {
 
   it('the sidebar "?" is a new-tab link to the docs, not the help sheet', () => {
     const src = readFileSync(join(__dirname, '..', 'src', 'components', 'shell', 'Sidebar.tsx'), 'utf8');
-    const i = src.indexOf('aria-label="Open the Limn docs"');
+    const i = src.indexOf('aria-label="Open the Ensemble docs"');
     expect(i).toBeGreaterThan(-1);
     const tag = src.slice(src.lastIndexOf('<a', i), src.indexOf('>', i));
     expect(tag).toContain('href={docsHref}');

@@ -38,7 +38,11 @@ export default function Page(): JSX.Element {
       <p>On the ticket's story view, in place of <Ui>Implement</Ui>, when all of these hold:</p>
       <ul>
         <li>the ticket has started (it has a pull request, or its status is past "not started") and is not complete;</li>
-        <li>there is no open session for it; and</li>
+        <li>there is no open session for it;</li>
+        <li>
+          no teammate is building it (see{' '}
+          <DocLink to="implement-story/overview#teammates">When a teammate is building it</DocLink>); and
+        </li>
         <li>
           its latest story check is current and found gaps: criteria not met or partly met, unsettled ones, or missing
           pieces.

@@ -34,7 +34,7 @@ export default function Page(): JSX.Element {
           <Ui>acme/worker no release yet — read only</Ui>
         </li>
       </ul>
-      <p>A repository with no release is read only: the agent can read it, and Limn keeps none of its changes.</p>
+      <p>A repository with no release is read only: the agent can read it, and Ensemble keeps none of its changes.</p>
 
       <H2 id="the-flow">The flow</H2>
       <Steps>
@@ -75,7 +75,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        This is the agent&rsquo;s own report, not a test result. Limn checks it against the two diffs. When they
+        This is the agent&rsquo;s own report, not a test result. Ensemble checks it against the two diffs. When they
         disagree, the tab says so beside Push: <Ui>Says main does not need it, but changed main.</Ui> or{' '}
         <Ui>Says it was ported, but main is unchanged.</Ui> You can still push. With no report, the tab says{' '}
         <Ui>No report from the agent</Ui>.
@@ -95,7 +95,7 @@ export default function Page(): JSX.Element {
       <p>
         Both are titled with the ticket key and title, and each description links the other and carries the port
         report&rsquo;s line, for example <Ui>Not applied to main: the export code was removed in src/export/</Ui>. Both are yours, as with any
-        Implement push. After they open, Limn writes nothing more for the build.
+        Implement push. After they open, Ensemble writes nothing more for the build.
       </p>
       <p>
         If <Ui>hotfix/&lt;tag&gt;</Ui> already has commits past the release, for example from an earlier hotfix, the

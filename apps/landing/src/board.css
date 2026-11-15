@@ -25,7 +25,7 @@
    The home page's own layout lives in pages/home.css; the product mocks in
    components/mock/mock.css.
    HEADER (.lb-nav): .bar > .mark · .links > a[aria-current] · .go ; .links-sm
-   FOOTER (.lb-foot): .blocks > .blk×4 · .flinks > div + p.c · .last
+   FOOTER (.lb-foot): .flinks > div + p.c · .last
    =========================================================================== */
 
 @font-face {
@@ -60,7 +60,7 @@
   --ink: #f1f1ef;
   --muted: #a9a69f;
   --dark: #121110;
-  /* the limner's pigments */
+  /* the four pigments (kept from the limning theme; all four were Baroque pigments too) */
   --lapis: #2f5288;
   --lapis-2: #1b2d4f;
   --verdigris: #336b5d;
@@ -172,7 +172,8 @@ body:has(.lb) {
   padding: 0;
 }
 .lb .tile.ph img {
-  filter: grayscale(1) contrast(1.05) brightness(0.9);
+  /* Bach's iron-gall ink on paper keeps its warmth; only toned down to sit on the dark board. */
+  filter: saturate(0.8) contrast(1.04) brightness(0.88);
 }
 .lb .lapis {
   background: var(--lapis) var(--g-lapis);
@@ -250,7 +251,8 @@ body:has(.lb) {
   gap: var(--gap);
 }
 .lb-nav .mark {
-  grid-column: span 1;
+  grid-column: span 2;
+  white-space: nowrap;
   background: var(--ink);
   color: var(--dark);
   display: flex;
@@ -263,7 +265,7 @@ body:has(.lb) {
   text-decoration: none;
 }
 .lb-nav .links {
-  grid-column: span 9;
+  grid-column: span 8;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -307,49 +309,11 @@ body:has(.lb) {
   padding-top: var(--m);
   padding-bottom: var(--m);
 }
-.lb-foot .blocks {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-  height: 34svh;
-  min-height: 260px;
-  align-items: end;
-}
-.lb-foot .blk {
-  height: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  font-weight: 600;
-  letter-spacing: -0.06em;
-  font-size: min(26vw, 30svh);
-  line-height: 0.78;
-  overflow: hidden;
-  color: #0b0b0c;
-}
-.lb-foot .blk:nth-child(-n + 3) {
-  color: var(--ink);
-}
-.lb-foot .blk:nth-child(1) {
-  background: var(--lapis) var(--g-lapis);
-}
-.lb-foot .blk:nth-child(2) {
-  height: 72%;
-  background: var(--verdigris) var(--g-verdigris);
-}
-.lb-foot .blk:nth-child(3) {
-  height: 88%;
-  background: var(--madder) var(--g-madder);
-}
-.lb-foot .blk:nth-child(4) {
-  height: 64%;
-  background: var(--gold) var(--g-gold);
-}
 .lb-foot .flinks {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
   gap: 24px;
-  margin-top: 56px;
+  margin-top: 96px;
   padding: 0 10px;
   font-size: 15px;
 }
@@ -440,13 +404,13 @@ body:has(.lb) {
    links drop to the phone's second row (same rules as the phone block). */
 @media (max-width: 960px) and (min-width: 761px) {
   .lb-nav .mark {
-    grid-column: span 3;
+    grid-column: span 5;
   }
   .lb-nav .links {
     display: none;
   }
   .lb-nav .go {
-    grid-column: span 9;
+    grid-column: span 7;
     justify-content: flex-end;
   }
   .lb-nav .links-sm {
@@ -476,13 +440,13 @@ body:has(.lb) {
     --m: 8px;
   }
   .lb-nav .mark {
-    grid-column: span 3;
+    grid-column: span 5;
   }
   .lb-nav .links {
     display: none;
   }
   .lb-nav .go {
-    grid-column: span 9;
+    grid-column: span 7;
     justify-content: flex-end;
   }
   .lb-nav .links-sm {
@@ -501,10 +465,6 @@ body:has(.lb) {
   }
   .lb-nav .links-sm a[aria-current='page'] {
     color: var(--ink);
-  }
-  .lb-foot .blocks {
-    height: 22svh;
-    min-height: 160px;
   }
   .lb-foot .flinks > div {
     grid-column: span 6;

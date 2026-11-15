@@ -97,7 +97,7 @@ export function resetConsent(): void {
 export function clearAnalyticsCookies(): void {
   if (typeof document === 'undefined') return;
   const host = window.location.hostname;
-  // e.g. "www.limn-review.com" → also try ".limn-review.com"
+  // e.g. "www.ensemble.ac" → also try ".ensemble.ac"
   const parts = host.split('.');
   const domains = new Set<string>([host, `.${host}`]);
   if (parts.length > 2) {

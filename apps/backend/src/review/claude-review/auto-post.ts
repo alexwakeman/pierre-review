@@ -1230,7 +1230,7 @@ async function autoPostReview(
     try {
       lines = (await deps.liveTeamLines?.(accountId, pctx.owner, pctx.name, pctx.reviewHeadSha)) ?? null;
     } catch (err) {
-      ctx.log.warn(`auto post review ${reviewId}: could not read the head's Limn lines: ${errText(err)}`);
+      ctx.log.warn(`auto post review ${reviewId}: could not read the head's Ensemble lines: ${errText(err)}`);
     }
     teammateLifts = teammateLifts.filter((c) => c.why !== 'away' || teammateLineAtHead(lines, c.login) === false);
   }
@@ -1675,7 +1675,7 @@ export async function withdrawApprovalWhenKept(
     if (w?.status === 'withdrawn') await deps.settle({ accountId, prId, log: ctx.log }).catch(() => ({ visible: false }));
     return w;
   } catch (err) {
-    ctx.log.warn(`auto review ${review.id}: could not withdraw Limn's approval: ${errText(err)}`);
+    ctx.log.warn(`auto review ${review.id}: could not withdraw Ensemble's approval: ${errText(err)}`);
     return null;
   }
 }

@@ -502,7 +502,7 @@ export function WorkspaceMetricsPanel({
                       was resolved. Split by who clicked resolve: a person or a bot.
                     </p>
                     <p>
-                      Only resolutions Limn saw happen are counted. A thread that was already
+                      Only resolutions Ensemble saw happen are counted. A thread that was already
                       resolved when its repository was first synced has no known resolve time.
                     </p>
                   </InfoButton>

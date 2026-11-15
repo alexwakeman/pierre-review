@@ -4,7 +4,7 @@ import { AppShell, Card, DocLink, H2, Illustration, Note, Pill, Ui } from '../..
 export const meta: DocMeta = {
   title: 'What the docs library is for',
   summary:
-    "Add your team's specifications, design notes and wikis once. Limn turns them into a library you can read and search, answers questions from it, and uses it in reviews and story checks.",
+    "Add your team's specifications, design notes and wikis once. Ensemble turns them into a library you can read and search, answers questions from it, and uses it in reviews and story checks.",
 };
 
 export default function Page(): JSX.Element {
@@ -13,7 +13,7 @@ export default function Page(): JSX.Element {
       <p>
         <Ui>Docs</Ui> is the workspace&rsquo;s reference library. You add the documents your team works from: a
         product specification, a refund policy, architecture notes, a Confluence space, a Notion wiki, the{' '}
-        <code>docs</code> folder of a repository. Limn turns each one into a tree of short sections with a one-line
+        <code>docs</code> folder of a repository. Ensemble turns each one into a tree of short sections with a one-line
         summary each. Then you, the AI reviewer and the story check can all use the same library.
       </p>
 
@@ -44,7 +44,7 @@ export default function Page(): JSX.Element {
           <Ui>+</Ui> button adds documents.
         </li>
         <li>
-          <strong>The viewer</strong>, in the middle: one section at a time. Every link inside it opens in Limn.
+          <strong>The viewer</strong>, in the middle: one section at a time. Every link inside it opens in Ensemble.
         </li>
         <li>
           <strong>The chat</strong>, on the right (a <Ui>Read</Ui> and <Ui>Ask</Ui> tab on a narrow screen): ask a
@@ -59,7 +59,7 @@ export default function Page(): JSX.Element {
           Confluence, Notion or a GitHub repository.
         </li>
         <li>
-          <DocLink to="docs-library/read-and-ask">Read and ask</DocLink>: read the library in Limn, and ask questions.
+          <DocLink to="docs-library/read-and-ask">Read and ask</DocLink>: read the library in Ensemble, and ask questions.
         </li>
         <li>
           <DocLink to="docs-library/search">Search the docs</DocLink>: find a passage across every document.
@@ -76,14 +76,14 @@ export default function Page(): JSX.Element {
 
       <H2 id="how-a-document-is-built">How a document is built</H2>
       <p>
-        When you add a document, Limn splits it into sections at its headings and AI writes a one-line summary of
+        When you add a document, Ensemble splits it into sections at its headings and AI writes a one-line summary of
         each section and a short summary of the document. That is the &ldquo;build&rdquo;. It runs on your machine
         with your own AI provider, one document at a time, and the line under the document shows how far it has got
         (&ldquo;Summarising sections (3 of 12)&rdquo;). A document you can read is &ldquo;built&rdquo;. If a build
         fails, the document says why and offers <Ui>Try again</Ui>.
       </p>
       <p>
-        Images and diagrams in a document are described in words where Limn can, so the text of a diagram can be
+        Images and diagrams in a document are described in words where Ensemble can, so the text of a diagram can be
         searched and quoted too.
       </p>
 
@@ -96,7 +96,7 @@ export default function Page(): JSX.Element {
       <H2 id="why-it-helps">Why it helps</H2>
       <p>
         Most review mistakes that matter are not bugs; they are a change that goes against something the team
-        already decided and wrote down. A library that the reviewer reads, with quotes Limn checks, turns
+        already decided and wrote down. A library that the reviewer reads, with quotes Ensemble checks, turns
         &ldquo;someone should have remembered the policy&rdquo; into a finding with the passage beside it.
       </p>
     </>

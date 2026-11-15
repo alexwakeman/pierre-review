@@ -482,7 +482,7 @@ function StillOpenBlock({
       ) : (
         <>
           <span className={`text-meta ${MUTED}`}>
-            {isPrLevelItem(item) ? 'Not said on GitHub yet.' : 'You resolved this thread. Limn posted nothing there.'}
+            {isPrLevelItem(item) ? 'Not said on GitHub yet.' : 'You resolved this thread. Ensemble posted nothing there.'}
           </span>
           <button type="button" className={BTN} disabled={posting} onClick={() => post.mutate()}>
             {posting ? 'Posting…' : 'Post still open'}

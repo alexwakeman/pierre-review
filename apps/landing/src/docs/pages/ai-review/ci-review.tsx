@@ -3,14 +3,14 @@ import { Btn, CheckRow, DocLink, H2, Illustration, Log, Steps, Ui, Warning } fro
 
 export const meta: DocMeta = {
   title: 'CI review',
-  summary: 'When checks fail, Limn reads the logs and says what broke and why.',
+  summary: 'When checks fail, Ensemble reads the logs and says what broke and why.',
 };
 
 function CiPicture(): JSX.Element {
   return (
     <Illustration
-      label="The CI check section of pull request 612. The test-api check failed; Limn says it is Flaky or infra with 85% confidence and not from this change. The build check failed in Code; it can be fixed in this pull request, with a Fix with AI button."
-      caption="CI check: one row per failing check, with the cause, how sure Limn is, and whether this pull request can fix it."
+      label="The CI check section of pull request 612. The test-api check failed; Ensemble says it is Flaky or infra with 85% confidence and not from this change. The build check failed in Code; it can be fixed in this pull request, with a Fix with AI button."
+      caption="CI check: one row per failing check, with the cause, how sure Ensemble is, and whether this pull request can fix it."
       title="CI check"
       meta="On latest commit"
     >
@@ -56,7 +56,7 @@ export default function Page(): JSX.Element {
         </li>
       </Steps>
       <p>
-        When you start a code review on a pull request whose checks are red, Limn starts a CI check beside it, so you
+        When you start a code review on a pull request whose checks are red, Ensemble starts a CI check beside it, so you
         get both.
       </p>
 
@@ -70,7 +70,7 @@ export default function Page(): JSX.Element {
           <b>A category</b>: <Ui>Code</Ui>, <Ui>Test</Ui>, <Ui>Flaky or infra</Ui>, <Ui>Config</Ui> or <Ui>Unclear</Ui>.
         </li>
         <li>
-          <b>Confidence</b>, as a percentage. Limn is told to go above 50% only when the log lines it cites show the
+          <b>Confidence</b>, as a percentage. Ensemble is told to go above 50% only when the log lines it cites show the
           cause.
         </li>
         <li>
@@ -85,7 +85,7 @@ export default function Page(): JSX.Element {
         A chip says when the result is out of date: <Ui>Pushed since</Ui>, <Ui>Changed since</Ui> (other checks fail
         now) or <Ui>Passing now</Ui>.
       </p>
-      <p>When Limn cannot read the failure, it says why instead of guessing:</p>
+      <p>When Ensemble cannot read the failure, it says why instead of guessing:</p>
       <ul>
         <li>
           <Ui>The failing checks do not run on GitHub Actions, so there are no logs to read.</Ui> Such checks are listed
@@ -121,7 +121,7 @@ export default function Page(): JSX.Element {
       </p>
       <Warning title="Posting">
         With auto-posting on and <Ui>CI failure reasons, in one PR comment</Ui> ticked under <Ui>What to post</Ui>, the
-        causes Limn is more than 50% sure of are posted to the pull request as one comment, once for each set of failing
+        causes Ensemble is more than 50% sure of are posted to the pull request as one comment, once for each set of failing
         checks. A failure that is likely flaky or an infrastructure problem is labelled as such. The section then says{' '}
         <Ui>Posted to the PR automatically.</Ui>
       </Warning>

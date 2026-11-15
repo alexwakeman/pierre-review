@@ -10,6 +10,7 @@ import { OpenPrsCards } from '../Activity/OpenPrsCards.js';
 import { ChevronIcon } from '../Icons.js';
 import { StoryLayout } from './StoryLayout.js';
 import { StoryBuildEntryProvider, type StoryBuildEntryFacts } from '../StoryBuild/StoryBuildEntry.js';
+import { StoryChat } from './StoryChat.js';
 
 // THE STORY VIEW'S BODY (docs/FRONTEND.md § The story view) — one ticket, Open PRs style: the SAME
 // ticket stack the Open PRs board draws (`OpenPrsCards` with `story`), so a ticket reads the same in
@@ -149,6 +150,9 @@ export function StoryViewBody({
           {total > 0 && outside > 0 && <p className={`px-1 text-meta ${MUTED}`}>{plural(outside, 'pull request')} in other workspaces.</p>}
           {data.truncated && <p className="px-1 text-meta text-ui-warn">Showing the latest pull requests only.</p>}
           {closed.length > 0 && <ClosedList prs={closed} repoNameById={repoNameById} onOpenPr={openTab} />}
+          {/* Ask about this story: the agent warms up at once on the story tab and the sprint tray; inside
+              the PR view's Story tab, only once the box is used. */}
+          <StoryChat workspaceId={workspaceId} ident={ident} warm={!embedded} />
         </>
       )}
     </div>

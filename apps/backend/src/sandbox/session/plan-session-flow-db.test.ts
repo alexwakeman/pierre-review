@@ -381,7 +381,7 @@ describe('plan first, end to end', () => {
     const s = b.session!;
     expect(s.conversation[0]).toMatchObject({ kind: 'reader', text: 'Plan', build: false });
     const agent = s.conversation.find((c) => c.kind === 'agent')!;
-    expect(agent).toMatchObject({ text: 'Two repositories, two pull requests. The cap on rows conflicts with AC1.\n\n(The plan went to Limn to check.)' });
+    expect(agent).toMatchObject({ text: 'Two repositories, two pull requests. The cap on rows conflicts with AC1.\n\n(The plan went to Ensemble to check.)' });
     expect(JSON.stringify(s.conversation)).not.toContain('limn.plan/1');
     const plan = s.plan!;
     expect(plan).toMatchObject({ revisions: 1, unanswered: 1, status: 'ready', approvedRevision: null, withDocs: false, fillGaps: false });
@@ -479,7 +479,7 @@ describe('plan first, end to end', () => {
     // ONE automatic continuation, the budget gate asked first; the second turn ended normally, so no more.
     expect(sentToClaude.at(-1)).toBe('Go on with the build from where you stopped. Follow PLAN.md, and finish with the build report.');
     expect(continueAsked).toEqual(['claude']);
-    expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === 'The build stopped at the turn limit with work left, so Limn asked the agent to go on (1 of 2).')).toBe(true);
+    expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === 'The build stopped at the turn limit with work left, so Ensemble asked the agent to go on (1 of 2).')).toBe(true);
     expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 2 });
     expect(b.prs!.map((p) => [p.key, p.fullName, p.position, p.stackIndex, p.branch, p.status, p.criteria])).toEqual([
       ['P1', 'acme/api', 0, 1, 'ACME-400', 'ready', ['AC1']],
@@ -536,7 +536,7 @@ describe('no usable plan: the ONE repair turn and the budget gate', () => {
     // The opening turn only: no repair turn followed.
     expect(sentToClaude.length).toBe(sentBefore + 1);
     expect(b.session!.plan!.problem).toMatch(/^The agent did not submit a plan\./);
-    expect(b.session!.conversation.some((c) => c.kind === 'notice' && /^The plan did not pass Limn's checks: The agent did not submit a plan\./.test(c.text))).toBe(true);
+    expect(b.session!.conversation.some((c) => c.kind === 'notice' && /^The plan did not pass Ensemble's checks: The agent did not submit a plan\./.test(c.text))).toBe(true);
 
     // The reader's message is a revision turn; this time the gate allows ONE repair, which delivers.
     gateAllows = true;
@@ -544,7 +544,7 @@ describe('no usable plan: the ONE repair turn and the budget gate', () => {
     expect((await post(`/api/story-builds/${id}/messages`, { text: 'Please send the plan block.' })).statusCode).toBe(202);
     const c = await until(id, (x) => x.session?.phase === 'plan_ready', 'plan after repair');
     expect(sentToClaude.at(-2)).toMatch(/^Please send the plan block\.\n\nEnd your answer with the plan in one ```limn-plan block/);
-    expect(sentToClaude.at(-1)).toMatch(/^Limn could not use your plan\. Fix these problems:/);
+    expect(sentToClaude.at(-1)).toMatch(/^Ensemble could not use your plan\. Fix these problems:/);
     expect(c.session!.plan!.latest!.source).toBe('repair');
     expect(c.session!.plan!.revisions).toBe(1);
   });
@@ -613,7 +613,7 @@ describe('The reference documents', () => {
     expect(String(files.get('/workspace/TICKET.md'))).toContain(
       'Reference documents are in `/home/agent/.limn/docs/` (read only). They may not apply to this ticket: start at INDEX.md and use only the sections that help.',
     );
-    expect(String(files.get('/workspace/DOCS.md'))).toMatch(/Limn has no current docs check for this ticket/);
+    expect(String(files.get('/workspace/DOCS.md'))).toMatch(/Ensemble has no current docs check for this ticket/);
     expect((await rowOf(id)).withDocs).toBe(true);
   });
 });

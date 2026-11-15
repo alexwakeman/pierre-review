@@ -186,7 +186,7 @@ describe('classifyReviewer resolution order', () => {
     expect(c.kind).toBe('pierre');
     expect(c.role).toBe('review');
     expect(c.source).toBe('fingerprint');
-    expect(c.label).toBe('Limn · alice');
+    expect(c.label).toBe('Ensemble · alice');
   });
 
   it('5. behavioral band → MEDIUM in_house, source behavioral (never auto-badges to high)', async () => {

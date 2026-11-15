@@ -120,7 +120,7 @@ export function resolveMsbProgram(opts: { cli?: string; env?: NodeJS.ProcessEnv;
 export function socketDirFor(root: string, instance: string, sessionId: string): string {
   const dir = join(root, createHash('sha256').update(`${instance}\n${sessionId}`).digest('hex').slice(0, 12));
   if (Buffer.byteLength(join(dir, 'anthropic.sock')) > MAX_SOCKET_PATH) {
-    throw new Error(`The data folder's path is too long for the sandbox proxy's sockets (${dir}). Set LIMN_DATA_DIR to a shorter path.`);
+    throw new Error(`The data folder's path is too long for the sandbox proxy's sockets (${dir}). Set ENSEMBLE_DATA_DIR to a shorter path.`);
   }
   return dir;
 }
@@ -251,7 +251,7 @@ export function createMicrosandboxRuntime(opts: MicrosandboxRuntimeOptions = {})
     const docker = opts.dockerFallback === undefined ? (resolveCliProgram({ env }) ? createDockerRuntime({ env, recipe, pin: null }) : null) : opts.dockerFallback;
     const dockerProgram = opts.dockerRunner === undefined ? resolveCliProgram({ env }) : opts.dockerRunner?.program ?? null;
     if (!docker || !dockerProgram) {
-      throw new Error('Limn could not download the sandbox image, and building it here needs Docker (or Colima) as well. Try again later, or install Colima.');
+      throw new Error('Ensemble could not download the sandbox image, and building it here needs Docker (or Colima) as well. Try again later, or install Colima.');
     }
     o.onProgress?.({ phase: 'build', line: `Building ${recipe.localTag} with Docker (a few minutes, once)` });
     const built = await docker.ensureImage(o);

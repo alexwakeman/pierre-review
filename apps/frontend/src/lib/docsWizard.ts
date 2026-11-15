@@ -102,7 +102,7 @@ export function shownUnreadableRepos(list: readonly RepoDocsUnreadable[]): RepoD
 
 /** One unreadable repository in the folders step: "acme/legacy: Limn can't read its files (no access)." */
 export function unreadableRepoText(u: RepoDocsUnreadable): string {
-  return `${u.repoFullName}: Limn can’t read its files (${repoDocsUnreadableReasonText(u.reason)}).`;
+  return `${u.repoFullName}: Ensemble can’t read its files (${repoDocsUnreadableReasonText(u.reason)}).`;
 }
 
 /** The folders step's line when nothing qualifies, or when some repositories were not looked at. */

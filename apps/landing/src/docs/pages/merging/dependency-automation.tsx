@@ -11,15 +11,15 @@ export default function Page(): JSX.Element {
     <>
       <p>
         Dependabot, Renovate and other dependency bots open a steady stream of small pull requests. Dependency
-        automation lets Limn handle them for you, by rules you set per workspace: merge them when their checks pass,
+        automation lets Ensemble handle them for you, by rules you set per workspace: merge them when their checks pass,
         approve them, ask the bot to rebase when they conflict, and, with AI on, fix them when CI fails. Everything is
-        off until you switch it on.
+        on until you switch it off, for Dependabot and Renovate; any other bot waits until you trust it.
       </p>
 
 
-      <H2 id="switch-it-on">Switch it on</H2>
+      <H2 id="switch-it-on">Choose what it does</H2>
       <Illustration
-        label="The Dependency updates section of Settings: Merge them automatically on, Approve them automatically on, Resolve their conflicts off, Fix them with AI off"
+        label="The Dependency updates section of Settings: Merge them automatically on, Approve them automatically on, Resolve their conflicts on, Fix them with AI on"
         caption="Settings → Dependencies, for one workspace."
       >
         <SettingsRow
@@ -28,8 +28,8 @@ export default function Page(): JSX.Element {
           control={<Toggle on />}
         />
         <SettingsRow label="Approve them automatically" hint="Once CI passes, as you. Trusted bots only." control={<Toggle on />} />
-        <SettingsRow label="Resolve their conflicts" hint="Asks the bot to rebase. Trusted bots only." control={<Toggle on={false} />} />
-        <SettingsRow label="Fix them with AI" hint="When CI fails, AI fixes the branch and pushes." control={<Toggle on={false} />} />
+        <SettingsRow label="Resolve their conflicts" hint="Asks the bot to rebase. Trusted bots only." control={<Toggle on />} />
+        <SettingsRow label="Fix them with AI" hint="When CI fails, AI fixes the branch and pushes." control={<Toggle on />} />
       </Illustration>
       <Steps>
         <li>
@@ -37,8 +37,9 @@ export default function Page(): JSX.Element {
           workspace you have selected.
         </li>
         <li>
-          Switch on the actions you want: <Ui>Merge them automatically</Ui>, <Ui>Approve them automatically</Ui>,{' '}
-          <Ui>Resolve their conflicts</Ui> and, while AI is on, <Ui>Fix them with AI</Ui>.
+          Switch off any action you don&rsquo;t want: <Ui>Merge them automatically</Ui>,{' '}
+          <Ui>Approve them automatically</Ui>, <Ui>Resolve their conflicts</Ui> and, while AI is on,{' '}
+          <Ui>Fix them with AI</Ui>. All four start on.
         </li>
         <li>
           Under <Ui>Which updates</Ui>, choose <Ui>Patch updates only</Ui>, <Ui>Patch and minor updates</Ui> or{' '}
@@ -48,8 +49,9 @@ export default function Page(): JSX.Element {
           Under <Ui>Ecosystems</Ui>, keep <Ui>All ecosystems</Ui> or choose <Ui>Only these</Ui> and tick them.
         </li>
         <li>
-          Under <Ui>Trusted bots</Ui>, tick the bots Limn may approve, resolve and fix for. Merging does not need a
-          trusted bot; the other three do nothing until you trust one.
+          Under <Ui>Trusted bots</Ui>, tick the bots Ensemble may approve, resolve and fix for. Dependabot and Renovate are
+          ticked until you untick them; any other bot does nothing until you tick it. Merging does not need a trusted
+          bot.
         </li>
         <li>
           Press <Ui>Save</Ui>.
@@ -59,19 +61,19 @@ export default function Page(): JSX.Element {
       <H2 id="what-each-action-does">What each action does</H2>
       <ul>
         <li>
-          <strong>Merge:</strong> Limn arms the pull request with <DocLink to="merging/merge-when-ready">Merge when ready</DocLink>{' '}
+          <strong>Merge:</strong> Ensemble arms the pull request with <DocLink to="merging/merge-when-ready">Merge when ready</DocLink>{' '}
           and merges it once GitHub’s required checks pass, in repositories you can push to. Drafts and conflicting
           pull requests are left alone. Armed this way, a pull request says{' '}
           <Ui>Armed automatically (dependency setting)</Ui>.
         </li>
         <li>
-          <strong>Approve:</strong> once all CI is green, Limn approves under your GitHub account. It approves each new
+          <strong>Approve:</strong> once all CI is green, Ensemble approves under your GitHub account. It approves each new
           commit once and never retries a failed approval.
         </li>
         <li>
-          <strong>Resolve conflicts:</strong> Limn first asks the bot to rebase: a comment for Dependabot, the rebase
+          <strong>Resolve conflicts:</strong> Ensemble first asks the bot to rebase: a comment for Dependabot, the rebase
           checkbox for Renovate. With AI on, if the branch still conflicts 30 minutes later, or the bot cannot be
-          asked, AI resolves the conflicts and pushes a merge commit. It pushes only when Limn’s check of the merge
+          asked, AI resolves the conflicts and pushes a merge commit. It pushes only when Ensemble’s check of the merge
           passes.
         </li>
         <li>
@@ -81,19 +83,19 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        After any push, CI must pass again before Limn approves or merges. AI actions stop while you are over your AI
+        After any push, CI must pass again before Ensemble approves or merges. AI actions stop while you are over your AI
         spend limit (see <DocLink to="settings/ai-usage-and-spend">AI usage and spend</DocLink>), and need a sandbox
         runtime on your computer (see <DocLink to="integrations/sandbox-runtimes">Sandbox runtimes</DocLink>).
       </p>
-      <H3>How Limn reads an update’s size</H3>
+      <H3>How Ensemble reads an update’s size</H3>
       <p>
-        From the version numbers in the pull request. When Limn cannot read them, only <Ui>All updates, major ones
+        From the version numbers in the pull request. When Ensemble cannot read them, only <Ui>All updates, major ones
         too</Ui> lets it through. An ecosystem list lets a pull request through only when every ecosystem it changes
         is ticked.
       </p>
       <Warning title="These actions write to GitHub as you">
-        Approvals, merges, comments to the bot and AI pushes go out under your GitHub account. Limn checks every two
-        minutes while it is running. If you cancel a pull request’s automation yourself, Limn leaves that pull request
+        Approvals, merges, comments to the bot and AI pushes go out under your GitHub account. Ensemble checks every two
+        minutes while it is running. If you cancel a pull request’s automation yourself, Ensemble leaves that pull request
         alone after that.
       </Warning>
 
@@ -103,10 +105,10 @@ export default function Page(): JSX.Element {
         the last two weeks of actions, grouped by pull request. To act on everything at once, press{' '}
         <Ui>Merge or arm all</Ui>: each pull request that can merge is merged, and each that cannot yet is armed.
       </p>
-      <Note title="Teams with more than one Limn">
-        When a teammate also runs Limn, each action first puts a <code>limn/deps</code> status on the commit, such as
-        “alex handling · fixing CI”. Limn skips a commit a teammate is working on, and an action a teammate already
-        did. This is always on.
+      <Note title="Teams with more than one Ensemble">
+        When a teammate also runs Ensemble, each action first puts an <code>ensemble/deps</code> status on the commit, such as
+        “alex handling · fixing CI”. Ensemble skips a commit a teammate is working on, and an action a teammate already
+        did. If their Ensemble stops partway, its status is cleared or runs out and yours takes over. This is always on.
       </Note>
 
       <H2 id="why-it-helps">Why it helps</H2>

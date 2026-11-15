@@ -58,7 +58,7 @@ const postBody = {
 
 function featureOff(reply: FastifyReply): ErrorBody {
   reply.status(404);
-  return { error: 'NotFound', message: 'Checking a story against the docs runs on your machine: npx limn-review' };
+  return { error: 'NotFound', message: 'Checking a story against the docs runs on your machine: npx ensemble-review' };
 }
 
 const fail = (reply: FastifyReply, status: number, error: string, message: string): ErrorBody => {

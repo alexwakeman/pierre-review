@@ -46,9 +46,9 @@ function pr(judgements: ClaudeThreadJudgement[]): ClaudeThreadJudgementsForPr {
 
 describe("a teammate's still-open on a thread", () => {
   it('labels the owner by first name', () => {
-    expect(stillOpenLabel(robin)).toBe('Robin’s Limn: still open');
-    expect(stillOpenLabel({ you: false, login: 'robin-dunn', name: null })).toBe('robin-dunn’s Limn: still open');
-    expect(stillOpenLabel({ you: true })).toBe('Your Limn: still open');
+    expect(stillOpenLabel(robin)).toBe('Robin’s Ensemble: still open');
+    expect(stillOpenLabel({ you: false, login: 'robin-dunn', name: null })).toBe('robin-dunn’s Ensemble: still open');
+    expect(stillOpenLabel({ you: true })).toBe('Your Ensemble: still open');
   });
 
   it('only a teammate judged it: the one pill, never the reader’s validity / state words', () => {
@@ -57,7 +57,7 @@ describe("a teammate's still-open on a thread", () => {
     if (pill.kind !== 'claude') return;
     expect(pill.marker.validity).toBeNull();
     expect(pill.marker.state).toBeNull();
-    expect(pill.marker.stillOpen).toEqual({ label: 'Robin’s Limn: still open', reason: 'The null case is still not handled.' });
+    expect(pill.marker.stillOpen).toEqual({ label: 'Robin’s Ensemble: still open', reason: 'The null case is still not handled.' });
     expect(threadStateBucket({ id: 1, derivedState: 'untouched' }, pr([j(1, { teammateOnly: true, stillOpen: so() })]))).toBe('claude');
   });
 
@@ -65,7 +65,7 @@ describe("a teammate's still-open on a thread", () => {
     const pill = threadPillFor({ id: 1, derivedState: 'untouched' }, pr([j(1, { stillOpen: so() })]));
     if (pill.kind !== 'claude') throw new Error('expected a claude pill');
     expect(pill.marker.validity).toBe('holds_up');
-    expect(pill.marker.stillOpen?.label).toBe('Robin’s Limn: still open');
+    expect(pill.marker.stillOpen?.label).toBe('Robin’s Ensemble: still open');
   });
 
   it("the reader's own still-open adds no extra pill (the pills say it)", () => {

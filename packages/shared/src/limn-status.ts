@@ -11,12 +11,47 @@
 // (`rollupStateWithoutLimn`). The PR details pane still LISTS the lines (`CheckRun.limnOwned`), with
 // a small "Limn" label, and never counts them.
 
-/** Every context name Limn posts starts with this. */
-export const LIMN_STATUS_PREFIX = 'limn/';
+// ⚠ TWO PREFIXES (the Limn → Ensemble rename, 2026-11). Every line this app WRITES now starts
+// `ensemble/` (`ensembleStatusContext`); a teammate still on an older Limn writes `limn/`, and lines
+// already on GitHub keep it. Every READER accepts both: never compare a context string by hand —
+// `isLimnStatusContext` (is it ours at all) and `sameStatusContext` (the same line under either prefix).
 
-/** Is this check / status context one of Limn's own lines (never CI)? */
+/** Every context name this app WRITES starts with this. */
+export const ENSEMBLE_STATUS_PREFIX = 'ensemble/';
+/** The prefix an older Limn wrote (and a teammate on one still writes). READ only, never written. */
+export const LIMN_STATUS_PREFIX = 'limn/';
+/** Every prefix a reader accepts as one of the app's own lines, the written one first. */
+export const STATUS_CONTEXT_PREFIXES: readonly string[] = [ENSEMBLE_STATUS_PREFIX, LIMN_STATUS_PREFIX];
+
+/** The context to WRITE for a line name: `ensembleStatusContext('review-claude')` → `ensemble/review-claude`. */
+export function ensembleStatusContext(name: string): string {
+  return `${ENSEMBLE_STATUS_PREFIX}${name}`;
+}
+
+/** The line name under either prefix (`limn/deps` and `ensemble/deps` → `deps`); null for any other context. */
+export function statusContextName(context: string | null | undefined): string | null {
+  if (typeof context !== 'string') return null;
+  for (const p of STATUS_CONTEXT_PREFIXES) {
+    if (context.startsWith(p)) return context.slice(p.length);
+  }
+  return null;
+}
+
+/**
+ * Do these two contexts name the SAME line? `ensemble/review-claude` matches `limn/review-claude`
+ * (an older teammate's line holds exactly as before); any other context must match exactly.
+ */
+export function sameStatusContext(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const na = statusContextName(a);
+  const nb = statusContextName(b);
+  if (na != null || nb != null) return na != null && na === nb;
+  return a === b;
+}
+
+/** Is this check / status context one of the app's own lines (`ensemble/…` or `limn/…`, never CI)? */
 export function isLimnStatusContext(name: string | null | undefined): boolean {
-  return typeof name === 'string' && name.startsWith(LIMN_STATUS_PREFIX);
+  return statusContextName(name) != null;
 }
 
 /** A check's state as `checkContextState` maps it (sync/upsert.ts). */

@@ -165,7 +165,7 @@ describe("why a queued auto review went first (a teammate's verdict)", () => {
     );
     expect(autoReviewWhyLine(why({}))).toBe('Queued: needs a verdict (alex’s own review)');
     expect(autoReviewWhyLine(why({ authorLogin: null }))).toBe('Queued: needs a verdict (the author’s own review)');
-    expect(autoReviewWhyLine(why({ reason: 'moved' }))).toBe('Queued: needs a verdict (new commits since the last Limn review)');
+    expect(autoReviewWhyLine(why({ reason: 'moved' }))).toBe('Queued: needs a verdict (new commits since the last Ensemble review)');
     expect(autoReviewWhyLine(null)).toBeNull();
   });
 });

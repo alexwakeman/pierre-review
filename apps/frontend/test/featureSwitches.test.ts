@@ -81,7 +81,7 @@ describe('the sidebar gate', () => {
 });
 
 describe('the switch hints promise only what happens by itself', () => {
-  it('This Sprint: a tracker shows it, and so does a GitHub milestone or iteration Limn finds', () => {
+  it('This Sprint: a tracker shows it, and so does a GitHub milestone or iteration Ensemble finds', () => {
     // A GitHub milestone or iteration is found by the tracker worker's sprint-source probe
     // (backend tracker/sprint/probe.ts), which runs in the background without the page being
     // opened — so the hint may say the page shows itself for one.

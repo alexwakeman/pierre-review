@@ -2,7 +2,7 @@
 //
 // WHY THIS EXISTS
 // The landing page is a client-rendered React SPA. Before this script, every URL
-// on limn-review.com returned the same ~7.8 KB shell whose entire <body> was an
+// on ensemble.ac returned the same ~7.8 KB shell whose entire <body> was an
 // empty #root plus a splash caret — so anything that does not execute JavaScript
 // (an AI agent fetching the page, a link unfurler, a text browser, a crawler on a
 // render budget) saw a site with no content and no way to tell /pricing from
@@ -185,8 +185,8 @@ for (const path of PRERENDER_PATHS) {
 // for, and it is the reason this number must be changed by hand whenever the
 // route list does. It was 10; the restructure took the site to six,
 // /how-we-measure took it to seven, /contact to eight, and /teams to nine; folding
-// Getting started into the docs took it to eight (home, Reporting, the teams page, the models
-// page, contact, and the three legal ones).
+// Getting started into the docs took it to eight; the 2026-11 restructure took it to nine
+// (home, Build, Ensemble review, Automation, Everything else, contact, the three legal ones).
 if (written.length !== PRERENDER_PATHS.length) {
   throw new Error(
     `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +
@@ -224,17 +224,17 @@ if (smallest < 12000) {
 // the alias table in App.tsx; change
 // both together.
 const ALIASES = {
-  'for-managers': 'reporting',
-  'how-it-works': 'how-we-measure',
-  bots: 'reporting',
-  pro: 'reporting',
+  'for-managers': 'everything-else',
+  'how-it-works': 'everything-else',
+  bots: 'everything-else',
+  pro: 'everything-else',
   // ⚠ /pricing goes to CONTACT, not to a content page like its siblings. Somebody
   // arriving on /pricing is asking what it costs; the contact page answers that in its
   // first two lines (free, unless the organisation is bigger than three people) and is
   // where a licence is asked for. Mirrors the alias table in App.tsx.
   pricing: 'contact',
-  insights: 'reporting',
-  reviews: 'reporting',
+  insights: 'everything-else',
+  reviews: 'everything-else',
 };
 for (const [alias, target] of Object.entries(ALIASES)) {
   mkdirSync(join(dist, alias), { recursive: true });

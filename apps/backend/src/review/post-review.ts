@@ -216,7 +216,7 @@ export function findingCommentBody(
 }
 
 /** The last visible line of every inline finding comment (the first comment of a Limn thread). */
-export const THREAD_REPLY_NOTE = '_Replies will be picked up in the next Limn check._';
+export const THREAD_REPLY_NOTE = '_Replies will be picked up in the next Ensemble check._';
 
 // Note appended to a PR-level comment, so readers know the referenced code is NOT
 // part of this PR's changes (it can't be an inline comment — there's no diff line).

@@ -4,7 +4,7 @@ import { DocLink, FindingRow, H2, H3, Illustration, MiniTable, Note, Ui } from '
 export const meta: DocMeta = {
   title: 'Acceptance criteria',
   summary:
-    'Where Limn finds a ticket\'s acceptance criteria on each tracker, how the story check judges each one, and what every status means.',
+    'Where Ensemble finds a ticket\'s acceptance criteria on each tracker, how the story check judges each one, and what every status means.',
 };
 
 export default function Page(): JSX.Element {
@@ -13,12 +13,12 @@ export default function Page(): JSX.Element {
       <p>
         Acceptance criteria are the testable parts of a ticket: &ldquo;a partial refund keeps the order
         open&rdquo;, &ldquo;no refunds after 30 days&rdquo;. The story check judges the code against each one. This
-        page says where Limn reads them from, what it does when a ticket has none, and what each status on a
+        page says where Ensemble reads them from, what it does when a ticket has none, and what each status on a
         criterion means.
       </p>
 
 
-      <H2 id="where-limn-finds-them">Where Limn finds them</H2>
+      <H2 id="where-ensemble-finds-them">Where Ensemble finds them</H2>
       <MiniTable
         cols={[
           { key: 't', label: 'Tracker' },
@@ -28,7 +28,7 @@ export default function Page(): JSX.Element {
           {
             _key: 'jira',
             t: 'Jira',
-            w: 'The acceptance criteria field you choose for each issue type. "Limn picks" uses the field whose name best matches "Acceptance Criteria".',
+            w: 'The acceptance criteria field you choose for each issue type. "Ensemble picks" uses the field whose name best matches "Acceptance Criteria".',
           },
           {
             _key: 'gh',
@@ -61,7 +61,7 @@ export default function Page(): JSX.Element {
       <H3 id="a-ticket-with-no-criteria">A ticket with no criteria</H3>
       <p>
         When a ticket has no criteria written, AI works out a short numbered list from the title and description.
-        Limn marks these &ldquo;Worked out from the description&rdquo; so nobody mistakes them for the
+        Ensemble marks these &ldquo;Worked out from the description&rdquo; so nobody mistakes them for the
         ticket&rsquo;s own. It is better to write the criteria in the ticket: the check is only as good as the
         ticket.
       </p>
@@ -110,7 +110,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <Ui>Can&rsquo;t tell from the code</Ui>: the code cannot answer it (a wording decision, a visual detail), or
-          one of the pull requests could not be read. Limn never turns &ldquo;could not look&rdquo; into &ldquo;not
+          one of the pull requests could not be read. Ensemble never turns &ldquo;could not look&rdquo; into &ldquo;not
           met&rdquo;.
         </li>
         <li>
@@ -127,7 +127,7 @@ export default function Page(): JSX.Element {
       <Note>
         A verdict is AI&rsquo;s reading of the code against the ticket. Each one names its evidence so you can check
         it. A &ldquo;Met outside code changes&rdquo; verdict stands only when the comment it cites is a real
-        comment by a person on that ticket; Limn checks that before it shows it.
+        comment by a person on that ticket; Ensemble checks that before it shows it.
       </Note>
     </>
   );

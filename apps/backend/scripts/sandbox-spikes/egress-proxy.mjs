@@ -75,7 +75,7 @@ function startServer() {
     try {
       url = new URL(req.url ?? '');
     } catch {
-      res.writeHead(400).end('Limn proxy: absolute URL required\n');
+      res.writeHead(400).end('Ensemble proxy: absolute URL required\n');
       return;
     }
     const host = url.hostname.replace(/^\[|\]$/g, '');
@@ -83,7 +83,7 @@ function startServer() {
     const started = Date.now();
     if (url.protocol !== 'http:' || !allowed(RULES, host, port)) {
       log({ kind: 'http', from: req.socket.remoteAddress, host, port, method: req.method, allowed: false, status: 403, up: 0, down: 0, ms: 0 });
-      res.writeHead(403, { 'content-type': 'text/plain' }).end(`Limn proxy: ${host} is not on the allow-list\n`);
+      res.writeHead(403, { 'content-type': 'text/plain' }).end(`Ensemble proxy: ${host} is not on the allow-list\n`);
       req.resume();
       return;
     }
@@ -118,7 +118,7 @@ function startServer() {
     const from = client.remoteAddress; // read now: it is gone once the socket closes
     if (!allowed(RULES, host, port)) {
       log({ kind: 'connect', from, host, port, method: 'CONNECT', allowed: false, status: 403, up: 0, down: 0, ms: 0 });
-      client.end('HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\n\r\nLimn proxy: not on the allow-list\n');
+      client.end('HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\n\r\nEnsemble proxy: not on the allow-list\n');
       return;
     }
     let up = head.length;

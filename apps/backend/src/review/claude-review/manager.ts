@@ -717,7 +717,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // on the AI Review tab, and the reader's replies are judged by a replies pass (auto.ts, the held
     // head). On a teammate's PR the second half runs alone as before.
     if (claim.kind === 'skip' && pair?.secondProvider && (await ownPrSafe(ctx, accountId, prId))) {
-      ctx.log.info(`auto claude review pr ${prId}: own PR, a teammate's Limn has ${provider}: standing down`);
+      ctx.log.info(`auto claude review pr ${prId}: own PR, a teammate's Ensemble has ${provider}: standing down`);
       return;
     }
     if (claim.kind === 'skip' && pair?.secondProvider) {

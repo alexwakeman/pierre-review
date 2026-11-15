@@ -2339,7 +2339,7 @@ export function ClaudeReviewTab({
         <PrReviewActionsSection pr={pr} usersById={usersById} fixReview={canEdit ? review : null} />
       </RailPiece>
       {/* WHERE THIS PR STANDS: the PR's latest commit (always — the cross-reference for each review's
-          commit), then each Limn reviewer's newest verdict (now only). In the rail when wide; above
+          commit), then each Ensemble reviewer's newest verdict (now only). In the rail when wide; above
           the run controls when narrow. */}
       <RailPiece slot="status" inline>
         <StandingsSection
@@ -2366,7 +2366,7 @@ export function ClaudeReviewTab({
         info={
           <InfoButton title="Review only, or review and post">
             <p>
-              <strong>Review only</strong> keeps the review in Limn. Its summary goes into the summary box, ready
+              <strong>Review only</strong> keeps the review in Ensemble. Its summary goes into the summary box, ready
               to edit and post.
             </p>
             <p>
@@ -2405,7 +2405,7 @@ export function ClaudeReviewTab({
               items={(['review_only', 'post'] as const).map((m) => ({
                 id: m,
                 label: REVIEW_POST_MODE_LABEL[m],
-                hint: m === 'post' ? 'Posts when done' : 'Kept in Limn',
+                hint: m === 'post' ? 'Posts when done' : 'Kept in Ensemble',
                 icon: m === postMode ? <CheckIcon size={12} /> : <span className="inline-block w-3" />,
                 disabled: runDisabled,
                 onSelect: () => onRunClick(m),
@@ -2566,7 +2566,7 @@ export function ClaudeReviewTab({
       </ReviewSection>
 
       {/* EVERY REVIEW ON THE PR, newest first (the first row is now), with THE REVIEW COUNT — full
-          Limn reviews so far, teammates' included (`teamView.reviewCount`). Any other row opens that
+          Ensemble reviews so far, teammates' included (`teamView.reviewCount`). Any other row opens that
           review read-only. */}
       {data != null && (
         <div className="mt-6">

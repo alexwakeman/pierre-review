@@ -13,6 +13,7 @@
 // Builds at once (owner decision 3 of STORY-BUILD, widened 2026-11-12 from one to LIMN_SANDBOX_MAX_BUILDS).
 import { SANDBOX_IDLE_MINUTES_DEFAULT, SANDBOX_MAX_BUILDS_DEFAULT, SANDBOX_MAX_OPEN_SESSIONS_DEFAULT, SANDBOX_TURN_MAX_MINUTES_DEFAULT } from '@pierre-review/shared';
 import { storyBuildLimits } from '../../coding/story-build/limits.js';
+import { readEnv } from '../../env-name.js';
 
 export interface SessionLimits {
   maxOpen: number;
@@ -23,8 +24,9 @@ export interface SessionLimits {
   maxTurns: number;
 }
 
+/** `key` without its prefix: ENSEMBLE_<key>, else LIMN_<key> (env-name.ts). */
 function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
-  const raw = env[key]?.trim();
+  const raw = readEnv(env, key)?.trim();
   if (!raw) return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -33,10 +35,10 @@ function positiveInt(env: NodeJS.ProcessEnv, key: string, fallback: number): num
 export function sessionLimits(env: NodeJS.ProcessEnv = process.env): SessionLimits {
   const story = storyBuildLimits(env);
   return {
-    maxOpen: Math.floor(positiveInt(env, 'LIMN_SANDBOX_MAX_SESSIONS', SANDBOX_MAX_OPEN_SESSIONS_DEFAULT)),
-    maxBuilds: Math.floor(positiveInt(env, 'LIMN_SANDBOX_MAX_BUILDS', SANDBOX_MAX_BUILDS_DEFAULT)),
-    idleMs: positiveInt(env, 'LIMN_SANDBOX_IDLE_MINUTES', SANDBOX_IDLE_MINUTES_DEFAULT) * 60_000,
-    turnMaxMs: positiveInt(env, 'LIMN_SANDBOX_TURN_MAX_MINUTES', SANDBOX_TURN_MAX_MINUTES_DEFAULT) * 60_000,
+    maxOpen: Math.floor(positiveInt(env, 'SANDBOX_MAX_SESSIONS', SANDBOX_MAX_OPEN_SESSIONS_DEFAULT)),
+    maxBuilds: Math.floor(positiveInt(env, 'SANDBOX_MAX_BUILDS', SANDBOX_MAX_BUILDS_DEFAULT)),
+    idleMs: positiveInt(env, 'SANDBOX_IDLE_MINUTES', SANDBOX_IDLE_MINUTES_DEFAULT) * 60_000,
+    turnMaxMs: positiveInt(env, 'SANDBOX_TURN_MAX_MINUTES', SANDBOX_TURN_MAX_MINUTES_DEFAULT) * 60_000,
     patchMaxBytes: story.patchMaxBytes,
     maxTurns: story.buildMaxTurns,
   };

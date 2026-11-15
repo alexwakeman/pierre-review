@@ -106,7 +106,7 @@ export interface PreparedSession {
 export async function prepareSessionWorkspace(runtime: SandboxRuntime, container: string, a: PrepareSessionArgs): Promise<PreparedSession> {
   const layout = a.resolved.layout;
   const notes = [...layout.notes];
-  await prepareSandboxGit(runtime, container, layout, a.identity ?? { name: 'Limn sandbox', email: 'sandbox@limn.invalid' });
+  await prepareSandboxGit(runtime, container, layout, a.identity ?? { name: 'Ensemble sandbox', email: 'sandbox@limn.invalid' });
   const mirror = await mirrorRepos(runtime, container, layout, a.bases, a.branch, {
     seams: a.seams,
     onProgress: a.onProgress,

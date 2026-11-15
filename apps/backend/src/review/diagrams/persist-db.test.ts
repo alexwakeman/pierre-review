@@ -286,7 +286,7 @@ describe('routes', () => {
   it('a story with no members here refuses too_few_prs; a pasted ident is a 400', async () => {
     const ident = 'jira:https://acme.atlassian.net#ABC-1';
     const get = await app.inject({ method: 'GET', url: `/api/sequence-diagrams/story?ident=${encodeURIComponent(ident)}` });
-    expect(get.json()).toMatchObject({ ident, memberCount: 0, diagram: null, latest: null });
+    expect(get.json()).toMatchObject({ ident, memberCount: 0, soloPr: null, diagram: null, latest: null });
     const post = await app.inject({ method: 'POST', url: '/api/sequence-diagrams/story/redraw', payload: { ident } });
     expect(post.json()).toMatchObject({ outcome: 'refused', refusal: 'too_few_prs' });
     const bad = await app.inject({ method: 'POST', url: '/api/sequence-diagrams/story/redraw', payload: { ident: 'manual:1:abcdef12' } });

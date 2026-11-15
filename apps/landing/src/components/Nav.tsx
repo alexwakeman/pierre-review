@@ -3,13 +3,13 @@ import { SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
 // The header, as three tiles of the board (styles: .lb-nav in board.css): an ink
-// tile carrying the name, a surface tile with the six links (Product, Docs, then four pages), and a flat
+// tile carrying the name, a surface tile with the six links (four pages, Docs, Contact), and a flat
 // gold "Run it now" tile that lands on the home page's run section.
 //
 // The active page is marked by a gold underline on its link (aria-current="page").
 // The home page and the legal pages match no link, so nothing is marked there.
 //
-// There is no sign-in. Limn has no hosted app and no accounts.
+// There is no sign-in. Ensemble has no hosted app and no accounts.
 //
 // NO MOBILE DRAWER. On a phone the link tile is hidden, as in the design, and the
 // same six links follow as a second row of small text under the tiles. A modal
@@ -18,13 +18,14 @@ import { SITE_NAME } from '../lib/site';
 
 const NAV_LINKS = [
   // The home page's first chapter. On the home page it scrolls; elsewhere it lands there.
-  { to: '/#review', label: 'Product' },
+  { to: '/build', label: 'Build' },
+  // How each teammate's local agent joins one review, with GitHub as the source of truth.
+  { to: '/ensemble-review', label: 'Ensemble review' },
+  { to: '/automation', label: 'Automation' },
+  // The rest: the product chapters, reporting and metrics, how we measure.
+  { to: '/everything-else', label: 'Everything else' },
   // The documentation: every screen of the app, Settings, integrations, security, the changelog.
   { to: '/docs', label: 'Docs' },
-  { to: '/reporting', label: 'Reporting and metrics' },
-  // How reviews work when several teammates run Limn, and where a team above the free size asks for a licence.
-  { to: '/teams', label: 'For teams' },
-  { to: '/how-we-measure', label: 'How we measure' },
   // Contact is in the header, not only the footer, because it is how an organisation
   // with more than three people gets a licence — a path in a footer is one nobody takes.
   { to: '/contact', label: 'Contact' },
@@ -38,12 +39,12 @@ const NAV_LINKS = [
 // /reviews onto a `/pro` nav link that no longer exists, so it had been inert since the
 // restructure — a mapping is only alive while its `to` is in NAV_LINKS.
 const ALIAS_OF: Record<string, string> = {
-  '/for-managers': '/reporting',
-  '/how-it-works': '/how-we-measure',
-  '/bots': '/reporting',
-  '/pro': '/reporting',
-  '/insights': '/reporting',
-  '/reviews': '/reporting',
+  '/for-managers': '/everything-else',
+  '/how-it-works': '/everything-else',
+  '/bots': '/everything-else',
+  '/pro': '/everything-else',
+  '/insights': '/everything-else',
+  '/reviews': '/everything-else',
   '/pricing': '/contact',
 };
 

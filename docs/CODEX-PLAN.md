@@ -3,7 +3,7 @@
 Status: Phases 0–3 built (Phase 3 COMPLETE 2026-10-25: every agent kind runs on Codex). **Phase 0 (the spike) ran 2026-10-25 — read [CODEX-SPIKE.md](CODEX-SPIKE.md) first: its "Plan changes" section SUPERSEDES the matching parts of §§ 2, 3, 6, 7 and 8 below** (strict-config, the extra locked keys, the `/tmp` write leak, silent untrusted hooks, MCP approval mode, CLI not SDK, app-server rate limits in whole percent, models).
 
 **Phase 1 (the seam) built 2026-10-25** (branch `codex/phase1-seam`): `apps/backend/src/ai/provider.ts`
-(the interface, the registry — `LIMN_AI_PROVIDER` = `claude` | `auto`, `codex` answers "not available
+(the interface, the registry — `ENSEMBLE_AI_PROVIDER` = `claude` | `auto`, `codex` answers "not available
 yet"), `ai/providers/claude.ts` (today's Agent SDK code moved behind `runAgent` / `complete` /
 `detect` and the usage reading; the 12 runners, `cheapComplete` and so `ctx.llm` go through it),
 `ai/result-schemas.ts` (§ 3.4: one strict JSON Schema per result, derived from the same zod shape the
@@ -19,7 +19,7 @@ locked `codex exec` argv; ⚠ `projects` is ONE inline table because Codex split
 dot, quoted or not — a worktree path with a dot failed `--strict-config`), `ai/codex/events.ts` (the
 JSONL fold: progress, final answer, per-turn usage deltas, stderr-only refusals), `ai/codex/run.ts`
 (spawn, stdin prompt, abort/timeout → SIGTERM → SIGKILL; a stopped run has null tokens) and
-`ai/providers/codex.ts` (`complete()` runs on Codex under `LIMN_AI_PROVIDER=codex`; `runAgent` answers
+`ai/providers/codex.ts` (`complete()` runs on Codex under `ENSEMBLE_AI_PROVIDER=codex`; `runAgent` answers
 "not available yet" for every kind outside `CODEX_AGENT_KINDS`, EMPTY until Phase 3; one validation
 retry via `exec resume`; writes read from git; a write run refuses without a trusted hook). API-key
 prices are TODO (`CODEX_PRICES_PER_MTOK`, US$ 0 until filled). The pre-flight still keeps Codex from
@@ -30,18 +30,18 @@ users.
   (`config.ts hookConfig` never re-serialises it — the trust hash and `hooks/list` read that text),
   `trustKey` + `trustedHash` feed `ensureCodexHomeConfig`, `env` (`LIMN_CODEX_GUARD`) is merged LAST
   into the `codex exec` environment.
-- EVERY agent run (read-only too) writes the hook's trust entry into Limn's own home, then refuses
+- EVERY agent run (read-only too) writes the hook's trust entry into Ensemble's own home, then refuses
   unless `verifyHookTrusted` says Codex will run it and it denies a canary. No `--ignore-user-config`:
-  Limn writes that home's whole `config.toml`.
+  Ensemble writes that home's whole `config.toml`.
 - The child's environment: `codexRunEnv` decides the credential, `codexChildEnv` cuts it to the
   minimum, `hook.env` last. `credentialRoute`/`detect`/`usage` are stream C's (`resolveCodexCredential`,
   `detectCodex`, `codexUsageSource`).
-- Availability: `LIMN_AI_PROVIDER=codex` runs `complete()` on Codex; every agent kind answers "not
+- Availability: `ENSEMBLE_AI_PROVIDER=codex` runs `complete()` on Codex; every agent kind answers "not
   available yet" (`CODEX_AGENT_KINDS` empty). `CODEX_RUNNABLE` = every kind ported (false), so `auto`
   never picks Codex, the pre-flight answers 'none' and `/api/me` reports `providers.codex.available:
   false`; `detect()` gives the same answer. A cancelled Codex run's $0 row with NULL tokens is kept.
-- Live (`ai/codex/live.test.ts`, Limn's own home ONLY — the per-stream live tests that copied
-  `~/.codex/auth.json` were removed): the hash agrees with `hooks/list`, Limn's config passes
+- Live (`ai/codex/live.test.ts`, Ensemble's own home ONLY — the per-stream live tests that copied
+  `~/.codex/auth.json` were removed): the hash agrees with `hooks/list`, Ensemble's config passes
   `--strict-config`, `complete()` answers in a schema, and an unchecked read-only run read through the
   MCP server while the trusted hook refused `../outside/secret.env`.
 
@@ -56,7 +56,7 @@ users.
   (`ai/codex/rollouts.ts`). Codex's own sqlite copy is handled since the second round (below).
 - The hook's matcher is `.*` and the rule an ALLOW-list (write tools and `mcp__workspace__*`
   path-checked, `update_plan`; everything else denied). Patch headers count only in header position.
-- The share's account tokens carry the SPAN they cover (`AiAccountTokenSpan`) and Limn's ledger is
+- The share's account tokens carry the SPAN they cover (`AiAccountTokenSpan`) and Ensemble's ledger is
   counted over the same span; a start sample older than 15 minutes is not exact; no account count is
   an UNKNOWN share (never blocks); a share with no live reset is never over.
 - Codex is looked up inside `<runtimeDir>/node_modules` only; a sign-in cancelled while starting
@@ -73,20 +73,20 @@ users.
 - The OPENAI_API_KEY route is REFUSED ("Codex with an OpenAI API key is not available yet — sign in
   with ChatGPT") in `complete()`, `runAgent`, `detect()` and `/api/me` (`auth: 'none'`, not available)
   until `CODEX_PRICES_PER_MTOK` holds real prices: unpriced, it recorded US$ 0 and no US$ cap tripped.
-- A Limn killed by SIGINT/SIGHUP/SIGTERM (no 'exit' event) SIGKILLs every live Codex group first, then
+- An Ensemble killed by SIGINT/SIGHUP/SIGTERM (no 'exit' event) SIGKILLs every live Codex group first, then
   re-raises the signal when nobody else listens for it (`ai/codex/run.ts`).
-- Codex 0.164 keeps a second copy of every thread in sqlite in Limn's home. A settled run's thread is
+- Codex 0.164 keeps a second copy of every thread in sqlite in Ensemble's home. A settled run's thread is
   deleted through Codex's own app-server `thread/delete` (its `threads` row, history rows and rollout),
   and its `logs` rows (which no API reaches) by `thread_id` with better-sqlite3; threads and log rows
   older than a day are swept once per process (`ai/codex/threads.ts`). Erasure deletes the sqlite
   files themselves (`state_`, `thread_history_`, `logs_`, `memories_`, `goals_`, `queue_` + -wal/-shm),
   never auth.json, config.toml or installation_id.
 - Every Codex-related process (the app-server, a sign-in, the hook trust probe and canary) gets the
-  run's environment ALLOW-LIST (`config.ts codexBaseEnv`), never Limn's whole environment.
+  run's environment ALLOW-LIST (`config.ts codexBaseEnv`), never Ensemble's whole environment.
 - "Set up AI" stages Codex APART from Claude: a Claude-only install keeps (moves) the old Codex and
   never re-downloads it; a failed Codex download is recorded as Codex's failure alone and never fails
   Claude's install.
-- The token-weighted share counts Limn's ledger over EXACTLY the account count's span — its start and
+- The token-weighted share counts Ensemble's ledger over EXACTLY the account count's span — its start and
   its END (`AiAccountTokenSpan.toMs`: the newest sample, or the last day bucket's end) — and the ledger
   read reaches back to the earliest span start (`ledgerSinceMs`).
 - A validation retry whose usage is unknown keeps the first turn's tokens. A missing Codex install is a
@@ -94,8 +94,8 @@ users.
   a start a cancel overtook.
 
 **Phase 2 review fixes, round 3 (2026-10-25)** (branch `codex/p2-fix3`):
-- THE WHOLE LOCKDOWN lives in Limn's `config.toml` (one list, `config.ts LOCKED_SETTINGS`, + the new
-  `features.daemon_auto_start=false`), so every process in Limn's home inherits it — the app-server
+- THE WHOLE LOCKDOWN lives in Ensemble's `config.toml` (one list, `config.ts LOCKED_SETTINGS`, + the new
+  `features.daemon_auto_start=false`), so every process in Ensemble's home inherits it — the app-server
   for cleanup, sweep, readings and sign-in, and the hook trust probe — and the same pairs still ride
   every `codex exec` AND app-server start with `-c` (the trust probe now runs `--strict-config` too).
   Measured on 0.164: a bare app-server fetched the remote plugin catalog (`ps/plugins/list`) and
@@ -109,13 +109,13 @@ users.
   `CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED` did not stop it. Every app-server still logs
   "remote control websocket loop started … initial_desired_state=Unknown" and "starting … connection
   cycle … current_status=Disabled" — but its status stays `disabled`, nothing enrols, and no socket is
-  held. Limn keeps app-server starts few instead (below).
+  held. Ensemble keeps app-server starts few instead (below).
 - Usage is RECORDED FIRST; a settled run's thread is then queued (`threads.ts`) on a per-home serial
   queue drained in the background: ONE app-server per drain for every pending id (and the sweep, when
   due). A refused `thread/delete` keeps its id and rollout for the next drain (≤ 3 attempts). The
   sweep re-arms every 6 h (a quarter of its one-day age) instead of once per process.
-- `auto` counts Codex ready only on a ChatGPT sign-in (`route === 'login'`); `limn ai status` prints the
-  API-key refusal sentence. A missing Codex install names `limn ai install codex` in the docs crawl and
+- `auto` counts Codex ready only on a ChatGPT sign-in (`route === 'login'`); `ensemble ai status` prints the
+  API-key refusal sentence. A missing Codex install names `ensemble ai install codex` in the docs crawl and
   the sprint "Ask" (they printed Claude's remedy).
 - Account erasure also removes `plugins/` and `cache/codex_apps_*` (written before the lockdown).
 
@@ -124,39 +124,39 @@ users.
   or while probes fail) the ladder reads `auth.json`'s NON-SECRET `auth_mode` (and only whether its
   key field is filled in): `apikey` (or no mode and a key) is the refused key rung, `chatgpt` with no
   key is the sign-in, anything else is `unconfirmed`. Only a sign-in KNOWN to be ChatGPT runs
-  (`codexCredentialRunnable`) — in `complete()`/`runAgent`, `auto`, `detect()`, `/api/me` and `limn ai
+  (`codexCredentialRunnable`) — in `complete()`/`runAgent`, `auto`, `detect()`, `/api/me` and `ensemble ai
   status`. A run on an `unconfirmed` sign-in waits for ONE fresh probe (forced at most every 15 s) and
-  refuses ("Limn could not check the Codex sign-in yet — try again in a moment") when it is still not
-  known. Before this, a key stored in Limn's home counted as the ChatGPT route and ran at US$ 0.
-- `LIMN_AI_USE_API_KEY=true` (shared with Claude) no longer pushes a ChatGPT sign-in onto the refused
+  refuses ("Ensemble could not check the Codex sign-in yet — try again in a moment") when it is still not
+  known. Before this, a key stored in Ensemble's home counted as the ChatGPT route and ran at US$ 0.
+- `ENSEMBLE_AI_USE_API_KEY=true` (shared with Claude) no longer pushes a ChatGPT sign-in onto the refused
   key route: while that route is refused, the Codex ladder consults the sign-in first.
 - A run's ROLLOUT FILE goes in the first drain whatever `thread/delete` answers. Measured on 0.164:
   `thread/delete` does not need the file (with the rollout gone it still deleted the `threads` row and
   the history rows), and a thread already gone answers "no rollout found for thread id …", which counts
   as done. Only the id stays pending; an unref'd timer retries after 1, 5 and 15 minutes (4 attempts in
-  all, then the day-old sweep). The sweep is armed AT BOOT when `~/.limn/codex` exists.
-- NO ONLINE MODEL REFRESH FROM AN APP-SERVER. Measured on 0.164 in Limn's own home (no model run): an
+  all, then the day-old sweep). The sweep is armed AT BOOT when `~/.ensemble/codex` exists.
+- NO ONLINE MODEL REFRESH FROM AN APP-SERVER. Measured on 0.164 in Ensemble's own home (no model run): an
   app-server started with the full lockdown moved `models_cache.json`'s `fetched_at` (19:10 → 19:41) on
   one `account/read`; started with `model_catalog_json` it did not. `features.remote_models` is a
-  removed flag. So every app-server Limn starts (probe, cleanup and sweep, sign-in, hook trust probe)
+  removed flag. So every app-server Ensemble starts (probe, cleanup and sweep, sign-in, hook trust probe)
   gets `-c model_catalog_json=<home>/limn-app-server-models.json`, a one-model STUB (hidden, not in
   the API, never run — Codex refuses an empty catalog). It is NOT in `LOCKED_SETTINGS`: a `codex exec`
   run needs the real catalog, so a run still refreshes the model list online, on a run the reader
   started. Live test 2d checks the key under `--strict-config`.
 - ⚠ The idle REMOTE-CONTROL LOOP still starts in every app-server (round 3: no config switches it off
-  in 0.164). Limn starts as few as it can: one per cleanup drain, the probe at most every 5 minutes,
+  in 0.164). Ensemble starts as few as it can: one per cleanup drain, the probe at most every 5 minutes,
   and a drain whose app-server is up anyway takes a DUE probe's reads on it (`shareCodexProbe`).
 
 **Phase 2 review fixes, round 5 (2026-10-25)** (branch `codex/p2-fix5`):
 - CODEX ITSELF REFUSES A STORED KEY. After the first `account/read` the ladder trusts the cache over
-  `auth.json`, so a key stored by hand in Limn's home since the last probe rode the cached "ChatGPT"
+  `auth.json`, so a key stored by hand in Ensemble's home since the last probe rode the cached "ChatGPT"
   and ran at US$ 0. `forced_login_method = "chatgpt"` is now in `LOCKED_SETTINGS` (config.toml AND
   `-c` on every exec and app-server) while the key route is refused. Measured on 0.164 in scratch
   homes with a DUMMY stored key: without it `codex exec` sent the key (a 401 "Incorrect API key" from
   api.openai.com); with it — in config.toml only, `-c` only, or both — exec stops before any request
   ("ChatGPT login is required, but an API key is currently being used. Logging out.") and ⚠ DELETES
   that auth.json; `CODEX_API_KEY` in the environment is refused the same way; an app-server's
-  `account/read` answers `account: null` (signed out). Live: the ChatGPT sign-in in `~/.limn/codex`
+  `account/read` answers `account: null` (signed out). Live: the ChatGPT sign-in in `~/.ensemble/codex`
   still runs (live test 3, one gpt-6-luna run) and 2b accepts the key under `--strict-config`.
 - The run path ALSO compares `auth.json`'s kind with the cache before every run
   (`codexAuthFileAgreesWithCache`): auth.json gone while cached signed in, a known kind different from
@@ -202,7 +202,7 @@ users.
 **Phase 3 COMPLETE 2026-10-25** (branch `codex/p3-plan`): `plan` joined `ai/codex/kinds/fix.ts`, so
 `CODEX_AGENT_KINDS` holds all 14 agent kinds and `codexRunnable()` / `CODEX_RUNNABLE` are TRUE. `/api/me`
 reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once signed in) and every
-`providers.codex.kinds` entry 'ok'; under `LIMN_AI_PROVIDER=codex` the top-level pre-flight answers 'ok'.
+`providers.codex.kinds` entry 'ok'; under `ENSEMBLE_AI_PROVIDER=codex` the top-level pre-flight answers 'ok'.
 `auto` still picks Claude when both are signed in and Codex only when Codex alone is
 (`api/routes/ai-codex.test.ts` pins both on the wire; an OpenAI API key alone never counts).
 - WHY THE FIRST PLAN RUN FAILED (read from its stored session file): the live test's fixture already held
@@ -221,7 +221,7 @@ reports `providers.codex.available` = the ChatGPT sign-in (`message: null` once 
   unchanged); on Codex that earns the provider's one retry, and a second step-less answer is never kept.
 - The live test (`coding/codex-fix.live.test.ts`) now logs every turn's final message and token counts,
   checks the plan reads the UNFIXED file, adds the "already done" case, and admits `plan` for itself
-  whatever `fix.ts` says. Live, `~/.limn/codex`, gpt-6-luna at low effort, 3 model runs, US$ 0 each, no
+  whatever `fix.ts` says. Live, `~/.ensemble/codex`, gpt-6-luna at low effort, 3 model runs, US$ 0 each, no
   retry needed: the plan before the wording change (25,116 in / 16,000 cached / 250 out), the plan after
   it (25,348 / 8,576 / 234) and the "already done" plan (25,428 / 16,128 / 237, one step "Confirm zero
   guard", no change). Each named `src/math.ts`, left the worktree clean and wrote one `ai_fix_plan` row.
@@ -241,7 +241,7 @@ reviews to look at if I switch models." Built (docs/CLAUDE-REVIEW.md § The per-
 tab's history):
 - Settings → AI is now the DEFAULT provider ("Automatic runs and default"): it runs every AUTOMATIC run
   (auto review, auto fix, the CI/ticket auto runs, scheduled one-shots) and every surface without a
-  model menu, and opens the menus. `LIMN_AI_PROVIDER` still wins; `auto` = Claude when both are signed in.
+  model menu, and opens the menus. `ENSEMBLE_AI_PROVIDER` still wins; `auto` = Claude when both are signed in.
 - The Claude Review run (+ re-review) and AI Fix (+ Plan first) menus list every set-up, signed-in
   provider that can run the kind, the default first (`lib/modelPick.ts`); Codex offers astra and sol, the
   depths Claude's menu offers. The request carries `{ provider, model }`, validated by
@@ -280,8 +280,8 @@ plan's own `plan_provider`). Open: the Demo phase (simulate `PUT /api/ai/provide
 **Phase 4 stream A1 built 2026-10-26** (branch `codex/p4-provider-labels`): the provider choice and run
 labelling.
 - THE CHOICE: Settings → AI (Auto / Claude / Codex), stored per machine on `accounts.ai_provider`
-  (sqlite `0128`), written by `PUT /api/ai/provider` (`read` tier; 409 while LIMN_AI_PROVIDER is set).
-  `ai/provider-setting.ts aiProviderSetting()` is the ONE resolver: an explicitly set LIMN_AI_PROVIDER
+  (sqlite `0128`), written by `PUT /api/ai/provider` (`read` tier; 409 while ENSEMBLE_AI_PROVIDER is set).
+  `ai/provider-setting.ts aiProviderSetting()` is the ONE resolver: an explicitly set ENSEMBLE_AI_PROVIDER
   wins, else the stored choice (held in memory: loaded at boot by `ai/provider-store.ts`, updated on
   write), else `auto`. A switch reaches the NEXT run; a run already going keeps its provider.
   `/api/me` adds `ai.providerSetting {value, source}`; `ai.runtime` is now the ACTIVE provider's
@@ -309,7 +309,7 @@ below are merged. `CODEX_AGENT_KINDS` holds 13 of the 14 agent kinds; ⚠ the ON
 (Plan first — ported in code, passing offline, but its live run on gpt-6-luna at low effort answered
 with no steps; stream (b) below). So `codexRunnable()` / `CODEX_RUNNABLE` stay FALSE: `auto` never
 picks Codex, `/api/me` reports `providers.codex.available: false` with the "not available" sentence,
-and under `LIMN_AI_PROVIDER=codex` the top-level pre-flight (no kind) answers 'none' while each ported
+and under `ENSEMBLE_AI_PROVIDER=codex` the top-level pre-flight (no kind) answers 'none' while each ported
 kind's own pre-flight answers 'ok' once signed in. `/api/me` now also carries
 `providers.codex.kinds` — Codex's OWN per-run-kind answer whichever provider is active (ported +
 signed in ⇒ 'ok'; `plan` ⇒ its "Codex cannot run AI Fix plans … yet" sentence). `provider.test.ts`
@@ -321,8 +321,8 @@ signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `promp
   `docsReviewPromptBlock`'s two callers re-word the finished block for Codex themselves and match
   Claude's sentences, so the block now always renders Claude's words (`review-refs.ts`); this
   restored `tickets-claude-prompts.json` and changes nothing under Claude.
-- Live check 2026-10-25 (`~/.limn/codex`, gpt-6-luna, low effort, 4 model runs, US$ 0 each):
-  `/api/me` on a scratch DB with `LIMN_AI_PROVIDER=codex` reported signed in (plus), `available:
+- Live check 2026-10-25 (`~/.ensemble/codex`, gpt-6-luna, low effort, 4 model runs, US$ 0 each):
+  `/api/me` on a scratch DB with `ENSEMBLE_AI_PROVIDER=codex` reported signed in (plus), `available:
   false`, every kind 'ok' except `plan`. Through the provider directly on a scratch git fixture:
   a `review` run (30,090 in / 21,248 cached / 200 out), a `fix` WRITE run that edited only
   `src/math.ts` in the worktree (40,310 / 30,720 / 290), a `ticket_review` run (30,213 / 14,720 /
@@ -340,7 +340,7 @@ signed in (decided, `pickAutoProvider`). Claude's behaviour is unchanged: `promp
   swap whose Claude sentence no prompt carries any more.
 - THE DEPTHS: the role from the review's model (Opus → deep, Sonnet → standard), Codex effort = the
   role's on a worktree run and ONE STEP LOWER diff-only (`review/codex-review.ts codexReviewEffort`).
-- SPECIALISTS: Limn runs them BEFORE the lead through `runCodexSpecialists` (one door: the active
+- SPECIALISTS: Ensemble runs them BEFORE the lead through `runCodexSpecialists` (one door: the active
   provider), picked in CODE (`pickCodexSpecialists`: offered only, accessibility first, design last, at
   most the cap), each `{ report }`; their reports reach the lead FENCED, a skipped/failed one NAMED. An
   AUTOMATIC review asks the spend gate before each (`RunReviewArgs.allowSpecialistStart`).
@@ -433,7 +433,7 @@ through the Workflow tool, in the phases below, with the user confirming the dec
 
 ## 1. The short version
 
-Codex can do everything Limn's agents need, and the 2026 releases closed the two gaps that looked
+Codex can do everything Ensemble's agents need, and the 2026 releases closed the two gaps that looked
 hardest: Codex now has **hooks** (`PreToolUse` can deny a tool call) and **subagents**. The port is
 still a real piece of work, because 13 agent call sites and the one-shot `cheapComplete` are written
 against the Claude Agent SDK. The plan:
@@ -446,21 +446,21 @@ against the Claude Agent SDK. The plan:
 
 ## 2. What the Codex docs say (checked 2026-10-23)
 
-| Limn needs | Codex has | What it means here |
+| Ensemble needs | Codex has | What it means here |
 |---|---|---|
 | Run an agent from Node, stream progress | `@openai/codex-sdk` (wraps the `codex` CLI, JSONL events: `thread.started`, `turn.started/completed/failed`, `item.started/updated/completed`; items `agent_message`, `reasoning`, `command_execution`, `file_change`, `mcp_tool_call`, `web_search`, `todo_list`, `error`) | Maps onto the one `AiStatusLine` and the SSE streams. |
-| A structured final answer (our `submit_*` tools) | `outputSchema` per turn (SDK) / `--output-schema` (CLI); the answer arrives as `finalResponse` | Each `submit_*` tool becomes a JSON Schema the final answer must match; Limn validates it and, on failure, sends one more turn on the same thread with the validation error. |
+| A structured final answer (our `submit_*` tools) | `outputSchema` per turn (SDK) / `--output-schema` (CLI); the answer arrives as `finalResponse` | Each `submit_*` tool becomes a JSON Schema the final answer must match; Ensemble validates it and, on failure, sends one more turn on the same thread with the validation error. |
 | Read-only review, edit-only fix | `sandbox_mode`: `read-only`, `workspace-write` (+ `sandbox_workspace_write.writable_roots`, `network_access`), OS-level | The fixer gets `workspace-write` scoped to its worktree; everything else is `read-only`. |
 | No shell | `features.shell_tool = false`; `approval_policy = "never"` for non-interactive runs | ⚠ Codex normally READS files through the shell. With the shell off, reads must come from somewhere else (see § 3.3). |
 | The path guard (`review/path-guard.ts`) | Hooks: `PreToolUse` with a regex `matcher` on `tool_name` (`Bash`, `apply_patch`/`Edit`/`Write`, `mcp__server__tool`); deny by exit code 2, or `hookSpecificOutput.permissionDecision: "deny"` | Usable, but non-managed hooks must be TRUSTED (persisted by hash via `/hooks`) or the run must pass `--dangerously-bypass-hook-trust`. Hooks fire for `apply_patch` and MCP tools but NOT for hosted tools such as web search. |
-| Deep review's specialists | Subagents: one TOML file per agent (`name`, `description`, `developer_instructions`, optional `model`, `model_reasoning_effort`), cap `agents.max_concurrent_threads_per_session`; children INHERIT the parent's sandbox and approvals | The docs do not say how subagents behave in `exec`/SDK runs, and the cap is per session, not per review. Limn orchestrates specialists itself instead (§ 3.5). |
+| Deep review's specialists | Subagents: one TOML file per agent (`name`, `description`, `developer_instructions`, optional `model`, `model_reasoning_effort`), cap `agents.max_concurrent_threads_per_session`; children INHERIT the parent's sandbox and approvals | The docs do not say how subagents behave in `exec`/SDK runs, and the cap is per session, not per review. Ensemble orchestrates specialists itself instead (§ 3.5). |
 | Cost per run | `turn.completed.usage`: `input_tokens`, `cached_input_tokens`, `cache_write_input_tokens`, `output_tokens`, `reasoning_output_tokens` | Tokens only, never dollars. On a ChatGPT login there is no per-run price at all (§ 3.6). |
 | Sign-in | `codex login` (ChatGPT account) or `--with-api-key`; `codex login status` exits 0 when signed in; `forced_login_method = chatgpt \| api` | The credential ladder gets a Codex branch: ChatGPT login, else `OPENAI_API_KEY`. |
-| Keep the user's own Codex setup out of Limn's runs | `--ignore-user-config` (auth still read from `CODEX_HOME`), `--ephemeral` (no session files), `history.persistence = "none"`, `projects.<path>.trust_level = "untrusted"` (skips the repo's `.codex/` layer) | ⚠ The same landmine as "the Agent SDK saw claude.ai connectors": without `--ignore-user-config` a user's own MCP servers and hooks would ride into every Limn run. |
+| Keep the user's own Codex setup out of Ensemble's runs | `--ignore-user-config` (auth still read from `CODEX_HOME`), `--ephemeral` (no session files), `history.persistence = "none"`, `projects.<path>.trust_level = "untrusted"` (skips the repo's `.codex/` layer) | ⚠ The same landmine as "the Agent SDK saw claude.ai connectors": without `--ignore-user-config` a user's own MCP servers and hooks would ride into every Ensemble run. |
 | Choose the model per job | `model`, `model_reasoning_effort` (`minimal`…`max`) per thread | One model table per provider, pinned in the spike (Phase 0). |
 
 Not settled by the docs, so Phase 0 checks them on a real install: whether the SDK can pass
-`--ignore-user-config` and `--ephemeral` (its options have no free-form CLI flags, so Limn may run
+`--ignore-user-config` and `--ephemeral` (its options have no free-form CLI flags, so Ensemble may run
 `codex exec --json` directly instead); how to stop a PR's own `AGENTS.md` reaching the prompt (a
 pull request is untrusted input: likely `project_doc_max_bytes = 0`); whether a ChatGPT login
 stored in the keychain is visible to a run with a private `CODEX_HOME`.
@@ -514,9 +514,9 @@ plus `-c` overrides: `sandbox_mode`, `sandbox_workspace_write.writable_roots`,
 result schema. Running the CLI directly (rather than through the SDK) keeps every flag in our
 hands; the SDK's `index.d.ts` is the reference for the event types.
 
-### 3.3 Reads without a shell: Limn's own workspace MCP server
+### 3.3 Reads without a shell: Ensemble's own workspace MCP server
 
-With the shell off, Codex needs a way to read code. Limn ships a small stdio MCP server
+With the shell off, Codex needs a way to read code. Ensemble ships a small stdio MCP server
 (`apps/backend/src/ai/codex/workspace-mcp.ts`) with `read_file`, `list_files` (glob) and `search`
 (grep). It is started per run with the run's `readRoots` and refuses anything outside them, so it
 IS the path guard for reads, enforced in code (the same check `review/path-guard.ts` makes today).
@@ -555,29 +555,29 @@ validate against the same contract. Codex returns it as the final answer; Claude
 ⚠ Every server-side check stays where it is (`validateDesign`, the fix's shown-ref check, the docs
 quote check, the digit gate): a provider swap must not move a single guard.
 
-### 3.5 Specialists: Limn runs them, not Codex
+### 3.5 Specialists: Ensemble runs them, not Codex
 
-A deep review consults up to five specialists, and the cap is a rule in code. On Codex, Limn runs
+A deep review consults up to five specialists, and the cap is a rule in code. On Codex, Ensemble runs
 each specialist as its own parallel `codex exec` thread (read-only, its own instructions and
 schema), then hands their answers to the main review run. This keeps the cap, the budget and the
-cost per specialist in Limn's hands, and does not depend on undocumented subagent behaviour in
+cost per specialist in Ensemble's hands, and does not depend on undocumented subagent behaviour in
 `exec`. The Claude path keeps its SDK subagents.
 
 ### 3.6 Cost and budget (revised 2026-10-25, see § 8)
 
-- API key (`OPENAI_API_KEY`): Limn turns tokens into US$ with an OpenAI price table (as
+- API key (`OPENAI_API_KEY`): Ensemble turns tokens into US$ with an OpenAI price table (as
   `review/pricing.ts` does for Claude), so `REVIEW_BUDGET_USD`, `recordAiUsage` and the spend
   budget's weekly US$ mode keep working.
-- ChatGPT login: the SAME rule as a Claude subscription — Limn's share of the 5-hour and weekly
+- ChatGPT login: the SAME rule as a Claude subscription — Ensemble's share of the 5-hour and weekly
   limits, default 5%, percentages only. Measured from Codex's OWN rate-limit reading (primary =
   5-hour, secondary = weekly, `used_percent` + reset), not from a guessed dollar allowance (§ 8.1).
 
 ### 3.7 Install, sign-in, choice
 
-- `@openai/codex` (the CLI, platform binaries) installs on first use into `~/.limn/ai-runtime`,
+- `@openai/codex` (the CLI, platform binaries) installs on first use into `~/.ensemble/ai-runtime`,
   pinned in `limnAiRuntime`, exactly like the Claude SDK; `ai/runtime.ts` stays the only module
-  that loads either. "Set up AI" / `limn ai install` gain a provider choice.
-- Provider choice: `LIMN_AI_PROVIDER = claude | codex | auto` plus a Settings → AI control.
+  that loads either. "Set up AI" / `ensemble ai install` gain a provider choice.
+- Provider choice: `ENSEMBLE_AI_PROVIDER = claude | codex | auto` plus a Settings → AI control.
   `auto` = whichever is signed in, Claude first when both are (a decision for § 6). REVISED 2026-10-26:
   that choice is the DEFAULT (automatic runs, surfaces without a model menu); a manual run with a
   model menu may pick any signed-in provider's model (Phase 4b above).
@@ -619,11 +619,11 @@ finding is checked by a second agent, then fixed in the same phase.
 ## 6. Decisions for the user (before Phase 1)
 
 **DECIDED 2026-10-25** (after the spike):
-- **Codex sign-in:** Limn's OWN Codex home, `~/.limn/codex` (one extra `codex login`, from Settings
-  or `limn ai login codex`). Limn writes its whole `config.toml` there, including the hook trust
+- **Codex sign-in:** Ensemble's OWN Codex home, `~/.ensemble/codex` (one extra `codex login`, from Settings
+  or `ensemble ai login codex`). Ensemble writes its whole `config.toml` there, including the hook trust
   entry; non-ephemeral session files there make validation retries (`exec resume`) possible. The
   user's `~/.codex` is never read or written.
-- **ChatGPT share:** TOKEN-WEIGHTED — Limn's tokens in the window ÷ the account's tokens in the
+- **ChatGPT share:** TOKEN-WEIGHTED — Ensemble's tokens in the window ÷ the account's tokens in the
   window (`account/usage/read`) × the window's `usedPercent` (`account/rateLimits/read`). Whole-percent
   readings, so the share is coarse; copy says so behind the ⓘ.
 - **Default when both are signed in:** Claude. Codex is chosen in Settings until Phase 5.
@@ -641,7 +641,7 @@ Original questions:
    one-shot summaries, Claude for reviews)? (Suggested: one choice in v1.)
 3. On a ChatGPT login, is a token ceiling per run an acceptable budget? (§ 3.6)
 4. Is it acceptable that, if Phase 0 finds per-run hooks need the interactive trust step, writes
-   are bounded by the OS sandbox only, with reads still guarded by Limn's MCP server?
+   are bounded by the OS sandbox only, with reads still guarded by Ensemble's MCP server?
 5. Which real pull requests should Phase 5 use, and how much quota may it spend?
 
 ## 7. Risks
@@ -661,11 +661,11 @@ Original questions:
 
 ### 8.1 The spend budget (`ai/budget.ts`, `packages/shared/src/ai-budget.ts`, migration `0125`)
 
-What landed: an optional per-machine budget, off by default. On a Claude subscription Limn may use a
+What landed: an optional per-machine budget, off by default. On a Claude subscription Ensemble may use a
 share of the week (1–50%, default 5%) and of each 5-hour session (follows the week unless set); on an
 API key, a weekly US$ budget. ONE gate (`allowAutomaticRun` / `review/budget-gate.ts`) is asked
 before every AUTOMATIC run; runs the reader starts warn and need a second press. A header item shows
-Limn's shares and Claude's own windows. Usage is read by tapping every Agent SDK message
+Ensemble's shares and Claude's own windows. Usage is read by tapping every Agent SDK message
 (`ai/runtime.ts` `tapQuery` → `rate_limit_event`) plus a background usage probe.
 
 What it means for Codex:
@@ -673,7 +673,7 @@ What it means for Codex:
 | Area | Today (Claude only) | Codex change |
 |---|---|---|
 | The gate | One gate, provider-blind callers | Keep ONE gate; it asks the ACTIVE provider's budget. No caller changes. |
-| Subscription share | Limn's recorded US$ ÷ an ESTIMATED weekly/5-hour US$ allowance (`SUBSCRIPTION_ESTIMATES`, third-party figures) | Codex reports tokens, never US$, so the estimate route does not carry over. Better: Codex exposes its own windows — a 5-hour ("primary") and a weekly ("secondary") `used_percent` with reset times. Limn's share = the sum of the `used_percent` RISE across each of Limn's own runs. No estimate table. ⚠ A run while the reader also uses Codex elsewhere over-counts; that errs on the safe side and is acceptable. Fallback only if Phase 0 finds no reading: a ChatGPT-plan estimate table (Plus / Pro / Business), labelled as an estimate like Claude's. |
+| Subscription share | Ensemble's recorded US$ ÷ an ESTIMATED weekly/5-hour US$ allowance (`SUBSCRIPTION_ESTIMATES`, third-party figures) | Codex reports tokens, never US$, so the estimate route does not carry over. Better: Codex exposes its own windows — a 5-hour ("primary") and a weekly ("secondary") `used_percent` with reset times. Ensemble's share = the sum of the `used_percent` RISE across each of Ensemble's own runs. No estimate table. ⚠ A run while the reader also uses Codex elsewhere over-counts; that errs on the safe side and is acceptable. Fallback only if Phase 0 finds no reading: a ChatGPT-plan estimate table (Plus / Pro / Business), labelled as an estimate like Claude's. |
 | Where the reading comes from | SDK message tap + experimental usage probe | Phase 0 must find it: an event in `exec --json`, the `app-server` `account/rateLimits/read` method, or the session log's `rate_limits` block. Then ONE normalised `AiUsageReading` feeds the same observer, whichever provider produced it. |
 | API key mode | Weekly US$ | Same, with OpenAI prices. |
 | Ledger | `ai_usage.cost_usd` is NOT NULL; no provider column | Migration: add `provider` (default `'claude'`) and a nullable per-run `share_pct` (the rise in the weekly window); a ChatGPT run stores `cost_usd = 0` with its tokens and share. Every fold that sums `cost_usd` filters by provider. |
@@ -698,6 +698,6 @@ the site changes.
 
 The Codex CLI is not installed (only a lazy-load shell wrapper). `~/.codex/auth.json` holds a ChatGPT
 sign-in last refreshed by Codex 0.77 in January, which may have expired; `~/.codex/config.toml`
-defines a `railway` MCP server — exactly what `--ignore-user-config` must keep out of Limn's runs.
+defines a `railway` MCP server — exactly what `--ignore-user-config` must keep out of Ensemble's runs.
 Phase 0 installs the pinned CLI into a scratch folder (never globally) and, if the sign-in has
 lapsed, stops for the user to run `codex login`.

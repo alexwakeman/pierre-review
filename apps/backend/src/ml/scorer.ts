@@ -20,6 +20,7 @@ import {
   type SeverityRequestItem,
   type SeverityResult,
 } from './severity-client.js';
+import { readEnv } from '../env-name.js';
 
 export type { SeverityBatchResponse, SeverityRequestItem, SeverityResult };
 
@@ -58,7 +59,7 @@ export function scorerLabel(): string {
  */
 export function scorerPaused(): string | null {
   if (activeScorer() !== 'local') return null;
-  if (process.env.LIMN_ML_ON_BATTERY !== 'run' && isOnBattery() === true) return 'on battery';
+  if (readEnv(process.env, 'ML_ON_BATTERY') !== 'run' && isOnBattery() === true) return 'on battery';
   return null;
 }
 

@@ -10,6 +10,7 @@ import type { ReadReviewResponseResult } from '../../../sandbox/workspace/review
 import type { PushNewBranchArgs } from '../../git-ops.js';
 import type { LoopHalfInput, LoopHalfResult } from './branch-review.js';
 import type { LoopStoryCheckInput, LoopStoryCheckResult } from './story-check.js';
+import type { LoopReviewLine, LoopReviewLineTarget } from './review-lines.js';
 
 export type HostTurn = 'started' | 'not_live' | 'busy' | 'build_busy';
 
@@ -24,6 +25,11 @@ export interface LoopSeams {
   storyProvider(): AiProviderId;
   automaticAllowed(ctx: AgentContext, accountId: number, what: string, provider: AiProviderId): Promise<boolean>;
   runHalf(ctx: AgentContext, i: LoopHalfInput): Promise<LoopHalfResult>;
+  /** The half's review claim lines on the branch head (review-lines.ts): pending before, the final line after. */
+  reviewLines: {
+    start(t: LoopReviewLineTarget, log: { warn: (m: string) => void }): Promise<LoopReviewLine | null>;
+    end(line: LoopReviewLine | null, outcome: LoopHalfResult['status'], log: { warn: (m: string) => void }): Promise<void>;
+  };
   runStoryCheck(ctx: AgentContext, i: LoopStoryCheckInput): Promise<LoopStoryCheckResult>;
   consolidate(
     ctx: AgentContext,
@@ -110,6 +116,10 @@ export function defaultLoopSeams(): LoopSeams {
       return automaticRunAllowed(ctx, accountId, what, provider);
     },
     runHalf: async (ctx, i) => (await import('./branch-review.js')).runLoopReviewHalf(ctx, i),
+    reviewLines: {
+      start: async (t, log) => (await import('./review-lines.js')).startLoopReviewLine(t, log),
+      end: async (line, outcome, log) => (await import('./review-lines.js')).endLoopReviewLine(line, outcome, log),
+    },
     runStoryCheck: async (ctx, i) => (await import('./story-check.js')).runLoopStoryCheck(ctx, i),
     async consolidate(ctx, accountId, a, b) {
       const { consolidateHalves } = await import('../../../review/claude-review/pair-consolidate.js');

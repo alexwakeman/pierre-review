@@ -44,7 +44,7 @@ export function Proof(): JSX.Element {
         </div>
       </div>
       <p className="src">
-        A nine-repository delivery team, September vs October 2026 after Limn auto-review introduced. Measured by Limn's Chronology report.
+        A nine-repository delivery team, September vs October 2026 after Ensemble auto-review introduced. Measured by Ensemble's Chronology report.
       </p>
     </section>
   );

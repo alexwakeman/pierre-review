@@ -134,7 +134,7 @@ describe('the repo store path', () => {
     expect(log.hydrated.sort()).toEqual(['docs', 'frontend']);
     expect(log.cleaned.sort()).toEqual(['docs', 'frontend']);
     // Only a repository WITH a local clone that was not used is named.
-    expect(res.notes).toEqual(["Copied from Limn's own clone, not yours: DEFRA/docs (it does not have the base commit)."]);
+    expect(res.notes).toEqual(["Copied from Ensemble's own clone, not yours: DEFRA/docs (it does not have the base commit)."]);
   });
 
   it('tries the next local clone, and the cache when copying from the local one fails', async () => {
@@ -146,7 +146,7 @@ describe('the repo store path', () => {
     expect(log.checked).toEqual(['/a/backend', '/b/backend']);
     expect(log.transfers).toEqual([{ dir: 'DEFRA__backend.git', gitDir: '/cache/backend/.git' }]);
     expect(res.repos).toHaveLength(1);
-    expect(res.notes).toEqual(["Copied from Limn's own clone, not yours: DEFRA/backend (copying from it failed)."]);
+    expect(res.notes).toEqual(["Copied from Ensemble's own clone, not yours: DEFRA/backend (copying from it failed)."]);
   });
 
   it('a store step that fails falls back to the per-session copy; a base that cannot be resolved does not', async () => {

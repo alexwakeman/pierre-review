@@ -64,7 +64,7 @@ vi.mock('../git-ops.js', () => ({
       g(wt, 'add', '-A');
       g(wt, 'commit', '-q', '--no-verify', '-m', a.commitMessage);
       if (a.expectTree != null && g(wt, 'rev-parse', 'HEAD^{tree}') !== a.expectTree) {
-        throw Object.assign(new Error("Limn's copy of the earlier pull request does not match. Push it again from Limn."), { code: 'TREE_MISMATCH' });
+        throw Object.assign(new Error("Ensemble's copy of the earlier pull request does not match. Push it again from Ensemble."), { code: 'TREE_MISMATCH' });
       }
       if (G.failBranch === `${a.name}:${a.branch}`) throw Object.assign(new Error('the push was refused'), { code: 'PUSH_DENIED' });
       const commitSha = g(wt, 'rev-parse', 'HEAD');

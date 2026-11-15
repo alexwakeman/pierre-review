@@ -7,7 +7,7 @@
 
 ## Two migration folders, one database
 
-Limn runs on SQLite only. There are two migration sets, both applied at boot, core first:
+Ensemble runs on SQLite only. There are two migration sets, both applied at boot, core first:
 
 - **Core** — `apps/backend/src/db/migrations/` (`0000`+), applied by drizzle's migrator through
   `meta/_journal.json` (`"version": "6"`). ⚠ **The journal is hand-maintained**: a `.sql` file on
@@ -1207,7 +1207,7 @@ Codex. Journal `when` sqlite `1792137622016`.
 
 ### `0136_review_kind` — the replies pass
 `ALTER TABLE claude_reviews ADD kind text`: `'replies'` on a REPLIES PASS (a run that judged only
-people's replies on Limn's own posted findings), NULL on every full review, older rows included.
+people's replies on Ensemble's own posted findings), NULL on every full review, older rows included.
 Additive, nullable, no backfill. ⚠ Every "latest review" / "run at this head" reader now filters
 `kind IS NULL` (the list is in [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The replies pass); the table is
 already in `accountScopedTables()`, erasure and the export. Journal `idx` 136, `when` sqlite
@@ -1223,18 +1223,18 @@ code. Both tables are already in `accountScopedTables()`, the erasure and the ex
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Claude + Codex. Journal `idx` 137, `when` sqlite `1792137624016`.
 
 ### `0138_team_claim_lines` — the team-claim LEDGER
-A new CORE table, `team_claim_lines`: one row per GitHub status line (`limn/review-claude` |
-`limn/review-codex`) this machine holds or released on a PR head (`whose 'mine'`: state `claiming` →
+A new CORE table, `team_claim_lines`: one row per GitHub status line (`ensemble/review-claude` |
+`ensemble/review-codex`) this machine holds or released on a PR head (`whose 'mine'`: state `claiming` →
 `pending` → `finished` | `released`; `whose 'teammate'`: a teammate's expired line released once). Written
 BEFORE the pending line is posted, so the reconciler (`team-claim-release.ts`, boot + every auto-review
 tick) can release a line a restart or a dropped run left pending. Two indexes (`state`; `account_id,
 pr_id, head_sha`). `owner` / `name` (the repo, at write time) let a line be released after its PR or
-repo left Limn. No FK on `pr_id` (the `sonar_snapshots` precedent): `deleteRepo` and retention's
+repo left Ensemble. No FK on `pr_id` (the `sonar_snapshots` precedent): `deleteRepo` and retention's
 `deletePrSubtree` delete its rows EXCEPT this machine's OPEN ones; the erasure and
 `accountScopedTables()` take it explicitly. ⚠ ONE BACKFILL: every
 (account, PR, head, context) whose NEWEST auto run's `team_claim` record (from the last 14 days) still
 read pending (`state 'marked'`, `lastLine 'reviewing' | 'unfinished'`) gets a `pending` row with a NULL
-login (the account's login is used) and the repo's owner/name, so lines older Limn left pending are
+login (the account's login is used) and the repo's owner/name, so lines older Ensemble left pending are
 released at the first boot — ⚠ only where the head's newest line is still this account's pending one (the
 reconciler reads GitHub first; a teammate's newer claim or review is left alone). (The `owner`/`name`
 columns were added to 0138 in place before it shipped.)
@@ -1328,7 +1328,7 @@ today's behaviour everywhere: the merge switch keeps merging every size. [MERGE-
 
 ### `0148_ai_fix_checks` — AI Fix "Run tests"
 `ALTER TABLE ai_fixes ADD checks text` — JSON `AiFixChecks`: the check names the reader ticked
-(written at insert, so an approved plan's build runs the same), then what Limn ran (results, install
+(written at insert, so an approved plan's build runs the same), then what Ensemble ran (results, install
 steps, the commit hook). Additive, nullable, no backfill: NULL = no tests asked for (every older row,
 every auto fix). `ai_fixes` is already in `accountScopedTables()`, the erasure and the export.
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Run tests (removed 2026-11-07, the column dormant). Journal `idx` 148, `when` sqlite `1792137652016`
@@ -1345,14 +1345,14 @@ has no FK). Both on `accountScopedTables()`, erased, exported (the seed withheld
 `deleteRepo` deletes a repository's rows explicitly. Additive, no backfill. [STORY-BUILD.md](STORY-BUILD.md)
 § Data model. Journal `idx` 149, `when` sqlite `1792137653016`.
 
-### `0151_limn_finding_bots` — Limn findings are bots
+### `0151_limn_finding_bots` — Ensemble findings are bots
 `ALTER TABLE review_comments ADD limn_posted_by_user_id` and the same on `pr_comments` (nullable,
 `REFERENCES users(id)`), with indexes `rc_limn_poster_idx` / `prc_limn_poster_idx`. A comment that is a
-Limn finding (shared `limnFindingPost`) keeps its true poster here while `author_id` holds the per-poster
+Ensemble finding (shared `limnFindingPost`) keeps its true poster here while `author_id` holds the per-poster
 bot user `limn:<login>`. No SQL backfill: the predicate is code, so the boot reconcile
 (`db/limn-bots.ts` `reconcileLimnFindingAuthors`) re-attributes stored rows, idempotently, and sync
 applies the same rule on every walk. No new table, so `accountScopedTables()` is unchanged.
-[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn findings are bots. Journal `idx` 151, `when` sqlite
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ensemble findings are bots. Journal `idx` 151, `when` sqlite
 `1792224054016`.
 
 ### `0152_reference_doc_chunks` — full-text search over the reference library
@@ -1427,7 +1427,7 @@ whose files can't be read. Journal `idx` 158, `when` sqlite `1792224061016`.
 `UPDATE workspaces SET team_claims_enabled = 1` (every workspace, a switched-off one included — the
 owner: "Just on by default on all workspaces"); from now NULL reads ON, only a stored false is off. And
 a NEW table `team_claim_seen` (one row per `(account_id, pr_id, head_sha, provider)`, unique index
-`team_claim_seen_account_pr_head_provider`): the teammate line this Limn stood down for, read by the AI
+`team_claim_seen_account_pr_head_provider`): the teammate line this Ensemble stood down for, read by the AI
 Review tab. No FK on `pr_id`: both delete paths delete its rows inside `deleteSettledClaimLinesForPrs`;
 the erasure deletes it and `accountScopedTables()` lists it. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team
 claims → THE TEAMMATE'S LINE ON THE TAB. Journal `idx` 159, `when` sqlite `1792224062016`.
@@ -1459,7 +1459,7 @@ post". Journal `idx` 161, `when` sqlite `1792224067016` (above 0162's — see 01
 Additive, no backfill. `workspaces.dependency_auto_fix` (NULL/false = OFF, the default: Settings →
 Dependencies → "Fix them with AI"), and two columns on `dependency_automation_actions`:
 `teammate_login` (text) and `teammate_handled` (integer boolean) for the new `skipped` rows (a
-teammate's `limn/deps` line held the head). The new `action` values (`ai_fix`, `arm_merge`,
+teammate's `ensemble/deps` line held the head). The new `action` values (`ai_fix`, `arm_merge`,
 `merge_landed`) and `state` value (`skipped`) need no DDL: both columns are plain text with no CHECK.
 No new index — the AI-run cap reads the PR's rows through the existing unique index's
 `(account_id, pr_id, …)` prefix. See [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Dependency automation.
@@ -1476,36 +1476,36 @@ Additive, no backfill: the next walk of each PR fills it; until then the fold ac
 "never the default branch" clause removes the common case (a fork PR from its own `main`). Journal
 `idx` 163, `when` sqlite `1792224069016` (above every earlier entry).
 
-### `0164_teammate_block_lift` — lifting a teammate's Limn block
+### `0164_teammate_block_lift` — lifting a teammate's Ensemble block
 
 ONE column, `claude_reviews.teammate_lift` (JSON `TeammateLiftRecord`), set only on an imported
-teammate review (`kind = 'teammate'`): the reader's Limn's ONE attempt to dismiss that teammate's
+teammate review (`kind = 'teammate'`): the reader's Ensemble's ONE attempt to dismiss that teammate's
 standing Request changes — claimed NULL → `dismissing` by compare-and-set BEFORE the GitHub write,
 settled `dismissed` / `failed`, never retried ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Lifting a
 teammate's block). The teammate import's update never writes it. Additive and nullable, no backfill;
 no new table, so erasure and the delete paths are unchanged (the row is a `claude_reviews` row).
 Journal `idx` 164, `when` sqlite `1792224071016`.
 
-### `0165_withdraw_approval_on_push` — withdrawing Limn's own approval on a push
+### `0165_withdraw_approval_on_push` — withdrawing Ensemble's own approval on a push
 
-ONE column, `workspaces.withdraw_approval_on_push` (integer boolean): "Withdraw Limn's approval when
+ONE column, `workspaces.withdraw_approval_on_push` (integer boolean): "Withdraw Ensemble's approval when
 new commits are pushed". NULL = ON (the default) — only a stored false is off, in every reader and in
 the writer (`setWorkspaceAutoReview`). The claim and outcome of each withdrawal ride the approving
 run's existing `claude_reviews.auto_post` JSON (`approvalWithdrawal`, written by a `json_set`
-compare-and-set), so no other DDL ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Withdrawing Limn's
+compare-and-set), so no other DDL ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Withdrawing Ensemble's
 approval). Additive and nullable, no backfill. Journal `idx` 165, `when` sqlite `1792224073016`.
 
 ⚠ **DORMANT since 2026-11-05**: the push path this column gated was REMOVED (GitHub's own "dismiss
-stale approvals" rule does that per repo/branch; Limn never overrides a repo that keeps approvals).
+stale approvals" rule does that per repo/branch; Ensemble never overrides a repo that keeps approvals).
 The column is never read or written, kept rather than dropped; the setting left the route, the wire
 type and Settings. `approvalWithdrawal` records with `why: 'push'` still read and render.
 
 ### `0166_team_claim_skip_lines` — the skipped line, once per head
 
 A NEW table `team_claim_skip_lines` (one row per `(account_id, pr_id, head_sha, provider, reason)`,
-unique index `team_claim_skip_lines_key`): when the reader's Limn does not start an auto review it would
+unique index `team_claim_skip_lines_key`): when the reader's Ensemble does not start an auto review it would
 otherwise run (the AI budget, the daily limit, a usage limit, AI not ready), it posts ONE green
-`limn/review-<provider>` line on the head; the row is CLAIMED before the GitHub write, so the line goes
+`ensemble/review-<provider>` line on the head; the row is CLAIMED before the GitHub write, so the line goes
 out at most once and a failed write is never retried ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Team claims
 → The skipped line). No FK on `pr_id`: both delete paths (`db/team-claim-lines-delete.ts`) and the
 erasure delete its rows; in `accountScopedTables()`. Additive, no backfill. Auto-posting and the auto
@@ -1527,14 +1527,14 @@ Journal `idx` 167, `when` sqlite `1792224077016`.
 dismissal_message text` — filled by `persistPr` from the PR walk's new `reviewDismissals` selection
 (ReviewDismissedEvent, `last: 10`, a leaf connection), which also writes one `events` row per
 dismissal (type `review_dismissed`, TYPE-level only, no CHECK). [DATA-MODEL.md](DATA-MODEL.md) §
-`events`; [TEAM-REVIEW.md](TEAM-REVIEW.md) § When Limn takes its approval back. On an existing
+`events`; [TEAM-REVIEW.md](TEAM-REVIEW.md) § When Ensemble takes its approval back. On an existing
 table, so erasure and export already cover it. Additive, no backfill: a PR gains its dismissals on its
 next walk. Journal `idx` 183, `when` sqlite `1792569679027` (written as 0184 on its own branch; renumbered at integration).
 
 ### `0182_ticket_auto_clock` — the automatic story check's stored clock
 
 Four nullable columns, bare `ADD COLUMN`: `pull_requests.head_seen_at` and `head_burst_at` (integer
-timestamps; when Limn saw the head move, and where the PR's run of pushes began), `tracker_tickets.linked_at`
+timestamps; when Ensemble saw the head move, and where the PR's run of pushes began), `tracker_tickets.linked_at`
 (integer timestamp; the row's first insert only) and `ticket_reviews.cause` (text). Read by
 `review/ticket-review/auto-inputs.ts` for the ONE start rule ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) §
 The automatic story check's clock; [DATA-MODEL.md](DATA-MODEL.md)). ⚠ **No backfill, on purpose**:
@@ -1551,7 +1551,7 @@ linked_at integer`), or `ticketMembers` answers [] silently. Journal `idx` 182, 
 views). On an existing table, so erasure already covers it; export adds the column. Additive, no
 backfill. Journal `idx` 181, `when` sqlite `1792569679025`.
 
-### `0180_limn_actions` — Limn's actions are bots: the ledger and the provenance columns
+### `0180_limn_actions` — Ensemble's actions are bots: the ledger and the provenance columns
 
 NEW `limn_actions` (unique `(account_id, kind, claim_key)`; indexes on `(account_id, pr_id)`, the
 GitHub ids and the sha; composite FKs `limn_actions_repo_account_fk` → `repos (id, account_id)` and
@@ -1649,7 +1649,7 @@ continuation thread), unique `(account_id, claim_key)` — every insert uses tha
 Composite FK onto `pull_requests (id, account_id)`, cascade. Erased explicitly and listed in
 `accountScopedTables()`. Additive, no backfill. Journal `idx` 170, `when` sqlite `1792396879016`.
 
-### `0169_approved_merged_since` — "Merged after your Limn approved" counts going forward only
+### `0169_approved_merged_since` — "Merged after your Ensemble approved" counts going forward only
 
 `accounts.approved_merged_since` (integer timestamp, nullable): the earliest merge My Turn's
 `ai_approved_merged` card may count. ⚠ **BACKFILLED** to the upgrade's `unixepoch()` for every existing
@@ -1699,7 +1699,7 @@ is kept as it is.
 ### `0184_ai_use_api_key` — "Use my API keys first"
 
 `ALTER TABLE accounts ADD ai_use_api_key integer` (Settings → AI; NULL = never chosen = off; written by
-`PUT /api/ai/api-key`, loaded at boot into `ai/credentials.ts`). An explicitly set `LIMN_AI_USE_API_KEY`
+`PUT /api/ai/api-key`, loaded at boot into `ai/credentials.ts`). An explicitly set `ENSEMBLE_AI_USE_API_KEY`
 wins. Only the tick is stored, never a key. Additive; journal `when` `1792656000000`.
 
 ### `0185_story_build_auto_push` — Implement's "Push and open the pull request when the build finishes"
@@ -1729,11 +1729,11 @@ erase and the export, with `verify:isolation` checks. Additive; journal idx 186,
 ### `0187_story_build_auto_approve` — Implement's "Approve the plan automatically"
 
 `ALTER TABLE story_builds ADD auto_approve_plan` (default 0, the reader's opt-in), `plan_auto_approved_at`
-(Limn approved the plan itself) and `ticket_review_done_at` (the reader closed the ticket step after the
+(Ensemble approved the plan itself) and `ticket_review_done_at` (the reader closed the ticket step after the
 build). Additive; journal idx 187, `when` `1792915200000`. [STORY-BUILD.md](STORY-BUILD.md) § Approve
 automatically.
 
-### `0195_story_build_port_report` — the hotfix port report
+### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on
 the port to the default branch for one hotfix repository (`same` / `adapted` / `not_needed`, the reason, the

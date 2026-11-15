@@ -238,7 +238,7 @@ export function ClaudeReviewSonarSection({
         <InfoButton title="SonarCloud">
           <div className="space-y-2">
             <p>
-              Limn reads this commit’s SonarCloud analysis: open issues, security hotspots to review, the
+              Ensemble reads this commit’s SonarCloud analysis: open issues, security hotspots to review, the
               quality gate with the files behind a coverage or duplication shortfall, and each rule’s advice
               on how to fix it.
             </p>

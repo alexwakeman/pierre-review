@@ -16,10 +16,10 @@ export type PreparedCall =
   | { ok: false; status: number; error: string; message: string };
 
 export const MSG_NO_READING_TRACKER =
-  'This workspace’s issue tracker is not one Limn reads. Set Jira, GitHub Issues, Linear or Notion in Settings.';
+  'This workspace’s issue tracker is not one Ensemble reads. Set Jira, GitHub Issues, Linear or Notion in Settings.';
 
 /** The sentence for a Notion workspace whose properties are not mapped yet. */
-export const MSG_NOTION_UNMAPPED = 'Map this Notion database’s properties in Settings before Limn can read it.';
+export const MSG_NOTION_UNMAPPED = 'Map this Notion database’s properties in Settings before Ensemble can read it.';
 
 // The words for a provider's credential.
 const credentialWord = (provider: string, label: string): string =>
@@ -37,7 +37,7 @@ export function prepareTrackerCall(
     return { ok: false, status: 400, error: 'NotJira', message: MSG_NO_READING_TRACKER };
   }
   if (access.issue.provider === 'github' && opts.github == null) {
-    return { ok: false, status: 503, error: 'NoGithubAccess', message: 'Limn cannot reach GitHub as this account here.' };
+    return { ok: false, status: 503, error: 'NoGithubAccess', message: 'Ensemble cannot reach GitHub as this account here.' };
   }
   const label = adapter.label;
   const apiRoot = adapter.siteRoot(access.issue.baseUrl);

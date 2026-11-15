@@ -1,6 +1,6 @@
-# Limn workspace session
+# Ensemble workspace session
 
-You work in a disposable sandbox that Limn started to fix pull request #77 in DEFRA/bng-metric-backend: "Show totals in hectares". You have a full shell here. Nothing you do reaches GitHub, the tracker or the reader's computer.
+You work in a disposable sandbox that Ensemble started to fix pull request #77 in DEFRA/bng-metric-backend: "Show totals in hectares". You have a full shell here. Nothing you do reaches GitHub, the tracker or the reader's computer.
 
 Read `/Users/alex/Projects/DEFRA/bng-fe-be/FIX.md` first. It is the task. `/Users/alex/Projects/DEFRA/bng-fe-be/TICKET.md` is the PR's ticket, for context only.
 
@@ -40,7 +40,7 @@ Run scripts from the harness.
 
 ## Services
 
-Limn runs these services for this session, outside the sandbox. Ask for them with `limn-svc` (`limn-svc help` lists every command):
+Ensemble runs these services for this session, outside the sandbox. Ask for them with `limn-svc` (`limn-svc help` lists every command):
 
 - `bng-metric-backend` (`bng-metric-backend/compose.yml`): postgis
 
@@ -50,17 +50,17 @@ Limn runs these services for this session, outside the sandbox. Ask for them wit
 - `limn-svc run <service> [command …]` runs a one-off container, for example a migration job.
 - Reach a service by its name. Its published ports also answer on `localhost` here, so a test that uses `localhost:5432` works.
 - There is no Docker in the sandbox. `docker` and `docker compose` do not work: use `limn-svc`.
-- Limn refuses a compose file that breaks the session rules, and gives the reasons. Do not try to go around a refusal: say so in your report.
+- Ensemble refuses a compose file that breaks the session rules, and gives the reasons. Do not try to go around a refusal: say so in your report.
 
 ## The network
 
-The sandbox reaches the internet only through Limn's proxy, and only the hosts on its allow-list: package registries (npm, Yarn, PyPI, Maven Central), nodejs.org and GitHub to read. npm, pnpm, Yarn, pip and git already use the proxy. For another program, use the proxy in `$LIMN_PROXY` (for example `curl -x "$LIMN_PROXY" …`).
+The sandbox reaches the internet only through Ensemble's proxy, and only the hosts on its allow-list: package registries (npm, Yarn, PyPI, Maven Central), nodejs.org and GitHub to read. npm, pnpm, Yarn, pip and git already use the proxy. For another program, use the proxy in `$LIMN_PROXY` (for example `curl -x "$LIMN_PROXY" …`).
 A host that is not on the list fails. Say which host you needed: the reader can allow it.
 
 ## Rules
 
-1. Do the fix when Limn asks. The reader watches, and may send more instructions in this same session.
-2. Change files ONLY in `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend` (DEFRA/bng-metric-backend). Limn pushes only that repository, to the PR's own branch. Edits in other repositories are shown to the reader and left out.
+1. Do the fix when Ensemble asks. The reader watches, and may send more instructions in this same session.
+2. Change files ONLY in `/Users/alex/Projects/DEFRA/bng-fe-be/bng-metric-backend` (DEFRA/bng-metric-backend). Ensemble pushes only that repository, to the PR's own branch. Edits in other repositories are shown to the reader and left out.
 3. Commit your work on `limn/fix-pr-77`, or leave it in the working tree: both count. Do not push, do not add a remote, do not change another branch, and do not rewrite or squash the base commit. There is no GitHub credential here.
 4. Do not edit `/Users/alex/Projects/DEFRA/bng-fe-be/CLAUDE.md`, `/Users/alex/Projects/DEFRA/bng-fe-be/AGENTS.md`, `/Users/alex/Projects/DEFRA/bng-fe-be/FIX.md`, `/Users/alex/Projects/DEFRA/bng-fe-be/PR.diff`, `/Users/alex/Projects/DEFRA/bng-fe-be/TICKET.md` or `/Users/alex/Projects/DEFRA/bng-fe-be/.limn/fix-refs.json`. They are not in any repository. The one file you write outside the repositories is the report.
 5. Make the smallest correct change for each item. Match the code's own style. Do not reformat unrelated code, bump versions or refactor.

@@ -106,12 +106,12 @@ describe('inflationHistory — the enlarged Inflation sparkline', () => {
   });
 
   // A Limn bot's severity is its own review's: named apart, never "badges nothing".
-  it('names a Limn bot apart from the bots that badge nothing', () => {
+  it('names an Ensemble bot apart from the bots that badge nothing', () => {
     const h = inflationHistory([
-      { ...row('u40', 'Limn · alice', { badged: 0, overCall: 0, underCall: 0 }), login: 'limn:alice' },
+      { ...row('u40', 'Ensemble · alice', { badged: 0, overCall: 0, underCall: 0 }), login: 'limn:alice' },
       row('u13', 'SonarQube', { badged: 0, overCall: 0, underCall: 0 }),
     ]);
-    expect(h.limn).toEqual(['Limn · alice']);
+    expect(h.limn).toEqual(['Ensemble · alice']);
     expect(h.unbadged).toEqual(['SonarQube']);
     expect(h.panels).toEqual([]);
   });

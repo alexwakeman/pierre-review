@@ -96,7 +96,7 @@ function TicketReviewBody({
       <div className="mb-1 flex flex-wrap items-center gap-1.5">
         <h4 className={REVIEW_SUBHEAD}>{heading}</h4>
         <InfoButton title="The ticket">
-          <p>The plan's changes to the ticket. Edit them, then press Update ticket. Limn writes to Jira only when you press it. Approve reads the ticket again.</p>
+          <p>The plan's changes to the ticket. Edit them, then press Update ticket. Ensemble writes to Jira only when you press it. Approve reads the ticket again.</p>
           <p className="mt-2">
             Under each box: what changes, and where the text no longer keeps the ticket's layout (its headings, its list style, GIVEN /
             WHEN / THEN). Those notes are advice: you decide.
@@ -105,7 +105,7 @@ function TicketReviewBody({
             <span className="doc-quote-mark px-0.5">Highlighted</span> words differ from the ticket as it is now.
           </p>
           {current?.acLocation.kind === 'description' && (
-            <p className="mt-2">This ticket keeps its acceptance criteria in the description. Limn writes them into that section.</p>
+            <p className="mt-2">This ticket keeps its acceptance criteria in the description. Ensemble writes them into that section.</p>
           )}
         </InfoButton>
         {edited && (
@@ -387,14 +387,14 @@ export function TicketStep({ build }: { build: StoryBuild }): JSX.Element | null
 /** "Build end to end"'s ticket step, in one line. Pure (test/storyBuildEndToEnd.test.ts). */
 export function endToEndTicketLine(r: StoryBuildEndToEndTicket | null): { text: string; bad: boolean } {
   if (r == null) return { text: 'Updating the Jira ticket…', bad: false };
-  if (r.skipped === 'not_jira') return { text: 'Limn updates Jira tickets only, so it did not change this one.', bad: false };
+  if (r.skipped === 'not_jira') return { text: 'Ensemble updates Jira tickets only, so it did not change this one.', bad: false };
   const what = r.updated.map((f) => (f === 'description' ? 'description' : 'acceptance criteria')).join(' and ');
   const did =
     r.updated.length > 0
-      ? `Limn updated the ticket's ${what}${r.commented ? ' and commented on it in Jira.' : ' in Jira.'}`
+      ? `Ensemble updated the ticket's ${what}${r.commented ? ' and commented on it in Jira.' : ' in Jira.'}`
       : r.commented
-        ? 'Limn commented on the ticket in Jira. The plan did not change the ticket text.'
-        : 'Limn did not change the ticket.';
+        ? 'Ensemble commented on the ticket in Jira. The plan did not change the ticket text.'
+        : 'Ensemble did not change the ticket.';
   return r.error != null ? { text: `${did} ${r.error}`, bad: true } : { text: did, bad: false };
 }
 
@@ -417,7 +417,7 @@ function OrdinaryTicketStep({ build }: { build: StoryBuild }): JSX.Element | nul
   }
   return (
     <section data-testid="story-build-ticket-step" aria-label="The ticket changes" className="mt-3 rounded-ui bg-ui-surface p-4 ring-1 ring-inset ring-ui-accent/40">
-      <p className="mb-2 text-body text-ui-ink">The pull request is open. Limn approved the plan for you and did not change the ticket.</p>
+      <p className="mb-2 text-body text-ui-ink">The pull request is open. Ensemble approved the plan for you and did not change the ticket.</p>
       <TicketReview build={build} update={update} onWritten={() => step.mutate({ id: build.id, done: true })} />
       <div className="mt-2">
         <Button size="sm" variant="ghost" data-testid="story-build-ticket-step-skip" disabled={step.isPending} onClick={() => step.mutate({ id: build.id, done: true })}>

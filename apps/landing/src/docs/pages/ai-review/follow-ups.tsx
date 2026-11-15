@@ -58,7 +58,7 @@ export default function Page(): JSX.Element {
         repeated posted comments."
       </p>
       <p>
-        When the author of the pull request reviewed it with their own Limn and posted that review, your follow-up
+        When the author of the pull request reviewed it with their own Ensemble and posted that review, your follow-up
         checks the author's points too, and does not post them again. A teammate's review is followed up while their{' '}
         <Ui>Request changes</Ui> still stands on GitHub. See <DocLink to="ai-review/team-reviews">Reviewing as a team</DocLink>.
       </p>
@@ -82,7 +82,7 @@ export default function Page(): JSX.Element {
         ]}
       />
       <p>
-        Limn never invents "addressed". On the same commit, an outcome cannot change: only new commits change a
+        Ensemble never invents "addressed". On the same commit, an outcome cannot change: only new commits change a
         judgement. A partly addressed, not addressed or pushed-back finding is raised again in the new review, marked{' '}
         <Ui>Raised in the previous review</Ui>, so you can post it again or fix it.
       </p>
@@ -92,7 +92,7 @@ export default function Page(): JSX.Element {
         Every outcome carries one short line in bold on the finding's row. For an addressed finding it says how it was
         dealt with. For a finding that is not, or only partly, addressed, it names the one thing still needed. For an
         accepted reply, it says why the reply settles it. The same line appears on the thread's card elsewhere in
-        Limn, and in the reply Limn posts when it resolves a thread for you.
+        Ensemble, and in the reply Ensemble posts when it resolves a thread for you.
       </p>
 
       <H2 id="pr-level-findings">Findings on the whole pull request</H2>
@@ -116,19 +116,19 @@ export default function Page(): JSX.Element {
         state="Resolved"
         tone="green"
         comments={[
-          { who: 'Limn · dana', bot: true, text: 'Warning: RefundPolicy.allows() never reads paid_at.' },
+          { who: 'Ensemble · dana', bot: true, text: 'Warning: RefundPolicy.allows() never reads paid_at.' },
           {
-            who: 'Limn · dana',
+            who: 'Ensemble · dana',
             bot: true,
-            text: 'Addressed in 4f1c2ab: allows() now rejects orders paid more than 30 days ago. Resolved by Limn’s Claude review.',
+            text: 'Addressed in 4f1c2ab: allows() now rejects orders paid more than 30 days ago. Resolved by Ensemble’s Claude review.',
           },
         ]}
       />
       <p>
-        On your own pull requests, <Ui>Resolve my Limn threads when addressed</Ui> (on by default) replies "Addressed
+        On your own pull requests, <Ui>Resolve my Ensemble threads when addressed</Ui> (on by default) replies "Addressed
         in" and the commit, with the one-line how, then resolves the thread. It acts after any review you run, and
-        only on your own Limn's findings. On other people's pull requests, Limn does the same after automatic reviews
-        while posting is on (always, with no setting). Limn never resolves a teammate's or a person's
+        only on your own Ensemble's findings. On other people's pull requests, Ensemble does the same after automatic reviews
+        while posting is on (always, with no setting). Ensemble never resolves a teammate's or a person's
         thread. See <DocLink to="settings/ai-review">Settings → AI review</DocLink>.
       </p>
 
@@ -140,8 +140,8 @@ export default function Page(): JSX.Element {
         a question or a person's comment is left alone.
       </p>
       <Note>
-        On your own pull request, Limn only replies. It never reopens a thread or starts a new one there. On a thread
-        you resolved yourself, Limn writes nothing: it shows <Ui>Not addressed · Resolved</Ui> and what is still
+        On your own pull request, Ensemble only replies. It never reopens a thread or starts a new one there. On a thread
+        you resolved yourself, Ensemble writes nothing: it shows <Ui>Not addressed · Resolved</Ui> and what is still
         needed, and offers <Ui>Post still open</Ui> if you want to say so on GitHub.
       </Note>
     </>

@@ -79,11 +79,11 @@ export function StillOpenList({
         <h4 className="m-0 text-meta font-semibold text-ui-ink">Still open ({points.length})</h4>
         <InfoButton title="Still open">
           <p>
-            Earlier review comments that a Limn review found not addressed yet. Your own Limn’s and
-            your teammates’ Limn reviews are both listed. The newest review of each thread decides.
+            Earlier review comments that an Ensemble review found not addressed yet. Your own Ensemble’s and
+            your teammates’ Ensemble reviews are both listed. The newest review of each thread decides.
           </p>
           <p>
-            When a Limn review posts, it replies “Still open” on each of these threads. It reopens a
+            When an Ensemble review posts, it replies “Still open” on each of these threads. It reopens a
             resolved thread once at most.
           </p>
         </InfoButton>

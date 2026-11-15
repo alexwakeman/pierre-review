@@ -2009,7 +2009,7 @@ function FeedRowImpl({
               <span
                 className="inline-flex items-center gap-1 text-meta font-medium"
                 style={vendorInk(automatedTag.color)}
-                title={`${automatedTag.label} — an automated reviewer Limn triages`}
+                title={`${automatedTag.label} — an automated reviewer Ensemble triages`}
               >
                 <BotIcon size={11} />
                 {automatedTag.label}
@@ -2037,10 +2037,10 @@ function FeedRowImpl({
             <span
               data-testid="feed-limn-label"
               className="inline-flex shrink-0 items-center gap-1 text-meta font-medium text-ai-signal"
-              title="Posted by Limn"
+              title="Posted by Ensemble"
             >
               <SparkleIcon size={11} />
-              Limn
+              Ensemble
             </span>
           )}
           <span className="contents max-sm:order-last max-sm:flex max-sm:min-w-0 max-sm:basis-full max-sm:items-center max-sm:gap-2 max-sm:pl-[21px]">

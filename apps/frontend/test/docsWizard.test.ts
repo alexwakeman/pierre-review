@@ -171,13 +171,13 @@ describe('a repository whose files can’t be read', () => {
   it('the wizard names the repository and the reason; the repo page says what it means', () => {
     const at = '2026-11-02T00:00:00.000Z';
     expect(unreadableRepoText({ repoId: 1, repoFullName: 'acme/legacy', reason: 'no_access', failedAt: at })).toBe(
-      'acme/legacy: Limn can’t read its files (no access).',
+      'acme/legacy: Ensemble can’t read its files (no access).',
     );
     expect(unreadableRepoText({ repoId: 2, repoFullName: 'acme/blank', reason: 'empty', failedAt: at })).toBe(
-      'acme/blank: Limn can’t read its files (the repository is empty).',
+      'acme/blank: Ensemble can’t read its files (the repository is empty).',
     );
     expect(repoDocsUnreadableLine('not_found')).toBe(
-      'Limn can’t read this repository’s files, so its docs can’t be offered: not found on GitHub.',
+      'Ensemble can’t read this repository’s files, so its docs can’t be offered: not found on GitHub.',
     );
     expect(repoDocsUnreadableLine('unavailable')).toMatch(/GitHub did not answer\.$/);
   });

@@ -20,7 +20,7 @@ import {
 // is everything the session code still needs for them: discard and the restart reconcile (a kept
 // worktree is released by kept-worktree.ts, which push.ts also calls).
 
-export const RESTART_LINE = 'Stopped when Limn restarted.';
+export const RESTART_LINE = 'Stopped when Ensemble restarted.';
 
 /** Discard an old-flow row: mark it discarded, remove its kept worktrees and its pinned base refs. The
  *  stored patches stay on the rows (the export reads them). */

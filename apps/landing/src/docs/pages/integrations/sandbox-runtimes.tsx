@@ -10,7 +10,7 @@ function RuntimePicture(): JSX.Element {
   return (
     <Illustration
       label="Settings, Sandbox, Container runtime: Runs in Colima on this computer, with a Check again button, and the resources per session: 4 CPUs, 8 GB memory, 30 GB disk."
-      caption="Settings → Sandbox: the runtime Limn found, and the resources each session may use."
+      caption="Settings → Sandbox: the runtime Ensemble found, and the resources each session may use."
       title="Container runtime"
       meta="Settings → Sandbox"
     >
@@ -29,8 +29,8 @@ export default function Page(): JSX.Element {
     <>
       <p>
         AI Fix and Implement story run their agent in a sandbox: a disposable container on your own computer. To make
-        one, Limn needs a container runtime, such as Docker Engine, Colima or Podman. Every route on this page is free.
-        Limn finds the runtime by itself; you install it once.
+        one, Ensemble needs a container runtime, such as Docker Engine, Colima or Podman. Every route on this page is free.
+        Ensemble finds the runtime by itself; you install it once.
       </p>
 
       <H2 id="what-you-need">What you need</H2>
@@ -40,7 +40,7 @@ export default function Page(): JSX.Element {
         <li>Network access to pull the sandbox image (about 1.3 GB) the first time.</li>
       </ul>
       <p>
-        Nothing else in Limn needs a runtime. Without one, reviews, the CI review and the merge resolver work as normal;
+        Nothing else in Ensemble needs a runtime. Without one, reviews, the CI review and the merge resolver work as normal;
         AI Fix and Implement show one line with <Ui>How to set up</Ui>.
       </p>
 
@@ -72,14 +72,14 @@ export default function Page(): JSX.Element {
             _key: 'win',
             c: 'Windows',
             r: 'WSL2 with Docker Engine',
-            s: 'Run Limn inside WSL2, and install Docker Engine in that Linux.',
+            s: 'Run Ensemble inside WSL2, and install Docker Engine in that Linux.',
           },
         ]}
       />
       <Steps>
         <li>Install and start the runtime for your computer.</li>
         <li>
-          Open <Ui>Settings → Sandbox</Ui> and press <Ui>Check again</Ui>. Limn shows the runtime it found, for example{' '}
+          Open <Ui>Settings → Sandbox</Ui> and press <Ui>Check again</Ui>. Ensemble shows the runtime it found, for example{' '}
           <Ui>Runs in Colima on this computer.</Ui>
         </li>
         <li>Start an AI Fix or an Implement session. The first one downloads the sandbox image, which takes minutes; later ones start in seconds.</li>
@@ -92,43 +92,43 @@ export default function Page(): JSX.Element {
 
       <H2 id="docker">Docker, Colima and Podman</H2>
       <p>
-        These all run the sandbox as a Docker-style container. Limn finds the <code>docker</code> command and checks that
+        These all run the sandbox as a Docker-style container. Ensemble finds the <code>docker</code> command and checks that
         it answers. On a Mac and on Windows the container also runs inside a virtual machine, which is a second wall
         around it. On Linux a container shares your computer's kernel.
       </p>
       <p>
-        To use Podman, start Limn with <code>SANDBOX_CLI=podman</code>. Podman is less tested than Docker.
+        To use Podman, start Ensemble with <code>SANDBOX_CLI=podman</code>. Podman is less tested than Docker.
       </p>
 
       <H2 id="microsandbox">microsandbox</H2>
       <p>
         microsandbox runs each sandbox as a small virtual machine with its own kernel, on an Apple Silicon Mac or on Linux
-        with KVM. It is a beta product, and Limn's support for it is new and less tested than Docker's.
+        with KVM. It is a beta product, and Ensemble's support for it is new and less tested than Docker's.
       </p>
       <Warning>
-        If microsandbox is installed and <code>msb doctor</code> passes, Limn uses it in place of Docker. Services for
-        integration tests do not run on microsandbox yet. To keep Docker, start Limn with{' '}
+        If microsandbox is installed and <code>msb doctor</code> passes, Ensemble uses it in place of Docker. Services for
+        integration tests do not run on microsandbox yet. To keep Docker, start Ensemble with{' '}
         <code>SANDBOX_RUNTIME=docker</code>. To force microsandbox, use <code>SANDBOX_RUNTIME=microsandbox</code>.
       </Warning>
       <p>
         An Intel Mac cannot run microsandbox. On Linux it needs access to <code>/dev/kvm</code>. The choice is made when
-        Limn starts and stays fixed until it restarts.
+        Ensemble starts and stays fixed until it restarts.
       </p>
 
       <H2 id="what-a-sandbox-can-do">What a sandbox can and cannot do</H2>
       <ul>
-        <li>It holds copies of the workspace's repositories, and only the files Limn put in. It has no writable view of your own files.</li>
-        <li>It has no GitHub credentials and no access to the Docker socket. The AI credential stays on your computer; Limn adds it to the AI provider's requests on the way out.</li>
+        <li>It holds copies of the workspace's repositories, and only the files Ensemble put in. It has no writable view of your own files.</li>
+        <li>It has no GitHub credentials and no access to the Docker socket. The AI credential stays on your computer; Ensemble adds it to the AI provider's requests on the way out.</li>
         <li>
-          Its only way to the network is Limn's allow-list: the AI provider, package registries and GitHub downloads by
+          Its only way to the network is Ensemble's allow-list: the AI provider, package registries and GitHub downloads by
           default. Every request is logged in the session's <Ui>Network</Ui> panel.
         </li>
         <li>
           It cannot reach services you already run on your computer, Docker Desktop's included: the filter refuses your
           computer's own addresses. Integration tests use the services you pick in <Ui>Settings → Sandbox</Ui>, which
-          Limn starts for each session.
+          Ensemble starts for each session.
         </li>
-        <li>Work leaves only as a set of changes that Limn checks and you push.</li>
+        <li>Work leaves only as a set of changes that Ensemble checks and you push.</li>
       </ul>
       <H3>Allowing a host</H3>
       <p>
@@ -148,17 +148,17 @@ export default function Page(): JSX.Element {
         <li>At most four sessions are open on this computer at a time, and three of them build at once.</li>
         <li>A session with nothing to do closes after 15 minutes; its changes are kept.</li>
         <li>
-          When a session ends, for any reason, Limn removes its containers, network and volumes. Every few minutes, and
+          When a session ends, for any reason, Ensemble removes its containers, network and volumes. Every few minutes, and
           when it starts, it also removes any of its own that no open session uses.
         </li>
         <li>
-          <Ui>Settings → Sandbox</Ui> says how many Limn sandboxes are running, and <Ui>Stop all</Ui> stops them.
+          <Ui>Settings → Sandbox</Ui> says how many Ensemble sandboxes are running, and <Ui>Stop all</Ui> stops them.
         </li>
       </ul>
       <Tip>
-        Sandboxes use disk space. With Limn stopped, <code>limn sandbox prune</code> removes everything left over (add{' '}
-        <code>--dry-run</code> to see what it would remove first). Limn keeps a copy of your repositories between sessions
-        to start faster; <code>limn sandbox prune --store</code> removes that too.
+        Sandboxes use disk space. With Ensemble stopped, <code>ensemble sandbox prune</code> removes everything left over (add{' '}
+        <code>--dry-run</code> to see what it would remove first). Ensemble keeps a copy of your repositories between sessions
+        to start faster; <code>ensemble sandbox prune --store</code> removes that too.
       </Tip>
 
       <H2 id="troubleshooting">Troubleshooting</H2>
@@ -170,10 +170,10 @@ export default function Page(): JSX.Element {
         rows={[
           { _key: '1', w: 'No container runtime is running on this computer.', d: 'Start the runtime (colima start, Docker Desktop, or sudo systemctl start docker), then press Check again in Settings → Sandbox.' },
           { _key: '2', w: 'permission denied … docker.sock (Linux)', d: 'Add yourself to the docker group and sign in again, or use Podman without root.' },
-          { _key: '3', w: 'The first session waits a long time for the sandbox image', d: 'The image is about 1.3 GB. If the download fails, Limn builds it on your computer, which takes longer.' },
-          { _key: '4', w: 'No space left on device', d: 'Stop Limn, run limn sandbox prune, and give the runtime more disk (colima start --disk 100).' },
+          { _key: '3', w: 'The first session waits a long time for the sandbox image', d: 'The image is about 1.3 GB. If the download fails, Ensemble builds it on your computer, which takes longer.' },
+          { _key: '4', w: 'No space left on device', d: 'Stop Ensemble, run ensemble sandbox prune, and give the runtime more disk (colima start --disk 100).' },
           { _key: '5', w: 'A tool cannot reach a host', d: 'Allow the host in the Network panel.' },
-          { _key: '6', w: 'Behind a company proxy or VPN', d: 'Set the runtime’s own proxy so it can pull images. Inside the sandbox, requests still go through Limn’s allow-list.' },
+          { _key: '6', w: 'Behind a company proxy or VPN', d: 'Set the runtime’s own proxy so it can pull images. Inside the sandbox, requests still go through Ensemble’s allow-list.' },
           { _key: '7', w: 'microsandbox is installed but not used', d: 'msb doctor must pass. An Intel Mac cannot run it; Linux needs /dev/kvm.' },
           { _key: '8', w: 'Sandboxes still running after you closed the tab', d: 'A session with nothing to do closes after 15 minutes. To stop them now, select Stop all in Settings → Sandbox.' },
         ]}

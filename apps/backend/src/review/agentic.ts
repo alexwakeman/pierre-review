@@ -31,6 +31,7 @@ import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
 import { registerStoryDocsRoutes } from './story-docs/routes.js';
 import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 import { registerSandboxSessionRoutes } from '../sandbox/session/routes.js';
+import { registerStoryChatRoutes } from '../story-chat/routes.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -85,6 +86,8 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // agent, starts the build, and pushes on a click only (the push routes are coding/story-build's). The
   // old plan/build flow's routes are no longer mounted (its code goes in WP10).
   registerSandboxSessionRoutes(app, ctx);
+  // Story chat (docs/STORY-CHAT.md): quick questions about one story, its commands in a process sandbox.
+  registerStoryChatRoutes(app, ctx);
   return ctx;
 }
 
@@ -179,6 +182,13 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileSessionsOnStartup(ctx);
     const { reconcileLegacyStoryBuildsOnStartup } = await import('../coding/story-build/legacy.js');
     await reconcileLegacyStoryBuildsOnStartup(ctx);
+    // THE TEAM CLAIM (docs/STORY-BUILD.md § The team claim): renew a live build's `ensemble/build` line, settle
+    // the lines a restart or a closed session left pending — now in the BACKGROUND, then every minute.
+    // Never under test (the claim tests drive the pass themselves).
+    if (!process.env.VITEST) {
+      const { bindStoryBuildClaims } = await import('../coding/story-build/build-claim-release.js');
+      bindStoryBuildClaims({ info: (m) => app.log.info(m), warn: (m) => app.log.warn(m) });
+    }
   } catch (err) {
     app.log.warn({ err }, 'story builds: startup reconcile failed');
   }

@@ -108,7 +108,7 @@ export function validateBuildReport(raw: unknown, ctx: BuildContextFile): BuildR
 export function buildReportCheckerSource(o: { reportFile: string; contextFile: string }): string {
   return [
     '#!/usr/bin/env node',
-    '// Limn: checks the build report. Run: node ~/.limn/build-report-check.cjs',
+    '// Ensemble: checks the build report. Run: node ~/.limn/build-report-check.cjs',
     "'use strict';",
     "const fs = require('fs');",
     `const REPORT = ${JSON.stringify(o.reportFile)};`,

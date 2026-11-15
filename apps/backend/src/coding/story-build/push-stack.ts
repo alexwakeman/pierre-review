@@ -138,7 +138,7 @@ export async function pushPlannedPr(ctx: AgentContext, a: PushPlannedPrArgs): Pr
   }
   if (pr.status !== 'ready' || !pr.patch) return res(pr, 'failed', 'NOT_READY', pr.status === 'empty' ? `${pr.prKey} has no changes.` : `${pr.prKey} has nothing to push.`);
   // The host-verified tree is what makes the push of a stacked PR checkable (expectTree): none ⇒ no push.
-  if (!pr.treeSha || !/^[0-9a-f]{40}$/.test(pr.treeSha)) return res(pr, 'failed', 'NOT_READY', `Limn has no verified copy of ${pr.prKey}. Send the agent a message to build it again.`);
+  if (!pr.treeSha || !/^[0-9a-f]{40}$/.test(pr.treeSha)) return res(pr, 'failed', 'NOT_READY', `Ensemble has no verified copy of ${pr.prKey}. Send the agent a message to build it again.`);
   if (pushingPr.has(pr.id)) return res(pr, 'skipped', 'PUSH_IN_PROGRESS', 'This pull request is being pushed.');
   pushingPr.add(pr.id);
   try {
@@ -201,7 +201,7 @@ async function pushClaimed(ctx: AgentContext, a: PushPlannedPrArgs, build: Story
     baseRef = prev.pushedBranch ?? prev.branch;
     baseSha = prev.pushedCommitSha ?? '';
     prBase = baseRef;
-    if (!/^[0-9a-f]{40}$/.test(baseSha)) return recordError('STACK_PREVIOUS_NOT_PUSHED', `Limn does not know the commit ${prev.prKey} was pushed as. Push it again from Limn.`);
+    if (!/^[0-9a-f]{40}$/.test(baseSha)) return recordError('STACK_PREVIOUS_NOT_PUSHED', `Ensemble does not know the commit ${prev.prKey} was pushed as. Push it again from Ensemble.`);
   } else {
     const first = await firstPrBase(ctx, a.accountId, repo, owner, name);
     if (!first.ok) return recordError(first.code, first.message);

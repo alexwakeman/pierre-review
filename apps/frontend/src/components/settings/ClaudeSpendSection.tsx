@@ -129,8 +129,8 @@ export function ClaudeSpendSection(): JSX.Element | null {
         info={info}
         desc={
           route === 'api_key'
-            ? `Off. Set a weekly US$ limit for Limn’s automatic ${name} runs.`
-            : `Off. Give Limn’s automatic ${name} runs a share of your week.`
+            ? `Off. Set a weekly US$ limit for Ensemble’s automatic ${name} runs.`
+            : `Off. Give Ensemble’s automatic ${name} runs a share of your week.`
         }
       >
         <button
@@ -163,7 +163,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
       desc={
         route === 'api_key'
           ? 'Your API key: pause automatic runs over this much a week.'
-          : `Your ${provider === 'codex' ? 'ChatGPT plan' : 'Claude subscription'}: pause automatic runs once Limn has used its share of your week.`
+          : `Your ${provider === 'codex' ? 'ChatGPT plan' : 'Claude subscription'}: pause automatic runs once Ensemble has used its share of your week.`
       }
     >
       <label className="flex items-center gap-2 text-body">
@@ -187,7 +187,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
         ) : (
           <>
             <Field
-              label={`Limn’s share of your weekly ${name} usage (%)`}
+              label={`Ensemble’s share of your weekly ${name} usage (%)`}
               htmlFor="ai-budget-share"
               hint={perDay ?? `1 to ${AI_BUDGET_SHARE_MAX}`}
             >
@@ -210,7 +210,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
                 </summary>
                 <div className="mt-1.5 space-y-1.5">
                   <Field
-                    label="Limn’s share of each 5-hour session (%)"
+                    label="Ensemble’s share of each 5-hour session (%)"
                     htmlFor="ai-budget-five-hour-share"
                     hint={
                       draft.fiveHourSharePct.trim() === ''
@@ -292,9 +292,9 @@ export function ClaudeSpendSection(): JSX.Element | null {
                 {fiveUsed != null && <p>{fiveUsed}.</p>}
               </>
             ) : provider === 'codex' ? (
-              <p>Limn has not read your Codex usage yet.</p>
+              <p>Ensemble has not read your Codex usage yet.</p>
             ) : (
-              <p>Pick your subscription so Limn can work out its share.</p>
+              <p>Pick your subscription so Ensemble can work out its share.</p>
             ))}
         </div>
       )}
@@ -328,7 +328,7 @@ function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; 
   return (
     <InfoButton title="AI spend">
       <p>
-        Limn runs some {name} work by itself: auto review and re-reviews, Check threads, auto fix, the
+        Ensemble runs some {name} work by itself: auto review and re-reviews, Check threads, auto fix, the
         CI and ticket reviews, diagrams, This Sprint's briefs and the Slack summary. This limits those
         runs.
       </p>
@@ -336,13 +336,13 @@ function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; 
         <>
           <p className="mt-2">
             On a ChatGPT plan, Codex reports how much of its {fiveHourLimit ? 'weekly and 5-hour limits' : 'weekly limit'}{' '}
-            your account has used, in whole percent. Limn's share is that figure times the part of your
-            Codex tokens its own runs used, so it moves in coarse steps. When its share is used, Limn stops
+            your account has used, in whole percent. Ensemble's share is that figure times the part of your
+            Codex tokens its own runs used, so it moves in coarse steps. When its share is used, Ensemble stops
             starting automatic runs until the window resets.
           </p>
           {fiveHourLimit && (
             <p className="mt-2">
-              Limn takes the same share of a 5-hour window as of the week, unless you set a separate 5-hour
+              Ensemble takes the same share of a 5-hour window as of the week, unless you set a separate 5-hour
               limit.
             </p>
           )}
@@ -351,18 +351,18 @@ function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; 
         <>
           <p className="mt-2">
             On a Claude subscription, Claude keeps track of how much of your weekly allowance you have
-            used. Limn adds up what its own runs use and compares it with your subscription's usual weekly
+            used. Ensemble adds up what its own runs use and compares it with your subscription's usual weekly
             allowance. That is an estimate, because Anthropic doesn't publish exact figures. When its share
-            is used, Limn stops starting automatic runs until your week resets.
+            is used, Ensemble stops starting automatic runs until your week resets.
           </p>
           {fiveHourLimit && (
             <p className="mt-2">
-              Your plan also limits each 5-hour session. Limn takes the same share of a session as of the
+              Your plan also limits each 5-hour session. Ensemble takes the same share of a session as of the
               week (5% of the week means 5% of each session), unless you set a separate 5-hour limit. Over
               it, automatic runs wait for the session to reset.
             </p>
           )}
-          <p className="mt-2">With an API key, the limit is what Limn's runs cost over the last 7 days.</p>
+          <p className="mt-2">With an API key, the limit is what Ensemble's runs cost over the last 7 days.</p>
         </>
       )}
       <p className="mt-2">

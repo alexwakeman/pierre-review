@@ -4,7 +4,7 @@ import { Btn, DocLink, H2, H3, Illustration, MiniTable, Note, Steps, Tip, Ui, Wa
 export const meta: DocMeta = {
   title: 'Add documents',
   summary:
-    'Upload files, add a web page or site, or connect Confluence, Notion or a GitHub repository. Limn can also offer the docs folders it finds in your repositories.',
+    'Upload files, add a web page or site, or connect Confluence, Notion or a GitHub repository. Ensemble can also offer the docs folders it finds in your repositories.',
 };
 
 export default function Page(): JSX.Element {
@@ -29,7 +29,7 @@ export default function Page(): JSX.Element {
           { _key: 'c', k: 'Confluence', w: 'A whole space, or one page and every page below it.' },
           { _key: 'n', k: 'Notion', w: 'A whole wiki, or one page and every page below it.' },
           { _key: 'g', k: 'GitHub repository', w: 'The markdown and text documents in a repository or one of its folders.' },
-          { _key: 'r', k: 'From your repositories', w: 'The docs folders Limn finds in this workspace’s repositories.' },
+          { _key: 'r', k: 'From your repositories', w: 'The docs folders Ensemble finds in this workspace’s repositories.' },
         ]}
       />
 
@@ -41,7 +41,7 @@ export default function Page(): JSX.Element {
         <li>Choose or drop one or more files. Each file is sent at once, and its build starts.</li>
       </Steps>
       <p>
-        Limn decides the kind of file from its contents, not its name. An old Word file (.doc) or an RTF file is
+        Ensemble decides the kind of file from its contents, not its name. An old Word file (.doc) or an RTF file is
         refused with a note to save it as .docx.
       </p>
 
@@ -52,7 +52,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           In <Ui>Links to follow</Ui>, keep <Ui>This page only</Ui>, or choose to follow links 1, 2 or 3 levels deep.
-          Limn follows links on the same site only, up to 25 pages, and the whole set becomes one document with a
+          Ensemble follows links on the same site only, up to 25 pages, and the whole set becomes one document with a
           chapter per page.
         </li>
         <li>
@@ -79,7 +79,7 @@ export default function Page(): JSX.Element {
           wiki; any other page adds it and every page below it, never its siblings.
         </li>
         <li>
-          Limn counts the pages first: &ldquo;This will add 12 pages from Payments handbook.&rdquo; Press{' '}
+          Ensemble counts the pages first: &ldquo;This will add 12 pages from Payments handbook.&rdquo; Press{' '}
           <Ui>Start</Ui>.
         </li>
       </Steps>
@@ -99,20 +99,20 @@ export default function Page(): JSX.Element {
         <li>Press <Ui>Start</Ui>.</li>
       </Steps>
       <p>
-        Limn reads the repository with your <code>gh</code> sign-in, on the default branch. It takes markdown and
+        Ensemble reads the repository with your <code>gh</code> sign-in, on the default branch. It takes markdown and
         other text documents only, and leaves out code, images, lock files and generated or vendored folders.
       </p>
 
       <H3 id="docs-offered-from-your-repositories">Docs offered from your repositories</H3>
       <p>
-        After a repository syncs, Limn looks at its file list (without reading the files) for folders that look like
+        After a repository syncs, Ensemble looks at its file list (without reading the files) for folders that look like
         documentation: a <code>docs</code>, <code>handbook</code> or <code>adr</code> folder, or any folder with
         several documents and enough words. A README alone never counts. When it finds some, a card on Docs and on
         Pending asks &ldquo;Add 2 docs collections from your repositories?&rdquo;.
       </p>
       <Illustration
         label="The docs offer card: two folders ticked, an Add button and a Not now button"
-        caption="Limn builds nothing until you press Add."
+        caption="Ensemble builds nothing until you press Add."
       >
         <p>Add 2 docs collections from your repositories?</p>
         <p>acme/payments › docs · 9 files</p>
@@ -127,7 +127,7 @@ export default function Page(): JSX.Element {
       </p>
       <Warning>
         Building a document runs your AI provider, so each build uses some of your subscription or costs a little on
-        an API key. The card says the most one build can use. Limn never builds anything before you press Add or
+        an API key. The card says the most one build can use. Ensemble never builds anything before you press Add or
         Start.
       </Warning>
 

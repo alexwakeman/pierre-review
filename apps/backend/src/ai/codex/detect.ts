@@ -21,7 +21,7 @@ import { CODEX_NOT_INSTALLED_MESSAGE } from './home.js';
 import { readingFromCodexRateLimits } from './readings.js';
 
 /** The one line shown when Codex is installed but nothing can pay for a run. */
-export const NO_CODEX_AUTH_MESSAGE = 'Sign in to Codex with ChatGPT: limn ai login codex';
+export const NO_CODEX_AUTH_MESSAGE = 'Sign in to Codex with ChatGPT: ensemble ai login codex';
 
 /**
  * ⚠ The API-key route is REFUSED until Limn can price it (ai/providers/codex.ts CODEX_PRICES_PER_MTOK
@@ -35,7 +35,7 @@ export const CODEX_API_KEY_NOT_AVAILABLE_MESSAGE =
  * auth.json is in Limn's home but no `account/read` has said what KIND of sign-in it is (and the file
  * does not say). FAIL CLOSED: nothing runs on it (ai/credentials.ts `codexCredentialRunnable`).
  */
-export const CODEX_SIGN_IN_UNCHECKED_MESSAGE = 'Limn could not check the Codex sign-in yet — try again in a moment';
+export const CODEX_SIGN_IN_UNCHECKED_MESSAGE = 'Ensemble could not check the Codex sign-in yet — try again in a moment';
 
 export interface CodexDetail {
   /** The Codex program is there (the download, or LIMN_CODEX_PATH). */

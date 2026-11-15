@@ -7,6 +7,6 @@ try {
   const { read, logFile } = parseServerArgv(process.argv.slice(2));
   await serveWorkspaceMcp({ read, logFile, input: process.stdin, output: process.stdout });
 } catch (e) {
-  process.stderr.write(`limn workspace MCP server: ${e instanceof Error ? e.message : String(e)}\n`);
+  process.stderr.write(`Ensemble workspace MCP server: ${e instanceof Error ? e.message : String(e)}\n`);
   process.exit(1);
 }

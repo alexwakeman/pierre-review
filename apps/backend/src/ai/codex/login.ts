@@ -112,7 +112,7 @@ export function startCodexLogin(method: CodexLoginMethod, opts: { timeoutMs?: nu
       };
       if (!state.authUrl && !state.verificationUrl) {
         endSession();
-        state = { state: 'failed', message: 'Codex did not say where to sign in. Try again, or run: limn ai login codex' };
+        state = { state: 'failed', message: 'Codex did not say where to sign in. Try again, or run: ensemble ai login codex' };
       }
       return state;
     } catch (err) {

@@ -118,7 +118,7 @@ const sameKinds = (a: AutoPostKinds, b: AutoPostKinds): boolean =>
 // Provider-neutral: an auto review may be Claude's, Codex's or both, and every Limn finding counts.
 const FIX_ROWS: Array<{ key: keyof AutoFixInclude; label: string }> = [
   { key: 'conflicts', label: 'Merge conflicts with the base branch' },
-  { key: 'findings', label: 'Limn’s findings' },
+  { key: 'findings', label: 'Ensemble’s findings' },
   { key: 'earlierFindings', label: 'Earlier findings not fixed yet' },
   { key: 'judgedThreads', label: 'Threads my agent says to fix' },
   { key: 'untouchedThreads', label: 'Threads nobody has answered' },
@@ -270,7 +270,7 @@ export function AutoReviewSection(): JSX.Element {
     <SectionShell
       title="Auto review"
       headingId={AUTO_REVIEW_SECTION_HEADING_ID}
-      desc="Limn reviews each new PR a person opens in this workspace, with the same model and budget as the Review button."
+      desc="Ensemble reviews each new PR a person opens in this workspace, with the same model and budget as the Review button."
       info={
         <InfoButton title="Auto review">
           <p>
@@ -281,7 +281,7 @@ export function AutoReviewSection(): JSX.Element {
             A reviewed PR is reviewed again when new commits are pushed, or when a person or a
             review bot adds review comments. A first push after a quiet spell starts a review at
             once. Pushes during a review or within 5 minutes of one, and new comments, wait until
-            the PR has been quiet for 5 minutes, or 20 minutes at most. Limn’s own comments never
+            the PR has been quiet for 5 minutes, or 20 minutes at most. Ensemble’s own comments never
             start a review.
           </p>
           <p>
@@ -289,12 +289,12 @@ export function AutoReviewSection(): JSX.Element {
             first.
           </p>
           <p>
-            Each auto review puts a status on the PR’s latest commit: limn/review-claude or
-            limn/review-codex. A teammate’s Limn then skips a commit someone is already reviewing
-            with the same provider. If a review doesn’t finish, Limn marks its status free to claim.
-            Without write access to the repo, Limn reviews without a status.
+            Each auto review puts a status on the PR’s latest commit: ensemble/review-claude or
+            ensemble/review-codex. A teammate’s Ensemble then skips a commit someone is already reviewing
+            with the same provider. If a review doesn’t finish, Ensemble marks its status free to claim.
+            Without write access to the repo, Ensemble reviews without a status.
           </p>
-          <p>Don’t make limn/ statuses required checks. A pending one would block merges.</p>
+          <p>Don’t make ensemble/ statuses required checks. A pending one would block merges.</p>
         </InfoButton>
       }
     >
@@ -333,7 +333,7 @@ export function AutoReviewSection(): JSX.Element {
           </div>
           <InfoButton title="Claude + Codex">
             <p>
-              Claude and Codex review the same commit at the same time, each on its own. Limn then
+              Claude and Codex review the same commit at the same time, each on its own. Ensemble then
               merges the two into one review: a point both raised is shown once.
             </p>
             <p>
@@ -366,12 +366,12 @@ export function AutoReviewSection(): JSX.Element {
               <p>
                 Strict approves only when both approve. Relaxed also approves when one approves and
                 the other only comments, as long as it raised nothing that blocks. Either way, if one
-                asks for changes, Limn does not approve.
+                asks for changes, Ensemble does not approve.
               </p>
               <p>
                 A model may hold back its approval when it cannot check something, for example a
                 binary file in the diff. Strict treats that as a reason not to approve; relaxed does
-                not. Limn always says why it did not approve.
+                not. Ensemble always says why it did not approve.
               </p>
             </InfoButton>
           </div>
@@ -387,7 +387,7 @@ export function AutoReviewSection(): JSX.Element {
                 onChange={() => setPostOn(false)}
               />
               <span>
-                Keep it in Limn
+                Keep it in Ensemble
                 <span className="mt-0.5 block text-meta text-ui-mute">
                   Read it in the AI Review tab and post it yourself if you want.
                 </span>
@@ -410,7 +410,7 @@ export function AutoReviewSection(): JSX.Element {
           </fieldset>
           <InfoButton title="Posting automatically">
             <p>
-              Limn posts as you, with your GitHub account. Findings go in one review, with
+              Ensemble posts as you, with your GitHub account. Findings go in one review, with
               questions on the lines they ask about. The review only comments unless you turn on
               Approve or request changes. On GitHub it counts as your review.
             </p>
@@ -418,25 +418,25 @@ export function AutoReviewSection(): JSX.Element {
               Nothing is posted twice: a comment already on the PR, from any earlier review, is
               left out, and so is anything you ignored. Merged, closed and draft PRs, and PRs opened
               by bots, are never posted on. A review request to a team does not make a PR yours:
-              Limn does not know which teams you are in.
+              Ensemble does not know which teams you are in.
             </p>
             <p>
-              With Approve or request changes on, a review that is not approved says why, in Limn and
+              With Approve or request changes on, a review that is not approved says why, in Ensemble and
               on GitHub. When nothing else is left to post, the reason goes out as one short comment,
               once per commit.
             </p>
             <p>
-              When a later review finds a posted comment fixed, Limn replies and resolves its thread.
+              When a later review finds a posted comment fixed, Ensemble replies and resolves its thread.
             </p>
             <p>
-              When a teammate’s Limn requested changes and every point is fixed at the PR’s latest
-              commit, your Limn dismisses that review and posts its own. Whether it approves is decided
+              When a teammate’s Ensemble requested changes and every point is fixed at the PR’s latest
+              commit, your Ensemble dismisses that review and posts its own. Whether it approves is decided
               by Approve or request changes. A review someone wrote by hand is never dismissed.
             </p>
             <p>
-              A teammate’s review from an older Limn is dismissed only when your Limn approves and
-              their Limn has not looked at the latest commit or done anything on GitHub for 4 hours.
-              Dismissing needs write access. If GitHub refuses, the AI Review tab says so and Limn
+              A teammate’s review from an older version is dismissed only when your Ensemble approves and
+              their Ensemble has not looked at the latest commit or done anything on GitHub for 4 hours.
+              Dismissing needs write access. If GitHub refuses, the AI Review tab says so and Ensemble
               does not try again.
             </p>
             <p>If a post fails, the AI Review tab says so and the Post button stays.</p>
@@ -507,7 +507,7 @@ export function AutoReviewSection(): JSX.Element {
                   A PR at an impact you untick gets a comment-only review instead of an approval.
                   Requesting changes is not affected.
                 </p>
-                <p>A PR whose impact Limn could not measure counts as High.</p>
+                <p>A PR whose impact Ensemble could not measure counts as High.</p>
               </InfoButton>
             </legend>
             {IMPACT_ROWS.map(({ key, label }) => (
@@ -550,16 +550,16 @@ export function AutoReviewSection(): JSX.Element {
       <div className="flex items-start gap-1 pl-5 text-body" data-resolve-own>
         <label className="flex items-start gap-2 text-ui-ink">
           <CheckInput className="mt-0.5" checked={resolveOwn} onChange={(e) => setResolveOwn(e.target.checked)} />
-          <span className="font-medium">Resolve my Limn threads when addressed</span>
+          <span className="font-medium">Resolve my Ensemble threads when addressed</span>
         </label>
-        <InfoButton title="Resolve my Limn threads when addressed">
+        <InfoButton title="Resolve my Ensemble threads when addressed">
           <p>
-            On your own PRs, drafts too. When any review you run finds one of your Limn’s comments
-            fixed, Limn replies “Addressed in” and the commit, then resolves the thread.
+            On your own PRs, drafts too. When any review you run finds one of your Ensemble’s comments
+            fixed, Ensemble replies “Addressed in” and the commit, then resolves the thread.
           </p>
           <p>
-            It never touches a person’s thread or a teammate’s Limn thread. Auto review and posting
-            can be off. If GitHub refuses, the AI Review tab says so and Limn does not try again.
+            It never touches a person’s thread or a teammate’s Ensemble thread. Auto review and posting
+            can be off. If GitHub refuses, the AI Review tab says so and Ensemble does not try again.
           </p>
           <p>On by default.</p>
         </InfoButton>
@@ -607,7 +607,7 @@ export function AutoReviewSection(): JSX.Element {
         </label>
         <InfoButton title="Auto AI Fix">
           <p>
-            When an auto review of a PR you opened finishes, Limn prepares one AI Fix from that
+            When an auto review of a PR you opened finishes, Ensemble prepares one AI Fix from that
             review. Unless you turn on Push automatically, the fix waits in the AI Fix tab until
             you press Push. A push is never forced; if it fails, the AI Fix tab says so.
           </p>
@@ -616,11 +616,11 @@ export function AutoReviewSection(): JSX.Element {
             and none while a fix is running or waiting to be pushed.
           </p>
           <p>
-            Limn’s findings are every finding of the review, from Claude, Codex or both.
+            Ensemble’s findings are every finding of the review, from Claude, Codex or both.
           </p>
           <p>
             With Merge conflicts ticked, a PR that conflicts with its base branch is merged first and
-            the conflicts are resolved. Limn checks the merge before any push: two parents and no
+            the conflicts are resolved. Ensemble checks the merge before any push: two parents and no
             conflict markers left. A merge that fails the check is never pushed.
           </p>
         </InfoButton>

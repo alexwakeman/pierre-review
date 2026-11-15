@@ -38,7 +38,7 @@ export function formatSharePct(n: number): string {
 export function usedSentence(status: AiBudgetStatus): string | null {
   const s = status.subscription;
   if (s == null || s.usedSharePct == null) return null;
-  return `Limn has used ${formatSharePct(s.usedSharePct)} of your week`;
+  return `Ensemble has used ${formatSharePct(s.usedSharePct)} of your week`;
 }
 
 /** "about 25 automatic reviews a working day", or null when not known. */
@@ -60,10 +60,10 @@ export function meterText(status: AiBudgetStatus): string | null {
   if (s == null) return null;
   // Codex reports its plan and its own windows: nothing to pick, only a reading still to come.
   if (status.provider === 'codex') {
-    if (s.usedSharePct == null) return 'Limn: usage not read yet';
-  } else if (s.subscription == null || s.usedSharePct == null) return 'Limn: pick your subscription';
+    if (s.usedSharePct == null) return 'Ensemble: usage not read yet';
+  } else if (s.subscription == null || s.usedSharePct == null) return 'Ensemble: pick your subscription';
   if (s.usedSharePct == null) return null;
-  return `Limn: ${formatSharePct(s.usedSharePct)} of your week · limit ${s.sharePct}%`;
+  return `Ensemble: ${formatSharePct(s.usedSharePct)} of your week · limit ${s.sharePct}%`;
 }
 
 /** "14:30" today, "Mon 14:30" within a week, "3 Nov 14:30" beyond. Empty for null or a bad date. */
@@ -84,10 +84,10 @@ export function formatResume(iso: string | null, now: number = Date.now()): stri
 export function pausedSentence(status: AiBudgetStatus, now: number = Date.now()): string {
   const used =
     status.mode === 'api_key'
-      ? 'Limn has used its weekly budget.'
+      ? 'Ensemble has used its weekly budget.'
       : status.limitedBy === 'five_hour'
-        ? 'Limn has used its share of this 5-hour session.'
-        : 'Limn has used its share of your week.';
+        ? 'Ensemble has used its share of this 5-hour session.'
+        : 'Ensemble has used its share of your week.';
   const when = formatResume(status.resumesAt, now);
   return when === '' ? `${used} Automatic runs are paused.` : `${used} Automatic runs resume ${when}.`;
 }
@@ -108,7 +108,7 @@ export function runButtonsIn(wrap: Pick<ParentNode, 'querySelectorAll'>): HTMLBu
 export function fiveHourUsedSentence(status: AiBudgetStatus): string | null {
   const s = status.subscription;
   if (s == null || s.fiveHourUsedSharePct == null) return null;
-  return `This 5-hour session: Limn has used ${formatSharePct(s.fiveHourUsedSharePct)} (limit ${s.fiveHourSharePct}%)`;
+  return `This 5-hour session: Ensemble has used ${formatSharePct(s.fiveHourUsedSharePct)} (limit ${s.fiveHourSharePct}%)`;
 }
 
 // ---- a run's cost (B) ----------------------------------------------------------------------------
@@ -228,18 +228,18 @@ function headerUsageOfOne(data: Pick<AiBudgetResponse, 'status' | 'usage'>): Hea
     if (status.mode === 'api_key' && status.apiKey != null && status.apiKey.weeklyUsd > 0) {
       const pct = (status.apiKey.usedUsd / status.apiKey.weeklyUsd) * 100;
       return {
-        label: 'AI quota for Limn:',
+        label: 'AI quota for Ensemble:',
         figure: ratioPct(pct),
         tone: toneOf(pct),
-        title: `Limn has used ${ratioPct(pct)} of its weekly budget (${formatRunUsd(status.apiKey.usedUsd)} of ${formatRunUsd(status.apiKey.weeklyUsd)})`,
+        title: `Ensemble has used ${ratioPct(pct)} of its weekly budget (${formatRunUsd(status.apiKey.usedUsd)} of ${formatRunUsd(status.apiKey.weeklyUsd)})`,
       };
     }
     if (usage.apiKey != null) {
       return {
-        label: 'Limn AI, last 7 days:',
+        label: 'Ensemble AI, last 7 days:',
         figure: formatRunUsd(usage.apiKey.weekUsd),
         tone: 'normal',
-        title: `Limn’s ${aiProviderName(usage.provider)} runs over the last 7 days: ${formatRunUsd(usage.apiKey.weekUsd)}`,
+        title: `Ensemble’s ${aiProviderName(usage.provider)} runs over the last 7 days: ${formatRunUsd(usage.apiKey.weekUsd)}`,
       };
     }
     return { label: 'AI usage', figure: null, tone: 'normal', title: 'AI usage' };
@@ -254,12 +254,12 @@ function headerUsageOfOne(data: Pick<AiBudgetResponse, 'status' | 'usage'>): Hea
     const useFive = over ? status.limitedBy === 'five_hour' : five != null && five > week;
     const pct = useFive && five != null ? five : week;
     return {
-      label: 'AI quota for Limn:',
+      label: 'AI quota for Ensemble:',
       figure: ratioPct(pct),
       tone: toneOf(pct),
       title: useFive
-        ? `Limn has used ${ratioPct(pct)} of its share of this 5-hour session`
-        : `Limn has used ${ratioPct(pct)} of its share of your week`,
+        ? `Ensemble has used ${ratioPct(pct)} of its share of this 5-hour session`
+        : `Ensemble has used ${ratioPct(pct)} of its share of your week`,
     };
   }
   const acct = usage.account?.week?.usedPct;
@@ -421,7 +421,7 @@ export function usageDetailOf(
       provider,
       heading: usage.provider === 'codex' ? 'OpenAI API key' : 'Anthropic API key',
       paused,
-      sections: [{ title: 'Limn’s runs', rows: [...rows, ...runsRows] }],
+      sections: [{ title: 'Ensemble’s runs', rows: [...rows, ...runsRows] }],
       updated: null,
       hasLimnShare: false,
     };
@@ -455,7 +455,7 @@ export function usageDetailOf(
     ),
     limnShareRow('This week', limn.weekSharePct, status, 'week', windowNote(limn.weekResetsAt, 'Last 7 days', now)),
   ].filter((r): r is UsageRow => r != null);
-  const sections: UsageSection[] = [{ title: 'Limn’s share', rows: [...limnRows, ...runsRows] }];
+  const sections: UsageSection[] = [{ title: 'Ensemble’s share', rows: [...limnRows, ...runsRows] }];
 
   const acctRows: UsageRow[] = [];
   const push = (label: string, w: AiUsageWindowView | null | undefined): void => {

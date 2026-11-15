@@ -12,7 +12,7 @@
 //
 //   pnpm --filter @pierre-review/backend test claude-review/teammate-lift
 import { describe, expect, it } from 'vitest';
-import { AUTO_POST_DEFAULT_KINDS, parseLimnReviewMarker } from '@pierre-review/shared';
+import { AUTO_POST_DEFAULT_KINDS, isLimnDismissalMessage, parseLimnReviewMarker } from '@pierre-review/shared';
 import {
   ALICE,
   HEAD,
@@ -93,8 +93,11 @@ describe('the pure rules', () => {
   });
 
   it('the message names the reader, the count and the commit', () => {
-    expect(F.lift.teammateLiftMessage('alex', 3, '70cc9b5aaaa')).toBe('Limn (alex) checked all 3 points are addressed at 70cc9b5.');
-    expect(F.lift.teammateLiftMessage('alex', 1, '70cc9b5aaaa')).toBe('Limn (alex) checked the 1 point is addressed at 70cc9b5.');
+    expect(F.lift.teammateLiftMessage('alex', 3, '70cc9b5aaaa')).toBe('Ensemble (alex) checked all 3 points are addressed at 70cc9b5.');
+    expect(F.lift.teammateLiftMessage('alex', 1, '70cc9b5aaaa')).toBe('Ensemble (alex) checked the 1 point is addressed at 70cc9b5.');
+    // Read back as our dismissal, in the new wording and an older Limn's.
+    expect(isLimnDismissalMessage(F.lift.teammateLiftMessage('alex', 3, '70cc9b5aaaa'))).toBe(true);
+    expect(isLimnDismissalMessage('Limn (alex) checked all 3 points are addressed at 70cc9b5.')).toBe(true);
   });
 
   it('the live check: standing, Limn-marked, consented — a later COMMENTED review never replaces it', () => {
@@ -131,7 +134,7 @@ describe("lifting a teammate's Limn block", () => {
       'lift',
       F.prSeq,
       ghId,
-      'Limn (alice-dev) checked all 2 points are addressed at bbbbbbb.',
+      'Ensemble (alice-dev) checked all 2 points are addressed at bbbbbbb.',
     ]);
     expect(await teammateLiftOf(teammateId)).toMatchObject({ status: 'dismissed', byReviewId: run, points: 2, error: null, headSha: HEAD });
     expect(await autoPostOf(run)).toMatchObject({

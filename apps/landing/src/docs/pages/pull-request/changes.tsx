@@ -74,7 +74,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>Switch a Markdown file's view.</b> <Ui>Plain text</Ui> in the file's header shows its diff;{' '}
-          <Ui>Rendered</Ui> goes back. Limn remembers your choice for every Markdown file.
+          <Ui>Rendered</Ui> goes back. Ensemble remembers your choice for every Markdown file.
         </li>
         <li>
           <b>Wrap lines.</b> <Ui>Wrap lines</Ui> wraps long lines instead of scrolling sideways.
@@ -93,7 +93,7 @@ export default function Page(): JSX.Element {
 
       <H3>Very large pull requests</H3>
       <p>
-        GitHub sends only part of a very large diff. Limn shows what it has and offers <Ui>Load full diff</Ui>.
+        GitHub sends only part of a very large diff. Ensemble shows what it has and offers <Ui>Load full diff</Ui>.
         GitHub lists at most 3,000 files in a pull request. A file over 1 MB, or a binary file, is listed without a
         diff.
       </p>

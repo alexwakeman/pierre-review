@@ -33,7 +33,7 @@ export function AiBudgetMeter({ provider }: { provider?: AiProviderId | null } =
       type="button"
       data-ai-budget-meter
       onClick={() => openSettings('claude-spend')}
-      title={`${perDay != null ? `Limn's share pays for ${perDay}.\n` : ''}AI spend: open Settings`}
+      title={`${perDay != null ? `Ensemble's share pays for ${perDay}.\n` : ''}AI spend: open Settings`}
       className="hit whitespace-nowrap rounded-ui text-meta text-ui-mute hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent"
     >
       {text}

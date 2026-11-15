@@ -227,7 +227,7 @@ export async function maybeStartLoop(ctx: AgentContext, input: { accountId: numb
     if (running.has(buildId)) return 'skipped';
     if (!(await claimLoopStart(ctx, accountId, buildId, seams.now()))) return 'skipped';
     seams.session.hold(buildId);
-    seams.session.notice(buildId, 'Limn pushes the branch, then reviews it.');
+    seams.session.notice(buildId, 'Ensemble pushes the branch, then reviews it.');
     kick(ctx, accountId, buildId, false);
     return 'started';
   } catch (err) {
@@ -277,7 +277,7 @@ export async function stopLoop(ctx: AgentContext, accountId: number, buildId: nu
   if (storyLoopDiscardRefusal(buildId)) return 'busy';
   const st = b.loopState as StoryBuildLoopState | null;
   if (st == null || st === 'done' || st === 'stopped' || st === 'failed') return 'not_running';
-  await setLoop(ctx, accountId, buildId, { loopState: 'stopped', loopPause: null, loopResume: null, loopError: 'You stopped the review loop. The branch and the work are kept: push from Limn to open the pull request.', loopFinishedAt: seams.now() });
+  await setLoop(ctx, accountId, buildId, { loopState: 'stopped', loopPause: null, loopResume: null, loopError: 'You stopped the review loop. The branch and the work are kept: push from Ensemble to open the pull request.', loopFinishedAt: seams.now() });
   running.get(buildId)?.abort.abort();
   if (st === 'fixing') await seams.session.interrupt(ctx, accountId, buildId);
   seams.session.release(buildId);
@@ -388,7 +388,7 @@ async function interruptedOutcome(accountId: number, t: LoopTarget, row: LoopPus
 
 async function treeOf(accountId: number, t: LoopTarget, all: readonly LoopTarget[]): Promise<string> {
   if (t.kind === 'pr') {
-    if (!t.treeSha) throw Object.assign(new Error(`Limn has no verified copy of ${t.key ?? 'this pull request'}.`), { code: 'NOT_READY' });
+    if (!t.treeSha) throw Object.assign(new Error(`Ensemble has no verified copy of ${t.key ?? 'this pull request'}.`), { code: 'NOT_READY' });
     return t.treeSha;
   }
   void all;
@@ -473,7 +473,7 @@ async function stepInitialPush(ctx: AgentContext, accountId: number, b: StoryBui
       return pause(ctx, accountId, b.id, pushPauseOf(code), 'pushing', code === 'BRANCH_EXISTS' ? `A branch named ${branch} already exists on ${t.fullName}. Pick another name.` : null);
     }
   }
-  seams.session.notice(b.id, 'Limn pushed the branch. The review starts now.');
+  seams.session.notice(b.id, 'Ensemble pushed the branch. The review starts now.');
   return 'ok';
 }
 
@@ -626,6 +626,11 @@ async function stepReview(
           await updateLoopReview(ctx, accountId, id, { failureReason: 'The AI spend limit is reached.', completedAt: seams.now() });
           return { id, p, res: null as LoopHalfResult | null };
         }
+        // THE REVIEW CLAIM LINES on the branch head, exactly as an auto review's (review-lines.ts).
+        const logOf = { warn: (m: string) => ctx.log.warn(m) };
+        const line = await seams.reviewLines
+          .start({ accountId, buildId: b.id, workspaceId: b.workspaceId, ident: b.ident, owner: t.owner, name: t.name, branch: t.loopBranch!, headSha: t.loopPushedSha!, provider: p }, logOf)
+          .catch(() => null);
         const res = await seams.runHalf(ctx, {
           accountId,
           workspaceId: b.workspaceId,
@@ -645,7 +650,11 @@ async function stepReview(
           prior: priorForTarget(reviews, findings, t.kind, t.id, k, p),
           abort,
           byReader,
+        }).catch(async (err: unknown) => {
+          await seams.reviewLines.end(line, 'failed', logOf).catch(() => {});
+          throw err;
         });
+        await seams.reviewLines.end(line, res.status, logOf).catch(() => {});
         await updateLoopReview(ctx, accountId, id, {
           status: res.status,
           provider: res.ranOn.provider,
@@ -989,7 +998,7 @@ async function stepFixPush(ctx: AgentContext, accountId: number, b: StoryBuildRo
       await updateLoopFinding(ctx, accountId, f.id, { response: 'answered', responseText: `(no code change) ${f.responseText ?? ''}`.trim() });
     }
   }
-  if (moved.size > 0) seams.session.notice(b.id, `Limn pushed the fixes of round ${k}.`);
+  if (moved.size > 0) seams.session.notice(b.id, `Ensemble pushed the fixes of round ${k}.`);
   return 'ok';
 }
 
@@ -1078,7 +1087,7 @@ async function stepOpen(ctx: AgentContext, accountId: number, b: StoryBuildRow, 
   }
   await setState(ctx, accountId, b.id, 'done', k, { loopFinishedAt: seams.now() });
   seams.session.release(b.id);
-  if (opened > 0) seams.session.notice(b.id, opened === 1 ? 'Limn opened the pull request.' : `Limn opened ${opened} pull requests.`);
+  if (opened > 0) seams.session.notice(b.id, opened === 1 ? 'Ensemble opened the pull request.' : `Ensemble opened ${opened} pull requests.`);
   // BUILD END TO END: the ticket step (update + comment), once, after the PRs are open and the loop's state
   // is stored. It has its own claim and record (../end-to-end.ts) and never throws.
   if (b.endToEnd === true) await seams.afterLoopDone?.(ctx, accountId, b.id).catch(() => {});
@@ -1204,7 +1213,7 @@ export async function loopTargetOf(ctx: AgentContext, accountId: number, buildId
 
 // ---- restart ---------------------------------------------------------------------------------------------------
 
-export const LOOP_INTERRUPTED_PUSH = 'Limn stopped before this push finished.';
+export const LOOP_INTERRUPTED_PUSH = 'Ensemble stopped before this push finished.';
 
 /**
  * BOOT: every loop a restart cut off (pushing / reviewing / fixing / opening, not running here) is PAUSED with one
@@ -1230,12 +1239,12 @@ export async function reconcileStoryLoopsOnStartup(ctx: AgentContext): Promise<n
       .execute();
     await ctx.db
       .update(s.storyBuildReviews)
-      .set({ status: 'cancelled', failureReason: 'Limn restarted.' })
+      .set({ status: 'cancelled', failureReason: 'Ensemble restarted.' })
       .where(and(eq(s.storyBuildReviews.buildId, r.id), eq(s.storyBuildReviews.accountId, r.accountId), inArray(s.storyBuildReviews.status, ['queued', 'running'])))
       .execute();
     await ctx.db
       .update(s.storyBuildStoryChecks)
-      .set({ status: 'cancelled', failureReason: 'Limn restarted.' })
+      .set({ status: 'cancelled', failureReason: 'Ensemble restarted.' })
       .where(and(eq(s.storyBuildStoryChecks.buildId, r.id), eq(s.storyBuildStoryChecks.accountId, r.accountId), inArray(s.storyBuildStoryChecks.status, ['queued', 'running'])))
       .execute();
     const resume: LoopResume = r.loopState === 'waiting' ? 'pushing' : (r.loopState as LoopResume);
@@ -1243,7 +1252,7 @@ export async function reconcileStoryLoopsOnStartup(ctx: AgentContext): Promise<n
       loopState: 'paused',
       loopPause: 'interrupted',
       loopResume: resume,
-      loopError: `Limn restarted during review round ${Math.max(1, r.loopRound)}. Press Continue to go on.`,
+      loopError: `Ensemble restarted during review round ${Math.max(1, r.loopRound)}. Press Continue to go on.`,
     });
     n += 1;
   }

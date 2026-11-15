@@ -247,7 +247,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   const removeFrom = (r: Repo, workspaceId: number, key: string = String(r.id)): void => {
     const count = membershipsOf(r.id, list).length;
     if (count <= 1) {
-      if (!window.confirm(`Remove ${r.fullName} from Limn? It is in no other workspace, so this deletes its synced data.`)) return;
+      if (!window.confirm(`Remove ${r.fullName}? It is in no other workspace, so this deletes its synced data.`)) return;
       void run(key, r.id, 'removing', () => deleteRepo.mutateAsync(r.id));
       return;
     }
@@ -379,8 +379,8 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
               <button
                 type="button"
                 onClick={() => selected != null && removeFrom(r, selected.id)}
-                title={others.length > 0 ? `Remove ${r.fullName} from this workspace` : `Remove ${r.fullName} from Limn`}
-                aria-label={others.length > 0 ? `Remove ${r.fullName} from this workspace` : `Remove ${r.fullName} from Limn`}
+                title={others.length > 0 ? `Remove ${r.fullName} from this workspace` : `Remove ${r.fullName} and its synced data`}
+                aria-label={others.length > 0 ? `Remove ${r.fullName} from this workspace` : `Remove ${r.fullName} and its synced data`}
                 className="hit shrink-0 px-1 text-ui-faint hover:text-ui-danger"
               >
                 <CloseIcon />
@@ -502,11 +502,11 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
                       type="button"
                       disabled={removing}
                       onClick={() => {
-                        if (!window.confirm(`Remove ${r.fullName} from Limn? This deletes its synced data from every workspace.`)) return;
+                        if (!window.confirm(`Remove ${r.fullName}? This deletes its synced data from every workspace.`)) return;
                         void run(String(r.id), r.id, 'removing', () => deleteRepo.mutateAsync(r.id));
                       }}
-                      title={`Remove ${r.fullName} from Limn`}
-                      aria-label={`Remove ${r.fullName} from Limn`}
+                      title={`Remove ${r.fullName} and its synced data`}
+                      aria-label={`Remove ${r.fullName} and its synced data`}
                       className="hit px-1 text-ui-faint hover:text-ui-danger"
                     >
                       <CloseIcon />
@@ -650,7 +650,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
   const infoButton = (
     <InfoButton title="Maintained and external repos" overModal>
       <p>
-        <strong>Maintained</strong>: your team owns the repo. Limn follows all of its pull requests, it counts in
+        <strong>Maintained</strong>: your team owns the repo. Ensemble follows all of its pull requests, it counts in
         Reports, and automatic reviews and fixes run as you set them. A repo is Maintained in one workspace at most.
       </p>
       <p className="mt-2">
@@ -722,7 +722,7 @@ export function WorkspaceManagerModal({ onClose }: { onClose: () => void }): JSX
           <div className="border-b border-ui-line bg-ui-sel px-4 py-3">
             <div className="text-body font-semibold text-ui-ink">Add a repo to get started</div>
             <p className="mt-0.5 text-meta text-ui-mute">
-              Search GitHub for a repo by name, or pick one of the suggested public repos to try Limn out.
+              Search GitHub for a repo by name, or pick one of the suggested public repos to try Ensemble out.
             </p>
           </div>
         )}

@@ -77,7 +77,7 @@ export function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; sa
       <div className="space-y-2">
         <p>
           Create an API token at id.atlassian.com under Security → API tokens, and use the email of that Atlassian
-          account. Limn only reads pages.
+          account. Ensemble only reads pages.
         </p>
         <p>When Jira is this workspace&rsquo;s tracker, a page on the same site uses the Jira email and token.</p>
         <p>The token is stored sealed and is never shown again.</p>

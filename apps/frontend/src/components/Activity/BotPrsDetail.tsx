@@ -674,7 +674,7 @@ export function BotPrsDetail(): JSX.Element {
                 className={`ml-1 flex items-center gap-1 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors disabled:opacity-40 touch:py-2 ${
                   activeDisagrees ? 'bg-ui-sel text-ui-ink' : 'bg-ui-raise text-ui-mute hover:text-ui-ink'
                 }`}
-                title="Only comments where the bot's OWN declared severity badge differs from Limn's. This is a SEVERITY disagreement and nothing else: vendors declare no machine-readable category, so category disagreement is not derivable and is never claimed here."
+                title="Only comments where the bot's OWN declared severity badge differs from Ensemble's. This is a SEVERITY disagreement and nothing else: vendors declare no machine-readable category, so category disagreement is not derivable and is never claimed here."
               >
                 <ScalesIcon size={11} />
                 Bot disagrees

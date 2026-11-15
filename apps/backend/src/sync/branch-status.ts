@@ -236,7 +236,7 @@ export async function withoutLimnStates(
   if (targets.length === 0) return { nodes, cost: 0 };
   try {
     const r = await fetchRollupsWithoutLimn(client, owner, name, targets, (errors) =>
-      log?.warn(`branch-status ${owner}/${name}: partial GraphQL on Limn-marked commits`, errors),
+      log?.warn(`branch-status ${owner}/${name}: partial GraphQL on Ensemble-marked commits`, errors),
     );
     return {
       nodes: nodes.map((n) =>
@@ -246,7 +246,7 @@ export async function withoutLimnStates(
     };
   } catch (err) {
     log?.warn(
-      `branch-status ${owner}/${name}: Limn-line recompute failed (non-fatal): ` +
+      `branch-status ${owner}/${name}: Ensemble-line recompute failed (non-fatal): ` +
         `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
     );
     return { nodes, cost: 0 };
@@ -741,6 +741,15 @@ export async function syncBranchStatus(
       .where(and(eq(repos.id, repoId), eq(repos.accountId, accountId)))
       .execute();
   });
+
+  // STORY CHAT's shared trees (story-chat/trees.ts): a repository a chat has read gets its new default
+  // branch tree built in the background. AFTER the transaction, lazy, never awaited, never fatal.
+  if (headSha != null) {
+    const [owner, name] = fullName.split('/') as [string, string];
+    void import('../story-chat/trees.js')
+      .then((m) => m.noteDefaultBranchHead({ owner, name, branch: branchName ?? null, headSha }))
+      .catch(() => {});
+  }
 
   // The trunk CI transition log — AFTER the snapshot's transaction and inside its own guard, so
   // this feed nicety can never roll back (or fail) the strip that just succeeded. The failing

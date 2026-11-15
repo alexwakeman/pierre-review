@@ -43,7 +43,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Limn help"
+        aria-label="Ensemble help"
       >
         <div className="flex items-center justify-between px-5 pb-1 pt-3">
           <h2><Wordmark /></h2>
@@ -152,7 +152,7 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="AI Review and AI Fix (on your machine)">
             The <strong>AI Review</strong> tab reviews a PR into findings; you pick which to
             post as one GitHub review. <strong>AI Fix</strong> edits the branch for you to push.
-            Both run on {aiCredentialWords(provider)} — Limn stores no key and charges
+            Both run on {aiCredentialWords(provider)} — Ensemble stores no key and charges
             nothing. The reviewer reads code; it cannot edit files, run commands or reach the web.
             The fixer edits files but has no shell, and builds and tests nothing. Nothing is posted
             or pushed until you press the button.
@@ -161,15 +161,15 @@ export function HelpModal({ onClose }: { onClose: () => void }): JSX.Element {
           <Section title="Bot comment scoring (on your machine)">
             A small model labels each comment a review bot leaves, from <strong>nit</strong> to{' '}
             <strong>critical</strong>, so you can see which ones matter. With{' '}
-            <Code>npx limn-review</Code>, turn it on once: <strong>Settings → Bot comment
+            <Code>npx ensemble-review</Code>, turn it on once: <strong>Settings → Bot comment
             scoring → Set up</strong> (<strong>Set up AI</strong> does it too), or run{' '}
-            <Code>npx limn-review ml install</Code>. That downloads about 240 MB into{' '}
-            <Code>~/.limn</Code>. It scores on this machine and sends nothing anywhere. It runs in
+            <Code>npx ensemble-review ml install</Code>. That downloads about 240 MB into{' '}
+            <Code>~/.ensemble</Code>. It scores on this machine and sends nothing anywhere. It runs in
             the background at low priority, using at most half of one CPU core, and pauses on
-            battery, so a large backlog of old comments takes a while. To score faster, start Limn
-            with <Code>LIMN_ML_CPU_SHARE=1</Code>; to keep scoring on battery,{' '}
-            <Code>LIMN_ML_ON_BATTERY=run</Code>; to turn it off, <Code>LIMN_ML_DISABLED=true</Code>.
-            Check it with <Code>npx limn-review ml status</Code>.
+            battery, so a large backlog of old comments takes a while. To score faster, start Ensemble
+            with <Code>ENSEMBLE_ML_CPU_SHARE=1</Code>; to keep scoring on battery,{' '}
+            <Code>ENSEMBLE_ML_ON_BATTERY=run</Code>; to turn it off, <Code>ENSEMBLE_ML_DISABLED=true</Code>.
+            Check it with <Code>npx ensemble-review ml status</Code>.
           </Section>
 
           <Section title="Keyboard">

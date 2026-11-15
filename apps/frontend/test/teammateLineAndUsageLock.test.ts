@@ -16,6 +16,9 @@ describe('teammateReviewLine', () => {
     expect(teammateReviewLine({ ...robin, kind: 'reviewed', description: 'robin-dunn reviewed · kept in Limn' })).toBe(
       'Robin Dunn reviewed this commit with Claude · not posted on GitHub',
     );
+    expect(teammateReviewLine({ ...robin, kind: 'reviewed', description: 'robin-dunn reviewed · kept in Ensemble' })).toBe(
+      'Robin Dunn reviewed this commit with Claude · not posted on GitHub',
+    );
   });
   it('while they review', () => {
     expect(teammateReviewLine({ ...robin, kind: 'reviewing', description: 'robin-dunn is reviewing with Claude' })).toBe(

@@ -244,7 +244,7 @@ export function useMyTurnNotifications(enabled: boolean): void {
       onlyWs != null ? ` in ${onlyWs}` : wsNames.length > 1 ? ` across ${wsNames.length} Workspaces` : '';
 
     try {
-      const n = new Notification(`Limn — ${added.length} new in My Turn${where}`, {
+      const n = new Notification(`Ensemble — ${added.length} new in My Turn${where}`, {
         // The stamp LEADS, on its own line: OS banners truncate the body (macOS to ~2 lines)
         // and the title already carries the count, so the moment is the half that has to
         // survive the cut.

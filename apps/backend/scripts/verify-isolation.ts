@@ -2582,8 +2582,9 @@ check(
   const wsB = await q.resolveWorkspaceScope(2, null);
   check(
     'setDependencyAutoMerge(B, A’s workspace) refuses (IDOR blocked)',
-    (await setDependencyAutoMerge(2, wsA.workspaceId, true)) === false &&
-      (await getDependencyAutoMerge(1, wsA.workspaceId))?.enabled === false,
+    // ON by default (migration 0193): B tries to switch A's OFF, and A's must still read ON.
+    (await setDependencyAutoMerge(2, wsA.workspaceId, false)) === false &&
+      (await getDependencyAutoMerge(1, wsA.workspaceId))?.enabled === true,
   );
   check(
     'getDependencyAutoMerge(B, A’s workspace) reads nothing',
@@ -2615,8 +2616,9 @@ check(
   const wsA = await q.resolveWorkspaceScope(1, null);
   check(
     'setDependencyAutomation(B, A’s workspace) refuses (IDOR blocked)',
-    (await auto.setDependencyAutomation(2, wsA.workspaceId, { autoApprove: true })) === false &&
-      (await auto.getDependencyAutomation(1, wsA.workspaceId))?.settings.autoApprove === false,
+    // ON by default (migration 0193): B tries to switch A's OFF, and A's must still read ON.
+    (await auto.setDependencyAutomation(2, wsA.workspaceId, { autoApprove: false })) === false &&
+      (await auto.getDependencyAutomation(1, wsA.workspaceId))?.settings.autoApprove === true,
   );
   check(
     'getDependencyAutomation(B, A’s workspace) reads nothing',

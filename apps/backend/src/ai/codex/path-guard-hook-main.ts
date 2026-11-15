@@ -36,7 +36,7 @@ let size = 0;
 const chunks: Buffer[] = [];
 process.stdin.on('data', (c: Buffer) => {
   size += c.length;
-  if (size > MAX_INPUT_BYTES) finish(2, 'Limn path guard: refused: the tool call is too large to check.', null);
+  if (size > MAX_INPUT_BYTES) finish(2, 'Ensemble path guard: refused: the tool call is too large to check.', null);
   chunks.push(c);
 });
 process.stdin.on('end', () => {
@@ -45,13 +45,13 @@ process.stdin.on('end', () => {
     payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     const p = payload as { tool_name?: unknown; tool_input?: unknown; cwd?: unknown };
     const roots = decodeGuardRoots(process.env[GUARD_ENV]);
-    if (!roots) finish(2, 'Limn path guard: refused: the guard was started without its folders.', payload);
-    if (typeof p.tool_name !== 'string') finish(2, 'Limn path guard: refused: the call names no tool.', payload);
+    if (!roots) finish(2, 'Ensemble path guard: refused: the guard was started without its folders.', payload);
+    if (typeof p.tool_name !== 'string') finish(2, 'Ensemble path guard: refused: the call names no tool.', payload);
     const d = decideCodexToolCall(p.tool_name, p.tool_input, roots, typeof p.cwd === 'string' ? p.cwd : null);
     if (d.allow) finish(0, null, payload);
     finish(2, d.reason, payload);
   } catch {
-    finish(2, 'Limn path guard: refused: the tool call could not be read.', payload);
+    finish(2, 'Ensemble path guard: refused: the tool call could not be read.', payload);
   }
 });
-process.stdin.on('error', () => finish(2, 'Limn path guard: refused: the tool call could not be read.', null));
+process.stdin.on('error', () => finish(2, 'Ensemble path guard: refused: the tool call could not be read.', null));

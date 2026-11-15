@@ -2,8 +2,8 @@ import type { DocMeta } from '../../types';
 import { ExtLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
 
 export const meta: DocMeta = {
-  title: 'The Limn License',
-  summary: 'Free for individuals and for organisations where no more than three people use Limn. Above that, ask for a licence.',
+  title: 'The Ensemble License',
+  summary: 'Free for individuals and for organisations where no more than three people use Ensemble. Above that, ask for a licence.',
 };
 
 const LICENSE_URL = 'https://github.com/alexwakeman/pierre-review/blob/main/LICENSE';
@@ -14,18 +14,18 @@ const WHO_COLS = [
 ];
 const WHO_ROWS = [
   { _key: 'me', who: 'You, for yourself (a side project, your own repositories, learning)', free: 'Yes' },
-  { _key: 'small', who: 'An organisation where 1, 2 or 3 people use Limn', free: 'Yes' },
-  { _key: 'big', who: 'An organisation where 4 or more people use Limn', free: 'Needs a commercial licence' },
-  { _key: 'compete', who: 'Offering Limn, or something like it, to others as a commercial product or service', free: 'Not allowed' },
+  { _key: 'small', who: 'An organisation where 1, 2 or 3 people use Ensemble', free: 'Yes' },
+  { _key: 'big', who: 'An organisation where 4 or more people use Ensemble', free: 'Needs a commercial licence' },
+  { _key: 'compete', who: 'Offering Ensemble, or something like it, to others as a commercial product or service', free: 'Not allowed' },
 ];
 
 export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Limn is released under the Limn License 1.0. Every feature is included for everyone the licence covers: there
-        are no locked features and no trial. This page explains the licence in plain English. The licence text itself is
-        what counts; read it in full in the <code>LICENSE</code> file that comes with Limn, or{' '}
+        Ensemble is released under the Ensemble License 1.0 (formerly the Limn License). Every feature is included for
+        everyone the licence covers: there are no locked features and no trial. This page explains the licence in plain English. The licence text itself is
+        what counts; read it in full in the <code>LICENSE</code> file that comes with Ensemble, or{' '}
         <ExtLink href={LICENSE_URL}>on GitHub</ExtLink>.
       </p>
       <Note>This page is a summary, not legal advice.</Note>
@@ -36,8 +36,8 @@ export default function Page(): JSX.Element {
       <H2 id="how-to-count">How to count people</H2>
       <ul>
         <li>
-          Count the people who <b>use</b> Limn for the organisation&rsquo;s work: anyone who runs it, or works with it
-          directly, in the course of their work. A colleague who only sees a comment Limn posted on GitHub does not use
+          Count the people who <b>use</b> Ensemble for the organisation&rsquo;s work: anyone who runs it, or works with it
+          directly, in the course of their work. A colleague who only sees a comment Ensemble posted on GitHub does not use
           it.
         </li>
         <li>
@@ -52,15 +52,15 @@ export default function Page(): JSX.Element {
 
       <H2 id="commercial-licence">A commercial licence</H2>
       <p>
-        If more than three people in your organisation use Limn, you need a separate commercial licence from the
+        If more than three people in your organisation use Ensemble, you need a separate commercial licence from the
         licensor. Ask for one through the <a className="dx-link" href="/contact">contact form</a>.
       </p>
 
       <H2 id="what-you-may-do">What you may do</H2>
       <H3>Use it</H3>
-      <p>For any permitted purpose above, you may use Limn in any way.</p>
+      <p>For any permitted purpose above, you may use Ensemble in any way.</p>
       <H3>Change it</H3>
-      <p>You may change Limn and build on it for a permitted purpose.</p>
+      <p>You may change Ensemble and build on it for a permitted purpose.</p>
       <H3>Share it</H3>
       <p>
         You may give copies to others, changed or not. Anyone who gets a copy from you must also get the licence terms
@@ -69,7 +69,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="what-you-may-not-do">What you may not do</H2>
       <Warning title="No competing use">
-        You may not offer Limn, or any product or service substantially like it or built from it, to others as a
+        You may not offer Ensemble, or any product or service substantially like it or built from it, to others as a
         commercial product or service: as software to install, as a hosted service or in any other form.
       </Warning>
       <ul>
@@ -81,14 +81,14 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <b>Patents:</b> the licence includes a patent licence for permitted use. It ends if you claim in writing that
-          Limn infringes a patent.
+          Ensemble infringes a patent.
         </li>
         <li>
           <b>Breaking the terms:</b> the first time you are told in writing that you broke the terms, you keep your
           licence if you put things right within 32 days.
         </li>
         <li>
-          <b>No warranty:</b> Limn comes as is, and the licensor is not liable for damages, as far as the law allows.
+          <b>No warranty:</b> Ensemble comes as is, and the licensor is not liable for damages, as far as the law allows.
         </li>
         <li>
           <b>Fair use:</b> the licence does not limit any fair-use rights you have under the law.
@@ -97,7 +97,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="third-party-terms">Other people&rsquo;s terms</H2>
       <p>
-        The licence covers Limn only. The AI programs Limn downloads come from Anthropic and OpenAI under their own
+        The licence covers Ensemble only. The AI programs Ensemble downloads come from Anthropic and OpenAI under their own
         terms, and your use of Claude, ChatGPT, GitHub and any tracker stays under your agreement with each of them.
       </p>
     </>

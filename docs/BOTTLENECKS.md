@@ -21,7 +21,7 @@ Three courts, and they partition the open life of a pull request:
 | Over time | core `db/flow-trend.ts` (+ `flowCoreFigures` in `db/flow-detail.ts`, `loadFlowPopulation` in `db/pr-intervals.ts`, `localWeeksEndingAt` in `db/working-hours.ts`) · `db/workspace-setting-events.ts` + `db/setting-event-write.ts` (`workspace_setting_events`) · `packages/shared/src/flow-trend.ts` · `hooks/useFlowTrend.ts` · `Activity/ChronologyTrend.tsx` + `chronologyTrendModel.ts` · `components/charts/EventMarkers.tsx` |
 | The contract | `FlowResponse` and friends in `packages/shared/src/types.ts` |
 | The panel | `apps/frontend/src/components/Activity/BottlenecksPanel.tsx` + `bottlenecksModel.ts` + `ChronologyCharts.tsx` / `ChronologyTables.tsx` / `chronologyModel.ts` + `chronologyInfo.tsx` (the modal copy) · `components/InfoModal.tsx` · `components/charts/ChartPopover.tsx` |
-| Tests | `db/flow-views-limn.test.ts` (the two views, Limn) · `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `platform/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
+| Tests | `db/flow-views-limn.test.ts` (the two views, Ensemble) · `db/flow-trend.test.ts` · `apps/frontend/test/chronologyTrendModel.test.ts` · `db/pr-intervals.test.ts` · `db/flow-detail.test.ts` · `db/working-hours.test.ts` · `sync/review-request-history.test.ts` · `api/routes/workspace-flow-settings.test.ts` · the `getFlowCourts` block in `verify-isolation.ts` · `platform/test/flow-pointers.test.ts` · `apps/frontend/test/chronologyModel.test.ts` + `flowSettingsForm.test.ts` |
 
 Deterministic, **no model touches any part of it except the Pointers block**, which is a separate,
 opt-in generation (below), shown while `me.ai.enabled`. It lives in Reports (`insightsTab:
@@ -102,20 +102,20 @@ LANDING court where it finally has a denominator.
 
 ## Two views — "People" and "People + bots" (2026-11-08)
 
-Limn's reviews, findings and approvals are bot actions (docs/CLAUDE-REVIEW.md § Limn's actions are
+Ensemble's reviews, findings and approvals are bot actions (docs/CLAUDE-REVIEW.md § Ensemble's actions are
 bots: stored under the `limn:` bot, its own `limn` lane). Before that change they were counted as the
-person they were posted for, so a Limn auto review ended the reviewer court on 208 PRs of the dev
+person they were posted for, so an Ensemble auto review ended the reviewer court on 208 PRs of the dev
 DB. A team still wants to see what its review automation did to the waits, so there are two views:
 
 | View | Reviews and comments that move the ball |
 |---|---|
-| **People + bots** (the default) | people, Limn, and the AI review bots (`FLOW_BALL_BOT_LANES`: `limn`, `ai_review`) |
+| **People + bots** (the default) | people, Ensemble, and the AI review bots (`FLOW_BALL_BOT_LANES`: `limn`, `ai_review`) |
 | **People** | people only — the original rule |
 
 - ⚠ In BOTH views a quality gate, CI or housekeeping bot never moves the ball (a "Quality Gate
   passed" comment is not a look), a push moves it whoever made it (the state machine's rule), and a
-  pull request a bot opened — Limn's Implement PRs included — is measured in neither.
-- "Merged without a review" follows the view: in "People + bots" a PR only Limn or CodeRabbit looked
+  pull request a bot opened — Ensemble's Implement PRs included — is measured in neither.
+- "Merged without a review" follows the view: in "People + bots" a PR only Ensemble or CodeRabbit looked
   at is measured, not unreviewed. The refusal sentences name what counted (`lookNoun`).
 - The first-reviewer CONCENTRATION rows count people only in both views (a bot first look carries no
   person id), so "rests on one person" never means CodeRabbit.

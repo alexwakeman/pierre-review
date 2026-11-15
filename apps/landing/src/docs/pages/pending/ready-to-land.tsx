@@ -57,13 +57,13 @@ export default function Page(): JSX.Element {
       <H3>Merge</H3>
       <p>
         <Ui>Merge</Ui> opens the merge options: <Ui>Create a merge commit</Ui>, <Ui>Squash and merge</Ui> or{' '}
-        <Ui>Rebase and merge</Ui>, as the repository allows. Limn reads the live merge state from GitHub only when
+        <Ui>Rebase and merge</Ui>, as the repository allows. Ensemble reads the live merge state from GitHub only when
         you press the button, and checks it again before it merges. With a row selected, <Kbd>m</Kbd> merges it.
       </p>
       <H3>Merge when ready</H3>
       <p>
-        <Ui>Merge when ready</Ui> arms Limn's own auto-merge for this pull request: Limn merges it as soon as it can
-        land, while the app is running. If new commits are pushed after you arm it, Limn does not merge them
+        <Ui>Merge when ready</Ui> arms Ensemble's own auto-merge for this pull request: Ensemble merges it as soon as it can
+        land, while the app is running. If new commits are pushed after you arm it, Ensemble does not merge them
         without you. <Ui>Cancel auto-merge</Ui> stops it. See{' '}
         <DocLink to="merging/merge-when-ready">Merge when ready</DocLink>.
       </p>

@@ -308,8 +308,38 @@ export interface ProviderUsageSource {
   probeReady(): boolean;
 }
 
+/**
+ * A LIVE agent kept between questions (story chat): started once, asked many times. The process is up
+ * before the first question, so an answer starts in about a second (docs/QUICK-CHAT-SPIKE.md).
+ */
+export interface AgentSessionSpec {
+  kind: AgentKind;
+  model: ModelChoice;
+  system: string;
+  cwd: string;
+  /** More roots the READ tools may reach (the path guard). A session is READ-ONLY: no shell, no edits. */
+  roots: string[];
+  /** US$ cap for the whole session (the provider stops it past this). */
+  budgetUsd: number | undefined;
+  /** Model turns per question. */
+  turnsPerQuestion: number;
+  claude: { disallowedTools: string[] };
+}
+
+export interface AgentSession {
+  /** Ask one question; resolves when its answer is complete. One at a time. */
+  ask(text: string, onProgress: (p: AgentProgress) => void): Promise<AgentOutcome>;
+  /** Stop the running answer (the session stays usable). */
+  interrupt(): Promise<void>;
+  /** End the process. Idempotent. */
+  close(): void;
+  readonly closed: boolean;
+}
+
 export interface AgentProvider {
   id: AgentProviderId;
+  /** A live session (story chat). Absent ⇒ this provider answers one run per question (Codex). */
+  openSession?(spec: AgentSessionSpec): Promise<AgentSession>;
   /** Resolve a role (or an explicit id) to this provider's model id. */
   resolveModel(choice: ModelChoice): string;
   runAgent(spec: AgentRunSpec): Promise<AgentRunResult>;

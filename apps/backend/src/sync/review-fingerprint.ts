@@ -42,7 +42,7 @@ const FINGERPRINTS: FingerprintDef[] = [
     // Limn review marker"), so it follows the product name. The PATTERN must never move: it is
     // the ONLY producer of the 'pierre' kind, and the marker it matches is already stamped into
     // GitHub review bodies we cannot edit.
-    patterns: [{ name: 'Limn review marker', re: /<!--\s*pierre:claude-review/i }],
+    patterns: [{ name: 'Ensemble review marker', re: /<!--\s*pierre:claude-review/i }],
   },
   {
     kind: 'coderabbit',

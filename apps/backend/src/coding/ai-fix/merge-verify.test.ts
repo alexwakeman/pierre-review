@@ -84,7 +84,7 @@ function sandboxRepo(): { dir: string; conflicted: string[] } {
   const dir = join(root, `sb${++n}`);
   git(root, 'init', '-q', dir);
   git(dir, 'config', 'user.email', 'sandbox@limn.invalid');
-  git(dir, 'config', 'user.name', 'Limn sandbox');
+  git(dir, 'config', 'user.name', 'Ensemble sandbox');
   for (const [sha, ref] of [[H, 'refs/limn/base'], [B, MERGE_TARGET_REF], [MB, MERGE_BASE_REF]] as const) {
     git(dir, '-c', 'protocol.file.allow=always', 'fetch', '-q', '--depth', '1', `file://${origin}`, `${sha}:${ref}`);
   }
@@ -284,7 +284,7 @@ describe('verifyMergeBundle', () => {
     git(dir, 'update-ref', 'refs/heads/other', 'HEAD');
     const f = join(root, 'two-refs.bundle');
     git(dir, 'bundle', 'create', '-q', f, 'refs/limn/out', 'refs/heads/other', `^${H}`, `^${B}`);
-    expect(await verify(readFileSync(f), conflicted)).toEqual({ ok: false, reason: 'The commits from the sandbox are not in the form Limn expects.' });
+    expect(await verify(readFileSync(f), conflicted)).toEqual({ ok: false, reason: 'The commits from the sandbox are not in the form Ensemble expects.' });
   });
 
   it('reads an unfinished merge as merging, with no merge commit', () => {
@@ -297,7 +297,7 @@ describe('verifyMergeBundle', () => {
   });
 
   it('checkShape refuses a ref outside Limn namespace before reading anything', async () => {
-    expect(await verifyMergeBundle({ gitDir: cache, bundle: Buffer.from(''), headSha: H, baseSha: B, baseRef: 'main', conflictedFiles: [], resultRef: 'refs/heads/main' })).toEqual({ ok: false, reason: 'Not a ref Limn keeps.' });
+    expect(await verifyMergeBundle({ gitDir: cache, bundle: Buffer.from(''), headSha: H, baseSha: B, baseRef: 'main', conflictedFiles: [], resultRef: 'refs/heads/main' })).toEqual({ ok: false, reason: 'Not a ref Ensemble keeps.' });
     void checkShape;
   });
 });

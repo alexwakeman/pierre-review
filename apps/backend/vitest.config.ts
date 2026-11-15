@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { configDefaults, defineConfig } from 'vitest/config';
 import TestBudgetReporter from './test-budget/reporter.js';
+import { USER_ENV_NAMES } from './src/env-name.ts';
 
 // Backend test config.
 //
@@ -119,7 +120,12 @@ export default defineConfig({
     // They used to be fixed `/tmp/pierre-*.sqlite` paths, so two runs at once on one machine (two
     // worktrees, two agents) opened the SAME file and failed each other with "table already exists"
     // and UNIQUE violations that looked like regressions. (Measured 2026-10-30: 5 files in one run.)
+    //
+    // ⚠ The backend reads ENSEMBLE_X before LIMN_X (src/env-name.ts). Tests set the LIMN_ names, so
+    // every ENSEMBLE_ name is BLANKED here (a blank one is read as unset): a reader's shell
+    // ENSEMBLE_DATA_DIR / ENSEMBLE_AI_PROVIDER can never override a test's own value.
     env: {
+      ...Object.fromEntries(USER_ENV_NAMES.map((n) => [`ENSEMBLE_${n}`, ''])),
       LIMN_DATA_DIR: process.env.LIMN_TEST_DATA_DIR ?? mkdtempSync(join(tmpdir(), 'limn-test-data-')),
       LIMN_TEST_RUN_DIR: process.env.LIMN_TEST_RUN_DIR ?? mkdtempSync(join(tmpdir(), 'limn-test-run-')),
     },

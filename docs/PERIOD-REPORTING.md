@@ -222,8 +222,8 @@ discipline as `db/changepoint.ts`.
 
 ## `PERIOD_METRICS_SCHEMA_VERSION` = 3
 
-**v3 (2026-11-08)**: Limn's own writes (reviews, approvals, merges, pushes) moved off the people's
-figures into the `limn` lane ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Limn's actions are bots), so every
+**v3 (2026-11-08)**: Ensemble's own writes (reviews, approvals, merges, pushes) moved off the people's
+figures into the `limn` lane ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ensemble's actions are bots), so every
 human-only figure changed meaning — bumped in both spellings (shared `types.ts`, `db/period-metrics.ts`).
 
 The version is **folded into the platform's `payloadHashFor`** (`v:${…}` alongside the `p3|`
@@ -307,8 +307,8 @@ figures describe nobody (the 68-line median above).
 human · code_agent · dependency · limn · ai_review · quality_gate · release · housekeeping
 ```
 
-`limn` is Limn itself: every `limn:<login>` bot, whatever its stored role (rule 0 below), band
-`responds`, label "Limn".
+`limn` is Ensemble itself: every `limn:<login>` bot, whatever its stored role (rule 0 below), band
+`responds`, label "Ensemble".
 
 `ACTOR_LANES` render order is people first, then the automation that **AUTHORS** code (the
 lanes that distort throughput), then the automation that **RESPONDS** to it (the lanes that

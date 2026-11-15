@@ -3,7 +3,7 @@ import { DocLink, FindingRow, H2, H3, Illustration, Note, Pill, Ui, Warning } fr
 
 export const meta: DocMeta = {
   title: 'AI Review tab',
-  summary: 'Run, read and post Limn\'s AI review of this pull request.',
+  summary: 'Run, read and post Ensemble\'s AI review of this pull request.',
 };
 
 export default function Page(): JSX.Element {
@@ -27,7 +27,7 @@ export default function Page(): JSX.Element {
           <b>
             <Ui>Review only</Ui>
           </b>
-          : the review stays in Limn until you post it. This is the default.
+          : the review stays in Ensemble until you post it. This is the default.
         </li>
         <li>
           <b>
@@ -38,7 +38,7 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        Once a review exists, the button reads <Ui>Re-review only</Ui> or <Ui>Re-review and post</Ui>. Limn
+        Once a review exists, the button reads <Ui>Re-review only</Ui> or <Ui>Re-review and post</Ui>. Ensemble
         remembers your last choice. While a review runs, the tab shows its progress and a stop button. See{' '}
         <DocLink to="ai-review/run-a-review">Run a review</DocLink>.
       </p>

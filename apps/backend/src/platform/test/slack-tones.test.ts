@@ -72,9 +72,9 @@ describe('Slack tones', () => {
     expect(m.text).toBe('@bob merged acme/api#12');
   });
 
-  it('a merge Limn landed names Limn and the person, never the bot login', () => {
+  it('a merge Ensemble landed names Ensemble and the person, never the bot login', () => {
     const m = mergeMessage(ctx, 1, { ...facts, mergedByLogin: 'limn:bob' });
-    expect(m.text).toBe('Limn for @bob merged acme/api#12');
+    expect(m.text).toBe('Ensemble for @bob merged acme/api#12');
     expect(att(m).blocks[0]!.text.text).not.toContain('limn:');
   });
 

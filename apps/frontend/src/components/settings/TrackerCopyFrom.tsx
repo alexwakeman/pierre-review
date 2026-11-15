@@ -56,7 +56,7 @@ export function TrackerCopyFrom({
         <InfoButton title="Copy from another workspace">
           <p>
             Copies the tracker, its address, project keys, where to look, the sign-in and the
-            acceptance criteria and open points fields. The saved token is copied too; it never leaves Limn.
+            acceptance criteria and open points fields. The saved token is copied too; it never leaves Ensemble.
           </p>
           <p className="mt-2">Later changes in either workspace do not affect the other.</p>
         </InfoButton>

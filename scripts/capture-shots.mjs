@@ -266,15 +266,8 @@ async function proShots() {
     await c.close();
   });
 
-  // ---- cross-cutting -----------------------------------------------------
-  await shot('og-image.png', async () => {
-    const c = await ctx({ width: 1200, height: 630, scale: 2 });
-    const p = await c.newPage();
-    await console_(p, 'attention');
-    await p.waitForTimeout(2500);
-    await p.screenshot({ path: join(PUBLIC, 'og-image.png') });
-    await c.close();
-  });
+  // The social preview card (og-image.png) is NOT a screenshot of the app: it is the landing's
+  // hero, rendered by scripts/make-og-image.mjs.
 }
 
 // ===========================================================================

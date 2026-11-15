@@ -49,7 +49,7 @@ export function ChronologyAboutInfo({
       </p>
       <p>
         It measures pull requests a person wrote, merged in the window you pick. In “People”, a
-        person must also have reviewed or commented on it; in “People + bots”, Limn or an AI review
+        person must also have reviewed or commented on it; in “People + bots”, Ensemble or an AI review
         bot is enough. The first option is the same window as the rest of Reports: this
         sprint so far, or the last 7 or 14 days, as set for the workspace in Settings. 30, 60 and
         90 days are longer views. Pull requests opened by automation are measured on the Bots rail.
@@ -72,7 +72,7 @@ export function FlowViewInfo(): JSX.Element {
   return (
     <>
       <p>
-        <strong>People + bots</strong>: a review or comment by a person, by Limn or by an AI review bot
+        <strong>People + bots</strong>: a review or comment by a person, by Ensemble or by an AI review bot
         such as CodeRabbit moves a pull request on. Compare it with People to see what your review
         bots change over time.
       </p>

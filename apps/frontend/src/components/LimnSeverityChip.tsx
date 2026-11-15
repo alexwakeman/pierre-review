@@ -24,7 +24,7 @@ export function LimnSeverityChip({ severity }: { severity: LimnSeverity | null |
     <span
       className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-meta font-semibold"
       style={{ backgroundColor: `${color}1a`, ...vendorInk(color) }}
-      title={`${word}: the severity of Limn’s review comment`}
+      title={`${word}: the severity of Ensemble’s review comment`}
       data-limn-severity={severity}
     >
       <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />

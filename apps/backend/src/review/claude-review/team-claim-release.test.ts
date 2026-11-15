@@ -12,6 +12,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sameStatusContext } from '@pierre-review/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentContext } from '../agent-context.js';
 import type { TeamClaimGithub, TeamClaimLine, TeamClaimPost } from './team-claim.js';
@@ -48,7 +49,10 @@ function fakeGh(opts: { postFails?: (n: number) => unknown; login?: string; onPo
   let id = 5000;
   const gh: TeamClaimGithub = {
     async listLines(_a, _o, _n, sha, context) {
-      return [...(lines[`${sha}|${context}`] ?? [])].reverse();
+      // Like the real adapter: either prefix is the same line, and each line says its context.
+      return Object.entries(lines)
+        .filter(([k]) => k.startsWith(`${sha}|`) && sameStatusContext(k.slice(sha.length + 1), context))
+        .flatMap(([k, ls]) => ls.map((l) => ({ ...l, context: k.slice(sha.length + 1) }))).reverse();
     },
     async postLine(_a, _o, _n, sha, context, post) {
       calls += 1;
@@ -149,7 +153,7 @@ beforeAll(async () => {
       model: 'm',
       provider: 'claude',
       trigger: 'auto',
-      teamClaim: { context: 'limn/review-claude', state: 'marked', reason: null, lastLine: 'reviewing', at: '' },
+      teamClaim: { context: 'ensemble/review-claude', state: 'marked', reason: null, lastLine: 'reviewing', at: '' },
     })
     .returning()
     .execute();
@@ -244,7 +248,7 @@ describe('releaseStaleOwnClaims (the reconciler)', () => {
     tc._resetTeamClaimsForTest();
     const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(res).toMatchObject({ released: 1, failed: 0, limited: false });
-    expect(f.posts.at(-1)).toEqual({ context: 'limn/review-claude', sha: 'head1', state: 'success', description: "Cleared by me: review didn't finish · free to claim" });
+    expect(f.posts.at(-1)).toEqual({ context: 'ensemble/review-claude', sha: 'head1', state: 'success', description: "Cleared by me: review didn't finish · free to claim" });
     expect(await rowById(r.handle.ledgerId!)).toMatchObject({ state: 'released' });
     // The run row's record says it was released.
     const [run] = await db.select().from(schema.claudeReviews).where(eq(schema.claudeReviews.id, reviewId)).execute();
@@ -279,7 +283,7 @@ describe('releaseStaleOwnClaims (the reconciler)', () => {
     const id = await ledger.recordClaimIntent(ctx, { accountId: 1, prId, headSha: 'head1', provider: 'codex', login: 'me' });
     await ledger.setClaimLine(ctx, id, { state: 'pending' });
     const down = fakeGh({ postFails: () => serverError() });
-    down.seed('limn/review-codex', ourPending('codex'));
+    down.seed('ensemble/review-codex', ourPending('codex'));
     let t = NOW + 60 * MIN; // well after the row was written
     const first = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: down.gh, nowMs: t });
     expect(first).toMatchObject({ failed: 1, gaveUp: 0 });
@@ -303,15 +307,15 @@ describe('releaseStaleOwnClaims (the reconciler)', () => {
     const a = await ledger.recordClaimIntent(ctx, { accountId: 1, prId, headSha: 'head1', provider: 'claude', login: 'me' });
     const b = await ledger.recordClaimIntent(ctx, { accountId: 1, prId, headSha: 'head1', provider: 'codex', login: 'me' });
     const limited = fakeGh({ postFails: () => rateLimited() });
-    limited.seed('limn/review-claude', ourPending('claude'));
-    limited.seed('limn/review-codex', ourPending('codex'));
+    limited.seed('ensemble/review-claude', ourPending('claude'));
+    limited.seed('ensemble/review-codex', ourPending('codex'));
     const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: limited.gh, nowMs: NOW });
     expect(res.limited).toBe(true);
     expect(limited.calls()).toBe(1); // stopped after the first
     expect(await rowById(a)).toMatchObject({ state: 'claiming', releaseAttempts: 0 });
     const refused = fakeGh({ postFails: () => Object.assign(new Error('Not Found'), { status: 404 }) });
-    refused.seed('limn/review-claude', ourPending('claude'));
-    refused.seed('limn/review-codex', ourPending('codex'));
+    refused.seed('ensemble/review-claude', ourPending('claude'));
+    refused.seed('ensemble/review-codex', ourPending('codex'));
     await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: refused.gh, nowMs: NOW });
     expect(await rowById(a)).toMatchObject({ state: 'released', lastError: 'no_access' });
     expect(await rowById(b)).toMatchObject({ state: 'released', lastError: 'no_access' });
@@ -333,11 +337,26 @@ describe('releaseStaleOwnClaims (the reconciler)', () => {
       .values({ accountId: 1, prId, headSha: 'old-head', provider: 'codex', whose: 'mine', state: 'pending', login: null })
       .execute();
     const f = fakeGh({ login: 'alex' });
-    f.seed('limn/review-codex', { id: 1, state: 'pending', description: 'alex is reviewing with Codex', createdAtMs: NOW - 90 * MIN, login: 'alex' }, 'old-head');
+    f.seed('ensemble/review-codex', { id: 1, state: 'pending', description: 'alex is reviewing with Codex', createdAtMs: NOW - 90 * MIN, login: 'alex' }, 'old-head');
     await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(f.posts).toEqual([
-      { context: 'limn/review-codex', sha: 'old-head', state: 'success', description: "Cleared by alex: review didn't finish · free to claim" },
+      { context: 'ensemble/review-codex', sha: 'old-head', state: 'success', description: "Cleared by alex: review didn't finish · free to claim" },
     ]);
+  });
+});
+
+describe('the rename: a pending line an older Limn posted under limn/', () => {
+  it('is released on limn/, so it is not left pending beside the ensemble/ line', async () => {
+    const id = await ledger.recordClaimIntent(ctx, { accountId: 1, prId, headSha: 'head1', provider: 'claude', login: 'me', owner: 'acme', name: 'api' });
+    await ledger.setClaimLine(ctx, id, { state: 'pending' });
+    const f = fakeGh();
+    f.seed('limn/review-claude', ourPending('claude'));
+    const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
+    expect(res.released).toBe(1);
+    expect(f.posts).toEqual([
+      { context: 'limn/review-claude', sha: 'head1', state: 'success', description: "Cleared by me: review didn't finish · free to claim" },
+    ]);
+    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-claude'), 'carol', NOW).kind).toBe('free');
   });
 });
 
@@ -351,25 +370,25 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
   it("a teammate's NEWER pending claim is left untouched: nothing posted, the row closed", async () => {
     const id = await openRow();
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'));
-    f.seed('limn/review-claude', { id: 2, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - 5 * MIN, login: 'bob' });
+    f.seed('ensemble/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', { id: 2, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - 5 * MIN, login: 'bob' });
     const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(res).toMatchObject({ released: 0, failed: 0 });
     expect(f.posts).toEqual([]);
     expect(await rowById(id)).toMatchObject({ state: 'released', lastError: 'superseded' });
-    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-claude'), 'carol', NOW)).toMatchObject({ kind: 'reviewing', login: 'bob' });
+    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-claude'), 'carol', NOW)).toMatchObject({ kind: 'reviewing', login: 'bob' });
   });
 
   it("a teammate's NEWER success (they reviewed it) is left untouched, also for a final-line replay", async () => {
     const id = await openRow();
     await ledger.setClaimLine(ctx, id, { finalDescription: 'me reviewed · 1 comment' });
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'));
-    f.seed('limn/review-claude', { id: 2, state: 'success', description: 'bob reviewed · 3 comments', createdAtMs: NOW - 5 * MIN, login: 'bob' });
+    f.seed('ensemble/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', { id: 2, state: 'success', description: 'bob reviewed · 3 comments', createdAtMs: NOW - 5 * MIN, login: 'bob' });
     await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(f.posts).toEqual([]);
     expect(await rowById(id)).toMatchObject({ state: 'released', lastError: 'superseded' });
-    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-claude'), 'carol', NOW)).toMatchObject({ kind: 'reviewed', login: 'bob' });
+    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-claude'), 'carol', NOW)).toMatchObject({ kind: 'reviewed', login: 'bob' });
   });
 
   it('no line of ours on GitHub (the pending POST never landed) ⇒ nothing posted, the row closed', async () => {
@@ -383,17 +402,28 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
   it("our own line already settled ⇒ nothing posted", async () => {
     const id = await openRow();
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'));
-    f.seed('limn/review-claude', { id: 2, state: 'success', description: 'me reviewed · no comments', createdAtMs: NOW - MIN, login: 'me' });
+    f.seed('ensemble/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', { id: 2, state: 'success', description: 'me reviewed · no comments', createdAtMs: NOW - MIN, login: 'me' });
     await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(f.posts).toEqual([]);
     expect(await rowById(id)).toMatchObject({ state: 'released', lastError: 'settled' });
   });
 
-  it('a run that turned busy while GitHub was read is left alone', async () => {
+  it('our own settled ensemble/ line beside our OLD limn/ pending one ⇒ the limn/ line is settled with the same words', async () => {
     const id = await openRow();
     const f = fakeGh();
     f.seed('limn/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', { id: 2, state: 'success', description: 'me reviewed · no comments', createdAtMs: NOW - MIN, login: 'me' });
+    await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
+    expect(f.posts).toEqual([{ context: 'limn/review-claude', sha: 'head1', state: 'success', description: 'me reviewed · no comments' }]);
+    expect(await rowById(id)).toMatchObject({ state: 'released', lastError: 'settled' });
+    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-claude'), 'carol', NOW)).toMatchObject({ kind: 'reviewed', login: 'me' });
+  });
+
+  it('a run that turned busy while GitHub was read is left alone', async () => {
+    const id = await openRow();
+    const f = fakeGh();
+    f.seed('ensemble/review-claude', ourPending('claude'));
     let asks = 0;
     // Free at both pre-read checks, busy at the post-read one.
     await rel.releaseStaleOwnClaims(ctx, { busy: () => (asks += 1) > 2, gh: f.gh, nowMs: NOW });
@@ -408,7 +438,7 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
     }
     const id = await openRow();
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', ourPending('claude'));
     const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(res.released).toBe(1);
     expect(await rowById(id)).toMatchObject({ state: 'released' });
@@ -419,7 +449,7 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
   it('a repo lookup that THROWS is a failed attempt, never "pull request gone"', async () => {
     const id = await ledger.recordClaimIntent(ctx, { accountId: 1, prId, headSha: 'head1', provider: 'claude', login: 'me' }); // no owner/name
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', ourPending('claude'));
     const broken = { ...ctx, schema: { ...ctx.schema, pullRequests: undefined } } as unknown as AgentContext;
     const res = await rel.releaseStaleOwnClaims(broken, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(res.failed).toBe(1);
@@ -436,9 +466,9 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
     expect(await rowById(settled)).toBeNull();
     expect(await rowById(open)).toMatchObject({ state: 'claiming' });
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'), 'head9');
+    f.seed('ensemble/review-claude', ourPending('claude'), 'head9');
     await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
-    expect(f.posts).toEqual([{ context: 'limn/review-claude', sha: 'head9', state: 'success', description: "Cleared by me: review didn't finish · free to claim" }]);
+    expect(f.posts).toEqual([{ context: 'ensemble/review-claude', sha: 'head9', state: 'success', description: "Cleared by me: review didn't finish · free to claim" }]);
     expect(await rowById(open)).toMatchObject({ state: 'released' });
   });
 
@@ -450,10 +480,10 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
     expect(await rowById(r.handle.ledgerId!)).toMatchObject({ state: 'claiming', finalDescription: 'me reviewed · 2 comments' });
     // The POST did land (a timeout GitHub still stored).
     const f = fakeGh();
-    f.seed('limn/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', ourPending('claude'));
     const res = await rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     expect(res.finished).toBe(1);
-    expect(f.posts).toEqual([{ context: 'limn/review-claude', sha: 'head1', state: 'success', description: 'me reviewed · 2 comments' }]);
+    expect(f.posts).toEqual([{ context: 'ensemble/review-claude', sha: 'head1', state: 'success', description: 'me reviewed · 2 comments' }]);
   });
 
   it('a claim starting at a head whose release is in flight waits for it, so its pending line is the newest', async () => {
@@ -470,7 +500,7 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
         }
       },
     });
-    f.seed('limn/review-claude', ourPending('claude'));
+    f.seed('ensemble/review-claude', ourPending('claude'));
     const releasing = rel.releaseStaleOwnClaims(ctx, { ...notBusy, gh: f.gh, nowMs: NOW });
     await atGate; // the release's POST is in flight
     const claiming = tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW, pressed: true }, f.gh);
@@ -487,7 +517,7 @@ describe('the reconciler reads GitHub before it writes (review fixes)', () => {
 describe("releaseExpiredTeammateLines (a teammate's stale line)", () => {
   it("an expired pending line of bob's is released ONCE, recorded in the ledger", async () => {
     const f = fakeGh();
-    f.seed('limn/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - 5 * MIN, login: 'bob' });
+    f.seed('ensemble/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - 5 * MIN, login: 'bob' });
     const skip = await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, f.gh);
     expect(skip).toMatchObject({ kind: 'skip', skip: { login: 'bob' } });
     // Inside the lease: nothing to do.
@@ -498,11 +528,11 @@ describe("releaseExpiredTeammateLines (a teammate's stale line)", () => {
     // Not taken back: released once.
     const res = await rel.releaseExpiredTeammateLines(ctx, { ...notBusy, gh: f.gh, nowMs: later });
     expect(res.released).toBe(1);
-    expect(f.posts.at(-1)).toMatchObject({ context: 'limn/review-claude', state: 'success', description: "Cleared by me: bob's claim expired" });
+    expect(f.posts.at(-1)).toMatchObject({ context: 'ensemble/review-claude', state: 'success', description: "Cleared by me: bob's claim expired" });
     expect((await rows()).find((r) => r.whose === 'teammate')).toMatchObject({ state: 'released', login: 'bob', headSha: 'head1' });
     expect(tc.teamClaimSkipFor(1, prId, 'head1')).toBeNull();
     // Another Limn reads it as free.
-    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'limn/review-claude'), 'carol', later).kind).toBe('free');
+    expect(tc.decideTeamClaim(await f.gh.listLines(1, 'acme', 'api', 'head1', 'ensemble/review-claude'), 'carol', later).kind).toBe('free');
     // Never twice, even if the skip were remembered again.
     const n = f.posts.length;
     await tc.claimBeforeAutoRun(ctx, target(), { nowMs: () => NOW }, { ...f.gh, listLines: async () => [{ id: 2, state: 'pending', description: 'x', createdAtMs: NOW - MIN, login: 'bob' }] });

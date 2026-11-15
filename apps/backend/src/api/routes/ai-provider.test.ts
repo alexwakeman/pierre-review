@@ -104,8 +104,18 @@ describe('the provider choice', () => {
       expect(ai.provider).toBe('claude');
       const res = await put('codex');
       expect(res.statusCode).toBe(409);
+      expect(res.json().message).toBe('LIMN_AI_PROVIDER is set, so it decides the provider.');
     } finally {
       delete process.env.LIMN_AI_PROVIDER;
+    }
+    // The new name wins the same way, and the refusal names the variable that is set.
+    process.env.ENSEMBLE_AI_PROVIDER = 'claude';
+    try {
+      const res = await put('codex');
+      expect(res.statusCode).toBe(409);
+      expect(res.json().message).toBe('ENSEMBLE_AI_PROVIDER is set, so it decides the provider.');
+    } finally {
+      delete process.env.ENSEMBLE_AI_PROVIDER;
     }
     // The stored choice is untouched by the refused write.
     expect((await me()).providerSetting).toEqual({ value: 'codex', source: 'settings' });

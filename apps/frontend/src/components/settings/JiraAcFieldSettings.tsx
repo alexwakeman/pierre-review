@@ -32,13 +32,13 @@ export function JiraAcFieldSettings({ workspaceId }: { workspaceId: number }): J
             can use a different one. Choose the field for each issue type here.
           </p>
           <p className="mt-2">
-            &ldquo;Limn picks&rdquo; uses the field whose name best matches &ldquo;Acceptance Criteria&rdquo;.
+            &ldquo;Ensemble picks&rdquo; uses the field whose name best matches &ldquo;Acceptance Criteria&rdquo;.
             A change applies at once to every stored ticket of that type in this workspace.
           </p>
           <p className="mt-2">
             <strong>Open points</strong> are what the ticket left undecided: a decision, content or a design still
             to be confirmed. A review lists them with the code that depends on them, and they never block it.
-            &ldquo;Limn picks&rdquo; uses a field named like &ldquo;Open points&rdquo;, else an &ldquo;Open
+            &ldquo;Ensemble picks&rdquo; uses a field named like &ldquo;Open points&rdquo;, else an &ldquo;Open
             points&rdquo; section of the description. &ldquo;Description only&rdquo; reads just that section.
           </p>
         </InfoButton>
@@ -46,7 +46,7 @@ export function JiraAcFieldSettings({ workspaceId }: { workspaceId: number }): J
       {isLoading && <p className="text-meta text-ui-mute">Loading…</p>}
       {isError && <p className="text-meta text-ui-danger">Could not load the issue types.</p>}
       {types != null && types.length === 0 && (
-        <p className="text-meta text-ui-mute">No Jira tickets read yet. Issue types show here once Limn has read a ticket.</p>
+        <p className="text-meta text-ui-mute">No Jira tickets read yet. Issue types show here once Ensemble has read a ticket.</p>
       )}
       {types != null && types.length > 0 && (
         // ONE grid for every row: the issue type, then a column per field. Every cell is vertically
@@ -127,7 +127,7 @@ function TypeRow({
           onChange={(e) => onChoose(e.target.value === '' ? null : e.target.value)}
           className={`${inputCls} truncate`}
         >
-          <option value="">Limn picks{row.chosen == null && row.inUse != null ? ` (${row.inUse.name})` : ''}</option>
+          <option value="">Ensemble picks{row.chosen == null && row.inUse != null ? ` (${row.inUse.name})` : ''}</option>
           {fieldOptions}
         </select>
       </span>
@@ -146,7 +146,7 @@ function TypeRow({
             }}
             className={`${inputCls} truncate`}
           >
-            <option value="">Limn picks{op.mode === 'auto' && op.inUse != null ? ` (${op.inUse.name})` : ''}</option>
+            <option value="">Ensemble picks{op.mode === 'auto' && op.inUse != null ? ` (${op.inUse.name})` : ''}</option>
             <option value={NONE}>Description only</option>
             {fieldOptions}
           </select>

@@ -42,7 +42,7 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        A diff shows lines; it does not show how the change works. After a review, Limn draws a design diagram of the
+        A diff shows lines; it does not show how the change works. After a review, Ensemble draws a design diagram of the
         pull request: what touches the data, across the top, and each step down the page in the order it happens. It
         is drawn by a separate run, so it never delays the review.
       </p>
@@ -90,7 +90,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="when-there-is-none">When there is no diagram</H2>
       <p>
-        A change with no data path gets none, and Limn says why in one line, for example{' '}
+        A change with no data path gets none, and Ensemble says why in one line, for example{' '}
         <Ui>No diagram: this change only edits copy.</Ui> This happens when the change edits only text or tests, changes
         only a few lines, or the model finds it moves no data. <Ui>Draw</Ui> asks for one anyway.
       </p>

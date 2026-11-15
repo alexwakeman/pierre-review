@@ -45,7 +45,7 @@ export function ClaudeReviewOpenPointsSection({
           </p>
           <p>They do not change the verdict or the counts. A posted review lists them too, marked as not blocking.</p>
           <p>
-            Limn reads the ticket again before each review. They come from the issue type&rsquo;s open points field
+            Ensemble reads the ticket again before each review. They come from the issue type&rsquo;s open points field
             (Settings → Integrations), else from an &ldquo;Open points&rdquo; section of the description.
           </p>
         </InfoButton>
@@ -53,7 +53,7 @@ export function ClaudeReviewOpenPointsSection({
     >
       {!openPoints.fresh && (
         <p className={`${REVIEW_META} mb-2`}>
-          The ticket could not be read again, so these are from Limn&rsquo;s stored copy{readAt ? ` (${readAt})` : ''}.
+          The ticket could not be read again, so these are from Ensemble&rsquo;s stored copy{readAt ? ` (${readAt})` : ''}.
         </p>
       )}
       <ul className="space-y-1.5">

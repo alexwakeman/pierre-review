@@ -80,7 +80,7 @@ The message may also carry the ticket's comments, oldest first, with author and 
 # Answer
 ${t.either(
     `Call ${STORY_DOCS_TOOL_NAME} ONCE with everything. If it refuses, fix every point it lists and call it again with the whole answer.`,
-    `${CODEX_FINAL_ANSWER_SENTENCE} If Limn refuses it, you are told every point to fix: answer again with the whole answer.`,
+    `${CODEX_FINAL_ANSWER_SENTENCE} If Ensemble refuses it, you are told every point to fix: answer again with the whole answer.`,
   )}`;
 }
 

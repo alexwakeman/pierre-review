@@ -29,8 +29,8 @@ const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0
 
 /** The `## Review in Limn` section (no trailing newline). */
 export function loopBodySection(s: LoopBodySummary): string {
-  const lines: string[] = ['## Review in Limn', ''];
-  const who = s.providers.length > 0 ? s.providers.map((p) => aiProviderName(p)).join(' and ') : 'Limn';
+  const lines: string[] = ['## Review in Ensemble', ''];
+  const who = s.providers.length > 0 ? s.providers.map((p) => aiProviderName(p)).join(' and ') : 'Ensemble';
   lines.push(`Reviewed ${s.reviews === 1 ? 'once' : `${s.reviews} times`} by ${who} before this pull request opened.`);
   lines.push('');
   lines.push(`Fixed: ${s.fixed} · Answered: ${s.answered} · Pushed back and accepted: ${s.pushedBackAccepted} · Still open: ${s.stillOpen.length}`);

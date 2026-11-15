@@ -29,9 +29,9 @@ const LINK = cx('rounded-ui text-left', TEXT_LINK, FOCUS_RING);
 
 /** Who ran it, in words: "Your Limn" (an auto run says so) or "Robin's Limn". Pure. */
 export function aiReviewRanBy(card: Pick<AiReviewCard, 'ranByUserId' | 'auto'>, user: User | undefined): string {
-  if (card.ranByUserId == null) return card.auto ? 'Your Limn, auto review' : 'Your Limn';
+  if (card.ranByUserId == null) return card.auto ? 'Your Ensemble, auto review' : 'Your Ensemble';
   const name = user != null ? user.displayName || user.githubLogin : 'A teammate';
-  return `${name}’s Limn`;
+  return `${name}’s Ensemble`;
 }
 
 /** "No findings" / "1 finding" / "4 findings". Pure. */
@@ -62,7 +62,7 @@ export function PendingAiReviews({
         Latest AI review on each pull request
         <InfoButton title="AI reviews">
           <p>
-            The newest AI review on each pull request in this workspace, your Limn’s and your teammates’, open or
+            The newest AI review on each pull request in this workspace, your Ensemble’s and your teammates’, open or
             closed. Newest first, up to 100.
           </p>
           <p className="mt-2">

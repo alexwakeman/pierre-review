@@ -527,11 +527,11 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
         </li>
         <li>
           <strong>Theme</strong>: one row per theme {name} named from the tickets; tickets in none sit in No theme. Under each name,
-          {name} says in a sentence what the work involves. The counts under it are Limn&rsquo;s.
+          {name} says in a sentence what the work involves. The counts under it are Ensemble&rsquo;s.
         </li>
         <li>
           <strong>People</strong>: one row per person the tickets are assigned to, Unassigned last. Reviews
-          waiting counts open pull requests in this workspace waiting on their review, where Limn knows their GitHub account. An
+          waiting counts open pull requests in this workspace waiting on their review, where Ensemble knows their GitHub account. An
           arrow between two rows is a hand-off.
         </li>
         <li>

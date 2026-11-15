@@ -54,7 +54,7 @@ const forward = createServer((req, res) => {
   const port = Number(url.port || 80);
   if (!allowed(url.hostname, port)) {
     log({ kind: 'forward', method: req.method, host: url.hostname, port, allowed: false });
-    res.writeHead(403, { 'content-type': 'text/plain' }).end(`Blocked by the Limn sandbox proxy: ${url.hostname}\n`);
+    res.writeHead(403, { 'content-type': 'text/plain' }).end(`Blocked by the Ensemble sandbox proxy: ${url.hostname}\n`);
     return;
   }
   let up = 0, down = 0;
@@ -78,7 +78,7 @@ forward.on('connect', (req, sock, head) => {
   const port = Number(portS || 443);
   if (!allowed(host, port)) {
     log({ kind: 'connect', host, port, allowed: false });
-    sock.end('HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\n\r\nBlocked by the Limn sandbox proxy\n');
+    sock.end('HTTP/1.1 403 Forbidden\r\ncontent-type: text/plain\r\n\r\nBlocked by the Ensemble sandbox proxy\n');
     return;
   }
   let up = head.length, down = 0;

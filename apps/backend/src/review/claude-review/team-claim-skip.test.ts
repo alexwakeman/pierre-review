@@ -3,6 +3,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sameStatusContext } from '@pierre-review/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AgentContext } from '../agent-context.js';
 import {
@@ -52,7 +53,7 @@ describe('the skipped line', () => {
     expect(decideTeamClaim([pending, l(skippedLine('bob', 'budget', 'claude'))], 'me', NOW).kind).toBe('free');
   });
 
-  it('is never CI: its context carries the limn/ prefix', async () => {
+  it('is never CI: its context carries the ensemble/ prefix', async () => {
     const { isLimnStatusContext } = await import('@pierre-review/shared');
     const { teamClaimContext } = await import('./team-claim.js');
     expect(isLimnStatusContext(teamClaimContext('claude'))).toBe(true);
@@ -79,7 +80,10 @@ function fakeGh(opts: { readFails?: unknown; postFails?: unknown; login?: string
   const gh: TeamClaimGithub = {
     async listLines(_a, _o, _n, sha, context) {
       if (opts.readFails) throw opts.readFails;
-      return [...(lines[`${sha}|${context}`] ?? [])];
+      // Like the real adapter: either prefix is the same line, and each line says its context.
+      return Object.entries(lines)
+        .filter(([k]) => k.startsWith(`${sha}|`) && sameStatusContext(k.slice(sha.length + 1), context))
+        .flatMap(([k, ls]) => ls.map((l) => ({ ...l, context: k.slice(sha.length + 1) })));
     },
     async postLine(_a, _o, _n, sha, context, post) {
       if (opts.postFails) throw opts.postFails;
@@ -170,9 +174,9 @@ describe('postAutoSkipLines', () => {
     );
     expect(out).toEqual(['posted', 'posted']);
     expect(f.posts).toEqual([
-      { context: 'limn/review-claude', sha: `head${prSeq}`, state: 'success', description: 'Cleared by me: auto review skipped · AI budget used' },
+      { context: 'ensemble/review-claude', sha: `head${prSeq}`, state: 'success', description: 'Cleared by me: auto review skipped · AI budget used' },
       {
-        context: 'limn/review-codex',
+        context: 'ensemble/review-codex',
         sha: `head${prSeq}`,
         state: 'success',
         description: 'Cleared by me: auto review skipped · Codex over its usage limit until 15:40',
@@ -200,14 +204,14 @@ describe('postAutoSkipLines', () => {
     const f = fakeGh();
     m._setSkipLineGithubForTest(f.gh);
     const a = await makePr();
-    f.seed(`head${prSeq}`, 'limn/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - MIN, login: 'bob' });
+    f.seed(`head${prSeq}`, 'ensemble/review-claude', { id: 1, state: 'pending', description: 'bob is reviewing with Claude', createdAtMs: NOW - MIN, login: 'bob' });
     expect(await m.postAutoSkipLines(ctx, { accountId: 1, prId: a }, [{ provider: 'claude', reason: 'budget' }], NOW)).toEqual(['not_needed']);
     const b = await makePr();
-    f.seed(`head${prSeq}`, 'limn/review-claude', { id: 2, state: 'success', description: 'bob reviewed · 2 comments', createdAtMs: NOW - MIN, login: 'bob' });
+    f.seed(`head${prSeq}`, 'ensemble/review-claude', { id: 2, state: 'success', description: 'bob reviewed · 2 comments', createdAtMs: NOW - MIN, login: 'bob' });
     expect(await m.postAutoSkipLines(ctx, { accountId: 1, prId: b }, [{ provider: 'claude', reason: 'budget' }], NOW)).toEqual(['not_needed']);
     // A free line (a teammate's Clear) is fine to follow.
     const c = await makePr();
-    f.seed(`head${prSeq}`, 'limn/review-claude', { id: 3, state: 'success', description: 'Cleared by bob', createdAtMs: NOW - MIN, login: 'bob' });
+    f.seed(`head${prSeq}`, 'ensemble/review-claude', { id: 3, state: 'success', description: 'Cleared by bob', createdAtMs: NOW - MIN, login: 'bob' });
     expect(await m.postAutoSkipLines(ctx, { accountId: 1, prId: c }, [{ provider: 'claude', reason: 'budget' }], NOW)).toEqual(['posted']);
     expect(f.posts).toHaveLength(1);
     expect(await m.postAutoSkipLines(ctx, { accountId: 1, prId: a }, [{ provider: 'claude', reason: 'budget' }], NOW)).toEqual(['already']);

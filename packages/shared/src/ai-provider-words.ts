@@ -7,11 +7,11 @@ import { aiProviderName, aiRunLabel, aiRunProvider, type AiProviderName } from '
  * Claude footer contradicted itself).
  */
 export function autoPostFooter(by: AiProviderName | null | undefined = 'Claude'): string {
-  return by === 'Codex' ? '_Posted automatically by Limn’s Codex review._' : AUTO_POST_FOOTER;
+  return by === 'Codex' ? '_Posted automatically by Ensemble’s Codex review._' : AUTO_POST_FOOTER;
 }
 
 /** The body footer of a Claude + Codex pair's ONE automatic review (docs/CLAUDE-REVIEW.md § Claude + Codex). */
-export const PAIR_AUTO_POST_FOOTER = '_Posted automatically by Limn’s Claude and Codex reviews._';
+export const PAIR_AUTO_POST_FOOTER = '_Posted automatically by Ensemble’s Claude and Codex reviews._';
 
 // ---- CLAUDE + CODEX: ONE REVIEW BY BOTH (docs/CLAUDE-REVIEW.md § Claude + Codex) ----
 
@@ -64,13 +64,20 @@ export function pairChatProvider(defaultProvider: AiProviderId, succeeded: reado
   return succeeded[0]!;
 }
 
-/** Every footer a Limn auto post may carry — what "was this posted automatically?" looks for. */
+/** Every footer an auto post may carry — what "was this posted automatically?" looks for. */
 export const AUTO_POST_FOOTERS: readonly string[] = [AUTO_POST_FOOTER, autoPostFooter('Codex'), PAIR_AUTO_POST_FOOTER];
 
-/** Whether a posted body carries one of Limn's auto-post footers (either provider's). */
+/** The footers an older Limn wrote (before the Ensemble rename). Still on GitHub, so still READ. */
+export const LEGACY_AUTO_POST_FOOTERS: readonly string[] = [
+  '_Posted automatically by Limn’s Claude review._',
+  '_Posted automatically by Limn’s Codex review._',
+  '_Posted automatically by Limn’s Claude and Codex reviews._',
+];
+
+/** Whether a posted body carries one of the auto-post footers (either provider's, new or Limn's wording). */
 export function hasAutoPostFooter(body: string | null | undefined): boolean {
   const b = body ?? '';
-  return AUTO_POST_FOOTERS.some((f) => b.includes(f));
+  return AUTO_POST_FOOTERS.some((f) => b.includes(f)) || LEGACY_AUTO_POST_FOOTERS.some((f) => b.includes(f));
 }
 
 // THE PROVIDER'S NAME IN PRODUCT COPY (docs/CODEX-PLAN.md § 3.7). ONE AI provider runs every feature
@@ -106,7 +113,7 @@ export function aiRunProviderName(run: { provider?: AiProviderId | null; model?:
 /** The one line in place of a Run button when the active provider has no credential. */
 export function aiSignInLine(provider: AiProviderId | null | undefined): string {
   return provider === 'codex'
-    ? 'Sign in to Codex with ChatGPT (limn ai login codex)'
+    ? 'Sign in to Codex with ChatGPT (ensemble ai login codex)'
     : 'Sign in to Claude Code or set ANTHROPIC_API_KEY';
 }
 

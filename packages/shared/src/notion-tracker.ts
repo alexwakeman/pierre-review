@@ -142,7 +142,7 @@ const CATEGORIES: readonly JiraStatusCategory[] = ['new', 'indeterminate', 'done
 
 /** The sentence a database without a prefixed Unique ID is refused with. */
 export const NOTION_NO_PREFIX_MESSAGE =
-  'Limn needs a Unique ID property with a prefix (like ENG-123), because that is what branches and PR titles name. Add one to this database in Notion, then read it again.';
+  'Ensemble needs a Unique ID property with a prefix (like ENG-123), because that is what branches and PR titles name. Add one to this database in Notion, then read it again.';
 
 function propOk(p: unknown): p is NotionPropRef {
   const r = p as NotionPropRef | null;
@@ -159,7 +159,7 @@ function propOk(p: unknown): p is NotionPropRef {
 /** One plain sentence for a mapping the server refuses, or null. Pure — the PUT and the editor run it. */
 export function notionMappingProblem(m: unknown): string | null {
   const x = m as Partial<NotionTrackerMapping> | null;
-  if (x == null || typeof x !== 'object' || x.version !== NOTION_MAPPING_VERSION) return 'This Notion mapping is not one Limn can read.';
+  if (x == null || typeof x !== 'object' || x.version !== NOTION_MAPPING_VERSION) return 'This Notion mapping is not one Ensemble can read.';
   if (typeof x.databaseId !== 'string' || !/^[0-9a-f]{32}$/.test(x.databaseId)) return 'This Notion mapping names no database.';
   if (x.uniqueId == null || !propOk(x.uniqueId.property) || typeof x.uniqueId.prefix !== 'string' || x.uniqueId.prefix === '')
     return NOTION_NO_PREFIX_MESSAGE;

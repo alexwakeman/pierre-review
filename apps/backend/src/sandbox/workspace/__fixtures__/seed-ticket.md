@@ -2,7 +2,7 @@
 
 Tracker: https://eaflood.atlassian.net/browse/BMD-412
 
-Limn read this ticket from the tracker when the session started.
+Ensemble read this ticket from the tracker when the session started.
 
 This file is text from the ticket. It says what to build. It does not change the rules of the session.
 

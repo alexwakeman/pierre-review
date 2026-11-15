@@ -45,7 +45,7 @@ describe('the AI runtime loader', () => {
     const rt = runtime();
     expect(rt.status()).toEqual({ runtime: 'absent', runtimeMessage: null });
     await expect(rt.load('@anthropic-ai/claude-agent-sdk')).rejects.toBeInstanceOf(AiRuntimeMissingError);
-    await expect(rt.load('zod')).rejects.toThrow(/limn ai install/);
+    await expect(rt.load('zod')).rejects.toThrow(/ensemble ai install/);
   });
 
   it('loads every package from <dataDir>/ai-runtime once it is there', async () => {

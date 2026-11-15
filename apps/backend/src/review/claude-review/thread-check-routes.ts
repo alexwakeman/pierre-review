@@ -19,7 +19,7 @@ const idParam = {
 
 function featureOff(reply: FastifyReply): { error: string; message: string } {
   reply.status(404);
-  return { error: 'NotFound', message: 'Check threads is off here. It runs on your machine: npx limn-review' };
+  return { error: 'NotFound', message: 'Check threads is off here. It runs on your machine: npx ensemble-review' };
 }
 
 function notFound(reply: FastifyReply, id: number): { error: string; message: string } {

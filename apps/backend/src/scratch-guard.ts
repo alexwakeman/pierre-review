@@ -39,7 +39,7 @@ export class ScratchWriteBlockedError extends Error {
   readonly code = 'SCRATCH_WRITE_BLOCKED';
   constructor(what: string) {
     super(
-      `This is a scratch Limn: ${what} was blocked and nothing was sent. ` +
+      `This is a scratch Ensemble: ${what} was blocked and nothing was sent. ` +
         'Start `pnpm dev:scratch` with `--github write` to allow writes.',
     );
     this.name = 'ScratchWriteBlockedError';

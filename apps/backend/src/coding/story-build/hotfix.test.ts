@@ -192,7 +192,7 @@ describe('the seed (one fold, sandbox/workspace/seed.ts)', () => {
       expect(md).toContain('acme/api: `/workspace/acme/api` at the release v2.4.0-rc.');
       expect(md).toContain('acme/api: `/workspace/acme/api.main` at main (ccccccc).');
       expect(md).toContain('acme/worker: `/workspace/acme/worker`');
-      expect(md).toContain('Limn refuses their changes');
+      expect(md).toContain('Ensemble refuses their changes');
     }
     expect(seed.systemPrompts.claude).toContain('This is a hotfix build');
   });

@@ -165,20 +165,20 @@ async function rangeProblem(dir: string, prev: string, tip: string, key: string,
   const anc = await gitRun(dir, ['merge-base', '--is-ancestor', prev, tip]);
   if (anc.code !== 0) return `${key} does not build on ${prevLabel}.`;
   const merges = await gitRun(dir, ['rev-list', '--merges', `${prev}..${tip}`]);
-  if (merges.code !== 0) return `Limn could not read the commits of ${key}.`;
+  if (merges.code !== 0) return `Ensemble could not read the commits of ${key}.`;
   if (merges.stdout.toString('utf8').trim() !== '') return `${key} has a merge commit. Each pull request must be a straight line of commits.`;
   const count = await gitRun(dir, ['rev-list', '--count', `${prev}..${tip}`]);
-  if (count.code !== 0) return `Limn could not read the commits of ${key}.`;
+  if (count.code !== 0) return `Ensemble could not read the commits of ${key}.`;
   if (Number.parseInt(count.stdout.toString('utf8').trim(), 10) > STACK_MAX_COMMITS) return `${key} has more than ${STACK_MAX_COMMITS} commits.`;
   const raw = await gitRun(dir, ['diff', '--raw', '-z', '--no-renames', '--no-abbrev', prev, tip]);
-  if (raw.code !== 0) return `Limn could not read the changes of ${key}.`;
+  if (raw.code !== 0) return `Ensemble could not read the changes of ${key}.`;
   const parts = raw.stdout.toString('utf8').split('\0');
   for (let i = 0; i + 1 < parts.length; i += 2) {
     const meta = parts[i]!.replace(/^\n/, '');
     const path = parts[i + 1]!;
     const m = /^:(\d{6}) (\d{6}) /.exec(meta);
     if (!m) continue;
-    if (m[1] === '160000' || m[2] === '160000') return `${key} changes a submodule (${path}). Limn does not push submodule changes.`;
+    if (m[1] === '160000' || m[2] === '160000') return `${key} changes a submodule (${path}). Ensemble does not push submodule changes.`;
     if (path.split('/').some((seg) => seg.toLowerCase() === '.git')) return `${key} changes a path inside .git (${path}).`;
   }
   return null;
@@ -187,9 +187,9 @@ async function rangeProblem(dir: string, prev: string, tip: string, key: string,
 /** Steps 1–5 for ONE repository. Never throws: a failure is a verdict on the PRs it reaches. */
 export async function verifyStackBundle(a: VerifyStackInput): Promise<StackVerdict> {
   const planned = [...a.planned].sort((x, y) => x.k - y.k);
-  if (!SHA.test(a.baseSha)) return { prs: failAll(planned, 1, 'Limn does not know the commit this repository started from.'), whole: null };
+  if (!SHA.test(a.baseSha)) return { prs: failAll(planned, 1, 'Ensemble does not know the commit this repository started from.'), whole: null };
   if (a.extract.tooLargeBytes != null) {
-    return { prs: failAll(planned, 1, `The commits are ${(a.extract.tooLargeBytes / 1024 / 1024).toFixed(1)} MB, more than Limn takes from the sandbox.`), whole: null };
+    return { prs: failAll(planned, 1, `The commits are ${(a.extract.tooLargeBytes / 1024 / 1024).toFixed(1)} MB, more than Ensemble takes from the sandbox.`), whole: null };
   }
   const tmp = await mkdtemp(join(tmpdir(), 'limn-stack-check-'));
   try {
@@ -207,7 +207,7 @@ export async function verifyStackBundle(a: VerifyStackInput): Promise<StackVerdi
       for (const h of heads) {
         const m = /^([0-9a-f]{40}) (\S+)$/.exec(h);
         const p = m ? expected.get(m[2]!) : undefined;
-        if (!m || !p || inBundle.has(p.k)) return { prs: failAll(planned, 1, 'The commits from the sandbox are not in the form Limn expects.'), whole: null };
+        if (!m || !p || inBundle.has(p.k)) return { prs: failAll(planned, 1, 'The commits from the sandbox are not in the form Ensemble expects.'), whole: null };
         inBundle.set(p.k, m[1]!);
       }
       const prereq = await bundlePrerequisites(file);
@@ -215,7 +215,7 @@ export async function verifyStackBundle(a: VerifyStackInput): Promise<StackVerdi
         return { prs: failAll(planned, 1, 'The commits from the sandbox do not start from the commit this repository started from.'), whole: null };
       }
       const verify = await gitRun(a.gitDir, ['bundle', 'verify', '-q', file]);
-      if (verify.code !== 0) return { prs: failAll(planned, 1, 'Limn does not have the commit this repository started from.'), whole: null };
+      if (verify.code !== 0) return { prs: failAll(planned, 1, 'Ensemble does not have the commit this repository started from.'), whole: null };
       if (inBundle.size > 0) {
         const specs = [...inBundle.keys()].map((k) => `+${STACK_REF_PREFIX}${k}:${storyBuildStackRef(a.buildId, planned.find((p) => p.k === k)!.prRowId)}`);
         const fetched = await gitRun(a.gitDir, [
@@ -224,7 +224,7 @@ export async function verifyStackBundle(a: VerifyStackInput): Promise<StackVerdi
           'fetch', '--quiet', '--no-tags', '--no-write-fetch-head', '--no-auto-maintenance',
           file, ...specs,
         ]);
-        if (fetched.code !== 0) return { prs: failAll(planned, 1, 'Limn could not read the commits from the sandbox.'), whole: null };
+        if (fetched.code !== 0) return { prs: failAll(planned, 1, 'Ensemble could not read the commits from the sandbox.'), whole: null };
       }
     }
 
@@ -238,19 +238,19 @@ export async function verifyStackBundle(a: VerifyStackInput): Promise<StackVerdi
       let tip: string;
       if (inBundle.has(p.k)) {
         tip = inBundle.get(p.k)!;
-        if (claimed != null && claimed !== tip) return { prs: failAll(planned, p.k, 'The commits from the sandbox are not in the form Limn expects.', out), whole: await wholeOf(a, lastGood) };
+        if (claimed != null && claimed !== tip) return { prs: failAll(planned, p.k, 'The commits from the sandbox are not in the form Ensemble expects.', out), whole: await wholeOf(a, lastGood) };
       } else if (claimed === a.baseSha) {
         tip = a.baseSha;
       } else {
-        return { prs: failAll(planned, p.k, `Limn did not get the commits of ${p.key} from the sandbox.`, out), whole: await wholeOf(a, lastGood) };
+        return { prs: failAll(planned, p.k, `Ensemble did not get the commits of ${p.key} from the sandbox.`, out), whole: await wholeOf(a, lastGood) };
       }
       const problem = await rangeProblem(a.gitDir, prev, tip, p.key, prevLabel);
       if (problem) return { prs: failAll(planned, p.k, problem, out), whole: await wholeOf(a, lastGood) };
       const view = await rangeView(a.gitDir, prev, tip, a.token ?? null).catch(() => null);
-      if (view == null) return { prs: failAll(planned, p.k, `Limn could not work out the diff of ${p.key}.`, out), whole: await wholeOf(a, lastGood) };
+      if (view == null) return { prs: failAll(planned, p.k, `Ensemble could not work out the diff of ${p.key}.`, out), whole: await wholeOf(a, lastGood) };
       const bytes = Buffer.byteLength(view.patch, 'utf8');
       if (bytes > a.maxPatchBytes) {
-        return { prs: failAll(planned, p.k, `${p.key} is ${(bytes / 1024 / 1024).toFixed(1)} MB, more than the ${(a.maxPatchBytes / 1024 / 1024).toFixed(0)} MB Limn keeps.`, out), whole: await wholeOf(a, lastGood) };
+        return { prs: failAll(planned, p.k, `${p.key} is ${(bytes / 1024 / 1024).toFixed(1)} MB, more than the ${(a.maxPatchBytes / 1024 / 1024).toFixed(0)} MB Ensemble keeps.`, out), whole: await wholeOf(a, lastGood) };
       }
       const tree = (await gitRun(a.gitDir, ['rev-parse', '--verify', `${tip}^{tree}`])).stdout.toString('utf8').trim();
       out.push({
@@ -272,7 +272,7 @@ export async function verifyStackBundle(a: VerifyStackInput): Promise<StackVerdi
     }
     return { prs: out, whole: await wholeOf(a, lastGood) };
   } catch {
-    return { prs: failAll(planned, 1, 'Limn could not check the commits from the sandbox.'), whole: null };
+    return { prs: failAll(planned, 1, 'Ensemble could not check the commits from the sandbox.'), whole: null };
   } finally {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
   }
@@ -289,7 +289,7 @@ async function wholeOf(a: VerifyStackInput, lastGood: string | null): Promise<St
 export async function verifyStackInCloneCache(accountId: number, fullName: string, input: Omit<VerifyStackInput, 'gitDir' | 'token'>): Promise<StackVerdict> {
   const i = fullName.indexOf('/');
   const failed = (why: string): StackVerdict => ({ prs: failAll(input.planned, 1, why), whole: null });
-  if (i <= 0) return failed('Limn does not know this repository any more.');
+  if (i <= 0) return failed('Ensemble does not know this repository any more.');
   const owner = fullName.slice(0, i);
   const name = fullName.slice(i + 1);
   try {
@@ -297,6 +297,6 @@ export async function verifyStackInCloneCache(accountId: number, fullName: strin
     const token = await (await import('../../auth/account.js')).getAccessToken(accountId).catch(() => null);
     return await cm.withRepoLock(`${owner}/${name}`, () => verifyStackBundle({ ...input, gitDir: cm.repoCloneDir(owner, name), token }));
   } catch {
-    return failed('Limn could not read its own copy of the repository to check the commits.');
+    return failed('Ensemble could not read its own copy of the repository to check the commits.');
   }
 }

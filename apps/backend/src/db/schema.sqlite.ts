@@ -276,7 +276,7 @@ export const repos = sqliteTable(
     // from GitHub (a nulled selection leaves it as it was); `checked_at` stamps every attempt.
     usesGithubIssues: integer('uses_github_issues', { mode: 'boolean' }),
     githubIssuesCheckedAt: integer('github_issues_checked_at', { mode: 'timestamp' }),
-    // ---- TAGS (migration 0192; docs/RELEASES.md) ----
+    // ---- TAGS (migration 0195; docs/RELEASES.md) ----
     // What the last COMPLETE tag read saw, as `tagSignature` (sync/repo-tags.ts): the tag count plus
     // the newest tag's name and target. The settle sweep reads the same three facts for ~nothing and
     // starts a tag sync when they differ — a tag push is updatedAt-silent. NULL = never read.
@@ -515,7 +515,7 @@ export const pullRequests = sqliteTable(
     linearLinks: text('linear_links', { mode: 'json' }).$type<string[]>(),
     linearLinksRoot: text('linear_links_root'),
     linearLinksCheckedAt: integer('linear_links_checked_at', { mode: 'timestamp' }),
-    // ---- RELEASES (migration 0192; docs/RELEASES.md) ----
+    // ---- RELEASES (migration 0195; docs/RELEASES.md) ----
     // The commit this PR landed as on its base branch (GraphQL `mergeCommit { oid }`): the squash
     // commit, the merge commit, or the last rebased commit. A version tag's range maps the commits
     // between two tags to PRs through it (sync/tag-ranges.ts). ⚠ Cleared only on a positive
@@ -2370,12 +2370,14 @@ export const workspaces = sqliteTable(
     approveLeftovers: text('approve_leftovers'),
     // DEPENDENCY AUTO-MERGE (migration 0093 / pg 0080): may the server arm "merge when ready" on
     // every open dependency-automation PR in this workspace's repos (merge/dependency-policy.ts)?
-    // NULL/false = OFF, the default for every workspace; nullable with no default, so no insert
-    // has to name it. The setting IS the consent, so a bot's new head is re-armed; a reader's
-    // cancel is recorded in `auto_merge_policy_skips` and never overridden.
+    // ⚠ ON BY DEFAULT since migration 0193: NULL reads ON, OFF is an explicit false (`!== false`);
+    // nullable with no default, so no insert has to name it. The setting IS the consent, so a bot's
+    // new head is re-armed; a reader's cancel is recorded in `auto_merge_policy_skips` and never
+    // overridden.
     dependencyAutoMerge: integer('dependency_auto_merge', { mode: 'boolean' }),
-    // DEPENDENCY AUTOMATION (migration 0147; docs/MERGE-CI-TRUNK.md § Dependency automation). Every
-    // switch NULL/false = OFF, the default. `dependencyAutoApprove`: approve a TRUSTED dependency
+    // DEPENDENCY AUTOMATION (migration 0147; docs/MERGE-CI-TRUNK.md § Dependency automation). ⚠ Every
+    // switch is ON BY DEFAULT since migration 0193: NULL reads ON, OFF is an explicit false
+    // (`dependencySwitchOn`). `dependencyAutoApprove`: approve a TRUSTED dependency
     // bot's PR (`workspace_reviewers.dependency_trusted`) once its CI is green, under the reader's
     // account. `dependencyAutoResolve`: on a conflict, ask that bot to rebase, then fall back to an AI
     // run through the in-app resolver. The POLICY gates all three switches (merge included):
@@ -2384,7 +2386,7 @@ export const workspaces = sqliteTable(
     // every ecosystem. The ONE writer is `setDependencyAutomation` (merge/dependency-automation.ts).
     dependencyAutoApprove: integer('dependency_auto_approve', { mode: 'boolean' }),
     dependencyAutoResolve: integer('dependency_auto_resolve', { mode: 'boolean' }),
-    // "Fix dependency PRs with AI" (migration 0162), NULL/false = OFF: an unattended AI Fix on a
+    // "Fix dependency PRs with AI" (migration 0162), NULL = ON (0193), false = OFF: an unattended AI Fix on a
     // TRUSTED bot's PR whose CI failed (proven live), pushed to its branch; also runs the conflict
     // steps of `dependencyAutoResolve`. merge/dependency-automation.ts.
     dependencyAutoFix: integer('dependency_auto_fix', { mode: 'boolean' }),
@@ -2403,7 +2405,7 @@ export const workspaces = sqliteTable(
     // `AI_REVIEWS_FIRST_LOOK_DAYS` days). Never moves back. The ONE reader/writer is
     // db/ai-reviews-seen.ts.
     aiReviewsSeenAt: integer('ai_reviews_seen_at', { mode: 'timestamp' }),
-    // RELEASES (migration 0192; docs/RELEASES.md § Terms and settings): the RELEASE suffix (a
+    // RELEASES (migration 0195; docs/RELEASES.md § Terms and settings): the RELEASE suffix (a
     // release tag is `<version tag><release suffix>`) and the HOTFIX suffix (a hotfix tag ends in
     // it). NULL = not set, and there is NO default: the Releases tab and the hotfix option do
     // nothing until BOTH are set. Validated by shared `validateReleaseSettings`; the ONE reader /
@@ -2559,6 +2561,74 @@ export const workspaceExternalRepos = sqliteTable(
       name: 'workspace_external_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ---- STORY CHAT (CORE) — migration 0192; docs/STORY-CHAT.md ----
+//
+// Quick, read-only questions about one story. A chat belongs to (account, workspace, ticket ident); its turns are
+// kept so a chat can be read and continued later. The live agent is memory only (story-chat/live.ts).
+// Limn's OWN record: never an import of the reader's Claude or Codex sessions.
+export const storyChats = sqliteTable(
+  'story_chats',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    /** Shared `trackerTicketIdent`. */
+    ticketIdent: text('ticket_ident').notNull(),
+    /** The first question, shortened. */
+    title: text('title').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    idAccountUx: uniqueIndex('story_chats_id_account').on(t.id, t.accountId),
+    accountTicketIdx: index('story_chats_account_ws_ticket_idx').on(t.accountId, t.workspaceId, t.ticketIdent, t.updatedAt),
+    workspaceAccountFk: foreignKey({
+      name: 'story_chats_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+export const storyChatTurns = sqliteTable(
+  'story_chat_turns',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    chatId: integer('chat_id').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer'),
+    /** 'running' | 'done' | 'failed' | 'stopped'. */
+    status: text('status').notNull(),
+    error: text('error'),
+    provider: text('provider'),
+    model: text('model'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    finishedAt: integer('finished_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    chatIdx: index('story_chat_turns_chat_idx').on(t.chatId, t.id),
+    chatAccountFk: foreignKey({
+      name: 'story_chat_turns_chat_account_fk',
+      columns: [t.chatId, t.accountId],
+      foreignColumns: [storyChats.id, storyChats.accountId],
     }).onDelete('cascade'),
   }),
 );
@@ -2883,7 +2953,10 @@ export const workspaceReviewers = sqliteTable(
       .default('flat'),
     // ── TRUST (migration 0147; one writer, `setDependencyAutomation`) ──
     // The reader marked this DEPENDENCY bot as belonging to the project: Settings → Dependencies may
-    // approve its PRs and resolve their conflicts. NULL/false = not trusted, the default. Like the
+    // approve its PRs and resolve their conflicts. true = trusted, false = NOT trusted (the reader's
+    // untick, stored explicitly so it wins). NULL = untouched, RESOLVED on read by
+    // `dependencyTrustedOf` (merge/dependency-rules.ts): trusted for dependabot[bot] and renovate[bot]
+    // (GitHub App logins: the `[bot]` suffix is reserved), untrusted for every other bot. Like the
     // price, nothing derived ever writes it (no detection UPDATE names it, no INSERT seeds it).
     dependencyTrusted: integer('dependency_trusted', { mode: 'boolean' }),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
@@ -4731,7 +4804,7 @@ export const storyBuilds = sqliteTable(
     endToEnd: integer('end_to_end', { mode: 'boolean' }).notNull().default(false),
     e2eTicketClaimedAt: integer('e2e_ticket_claimed_at', { mode: 'timestamp' }),
     e2eTicketJson: text('e2e_ticket_json', { mode: 'json' }).$type<StoryBuildEndToEndTicket>(),
-    // HOTFIX (migration 0193; docs/STORY-BUILD.md § Hotfix builds): "Treat as a hotfix" at Start. Each repository
+    // HOTFIX (migration 0196; docs/STORY-BUILD.md § Hotfix builds): "Treat as a hotfix" at Start. Each repository
     // with a latest release is fixed there and the fix PORTED to the default branch; the review loop and
     // "Build end to end" are refused for it.
     hotfix: integer('hotfix', { mode: 'boolean' }).notNull().default(false),
@@ -4805,7 +4878,7 @@ export const storyBuildRepos = sqliteTable(
     loopPushedTree: text('loop_pushed_tree'),
     loopPushedAt: integer('loop_pushed_at', { mode: 'timestamp' }),
     loopEnded: text('loop_ended'),
-    // HOTFIX (migration 0193; docs/STORY-BUILD.md § Hotfix builds). `hotfix_tag` = the latest release the
+    // HOTFIX (migration 0196; docs/STORY-BUILD.md § Hotfix builds). `hotfix_tag` = the latest release the
     // release checkout starts at (NULL on an ordinary build and on a read-only repository); `read_only` = no
     // release yet, its changes are refused at extraction. `main_*` = THE MAIN FIX (the default-branch checkout
     // in the same sandbox): its base, path, patch and push record, beside the row's own (the RELEASE FIX).
@@ -4831,7 +4904,7 @@ export const storyBuildRepos = sqliteTable(
     mainPushErrorCode: text('main_push_error_code'),
     // Push's record of `hotfix/<tag>` (shared StoryBuildHotfixBranch): created or found, moved, the PRs on it.
     hotfixBranchJson: text('hotfix_branch_json', { mode: 'json' }).$type<StoryBuildHotfixBranch>(),
-    // THE PORT REPORT (migration 0195): the agent's claim for this repository (same | adapted | not_needed,
+    // THE PORT REPORT (migration 0198): the agent's claim for this repository (same | adapted | not_needed,
     // the reason, the evidence), as the host checked and clipped it; NULL = no report. Untrusted model text.
     portReportJson: text('port_report_json', { mode: 'json' }).$type<HotfixPortClaim>(),
     provider: text('provider'),
@@ -5275,6 +5348,94 @@ export const teamClaimSkipLines = sqliteTable(
   }),
 );
 
+// 0193. THE DEPENDENCY CLAIM LEDGER (merge/deps-claim-ledger.ts; docs/MERGE-CI-TRUNK.md § Team claims
+// for dependency work). ONE row per `limn/deps` commit status this machine holds or released — the
+// dependency automation's twin of `team_claim_lines`, with the same rules:
+//   whose 'mine'     a claim this machine made: 'claiming' BEFORE its pending line is posted, 'pending'
+//                    once it is up, 'finished' / 'released' once its final line is up. An ARMED merge
+//                    ('arm_merge') stays 'armed' while its intent is armed: the reconciler renews its line
+//                    (`last_posted_at`) and posts the release line when the intent ends unlanded. An
+//                    'ai_pushed' row is the line on the commit an AI run PUSHED (`head_sha` = that commit).
+//   whose 'teammate' a teammate's expired pending line this machine released ("Cleared by alex: robin's
+//                    claim expired"), recorded so it is posted ONCE. Always 'released'.
+// `final_description`: a line that could not be written when the action ended — the reconciler posts IT.
+// No FK on pr_id: BOTH delete paths keep this machine's OPEN rows (db/team-claim-lines-delete.ts); the
+// erasure deletes everything.
+export const depsClaimLines = sqliteTable(
+  'deps_claim_lines',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    prId: integer('pr_id').notNull(),
+    repoId: integer('repo_id'),
+    owner: text('owner'),
+    name: text('name'),
+    headSha: text('head_sha').notNull(),
+    // 'approve' | 'rebase_request' | 'ai_resolve' | 'ai_fix' | 'arm_merge' | 'ai_pushed'
+    action: text('action').notNull(),
+    whose: text('whose', { enum: ['mine', 'teammate'] }).notNull().default('mine'),
+    state: text('state', { enum: ['claiming', 'pending', 'armed', 'finished', 'released'] }).notNull(),
+    login: text('login'),
+    lastDescription: text('last_description'),
+    finalDescription: text('final_description'),
+    lastPostedAt: integer('last_posted_at', { mode: 'timestamp' }),
+    releaseAttempts: integer('release_attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    stateIdx: index('deps_claim_lines_state').on(t.state),
+    prHeadIdx: index('deps_claim_lines_account_pr_head').on(t.accountId, t.prId, t.headSha),
+  }),
+);
+
+// 0194. THE STORY-BUILD CLAIM LEDGER (coding/story-build/build-claim-ledger.ts; docs/TEAM-REVIEW.md §
+// Implement and Fill gaps, docs/STORY-BUILD.md § The team claim). ONE row per commit status a story build
+// of this machine holds or released, the same rules as `deps_claim_lines`:
+//   kind 'build'   the `ensemble/build` claim on the head of the ticket branch (`branch`, `<KEY>`) in ONE
+//                  repository: 'claiming' BEFORE the placeholder branch and its pending line are written,
+//                  'pending' while the build's session runs (renewed: `last_posted_at`), 'finished' /
+//                  'released' once its final line is up. `head_sha` FOLLOWS the branch: the placeholder
+//                  commit first, then each commit this machine pushes onto that branch.
+//   kind 'review'  the review loop's `ensemble/review-<provider>` line on the branch head it reviews
+//                  (`provider`), exactly as an auto review's.
+//   whose 'teammate'  a teammate's expired build line this machine released (by Clear), posted ONCE.
+// `final_description`: a line that could not be written when the build ended — the reconciler posts IT.
+// No FK on build_id: a deleted build must still let the reconciler release its line; the erasure
+// deletes everything.
+export const storyBuildClaimLines = sqliteTable(
+  'story_build_claim_lines',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    buildId: integer('build_id'),
+    workspaceId: integer('workspace_id'),
+    ident: text('ident'),
+    kind: text('kind', { enum: ['build', 'review'] }).notNull(),
+    context: text('context').notNull(),
+    owner: text('owner').notNull(),
+    name: text('name').notNull(),
+    branch: text('branch'),
+    headSha: text('head_sha').notNull(),
+    provider: text('provider'),
+    whose: text('whose', { enum: ['mine', 'teammate'] }).notNull().default('mine'),
+    state: text('state', { enum: ['claiming', 'pending', 'finished', 'released'] }).notNull(),
+    login: text('login'),
+    lastDescription: text('last_description'),
+    finalDescription: text('final_description'),
+    lastPostedAt: integer('last_posted_at', { mode: 'timestamp' }),
+    releaseAttempts: integer('release_attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    stateIdx: index('story_build_claim_lines_state').on(t.state),
+    buildIdx: index('story_build_claim_lines_account_build').on(t.accountId, t.buildId),
+  }),
+);
+
 // 0139. THIS DATABASE'S OWN FACTS (key → value) — never an account's, so not account-scoped and not
 // erased with one. `instance_id`: a random id written once (db/instance-id.ts) that names this
 // database file wherever it is moved; the reference-docs janitor's ownership marker.
@@ -5391,7 +5552,7 @@ export const limnActions = sqliteTable(
   }),
 );
 
-// ---- RELEASES (migration 0192; docs/RELEASES.md) ------------------------------------------------
+// ---- RELEASES (migration 0195; docs/RELEASES.md) ------------------------------------------------
 //
 // FIVE tables, all account-scoped with composite FKs (tenancy as a constraint), all in
 // `accountScopedTables()` and erased explicitly; the repo-anchored ones in `deleteRepo` too.
@@ -5416,7 +5577,7 @@ export const limnActions = sqliteTable(
 //                   true is final for that sha (until the tag moves); false is re-checked when the
 //                   head moves.
 //   previous_sha / moved_at  the tag was MOVED to another commit (re-pushed with --force): the sha
-//                   it pointed at before, and when Limn saw the move.
+//                   it pointed at before, and when Ensemble saw the move.
 export const repoTags = sqliteTable(
   'repo_tags',
   {
@@ -5452,14 +5613,14 @@ export const repoTags = sqliteTable(
 // (base, tag], where base is the tag before it on the default branch (by committed date, then
 // name). Suffix-free on purpose — the release check sums increments from the baseline up to a
 // version tag, so a new release (a new baseline) or a changed suffix needs no recompute.
-//   base_tag_name / base_sha  NULL for the OLDEST tag Limn knows: its range is every PR in the
+//   base_tag_name / base_sha  NULL for the OLDEST tag Ensemble knows: its range is every PR in the
 //                   synced history merged into the default branch no later than the tag's commit
 //                   (method 'history'), so older PRs are not checked.
 //   method          'compare' (REST compare base...tag) | 'history' (no base: the stored PRs).
 //   pr_numbers      the PRs, by NUMBER (a PR the walk has not stored yet still counts). Resolved to
 //                   local ids within (account, repo) on read (db/repo-tags.ts).
 //   commit_count / unmatched_commits  commits in the range, and how many matched no PR (direct pushes).
-//   truncated       the compare had more commits than Limn reads (TAG_RANGE_MAX_COMMITS).
+//   truncated       the compare had more commits than Ensemble reads (TAG_RANGE_MAX_COMMITS).
 //   moved_from_sha  the tag MOVED since the last computation: the sha the old range was for.
 // Recomputed only when the tag's sha or its base's sha changes.
 export const repoTagRanges = sqliteTable(
@@ -5560,7 +5721,7 @@ export const releaseItems = sqliteTable(
   (t) => ({
     releaseRepoUx: uniqueIndex('release_items_account_release_repo').on(t.accountId, t.releaseId, t.repoId),
     // ⚠ The tag-name UNIQUE is PARTIAL — only a live row (pending / claimed / done) holds the name, so
-    // a failed or refused write does not block a later press. It lives in migration 0194 ONLY
+    // a failed or refused write does not block a later press. It lives in migration 0197 ONLY
     // (`release_items_account_repo_tag_live`); this is its plain lookup index.
     tagNameIdx: index('release_items_account_repo_tag_idx').on(t.accountId, t.repoId, t.releaseTagName),
     releaseAccountFk: foreignKey({

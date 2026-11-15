@@ -595,7 +595,7 @@ export function AutoMergeBanner(): JSX.Element | null {
       alert={otherOutcomes > 0}
       footer={
         <>
-          <span>Auto-merge only runs while Limn is running.</span>
+          <span>Auto-merge only runs while Ensemble is running.</span>
           <span className="flex items-center gap-3">
             <ToastShowMore
               hidden={hidden}

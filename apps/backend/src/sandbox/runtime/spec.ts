@@ -190,7 +190,7 @@ export function proxyBuildArgs(proxyUrl: string): Record<string, string> {
  * containers even when a step fails. Base images are pulled by the host daemon (docs/SANDBOX.md § Services).
  */
 export function serviceBuildArgv(spec: ImageBuildSpec, labels: Record<string, string>): string[] {
-  if (!/^limn-[a-z0-9][a-z0-9_.-]*:[a-z0-9_.-]+$/.test(spec.tag)) throw new Error(`Not a Limn service image tag: ${JSON.stringify(spec.tag)}`);
+  if (!/^limn-[a-z0-9][a-z0-9_.-]*:[a-z0-9_.-]+$/.test(spec.tag)) throw new Error(`Not an Ensemble service image tag: ${JSON.stringify(spec.tag)}`);
   if (!spec.dockerfile || spec.dockerfile.startsWith('/') || spec.dockerfile.split('/').includes('..')) {
     throw new Error(`The Dockerfile must be a path inside the build folder: ${JSON.stringify(spec.dockerfile)}`);
   }

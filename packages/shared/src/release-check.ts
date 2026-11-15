@@ -94,7 +94,7 @@ export interface ReleaseCheckTagInput extends TagOrderKey {
   sha: string;
   /** null = not known yet (the tag is left out until it is). */
   onDefaultBranch: boolean | null;
-  /** The tag was moved to another commit since Limn first saw it. */
+  /** The tag was moved to another commit since Ensemble first saw it. */
   moved: boolean;
 }
 

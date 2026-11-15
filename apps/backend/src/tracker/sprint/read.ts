@@ -504,7 +504,7 @@ const PREPARE_MESSAGES: Record<string, (label: string, provider: TrackerProvider
   NotJira: () => MSG_NO_READING_TRACKER,
   NoNotionMapping: () => MSG_NOTION_UNMAPPED,
   no_tracker: () => MSG_NO_READING_TRACKER,
-  NoGithubAccess: () => 'Limn cannot reach GitHub as this account here.',
+  NoGithubAccess: () => 'Ensemble cannot reach GitHub as this account here.',
   NoJiraUrl: (label, p) =>
     p === 'linear'
       ? 'The Linear workspace URL in Settings is not a linear.app address, like https://linear.app/your-workspace.'
@@ -523,11 +523,11 @@ export function sprintReadErrorMessage(provider: TrackerProvider | null, code: s
   if (prep != null) return prep(label, provider);
   switch (code) {
     case 'no_projects':
-      return `No ${label} tickets have been seen on this workspace's pull requests yet, so Limn does not know which projects to read.`;
+      return `No ${label} tickets have been seen on this workspace's pull requests yet, so Ensemble does not know which projects to read.`;
     case 'no_repos':
-      return 'This workspace has no repositories, so Limn has no milestones to read.';
+      return 'This workspace has no repositories, so Ensemble has no milestones to read.';
     case 'rate_limited':
-      return `${label}'s rate limit is used up for now. Limn will read the sprint again in a few minutes.`;
+      return `${label}'s rate limit is used up for now. Ensemble will read the sprint again in a few minutes.`;
     case 'not_found':
       return provider === 'github'
         ? 'GitHub could not find these repositories, or your GitHub account cannot see them.'
