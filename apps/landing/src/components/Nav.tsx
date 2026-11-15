@@ -2,8 +2,8 @@ import { Link, useRoute } from '../router';
 import { SITE_NAME } from '../lib/site';
 
 // ---------------------------------------------------------------------------
-// The header, as three tiles of the board (styles: .lb-nav in board.css): an ink
-// tile carrying the name, a surface tile with the six links (four pages, Docs, Contact), and a flat
+// The header, as three tiles of the board (styles: .lb-nav in board.css): a black
+// tile carrying the mark and the name, a surface tile with the six links (four pages, Docs, Contact), and a flat
 // gold "Run it now" tile that lands on the home page's run section.
 //
 // The active page is marked by a gold underline on its link (aria-current="page").
@@ -67,6 +67,8 @@ export default function Nav(): JSX.Element {
       <nav aria-label="Primary">
         <div className="bar">
           <Link to="/" className="mark" aria-current={path === '/' ? 'page' : undefined}>
+            {/* The Ensemble mark, rendered from packages/shared brand-mark.ts by scripts/make-favicons.mjs. */}
+            <img src="/mark.svg" alt="" width={30} height={30} />
             {SITE_NAME}
           </Link>
           <div className="links">{links}</div>

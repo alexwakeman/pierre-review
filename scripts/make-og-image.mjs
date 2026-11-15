@@ -6,7 +6,9 @@
 //
 // WHY A CARD, NOT A SCREENSHOT. The landing shows no product screenshots (every picture of the app
 // is a clickable HTML mock), so the preview a link unfurls to is the hero itself: the same claim,
-// the same Bach picture, the same tiles, fonts and pigments as the board (apps/landing/src/board.css).
+// the same Spiral picture, the same tiles, fonts and spectrum as the board (apps/landing/src/board.css).
+// The Spiral is drawn by the landing's own arc geometry (components/arcs/geometry.ts, imported with
+// Node's type stripping) and the mark by packages/shared brand-mark.ts, so neither can drift.
 // ⚠ The words here are the hero's (components/board/Hero.tsx). Change them in the same commit.
 //
 // Everything is inlined as data: URLs, so the page needs no server and no network.
@@ -15,6 +17,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { quartersToSvg, spiralQuarters } from '../apps/landing/src/components/arcs/geometry.ts';
+import { brandMarkSvg } from '../packages/shared/src/brand-mark.ts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const landing = join(root, 'apps', 'landing');
@@ -29,31 +33,31 @@ ${font(400)} ${font(500)} ${font(600)}
 html, body { width: 1200px; height: 630px; background: #0f1012; }
 body { padding: 10px; display: grid; gap: 8px; grid-template-columns: 1fr 380px; grid-template-rows: 1fr 150px;
   font-family: 'Albert Sans', system-ui, sans-serif; color: #f1f1ef; }
-.tile { border-radius: 4px; overflow: hidden; }
-.say { background: #1a1b1e; padding: 46px 52px; display: flex; flex-direction: column; grid-row: 1 / 3; }
-.kick { font-size: 21px; font-weight: 500; color: #a9a69f; letter-spacing: 0.01em; }
-.kick b { color: #d2b071; font-weight: 600; }
+.tile { overflow: hidden; }
+.say { background: #000; padding: 46px 52px; display: flex; flex-direction: column; grid-row: 1 / 3; }
+.kick { font-size: 21px; font-weight: 500; color: #a9a69f; letter-spacing: 0.01em; display: flex; align-items: center; gap: 12px; }
+.kick svg { width: 34px; height: 34px; }
+.kick b { color: #f1f1ef; font-weight: 600; }
 h1 { font-size: 76px; line-height: 1.0; font-weight: 600; letter-spacing: -0.035em; margin-top: 30px; }
-.lead { font-size: 25px; line-height: 1.35; color: #d8d6d0; margin-top: 26px; max-width: 640px; }
+.lead { font-size: 25px; line-height: 1.35; color: #dcdad5; margin-top: 26px; max-width: 640px; }
 .foot { margin-top: auto; display: flex; align-items: center; gap: 22px; }
 code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background: #24252a; color: #f1f1ef;
-  padding: 12px 18px; border-radius: 4px; }
+  padding: 12px 18px; }
 .url { font-size: 22px; color: #a9a69f; }
-.ph { background: #121110; }
-.ph img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%;
-  filter: saturate(0.8) contrast(1.04) brightness(0.88); display: block; }
-.motto { background: linear-gradient(135deg, #e2c487 0%, #d2b071 45%, #9a763f 100%); color: #121110;
+.art { background: #000; padding: 18px; display: flex; align-items: center; justify-content: center; }
+.art svg { width: 100%; height: 100%; }
+.motto { background: linear-gradient(120deg, #ff6a00 0%, #fe9c00 45%, #ffcf00 100%); color: #121110;
   padding: 22px 26px; display: flex; flex-direction: column; justify-content: center; }
 .motto p { font-size: 21px; line-height: 1.25; font-weight: 500; letter-spacing: -0.01em; }
-.motto span { font-size: 15px; margin-top: 8px; opacity: 0.8; }
+.motto span { font-size: 15px; margin-top: 8px; color: #2a1d05; }
 </style></head><body>
 <div class="tile say">
-  <p class="kick"><b>Ensemble</b> · an agentic SDLC on your machine</p>
+  <p class="kick">${brandMarkSvg(4)}<span><b>Ensemble</b> · an agentic SDLC on your machine</span></p>
   <h1>Define, build, and review as an ensemble.</h1>
   <p class="lead">From ticket to merged pull request with your own Claude or Codex. It runs fully on your team’s own machines, with no added service.</p>
   <div class="foot"><code>npx ensemble-review</code><span class="url">ensemble.ac</span></div>
 </div>
-<div class="tile ph"><img src="${data('src/assets/board/img/bach-hand.jpg', 'image/jpeg')}" alt=""></div>
+<div class="tile art">${quartersToSvg('0 0 130 210', spiralQuarters(10))}</div>
 <div class="tile motto"><p>“One hears four sensible people conversing among themselves.”</p><span>Goethe, on the string quartet, 1829</span></div>
 </body></html>`;
 

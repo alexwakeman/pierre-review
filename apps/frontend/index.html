@@ -5,17 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Ensemble</title>
     <meta name="theme-color" content="#0b1020" />
-    <!-- Brand favicon: the Limn mark, the `group` sprite the header wordmark draws.
-         Regenerate with `node scripts/make-favicons.mjs` — it renders from the ONE grid in
-         apps/landing/src/lib/sprites.ts, so the tab icon cannot drift from the header.
+    <!-- Brand favicon: the Ensemble mark, the banded ember quarter the header Wordmark draws.
+         Regenerate with `node scripts/make-favicons.mjs` — it renders from the ONE definition in
+         packages/shared/src/brand-mark.ts, so the tab icon cannot drift from the header.
          Root-absolute public-asset paths — Vite
          base-prefixes them to '/app/...' in dev and in the production build, so they
          load whether the SPA is served locally or behind the cloud auth gate. -->
     <!-- ⚠ THE SVG MUST STAY FIRST AND KEEP ITS `type`. A tab slot is 16 CSS px — 32 device px
          at DPR 2 — and Chrome picks ONE of these and scales it, so any pick but an exact 1:1
-         raster resamples a grid whose features are one pixel wide and reads as blur. Declared
-         this way Chrome takes the SVG and `shape-rendering: crispEdges` snaps it to the device
-         grid at every DPR. The PNGs remain for Safari < 16.4 and the big-raster surfaces. -->
+         raster resamples three-band arcs drawn for a 16px slot and reads as blur. Declared
+         this way Chrome takes the SVG and draws it at the device's own resolution. The PNGs remain for Safari < 16.4 and the big-raster surfaces. -->
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
