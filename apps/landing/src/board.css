@@ -262,30 +262,28 @@ body:has(.lb) {
   width: 100%;
   height: 100%;
 }
-/* centred explicitly: a 'slice' box is larger than the picture and must crop
-   evenly on both sides (grid centring lets an overflowing box start at the left) */
+/* The box is placed by arithmetic, NEVER by a transform: scroll-driven view()
+   timelines measure layout before transforms, so a box centred with translate
+   reads half its size off and starts its animation late. --bw is the box width:
+   'meet' fits inside the tile, 'slice' covers it (and is clipped). */
 .lb .arcs-box {
+  --bw: min(100cqw, calc(100cqh * var(--ar)));
   position: absolute;
-  left: 50%;
-  top: 50%;
-  translate: -50% -50%;
+  width: var(--bw);
+  left: calc((100cqw - var(--bw)) / 2);
+  top: calc((100cqh - var(--bw) / var(--ar)) / 2);
   aspect-ratio: var(--ar);
   isolation: isolate;
 }
-.lb .arcs.meet .arcs-box {
-  width: min(100cqw, calc(100cqh * var(--ar)));
+.lb .arcs.slice .arcs-box {
+  --bw: max(100cqw, calc(100cqh * var(--ar)));
 }
 .lb .arcs.end .arcs-box {
   /* anchored right: the composition's own margin is its gap from the edge */
-  left: auto;
-  right: 0;
-  translate: 0 -50%;
+  left: calc(100cqw - var(--bw));
 }
 .lb .arcs.slice {
   overflow: clip; /* not hidden: see .tile.art */
-}
-.lb .arcs.slice .arcs-box {
-  width: max(100cqw, calc(100cqh * var(--ar)));
 }
 .lb .arcs .layer {
   position: absolute;
@@ -313,6 +311,10 @@ body:has(.lb) {
     transform: translate(var(--ax), var(--ay));
     will-change: transform;
   }
+  /* a swirl swings in: half a turn round the centre, 1.8× larger */
+  .lb .arcs.swirl .layer {
+    transform: rotate(-180deg) scale(1.8);
+  }
   @supports (animation-timeline: scroll()) {
     /* the hero: over the first 60vh of page scroll */
     .lb .arcs.lead .layer {
@@ -320,15 +322,26 @@ body:has(.lb) {
       animation-timeline: scroll(root block);
       animation-range: 0px 60vh;
     }
-    /* every other picture: it stays apart until it is WHOLLY on screen (contain 0%:
-       its bottom edge reaches the viewport's), then lands over the next 30% of its
-       travel through the viewport. Short on purpose: a picture near the foot of the
-       page can only scroll so far up, and it must always land. */
+    /* every other picture: it starts moving the moment it appears (entry 0%: its
+       top edge at the viewport's bottom) and lands by contain 30% (wholly on screen,
+       then 30% of the way on). The end stays short on purpose: a picture near the
+       foot of the page can only scroll so far up, and it must always land. */
     .lb .arcs:not(.lead) .layer {
       animation: arc-gather linear both;
       animation-timeline: view(block);
-      animation-range: contain 0% contain 30%;
+      animation-range: entry 0% contain 30%;
     }
+    .lb .arcs.swirl:not(.lead) .layer {
+      animation-name: arc-swirl;
+    }
+  }
+}
+@keyframes arc-swirl {
+  from {
+    transform: rotate(-180deg) scale(1.8);
+  }
+  to {
+    transform: none;
   }
 }
 @keyframes arc-gather {
