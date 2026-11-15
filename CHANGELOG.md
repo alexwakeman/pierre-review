@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.44] - 2026-11-15
+
 ### Added
 
 - Repos & workspaces: click a repository to open its panel, with its first sync of the last 90 days while it runs, how many pull requests were synced, and its Bot scoring switch. A repository you add opens there.
