@@ -1,16 +1,16 @@
 import { Arcs } from './Arcs';
-import { chainQuarters, SITE_CHAIN } from './geometry';
+import { chainQuarters, quartetQuarters, SITE_CHAIN } from './geometry';
 import type { Corner, Quarter, RunName } from './geometry';
 
 // ---------------------------------------------------------------------------
 // The compositions. Every picture on the site is one of these, drawn from the same
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
-//   Chain      the signature: quarters linked end to end, each a different voice,
-//              whose bands run on from link to link (the hero). It closes up as
-//              the reader scrolls down.
-//   Quartet    four equal quarters facing one centre: "four sensible people
-//              conversing" (beside Goethe's line)
+//   Quartet    the hero's lead picture: four equal quarters facing one centre,
+//              "four sensible people conversing". Its quarters start apart and
+//              close in as the reader scrolls down.
+//   Chain      quarters linked end to end, each a different voice, whose bands run
+//              on from link to link (the small tile beside Goethe's line)
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -38,26 +38,19 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   );
 }
 
-export function Quartet({ className, label }: PieceProps): JSX.Element {
-  const R = 50;
-  const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => ({ cx, cy, R, corner, run, n: 11 });
+// The hero's lead picture: the margin keeps the apart state inside the tile.
+const QUARTET = quartetQuarters(22);
+
+export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
   return (
     <Arcs
-      viewBox="0 0 100 100"
+      lead={lead}
+      viewBox={QUARTET.viewBox}
       className={className}
       label={label}
       preserveAspectRatio="xMidYMid meet"
-      quarters={[q(0, 0, 'tl', 'ember'), q(100, 0, 'tr', 'dawn'), q(100, 100, 'br', 'dusk'), q(0, 100, 'bl', 'bloom')]}
-    >
-      {[
-        [0, 0],
-        [100, 0],
-        [100, 100],
-        [0, 100],
-      ].map(([x, y], i) => (
-        <circle key={i} className="player" cx={x} cy={y} r={3.2} />
-      ))}
-    </Arcs>
+      quarters={QUARTET.quarters}
+    />
   );
 }
 

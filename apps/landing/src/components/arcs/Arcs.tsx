@@ -80,6 +80,7 @@ export function Arcs({
               style={{ '--k': p.k } as React.CSSProperties}
             />
           ))}
+          {l.dot && <circle className="player" cx={l.dot.cx} cy={l.dot.cy} r={l.dot.r} />}
         </g>
       ))}
       {children}
