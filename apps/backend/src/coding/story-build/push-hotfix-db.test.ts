@@ -126,7 +126,7 @@ beforeEach(() => {
 });
 
 /** A built hotfix session: api with a release fix and a main fix, worker read only. */
-async function hotfixSession(o: { mainPatch?: string | null } = {}): Promise<{ id: number; apiRow: number; workerRow: number }> {
+async function hotfixSession(o: { mainPatch?: string | null; port?: import('@pierre-review/shared').HotfixPortClaim | null } = {}): Promise<{ id: number; apiRow: number; workerRow: number }> {
   for (const r of await P.listStoryBuildRowsFor(ctx, 1, wsId, IDENT)) if (r.status !== 'discarded') await P.updateStoryBuild(ctx, 1, r.id, { status: 'discarded' });
   const started = await P.insertStoryBuild(ctx, {
     accountId: 1,
@@ -179,6 +179,7 @@ async function hotfixSession(o: { mainPatch?: string | null } = {}): Promise<{ i
     commitMessage: 'fix: round refunds half up',
     summary: 'Rounds refunds half up.',
     ...(mainPatch ? { mainPatch, mainStatus: 'ready', mainCommitMessage: 'fix: round refunds half up (main)' } : { mainStatus: 'skipped' }),
+    ...(o.port !== undefined ? { portReportJson: o.port } : {}),
   });
   return { id, apiRow, workerRow };
 }
@@ -263,6 +264,62 @@ describe('push a hotfix repository (acceptance 28, 29, 31)', () => {
     expect(G.pushes[0].body).not.toContain('**Hotfix:**');
     expect(G.bodies).toEqual([]);
     expect((await P.getStoryBuildRepoRow(ctx, 1, s.id, repo.api))!.status).toBe('pushed');
+  });
+
+  it('36: not_needed with main unchanged opens PR 1 only, its body says why; no -main branch', async () => {
+    const s = await hotfixSession({ mainPatch: null, port: { outcome: 'not_needed', reason: 'The refund code was removed from main in src/refunds/ (see @alice, fixes #12).', evidence: ['src/refunds/'] } });
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });
+    expect(G.pushes).toHaveLength(1);
+    expect(G.pushes[0]).toMatchObject({ branch: 'PLAT-290', prBase: 'hotfix/v2.4.0-rc' });
+    const body: string = G.pushes[0].body;
+    expect(body).toContain('**Port:** Not applied to main: The refund code was removed from main in src/refunds/');
+    // Untrusted text, defanged: no mention, no closing keyword.
+    expect(body).toContain('@\u200balice');
+    expect(body).toContain('f\u200bixes #12');
+    expect(body).not.toContain('**Hotfix:**');
+    expect(body).not.toMatch(/limn/i);
+    expect(G.pushes.some((p: any) => p.branch === 'PLAT-290-main')).toBe(false);
+    const row = await P.getStoryBuildRepoRow(ctx, 1, s.id, repo.api);
+    expect(row!.status).toBe('pushed');
+    expect(P.toStoryBuildRepo(row!, 'acme/api', null, true).hotfix?.port).toEqual({
+      claim: { outcome: 'not_needed', reason: 'The refund code was removed from main in src/refunds/ (see @alice, fixes #12).', evidence: ['src/refunds/'] },
+      flag: null,
+      files: null,
+    });
+  });
+
+  it('34/35: same and adapted — both PRs carry the one line, adapted with its reason', async () => {
+    let s = await hotfixSession({ port: { outcome: 'same', reason: null, evidence: [] } });
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });
+    expect(G.pushes).toHaveLength(2);
+    for (const p of G.pushes) expect(p.body).toContain('**Port:** Applied to both.');
+    expect(G.pushes[1].body).toContain('**Hotfix:** the same fix for the release');
+    G.pushes.length = 0;
+    G.bodies.length = 0;
+    G.branches.clear();
+    s = await hotfixSession({ port: { outcome: 'adapted', reason: 'Main computes refunds in src/money.ts, so the rounding moved there.', evidence: [] } });
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });
+    expect(G.pushes).toHaveLength(2);
+    for (const p of G.pushes) expect(p.body).toContain('**Port:** Applied to both, adapted for main: Main computes refunds in src/money.ts, so the rounding moved there.');
+    expect(G.pushes[1].body).toContain('**Hotfix:** the fix for the release');
+    expect(G.bodies[0].body).toContain('**Hotfix:** the fix for main is');
+  });
+
+  it('37: a claim the patches contradict is flagged on the wire, Push still opens what changed, and the claim is not sent', async () => {
+    const s = await hotfixSession({ port: { outcome: 'not_needed', reason: 'Removed on main.', evidence: [] } });
+    const before = await P.getStoryBuildRepoRow(ctx, 1, s.id, repo.api);
+    expect(P.toStoryBuildRepo(before!, 'acme/api', null, true).hotfix?.port?.flag).toBe('not_needed_but_changed');
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });
+    expect(G.pushes).toHaveLength(2);
+    for (const p of G.pushes) expect(p.body).not.toContain('**Port:**');
+  });
+
+  it('no report: the wire says so (claim null), never inferred; the bodies carry no port line', async () => {
+    const s = await hotfixSession();
+    const row = await P.getStoryBuildRepoRow(ctx, 1, s.id, repo.api);
+    expect(P.toStoryBuildRepo(row!, 'acme/api', null, true).hotfix?.port).toMatchObject({ claim: null, flag: null });
+    await push.pushRepo(ctx, { accountId: 1, buildId: s.id, repoId: repo.api, draft: true });
+    for (const p of G.pushes) expect(p.body).not.toContain('**Port:**');
   });
 
   it('a read-only repository is never pushed', async () => {

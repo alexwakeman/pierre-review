@@ -18,10 +18,11 @@ import { ChangeReportSections, CHANGE_REPORT_CHIP } from '../AiFix/ChangeReport.
 import { ChecksReport, ChecksStatus } from '../AiFix/RunTests.js';
 import { AiRunLabel } from '../AiRunLabel.js';
 import { DiffWrapToggle, FileDiffView, type DiffFile } from '../diff/FileDiffView.js';
-import { ChevronIcon, ExternalLinkIcon, PullRequestIcon } from '../Icons.js';
+import { ChevronIcon, ExternalLinkIcon, PullRequestIcon, WarningIcon } from '../Icons.js';
+import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { RenameBranch } from './RenameBranch.js';
-import { HOTFIX_DIFF_LABEL, hotfixDiffTargets, hotfixMovedLine, hotfixPushWords } from '../../lib/hotfix.js';
+import { HOTFIX_DIFF_LABEL, hotfixDiffTargets, hotfixMovedLine, hotfixPortView, hotfixPushWords } from '../../lib/hotfix.js';
 
 // THE CHANGES: one card per repository with stored work, in build order (the One PR card shell look).
 // Each card: its status, what the agent says it changed (`ChangeReportSections`; the refs jump to the
@@ -110,6 +111,7 @@ function BuildRepoCard({
   const hf = repo.hotfix ?? null;
   const [mainDiffOpen, setMainDiffOpen] = useState(false);
   const movedLine = hotfixMovedLine(hf?.branch);
+  const port = hotfixPortView(repo);
   const mainUrl = safeExternalUrl(hf?.mainPushedPrUrl) ?? null;
   // THE REVIEW LOOP pushes by itself while it runs: Push hides (never disabled) until it pauses or ends.
   const loopBusy = loopRunning(build);
@@ -223,6 +225,26 @@ function BuildRepoCard({
             );
           })}
         {hf?.mainError != null && <p className="mt-1 text-meta text-ui-danger">{hf.mainError}</p>}
+        {port != null && (
+          <div data-testid="story-build-hotfix-port" data-outcome={port.outcome ?? 'none'} className="mt-2 text-meta">
+            <div className="flex items-start gap-1.5">
+              <span className={port.outcome == null ? 'text-ui-mute' : 'text-ui-ink'}>{port.line}</span>
+              <InfoButton title="The port to main">
+                <p>The agent says, for each repository, whether the fix on the release was applied to main as it is, adapted for main, or not needed on main.</p>
+                <p className="mt-2">This is the agent's own report. Limn checks it against the two diffs and says when they disagree. It does not use test results: tests may not apply to both.</p>
+                <p className="mt-2">When main does not need the fix, Push opens only the pull request into the hotfix branch.</p>
+              </InfoButton>
+            </div>
+            {port.files != null && <p className="mt-0.5 text-ui-mute">{port.files}</p>}
+            {/* Beside Push while it shows (below); here once it does not. */}
+            {port.flag != null && !(canPushRepo(repo) && !loopBusy) && (
+              <p className="mt-0.5 inline-flex items-center gap-1 text-ui-warn">
+                <WarningIcon size={12} />
+                {port.flag}
+              </p>
+            )}
+          </div>
+        )}
         {movedLine != null && (
           <p data-testid="story-build-hotfix-moved" className="mt-2 text-meta text-ui-mute">
             {movedLine}
@@ -250,6 +272,12 @@ function BuildRepoCard({
             >
               {hf != null ? hotfixPushWords(repo, draft) : pushButtonWords(build, 'repo', repo.id, draft)}
             </Button>
+            {port?.flag != null && (
+              <span data-testid="story-build-hotfix-port-flag" className="inline-flex items-center gap-1 text-meta text-ui-warn">
+                <WarningIcon size={12} />
+                {port.flag}
+              </span>
+            )}
             <ChecksStatus checks={repo.checks} />
             {!session && !repo.checks?.ran && <span className="text-meta text-ui-mute">Not built or tested here.</span>}
           </div>

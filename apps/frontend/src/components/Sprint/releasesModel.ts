@@ -103,6 +103,8 @@ export function ticketRepoMark(state: ReleaseTicketRepoState): { tone: MarkTone;
       return { tone: 'bad', text: 'open PR' };
     case 'linked_no_pr':
       return { tone: 'warn', text: 'linked, no PR' };
+    case 'hotfix_only':
+      return { tone: 'ok', text: 'hotfix only' };
   }
 }
 

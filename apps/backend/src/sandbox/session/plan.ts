@@ -52,6 +52,7 @@ import type { ServiceRunRecord } from '../services/run-log.js';
 import type { SandboxRuntime } from '../runtime/types.js';
 import { BUILD_REPORT_CHECKER, BUILD_REPORT_FILE, buildReportFiles } from '../workspace/build-report.js';
 import { PLAN_CONTEXT_FILE } from '../workspace/plan-check.js';
+import { portReportInstructionLine } from '../workspace/port-report.js';
 import { planContextFor, ticketLayoutFacts, ticketMarkdown } from '../workspace/seed.js';
 import type { SessionTicket } from '../workspace/ticket.js';
 import { extractPlanBlock } from './plan-block.js';
@@ -152,8 +153,9 @@ export function planBuildInstruction(o: {
     ? [
         `- This is a hotfix build ("Hotfix" in CLAUDE.md and AGENTS.md). In each repository you change, commit on the branch \`${o.hotfix.branch}\` in BOTH checkouts:`,
         '  1. Fix the release checkout. Run its checks and fix what fails.',
-        '  2. Port the fix to the main checkout. Resolve the differences where the code moved. Run its checks again and fix what fails.',
+        '  2. Read the main checkout and find the code the fix changes. If main needs the fix, port it there. Resolve the differences where the code moved. Run its checks again and fix what fails. If main does not need it (for example, the code was removed), leave the main checkout unchanged.',
         '- Do not change a read-only repository. Limn refuses its changes.',
+        `- ${portReportInstructionLine(o.root)}`,
       ]
     : [
         '- Build the pull requests in PLAN.md\'s order. Commit each one on its own branch:',

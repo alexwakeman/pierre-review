@@ -14,7 +14,8 @@
 //     past every candidate ships nothing and holds nothing (it is ready, just not in this release).
 // Authorship never changes a block (a bot PR on a not-done ticket blocks). A human PR with no ticket is
 // a WARNING; a bot PR with no ticket is listed under "Dependency and bot changes". A linked repo with
-// no pull request for the ticket is a warning. A pull request into any other branch (a hotfix branch)
+// no pull request for the ticket is a warning — unless it has one into another branch (`hotfix_only`: a
+// hotfix not needed on the default branch). A pull request into any other branch (a hotfix branch)
 // never counts — the caller marks it `intoDefaultBranch: false` and the stored ranges never hold it.
 //
 // RANGES are the stored per-tag INCREMENTS (previous default-branch tag, tag] (backend
@@ -240,7 +241,9 @@ export type ReleaseTicketRepoState =
   | 'released'
   | 'merged_after_candidate'
   | 'open_pr'
-  | 'linked_no_pr';
+  | 'linked_no_pr'
+  /** Linked, with pull requests into another branch only (a hotfix branch): no warning. */
+  | 'hotfix_only';
 
 export interface ReleaseTicketCheck {
   ident: string;
@@ -403,6 +406,14 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
     const into = p.state === 'merged' ? mergedByTicket : p.state === 'open' ? openByTicket : null;
     if (into == null) continue;
     for (const ident of new Set(p.ticketIdents)) into.set(ident, [...(into.get(ident) ?? []), p]);
+  }
+  // A ticket's open / merged PRs into ANOTHER branch (a hotfix branch). They never count toward a release;
+  // they only keep a linked repo from reading "no pull request" (a hotfix whose port report said main
+  // does not need it opens no default-branch PR there).
+  const otherBranchByTicket = new Map<string, ReleaseCheckPrInput[]>();
+  for (const p of input.prs) {
+    if (p.intoDefaultBranch || p.state === 'closed') continue;
+    for (const ident of new Set(p.ticketIdents)) otherBranchByTicket.set(ident, [...(otherBranchByTicket.get(ident) ?? []), p]);
   }
 
   // THE POPULATION: tickets on a PR in any repo's range after its baseline.
@@ -607,10 +618,11 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
         const c = cands.get(repoId)!;
         const m = merged.filter((p) => p.repoId === repoId);
         const o = open.filter((p) => p.repoId === repoId);
-        const prIds = [...o, ...m].map((p) => p.id);
+        const side = o.length === 0 && m.length === 0 ? (otherBranchByTicket.get(ident) ?? []).filter((p) => p.repoId === repoId) : [];
+        const prIds = [...o, ...m, ...side].map((p) => p.id);
         let state: ReleaseTicketRepoState;
         if (o.length > 0) state = 'open_pr';
-        else if (m.length === 0) state = 'linked_no_pr';
+        else if (m.length === 0) state = side.length > 0 ? 'hotfix_only' : 'linked_no_pr';
         else {
           const at = m.map((p) => posOf(prep, p));
           if (at.some((x) => x > c.coverIdx)) state = 'merged_after_candidate';

@@ -93,6 +93,8 @@ let ticketReads = 0;
 let releaseTurn: () => void = () => {};
 const held = new Promise<void>((r) => (releaseTurn = r));
 let extractAnswer: (path: string) => string = () => '';
+/** A hotfix build's port report as the sandbox holds it (null: no file). */
+let portReportAnswer: string | null = null;
 
 const ticket = (n: number) => ({
   ident: IDENT,
@@ -147,6 +149,12 @@ function scriptFake(rt: import('../runtime/fake.js').FakeRuntime): void {
   // The patch extraction, per repository path.
   rt.onExec((argv) => argv[0] === 'sh' && argv[2] === EXTRACT_SCRIPT, async (c) => {
     c.stdout(extractAnswer(c.argv[4]!));
+    return 0;
+  });
+  // A hotfix build's port report (sandbox/workspace/port-report.ts readPortReport).
+  rt.onExec((argv) => argv[0] === 'sh' && /test -f/.test(argv[2] ?? '') && (argv[4] ?? '').endsWith('/.limn/port-report.json'), async (c) => {
+    if (portReportAnswer == null) return 4;
+    c.stdout(portReportAnswer);
     return 0;
   });
   // Resume's restore.
@@ -561,6 +569,13 @@ describe('a hotfix build', () => {
         : path.endsWith('/api.main')
           ? out(MAIN_PATCH, ['src/export.ts'], 'fix: CSV export on main')
           : out(API_PATCH, ['src/export.ts'], 'chore: touched web');
+    // The agent's port report: api adapted (kept), web read only (not a hotfix repository: dropped, named).
+    portReportAnswer = JSON.stringify({
+      repos: [
+        { repo: 'acme/api', outcome: 'adapted', reason: 'Main builds the CSV in src/export.ts now.', evidence: ['src/export.ts'] },
+        { repo: 'acme/web', outcome: 'same' },
+      ],
+    });
     // The recorded stream answers a chat turn first, then the build (the flow above).
     expect((await post(`/api/story-builds/${id}/messages`, { text: 'Look at the release first.' })).statusCode).toBe(202);
     await until(id, (x) => x.session?.phase === 'ready' && x.session.agentState !== 'working', 'the chat turn');
@@ -572,6 +587,15 @@ describe('a hotfix build', () => {
     expect(repos.get('acme/web')).toMatchObject({ status: 'skipped', hasPatch: false, error: 'acme/web has no release yet, so it is read only in this hotfix build. Its changes were not kept.' });
     const notices = b.session!.conversation.filter((c) => c.kind === 'notice').map((c) => (c as { text: string }).text);
     expect(notices).toContain('Changes stored: acme/api (release fix and main fix).');
+    // The port report (acceptance 35): stored per repository, checked against the patches on read.
+    expect(repos.get('acme/api')?.hotfix?.port).toEqual({
+      claim: { outcome: 'adapted', reason: 'Main builds the CSV in src/export.ts now.', evidence: ['src/export.ts'] },
+      flag: null,
+      files: 'same',
+    });
+    expect(repos.get('acme/web')?.hotfix?.port).toBeNull();
+    expect(notices.some((n) => /The port report did not pass Limn's checks \("repos"\[1\]\.repo must be one of acme\/api\./.test(n))).toBe(true);
+    portReportAnswer = null;
     const main = (await get(`/api/story-builds/${id}/repos/${api}/diff?target=main`)).json();
     expect(main).toMatchObject({ target: 'main', baseSha: SHA.main, patch: MAIN_PATCH });
     // The review loop is never asked for a hotfix build.

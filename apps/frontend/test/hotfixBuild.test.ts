@@ -3,8 +3,8 @@
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/hotfixBuild.test.ts
 import { describe, expect, it } from 'vitest';
-import { hotfixBasesOf, type StoryBuildRepo, type StoryBuildRepoHotfix } from '@pierre-review/shared';
-import { HOTFIX_DIFF_LABEL, hotfixBaseLine, hotfixDiffTargets, hotfixMovedLine, hotfixPushWords } from '../src/lib/hotfix.js';
+import { hotfixPortClaimOf, hotfixPortOf, hotfixBasesOf, type StoryBuildRepo, type StoryBuildRepoHotfix } from '@pierre-review/shared';
+import { HOTFIX_DIFF_LABEL, hotfixBaseLine, hotfixDiffTargets, hotfixMovedLine, hotfixPortView, hotfixPushWords } from '../src/lib/hotfix.js';
 import { canPushRepo } from '../src/lib/storyBuild.js';
 
 const SETTINGS = { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' };
@@ -28,6 +28,7 @@ const hf = (over: Partial<StoryBuildRepoHotfix> = {}): StoryBuildRepoHotfix => (
   mainPushError: null,
   mainPushErrorCode: null,
   branch: null,
+  port: { claim: null, flag: null, files: null },
   ...over,
 });
 
@@ -100,5 +101,39 @@ describe('the repository card (acceptance 27, 28, 29)', () => {
       at: '2026-11-15T09:00:00.000Z',
     };
     expect(hotfixMovedLine(branch)).toBe('hotfix/v2.4.0-rc already exists. Already on it: #50 PLAT-201: Fix the totals.');
+  });
+});
+
+describe('the port report line (acceptance 34–37)', () => {
+  const port = (claim: Parameters<typeof hotfixPortClaimOf>[0] | null, mainFiles: string[]) =>
+    hotfixPortOf({ claim: claim ? hotfixPortClaimOf(claim) : null, releaseFiles: ['a.ts'], mainFiles, mainChanged: mainFiles.length > 0 });
+
+  it('34: same → "Applied to both", the files compared', () => {
+    const v = hotfixPortView(repo({ hotfix: hf({ port: port({ outcome: 'same', reason: 'ignored for same' }, ['a.ts']) }) }));
+    expect(v).toEqual({ line: 'Applied to both', outcome: 'same', flag: null, files: 'Both fixes change the same files.' });
+  });
+
+  it('35: adapted → the reason after the outcome', () => {
+    const v = hotfixPortView(repo({ hotfix: hf({ port: port({ outcome: 'adapted', reason: 'main moved the totals to src/money.ts.' }, ['src/money.ts']) }) }));
+    expect(v?.line).toBe('Applied to both, adapted for main — main moved the totals to src/money.ts.');
+    expect(v?.files).toBe('The two fixes have no file in common.');
+    expect(v?.flag).toBeNull();
+  });
+
+  it('36: not_needed with main unchanged → the reason, no flag', () => {
+    const v = hotfixPortView(repo({ hotfix: hf({ mainHasPatch: false, port: port({ outcome: 'not_needed', reason: 'The export code was removed in src/export/.' }, []) }) }));
+    expect(v).toEqual({ line: 'Not applied to main — The export code was removed in src/export/.', outcome: 'not_needed', flag: null, files: null });
+  });
+
+  it('37: a claim the patches contradict is flagged; no claim reads "No report from the agent"', () => {
+    expect(hotfixPortView(repo({ hotfix: hf({ port: port({ outcome: 'not_needed', reason: 'gone' }, ['a.ts']) }) }))?.flag).toBe('Says main does not need it, but changed main.');
+    expect(hotfixPortView(repo({ hotfix: hf({ mainHasPatch: false, port: port({ outcome: 'same' }, []) }) }))?.flag).toBe('Says it was ported, but main is unchanged.');
+    expect(hotfixPortView(repo({ hotfix: hf({ port: port(null, ['a.ts']) }) }))).toEqual({ line: 'No report from the agent', outcome: null, flag: null, files: 'Both fixes change the same files.' });
+  });
+
+  it('a read-only repository, or one with no change and no claim, has no line', () => {
+    expect(hotfixPortView(repo({ hotfix: hf({ readOnly: true, port: null }) }))).toBeNull();
+    expect(hotfixPortView(repo({ hasPatch: false, hotfix: hf({ mainHasPatch: false }) }))).toBeNull();
+    expect(hotfixPortView(repo({ hotfix: null }))).toBeNull();
   });
 });

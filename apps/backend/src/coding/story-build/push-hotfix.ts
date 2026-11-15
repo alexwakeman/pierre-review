@@ -1,6 +1,7 @@
 import {
   hotfixBranchState,
   hotfixPairLine,
+  hotfixPortBodyLine,
   hotfixPushTargets,
   type StoryBuildHotfixBranch,
   type StoryBuildRepoPushResult,
@@ -13,6 +14,7 @@ import {
   getStoryBuildRow,
   listStoryBuildRepoRows,
   storyBuildRepoNames,
+  storyBuildRepoPort,
   updateStoryBuildRepo,
   type StoryBuildRepoRow,
   type StoryBuildRow,
@@ -32,6 +34,9 @@ import type { PushRepoArgs } from './seams.js';
 //
 // Both titled `<KEY>: <title>`, draft by default (the toggle), `BRANCH_EXISTS` refused, push permission
 // re-checked. A second press pushes only what is left; once both PRs are open nothing more is written.
+// PR 2 opens only when the main fix changed something: a port report of `not_needed` with an unchanged main
+// checkout opens PR 1 alone. Both bodies carry the port report's one line (shared `hotfixPortBodyLine`) —
+// never when the patches contradict the claim (the tab shows that flag; Push stays the reader's call).
 
 const pushing = new Set<number>();
 
@@ -141,7 +146,18 @@ export function hotfixPrBody(
     closes: o.self === 'main' ? closesFor(build, o.includedRepos) : null,
   });
   const where = o.self === 'release' ? `**Release:** this fixes ${o.tagName}.` : `**Release:** this ports the fix for ${o.tagName} to ${o.defaultBranch}.`;
-  return [base, '', where, ...(o.paired ? [hotfixPairLine(o.self, { tagName: o.tagName, defaultBranch: o.defaultBranch, other: o.other })] : [])].join('\n');
+  // THE PORT REPORT's one line (the agent's claim; null when there is none or the patches contradict it).
+  // Untrusted model text: defanged like every other text sent to GitHub.
+  const port = storyBuildRepoPort(repo);
+  const portLine = hotfixPortBodyLine(port);
+  const adapted = port.flag == null && port.claim?.outcome === 'adapted';
+  return [
+    base,
+    '',
+    where,
+    ...(portLine != null ? [defangGithubText(portLine)] : []),
+    ...(o.paired ? [hotfixPairLine(o.self, { tagName: o.tagName, defaultBranch: o.defaultBranch, other: o.other, adapted })] : []),
+  ].join('\n');
 }
 
 export async function pushHotfixRepo(ctx: AgentContext, a: PushRepoArgs): Promise<StoryBuildRepoPushResult> {

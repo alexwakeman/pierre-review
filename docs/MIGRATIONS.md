@@ -1732,3 +1732,12 @@ erase and the export, with `verify:isolation` checks. Additive; journal idx 186,
 (Limn approved the plan itself) and `ticket_review_done_at` (the reader closed the ticket step after the
 build). Additive; journal idx 187, `when` `1792915200000`. [STORY-BUILD.md](STORY-BUILD.md) § Approve
 automatically.
+
+### `0195_story_build_port_report` — the hotfix port report
+
+`ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on
+the port to the default branch for one hotfix repository (`same` / `adapted` / `not_needed`, the reason, the
+evidence), as the host checked and clipped it; NULL = no report, never inferred. The contradiction flag and the
+files comparison are DERIVED on read (shared `hotfixPortOf`), never stored. An existing table, so erasure and
+export already cover it. Additive; journal idx 195, `when` `1793606400000`. [STORY-BUILD.md](STORY-BUILD.md)
+§ Hotfix builds → The port report; [RELEASES.md](RELEASES.md) § Port report.

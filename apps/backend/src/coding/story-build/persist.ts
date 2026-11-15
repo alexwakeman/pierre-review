@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, asc, notInArray } from 'drizzle-orm';
 import {
   aiRunProvider,
   hotfixBranchName,
+  hotfixPortOf,
   isFlowDiagram,
   isLegacyDesignDiagram,
   isStoryBuildOpen,
@@ -13,6 +14,7 @@ import {
   type StoryBuildPhase,
   type StoryBuildRepo,
   type StoryBuildRepoHotfix,
+  type StoryBuildHotfixPort,
   type StoryBuildRepoStatus,
   type StoryBuildStatus,
   type StoryBuildSummary,
@@ -350,7 +352,19 @@ export function toStoryBuildRepoHotfix(row: StoryBuildRepoRow, hotfixBuild: bool
     mainPushError: row.mainPushError ?? null,
     mainPushErrorCode: row.mainPushErrorCode ?? null,
     branch: row.hotfixBranchJson ?? null,
+    // THE PORT REPORT: the agent's claim, checked against the two stored patches (derived on read).
+    port: row.readOnly === true ? null : storyBuildRepoPort(row),
   };
+}
+
+/** One hotfix repository's port report (shared `hotfixPortOf` over the stored claim and the two patches). */
+export function storyBuildRepoPort(row: Pick<StoryBuildRepoRow, 'portReportJson' | 'filesChangedJson' | 'mainFilesChangedJson' | 'mainPatch' | 'patch'>): StoryBuildHotfixPort {
+  return hotfixPortOf({
+    claim: row.portReportJson ?? null,
+    releaseFiles: row.patch != null && row.patch.length > 0 ? (row.filesChangedJson ?? []) : [],
+    mainFiles: row.mainPatch != null && row.mainPatch.length > 0 ? (row.mainFilesChangedJson ?? []) : [],
+    mainChanged: row.mainPatch != null && row.mainPatch.length > 0,
+  });
 }
 
 // ---- the wire mapper --------------------------------------------------------------------------------

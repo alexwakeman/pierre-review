@@ -622,10 +622,28 @@ the story subject in `sandbox/session/manager.ts` (`hotfixBasesFor`, `extractHot
   is OFF. A repository without a release is READ ONLY, at the default branch.
 - **What the agent is told** (the ONE seed fold, `seed.ts` `hotfixSection`; an ordinary build's seed is
   byte-identical): the release checkouts, the main checkouts, the read-only repositories, and the order of work
-  — fix the release checkout and run its checks; port the fix to the main checkout (fetch and cherry-pick, or by
-  hand), resolve the differences, run the checks again; commit in both on `<KEY>`; plan ONE PR per repository.
-  The system prompt adds one line. After Approve, `planBuildInstruction({hotfix})` replaces the stack's branch
-  lines with the release-then-port steps. No Claude prompt golden changes (the goldens are ordinary builds).
+  — fix the release checkout and run its checks; READ the main checkout before porting (the code may be the
+  same, moved, rewritten or removed); port the fix there only when main needs it (fetch and cherry-pick, or by
+  hand), resolve the differences, run the checks again; commit in both on `<KEY>`; plan ONE PR per repository;
+  finish with the PORT REPORT (below). The system prompt adds one line. After Approve,
+  `planBuildInstruction({hotfix})` replaces the stack's branch lines with the release-then-port steps; without a
+  plan, `buildInstruction({hotfix})` adds two lines. No Claude prompt golden changes (the goldens are ordinary
+  builds; an ordinary seed and build instruction are byte-identical).
+- **The port report** (`sandbox/workspace/port-report.ts`, the build-report.ts pattern; shared `hotfixPortOf`).
+  The agent ends every build turn with `<root>/.limn/port-report.json` — `{repos: [{repo, outcome: same |
+  adapted | not_needed, reason, evidence?}]}`, `reason` REQUIRED for adapted (what differs on main) and
+  not_needed (why main does not need it) — and checks it with `node ~/.limn/port-report-check.cjs` (copied in by
+  the hotfix seed with `.limn/port-context.json`, the release repositories). The same file and checker for Claude
+  and Codex. After every build turn `extractHotfix` reads it and runs THE SAME validator text against the HOST's
+  list of hotfix repositories: an unknown or read-only repository, a duplicate, a missing reason or an over-long
+  field drops THAT entry (one notice names the first problem); a kept reason is one clipped line (≤ 600
+  characters, shared `hotfixPortClaimOf`). A file that reads replaces every hotfix row's claim (`port_report_json`;
+  a repository it leaves out → NULL); a missing or unreadable file leaves the stored claims. ⚠ A SELF-REPORT and
+  UNTRUSTED TEXT, never a gate: no report ⇒ "No report from the agent" (never inferred from the patches). ON
+  READ the claim is checked against the FACTS — the two stored patches, never test results: `not_needed` with a
+  main change → `not_needed_but_changed` ("Says main does not need it, but changed main."); `same` / `adapted`
+  with an unchanged main → `ported_but_unchanged` ("Says it was ported, but main is unchanged."); plus the files
+  the two fixes change (the same / some differ / none in common). Wire: `StoryBuildRepo.hotfix.port`.
 - **Plan first works as usual**, except that Approve writes NO `story_build_prs` rows (`approvePlanRevision
   {writePrs: false}`): the build is pushed per repository, never as a stack.
 - **Extraction** (`extractHotfix`, after every build turn): each repository's TWO checkouts — the RELEASE FIX
@@ -640,17 +658,28 @@ the story subject in `sandbox/session/manager.ts` (`hotfixBasesFor`, `extractHot
      422 is "it exists", read again). When it has MOVED past the release commit, PR 1 still targets it and the
      open PRs already on it are recorded (`hotfix_branch_json`), so the tab names them.
   2. PR 1 `<KEY>` → `hotfix/<tag>`: the release fix on the release commit.
-  3. PR 2 `<KEY>-main` → the default branch: the main fix on its base.
+  3. PR 2 `<KEY>-main` → the default branch: the main fix on its base — ONLY when the main fix changed something
+     (a `not_needed` report with an unchanged main checkout opens PR 1 alone: no `<KEY>-main` branch).
   4. PR 1's body edited ONCE to link PR 2 (PR 2's links PR 1 from the start). A failed edit is logged, never retried.
   Both titled `<KEY>: <title>`, draft by default (the toggle), `applyAndPushBranch`'s rules (`BRANCH_EXISTS`
   refused, never forced; the default branch, `hotfix/<tag>`, the tag and the pair's other branch protected),
   push permission re-checked. A rename (`branch`) is refused; a read-only repository is `skipped READ_ONLY`. A
   second press pushes only what is left; once every fix with a change has its PR the row is `pushed` and
-  NOTHING more is written for that build. `Closes …` goes on the default-branch PR only.
+  NOTHING more is written for that build. `Closes …` goes on the default-branch PR only. Both bodies carry the
+  port report's ONE line (shared `hotfixPortBodyLine`, defanged): `**Port:** Applied to both.`, `**Port:** Applied
+  to both, adapted for main: <reason>` (the pair line then says "the fix", not "the same fix") or `**Port:** Not
+  applied to main: <reason>` — and NONE when there is no report or the patches contradict it. A flagged repository
+  is still pushable: the reader decides.
 - **The tab** (`BuildSection.tsx`): per repository "from the release <tag> and main" (or "read only: no
   release yet"), two diffs, **Release fix** and **Main fix** (`GET …/repos/:repoId/diff?target=main`), Push
   ("Push both as drafts"), both PR links once open, and the moved-branch line ("hotfix/v2.4.0-rc has moved past
-  the release, … Already on it: #12 …").
+  the release, … Already on it: #12 …"). Before Push, the port line (`lib/hotfix.ts hotfixPortView`): "Applied to
+  both", "Applied to both, adapted for main — <reason>", "Not applied to main — <reason>" or "No report from the
+  agent", the files compared under it, an ⓘ ("The port to main"), and a contradiction flag (`WarningIcon`) beside
+  the Push button (under the line once Push is not shown).
+- **The release check**: a hotfix PR into `hotfix/<tag>` never counts toward a release; a linked repository whose
+  only PRs for the ticket go into another branch reads `hotfix_only` (no `linked_no_pr` warning), so a `not_needed`
+  hotfix with no default-branch PR neither blocks nor warns.
 
 ## The builds toast (`components/StoryBuild/StoryBuildsToast.tsx`)
 

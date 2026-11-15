@@ -989,6 +989,10 @@ which shares the repository's sweep key), `main_sandbox_path`, `main_patch` (+ `
 `hotfix_branch_json` (shared `StoryBuildHotfixBranch`: `hotfix/<tag>` made or found, moved past the release, the
 open PRs already on it). The row's `status` is `ready` when either fix has a change, `pushed` once every fix with a
 change has its PR. No new table: the erase and export cover the columns with their rows.
+`port_report_json` (migration `0195`; shared `HotfixPortClaim`): THE PORT REPORT — the agent's word on the port to the
+default branch (`same` / `adapted` / `not_needed`, a one-line reason, evidence paths), host-checked and clipped,
+replaced after each build turn whose report file reads; NULL = no report (never inferred). Untrusted model text. The
+contradiction flag and the files comparison are DERIVED on read (shared `hotfixPortOf`), never stored.
 
 **THE REVIEW LOOP** (migration `0186`; [STORY-BUILD.md](STORY-BUILD.md) § The review loop). On
 `story_builds`: `loop_rounds` (N, default 3, 1..6), `loop_state` (shared `StoryBuildLoopState`; NULL =

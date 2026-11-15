@@ -112,6 +112,7 @@ import type { LayoutPlaces } from '../workspace/check.js';
 import type { MirrorSeams } from '../workspace/mirror.js';
 import type { StoreSeams } from '../workspace/store.js';
 import { ticketMarkdown } from '../workspace/seed.js';
+import { portClaimsOf, portReportInstructionLine, readPortReport } from '../workspace/port-report.js';
 import { listPlanRows, listPlannedPrRows, toStoryBuildPr } from '../../coding/story-build/plan-persist.js';
 import { storedServiceRuns, type ServiceRunRecord } from '../services/run-log.js';
 import { AUTO_APPROVE_BUSY_LINE, PLAN_SENT_LINE, PlanStage, planBuildInstruction, planMessageText, planViewOf, type PlanLive, type PlanMachine } from './plan.js';
@@ -156,11 +157,18 @@ const TURN_STOP_GRACE_MS = 60_000;
 const STOP_TURN_WAIT_MS = 30_000;
 
 /** The build turn's instruction. The ticket and the rules are in the seed; this only starts the work. */
-export function buildInstruction(o: { ticketChanged: boolean; extra: string | null }): string {
+export function buildInstruction(o: { ticketChanged: boolean; extra: string | null; hotfix?: { root: string } | null }): string {
   const lines = [
     'Start the build now. Implement the ticket in TICKET.md in the repositories of this workspace.',
     "Run each changed repository's own tests, and use limn-svc for the services they need.",
     'Commit your work on the session branch in each repository you change.',
+    // A HOTFIX build only (docs/STORY-BUILD.md § Hotfix builds): every other build's instruction is unchanged.
+    ...(o.hotfix
+      ? [
+          'This is a hotfix build: fix each release checkout first, then read its main checkout and port the fix there only when main needs it ("Hotfix" in CLAUDE.md and AGENTS.md).',
+          portReportInstructionLine(o.hotfix.root),
+        ]
+      : []),
     'End with one line per acceptance criterion: done, partly done or not done, and why.',
   ];
   if (o.ticketChanged) lines.unshift('TICKET.md was read again just now and the acceptance criteria changed. Read it again first.');
@@ -2081,7 +2089,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
         });
       }
       const ticketChanged = await rereadTicket(l);
-      return buildInstruction({ ticketChanged, extra });
+      return buildInstruction({ ticketChanged, extra, ...(hotfixBuild ? { hotfix: { root: l.layoutRoot ?? '/workspace' } } : {}) });
     },
     afterBuildTurn: async (l0) => {
       const l = l0 as Live;
@@ -2198,10 +2206,24 @@ async function extractHotfix(l: Live, buildId: number): Promise<void> {
       return { error: err instanceof PatchTooLargeError ? err.message : scrub(err), tooLarge: err instanceof PatchTooLargeError };
     }
   };
+  // THE PORT REPORT (sandbox/workspace/port-report.ts): the agent's word per hotfix repository, checked
+  // against the HOST's list. Read: each repository's entry (or null: not reported) replaces the stored one.
+  // Missing or unreadable: the stored claims stay (the file stays between turns; nothing is inferred).
+  const hotfixNames = rows.filter((r) => !r.readOnly && r.hotfixTag != null).map((r) => names.get(r.repoId)).filter((n): n is string => n != null);
+  let claims: ReturnType<typeof portClaimsOf> | null = null;
+  if (l.container && l.layoutRoot && hotfixNames.length > 0) {
+    const got = await readPortReport(l.runtime, l.container, l.layoutRoot, { repos: hotfixNames });
+    if (got.kind === 'ok') {
+      claims = portClaimsOf(got.check);
+      if (got.check.problems.length > 0) notice(l, `The port report did not pass Limn's checks (${got.check.problems[0]}), so those entries are left out.`);
+    } else if (got.kind === 'unreadable') notice(l, got.reason);
+    else notice(l, 'The agent wrote no port report.');
+  }
   for (const row of rows) {
     if (!row.sandboxPath || row.status === 'pushed' || !l.container) continue;
     const name = names.get(row.repoId) ?? `#${row.repoId}`;
     const set: StoryBuildRepoSet = { error: null };
+    if (claims != null && !row.readOnly && row.hotfixTag != null) set.portReportJson = claims.get(name) ?? null;
     let releaseReady = false;
     let mainReady = false;
     const rel = await read(row.sandboxPath);

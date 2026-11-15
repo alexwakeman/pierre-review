@@ -125,12 +125,27 @@ worker  no release yet — read only
 - The agent fixes the release checkout, runs the tests, then PORTS the fix to a `main` checkout in the
   same sandbox, resolves differences and runs the tests again. Each repo shows two diffs: "Release fix"
   and "Main fix". A repo without a release is read-only for the build.
+- **The port report.** The release and `main` may have diverged: the fix may not be needed on `main` (the
+  code was removed) or may need to be different there. Before porting, the agent reads the `main` checkout;
+  at the end it reports per repo one of **Applied to both** (the same fix), **Applied to both, adapted for
+  main** (what differs) or **Not applied to main** (why). Test passes are not the measure. Limn checks the
+  claim against the two diffs (not against tests) and flags a contradiction: "Says main does not need it,
+  but changed main." / "Says it was ported, but main is unchanged." No report reads "No report from the
+  agent" — never inferred. The tab shows one line per repo before Push:
+  ```
+  api     Applied to both
+  web     Applied to both, adapted for main — main builds totals in src/money.ts
+  worker  Not applied to main — the export code was removed in src/export/
+  ```
 - Plan first works as usual. The review loop and "Build end to end" are OFF for hotfix builds (v1).
 - **Push** (reader's press, per repo): create `hotfix/<latest release tag>` at the release commit if
   missing; open PR 1 from `<KEY>` into it and PR 2 from `<KEY>-main` into `main`. Both titled
   `<KEY>: <title>`; each body links the other; draft by default (the existing toggle); the usual Push
   rules (reader's PR, `BRANCH_EXISTS` refused, permission re-checked). If the hotfix branch exists and
   has moved past the release commit, PR 1 still targets it and the tab names the PRs already on it.
+  **Not applied to main** with an unchanged `main` checkout opens PR 1 only (no `<KEY>-main` branch), its
+  body saying "Not applied to main: <reason>". Otherwise both bodies carry the one-line outcome (+ the reason
+  when adapted). A repo with a contradiction flag can still be pushed; the reader decides.
 - After the PRs open, Limn writes NOTHING more for that build.
 
 ## Invariants this feature adds
@@ -194,6 +209,17 @@ Hotfix
 Notes
 32. AI off: complete minus summaries. AI on: a summary per story, no model-written numbers.
 33. No output contains the word "Limn".
+
+Port report
+34. The agent reports **Applied to both**: the tab reads "Applied to both"; Push opens two PRs, both bodies
+    saying "Applied to both."
+35. **Adapted for main**: the tab reads "Applied to both, adapted for main — <reason>"; both PR bodies carry the
+    reason.
+36. **Not applied to main** with an unchanged `main` checkout: the tab reads "Not applied to main — <reason>"; Push
+    opens PR 1 only, its body says "Not applied to main: <reason>"; the ticket neither blocks nor warns in the
+    release check for that repo.
+37. A claim the diffs contradict (not needed but `main` changed, or ported but `main` unchanged) shows the flag
+    beside Push; Push still works and sends no outcome line. No report reads "No report from the agent".
 
 ## Implementation
 
@@ -473,3 +499,36 @@ The flow and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds.
   `sync/repo-tags.test.ts` (never-asked first, inherited ancestry), `releases/create.test.ts` (whole-workspace
   check, failed-tag re-press, a claimed earlier row, no empty release), `coding/story-build/push-hotfix-db.test.ts`
   and `apps/frontend/test/hotfixBuild.test.ts` (acceptance 29 at the release commit), `rate-limit.test.ts`.
+
+### Port report
+
+The agent's per-repository verdict on the port to the default branch, checked against the two diffs. The flow
+and its rules: [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds → The port report.
+
+- **Migration `0195_story_build_port_report`** (registered in the journal): `story_build_repos.port_report_json`
+  (shared `HotfixPortClaim`; NULL = no report). The flag and the files comparison are derived on read.
+- **Shared** `packages/shared/src/hotfix.ts`: `HotfixPortOutcome` (`same` / `adapted` / `not_needed`),
+  `HotfixPortClaim`, `hotfixPortClaimOf` + `hotfixPortText` (the host's clip: one line, reason ≤ 600 characters,
+  ≤ 10 evidence entries of ≤ 200), THE FOLD `hotfixPortOf` (the claim vs the patches: `not_needed_but_changed`,
+  `ported_but_unchanged`; `hotfixPortFilesOf`: `same` / `some_differ` / `none_in_common`), the words
+  (`HOTFIX_PORT_OUTCOME_WORDS`, `HOTFIX_PORT_FLAG_WORDS`, `HOTFIX_PORT_FILES_WORDS`, `HOTFIX_PORT_NO_REPORT`,
+  `hotfixPortLine`), the PR body's `hotfixPortBodyLine` (null with no claim or a flag), `hotfixPairLine({adapted})`,
+  the wire `StoryBuildHotfixPort` on `StoryBuildRepoHotfix.port`. `release-check.ts`: the repo state `hotfix_only`.
+- **Backend**: `sandbox/workspace/port-report.ts` (`PORT_REPORT_VALIDATOR_SOURCE` — ONE validator for the
+  sandbox checker and the host — `validatePortReport`, `portClaimsOf`, `portReportFiles`, `readPortReport`,
+  `portReportInstructionLine`); `seed.ts` (the hotfix section's investigate-then-port steps and the report, the
+  checker + context files, one system-prompt line — hotfix only); `plan.ts planBuildInstruction({hotfix})` and
+  `manager.ts buildInstruction({hotfix})` (the report line); `manager.ts extractHotfix` (reads, checks and
+  stores the claims); `persist.ts storyBuildRepoPort` (the wire); `push-hotfix.ts hotfixPrBody` (the body line).
+- **Frontend**: `lib/hotfix.ts hotfixPortView`; `BuildSection.tsx` (the line, the files, the ⓘ, the flag beside
+  Push); `releasesModel.ts ticketRepoMark('hotfix_only')` ("hotfix only").
+- **User docs**: `/docs/implement-story/hotfix` § The port report; CHANGELOG Unreleased.
+- **Tests**: `coding/story-build/hotfix-port.test.ts` (34–37 over the fold; the validator and the host's clip;
+  the checker run in Node; the seed and build instructions — hotfix only, an ordinary build byte-identical; the
+  release check's `hotfix_only`), `coding/story-build/push-hotfix-db.test.ts` (34–37 through Push: PR 1 alone with
+  its reason, defanged; both bodies; a flagged claim not sent; no report), `sandbox/session/session-flow-db.test.ts`
+  § a hotfix build (the report read from the sandbox and stored; an entry for a read-only repository dropped and
+  named), `apps/frontend/test/hotfixBuild.test.ts` (34–37: the tab's lines).
+- **Deviations:** the report is a FILE the agent writes and checks (as the build and fix reports are), not a
+  tool call, so Claude and Codex share one handler. A `not_needed` repository whose main checkout changed still
+  opens both PRs (the patches win; the flag says so). The landing's build-tab mock still shows no hotfix build.

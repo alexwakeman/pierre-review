@@ -22,6 +22,9 @@ no internals.
 - Implement → "Treat as a hotfix": the agent fixes your latest release, then ports the fix to the default branch in
   the same sandbox. Push opens two pull requests per repository, one into `hotfix/<tag>` and one into the default
   branch, each linking the other.
+- Implement → a hotfix build ends with a port report per repository: "Applied to both", "Applied to both, adapted for
+  main" or "Not applied to main", with the agent's reason. When main does not need the fix, Push opens only the pull
+  request into `hotfix/<tag>`. The build tab says when the report and the two diffs disagree.
 
 ## [1.0.31] - 2026-11-12
 

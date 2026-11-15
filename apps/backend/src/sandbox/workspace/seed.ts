@@ -28,6 +28,7 @@ import { WRITING_RULES } from '../../ai/writing-rules.js';
 import type { FileToCopy } from '../runtime/types.js';
 import { FIX_REFS_FILE, FIX_REPORT_CHECKER, FIX_REPORT_FILE, fixReportCheckerSource } from './fix-report.js';
 import { PLAN_CHECKER, PLAN_CONTEXT_FILE, planCheckerSource, type PlanContextFile } from './plan-check.js';
+import { PORT_REPORT_CHECKER, PORT_REPORT_FILE, portReportFiles } from './port-report.js';
 import type { WorkspaceLayout } from './layout.js';
 import type { SessionTicket } from './ticket.js';
 
@@ -363,10 +364,12 @@ function hotfixSection(i: SeedInput, h: SeedHotfix): string {
     '',
     numbered([
       'Fix the release checkout of each repository you change. Run its checks and fix what fails.',
-      `Port the fix to the main checkout of the same repository. For example, fetch the commits from the release checkout (\`git -C <main checkout> fetch <release checkout> ${i.branch}\`) and cherry-pick them, or make the change by hand. Resolve the differences where the code moved. Run the checks again and fix what fails.`,
-      `Commit in both checkouts on the branch \`${i.branch}\`. Limn makes two pull requests for each repository: one into the release's \`hotfix/<tag>\` branch, one into the default branch.`,
+      'Before you port, read the main checkout of the same repository. Find the code the release fix changes. The default branch can be far from the release: that code can be the same, moved, rewritten or removed. Passing tests do not show that main needs the fix.',
+      `If main needs the fix, port it to the main checkout. For example, fetch the commits from the release checkout (\`git -C <main checkout> fetch <release checkout> ${i.branch}\`) and cherry-pick them, or make the change by hand. Resolve the differences where the code moved. Run the checks again and fix what fails. If main does not need the fix (for example, the code was removed), do not change the main checkout.`,
+      `Commit in both checkouts on the branch \`${i.branch}\`. Limn makes a pull request into the release's \`hotfix/<tag>\` branch for each repository, and one into the default branch when the main checkout changed.`,
       'In the plan, put ONE pull request per repository you change in `stack`. The port to the main checkout is part of that pull request.',
       'In the report, say for each repository what the port changed and the result of the checks in both checkouts.',
+      `Finish with the port report: write \`${posix.join(i.layout.root, PORT_REPORT_FILE)}\` with one entry per repository you fixed: \`{ "repos": [ { "repo": "owner/name", "outcome": "same" | "adapted" | "not_needed", "reason": "…", "evidence": ["path or commit", …] } ] }\`. \`same\`: the same fix on the release and on main. \`adapted\`: main needed a materially different fix; the reason says what is different. \`not_needed\`: main does not need the fix and the main checkout is unchanged; the reason says why (for example, "the code was removed in src/billing/"). \`evidence\` lists the paths or commits you read. Check it with \`node ${PORT_REPORT_CHECKER}\` until it prints OK.`,
     ]),
   );
   return out.join('\n');
@@ -536,7 +539,7 @@ function systemPromptOf(i: SeedInput, provider: AiProviderId): string {
     `You are in a Limn workspace session for the ticket ${i.ticket.key}. Read \`${own}\` and \`${posix.join(i.layout.root, 'TICKET.md')}\` before anything else.`,
     i.planFirst ? 'Until the reader approves the plan, read and plan only: do not change files.' : 'Until the reader starts the build, read and plan only: do not change files.',
     `Never push or add a remote. Commit your work on \`${i.branch}\`. Report per acceptance criterion at the end of the build.`,
-    ...(i.hotfix ? ['This is a hotfix build: fix each release checkout first, then port the fix to its main checkout ("Hotfix" in that file). Never change a read-only repository.'] : []),
+    ...(i.hotfix ? ['This is a hotfix build: fix each release checkout first, then read its main checkout and port the fix there when main needs it ("Hotfix" in that file). End with the port report. Never change a read-only repository.'] : []),
   ].join(' ');
 }
 
@@ -645,6 +648,8 @@ export function buildSeed(i: SeedInput | FixSeedBuildInput): Seed {
       { path: PLAN_CHECKER, content: planCheckerSource({ contextFile }), mode: 0o755 },
     );
   }
+  // A HOTFIX build's port report: its checker and the repositories it may name (the release checkouts).
+  if (i.hotfix) files.push(...portReportFiles(i.layout.root, { repos: i.hotfix.repos.filter((r) => r.release != null).map((r) => r.fullName) }));
   return { files, claudeMd, agentsMd, ticketMd, systemPrompts: { claude: systemPromptOf(i, 'claude'), codex: systemPromptOf(i, 'codex') } };
 }
 

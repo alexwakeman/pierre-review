@@ -1,4 +1,11 @@
-import type { StoryBuildHotfixBase, StoryBuildHotfixBranch, StoryBuildRepo } from '@pierre-review/shared';
+import {
+  HOTFIX_PORT_FILES_WORDS,
+  HOTFIX_PORT_FLAG_WORDS,
+  hotfixPortLine,
+  type StoryBuildHotfixBase,
+  type StoryBuildHotfixBranch,
+  type StoryBuildRepo,
+} from '@pierre-review/shared';
 
 // HOTFIX BUILDS in the build tab (docs/STORY-BUILD.md § Hotfix builds; docs/RELEASES.md § Hotfix). Pure words:
 // the Start panel's base list, the two diffs' labels, the moved-branch line and the push button.
@@ -51,4 +58,23 @@ export function hotfixPushWords(r: Pick<StoryBuildRepo, 'hasPatch' | 'pushedPrNu
   const main = r.hotfix?.mainHasPatch === true && r.hotfix.mainPushedPrNumber == null;
   if (release && main) return draft ? 'Push both as drafts' : 'Push both';
   return draft ? 'Push as draft' : 'Push';
+}
+
+/** THE PORT REPORT of one hotfix repository card (docs/STORY-BUILD.md § Hotfix builds → The port report): the
+ *  agent's outcome line ("Applied to both", "Applied to both, adapted for main — <reason>", "Not applied to
+ *  main — <reason>", or "No report from the agent"), the contradiction flag, the files compared. Null on a
+ *  read-only repository and on one with neither a change nor a claim. */
+export function hotfixPortView(
+  r: Pick<StoryBuildRepo, 'hasPatch' | 'hotfix'>,
+): { line: string; outcome: 'same' | 'adapted' | 'not_needed' | null; flag: string | null; files: string | null } | null {
+  const hf = r.hotfix;
+  if (hf == null || hf.readOnly || hf.port == null) return null;
+  const p = hf.port;
+  if (p.claim == null && !r.hasPatch && !hf.mainHasPatch) return null;
+  return {
+    line: hotfixPortLine(p.claim),
+    outcome: p.claim?.outcome ?? null,
+    flag: p.flag != null ? HOTFIX_PORT_FLAG_WORDS[p.flag] : null,
+    files: p.files != null ? HOTFIX_PORT_FILES_WORDS[p.files] : null,
+  };
 }

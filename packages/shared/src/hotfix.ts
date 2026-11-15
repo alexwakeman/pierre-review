@@ -148,12 +148,147 @@ export function hotfixBranchState(liveSha: string | null, releaseSha: string): '
  */
 export function hotfixPairLine(
   self: 'release' | 'main',
-  o: { tagName: string; defaultBranch: string; other: { number: number; url: string | null } | null },
+  o: {
+    tagName: string;
+    defaultBranch: string;
+    other: { number: number; url: string | null } | null;
+    /** The port report says main needed a different fix ("the fix", not "the same fix"). */
+    adapted?: boolean;
+  },
 ): string {
   const where = self === 'release' ? o.defaultBranch : `the release ${o.tagName}`;
-  if (o.other == null) return `**Hotfix:** the same fix for ${where} follows in its own pull request.`;
+  const fix = o.adapted === true ? 'the fix' : 'the same fix';
+  if (o.other == null) return `**Hotfix:** ${fix} for ${where} follows in its own pull request.`;
   const link = o.other.url != null && /^https?:\/\/[^\s<>()]+$/i.test(o.other.url) ? `[#${o.other.number}](${o.other.url})` : `#${o.other.number}`;
-  return `**Hotfix:** the same fix for ${where} is ${link}.`;
+  return `**Hotfix:** ${fix} for ${where} is ${link}.`;
+}
+
+// ── The port report ────────────────────────────────────────────────────────────────────────────────
+//
+// At the end of a hotfix build the AGENT says, per repository, what the port to the default branch came to
+// (the sandbox's `.limn/port-report.json`, checked by the host: sandbox/workspace/port-report.ts):
+//
+//   same        Applied to both: the same fix on the release and on main.
+//   adapted     Applied to both, adapted for main: main needed a materially different fix (the reason says how).
+//   not_needed  Not applied to main: main no longer needs it (the reason says why, e.g. the code was removed).
+//
+// ⚠ A SELF-REPORT. The host never infers an outcome: no report ⇒ "No report from the agent" (unknown is not
+// zero). It checks the claim against the FACTS it has — the two stored patches — and flags a contradiction;
+// the reader decides (Push stays allowed). Test results are not the measure: tests may not apply to both.
+
+export type HotfixPortOutcome = 'same' | 'adapted' | 'not_needed';
+export const HOTFIX_PORT_OUTCOMES: readonly HotfixPortOutcome[] = ['same', 'adapted', 'not_needed'];
+/** A reason is clipped to this many characters (one plain sentence or two). */
+export const HOTFIX_PORT_REASON_MAX = 600;
+/** At most this many evidence entries (paths or commits the agent looked at), each at most `…_ITEM_MAX`. */
+export const HOTFIX_PORT_EVIDENCE_MAX = 10;
+export const HOTFIX_PORT_EVIDENCE_ITEM_MAX = 200;
+
+/** The agent's claim for one repository, as the host stored it (`story_build_repos.port_report_json`). */
+export interface HotfixPortClaim {
+  outcome: HotfixPortOutcome;
+  /** One line; required for `adapted` / `not_needed`, optional for `same`. Untrusted model text. */
+  reason: string | null;
+  /** Paths or commits the agent looked at. Untrusted model text. */
+  evidence: string[];
+}
+
+/** A claim the stored patches contradict. */
+export type HotfixPortFlag = 'not_needed_but_changed' | 'ported_but_unchanged';
+/** The files the two fixes change: the same set, some differ, or none in common. */
+export type HotfixPortFiles = 'same' | 'some_differ' | 'none_in_common';
+
+/** One repository's port report on the wire (`StoryBuildRepoHotfix.port`). Derived on read, never stored. */
+export interface StoryBuildHotfixPort {
+  /** null ⇒ no report from the agent for this repository. */
+  claim: HotfixPortClaim | null;
+  flag: HotfixPortFlag | null;
+  /** null when either fix changes nothing (nothing to compare). */
+  files: HotfixPortFiles | null;
+}
+
+/** One line of untrusted text: whitespace collapsed, control characters dropped, clipped. Pure. */
+export function hotfixPortText(text: string, max: number): string {
+  // eslint-disable-next-line no-control-regex -- dropping control characters is the point.
+  const one = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return one.length <= max ? one : `${one.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** The host's form of a claim (pure): reason and evidence as one-line, clipped text; empty ⇒ null / dropped. */
+export function hotfixPortClaimOf(o: { outcome: HotfixPortOutcome; reason?: string | null; evidence?: readonly string[] | null }): HotfixPortClaim {
+  const reason = o.reason != null ? hotfixPortText(o.reason, HOTFIX_PORT_REASON_MAX) : '';
+  const evidence = (o.evidence ?? [])
+    .map((e) => hotfixPortText(e, HOTFIX_PORT_EVIDENCE_ITEM_MAX))
+    .filter((e) => e !== '')
+    .slice(0, HOTFIX_PORT_EVIDENCE_MAX);
+  return { outcome: o.outcome, reason: reason === '' ? null : reason, evidence };
+}
+
+/** Which files the two fixes change, compared (pure). null when either changes nothing. */
+export function hotfixPortFilesOf(releaseFiles: readonly string[], mainFiles: readonly string[]): HotfixPortFiles | null {
+  if (releaseFiles.length === 0 || mainFiles.length === 0) return null;
+  const rel = new Set(releaseFiles);
+  const main = new Set(mainFiles);
+  const common = [...rel].filter((f) => main.has(f)).length;
+  if (common === 0) return 'none_in_common';
+  return common === rel.size && common === main.size ? 'same' : 'some_differ';
+}
+
+/**
+ * THE PORT REPORT of one repository (pure): the agent's claim, checked against the stored patches.
+ * `not_needed` with a main change, or `same` / `adapted` with none, is FLAGGED. No claim ⇒ no flag (nothing
+ * is inferred). `mainChanged` = the main fix's patch is not empty.
+ */
+export function hotfixPortOf(o: {
+  claim: HotfixPortClaim | null;
+  releaseFiles: readonly string[];
+  mainFiles: readonly string[];
+  mainChanged: boolean;
+}): StoryBuildHotfixPort {
+  const c = o.claim;
+  const flag: HotfixPortFlag | null =
+    c == null ? null : c.outcome === 'not_needed' ? (o.mainChanged ? 'not_needed_but_changed' : null) : o.mainChanged ? null : 'ported_but_unchanged';
+  return { claim: c, flag, files: hotfixPortFilesOf(o.releaseFiles, o.mainFiles) };
+}
+
+/** The outcome in words. */
+export const HOTFIX_PORT_OUTCOME_WORDS: Readonly<Record<HotfixPortOutcome, string>> = {
+  same: 'Applied to both',
+  adapted: 'Applied to both, adapted for main',
+  not_needed: 'Not applied to main',
+};
+/** The line when the agent gave no report for a repository. */
+export const HOTFIX_PORT_NO_REPORT = 'No report from the agent';
+
+/** The tab's line (pure): "Applied to both", "Applied to both, adapted for main — <reason>", … */
+export function hotfixPortLine(claim: HotfixPortClaim | null): string {
+  if (claim == null) return HOTFIX_PORT_NO_REPORT;
+  const words = HOTFIX_PORT_OUTCOME_WORDS[claim.outcome];
+  return claim.reason != null && claim.outcome !== 'same' ? `${words} — ${claim.reason}` : words;
+}
+
+/** A contradiction in words. */
+export const HOTFIX_PORT_FLAG_WORDS: Readonly<Record<HotfixPortFlag, string>> = {
+  not_needed_but_changed: 'Says main does not need it, but changed main.',
+  ported_but_unchanged: 'Says it was ported, but main is unchanged.',
+};
+
+/** The files compared, in words. */
+export const HOTFIX_PORT_FILES_WORDS: Readonly<Record<HotfixPortFiles, string>> = {
+  same: 'Both fixes change the same files.',
+  some_differ: 'Some files differ between the two fixes.',
+  none_in_common: 'The two fixes have no file in common.',
+};
+
+/**
+ * The one line both PR bodies carry (pure; the caller defangs it for GitHub). Null when there is no claim or
+ * the claim is FLAGGED: a claim the patches contradict is not sent to GitHub.
+ */
+export function hotfixPortBodyLine(port: StoryBuildHotfixPort | null): string | null {
+  if (port?.claim == null || port.flag != null) return null;
+  const c = port.claim;
+  const words = HOTFIX_PORT_OUTCOME_WORDS[c.outcome];
+  return `**Port:** ${c.reason != null && c.outcome !== 'same' ? `${words}: ${c.reason}` : `${words}.`}`;
 }
 
 // ── The wire ───────────────────────────────────────────────────────────────────────────────────────
@@ -182,6 +317,8 @@ export interface StoryBuildRepoHotfix {
   mainPushErrorCode: string | null;
   /** Push's record of `hotfix/<tag>`; null before the first push. */
   branch: StoryBuildHotfixBranch | null;
+  /** The port report (the agent's claim, checked against the two patches); null on a read-only repository. */
+  port: StoryBuildHotfixPort | null;
 }
 
 /** "Release fix" / "Main fix" — the two diffs of one repository. */

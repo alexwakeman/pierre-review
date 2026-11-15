@@ -204,7 +204,7 @@ describe('the seed (one fold, sandbox/workspace/seed.ts)', () => {
     expect(plain).toContain('- P1: `PLAT-290` in acme/api');
     const hf = planBuildInstruction({ ...o, hotfix: { branch: 'PLAT-290' } });
     expect(hf).toContain('in BOTH checkouts');
-    expect(hf).toContain('Port the fix to the main checkout');
+    expect(hf).toContain('If main needs the fix, port it there');
     expect(hf).not.toContain('- P1: `PLAT-290` in acme/api');
   });
 });

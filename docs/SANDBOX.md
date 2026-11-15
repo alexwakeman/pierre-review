@@ -1019,7 +1019,9 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   made from the previous one in its repository) and asks for THE BUILD REPORT (`workspace/build-report.ts`,
   the fix-report pattern: ONE validator text, `~/.limn/build-report-check.cjs`, read out after every build
   turn; a self-report, never a gate). Seed rule 3 says to commit each planned PR on the branch PLAN.md
-  names. A build turn that hit the turn cap (`max_turns`) with work unfinished gets ≤ 2 automatic
+  names. A HOTFIX build also ends with THE PORT REPORT (`workspace/port-report.ts`, the same pattern:
+  `.limn/port-report.json`, `~/.limn/port-report-check.cjs`, copied in by the hotfix seed; STORY-BUILD.md § Hotfix
+  builds → The port report). A build turn that hit the turn cap (`max_turns`) with work unfinished gets ≤ 2 automatic
   continuation turns (`SessionSubject.buildFollowUp`, claimed by `runTurn` in the same tick with the build
   slot); each asks the ONE budget gate first (`deps.automaticAllowed`), refused ⇒ no turn, one notice.
 - **The stacked extraction** (`session/stack-turn.ts`, `session/stack.ts`, `coding/story-build/stack-verify.ts`):

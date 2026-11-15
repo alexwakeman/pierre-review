@@ -19,6 +19,7 @@ import { sql } from 'drizzle-orm';
 import type {
   StoryBuildEndToEndTicket,
   StoryBuildHotfixBranch,
+  HotfixPortClaim,
   BlastRadiusConfig,
   SprintStatusAutoOrder,
   SprintStatusSettings,
@@ -4830,6 +4831,9 @@ export const storyBuildRepos = sqliteTable(
     mainPushErrorCode: text('main_push_error_code'),
     // Push's record of `hotfix/<tag>` (shared StoryBuildHotfixBranch): created or found, moved, the PRs on it.
     hotfixBranchJson: text('hotfix_branch_json', { mode: 'json' }).$type<StoryBuildHotfixBranch>(),
+    // THE PORT REPORT (migration 0195): the agent's claim for this repository (same | adapted | not_needed,
+    // the reason, the evidence), as the host checked and clipped it; NULL = no report. Untrusted model text.
+    portReportJson: text('port_report_json', { mode: 'json' }).$type<HotfixPortClaim>(),
     provider: text('provider'),
     model: text('model'),
     effort: text('effort'),
