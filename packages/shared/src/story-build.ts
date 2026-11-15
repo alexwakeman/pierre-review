@@ -588,7 +588,54 @@ export interface StoryBuildDiffResponse {
 }
 
 /** Error codes the routes answer (`{ error: code, message }`). */
-export type StoryBuildErrorCode = 'NoClaudeAuth' | 'ModelNotOnProvider' | 'NoStory' | 'NotReady' | 'BadRequest' | 'NotFound';
+export type StoryBuildErrorCode = 'NoClaudeAuth' | 'ModelNotOnProvider' | 'NoStory' | 'NotReady' | 'BadRequest' | 'NotFound' | 'TeamClaimed';
+
+// ---- the team claim (docs/TEAM-REVIEW.md § Implement and Fill gaps; docs/STORY-BUILD.md § The team claim) ----
+
+/**
+ * A teammate's build of this ticket, as GitHub shows it: an `ensemble/build` commit status on the head of
+ * the ticket branch (`<KEY>`) in one of the workspace's repositories. `GET /api/story-builds/claim`.
+ *   login        who posted the claim (GitHub's `creator.login`)
+ *   mine         the reader's own claim, made on ANOTHER computer (this computer's own build is the
+ *                session, never a claim)
+ *   live         inside its lease (renewed while that build's session runs); false = the lease ran out
+ *                and the line was not released yet
+ *   since        when the claim started; `leaseEndsAt` when it lapses unless renewed
+ *   repo         `owner/name` the claim hangs on
+ * Every claim the server answers blocks Implement and Fill gaps (`storyBuildOffered`); Clear is offered
+ * when `storyBuildClaimClearable`.
+ */
+export interface StoryBuildTeamClaim {
+  login: string;
+  mine: boolean;
+  live: boolean;
+  since: string;
+  leaseEndsAt: string;
+  repo: string;
+}
+
+/** `GET /api/story-builds/claim?workspace=&ident=`. `claim` null: nobody else is building the ticket. */
+export interface StoryBuildClaimResponse {
+  workspaceId: number;
+  claim: StoryBuildTeamClaim | null;
+}
+
+/** `POST /api/story-builds/claim/clear`. */
+export interface StoryBuildClaimClearBody {
+  workspaceId?: number | string | null;
+  ident: string;
+}
+
+/** A person may Clear a claim once its lease ran out, or at once when it is their own (never blocked forever). */
+export function storyBuildClaimClearable(c: Pick<StoryBuildTeamClaim, 'mine' | 'live'> | null | undefined): boolean {
+  return c != null && (c.mine || !c.live);
+}
+
+/** The one line the story view shows in place of Implement / Fill gaps. */
+export function storyBuildClaimLine(c: Pick<StoryBuildTeamClaim, 'login' | 'mine' | 'live'>): string {
+  if (c.mine) return c.live ? 'You are building this on another computer' : 'Your build on another computer stopped';
+  return c.live ? `${c.login} is building this` : `${c.login} stopped building this`;
+}
 
 // ---- the routes (one spelling for the backend's registration, the client and the rate-limit tiers) ----
 
@@ -616,6 +663,9 @@ export const STORY_BUILD_API = {
   ticketReview: '/api/story-builds/:id/ticket-review',
   /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
   active: '/api/story-builds/active',
+  /** THE TEAM CLAIM: a teammate's build of the ticket on GitHub (`?workspace=&ident=`), and Clear. */
+  claim: '/api/story-builds/claim',
+  claimClear: '/api/story-builds/claim/clear',
 } as const;
 
 /** `POST …/auto-approve`. */
@@ -703,6 +753,8 @@ export function storyBuildCheckGaps(c: SprintTicketCheck | null | undefined): nu
  *   null         neither
  * The SPA also requires `me.ai.enabled`. The backend's gap fold builds only the gaps whenever the ticket
  * has PRs, so both actions start the same session.
+ * `claim`: a teammate's build of the ticket, as the server read it from GitHub (`StoryBuildClaimResponse`).
+ * Any claim offers nothing (the story view shows who is building it instead). Pure: the caller feeds it.
  */
 export function storyBuildOffered(n: {
   ghost: boolean;
@@ -710,8 +762,9 @@ export function storyBuildOffered(n: {
   prs: ReadonlyArray<unknown>;
   build?: SprintNodeBuild | null;
   check?: SprintTicketCheck | null;
+  claim?: StoryBuildTeamClaim | null;
 }): StoryBuildAction | null {
-  if (n.ghost || n.build != null) return null;
+  if (n.ghost || n.build != null || n.claim != null) return null;
   if ((n.stage === 'not_started' || n.stage === 'in_progress') && n.prs.length === 0) return 'implement';
   const started = n.prs.length > 0 || (n.stage != null && n.stage !== 'not_started');
   if (!started || n.stage === 'done') return null;

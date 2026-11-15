@@ -432,6 +432,42 @@ describe('limits, teardown, restart and resume', () => {
     expect((await db.select().from(schema.storyBuilds).execute()).length).toBe(before);
   });
 
+  it("THE TEAM CLAIM is re-checked at the start: a teammate building the ticket ⇒ 409 TeamClaimed, nothing starts", async () => {
+    const F = await import('../../coding/story-build/build-claim-flow.js');
+    const now = Date.now();
+    F.setBuildClaimSeamsForTest({
+      gh: {
+        login: async () => 'me',
+        readTicketBranch: async (_a: number, repos: Array<{ owner: string; name: string }>) =>
+          repos.map((r, i) => ({ owner: r.owner, name: r.name, canPush: true, defaultBranch: { name: 'main', oid: 'm', treeOid: 't' }, head: i === 0 ? { oid: 'robin-ph', message: 'Ensemble: building X\n\nEnsemble-Claim: build', treeOid: 't' } : null })),
+        listLines: async (_a: number, _o: string, _n: string, sha: string) =>
+          sha === 'robin-ph' ? [{ id: 1, state: 'pending', description: 'robin is building this', createdAtMs: now - 60_000, login: 'robin' }] : [],
+        postLine: async () => {
+          throw new Error('must not write');
+        },
+        createPlaceholder: async () => {
+          throw new Error('must not write');
+        },
+        deletePlaceholder: async () => false,
+        commitMessage: async () => null,
+      } as any,
+    });
+    try {
+      const before = (await db.select().from(schema.storyBuilds).execute()).length;
+      const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT2 });
+      expect(r.statusCode).toBe(409);
+      expect(r.json()).toMatchObject({ error: 'TeamClaimed', message: 'robin is building this ticket. Ensemble offers Clear if their claim lapses.' });
+      expect((await db.select().from(schema.storyBuilds).execute()).length).toBe(before);
+      // The story view reads the same claim (and offers nothing).
+      const c = await get(`/api/story-builds/claim?workspace=${wsId}&ident=${encodeURIComponent(IDENT2)}`);
+      expect(c.json().claim).toMatchObject({ login: 'robin', mine: false, live: true });
+      // Clear is refused while robin's claim is live.
+      expect((await post('/api/story-builds/claim/clear', { workspaceId: wsId, ident: IDENT2 })).statusCode).toBe(409);
+    } finally {
+      F.setBuildClaimSeamsForTest(null);
+    }
+  });
+
   it('caps the open sessions, and closes an idle one (no patch ⇒ failed, the work is gone)', async () => {
     process.env.LIMN_SANDBOX_MAX_SESSIONS = '1';
     ticketReads = 0;

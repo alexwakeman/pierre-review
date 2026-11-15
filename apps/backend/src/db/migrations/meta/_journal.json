@@ -1359,6 +1359,13 @@
       "when": 1793433600000,
       "tag": "0193_dependency_automation_on",
       "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "6",
+      "when": 1793520000000,
+      "tag": "0194_story_build_claims",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   type BuildPlanView,
   type StoryBuildPrDiffResponse,
   type StoryBuild,
+  type StoryBuildClaimResponse,
   type StoryBuildDiffResponse,
   type StoryBuildForTicketResponse,
   type StoryBuildLoopContinueBody,
@@ -70,6 +71,38 @@ export function useStoryBuildFor(workspaceId: number | null, ident: string | nul
       // whether the sandbox is open or not (a review or the PR open runs with the session closed too).
       if (loopRunning(b)) return SESSION_POLL_MS;
       return b.session.live && b.session.phase !== 'ready' && b.session.phase !== 'plan_ready' && b.session.phase !== 'built' ? SESSION_POLL_MS : false;
+    },
+  });
+}
+
+export function storyBuildClaimKey(workspaceId: number | null, ident: string): [string, string, string] {
+  return ['story-build-claim', workspaceKey(workspaceId), ident];
+}
+
+/**
+ * THE TEAM CLAIM (docs/STORY-BUILD.md § The team claim): is a teammate building this ticket? A live GitHub
+ * read (the server caches it 30 s), asked ONLY by the story view and only while it would otherwise offer
+ * Implement or Fill gaps (`enabled`) — never by the sprint board or the Pending board.
+ */
+export function useStoryBuildClaim(workspaceId: number | null, ident: string | null, enabled: boolean) {
+  return useQuery<StoryBuildClaimResponse>({
+    queryKey: storyBuildClaimKey(workspaceId, ident ?? ''),
+    queryFn: () => api.storyBuildClaim(workspaceId as number, ident as string),
+    enabled: enabled && workspaceId != null && ident != null,
+    staleTime: 30_000,
+    // A live claim lapses (or is released) by itself: look again now and then while the view is open.
+    refetchInterval: (q) => (q.state.data?.claim != null ? 60_000 : false),
+    retry: false,
+  });
+}
+
+/** Clear: a lapsed claim, or the reader's own from another computer. */
+export function useClearStoryBuildClaim(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.clearStoryBuildClaim(workspaceId as number, ident),
+    onSuccess: (data) => {
+      qc.setQueryData(storyBuildClaimKey(workspaceId, ident), data);
     },
   });
 }

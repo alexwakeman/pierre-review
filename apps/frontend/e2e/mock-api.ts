@@ -81,7 +81,9 @@ import type {
   StoryBuildDiscardResponse,
   PrReviewWaitsResponse,
   ReviewerCandidateResponse,
+  StoryBuildClaimResponse,
   StoryBuildForTicketResponse,
+  StoryBuildTeamClaim,
   StoryBuildPushResponse,
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
@@ -940,7 +942,7 @@ export const STORY_SESSION_READY_SESSION: StoryBuildSession = {
     { repoId: 10, fullName: 'acme/web', path: '/Users/me/acme/web', branch: 'ACME-1', baseSha: 'c'.repeat(40) },
   ],
   startDir: '/Users/me/acme/api',
-  credentialLine: 'The model’s sign-in stays on your computer: Limn adds it to each request on the way out.',
+  credentialLine: 'The model’s sign-in stays on your computer: Ensemble adds it to each request on the way out.',
   services: null,
   network: [
     { key: 'agent|api.anthropic.com|443|1', source: 'agent', host: 'api.anthropic.com', port: 443, allowed: true, reason: null, via: 'anthropic', count: 6, up: 4200, down: 81000, lastStatus: 200, firstAt: iso(0.01), lastAt: iso(0.001) },
@@ -1270,7 +1272,7 @@ function loopNotStarted(rounds: number): StoryBuildLoop {
     error: null,
     targets: [],
     history: [],
-    next: `After the build, Limn pushes the branch and Claude reviews it (up to ${rounds} rounds).`,
+    next: `After the build, Ensemble pushes the branch and Claude reviews it (up to ${rounds} rounds).`,
   };
 }
 
@@ -1612,7 +1614,7 @@ export function aiFixMerged(prId: number, status: 'valid' | 'invalid' = 'valid')
     ],
     changeReport: valid
       ? { ...b.changeReport!, changes: [{ path: 'src/reports/limits.ts', summary: 'Kept the PR’s limit and main’s comment, once.', refs: ['MERGE'] }, ...b.changeReport!.changes] }
-      : { ...b.changeReport!, unaddressed: [{ ref: 'MERGE', reason: 'Limn: conflict markers are left in src/reports/limits.ts.' }, ...b.changeReport!.unaddressed] },
+      : { ...b.changeReport!, unaddressed: [{ ref: 'MERGE', reason: 'Ensemble: conflict markers are left in src/reports/limits.ts.' }, ...b.changeReport!.unaddressed] },
     merge: {
       baseRef: 'main',
       baseSha: 'e'.repeat(40),
@@ -1681,7 +1683,7 @@ export const SANDBOX_RUNTIME_NONE: SandboxRuntimeStatus = {
   kind: null,
   label: null,
   licenceNote: null,
-  problem: 'No container runtime is installed. Limn needs one to run the AI in a sandbox.',
+  problem: 'No container runtime is installed. Ensemble needs one to run the AI in a sandbox.',
   cpus: null,
   memoryGb: null,
 };
@@ -2112,6 +2114,8 @@ export async function installMockApi(
   page: Page,
   opts: {
     storyBuild?: StoryBuild | null;
+    // THE TEAM CLAIM: a teammate building ACME-1 on GitHub (default: nobody; Clear frees a clearable one).
+    storyBuildClaim?: StoryBuildTeamClaim | null;
     runtime?: SandboxRuntimeStatus;
     aiFix?: AiFix | null;
     // The picker the preview answers (default AI_FIX_PREVIEW) and the fix a Start fix produces (default aiFixBuilt).
@@ -2134,6 +2138,7 @@ export async function installMockApi(
   // "Implement story": ACME-1's session, advanced by the writes below (one per page). A spec may start
   // from a session (`opts.storyBuild`) and name the container runtime (`opts.runtime`).
   let storyBuild: StoryBuild | null = opts.storyBuild ?? null;
+  let storyBuildClaim: StoryBuildTeamClaim | null = opts.storyBuildClaim ?? null;
   const runtime = opts.runtime ?? SANDBOX_RUNTIME_OK;
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
@@ -2160,6 +2165,17 @@ export async function installMockApi(
         const at = (route: keyof typeof SANDBOX_SESSION_API): boolean => path === SANDBOX_SESSION_API[route].replace(':id', String(id));
         if (path === STORY_BUILD_API.list && method === 'GET') {
           return json(route, { workspaceId: WORKSPACE.id, build: storyBuild, earlier: [] } satisfies StoryBuildForTicketResponse);
+        }
+        // THE TEAM CLAIM: the story view asks before it offers Implement / Fill gaps; Clear frees a clearable one.
+        if (path === STORY_BUILD_API.claim && method === 'GET') {
+          return json(route, { workspaceId: WORKSPACE.id, claim: storyBuildClaim } satisfies StoryBuildClaimResponse);
+        }
+        if (path === STORY_BUILD_API.claimClear && method === 'POST') {
+          if (storyBuildClaim != null && storyBuildClaim.live && !storyBuildClaim.mine) {
+            return json(route, { error: 'NotReady', message: `${storyBuildClaim.login} is still building this.` }, 409);
+          }
+          storyBuildClaim = null;
+          return json(route, { workspaceId: WORKSPACE.id, claim: null } satisfies StoryBuildClaimResponse);
         }
         if (path === STORY_BUILD_API.list && method === 'POST') {
           if (!runtime.available) return json(route, { error: 'NoRuntime', message: runtime.problem }, 409);

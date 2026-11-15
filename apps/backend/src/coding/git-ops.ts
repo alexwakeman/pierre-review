@@ -32,6 +32,7 @@ import {
   commitAll,
   commitsAdded,
   headTree,
+  pushForceWithLease,
   pushRef,
 } from './git.js';
 
@@ -310,7 +311,7 @@ export interface ApplyAndPushBranchArgs {
   expectTree?: string;
 }
 
-export const TREE_MISMATCH_LINE = "Limn's copy of the earlier pull request does not match. Push it again from Limn.";
+export const TREE_MISMATCH_LINE = "Ensemble's copy of the earlier pull request does not match. Push it again from Ensemble.";
 
 /**
  * THE NO-PR VARIANT of `applyAndPush` (a story build's push, coding/story-build/push.ts): the same
@@ -365,6 +366,16 @@ async function readerAuthor(accountId: number): Promise<{ authorName: string; au
 
 const refPathOf = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/');
 
+/** The sha of a `GET git/ref/…` answer, or null. */
+function refShaOf(text: string | undefined): string | null {
+  try {
+    const sha = (JSON.parse(text ?? '') as { object?: { sha?: unknown } }).object?.sha;
+    return typeof sha === 'string' && /^[0-9a-f]{40}$/.test(sha) ? sha : null;
+  } catch {
+    return null;
+  }
+}
+
 export type PushNewBranchArgs = Omit<ApplyAndPushBranchArgs, 'prBase' | 'title' | 'body' | 'draft' | 'afterSync'>;
 
 /**
@@ -386,8 +397,17 @@ export async function pushNewBranch(args: PushNewBranchArgs): Promise<{ commitSh
   // it is spelled into a GitHub URL — each segment encoded (`#`, `%` and the like are valid in a ref).
   await assertPushTarget(args.branch, args.protect);
   const existing = await ghRestGetText(token, `/repos/${owner}/${name}/git/ref/heads/${refPathOf(args.branch)}`);
+  // THE TEAM CLAIM'S PLACEHOLDER (docs/STORY-BUILD.md § The team claim): a branch that exists is replaced
+  // — with a LEASE on the head that was read — only when that head is a placeholder of this machine's
+  // build, or one nobody holds. Anything else stays BRANCH_EXISTS, never forced.
+  let replaced: string | null = null;
   if (existing.ok) {
-    throw codedError('BRANCH_EXISTS', `branch ${args.branch} already exists on ${owner}/${name}`);
+    const liveSha = refShaOf(existing.text);
+    const { placeholderReplaceable } = await import('./story-build/build-claim-flow.js');
+    if (liveSha == null || !(await placeholderReplaceable(accountId, owner, name, args.branch, liveSha))) {
+      throw codedError('BRANCH_EXISTS', `branch ${args.branch} already exists on ${owner}/${name}`);
+    }
+    replaced = liveSha;
   }
 
   let repoCloneDir: string | null = null;
@@ -407,7 +427,7 @@ export async function pushNewBranch(args: PushNewBranchArgs): Promise<{ commitSh
     });
     const treeSha = await headTree(worktreePath);
     if (args.expectTree != null && treeSha !== args.expectTree) throw codedError('TREE_MISMATCH', TREE_MISMATCH_LINE);
-    await pushRef({
+    const push = {
       worktree: worktreePath,
       owner,
       name,
@@ -417,7 +437,15 @@ export async function pushNewBranch(args: PushNewBranchArgs): Promise<{ commitSh
       remoteBranch: args.branch,
       origin,
       limnCommits: [commitSha],
-    });
+    };
+    if (replaced != null) {
+      await pushForceWithLease({ ...push, leaseSha: replaced });
+      // The claim follows the branch to the pushed commit (never throws).
+      const { noteTicketBranchMoved } = await import('./story-build/build-claim-flow.js');
+      await noteTicketBranchMoved({ accountId, owner, name, branch: args.branch, from: replaced, to: commitSha });
+    } else {
+      await pushRef(push);
+    }
     return { commitSha, treeSha };
   } finally {
     if (repoCloneDir && worktreePath) {
@@ -538,7 +566,7 @@ export async function treeOfPatch(accountId: number, owner: string, name: string
   }
 }
 
-export const HEAD_MOVED_LOOP_LINE = (branch: string): string => `Someone pushed to ${branch} outside Limn. Limn stopped the review loop for it.`;
+export const HEAD_MOVED_LOOP_LINE = (branch: string): string => `Someone pushed to ${branch} outside Ensemble. Ensemble stopped the review loop for it.`;
 
 /**
  * A FAST-FORWARD commit on a branch the review loop pushed: a commit with tree `tree` and parents
@@ -587,6 +615,9 @@ export async function pushFastForward(a: {
     origin: 'reader',
     limnCommits: [commitSha],
   });
+  // A build claim on this branch moves to the new head (never throws).
+  const { noteTicketBranchMoved } = await import('./story-build/build-claim-flow.js');
+  await noteTicketBranchMoved({ accountId: a.accountId, owner: a.owner, name: a.name, branch: a.branch, from: a.pushedSha, to: commitSha });
   return { commitSha, pushed: true };
 }
 
@@ -644,7 +675,7 @@ export async function pushMergeResult(args: PushMergeArgs): Promise<ApplyAndPush
     : 'pierre-review@users.noreply.github.com';
   const info = await fetchPrHeadInfo(token, owner, name, prNumber);
   if (info.isFork || info.headRepoFullName.toLowerCase() !== `${owner}/${name}`.toLowerCase()) {
-    throw codedError('PUSH_DENIED', "the pull request's branch is in a fork; Limn pushes a merge only to a branch in the same repository");
+    throw codedError('PUSH_DENIED', "the pull request's branch is in a fork; Ensemble pushes a merge only to a branch in the same repository");
   }
   if (info.headSha !== args.headSha) {
     throw codedError(
@@ -671,10 +702,10 @@ export async function pushMergeResult(args: PushMergeArgs): Promise<ApplyAndPush
         resultRef: aiFixMergeRef(args.fixId, 'result'),
         token,
       });
-      if (!v.ok) throw codedError('APPLY_FAILED', `the merge failed Limn's check: ${v.reason}`);
+      if (!v.ok) throw codedError('APPLY_FAILED', `the merge failed Ensemble's check: ${v.reason}`);
       // Exactly the commits the reader reviewed (their diffs were computed from these), nothing else.
       if (v.mergeSha !== args.expectedMergeSha || v.resultSha !== args.expectedResultSha) {
-        throw codedError('APPLY_FAILED', 'the stored merge is not the one Limn checked after the turn');
+        throw codedError('APPLY_FAILED', 'the stored merge is not the one Ensemble checked after the turn');
       }
       const sha = await buildMergeCommits(
         dir,

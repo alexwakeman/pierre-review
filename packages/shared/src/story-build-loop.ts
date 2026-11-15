@@ -143,7 +143,7 @@ export interface StoryBuildLoop {
 export const STORY_BUILD_LOOP_PAUSE_LINE: Record<StoryBuildLoopPause, string> = {
   budget: 'Paused: the AI spend limit is reached. Press Continue to go on.',
   session_closed: 'Paused: the session closed. Press Continue to start it again and go on.',
-  interrupted: 'Paused: Limn restarted during the review loop. Press Continue to go on.',
+  interrupted: 'Paused: Ensemble restarted during the review loop. Press Continue to go on.',
   fix_stopped: 'Paused: the fix was stopped. Press Continue to go on.',
   fix_failed: 'Paused: the agent could not finish the fixes. Press Continue to try again.',
   push_failed: 'Paused: a push did not work. Press Continue to try again.',
@@ -153,8 +153,8 @@ export const STORY_BUILD_LOOP_PAUSE_LINE: Record<StoryBuildLoopPause, string> = 
 };
 
 const providersWords = (providers: readonly AiProviderId[]): string =>
-  providers.length === 0 ? 'Limn' : providers.map((p) => aiProviderName(p)).join(' and ');
-/** "Claude reviews" / "Claude and Codex review" (one reviewer, or Limn, takes the -s). */
+  providers.length === 0 ? 'Ensemble' : providers.map((p) => aiProviderName(p)).join(' and ');
+/** "Claude reviews" / "Claude and Codex review" (one reviewer, or Ensemble, takes the -s). */
 const reviewVerb = (providers: readonly AiProviderId[]): string => (providers.length >= 2 ? 'review' : 'reviews');
 
 /**
@@ -171,22 +171,22 @@ export function loopNextLine(
   const prs = many ? 'the pull requests' : 'the pull request';
   switch (loop.state) {
     case null:
-      return `After the build, Limn pushes the branch and ${providersWords(providers)} ${reviewVerb(providers)} it (up to ${loop.rounds} ${loop.rounds === 1 ? 'round' : 'rounds'}).`;
+      return `After the build, Ensemble pushes the branch and ${providersWords(providers)} ${reviewVerb(providers)} it (up to ${loop.rounds} ${loop.rounds === 1 ? 'round' : 'rounds'}).`;
     case 'waiting':
-      return 'Next: Limn pushes the branch.';
+      return 'Next: Ensemble pushes the branch.';
     case 'pushing':
-      return loop.round === 0 ? 'Next: Limn pushes the branch, then reviews it.' : `Next: ${providersWords(providers)} ${reviewVerb(providers)} round ${loop.round + 1}.`;
+      return loop.round === 0 ? 'Next: Ensemble pushes the branch, then reviews it.' : `Next: ${providersWords(providers)} ${reviewVerb(providers)} round ${loop.round + 1}.`;
     case 'reviewing':
-      return loop.round > loop.rounds ? `Next: Limn opens ${prs}.` : `Next: the agent answers what round ${loop.round} finds.`;
+      return loop.round > loop.rounds ? `Next: Ensemble opens ${prs}.` : `Next: the agent answers what round ${loop.round} finds.`;
     case 'fixing': {
-      if (open == null) return 'Next: Limn pushes the fixes and reviews again.';
+      if (open == null) return 'Next: Ensemble pushes the fixes and reviews again.';
       const parts: string[] = [];
       if (open.findings > 0) parts.push(`${open.findings} ${open.findings === 1 ? 'finding' : 'findings'}`);
       if (open.criteria > 0) parts.push(`${open.criteria} ${open.criteria === 1 ? 'criterion' : 'criteria'}`);
-      return parts.length > 0 ? `Next: the agent answers ${parts.join(' and ')}.` : 'Next: Limn pushes the fixes and reviews again.';
+      return parts.length > 0 ? `Next: the agent answers ${parts.join(' and ')}.` : 'Next: Ensemble pushes the fixes and reviews again.';
     }
     case 'opening':
-      return `Next: Limn opens ${prs}.`;
+      return `Next: Ensemble opens ${prs}.`;
     case 'paused':
       return loop.pause ? STORY_BUILD_LOOP_PAUSE_LINE[loop.pause] : null;
     case 'done':

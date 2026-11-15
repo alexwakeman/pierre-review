@@ -12,7 +12,7 @@ import { insertQueuedReview, saveReviewSuccess } from '../../../review/claude-re
 import type { LoopFindingRow, LoopReviewRow } from './persist.js';
 import { openFindingsOf } from './wire.js';
 
-export const IMPORTED_LINE = (round: number): string => `Reviewed in Limn before this pull request opened (round ${round}).`;
+export const IMPORTED_LINE = (round: number): string => `Reviewed in Ensemble before this pull request opened (round ${round}).`;
 
 /** Write the row (see the header). Returns its id, or null when nothing was written. Never throws. */
 export async function markLoopReviewOnPr(

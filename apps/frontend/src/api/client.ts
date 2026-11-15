@@ -317,6 +317,8 @@ import type {
   BuildPlanRevisionResponse,
   BuildPlanView,
   StoryBuildDiscardResponse,
+  StoryBuildClaimClearBody,
+  StoryBuildClaimResponse,
   StoryBuildForTicketResponse,
   StoryBuildPushBody,
   StoryBuildAutoPushBody,
@@ -1916,6 +1918,14 @@ export const api = {
       withQuery(storyBuildPath('list'), workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`),
     ),
   storyBuild: (id: number) => get<StoryBuild>(storyBuildPath('one', { id })),
+  // THE TEAM CLAIM (docs/STORY-BUILD.md § The team claim): a teammate building the ticket (a live GitHub
+  // read, cached on the server), and Clear (a lapsed claim, or the reader's own from another computer).
+  storyBuildClaim: (workspaceId: number, ident: string) =>
+    get<StoryBuildClaimResponse>(withQuery(storyBuildPath('claim'), workspaceParam(workspaceId), `ident=${encodeURIComponent(ident)}`)),
+  clearStoryBuildClaim: (workspaceId: number, ident: string) =>
+    fetch(storyBuildPath('claimClear'), jsonBody('POST', { workspaceId, ident } satisfies StoryBuildClaimClearBody)).then((r) =>
+      handle<StoryBuildClaimResponse>(r),
+    ),
   // The stored patch, fetched only when the reader opens the diff.
   storyBuildRepoDiff: (id: number, repoId: number) =>
     get<StoryBuildDiffResponse>(storyBuildPath('repoDiff', { id, repoId })),

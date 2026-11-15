@@ -7,6 +7,8 @@ import {
   storyBuildCheckGaps,
   storyBuildGapsOf,
   storyBuildMark,
+  storyBuildClaimClearable,
+  storyBuildClaimLine,
   storyBuildOffered,
   trackerTicketIdent,
   type ClaudeTicketCriterionStatus as SprintCriterionStatus,
@@ -78,6 +80,22 @@ describe('the card mark and the entry gate (shared)', () => {
     expect(storyBuildOffered({ ghost: false, stage: null, prs: [] })).toBeNull();
     expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [{}] })).toBeNull();
     expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [], build: b({ status: 'plan_ready' }) })).toBeNull();
+  });
+  it('offers NOTHING while the server reports a team claim on the ticket (pure: the caller feeds the claim)', () => {
+    const claim = { login: 'robin', mine: false, live: true, since: '2026-11-15T10:00:00.000Z', leaseEndsAt: '2026-11-15T10:30:00.000Z', repo: 'acme/api' };
+    expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [], claim })).toBeNull();
+    expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [], claim: { ...claim, live: false } })).toBeNull();
+    expect(storyBuildOffered({ ghost: false, stage: 'not_started', prs: [], claim: null })).toBe('implement');
+    const started = { ghost: false, stage: 'in_progress' as const, prs: [{}] };
+    const gaps: SprintTicketCheck = { met: 1, partlyMet: 0, notMet: 1, unsettled: 0, total: 2, checkedAt: '2026-10-30T00:00:00.000Z', stale: false };
+    expect(storyBuildOffered({ ...started, check: gaps, claim })).toBeNull();
+    // Clear: a teammate's claim only once it lapsed; the reader's own (another computer) at once.
+    expect(storyBuildClaimClearable(claim)).toBe(false);
+    expect(storyBuildClaimClearable({ ...claim, live: false })).toBe(true);
+    expect(storyBuildClaimClearable({ ...claim, mine: true })).toBe(true);
+    expect(storyBuildClaimLine(claim)).toBe('robin is building this');
+    expect(storyBuildClaimLine({ ...claim, live: false })).toBe('robin stopped building this');
+    expect(storyBuildClaimLine({ ...claim, mine: true })).toBe('You are building this on another computer');
   });
   it('offers Fill gaps only on a started ticket whose CURRENT story check found gaps', () => {
     const check = (o: Partial<SprintTicketCheck> = {}): SprintTicketCheck => ({

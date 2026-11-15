@@ -4,6 +4,7 @@ import { eraseCodexHistory } from '../ai/codex/rollouts.js';
 import { removeAccountDocs } from '../reference-docs/library.js';
 import { db, runTransaction, schema } from './client.js';
 import { deleteRepo } from './queries.js';
+import { readEnv } from '../env-name.js';
 
 // ---------------------------------------------------------------------------
 // Right to erasure (UK/EU GDPR Art. 17, CCPA "right to delete").
@@ -242,6 +243,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.teamClaimSkipLines).where(eq(schema.teamClaimSkipLines.accountId, accountId)).execute();
     // The `limn/deps` ledger (migration 0193): GitHub logins and heads. No FK.
     await tx.delete(schema.depsClaimLines).where(eq(schema.depsClaimLines.accountId, accountId)).execute();
+    // The story-build claim ledger (migration 0194): GitHub logins, heads and ticket keys. No FK.
+    await tx.delete(schema.storyBuildClaimLines).where(eq(schema.storyBuildClaimLines.accountId, accountId)).execute();
     // The worktree ledger (migration 0146): which PR / ticket a checkout on disk was for. No FK. The
     // directories themselves become unledgered orphans the worktree sweep collects by age.
     await tx.delete(schema.worktreeLedger).where(eq(schema.worktreeLedger.accountId, accountId)).execute();
@@ -381,7 +384,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
   //    home serves this one account; the sign-in, config.toml and installation_id stay (the machine's;
   //    `limn ai logout codex` removes the sign-in).
   //    ⚠ A test run never touches the REAL home: under vitest only an explicit LIMN_DATA_DIR is erased.
-  const underTest = process.env.VITEST === 'true' && !process.env.LIMN_DATA_DIR;
+  const underTest = process.env.VITEST === 'true' && !readEnv(process.env, 'DATA_DIR');
   if (!underTest) eraseCodexHistory(codexHome());
 
   return { reposDeleted };
@@ -462,6 +465,8 @@ export function accountScopedTables(): {
     { name: 'teamClaimSkipLines', col: schema.teamClaimSkipLines.accountId, table: schema.teamClaimSkipLines },
     // The `limn/deps` ledger (migration 0193), erased explicitly above.
     { name: 'depsClaimLines', col: schema.depsClaimLines.accountId, table: schema.depsClaimLines },
+    // The story-build claim ledger (migration 0194), erased explicitly above.
+    { name: 'storyBuildClaimLines', col: schema.storyBuildClaimLines.accountId, table: schema.storyBuildClaimLines },
     // The worktree ledger (migration 0146), erased explicitly above.
     { name: 'worktreeLedger', col: schema.worktreeLedger.accountId, table: schema.worktreeLedger },
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },

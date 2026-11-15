@@ -182,6 +182,13 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     await reconcileSessionsOnStartup(ctx);
     const { reconcileLegacyStoryBuildsOnStartup } = await import('../coding/story-build/legacy.js');
     await reconcileLegacyStoryBuildsOnStartup(ctx);
+    // THE TEAM CLAIM (docs/STORY-BUILD.md § The team claim): renew a live build's `ensemble/build` line, settle
+    // the lines a restart or a closed session left pending — now in the BACKGROUND, then every minute.
+    // Never under test (the claim tests drive the pass themselves).
+    if (!process.env.VITEST) {
+      const { bindStoryBuildClaims } = await import('../coding/story-build/build-claim-release.js');
+      bindStoryBuildClaims({ info: (m) => app.log.info(m), warn: (m) => app.log.warn(m) });
+    }
   } catch (err) {
     app.log.warn({ err }, 'story builds: startup reconcile failed');
   }

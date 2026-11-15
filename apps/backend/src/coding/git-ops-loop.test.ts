@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const T = vi.hoisted(() => ({ live: null as null | { status: number; sha?: string }, pushed: [] as any[], prs: [] as any[], repo: '' }));
+const T = vi.hoisted(() => ({ live: null as null | { status: number; sha?: string }, pushed: [] as any[], prs: [] as any[], moved: [] as any[], repo: '' }));
 
 vi.mock('../auth/account.js', () => ({
   getAccessToken: async () => 'gh-token',
@@ -36,6 +36,11 @@ vi.mock('./git.js', async (orig) => {
   const real = await orig<typeof import('./git.js')>();
   return { ...real, pushRef: async (t: any) => void T.pushed.push(t) };
 });
+// THE TEAM CLAIM follows a push (build-claim-flow.ts): recorded, never a GitHub call here.
+vi.mock('./story-build/build-claim-flow.js', () => ({
+  placeholderReplaceable: async () => false,
+  noteTicketBranchMoved: async (a: any) => void T.moved.push(a),
+}));
 vi.mock('../review/clone-manager.js', () => ({
   resolveBranchCommit: async () => ({ repoCloneDir: T.repo, sha: '' }),
   prepBranchWorktree: async (_o: string, _n: string, ref: any) => {
@@ -95,6 +100,8 @@ describe('pushFastForward', () => {
     expect(T.pushed).toHaveLength(1);
     expect(T.pushed[0]).toMatchObject({ committish: r.commitSha, remoteBranch: 'PAY-142', origin: 'reader', protect: ['main'] });
     expect(git('rev-parse', 'refs/pierre/story-loop/1/repo-1')).toBe(r.commitSha);
+    // THE TEAM CLAIM follows the branch to the new head (build-claim-flow.ts noteTicketBranchMoved).
+    expect(T.moved.at(-1)).toEqual({ accountId: 1, owner: 'acme', name: 'api', branch: 'PAY-142', from: PUSHED, to: r.commitSha });
   });
 
   it('refuses when someone pushed to the branch outside Limn', async () => {

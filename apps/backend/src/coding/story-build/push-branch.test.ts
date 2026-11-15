@@ -26,6 +26,11 @@ const T = vi.hoisted(() => {
     prs: [] as any[],
     posts: [] as any[],
     branchExists: false,
+    // The live branch's head when it exists, and whether the team claim lets a push replace it.
+    existingSha: null as string | null,
+    replaceable: false,
+    replaced: [] as any[],
+    moved: [] as any[],
     refReads: [] as string[],
     prFails: false,
     worktree: '' as string,
@@ -42,7 +47,7 @@ vi.mock('../../sync/resync-after-write.js', () => ({ settlePrAfterWrite: async (
 vi.mock('../../github/client.js', () => ({
   ghRestGetText: async (_t: string, path: string) => {
     T.refReads.push(path);
-    return { ok: T.branchExists };
+    return { ok: T.branchExists, text: T.existingSha ? JSON.stringify({ object: { sha: T.existingSha } }) : '' };
   },
   ghRestGetFor: async () => ({}),
   ghRestPostFor: async (_t: string, path: string, body: unknown) => {
@@ -70,8 +75,17 @@ vi.mock('../git.js', async (importOriginal) => {
       await real.assertPushTarget(t.remoteBranch, t.protect);
       T.pushed.push(t);
     },
+    pushForceWithLease: async (t: any) => {
+      await real.assertPushTarget(t.remoteBranch, t.protect);
+      T.replaced.push(t);
+    },
   };
 });
+// THE TEAM CLAIM's placeholder (build-claim-flow.ts): whether an existing branch may be replaced, and the move.
+vi.mock('./build-claim-flow.js', () => ({
+  placeholderReplaceable: async () => T.replaceable,
+  noteTicketBranchMoved: async (a: any) => void T.moved.push(a),
+}));
 vi.mock('../../review/clone-manager.js', () => ({
   prepBranchWorktree: async (owner: string, name: string, ref: any) => {
     T.prepped.push({ owner, name, ref });
@@ -139,6 +153,10 @@ beforeEach(() => {
   T.prs.length = 0;
   T.posts.length = 0;
   T.branchExists = false;
+  T.existingSha = null;
+  T.replaceable = false;
+  T.replaced.length = 0;
+  T.moved.length = 0;
   T.prFails = false;
 });
 afterAll(() => rmSync(T.root, { recursive: true, force: true }));
@@ -165,6 +183,26 @@ describe('applyAndPushBranch — the no-PR push', () => {
   it('never lands on an existing branch: BRANCH_EXISTS before any checkout', async () => {
     T.branchExists = true;
     await expect(applyAndPushBranch(args())).rejects.toMatchObject({ code: 'BRANCH_EXISTS' });
+    expect(T.prepped).toEqual([]);
+  });
+
+  it('replaces the TEAM CLAIM’S PLACEHOLDER with a lease on the head it read, and the claim follows the push', async () => {
+    T.branchExists = true;
+    T.existingSha = 'c'.repeat(40);
+    T.replaceable = true;
+    const r = await applyAndPushBranch(args({ branch: 'ACME-214' }));
+    expect(r.pushedBranch).toBe('ACME-214');
+    expect(T.pushed).toEqual([]); // never a plain push over it
+    expect(T.replaced[0]).toMatchObject({ remoteBranch: 'ACME-214', leaseSha: 'c'.repeat(40), origin: 'reader' });
+    expect(T.moved).toEqual([{ accountId: 1, owner: 'acme', name: 'web', branch: 'ACME-214', from: 'c'.repeat(40), to: r.commitSha }]);
+  });
+
+  it('an existing branch that is NOT a free placeholder stays BRANCH_EXISTS (never forced)', async () => {
+    T.branchExists = true;
+    T.existingSha = 'c'.repeat(40);
+    T.replaceable = false;
+    await expect(applyAndPushBranch(args({ branch: 'ACME-214' }))).rejects.toMatchObject({ code: 'BRANCH_EXISTS' });
+    expect(T.replaced).toEqual([]);
     expect(T.prepped).toEqual([]);
   });
 
@@ -208,7 +246,7 @@ describe('applyAndPushBranch — the no-PR push', () => {
   it('plan first: `expectTree` — the verified tree pushes; any other is TREE_MISMATCH before the push', async () => {
     const wrong = await applyAndPushBranch(args({ expectTree: '0'.repeat(40) })).catch((e) => e);
     expect(wrong.code).toBe('TREE_MISMATCH');
-    expect(wrong.message).toBe("Limn's copy of the earlier pull request does not match. Push it again from Limn.");
+    expect(wrong.message).toBe("Ensemble's copy of the earlier pull request does not match. Push it again from Ensemble.");
     expect(T.pushed).toEqual([]);
     expect(T.prs).toEqual([]);
     expect(T.removed).toHaveLength(1);

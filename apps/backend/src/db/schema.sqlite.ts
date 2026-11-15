@@ -5333,6 +5333,52 @@ export const depsClaimLines = sqliteTable(
   }),
 );
 
+// 0194. THE STORY-BUILD CLAIM LEDGER (coding/story-build/build-claim-ledger.ts; docs/TEAM-REVIEW.md §
+// Implement and Fill gaps, docs/STORY-BUILD.md § The team claim). ONE row per commit status a story build
+// of this machine holds or released, the same rules as `deps_claim_lines`:
+//   kind 'build'   the `ensemble/build` claim on the head of the ticket branch (`branch`, `<KEY>`) in ONE
+//                  repository: 'claiming' BEFORE the placeholder branch and its pending line are written,
+//                  'pending' while the build's session runs (renewed: `last_posted_at`), 'finished' /
+//                  'released' once its final line is up. `head_sha` FOLLOWS the branch: the placeholder
+//                  commit first, then each commit this machine pushes onto that branch.
+//   kind 'review'  the review loop's `ensemble/review-<provider>` line on the branch head it reviews
+//                  (`provider`), exactly as an auto review's.
+//   whose 'teammate'  a teammate's expired build line this machine released (by Clear), posted ONCE.
+// `final_description`: a line that could not be written when the build ended — the reconciler posts IT.
+// No FK on build_id: a deleted build must still let the reconciler release its line; the erasure
+// deletes everything.
+export const storyBuildClaimLines = sqliteTable(
+  'story_build_claim_lines',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id').notNull(),
+    buildId: integer('build_id'),
+    workspaceId: integer('workspace_id'),
+    ident: text('ident'),
+    kind: text('kind', { enum: ['build', 'review'] }).notNull(),
+    context: text('context').notNull(),
+    owner: text('owner').notNull(),
+    name: text('name').notNull(),
+    branch: text('branch'),
+    headSha: text('head_sha').notNull(),
+    provider: text('provider'),
+    whose: text('whose', { enum: ['mine', 'teammate'] }).notNull().default('mine'),
+    state: text('state', { enum: ['claiming', 'pending', 'finished', 'released'] }).notNull(),
+    login: text('login'),
+    lastDescription: text('last_description'),
+    finalDescription: text('final_description'),
+    lastPostedAt: integer('last_posted_at', { mode: 'timestamp' }),
+    releaseAttempts: integer('release_attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    stateIdx: index('story_build_claim_lines_state').on(t.state),
+    buildIdx: index('story_build_claim_lines_account_build').on(t.accountId, t.buildId),
+  }),
+);
+
 // 0139. THIS DATABASE'S OWN FACTS (key → value) — never an account's, so not account-scoped and not
 // erased with one. `instance_id`: a random id written once (db/instance-id.ts) that names this
 // database file wherever it is moved; the reference-docs janitor's ownership marker.
