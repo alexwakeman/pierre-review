@@ -17,8 +17,6 @@ import type { Quarter } from './geometry';
 // brings it home, on the compositor:
 //   lead     the hero's picture: over the first 60vh of page scroll
 //   others   from the moment they appear (a view timeline, entry 0% → contain 30%)
-// A `swirl` picture swings in instead of sliding (rotate + scale, still one
-// transform per layer).
 // Browsers without scroll-driven animations get the same mappings from
 // arcMotion.ts. No JS (a <noscript> style) and reduced motion: home, still.
 // Nothing is ever redrawn: the bands are painted once, only layers move.
@@ -40,9 +38,6 @@ export interface ArcsProps {
   lead?: boolean;
   /** 'end' anchors the composition to the right of its box instead of centring it. */
   align?: 'center' | 'end';
-  /** Instead of sliding, every layer swings in: half a turn round the centre and
-   *  1.8× larger at the start, home at the end. */
-  swirl?: boolean;
 }
 
 /** How far a lead layer starts from home, as a multiple of its offset. */
@@ -60,11 +55,10 @@ export function Arcs({
   fit = 'slice',
   lead,
   align = 'center',
-  swirl,
 }: ArcsProps): JSX.Element {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const [, , W = 100, H = 100] = viewBox.split(/\s+/).map(Number);
-  const cls = ['arcs', fit, blend && 'blend', lead && 'lead', align === 'end' && 'end', swirl && 'swirl', className].filter(Boolean).join(' ');
+  const cls = ['arcs', fit, blend && 'blend', lead && 'lead', align === 'end' && 'end', className].filter(Boolean).join(' ');
   return (
     <div
       className={cls}

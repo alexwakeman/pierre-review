@@ -299,10 +299,16 @@ export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.15, cross: 
  * centre, each with a player's dot at its corner. With R above 50 the quarters
  * OVERLAP in the middle, so the picture lands on crossing lines (mixed like light).
  * With `cross`, each quarter starts at the mirror of its place through the middle
- * (−2u, reached at APART × dx) and travels through the others to land; otherwise it
+ * (−2u, reached at APART × dx; `reach` multiplies that distance) and travels through
+ * the others to land; otherwise it
  * waits outward. `margin` (in units) is added round the square.
  */
-export function quartetQuarters(margin = 0, R = 50, cross = false): { quarters: Quarter[]; viewBox: string } {
+export function quartetQuarters(
+  margin = 0,
+  R = 50,
+  cross = false,
+  reach = 1,
+): { quarters: Quarter[]; viewBox: string } {
   const away = R * 0.2;
   const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => {
     const ux = (cx === 0 ? R / 2 : 100 - R / 2) - 50;
@@ -315,8 +321,8 @@ export function quartetQuarters(margin = 0, R = 50, cross = false): { quarters: 
       run,
       n: Math.round((11 * R) / 50),
       dot: 3.2,
-      dx: cross ? Math.round(((-2 * ux) / 1.6) * 100) / 100 : cx === 0 ? -away : away,
-      dy: cross ? Math.round(((-2 * uy) / 1.6) * 100) / 100 : cy === 0 ? -away : away,
+      dx: cross ? Math.round(((-2 * reach * ux) / 1.6) * 100) / 100 : cx === 0 ? -away : away,
+      dy: cross ? Math.round(((-2 * reach * uy) / 1.6) * 100) / 100 : cy === 0 ? -away : away,
     };
   };
   return {

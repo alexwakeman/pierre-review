@@ -8,8 +8,8 @@ import type { Corner, Quarter, RunName } from './geometry';
 //
 //   Quartet    four equal quarters facing one centre, "four sensible people
 //              conversing", in the close at the foot of the page. Its quarters
-//              swing in round the centre as it scrolls into view and land
-//              overlapping.
+//              start well beyond the opposite corners, cross through the middle as
+//              it scrolls into view, and land overlapping.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
 //              mirrored across the tile and cross through each other into place as
@@ -44,9 +44,11 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   );
 }
 
-// R 62: the quarters overlap in the middle and land on crossing lines; they cross
-// into place like the hero's Chain. The margin leaves room for the corner dots.
-const QUARTET = quartetQuarters(4, 62, true);
+// R 62: the quarters overlap in the middle and land on crossing lines. They cross
+// into place like the hero's Chain, starting at TWICE the mirror distance, beyond
+// the opposite corner (the tile clips them until they fly in). The margin leaves
+// room for the corner dots.
+const QUARTET = quartetQuarters(4, 62, true, 2);
 
 export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
   return (
@@ -57,7 +59,6 @@ export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
       label={label}
       fit="meet"
       blend
-      swirl
       quarters={QUARTET.quarters}
     />
   );
