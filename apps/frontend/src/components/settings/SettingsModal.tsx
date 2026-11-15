@@ -7,9 +7,9 @@ import { AutoReviewSection, AUTO_REVIEW_SECTION_HEADING_ID } from './AutoReviewS
 import { LargePrThresholdSection } from './LargePrThresholdSection.js';
 import { BlastRadiusSection } from './BlastRadiusSection.js';
 import { MyTurnSection, MY_TURN_SECTION_HEADING_ID } from './MyTurnSection.js';
-import { BotScoringSection } from './BotScoringSection.js';
 import { BotClassificationSection } from './BotClassificationSection.js';
 import { FeaturesSection } from './FeaturesSection.js';
+import { ToolsSection, TOOLS_SECTION_HEADING_ID } from './ToolsSection.js';
 import { AppearanceSection } from './AppearanceSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
@@ -107,7 +107,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   SandboxRuntimeSection,
   SandboxSection,
   SlackSection,
-  BotScoringSection,
+  ToolsSection,
   BotClassificationSection,
   DependencyAutomationSection,
 };
@@ -228,7 +228,9 @@ export function SettingsModal({
               ? AUTO_REVIEW_SECTION_HEADING_ID
               : focus === 'ai-effort'
                 ? AI_SECTION_HEADING_ID
-                : null;
+                : focus === 'tools'
+                  ? TOOLS_SECTION_HEADING_ID
+                  : null;
     let raf: number | null = null;
     let observer: MutationObserver | null = null;
     const INTERACTIONS = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const;
@@ -421,7 +423,7 @@ function SettingsTabPanel({
     >
       {/* ── GLOBAL. One account, every workspace. ─────────────────────────────────────── */}
       {/* ⚠ `peer` + `:empty`, NOT `def.global.length`: a listed section may render nothing
-          (BotScoringSection where ML is off), and the rule below must then go with it, or the tab
+          (ToolsSection where neither tool can run here), and the rule below must then go with it, or the tab
           opens on a divider with nothing above it. */}
       {def.global.length > 0 && <div className="peer space-y-4">{renderSections(def.global)}</div>}
 

@@ -134,8 +134,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="bot-scoring">Bot comment scoring</H2>
       <p>
-        Scoring needs a one-time download of about 240 MB. Select <Ui>Set up (one-time ~240 MB download)</Ui> on the{' '}
-        <DocLink to="settings/bots">Bots</DocLink> tab, or run <code>ensemble ml install</code>; <code>ensemble ml status</code>{' '}
+        Scoring needs a one-time download of about 240 MB. Switch on <Ui>Bot comment analysis</Ui> in{' '}
+        <DocLink to="settings/features">Settings → Features</DocLink>, or run <code>ensemble ml install</code>; <code>ensemble ml status</code>{' '}
         checks it. Scoring is slow on purpose so it never slows your computer, and it pauses while your computer is on
         battery, so a backlog of comments can take a while.
       </p>

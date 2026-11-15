@@ -13,6 +13,15 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Features: switches for AI (Claude and Codex) and Bot comment analysis. Switching one on that is not downloaded asks first, then downloads it; an installed one lists what was found. Switched off, AI features show how to set them up again and nothing runs automatically, and no new bot comments are scored. Nothing is deleted.
+- Repos & workspaces: a Bot scoring switch on each repository leaves its bot comments out of severity scoring. Every repository is scored by default.
+
+### Changed
+
+- AI and bot comment analysis now download only from Settings → Features (or the terminal). The Set up buttons elsewhere link there, and bot comment scoring left Settings → Bots.
+
 ### Fixed
 
 - Builds: you can now dismiss a failed build from the builds circle in the corner, and it stays dismissed.

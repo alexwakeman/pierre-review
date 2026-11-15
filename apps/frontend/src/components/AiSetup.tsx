@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 import { aiSignInLine, type AiProviderId, type AiRunKind } from '@pierre-review/shared';
 import {
-  AI_SETUP_LABEL_BOTH,
-  aiSetupLabel,
   aiAuthFor,
   useAiCapabilities,
   useAiRuntimeInstall,
@@ -10,6 +8,7 @@ import {
 } from '../hooks/useAiCapabilities.js';
 import { AiBudgetMeter, OverBudgetConfirm } from './AiBudget.js';
 import { useMe } from '../hooks/useTriage.js';
+import { useSettingsModal } from '../store/settingsModal.js';
 import { aiGateReadyFor } from '../lib/aiCapabilities.js';
 import { usageLockLines } from '../lib/usageLockout.js';
 
@@ -99,14 +98,28 @@ export function AiAuthLine({ kind, provider }: { kind?: AiRunKind; provider?: Ai
   return <span className="text-meta text-ui-mute">{line}</span>;
 }
 
+/** "Set up in Settings → Features": the ONE place in the app that downloads AI (or bot comment analysis). */
+export function SetUpInFeatures({ label = 'Set up in Settings → Features' }: { label?: string }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={() => useSettingsModal.getState().openSettings('tools')}
+      className="hit bg-ui-raise rounded-ui px-2 py-1 text-meta hover:bg-ui-hover"
+    >
+      {label}
+    </button>
+  );
+}
+
 /**
  * What stands where "Set up AI" used to: Limn downloads Claude and Codex by itself on the first boot
- * (`ai.autoInstall`), so this is the download's progress line, then — only if it failed — the reason
- * and Retry. The Set up button shows only where the automatic download is off (LIMN_AI_AUTO_INSTALL=false).
+ * (`ai.autoInstall`), so this is the download's progress line; otherwise the reason AI is not ready (not
+ * downloaded, failed, or switched off) and a link to Settings → Features, the one place that downloads it
+ * (components/settings/ToolsSection.tsx).
  */
 export function AiRuntimeSetup(): JSX.Element | null {
   const ai = useAiCapabilities();
-  const { state, start } = useAiRuntimeInstall();
+  const { state } = useAiRuntimeInstall();
   // Poll while the SERVER is downloading (the automatic one, another tab's, `limn ai install`): its
   // step shows, and the line turns into Run on its own.
   useAiRuntimePoll(ai.runtime === 'installing');
@@ -121,22 +134,14 @@ export function AiRuntimeSetup(): JSX.Element | null {
     );
   }
 
-  const failure =
+  const reason =
     state.phase === 'failed'
       ? (state.message ?? 'The download failed.')
-      : ai.runtime === 'failed'
-        ? (ai.runtimeMessage ?? 'The download failed.')
-        : null;
+      : (ai.runtimeMessage ?? 'AI is not set up yet.');
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      {failure != null && <span className="text-meta text-ui-danger">{failure}</span>}
-      <button
-        type="button"
-        onClick={() => start()}
-        className="hit bg-ui-raise rounded-ui px-2 py-1 text-meta hover:bg-ui-hover"
-      >
-        {failure != null ? 'Retry' : ai.autoInstall ? AI_SETUP_LABEL_BOTH : aiSetupLabel(ai.provider)}
-      </button>
+      <span className={`text-meta ${ai.runtime === 'failed' || state.phase === 'failed' ? 'text-ui-danger' : 'text-ui-mute'}`}>{reason}</span>
+      <SetUpInFeatures />
     </span>
   );
 }

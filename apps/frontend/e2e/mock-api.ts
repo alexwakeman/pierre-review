@@ -405,7 +405,7 @@ const prCiReviewFor = (prId: number): PrCiReviewResponse => ({
   },
 });
 
-const ME_RESPONSE: MeResponse = {
+export const ME_RESPONSE: MeResponse = {
   user: {
     login: ME.githubLogin,
     githubId: 'MDQ6VXNlcjE=',

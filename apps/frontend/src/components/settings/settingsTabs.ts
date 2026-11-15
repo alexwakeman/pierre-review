@@ -55,7 +55,13 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   { id: 'pending', label: 'Pending', summary: 'My Turn, muted repositories', global: ['MyTurnSection'], workspace: ['PendingMuteSection'] },
   // Which pages the sidebar shows (Settings → Features; visibility only).
-  { id: 'features', label: 'Features', summary: 'Pages shown in the sidebar', global: ['FeaturesSection'], workspace: [] },
+  {
+    id: 'features',
+    label: 'Features',
+    summary: 'Pages shown in the sidebar; AI and bot comment analysis',
+    global: ['FeaturesSection', 'ToolsSection'],
+    workspace: [],
+  },
   {
     id: 'dependencies',
     label: 'Dependencies', summary: 'Merge, approve and resolve dependency updates',
@@ -110,8 +116,8 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'bots',
-    label: 'Bots', summary: 'Which reviewers are bots, their category and price; bot comment scoring',
-    global: ['BotScoringSection'],
+    label: 'Bots', summary: 'Which reviewers are bots, their category and price',
+    global: [],
     // Every bot in the workspace with its category (it was Bots Monitoring → Classification).
     workspace: ['BotClassificationSection'],
   },
@@ -132,6 +138,7 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   bots: 'bots',
   sandbox: 'sandbox',
   releases: 'releases',
+  tools: 'features',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a

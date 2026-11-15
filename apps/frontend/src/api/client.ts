@@ -177,6 +177,10 @@ import type {
   FeatureSettings,
   FeatureSettingsBody,
   FeatureSettingsResponse,
+  ToolId,
+  ToolSwitchBody,
+  ToolSwitchesResponse,
+  RepoBotScoringBody,
   MyTurnSettingsResponse,
   AiBudgetBody,
   AiBudgetResponse,
@@ -1060,6 +1064,16 @@ export const api = {
   // SETTINGS → FEATURES: which sidebar destinations show. ACCOUNT-GRAINED, a PUT of the WHOLE
   // switches object (overrides only; `null` resets every switch). Echoes what was stored and the
   // resolved `features`, which the SPA seats on `['me']` at once.
+  // SETTINGS → FEATURES, THE TOOL SWITCHES (shared tool-switches.ts): ONE switch, null = its default.
+  setToolSwitch: (id: ToolId, on: boolean | null) =>
+    fetch('/api/me/tool-switches', jsonBody('PUT', { id, on } as ToolSwitchBody)).then((r) =>
+      handle<ToolSwitchesResponse>(r),
+    ),
+  // Leave a repo out of bot comment scoring, or put it back (Repos & workspaces). Echoes the repo.
+  setRepoBotScoring: (repoId: number, excluded: boolean) =>
+    fetch(`/api/repos/${repoId}/bot-scoring`, jsonBody('PUT', { excluded } as RepoBotScoringBody)).then((r) =>
+      handle<Repo>(r),
+    ),
   setFeatureSettings: (settings: FeatureSettings | null) =>
     fetch('/api/me/feature-settings', jsonBody('PUT', { settings } as FeatureSettingsBody)).then((r) =>
       handle<FeatureSettingsResponse>(r),

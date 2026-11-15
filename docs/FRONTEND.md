@@ -689,6 +689,16 @@ persisted) and, with AI on, `useClaudeReviewStates(prTabIds, …, { staleTime })
 query and key family, so its invalidations reach the card. Never a GitHub call, never `['pr', id]` fetched
 from a hover.
 
+### AI and bot comment analysis — Settings → Features (`settings/ToolsSection.tsx`, shared `tool-switches.ts`)
+
+The ONE place in the SPA that downloads AI or the bot comment model (besides the first boot's automatic AI
+download and the CLI). Switching ON a tool not installed opens a confirm (`InfoModal overModal`, so Escape
+closes only it), then stores `true` and starts the download; OFF stores without asking. A value equal to
+`defaultOn` is stored as null. Every other "Set up" place is `SetUpInFeatures` (`AiSetup.tsx`, opens
+`openSettings('tools')`); `SettingsModal` is keyed on its focus so a deep link from inside Settings re-lands.
+The per-repo **Bot scoring** switch is on each WorkspaceManager list row (not the grid), shown while
+`me.tools.botAnalysis` is installed and on.
+
 ### Features shown — Settings → Features (`nav.ts` `isDestinationShown`, shared `features.ts`)
 
 Five destinations can be left out of the sidebar, the phone's bottom bar, the key sheet and ⌘K:
