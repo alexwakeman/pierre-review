@@ -53,7 +53,7 @@ export type RouteSeo = {
  */
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
-    title: `${SITE_NAME} — define, build, and review as an ensemble`,
+    title: `${SITE_NAME} — refine, build and review as an ensemble`,
     description: `${SITE_NAME} takes a ticket from your tracker, checks it against your docs and code, implements it, reviews it in rounds and opens the pull request. Each teammate reviews with their own Claude or Codex, and GitHub is the source of truth. It runs fully on your machine, with no added service. Free for up to ${FREE_TEAM_SIZE} people: npx ${NPM_PACKAGE}.`,
   },
   '/build': {
