@@ -10,8 +10,9 @@
 //
 //   COLUMNS   `statusLayout.columns`, verbatim. "Outside the sprint" is added at the LEFT only for the
 //             Critical path view and only when a path names a ticket outside the sprint; "Status not
-//             known" at the right only when a card has no column. A Complete column is COLLAPSED by
-//             default (a count and "Show"), so a sprint with many done or won't-do tickets still fits;
+//             known" at the right only when a card has no column. A Complete or Cancelled column (the
+//             last ones) is COLLAPSED by default (a count and "Show"), so a sprint with many done or
+//             won't-do tickets still fits;
 //             a lane's own "n tickets" opens THAT lane's cell only (`expanded`, `cellKey`).
 //   LANES     each lane is as many grid rows as its fullest cell; an empty lane is not drawn.
 //   ARROWS    a `depends_on` edge, drawn FROM the ticket waited on TO the one that waits (the flow of
@@ -27,6 +28,7 @@
 import {
   SPRINT_STAGE_LABEL,
   criteriaDoneWords,
+  sprintStageIsOpen,
   personNameKey,
   sprintLaneSummary,
   type SprintColumn,
@@ -95,9 +97,9 @@ export interface BoardLayout<L, C> {
   rows: number;
 }
 
-/** A Complete bucket folds to a count (never a pseudo-column). */
+/** A Complete or Cancelled bucket folds to a count (never a pseudo-column). */
 export function isCollapsible(c: Pick<BoardColumn, 'meaning'>): boolean {
-  return c.meaning === 'done';
+  return c.meaning === 'done' || c.meaning === 'cancelled';
 }
 
 /** The key of one lane's cell in one column (the per-lane "n tickets" toggle). */
@@ -434,7 +436,8 @@ export function ticketCardSurface(o: { ghost: boolean }): string {
 }
 
 /** Tickets waiting on another unfinished ticket: an unfinished ticket with a `depends_on` edge onto one
- *  that is not Complete (status not known counts as unfinished, as the pace's count does). */
+ *  that is neither Complete nor Cancelled (status not known counts as unfinished, as the pace's count
+ *  does). */
 export function waitingIdents(
   nodes: ReadonlyArray<Pick<SprintGraphNode, 'ident' | 'stage'>>,
   edges: ReadonlyArray<Pick<SprintGraphEdge, 'from' | 'to' | 'kind'>>,
@@ -443,7 +446,7 @@ export function waitingIdents(
   const out = new Set<string>();
   for (const e of edges) {
     if (e.kind !== 'depends_on' || !stage.has(e.from) || !stage.has(e.to)) continue;
-    if (stage.get(e.from) !== 'done' && stage.get(e.to) !== 'done') out.add(e.from);
+    if (sprintStageIsOpen(stage.get(e.from)) && sprintStageIsOpen(stage.get(e.to))) out.add(e.from);
   }
   return out;
 }
@@ -683,7 +686,7 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
         kind: 'theme',
         prs: lanePrCount(mine),
         other: l.other,
-        live: mine.filter((c) => c.data.node.stage !== 'done').length,
+        live: mine.filter((c) => sprintStageIsOpen(c.data.node.stage)).length,
         merged: mine.filter((c) => codeMerged(c.data.node)).length,
         segments: segmentsOf(columns, mine),
         summary: l.summary,
@@ -792,6 +795,8 @@ export function paceItems(pace: SprintPace, o: { productReview: boolean }): Pace
   out.push({ label: 'Code merged', value: of(pace.codeMerged), pct: null });
   if (o.productReview) out.push({ label: SPRINT_STAGE_LABEL.product_review, value: of(pace.productReview), pct: null });
   out.push({ label: SPRINT_STAGE_LABEL.done, value: of(pace.done), pct: null });
+  // Never folded into Complete; shown only when a ticket was cancelled (absent from an older server).
+  if ((pace.cancelled ?? 0) > 0) out.push({ label: SPRINT_STAGE_LABEL.cancelled, value: of(pace.cancelled ?? 0), pct: null });
   out.push({
     label: 'Open dependencies',
     value:

@@ -58,9 +58,11 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
 - **Range of a version tag** — the PRs merged INTO THE DEFAULT BRANCH after the baseline, up to and
   including that tag's commit (commit → PR by the stored merge commit oid; fallback GraphQL
   `associatedPullRequests` for unmatched commits).
-- **Done** — the ticket is in the workspace's Complete stage (`SPRINT_STAGES`; with automatic buckets
-  that is the tracker's `done` category). "Won't do" is in Complete, so it counts as Done (owner may
-  revisit).
+- **Done** — the ticket is in the workspace's Complete stage and nothing else (`stage === 'done'`,
+  `SPRINT_STAGES`; with automatic buckets: the tracker's `done` category minus the names that read as
+  cancelled). ⚠ **A Cancelled ticket ("Won't do", "Duplicate", "Closed as not planned") is NOT Done and
+  holds a tag like any not-Done ticket** (owner, 2026-11-15, reversing the earlier "Won't do counts"):
+  its blocker reads "BMD-12 is not done (Won't Do)." (docs/TRACKERS.md § The status order and buckets).
 - **Human vs bot PR** — by author through `globalAutomationUserIds`, never `hiddenBotUserIds`.
 
 ## The release check (one pure fold)
@@ -194,7 +196,7 @@ Candidate
 8. A bot PR with no ticket → no warning; listed under bot changes.
 9. A bot PR naming a not-done ticket → blocks.
 10. An unreadable ticket → blocks, with the reason.
-11. "Won't do" with merged code → counts as Done.
+11. "Won't do" with merged code → Cancelled, not Done: it holds its tag ("T2 is not done (Won't do).").
 12. No version tag after the baseline → "Nothing new", not in the release.
 13. A merged PR into `hotfix/…` for a not-done ticket blocks no `main` candidate.
 
@@ -306,7 +308,7 @@ Port report
   as shipped).
 - **The DB half** `apps/backend/src/db/release-check.ts`: `loadReleaseCheckInput`, `getReleases`, pure
   `ticketIsDone` (THE This Sprint resolver: `sprintStageOf` over `sprintLayoutFor`, category fallback
-  when the sprint was never read; "Won't do" → Complete) and `bestTicketRow`. Ticket links are
+  when the sprint was never read; "Won't do" → Cancelled, so NOT Done) and `bestTicketRow`. Ticket links are
   `tracker_tickets` rows on the workspace's CURRENT tracker site only (`workspaceSite`); rows of another
   site are not links. A fresher `sprint_tickets` status wins over the PR rows'.
 - **Route** `GET /api/releases?workspace=` (`api/routes/releases.ts`, tier `read` in `tierFor`), client

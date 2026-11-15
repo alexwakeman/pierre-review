@@ -19,8 +19,14 @@ no internals.
   and offers hotfix bases for those only, and ignores the rest. Nothing is ticked at first.
 - This Sprint → Releases → "Start from this tag": treat a version tag on main, and everything before it, as
   accepted, so only later tags are checked. Change or clear it from the repository row. Nothing is written to GitHub.
+- This Sprint: a sixth column, Cancelled, after Complete. Closed statuses such as "Won't do", "Duplicate" and
+  "Closed as not planned" go there, and you can give any bucket this meaning in Statuses. Cancelled tickets never
+  count as complete. The column is closed at first, like Complete. Saved buckets gain a Cancelled bucket when read.
 
 ### Changed
+
+- This Sprint → Releases: only a Complete ticket is Done. A cancelled ticket ("Won't do") now holds a tag back like
+  any other unfinished ticket.
 
 - This Sprint → Releases: one row per repository with the latest version tag and the candidate ("Latest 0.394.0 ·
   candidate 0.390.0 → 0.390.0-rc"). Open a row to see each tag's tickets and status. The separate tickets list is gone.

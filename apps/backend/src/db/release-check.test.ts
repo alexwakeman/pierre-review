@@ -220,9 +220,12 @@ describe('foldReleaseCheck — per repo', () => {
     expect(tagOf(res, 1, 'v1.1.0').blockers[0]).toMatchObject({ kind: 'unreadable', reason: 'not_read' });
   });
 
-  it('acceptance 11: "Won\'t do" with merged code (Done in the fold) → counts as Done', () => {
-    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { statusName: "Won't do", done: true }), ticket('T3')] });
-    expect(repoOf(res, 1).candidate?.name).toBe('v1.2.0');
+  it('acceptance 11: a Cancelled ticket ("Won\'t do", not Done in the fold) holds its tag like any not-Done one', () => {
+    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { statusName: "Won't do", done: false }), ticket('T3')] });
+    const blocker = tagOf(res, 1, 'v1.1.0').blockers[0]!;
+    expect(blocker).toMatchObject({ kind: 'not_done', key: 'T2', statusName: "Won't do" });
+    expect(releaseBlockerText(blocker, words(res))).toBe("T2 is not done (Won't do).");
+    expect(repoOf(res, 1).candidate?.name).not.toBe('v1.2.0');
   });
 
   it('acceptance 12: no version tag after the baseline → "Nothing new", not in the release', () => {
@@ -486,9 +489,19 @@ afterAll(async () => {
 });
 
 describe('ticketIsDone — the This Sprint stage resolver', () => {
-  it("acceptance 11: \"Won't do\" (done category) is in Complete, so it counts as Done", () => {
-    expect(m.ticketIsDone(null, "Won't Do", 'done')).toBe(true);
+  it("acceptance 11: \"Won't do\" (done category) is Cancelled, not Complete, so it is NOT Done", () => {
+    expect(m.ticketIsDone(null, "Won't Do", 'done')).toBe(false);
+    expect(m.ticketIsDone(null, 'Duplicate', 'done')).toBe(false);
+    expect(m.ticketIsDone(null, 'Closed as not planned', 'done')).toBe(false);
     expect(m.ticketIsDone(null, 'Done', 'done')).toBe(true);
+    expect(m.ticketIsDone(null, 'Closed', 'done')).toBe(true);
+  });
+  it('a status placed in a Cancelled bucket is not Done, whatever its name or category', () => {
+    const layout = {
+      order: [{ name: 'Shelved', category: 'done' as const, count: 0, auto: false, stage: 'cancelled' as const, bucketId: 'cancelled' }],
+      buckets: [],
+    };
+    expect(m.ticketIsDone(layout, 'Shelved', 'done')).toBe(false);
   });
   it('In review / In progress / no status are not Done', () => {
     expect(m.ticketIsDone(null, 'In review', 'indeterminate')).toBe(false);
@@ -630,9 +643,19 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     ]);
     expect(res.check!.prs.find((p) => p.id === p3)).toMatchObject({ isBot: true, ticketIdents: [] });
 
+    // The ticket is closed as "Won't Do" → Cancelled, not Complete: it still holds v1.1.0.
+    const { eq } = await import('drizzle-orm');
+    await db.update(trackerTickets).set({ statusName: "Won't Do", statusCategory: 'done' }).where(eq(trackerTickets.issueKey, 'PLAT-2')).execute();
+    const cancelled = await m.getReleases(1, scope.workspaceId);
+    const repoC = cancelled.check!.repos.find((r) => r.repoId === api.id)!;
+    expect(repoC.candidate?.name).toBe('v1.0.0');
+    expect(repoC.tags.find((t) => t.name === 'v1.1.0')!.blockers).toEqual([
+      { kind: 'not_done', ident: `jira:${SITE.apiRoot}#PLAT-2`, key: 'PLAT-2', statusName: "Won't Do" },
+    ]);
+
     // The ticket moves to Done (the worker's next read) → the candidate moves to v1.1.0; the bot PR
     // without a ticket is listed, not warned.
-    await db.update(trackerTickets).set({ statusName: "Won't Do", statusCategory: 'done' }).execute();
+    await db.update(trackerTickets).set({ statusName: 'Done', statusCategory: 'done' }).execute();
     const after = await m.getReleases(1, scope.workspaceId);
     const repo2 = after.check!.repos.find((r) => r.repoId === api.id)!;
     expect(repo2.candidate).toMatchObject({ name: 'v1.1.0', releaseTagName: 'v1.1.0-rc' });

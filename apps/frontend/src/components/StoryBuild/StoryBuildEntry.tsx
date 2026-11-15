@@ -105,7 +105,7 @@ function Entry({
     const cached = qc.getQueryData<SprintGraphResponse>(sprintGraphKey(workspaceId))?.nodes.find((n) => n.ident === ticket.ident) ?? null;
     inputs = {
       ghost: cached?.ghost ?? false,
-      stage: cached != null ? cached.stage : storyStageOfCategory(ticket.statusCategory),
+      stage: cached != null ? cached.stage : storyStageOfCategory(ticket.statusCategory, ticket.status),
       prs: Array.from({ length: facts.prTotal }),
       build: sprintNodeBuildOf(buildQ.data.build),
       check: storyViewCheck(state, runQ.data),

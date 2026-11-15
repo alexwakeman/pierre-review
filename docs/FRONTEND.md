@@ -517,7 +517,9 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   anatomy**: ticket KEY (mono) + ticket TITLE (`text-base`, the heaviest text on the page) as ONE
   button that opens the ticket's STORY VIEW tab (`TicketKeyButton` → `useOpenStory`; a ticket with no
   ident keeps the tracker link on its key, through `safeExternalUrl`, and a plain title) / next line: STATUS pill coloured by `statusCategory` (new grey, indeterminate blue, done
-  green; the site's own status words, else To do / In progress / Complete) · issue type (11px) ·
+  green — but a done status whose NAME reads as cancelled, "Won't Do", is grey and followed by a muted
+  "Cancelled", shared `isCancelledStatusName`; the site's own status words, else To do / In progress /
+  Complete) · issue type (11px) ·
   assignee as INITIALS + name (Jira avatar URLs are third-party and the CSP blocks them — do not
   loosen it) or "Unassigned" when the status is known / right: a quiet roll-up over the stack's
   cards from fields they already carry ("N failing CI · N changes requested · N ready to merge",
@@ -2970,12 +2972,14 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   diagrams), so the app draws one way:
   - **COLUMNS are `statusLayout.columns`, verbatim** — the workspace's status buckets in order (the gear's
     bucket editor): Not started, In progress, **Code review**, **Product review** (QA and other sign-offs —
-    a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete. A ticket's
+    a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete, then
+    **Cancelled** (won't do, duplicate — closed, NOT done: it never counts as Complete). A ticket's
     column is `SprintGraphNode.column`, computed ONCE in the server's fold (its bucket, or the first
     Product review bucket when the merge rule moves a Code review ticket whose PRs have all merged) — the
     SPA never re-derives it. Two pseudo-columns appear only when a card needs one: "Outside the sprint"
     at the LEFT (Critical path only) and "Status not known" at the right. Each header shows its card
-    count. ⚠ **A Complete bucket (meaning `done`) is COLLAPSED by default** — a narrow column of per-lane
+    count. ⚠ **A Complete or Cancelled bucket (meaning `done` / `cancelled`, `isCollapsible`) is COLLAPSED
+    by default** — the same toggle for both, each its own column — a narrow column of per-lane
     counts and a "Show" button (`aria-expanded`) that opens the whole column. **Each lane's "n tickets"
     is its own button** (`onToggleCell`, `layoutBoard`'s `expanded` set of `cellKey(lane, column)`): it
     opens THAT lane's cell only — the cell's first row becomes "Hide", its cards sit below, the column
@@ -3051,7 +3055,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 - **CRITICAL PATH** (`SprintPathsView`, `Activity/SprintBoards.tsx`; state fold `sprintPathsModel.ts`):
   1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
      with a time bar, "Code merged 21 of 55", "Product review 15 of 55" (`pace.productReview`; only when
-     a Product review bucket exists), "Complete 17 of 55", "Open dependencies 6 in 3 chains".
+     a Product review bucket exists), "Complete 17 of 55", "Cancelled 2 of 55" (`pace.cancelled`; only when
+     one is cancelled — never folded into Complete), "Open dependencies 6 in 3 chains". A Cancelled ticket
+     is neither live nor waited on (`sprintStageIsOpen`); the pace card says "(2 of 5; 1 cancelled)".
   2. **"Critical paths"** (ⓘ beside it) — one lane per STORED path (`pathsBoard`; by PR count, ties
      riskiest first as stored), its header the risk as a WORD chip ("High risk" / "Medium risk" / "Low risk"), the title and
      the one sentence of advice; its tickets on their columns, every arrow on it critical. A ticket
@@ -4508,15 +4514,16 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   or in progress, no PR, no open session — `WrenchIcon`, the AI Fix wrench (one mark for "a model writes code"; the
   hammer `BuildIcon` is DELETED, 2026-11-04; the builds TOAST has its own `HammerIcon`, docs/STORY-BUILD.md
   § The builds toast), "Implement", accessible name "Implement KEY") or `'fill_gaps'` (a
-  STARTED ticket — a PR, or a status past Not started, short of Complete — whose latest succeeded story
-  check is CURRENT and found gaps, `storyBuildCheckGaps` over not met + partly met + unsettled +
+  STARTED ticket — a PR, or a status past Not started, short of Complete and not Cancelled — whose latest
+  succeeded story check is CURRENT and found gaps, `storyBuildCheckGaps` over not met + partly met + unsettled +
   `missing`; `FillGapsIcon`, "Fill gaps in KEY"); with an OPEN session "Open build · <mark>" (accessible
   name "Open KEY's build: <mark>"). `data-testid="story-build-entry"`, `data-action`. Opens the tab through
   `useOpenStoryBuild`, handing the offer (`TabTicketMeta.buildOffer`: action + the check's run id).
   **Inputs:** the tray passes the board's NODE (`SprintStoryTray node` → `StoryViewBody sprintNode` →
   a context) and nothing is fetched. Elsewhere the view's own facts: stage from the cached sprint graph
   (`getQueryData`, never a fetch) else the tracker status CATEGORY (`storyStageOfCategory`: To Do ⇒ Not
-  started, Done ⇒ Complete, else started; unknown ⇒ Implement never offered); the PR count from
+  started, Done ⇒ Cancelled when the status name reads as cancelled, else Complete; else started; unknown
+  ⇒ Implement never offered); the PR count from
   `/api/ticket-prs` (open + merged + closed); the check from the view's `TicketReviewState` + its latest
   run (`storyViewCheck`, the run the Story section already reads — same query key; stale for ANY stale
   reason); the session from ONE DB read, `GET /api/story-builds?ident=` (`sprintNodeBuildOf`). Nothing

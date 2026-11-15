@@ -15,7 +15,7 @@
 //   • coding begins / ends; the stage of a ticket; the section index; the evidence fold (closed-
 //     unmerged PRs ignored, the sprint ticket's status beats a stored row's, the freshest otherwise).
 import { describe, expect, it } from 'vitest';
-import { SPRINT_STATUS_SETTINGS_DEFAULT, SPRINT_STATUS_SETTINGS_VERSION, type SprintBucket, type SprintStage, type SprintStatusAutoOrder } from '@pierre-review/shared';
+import { SPRINT_STATUS_SETTINGS_DEFAULT, SPRINT_STATUS_SETTINGS_VERSION, isCancelledStatusName, type SprintBucket, type SprintStage, type SprintStatusAutoOrder } from '@pierre-review/shared';
 import {
   applyBuckets,
   automaticStages,
@@ -62,7 +62,7 @@ const PLAIN: SprintStatusAutoOrder = {
 const t = (statusName: string | null, statusCategory: string | null) => ({ statusName, statusCategory });
 const names = (xs: Array<{ name: string }>) => xs.map((x) => x.name);
 const ev = (o: Record<string, [number, number]>) => new Map(Object.entries(o).map(([k, [w, m]]) => [k, { withPrs: w, allMerged: m }]));
-const noSections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], product_review: [], done: [] });
+const noSections = (): Record<SprintStage, string[]> => ({ not_started: [], in_progress: [], in_review: [], product_review: [], done: [], cancelled: [] });
 const B = (id: string, name: string, meaning: SprintStage, statuses: string[]): SprintBucket => ({ id, name, meaning, statuses });
 
 describe('automaticStatusOrder', () => {
@@ -116,6 +116,40 @@ describe('isReviewStatusName / isProductReviewStatusName', () => {
   });
 });
 
+describe('SPRINT_CANCELLED_STATUS_RE (isCancelledStatusName)', () => {
+  it('reads won’t-do, cancelled and similar names as cancelled', () => {
+    for (const n of [
+      "Won't Do",
+      'Won’t do',
+      'Wont do',
+      'WONT DO',
+      "Won't Fix",
+      'Will not do',
+      'Cancelled',
+      'Canceled',
+      'Rejected',
+      'Declined',
+      'Duplicate',
+      'Duplicated',
+      'Abandoned',
+      'Obsolete',
+      'Not doing',
+      'Invalid',
+      'Closed as not planned',
+      'Closed as duplicate',
+      'Done (won’t do)',
+    ]) {
+      expect([n, isCancelledStatusName(n)]).toEqual([n, true]);
+    }
+  });
+
+  it('leaves done names alone', () => {
+    for (const n of ['Done', 'Closed', 'Resolved', 'Released', 'Shipped', 'Complete', 'Fixed', 'Won', 'Validated', 'Planned', 'Doing', 'Cancel requested']) {
+      expect([n, isCancelledStatusName(n)]).toEqual([n, false]);
+    }
+  });
+});
+
 describe('inferReviewFrom', () => {
   const order = automaticStatusOrder(BOARD, []);
 
@@ -138,6 +172,28 @@ describe('automaticStages', () => {
     expect(automaticStages(automaticStatusOrder(BOARD, []), new Map())).toEqual(['not_started', 'in_progress', 'product_review', 'product_review', 'done']);
     const named: SprintStatusAutoOrder = { ...PLAIN, statuses: [...PLAIN.statuses.slice(0, 2), { id: '9', name: 'Code Review', category: 'indeterminate' }, ...PLAIN.statuses.slice(2)] };
     expect(automaticStages(automaticStatusOrder(named, []), new Map())).toEqual(['not_started', 'in_progress', 'in_review', 'in_progress', 'in_progress', 'done']);
+  });
+
+  it('a done status is Cancelled by name or by the tracker’s own flag (a Linear canceled state), else Complete; an in-progress “cancel” name is not', () => {
+    const order: SprintStatusAutoOrder = {
+      source: 'linear_states',
+      readAt: 'T',
+      statuses: [
+        { id: '1', name: 'Todo', category: 'new' },
+        { id: '2', name: 'Cancel requested', category: 'indeterminate' },
+        { id: '3', name: 'Done', category: 'done' },
+        { id: '4', name: 'Won’t do', category: 'done' },
+        { id: '5', name: 'Parked for good', category: 'done', cancelled: true },
+      ],
+    };
+    expect(automaticStages(automaticStatusOrder(order, []), new Map())).toEqual(['not_started', 'in_progress', 'done', 'cancelled', 'cancelled']);
+    // The flag survives the automatic order; an unknown done status falls back by name.
+    const l = resolveSprintStatusLayout({ autoOrder: order, settings: SPRINT_STATUS_SETTINGS_DEFAULT, tickets: [], evidence: new Map() });
+    expect(l.buckets.map((b) => `${b.id}:${names(b.statuses).join('|')}`).at(-1)).toBe('cancelled:Won’t do|Parked for good');
+    expect(sprintPlacementOf(l, { name: 'Duplicate', category: 'done' })).toEqual({ stage: 'cancelled', bucketId: 'cancelled' });
+    expect(sprintPlacementOf(l, { name: 'Shipped', category: 'done' })).toEqual({ stage: 'done', bucketId: 'done' });
+    // With no buckets at all, the fallback is the stage's own automatic id.
+    expect(sprintPlacementOf({ order: [] }, { name: "Won't fix", category: 'done' })).toEqual({ stage: 'cancelled', bucketId: 'cancelled' });
   });
 
   it('with neutral names, the PR evidence boundary and everything after it is In review', () => {
@@ -268,23 +324,24 @@ describe('resolveSprintStatusLayout', () => {
       'Ready for QA:0:product_review',
       'In PO Review:1:product_review',
       'Done:1:done',
-      'Won’t do:1:done',
+      'Won’t do:1:cancelled',
     ]);
     // No Code review status: coding ends where Product review begins.
     expect([l.codingBegins, l.codingEnds]).toEqual(['In Development', 'Ready for QA']);
     expect(l.evidence.map((e) => `${e.status}:${e.allMerged}/${e.withPrs}`)).toEqual(['In Development:0/0', 'Ready for QA:0/0', 'In PO Review:3/3']);
   });
 
-  it('automatic → five buckets named by stage, QA names in Product review, Won’t do in Complete; one column per bucket', () => {
+  it('automatic → six buckets named by stage, QA names in Product review, Won’t do in Cancelled (never Complete); one column per bucket', () => {
     const l = resolveSprintStatusLayout({ autoOrder: BOARD, settings: SPRINT_STATUS_SETTINGS_DEFAULT, tickets, evidence: new Map() });
     expect(l.buckets.map((b) => `${b.id}:${b.name}:${names(b.statuses).join('|')}`)).toEqual([
       'not_started:Not started:To Do',
       'in_progress:In progress:In Development',
       'in_review:Code review:',
       'product_review:Product review:Ready for QA|In PO Review',
-      'done:Complete:Done|Won’t do',
+      'done:Complete:Done',
+      'cancelled:Cancelled:Won’t do',
     ]);
-    expect(l.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'product_review', 'done']);
+    expect(l.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'product_review', 'done', 'cancelled']);
     expect(mergeRuleTarget(l)).toBe('product_review');
   });
 
@@ -361,15 +418,17 @@ describe('storedSettingsFor (the retired shapes)', () => {
       BOARD,
       [],
     );
-    // …and, being stored before Product review, read with one: the QA / sign-off names move into it.
+    // …and, being stored before Product review and Cancelled, read with both: the QA / sign-off names
+    // move into Product review; Cancelled is added (empty: no Complete status reads as cancelled).
     expect(sec(s)).toEqual({
       not_started: ['To Do'],
       in_progress: ['In Development'],
       in_review: [],
       product_review: ['Ready for QA', 'In PO Review'],
       done: ['Done'],
+      cancelled: [],
     });
-    expect(s.buckets?.map((b) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete']);
+    expect(s.buckets?.map((b) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete', 'Cancelled']);
     expect(s.mergedColumn).toBe(true);
   });
 
@@ -383,7 +442,8 @@ describe('storedSettingsFor (the retired shapes)', () => {
 
   it('{sections} → four buckets named by stage; an empty one → automatic', () => {
     const s = storedSettingsFor({ sections: { ...noSections(), in_review: ['Done'], done: ['Won’t do'] } }, BOARD, []);
-    expect(sec(s)).toEqual({ ...noSections(), in_review: ['Done'], done: ['Won’t do'] });
+    // Won’t do moves out of Complete into the added Cancelled bucket.
+    expect(sec(s)).toEqual({ ...noSections(), in_review: ['Done'], done: [], cancelled: ['Won’t do'] });
     expect(storedSettingsFor({ sections: noSections() }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true });
     expect(storedSettingsFor({ sections: null }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true });
   });
@@ -417,6 +477,7 @@ describe('storedSettingsFor (the retired shapes)', () => {
       'in_review:Code review:in_review:In Code Review',
       'product_review:Product review:product_review:Ready for QA|In QA|In PO Review|Awaiting Release|Final PO Check',
       'done:Complete:done:Done',
+      'cancelled:Cancelled:cancelled:',
     ]);
     // Saved since: a removed Product review stays removed, a typed "In review" stays typed.
     const current = { ...legacy, version: SPRINT_STATUS_SETTINGS_VERSION };
@@ -425,12 +486,50 @@ describe('storedSettingsFor (the retired shapes)', () => {
 
   it('the added bucket goes after the last In progress bucket with no Code review one, else before Complete; never past the cap or onto a taken name', () => {
     const ids = (raw: unknown) => storedSettingsFor(raw, null, []).buckets?.map((b) => b.id);
-    expect(ids({ buckets: [B('a', 'A', 'not_started', []), B('b', 'B', 'in_progress', []), B('d', 'D', 'done', [])] })).toEqual(['a', 'b', 'product_review', 'd']);
-    expect(ids({ buckets: [B('a', 'A', 'not_started', []), B('d', 'D', 'done', [])] })).toEqual(['a', 'product_review', 'd']);
-    expect(ids({ buckets: [B('product_review', 'Later', 'done', [])] })).toEqual(['product_review_2', 'product_review']);
-    expect(ids({ buckets: [B('a', 'Product review', 'in_progress', [])] })).toEqual(['a']);
+    // (Cancelled, added after Product review for a value this old, always goes last.)
+    const pr = (raw: unknown) => ids(raw)?.filter((id) => id !== 'cancelled');
+    expect(pr({ buckets: [B('a', 'A', 'not_started', []), B('b', 'B', 'in_progress', []), B('d', 'D', 'done', [])] })).toEqual(['a', 'b', 'product_review', 'd']);
+    expect(pr({ buckets: [B('a', 'A', 'not_started', []), B('d', 'D', 'done', [])] })).toEqual(['a', 'product_review', 'd']);
+    expect(pr({ buckets: [B('product_review', 'Later', 'done', [])] })).toEqual(['product_review_2', 'product_review']);
+    expect(pr({ buckets: [B('a', 'Product review', 'in_progress', [])] })).toEqual(['a']);
     const ten = Array.from({ length: 10 }, (_, i) => B(`b${i}`, `B${i}`, 'in_progress', []));
     expect(ids({ buckets: ten })).toHaveLength(10);
+  });
+
+  it('a version-2 value (saved before Cancelled) gets a Cancelled bucket after the last Complete one, taking its cancelled-named statuses', () => {
+    const v2 = {
+      version: 2,
+      buckets: [
+        B('todo', 'To do', 'not_started', ['To Do']),
+        B('qa', 'QA', 'product_review', ['In QA']),
+        B('done', 'Done', 'done', ['Done', 'Won’t Do']),
+        B('shipped', 'Shipped', 'done', ['Released', 'Duplicate']),
+      ],
+      mergedColumn: false,
+    };
+    const s = storedSettingsFor(v2, null, []);
+    expect(s.buckets?.map((b) => `${b.id}:${b.name}:${b.meaning}:${b.statuses.join('|')}`)).toEqual([
+      'todo:To do:not_started:To Do',
+      'qa:QA:product_review:In QA',
+      'done:Done:done:Done',
+      'shipped:Shipped:done:Released',
+      'cancelled:Cancelled:cancelled:Won’t Do|Duplicate',
+    ]);
+    expect(s.mergedColumn).toBe(false);
+    // Read-time only: the version-2 value is not given a second Product review.
+    expect(s.buckets?.filter((b) => b.meaning === 'product_review')).toHaveLength(1);
+  });
+
+  it('the Cancelled bucket is never added past the cap, onto a taken name, or twice; a current value reads as saved', () => {
+    const ids = (raw: unknown) => storedSettingsFor(raw, null, []).buckets?.map((b) => b.id);
+    const ten = Array.from({ length: 10 }, (_, i) => B(`b${i}`, `B${i}`, 'done', []));
+    expect(ids({ version: 2, buckets: ten })).toHaveLength(10);
+    const nine = Array.from({ length: 9 }, (_, i) => B(`b${i}`, `B${i}`, 'done', []));
+    expect(ids({ version: 2, buckets: nine })).toHaveLength(10);
+    expect(ids({ version: 2, buckets: [B('a', 'cancelled', 'done', ['Won’t do'])] })).toEqual(['a']);
+    expect(ids({ version: 2, buckets: [B('cancelled', 'Later', 'done', [])] })).toEqual(['cancelled', 'cancelled_2']);
+    const current = { version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('d', 'Done', 'done', ['Done', 'Won’t do'])], mergedColumn: true };
+    expect(storedSettingsFor(current, null, [])).toEqual({ buckets: [B('d', 'Done', 'done', ['Done', 'Won’t do'])], mergedColumn: true });
   });
 });
 

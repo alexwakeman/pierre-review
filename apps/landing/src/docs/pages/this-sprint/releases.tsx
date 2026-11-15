@@ -77,7 +77,10 @@ export default function Page(): JSX.Element {
 
       <H2 id="the-rules">The rules</H2>
       <ul>
-        <li>A ticket counts as Done when it is in your Complete column. &ldquo;Won&rsquo;t do&rdquo; counts as Done.</li>
+        <li>
+          A ticket counts as Done only when it is in your Complete column. A cancelled ticket, such as &ldquo;Won&rsquo;t
+          do&rdquo;, is not Done, so it holds the release back like any other unfinished ticket.
+        </li>
         <li>A ticket that could not be read from the tracker holds the release back, with the reason.</li>
         <li>
           Only the ticket counts. Its pull requests in other repositories, and its open pull requests, hold nothing

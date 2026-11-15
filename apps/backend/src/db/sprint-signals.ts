@@ -2,6 +2,8 @@ import { and, eq } from 'drizzle-orm';
 import {
   SPRINT_STAGE_LABEL,
   SPRINT_STAGES,
+  sprintStageIsComplete,
+  sprintStageIsOpen,
   SPRINT_VISIT_GAP_MS,
   type SprintGraphEdge,
   type SprintGraphNode,
@@ -38,7 +40,9 @@ import type { SprintTiming } from './sprint-paths.js';
 //
 // ⚠ PURE AT IMPORT: the DB client is reached LAZILY inside the store functions.
 
-const isDone = (n: Pick<SprintGraphNode, 'stage'>): boolean => n.stage === 'done';
+// ⚠ Complete ONLY is delivered (`isDone`); Cancelled is closed, never complete (`isClosed` = either).
+const isDone = (n: Pick<SprintGraphNode, 'stage'>): boolean => sprintStageIsComplete(n.stage);
+const isClosed = (n: Pick<SprintGraphNode, 'stage'>): boolean => !sprintStageIsOpen(n.stage);
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 const pct = (n: number, of: number): number => (of === 0 ? 0 : Math.round((100 * n) / of));
 const stageLabel = (s: SprintStage): string => SPRINT_STAGE_LABEL[s];
@@ -50,6 +54,7 @@ export function outOfStepSignal(nodes: readonly SprintGraphNode[]): SprintSignal
   const reviewMerged: string[] = [];
   const reviewNoPr: string[] = [];
   const doneOpen: string[] = [];
+  const cancelledOpen: string[] = [];
   const notStartedOpen: string[] = [];
   const notStartedDraft: string[] = [];
   for (const n of nodes) {
@@ -62,14 +67,16 @@ export function outOfStepSignal(nodes: readonly SprintGraphNode[]): SprintSignal
       (merged ? reviewMerged : reviewNoPr).push(n.ident);
     }
     else if (n.stage === 'done' && open.length > 0) doneOpen.push(n.ident);
+    else if (n.stage === 'cancelled' && open.length > 0) cancelledOpen.push(n.ident);
     else if (n.stage === 'not_started' && open.length > 0) (open.some((p) => !p.draft) ? notStartedOpen : notStartedDraft).push(n.ident);
   }
-  const idents = [...reviewNoPr, ...reviewMerged, ...doneOpen, ...notStartedOpen, ...notStartedDraft];
+  const idents = [...reviewNoPr, ...reviewMerged, ...doneOpen, ...cancelledOpen, ...notStartedOpen, ...notStartedDraft];
   if (idents.length === 0) return null;
   const parts: string[] = [];
   if (reviewNoPr.length > 0) parts.push(`${reviewNoPr.length} in code review with no pull request`);
   if (reviewMerged.length > 0) parts.push(`${reviewMerged.length} in code review with ${reviewMerged.length === 1 ? 'its' : 'their'} code already merged`);
   if (doneOpen.length > 0) parts.push(`${doneOpen.length} complete with a pull request still open`);
+  if (cancelledOpen.length > 0) parts.push(`${cancelledOpen.length} cancelled with a pull request still open`);
   if (notStartedOpen.length > 0) parts.push(`${notStartedOpen.length} not started with a pull request open`);
   if (notStartedDraft.length > 0) parts.push(`${notStartedDraft.length} not started with a draft pull request open`);
   return {
@@ -88,11 +95,13 @@ export function paceSignal(nodes: readonly SprintGraphNode[], timing: SprintTimi
   const sprint = nodes.filter((n) => !n.ghost);
   if (sprint.length === 0) return null;
   const done = sprint.filter(isDone).length;
+  const cancelled = sprint.filter((n) => n.stage === 'cancelled').length;
+  const tail = cancelled > 0 ? `; ${cancelled} cancelled` : '';
   return {
     kind: 'pace',
     title: `Day ${timing.day} of ${timing.days}`,
-    sentence: `${pct(timing.day, timing.days)}% of the sprint's time has gone and ${pct(done, sprint.length)}% of its tickets are complete (${done} of ${sprint.length}).`,
-    idents: sprint.filter((n) => !isDone(n)).map((n) => n.ident),
+    sentence: `${pct(timing.day, timing.days)}% of the sprint's time has gone and ${pct(done, sprint.length)}% of its tickets are complete (${done} of ${sprint.length}${tail}).`,
+    idents: sprint.filter((n) => !isClosed(n)).map((n) => n.ident),
   };
 }
 
@@ -107,7 +116,7 @@ export function blockedOutsideSignal(nodes: readonly SprintGraphNode[], edges: r
     if (e.kind !== 'depends_on') continue;
     const from = byIdent.get(e.from);
     const to = byIdent.get(e.to);
-    if (from == null || to == null || from.ghost || isDone(from) || !to.ghost || isDone(to)) continue;
+    if (from == null || to == null || from.ghost || isClosed(from) || !to.ghost || isClosed(to)) continue;
     blocked.add(from.ident);
     outside.add(to.ident);
   }
@@ -201,7 +210,7 @@ export function sinceTitle(atMs: number, nowMs: number): string {
   return d === 1 ? 'Since yesterday' : `Since ${d} days ago`;
 }
 
-const MOVE_ORDER: readonly SprintStage[] = ['done', 'product_review', 'in_review', 'in_progress', 'not_started'];
+const MOVE_ORDER: readonly SprintStage[] = ['done', 'cancelled', 'product_review', 'in_review', 'in_progress', 'not_started'];
 
 /** What moved since the baseline. null with no baseline, a baseline sharing no ticket with today's
  *  sprint (a new sprint), or nothing moved. Pure. */

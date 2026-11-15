@@ -228,6 +228,9 @@ describe('the story view\'s entry (owner decision 4; shared `storyBuildOffered`)
     expect(entryOf(started({ check: { ...CHECK, stale: true } }))).toBeNull();
     expect(entryOf(started({ check: { ...CHECK, notMet: 0, met: 2 } }))).toBeNull();
     expect(entryOf(started({ stage: 'done' }))).toBeNull();
+    // Cancelled work is closed: no Fill gaps, and no Implement either.
+    expect(entryOf(started({ stage: 'cancelled' }))).toBeNull();
+    expect(entryOf(node({ stage: 'cancelled' }))).toBeNull();
   });
 
   it("THE TEAM CLAIM: a teammate building the ticket replaces the offer with their line — never an open session's mark", () => {
@@ -251,6 +254,9 @@ describe('the story view\'s entry (owner decision 4; shared `storyBuildOffered`)
     expect(storyStageOfCategory('new')).toBe('not_started');
     expect(storyStageOfCategory('indeterminate')).toBe('in_progress');
     expect(storyStageOfCategory('done')).toBe('done');
+    expect(storyStageOfCategory('done', 'Done')).toBe('done');
+    expect(storyStageOfCategory('done', "Won't Do")).toBe('cancelled');
+    expect(storyStageOfCategory('new', 'Cancelled')).toBe('not_started');
     expect(storyStageOfCategory(null)).toBeNull();
     expect(storyStageOfCategory(undefined)).toBeNull();
   });

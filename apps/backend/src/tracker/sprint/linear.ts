@@ -125,7 +125,10 @@ export function linearStatesOrder(teams: readonly Team[], readAt: string): Sprin
       const name = (s.name ?? '').trim().slice(0, SPRINT_STATUS_NAME_MAX);
       if (names.has(name.toLowerCase())) continue;
       names.add(name.toLowerCase());
-      statuses.push({ id: typeof s.id === 'string' && s.id !== '' ? s.id : null, name, category: linearCategory(s.type) });
+      const id = typeof s.id === 'string' && s.id !== '' ? s.id : null;
+      // A `canceled` state is Cancelled whatever its name (the layout reads `cancelled`, not the name).
+      if ((s.type ?? '').toLowerCase() === 'canceled') statuses.push({ id, name, category: linearCategory(s.type), cancelled: true });
+      else statuses.push({ id, name, category: linearCategory(s.type) });
       if (statuses.length >= SPRINT_STATUS_ORDER_MAX) break;
     }
     if (statuses.length >= SPRINT_STATUS_ORDER_MAX) break;

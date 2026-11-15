@@ -297,6 +297,7 @@ describe('the pace', () => {
       tickets: 4,
       live: 3,
       done: 1,
+      cancelled: 0,
       productReview: 1,
       codeMerged: 2,
       // BMD-1081 → BMD-1080 and BMD-1080 → BMD-1096 (a ghost → ghost link is not the sprint's).
@@ -304,6 +305,9 @@ describe('the pace', () => {
       chains: 1,
     });
     expect(sprintPaceOf(nodes, edges, null)).toMatchObject({ daysElapsed: null, daysTotal: null, timeUsedPct: null });
+    // A cancelled ticket is never complete, never live, and no longer something to wait on.
+    const cancelled = nodes.map((n) => (n.stage === 'done' && !n.ghost ? { ...n, stage: 'cancelled' as const } : n));
+    expect(sprintPaceOf(cancelled, edges, null)).toMatchObject({ tickets: 4, live: 3, done: 0, cancelled: 1 });
     expect(sprintChains(nodes, edges)).toEqual([[I('BMD-1081'), I('BMD-1080'), I('BMD-1096'), I('BMD-2000')]]);
   });
 });

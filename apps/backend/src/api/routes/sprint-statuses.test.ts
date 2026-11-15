@@ -172,7 +172,7 @@ describe('PUT /api/sprint-stories/statuses', () => {
     const reset = await put({ workspaceId: ownWs, settings: { buckets: null, mergedColumn: true } });
     expect(reset.statusCode).toBe(200);
     expect(reset.json().statusLayout.orderSource).toBe('jira_board');
-    expect(reset.json().statusLayout.buckets.map((b: any) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete']);
+    expect(reset.json().statusLayout.buckets.map((b: any) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete', 'Cancelled']);
     expect(await stored(ownWs)).toBeNull();
   });
 });

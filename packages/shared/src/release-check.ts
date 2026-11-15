@@ -4,8 +4,8 @@
 // Releases); the caller hands in no other. EACH REPOSITORY IS JUDGED ON ITS OWN: its CANDIDATE is the
 // newest version tag on the default branch after its BASELINE whose range holds no pull request linked
 // to a ticket that is not Done. A ticket holds a tag when it is:
-//   • not Done (the workspace's Complete stage — the caller resolves that through the This Sprint stage
-//     resolver and hands `done` in);
+//   • not Done (the workspace's Complete stage ONLY — the caller resolves that through the This Sprint
+//     stage resolver and hands `done` in; a Cancelled ticket, "Won't Do", is not Done and holds);
 //   • unreadable (`not_found` / `no_access` / `failed`, or never read on the workspace's site): Done is
 //     unknown.
 // Nothing else about pull requests across repositories counts (no "ships whole", no "open work"). A tag
@@ -202,7 +202,7 @@ export interface ReleaseCheckTicketInput {
   title: string | null;
   url: string | null;
   statusName: string | null;
-  /** In the workspace's Complete stage ("Won't do" included). */
+  /** In the workspace's Complete stage — Complete ONLY: a Cancelled ticket ("Won't Do") is false. */
   done: boolean;
   readState: ReleaseTicketReadState;
 }

@@ -10,7 +10,8 @@
 //   • Tickets: `tracker_tickets` rows ON THE WORKSPACE'S TRACKER SITE only (a row of another site is a
 //     ticket of a tracker the workspace no longer uses: not a link). The best row per ticket is the
 //     newest successful read; a fresher `sprint_tickets` row's status wins. DONE = the This Sprint
-//     stage resolver (`sprintStageOf` over `sprintLayoutFor`) says Complete — never a second resolver.
+//     stage resolver (`sprintStageOf` over `sprintLayoutFor`) says Complete (`stage === 'done'`; a
+//     Cancelled ticket holds like any not-Done one) — never a second resolver.
 //     A range PR with a ticket key THE detection rule finds but no stored row yet is `not_read` (blocks).
 //   • A 'history' range (the oldest tag) is read fresh from the stored PRs, never from its frozen row.
 //   • Bot-ness: `globalAutomationUserIds`, never the hidden-bots list.
@@ -47,9 +48,10 @@ function chunks<T>(xs: readonly T[], n = CHUNK): T[][] {
   return out;
 }
 
-/** Done = the workspace's Complete stage, through THE This Sprint stage resolver. With no stored
- *  layout (the sprint was never read) the resolver's category fallback decides (`done` → Complete,
- *  so "Won't do" counts). Pure. */
+/** Done = the workspace's Complete stage ONLY, through THE This Sprint stage resolver. With no stored
+ *  layout (the sprint was never read) the resolver's category fallback decides (`done` → Complete, but
+ *  a name that reads as cancelled — "Won't do" — → Cancelled, which is NOT Done and holds the tag).
+ *  Pure. */
 export function ticketIsDone(
   layout: Pick<SprintStatusLayout, 'order' | 'buckets'> | null,
   statusName: string | null,
