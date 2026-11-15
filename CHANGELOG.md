@@ -21,6 +21,10 @@ no internals.
   when the build ends. A mark whose computer went away for 30 minutes shows Clear.
 - The review loop ("After the build: review and fix, then open the pull request") now shows each review round as
   a status on the branch: "alex is reviewing with Claude", then "alex reviewed · kept in Ensemble".
+- The story view shows "How the code meets each criterion": each criterion beside the pull requests that say they
+  move it forward, with how and the files. A criterion no pull request claims says so.
+- A ticket with one pull request now shows that pull request's design in the story view, with Draw design and
+  Redraw design.
 
 ### Changed
 

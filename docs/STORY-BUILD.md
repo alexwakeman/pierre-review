@@ -549,7 +549,9 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   branch. Loop runs do NOT take a PR-review slot.
 - **The story check** (`story-check.ts`): the ticket review's prompt, agent and reconcile over every
   target as a member labelled `branch <name>`, with the agent's not-applicable and answer notes as
-  `claims`; the ticket is the build's frozen seed and Ensemble's stored comments (never a tracker read).
+  `claims`; the ticket is the build's frozen seed and Ensemble's stored comments (never a tracker read). It saves NO
+  contribution card, so the story view's criteria map has nothing to draw for a build with no PR
+  ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket review → THE CRITERIA MAP).
 - **The fix pass**: the driver writes REVIEW.md (`seed.ts`: `F<n>` findings by severity, `AC<n>` / `M<n>`
   open criteria with the reviewer's words and a rejected claim's reason; an earlier finding still open is
   re-raised as a finding of the round, with the agent's earlier answer), the refs file and the checker,

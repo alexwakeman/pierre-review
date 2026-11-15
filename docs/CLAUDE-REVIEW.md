@@ -2214,6 +2214,15 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   merged PR, ONE design of the whole story across every participating repository — how the PRs fit
   together, each cell tagged with its PR, arrows free to cross repositories (at most
   `SEQUENCE_DIAGRAM_STORY_MAX_PRS` = 12 members, else refused `too_many_prs`; at most 3 tickets per PR).
+- ⚠ **A ONE-PR TICKET SHOWS THAT PR'S OWN DESIGN** (2026-11-15). A story design still needs 2+ members
+  (`too_few_prs`, unchanged; the fingerprint and the caps are untouched), so no second model run: the
+  story read (`GET /api/sequence-diagrams/story`, `storySlot`) adds `soloPr` — the one live member —
+  while `memberCount` is 1, and the story view's design slot (`StoryDesignSection` → `SoloDesignSection`)
+  reads THAT PR's slot (`GET /api/prs/:id/sequence-diagrams`: its newest succeeded 'pr' row, "Drawn for
+  an earlier commit" when its head moved), headed "Pull request design" with the PR's ref, and the
+  Story heading's Draw / Redraw design queues THAT PR's redraw (`POST /api/prs/:id/sequence-diagrams/redraw`).
+  A story design stored back when the ticket had two PRs is not shown while it has one. A second PR
+  joining switches the slot back to the story's.
 - **The trigger** (`trigger.ts` `maybeDrawDiagramsAfterReview`): `claude-review/manager.ts` calls it
   fire-and-forget after EVERY SUCCEEDED review, manual or auto. It only QUEUES and never throws, so it
   can neither block nor fail the review. ⚠ **THE WORKSPACE SWITCH comes first**:
@@ -2487,6 +2496,22 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
     named in the prompt, never silently dropped.
   - Diffs and the pre-pass reuse `fetchPrDiff` (with its `localPrDiff` fallback), the noise strip and
     `capDiff`; the 120k shared diff budget now covers at most 4 (+2) members.
+- **THE CRITERIA MAP** (2026-11-15; the story view's "How the code meets each criterion", docs/FRONTEND.md
+  § The story view → The criteria map). NO model call and NO route: shared `criteria-map.ts` `criteriaMap`
+  folds the latest succeeded run's criteria (ref, text, the STORY CHECK's status, `criterionDone`) with
+  each member's `card` as the wire already carries it — only the card at the PR's CURRENT synced head
+  (`readCardsAt`), so a PR pushed since is `hasCard: false` and draws no line, never an old card shown as
+  current. A card line names a criterion by text or ref (`TicketPrCardCriterion.criterion`), from a run
+  that may have worded it differently, so `matchCardCriterion` takes the same text (refs and punctuation
+  aside), else the best word overlap (≥ `CRITERIA_MAP_MATCH_MIN` 0.5 of the shorter text, ≥ 2 shared
+  words, a TIE is no match), else a lone leading ref ("AC3"). Two lines of one card on one criterion
+  are ONE link (how joined, files merged). ⚠ Unknown is never zero: an unclaimed criterion is a row with
+  no links; a card line matching nothing stays on its PR (`unmatched`). The status is never derived from
+  the cards. Tested in `review/ticket-review/criteria-map.test.ts`.
+  - ⚠ **AN IMPLEMENT BUILD WITH NO PR GETS NO MAP.** Its story check (`coding/story-build/loop/
+    story-check.ts`) writes NO card ("no card is saved"): its members' `card` is always null, and the
+    build agent's `claims` are notes on a criterion (`not_applicable` / `answer`, words only, no files),
+    not a per-PR "how + files". So there is nothing to link; the map is drawn only from member cards.
 - **Checkouts.** An OPEN member gets its own read-only worktree at its head (card or diff — the agent
   may verify a card). A MERGED member gets no worktree of its own: ONE read-only checkout of its
   repository's DEFAULT BRANCH, deduplicated per repo (`prepDefaultBranchCheckouts`: fetched into a

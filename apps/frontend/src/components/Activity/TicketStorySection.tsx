@@ -14,8 +14,11 @@
 //      when one exists — the summary (two sentences; its currency is in the header, not here), every criterion with who delivers it, the
 //      missing and not-asked-for items, and "What each PR adds"; otherwise the sprint brief's summary
 //      and numbered criteria ("Worked out from the description" when derived); otherwise nothing.
+//      On the review path, "HOW THE CODE MEETS EACH CRITERION" (CriteriaMap.tsx) comes right under the
+//      criteria: the check's criteria joined to the members' current cards, no request of its own.
 //      THE STORY'S DESIGN (StoryDesignSection.tsx) sits RIGHT UNDER THE SUMMARY AND ITS CRITERIA
-//      (`afterCriteria`) — only where agentic AI runs and the ticket has a PR.
+//      (`afterCriteria`, after the map) — only where agentic AI runs and the ticket has a PR; with ONE
+//      PR it is that pull request's own design.
 //   2. THE TICKET AS WRITTEN — the StoryDisclosure ("As written in Jira"): the stored tracker row read
 //      through any PR on the ticket, else the ticket review's snapshot, else the sprint read's text.
 //      Its own copy of the comments is left out (`withComments={false}`): they are 3.
@@ -59,6 +62,7 @@ import { StoryComments } from '../TicketComments.js';
 import { newSinceCheckIds } from '../../lib/ticketComments.js';
 import { workspaceKey } from '../../hooks/useActivity.js';
 import { StoryDesignButton, StoryDesignSection, useStoryDesign, type StoryDesign } from './StoryDesignSection.js';
+import { CriteriaMapSection } from './CriteriaMap.js';
 import { StoryDocsAlignmentBlock, StoryDocsButton, StoryDocsCriterionDetail, StoryDocsRailSummary } from './StoryDocsAlignment.js';
 import { InRail, StorySectionNav, useInRail } from '../Ticket/StoryLayout.js';
 import { StoryBuildEntry } from '../StoryBuild/StoryBuildEntry.js';
@@ -379,6 +383,14 @@ function ReviewSummary({
       </div>
     );
   }
+  // Under the criteria: how the code meets each criterion (the criteria and the cards already loaded),
+  // then the story's design.
+  const afterCriteria = (
+    <>
+      <CriteriaMapSection review={review} />
+      {design}
+    </>
+  );
   // A bare "#12" in the text reads as the repo of the PR that started the run.
   const home = members.find((m) => m.prId === review.originPrId) ?? members[0];
   return (
@@ -392,7 +404,7 @@ function ReviewSummary({
       <div className="space-y-2" data-testid="story-review">
         {/* The currency ("2 PRs changed since") is the header's (OpenPrsCards `StoryViewHeader`): said once. */}
         {review.status === 'succeeded' ? (
-          <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} afterCriteria={design} />
+          <TicketResults review={review} viewedPrId={null} docsItems={docsNotes.items} afterCriteria={afterCriteria} />
         ) : (
           <>
             <p className={`text-meta ${MUTED}`}>No result stored.</p>

@@ -100,6 +100,8 @@ async function storySlot(
     ident,
     ticketKey: ticketKey ?? slot.diagram?.ticketKey ?? slot.latest?.ticketKey ?? null,
     memberCount: members.length,
+    // ONE pull request is no story to draw (`too_few_prs`): the story view shows that PR's own design.
+    soloPr: members.length === 1 ? (toDiagramMembers(members)[0] ?? null) : null,
     ...slot,
   };
 }

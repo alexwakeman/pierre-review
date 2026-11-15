@@ -8,6 +8,7 @@ import {
   type RedrawSequenceDiagramResponse,
   type SequenceDiagramPhase,
   type SequenceDiagramProgress,
+  type SequenceDiagramMember,
   type SequenceDiagramSlot,
   type SequenceDiagramView,
 } from '@pierre-review/shared';
@@ -118,4 +119,13 @@ export function diagramProgressText(run: Pick<SequenceDiagramView, 'status' | 'p
   if (run?.status === 'queued') return DIAGRAM_PHASE_LABEL.waiting;
   if (run?.status === 'running') return 'Drawing the design';
   return redrawing ? 'Starting' : 'Drawing the design';
+}
+
+/** A ONE-PR TICKET'S DESIGN: the pull request whose own design stands in for the story's — the story
+ *  read's `soloPr` while it counts exactly one member (a story design needs two, `too_few_prs`); else
+ *  null. Pure. */
+export function soloDesignPr(
+  data: { memberCount: number; soloPr?: SequenceDiagramMember | null } | undefined,
+): SequenceDiagramMember | null {
+  return data != null && data.memberCount === 1 ? (data.soloPr ?? null) : null;
 }

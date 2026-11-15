@@ -317,6 +317,10 @@ on read; the stored `changedFiles` never leave the server. Additive and optional
 It rides every read that returns a `TicketReview` (`GET /api/ticket-reviews/:id`, `GET
 /api/prs/:id/ticket-reviews`). Card availability is NOT part of the currency fingerprint.
 
+**The criteria map reads the same wire.** The story view's "How the code meets each criterion" is a pure
+SPA fold (shared `criteriaMap`, `criteria-map.ts`) over the run's `assessment.criteria` and each
+member's `card` — no route of its own, nothing fetched.
+
 **Currency** is server-computed (`deriveTicketReviewState`): the latest SUCCEEDED run's
 `fingerprint` = sha256(`TICKET_REVIEW_VERSION` | story hash | sorted `prId:headSha:state`)
 against one rebuilt from the synced `pull_requests` heads and the ticket source's current members.
@@ -386,7 +390,7 @@ Mermaid `source` and `diagramType` left the wire. Only design-era rows are read:
 |---|---|
 | `GET /api/prs/:id/sequence-diagrams` | `PrSequenceDiagramsResponse {prId, pr: slot, stories: StorySequenceDiagramSlot[]}` — the PR's diagram and, for each of its tracker tickets (≤ 3; STORED rows only) with 2+ open or merged PRs or a stored diagram, `{ident, ticketKey, memberCount, …slot}`. DB-only. Another account's PR → `404`. Tier `read` |
 | `POST /api/prs/:id/sequence-diagrams/redraw` | Queue the PR's diagram at its synced head NOW (trigger `manual`, never counted against the daily cap; a NEW row — the diagram already drawn at that head stays shown until this one succeeds). → `202 RedrawSequenceDiagramResponse {outcome: 'queued'\|'already_running', diagramId}`, or `200 {outcome:'refused', diagramId:null, refusal:'no_code'}` when the stored file list shows no code. `404` another account's PR, `409 NoHead`, `400 NoClaudeAuth`, `409 Busy`. Tiers **`ai` + `ai_hourly`** |
-| `GET /api/sequence-diagrams/story?ident=` | `TicketSequenceDiagramResponse {ident, ticketKey, memberCount, diagram, latest}` — members are read WITHIN the account, so another account's ident has none. A malformed ident (a stored `manual:` one included) → `400 BadIdent`. Tier `read` |
+| `GET /api/sequence-diagrams/story?ident=` | `TicketSequenceDiagramResponse {ident, ticketKey, memberCount, soloPr, diagram, latest}` — members are read WITHIN the account, so another account's ident has none. `soloPr` (`SequenceDiagramMember`, else null; also on each `stories[]` slot) is the ONE open or merged PR when `memberCount` is 1: the story view then shows THAT PR's design (its own GET above) and its Draw / Redraw is the PR redraw — no story run. A malformed ident (a stored `manual:` one included) → `400 BadIdent`. Tier `read` |
 | `POST /api/sequence-diagrams/story/redraw {ident}` | Queue the story diagram now. Fewer than 2 members → `200 {outcome:'refused', refusal:'too_few_prs'}`; more than 12 → `too_many_prs`; otherwise as the PR redraw. Tiers **`ai` + `ai_hourly`** |
 
 ### Reference docs

@@ -44,6 +44,7 @@ export * from './limn-actions.js';
 export * from './prose.js';
 export * from './ticket-comments.js';
 export * from './criterion-status.js';
+export * from './criteria-map.js';
 export * from './notion-tracker.js';
 export * from './story-build.js';
 export * from './story-build-loop.js';

@@ -337,6 +337,10 @@ export interface StorySequenceDiagramSlot extends SequenceDiagramSlot {
   ticketKey: string | null;
   // Open + merged pull requests on the ticket right now (a story design needs 2+).
   memberCount: number;
+  // The ticket's ONE open or merged pull request when `memberCount` is 1, else null: the story view
+  // shows THAT PR's own design in the story design's place (no second model run). Absent from an older
+  // server (read as null).
+  soloPr?: SequenceDiagramMember | null;
 }
 
 /** GET /api/prs/:id/sequence-diagrams — the PR's design and its tickets' story designs. */

@@ -11,7 +11,8 @@
      check    .bd-pair > .bd-id (.bd-word, .bd-story) · .bd-wide (.bd-stat)
      verify   .bd-verify > .gold.bd-vhead · .bd-tier ×3 · .bd-checklist (ol.bd-ol)
      start    .bd-start > .gold.bd-start-main (code.bd-cmd) · .bd-start-list
-     mocks    .bd-flow (--n lanes) > ul.bd-lanes > li.bd-lane.ch-* · ol.bd-steps > .bd-line,
+     mocks    .bd-cmap > ol.bd-cm-crit (li[data-cm-crit], .bd-cm-link) · ul.bd-cm-prs · svg.bd-cm-lines
+              .bd-flow (--n lanes) > ul.bd-lanes > li.bd-lane.ch-* · ol.bd-steps > .bd-line,
               li.bd-step.(to-r|to-l|self).k-* (.seg, .bd-box) · .bd-keys · .bd-md
    Under 961px everything restacks to one column, and the diagram's steps become a list.
    =========================================================================== */
@@ -158,6 +159,119 @@
   gap: var(--gap);
 }
 /* A five-step flow (Automation) fills the row on wide screens; narrower ones use the rules below. */
+/* ---- mock: How the code meets each criterion (CriteriaMapMock) -------- */
+.lb.build .bd-cmap {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px minmax(150px, 210px);
+  align-items: start;
+}
+.lb.build .bd-cm-crit,
+.lb.build .bd-cm-prs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.lb.build .bd-cm-prs {
+  gap: 28px;
+}
+.lb.build .bd-cm-crit > li,
+.lb.build .bd-cm-prs > li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid #3a3b42;
+  border-radius: 4px;
+  background: #1b1c20;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.lb.build .bd-cm-crit > li.bd-cm-none {
+  border-style: dashed;
+}
+.lb.build .bd-cm-prs > li.hot {
+  border-color: var(--gold);
+}
+.lb.build .bd-cm-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.lb.build .bd-cm-ref,
+.lb.build .bd-cm-pr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.lb.build .bd-cm-ref,
+.lb.build .bd-cm-n,
+.lb.build .bd-cm-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lb.build .bd-cm-n {
+  white-space: nowrap;
+}
+.lb.build .bd-cm-link button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.lb.build .bd-cm-link button:hover,
+.lb.build .bd-cm-link.hot button {
+  background: #26272d;
+}
+.lb.build .bd-cm-link button > span:nth-child(2) {
+  flex: 1 1 auto;
+}
+.lb.build .bd-cm-link.hot .bd-cm-pr {
+  color: var(--gold);
+}
+.lb.build .bd-cm-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px 4px 20px;
+}
+.lb.build .bd-cm-files code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.lb.build .bd-cm-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.lb.build .bd-cm-lines path {
+  fill: none;
+  stroke: #8d8a84;
+  stroke-width: 1.25;
+}
+.lb.build .bd-cm-lines path.hot {
+  stroke: var(--gold);
+  stroke-width: 2;
+}
+.lb.build .bd-cm-lines path.dim {
+  opacity: 0.35;
+}
+
 @media (min-width: 1101px) {
   .lb.build .bd-flowsteps.five {
     grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -554,6 +668,18 @@
 
 /* ---- narrow: one column ----------------------------------------------- */
 @media (max-width: 960px) {
+  /* How the code meets each criterion: one list, each link naming its pull request; no lines. */
+  .lb.build .bd-cmap {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .lb.build .bd-cm-prs {
+    gap: 8px;
+  }
+  .lb.build .bd-cm-lines {
+    display: none;
+  }
   .lb.build .board > * {
     grid-column: 1 / -1 !important;
     grid-row: auto !important;

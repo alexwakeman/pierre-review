@@ -643,6 +643,24 @@ export const BUILD = {
     missing: 'An audit log entry for each partial refund',
     notAsked: { pr: 'web #1196', text: 'A refunds filter on the orders list' },
   },
+  /**
+   * "How the code meets each criterion" for the same ticket (the story view's criteria map,
+   * apps/frontend/src/components/Activity/CriteriaMap.tsx): one link per (criterion, pull request) a
+   * pull request's description says it moves forward, with how and the files. Criterion 3 has none,
+   * as the story check and the design agree.
+   */
+  criteriaMap: {
+    prs: [
+      { id: 'pay', label: 'payments#612', title: 'Partial refunds in RefundPolicy' },
+      { id: 'web', label: 'web#1196', title: 'Refund form' },
+    ],
+    links: [
+      { n: 1, pr: 'web', how: 'The form asks for an amount below the order total.', files: ['web/src/refunds/RefundForm.tsx'] },
+      { n: 1, pr: 'pay', how: 'RefundPolicy writes a refund row and leaves the order open.', files: ['src/refunds/policy.ts', 'src/refunds/repo.ts'] },
+      { n: 2, pr: 'pay', how: 'Sends the refund email once per refund; the retry path sends it again.', files: ['src/refunds/policy.ts', 'src/mail/refund-email.ts'] },
+      { n: 4, pr: 'pay', how: 'Emits a refund event that the daily ledger job reads.', files: ['src/refunds/events.ts'] },
+    ] as { n: number; pr: 'pay' | 'web'; how: string; files: string[] }[],
+  },
   /** The "Review in Ensemble" section the review loop ends a pull request's description with (loop/pr-body.ts). */
   loopBody: {
     reviewed: 'Reviewed 3 times by Claude and Codex before this pull request opened.',

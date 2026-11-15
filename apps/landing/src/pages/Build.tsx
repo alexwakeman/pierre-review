@@ -5,7 +5,7 @@ import { seoFor } from '../lib/routes';
 import { INSTALL_COMMAND, SITE_NAME } from '../lib/site';
 import { CopyCommand } from '../components/board/CopyCommand';
 import { useReveal } from '../components/board/useReveal';
-import { LoopBodyMock, TicketCheckMock, TicketDesignMock } from '../components/mock/build';
+import { CriteriaMapMock, LoopBodyMock, TicketCheckMock, TicketDesignMock } from '../components/mock/build';
 import './build.css';
 
 // ---------------------------------------------------------------------------
@@ -229,6 +229,20 @@ export default function Build(): JSX.Element {
             criterion names; and <b>Not asked for</b>, work in the pull requests the ticket does not ask for.
           </p>
         </div>
+        <div className="tile bd-shot bd-left rise">
+          <CriteriaMapMock />
+        </div>
+        <div className="tile bd-txt bd-right rise">
+          <h3>How the code meets each criterion</h3>
+          <p>
+            The story view joins each criterion to the pull requests that move it forward: how, and in which files.
+            No new model run: it uses the story check&rsquo;s status and each pull request&rsquo;s description.
+          </p>
+          <p>
+            A criterion no pull request claims says so. A pull request pushed since its description has no lines
+            until the next check.
+          </p>
+        </div>
         <div className="tile lapis bd-txt bd-full rise">
           <h3>Check against docs</h3>
           <p>
@@ -248,7 +262,8 @@ export default function Build(): JSX.Element {
           <p>
             For a ticket with two or more pull requests, the story view draws a <b>Ticket design</b>: who touches the
             data across the top, each step down the page in the order it happens. Each box and each step names the
-            pull request that does it. The model works the flow out from the code.
+            pull request that does it. The model works the flow out from the code. A ticket with one pull request
+            shows that pull request&rsquo;s own design.
           </p>
         </div>
         <div className="tile bd-shot bd-full rise">

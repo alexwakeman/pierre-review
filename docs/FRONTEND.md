@@ -4372,10 +4372,15 @@ pills):
    sprint read's text (`storyFallbackTicket`, for a ticket with no PR). ⚠ It passes
    `withComments={false}`: the comments are 4, never twice (a Story check block's disclosure,
    TicketCoverage, keeps its own collapsed copy).
-3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
+3. **The story's design** — drawn RIGHT UNDER 1's SUMMARY AND CRITERIA (`afterCriteria` on `TicketResults` / `BriefSummary`; before the missing / not-asked-for lists; on the review path after the criteria map), listed here for its rules: `StoryDesignSection` (`Activity/StoryDesignSection.tsx`), only with `me.ai`
    and ≥ 1 PR (`storyDesignOffered`); it draws only when a design is stored or the ticket has 2+ PRs
-   (the server's `too_few_prs`). When the last finished review skipped drawing it on a limit, the
+   (the server's `too_few_prs`). ⚠ **ONE PR** (the story read's `soloPr` while `memberCount` is 1,
+   `soloDesignPr` in `lib/sequenceDiagrams.ts`): the slot is THAT PR's design (`usePrSequenceDiagrams`,
+   `SoloDesignSection`, `data-story-design="pr"`), headed "Pull request design" + the PR's ref, its ⓘ
+   saying the ticket has one PR; the heading's Draw / Redraw design is THAT PR's redraw
+   (`useRedrawPrDiagram`). When the last finished review skipped drawing it on a limit, the
    slot's `autoSkipped` is the status line (`autoSkippedLine`, `lib/sequenceDiagrams.ts`).
+   - **The criteria map** comes first, between the criteria and the design (review path only) — below.
 4. **Comments** — `StoryComments` (`components/TicketComments.tsx`, pure half `lib/ticketComments.ts`,
    test/storyComments.test.ts), the LAST thing in the Ticket box, OPEN: "Comments (n)", the newest
    `STORY_COMMENTS_SHOWN` (3) in stored order (oldest first), "Show all n"; author · relative date (full
@@ -4429,6 +4434,32 @@ docs" ([docs/REFERENCE-DOCS.md](REFERENCE-DOCS.md) § Check a story against the 
 - **Every reference is the existing in-app opener**, `DocLink` (now exported from
   `components/DocReferences.tsx`): plain click ⇒ `openDocsSection(ref.workspaceId, path, anchor)`, modified
   click ⇒ the `docsDeepLink` href, with the quote as the same italic blockquote beneath. Never a raw href.
+
+### The criteria map ("How the code meets each criterion", `Activity/CriteriaMap.tsx`)
+
+On the REVIEW path of the Story section only, right under the criteria (`afterCriteria`, before the
+design); `data-story-section="criteria-map"` (nav "Code per criterion"). NO request of its own: shared
+`criteriaMap` (docs/CLAUDE-REVIEW.md § Ticket review → THE CRITERIA MAP) over the review ALREADY LOADED —
+its criteria and status, each member's card at its current commit. Absent when the run has no criteria
+or no members (`criteriaMapOffered`); every member without a card ⇒ ONE line, "No pull request has a
+description at its current commit yet."
+- **Shape**: criteria boxes on the left (status chip — the check's measured `TICKET_CRITERION_STATUS_CLASS`,
+  ref, text), the PRs on the right (`memberLabel`, title without its ticket key, "n criteria", a merged mark),
+  ordered by the mean row of their links (`orderMapPrs`, `lib/criteriaMapLayout.ts`; unlinked next,
+  card-less last). Each link is a row in its criterion's box — the PR's ref and the card's "how" — and,
+  with files, a ChevronIcon disclosure listing them; a file opens that PR's Changes tab
+  (`useOpenMemberFile`). An SVG layer (`aria-hidden`) draws one curve per link from the criterion box's
+  right edge at its row to the PR box (entries spread over the box's middle half, `entryY`); hovering a
+  PR or a link (or focusing a link) lights its lines in the accent and dims the rest.
+- ⚠ **UNKNOWN IS NEVER ZERO**: an unclaimed criterion is a DASHED box saying "No pull request claims
+  this."; a PR with no current card is a DASHED box saying "No description at its current commit." and
+  has no line; card lines matching no criterion sit under their PR ("Not matched to a criterion (n)").
+- **Two columns from `CRITERIA_MAP_TWO_COLUMN_MIN_PX` (560) of ITS OWN width** (ResizeObserver; never the
+  window), else ONE stacked list with a "Pull requests" list under it and no lines — each link already
+  names its PR in words (`data-layout` `columns` / `stacked`).
+- The honesty line is said ONCE, behind the heading's ⓘ: the descriptions are AI-written from each PR's
+  changes at its current commit, the status is the story check's. Model text through `PrRefText`.
+- Pinned by test/criteriaMap.test.ts and e2e/story-criteria-map.spec.ts (wide, phone, the one-PR design).
 
 ## The build tab — "Implement story" (`kind: 'story-build'`, docs/STORY-BUILD.md)
 
@@ -6154,7 +6185,8 @@ test/designGrid.test.ts).
 `ClaudesReview` after SonarCloud, absent without `me.ai`) shows the PR's slot and each multi-PR
 ticket's "Story design" slot through `DiagramSlotView`; `Activity/StoryDesignSection.tsx` shows the
 story slot as the last part of the story view's Story section (only with `me.ai` and a PR on the ticket, and it draws
-only when the ticket has 2+ pull requests or a stored design; its Draw / Redraw button sits in the Story
+only when the ticket has 2+ pull requests or a stored design — with exactly ONE pull request it draws THAT
+PR's own design instead, its Draw / Redraw the PR's; its Draw / Redraw button sits in the Story
 heading row). The status folds live in `lib/sequenceDiagrams.ts` (test/sequenceDiagram.test.ts). ⚠
 POLLING: the reads poll every 5 s only while a run is queued or running, and the PR read also for 90 s
 after the shown review's `finishedAt` while nothing is stored at the current head for the PR OR for

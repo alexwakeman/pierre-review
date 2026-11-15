@@ -147,7 +147,9 @@ describe('the wiring', () => {
     expect(panel.match(/useTicketReviewById\(/g)).toHaveLength(1);
     // The docs check's notes ride along (empty unless written against this same list).
     // …and the story's design sits right under the criteria (both summaries).
-    expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} docsItems=\{docsNotes\.items\} afterCriteria=\{design\} \/>/);
+    expect(panel).toMatch(/<TicketResults review=\{review\} viewedPrId=\{null\} docsItems=\{docsNotes\.items\} afterCriteria=\{afterCriteria\} \/>/);
+    // …the criteria map first, then the design.
+    expect(panel).toMatch(/const afterCriteria = \(\s*<>\s*<CriteriaMapSection review=\{review\} \/>\s*\{design\}/);
     expect(panel).toMatch(/<BriefSummary brief=\{summary\.brief\} docsItems=\{briefNotes\.items\} afterCriteria=\{designNode\} \/>/);
     expect(panel.match(/<StoryDesignSection\s/g)).toHaveLength(1);
     // No Post anywhere in the stack, and no dependency or reference cards.

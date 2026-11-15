@@ -81,6 +81,7 @@ are the app's own; never invent a feature for a mock.
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx` (the People + bots / People view in the meta line), `ChronologyTrend.tsx` (Show markers) |
 | `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
 | `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
+| `build.tsx` CriteriaMapMock | `/build` | `Activity/CriteriaMap.tsx` ("How the code meets each criterion", the story view) |
 | `build.tsx` TicketDesignMock, TicketCheckMock, LoopBodyMock | `/build` | `components/FlowDiagram.tsx` + `StoryDesignSection.tsx` ("Ticket design"), the story check in `ClaudeReviewTab.tsx` / `StoryLayout.tsx`, the loop's PR body (`coding/story-build/loop/pr-body.ts`) |
 | `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
 | `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
