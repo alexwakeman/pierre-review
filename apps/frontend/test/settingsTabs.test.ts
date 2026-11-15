@@ -59,6 +59,7 @@ describe('opening at a section opens its tab', () => {
       bots: 'BotClassificationSection',
       sandbox: 'SandboxSection',
       releases: 'ReleasesSection',
+      tools: 'ToolsSection',
     };
     for (const [focus, tabId] of Object.entries(SETTINGS_FOCUS_TAB)) {
       const tab = SETTINGS_TABS.find((t) => t.id === tabId)!;
@@ -120,7 +121,7 @@ describe('the modal remembers the tab on screen', () => {
     expect(select).not.toContain('setLastTab(id)');
   });
   it('the workspace rule hides when every global section rendered nothing', () => {
-    // BotScoringSection renders null where ML is off; a rule keyed on def.global.length alone
+    // ToolsSection renders null where neither tool can run; a rule keyed on def.global.length alone
     // would open the Bots tab on a bare divider.
     expect(modal).toContain('<div className="peer space-y-4">{renderSections(def.global)}</div>');
     expect(modal).toContain('peer-empty:mt-0 peer-empty:border-t-0 peer-empty:pt-0');

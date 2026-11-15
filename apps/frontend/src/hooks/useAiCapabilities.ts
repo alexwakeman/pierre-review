@@ -4,7 +4,6 @@ import type { AiProviderId, AiProviderName, AiRuntimeInstallBody, AiRuntimeInsta
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { useMe } from './useTriage.js';
-import { startMlInstall } from './useMlInstall.js';
 import { aiCapabilitiesOf, type AiCapabilities } from '../lib/aiCapabilities.js';
 
 // The pure half (the type, the copy constants, `aiCapabilitiesOf`) lives in lib/aiCapabilities.ts
@@ -90,10 +89,8 @@ export function useAiRuntimeInstall(): { state: AiInstallState; start: (forProvi
         setInstallState(
           failed != null ? { phase: 'failed', message: failed } : { phase: 'idle', message: null },
         );
-        // ONE "Set up" for both downloads: local bot-comment scoring rides along when it is not
-        // set up yet. Its own runtime, its own route — chained here, never merged.
-        const ml = qc.getQueryData<MeResponse>(['me'])?.ml;
-        if (failed == null && (ml?.state === 'absent' || ml?.state === 'failed')) startMlInstall(qc);
+        // Bot comment analysis is NOT chained on any more: Settings → Features asks for each download on
+        // its own (shared tool-switches.ts).
       })
       .catch((err: unknown) => {
         setInstallState({

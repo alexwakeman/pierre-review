@@ -3,7 +3,7 @@ import { Btn, Card, DocLink, H2, H3, Illustration, Note, Pill, Ui } from '../../
 
 export const meta: DocMeta = {
   title: 'Bots settings',
-  summary: 'Which reviewers are bots, their category and price, and bot comment scoring.',
+  summary: 'Which reviewers are bots, their category and price.',
 };
 
 const ROLES: ReadonlyArray<{ label: string; help: string }> = [
@@ -38,28 +38,16 @@ export default function Page(): JSX.Element {
     <>
       <p>
         The <Ui>Bots</Ui> tab decides which accounts Ensemble treats as bots, what kind of bot each one is, and what it
-        costs. It also sets up bot comment scoring. These choices feed{' '}
-        <DocLink to="bots-monitoring/overview">Bots Monitoring</DocLink>, the Feed and the Timeline. Bot comment scoring
-        applies to the whole computer; the classification applies to the current workspace only.
+        costs. These choices feed{' '}
+        <DocLink to="bots-monitoring/overview">Bots Monitoring</DocLink>, the Feed and the Timeline, and apply to the
+        current workspace only.
       </p>
 
       <H2 id="bot-comment-scoring">Bot comment scoring</H2>
       <p>
-        A small model reads each review comment a bot leaves and labels how serious it is, from nit to critical. It
-        runs on your computer: nothing is sent anywhere to score a comment. Setting it up downloads the model and the
-        program that runs it, about 240 MB, once.
-      </p>
-      <ul>
-        <li>
-          Select <Ui>Set up (one-time ~240 MB download)</Ui>, or run <code>ensemble ml install</code> in a terminal.
-        </li>
-        <li>
-          When it is ready the section reads <Ui>Set up. Bot review comments are scored on this machine.</Ui>
-        </li>
-      </ul>
-      <p>
-        Scoring is kept gentle on your computer: one comment at a time, at low priority, and it pauses on battery. See{' '}
-        <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
+        Bot comment scoring moved to <DocLink to="settings/features">Settings → Features</DocLink>, under{' '}
+        <Ui>Bot comment analysis</Ui>. To leave one repository out, use its <Ui>Bot scoring</Ui> switch in{' '}
+        <Ui>Repos &amp; workspaces</Ui>. See <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
       </p>
 
       <H2 id="bot-classification">Bot classification</H2>

@@ -18,6 +18,7 @@ import { CheckboxBox } from '../ui/FormControls.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { chatGptPlanLabel } from '../../lib/aiBudget.js';
 import { InfoButton } from '../InfoModal.js';
+import { SetUpInFeatures } from '../AiSetup.js';
 import { SectionShell, RadioInput } from './ui.js';
 import { Select, type SelectOption } from '../ui/index.js';
 
@@ -157,33 +158,15 @@ export function AiProviderSection(): JSX.Element | null {
             <span className={ai.providers.claude.runtime === 'failed' ? 'text-ui-danger' : MUTED}>
               {claudeLine(ai.providers.claude)}
             </span>
-            {retryable(claudeRuntime) && (
-              <button
-                type="button"
-                className={BTN}
-                disabled={install.state.phase === 'running'}
-                // Where Limn sets both up by itself, a Retry fetches both; otherwise Claude's Set up is Claude's.
-                onClick={() => install.start(ai.autoInstall === true ? 'codex' : 'claude')}
-              >
-                {claudeRuntime === 'failed' ? 'Retry' : 'Set up'}
-              </button>
-            )}
+            {/* Downloads happen in ONE place, Settings → Features (components/settings/ToolsSection.tsx). */}
+            {retryable(claudeRuntime) && <SetUpInFeatures />}
           </dd>
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2">
           <dt className="w-14 shrink-0 font-medium text-ui-ink">Codex</dt>
           <dd className="flex flex-wrap items-center gap-2">
             <span className={codexRuntime === 'failed' ? 'text-ui-danger' : MUTED}>{codexLine(ai.providers.codex)}</span>
-            {retryable(codexRuntime) && !retryable(claudeRuntime) && (
-              <button
-                type="button"
-                className={BTN}
-                disabled={install.state.phase === 'running'}
-                onClick={() => install.start('codex')}
-              >
-                {codexRuntime === 'failed' ? 'Retry' : 'Set up Codex'}
-              </button>
-            )}
+            {retryable(codexRuntime) && !retryable(claudeRuntime) && <SetUpInFeatures />}
             {codexReady && (
               <CodexSignIn
                 signedIn={ai.providers.codex.signedIn}

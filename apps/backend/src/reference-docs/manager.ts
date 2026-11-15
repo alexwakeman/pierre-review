@@ -299,7 +299,7 @@ async function crawlSource(job: Job, row: DocRow, crawl: ReferenceDocCrawl, repo
               err instanceof CodexNotInstalledError
                 ? `No links were followed. ${err.message}`
                 : err instanceof AiRuntimeMissingError
-                ? 'Claude is not set up here, so no links were followed. Press "Set up AI", then rebuild.'
+                ? 'Claude is not set up here, so no links were followed. Switch AI on in Settings → Features, then rebuild.'
                 : `${providerName()} could not be reached to choose which links to follow.`,
             );
           }

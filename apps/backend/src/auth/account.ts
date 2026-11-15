@@ -8,8 +8,15 @@ import type {
   FeatureSettings,
   LocalUser,
   StoredMyTurnSettings,
+  ToolId,
+  ToolSwitches,
 } from '@pierre-review/shared';
-import { compactFeatureSettings, storedMyTurnSettings, type MyTurnSettings } from '@pierre-review/shared';
+import {
+  compactFeatureSettings,
+  compactToolSwitches,
+  storedMyTurnSettings,
+  type MyTurnSettings,
+} from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { getGithubTokenAsync } from '../github/auth.js';
 
@@ -40,6 +47,9 @@ export interface Account {
   // same fallback-literal reason as `myTurnSettings`.
   featureSettings?: FeatureSettings | null;
   featuresExistingInstall?: boolean;
+  // SETTINGS → FEATURES, the tool switches as STORED (overrides only; null = every default). Optional for
+  // the same fallback-literal reason.
+  toolSwitches?: ToolSwitches | null;
 }
 
 const STALE_MS = 24 * 60 * 60 * 1000; // re-fetch the local identity once a day
@@ -84,6 +94,7 @@ function rowToAccount(row: typeof schema.accounts.$inferSelect): Account {
     myTurnSettings: row.myTurnSettings ?? null,
     featureSettings: row.featureSettings ?? null,
     featuresExistingInstall: row.featuresExistingInstall,
+    toolSwitches: row.toolSwitches ?? null,
   };
 }
 
@@ -375,6 +386,26 @@ export async function setFeatureSettings(
     .where(eq(accounts.id, accountId))
     .execute();
   // ⚠ The settings rule above: without the refresh, /api/me would hand the old value back.
+  await refreshLocalAccountCache(accountId);
+  return value;
+}
+
+/**
+ * SETTINGS → FEATURES, THE TOOL SWITCHES: store ONE switch (`null` = back to its default) and return the
+ * whole stored object. The in-memory mirror (ai/tool-switches.ts) is updated by the caller.
+ */
+export async function setToolSwitch(accountId: number, id: ToolId, on: boolean | null): Promise<ToolSwitches | null> {
+  const { accounts } = schema;
+  const [row] = await db
+    .select({ toolSwitches: accounts.toolSwitches })
+    .from(accounts)
+    .where(eq(accounts.id, accountId))
+    .execute();
+  const next: ToolSwitches = { ...(row?.toolSwitches ?? {}) };
+  if (on == null) delete next[id];
+  else next[id] = on;
+  const value = compactToolSwitches(next);
+  await db.update(accounts).set({ toolSwitches: value }).where(eq(accounts.id, accountId)).execute();
   await refreshLocalAccountCache(accountId);
   return value;
 }

@@ -72,6 +72,11 @@ export default function Page(): JSX.Element {
           workspace, Ensemble asks first and then removes it and its synced data. Each line shows its own progress,
           so you can remove several at once.
         </li>
+        <li>
+          <Ui>Bot scoring</Ui>, on each line, leaves the repository's bot comments out of severity scoring when you
+          switch it off. Every repository is scored by default. It shows once{' '}
+          <DocLink to="bots-monitoring/severity-scoring">bot comment analysis</DocLink> is on.
+        </li>
       </ul>
       <p>
         <Ui>Grid</Ui>, at the top of the dialog, shows every repository against every workspace. Click a cell to

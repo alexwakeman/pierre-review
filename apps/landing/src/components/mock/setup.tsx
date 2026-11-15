@@ -114,11 +114,13 @@ export function WorkspacesMock(): JSX.Element {
     );
   const [selected, setSelected] = useState(ws[0]?.id ?? '');
   const [mem, setMem] = useState<Record<string, Record<string, Mode>>>(initial);
+  // Bot scoring per repository (Repos & workspaces → Bot scoring): every repository is scored by default.
+  const [unscored, setUnscored] = useState<string[]>([]);
   const sel = ws.find((w) => w.id === selected) ?? ws[0];
   const nameOf = (id: string): string => ws.find((w) => w.id === id)?.name ?? id;
   const count = (id: string): number => Object.values(mem).filter((m) => m[id] != null).length;
   const inSel = (mode: Mode) => SETUP_WORKSPACES.repos.filter((r) => mem[r.name]?.[selected] === mode);
-  const changed = JSON.stringify(mem) !== JSON.stringify(initial());
+  const changed = JSON.stringify(mem) !== JSON.stringify(initial()) || unscored.length > 0;
   const options = ws.map((w) => ({ id: w.id, label: w.name }));
 
   const setMode = (repo: string, wsId: string, mode: Mode): void =>
@@ -164,6 +166,18 @@ export function WorkspacesMock(): JSX.Element {
           options={MODE_OPTIONS}
           onChange={(v) => setMode(r.name, selected, v as Mode)}
         />
+        <button
+          type="button"
+          className="mk-toggle"
+          aria-pressed={!unscored.includes(r.name)}
+          aria-label={`Score bot comments in ${r.name}`}
+          onClick={() =>
+            setUnscored((u) => (u.includes(r.name) ? u.filter((n) => n !== r.name) : [...u, r.name]))
+          }
+        >
+          <b style={{ background: 'currentColor' }} aria-hidden="true" />
+          Bot scoring
+        </button>
       </div>
     );
   };
@@ -176,11 +190,12 @@ export function WorkspacesMock(): JSX.Element {
         changed || selected !== ws[0]?.id
           ? () => {
               setMem(initial());
+              setUnscored([]);
               setSelected(ws[0]?.id ?? '');
             }
           : null
       }
-      label="The Repos and workspaces dialog: two workspaces, Acme payments (the default) and Web. The selected workspace lists its Maintained and its External repositories, each with a workspace picker that moves it and a Maintained or External picker"
+      label="The Repos and workspaces dialog: two workspaces, Acme payments (the default) and Web. The selected workspace lists its Maintained and its External repositories, each with a workspace picker that moves it a Maintained or External picker and a Bot scoring switch"
     >
       <div className="mk-ws">
         <div className="mk-wslist" role="group" aria-label="Workspaces">

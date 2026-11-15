@@ -454,6 +454,7 @@ export async function listRepos(accountId: number): Promise<Repo[]> {
     // The repair above guarantees a row; the `?? 0` is only there because TypeScript cannot see
     // that. A 0 here would mean the repair itself failed, which is a bug, not a state.
     workspaceId: workspaceByRepo.get(r.repos.id) ?? 0,
+    botScoringExcluded: r.repos.botScoringExcluded,
   }));
 }
 

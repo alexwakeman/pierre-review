@@ -1401,6 +1401,13 @@
       "when": 1793952000000,
       "tag": "0199_workspace_release_repos",
       "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "6",
+      "when": 1794038400000,
+      "tag": "0200_tool_switches_bot_scoring",
+      "breakpoints": true
     }
   ]
 }

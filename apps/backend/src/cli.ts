@@ -73,10 +73,11 @@ Commands:
                    clickable links (see \`ensemble status --help\`)
   ai install       Download the AI runtime AI Review and AI Fix run on
                    (one time, about 110 MB). Ensemble does this by itself the
-                   first time it starts, with Codex.
+                   first time it starts, with Codex; Settings → Features does
+                   the same.
   ai status        Say whether the AI runtime is set up
   ml install       Download the model that scores bot review comments
-                   (one time, about 240 MB). The app offers the same button.
+                   (one time, about 240 MB). Settings → Features in the app does the same.
   ml status        Say whether bot comment scoring is set up
   sandbox prune    Remove leftover Implement sandboxes (stop Ensemble first;
                    --dry-run lists them, --store also removes the repo store)

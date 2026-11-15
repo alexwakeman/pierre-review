@@ -179,7 +179,7 @@ await new Promise((r) => setTimeout(r, 50));
     seedPackages(join(dataDir, 'ai-runtime'), PINS, { later: false });
     const rt = runtime();
     expect(rt.status().runtime).toBe('absent');
-    expect(rt.status().runtimeMessage).toMatch(/Set up AI again/);
+    expect(rt.status().runtimeMessage).toMatch(/Download AI again from Settings → Features/);
     const sdk = (await rt.load('@anthropic-ai/claude-agent-sdk')) as { query(): string };
     expect(sdk.query()).toBe('fake');
     await expect(rt.load('mammoth')).rejects.toBeInstanceOf(AiRuntimeMissingError);

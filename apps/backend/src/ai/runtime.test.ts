@@ -78,7 +78,7 @@ describe('the AI runtime loader', () => {
     seedPackages(join(dataDir, 'ai-runtime'), { ...PINS, '@anthropic-ai/claude-agent-sdk': '0.2.0' });
     const s = runtime().status();
     expect(s.runtime).toBe('absent');
-    expect(s.runtimeMessage).toMatch(/Set up AI again/);
+    expect(s.runtimeMessage).toMatch(/Download AI again from Settings → Features/);
   });
 
   it('reads EXACT pins from the manifest field and refuses a range', () => {

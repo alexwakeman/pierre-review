@@ -3,7 +3,7 @@ import { DocLink, H2, Illustration, Kbd, Note, SettingsRow, Toggle, Ui } from '.
 
 export const meta: DocMeta = {
   title: 'Features',
-  summary: 'Choose which pages the sidebar shows.',
+  summary: 'Choose which pages the sidebar shows, and switch AI and bot comment analysis on or off.',
 };
 
 export default function Page(): JSX.Element {
@@ -64,6 +64,41 @@ export default function Page(): JSX.Element {
         Reports and This Sprint switch themselves on when they have something to show. Switch one off to keep it
         hidden even then.
       </Note>
+
+      <H2 id="ai-and-bot-comment-analysis">AI and bot comment analysis</H2>
+      <p>
+        Below the pages, two switches turn the downloaded tools on or off. This is the one place in the app that
+        downloads them.
+      </p>
+      <Illustration
+        label="Two switches: AI (Claude and Codex) on and downloaded, Bot comment analysis off and not downloaded."
+        caption="Each switch says what is installed."
+      >
+        <SettingsRow label="AI (Claude and Codex)" hint="Downloaded." control={<Toggle on />} />
+        <SettingsRow
+          label="Bot comment analysis"
+          hint="Not downloaded yet. Switching it on asks before downloading."
+          control={<Toggle on={false} />}
+        />
+      </Illustration>
+      <ul>
+        <li>
+          <Ui>AI (Claude and Codex)</Ui>: on when it is downloaded. Ensemble downloads it by itself the first time it
+          starts. Switched off, every AI feature shows how to set it up again and nothing runs automatically. The
+          download stays on your computer. See <DocLink to="settings/ai">AI</DocLink>.
+        </li>
+        <li>
+          <Ui>Bot comment analysis</Ui>: labels how serious each bot review comment is. Switched off, no new comments are
+          scored; labels already shown stay, and so does the model. See{' '}
+          <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
+        </li>
+      </ul>
+      <p>
+        Switching on a tool that is not downloaded asks first, and says how big the download is. Select{' '}
+        <Ui>Download</Ui> to start it. When a tool is installed, the switch lists what was found: versions, the models
+        and where they are. From a terminal, <code>npx ensemble-review ai install</code> and{' '}
+        <code>npx ensemble-review ml install</code> do the same downloads.
+      </p>
     </>
   );
 }

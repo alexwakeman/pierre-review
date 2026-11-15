@@ -24,7 +24,17 @@ import type { SettingsTabId } from '../components/settings/settingsTabs.js';
  *  section's effort (Reports → AI usage's suggestions), and the Bots tab (where a bot's category and
  *  price are set; it opens on the tab, with no section scroll), and Releases (This Sprint → Releases'
  *  setup line; on the tab). */
-export type SettingsFocus = 'my-turn' | 'issue-tracker' | 'claude-spend' | 'auto-review' | 'ai-effort' | 'bots' | 'sandbox' | 'releases';
+export type SettingsFocus =
+  | 'my-turn'
+  | 'issue-tracker'
+  | 'claude-spend'
+  | 'auto-review'
+  | 'ai-effort'
+  | 'bots'
+  | 'sandbox'
+  | 'releases'
+  // Settings → Features → AI and bot comment analysis: the one place the app downloads either.
+  | 'tools';
 
 interface SettingsModalState {
   open: boolean;
