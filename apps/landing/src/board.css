@@ -252,42 +252,96 @@ body:has(.lb) {
 }
 
 /* ---- the arcs (components/arcs) ---------------------------------------- */
-/* Two inputs, set by arcMotion.ts from the scroll position: --draw (the bands
-   draw out, innermost first, and each quarter slides home) and --apart (how far
-   the hero's links still are from closing up). Scrolling down only ever brings a
-   picture together. The defaults are the finished, still picture. */
-.lb svg.arcs,
-.lb-foot svg.arcs {
-  --draw: 1;
-  --apart: 0;
-  display: block;
+/* A picture is a stack of LAYERS (one <svg> per quarter) in a box with the
+   composition's aspect ratio. Every movement is a transform on a whole layer,
+   so the compositor moves it and nothing repaints while the page scrolls.
+   Arcs.tsx explains the two motions; arcMotion.ts is the JS half. */
+.lb .arcs {
+  container-type: size;
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+/* centred explicitly: a 'slice' box is larger than the picture and must crop
+   evenly on both sides (grid centring lets an overflowing box start at the left) */
+.lb .arcs-box {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  translate: -50% -50%;
+  aspect-ratio: var(--ar);
+  isolation: isolate;
+}
+.lb .arcs.meet .arcs-box {
+  width: min(100cqw, calc(100cqh * var(--ar)));
+}
+.lb .arcs.slice {
+  overflow: hidden;
+}
+.lb .arcs.slice .arcs-box {
+  width: max(100cqw, calc(100cqh * var(--ar)));
+}
+.lb .arcs .layer {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
 }
-.lb svg.arcs path {
+.lb .arcs.blend .layer {
+  mix-blend-mode: screen;
+}
+.lb .arcs path {
   fill: none;
   stroke-linecap: butt;
 }
-.lb svg.arcs .q:not(.seats) path {
+.lb .arcs .layer:not(.seats) path {
   stroke-dasharray: 1 1;
-  stroke-dashoffset: calc(1 - clamp(0, var(--draw) * 1.8 - var(--k) * 0.8, 1));
+  stroke-dashoffset: 0;
 }
-.lb svg.arcs .q.seats path {
-  opacity: clamp(0, var(--draw) * 1.8 - var(--k) * 0.8, 1);
-}
-.lb svg.arcs .q {
-  transform-box: view-box;
-  transform: translate(
-    calc(var(--dx) * (1 - var(--draw) + var(--apart) * 1.6) * 1px),
-    calc(var(--dy) * (1 - var(--draw) + var(--apart) * 1.6) * 1px)
-  );
-}
-.lb svg.arcs.blend .q {
-  mix-blend-mode: screen;
-}
-.lb svg.arcs .player {
+.lb .arcs .player {
   fill: var(--ink);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* LEAD: apart from the first paint (no flash), home by 60vh of scroll. */
+  .lb .arcs.lead .layer {
+    transform: translate(var(--ax), var(--ay));
+    will-change: transform;
+  }
+  @supports (animation-timeline: scroll()) {
+    .lb .arcs.lead .layer {
+      animation: arc-gather linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0px 60vh;
+    }
+  }
+  /* REVEAL: set by arcMotion.ts on pictures below the fold, then drawn once. */
+  .lb .arcs.pre .layer {
+    transform: translate(var(--ex), var(--ey));
+  }
+  .lb .arcs.pre .layer:not(.seats) path {
+    stroke-dashoffset: 1;
+  }
+  .lb .arcs.pre .layer.seats path {
+    opacity: 0;
+  }
+  .lb .arcs.in .layer {
+    transition: transform 1.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .lb .arcs.in path {
+    transition:
+      stroke-dashoffset 1.1s cubic-bezier(0.3, 0.6, 0.2, 1) calc(var(--k) * 450ms),
+      opacity 0.6s ease calc(var(--k) * 450ms);
+  }
+}
+@keyframes arc-gather {
+  from {
+    transform: translate(var(--ax), var(--ay));
+  }
+  to {
+    transform: none;
+  }
 }
 /* The artwork's print grain, over every picture tile; on the dark ground it vanishes. */
 .lb .tile.art {
@@ -302,6 +356,12 @@ body:has(.lb) {
   mix-blend-mode: multiply;
   opacity: 0.35;
   pointer-events: none;
+}
+/* Not over a moving hero picture: a blended overlay on top of moving, blended
+   layers makes the compositor re-blend the whole tile every frame (measured: it
+   alone turned a smooth scroll into dropped frames). */
+.lb .tile.art:has(.arcs.lead)::after {
+  display: none;
 }
 
 .lb .btn,
@@ -612,9 +672,4 @@ body:has(.lb) {
 .lb .gold .btn.alt { background: transparent; color: var(--dark); box-shadow: inset 0 0 0 2px var(--dark); }
 .lb .gold .btn.alt:hover { background: rgba(18, 17, 16, .1); }
 
-@media (prefers-reduced-motion: reduce) {
-  .lb svg.arcs {
-    --draw: 1 !important;
-    --apart: 0 !important;
-  }
-}
+

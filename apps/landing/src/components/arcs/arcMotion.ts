@@ -1,79 +1,77 @@
 // ---------------------------------------------------------------------------
-// Scroll-linked motion for every <Arcs> under a page root (called by useReveal).
+// The JavaScript half of the arcs' motion (called by useReveal, which skips it
+// under prefers-reduced-motion). It never runs per frame on a browser that has
+// CSS scroll-driven animations, and it only ever writes a transform.
 //
-// EVERY PICTURE COMES TOGETHER AS THE READER SCROLLS DOWN, and stays together.
-//
-// For each svg.arcs, `v` is how far it has travelled through the viewport:
-// 0 as its top meets the viewport's bottom, 1 as its bottom leaves the top.
-//   --draw  = v / 0.45, clamped: the bands draw out and the quarters slide home
-//             as it comes into view
-//   --apart = 0: once home, a picture never comes apart again
-// A LEAD piece (data-lead: the hero's two pictures) is on screen from the start, so
-// it is always drawn, and it begins APART at the top of the page instead:
-//   --apart = 1 - scrollY / (0.6 × viewport height), clamped: its links close up
-//             over the first 60% of a screen of scrolling
-// Values ease toward their targets each frame. The caller skips all of this under
-// prefers-reduced-motion, which (like no JS and the prerendered HTML) shows every
-// picture drawn and together.
+// 1. REVEAL (every non-lead picture). A picture below the fold at load gets
+//    `pre` (layers offset, bands undrawn); when a fifth of it scrolls into view
+//    it swaps to `in` and CSS transitions draw it, once. A picture already on
+//    screen at load is left alone, so nothing flashes.
+// 2. LEAD FALLBACK (the hero's pictures, only where `animation-timeline:
+//    scroll()` is unsupported). CSS already paints each lead layer apart; this
+//    maps scrollY → apart = 1 − scrollY / (0.6 × viewport height), the same as
+//    the CSS animation's range, and writes it as one transform per layer per
+//    frame (rAF, passive listener, no layout reads).
 // ---------------------------------------------------------------------------
-
-interface Track {
-  el: SVGSVGElement;
-  draw: number;
-  apart: number;
-}
 
 const clamp = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-function targets(el: Element, vh: number): [number, number] {
-  const r = el.getBoundingClientRect();
-  if (el.hasAttribute('data-lead')) return [1, clamp(1 - window.scrollY / (vh * 0.6))];
-  const v = clamp((vh - r.top) / (vh + r.height));
-  return [clamp(v / 0.45), 0];
-}
-
 export function startArcMotion(root: HTMLElement): () => void {
-  const vh0 = window.innerHeight;
-  const tracks: Track[] = Array.from(root.querySelectorAll<SVGSVGElement>('svg.arcs')).map((el) => {
-    const [draw, apart] = targets(el, vh0);
-    const t: Track = { el, draw, apart };
-    el.style.setProperty('--draw', t.draw.toFixed(3));
-    el.style.setProperty('--apart', t.apart.toFixed(3));
-    return t;
-  });
-  if (tracks.length === 0) return () => undefined;
+  const cleanups: (() => void)[] = [];
 
-  let raf = 0;
-  const tick = (): void => {
-    raf = 0;
-    const vh = window.innerHeight;
-    let moving = false;
-    for (const t of tracks) {
-      const [d, s] = targets(t.el, vh);
-      const nd = t.draw + (d - t.draw) * 0.16;
-      const na = t.apart + (s - t.apart) * 0.16;
-      if (Math.abs(nd - t.draw) > 0.001 || Math.abs(na - t.apart) > 0.001) moving = true;
-      t.draw = Math.abs(nd - d) < 0.001 ? d : nd;
-      t.apart = Math.abs(na - s) < 0.001 ? s : na;
-      t.el.style.setProperty('--draw', t.draw.toFixed(3));
-      t.el.style.setProperty('--apart', t.apart.toFixed(3));
-    }
-    if (moving) raf = requestAnimationFrame(tick);
-  };
-  const kick = (): void => {
-    if (!raf) raf = requestAnimationFrame(tick);
-  };
-  window.addEventListener('scroll', kick, { passive: true });
-  window.addEventListener('resize', kick);
-  kick();
+  // ---- 1. reveal ----
+  const vh = window.innerHeight;
+  const pending = Array.from(root.querySelectorAll<HTMLElement>('.arcs:not(.lead)')).filter(
+    (el) => el.getBoundingClientRect().top >= vh,
+  );
+  if (pending.length > 0 && typeof IntersectionObserver !== 'undefined') {
+    pending.forEach((el) => el.classList.add('pre'));
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          const el = e.target as HTMLElement;
+          el.classList.remove('pre');
+          el.classList.add('in');
+          io.unobserve(el);
+        }
+      },
+      { threshold: 0.2 },
+    );
+    pending.forEach((el) => io.observe(el));
+    cleanups.push(() => {
+      io.disconnect();
+      pending.forEach((el) => el.classList.remove('pre', 'in'));
+    });
+  }
 
-  return () => {
-    window.removeEventListener('scroll', kick);
-    window.removeEventListener('resize', kick);
-    if (raf) cancelAnimationFrame(raf);
-    for (const t of tracks) {
-      t.el.style.removeProperty('--draw');
-      t.el.style.removeProperty('--apart');
-    }
-  };
+  // ---- 2. lead fallback ----
+  const scrollDriven = typeof CSS !== 'undefined' && CSS.supports('animation-timeline: scroll()');
+  const layers = scrollDriven ? [] : Array.from(root.querySelectorAll<SVGSVGElement>('.arcs.lead .layer'));
+  if (layers.length > 0) {
+    let raf = 0;
+    let last = -1;
+    const paint = (): void => {
+      raf = 0;
+      const a = clamp(1 - window.scrollY / (window.innerHeight * 0.6));
+      if (Math.abs(a - last) < 0.0005) return;
+      last = a;
+      const t = a === 0 ? 'none' : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
+      for (const l of layers) l.style.transform = t;
+    };
+    const kick = (): void => {
+      if (!raf) raf = requestAnimationFrame(paint);
+    };
+    window.addEventListener('scroll', kick, { passive: true });
+    window.addEventListener('resize', kick);
+    paint();
+    cleanups.push(() => {
+      window.removeEventListener('scroll', kick);
+      window.removeEventListener('resize', kick);
+      if (raf) cancelAnimationFrame(raf);
+      layers.forEach((l) => (l.style.transform = ''));
+    });
+  }
+
+  return () => cleanups.forEach((c) => c());
 }
