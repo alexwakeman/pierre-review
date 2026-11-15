@@ -18,7 +18,7 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Define, build, and review as an ensemble": the hero (the Chain, and the Quartet beside Poincaré's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close |
+| `/` | `pages/Home.tsx` | "Refine, build and review as an ensemble": the hero (the Chain, Poincaré's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close (with the Quartet) |
 | `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
 | `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
 | `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |

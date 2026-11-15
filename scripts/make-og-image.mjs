@@ -59,7 +59,7 @@ code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background
 </style></head><body>
 <div class="tile say">
   <p class="kick">${brandMarkSvg(4)}<span><b>Ensemble</b> · an agentic SDLC on your machine</span></p>
-  <h1>Define, build, and review as an ensemble.</h1>
+  <h1>Refine, build and review as an ensemble.</h1>
   <p class="lead">From ticket to merged pull request with your own Claude or Codex. It runs fully on your team’s own machines, with no added service.</p>
   <div class="foot"><code>npx ensemble-review</code><span class="url">ensemble.ac</span></div>
 </div>

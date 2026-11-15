@@ -7,8 +7,8 @@ import type { Corner, Quarter, RunName } from './geometry';
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
 //   Quartet    four equal quarters facing one centre, "four sensible people
-//              conversing" (the hero's small tile). Its quarters start apart and
-//              close in as the reader scrolls down.
+//              conversing", in the close at the foot of the page. It draws in
+//              and its quarters slide together as it scrolls into view.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
 //              mirrored across the tile and cross through each other into place as
