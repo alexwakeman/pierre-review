@@ -18,7 +18,6 @@
 //   · the `limn.*` localStorage keys, DB tables and columns, migrations, `/api/pro/*` paths
 //   · test-only environment variables (`LIMN_TEST_RUN_DIR`, `LIMN_SCRATCH*`, `LIMN_SANDBOX_LIVE` …)
 //   · git namespaces (`refs/limn/…`, `limn/…` branches), cookie names
-//   · the domain (limn-review.com), until a new one is bought
 // Every PARSER of text an older Limn wrote (status lines, PR-body headings, footers, bot names)
 // reads both the old and the new wording.
 //

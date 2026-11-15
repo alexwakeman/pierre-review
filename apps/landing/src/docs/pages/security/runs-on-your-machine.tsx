@@ -60,7 +60,7 @@ export default function Page(): JSX.Element {
         <li>It does not run in the background when you stop it. Syncing, auto review and automation happen only while Ensemble is running.</li>
       </ul>
       <Note>
-        The website at limn-review.com, where you are reading this, is separate from the app. The website may use
+        The website at ensemble.ac, where you are reading this, is separate from the app. The website may use
         analytics with your consent; the app never does.
       </Note>
 

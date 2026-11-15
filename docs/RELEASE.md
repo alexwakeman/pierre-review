@@ -349,7 +349,7 @@ It is **not enabled by default.** To turn it on:
 
 ## The website (`deploy-site.yml`)
 
-limn-review.com is a separate deploy, unrelated to the npm release: ONE small Node
+ensemble.ac is a separate deploy, unrelated to the npm release: ONE small Node
 service, `apps/site` (plain `node:http`, no runtime deps), serving the prerendered landing
 (`apps/landing/dist`), `/api/health` and the contact form (`GET /api/contact/ticket` +
 `POST /api/contact`, delivered to a Slack incoming webhook). There is no app server, no

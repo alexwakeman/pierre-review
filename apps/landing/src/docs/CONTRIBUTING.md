@@ -1,6 +1,6 @@
 # Writing the Ensemble docs
 
-The user documentation at **limn-review.com/docs**. It is part of the landing site
+The user documentation at **ensemble.ac/docs**. It is part of the landing site
 (`apps/landing`), prerendered per page, with no runtime dependency.
 
 ## The rule

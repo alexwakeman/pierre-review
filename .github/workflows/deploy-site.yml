@@ -1,6 +1,6 @@
 name: Deploy site
 
-# Builds the image behind limn-review.com — the landing pages and the contact form,
+# Builds the image behind ensemble.ac — the landing pages and the contact form,
 # served by apps/site — pushes it to GitHub Container Registry, and asks Railway to
 # redeploy it.
 #
@@ -12,7 +12,7 @@ name: Deploy site
 # SUCCESSFUL RELEASE (workflow_run): the release workflow bumps apps/backend/package.json and moves
 # CHANGELOG.md's Unreleased entries under the new version in a `chore(release):` commit that never
 # triggers a push run, so this rebuild is what puts the released version and its changelog on
-# limn-review.com/docs (docs/RELEASE.md § The changelog).
+# ensemble.ac/docs (docs/RELEASE.md § The changelog).
 #
 # Repo secrets (all optional):
 #   VITE_GA_ID       build-time Google Analytics id, inlined into the landing bundles.
@@ -25,8 +25,8 @@ name: Deploy site
 #   CONTACT_SLACK_WEBHOOK_URL  Slack incoming webhook the contact form posts to. Unset =
 #                              the form says it is unavailable.
 #   CONTACT_TICKET_SECRET      signs the form's fill-time ticket. Unset = a random key per process.
-#   SITE_URL                   https://limn-review.com — turns on the www → apex 301.
-#   REDIRECT_HOSTS             pierre-review.com,www.pierre-review.com — 301'd to SITE_URL.
+#   SITE_URL                   https://ensemble.ac — turns on the www → apex 301.
+#   REDIRECT_HOSTS             limn-review.com,www.limn-review.com,pierre-review.com,www.pierre-review.com — 301'd to SITE_URL.
 #   HSTS_MAX_AGE               seconds, default 31536000; 0 disables.
 #   PORT                       injected by Railway.
 #   TRUST_PROXY_HOPS           set to 1 in the image; leave it.

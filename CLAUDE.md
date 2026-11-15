@@ -634,7 +634,7 @@ docs/PACKAGING.md · docs/RELEASE.md.
 
 ## The website (`apps/site`) and the landing
 
-- **`apps/site`** serves limn-review.com: the prerendered landing and the contact form (`/demo/` 302s to `/`)
+- **`apps/site`** serves ensemble.ac: the prerendered landing and the contact form (`/demo/` 302s to `/`)
   (the commercial-licence path; [apps/site/README.md](apps/site/README.md)). ⚠ Its rate limit reads
   `X-Forwarded-For` from the RIGHT (`TRUST_PROXY_HOPS`). GA lives in the landing only, never the SPA.
 - The landing's `<!-- seo:start/end -->` / `<!-- app:start/end -->` markers in

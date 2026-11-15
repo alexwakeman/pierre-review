@@ -190,7 +190,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   § below), and the
   foot: `SyncStatus` (sidebar variant: "Synced 2m ago" / "Sync error" in words), `AiUsageMenu`,
   the bell, "?", the key sheet, the theme, and the account menu (`UserMenu`, opens UP).
-  The "?" is a LINK, not a dialog: it opens the public docs (limn-review.com/docs) in a new tab on
+  The "?" is a LINK, not a dialog: it opens the public docs (ensemble.ac/docs) in a new tab on
   the page for the current location (`lib/docsLink.ts` `docsUrlForView`; ⌘K "Open the Ensemble docs"
   uses the same). The SPA never imports the landing, so the page keys are hard-coded there; the
   landing's `test/docs.test.ts` fails if one is not a real docs page. `HelpModal` is reached only

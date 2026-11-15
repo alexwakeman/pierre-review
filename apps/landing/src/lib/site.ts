@@ -13,7 +13,7 @@
 //
 // SCOPE OF THE EARLIER RENAME (Pierre → Limn), staged in two tranches:
 //
-//   DONE — the domain (limn-review.com, 2026-10-23) and every user-visible string: this site, the SPA's chrome, the CLI banner,
+//   DONE — the domain (limn-review.com on 2026-10-23, then ensemble.ac on 2026-11-15) and every user-visible string: this site, the SPA's chrome, the CLI banner,
 //          and the re-captured screenshots. Then, in the release that made Claude
 //          Review and AI Fix free, the npm package: `pierre-review` → `limn-review`
 //          (bin `limn`, with `pierre-review` kept as a deprecated alias) and the

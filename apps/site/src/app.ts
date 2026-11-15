@@ -1,4 +1,4 @@
-// The request handler for limn-review.com.
+// The request handler for ensemble.ac.
 //
 //   /                  the prerendered landing (apps/landing/dist)
 //   /demo, /demo/...   302 to / (the static demo is gone; old links land on the home page)
@@ -50,7 +50,7 @@ export interface SiteOptions {
   contactWebhookUrl: string;
   /** CONTACT_TICKET_SECRET. Null ⇒ a per-process random key. */
   ticketSecret: string | null;
-  /** SITE_URL, e.g. https://limn-review.com. Enables the www → apex redirect. */
+  /** SITE_URL, e.g. https://ensemble.ac. Enables the www → apex redirect. */
   canonicalOrigin: string | null;
   /** REDIRECT_HOSTS: other hosts 301'd to canonicalOrigin (the old domain). */
   redirectHosts?: readonly string[];

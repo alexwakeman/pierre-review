@@ -1,4 +1,4 @@
-// THE "?" BUTTON (lib/docsLink.ts): it opens the public docs at limn-review.com, on the page for
+// THE "?" BUTTON (lib/docsLink.ts): it opens the public docs at ensemble.ac, on the page for
 // where the reader is. The SPA does not import the landing, so the page keys are hard-coded; this
 // test lists them, and apps/landing/test/docs.test.ts checks each one is a real docs page.
 //

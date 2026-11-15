@@ -1,6 +1,6 @@
 # @pierre-review/landing
 
-Public marketing site for Ensemble (limn-review.com). Built independently — it shares no
+Public marketing site for Ensemble (ensemble.ac). Built independently — it shares no
 runtime code with the timeline SPA — and served at `/` by the small site service in
 [`apps/site`](../site/README.md), which also serves the contact form's API.
 
@@ -186,6 +186,12 @@ sips -c 130 130 logo.png --out /tmp/sq.png            # crop to a centred square
 for s in 16 32 48 180 192 512; do sips -z $s $s /tmp/sq.png --out public/icon-$s.png; done
 # then rename: favicon-16/32/48.png, apple-touch-icon.png (180), icon-192/512.png
 ```
+
+## Social preview card
+
+`public/og-image.png` (2400x1260) is the hero as a card, not an app screenshot. After a change to
+the hero's words or picture, run `node scripts/make-og-image.mjs` (`CHROMIUM_PATH=…` to use a Chrome
+other than Playwright's own).
 
 ## Screenshots
 

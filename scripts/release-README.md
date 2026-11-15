@@ -161,7 +161,7 @@ locally instead — a larger database, but PR detail then works fully offline.
 Source-available under the **Ensemble License 1.0** — see [LICENSE](./LICENSE).
 Ensemble is free for individuals, and for organisations where no more than 3 people
 use it (affiliates count together). More users than that need a licence — ask
-through the [contact form](https://limn-review.com/contact?topic=licence). You may
+through the [contact form](https://ensemble.ac/contact?topic=licence). You may
 **not** offer Ensemble, or a product built from it, as a competing commercial
 product or service.
 The AI runtime Ensemble downloads on first use is Anthropic's, under Anthropic's own

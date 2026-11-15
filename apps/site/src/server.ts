@@ -10,7 +10,7 @@
 //                              per process.
 //   SITE_URL                   canonical origin, for the www → apex redirect.
 //   REDIRECT_HOSTS             comma list of other hosts 301'd to SITE_URL
-//                              (the old pierre-review.com).
+//                              (the old limn-review.com and pierre-review.com).
 //   HSTS_MAX_AGE               seconds; 0 disables. Default 31536000.
 //   TRUST_PROXY_HOPS           proxies in front that append to X-Forwarded-For
 //                              (Railway: 1). Default 0 — the header is ignored.

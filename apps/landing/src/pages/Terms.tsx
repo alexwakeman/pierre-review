@@ -41,7 +41,7 @@ export default function Terms(): JSX.Element {
       intro={
         <>
           <p>
-            These terms cover this website, limn-review.com,
+            These terms cover this website, ensemble.ac,
             and the {SITE_NAME} software you install from npm. There is no hosted version of{' '}
             {SITE_NAME} and no account to sign up for.
           </p>

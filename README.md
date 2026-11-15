@@ -178,7 +178,7 @@ From a checkout, `pnpm dev` reads the model from the `packages/ml` submodule.
 
 ## Website
 
-- `apps/site` is the small service behind limn-review.com: the landing pages and the
+- `apps/site` is the small service behind ensemble.ac: the landing pages and the
   contact form. See [apps/site/README.md](apps/site/README.md).
 
 ## Layout
@@ -201,7 +201,7 @@ Ensemble is **source-available** under the [Ensemble License 1.0](./LICENSE).
   fewer** use it. You may use, copy and change it.
 - **More than 3 people** in one organisation (affiliates count together) need a
   commercial licence — ask through the
-  [contact form](https://limn-review.com/contact).
+  [contact form](https://ensemble.ac/contact).
 - You may **not** offer Ensemble, or a product built from it, as a competing
   commercial product or service.
 - Copies you pass on must keep the licence and copyright notice.

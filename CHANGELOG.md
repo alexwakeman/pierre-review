@@ -27,6 +27,7 @@ no internals.
 - Limn is now called Ensemble. Run it with `npx ensemble-review`, or `ensemble` once installed; the old
   `limn-review` command still works and points you to the new one.
 - Your data moves from `~/.limn` to `~/.ensemble` the first time Ensemble starts.
+- The website and the docs moved to ensemble.ac. Links to limn-review.com still work and take you there.
 - Settings you set as `LIMN_…` environment variables still work. The new names start with `ENSEMBLE_`
   (for example `ENSEMBLE_AI_PROVIDER`), and win when both are set.
 - Teams: your Ensemble still sees the claims of teammates on Limn. Limn does not read Ensemble's new

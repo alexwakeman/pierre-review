@@ -16,9 +16,10 @@ import { FREE_TEAM_SIZE, NPM_PACKAGE, SITE_NAME } from './site';
 // The product name comes from lib/site.ts, never a literal, so a rename does not
 // have to be re-applied across nine strings here.
 //
-// The site lives at limn-review.com (moved from the old pierre-review.com on 2026-10-23).
+// The site lives at ensemble.ac (moved from limn-review.com on 2026-11-15, which had moved from
+// pierre-review.com on 2026-10-23; both old domains 301 here through REDIRECT_HOSTS).
 
-export const SITE_URL = 'https://limn-review.com';
+export const SITE_URL = 'https://ensemble.ac';
 export const OG_IMAGE = `${SITE_URL}/og-image.png`;
 
 export type RouteSeo = {
