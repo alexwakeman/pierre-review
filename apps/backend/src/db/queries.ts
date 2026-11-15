@@ -830,7 +830,7 @@ export async function deleteWorkspace(
       .set({ workspaceId: defaultId })
       .where(and(eq(schema.releases.accountId, accountId), eq(schema.releases.workspaceId, id)))
       .execute();
-    // The releasable ticks and start tags (migration 0199) are THIS workspace's choice: they do not
+    // The releasable ticks (migration 0199) are THIS workspace's choice: they do not
     // follow the repos to Default (the FK cascades too; explicit, as below).
     await tx
       .delete(schema.workspaceReleaseRepos)

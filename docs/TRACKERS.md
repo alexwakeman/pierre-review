@@ -444,18 +444,24 @@ relation phrase from THIS ticket's side, and an https browse URL; ≤ 20). Migra
 
 Statuses are per project and per tracker, so nothing hard-codes a name. The sprint list read stores the
 AUTOMATIC order (shared `SprintStatusAutoOrder`) with the list. Every status sits in ONE **bucket**; a
-bucket has an id, a name (≤ 24 characters) and a **meaning** — one of the five stages Not started, In
-progress, Code review, Product review, Complete (`SPRINT_STAGES`; Code review's id stays `in_review`,
-because stored settings and snapshots carry it). A ticket's `stage` is its bucket's meaning, so every
-reader of `stage` works whatever the buckets are.
+bucket has an id, a name (≤ 24 characters) and a **meaning** — one of the six stages Not started, In
+progress, Code review, Product review, Complete, Cancelled (`SPRINT_STAGES`; Code review's id stays
+`in_review`, because stored settings and snapshots carry it). A ticket's `stage` is its bucket's meaning,
+so every reader of `stage` works whatever the buckets are.
 
-- **Automatic** (`buckets: null`): five buckets, one per stage (id = the stage, named
+- ⚠ **ONLY COMPLETE MEANS DONE** (owner, 2026-11-15). Cancelled (`'cancelled'`, after Complete) is work
+  closed WITHOUT being delivered — "Won't do", "Duplicate", GitHub's "Closed as not planned". It is never
+  counted as complete (pace, briefs, Releases) and never as live work (pace `live`, open dependencies,
+  chains, "waiting"). Every reader asks shared `sprintStageIsComplete` (`=== 'done'`) or
+  `sprintStageIsOpen` (neither), never a category.
+- **Automatic** (`buckets: null`): six buckets, one per stage (id = the stage, named
   `SPRINT_STAGE_LABEL`), each status in the bucket of its automatic stage (below). "Won't do" is a
-  done-category status, so it lands in Complete.
+  done-category status whose name reads as cancelled, so it lands in Cancelled.
 - **The workspace's buckets** (`workspaces.sprint_statuses` = `{version, buckets, mergedColumn}`,
   `db/sprint-status-settings.ts`, `PUT /api/sprint-stories/statuses`, edited from This Sprint's gear):
   1–10 buckets in reading order; meanings must be NON-DECREASING (two Code review buckets are fine, a Not
-  started bucket after a Complete one is not); a status in at most one bucket; ≤ 60 statuses in all.
+  started bucket after a Complete one is not — so Cancelled buckets follow the Complete ones or come
+  last, said as "Cancelled buckets come last, so “X” cannot come after “Y”."); a status in at most one bucket; ≤ 60 statuses in all.
   Every refusal is ONE plain sentence from shared `sprintBucketsProblem`, which the editor runs before
   Save and the route returns as the 400's `message`. ⚠ Placement beats category. ⚠ A status no bucket
   names (new on the board since) keeps its automatic stage and joins the FIRST bucket with that
@@ -482,8 +488,14 @@ reader of `stage` works whatever the buckets are.
   first Complete one; not when it already has ten buckets or the name is taken), which takes that Code
   review bucket's statuses whose names read as Product review; a Code review bucket named exactly "In
   review" reads as "Code review" (`withProductReview`). Nothing is written until the reader saves; a
-  saved value carries the version, so a Product review bucket the reader removed stays removed. Only the
-  new shape may be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
+  saved value carries the version, so a Product review bucket the reader removed stays removed.
+  ⚠ **Cancelled the same way** (`SPRINT_STATUS_SETTINGS_VERSION` 3, since 2026-11-15): a stored value
+  of an OLDER version (2, or none — after its Product review) is read with a Cancelled bucket APPENDED
+  after the last Complete bucket (`withCancelled`; id `cancelled`, numbered when taken), holding the
+  Complete buckets' statuses whose names read as cancelled — only when it has ≤ 9 buckets and no bucket
+  is already called "Cancelled"; otherwise those statuses stay in Complete. Read-time only; Save stores
+  version 3, after which a removed Cancelled bucket stays removed (a cancelled-named status no bucket
+  names then joins the nearest earlier bucket, Complete). Only the new shape may be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
 - "Coding begins" / "Coding ends" = the first status of the first In progress / Code review bucket
   (else the first Product review one), derived.
 
@@ -494,16 +506,23 @@ reader of `stage` works whatever the buckets are.
   `jiraGetJson`; unknown ids are dropped. The status fallback has no board → null.
 - **Linear**: the teams' workflow `states` (read in the teams query) by type (triage / backlog /
   unstarted → started → completed / canceled), then `position`; several teams concatenate, active-cycle
-  teams first, names deduped.
-- **GitHub Issues**: Open, then the closed names. Projects v2 status is NOT stored on tickets, so it is
-  not read — every GitHub ticket's category is `new`, so all are "Not started".
+  teams first, names deduped. A `canceled`-type state carries `cancelled: true` on the stored order, so
+  it is Cancelled whatever its name (an order stored before that is read by name).
+- **GitHub Issues**: Open, then the closed names. The closed state reason IS stored, in the status name
+  (`githubStatus`: "Closed", "Closed as not planned", "Closed as duplicate"), so "not planned" and
+  "duplicate" read as Cancelled by name and a plain "Closed" stays Complete. Projects v2 status is NOT
+  stored on tickets, so it is not read.
 - **Notion** (`notion_status`): a `status` property's options in GROUP order (To-do → In progress →
   Complete, each group's own option order); a mapped `select`'s options by their mapped category, then
   Notion's order. From the database schema — one call, `{ fresh: true }`.
 - ⚠ **AN ORDER FAILURE NEVER FAILS THE LIST.** A failed board read returns `statusOrder: undefined`
   (the stored order stands) and a code that is logged; `null` (no board) clears it, and the page falls
   back to category then name.
-- **The automatic stage**: category `new` → Not started, `done` → Complete. An in-progress status is
+- **The automatic stage**: category `new` → Not started; `done` → Cancelled when the tracker marks the
+  state cancelled (Linear) or its NAME reads as cancelled (shared `SPRINT_CANCELLED_STATUS_RE`, only ever
+  asked of a done status: won't do / wont do / won't fix / will not do, cancelled / canceled, rejected,
+  declined, duplicate(d), abandoned, obsolete, not doing, not planned, invalid), else Complete. Jira and
+  Notion are by name. A status the layout does not know falls back the same way. An in-progress status is
   Product review when its NAME reads as QA / test / sign-off / release (`SPRINT_PRODUCT_REVIEW_STATUS_RE`,
   checked first: "Ready for QA", "In Test", "UAT", "In PO Review", "Awaiting Deployment", "Release"…);
   else Code review when its name reads as review (`SPRINT_REVIEW_STATUS_RE`: "Code Review", "In
@@ -704,13 +723,23 @@ Sprint → Releases is the reader's press, and it does two tracker things:
   candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
   the Releases tab and the dialog's preview read the stored rows (a view still never calls a reader).
 - **Refresh's re-read** (`POST /api/releases/refresh`, `releases/refresh.ts`) — the same exception, the
-  tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable, never read),
-  ≤ 30, through the same `syncOnePrNow(force)`. Needed because the worker is MISSING-ONLY for a merged
+  tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable) or still
+  waits for (not read yet), ≤ 30, through the same `syncOnePrNow(force)`. Needed because the worker is MISSING-ONLY for a merged
   PR (it never TTL-refreshes one), so a ticket moved to Done after its PRs merged would otherwise hold its
   tag for good. Tier `search`.
-- **A range PR with no stored row** (merged between worker passes) is found by the ONE detection rule
-  (`detectKeysWithAccess`, DB only) in `db/release-check.ts` and holds its tag as `not_read` — it never
-  passes as an untracked PR.
+- **RELEASE-RANGE PRs — read when RECEIVED, by the release scan** (`sync/release-scan.ts`; owner
+  decision 2026-11-15). The automatic check walks every version tag on main, so a range can name merged
+  PRs of ANY age — past the worker's 90-day merged window, often stored only just now by the scan's
+  single-PR sync. A range PR whose key THE detection rule finds (`detectKeysWithAccess`, DB only) but
+  with no stored row on the workspace's site is `not_read`: the check says "checking", never a blocker,
+  and the scan names it (`db/release-check.ts` `releaseTicketsOwed`) to the worker: `queueReleaseTicketReads`
+  puts it in a per-account PRIORITY set (≤ 2000) read FIRST in the next pass, in the same MISSING-ONLY mode
+  as any merged PR (a key with no row is read; no TTL refresh, no prune), inside the same per-pass budget;
+  it leaves the set once settled. `kickReleaseTicketReads` starts that pass without re-opening the
+  account's merged windows; the `*/2` tick reads what is left. Any reading tracker (Jira, GitHub Issues,
+  Linear). The TTL rules of every other PR are unchanged. A tracker FAILURE (`not_found` / `no_access` /
+  `failed`) holds the tag with the reason; a workspace whose tracker cannot read at all (no reader, no
+  credential) holds a `not_read` ticket ("the tracker cannot read it") rather than checking forever.
 - **The comment** — one per shipped ticket whose repos ALL tagged in this release, through the same
   `postTicketComment` (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind `statusGate`, under the
   reader's Jira login). Exactly three lines (shared `releaseCommentWiki`): "Approved for release by <name>

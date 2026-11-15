@@ -942,11 +942,12 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
 - **`workspace_release_repos`** (migration `0199`) — one row per `(account_id, workspace_id, repo_id)`
   the reader ticked "Released from this workspace" (Settings → Releases; default: none). ONLY these are
   folded by the release check, tagged, ranged by the tag sync and offered as hotfix bases; no row = ignored
-  entirely. `start_tag_name` / `start_tag_sha` ("Start from this tag": a version tag on the default branch
-  and the commit it was at; NULL = none), `start_set_by_login`, `start_set_at`, `created_at`. Composite FKs
-  to `workspaces` and `repos`, both cascading; `deleteWorkspace` deletes the workspace's rows (a tick is
-  that workspace's choice, never re-homed); `deleteRepo` deletes the repo's. Unticking deletes the row (its
-  start tag with it). ONE reader/writer `db/release-repos.ts`; every read is intersected with the
+  entirely. `created_at`. ⚠ `start_tag_name` / `start_tag_sha` / `start_set_by_login` / `start_set_at` are
+  DORMANT since 2026-11-15 (the reader's "Start from this tag" was removed: the check finds its own starting
+  point) — never read or written, kept, never dropped. Composite FKs to `workspaces` and `repos`, both
+  cascading; `deleteWorkspace` deletes the workspace's rows (a tick is that workspace's choice, never
+  re-homed); `deleteRepo` deletes the repo's. Unticking deletes the row. ONE reader/writer
+  `db/release-repos.ts`; every read is intersected with the
   workspace's CURRENT membership (home + External), so a row of a repo that left is inert.
 
 All six carry `account_id`, composite FKs `(…, account_id)` with cascade, sit in `accountScopedTables()`

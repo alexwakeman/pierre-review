@@ -39,7 +39,8 @@ import {
 
 // Activity → This Sprint → Settings → STATUSES: the workspace's BUCKETS of tracker statuses (shared
 // sprint-stories.ts § The status layout). Each bucket has a name and a MEANING (Not started, In
-// progress, Code review, Product review, Complete) — meanings may not go backwards. AUTOMATIC (five
+// progress, Code review, Product review, Complete, Cancelled) — meanings may not go backwards, so
+// Cancelled buckets come last. Only Complete means done. AUTOMATIC (six
 // buckets, one per stage) until a reader changes it here, per workspace. A DRAFT until Save; Cancel
 // drops it; "Reset to automatic" clears the override. The merge rule's switch (a Code review ticket
 // whose pull requests have all merged moves into the first Product review bucket) rides the same Save.
@@ -164,9 +165,13 @@ export function SprintStatusSettings({
         <InfoButton title="Statuses">
           <p>
             Each bucket is a column on This Sprint. Put any of your tracker’s statuses in a bucket, and say what the
-            bucket means: Not started, In progress, Code review, Product review or Complete. Buckets must go in that
-            order, but you can have two of one kind, such as two review stages. Product review is for QA, testing and
-            other sign-offs after the code is reviewed.
+            bucket means: Not started, In progress, Code review, Product review, Complete or Cancelled. Buckets must go
+            in that order, but you can have two of one kind, such as two review stages. Product review is for QA, testing
+            and other sign-offs after the code is reviewed.
+          </p>
+          <p>
+            Only Complete means done. Cancelled is for work you closed without doing it, such as Won’t Do or Duplicate:
+            it never counts as complete, and a release waits for it like any other unfinished ticket.
           </p>
           <p>
             Drag a status to move it, within a bucket or into another one. The arrow buttons do the same from the

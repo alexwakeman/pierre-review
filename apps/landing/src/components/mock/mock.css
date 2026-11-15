@@ -819,10 +819,33 @@
   gap: 6px;
   padding: 6px 0 2px 16px;
 }
-.lb .rp-releases .tags .start {
+.lb .rp-releases .tags .note {
   margin: 0;
   font-size: 12px;
   color: var(--muted);
+}
+.lb .rp-releases .prog {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 0 138px;
+}
+.lb .rp-releases .prog .bar {
+  flex: 0 0 120px;
+  height: 5px;
+  border-radius: 3px;
+  background: #26272c;
+  overflow: hidden;
+}
+.lb .rp-releases .prog .bar > span {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+}
+@media (max-width: 560px) {
+  .lb .rp-releases .prog {
+    padding-left: 0;
+  }
 }
 .lb .rp-releases .tags .tn {
   font-weight: 600;

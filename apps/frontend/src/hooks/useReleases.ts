@@ -9,14 +9,17 @@ import type {
   ReleasesResponse,
   SetReleaseReposBody,
   SetReleaseSettingsBody,
-  SetReleaseStartTagBody,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { releasesPollInterval } from '../components/Sprint/releasesModel.js';
 import { workspaceKey } from './useActivity.js';
 
 // RELEASES (docs/RELEASES.md) — This Sprint → Releases and Settings → Releases.
 //
-// ⚠ THE TAB FETCHES ONE THING ON MOUNT: `GET /api/releases` (DB only). The dialog's preview (notes +
+// ⚠ THE TAB FETCHES ONE THING ON MOUNT: `GET /api/releases` (DB + memory only). While ANY repo is still
+// being checked (`releasesChecking`: the scan's ancestry, ranges, PRs or tickets are not all read), it
+// polls that same GET every RELEASES_POLL_MS (releasesModel.ts `releasesPollInterval`) and stops as soon as none is — never another route. The
+// dialog's preview (notes +
 // comment; it may call the model) runs only while the dialog is OPEN — a reader's click — and a stored
 // release is read only when the reader asks to see it.
 // ⚠ Every key carries `ws:<id>`; every query idles while `workspaceId` is null (not resolved yet).
@@ -36,6 +39,7 @@ export function useReleases(workspaceId: number | null) {
     queryKey: releasesKey(workspaceId),
     queryFn: workspaceId == null ? skipToken : () => api.releases(workspaceId),
     staleTime: 30_000,
+    refetchInterval: (query) => releasesPollInterval(query.state.data),
   });
 }
 
@@ -94,21 +98,6 @@ export function useSetReleaseRepos(workspaceId: number | null) {
       qc.setQueryData(releaseSettingsKey(data.workspaceId), data);
       // Only ticked repos are checked: the check is read again.
       void qc.invalidateQueries({ queryKey: releasesKey(data.workspaceId) });
-    },
-  });
-}
-
-/** "Start from this tag" (a press in the repo row; `tagName` null clears it). The answer is the check. */
-export function useSetReleaseStartTag(workspaceId: number | null) {
-  const qc = useQueryClient();
-  return useMutation<ReleasesResponse, Error, SetReleaseStartTagBody>({
-    mutationKey: ['release-start-tag', workspaceKey(workspaceId)],
-    mutationFn: (body) => {
-      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
-      return api.setReleaseStartTag(workspaceId, body);
-    },
-    onSuccess: (data) => {
-      qc.setQueryData<ReleasesResponse>(releasesKey(data.workspaceId), data);
     },
   });
 }

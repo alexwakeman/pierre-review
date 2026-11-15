@@ -1,4 +1,4 @@
-// THE RELEASE CHECK (docs/RELEASES.md § The release check; § Acceptance checks 4–18): the pure shared
+// THE RELEASE CHECK (docs/RELEASES.md § The release check; § Acceptance checks 4–18, 38–42): the pure shared
 // fold `foldReleaseCheck` (+ `releaseBlockerText`, `releaseShippedTickets`), then the DB half
 // (db/release-check.ts `getReleases`) on a THROWAWAY sqlite DB with the tracker site stubbed.
 //
@@ -8,8 +8,11 @@ import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   foldReleaseCheck,
+  releaseBlockerShort,
   releaseBlockerText,
+  releaseScanLine,
   releaseShippedTickets,
+  releasesChecking,
   type ReleaseCheckInput,
   type ReleaseCheckPrInput,
   type ReleaseCheckRepoInput,
@@ -120,49 +123,55 @@ const threePrs = () => [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])];
 
 // ── Candidate ───────────────────────────────────────────────────────────────────────────────────
 
-describe('foldReleaseCheck — per repo', () => {
-  it('acceptance 4: v1.0.0, v1.1.0, v1.2.0, no release, all Done → candidate v1.2.0', () => {
+describe('foldReleaseCheck — the automatic walk, per repo', () => {
+  it('acceptance 4/14: v1.0.0, v1.1.0, v1.2.0, no release, all Done → the walk starts at the OLDEST tag; candidate v1.2.0', () => {
     const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
     const api = repoOf(res, 1);
     expect(api.status).toBe('candidate');
     expect(api.candidate).toMatchObject({ name: 'v1.2.0', releaseTagName: 'v1.2.0-rc', releaseTagExists: false });
     expect(api.baseline).toBeNull();
-    expect(api.noBaseline).toBe(true);
+    expect(api.firstVersion?.name).toBe('v1.0.0');
     expect(api.tags.map((t) => t.name)).toEqual(['v1.2.0', 'v1.1.0', 'v1.0.0']);
     expect(api.tags.filter((t) => t.isCandidate).map((t) => t.name)).toEqual(['v1.2.0']);
     expect(api.ticketIdents.sort()).toEqual(['T1', 'T2', 'T3']);
+    expect(api).toMatchObject({ checking: false, progress: null });
     expect(res.warnings).toEqual([]);
   });
 
-  it('acceptance 5: v1.1.0 adds a PR whose ticket is In review → candidate v1.0.0; v1.1.0 names the blocker', () => {
+  it('acceptance 5/42: v1.1.0 adds an In review ticket → candidate v1.0.0; v1.1.0 names it; v1.2.0 says it also contains it', () => {
     const res = run({
       repos: [threeTags()],
       prs: threePrs(),
-      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' }), ticket('T3')],
+      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' }), ticket('T3', { done: false, statusName: 'To do' })],
     });
     const api = repoOf(res, 1);
     expect(api.status).toBe('candidate');
     expect(api.candidate?.name).toBe('v1.0.0');
     expect(api.firstBlocked).toBe('v1.1.0');
+    expect(api.firstBlocker).toEqual({ kind: 'not_done', ident: 'T2', key: 'T2', statusName: 'In review' });
     const v11 = tagOf(res, 1, 'v1.1.0');
-    expect(v11.blocked).toBe(true);
-    expect(v11.blockers).toEqual([{ kind: 'not_done', ident: 'T2', key: 'T2', statusName: 'In review' }]);
+    expect(v11).toMatchObject({ blocked: true, state: 'held', alsoHeldBy: [] });
     expect(releaseBlockerText(v11.blockers[0]!, words(res))).toBe('T2 is not done (In review).');
-    // v1.2.0 is held by the earlier tag, and adds no blocker of its own.
-    expect(tagOf(res, 1, 'v1.2.0')).toMatchObject({ blocked: true, blockers: [] });
+    // v1.2.0 shows its OWN reason, and what it carries from the earlier held tag (tags are cumulative).
+    const v12 = tagOf(res, 1, 'v1.2.0');
+    expect(v12).toMatchObject({ blocked: true, state: 'held' });
+    expect(v12.blockers).toEqual([{ kind: 'not_done', ident: 'T3', key: 'T3', statusName: 'To do' }]);
+    expect(v12.alsoHeldBy).toEqual([{ blocker: v11.blockers[0], fromTag: 'v1.1.0' }]);
     expect(ticketOf(res, 'T2')).toMatchObject({ ready: false, inRelease: false });
-    // T3 is wholly past the candidate: ready, not in this release, holding nothing.
-    expect(ticketOf(res, 'T3')).toMatchObject({ ready: true, inRelease: false, blocker: null });
-    expect(ticketOf(res, 'T3').repos).toEqual([{ repoId: 1, state: 'after_candidate', prIds: [3] }]);
     expect(api.latestVersion?.name).toBe('v1.2.0');
   });
 
-  it('acceptance 5: the oldest tag blocked → no candidate at all', () => {
-    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1', { done: false, statusName: 'In progress' }), ticket('T2'), ticket('T3')] });
-    expect(repoOf(res, 1)).toMatchObject({ status: 'blocked', candidate: null, firstBlocked: 'v1.0.0' });
+  it('acceptance 16: the OLDEST tag holds → no tag can be released (blocked, the oldest tag named)', () => {
+    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1', { done: false, statusName: 'In Progress' }), ticket('T2'), ticket('T3')] });
+    const api = repoOf(res, 1);
+    expect(api).toMatchObject({ status: 'blocked', candidate: null, firstBlocked: 'v1.0.0', baseline: null });
+    expect(api.firstBlocker).toMatchObject({ kind: 'not_done', key: 'T1', statusName: 'In Progress' });
+    expect(releaseBlockerShort(api.firstBlocker!)).toBe('T1 (In Progress)');
+    // The later tags are each read and say they also contain T1.
+    expect(tagOf(res, 1, 'v1.2.0').alsoHeldBy.map((h) => [h.blocker.kind, h.fromTag])).toEqual([['not_done', 'v1.0.0']]);
   });
 
-  it('acceptance 6: that ticket moves to Done → candidate v1.2.0', () => {
+  it('acceptance 8: that ticket moves to Done → candidate v1.2.0', () => {
     const before = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' }), ticket('T3')] });
     const after = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
     expect(repoOf(before, 1).candidate?.name).toBe('v1.0.0');
@@ -207,7 +216,7 @@ describe('foldReleaseCheck — per repo', () => {
     ['not_found', 'T2 could not be read: it was not found.'],
     ['no_access', 'T2 could not be read: there is no access to it.'],
     ['failed', 'T2 could not be read: the tracker did not answer.'],
-  ] as const)('acceptance 10: an unreadable ticket (%s) → blocks, with the reason', (state, sentence) => {
+  ] as const)('acceptance 10: a tracker failure (%s) → blocks, with the reason', (state, sentence) => {
     const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { readState: state, done: false }), ticket('T3')] });
     expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
     const b = tagOf(res, 1, 'v1.1.0').blockers[0]!;
@@ -215,31 +224,46 @@ describe('foldReleaseCheck — per repo', () => {
     expect(releaseBlockerText(b, words(res))).toBe(sentence);
   });
 
-  it('acceptance 10: a ticket named on a PR but with no stored row at all → blocks as not read', () => {
-    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T3')] });
-    expect(tagOf(res, 1, 'v1.1.0').blockers[0]).toMatchObject({ kind: 'unreadable', reason: 'not_read' });
+  it('acceptance 17: a ticket NOT READ YET is checking, never a blocker: the candidate proven so far stands, with later tags still read', () => {
+    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T3')], trackerName: 'Jira' });
+    const api = repoOf(res, 1);
+    expect(api).toMatchObject({ status: 'candidate', checking: true, firstBlocked: null });
+    expect(api.candidate?.name).toBe('v1.0.0');
+    expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ state: 'checking', pending: true, blockers: [], blocked: true });
+    expect(ticketOf(res, 'T2')).toMatchObject({ pending: true, blocker: null, ready: false });
+    expect(api.progress).toEqual({ step: 'tickets', done: 2, total: 3, line: 'Reading tickets from Jira: 2 of 3' });
+    // The FIRST tag's ticket not read: the repo is checking, no candidate yet.
+    const first = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T2'), ticket('T3')] });
+    expect(repoOf(first, 1)).toMatchObject({ status: 'checking', candidate: null, firstBlocked: null });
+    // A tracker that cannot read at all: a ticket not read yet will never be read — it HOLDS.
+    const none = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T3')], ticketsReadable: false });
+    expect(tagOf(none, 1, 'v1.1.0').blockers[0]).toMatchObject({ kind: 'unreadable', reason: 'not_read' });
+    expect(repoOf(none, 1)).toMatchObject({ status: 'candidate', checking: false, firstBlocked: 'v1.1.0' });
   });
 
-  it('acceptance 11: "Won\'t do" with merged code (Done in the fold) → counts as Done', () => {
-    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { statusName: "Won't do", done: true }), ticket('T3')] });
-    expect(repoOf(res, 1).candidate?.name).toBe('v1.2.0');
+  it('acceptance 11: a Cancelled ticket ("Won\'t do", not Done in the fold) holds its tag like any not-Done one', () => {
+    const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { statusName: "Won't do", done: false }), ticket('T3')] });
+    const blocker = tagOf(res, 1, 'v1.1.0').blockers[0]!;
+    expect(blocker).toMatchObject({ kind: 'not_done', key: 'T2', statusName: "Won't do" });
+    expect(releaseBlockerText(blocker, words(res))).toBe("T2 is not done (Won't do).");
+    expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
   });
 
-  it('acceptance 12: no version tag after the baseline → "Nothing new", not in the release', () => {
+  it('acceptance 12: no version tag after the baseline → "Nothing new", not in the release; no tags at all → no_tags', () => {
     const r = repo(1, 'api', [
       { name: 'v1.0.0', d: 1, prs: [1] },
       { name: 'v1.0.0-rc', d: 1, commit: 'v1.0.0', taggedAt: 2 },
     ]);
     const res = run({ repos: [r], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1')] });
     const api = repoOf(res, 1);
-    expect(api).toMatchObject({ status: 'nothing_new', nothingNewReason: 'no_new_tags', candidate: null, tags: [] });
+    expect(api).toMatchObject({ status: 'nothing_new', nothingNewReason: 'no_new_tags', candidate: null, tags: [], checking: false });
     expect(api.baseline?.name).toBe('v1.0.0-rc');
     expect(api.latestRelease).toMatchObject({ name: 'v1.0.0-rc', kind: 'release' });
     expect(res.tickets).toEqual([]);
     expect(repoOf(run({ repos: [repo(2, 'web', [])] }), 2)).toMatchObject({ status: 'nothing_new', nothingNewReason: 'no_tags' });
   });
 
-  it('acceptance 12/24: after a release the baseline moves; only later version tags count', () => {
+  it('acceptance 15/24: the newest release tag on main is the baseline; only later version tags count', () => {
     const r = repo(1, 'api', [
       { name: 'v1.0.0', d: 1, prs: [1] },
       { name: 'v1.1.0', d: 3, prs: [2] },
@@ -252,7 +276,9 @@ describe('foldReleaseCheck — per repo', () => {
     expect(api.baseline?.name).toBe('v1.1.0-rc');
     expect(api.candidate?.name).toBe('v1.2.0');
     expect(api.tags.map((t) => t.name)).toEqual(['v1.2.0']);
-    expect(api.noBaseline).toBe(false);
+    // With a baseline, the held tag is "the next tag" after it.
+    const held = run({ repos: [r], prs: threePrs(), tickets: [ticket('T3', { done: false, statusName: 'In Progress' })] });
+    expect(repoOf(held, 1)).toMatchObject({ status: 'blocked', firstBlocked: 'v1.2.0', baseline: { name: 'v1.1.0-rc' } });
   });
 
   it('acceptance 13: a merged PR into hotfix/… for a not-done ticket blocks no main candidate', () => {
@@ -266,25 +292,29 @@ describe('foldReleaseCheck — per repo', () => {
     expect(res.tickets.map((t) => t.ident)).not.toContain('T9');
   });
 
-  it('a version tag whose increment is not computed yet (or is stale) cannot be the candidate — "Reading changes…", never a ticket blocker', () => {
+  it('acceptance 16 (notes): commits with no pull request are a note only', () => {
+    const r = threeTags();
+    r.ranges[1]!.unmatchedCommits = 3;
+    const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    expect(repoOf(res, 1)).toMatchObject({ status: 'candidate', directCommits: 3, warningCount: 0 });
+    expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ unmatchedCommits: 3, state: 'clear', blockers: [] });
+  });
+
+  it('acceptance 17: an increment not computed yet (or stale) is checking, never a ticket blocker', () => {
     const r = repo(1, 'api', [
       { name: 'v1.0.0', d: 1, prs: [1] },
       { name: 'v1.1.0', d: 3, prs: [2], noRange: true },
       { name: 'v1.2.0', d: 5, prs: [3] },
     ]);
     const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
-    expect(repoOf(res, 1)).toMatchObject({ status: 'candidate', reading: true, firstBlocked: 'v1.1.0' });
+    expect(repoOf(res, 1)).toMatchObject({ status: 'candidate', checking: true, firstBlocked: null });
     expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
-    const v11 = tagOf(res, 1, 'v1.1.0');
-    expect(v11).toMatchObject({ pending: true, blocked: true, blockers: [] });
-    // The first tag not read: the repo is READING, not blocked.
+    expect(repoOf(res, 1).progress).toMatchObject({ step: 'ranges', done: 2, total: 3, line: "Matching v1.1.0's commits to pull requests (tag 2 of 3)" });
+    expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ pending: true, blocked: true, blockers: [], state: 'checking' });
+    // The first tag not read: CHECKING, not blocked.
     const first = repo(1, 'api', [{ name: 'v1.0.0', d: 1, prs: [1], noRange: true }]);
-    expect(repoOf(run({ repos: [first], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1')] }), 1)).toMatchObject({
-      status: 'reading',
-      candidate: null,
-      firstBlocked: 'v1.0.0',
-    });
-    // A moved tag: the stored increment's sha no longer matches → pending.
+    expect(repoOf(run({ repos: [first], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1')] }), 1)).toMatchObject({ status: 'checking', candidate: null });
+    // A moved tag: the stored increment's sha no longer matches → checking.
     const moved = threeTags();
     moved.tags[2]!.sha = sha('moved');
     moved.tags[2]!.moved = true;
@@ -293,29 +323,63 @@ describe('foldReleaseCheck — per repo', () => {
     expect(tagOf(res2, 1, 'v1.2.0')).toMatchObject({ moved: true, pending: true });
   });
 
-  it('50 version tags, no release, ranges only for the newest 40 → only those are listed, and still a candidate', () => {
-    const specs: TagSpec[] = Array.from({ length: 50 }, (_, i) => ({ name: `v0.0.${String(i).padStart(2, '0')}`, d: 1, prs: [], noRange: i < 10 }));
-    const r = repo(1, 'api', specs);
-    // Distinct commit times so the order is the index.
-    r.tags.forEach((t, i) => (t.committedAt = new Date(Date.UTC(2026, 10, 1, 0, i))));
-    const res = run({ repos: [r] });
-    expect(repoOf(res, 1).candidate?.name).toBe('v0.0.49');
-    expect(repoOf(res, 1).noBaseline).toBe(true);
-    expect(repoOf(res, 1).tags).toHaveLength(40);
-    expect(repoOf(res, 1).versionTags).toHaveLength(50);
-    // With a release tag, a missing range after it is only not read YET: the repo is reading.
-    const withBaseline = repo(1, 'api', [
-      { name: 'v0.0.01', d: 1, prs: [] },
-      { name: 'v0.0.01-rc', d: 1, commit: 'v0.0.01', taggedAt: 2 },
-      ...Array.from({ length: 45 }, (_, i) => ({ name: `v0.1.${String(i).padStart(2, '0')}`, d: 3, prs: [], noRange: i < 3 })),
-    ]);
-    withBaseline.tags.forEach((t, i) => (t.committedAt = new Date(Date.UTC(2026, 10, i < 2 ? 1 : 3, 0, i))));
-    const held = run({ repos: [withBaseline] });
-    expect(repoOf(held, 1)).toMatchObject({ candidate: null, status: 'reading' });
-    expect(repoOf(held, 1).tags.at(-1)).toMatchObject({ name: 'v0.1.00', pending: true });
+  it("acceptance 17/38: a tag whose ancestry is not known yet stops the walk there; the repo says it is checking which tags are on main", () => {
+    const r = threeTags();
+    r.defaultBranch = 'main';
+    r.tags[1]!.onDefaultBranch = null;
+    const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    const api = repoOf(res, 1);
+    expect(api).toMatchObject({ status: 'candidate', checking: true });
+    expect(api.candidate?.name).toBe('v1.0.0');
+    expect(api.progress).toEqual({ step: 'ancestry', done: 2, total: 3, line: 'Checking which tags are on main: 2 of 3' });
+    // Nothing known yet: checking, never "No version tags".
+    const none = threeTags();
+    none.tags.forEach((t) => (t.onDefaultBranch = null));
+    expect(repoOf(run({ repos: [none] }), 1)).toMatchObject({ status: 'checking', nothingNewReason: null });
   });
 
-  it('a truncated compare (more commits than are read) holds its tag, with a sentence', () => {
+  it('acceptance 38: the WHOLE history is walked — 250 version tags, no release, no window', () => {
+    const specs: TagSpec[] = Array.from({ length: 250 }, (_, i) => ({ name: `v0.${i}.0`, d: 1, prs: [] }));
+    const r = repo(1, 'api', specs);
+    r.tags.forEach((t, i) => (t.committedAt = new Date(Date.UTC(2026, 0, 1, 0, i))));
+    // Rebuild the ranges in the new order (the builder sorted by the old dates).
+    const ordered = [...r.tags].sort((a, b) => a.committedAt!.getTime() - b.committedAt!.getTime());
+    r.ranges = ordered.map((t, i) => ({
+      tagName: t.name,
+      sha: t.sha,
+      baseTagName: i > 0 ? ordered[i - 1]!.name : null,
+      baseSha: i > 0 ? ordered[i - 1]!.sha : null,
+      method: i > 0 ? ('compare' as const) : ('history' as const),
+      prIds: i === 0 ? [1] : [],
+      unresolvedPrNumbers: [],
+      unmatchedCommits: 0,
+      truncated: false,
+    }));
+    const res = run({ repos: [r], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1', { done: false, statusName: 'In Progress' })] });
+    const api = repoOf(res, 1);
+    expect(api.tags).toHaveLength(250);
+    expect(api).toMatchObject({ status: 'blocked', firstBlocked: 'v0.0.0' });
+    const clear = run({ repos: [r], prs: [pr(1, 1, ['T1'])], tickets: [ticket('T1')] });
+    expect(repoOf(clear, 1).candidate?.name).toBe('v0.249.0');
+  });
+
+  it('acceptance 39: a range PR not fetched yet is checking ("Fetching pull requests"); one GitHub could not give holds (40)', () => {
+    const r = threeTags();
+    r.ranges[1]!.unresolvedPrNumbers = [88];
+    const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    expect(repoOf(res, 1)).toMatchObject({ status: 'candidate', checking: true });
+    expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
+    expect(repoOf(res, 1).progress).toEqual({ step: 'prs', done: 3, total: 4, line: 'Fetching pull requests: 3 of 4' });
+    expect(tagOf(res, 1, 'v1.1.0')).toMatchObject({ state: 'checking', unresolvedPrCount: 1 });
+    r.unreadablePrNumbers = [88];
+    const held = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    const b = tagOf(held, 1, 'v1.1.0').blockers[0]!;
+    expect(b).toEqual({ kind: 'pr_unreadable', number: 88 });
+    expect(releaseBlockerText(b)).toBe('Pull request #88 could not be read from GitHub.');
+    expect(repoOf(held, 1)).toMatchObject({ firstBlocked: 'v1.1.0', checking: false });
+  });
+
+  it('acceptance 17: a truncated compare (more commits than are read) holds its tag, with a sentence', () => {
     const r = threeTags();
     r.ranges[1]!.truncated = true;
     const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
@@ -326,18 +390,19 @@ describe('foldReleaseCheck — per repo', () => {
     expect(releaseBlockerText(b, words(res))).toBe('v1.1.0 has more commits than can be read, so its changes cannot be checked.');
   });
 
-  it('acceptance 6: Refresh reads again only the tickets held by their own state (not Done, unreadable), capped', async () => {
+  it('acceptance 6: Refresh reads again the tickets held by their own state or not read yet, capped', async () => {
     const { ticketsToRefresh } = await import('../releases/refresh.js');
     const res = run({
       repos: [threeTags()],
       prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3']), pr(4, 1, ['T2'], { state: 'open' })],
-      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In review' }), ticket('T3', { readState: 'failed', done: false })],
+      tickets: [ticket('T2', { done: false, statusName: 'In review' }), ticket('T3', { readState: 'failed', done: false })],
     });
     expect(ticketsToRefresh(res).map((t) => [t.key, t.prIds.sort()])).toEqual([
+      ['T1', [1]],
       ['T2', [2, 4]],
       ['T3', [3]],
     ]);
-    expect(ticketsToRefresh(res, 1).map((t) => t.key)).toEqual(['T2']);
+    expect(ticketsToRefresh(res, 1).map((t) => t.key)).toEqual(['T1']);
   });
 
   it('flags a candidate whose release tag name already exists', () => {
@@ -363,7 +428,27 @@ describe('foldReleaseCheck — per repo', () => {
   });
 });
 
-// ── Each repo on its own; the start tag ─────────────────────────────────────────────────────────
+describe('releaseScanLine and releasesChecking — the progress words and the polling switch', () => {
+  it('one short line per step', () => {
+    expect(releaseScanLine({ step: 'ancestry', done: 140, total: 212, branch: 'main' })).toBe('Checking which tags are on main: 140 of 212');
+    expect(releaseScanLine({ step: 'ranges', done: 60, total: 140, tagName: '0.389.0', tagIndex: 61 })).toBe(
+      "Matching 0.389.0's commits to pull requests (tag 61 of 140)",
+    );
+    expect(releaseScanLine({ step: 'prs', done: 35, total: 80 })).toBe('Fetching pull requests: 35 of 80');
+    expect(releaseScanLine({ step: 'tickets', done: 12, total: 30, tracker: 'Jira' })).toBe('Reading tickets from Jira: 12 of 30');
+    expect(releaseScanLine({ step: 'prs', done: 35, total: 80, paused: true })).toBe("Fetching pull requests: 35 of 80 (waiting for GitHub's rate limit)");
+  });
+  it('acceptance 41: on while any repo is checking, off when none is', () => {
+    const checking = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1')] });
+    const done = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    expect(releasesChecking({ check: checking })).toBe(true);
+    expect(releasesChecking({ check: done })).toBe(false);
+    expect(releasesChecking({ check: null })).toBe(false);
+    expect(releasesChecking(undefined)).toBe(false);
+  });
+});
+
+// ── Each repo on its own ────────────────────────────────────────────────────────────────────────
 
 describe('foldReleaseCheck — each repo on its own (no "ships whole", no "open work")', () => {
   // api: v2.3.0 (PR 10, PLAT-100) · v2.4.0 (PR 11, PLAT-290). web: v1.8.0 (PR 20, PLAT-200).
@@ -412,58 +497,6 @@ describe('foldReleaseCheck — each repo on its own (no "ships whole", no "open 
     expect(repoOf(res, 1).candidate?.name).toBe('v2.4.0');
     expect(res.warnings).toEqual([]);
   });
-
-  it('acceptance 14: a start tag treats everything up to it as accepted; only later tags are checked', () => {
-    const r = threeTags();
-    r.startTag = { name: 'v1.1.0', sha: sha('v1.1.0'), setBy: 'ada', setAt: day(9) };
-    const res = run({
-      repos: [r],
-      prs: threePrs(),
-      tickets: [ticket('T1', { done: false }), ticket('T2', { done: false, statusName: 'In PO Review' }), ticket('T3')],
-    });
-    const api = repoOf(res, 1);
-    expect(api.baseline).toMatchObject({ name: 'v1.1.0', kind: 'start' });
-    expect(api.startTag).toMatchObject({ name: 'v1.1.0', problem: null, setBy: 'ada' });
-    expect(api.tags.map((t) => t.name)).toEqual(['v1.2.0']);
-    expect(api.candidate?.name).toBe('v1.2.0');
-    expect(api.noBaseline).toBe(false);
-    expect(res.tickets.map((t) => t.key)).toEqual(['T3']);
-  });
-
-  it('acceptance 15: a newer release tag wins over an older start tag', () => {
-    const r = repo(1, 'api', [
-      { name: 'v1.0.0', d: 1, prs: [1] },
-      { name: 'v1.1.0', d: 3, prs: [2] },
-      { name: 'v1.1.0-rc', d: 3, commit: 'v1.1.0', taggedAt: 4 },
-      { name: 'v1.2.0', d: 5, prs: [3] },
-    ]);
-    r.startTag = { name: 'v1.0.0', sha: sha('v1.0.0'), setBy: null, setAt: null };
-    const res = run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
-    expect(repoOf(res, 1).baseline).toMatchObject({ name: 'v1.1.0-rc', kind: 'release' });
-    expect(repoOf(res, 1).startTag?.problem).toBeNull();
-  });
-
-  it('acceptance 16: a start tag that moved, or is gone, is not used (said), and the check falls back', () => {
-    const r = threeTags();
-    r.startTag = { name: 'v1.1.0', sha: sha('old'), setBy: null, setAt: null };
-    const moved = repoOf(run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] }), 1);
-    expect(moved.startTag?.problem).toBe('moved');
-    expect(moved.baseline).toBeNull();
-    expect(moved.tags).toHaveLength(3);
-    r.startTag = { name: 'v0.9.0', sha: sha('v0.9.0'), setBy: null, setAt: null };
-    expect(repoOf(run({ repos: [r], prs: threePrs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] }), 1).startTag?.problem).toBe('missing');
-  });
-
-  it('acceptance 17: ranges are needed only after the baseline (a start tag makes the list short)', () => {
-    const specs: TagSpec[] = Array.from({ length: 30 }, (_, i) => ({ name: `v0.${i}.0`, d: 1, prs: [], noRange: i < 27 }));
-    const r = repo(1, 'api', specs);
-    r.tags.forEach((t, i) => (t.committedAt = new Date(Date.UTC(2026, 10, 1, 0, i))));
-    expect(repoOf(run({ repos: [r] }), 1).status).toBe('reading');
-    r.startTag = { name: 'v0.27.0', sha: sha('v0.27.0'), setBy: null, setAt: null };
-    const res = repoOf(run({ repos: [r] }), 1);
-    expect(res.tags.map((t) => t.name)).toEqual(['v0.29.0', 'v0.28.0']);
-    expect(res.candidate?.name).toBe('v0.29.0');
-  });
 });
 
 // ── The DB half ─────────────────────────────────────────────────────────────────────────────────
@@ -486,9 +519,19 @@ afterAll(async () => {
 });
 
 describe('ticketIsDone — the This Sprint stage resolver', () => {
-  it("acceptance 11: \"Won't do\" (done category) is in Complete, so it counts as Done", () => {
-    expect(m.ticketIsDone(null, "Won't Do", 'done')).toBe(true);
+  it("acceptance 11: \"Won't do\" (done category) is Cancelled, not Complete, so it is NOT Done", () => {
+    expect(m.ticketIsDone(null, "Won't Do", 'done')).toBe(false);
+    expect(m.ticketIsDone(null, 'Duplicate', 'done')).toBe(false);
+    expect(m.ticketIsDone(null, 'Closed as not planned', 'done')).toBe(false);
     expect(m.ticketIsDone(null, 'Done', 'done')).toBe(true);
+    expect(m.ticketIsDone(null, 'Closed', 'done')).toBe(true);
+  });
+  it('a status placed in a Cancelled bucket is not Done, whatever its name or category', () => {
+    const layout = {
+      order: [{ name: 'Shelved', category: 'done' as const, count: 0, auto: false, stage: 'cancelled' as const, bucketId: 'cancelled' }],
+      buckets: [],
+    };
+    expect(m.ticketIsDone(layout, 'Shelved', 'done')).toBe(false);
   });
   it('In review / In progress / no status are not Done', () => {
     expect(m.ticketIsDone(null, 'In review', 'indeterminate')).toBe(false);
@@ -630,9 +673,19 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     ]);
     expect(res.check!.prs.find((p) => p.id === p3)).toMatchObject({ isBot: true, ticketIdents: [] });
 
+    // The ticket is closed as "Won't Do" → Cancelled, not Complete: it still holds v1.1.0.
+    const { eq } = await import('drizzle-orm');
+    await db.update(trackerTickets).set({ statusName: "Won't Do", statusCategory: 'done' }).where(eq(trackerTickets.issueKey, 'PLAT-2')).execute();
+    const cancelled = await m.getReleases(1, scope.workspaceId);
+    const repoC = cancelled.check!.repos.find((r) => r.repoId === api.id)!;
+    expect(repoC.candidate?.name).toBe('v1.0.0');
+    expect(repoC.tags.find((t) => t.name === 'v1.1.0')!.blockers).toEqual([
+      { kind: 'not_done', ident: `jira:${SITE.apiRoot}#PLAT-2`, key: 'PLAT-2', statusName: "Won't Do" },
+    ]);
+
     // The ticket moves to Done (the worker's next read) → the candidate moves to v1.1.0; the bot PR
     // without a ticket is listed, not warned.
-    await db.update(trackerTickets).set({ statusName: "Won't Do", statusCategory: 'done' }).execute();
+    await db.update(trackerTickets).set({ statusName: 'Done', statusCategory: 'done' }).execute();
     const after = await m.getReleases(1, scope.workspaceId);
     const repo2 = after.check!.repos.find((r) => r.repoId === api.id)!;
     expect(repo2.candidate).toMatchObject({ name: 'v1.1.0', releaseTagName: 'v1.1.0-rc' });
@@ -648,7 +701,7 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     expect((await m.getReleases(1, 'nope')).workspaceId).toBe(scope.workspaceId);
   });
 
-  it('acceptance 5/10: a range PR whose ticket the worker has not read yet (no row) BLOCKS as not read, never passes as untracked', async () => {
+  it('acceptance 17/39: a range PR whose ticket is not read yet is CHECKING (queued for the worker), never untracked; a tracker that cannot read holds it', async () => {
     const { db, schema } = client;
     const { repos, pullRequests, repoTags, repoTagRanges, trackerTickets, workspaceTrackers } = schema;
     const { resolveWorkspaceScope } = await import('./queries.js');
@@ -699,13 +752,51 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     const repo = res.check!.repos.find((r) => r.repoId === api.id)!;
     expect(repo.candidate?.name).toBe('v1.1.0');
     expect(repo.untrackedPrIds).not.toContain(p4.id);
+    // No credential: the tracker cannot read, so the ticket would never be read — it holds.
     expect(repo.tags.find((t) => t.name === 'v1.2.0')!.blockers).toEqual([
       { kind: 'unreadable', ident: `jira:${SITE.apiRoot}#PLAT-310`, key: 'PLAT-310', reason: 'not_read' },
     ]);
     expect(res.check!.prs.find((p) => p.id === p4.id)?.ticketIdents).toEqual([`jira:${SITE.apiRoot}#PLAT-310`]);
+    expect(await m.releaseTicketsOwed(1, scope.workspaceId, api.id, SETTINGS)).toEqual({ prIds: [], waiting: 0 });
+
+    // With a credential the worker will read it: CHECKING, with the tickets step, and the scan queues it.
+    await db.update(workspaceTrackers).set({ authEmail: 'ada@acme.test', authToken: 'plain:tok' }).execute();
+    const res2 = await m.getReleases(1, scope.workspaceId);
+    const repo2 = res2.check!.repos.find((r) => r.repoId === api.id)!;
+    expect(repo2).toMatchObject({ status: 'candidate', checking: true, firstBlocked: null });
+    expect(repo2.candidate?.name).toBe('v1.1.0');
+    expect(repo2.tags.find((t) => t.name === 'v1.2.0')).toMatchObject({ state: 'checking', blockers: [] });
+    expect(repo2.progress).toMatchObject({ step: 'tickets', line: expect.stringMatching(/^Reading tickets from Jira: \d+ of \d+$/) });
+    expect(await m.releaseTicketsOwed(1, scope.workspaceId, api.id, SETTINGS)).toEqual({ prIds: [p4.id], waiting: 1 });
+
+    // The scan's live step is laid over the derived one while fresh (never for tickets).
+    const scan = await import('../releases/scan-state.js');
+    scan.noteScanStep(api.id, { step: 'prs', done: 35, total: 80, paused: false });
+    const res3 = await m.getReleases(1, scope.workspaceId);
+    expect(res3.check!.repos.find((r) => r.repoId === api.id)!.progress).toEqual({ step: 'prs', done: 35, total: 80, line: 'Fetching pull requests: 35 of 80' });
+    scan.__resetScanState();
   });
 
-  it("the oldest tag's 'history' range is read fresh: a PR the backfill stores later enters it", async () => {
+  it('acceptance 40: a range PR GitHub could not give (the scan remembered it) holds its tag', async () => {
+    const { resolveWorkspaceScope } = await import('./queries.js');
+    const scope = await resolveWorkspaceScope(1, undefined);
+    const { db, schema } = client;
+    const { repos, repoTagRanges } = schema;
+    const { and, eq } = await import('drizzle-orm');
+    const api = (await db.select().from(repos).execute()).find((r: any) => r.name === 'api');
+    await db.update(repoTagRanges).set({ prNumbers: [4, 77] }).where(and(eq(repoTagRanges.repoId, api.id), eq(repoTagRanges.tagName, 'v1.2.0'))).execute();
+    const scan = await import('../releases/scan-state.js');
+    // Not tried yet: checking.
+    const before = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
+    expect(before.tags.find((t) => t.name === 'v1.2.0')).toMatchObject({ state: 'checking', unresolvedPrCount: 1 });
+    scan.notePrFetchFailed(api.id, 77);
+    const after = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
+    expect(after.tags.find((t) => t.name === 'v1.2.0')!.blockers).toContainEqual({ kind: 'pr_unreadable', number: 77 });
+    scan.__resetScanState();
+    await db.update(repoTagRanges).set({ prNumbers: [4] }).where(and(eq(repoTagRanges.repoId, api.id), eq(repoTagRanges.tagName, 'v1.2.0'))).execute();
+  });
+
+  it("the oldest tag's 'history' range also takes the stored PRs fresh: a PR stored later enters it", async () => {
     const { db, schema } = client;
     const { repos, pullRequests, repoTagRanges } = schema;
     const { resolveWorkspaceScope } = await import('./queries.js');

@@ -13,9 +13,11 @@ export default function Page(): JSX.Element {
     <>
       <p>
         <Ui>This Sprint → Releases</Ui> (press <Kbd>4</Kbd> on This Sprint) checks the version tags of each repository you
-        release against your tickets. For each one it finds the newest version tag on the default branch whose pull
-        requests link only to Done tickets. Each repository is checked on its own. That tag is the <strong>candidate</strong>. One press then tags every
-        candidate as a release, publishes the release notes and comments on each ticket.
+        release against your tickets, by itself. It walks the version tags on the default branch from the oldest after
+        the last release, or from the very first tag when there is no release yet. The first tag with a pull request
+        whose ticket is not Done holds itself and every later tag back. The tag before it is the{' '}
+        <strong>candidate</strong>. Each repository is checked on its own. One press then tags every candidate as a
+        release, publishes the release notes and comments on each ticket.
       </p>
       <p>
         Ensemble never cuts a version tag and deploys nothing. Your CI, or a person, tags the default branch. The release
@@ -48,37 +50,55 @@ export default function Page(): JSX.Element {
         <Ui>Refresh</Ui> reads the tickets that hold a version tag back from the tracker again, then checks again.
       </p>
       <H3 id="repository-rows">Repository rows</H3>
-      <p>One row for each repository you release. It shows the latest version tag on the default branch and the candidate:</p>
+      <p>One row for each repository you release:</p>
       <ul>
-        <li>&ldquo;Latest 0.394.0 is the candidate → 0.394.0-rc&rdquo;. The last name is the release tag the press would create.</li>
-        <li>&ldquo;Latest 0.394.0 · candidate 0.390.0 → 0.390.0-rc&rdquo;. A later tag is held back.</li>
-        <li>&ldquo;No candidate: 0.391.0 held by BMD-1048 (In PO Review)&rdquo;. The first tag after the last release is held back.</li>
-        <li>&ldquo;Latest 0.394.0 · Reading changes…&rdquo;. Ensemble is still reading which pull requests are in the tags.</li>
+        <li>
+          &ldquo;Release 0.388.0 → 0.388.0-rc&rdquo;, with &ldquo;Latest 0.394.0&rdquo; beside it when a later tag is held
+          back, and the counts, for example &ldquo;6 tickets · 1 warning&rdquo;. The last name is the release tag the press
+          would create.
+        </li>
+        <li>
+          &ldquo;No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)&rdquo;. After a
+          release it reads &ldquo;No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains …&rdquo;.
+        </li>
+        <li>
+          &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Checking
+          which tags are on main: 140 of 212&rdquo;, &ldquo;Matching 0.389.0&rsquo;s commits to pull requests (tag 61 of
+          140)&rdquo;, &ldquo;Fetching pull requests: 35 of 80&rdquo; or &ldquo;Reading tickets from Jira: 12 of
+          30&rdquo;. A candidate already found while later tags are still being read shows with a small &ldquo;Still
+          reading later tags&rdquo; bar. The tab updates by itself until every repository is checked.
+        </li>
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
+        <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
       <p>
-        Select a row to see its version tags since the last release, newest first. Each tag lists its tickets, with their
-        status, and its pull requests with no ticket. The candidate has a star, and the first tag held back is marked.
-        Select a pull request to open it, or a ticket to open its story.
+        Select a row to see every tag after the candidate, newest first, then the candidate itself. Each held tag says
+        why: its own tickets that are not Done, with their status, and what it carries from an earlier held tag, such as
+        &ldquo;Also contains BMD-127 (from 0.312.0).&rdquo; Each tag also lists its pull requests with no ticket. Select a
+        pull request to open it, or a ticket to open its story.
       </p>
-      <H3 id="start-from-a-tag">Start from a tag</H3>
+      <H3 id="the-whole-history">The whole history</H3>
       <p>
-        With no release yet, only the newest 40 tags are checked, and an old ticket that is not Done can hold every one of
-        them. Press <Ui>Start from this tag</Ui> beside a version tag to treat it, and everything before it, as accepted.
-        Only the tags after it are checked. The row then says &ldquo;Starts from 0.380.0&rdquo;, with <Ui>Change</Ui> to
-        pick another version tag and <Ui>Clear</Ui> to remove it. Nothing is written to GitHub.
-      </p>
-      <p>
-        If that tag later moves to another commit or is deleted, the row says so and the check goes back to the last
-        release. A release newer than the start tag always counts from the release.
+        There is nothing to pick. The first check of a repository reads every version tag it can reach, beyond the 90
+        days Ensemble normally syncs. Pull requests it does not have yet are fetched from GitHub, and their tickets are
+        read from your tracker, so a long history takes a while the first time. It works within your GitHub rate limit
+        and waits when the limit is low.
       </p>
       <H3 id="warnings">Warnings</H3>
       <p>A pull request with no ticket is listed as a warning. It never holds a release back.</p>
 
       <H2 id="the-rules">The rules</H2>
       <ul>
-        <li>A ticket counts as Done when it is in your Complete column. &ldquo;Won&rsquo;t do&rdquo; counts as Done.</li>
-        <li>A ticket that could not be read from the tracker holds the release back, with the reason.</li>
+        <li>
+          A ticket counts as Done only when it is in your Complete column. A cancelled ticket, such as &ldquo;Won&rsquo;t
+          do&rdquo;, is not Done, so it holds the release back like any other unfinished ticket.
+        </li>
+        <li>
+          A ticket that could not be read from the tracker, or a pull request that could not be read from GitHub, holds
+          the release back, with the reason. A ticket that is simply not read yet only keeps the row checking.
+        </li>
+        <li>A tag with more commits than can be read holds the release back.</li>
+        <li>Commits with no pull request are noted on their tag. They hold nothing back.</li>
         <li>
           Only the ticket counts. Its pull requests in other repositories, and its open pull requests, hold nothing
           back.

@@ -25,6 +25,7 @@ import {
   PR_ACTIVITY_ONE_QUERY,
   type PrActivityOneResponse,
 } from '../github/queries.js';
+import { noteBudget } from '../github/rate-budget.js';
 import { clearSamlBlock, recordSamlBlock } from './auth-notices.js';
 import { ensureCommitFiles } from './commit-files.js';
 import { drainReviewThreads, drainReviews } from './drain-review-threads.js';
@@ -155,6 +156,15 @@ async function runOnePrSync(
         );
       },
     );
+
+    // The account's GraphQL budget, so a caller syncing many PRs (the release scan) pre-empts the limit.
+    if (resp.rateLimit) {
+      const resetAt = resp.rateLimit.resetAt ? new Date(resp.rateLimit.resetAt) : null;
+      noteBudget(accountId, {
+        remaining: resp.rateLimit.remaining ?? null,
+        resetAt: resetAt && !Number.isNaN(resetAt.getTime()) ? resetAt : null,
+      });
+    }
 
     const pr = resp.repository?.pullRequest ?? null;
     if (!pr) {

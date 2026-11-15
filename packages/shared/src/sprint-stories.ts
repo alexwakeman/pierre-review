@@ -10,8 +10,9 @@ import type { JiraStatusCategory, TrackerProvider } from './types.js';
 //     sprints, Linear's active cycle, GitHub's nearest-due open milestone, else the status fallback
 //     (To do + In progress tickets touched in the reporting window). The `source` says which.
 //   • THE COLUMNS follow the workspace's STATUS LAYOUT (`SprintStatusLayout`): BUCKETS of statuses, each
-//     meaning one of five stages — Not started, In progress, Code review, Product review, Complete.
-//     AUTOMATIC (category, a code-review and a QA / sign-off name vocabulary, PR evidence; the tracker's
+//     meaning one of six stages — Not started, In progress, Code review, Product review, Complete,
+//     Cancelled. AUTOMATIC (category, a code-review, a QA / sign-off and a cancelled name vocabulary, PR
+//     evidence; the tracker's
 //     board / workflow order) unless the workspace sets its own (`SprintStatusSettings`).
 //   • "Check against code" (a Sonnet run per ticket over default-branch checkouts) was REMOVED on
 //     2026-10-18 with the sprint drawer; its tables (`sprint_ticket_repos`, `sprint_assessments`) are
@@ -129,19 +130,22 @@ export interface SprintReadState {
 
 /** The coarse phase of a listed ticket — derived from its `stage` (in_progress = In progress, Code
  *  review or Product review). */
-export type SprintPhase = 'not_started' | 'in_progress' | 'done';
+export type SprintPhase = 'not_started' | 'in_progress' | 'done' | 'cancelled';
 
 export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
   not_started: 'Not started',
   in_progress: 'In progress',
   done: 'Complete',
+  cancelled: 'Cancelled',
 };
 
 // ── The status layout (buckets of statuses) ───────────────────────────────────────────────────────
 //
 // Statuses are per PROJECT and per TRACKER, so nothing here hard-codes a status name. The workspace
 // groups its statuses into BUCKETS (1–SPRINT_BUCKETS_MAX, in reading order), each with a name and a
-// MEANING — one of the five stages (Not started, In progress, Code review, Product review, Complete). The
+// MEANING — one of the six stages (Not started, In progress, Code review, Product review, Complete,
+// Cancelled). ⚠ ONLY Complete means done: Cancelled ("Won't do", "Duplicate") is closed work that was
+// NOT delivered — never counted as complete, never live (`sprintStageIsComplete` / `sprintStageIsOpen`). The
 // internal id of Code review stays `in_review` (stored settings and snapshots carry it). A ticket's `stage` is
 // its bucket's meaning, so everything that reads a stage keeps working whatever the buckets are. Both
 // the buckets and which status sits where are worked out automatically until the workspace sets them:
@@ -151,18 +155,19 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 //     Linear: the team's workflow states (type, then `position`); GitHub Issues: Open, Closed. Stored
 //     on `sprint_reads.status_order_json` by the sprint read. Unreadable → null, and the fallback is
 //     the statuses on the tickets sorted by category (new → indeterminate → done), then name.
-//   • THE AUTOMATIC STAGE — category `new` → Not started, `done` → Complete (so "Won't do" lands there).
-//     An in-progress (or unknown-category) status is Product review when its NAME reads as QA / test /
+//   • THE AUTOMATIC STAGE — category `new` → Not started; `done` → Cancelled when the tracker says so
+//     (a Linear `canceled` state) or its NAME reads as cancelled (`SPRINT_CANCELLED_STATUS_RE`: "Won't
+//     do", "Duplicate", GitHub's "Closed as not planned"…), else Complete. An in-progress (or unknown-category) status is Product review when its NAME reads as QA / test /
 //     sign-off / release (`SPRINT_PRODUCT_REVIEW_STATUS_RE`, checked first); else Code review when its
 //     name reads as review (`SPRINT_REVIEW_STATUS_RE`), or when it sits at or after the PR-evidence
 //     boundary: the FIRST in-progress status, in order, where at least SPRINT_DELIVERED_MIN_SHARE of the
 //     tickets that have ≥ 1 pull request have ALL of them merged and none open, with at least
 //     SPRINT_DELIVERED_MIN_TICKETS such tickets. Otherwise In progress.
-//   • AUTOMATIC BUCKETS (`buckets: null`) — five, one per stage, id = the stage, named
+//   • AUTOMATIC BUCKETS (`buckets: null`) — six, one per stage, id = the stage, named
 //     SPRINT_STAGE_LABEL; every status sits in the bucket of its automatic stage.
 //   • THE WORKSPACE'S BUCKETS (`SprintStatusSettings.buckets`) — meanings NON-DECREASING in order
-//     (`sprintBucketsProblem`); each lists the statuses placed there, in order; a status sits in at
-//     most one. ⚠ PLACEMENT BEATS CATEGORY. A status no bucket names (new on the board since) keeps
+//     (`sprintBucketsProblem`: so Cancelled buckets come last); each lists the statuses placed there,
+//     in order; a status sits in at most one. ⚠ PLACEMENT BEATS CATEGORY. A status no bucket names (new on the board since) keeps
 //     its automatic stage and joins the FIRST bucket with that meaning; with none, the bucket of the
 //     nearest EARLIER meaning (else the nearest later one) — marked `auto` either way.
 //   • THE COLUMNS (`SprintStatusLayout.columns`) — the x axis of every This Sprint view: the buckets in
@@ -176,6 +181,10 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 //     first Complete one), taking that Code review bucket's statuses whose names read as QA / sign-off
 //     / release; a bucket named exactly "In review" reads as "Code review". Read-time only: the next Save
 //     stores it (`SPRINT_STATUS_SETTINGS_VERSION`), after which a removed Product review stays removed.
+//   • STORED BUCKETS SAVED BEFORE CANCELLED (version < 3) are read with a Cancelled bucket added after
+//     the last Complete bucket (else last), taking the Complete buckets' statuses whose names read as
+//     cancelled — when there is room (≤ 9 buckets) and the name "Cancelled" is free. Read-time only,
+//     like Product review: nothing is written until the reader saves.
 //   • "Coding begins" = the first status of the first In progress bucket; "Coding ends" = the first
 //     of the first Code review bucket, else of the first Product review one (`codingBegins` /
 //     `codingEnds`) — derived, never stored.
@@ -206,11 +215,20 @@ export const SPRINT_PRODUCT_REVIEW_STATUS_RE =
  *  automatically Code review ("Code Review", "In Review", "Ready for review"). */
 export const SPRINT_REVIEW_STATUS_RE = /\b(?:review|ready for)\b/i;
 
-/** The five stages, in page order — a bucket's MEANING. `in_review` is Code review (the id is kept:
- *  stored settings and snapshots carry it). */
-export type SprintStage = 'not_started' | 'in_progress' | 'in_review' | 'product_review' | 'done';
+/** A DONE-category status whose NAME matches this is automatically Cancelled, not Complete — "Won't
+ *  Do", "Wont do", "Won't fix", "Will not do", "Cancelled", "Canceled", "Rejected", "Declined",
+ *  "Duplicate", "Abandoned", "Obsolete", "Not doing", "Invalid", and GitHub's "Closed as not planned" /
+ *  "Closed as duplicate". Only ever asked of a done-category status (an in-progress "Cancel requested"
+ *  stays in progress). */
+export const SPRINT_CANCELLED_STATUS_RE =
+  /\b(?:won['\u2019]?t[\s-]*(?:do|fix)|will[\s-]+not[\s-]+(?:do|fix)|cancell?ed|rejected|declined|duplicated?|abandoned|obsolete|not[\s-]+doing|not[\s-]+planned|invalid)\b/i;
 
-export const SPRINT_STAGES: readonly SprintStage[] = ['not_started', 'in_progress', 'in_review', 'product_review', 'done'];
+/** The six stages, in page order — a bucket's MEANING. `in_review` is Code review (the id is kept:
+ *  stored settings and snapshots carry it). `done` is Complete — the ONLY stage that means delivered;
+ *  `cancelled` comes after it and is closed, not delivered. */
+export type SprintStage = 'not_started' | 'in_progress' | 'in_review' | 'product_review' | 'done' | 'cancelled';
+
+export const SPRINT_STAGES: readonly SprintStage[] = ['not_started', 'in_progress', 'in_review', 'product_review', 'done', 'cancelled'];
 
 export const SPRINT_STAGE_LABEL: Record<SprintStage, string> = {
   not_started: 'Not started',
@@ -218,21 +236,45 @@ export const SPRINT_STAGE_LABEL: Record<SprintStage, string> = {
   in_review: 'Code review',
   product_review: 'Product review',
   done: 'Complete',
+  cancelled: 'Cancelled',
 };
 
 /** A stage's place in page order (meanings may never go backwards along the buckets). */
-export const SPRINT_STAGE_RANK: Record<SprintStage, number> = { not_started: 0, in_progress: 1, in_review: 2, product_review: 3, done: 4 };
+export const SPRINT_STAGE_RANK: Record<SprintStage, number> = {
+  not_started: 0,
+  in_progress: 1,
+  in_review: 2,
+  product_review: 3,
+  done: 4,
+  cancelled: 5,
+};
 
 /** The coarse phase of a stage. */
 export function sprintPhaseOfStage(stage: SprintStage): SprintPhase {
-  return stage === 'not_started' ? 'not_started' : stage === 'done' ? 'done' : 'in_progress';
+  return stage === 'not_started' ? 'not_started' : stage === 'done' || stage === 'cancelled' ? stage : 'in_progress';
+}
+
+/** Delivered: the Complete stage and nothing else (never Cancelled). Pure. */
+export function sprintStageIsComplete(stage: SprintStage | null | undefined): boolean {
+  return stage === 'done';
+}
+
+/** Still work: neither Complete nor Cancelled (an unknown stage counts as open). Pure. */
+export function sprintStageIsOpen(stage: SprintStage | null | undefined): boolean {
+  return stage !== 'done' && stage !== 'cancelled';
+}
+
+/** Does this (done-category) status name read as cancelled? Pure. */
+export function isCancelledStatusName(name: string): boolean {
+  return SPRINT_CANCELLED_STATUS_RE.test(name);
 }
 
 /** The automatic order as the sprint read stored it (`sprint_reads.status_order_json`). */
 export interface SprintStatusAutoOrder {
   source: 'jira_board' | 'linear_states' | 'github' | 'notion_status';
-  /** In board / workflow order. `id` is the tracker's status id when it has one. */
-  statuses: Array<{ id: string | null; name: string; category: JiraStatusCategory | null }>;
+  /** In board / workflow order. `id` is the tracker's status id when it has one. `cancelled`: the
+   *  tracker itself says this status is cancelled (a Linear `canceled` state); absent = read the name. */
+  statuses: Array<{ id: string | null; name: string; category: JiraStatusCategory | null; cancelled?: boolean }>;
   /** ISO-8601 of the read that produced it. */
   readAt: string;
 }
@@ -250,7 +292,7 @@ export interface SprintBucket {
 
 /** The workspace's override (`workspaces.sprint_statuses`). OVERRIDES ONLY: the default (automatic
  *  buckets, merge rule on) is stored as NULL. A stored value of the retired `{sections}` or
- *  `{order, deliveredFrom}` shape is read into five buckets named SPRINT_STAGE_LABEL. */
+ *  `{order, deliveredFrom}` shape is read into buckets named SPRINT_STAGE_LABEL. */
 export interface SprintStatusSettings {
   /** null = automatic. */
   buckets: SprintBucket[] | null;
@@ -259,13 +301,14 @@ export interface SprintStatusSettings {
   mergedColumn: boolean;
 }
 
-/** Stamped on every stored value written since Product review became a bucket. A stored value WITHOUT
- *  it was saved before, and is read with a Product review bucket added (see the header). */
-export const SPRINT_STATUS_SETTINGS_VERSION = 2;
+/** Stamped on every stored value. A stored value WITHOUT it was saved before Product review became a
+ *  bucket (read with a Product review bucket added, then a Cancelled one); one stamped 2 was saved
+ *  before Cancelled (read with a Cancelled bucket added). See the header. */
+export const SPRINT_STATUS_SETTINGS_VERSION = 3;
 
 export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { buckets: null, mergedColumn: true };
 
-/** The five automatic buckets (no statuses named). */
+/** The six automatic buckets (no statuses named). */
 export function sprintAutomaticBuckets(): SprintBucket[] {
   return SPRINT_STAGES.map((s) => ({ id: s, name: SPRINT_STAGE_LABEL[s], meaning: s, statuses: [] }));
 }
@@ -298,6 +341,8 @@ export function sprintBucketsProblem(buckets: ReadonlyArray<SprintBucket>): stri
     if (!SPRINT_STAGES.includes(b.meaning)) return `Choose what “${name}” means.`;
     const prev = buckets[i - 1];
     if (prev != null && STAGE_RANK[b.meaning] < STAGE_RANK[prev.meaning]) {
+      // Cancelled is closed, not a further step of the work: say where it goes instead.
+      if (prev.meaning === 'cancelled') return `Cancelled buckets come last, so “${name}” cannot come after “${prev.name.trim()}”.`;
       return `“${name}” means ${SPRINT_STAGE_LABEL[b.meaning]}, so it cannot come after a bucket that means ${SPRINT_STAGE_LABEL[prev.meaning]}.`;
     }
     if (!Array.isArray(b.statuses)) return 'Each bucket needs a list of statuses.';
@@ -357,7 +402,7 @@ export interface SprintStatusLayout {
   /** Every known status (automatic order ∪ statuses on the tickets ∪ the buckets' names), grouped by
    *  bucket in bucket order, in order within a bucket. */
   order: SprintStatusLayoutEntry[];
-  /** The resolved buckets, in order (five automatic ones when none are set). */
+  /** The resolved buckets, in order (six automatic ones when none are set). */
   buckets: SprintStatusLayoutBucket[];
   /** The drawn x axis: the buckets, in order. */
   columns: SprintColumn[];
@@ -368,8 +413,8 @@ export interface SprintStatusLayout {
   codingEnds: string | null;
   /** In order; in-progress (and unknown-category) statuses only. */
   evidence: SprintStatusEvidence[];
-  /** The stored override (default when none), as read — a pre-Product-review value already carries
-   *  its added Product review bucket. */
+  /** The stored override (default when none), as read — an older value already carries its added
+   *  Product review and Cancelled buckets. */
   settings: SprintStatusSettings;
 }
 

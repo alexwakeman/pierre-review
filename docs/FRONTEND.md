@@ -517,7 +517,9 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   anatomy**: ticket KEY (mono) + ticket TITLE (`text-base`, the heaviest text on the page) as ONE
   button that opens the ticket's STORY VIEW tab (`TicketKeyButton` → `useOpenStory`; a ticket with no
   ident keeps the tracker link on its key, through `safeExternalUrl`, and a plain title) / next line: STATUS pill coloured by `statusCategory` (new grey, indeterminate blue, done
-  green; the site's own status words, else To do / In progress / Complete) · issue type (11px) ·
+  green — but a done status whose NAME reads as cancelled, "Won't Do", is grey and followed by a muted
+  "Cancelled", shared `isCancelledStatusName`; the site's own status words, else To do / In progress /
+  Complete) · issue type (11px) ·
   assignee as INITIALS + name (Jira avatar URLs are third-party and the CSP blocks them — do not
   loosen it) or "Unassigned" when the status is known / right: a quiet roll-up over the stack's
   cards from fields they already carry ("N failing CI · N changes requested · N ready to merge",
@@ -2908,17 +2910,22 @@ FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky
 
 **Releases — the 4th tab (2026-11-15, docs/RELEASES.md).** `?sprintTab=releases`, key `4`; NOT a lane
 board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`. ONE fetch on mount,
-`GET /api/releases` (`hooks/useReleases.ts`, key `['releases', ws:<id>]`); nothing renders while
-`workspaceId` is null; not configured, or NO repo ticked "Released from this workspace"
-(`hasReleasableRepos`) ⇒ ONE setup line (`openSettings('releases')`). REPO-ORIENTED (no tickets panel):
-one row per releasable repo showing the PAIR (`repoRowText`: "Latest 0.394.0 · candidate 0.390.0 →
-0.390.0-rc", "Latest 0.394.0 is the candidate → 0.394.0-rc", "No candidate: 0.391.0 held by BMD-1048 (In PO
-Review)", "Latest 0.394.0 · Reading changes…", "Nothing new since 0.390.0-rc"), counts beside it
-(`repoRowCounts`). A row expands to its version tags after the baseline, newest first (`tagContents`: the
-tickets with `ticketMark`, the PRs with no ticket, bot PRs), the candidate starred, the first held tag
-marked, "Start from this tag" on each, and the start-tag line (`startTagLine`: "Starts from 0.380.0 ·
-Change · Clear"; Change = a `Select` over `versionTags`) — `useSetReleaseStartTag` (`PUT
-/api/releases/start-tag`, a press; the answer becomes the check). "Released" is never said of a ticket.
+`GET /api/releases` (`hooks/useReleases.ts`, key `['releases', ws:<id>]`), which POLLS that same GET every
+`RELEASES_POLL_MS` (3 s) ONLY while a repo is checking (`refetchInterval` = `releasesPollInterval`, shared
+`releasesChecking`) and stops when none is; nothing renders while `workspaceId` is null; not configured,
+or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE setup line
+(`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick). REPO-ORIENTED (no
+tickets panel): one row per releasable repo (`repoRowText`: "Release 0.388.0 → 0.388.0-rc", "No tag can
+be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)" / "… since 0.380.0-rc: the
+next tag, 0.381.0, contains …", "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main
+yet"), "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts
+(`repoRowCounts`), and the scan's progress (`repoProgress`): a bar (`Activity/SprintProgressBar`, a share)
+with ONE line from the server (`progress.line`: "Fetching pull requests: 35 of 80"), or a small bar with
+"Still reading later tags" when a candidate (or a held row) already stands. A row expands to
+`expandedTags` — every tag after the candidate, newest first, then the candidate — each with
+`tagExplainer` (its own blockers' sentences; "Also contains BMD-127 (from 0.312.0)."; "Still being read.")
+and `tagContents` (the tickets with `ticketMark` — "not read yet" included — the PRs with no ticket, bot
+PRs, the direct-commit note). "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
 fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
 (`showCreateRelease`). The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only
@@ -2985,12 +2992,14 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   diagrams), so the app draws one way:
   - **COLUMNS are `statusLayout.columns`, verbatim** — the workspace's status buckets in order (the gear's
     bucket editor): Not started, In progress, **Code review**, **Product review** (QA and other sign-offs —
-    a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete. A ticket's
+    a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete, then
+    **Cancelled** (won't do, duplicate — closed, NOT done: it never counts as Complete). A ticket's
     column is `SprintGraphNode.column`, computed ONCE in the server's fold (its bucket, or the first
     Product review bucket when the merge rule moves a Code review ticket whose PRs have all merged) — the
     SPA never re-derives it. Two pseudo-columns appear only when a card needs one: "Outside the sprint"
     at the LEFT (Critical path only) and "Status not known" at the right. Each header shows its card
-    count. ⚠ **A Complete bucket (meaning `done`) is COLLAPSED by default** — a narrow column of per-lane
+    count. ⚠ **A Complete or Cancelled bucket (meaning `done` / `cancelled`, `isCollapsible`) is COLLAPSED
+    by default** — the same toggle for both, each its own column — a narrow column of per-lane
     counts and a "Show" button (`aria-expanded`) that opens the whole column. **Each lane's "n tickets"
     is its own button** (`onToggleCell`, `layoutBoard`'s `expanded` set of `cellKey(lane, column)`): it
     opens THAT lane's cell only — the cell's first row becomes "Hide", its cards sit below, the column
@@ -3066,7 +3075,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
 - **CRITICAL PATH** (`SprintPathsView`, `Activity/SprintBoards.tsx`; state fold `sprintPathsModel.ts`):
   1. **The pace strip** — CODE's `pace` (`paceItems`), every figure with its denominator: "Day 4 of 14"
      with a time bar, "Code merged 21 of 55", "Product review 15 of 55" (`pace.productReview`; only when
-     a Product review bucket exists), "Complete 17 of 55", "Open dependencies 6 in 3 chains".
+     a Product review bucket exists), "Complete 17 of 55", "Cancelled 2 of 55" (`pace.cancelled`; only when
+     one is cancelled — never folded into Complete), "Open dependencies 6 in 3 chains". A Cancelled ticket
+     is neither live nor waited on (`sprintStageIsOpen`); the pace card says "(2 of 5; 1 cancelled)".
   2. **"Critical paths"** (ⓘ beside it) — one lane per STORED path (`pathsBoard`; by PR count, ties
      riskiest first as stored), its header the risk as a WORD chip ("High risk" / "Medium risk" / "Low risk"), the title and
      the one sentence of advice; its tickets on their columns, every arrow on it critical. A ticket
@@ -4523,15 +4534,16 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
   or in progress, no PR, no open session — `WrenchIcon`, the AI Fix wrench (one mark for "a model writes code"; the
   hammer `BuildIcon` is DELETED, 2026-11-04; the builds TOAST has its own `HammerIcon`, docs/STORY-BUILD.md
   § The builds toast), "Implement", accessible name "Implement KEY") or `'fill_gaps'` (a
-  STARTED ticket — a PR, or a status past Not started, short of Complete — whose latest succeeded story
-  check is CURRENT and found gaps, `storyBuildCheckGaps` over not met + partly met + unsettled +
+  STARTED ticket — a PR, or a status past Not started, short of Complete and not Cancelled — whose latest
+  succeeded story check is CURRENT and found gaps, `storyBuildCheckGaps` over not met + partly met + unsettled +
   `missing`; `FillGapsIcon`, "Fill gaps in KEY"); with an OPEN session "Open build · <mark>" (accessible
   name "Open KEY's build: <mark>"). `data-testid="story-build-entry"`, `data-action`. Opens the tab through
   `useOpenStoryBuild`, handing the offer (`TabTicketMeta.buildOffer`: action + the check's run id).
   **Inputs:** the tray passes the board's NODE (`SprintStoryTray node` → `StoryViewBody sprintNode` →
   a context) and nothing is fetched. Elsewhere the view's own facts: stage from the cached sprint graph
   (`getQueryData`, never a fetch) else the tracker status CATEGORY (`storyStageOfCategory`: To Do ⇒ Not
-  started, Done ⇒ Complete, else started; unknown ⇒ Implement never offered); the PR count from
+  started, Done ⇒ Cancelled when the status name reads as cancelled, else Complete; else started; unknown
+  ⇒ Implement never offered); the PR count from
   `/api/ticket-prs` (open + merged + closed); the check from the view's `TicketReviewState` + its latest
   run (`storyViewCheck`, the run the Story section already reads — same query key; stale for ANY stale
   reason); the session from ONE DB read, `GET /api/story-builds?ident=` (`sprintNodeBuildOf`). Nothing

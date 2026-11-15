@@ -214,6 +214,27 @@ describe('blocking relations and the workflow order', () => {
     expect(linearStatesOrder([{ key: 'ENG' }], 'T')).toBeNull();
   });
 
+  it('marks a canceled-type state cancelled whatever its name (the layout reads it as Cancelled)', () => {
+    const o = linearStatesOrder(
+      [
+        {
+          key: 'ENG',
+          states: {
+            nodes: [
+              { id: 'd', name: 'Done', type: 'completed', position: 0 },
+              { id: 'c', name: 'Parked for good', type: 'canceled', position: 1 },
+            ],
+          },
+        },
+      ],
+      'T',
+    );
+    expect(o?.statuses).toEqual([
+      { id: 'd', name: 'Done', category: 'done' },
+      { id: 'c', name: 'Parked for good', category: 'done', cancelled: true },
+    ]);
+  });
+
   it('the list read selects inverse relations and the teams’ states, and returns the order', async () => {
     const log: Array<{ query: string; vars: Record<string, unknown>; auth: string }> = [];
     const t = transport((q) => {

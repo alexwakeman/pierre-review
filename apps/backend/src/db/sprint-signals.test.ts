@@ -85,6 +85,8 @@ describe('out of step', () => {
   });
   it('none → no card', () => {
     expect(outOfStepSignal([N('A-1', 'in_progress'), N('A-2', 'done')])).toBeNull();
+    expect(outOfStepSignal([N('A-1', 'cancelled', { prs: [pr(1, 'open')] })])?.sentence).toBe('1 ticket: 1 cancelled with a pull request still open.');
+    expect(outOfStepSignal([N('A-1', 'cancelled', { prs: [pr(1, 'merged')] })])).toBeNull();
     expect(outOfStepSignal([])).toBeNull();
   });
 });
@@ -96,6 +98,13 @@ describe('pace', () => {
       kind: 'pace',
       title: 'Day 9 of 14',
       sentence: "64% of the sprint's time has gone and 50% of its tickets are complete (2 of 4).",
+      idents: [I('A-3'), I('A-4')],
+    });
+  });
+  it('a cancelled ticket is never complete and never unfinished work; the sentence names it', () => {
+    const withCancelled = [...ns.slice(0, 4), N('A-5', 'cancelled')];
+    expect(paceSignal(withCancelled, { day: 9, days: 14, daysLeft: 5 })).toMatchObject({
+      sentence: "64% of the sprint's time has gone and 40% of its tickets are complete (2 of 5; 1 cancelled).",
       idents: [I('A-3'), I('A-4')],
     });
   });

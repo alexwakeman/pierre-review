@@ -16,10 +16,25 @@ no internals.
 ### Added
 
 - Repos & workspaces: click a repository to open its panel, with its first sync of the last 90 days while it runs, how many pull requests were synced, and its Bot scoring switch. A repository you add opens there.
+- This Sprint → Releases finds the candidate by itself. It checks every version tag on main after the last
+  release, or from the very first tag when there is none, oldest first. The first tag with a ticket that is not
+  Complete, or that could not be read, holds itself and every later tag, and the tag before it is the candidate.
+  Pull requests and tickets older than the synced history are fetched for the check.
+- This Sprint → Releases: a repository still being checked says "Checking…" with a progress bar and one line of
+  what it is doing ("Fetching pull requests: 35 of 80"). The tab updates by itself until every repository is done.
+- This Sprint: a sixth column, Cancelled, after Complete. Closed statuses such as "Won't do", "Duplicate" and
+  "Closed as not planned" go there, and you can give any bucket this meaning in Statuses. Cancelled tickets never
+  count as complete. The column is closed at first, like Complete. Saved buckets gain a Cancelled bucket when read.
 
 ### Changed
 
 - Bot scoring is now off for every repository until you switch it on in its panel. Switched on, the panel shows how many of its bot comments are scored. If the bot comment model is not downloaded, the panel says so and links to Settings → Features.
+- This Sprint → Releases: only a Complete ticket is Done. A cancelled ticket ("Won't do") now holds a tag back like
+  any other unfinished ticket.
+- This Sprint → Releases: one row per repository: "Release 0.388.0 → 0.388.0-rc" (with the latest version tag
+  beside it when different), or "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In
+  Progress)". Open a row to see every tag after the candidate and why each one is held back. The separate tickets
+  list is gone.
 
 ### Fixed
 

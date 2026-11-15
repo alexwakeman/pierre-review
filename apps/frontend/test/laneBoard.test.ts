@@ -102,6 +102,12 @@ describe('columns', () => {
     expect([...collapsedColumns(cols, new Set())]).toEqual(['done']);
     expect([...collapsedColumns(cols, new Set(['done']))]).toEqual([]);
   });
+  it('a Cancelled bucket is its own column after Complete, collapsed by the same toggle', () => {
+    const cols = sprintColumns([...COLUMNS, { id: 'cancelled', name: 'Cancelled', meaning: 'cancelled' as const }], { outside: false, unknown: false });
+    expect(cols.map((c) => c.id).slice(-2)).toEqual(['done', 'cancelled']);
+    expect([...collapsedColumns(cols, new Set())]).toEqual(['done', 'cancelled']);
+    expect([...collapsedColumns(cols, new Set(['cancelled']))]).toEqual(['done']);
+  });
 });
 
 describe('the ghost column is the Critical path view only', () => {
@@ -431,6 +437,10 @@ describe('waiting', () => {
     const nodes = [node('A-1'), node('A-2'), node('A-3', { stage: 'done' }), node('A-4', { stage: 'done' })];
     expect([...waitingIdents(nodes, [dep('A-2', 'A-1'), dep('A-1', 'A-3'), dep('A-4', 'A-1')])]).toEqual([id('A-2')]);
   });
+  it('a Cancelled ticket neither waits nor is waited on', () => {
+    const nodes = [node('A-1'), node('A-2', { stage: 'cancelled' }), node('A-3', { stage: 'cancelled' })];
+    expect([...waitingIdents(nodes, [dep('A-1', 'A-2'), dep('A-3', 'A-1')])]).toEqual([]);
+  });
 });
 
 describe('TicketCard tags are words', () => {
@@ -558,6 +568,12 @@ describe('under the Critical path board', () => {
       'Open dependencies: 6 in 3 chains',
     ]);
     expect(paceItems(pace, { productReview: true })[0]!.pct).toBe(29);
+  });
+  it('Cancelled is listed beside Complete, never in it — only when there is one', () => {
+    const labels = (p: SprintPace) => paceItems(p, { productReview: false }).map((i) => `${i.label}: ${i.value}`);
+    expect(labels({ ...pace, cancelled: 2 })).toContain('Cancelled: 2 of 55');
+    expect(labels({ ...pace, cancelled: 2 })).toContain('Complete: 17 of 55');
+    expect(labels({ ...pace, cancelled: 0 }).some((l) => l.startsWith('Cancelled'))).toBe(false);
   });
   it('no sprint window: no time; no Product review bucket: not listed', () => {
     const items = paceItems({ ...pace, daysElapsed: null, daysTotal: null, timeUsedPct: null, chains: 0 }, { productReview: false });

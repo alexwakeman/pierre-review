@@ -56,7 +56,7 @@ export default function Page(): JSX.Element {
       <p>
         A strip of figures, each with what it counts: the day of the sprint with a bar for time used, how many
         tickets have their code merged, how many are in Product review (when you have that column), how many are
-        complete, and how many open dependencies there are in how many chains. Ensemble counts all of these from the
+        complete, how many are cancelled (when any are), and how many open dependencies there are in how many chains. Ensemble counts all of these from the
         tracker and GitHub. AI does not write any number on this page.
       </p>
 
@@ -92,7 +92,7 @@ export default function Page(): JSX.Element {
         <li>
           Ensemble&rsquo;s own, from what it has stored: <Ui>Since you last looked</Ui> (tickets that changed column, tickets
           added and pull requests merged since your last visit), <Ui>Out of step</Ui> (the tracker and the code
-          disagree: in code review with no open pull request, Complete with one still open, or Not started with one
+          disagree: in code review with no open pull request, Complete or Cancelled with one still open, or Not started with one
           open) and <Ui>Blocked outside the sprint</Ui> (sprint tickets that wait on an unfinished ticket outside
           the sprint).
         </li>

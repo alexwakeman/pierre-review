@@ -82,16 +82,18 @@ export default function Page(): JSX.Element {
 
       <H2 id="columns-and-statuses">Columns and statuses</H2>
       <p>
-        The columns are <Ui>Not started</Ui>, <Ui>In progress</Ui>, <Ui>Code review</Ui>, <Ui>Product review</Ui>{' '}
-        and <Ui>Complete</Ui>. Ensemble puts each tracker status in a column by itself, using the status&rsquo;s
-        category in the tracker. If your board has its own stages, press <Ui>Statuses</Ui> to add, rename, reorder
+        The columns are <Ui>Not started</Ui>, <Ui>In progress</Ui>, <Ui>Code review</Ui>, <Ui>Product review</Ui>,{' '}
+        <Ui>Complete</Ui> and <Ui>Cancelled</Ui>. Ensemble puts each tracker status in a column by itself, using the
+        status&rsquo;s category in the tracker. A closed status named like &ldquo;Won&rsquo;t do&rdquo;,
+        &ldquo;Duplicate&rdquo; or &ldquo;Not planned&rdquo; goes in Cancelled. Only Complete means done: a cancelled
+        ticket never counts as complete. If your board has its own stages, press <Ui>Statuses</Ui> to add, rename, reorder
         or remove columns, give each column a meaning, and drag each status into the column it belongs to. A switch
         in the same editor moves a ticket from Code review to Product review when all of its pull requests have
         merged. <Ui>Reset to automatic</Ui> goes back to Ensemble&rsquo;s own columns. A status that is new on your
         board since you saved is marked &ldquo;not placed yet&rdquo;.
       </p>
       <p>
-        The <Ui>Complete</Ui> column is closed at first, to save room. Press <Ui>Show</Ui> to open it, or press a
+        The <Ui>Complete</Ui> and <Ui>Cancelled</Ui> columns are closed at first, to save room. Press <Ui>Show</Ui> to open it, or press a
         row&rsquo;s ticket count to open that row only.
       </p>
 

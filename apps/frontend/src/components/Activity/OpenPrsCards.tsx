@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { ClaudeReviewPrState, MergeQueueEntryState, TicketMergedPr, TicketReviewState, TimelinePr, User } from '@pierre-review/shared';
-import { TRACKER_PROVIDER_LABEL, canAssignTickets, landsAfterOf } from '@pierre-review/shared';
+import { SPRINT_STAGE_LABEL, TRACKER_PROVIDER_LABEL, canAssignTickets, isCancelledStatusName, landsAfterOf } from '@pierre-review/shared';
 import { useRepos, useUsers } from '../../hooks/useTimeline.js';
 import { useMaintainersByRepo } from '../../hooks/useMaintainers.js';
 import { aiReadyFor, useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
@@ -861,16 +861,28 @@ export function TicketKeyButton({
 
 // ---- one ticket stack ----
 
-const STATUS_PILL: Record<'new' | 'indeterminate' | 'done', string> = {
+const STATUS_PILL: Record<'new' | 'indeterminate' | 'done' | 'cancelled', string> = {
   new: 'bg-ui-raise text-ui-ink',
   indeterminate: 'bg-ui-raise text-ui-mute', // grey: accent is the selection + the one primary action
   done: 'bg-ui-raise text-ui-success',
+  // Closed, not delivered: never the Complete green.
+  cancelled: 'bg-ui-raise text-ui-mute',
 };
-const STATUS_WORD: Record<'new' | 'indeterminate' | 'done', string> = {
+const STATUS_WORD: Record<'new' | 'indeterminate' | 'done' | 'cancelled', string> = {
   new: 'To do',
   indeterminate: 'In progress',
   done: 'Complete',
+  cancelled: SPRINT_STAGE_LABEL.cancelled,
 };
+/** A done-category status whose name reads as cancelled ("Won't Do") is Cancelled, not Complete (shared
+ *  `isCancelledStatusName`, the sprint layout's automatic rule). */
+const pillOf = (cat: 'new' | 'indeterminate' | 'done', status: string | null | undefined): keyof typeof STATUS_PILL =>
+  cat === 'done' && status != null && isCancelledStatusName(status) ? 'cancelled' : cat;
+/** "Cancelled" beside a cancelled status whose own name does not already say it ("Won't Do"). */
+function CancelledNote({ cat, status }: { cat: 'new' | 'indeterminate' | 'done' | null; status: string | null | undefined }): JSX.Element | null {
+  if (cat == null || pillOf(cat, status) !== 'cancelled' || /^\s*cancell?ed\s*$/i.test(status ?? '')) return null;
+  return <span className="text-meta text-ui-mute" data-testid="ticket-cancelled">{SPRINT_STAGE_LABEL.cancelled}</span>;
+}
 /** Move to another stack on the page — the "Also in" link. */
 function jumpToStack(stackId: string, tries = 2): void {
   requestAnimationFrame(() => {
@@ -1063,15 +1075,19 @@ function TicketStatusChip({
 }): JSX.Element {
   return single && t.ident != null && t.provider === 'jira' && (cat != null || t.status != null) ? (
     // The story view's Jira ticket: the chip is the status picker (a tracker write).
-    <TicketStatusPicker
-      ident={t.ident}
-      status={t.status ?? STATUS_WORD[cat ?? 'new']}
-      chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[cat]}` : NEUTRAL_CHIP}
-    />
+    <>
+      <TicketStatusPicker
+        ident={t.ident}
+        status={t.status ?? STATUS_WORD[cat ?? 'new']}
+        chipClassName={cat != null ? `${CHIP} border-transparent ${STATUS_PILL[pillOf(cat, t.status)]}` : NEUTRAL_CHIP}
+      />
+      <CancelledNote cat={cat} status={t.status} />
+    </>
   ) : (
     <>
-      {cat != null && <span className={`${CHIP} border-transparent ${STATUS_PILL[cat]}`}>{t.status ?? STATUS_WORD[cat]}</span>}
+      {cat != null && <span className={`${CHIP} border-transparent ${STATUS_PILL[pillOf(cat, t.status)]}`}>{t.status ?? STATUS_WORD[cat]}</span>}
       {cat == null && t.status != null && <span className={NEUTRAL_CHIP}>{t.status}</span>}
+      <CancelledNote cat={cat} status={t.status} />
     </>
   );
 }

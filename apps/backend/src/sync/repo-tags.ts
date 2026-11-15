@@ -2,18 +2,19 @@
 // default-branch snapshot step. STRICTLY NON-FATAL: `syncRepoTagsSafe` never throws, and a failed
 // read changes nothing stored.
 //
-//   1. ONE GraphQL read (github/tag-queries.ts, 1 point): the newest REPO_TAGS_READ_CAP tags by the
-//      tagged commit's date, and the default branch head. Tags past the cap are DROPPED and the
-//      count is logged — never silently.
+//   1. ONE GraphQL read (github/tag-queries.ts, 1 point a page): the newest REPO_TAGS_READ_CAP tags by
+//      the tagged commit's date, and the default branch head — for a RELEASABLE repo (`readCap`) paged
+//      on up to REPO_TAGS_READ_CAP_RELEASABLE, the whole history the release check walks. Tags past the
+//      cap are DROPPED and the count is logged — never silently.
 //   2. ONE transaction writes the fold: new tags inserted, a tag whose commit changed is MOVED
 //      (`previous_sha`, `moved_at`; its ancestry forgotten), a tag GitHub no longer lists deleted —
 //      every absent tag when the read was complete, else only absent tags inside the read window
 //      (no older than the oldest tag read). `repos.tags_signature` records what was read, so the
 //      settle sweep can tell a tag push from nothing (sync/settle-sweep.ts).
 //   3. ANCESTRY, ONLY FOR A RELEASABLE REPO (the tags step passes `ancestryCap`: 0 for a repo no
-//      workspace releases, ANCESTRY_CHECKS_RELEASABLE — every tag read — for one that is), newest
-//      first: is the tagged commit on the
-//      default branch? One REST compare `tag...head` (per_page=1) per tag: 'ahead' / 'identical'
+//      workspace releases, ANCESTRY_CHECKS_RELEASABLE — no count cap, every tag — for one that is;
+//      the run's `deadline` and the budget still stop it, the rest go next run), newest first: is the
+//      tagged commit on the default branch? One REST compare `tag...head` (per_page=1) per tag: 'ahead' / 'identical'
 //      means the tag is an ancestor of the head. `true` is final for that sha; `false` is asked
 //      again when the head moves (a branch can be merged later). Skipped while the account's
 //      budget is low or limited — rate limits are pre-empted, never errors.
@@ -32,6 +33,7 @@ import {
   fetchComparePage,
   REPO_TAGS_QUERY,
   REPO_TAGS_READ_CAP,
+  REPO_TAGS_READ_CAP_RELEASABLE,
   type GqlTagRefs,
   type RepoTagsResponse,
   type RestCompareResponse,
@@ -41,9 +43,10 @@ const { repos, repoTags } = schema;
 
 /** Ancestry compares per sync by default (the planner's own default). The rest wait for the next sync. */
 export const ANCESTRY_CHECKS_PER_SYNC = 20;
-/** Ancestry compares per run for a RELEASABLE repo: every tag the read can return, so one run catches up
- *  when the budget allows (the budget check still stops it early). */
-export const ANCESTRY_CHECKS_RELEASABLE = REPO_TAGS_READ_CAP;
+/** Ancestry compares per run for a RELEASABLE repo: NO count cap (every tag the read returns); the run's
+ *  deadline and the budget check stop it early, and the rest go next run. */
+export const ANCESTRY_CHECKS_RELEASABLE = Number.MAX_SAFE_INTEGER;
+export { REPO_TAGS_READ_CAP_RELEASABLE };
 
 export interface TagSyncLogger {
   info: (msg: string, ...args: unknown[]) => void;
@@ -251,9 +254,16 @@ export interface SyncRepoTagsOptions {
   /** Ancestry compares this run (default ANCESTRY_CHECKS_PER_SYNC); 0 = none (a repo no workspace
    *  releases: nothing needs to know whether its tags are on the default branch). */
   ancestryCap?: number;
+  /** Tags read (pages of REPO_TAGS_READ_CAP; default one page). A releasable repo passes
+   *  REPO_TAGS_READ_CAP_RELEASABLE. */
+  readCap?: number;
+  /** Stop asking about ancestry after this time (ms since the epoch); the rest go next run. */
+  deadline?: number;
+  /** Told as the ancestry checks go (the scan's progress, sync/release-scan.ts). */
+  onAncestry?: (p: { done: number; total: number; paused: boolean }) => void;
   /** Test seams; production reads GitHub. */
   deps?: {
-    readTags?: () => Promise<RepoTagsResponse>;
+    readTags?: (after: string | null) => Promise<RepoTagsResponse>;
     compare?: (base: string, head: string) => Promise<RestCompareResponse>;
     now?: () => number;
   };
@@ -295,29 +305,52 @@ export async function syncRepoTags(opts: SyncRepoTagsOptions): Promise<RepoTagSy
     cost: 0,
   };
 
-  const resp =
-    (await opts.deps?.readTags?.()) ??
+  const cap = Math.max(REPO_TAGS_READ_CAP, opts.readCap ?? REPO_TAGS_READ_CAP);
+  const readPage = async (after: string | null): Promise<RepoTagsResponse> =>
+    (await opts.deps?.readTags?.(after)) ??
     (await withGithubRetry(() =>
       graphqlTolerant<RepoTagsResponse>(
         getGraphqlClientFor(token),
         REPO_TAGS_QUERY,
-        { owner, name, first: REPO_TAGS_READ_CAP },
+        { owner, name, first: REPO_TAGS_READ_CAP, after },
         (errors) => log?.warn(`tags ${fullName}: partial GraphQL — keeping stored tags where unread`, errors),
       ),
     ));
-  const rate = resp.rateLimit;
-  if (rate) {
-    result.cost += rate.cost ?? 0;
-    const resetAt = rate.resetAt ? new Date(rate.resetAt) : null;
+  const noteRate = (r: RepoTagsResponse['rateLimit']): void => {
+    if (!r) return;
+    result.cost += r.cost ?? 0;
+    const resetAt = r.resetAt ? new Date(r.resetAt) : null;
     noteBudget(accountId, {
-      remaining: rate.remaining ?? null,
+      remaining: r.remaining ?? null,
       resetAt: resetAt && !Number.isNaN(resetAt.getTime()) ? resetAt : null,
     });
+  };
+  const resp = await readPage(null);
+  noteRate(resp.rateLimit);
+  // A RELEASABLE repo pages on: the walk needs every tag. A page that does not arrive ends the read
+  // (incomplete: absent tags older than the oldest read are kept).
+  const refs = resp.repository?.refs;
+  if (refs != null && Array.isArray(refs.nodes)) {
+    let page = refs;
+    while (
+      page.pageInfo?.hasNextPage === true &&
+      typeof page.pageInfo.endCursor === 'string' &&
+      refs.nodes!.length < cap &&
+      !isLimited(accountId) &&
+      !isBudgetLow(accountId)
+    ) {
+      const more = await readPage(page.pageInfo.endCursor);
+      noteRate(more.rateLimit);
+      const next = more.repository?.refs;
+      if (next == null || !Array.isArray(next.nodes)) break;
+      refs.nodes!.push(...next.nodes);
+      page = next;
+    }
   }
   result.defaultBranchName = resp.repository?.defaultBranchRef?.name ?? null;
   result.headSha = resp.repository?.defaultBranchRef?.target?.oid ?? null;
 
-  const read = foldTagRefs(resp.repository?.refs);
+  const read = foldTagRefs(resp.repository?.refs, cap);
   if (read == null) {
     log?.warn(`tags ${fullName}: the tag list did not arrive — nothing changed`);
     return result;
@@ -445,7 +478,8 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
       )
       .execute();
   };
-  for (const t of inheritedAncestry(rows)) await write(t, true);
+  const inherited = inheritedAncestry(rows);
+  for (const t of inherited) await write(t, true);
   const all = ancestryTargets(rows, headSha, Number.MAX_SAFE_INTEGER);
   const targets = all.slice(0, opts.ancestryCap ?? ANCESTRY_CHECKS_PER_SYNC);
   // Every tag on an asked commit takes the answer (one request per commit).
@@ -455,8 +489,19 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
       .map((r) => ({ name: r.name, sha: r.sha }));
   let checked = 0;
   let asked = 0;
+  // Progress: every dated tag, how many have a known answer (a re-ask counts as known).
+  const inheritedNames = new Set(inherited.map((t) => t.name));
+  const dated = rows.filter((r) => r.committedAt != null);
+  const total = dated.length;
+  let known = dated.filter((r) => r.onDefaultBranch != null || inheritedNames.has(r.name)).length;
+  const tell = (paused: boolean): void => opts.onAncestry?.({ done: known, total, paused });
+  if (targets.length > 0) tell(false);
   for (const t of targets) {
-    if (isLimited(accountId) || isBudgetLow(accountId)) break;
+    if (isLimited(accountId) || isBudgetLow(accountId)) {
+      tell(true);
+      break;
+    }
+    if (opts.deadline != null && Date.now() >= opts.deadline) break;
     asked += 1;
     let onBranch: boolean | undefined;
     if (t.sha === headSha) onBranch = true;
@@ -479,9 +524,28 @@ async function checkAncestry(opts: SyncRepoTagsOptions, headSha: string, now: Da
     }
     if (onBranch === undefined) continue;
     checked += 1;
-    for (const same of sameCommit(t.sha)) await write(same, onBranch);
+    for (const same of sameCommit(t.sha)) {
+      const row = dated.find((r) => r.name === same.name);
+      if (row != null && row.onDefaultBranch == null && !inheritedNames.has(row.name)) known += 1;
+      await write(same, onBranch);
+    }
+    if (checked % 10 === 0) tell(false);
   }
   return { checked, left: all.length - asked };
+}
+
+/**
+ * Ancestry only, against a head read earlier (the tags step's quick re-runs skip the tag read, 1–10
+ * points, within TAG_READ_MIN_INTERVAL_MS). NEVER THROWS.
+ */
+export async function runAncestryChecks(opts: SyncRepoTagsOptions, headSha: string): Promise<{ checked: number; left: number }> {
+  if ((opts.ancestryCap ?? ANCESTRY_CHECKS_PER_SYNC) <= 0) return { checked: 0, left: 0 };
+  try {
+    return await checkAncestry(opts, headSha, new Date(opts.deps?.now?.() ?? Date.now()));
+  } catch (err) {
+    opts.log?.warn(`tags ${opts.owner}/${opts.name}: ancestry checks failed (non-fatal): ${errMsg(err)}`);
+    return { checked: 0, left: 0 };
+  }
 }
 
 /** `syncRepoTags` that NEVER THROWS: a failure is a warn line and changes nothing stored. */

@@ -561,7 +561,8 @@ async function judgeRepo(
   }
   // A TAG PUSH (docs/RELEASES.md): GitHub's tag signature differs from the stored one → the tags
   // step runs in the background (sync/tags-step.ts). Once per distinct observation. A RELEASABLE repo
-  // with work left (ranges, ancestry), just ticked, or given a start tag is CAUGHT UP the same way.
+  // whose release scan has work left and made no progress last run (the budget), or just ticked, is
+  // CAUGHT UP the same way (a run that made progress re-runs itself within seconds).
   if (tagSyncDue(repo.tagsSignature, read.tagSig, tagActed.get(repo.id))) {
     if (scheduleTagSync(accountId, repo.id, log)) {
       result.tagSyncs += 1;

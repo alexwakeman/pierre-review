@@ -5,6 +5,7 @@ import {
   SPRINT_REVIEW_STATUS_RE,
   SPRINT_STAGE_RANK,
   SPRINT_STATUS_SETTINGS_DEFAULT,
+  isCancelledStatusName,
   sprintAutomaticBuckets,
   type JiraStatusCategory,
   type SprintBucket,
@@ -30,18 +31,20 @@ const dbMods = async () => {
 
 // ACTIVITY → THIS SPRINT — THE STATUS LAYOUT (shared sprint-stories.ts § The status layout;
 // docs/TRACKERS.md § This Sprint statuses; docs/API.md § This sprint). Which BUCKET each status sits in
-// (and so which of the five stages — the bucket's meaning), in what order, and the drawn COLUMNS. The
+// (and so which of the six stages — the bucket's meaning), in what order, and the drawn COLUMNS. The
 // PURE half is here (sprint-status-layout.test.ts); the DB half — the stored override
 // (db/sprint-status-settings.ts) and the PR evidence (`loadSprintStatusEvidence`) — feeds it.
 //
 //   AUTOMATIC ORDER: the tracker's board / workflow order, else the category fallback (new →
 //   indeterminate → done, then name); a status on the tickets the tracker did not list is placed by
 //   category among the known ones.
-//   AUTOMATIC STAGE: new → Not started, done → Complete; an in-progress (or unknown) status → Product
+//   AUTOMATIC STAGE: new → Not started; done → Cancelled when the tracker marks the status cancelled
+//   (`cancelled`, a Linear `canceled` state) or its name reads as cancelled (shared
+//   `SPRINT_CANCELLED_STATUS_RE`), else Complete; an in-progress (or unknown) status → Product
 //   review when its name reads as QA / test / sign-off / release (`SPRINT_PRODUCT_REVIEW_STATUS_RE`),
 //   else Code review (`in_review`) when its name reads as review (`SPRINT_REVIEW_STATUS_RE`) or it sits
 //   at / after the PR evidence boundary (`inferReviewFrom`), else In progress.
-//   AUTOMATIC BUCKETS: five, one per stage (shared `sprintAutomaticBuckets`).
+//   AUTOMATIC BUCKETS: six, one per stage (shared `sprintAutomaticBuckets`).
 //   COLUMNS: one per bucket. THE MERGE RULE (`sprintColumnOf`) draws a Code review ticket whose PRs have
 //   all merged in the first Product review bucket.
 //   OVERRIDE: the reader's buckets, in their order. ⚠ PLACEMENT BEATS CATEGORY. A status no bucket
@@ -68,6 +71,9 @@ export interface StatusLayoutInput {
   evidence: ReadonlyMap<string, { withPrs: number; allMerged: number }>;
 }
 
+/** One status of the automatic order. `cancelled`: the tracker marks it cancelled (absent = by name). */
+export type AutoStatus = { name: string; category: JiraStatusCategory | null; cancelled?: boolean };
+
 const asCategory = (c: string | null | undefined): JiraStatusCategory | null =>
   c === 'new' || c === 'indeterminate' || c === 'done' ? c : null;
 
@@ -76,14 +82,14 @@ const asCategory = (c: string | null | undefined): JiraStatusCategory | null =>
 export function automaticStatusOrder(
   autoOrder: SprintStatusAutoOrder | null,
   tickets: readonly StatusTicketInput[],
-): Array<{ name: string; category: JiraStatusCategory | null }> {
-  const out: Array<{ name: string; category: JiraStatusCategory | null }> = [];
+): AutoStatus[] {
+  const out: AutoStatus[] = [];
   const seen = new Set<string>();
   for (const s of autoOrder?.statuses ?? []) {
     const k = norm(s.name);
     if (k === '' || seen.has(k)) continue;
     seen.add(k);
-    out.push({ name: s.name.trim(), category: s.category });
+    out.push(s.cancelled === true ? { name: s.name.trim(), category: s.category, cancelled: true } : { name: s.name.trim(), category: s.category });
   }
   const extra = new Map<string, { name: string; category: JiraStatusCategory | null }>();
   for (const t of tickets) {
@@ -138,16 +144,22 @@ export function isReviewStatusName(name: string): boolean {
   return !isProductReviewStatusName(name) && SPRINT_REVIEW_STATUS_RE.test(name);
 }
 
+/** A done-category status: Cancelled when the tracker says so or its name reads as cancelled, else
+ *  Complete. Pure. */
+export function doneStageOf(s: { name: string; cancelled?: boolean }): SprintStage {
+  return s.cancelled === true || isCancelledStatusName(s.name) ? 'cancelled' : 'done';
+}
+
 /** The automatic stage of every status in the automatic order. Pure. */
 export function automaticStages(
-  auto: ReadonlyArray<{ name: string; category: JiraStatusCategory | null }>,
+  auto: ReadonlyArray<AutoStatus>,
   evidence: ReadonlyMap<string, { withPrs: number; allMerged: number }>,
 ): SprintStage[] {
   const from = inferReviewFrom(auto, evidence);
   const fromAt = from == null ? -1 : auto.findIndex((s) => norm(s.name) === norm(from));
   return auto.map((s, i) => {
     if (s.category === 'new') return 'not_started';
-    if (s.category === 'done') return 'done';
+    if (s.category === 'done') return doneStageOf(s);
     if (isProductReviewStatusName(s.name)) return 'product_review';
     if (isReviewStatusName(s.name) || (fromAt >= 0 && i >= fromAt)) return 'in_review';
     return 'in_progress';
@@ -179,7 +191,7 @@ export function bucketForStage<B extends Pick<SprintBucket, 'id' | 'meaning'>>(b
 
 /** Place every status in a bucket: the buckets' named statuses first (in their order), then each
  *  unnamed automatic status in `bucketForStage`'s bucket. Grouped in bucket order. Pure. `buckets:
- *  null` = the five automatic buckets, every status in its automatic stage's, in automatic order. */
+ *  null` = the six automatic buckets, every status in its automatic stage's, in automatic order. */
 export function applyBuckets(
   auto: ReadonlyArray<{ name: string; category: JiraStatusCategory | null; stage: SprintStage }>,
   buckets: readonly SprintBucket[] | null,
@@ -253,11 +265,11 @@ export function mergeRuleTarget(layout: Pick<SprintStatusLayout, 'buckets' | 'se
   return layout.buckets.find((b) => b.meaning === 'product_review')?.id ?? null;
 }
 
-/** The category fallback for a status the layout does not know: done → Complete, new or none → Not
- *  started, else Product review / Code review by name, else In progress. */
+/** The category fallback for a status the layout does not know: done → Cancelled by name, else
+ *  Complete; new or none → Not started, else Product review / Code review by name, else In progress. */
 function fallbackStage(status: { name: string; category: string | null } | null): SprintStage {
   const cat = asCategory(status?.category ?? null);
-  if (cat === 'done') return 'done';
+  if (cat === 'done') return doneStageOf({ name: status?.name ?? '' });
   if (cat === 'new' || status == null) return 'not_started';
   if (isProductReviewStatusName(status.name)) return 'product_review';
   return isReviewStatusName(status.name) ? 'in_review' : 'in_progress';

@@ -1,4 +1,7 @@
 import {
+  releaseBlockerShort,
+  releaseBlockerText,
+  releasesChecking,
   type ReleaseBlocker,
   type ReleaseCheckPr,
   type ReleaseCheckResult,
@@ -16,8 +19,9 @@ import {
 // test/releasesModel.test.ts. ⚠ The check itself is the SHARED fold (`foldReleaseCheck`, run on the
 // server) — never a second fold here. Each repository is judged on its own: unticking one in the
 // dialog changes nothing about another.
-// ⚠ "released" is never said of a ticket or PR: only a release tag is a release. PRs before the
-// checked history are simply not listed.
+// ⚠ "released" is never said of a ticket or PR: only a release tag is a release. The check is
+// AUTOMATIC: it walks every version tag on main after the last release (or from the oldest), and a row
+// still being read says "Checking…" with ONE line of what the scan is doing.
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
@@ -45,48 +49,47 @@ export function releaseWordsContext(check: Pick<ReleaseCheckResult, 'repos' | 'p
   };
 }
 
-/** A blocker in a few words, for a repo row: "PLAT-301 (In review)". */
+/** A blocker in a few words, after "contains": "PLAT-301 (In review)". The shared words. */
 export function shortBlocker(b: ReleaseBlocker): string {
-  switch (b.kind) {
-    case 'not_done':
-      return b.statusName != null ? `${b.key} (${b.statusName})` : `${b.key} (not done)`;
-    case 'unreadable':
-      return `${b.key} (could not be read)`;
-    case 'too_large':
-      return 'too many commits to check';
-  }
+  return releaseBlockerShort(b);
 }
 
 /** The first blocker that holds a repo back: the first held tag's own. */
-export function repoFirstBlocker(repo: ReleaseRepoCheck): ReleaseBlocker | null {
-  const tag = repo.tags.find((t) => t.name === repo.firstBlocked) ?? repo.tags.find((t) => t.blockers.length > 0);
-  return tag?.blockers[0] ?? null;
+export function repoFirstBlocker(repo: Pick<ReleaseRepoCheck, 'firstBlocker'>): ReleaseBlocker | null {
+  return repo.firstBlocker;
 }
 
 /**
- * A repo row's line after its name — the PAIR (the latest version tag on main, and the candidate):
- *   candidate  "Latest 0.394.0 is the candidate → 0.394.0-rc"
- *              "Latest 0.394.0 · candidate 0.390.0 → 0.390.0-rc"
- *   blocked    "No candidate: 0.391.0 held by BMD-1048 (In PO Review)"
- *   reading    "Latest 0.394.0 · Reading changes…"
+ * A repo row's line after its name:
+ *   candidate  "Release 0.388.0 → 0.388.0-rc"
+ *   blocked    "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)"
+ *              "No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains BMD-127 (In Progress)"
+ *   checking   "Checking…" (the progress line and bar sit under it)
  *   nothing    "Nothing new since 0.390.0-rc" / "No version tags on main yet"
  */
 export function repoRowText(repo: ReleaseRepoCheck): string {
-  const latest = repo.latestVersion?.name ?? null;
   if (repo.status === 'candidate' && repo.candidate != null) {
-    const c = repo.candidate;
-    if (latest == null || latest === c.name) return `Latest ${c.name} is the candidate → ${c.releaseTagName}`;
-    return `Latest ${latest} · candidate ${c.name} → ${c.releaseTagName}`;
+    return `Release ${repo.candidate.name} → ${repo.candidate.releaseTagName}`;
   }
   if (repo.status === 'nothing_new') {
     if (repo.nothingNewReason === 'no_tags') return 'No version tags on main yet';
     return repo.baseline != null ? `Nothing new since ${repo.baseline.name}` : 'Nothing new';
   }
-  if (repo.status === 'reading') return latest != null ? `Latest ${latest} · Reading changes…` : 'Reading changes…';
-  const b = repoFirstBlocker(repo);
-  const at = repo.firstBlocked ?? repo.tags[repo.tags.length - 1]?.name ?? null;
-  if (at == null) return 'No candidate';
-  return b != null ? `No candidate: ${at} held by ${shortBlocker(b)}` : `No candidate: ${at} is held back`;
+  if (repo.status === 'checking') return 'Checking…';
+  const at = repo.firstBlocked ?? repo.firstVersion?.name ?? null;
+  const b = repo.firstBlocker;
+  if (at == null) return 'No tag can be released';
+  const what = b == null ? 'is held back' : b.kind === 'too_large' ? 'has more commits than can be read' : null;
+  if (repo.baseline == null) {
+    return `No tag can be released: the oldest tag, ${at}, ${what ?? `already contains ${releaseBlockerShort(b!)}`}`;
+  }
+  return `No tag can be released since ${repo.baseline.name}: the next tag, ${at}, ${what ?? `contains ${releaseBlockerShort(b!)}`}`;
+}
+
+/** "Latest 0.394.0" beside a candidate that is not the latest version tag; null otherwise. */
+export function repoLatestNote(repo: Pick<ReleaseRepoCheck, 'status' | 'candidate' | 'latestVersion'>): string | null {
+  if (repo.status !== 'candidate' || repo.candidate == null || repo.latestVersion == null) return null;
+  return repo.latestVersion.name === repo.candidate.name ? null : `Latest ${repo.latestVersion.name}`;
 }
 
 /** The counts beside a candidate row: "6 tickets · 1 warning"; null otherwise. */
@@ -97,38 +100,66 @@ export function repoRowCounts(repo: ReleaseRepoCheck): string | null {
   return parts.join(' · ');
 }
 
-/** "Reading changes…" beside a row whose later tags are still being read (null when not, or when the
- *  row line already says it). */
-export function repoReadingNote(repo: ReleaseRepoCheck): string | null {
-  return repo.reading && repo.status !== 'reading' ? 'Reading changes…' : null;
+/** The scan's progress for a row: the bar's share (0–1) and its ONE line. `small` = a candidate (or a
+ *  held row) already stands and later tags are still being read ("Still reading later tags"). Null when
+ *  nothing is left. Pure. */
+export function repoProgress(
+  repo: Pick<ReleaseRepoCheck, 'status' | 'checking' | 'progress'>,
+): { share: number; line: string | null; small: boolean } | null {
+  if (!repo.checking) return null;
+  const p = repo.progress;
+  const share = p == null || p.total <= 0 ? 0 : Math.max(0, Math.min(1, p.done / p.total));
+  if (repo.status === 'checking') return { share, line: p?.line ?? null, small: false };
+  return { share, line: 'Still reading later tags', small: true };
 }
 
-/**
- * The start-tag line in an expanded row (null = no start tag):
- *   "Starts from 0.380.0" · "Starts from 0.390.0-rc, the last release" (a newer release wins)
- *   "Start tag 0.380.0 moved to another commit, so it is not used."
- *   "Start tag 0.380.0 is no longer a version tag on main, so it is not used."
- */
-export function startTagLine(repo: Pick<ReleaseRepoCheck, 'startTag' | 'baseline'>): string | null {
-  const st = repo.startTag;
-  if (st == null) return null;
-  if (st.problem === 'moved') return `Start tag ${st.name} moved to another commit, so it is not used.`;
-  if (st.problem === 'missing') return `Start tag ${st.name} is no longer a version tag on main, so it is not used.`;
-  if (repo.baseline != null && repo.baseline.kind === 'release') return `Starts from ${repo.baseline.name}, the last release`;
-  return `Starts from ${st.name}`;
+/** The tags an expanded row lists: every tag after the candidate (newest first), then the candidate
+ *  itself; with no candidate, every tag after the baseline. */
+export function expandedTags(repo: Pick<ReleaseRepoCheck, 'tags'>): ReleaseTagCheck[] {
+  return repo.tags.filter((t) => t.blocked || t.isCandidate);
 }
 
-/** The ONE line for repos with no release and no start tag: only the window is checked. */
-export function noBaselineLine(repos: readonly Pick<ReleaseRepoCheck, 'name' | 'noBaseline' | 'status'>[], window: number): string | null {
-  const names = repos.filter((r) => r.noBaseline && r.status !== 'nothing_new').map((r) => r.name);
-  if (names.length === 0) return null;
-  return `No release or start tag yet in ${joinWords(names)}: only the newest ${window} tags are checked. Pick a start tag to check fewer.`;
+const ALSO_MAX = 3;
+
+/** What the expanded row says about one tag, in lines: its own blockers (sentences), what it carries
+ *  from earlier held tags ("Also contains BMD-127 (from 0.312.0)."), or that it is still being read. */
+export function tagExplainer(t: Pick<ReleaseTagCheck, 'blockers' | 'alsoHeldBy' | 'state' | 'blocked' | 'isCandidate'>): string[] {
+  const out = t.blockers.map((b) => releaseBlockerText(b));
+  const also = t.alsoHeldBy.map((h) => `${alsoWhat(h.blocker)} (from ${h.fromTag})`);
+  if (also.length > 0) {
+    const shown = also.slice(0, ALSO_MAX).join(', ');
+    out.push(`Also contains ${shown}${also.length > ALSO_MAX ? ` and ${also.length - ALSO_MAX} more` : ''}.`);
+  }
+  if (t.state === 'checking') out.push('Still being read.');
+  else if (t.blocked && out.length === 0) out.push('Waits for the tags before it to be read.');
+  return out;
+}
+
+function alsoWhat(b: ReleaseBlocker): string {
+  switch (b.kind) {
+    case 'not_done':
+    case 'unreadable':
+      return b.key;
+    case 'pr_unreadable':
+      return `#${b.number}`;
+    case 'too_large':
+      return 'more commits than can be read';
+  }
+}
+
+/** How often the tab re-reads GET /api/releases while a repo is being checked. */
+export const RELEASES_POLL_MS = 3_000;
+
+/** The tab's poll interval for this answer: RELEASES_POLL_MS while any repo is checking, else off. Pure. */
+export function releasesPollInterval(data: Pick<ReleasesResponse, 'check'> | null | undefined): number | false {
+  return releasesChecking(data) ? RELEASES_POLL_MS : false;
 }
 
 export type MarkTone = 'ok' | 'bad' | 'warn';
 
-/** A ticket's mark in a tag: Done, or not (its status), or unreadable. */
+/** A ticket's mark in a tag: Done, or not (its status), not read yet, or unreadable. */
 export function ticketMark(t: Pick<ReleaseTicketCheck, 'done' | 'readState' | 'statusName'>): { tone: MarkTone; text: string } {
+  if (t.readState === 'not_read') return { tone: 'warn', text: 'not read yet' };
   if (t.readState !== 'ok') return { tone: 'warn', text: 'could not be read' };
   if (t.done) return { tone: 'ok', text: t.statusName ?? 'Done' };
   return { tone: 'bad', text: t.statusName ?? 'not done' };
@@ -161,8 +192,6 @@ export function releaseWarningText(w: ReleaseWarning, check: Pick<ReleaseCheckRe
       const n = pr != null ? `#${pr.number}` : 'a pull request';
       return `${ctx.repoName(w.repoId)} ${n} has no ticket${pr != null ? `: ${pr.title}` : ''}.`;
     }
-    case 'unsynced_prs':
-      return `${ctx.repoName(w.repoId)}: ${plural(w.count, 'pull request')} in these tags ${w.count === 1 ? 'is' : 'are'} not synced yet.`;
   }
 }
 
@@ -187,11 +216,6 @@ export function defaultTickedRepoIds(check: Pick<ReleaseCheckResult, 'repos'>): 
  *  selection stops it. Empty = Confirm may be pressed. */
 export function confirmStops(ticked: readonly number[]): string[] {
   return ticked.length === 0 ? ['Tick at least one repository.'] : [];
-}
-
-function joinWords(xs: readonly string[]): string {
-  if (xs.length <= 1) return xs[0] ?? '';
-  return `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`;
 }
 
 /**

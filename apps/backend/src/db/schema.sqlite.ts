@@ -5784,16 +5784,15 @@ export const releaseTicketComments = sqliteTable(
   }),
 );
 
-// RELEASABLE REPOSITORIES (migration 0199; docs/RELEASES.md § Releasable repos and start tag). One row
+// RELEASABLE REPOSITORIES (migration 0199; docs/RELEASES.md § Releasable repos; § Automatic candidate). One row
 // per (account, workspace, repo) the reader ticked "Released from this workspace" in Settings → Releases:
 // ONLY these are folded by the release check, tagged, ranged by the tag sync, and offered as hotfix
 // bases. No row = not released from this workspace (the default), ignored entirely. Unticking deletes
-// the row (its start tag with it). Read through db/release-repos.ts only, intersected with the
-// workspace's CURRENT membership (home + External): a row of a repo that left is inert.
-//   start_tag_name / start_tag_sha   the reader's "Start from this tag": a version tag on the default
-//                   branch; everything up to and including it is treated as accepted. The sha is the
-//                   commit it pointed at when set — a tag moved since (or gone) is not used. NULL = none.
-//   start_set_by_login / start_set_at  who set it and when.
+// the row. Read through db/release-repos.ts only, intersected with the workspace's CURRENT membership
+// (home + External): a row of a repo that left is inert.
+//   start_tag_name / start_tag_sha / start_set_by_login / start_set_at   DORMANT since 2026-11-15 (the
+//                   reader's "Start from this tag" was removed: the check finds its starting point
+//                   itself). Never read or written; kept, never dropped.
 export const workspaceReleaseRepos = sqliteTable(
   'workspace_release_repos',
   {

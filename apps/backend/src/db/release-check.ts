@@ -2,25 +2,34 @@
 // shared `foldReleaseCheck` and answers GET /api/releases. DB ONLY: never a GitHub or tracker call.
 //
 //   • Repos: the workspace's RELEASABLE repos only (db/release-repos.ts: ticked "Released from this
-//     workspace", ∩ its current membership — unticked repos are ignored entirely), their start tags,
-//     their stored tags and range increments (db/repo-tags.ts), `writable` from the synced
-//     `viewerPermission` (the ONE WRITE_PERMISSIONS set).
+//     workspace", ∩ its current membership — unticked repos are ignored entirely), their stored tags
+//     and range increments (db/repo-tags.ts), `writable` from the synced `viewerPermission` (the ONE
+//     WRITE_PERMISSIONS set), and the range PRs GitHub did not give (releases/scan-state.ts).
 //   • PRs: every PR in a stored range (each repository is judged on its own: a ticket's PRs elsewhere
 //     do not count).
 //   • Tickets: `tracker_tickets` rows ON THE WORKSPACE'S TRACKER SITE only (a row of another site is a
 //     ticket of a tracker the workspace no longer uses: not a link). The best row per ticket is the
 //     newest successful read; a fresher `sprint_tickets` row's status wins. DONE = the This Sprint
-//     stage resolver (`sprintStageOf` over `sprintLayoutFor`) says Complete — never a second resolver.
-//     A range PR with a ticket key THE detection rule finds but no stored row yet is `not_read` (blocks).
-//   • A 'history' range (the oldest tag) is read fresh from the stored PRs, never from its frozen row.
+//     stage resolver (`sprintStageOf` over `sprintLayoutFor`) says Complete (`stage === 'done'`; a
+//     Cancelled ticket holds like any not-Done one) — never a second resolver.
+//     A range PR with a ticket key THE detection rule finds but no stored row yet is `not_read`: the
+//     scan has queued it for the tracker worker, so the fold says "checking" — unless the workspace's
+//     tracker cannot read at all (`ticketsReadable` false), when it holds.
+//   • A 'history' range (the oldest tag) is its stored numbers (read from GitHub) plus the stored PRs
+//     merged by then, read fresh.
+//   • PROGRESS: the fold derives it; the scan's live step (releases/scan-state.ts) is laid over it while
+//     fresh. Still DB + memory only.
 //   • Bot-ness: `globalAutomationUserIds`, never the hidden-bots list.
 import { and, desc, eq, inArray, isNotNull, lte, or } from 'drizzle-orm';
 import {
+  TRACKER_PROVIDER_LABEL,
   foldReleaseCheck,
+  releaseScanLine,
   releaseSettingsConfigured,
   tagKind,
   trackerTicketIdent,
   type ReleaseCheckInput,
+  type ReleaseCheckResult,
   type ReleaseCheckPrInput,
   type ReleaseCheckTicketInput,
   type ReleaseSettings,
@@ -35,6 +44,7 @@ import { WRITE_PERMISSIONS, resolveWorkspaceScope } from './queries.js';
 import { getReleaseRepos } from './release-repos.js';
 import { getReleaseSettings } from './release-settings.js';
 import { getRepoTags, getTagRanges } from './repo-tags.js';
+import { liveScanStep, unreadablePrNumbers } from '../releases/scan-state.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
 
 const { repos, pullRequests, trackerTickets, sprintTickets, releases } = schema;
@@ -47,9 +57,10 @@ function chunks<T>(xs: readonly T[], n = CHUNK): T[][] {
   return out;
 }
 
-/** Done = the workspace's Complete stage, through THE This Sprint stage resolver. With no stored
- *  layout (the sprint was never read) the resolver's category fallback decides (`done` → Complete,
- *  so "Won't do" counts). Pure. */
+/** Done = the workspace's Complete stage ONLY, through THE This Sprint stage resolver. With no stored
+ *  layout (the sprint was never read) the resolver's category fallback decides (`done` → Complete, but
+ *  a name that reads as cancelled — "Won't do" — → Cancelled, which is NOT Done and holds the tag).
+ *  Pure. */
 export function ticketIsDone(
   layout: Pick<SprintStatusLayout, 'order' | 'buckets'> | null,
   statusName: string | null,
@@ -81,20 +92,41 @@ export function bestTicketRow<R extends Pick<TicketRow, 'state' | 'fetchedAt' | 
   return [...rows].sort((a, b) => ms(b.checkedAt) - ms(a.checkedAt))[0] ?? null;
 }
 
+/** The workspace's tracker as the check needs it: the detection access, whether it can READ tickets
+ *  (a reading adapter and a usable credential), and its name. DB only. */
+async function workspaceTrackerOf(accountId: number, workspaceId: number) {
+  // LAZY: tracker/runtime.ts opens the database at import.
+  const [{ trackerContext }, { readWorkspaceTrackerRow, trackerAccessOf }, { maybeAdapterFor }, { prepareTrackerCall }, { githubAccessFor }] =
+    await Promise.all([
+      import('../tracker/runtime.js'),
+      import('../tracker/settings.js'),
+      import('../tracker/registry.js'),
+      import('../tracker/calls.js'),
+      import('../tracker/context.js'),
+    ]);
+  const ctx = trackerContext();
+  const access = trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, accountId, workspaceId));
+  const provider = access.issue.provider;
+  const readable =
+    maybeAdapterFor(provider)?.reader != null && prepareTrackerCall(access, { github: githubAccessFor(ctx, accountId) }).ok;
+  const name = provider != null && provider in TRACKER_PROVIDER_LABEL ? TRACKER_PROVIDER_LABEL[provider as keyof typeof TRACKER_PROVIDER_LABEL] : null;
+  return { access, readable, name };
+}
+
 /**
  * THE ONE detection rule (tracker/enricher.ts `detectKeysWithAccess`: title + head branch + stored
  * links) over these PRs, against the WORKSPACE's tracker: prId → keys. DB only (no tracker call). A
- * key detected on a range PR with no stored row is a ticket the worker has not read yet — it BLOCKS
- * (`not_read`), never passes as an untracked PR.
+ * key detected on a range PR with no stored row is a ticket the worker has not read yet (`not_read`) —
+ * never an untracked PR.
  */
-async function detectedKeysByPr(accountId: number, workspaceId: number, prIds: readonly number[]): Promise<Map<number, string[]>> {
+async function detectedKeysByPr(
+  accountId: number,
+  access: Awaited<ReturnType<typeof workspaceTrackerOf>>['access'],
+  prIds: readonly number[],
+): Promise<Map<number, string[]>> {
   const out = new Map<number, string[]>();
   if (prIds.length === 0) return out;
-  // LAZY: tracker/runtime.ts opens the database at import.
-  const [{ trackerContext }, { readWorkspaceTrackerRow, trackerAccessOf }, { detectKeysWithAccess, withParsedLinks, prLinkColumns }] =
-    await Promise.all([import('../tracker/runtime.js'), import('../tracker/settings.js'), import('../tracker/enricher.js')]);
-  const ctx = trackerContext();
-  const access = trackerAccessOf(ctx.host, await readWorkspaceTrackerRow(ctx, accountId, workspaceId));
+  const { detectKeysWithAccess, withParsedLinks, prLinkColumns } = await import('../tracker/enricher.js');
   for (const part of chunks(prIds)) {
     const rows = await db
       .select({ id: pullRequests.id, title: pullRequests.title, headRefName: pullRequests.headRefName, ...prLinkColumns(pullRequests) })
@@ -110,9 +142,9 @@ async function detectedKeysByPr(accountId: number, workspaceId: number, prIds: r
 }
 
 /**
- * A 'history' range (the oldest tag: no base) is read FRESH from the stored PRs, never from its frozen
- * row: PRs the deep backfill brings in after the row was computed must enter it. Merged into the
- * default branch no later than the tag's commit (or by the tag's own commit). prIds per tag name.
+ * A 'history' range (the oldest tag: no base) also takes the stored PRs FRESH, on top of its row's
+ * numbers (read from GitHub): a PR stored after the row was computed enters it. Merged into the
+ * default branch no later than the tag's commit (or by the tag's own commit).
  */
 async function historyPrIds(
   accountId: number,
@@ -174,13 +206,15 @@ export async function loadReleaseCheckInput(
       const row = repoRowById.get(r.repoId);
       const def = row?.defaultBranch ?? row?.defaultBranchName ?? null;
       if (tag == null || tag.sha !== r.sha || tag.committedAt == null || def == null) return r;
-      return { ...r, prIds: await historyPrIds(accountId, r.repoId, def, { sha: tag.sha, committedAt: tag.committedAt }), unresolvedPrNumbers: [] };
+      const fresh = await historyPrIds(accountId, r.repoId, def, { sha: tag.sha, committedAt: tag.committedAt });
+      return { ...r, prIds: [...new Set([...r.prIds, ...fresh])].sort((a, b) => a - b) };
     }),
   );
 
   // The workspace's tracker site (LAZY: db/stories.ts reaches the tracker runtime).
   const { workspaceSite } = await import('./stories.js');
   const site = await workspaceSite(accountId, workspaceId);
+  const tracker = site != null ? await workspaceTrackerOf(accountId, workspaceId) : null;
 
   const rangePrIds = [...new Set(ranges.flatMap((r) => r.prIds))];
   const ticketRows: TicketRow[] = [];
@@ -216,7 +250,7 @@ export async function loadReleaseCheckInput(
     // Keys the detection rule finds on a range PR but no stored row answers for that PR yet.
     const rowKeys = new Map<number, Set<string>>();
     for (const r of ticketRows) rowKeys.set(r.prId, (rowKeys.get(r.prId) ?? new Set()).add(r.issueKey));
-    for (const [prId, keys] of await detectedKeysByPr(accountId, workspaceId, rangePrIds)) {
+    for (const [prId, keys] of await detectedKeysByPr(accountId, tracker!.access, rangePrIds)) {
       const missing = keys.filter((k) => !(rowKeys.get(prId)?.has(k) ?? false));
       if (missing.length > 0) detectedOnly.set(prId, missing);
     }
@@ -385,6 +419,8 @@ export async function loadReleaseCheckInput(
 
   return {
     settings,
+    ticketsReadable: tracker?.readable ?? true,
+    trackerName: tracker?.name ?? null,
     repos: [...repoRows]
       .sort((a, b) => a.name.localeCompare(b.name) || a.id - b.id)
       .map((r) => ({
@@ -392,7 +428,8 @@ export async function loadReleaseCheckInput(
         fullName: `${r.owner}/${r.name}`,
         name: r.name,
         writable: WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
-        startTag: ticked.get(r.id)?.startTag ?? null,
+        defaultBranch: r.defaultBranch ?? r.defaultBranchName ?? null,
+        unreadablePrNumbers: unreadablePrNumbers(r.id),
         tags: (tagsByRepo.get(r.id) ?? []).map((t) => ({
           name: t.name,
           sha: t.sha,
@@ -416,6 +453,50 @@ export async function loadReleaseCheckInput(
     prs,
     tickets,
   };
+}
+
+/**
+ * The scan's LIVE step laid over the fold's derived progress, per repo, while it is fresh and work is
+ * left (the tickets step is always the derived one: the stored rows are the truth). Mutates `result`.
+ */
+export function withLiveProgress(result: ReleaseCheckResult, input: Pick<ReleaseCheckInput, 'repos' | 'trackerName'>, now: number = Date.now()): ReleaseCheckResult {
+  for (const r of result.repos) {
+    if (!r.checking) continue;
+    const live = liveScanStep(r.repoId, now);
+    if (live == null || live.step === 'tickets') continue;
+    const repo = input.repos.find((x) => x.repoId === r.repoId);
+    const p = {
+      step: live.step,
+      done: live.done,
+      total: live.total,
+      tagName: live.tagName ?? null,
+      tagIndex: live.tagIndex ?? null,
+      branch: repo?.defaultBranch ?? null,
+      tracker: input.trackerName ?? null,
+      paused: live.paused,
+    };
+    r.progress = { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
+  }
+  return result;
+}
+
+/**
+ * The release scan's ticket step (sync/release-scan.ts): one releasable repo's range PRs whose tickets
+ * are not read yet in this workspace (`not_read`: a key detected, no stored row), and how many tickets
+ * wait. DB only. Nothing when the workspace's tracker cannot read.
+ */
+export async function releaseTicketsOwed(
+  accountId: number,
+  workspaceId: number,
+  repoId: number,
+  settings: ReleaseSettings,
+): Promise<{ prIds: number[]; waiting: number }> {
+  if (!releaseSettingsConfigured(settings)) return { prIds: [], waiting: 0 };
+  const input = await loadReleaseCheckInput(accountId, workspaceId, [repoId], settings);
+  if (input.ticketsReadable === false) return { prIds: [], waiting: 0 };
+  const waiting = new Set(input.tickets.filter((t) => t.readState === 'not_read').map((t) => t.ident));
+  const prIds = input.prs.filter((p) => p.ticketIdents.some((i) => waiting.has(i))).map((p) => p.id);
+  return { prIds, waiting: waiting.size };
 }
 
 /** GET /api/releases. `rawWorkspace` absent / unknown / unparseable ⇒ the Default workspace. With no
@@ -456,6 +537,6 @@ export async function getReleases(accountId: number, rawWorkspace: string | numb
   return {
     ...withRepos,
     latestReleaseTagAt: latestTagMs == null ? null : new Date(latestTagMs).toISOString(),
-    check: foldReleaseCheck(input),
+    check: withLiveProgress(foldReleaseCheck(input), input),
   };
 }

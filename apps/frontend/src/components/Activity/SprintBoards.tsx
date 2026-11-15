@@ -292,6 +292,7 @@ const SEGMENT_FILL: Record<SprintStage | 'unknown', string> = {
   in_review: 'bg-ui-warn',
   product_review: 'bg-ui-success',
   done: 'bg-ui-success',
+  cancelled: 'bg-ui-faint',
   unknown: 'bg-ui-line',
 };
 
@@ -476,8 +477,8 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
       </p>
       <p>
         <strong>Pace</strong>: the day of the sprint (today counts), then how many of its tickets have their code merged (at least one
-        pull request merged and none open), sit in a Product review bucket, or are in a bucket that means Complete. Open
-        dependencies counts the links from an unfinished ticket to another unfinished one.
+        pull request merged and none open), sit in a Product review bucket, or are in a bucket that means Complete. Cancelled
+        tickets are never Complete. Open dependencies counts the links from an unfinished ticket to another unfinished one.
       </p>
       <p>Ensemble writes some call-outs itself, from what it has stored:</p>
       <ul className="list-disc space-y-1 pl-5">
@@ -486,8 +487,8 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
           visit. A visit ends after {GAP_MINUTES} minutes away from this page.
         </li>
         <li>
-          <strong>Out of step</strong>: the tracker and the code disagree &mdash; in code review with no open pull request, Complete with one
-          still open, or Not started with one open.
+          <strong>Out of step</strong>: the tracker and the code disagree &mdash; in code review with no open pull request, Complete or Cancelled
+          with one still open, or Not started with one open.
         </li>
         <li>
           <strong>Blocked outside the sprint</strong>: sprint tickets waiting on an unfinished ticket outside the sprint.

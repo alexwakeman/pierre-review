@@ -589,15 +589,17 @@ export interface SprintPace {
   /** round(100 × daysElapsed ÷ daysTotal); null with no real sprint window. */
   timeUsedPct: number | null;
   tickets: number;
-  /** Not in a bucket meaning Complete (status unknown counts as live). */
+  /** In a bucket meaning neither Complete nor Cancelled (status unknown counts as live). */
   live: number;
-  /** In a bucket meaning Complete. */
+  /** In a bucket meaning Complete — delivered. Never includes Cancelled. */
   done: number;
+  /** In a bucket meaning Cancelled — closed, NOT delivered. Absent from an older server (read as 0). */
+  cancelled?: number;
   /** Drawn in a Product review column: a status placed there, or moved there by the merge rule. */
   productReview: number;
   /** At least one merged pull request and none open, whatever the column. */
   codeMerged: number;
-  /** `depends_on` edges from a live sprint ticket onto a ticket (sprint or outside) not Complete. */
+  /** `depends_on` edges from a live sprint ticket onto a ticket (sprint or outside) still live. */
   openDependencies: number;
   /** Dependency chains code found (two or more tickets, each link waiting on unfinished work). */
   chains: number;

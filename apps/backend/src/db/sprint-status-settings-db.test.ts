@@ -142,7 +142,7 @@ afterAll(async () => {
   for (const s of ['', '-shm', '-wal']) rmSync(DB_PATH + s, { force: true });
 });
 
-type Stage = 'not_started' | 'in_progress' | 'in_review' | 'done';
+type Stage = 'not_started' | 'in_progress' | 'in_review' | 'done' | 'cancelled';
 const B = (id: string, name: string, meaning: Stage, statuses: unknown[] = []) => ({ id, name, meaning, statuses });
 const sec = (s: { buckets: Array<{ id: string; statuses: string[] }> | null } | null) =>
   s?.buckets == null ? null : Object.fromEntries(s.buckets.map((b) => [b.id, b.statuses]));
@@ -183,6 +183,10 @@ describe('parseSprintStatusSettings', () => {
     expect(why({ buckets: [B('a', 'Done', 'done'), B('b', 'To do', 'not_started')] })).toBe(
       '“To do” means Not started, so it cannot come after a bucket that means Complete.',
     );
+    // Cancelled may only follow Complete buckets or come last.
+    expect(why({ buckets: [B('a', 'Won’t do', 'cancelled'), B('b', 'Done', 'done')] })).toBe('Cancelled buckets come last, so “Done” cannot come after “Won’t do”.');
+    expect(why({ buckets: [B('a', 'Done', 'done'), B('b', 'Won’t do', 'cancelled'), B('c', 'Dupes', 'cancelled')] })).toBeNull();
+    expect(why({ buckets: [B('a', 'Doing', 'in_progress'), B('b', 'Dropped', 'cancelled')] })).toBeNull();
     expect(why({ buckets: [B('a', 'A', 'done', ['To Do']), B('b', 'B', 'done', ['to do'])] })).toBe('“to do” is in two buckets.');
     expect(why({ buckets: [B('a', 'A', 'done', [''])] })).toBe('A status name is not valid.');
     expect(why({ buckets: [B('a', 'A', 'done', [3])] })).toBe('A status name is not valid.');
@@ -195,9 +199,9 @@ describe('parseSprintStatusSettings', () => {
   it('reads a stored value tolerantly, the retired shapes included', () => {
     expect(tolerant(null)).toEqual({ buckets: null, mergedColumn: true });
     expect(tolerant('junk')).toEqual({ buckets: null, mergedColumn: true });
-    expect(sec(tolerant({ sections: { done: ['A', 'a', 3, ''] } }))).toEqual({ not_started: [], in_progress: [], in_review: [], product_review: [], done: ['A'] });
+    expect(sec(tolerant({ sections: { done: ['A', 'a', 3, ''] } }))).toEqual({ not_started: [], in_progress: [], in_review: [], product_review: [], done: ['A'], cancelled: [] });
     // No categories handed in: every retired status reads as in progress until deliveredFrom.
-    expect(sec(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' }))).toEqual({ not_started: [], in_progress: ['A'], in_review: ['B'], product_review: [], done: [] });
+    expect(sec(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' }))).toEqual({ not_started: [], in_progress: ['A'], in_review: ['B'], product_review: [], done: [], cancelled: [] });
     // Bad buckets dropped, good ones kept.
     expect(tolerant({ version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'A', 'in_progress', ['X', 'x']), { id: 'B!', name: 'B', meaning: 'done', statuses: [] }], mergedColumn: false })).toEqual({
       buckets: [B('a', 'A', 'in_progress', ['X'])],
@@ -241,7 +245,7 @@ describe('evidence and the layout', () => {
     ]);
     expect([l?.codingBegins, l?.codingEnds]).toEqual(['In Development', 'Ready for QA']);
     await settings.setSprintStatusSettings(1, wsA, {
-      buckets: settings.sectionsToBuckets({ not_started: [], in_progress: [], in_review: ['In Development'], product_review: [], done: [] }),
+      buckets: settings.sectionsToBuckets({ not_started: [], in_progress: [], in_review: ['In Development'], product_review: [], done: [], cancelled: [] }),
       mergedColumn: true,
     });
     const set = await layout.sprintLayoutFor(1, wsA);
@@ -256,13 +260,14 @@ describe('evidence and the layout', () => {
       .where(eq(schema.workspaces.id, wsA))
       .execute();
     const legacy = await layout.sprintLayoutFor(1, wsA);
-    // …and read with Product review added (stored before it), taking the QA name.
+    // …and read with Product review added (stored before it), taking the QA name, then Cancelled.
     expect(sec(legacy?.settings ?? null)).toEqual({
       not_started: ['To Do'],
       in_progress: [],
       in_review: ['In Development'],
       product_review: ['Ready for QA'],
       done: ['Done'],
+      cancelled: [],
     });
     await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true });
     // Never read: no site, no layout.

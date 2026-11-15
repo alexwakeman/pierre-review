@@ -523,13 +523,16 @@ export interface ReleaseMockTag {
   candidate?: boolean;
   /** The first tag held back. */
   held?: boolean;
+  /** The tag's explainer lines (Sprint/releasesModel.ts `tagExplainer`). */
+  notes?: string[];
   tickets: Array<{ key: string; title: string; tone: ReleaseMark; status: string }>;
   /** PRs with no ticket. */
   untracked?: string[];
 }
 
 /** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`.
- *  One row per repository released from this workspace, showing the latest version tag and the candidate. */
+ *  One row per repository released from this workspace: the candidate the check found by itself, a row
+ *  no tag of which can be released, one still being checked (its progress line), one with nothing new. */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
   action: 'Create release…',
@@ -539,7 +542,7 @@ export const SPRINT_RELEASES = {
     {
       name: REPOS.payments,
       candidate: true,
-      text: 'Latest v3.2.0 is the candidate → v3.2.0-rc',
+      text: 'Release v3.2.0 → v3.2.0-rc',
       counts: '2 tickets · 1 warning',
       tags: [
         {
@@ -548,30 +551,59 @@ export const SPRINT_RELEASES = {
           tickets: [{ key: 'PAY-134', title: 'Payout dates in the export', tone: 'ok', status: 'Done' }],
           untracked: ['#605 Tidy the refund logs'],
         },
-        { name: 'v3.1.0', tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done' }] },
       ],
     },
     {
       name: REPOS.web,
       candidate: true,
-      text: 'Latest v1.9.0 · candidate v1.8.2 → v1.8.2-rc',
+      text: 'Release v1.8.2 → v1.8.2-rc',
+      latest: 'Latest v1.9.1',
       counts: '1 ticket',
       tags: [
-        { name: 'v1.9.0', held: true, tickets: [{ key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review' }] },
+        {
+          name: 'v1.9.1',
+          notes: ['Also contains PAY-150 (from v1.9.0).'],
+          tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done' }],
+        },
+        {
+          name: 'v1.9.0',
+          held: true,
+          notes: ['PAY-150 is not done (In review).'],
+          tickets: [{ key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review' }],
+        },
         { name: 'v1.8.2', candidate: true, tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done' }] },
       ],
     },
     {
       name: REPOS.ledger,
       candidate: false,
-      text: 'No candidate: v0.9.0 held by PAY-146 (In progress)',
-      start: 'Starts from v0.8.0',
+      text: 'No tag can be released: the oldest tag, v0.9.0, already contains PAY-146 (In progress)',
       tags: [
-        { name: 'v0.9.0', held: true, tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'In progress' }] },
+        {
+          name: 'v0.9.0',
+          held: true,
+          notes: ['PAY-146 is not done (In progress).'],
+          tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'In progress' }],
+        },
       ],
     },
-    { name: REPOS.api, candidate: false, text: 'Nothing new since v2.3.0-rc', tags: [] },
-  ] as Array<{ name: string; candidate: boolean; text: string; counts?: string; start?: string; tags: ReleaseMockTag[] }>,
+    {
+      name: REPOS.api,
+      candidate: false,
+      text: 'Checking…',
+      progress: { share: 0.44, line: "Matching v2.3.0's commits to pull requests (tag 61 of 140)" },
+      tags: [],
+    },
+    { name: 'acme/docs-site', candidate: false, text: 'Nothing new since v4.1.0-rc', tags: [] },
+  ] as Array<{
+    name: string;
+    candidate: boolean;
+    text: string;
+    latest?: string;
+    counts?: string;
+    progress?: { share: number; line: string };
+    tags: ReleaseMockTag[];
+  }>,
   warnings: ['acme/payments #605 has no ticket: Tidy the refund logs.'],
 };
 

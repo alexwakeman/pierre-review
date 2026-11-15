@@ -8,6 +8,8 @@ import {
   SPRINT_PATHS_VERSION,
   SPRINT_PATH_RISKS,
   SPRINT_STAGE_LABEL,
+  sprintStageIsComplete,
+  sprintStageIsOpen,
   sprintDayOf,
   sprintMembers,
   type SprintCallout,
@@ -76,7 +78,10 @@ const WHY_MAX = 160;
 /** Chains listed to the model as hints (the pace counts all of them). */
 export const SPRINT_PATHS_CHAINS_LISTED = 8;
 
-const isDone = (n: Pick<SprintGraphNode, 'stage'>): boolean => n.stage === 'done';
+// ⚠ Complete ONLY is delivered (`isDone`); Cancelled is closed but never complete. `isClosed` (either)
+// is what stops a ticket being live work or a link someone waits on.
+const isDone = (n: Pick<SprintGraphNode, 'stage'>): boolean => sprintStageIsComplete(n.stage);
+const isClosed = (n: Pick<SprintGraphNode, 'stage'>): boolean => !sprintStageIsOpen(n.stage);
 const byKey = (a: SprintGraphNode, b: SprintGraphNode): number =>
   a.key.localeCompare(b.key, undefined, { numeric: true }) || a.ident.localeCompare(b.ident);
 const oneLine = (s: string | null | undefined, max: number): string => {
@@ -97,7 +102,7 @@ export function sprintChains(nodes: readonly SprintGraphNode[], edges: readonly 
   const out = new Map<string, string[]>();
   for (const e of edges) {
     if (e.kind !== 'depends_on' || !byIdent.has(e.from) || !byIdent.has(e.to) || e.from === e.to) continue;
-    if (isDone(byIdent.get(e.to)!)) continue;
+    if (isClosed(byIdent.get(e.to)!)) continue;
     out.set(e.from, [...(out.get(e.from) ?? []), e.to]);
   }
   for (const [k, v] of out) out.set(k, [...new Set(v)].sort((a, b) => byKey(byIdent.get(a)!, byIdent.get(b)!)));
@@ -122,7 +127,7 @@ export function sprintChains(nodes: readonly SprintGraphNode[], edges: readonly 
   const paths = [...out.keys()]
     .map((id) => longest(id))
     .filter((p) => p.length >= 2)
-    .filter((p) => p.some((id) => { const n = byIdent.get(id)!; return !n.ghost && !isDone(n); }))
+    .filter((p) => p.some((id) => { const n = byIdent.get(id)!; return !n.ghost && !isClosed(n); }))
     .sort((a, b) => b.length - a.length || byKey(byIdent.get(a[0]!)!, byIdent.get(b[0]!)!));
   const picked: string[][] = [];
   const used = new Set<string>();
@@ -146,12 +151,13 @@ export function sprintPaceOf(
   const sprint = nodes.filter((n) => !n.ghost);
   const byIdent = new Map(nodes.map((n) => [n.ident, n]));
   const done = sprint.filter(isDone).length;
+  const cancelled = sprint.filter((n) => n.stage === 'cancelled').length;
   let openDependencies = 0;
   for (const e of edges) {
     if (e.kind !== 'depends_on') continue;
     const from = byIdent.get(e.from);
     const to = byIdent.get(e.to);
-    if (from == null || to == null || from.ghost || isDone(from) || isDone(to)) continue;
+    if (from == null || to == null || from.ghost || isClosed(from) || isClosed(to)) continue;
     openDependencies += 1;
   }
   return {
@@ -159,8 +165,9 @@ export function sprintPaceOf(
     daysTotal: timing?.days ?? null,
     timeUsedPct: timing != null ? pct(timing.day, timing.days) : null,
     tickets: sprint.length,
-    live: sprint.length - done,
+    live: sprint.length - done - cancelled,
     done,
+    cancelled,
     // A Product review column: a status placed there (`stage`), or moved there by the merge rule — the
     // only way a node's column differs from its bucket.
     productReview: sprint.filter((n) => n.stage === 'product_review' || (n.column != null && n.column !== n.bucketId)).length,
@@ -307,7 +314,8 @@ export function sprintPathsInput(g: {
   const facts = [
     `Sprint: ${g.sprintName != null && g.sprintName.trim() !== '' ? oneLine(g.sprintName, TITLE_MAX) : 'This sprint'}`,
     `Columns, left to right: ${g.columns.map((c) => columnLabel(c)).join(' · ') || 'none'}`,
-    `Tickets in the sprint: ${pace.tickets}; complete: ${pace.done}; in product review: ${pace.productReview}; not complete: ${pace.live}`,
+    // "cancelled" only when there is one, so a sprint with none keeps its payload (and its hash).
+    `Tickets in the sprint: ${pace.tickets}; complete: ${pace.done}; in product review: ${pace.productReview}; not complete: ${pace.live}${(pace.cancelled ?? 0) > 0 ? `; cancelled (closed, not complete): ${pace.cancelled}` : ''}`,
     `Open dependencies: ${pace.openDependencies}; dependency chains: ${chains.length} found, ${chainLines.length} listed below`,
   ];
   const ticketLines = sprint.map((n) =>
@@ -325,7 +333,7 @@ export function sprintPathsInput(g: {
   );
   const outsideLines = outside.map(
     (n) =>
-      `- ${n.key} | title: ${n.title !== '' ? oneLine(n.title, TITLE_MAX) : '(not read)'} | status: ${n.status != null ? oneLine(n.status.name, 40) : 'unknown'}${isDone(n) ? ' (complete)' : ' (not complete)'} | outside the sprint`,
+      `- ${n.key} | title: ${n.title !== '' ? oneLine(n.title, TITLE_MAX) : '(not read)'} | status: ${n.status != null ? oneLine(n.status.name, 40) : 'unknown'}${isDone(n) ? ' (complete)' : n.stage === 'cancelled' ? ' (cancelled)' : ' (not complete)'} | outside the sprint`,
   );
   const linkLines = tied
     .filter((e) => listed.has(e.from) && listed.has(e.to))

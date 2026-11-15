@@ -769,7 +769,8 @@ export function storyBuildCheckGaps(c: SprintTicketCheck | null | undefined): nu
  * ticket (never a ghost) offers, and only while no session is open (then the card shows the mark instead).
  *   'implement'  its status sits in the Not started or In progress bucket and it has NO pull request
  *                (In progress widened 2026-11-12: work under way with nothing pushed yet)
- *   'fill_gaps'  it has STARTED (a pull request, or a status past Not started, short of Complete) and its
+ *   'fill_gaps'  it has STARTED (a pull request, or a status past Not started, short of Complete and not
+ *                Cancelled) and its
  *                latest succeeded story check is CURRENT and found gaps (`storyBuildCheckGaps`). No check,
  *                or a stale one, offers nothing: the gaps are not known.
  *   null         neither
@@ -789,7 +790,8 @@ export function storyBuildOffered(n: {
   if (n.ghost || n.build != null || n.claim != null) return null;
   if ((n.stage === 'not_started' || n.stage === 'in_progress') && n.prs.length === 0) return 'implement';
   const started = n.prs.length > 0 || (n.stage != null && n.stage !== 'not_started');
-  if (!started || n.stage === 'done') return null;
+  // Complete or Cancelled: closed work offers no build.
+  if (!started || n.stage === 'done' || n.stage === 'cancelled') return null;
   return storyBuildCheckGaps(n.check) > 0 ? 'fill_gaps' : null;
 }
 

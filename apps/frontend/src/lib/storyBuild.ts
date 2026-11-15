@@ -12,6 +12,7 @@ import {
   trackerTicketRow,
   type TrackerProvider,
   storyBuildMark,
+  isCancelledStatusName,
   storyBuildOffered,
   type JiraStatusCategory,
   type SprintGraphNode,
@@ -78,11 +79,12 @@ export function storyBuildActionOf(
 // ── the story view's entry: "Implement" / "Fill gaps" / "Open build" ────────────────────────────
 
 /** The stage a ticket's tracker status CATEGORY implies, where the sprint board's bucket is not known
- *  (a story outside the sprint, or the board not read yet): To Do ⇒ Not started, Done ⇒ Complete, anything
- *  in between ⇒ started. Unknown ⇒ null (Implement is then never offered). */
-export function storyStageOfCategory(category: JiraStatusCategory | null | undefined): SprintStage | null {
+ *  (a story outside the sprint, or the board not read yet): To Do ⇒ Not started, Done ⇒ Cancelled when the
+ *  status NAME reads as cancelled (shared `isCancelledStatusName`), else Complete; anything in between ⇒
+ *  started. Unknown ⇒ null (Implement is then never offered). */
+export function storyStageOfCategory(category: JiraStatusCategory | null | undefined, name?: string | null): SprintStage | null {
   if (category === 'new') return 'not_started';
-  if (category === 'done') return 'done';
+  if (category === 'done') return name != null && isCancelledStatusName(name) ? 'cancelled' : 'done';
   if (category === 'indeterminate') return 'in_progress';
   return null;
 }

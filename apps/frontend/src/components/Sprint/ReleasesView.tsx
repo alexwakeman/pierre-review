@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
-import { TAG_RANGE_WINDOW, releaseBlockerText, type ReleaseCheckPr, type ReleaseCheckResult, type ReleaseRepoCheck, type ReleaseTicketCheck } from '@pierre-review/shared';
-import { useRefreshReleases, useReleases, useSetReleaseStartTag } from '../../hooks/useReleases.js';
+import type { ReleaseCheckPr, ReleaseCheckResult, ReleaseRepoCheck, ReleaseTicketCheck } from '@pierre-review/shared';
+import { useRefreshReleases, useReleases } from '../../hooks/useReleases.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { useFilters } from '../../store/filters.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
@@ -9,18 +9,19 @@ import { CheckIcon, ChevronIcon, CloseIcon, GearIcon, RefreshIcon, RocketIcon, S
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { FOCUS_RING } from '../ui/cx.js';
-import { Select } from '../ui/Select.js';
+import { SprintProgressBar } from '../Activity/SprintProgressBar.js';
 import { ReleaseDetailModal, ReleaseDialog } from './ReleaseDialog.js';
 import {
+  expandedTags,
   latestReleaseLine,
-  noBaselineLine,
   releaseWarningText,
-  repoReadingNote,
+  repoLatestNote,
+  repoProgress,
   repoRowCounts,
   repoRowText,
   showCreateRelease,
-  startTagLine,
   tagContents,
+  tagExplainer,
   ticketMark,
   type MarkTone,
 } from './releasesModel.js';
@@ -30,15 +31,18 @@ import {
 //   • Header: "Latest release: none" / "Latest release: 12 Nov", Refresh, the ⓘ with the rules,
 //     "View notes" for the newest release made here, and "Create release…" (SHOWN only with a
 //     candidate in a repo the reader can push to — hidden, never disabled).
-//   • ONE ROW PER RELEASABLE REPO showing the PAIR — the latest version tag on main and the candidate
-//     ("Latest 0.394.0 · candidate 0.390.0 → 0.390.0-rc"). A row expands to its version tags after the
-//     baseline, newest first, each with its tickets (key, title, status) and its PRs with no ticket; the
-//     candidate starred, the first held tag marked, "Start from this tag" beside each, and the start tag's
-//     line ("Starts from 0.380.0 · Change").
+//   • ONE ROW PER RELEASABLE REPO: "Release 0.388.0 → 0.388.0-rc" (+ "Latest 0.394.0" when different,
+//     + "6 tickets · 1 warning"), "No tag can be released: the oldest tag, 0.12.0, already contains
+//     BMD-127 (In Progress)", "Checking…" with a progress bar and ONE line of what the scan is doing, or
+//     "Nothing new since 0.390.0-rc". A standing candidate whose later tags are still read shows a small
+//     "Still reading later tags" bar. A row expands to every tag after the candidate, newest first, each
+//     with its explainer (its own blockers; "Also contains BMD-127 (from 0.312.0)."), then the candidate
+//     tag's own tickets. The check is automatic: there is nothing to pick.
 //   • The warnings, which never block.
 //
-// ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB only). Refresh (a press) reads the held tickets again
-// from the tracker (POST /api/releases/refresh). "Start from this tag" is a press (PUT, DB only).
+// ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB + memory only); it POLLS that same GET every ~3 s only
+// while a repo is checking (hooks/useReleases.ts). Refresh (a press) reads the held tickets again from the
+// tracker (POST /api/releases/refresh).
 // ⚠ Nothing renders while `workspaceId` is null. Not configured, or no repo ticked "Released from this
 // workspace": ONE setup line linking to Settings → Releases.
 // ⚠ A ticket chip opens the story through `useOpenStory()`; a pull request opens its PR tab.
@@ -77,8 +81,7 @@ export function ReleasesView(): JSX.Element | null {
     );
   }
   const check = data.check;
-  const busy = refresh.isPending || q.isFetching;
-  const windowLine = noBaselineLine(check.repos, TAG_RANGE_WINDOW);
+  const busy = refresh.isPending;
 
   return (
     <div data-testid="releases-view" className="space-y-5 pb-4">
@@ -90,8 +93,9 @@ export function ReleasesView(): JSX.Element | null {
             own.
           </p>
           <p>
-            The candidate is the newest version tag on main after the last release (or after your start tag) whose
-            pull requests link only to Done tickets. A ticket that could not be read holds its tag.
+            Version tags on main are checked from the oldest after the last release (or from the very first tag).
+            The first tag with a pull request whose ticket is not Complete holds itself and every later tag; the
+            candidate is the tag before it. A ticket or pull request that could not be read holds its tag too.
           </p>
           <p>
             A pull request with no ticket is a warning, not a block. Bot pull requests with no ticket are listed under
@@ -120,12 +124,11 @@ export function ReleasesView(): JSX.Element | null {
       {refresh.data != null && refresh.data.unread.length > 0 && (
         <p className="text-meta text-ui-mute">The tracker did not answer for {refresh.data.unread.join(', ')}.</p>
       )}
-      {windowLine != null && <p className="text-meta text-ui-mute">{windowLine}</p>}
 
       <section aria-label="Repositories">
         <ul className="divide-y divide-ui-line overflow-hidden rounded-ui bg-ui-surface">
           {check.repos.map((r) => (
-            <RepoRow key={r.repoId} repo={r} check={check} workspaceId={workspaceId} />
+            <RepoRow key={r.repoId} repo={r} check={check} />
           ))}
         </ul>
       </section>
@@ -148,11 +151,12 @@ export function ReleasesView(): JSX.Element | null {
   );
 }
 
-function RepoRow({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult; workspaceId: number }): JSX.Element {
+function RepoRow({ repo, check }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult }): JSX.Element {
   const [open, setOpen] = useState(false);
   const counts = repoRowCounts(repo);
-  const reading = repoReadingNote(repo);
-  const expandable = repo.tags.length > 0 || repo.startTag != null || repo.versionTags.length > 0;
+  const latest = repoLatestNote(repo);
+  const progress = repoProgress(repo);
+  const expandable = repo.tags.length > 0;
   const tone = repo.status === 'candidate' ? 'text-ui-ink' : repo.status === 'blocked' ? 'text-ui-warn' : 'text-ui-mute';
   const head = (
     <>
@@ -160,9 +164,8 @@ function RepoRow({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: 
       <span className="font-medium text-ui-ink">{repo.name}</span>
       {repo.status === 'candidate' && <StarIcon size={12} className="shrink-0 text-ui-accent" title="Candidate" />}
       <span className={`min-w-0 ${tone}`}>{repoRowText(repo)}</span>
+      {latest != null && <span className="text-meta text-ui-mute">{latest}</span>}
       {counts != null && <span className="text-meta text-ui-mute">{counts}</span>}
-      {reading != null && <span className="text-meta text-ui-mute">{reading}</span>}
-      {repo.startTag?.problem != null && <span className="text-meta text-ui-warn">Start tag not used</span>}
       {repo.candidate != null && !repo.writable && <span className="text-meta text-ui-faint">No push access</span>}
       {repo.candidate?.releaseTagExists === true && (
         <span className="text-meta text-ui-warn">{repo.candidate.releaseTagName} already exists</span>
@@ -170,7 +173,7 @@ function RepoRow({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: 
     </>
   );
   return (
-    <li data-testid="release-repo-row" data-repo={repo.name}>
+    <li data-testid="release-repo-row" data-repo={repo.name} data-status={repo.status}>
       {expandable ? (
         <button
           type="button"
@@ -183,82 +186,44 @@ function RepoRow({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: 
       ) : (
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-body">{head}</div>
       )}
-      {open && <RepoDetail repo={repo} check={check} workspaceId={workspaceId} />}
+      {progress != null && (
+        <div className="flex items-center gap-2 px-3 pb-2 pl-8" data-testid="release-progress">
+          <SprintProgressBar
+            progress={{ kind: 'share', label: progress.line ?? 'Checking', value: progress.share }}
+            className={progress.small ? 'h-1 w-24 shrink-0 rounded-full' : 'h-1.5 w-40 shrink-0 rounded-full'}
+            testId="release-progress-bar"
+          />
+          {progress.line != null && <span className="min-w-0 text-meta text-ui-mute">{progress.line}</span>}
+        </div>
+      )}
+      {open && <RepoDetail repo={repo} check={check} />}
     </li>
   );
 }
 
-function RepoDetail({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult; workspaceId: number }): JSX.Element {
-  const setStart = useSetReleaseStartTag(workspaceId);
-  const [picking, setPicking] = useState(false);
-  const [picked, setPicked] = useState<string | null>(repo.startTag?.name ?? null);
-  const start = (tagName: string | null): void =>
-    setStart.mutate({ repoId: repo.repoId, tagName }, { onSuccess: () => setPicking(false) });
-  const line = startTagLine(repo);
+function RepoDetail({ repo, check }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult }): JSX.Element {
+  const tags = expandedTags(repo);
   return (
     <div className="space-y-3 px-3 pb-3 pl-8">
-      {(line != null || picking) && (
-        <div className="flex flex-wrap items-center gap-2 text-meta">
-          {line != null && <span className={repo.startTag?.problem != null ? 'text-ui-warn' : 'text-ui-mute'}>{line}</span>}
-          {!picking && (
-            <>
-              <Button size="sm" variant="ghost" onClick={() => setPicking(true)}>
-                Change
-              </Button>
-              <Button size="sm" variant="ghost" busy={setStart.isPending} onClick={() => start(null)}>
-                Clear
-              </Button>
-            </>
-          )}
-        </div>
-      )}
-      {picking && (
-        <div className="flex flex-wrap items-center gap-2">
-          <Select
-            size="sm"
-            label="Start from"
-            value={picked}
-            placeholder="Pick a version tag"
-            options={repo.versionTags.map((t) => ({ value: t.name, label: t.name }))}
-            onChange={setPicked}
-          />
-          {picked != null && (
-            <Button size="sm" variant="primary" busy={setStart.isPending} onClick={() => start(picked)}>
-              Start from this tag
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setPicking(false)}>
-            Cancel
-          </Button>
-        </div>
-      )}
-      {setStart.isError && <p className="text-meta text-ui-danger">{setStart.error.message}</p>}
-      {repo.tags.length === 0 && <p className="text-meta text-ui-faint">No version tags after {repo.baseline?.name ?? 'the start'}.</p>}
+      {tags.length === 0 && <p className="text-meta text-ui-faint">No version tags after {repo.baseline?.name ?? 'the start'}.</p>}
       <ol className="space-y-3">
-        {repo.tags.map((t) => {
+        {tags.map((t) => {
           const c = tagContents(check, t);
+          const lines = tagExplainer(t);
           return (
             <li key={t.name} className="space-y-1" data-testid="release-tag" data-tag={t.name}>
               <div className="flex flex-wrap items-center gap-2 text-body">
                 {t.isCandidate && <StarIcon size={12} className="text-ui-accent" title="Candidate" />}
                 <span className="font-medium text-ui-ink">{t.name}</span>
                 {t.isCandidate && <span className="text-meta text-ui-mute">candidate</span>}
-                {t.name === repo.firstBlocked && !t.pending && <span className="text-meta text-ui-warn">first tag held back</span>}
-                {t.pending && <span className="text-meta text-ui-mute">Reading changes…</span>}
+                {t.name === repo.firstBlocked && <span className="text-meta text-ui-warn">first tag held back</span>}
                 {t.moved && <span className="text-meta text-ui-warn">moved to another commit</span>}
-                {repo.startTag?.name !== t.name && (
-                  <Button size="sm" variant="ghost" className="ml-auto" busy={setStart.isPending && setStart.variables?.tagName === t.name} onClick={() => start(t.name)}>
-                    Start from this tag
-                  </Button>
-                )}
               </div>
-              {t.blockers
-                .filter((b) => b.kind === 'too_large')
-                .map((b, i) => (
-                  <p key={i} className="text-meta text-ui-warn">
-                    {releaseBlockerText(b)}
-                  </p>
-                ))}
+              {lines.map((l, i) => (
+                <p key={i} className={`text-meta ${t.state === 'held' && i < t.blockers.length ? 'text-ui-warn' : 'text-ui-mute'}`}>
+                  {l}
+                </p>
+              ))}
               {c.tickets.length > 0 && (
                 <ul className="space-y-0.5">
                   {c.tickets.map(({ ticket, prs }) => (
@@ -268,10 +233,9 @@ function RepoDetail({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; chec
               )}
               {c.untracked.length > 0 && <PrList label="No ticket" prs={c.untracked} check={check} />}
               {c.bot.length > 0 && <PrList label="Bot" prs={c.bot} check={check} />}
-              {(t.unmatchedCommits > 0 || t.truncated) && (
+              {t.unmatchedCommits > 0 && (
                 <p className="text-meta text-ui-faint">
-                  {t.unmatchedCommits > 0 ? `${t.unmatchedCommits} ${t.unmatchedCommits === 1 ? 'commit has' : 'commits have'} no pull request.` : ''}
-                  {t.truncated ? ' Only the first commits were read.' : ''}
+                  {t.unmatchedCommits} {t.unmatchedCommits === 1 ? 'commit has' : 'commits have'} no pull request.
                 </p>
               )}
               {t.prIds.length === 0 && !t.pending && <p className="text-meta text-ui-faint">No pull requests in this tag.</p>}
