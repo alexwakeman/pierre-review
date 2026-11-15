@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.42] - 2026-11-15
+
 ### Added
 
 - Settings → Releases → "Released from this workspace": tick the repositories you release. Releases checks, tags
