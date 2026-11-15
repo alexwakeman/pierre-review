@@ -282,7 +282,7 @@ body:has(.lb) {
   translate: 0 -50%;
 }
 .lb .arcs.slice {
-  overflow: hidden;
+  overflow: clip; /* not hidden: see .tile.art */
 }
 .lb .arcs.slice .arcs-box {
   width: max(100cqw, calc(100cqh * var(--ar)));
@@ -320,11 +320,14 @@ body:has(.lb) {
       animation-timeline: scroll(root block);
       animation-range: 0px 60vh;
     }
-    /* every other picture: over its own way into view, landing as it is fully shown */
+    /* every other picture: it stays apart until it is WHOLLY on screen (contain 0%:
+       its bottom edge reaches the viewport's), then lands over the next 30% of its
+       travel through the viewport. Short on purpose: a picture near the foot of the
+       page can only scroll so far up, and it must always land. */
     .lb .arcs:not(.lead) .layer {
       animation: arc-gather linear both;
       animation-timeline: view(block);
-      animation-range: entry 0% cover 60%;
+      animation-range: contain 0% contain 30%;
     }
   }
 }
@@ -339,6 +342,10 @@ body:has(.lb) {
 .lb .tile.art {
   padding: 0;
   background: #000;
+  /* clip, NOT hidden: overflow:hidden makes the tile a scroll container, and a
+     view() timeline inside it would then track the picture's place in its own
+     tile (which never changes) instead of in the page, so it never moved */
+  overflow: clip;
 }
 /* No print grain over a picture tile: a blended overlay on top of moving, blended
    layers makes the compositor re-blend the whole tile every frame (measured: it alone
