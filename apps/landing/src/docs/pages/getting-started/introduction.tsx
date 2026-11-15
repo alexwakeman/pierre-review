@@ -82,9 +82,10 @@ export default function Page(): JSX.Element {
           Anthropic API key. You choose the provider, the effort and a spend budget.
         </li>
         <li>
-          <b>It works with the bots you already have.</b> Ensemble does not replace CodeRabbit, Copilot or other
-          review bots. It sorts what they say, scores how serious each comment is, and shows which of their
-          threads still need a person.
+          <b>It works with the bots you already have.</b> Ensemble complements your existing review bots, like
+          CodeRabbit and Copilot, and gives a team without them high-quality automated code review. It sorts
+          what the bots say, scores how serious each comment is, and shows which of their threads still need
+          a person.
         </li>
         <li>
           <b>It is honest about guesses.</b> Where Ensemble guesses (for example, Likely addressed or the blast

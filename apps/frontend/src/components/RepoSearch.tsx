@@ -413,7 +413,8 @@ export function RepoSearch({
           role="listbox"
           aria-label="Repository search results"
           aria-busy={pageLoading || undefined}
-          className={`absolute left-0 top-full z-[60] mt-1 max-h-96 ${fullWidth ? 'w-full min-w-[24rem]' : 'w-96'} overflow-y-auto rounded-ui bg-ui-surface shadow-lg`}
+          // Never taller than the space a host modal can give it (it clips overflow).
+          className={`absolute left-0 top-full z-[60] mt-1 max-h-[min(24rem,55vh)] ${fullWidth ? 'w-full min-w-[24rem]' : 'w-96'} overflow-y-auto rounded-ui bg-ui-surface shadow-lg`}
         >
           {atRepoLimit && (
             <div className="sticky top-0 z-20 border-b border-ui-line bg-ui-raise px-3 py-1.5 text-meta text-ui-warn">
