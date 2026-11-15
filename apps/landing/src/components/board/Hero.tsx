@@ -6,7 +6,7 @@ import { CopyCommand } from './CopyCommand';
 // The hero: the claim, the command, and the site's lead picture, the QUARTET
 // (components/arcs): four quarters facing one centre that close in as the reader
 // scrolls, an ensemble as a conversation, which is what a review is. Under the claim,
-// the CHAIN (quarters linked end to end) beside Goethe's line on the string quartet.
+// the CHAIN (quarters linked end to end) beside Poincaré's line on the ensemble and the details.
 //
 // ⚠ "Fully local, no added service" is the claim, and it is exact: the app runs on each
 // person's machine and talks only to GitHub, their tracker and their own AI provider.
@@ -34,9 +34,19 @@ export function Hero(): JSX.Element {
       </div>
       <figure className="tile motto">
         <blockquote>
-          <p>“One hears four sensible people conversing among themselves.”</p>
+          {/* ⚠ Poincaré's own words (the English translation), cut with an ellipsis and
+              never reworded: a reworded line would need "after Poincaré". */}
+          <p>
+            “It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once
+            both the ensemble and the details.”
+          </p>
         </blockquote>
-        <figcaption>Goethe, on the string quartet, in a letter to Zelter, 1829</figcaption>
+        <figcaption>
+          <a href="https://en.wikipedia.org/wiki/Henri_Poincar%C3%A9" target="_blank" rel="noreferrer noopener">
+            Henri Poincaré
+          </a>
+          , <cite>Science and Method</cite>, 1908
+        </figcaption>
       </figure>
       <div className="tile art hand">
         <Quartet lead label="Four banded quarter-circles in four colours, facing one centre" />
