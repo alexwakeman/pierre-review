@@ -181,6 +181,7 @@ import type {
   ToolSwitchBody,
   ToolSwitchesResponse,
   RepoBotScoringBody,
+  RepoOverviewResponse,
   MyTurnSettingsResponse,
   AiBudgetBody,
   AiBudgetResponse,
@@ -1074,11 +1075,13 @@ export const api = {
     fetch('/api/me/tool-switches', jsonBody('PUT', { id, on } as ToolSwitchBody)).then((r) =>
       handle<ToolSwitchesResponse>(r),
     ),
-  // Leave a repo out of bot comment scoring, or put it back (Repos & workspaces). Echoes the repo.
-  setRepoBotScoring: (repoId: number, excluded: boolean) =>
-    fetch(`/api/repos/${repoId}/bot-scoring`, jsonBody('PUT', { excluded } as RepoBotScoringBody)).then((r) =>
+  // Score a repo's bot comments (opt-in), or stop (Repos & workspaces → the repo's panel). Echoes the repo.
+  setRepoBotScoring: (repoId: number, enabled: boolean) =>
+    fetch(`/api/repos/${repoId}/bot-scoring`, jsonBody('PUT', { enabled } as RepoBotScoringBody)).then((r) =>
       handle<Repo>(r),
     ),
+  // The repo's panel in Repos & workspaces: PRs synced by state, authors, bot scoring counts. DB only.
+  repoOverview: (repoId: number) => get<RepoOverviewResponse>(`/api/repos/${repoId}/overview`),
   setFeatureSettings: (settings: FeatureSettings | null) =>
     fetch('/api/me/feature-settings', jsonBody('PUT', { settings } as FeatureSettingsBody)).then((r) =>
       handle<FeatureSettingsResponse>(r),

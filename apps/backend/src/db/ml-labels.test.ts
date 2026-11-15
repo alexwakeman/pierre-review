@@ -44,7 +44,7 @@ beforeAll(async () => {
 
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'o', name: 'r', githubNodeId: 'R_ml' })
+    .values({ accountId: 1, owner: 'o', name: 'r', githubNodeId: 'R_ml', botScoringEnabled: true }) // opt-in (0201)
     .returning()
     .execute();
   const [pr] = await db
@@ -171,6 +171,16 @@ describe('ML label candidates vs the pending count', () => {
     expect(backlog.pending).toBe(rollup.pending);
     expect(backlog.pending).toBe(2);
     expect(backlog.labelled).toBe(0);
+  });
+
+  it('counts only repos switched on for bot scoring (opt-in)', async () => {
+    const { setRepoBotScoring } = await import('./repo-bot-scoring.js');
+    await setRepoBotScoring(1, scope.repoIds[0]!, false);
+    expect((await mlLabels.getMlBacklogForAccount(1)).pending).toBe(0);
+    expect(await mlLabels.getMlBacklogForRepo(1, scope.repoIds[0]!, false)).toEqual({ pending: 0, labelled: 0 });
+    await setRepoBotScoring(1, scope.repoIds[0]!, true);
+    expect((await mlLabels.getMlBacklogForAccount(1)).pending).toBe(2);
+    expect(await mlLabels.getMlBacklogForRepo(1, scope.repoIds[0]!, true)).toEqual({ pending: 2, labelled: 0 });
   });
 
   it('drops to zero pending once every candidate is labelled', async () => {

@@ -16,3 +16,12 @@ export function escapeOwnedByControl(target: EventTarget | null): boolean {
   if (typeof closest !== 'function') return false;
   return (closest as (s: string) => unknown).call(target, `[${ESCAPE_OWNER_ATTR}]`) != null;
 }
+
+/**
+ * A DIALOG opened over a modal (InfoModal `overModal`) is open. The modal underneath must step aside
+ * for Escape whatever has focus: the dialog moves focus into itself a frame after it mounts, and an
+ * Escape in that gap still comes from the control that opened it, inside the modal.
+ */
+export function dialogOverModalOpen(doc: { querySelector: (s: string) => unknown } | undefined = globalThis.document): boolean {
+  return doc?.querySelector(`[role="dialog"][${ESCAPE_OWNER_ATTR}]`) != null;
+}

@@ -73,11 +73,15 @@ export default function Page(): JSX.Element {
           so you can remove several at once.
         </li>
         <li>
-          <Ui>Bot scoring</Ui>, on each line, leaves the repository's bot comments out of severity scoring when you
-          switch it off. Every repository is scored by default. It shows once{' '}
-          <DocLink to="bots-monitoring/severity-scoring">bot comment analysis</DocLink> is on.
+          Click a repository's name to open its panel on the right. It shows the first sync of the last 90 days
+          while it runs, how many pull requests were synced, and its <Ui>Bot scoring</Ui> switch. A repository you
+          add opens there.
         </li>
       </ul>
+      <p>
+        <Ui>Bot scoring</Ui> is off for every repository until you switch it on in its panel. See{' '}
+        <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
+      </p>
       <p>
         <Ui>Grid</Ui>, at the top of the dialog, shows every repository against every workspace. Click a cell to
         change it: not in the workspace, then External, then Maintained.

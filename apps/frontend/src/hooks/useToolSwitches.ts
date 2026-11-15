@@ -17,15 +17,18 @@ export function useSetToolSwitch() {
   });
 }
 
-// Leave a repo out of bot comment scoring (Repos & workspaces). The repo list carries the switch.
+// Score a repo's bot comments (opt-in), or stop (Repos & workspaces → the repo's panel). The repo list
+// carries the switch; the panel's overview and the scoring status refetch so the bar starts at once.
 export function useSetRepoBotScoring() {
   const qc = useQueryClient();
-  return useMutation<Repo, Error, { repoId: number; excluded: boolean }>({
+  return useMutation<Repo, Error, { repoId: number; enabled: boolean }>({
     mutationKey: ['repo-bot-scoring'],
-    mutationFn: ({ repoId, excluded }) => api.setRepoBotScoring(repoId, excluded),
+    mutationFn: ({ repoId, enabled }) => api.setRepoBotScoring(repoId, enabled),
     onSuccess: (repo) => {
       qc.setQueryData<Repo[]>(['repos'], (prev) => prev?.map((r) => (r.id === repo.id ? { ...r, ...repo } : r)));
       void qc.invalidateQueries({ queryKey: ['repos'] });
+      void qc.invalidateQueries({ queryKey: ['repo-overview', repo.id] });
+      void qc.invalidateQueries({ queryKey: ['ml-status'] });
     },
   });
 }

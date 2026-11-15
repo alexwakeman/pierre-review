@@ -3,7 +3,7 @@
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/escapeOwner.test.ts
 import { describe, expect, it } from 'vitest';
-import { ESCAPE_OWNER_ATTR, escapeOwnedByControl } from '../src/lib/escapeOwner.js';
+import { ESCAPE_OWNER_ATTR, dialogOverModalOpen, escapeOwnedByControl } from '../src/lib/escapeOwner.js';
 
 describe('escapeOwnedByControl', () => {
   it('is false with no target', () => {
@@ -20,5 +20,15 @@ describe('escapeOwnedByControl', () => {
     expect(escapeOwnedByControl({ closest: () => null } as unknown as EventTarget)).toBe(false);
     // `window` and `document` are event targets with no `closest`.
     expect(escapeOwnedByControl({} as EventTarget)).toBe(false);
+  });
+});
+
+describe('dialogOverModalOpen', () => {
+  it('is true while a dialog opened over a modal is in the page, wherever focus is', () => {
+    const doc = { querySelector: (s: string) => (s === `[role="dialog"][${ESCAPE_OWNER_ATTR}]` ? {} : null) };
+    expect(dialogOverModalOpen(doc)).toBe(true);
+  });
+  it('is false when none is open', () => {
+    expect(dialogOverModalOpen({ querySelector: () => null })).toBe(false);
   });
 });

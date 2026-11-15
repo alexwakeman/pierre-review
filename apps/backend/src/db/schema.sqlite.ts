@@ -287,9 +287,11 @@ export const repos = sqliteTable(
     // starts a tag sync when they differ — a tag push is updatedAt-silent. NULL = never read.
     tagsSignature: text('tags_signature'),
     tagsSyncedAt: integer('tags_synced_at', { mode: 'timestamp' }),
-    // 0199. LEFT OUT OF BOT COMMENT SCORING (Repos & workspaces): the scoring worker skips this repo's
-    // bot comments (sync/ml-enrichment.ts). Labels already stored stay. Default false.
+    // 0200. DORMANT since 0201 (scoring became opt-in): kept, never read.
     botScoringExcluded: integer('bot_scoring_excluded', { mode: 'boolean' }).notNull().default(false),
+    // 0201. BOT COMMENT SCORING, OPT-IN (Repos & workspaces → the repo's panel): the scoring worker scores
+    // only these repos' bot comments (sync/ml-enrichment.ts). Default false; labels already stored stay.
+    botScoringEnabled: integer('bot_scoring_enabled', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => ({
     // Composite uniques so two accounts can watch the same GitHub repo (each

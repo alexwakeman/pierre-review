@@ -165,6 +165,14 @@ check("getAddedRepoNodeIds(A) excludes B's node", nodesA.has(A.nodeId) && !nodes
 
 check('getPrDetail(A.pr, A) returns the PR', (await q.getPrDetail(A.prId, 1))?.id === A.prId);
 check('getPrDetail(B.pr, A) returns null (IDOR blocked)', (await q.getPrDetail(B.prId, 1)) === null);
+// The repo's panel in Repos & workspaces (GET /api/repos/:id/overview) and its Bot scoring switch.
+{
+  const { getRepoOverview } = await import('../src/db/repo-overview.js');
+  const { setRepoBotScoring } = await import('../src/db/repo-bot-scoring.js');
+  check('getRepoOverview(A.repo, A) returns the overview', (await getRepoOverview(1, A.repoId))?.repoId === A.repoId);
+  check('getRepoOverview(B.repo, A) returns null (IDOR blocked)', (await getRepoOverview(1, B.repoId)) === null);
+  check('setRepoBotScoring(B.repo) as A is refused', (await setRepoBotScoring(1, B.repoId, true)) === false);
+}
 
 check(
   'getMentionCandidates(A.pr, A) returns candidates',

@@ -866,9 +866,11 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (mutating && /^\/api\/prs\/\d+\/refresh$/.test(path)) {
     return [TIERS.prDetail, TIERS.read];
   }
-  // PUT /api/repos/:id/bot-scoring — leave a repo out of bot comment scoring (Repos & workspaces). One
-  // UPDATE of one column, no GitHub, no model: `read`, anchored at both ends.
+  // PUT /api/repos/:id/bot-scoring — switch a repo's bot comment scoring on or off (Repos & workspaces).
+  // One UPDATE of one column, no GitHub, no model: `read`, anchored at both ends.
   if (mutating && /^\/api\/repos\/\d+\/bot-scoring$/.test(path)) return [TIERS.read];
+  // GET /api/repos/:id/overview — the repo's panel in Repos & workspaces: grouped counts, DB only.
+  if (!mutating && /^\/api\/repos\/\d+\/overview$/.test(path)) return [TIERS.read];
   if (mutating && (path === '/api/repos' || /^\/api\/repos\/\d+\/sync$/.test(path))) {
     return [TIERS.sync];
   }

@@ -99,7 +99,7 @@ beforeAll(async () => {
 
   const [repo] = await db
     .insert(repos)
-    .values({ accountId: 1, owner: 'o', name: 'r', githubNodeId: 'R_hb' })
+    .values({ accountId: 1, owner: 'o', name: 'r', githubNodeId: 'R_hb', botScoringEnabled: true }) // opt-in (0201)
     .returning()
     .execute();
   const [pr] = await db

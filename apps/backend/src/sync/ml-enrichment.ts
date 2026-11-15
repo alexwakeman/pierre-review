@@ -25,7 +25,7 @@ export interface MlLog {
   warn: (msg: string) => void;
 }
 import { botAnalysisSwitchedOff } from '../ai/tool-switches.js';
-import { botScoringExcludedRepoIds } from '../db/repo-bot-scoring.js';
+import { botScoringEnabledRepoIds, scoreableRepoIds } from '../db/repo-bot-scoring.js';
 import { createHash } from 'node:crypto';
 import { gte, inArray } from 'drizzle-orm';
 import type { MlCategory, MlSeverity, ReviewBotKind } from '@pierre-review/shared';
@@ -427,8 +427,9 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
 
     for (const accountId of rotated) {
       if (Date.now() >= deadline) break;
-      // Repos left out of bot scoring in Repos & workspaces (db/repo-bot-scoring.ts).
-      const leftOut = await botScoringExcludedRepoIds(accountId);
+      // Bot scoring is OPT-IN per repo (Repos & workspaces; db/repo-bot-scoring.ts).
+      const enabled = await botScoringEnabledRepoIds(accountId);
+      if (enabled.size === 0) continue;
       // Every workspace, because a repo lives in exactly one and the bot verdict is per
       // workspace: the same login can be a bot in one and a person in another.
       for (const workspace of await listWorkspaces(accountId)) {
@@ -437,7 +438,7 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
         // and scoring a busy shared repo's backlog would cost CPU for comments nobody reads.
         const scope: BotScope = {
           workspaceId: workspace.id,
-          repoIds: scoreableRepoIds(workspace, leftOut),
+          repoIds: scoreableRepoIds(workspace, enabled),
         };
         if (scope.repoIds.length === 0) continue;
 
@@ -480,17 +481,8 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
   return stats;
 }
 
-/**
- * The workspace repos whose bot comments are scored: not EXTERNAL (db/external-repos.ts: their bot
- * comments are not watched) and not LEFT OUT of bot scoring in Repos & workspaces (db/repo-bot-scoring.ts).
- */
-export function scoreableRepoIds(
-  workspace: { repoIds: number[]; externalRepoIds?: number[] },
-  leftOut: ReadonlySet<number>,
-): number[] {
-  const external = new Set(workspace.externalRepoIds ?? []);
-  return workspace.repoIds.filter((id) => !external.has(id) && !leftOut.has(id));
-}
+// The scoreable-repo rule lives with the switch (db/repo-bot-scoring.ts); re-exported for callers.
+export { scoreableRepoIds };
 
 /** @returns true when this workspace's backlog was fully drained within the budget. */
 async function enrichWorkspace(

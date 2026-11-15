@@ -129,6 +129,8 @@ import type {
   StoryBuildPr,
   StoryBuildPrDiffResponse,
   SandboxSessionStartBody,
+  RepoOverviewResponse,
+  SyncStatus,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -2490,6 +2492,29 @@ export async function installMockApi(
       if (ciReviewMatch) return json(route, prCiReviewFor(Number(ciReviewMatch[1])));
       if (path.endsWith('/api/users')) return json(route, USERS);
       if (path.endsWith('/api/repos')) return json(route, [REPO]);
+      // THE REPO's PANEL in Repos & workspaces (RepoPanel.tsx): synced, scoring off (opt-in).
+      const overviewMatch = path.match(/\/api\/repos\/(\d+)\/overview$/);
+      if (overviewMatch) {
+        const overview: RepoOverviewResponse = {
+          repoId: Number(overviewMatch[1]),
+          prs: { total: 42, open: 6, merged: 31, closed: 5 },
+          authors: 7,
+          botScoring: { enabled: false, labelled: 0, pending: 0 },
+        };
+        return json(route, overview);
+      }
+      const syncStatusMatch = path.match(/\/api\/repos\/(\d+)\/sync-status$/);
+      if (syncStatusMatch) {
+        const status: SyncStatus = {
+          repoId: Number(syncStatusMatch[1]),
+          status: 'ok',
+          progress: null,
+          lastFullSyncAt: REPO.lastFullSyncAt,
+          lastIncrementalSyncAt: REPO.lastIncrementalSyncAt,
+          lastSyncError: null,
+        };
+        return json(route, status);
+      }
       if (path.endsWith('/api/mergers')) return json(route, []);
       // THE ISSUE TRACKER (core, free — apiVersion 23). No tracker in e2e: the workspace answers
       // "none", so the Open PRs board is the plain list and no ticket row is requested. Typed, so a

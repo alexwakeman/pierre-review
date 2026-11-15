@@ -455,10 +455,12 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/me/tool-switches')).not.toContain('ai');
   });
 
-  // PUT /api/repos/:id/bot-scoring — leave a repo out of bot comment scoring. One UPDATE.
+  // PUT /api/repos/:id/bot-scoring — switch a repo's bot comment scoring. One UPDATE.
   it('keeps the repo bot-scoring write on read', () => {
     expect(tiers('PUT', '/api/repos/12/bot-scoring')).toEqual(['read']);
     expect(tiers('PUT', '/api/repos/12/bot-scoring')).not.toContain('github_write');
+    // GET /api/repos/:id/overview — the repo's panel: grouped counts, DB only.
+    expect(tiers('GET', '/api/repos/12/overview')).toEqual(['read']);
   });
 
   // PUT /api/me/feature-settings — Settings → Features. DB-only, like its neighbours.
