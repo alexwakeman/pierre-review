@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.45] - 2026-11-15
+
 ### Changed
 
 - This Sprint → Releases checks much faster: it reads main's history once, newest first, instead of asking
