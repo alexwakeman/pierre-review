@@ -8,8 +8,8 @@
 //   --draw  = v / 0.45, clamped: the bands draw out and the quarters slide home
 //             as it comes into view
 //   --apart = 0: once home, a picture never comes apart again
-// A LEAD piece (data-lead: the hero's) is on screen from the start, so it is
-// always drawn, and it begins APART at the top of the page instead:
+// A LEAD piece (data-lead: the hero's two pictures) is on screen from the start, so
+// it is always drawn, and it begins APART at the top of the page instead:
 //   --apart = 1 - scrollY / (0.6 × viewport height), clamped: its links close up
 //             over the first 60% of a screen of scrolling
 // Values ease toward their targets each frame. The caller skips all of this under

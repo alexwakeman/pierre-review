@@ -30,7 +30,7 @@ export function Hero(): JSX.Element {
         </div>
       </div>
       <div className="tile art p1">
-        <Chain label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />
+        <Chain lead label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />
       </div>
       <figure className="tile motto">
         <blockquote>

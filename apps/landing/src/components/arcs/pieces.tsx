@@ -10,7 +10,9 @@ import type { Corner, Quarter, RunName } from './geometry';
 //              "four sensible people conversing". Its quarters start apart and
 //              close in as the reader scrolls down.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
-//              on from link to link (the small tile beside Poincaré's line)
+//              on from link to link (the small tile beside Poincaré's line). Also a
+//              lead picture: its links start mirrored across the tile and cross
+//              through each other into place as the reader scrolls down.
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -23,7 +25,7 @@ interface PieceProps {
   lead?: boolean;
 }
 
-const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin);
+const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross);
 
 export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   return (
@@ -31,6 +33,8 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
       lead={lead}
       viewBox={`0 0 ${CHAIN.width} ${CHAIN.height}`}
       quarters={CHAIN.quarters}
+      // the links cross through each other on the way in: overlaps mix like light
+      blend
       className={className}
       label={label}
       preserveAspectRatio="xMidYMid meet"
