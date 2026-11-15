@@ -2895,17 +2895,22 @@ FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky
 
 **Releases — the 4th tab (2026-11-15, docs/RELEASES.md).** `?sprintTab=releases`, key `4`; NOT a lane
 board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`. ONE fetch on mount,
-`GET /api/releases` (`hooks/useReleases.ts`, key `['releases', ws:<id>]`); nothing renders while
-`workspaceId` is null; not configured, or NO repo ticked "Released from this workspace"
-(`hasReleasableRepos`) ⇒ ONE setup line (`openSettings('releases')`). REPO-ORIENTED (no tickets panel):
-one row per releasable repo showing the PAIR (`repoRowText`: "Latest 0.394.0 · candidate 0.390.0 →
-0.390.0-rc", "Latest 0.394.0 is the candidate → 0.394.0-rc", "No candidate: 0.391.0 held by BMD-1048 (In PO
-Review)", "Latest 0.394.0 · Reading changes…", "Nothing new since 0.390.0-rc"), counts beside it
-(`repoRowCounts`). A row expands to its version tags after the baseline, newest first (`tagContents`: the
-tickets with `ticketMark`, the PRs with no ticket, bot PRs), the candidate starred, the first held tag
-marked, "Start from this tag" on each, and the start-tag line (`startTagLine`: "Starts from 0.380.0 ·
-Change · Clear"; Change = a `Select` over `versionTags`) — `useSetReleaseStartTag` (`PUT
-/api/releases/start-tag`, a press; the answer becomes the check). "Released" is never said of a ticket.
+`GET /api/releases` (`hooks/useReleases.ts`, key `['releases', ws:<id>]`), which POLLS that same GET every
+`RELEASES_POLL_MS` (3 s) ONLY while a repo is checking (`refetchInterval` = `releasesPollInterval`, shared
+`releasesChecking`) and stops when none is; nothing renders while `workspaceId` is null; not configured,
+or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE setup line
+(`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick). REPO-ORIENTED (no
+tickets panel): one row per releasable repo (`repoRowText`: "Release 0.388.0 → 0.388.0-rc", "No tag can
+be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)" / "… since 0.380.0-rc: the
+next tag, 0.381.0, contains …", "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main
+yet"), "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts
+(`repoRowCounts`), and the scan's progress (`repoProgress`): a bar (`Activity/SprintProgressBar`, a share)
+with ONE line from the server (`progress.line`: "Fetching pull requests: 35 of 80"), or a small bar with
+"Still reading later tags" when a candidate (or a held row) already stands. A row expands to
+`expandedTags` — every tag after the candidate, newest first, then the candidate — each with
+`tagExplainer` (its own blockers' sentences; "Also contains BMD-127 (from 0.312.0)."; "Still being read.")
+and `tagContents` (the tickets with `ticketMark` — "not read yet" included — the PRs with no ticket, bot
+PRs, the direct-commit note). "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
 fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
 (`showCreateRelease`). The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only

@@ -253,29 +253,43 @@ not watched — only its recent project PRs and ticket-linked PRs are read from 
 
 Right after `syncBranchStatus`, `sync-repo.ts` runs `runTagsStep` (`sync/tags-step.ts`; [RELEASES.md](RELEASES.md)),
 in its own non-fatal guard. RELEASABLE REPOS FIRST: only a repo some workspace releases ("Released from this
-workspace", `db/release-repos.ts` `releaseRangeViews` — ticked, still a member, both suffixes set) gets
+workspace", `db/release-repos.ts` `releaseRangeViews` — ticked, still a member, both suffixes set) gets the
 ancestry checks and ranges; any other repo's tags still sync (the hotfix bases read them) with no ancestry
 and no range (its stored ranges are dropped). An EXTERNAL repo runs the step only when releasable.
 
-- **The tag read** (`sync/repo-tags.ts`, 1 point): the newest `REPO_TAGS_READ_CAP` (100) tags by
-  `TAG_COMMIT_DATE`; tags past the cap are logged as not read. At most once per
-  `TAG_READ_MIN_INTERVAL_MS` (15 min) from a walk — the settle sweep starts it sooner on a tag push.
-  Writes `repo_tags` (insert / refresh / MOVE / delete-on-a-positive-statement) and
-  `repos.tags_signature`, then — releasable repos only — asks up to `ANCESTRY_CHECKS_RELEASABLE` (every
-  tag read, 100) tags whether they are on the default branch (REST compare `tag...head`, `per_page=1`),
-  never-asked first, newest first, while the budget allows (`ancestryCap`; 0 for any other repo).
-- **The ranges** (`sync/tag-ranges.ts`, releasable repos only): per releasing workspace, every tag after
-  its BASELINE (the newer of the newest release tag and the reader's start tag), or the newest
-  `TAG_RANGE_WINDOW` (40) tags with no baseline (shared `tagRangeKeepFrom`; the oldest baseline of all
-  releasing workspaces decides): the PRs between each and the tag before it — REST compare base...tag
-  (≤ 1000 commits), each commit → PR by `merge_commit_oid`, then stored PR commits, then GraphQL
-  `associatedPullRequests` (2 points per 100); only PRs merged INTO THE DEFAULT BRANCH. ≤
-  `TAG_RANGES_PER_SYNC` (40 — the whole window) per run; once per (tag sha, base sha); a failed compare is
-  retried next run. Ranges before the baseline are dropped.
-- **The catch-up**: a releasable repo left with work (ranges or ancestry, or the budget ran low) is marked
-  (`markTagCatchUp`, in memory); the settle sweep starts the step again after `CATCH_UP_DELAY_MS` (60 s,
-  `takeTagCatchUp`) rather than at the next walk. Ticking a repo and setting a start tag mark it too (those
-  routes never call GitHub). While ranges are pending the Releases tab reads "Reading changes…".
+- **The tag read** (`sync/repo-tags.ts`, 1 point a page): the newest `REPO_TAGS_READ_CAP` (100) tags by
+  `TAG_COMMIT_DATE` — a RELEASABLE repo pages on (`after`) up to `REPO_TAGS_READ_CAP_RELEASABLE` (1000,
+  ≤ 10 points); tags past the cap are logged as not read. At most once per `TAG_READ_MIN_INTERVAL_MS`
+  (15 min) from a walk or a quick re-run — the settle sweep starts it sooner on a tag push. Writes
+  `repo_tags` (insert / refresh / MOVE / delete-on-a-positive-statement) and `repos.tags_signature`.
+- **THE RELEASE SCAN** (releasable repos only; [RELEASES.md](RELEASES.md) § Implementation → Automatic
+  candidate). NO count caps — each run is TIME-BOXED (`WALK_RUN_MS` 20 s in a walk's tail,
+  `SCAN_RUN_MS` 45 s in the background; the ranges take `RANGES_SHARE` of it) and stops when the
+  account's budget is low or limited (paused, never an error). In order, oldest tag first:
+  1. **ancestry** — every tag: is it on the default branch? (REST compare `tag...head`, `per_page=1`;
+     never-asked first; `ANCESTRY_CHECKS_RELEASABLE` = no cap; a quick re-run asks against the head it
+     read last). No ranges are planned while ancestry is left.
+  2. **ranges** (`sync/tag-ranges.ts`) — per releasing workspace, every tag after its BASELINE (the
+     newest release tag on main), or EVERY tag with none (shared `tagRangeKeepFrom`; the oldest baseline
+     of all releasing workspaces decides), OLDEST FIRST: the PRs between each and the tag before it —
+     REST compare base...tag with full pagination (≤ `TAG_RANGE_MAX_COMMITS` 10,000 commits; past it
+     `truncated`, which holds the tag), each commit → PR by `merge_commit_oid`, then stored PR commits,
+     then GraphQL `associatedPullRequests` for every commit still unmatched (2 points per 50); only PRs
+     merged INTO THE DEFAULT BRANCH. The OLDEST tag (no base) is `'history'`: the closed PRs into the
+     default branch from GitHub (REST list, 100 per call, oldest created first, stopped past the tag's
+     date; ≤ `HISTORY_MAX_PRS` 10,000) plus the stored ones. Once per (tag sha, base sha); a failed
+     compare is retried next run. Ranges before the baseline are dropped.
+  3. **prs** (`sync/release-scan.ts`) — a range PR number with no `pull_requests` row is synced through
+     `syncOnePr` (an ordinary stored PR, any age), ≤ `RELEASE_PR_FETCH_PER_RUN` (120) per run, 3 at a
+     time; one GitHub does not give is remembered (`releases/scan-state.ts`): it holds its tag and is
+     asked again after 10 min.
+  4. **tickets** — the range PRs whose tickets are not read yet are queued for the tracker worker's
+     priority read ([TRACKERS.md](TRACKERS.md) § Release-range PRs).
+  Progress per step goes to `releases/scan-state.ts` (in memory) for `GET /api/releases`.
+- **Re-runs**: work left after a run that made progress ⇒ the step runs again in the background after
+  `QUICK_RERUN_MS` (3 s); work left and no progress (the budget) ⇒ marked for the settle sweep's catch-up
+  (`markTagCatchUp`, `CATCH_UP_DELAY_MS` 60 s, `takeTagCatchUp`). Ticking a repo marks it too (that route
+  never calls GitHub). While work is left the Releases tab reads "Checking…" and polls.
 
 ## Incremental updates (every subsequent sync)
 

@@ -490,9 +490,6 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (!mutating && path === '/api/releases') return [TIERS.read];
   // GET /api/releases/:id — one stored release (its notes and step results). DB only.
   if (!mutating && /^\/api\/releases\/\d+$/.test(path)) return [TIERS.read];
-  // PUT /api/releases/start-tag — "Start from this tag": one stored row, then the check again. DB only
-  // (the tag sync's catch-up it asks for reads GitHub later, in the settle sweep, budget-aware). `read`.
-  if (method === 'PUT' && path === '/api/releases/start-tag') return [TIERS.read];
   // POST /api/releases/refresh — Refresh: re-reads the held tickets from the tracker (the customer's
   // quota, as every tracker call → `search`). No GitHub call.
   if (method === 'POST' && path === '/api/releases/refresh') return [TIERS.search];

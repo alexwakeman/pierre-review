@@ -630,9 +630,8 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/releases/preview')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/releases/refresh')).toEqual(['search']);
     expect(tiers('POST', '/api/releases')).toEqual(['search', 'github_write']);
-    // "Start from this tag" and the releasable ticks: DB only (the tag sync's catch-up reads GitHub
+    // The releasable ticks: DB only (the tag sync's catch-up reads GitHub
     // later, in the settle sweep).
-    expect(tiers('PUT', '/api/releases/start-tag')).toEqual(['read']);
     expect(tiers('PUT', '/api/workspaces/3/release-repos')).toEqual(['read']);
     expect(tiers('GET', '/api/ticket-story')).toEqual(['read']);
     // The story view's status picker — a tracker write: Jira quota on both.

@@ -274,6 +274,63 @@ describe('syncRepoTags (DB)', () => {
   });
 });
 
+describe('syncRepoTags — a RELEASABLE repo reads the whole history (acceptance 38)', () => {
+  it('pages past 100 tags up to the read cap, asks ancestry for every one with no count cap, and tells its progress', async () => {
+    const [repo2] = await client.db
+      .insert(client.schema.repos)
+      .values({ accountId: 1, owner: 'acme', name: 'paged', githubNodeId: 'R_tags_paged', defaultBranchName: 'main' })
+      .returning()
+      .execute();
+    const all = Array.from({ length: 212 }, (_, i) =>
+      light(`v0.${211 - i}.0`, sha(`p${211 - i}`), new Date(Date.UTC(2026, 0, 1, 0, 211 - i)).toISOString()),
+    );
+    const pages: Array<string | null> = [];
+    const told: Array<[number, number]> = [];
+    const res = await m.syncRepoTags({
+      owner: 'acme',
+      name: 'paged',
+      repoId: repo2.id,
+      accountId: 1,
+      token: 't',
+      readCap: m.REPO_TAGS_READ_CAP_RELEASABLE,
+      ancestryCap: m.ANCESTRY_CHECKS_RELEASABLE,
+      onAncestry: (p) => told.push([p.done, p.total]),
+      deps: {
+        readTags: async (after) => {
+          pages.push(after);
+          const from = after == null ? 0 : Number(after);
+          const nodes = all.slice(from, from + 100);
+          const r = response(nodes, all.length);
+          r.repository!.refs!.pageInfo = { hasNextPage: from + 100 < all.length, endCursor: String(from + 100) };
+          return r;
+        },
+        compare: async () => ({ status: 'ahead' }),
+      },
+    });
+    expect(pages).toEqual([null, '100', '200']);
+    expect(res).toMatchObject({ read: true, inserted: 212, dropped: 0, ancestryChecked: 212, ancestryLeft: 0 });
+    expect(told[0]).toEqual([0, 212]);
+    expect(told.at(-1)![1]).toBe(212);
+    // One page only for a repo no workspace releases (the old cap): the rest is dropped and logged.
+    const one = await m.syncRepoTags({
+      owner: 'acme',
+      name: 'paged',
+      repoId: repo2.id,
+      accountId: 1,
+      token: 't',
+      ancestryCap: 0,
+      deps: {
+        readTags: async () => {
+          const r = response(all.slice(0, 100), all.length);
+          r.repository!.refs!.pageInfo = { hasNextPage: true, endCursor: '100' };
+          return r;
+        },
+      },
+    });
+    expect(one).toMatchObject({ read: true, dropped: 112, deleted: 0 });
+  });
+});
+
 describe('the PR walk stores the landed commit only on a positive statement', () => {
   it('writes an oid, clears on a not-merged PR, and omits a nulled selection on a merged one', async () => {
     const { mergeCommitOidToWrite } = await import('./upsert.js');

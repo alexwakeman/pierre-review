@@ -268,7 +268,6 @@ import type {
   ReleaseDetail,
   SetReleaseSettingsBody,
   SetReleaseReposBody,
-  SetReleaseStartTagBody,
   FlowPointersResponse,
   SandboxComposeFiles,
   SandboxFolderCheck,
@@ -670,12 +669,8 @@ export const api = {
   // Settings → Releases: the WHOLE set of repos ticked "Released from this workspace" (DB only).
   setReleaseRepos: (id: number, body: SetReleaseReposBody) =>
     fetch(`/api/workspaces/${id}/release-repos`, jsonBody('PUT', body)).then((r) => handle<ReleaseSettingsResponse>(r)),
-  // "Start from this tag" for one releasable repo (tagName null clears). DB only; answers the check.
-  setReleaseStartTag: (workspaceId: number, body: SetReleaseStartTagBody) =>
-    fetch(withQuery('/api/releases/start-tag', workspaceParam(workspaceId)), jsonBody('PUT', body)).then((r) =>
-      handle<ReleasesResponse>(r),
-    ),
-  // This Sprint → Releases: the release check over stored tags, ranges and tickets (DB only).
+  // This Sprint → Releases: the release check over stored tags, ranges and tickets, with each repo's
+  // scan progress (DB + memory only; the tab polls it while a repo is checking).
   releases: (workspaceId: number) => get<ReleasesResponse>(withQuery('/api/releases', workspaceParam(workspaceId))),
   // Refresh (a reader's press): the held tickets read again from the tracker, then the check.
   refreshReleases: (workspaceId: number) =>

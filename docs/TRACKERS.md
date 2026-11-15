@@ -723,13 +723,23 @@ Sprint → Releases is the reader's press, and it does two tracker things:
   candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
   the Releases tab and the dialog's preview read the stored rows (a view still never calls a reader).
 - **Refresh's re-read** (`POST /api/releases/refresh`, `releases/refresh.ts`) — the same exception, the
-  tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable, never read),
-  ≤ 30, through the same `syncOnePrNow(force)`. Needed because the worker is MISSING-ONLY for a merged
+  tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable) or still
+  waits for (not read yet), ≤ 30, through the same `syncOnePrNow(force)`. Needed because the worker is MISSING-ONLY for a merged
   PR (it never TTL-refreshes one), so a ticket moved to Done after its PRs merged would otherwise hold its
   tag for good. Tier `search`.
-- **A range PR with no stored row** (merged between worker passes) is found by the ONE detection rule
-  (`detectKeysWithAccess`, DB only) in `db/release-check.ts` and holds its tag as `not_read` — it never
-  passes as an untracked PR.
+- **RELEASE-RANGE PRs — read when RECEIVED, by the release scan** (`sync/release-scan.ts`; owner
+  decision 2026-11-15). The automatic check walks every version tag on main, so a range can name merged
+  PRs of ANY age — past the worker's 90-day merged window, often stored only just now by the scan's
+  single-PR sync. A range PR whose key THE detection rule finds (`detectKeysWithAccess`, DB only) but
+  with no stored row on the workspace's site is `not_read`: the check says "checking", never a blocker,
+  and the scan names it (`db/release-check.ts` `releaseTicketsOwed`) to the worker: `queueReleaseTicketReads`
+  puts it in a per-account PRIORITY set (≤ 2000) read FIRST in the next pass, in the same MISSING-ONLY mode
+  as any merged PR (a key with no row is read; no TTL refresh, no prune), inside the same per-pass budget;
+  it leaves the set once settled. `kickReleaseTicketReads` starts that pass without re-opening the
+  account's merged windows; the `*/2` tick reads what is left. Any reading tracker (Jira, GitHub Issues,
+  Linear). The TTL rules of every other PR are unchanged. A tracker FAILURE (`not_found` / `no_access` /
+  `failed`) holds the tag with the reason; a workspace whose tracker cannot read at all (no reader, no
+  credential) holds a `not_read` ticket ("the tracker cannot read it") rather than checking forever.
 - **The comment** — one per shipped ticket whose repos ALL tagged in this release, through the same
   `postTicketComment` (`POST /rest/api/2/issue/<key>/comment`, wiki markup, behind `statusGate`, under the
   reader's Jira login). Exactly three lines (shared `releaseCommentWiki`): "Approved for release by <name>

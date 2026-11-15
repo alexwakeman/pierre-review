@@ -60,12 +60,14 @@ describe('planTagRanges', () => {
       tag('unknown', 'u1', 2, { onDefaultBranch: null }),
     ];
     const plan = m.planTagRanges(tags, []);
-    expect(plan.work.map((w) => [w.tag.name, w.base?.name ?? null])).toEqual([
-      ['v1.2.0', 'v1.1.0-rc'],
-      ['v1.1.0-rc', 'v1.1.0'],
-      ['v1.1.0', 'v1.0.0'],
-      ['v1.0.0', null],
+    // OLDEST FIRST (the release check walks oldest first, so the candidate is proven early).
+    expect(plan.work.map((w) => [w.tag.name, w.base?.name ?? null, w.position])).toEqual([
+      ['v1.0.0', null, 1],
+      ['v1.1.0', 'v1.0.0', 2],
+      ['v1.1.0-rc', 'v1.1.0', 3],
+      ['v1.2.0', 'v1.1.0-rc', 4],
     ]);
+    expect(plan.needed).toBe(4);
   });
 
   it('skips a fresh range, recomputes a moved tag (flagged) and a changed base', () => {
@@ -78,18 +80,16 @@ describe('planTagRanges', () => {
     ];
     const plan = m.planTagRanges(tags, stored);
     expect(plan.work.map((w) => [w.tag.name, w.movedFromSha])).toEqual([
-      ['v1.2.0', sha('c5')],
       ['v1.1.0', null],
+      ['v1.2.0', sha('c5')],
     ]);
     expect(plan.deleteTagNames).toEqual(['gone']);
   });
 
-  it('bounds the work to the newest tags in the window, newest first', () => {
+  it('no window: every tag gets a range, oldest first; `perSync` bounds a run', () => {
     const tags = Array.from({ length: 6 }, (_, i) => tag(`v${i}`, `c${i}`, i + 1));
-    const plan = m.planTagRanges(tags, [], { window: 3, perSync: 2 });
-    expect(plan.work.map((w) => w.tag.name)).toEqual(['v5', 'v4']);
-    // The oldest tag in the window still has a base (outside the window), so it is not 'history'.
-    expect(m.planTagRanges(tags, [], { window: 3 }).work.at(-1)?.base?.name).toBe('v2');
+    expect(m.planTagRanges(tags, []).work.map((w) => w.tag.name)).toEqual(['v0', 'v1', 'v2', 'v3', 'v4', 'v5']);
+    expect(m.planTagRanges(tags, [], { perSync: 2 }).work.map((w) => w.tag.name)).toEqual(['v0', 'v1']);
   });
 });
 
@@ -102,35 +102,27 @@ describe('planTagRanges — only for a releasable repo, only after its baseline'
     const tags = fifty();
     // v0.0.4 was released (its release tag shares the commit).
     tags.push(tag('v0.0.4-rc', 'c4', 1, { committedAt: at(4), taggedAt: day(9) }));
-    const plan = m.planTagRanges(tags, [], { perSync: Number.MAX_SAFE_INTEGER, views: [{ settings, startTag: null }] });
+    const plan = m.planTagRanges(tags, [], { views: [{ settings }] });
     const names = new Set(plan.work.map((w) => w.tag.name));
     // Everything after the baseline (the release tag at ordered index 5) has a range, nothing up to it.
     for (let i = 5; i < 50; i += 1) expect(names.has(`v0.0.${i}`)).toBe(true);
     expect(names.has('v0.0.4')).toBe(false);
     expect(names.has('v0.0.4-rc')).toBe(false);
-    // Without a baseline only the newest 40 do.
-    expect(m.planTagRanges(fifty(), [], { perSync: Number.MAX_SAFE_INTEGER, views: [{ settings, startTag: null }] }).work).toHaveLength(40);
-    // A stored row after the baseline is NOT deleted as out of the window.
-    const kept = m.planTagRanges(tags, [{ tagName: 'v0.0.6', sha: sha('c6'), baseTagName: 'v0.0.5', baseSha: sha('c5') }], { views: [{ settings, startTag: null }] });
+    // Acceptance 14/38: without a baseline EVERY tag does (the whole history), the oldest first.
+    const all = m.planTagRanges(fifty(), [], { views: [{ settings }] });
+    expect(all.work).toHaveLength(50);
+    expect(all.work[0]).toMatchObject({ tag: { name: 'v0.0.0' }, base: null });
+    // A stored row after the baseline is NOT deleted.
+    const kept = m.planTagRanges(tags, [{ tagName: 'v0.0.6', sha: sha('c6'), baseTagName: 'v0.0.5', baseSha: sha('c5') }], { views: [{ settings }] });
     expect(kept.deleteTagNames).toEqual([]);
   });
 
-  it('a start tag: ranges only for the tags after it (a short list, so it catches up fast)', () => {
-    const plan = m.planTagRanges(fifty(), [{ tagName: 'v0.0.20', sha: sha('c20'), baseTagName: 'v0.0.19', baseSha: sha('c19') }], {
-      perSync: Number.MAX_SAFE_INTEGER,
-      views: [{ settings, startTag: { name: 'v0.0.47', sha: sha('c47') } }],
-    });
-    expect(plan.work.map((w) => w.tag.name)).toEqual(['v0.0.49', 'v0.0.48']);
-    expect(plan.deleteTagNames).toEqual(['v0.0.20']);
-    // Two workspaces release it: the OLDER baseline decides.
-    const two = m.planTagRanges(fifty(), [], {
-      perSync: Number.MAX_SAFE_INTEGER,
-      views: [
-        { settings, startTag: { name: 'v0.0.47', sha: sha('c47') } },
-        { settings, startTag: { name: 'v0.0.44', sha: sha('c44') } },
-      ],
-    });
-    expect(two.work).toHaveLength(5);
+  it('two workspaces release it: the OLDER baseline decides (one with no release: every tag)', () => {
+    const tags = fifty();
+    tags.push(tag('v0.0.47-rc', 'c47', 1, { committedAt: at(47), taggedAt: day(9) }));
+    const other = { releaseSuffix: '-release', hotfixSuffix: '-hotfix' };
+    expect(m.planTagRanges(tags, [], { views: [{ settings }] }).work.map((w) => w.tag.name)).toEqual(['v0.0.48', 'v0.0.49']);
+    expect(m.planTagRanges(tags, [], { views: [{ settings }, { settings: other }] }).work).toHaveLength(51);
   });
 
   it('no workspace releases the repo → no range at all, and stored ones are dropped', () => {
@@ -160,12 +152,28 @@ describe('rangePrNumbersFromAssociated', () => {
 
 describe('computeTagRanges (DB)', () => {
   const compareCalls: string[] = [];
+  const closedPages: number[] = [];
   const commitPrCalls: string[][] = [];
   const compareLists: Record<string, string[]> = {};
   const deps: TagRangeDeps = {
-    // One workspace releases this repo, with no start tag and a suffix no tag here ends in (no baseline:
-    // the whole window gets ranges).
-    views: () => [{ settings: { releaseSuffix: '-final', hotfixSuffix: '-hf' }, startTag: null }],
+    // One workspace releases this repo, with a suffix no tag here ends in (no baseline: the whole
+    // history gets ranges).
+    views: () => [{ settings: { releaseSuffix: '-final', hotfixSuffix: '-hf' } }],
+    // The closed PRs into main, oldest created first (the oldest tag's history, read from GitHub): #7 is
+    // older than the synced history (not stored), #8 was closed unmerged, #9 merged after v1.0.0, and
+    // #11 was created after v1.0.0's commit (the list stops at that page).
+    closedPrs: async (page: number) => {
+      closedPages.push(page);
+      return page === 1
+        ? [
+            { number: 7, created_at: day(0, 1).toISOString(), merged_at: day(0, 2).toISOString(), merge_commit_sha: sha('old7'), base: { ref: 'main' } },
+            { number: 8, created_at: day(0, 3).toISOString(), merged_at: null, base: { ref: 'main' } },
+            { number: 1, created_at: day(1, 0).toISOString(), merged_at: day(1).toISOString(), merge_commit_sha: sha('c1'), base: { ref: 'main' } },
+            { number: 9, created_at: day(1, 1).toISOString(), merged_at: day(6).toISOString(), merge_commit_sha: sha('x9'), base: { ref: 'main' } },
+            ...Array.from({ length: 96 }, (_, i) => ({ number: 100 + i, created_at: day(1, 13).toISOString(), merged_at: day(2).toISOString(), base: { ref: 'main' } })),
+          ]
+        : [{ number: 11, created_at: day(2).toISOString(), merged_at: day(2).toISOString(), base: { ref: 'main' } }];
+    },
     compare: async (base: string, head: string, page: number) => {
       compareCalls.push(`${base.slice(0, 2)}...${head.slice(0, 2)}#${page}`);
       const list = compareLists[`${base}...${head}`] ?? [];
@@ -265,7 +273,10 @@ describe('computeTagRanges (DB)', () => {
     expect(compareCalls.sort()).toEqual(['c1...c3#1', 'c3...m5#1']);
     const r = await ranges();
     const ids = (ns: number[]) => ns.map((n) => prIdByNumber.get(n));
-    expect(r['v1.0.0']).toMatchObject({ method: 'history', baseTagName: null, prIds: ids([1]) });
+    // acceptance 38: the oldest tag's history comes from GitHub too — #7 (never synced) is in it, kept
+    // as a number to fetch; unmerged and later PRs are not; the list stopped after the page past the tag.
+    expect(r['v1.0.0']).toMatchObject({ method: 'history', baseTagName: null, prIds: ids([1]), unresolvedPrNumbers: [7] });
+    expect(closedPages).toEqual([1, 2]);
     expect(r['v1.1.0']).toMatchObject({ method: 'compare', baseTagName: 'v1.0.0', prIds: ids([2, 3]), commitCount: 2, unmatchedCommits: 0 });
     expect(r['v1.1.0-rc']).toMatchObject({ baseTagName: 'v1.1.0', prIds: [], commitCount: 0 });
     // acceptance 13: PR 4 (into hotfix/…) is in no main range; d1 is a direct push.
@@ -326,6 +337,40 @@ describe('computeTagRanges (DB)', () => {
       __resetRateBudget();
       await client.db.delete(repoTags).where(and(eq(repoTags.repoId, repoId), eq(repoTags.name, 'v1.4.0'))).execute();
     }
+  });
+
+  it('a run stops starting ranges at its deadline (the rest are pending) and tells its progress, oldest first', async () => {
+    const { repoTags } = client.schema;
+    const { and, eq } = await import('drizzle-orm');
+    await client.db
+      .insert(repoTags)
+      .values({ accountId: 1, repoId, name: 'v1.5.0', sha: sha('c10'), committedAt: day(10), onDefaultBranch: true, firstSeenAt: day(10), lastSeenAt: day(10) })
+      .execute();
+    const told: Array<[string, number]> = [];
+    const late = await m.computeTagRanges({
+      owner: 'acme', name: 'web', repoId, accountId: 1, token: 't', defaultBranchName: 'main', deps,
+      deadline: Date.now() - 1,
+      onProgress: (p) => told.push([p.tagName, p.position]),
+    });
+    expect(late).toMatchObject({ computed: 0, pending: 1, paused: false });
+    expect(told).toEqual([]);
+    const ok = await m.computeTagRanges({
+      owner: 'acme', name: 'web', repoId, accountId: 1, token: 't', defaultBranchName: 'main', deps,
+      onProgress: (p) => told.push([p.tagName, p.position]),
+    });
+    expect(ok).toMatchObject({ computed: 1, pending: 0 });
+    expect(ok.ready).toBe(ok.needed);
+    expect(told).toEqual([['v1.5.0', 5]]);
+    await client.db.delete(repoTags).where(and(eq(repoTags.repoId, repoId), eq(repoTags.name, 'v1.5.0'))).execute();
+  });
+
+  it('historyPrNumber: merged into the default branch by the tag commit, or no later than its date', () => {
+    const tag = { sha: sha('t'), committedAt: day(5) };
+    expect(m.historyPrNumber({ number: 1, merged_at: day(4).toISOString(), base: { ref: 'main' } }, tag, 'main')).toBe(1);
+    expect(m.historyPrNumber({ number: 2, merged_at: day(6).toISOString(), merge_commit_sha: sha('t'), base: { ref: 'main' } }, tag, 'main')).toBe(2);
+    expect(m.historyPrNumber({ number: 3, merged_at: day(6).toISOString(), base: { ref: 'main' } }, tag, 'main')).toBeNull();
+    expect(m.historyPrNumber({ number: 4, merged_at: null, base: { ref: 'main' } }, tag, 'main')).toBeNull();
+    expect(m.historyPrNumber({ number: 5, merged_at: day(4).toISOString(), base: { ref: 'hotfix/x' } }, tag, 'main')).toBeNull();
   });
 
   it('a failed compare is non-fatal and leaves the stored range', async () => {

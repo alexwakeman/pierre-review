@@ -17,8 +17,12 @@ no internals.
 
 - Settings → Releases → "Released from this workspace": tick the repositories you release. Releases checks, tags
   and offers hotfix bases for those only, and ignores the rest. Nothing is ticked at first.
-- This Sprint → Releases → "Start from this tag": treat a version tag on main, and everything before it, as
-  accepted, so only later tags are checked. Change or clear it from the repository row. Nothing is written to GitHub.
+- This Sprint → Releases finds the candidate by itself. It checks every version tag on main after the last
+  release, or from the very first tag when there is none, oldest first. The first tag with a ticket that is not
+  Complete, or that could not be read, holds itself and every later tag, and the tag before it is the candidate.
+  Pull requests and tickets older than the synced history are fetched for the check.
+- This Sprint → Releases: a repository still being checked says "Checking…" with a progress bar and one line of
+  what it is doing ("Fetching pull requests: 35 of 80"). The tab updates by itself until every repository is done.
 - This Sprint: a sixth column, Cancelled, after Complete. Closed statuses such as "Won't do", "Duplicate" and
   "Closed as not planned" go there, and you can give any bucket this meaning in Statuses. Cancelled tickets never
   count as complete. The column is closed at first, like Complete. Saved buckets gain a Cancelled bucket when read.
@@ -28,12 +32,12 @@ no internals.
 - This Sprint → Releases: only a Complete ticket is Done. A cancelled ticket ("Won't do") now holds a tag back like
   any other unfinished ticket.
 
-- This Sprint → Releases: one row per repository with the latest version tag and the candidate ("Latest 0.394.0 ·
-  candidate 0.390.0 → 0.390.0-rc"). Open a row to see each tag's tickets and status. The separate tickets list is gone.
+- This Sprint → Releases: one row per repository: "Release 0.388.0 → 0.388.0-rc" (with the latest version tag
+  beside it when different), or "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In
+  Progress)". Open a row to see every tag after the candidate and why each one is held back. The separate tickets
+  list is gone.
 - This Sprint → Releases: a version tag is held back only by its own tickets that are not Done or could not be read.
   A ticket's pull requests in other repositories, and open pull requests, no longer hold anything back.
-- This Sprint → Releases: tags whose changes are still being read say "Reading changes…" instead of holding the
-  release back, and repositories you release catch up much sooner.
 - Settings → Releases: the hyphen before each suffix is fixed. Type `rc`, and the tag is `v2.4.0-rc`. A suffix saved
   without a hyphen now has one.
 - Implement → "Treat as a hotfix": a repository not released from this workspace is read only.

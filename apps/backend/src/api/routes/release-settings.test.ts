@@ -281,26 +281,9 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
     expect(foreign.statusCode).toBe(404);
   });
 
-  it('PUT /api/releases/start-tag: a version tag on main is stored with its commit; anything else is refused; null clears', async () => {
-    const { repoTags, workspaceReleaseRepos } = client.schema;
-    await call('PUT', ownWs, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' });
-    const repoId = (await client.db.select().from(repoTags).execute())[0].repoId;
-    const put = async (body: unknown) => {
-      const res = await app.inject({ method: 'PUT', url: `/api/releases/start-tag?workspace=${ownWs}`, payload: body as any });
-      return { status: res.statusCode, body: res.json() as any };
-    };
-    const ok = await put({ repoId, tagName: 'v1.0.0' });
-    expect(ok.status).toBe(200);
-    expect(ok.body.check.repos[0].startTag).toMatchObject({ name: 'v1.0.0', sha: 'a'.repeat(40), problem: null });
-    const row = (await client.db.select().from(workspaceReleaseRepos).execute())[0];
-    expect(row).toMatchObject({ startTagName: 'v1.0.0', startTagSha: 'a'.repeat(40) });
-    // A release tag is not a version tag; an unknown tag neither.
-    expect((await put({ repoId, tagName: 'v1.0.0-rc' })).body).toMatchObject({ error: 'NotAVersionTag' });
-    expect((await put({ repoId, tagName: 'nope' })).status).toBe(400);
-    // A repo not released from this workspace.
-    expect((await put({ repoId: 999_999, tagName: 'v1.0.0' })).status).toBe(404);
-    const cleared = await put({ repoId, tagName: null });
-    expect(cleared.body.check.repos[0].startTag).toBeNull();
+  it('the start tag is gone: PUT /api/releases/start-tag is not a route (the check finds its own start)', async () => {
+    const res = await app.inject({ method: 'PUT', url: `/api/releases/start-tag?workspace=${ownWs}`, payload: { repoId: 1, tagName: 'v1.0.0' } });
+    expect(res.statusCode).toBe(404);
   });
 
   it('the new tables are on the erasure checklist', async () => {

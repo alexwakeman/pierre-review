@@ -9,17 +9,13 @@ import {
   type ReleasesResponse,
   type SetReleaseReposBody,
   type SetReleaseSettingsBody,
-  type SetReleaseStartTagBody,
 } from '@pierre-review/shared';
-import { eq } from 'drizzle-orm';
-import { db, schema } from '../../db/client.js';
-import { getReleaseRepos, setReleaseRepos, setReleaseStartTag } from '../../db/release-repos.js';
-import { resolveWorkspaceScope } from '../../db/queries.js';
+import { getReleaseRepos, setReleaseRepos } from '../../db/release-repos.js';
 import { markTagCatchUp } from '../../sync/tags-step.js';
 import { ReleaseRequestError, createRelease, getReleaseDetail, previewRelease } from '../../releases/create.js';
 import { getReleases } from '../../db/release-check.js';
 import { refreshReleases } from '../../releases/refresh.js';
-import { getReleaseSettings, getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
+import { getReleaseSettingsResponse, setReleaseSettings } from '../../db/release-settings.js';
 import { accountIdOf } from '../plugins/auth.js';
 
 // RELEASES (docs/RELEASES.md; docs/API.md § Releases). CORE, always registered.
@@ -36,13 +32,12 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                              DB only; newly ticked repos are marked for the tag
 //                                              sync's catch-up (the settle sweep reads GitHub, not this
 //                                              route). Answers the settings.
-//   PUT /api/releases/start-tag?workspace=<id> "Start from this tag": `{ repoId, tagName }` (null
-//                                              clears). DB only, nothing written to GitHub. Answers
-//                                              the check (GET /api/releases's shape).
 //   GET /api/releases?workspace=<id>           This Sprint → Releases: the release check (shared
 //                                              `foldReleaseCheck` over db/release-check.ts's stored
-//                                              inputs), the newest release, whether both suffixes are
-//                                              set. DB only, NEVER a GitHub or tracker call; tier `read`.
+//                                              inputs) with each repo's scan progress, the newest
+//                                              release, whether both suffixes are set. DB + memory
+//                                              only, NEVER a GitHub or tracker call; tier `read`. The
+//                                              tab polls it every ~3 s while a repo is checking.
 //   POST /api/releases/refresh?workspace=<id>  Refresh (a reader's press): the tickets the check holds by
 //                                              their own state read again from the tracker
 //                                              (releases/refresh.ts), then the check. Tier `search`.
@@ -55,7 +50,7 @@ import { accountIdOf } from '../plugins/auth.js';
 //                                              Tracker reads + GitHub writes: tier `search` + `github_write`.
 //   GET  /api/releases/:id                     one stored release (its notes and per-step results).
 //
-// The settings routes and the start tag are DB only — the `read` tier (api/plugins/rate-limit.ts). 404
+// The settings routes are DB only — the `read` tier (api/plugins/rate-limit.ts). 404
 // on a workspace that is not this account's, like every id-addressed workspace route.
 
 const idParamSchema = {
@@ -179,38 +174,6 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
     }
     return detail;
   });
-
-  app.put(
-    '/api/releases/start-tag',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          required: ['repoId', 'tagName'],
-          additionalProperties: false,
-          properties: { repoId: { type: 'integer' }, tagName: { type: ['string', 'null'], minLength: 1, maxLength: 300 } },
-        },
-      },
-    },
-    async (req, reply) => {
-      const accountId = accountIdOf(req);
-      const q = req.query as { workspace?: string };
-      const body = req.body as SetReleaseStartTagBody;
-      const scope = await resolveWorkspaceScope(accountId, q.workspace);
-      const settings = (await getReleaseSettings(accountId, scope.workspaceId)) ?? { releaseSuffix: null, hotfixSuffix: null };
-      const login =
-        (await db.select({ login: schema.accounts.githubLogin }).from(schema.accounts).where(eq(schema.accounts.id, accountId)).execute())[0]
-          ?.login ?? null;
-      const out = await setReleaseStartTag(accountId, scope.workspaceId, settings, body.repoId, body.tagName, login);
-      if (!out.ok) {
-        reply.status(out.status);
-        return { error: out.code, message: out.message };
-      }
-      // A new baseline needs only the ranges after it: ask the tag sync to catch up soon.
-      markTagCatchUp(body.repoId);
-      return getReleases(accountId, scope.workspaceId);
-    },
-  );
 
   app.put(
     '/api/workspaces/:id/release-repos',

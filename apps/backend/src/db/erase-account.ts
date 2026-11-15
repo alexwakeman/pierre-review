@@ -145,7 +145,7 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.releases).where(eq(schema.releases.accountId, accountId)).execute();
     await tx.delete(schema.repoTagRanges).where(eq(schema.repoTagRanges.accountId, accountId)).execute();
     await tx.delete(schema.repoTags).where(eq(schema.repoTags.accountId, accountId)).execute();
-    // Releasable repositories and their start tags (migration 0199).
+    // Releasable repositories (migration 0199).
     await tx.delete(schema.workspaceReleaseRepos).where(eq(schema.workspaceReleaseRepos.accountId, accountId)).execute();
     // Story chats (migration 0192): turns first (their FK names the chat), then the chats.
     await tx.delete(schema.storyChatTurns).where(eq(schema.storyChatTurns.accountId, accountId)).execute();
@@ -561,7 +561,7 @@ export function accountScopedTables(): {
     { name: 'releases', col: schema.releases.accountId, table: schema.releases },
     { name: 'releaseItems', col: schema.releaseItems.accountId, table: schema.releaseItems },
     { name: 'releaseTicketComments', col: schema.releaseTicketComments.accountId, table: schema.releaseTicketComments },
-    // Releasable repositories and their start tags (migration 0199).
+    // Releasable repositories (migration 0199).
     { name: 'workspaceReleaseRepos', col: schema.workspaceReleaseRepos.accountId, table: schema.workspaceReleaseRepos },
     // Story chats (migration 0192): the reader's questions and the answers.
     { name: 'storyChats', col: schema.storyChats.accountId, table: schema.storyChats },

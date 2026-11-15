@@ -670,7 +670,7 @@ function ReleasesPanel(): JSX.Element {
       {open ? <p className="dlg">{R.dialog}</p> : null}
       <ul className="repos">
         {R.repos.map((r) => {
-          const isOpen = expanded === r.name && (r.tags.length > 0 || r.start != null);
+          const isOpen = expanded === r.name && r.tags.length > 0;
           return (
             <li key={r.name} className={r.candidate ? 'cand' : undefined}>
               <button
@@ -685,12 +685,20 @@ function ReleasesPanel(): JSX.Element {
                 </span>
                 <span className="txt">
                   {r.text}
+                  {r.latest ? <small> · {r.latest}</small> : null}
                   {r.counts ? <small> · {r.counts}</small> : null}
                 </span>
               </button>
+              {r.progress ? (
+                <div className="prog">
+                  <span className="bar" role="progressbar" aria-label={r.progress.line} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r.progress.share * 100)}>
+                    <span style={{ width: `${Math.round(r.progress.share * 100)}%` }} />
+                  </span>
+                  <small>{r.progress.line}</small>
+                </div>
+              ) : null}
               {isOpen ? (
                 <div className="tags">
-                  {r.start ? <p className="start">{r.start} · Change</p> : null}
                   {r.tags.map((t) => (
                     <div key={t.name} className="tag">
                       <span className="tn">
@@ -699,6 +707,11 @@ function ReleasesPanel(): JSX.Element {
                         {t.candidate ? <small> candidate</small> : null}
                         {t.held ? <small className="held"> first tag held back</small> : null}
                       </span>
+                      {(t.notes ?? []).map((n) => (
+                        <p key={n} className="note">
+                          {n}
+                        </p>
+                      ))}
                       <ul className="tickets">
                         {t.tickets.map((k) => (
                           <li key={k.key} className={`mark ${k.tone}`}>
