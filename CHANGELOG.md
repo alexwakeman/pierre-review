@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.47] - 2026-11-16
+
 ### Changed
 
 - This Sprint → Releases: the candidate is now the newest tag whose tickets are Complete with no pull request
