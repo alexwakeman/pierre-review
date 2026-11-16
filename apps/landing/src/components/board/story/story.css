@@ -1,0 +1,109 @@
+/* ---------------------------------------------------------------------------
+   THE STORY: shared by the landing's animated explanations (components/board/story/).
+     .story            the picture, then the caption card
+       .story-cap      the card: .cap-stack (every step in one grid cell, only [data-on]
+                       visible, so the card never changes height) + .cap-nav (Replay, ‹ ›)
+       .story-all      STILL (prerender, reduced motion): every step listed
+   --------------------------------------------------------------------------- */
+.lb .story {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* the caption card */
+.lb .story-cap {
+  position: relative;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.lb .story-cap h3 {
+  margin: 4px 0 6px;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.lb .story-cap p {
+  margin: 0;
+  color: #dcdad5;
+  line-height: 1.45;
+}
+.lb .cap-stack {
+  display: grid;
+}
+.lb .cap-stack > * {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+.lb .cap-stack > [data-on] {
+  visibility: visible;
+}
+.lb .story-cap .cap-wait {
+  color: var(--muted);
+}
+.lb .cap-n {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.lb .cap-nav {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lb .story-cap h3 {
+  padding-right: 120px;
+}
+.lb .cap-arrow {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink);
+  background: none;
+  border: 1px solid rgba(241, 241, 239, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.lb .cap-arrow:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.lb .cap-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.lb .cap-replay {
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: none;
+  border: 1px solid rgba(241, 241, 239, 0.3);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.lb .cap-replay:hover {
+  border-color: var(--ink);
+}
+.lb .story-all {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.lb .story-all li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 6px;
+}

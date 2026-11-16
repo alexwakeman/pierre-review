@@ -1,6 +1,7 @@
 import { Link } from '../../router';
 import { SITE_NAME } from '../../lib/site';
 import { EnsembleStory } from './EnsembleStory';
+import { BuildStory } from './BuildStory';
 
 // ---------------------------------------------------------------------------
 // The home page's three sections after the hero: review as an ensemble (the team
@@ -8,39 +9,15 @@ import { EnsembleStory } from './EnsembleStory';
 // ends on a link to the page that tells it in full (/build, /ensemble-review,
 // /automation).
 //
-// Both diagrams are real markup, not pictures: the flow is an ordered list, the circle
-// an SVG with a role="img" summary AND a visually hidden list carrying the same facts,
-// so a crawler or screen reader gets every word.
+// Both diagrams are stories (./story/): an SVG with a role="img" summary AND a visually
+// hidden list carrying the same steps, so a crawler or screen reader gets every word.
 //
 // ⚠ EVERY CLAIM IS A PRODUCT FACT (docs/STORY-BUILD.md, docs/TEAM-REVIEW.md,
 // docs/CLAUDE-REVIEW.md § Team claims, docs/MERGE-CI-TRUNK.md § Dependency automation).
 // Change the copy here in the same commit as the behaviour.
 // ---------------------------------------------------------------------------
 
-const STEPS: { n: string; h: string; p: string; tone: string }[] = [
-  {
-    n: '1',
-    h: 'Refine and plan',
-    p: 'Your agent reads the ticket against your docs and your code, updates the acceptance criteria where they fall short, and plans the change.',
-    tone: 'verdigris',
-  },
-  { n: '2', h: 'Build', p: 'Your Claude or Codex writes the change in a sandbox on your machine.', tone: 'madder' },
-  {
-    n: '3',
-    h: 'Review in rounds',
-    p: 'Claude and Codex review the branch against the new criteria. The agent fixes what they find, and they review again.',
-    tone: 'lapis',
-  },
-  { n: '4', h: 'Open the pull request', p: 'Its description says what the review found and what was fixed.', tone: 'gold' },
-  {
-    n: '5',
-    h: 'Update the ticket',
-    p: 'The ticket gets the new criteria, and a plain-English comment that links the pull requests.',
-    tone: 'lapis',
-  },
-];
-
-/** The build flow: five steps, with the review loop drawn under Implement and Review. */
+/** The build flow, as a story: from the press to the updated ticket, then How to test. */
 export function HowItWorks(): JSX.Element {
   return (
     <section id="how" className="section chapter" aria-labelledby="how-h">
@@ -52,24 +29,9 @@ export function HowItWorks(): JSX.Element {
         </p>
       </div>
       <div className="board flow">
-        <ol className="flow-steps">
-          {STEPS.map((s) => (
-            <li key={s.n} className={`tile ${s.tone} rise`}>
-              <span className="flow-n" aria-hidden="true">
-                {s.n}
-              </span>
-              <h3>{s.h}</h3>
-              <p>{s.p}</p>
-            </li>
-          ))}
-        </ol>
-        <p className="flow-loop rise">
-          <span aria-hidden="true">↺</span> Steps 2 and 3 repeat until the review is clean.
-        </p>
-        <p className="flow-loop rise">
-          No context to paste, no prompt to write, no steps to remember. You review a pull request that has already
-          been reviewed.
-        </p>
+        <div className="tile flow-stage rise">
+          <BuildStory />
+        </div>
         <p className="flow-more rise">
           <Link to="/build">How the build works →</Link>
         </p>

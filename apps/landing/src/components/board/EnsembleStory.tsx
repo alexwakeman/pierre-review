@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useStory } from './story/useStory';
+import { SITE_NAME } from '../../lib/site';
+import { StoryCaption, type StoryStep } from './story/StoryCaption';
 
 // ---------------------------------------------------------------------------
 // REVIEW AS AN ENSEMBLE, AS A STORY (the home page's "Review as an ensemble"). The team
@@ -42,7 +44,7 @@ const AT: Record<Phase, number> = {
 /** The caption step each phase belongs to. */
 const STEP_OF: Record<Phase, number> = { open: 1, review: 2, findings: 3, fix: 3, push: 3, back: 4, approve: 4, merged: 5 };
 
-export const STORY_STEPS: { h: string; p: string }[] = [
+export const STORY_STEPS: StoryStep[] = [
   { h: 'You open a pull request', p: '#612 Partial refunds goes up on GitHub. You are its author.' },
   {
     h: 'Sam and Dana review it, at the same time',
@@ -57,11 +59,11 @@ export const STORY_STEPS: { h: string; p: string }[] = [
 ];
 
 const MATES = [
-  { name: 'You', agent: 'Claude + Codex', cls: 'you' },
-  { name: 'Sam', agent: 'Claude', cls: 'sam' },
-  { name: 'Dana', agent: 'Codex', cls: 'dana' },
-  { name: 'Priya', agent: 'Claude', cls: 'faint' },
-  { name: 'Leo', agent: 'Codex', cls: 'faint' },
+  { name: 'You', agent: '+ Claude, Codex', cls: 'you' },
+  { name: 'Sam', agent: '+ Claude', cls: 'sam' },
+  { name: 'Dana', agent: '+ Codex', cls: 'dana' },
+  { name: 'Priya', agent: '+ Claude', cls: 'faint' },
+  { name: 'Leo', agent: '+ Codex', cls: 'faint' },
 ] as const;
 
 const CX = 300;
@@ -97,80 +99,15 @@ const E = {
   push: edge('You', 12, true),
 };
 
-const ALL = new Set<Phase>(PHASES);
-
 export function EnsembleStory(): JSX.Element {
-  // The prerendered page shows the finished picture; the effect resets it to the start
-  // (before it can be seen: the section is below the fold) and plays it once in view.
-  const [reached, setReached] = useState<Set<Phase>>(ALL);
-  const [still, setStill] = useState(true);
-  const [played, setPlayed] = useState(false);
-  const timers = useRef<number[]>([]);
-  const root = useRef<HTMLDivElement>(null);
-
-  const clear = (): void => {
-    timers.current.forEach((t) => window.clearTimeout(t));
-    timers.current = [];
-  };
-  // The step the reader moved to with the arrows (null while the story plays by itself).
-  const [picked, setPicked] = useState<number | null>(null);
-  const play = (): void => {
-    clear();
-    setReached(new Set());
-    setPlayed(true);
-    setPicked(null);
-    for (const ph of PHASES) {
-      timers.current.push(window.setTimeout(() => setReached((r) => new Set(r).add(ph)), AT[ph]));
-    }
-  };
-
-  /** Step `k` (1–5): every earlier step finished, then this step's own phases play. Stops the autoplay. */
-  const goTo = (k: number): void => {
-    const n = Math.min(Math.max(k, 1), STORY_STEPS.length);
-    clear();
-    setPlayed(true);
-    setPicked(n);
-    setReached(new Set(PHASES.filter((p) => STEP_OF[p] < n)));
-    const own = PHASES.filter((p) => STEP_OF[p] === n);
-    const first = Math.min(...own.map((p) => AT[p]));
-    for (const ph of own) {
-      timers.current.push(window.setTimeout(() => setReached((r) => new Set(r).add(ph)), AT[ph] - first + 150));
-    }
-  };
-
-  useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches || typeof IntersectionObserver === 'undefined') return;
-    setStill(false);
-    setReached(new Set());
-    const el = root.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      (es) => {
-        if (es.some((e) => e.isIntersecting)) {
-          io.disconnect();
-          play();
-        }
-      },
-      { threshold: 0.55 },
-    );
-    io.observe(el);
-    return () => {
-      io.disconnect();
-      clear();
-    };
-    // play/clear only touch refs and setters
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const last = PHASES.filter((p) => reached.has(p)).pop();
-  const step = picked ?? (last != null ? STEP_OF[last] : 0);
-  const cls = ['circle-svg', 'story-svg', still ? 'still' : '', ...PHASES.filter((p) => reached.has(p)).map((p) => `p-${p}`)].filter(Boolean).join(' ');
+  const player = useStory(PHASES, AT, STEP_OF, STORY_STEPS.length);
+  const cls = `circle-svg story-svg ${player.phaseClasses}`;
   const you = byName('You');
   const dana = byName('Dana');
   const sam = byName('Sam');
 
   return (
-    <div className="story" ref={root}>
+    <div className="story" ref={player.root}>
       <svg
         className={cls}
         viewBox="0 0 600 600"
@@ -221,10 +158,14 @@ export function EnsembleStory(): JSX.Element {
         {nodes.map((n) => (
           <g key={n.name} className={`s-mate m-${n.cls}`}>
             <circle cx={n.x} cy={n.y} r={NODE} className="c-node s-node" />
-            <text x={n.x} y={n.y - 4} className="c-name">
+            <text x={n.x} y={n.y - 12} className="c-name">
               {n.name}
             </text>
-            <text x={n.x} y={n.y + 18} className="c-agent">
+            {/* everyone reviews through their own Ensemble, with their own agent */}
+            <text x={n.x} y={n.y + 9} className="c-ens">
+              {SITE_NAME}
+            </text>
+            <text x={n.x} y={n.y + 26} className="c-agent">
               {n.agent}
             </text>
           </g>
@@ -281,79 +222,7 @@ export function EnsembleStory(): JSX.Element {
         </g>
       </svg>
 
-      {still ? (
-        <ol className="story-all">
-          {STORY_STEPS.map((s, i) => (
-            <li key={s.h}>
-              <span className="cap-n">{i + 1}</span>
-              <span>
-                <b>{s.h}.</b> {s.p}
-              </span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-      <div
-        className="story-cap"
-        aria-live="polite"
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' && step > 1) goTo(step - 1);
-          else if (e.key === 'ArrowRight' && step < STORY_STEPS.length) goTo(step + 1);
-          else return;
-          e.preventDefault();
-        }}
-      >
-        {/* Every caption sits in the same grid cell and only the current one shows, so the
-            card is always as tall as the longest step: nothing below it moves as it plays. */}
-        <div className="cap-stack">
-          <p className="cap-wait" aria-hidden={step !== 0} data-on={step === 0 || undefined}>
-            The life of one pull request.
-          </p>
-          {STORY_STEPS.map((s, i) => (
-            <div key={s.h} className="cap-step" aria-hidden={step !== i + 1} data-on={step === i + 1 || undefined}>
-              <span className="cap-n">
-                {i + 1} / {STORY_STEPS.length}
-              </span>
-              <h3>{s.h}</h3>
-              <p>{s.p}</p>
-            </div>
-          ))}
-        </div>
-        <div className="cap-nav">
-          {played && step === STORY_STEPS.length && (
-            <button type="button" className="cap-replay" onClick={play}>
-              Replay
-            </button>
-          )}
-          <button
-            type="button"
-            className="cap-arrow"
-            aria-label="Previous step"
-            disabled={step <= 1}
-            onClick={() => goTo(step - 1)}
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            className="cap-arrow"
-            aria-label="Next step"
-            disabled={step >= STORY_STEPS.length}
-            onClick={() => goTo(step + 1)}
-          >
-            ›
-          </button>
-        </div>
-      </div>
-      )}
-
-      <ol className="vh">
-        {STORY_STEPS.map((s) => (
-          <li key={s.h}>
-            {s.h}: {s.p}
-          </li>
-        ))}
-      </ol>
+      <StoryCaption steps={STORY_STEPS} player={player} intro="The life of one pull request." />
     </div>
   );
 }
