@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 import { startArcMotion } from '../arcs/arcMotion';
+import { startCornerWaves } from '../arcs/cornerWave';
 
 // ---------------------------------------------------------------------------
 // The board's entrance: tiles marked `.rise` lift into place as they scroll in.
@@ -12,7 +13,8 @@ import { startArcMotion } from '../arcs/arcMotion';
 // IntersectionObserver, nothing is ever hidden.
 //
 // It also starts the scroll-linked motion of every arc picture on the page
-// (components/arcs/arcMotion.ts), under the same reduced-motion rule.
+// (components/arcs/arcMotion.ts) and the ripple through each voice tile's corner
+// quarter (components/arcs/cornerWave.ts), under the same reduced-motion rule.
 //
 // Usage: const ref = useReveal<HTMLDivElement>(); <div className="lb" ref={ref}>…
 // ---------------------------------------------------------------------------
@@ -33,6 +35,7 @@ export function useReveal<T extends HTMLElement>(): RefObject<T> {
 
     root.classList.add('js-rise');
     const stopArcs = startArcMotion(root);
+    const stopWaves = startCornerWaves(root);
 
     const io = new IntersectionObserver(
       (entries) => {
@@ -53,6 +56,7 @@ export function useReveal<T extends HTMLElement>(): RefObject<T> {
     return () => {
       io.disconnect();
       stopArcs();
+      stopWaves();
       // Back to the markup's state (everything visible), so a remount — StrictMode
       // runs every effect twice in dev — starts the reveal cleanly.
       root.classList.remove('js-rise');
