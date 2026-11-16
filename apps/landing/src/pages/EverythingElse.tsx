@@ -28,17 +28,10 @@ export default function EverythingElse(): JSX.Element {
   return (
     <>
       <div className="lb home" ref={top}>
-        <section className="section chapter ee-head" aria-labelledby="ee-h">
+        {/* The page's first section carries its one h1 (the old "Everything else" header is gone). */}
+        <section id="open-prs" className="section chapter ee-head" aria-labelledby="op-h">
           <div className="chap">
-            <h1 id="ee-h">Everything else</h1>
-            <p>
-              Every open pull request in one view, how it reports and how we measure.
-            </p>
-          </div>
-        </section>
-        <section id="open-prs" className="section chapter" aria-labelledby="op-h">
-          <div className="chap rise">
-            <h2 id="op-h">Open pull requests</h2>
+            <h1 id="op-h">Open pull requests</h1>
             <p>
               Every open pull request in the workspace, grouped by its ticket. Each row says whether it can land. Open
               one to see why.
