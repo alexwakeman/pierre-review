@@ -303,17 +303,22 @@ export function EnsembleStory(): JSX.Element {
           e.preventDefault();
         }}
       >
-        {step === 0 ? (
-          <p className="cap-wait">The life of one pull request.</p>
-        ) : (
-          <>
-            <span className="cap-n">
-              {step} / {STORY_STEPS.length}
-            </span>
-            <h3>{STORY_STEPS[step - 1]!.h}</h3>
-            <p>{STORY_STEPS[step - 1]!.p}</p>
-          </>
-        )}
+        {/* Every caption sits in the same grid cell and only the current one shows, so the
+            card is always as tall as the longest step: nothing below it moves as it plays. */}
+        <div className="cap-stack">
+          <p className="cap-wait" aria-hidden={step !== 0} data-on={step === 0 || undefined}>
+            The life of one pull request.
+          </p>
+          {STORY_STEPS.map((s, i) => (
+            <div key={s.h} className="cap-step" aria-hidden={step !== i + 1} data-on={step === i + 1 || undefined}>
+              <span className="cap-n">
+                {i + 1} / {STORY_STEPS.length}
+              </span>
+              <h3>{s.h}</h3>
+              <p>{s.p}</p>
+            </div>
+          ))}
+        </div>
         <div className="cap-nav">
           {played && step === STORY_STEPS.length && (
             <button type="button" className="cap-replay" onClick={play}>
