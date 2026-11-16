@@ -30,6 +30,7 @@ import { AutoPushLine } from './AutoPushOption.js';
 import { ReviewLoopSection } from './ReviewLoopSection.js';
 import { AutoApproveSetting } from './AutoApproveOption.js';
 import { TicketStep } from './TicketUpdatePanel.js';
+import { HowToTestPointer } from './HowToTestPointer.js';
 import { StoryBuildHeader } from './StoryBuildHeader.js';
 import { StoryBuildSection } from './StoryBuildSection.js';
 
@@ -120,6 +121,8 @@ function StoryBuildBody({
       />
       {q.isLoading && <p className="mt-5 text-meta text-ui-mute">Loading…</p>}
       {q.isError && <p className="mt-5 text-body text-ui-danger">Could not load this session.</p>}
+      {/* "How to test" after a build: points at the story chat's answer until opened or dismissed. */}
+      {build != null && <HowToTestPointer build={build} />}
       {open != null && <AutoPushLine build={open.build} />}
       {open != null && <AutoApproveSetting build={open.build} />}
       {open != null && <TicketStep build={open.build} />}

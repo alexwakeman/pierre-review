@@ -160,6 +160,7 @@ beforeAll(async () => {
     sprint: async () => '- ACME-10 "Refund emails" — In Progress; acme/web#3 (open)',
     tmpBase: () => TMP_BASE,
     diff: async (repo, n) => `diff --git a/x b/x\n# ${repo}#${n}\n`,
+    buildWork: async () => [{ repo: 'acme/web', label: "the build's work", where: 'not pushed', patch: 'diff --git a/w.ts b/w.ts\n--- a/w.ts\n+++ b/w.ts\n@@ -1 +1 @@\n-old\n+new\n' }],
   });
 });
 
@@ -211,8 +212,31 @@ describe('story chat — the live agent', () => {
     const memFile = (spec.system.match(/Every memory file is also in (\S+?)\./) ?? [])[1];
     expect(memFile).toBeTruthy();
     expect(readFileSync(join(memFile!, '1-api', 'MEMORY.md'), 'utf8')).toBe('Staging needs the REFUNDS_V2 flag.');
-    // The PR's diff is written on the host (the checkout is blobless; the sandbox has no GitHub).
-    expect(spec.system).toMatch(/its full diff: .*acme__api-12\.diff/);
+    // The PR's diff is written on the host (the checkout is blobless; the sandbox has no GitHub): whole, and
+    // file by file in parts that one Read returns whole. No read limit in the instructions.
+    expect(spec.system).toMatch(/its diff in one file: .*acme__api-12\.diff/);
+    const index = (spec.system.match(/its diff, file by file: (\S+INDEX\.md)/) ?? [])[1];
+    expect(readFileSync(index!, 'utf8')).toContain('- x (changed, +0 −0): 001-x.diff');
+    expect(spec.system).not.toMatch(/about 20 reads/);
+    expect(spec.system).toContain('read EVERY part of EVERY pull request');
+    // The story's build work, not pushed yet, is readable too.
+    const work = (spec.system.match(/- acme\/web: the build's work \(not pushed\)\. Its diff, file by file: (\S+)/) ?? [])[1];
+    expect(readFileSync(work!, 'utf8')).toContain('w.ts (changed, +1 −1): 001-w.ts.diff');
+    expect(spec.turnsPerQuestion).toBe(L.STORY_CHAT_TURNS_PER_QUESTION);
+  });
+
+  it('checks out every PR of the story (past six), naming any past the bound', async () => {
+    const many = Array.from({ length: L.STORY_CHAT_MAX_CHECKOUTS + 2 }, (_, i) => ({ fullName: 'acme/api', number: 100 + i, title: `P${i}`, state: 'open', byReader: false }));
+    const saved = ticket.prs;
+    ticket.prs = many;
+    try {
+      await L.prepare(ctx, 1, ws, IDENT);
+      expect(L.liveOf(1, ws, IDENT).checkouts).toHaveLength(L.STORY_CHAT_MAX_CHECKOUTS);
+      expect(sessions.at(-1).spec.system).toContain('Not checked out (too many pull requests): acme/api#101, acme/api#100.');
+    } finally {
+      ticket.prs = saved;
+      await L.closeAll();
+    }
   });
 
   it('answers on the warm session, stores the turn, and serves the next question on the SAME session', async () => {

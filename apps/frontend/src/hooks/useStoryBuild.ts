@@ -304,6 +304,19 @@ export function useStoryBuildTicketReview(workspaceId: number | null, ident: str
   });
 }
 
+/** "How to test" after a build: the build tab's pointer was opened or dismissed (docs/STORY-BUILD.md). */
+export function useStoryBuildHowToTestSeen(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.setStoryBuildHowToTestSeen(id),
+    onSuccess: () => {
+      qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) =>
+        old?.build?.howToTest == null ? old : { ...old, build: { ...old.build, howToTest: { ...old.build.howToTest, seen: true } } },
+      );
+    },
+  });
+}
+
 /** THE BUILDS TOAST's query. */
 export function storyBuildActivityKey(workspaceId: number | null): [string, string] {
   return ['story-build-activity', workspaceKey(workspaceId)];

@@ -84,8 +84,9 @@ export default function Page(): JSX.Element {
       <p>
         Where the workspace has an issue tracker connected, the list is grouped by ticket. Each group shows
         the ticket's key and name; choose it to open the ticket's{' '}
-        <DocLink to="this-sprint/story-view">story view</DocLink>. A pull request that names two tickets is in
-        both groups. Pull requests with no ticket are in a last group, <Ui>No ticket</Ui>. Tickets that are not
+        <DocLink to="this-sprint/story-view">story view</DocLink>. Tickets that share a pull request are one
+        group: each ticket on its own line, and each pull request once beneath them. A row names its ticket
+        when it is not on every ticket of the group. Pull requests with no ticket are in a last group, <Ui>No ticket</Ui>. Tickets that are not
         done come first, then the most recently updated.
       </p>
       <p>

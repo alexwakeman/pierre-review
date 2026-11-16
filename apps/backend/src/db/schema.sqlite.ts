@@ -4819,6 +4819,13 @@ export const storyBuilds = sqliteTable(
     // with a latest release is fixed there and the fix PORTED to the default branch; the review loop and
     // "Build end to end" are refused for it.
     hotfix: integer('hotfix', { mode: 'boolean' }).notNull().default(false),
+    // HOW TO TEST AFTER A BUILD (migration 0204; docs/STORY-BUILD.md § How to test after a build): the story
+    // chat's "How to test" asked once per version of the stored work. `how_to_test_key` is the claim (the
+    // work's hash, compare-and-set); `how_to_test_chat_id` the chat (NO FK, re-scoped by account);
+    // `how_to_test_seen_at` when the reader opened or dismissed it from the build tab.
+    howToTestKey: text('how_to_test_key'),
+    howToTestChatId: integer('how_to_test_chat_id'),
+    howToTestSeenAt: integer('how_to_test_seen_at', { mode: 'timestamp' }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),

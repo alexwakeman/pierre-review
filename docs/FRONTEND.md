@@ -453,7 +453,12 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   tooltip): ONE spec, `openPrsColumns`, gives the heading and every row the same fixed-width cells, so
   a review tick and a CI tick never share a place. Grouped by ticket = collapsible groups (fold per
   session, never stored) whose line is the chevron and the ticket key + story name (→ the story view) ONLY — NO PR
-  count (2026-11-04; the story view keeps its count) — status, assignee, criteria met, Re-check and the roll-up are in the story view
+  count (2026-11-04; the story view keeps its count). **Tickets that SHARE a PR are ONE group** (2026-11-16,
+  `stackOpenPrs(…, { mergeShared: true })`, Open's rows ONLY — Merged's cards and the story view keep one
+  stack per ticket): transitive; one header line per ticket (`OpenPrsStack.tickets`, the open ticket first, the
+  chevron on the first line), each PR ONCE beneath in the Sort menu's order; a row whose PR is not on every
+  ticket of its group names its keys on its second line (`StackRow.ticketKeys`); id `ticket:A+ticket:B`; the
+  group is "done" only when every ticket is; its Merged (n) is every ticket's merged PRs, once — status, assignee, criteria met, Re-check and the roll-up are in the story view
   (2026-11-02). **A row is ALWAYS TWO LINES, drawer open or closed** (2026-11-03): the title,
   then `repo#N · avatar author · age` (`data-testid="open-prs-row-two-line"`; the repo label gives
   way first, the author and age never truncate away). The size is in the drawer. There is no

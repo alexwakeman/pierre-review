@@ -12,6 +12,7 @@ import {
   type StoryBuildAutoPushResponse,
   type StoryBuildLoopState,
   type StoryBuildTicketReviewResponse,
+  type StoryBuildHowToTestSeenResponse,
   type StoryBuildDiffResponse,
   type StoryBuildHotfixBasesResponse,
   type StoryBuildPrDiffResponse,
@@ -236,6 +237,18 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     const at = done ? new Date() : null;
     await updateStoryBuild(ctx, accountId, id, { ticketReviewDoneAt: at });
     const resp: StoryBuildTicketReviewResponse = { ticketReviewDoneAt: at?.toISOString() ?? null };
+    return reply.send(resp);
+  });
+
+  // HOW TO TEST AFTER A BUILD (story-chat/how-to-test.ts): the build tab's pointer at the story chat was
+  // opened or dismissed. DB only.
+  app.post<{ Params: { id: string } }>(STORY_BUILD_API.howToTestSeen, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const id = parseId(req.params.id);
+    if (id == null) return reply.code(404).send(NOT_FOUND);
+    const { markHowToTestSeen } = await import('../../story-chat/how-to-test.js');
+    if (!(await markHowToTestSeen(accountId, id))) return reply.code(404).send(NOT_FOUND);
+    const resp: StoryBuildHowToTestSeenResponse = { seen: true };
     return reply.send(resp);
   });
 

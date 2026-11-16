@@ -67,6 +67,15 @@ export default function Page(): JSX.Element {
         computer, under your GitHub account.
       </p>
 
+      <H2 id="how-to-test">How to test after a build</H2>
+      <p>
+        When a build finishes, Ensemble asks the story&rsquo;s <DocLink to="this-sprint/story-view#ask-about-this-story">
+        Ask about this story</DocLink> chat its <Ui>How to test</Ui> question about the new changes. The next time you open
+        the build tab, a line at the top says the answer is ready. Choose <Ui>Open in the story</Ui> to read it, or ✕ to
+        dismiss it. Ensemble asks again only when the build&rsquo;s changes change. It is an automatic run, so it waits
+        when you are over your <DocLink to="settings/ai-usage-and-spend">AI spend limit</DocLink>. It only reads: it changes nothing.
+      </p>
+
       <H2 id="check-the-changes">Check the changes</H2>
       <StackPicture />
       <p>

@@ -1429,6 +1429,13 @@
       "when": 1794297600000,
       "tag": "0203_ticket_status_detail",
       "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "6",
+      "when": 1794384000000,
+      "tag": "0204_story_build_how_to_test",
+      "breakpoints": true
     }
   ]
 }

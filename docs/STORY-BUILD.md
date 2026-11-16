@@ -187,7 +187,7 @@ From 2026-11-12 (THE REVIEW LOOP, § The review loop):
 - After the PR opens, the closing review is stored as ONE non-posted `claude_reviews` row at the PR head
   (trigger `manual`), so auto review does not review the same head again.
 
-## Data model (migrations 0149, 0176, 0179, 0185, 0186, 0187, 0194)
+## Data model (migrations 0149, 0176, 0179, 0185, 0186, 0187, 0194, 0204)
 
 Four core tables, all account-scoped, on the erase checklist (`accountScopedTables`) and in the export.
 
@@ -292,6 +292,7 @@ story.
 | `POST …/:id/loop/stop` | stop at the next checkpoint → `{loop}` (409 `NotReady` when not running) | read |
 | `POST …/:id/auto-approve` | `{on}` → `{autoApprovePlan}` (400 · 404 · 409 `NotReady` once the plan is approved) | read |
 | `POST …/:id/ticket-review` | `{done}` → `{ticketReviewDoneAt}`: the ticket step closed (true) or open again (false) | read |
+| `POST …/:id/how-to-test/seen` | → `{seen: true}`: the build tab's "How to test" pointer was opened or dismissed (404 another account's) | read |
 | `GET /api/story-builds/active?workspace=` | THE BUILDS TOAST: `StoryBuildActivityResponse` (DB + the live map) | read |
 
 Error codes: shared `StoryBuildErrorCode` + `SandboxSessionErrorCode` + `BuildPlanErrorCode`. The plan paths
@@ -759,6 +760,30 @@ the story subject in `sandbox/session/manager.ts` (`hotfixBasesFor`, `extractHot
 - **The release check**: a hotfix PR into `hotfix/<tag>` never counts toward a release; a linked repository whose
   only PRs for the ticket go into another branch reads `hotfix_only` (no `linked_no_pr` warning), so a `not_needed`
   hotfix with no default-branch PR neither blocks nor warns.
+
+## How to test after a build (`story-chat/how-to-test.ts`; migration 0204; 2026-11-16)
+
+Owner ask (2026-11-16): after a build, the story's "How to test" should be written by default, and the build
+tab should send the reader to it.
+
+- **When.** The story subject's `afterBuildTurnEnded` (sandbox/session/manager.ts), on a build turn that
+  COMPLETED and whose work was STORED and SAVED (a review-loop fix turn goes to the loop and does not ask;
+  hotfix builds ask too). Fired and forgotten; `maybeAskHowToTest` never throws.
+- **What.** The story chat's ready-made "How to test" question (shared `STORY_CHAT_PRESETS`, word for word),
+  asked through `story-chat/live.ts ask` as a NEW chat on the story — the same read-only agent as the reader's
+  own questions (docs/STORY-CHAT.md), which reads the build's stored work (§ The build's work there).
+- **Once per version of the work.** `story_builds.how_to_test_key` is the sha-256 of the stored work (every
+  `story_build_repos.patch` / `story_build_prs.patch`), CLAIMED compare-and-set before the ask; the same work
+  never asks twice, new work asks again (and resets `how_to_test_seen_at`). A failed ask (the story's chat busy
+  answering, or it could not start) puts the previous key back, so the next stored work asks.
+- **An AUTOMATIC run**: it asks the ONE spend gate (`automaticRunAllowed`) first and is SKIPPED, never queued,
+  when over. AI off ⇒ nothing.
+- **The pointer.** The build tab (`components/StoryBuild/HowToTestPointer.tsx`, under the header) shows ONE line
+  while `build.howToTest` is set and not `seen`: the chat's latest turn read through `useStoryChat` ("Ensemble
+  is writing…" / "…is ready" / "could not write…"), **Open in the story** (asks `store/storyChatFocus.ts` for that
+  chat, then `useOpenStory`; the story view's `StoryChat` takes it once, selects it and scrolls to it) and ✕.
+  Either press is `POST /api/story-builds/:id/how-to-test/seen` (DB only, `read` tier). Nothing is posted,
+  pushed or written to the tracker.
 
 ## The builds toast (`components/StoryBuild/StoryBuildsToast.tsx`)
 

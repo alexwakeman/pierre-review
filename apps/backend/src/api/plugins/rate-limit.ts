@@ -621,6 +621,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
   //   GET /api/story-builds/hotfix-bases → read (DB only: the synced tags)
   //   POST …/:id/auto-approve · …/:id/ticket-review · GET /api/story-builds/active → read (DB only: the
   //   automatic approval's build turn is started by the plan turn's end and asks the spend gate itself)
+  //   POST …/:id/how-to-test/seen → read (DB only: the "How to test" question itself is asked by the build
+  //   turn's end, an automatic run that asks the spend gate itself)
   //   POST …/:id/loop/continue   THE REVIEW LOOP's Continue: may start reviews, a fix turn AND pushes
   //                              → ai + ai_hourly + github_write
   //   GET …/:id/loop · POST …/:id/loop/settings · …/:id/loop/stop → read (DB only; the loop's own automatic

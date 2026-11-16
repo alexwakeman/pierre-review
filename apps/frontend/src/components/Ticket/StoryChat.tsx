@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   STORY_CHAT_IDLE_MINUTES,
   STORY_CHAT_MAX_QUESTION,
@@ -17,6 +17,7 @@ import {
   useStoryChatStop,
 } from '../../hooks/useStoryChat.js';
 import { relativeTime } from '../../lib/ui.js';
+import { useStoryChatFocus } from '../../store/storyChatFocus.js';
 import { AiRunGate } from '../AiSetup.js';
 import { InfoButton } from '../InfoModal.js';
 import { Markdown } from '../Markdown.js';
@@ -75,11 +76,22 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
   const deleteM = useStoryChatDelete(workspaceId, ident);
   const costText = useRunCostText();
 
-  // A new story: a new chat.
+  // A new story: a new chat — unless a page sent the reader to one of its saved chats (the build tab's
+  // "How to test" pointer): that one is shown, and the panel scrolled into view.
+  const pending = useStoryChatFocus((st) => (st.pending?.ident === ident ? st.pending.chatId : null));
+  const sectionRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setChatId(null);
     setDraft('');
   }, [ident]);
+  useEffect(() => {
+    if (pending == null) return;
+    const id = useStoryChatFocus.getState().take(ident);
+    if (id == null) return;
+    setChatId(id);
+    setFocused(true);
+    requestAnimationFrame(() => sectionRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+  }, [pending, ident]);
 
   const chats = listQ.data?.chats ?? [];
   const live = chatQ.data?.live ?? listQ.data?.live ?? null;
@@ -115,7 +127,7 @@ export function StoryChat({ workspaceId, ident, warm }: { workspaceId: number; i
   };
 
   return (
-    <section data-testid="story-chat" aria-labelledby="story-chat-heading" className="space-y-3 rounded-ui bg-ui-surface p-3">
+    <section ref={sectionRef} data-testid="story-chat" aria-labelledby="story-chat-heading" className="space-y-3 rounded-ui bg-ui-surface p-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="story-chat-heading" className="text-title font-semibold text-ui-ink">
           Ask about this story

@@ -802,6 +802,15 @@
   gap: 6px;
   padding: 2px 4px;
 }
+.lb .mk-op-ghead.multi {
+  align-items: flex-start;
+}
+.lb .mk-op-gtickets {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 .lb .mk-op-ghead h4 {
   margin: 0;
   display: flex;

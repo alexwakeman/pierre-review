@@ -52,7 +52,7 @@ describe('the story chat seed', () => {
   it('names each checkout, its diff, and the one that failed', () => {
     const s = storyChatSystemPrompt({ ...base, checkouts: [{ ...base.checkouts[0]!, diffFile: '/tmp/q/acme__api-12.diff' }, base.checkouts[1]!] });
     expect(s).toContain('acme/api#12 (open) "Queue refunds": checked out at /wt/api at abcdef1');
-    expect(s).toContain('  its full diff: /tmp/q/acme__api-12.diff');
+    expect(s).toContain('  its diff in one file: /tmp/q/acme__api-12.diff');
     expect(s).toContain('acme/web#3 (merged) "Email": not checked out (fetch failed)');
   });
 

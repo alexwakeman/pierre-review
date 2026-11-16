@@ -13,6 +13,22 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Implement story: when a build finishes, Ensemble asks the story's chat "How to test" for you. The next time
+  you open the build tab, a line at the top says the answer is ready, with Open in the story.
+
+### Changed
+
+- Open PRs: tickets that share a pull request are one group. Each ticket is on its own line, and each pull
+  request is listed once beneath them.
+
+### Fixed
+
+- Story view → Ask about this story: the chat now reads every pull request of the story and each one's changes
+  in full, however large, and the latest Implement story build's changes, pushed or not. Before, it could read
+  a large change only in part and skipped pull requests past the sixth.
+
 ## [1.0.53] - 2026-11-16
 
 ### Changed

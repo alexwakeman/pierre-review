@@ -416,6 +416,12 @@ export interface StoryBuildRepo {
 }
 
 /** `GET /api/story-builds/:id`. Never carries a patch, the frozen prompt seed, or a token. */
+/** The story chat that holds a build's "How to test" answer. */
+export interface StoryBuildHowToTest {
+  chatId: number;
+  seen: boolean;
+}
+
 export interface StoryBuild {
   id: number;
   workspaceId: number;
@@ -484,6 +490,10 @@ export interface StoryBuild {
   hotfix?: boolean;
   /** What its ticket step did once the PRs opened; null before (or not an end-to-end build). */
   endToEndTicket?: StoryBuildEndToEndTicket | null;
+  /** HOW TO TEST AFTER A BUILD (docs/STORY-BUILD.md § How to test after a build): the story chat Ensemble
+   *  asked "How to test" when this build stored its work; `seen` once the reader opened or dismissed it from
+   *  the build tab. null before any was asked. */
+  howToTest?: StoryBuildHowToTest | null;
   /** A WORKSPACE SESSION's own state (docs/SANDBOX.md § Sessions); null on a row of the old plan flow. */
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
@@ -681,6 +691,8 @@ export const STORY_BUILD_API = {
   autoApprove: '/api/story-builds/:id/auto-approve',
   /** The ticket step after an automatically approved build: `{done}` — Update ticket ran, or "No update". */
   ticketReview: '/api/story-builds/:id/ticket-review',
+  /** The build tab's "How to test" pointer: the reader opened or dismissed it. DB only. */
+  howToTestSeen: '/api/story-builds/:id/how-to-test/seen',
   /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
   active: '/api/story-builds/active',
   /** HOTFIX: each workspace repository's latest release (the hotfix base) and whether the option is offered. */
@@ -698,6 +710,11 @@ export interface StoryBuildAutoApproveResponse {
 /** `POST …/ticket-review`. */
 export interface StoryBuildTicketReviewResponse {
   ticketReviewDoneAt: string | null;
+}
+
+/** `POST …/how-to-test/seen`. */
+export interface StoryBuildHowToTestSeenResponse {
+  seen: true;
 }
 
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;

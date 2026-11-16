@@ -482,6 +482,7 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     ticketReviewDoneAt: iso(row.ticketReviewDoneAt),
     endToEnd: row.endToEnd === true,
     endToEndTicket: row.e2eTicketJson ?? null,
+    howToTest: row.howToTestChatId != null ? { chatId: row.howToTestChatId, seen: row.howToTestSeenAt != null } : null,
     hotfix: row.hotfix === true,
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
