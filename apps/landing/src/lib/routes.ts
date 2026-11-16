@@ -69,8 +69,8 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
     description: `${SITE_NAME} handles Dependabot and Renovate pull requests end to end on your machine: it approves, fixes, resolves conflicts and merges when checks pass, and claims each one on GitHub so only one teammate acts.`,
   },
   '/everything-else': {
-    title: `Everything else — review, fix, ship, reports and how we measure · ${SITE_NAME}`,
-    description: `The rest of ${SITE_NAME}: reviewing, fixing and shipping across every repository, reports per sprint or month, Chronology, what your review bots are worth, and the two models behind the numbers. It runs on your own machine.`,
+    title: `Everything else — open pull requests, reports and how we measure · ${SITE_NAME}`,
+    description: `The rest of ${SITE_NAME}: every open pull request grouped by its ticket, reports per sprint or month, Chronology, what your review bots are worth, and the two models behind the numbers. It runs on your own machine.`,
   },
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,

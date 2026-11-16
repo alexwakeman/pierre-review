@@ -1,9 +1,7 @@
 import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { useReveal } from '../components/board/useReveal';
-import { WorksWith } from '../components/board/WorksWith';
-import { Proof } from '../components/board/Proof';
-import { Fix, Review, See, Ship } from '../components/board/Chapters';
+import { OpenPrsMock } from '../components/mock/openPrs';
 import { WhyEnsemble } from '../components/board/WhyEnsemble';
 import { Tiers } from '../components/board/Tiers';
 import { Faq } from '../components/board/Faq';
@@ -13,9 +11,9 @@ import { HowWeMeasureSection } from './HowWeMeasure';
 import './home.css';
 
 // ---------------------------------------------------------------------------
-// Everything else: what the home page no longer carries. The four product chapters
-// (Review, Fix, Ship, See), the tools it reads, the proof figures, Reporting and
-// metrics (#reporting) and How we measure (#how-we-measure), then Why Ensemble,
+// Everything else: what the home page no longer carries. A workspace's Open pull
+// requests, grouped by ticket (#open-prs, a clickable mock with the drawer), Reporting
+// and metrics (#reporting) and How we measure (#how-we-measure), then Why Ensemble,
 // every feature free and the questions.
 //
 // Each part keeps its own page-scoped root (`.lb.home`, `.lb.rep`, `.lb.hwm`), so its
@@ -34,17 +32,22 @@ export default function EverythingElse(): JSX.Element {
           <div className="chap">
             <h1 id="ee-h">Everything else</h1>
             <p>
-              Review, fix, ship and see across every repository: the rest of what it does, how it reports and how we
-              measure.
+              Every open pull request in one view, how it reports and how we measure.
             </p>
           </div>
         </section>
-        <Review />
-        <Fix />
-        <Ship />
-        <See />
-        <WorksWith />
-        <Proof />
+        <section id="open-prs" className="section chapter" aria-labelledby="op-h">
+          <div className="chap rise">
+            <h2 id="op-h">Open pull requests</h2>
+            <p>
+              Every open pull request in the workspace, grouped by its ticket. Each row says whether it can land. Open
+              one to see why.
+            </p>
+          </div>
+          <div className="op-mock rise">
+            <OpenPrsMock />
+          </div>
+        </section>
       </div>
       <ReportingSection />
       <HowWeMeasureSection />

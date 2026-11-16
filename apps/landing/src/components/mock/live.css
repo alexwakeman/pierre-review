@@ -758,3 +758,375 @@
 .lb .mk-disc:hover {
   text-decoration: underline;
 }
+
+/* ---- Open pull requests, grouped by ticket (openPrs.tsx; Activity/OpenPrsRows.tsx) ---- */
+.lb .mk-op .mk-op-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+  align-items: start;
+  font-size: 13px;
+}
+.lb .mk-op-heads,
+.lb .mk-op-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 52px 36px 56px 64px;
+  align-items: center;
+  column-gap: 6px;
+}
+.lb .mk-op-heads {
+  padding: 0 8px 6px 30px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.lb .mk-op-heads > span,
+.lb .mk-op-col {
+  text-align: center;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+}
+.lb .mk-op-groups,
+.lb .mk-op-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.lb .mk-op-group + .mk-op-group {
+  margin-top: 14px;
+}
+.lb .mk-op-ghead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+}
+.lb .mk-op-ghead h4 {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink);
+  min-width: 0;
+}
+.lb .mk-op-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .mk-op svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.lb .mk-op-fold {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  border-radius: 3px;
+}
+.lb .mk-op-fold.folded svg {
+  transform: rotate(-90deg);
+}
+.lb .mk-op-rows {
+  position: relative;
+  padding-left: 22px;
+}
+.lb .mk-op-rows::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 0;
+  bottom: 4px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.lb .mk-op-row {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+.lb .mk-op-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.lb .mk-op-row.open {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--amber);
+}
+.lb .mk-op-two {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.lb .mk-op-title {
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb .mk-op-title.draft {
+  color: var(--muted);
+}
+.lb .mk-op-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* The repo label gives way first; the author and the age keep their room (as in the app). */
+.lb .mk-op-repo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb .mk-op-av {
+  flex-shrink: 0;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3a3b42;
+  color: var(--ink);
+  font-size: 9px;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+}
+.lb .mk-op-lead,
+.lb .mk-op-st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lb .mk-op-lead.blocked,
+.lb .mk-op-lead.conflicts,
+.lb .mk-op-st.bad {
+  color: #ff6b6b;
+}
+.lb .mk-op-lead.ready,
+.lb .mk-op-st.ok {
+  color: #7fd36b;
+}
+.lb .mk-op-lead.draft,
+.lb .mk-op-st.quiet {
+  color: #8d8a84;
+}
+.lb .mk-op-lead.neutral,
+.lb .mk-op-st.neutral {
+  color: var(--ink);
+}
+.lb .mk-op-col.c-threads {
+  color: var(--muted);
+  font-size: 12px;
+}
+.lb .mk-op-red {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff6b6b;
+}
+.lb .mk-op-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.lb .mk-op-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.lb .mk-op-ai.t-red {
+  color: #ff6b6b;
+}
+.lb .mk-op-ai.t-green {
+  color: #7fd36b;
+}
+.lb .mk-op-ai.t-grey {
+  color: var(--muted);
+}
+.lb .mk-op-ai.working {
+  color: #b9a3ff;
+}
+.lb .mk-op-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: mk-op-pulse 1.4s ease-in-out infinite;
+}
+@keyframes mk-op-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lb .mk-op-pulse {
+    animation: none;
+  }
+}
+.lb .mk-op-drawer,
+.lb .mk-op-empty {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: var(--surface);
+  padding: 14px 16px;
+}
+.lb .mk-op-empty {
+  border-style: dashed;
+  background: none;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.lb .mk-op-dhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.lb .mk-op-dtitle {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 14px;
+}
+.lb .mk-op-dsub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .mk-op-x {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  border-radius: 4px;
+}
+.lb .mk-op-x:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.lb .mk-op-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.lb .mk-op-fact {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+}
+.lb .mk-op-fact dt {
+  color: var(--muted);
+  font-size: 12px;
+  padding-top: 1px;
+}
+.lb .mk-op-fact dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+.lb .mk-op-detail {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .mk-op-h {
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.lb .mk-op-thr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lb .mk-op-bar {
+  display: inline-flex;
+  width: 40px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.lb .mk-op-bar i.u {
+  background: #ff6b6b;
+}
+.lb .mk-op-bar i.r {
+  background: var(--amber);
+}
+.lb .mk-op-bar i.d {
+  background: #7fd36b;
+}
+.lb .mk-op-link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(255, 255, 255, 0.35);
+}
+.lb .mk-op-ticket {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+.lb .mk-op-diff {
+  font-size: 11.5px;
+  color: var(--muted);
+  background: none;
+  padding: 0;
+}
+.lb .mk-op-reach.r-high {
+  color: var(--amber);
+}
+.lb .mk-op-reach.r-medium {
+  color: var(--ink);
+}
+.lb .mk-op-reach.r-low {
+  color: var(--muted);
+}
+/* Narrow: the drawer sits under the list, and the Threads column goes (it is in the drawer). */
+@media (max-width: 760px) {
+  .lb .mk-op .mk-op-wrap {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .lb .mk-op-heads,
+  .lb .mk-op-row {
+    grid-template-columns: 22px minmax(0, 1fr) 40px 30px 52px;
+  }
+  .lb .mk-op-heads .c-threads,
+  .lb .mk-op-col.c-threads {
+    display: none;
+  }
+}
