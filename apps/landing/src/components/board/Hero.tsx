@@ -1,13 +1,12 @@
-import { Chain } from '../arcs/pieces';
 import { INSTALL_COMMAND, SITE_NAME } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
 
 // ---------------------------------------------------------------------------
-// The hero: the claim, the command, and the site's big picture, the CHAIN
-// (components/arcs): quarters linked end to end whose links start mirrored across
-// the tile and cross through each other into place as the reader scrolls. Under the
-// claim, Poincaré's line on the ensemble and the details. ONE moving picture per
-// screen: the Quartet lives in the close (Close.tsx), not here.
+// The hero: the claim, the command, and Poincaré's line on the ensemble and the
+// details. It is the first thing that scrolls over the site's big picture, the
+// CHAIN, pinned full width behind it (pages/Home.tsx, components/arcs/Scene.tsx):
+// faded under the text, it comes together and brightens as the text scrolls away,
+// then dims again behind "Review as an ensemble".
 //
 // ⚠ "Fully local, no added service" is the claim, and it is exact: the app runs on each
 // person's machine and talks only to GitHub, their tracker and their own AI provider.
@@ -46,9 +45,6 @@ export function Hero(): JSX.Element {
           , <cite>Science and Method</cite>, 1908
         </figcaption>
       </figure>
-      <div className="tile art hand">
-        <Chain lead label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />
-      </div>
     </section>
   );
 }

@@ -13,7 +13,7 @@ import type { Corner, Quarter, RunName } from './geometry';
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
 //              mirrored across the tile and cross through each other into place as
-//              the reader scrolls down.
+//              the reader scrolls down, landing SYMMETRIC left to right (SITE_CHAIN).
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -24,6 +24,8 @@ interface PieceProps {
   className?: string;
   label?: string;
   lead?: boolean;
+  /** 'slice' fills a wide stage and crops (the Quartet full width); default 'meet'. */
+  fit?: 'meet' | 'slice';
 }
 
 const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross);
@@ -49,17 +51,22 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
 // the opposite corner (the tile clips them until they fly in). The margin leaves
 // room for the corner dots.
 const QUARTET = quartetQuarters(4, 62, true, 2);
+// The STAGE quartet (Home.tsx, pinned full width): it starts just past the mirror of
+// its place (reach 1.15), so the pinned screen is never empty, and its players are
+// small, since a unit there is many pixels.
+const QUARTET_STAGE = quartetQuarters(4, 62, true, 1.15, 1.1);
 
-export function Quartet({ className, label, lead }: PieceProps): JSX.Element {
+export function Quartet({ className, label, lead, fit = 'meet', stage }: PieceProps & { stage?: boolean }): JSX.Element {
+  const q = stage ? QUARTET_STAGE : QUARTET;
   return (
     <Arcs
       lead={lead}
-      viewBox={QUARTET.viewBox}
+      viewBox={q.viewBox}
       className={className}
       label={label}
-      fit="meet"
+      fit={fit}
       blend
-      quarters={QUARTET.quarters}
+      quarters={q.quarters}
     />
   );
 }

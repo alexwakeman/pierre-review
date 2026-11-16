@@ -205,6 +205,42 @@ export const RUN_ORDER: readonly RunName[] = ['ember', 'dawn', 'meadow', 'dusk',
 
 // Neighbouring links never share a temperature: warm, cool, warm, cool …
 const CHAIN_RUNS: readonly RunName[] = ['ember', 'dusk', 'dawn', 'bloom', 'meadow', 'dusk', 'ember'];
+const WARM: ReadonlySet<RunName> = new Set(['ember', 'dawn']);
+const MIRROR_CORNER: Record<Corner, Corner> = { tl: 'tr', tr: 'tl', bl: 'br', br: 'bl' };
+
+/**
+ * Colours for a chain that is MIRROR-SYMMETRIC left to right: each link takes the run of
+ * its mirror image, so the finished picture is symmetric in colour as well as shape.
+ * The links are coloured in chain order from `CHAIN_RUNS`, a link whose mirror is already
+ * coloured copies it, and a new colour never shares a temperature with the link before.
+ * Null when the chain is not symmetric.
+ */
+function mirroredRuns(qs: { cx: number; cy: number; corner: Corner }[], width: number): RunName[] | null {
+  const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
+  const partner = qs.map((q) =>
+    qs.findIndex((o) => near(o.cx, width - q.cx) && near(o.cy, q.cy) && o.corner === MIRROR_CORNER[q.corner]),
+  );
+  if (partner.some((j) => j < 0)) return null;
+  const runs: RunName[] = [];
+  let k = 0;
+  qs.forEach((_, i) => {
+    const j = partner[i] as number;
+    if (j < i) {
+      runs[i] = runs[j] as RunName;
+      return;
+    }
+    const prev = runs[i - 1];
+    for (let t = 0; t < CHAIN_RUNS.length; t++) {
+      const r = CHAIN_RUNS[(k + t) % CHAIN_RUNS.length] as RunName;
+      if (prev != null && (r === prev || WARM.has(r) === WARM.has(prev))) continue;
+      runs[i] = r;
+      k = (k + t + 1) % CHAIN_RUNS.length;
+      return;
+    }
+    runs[i] = CHAIN_RUNS[k++ % CHAIN_RUNS.length] as RunName;
+  });
+  return runs;
+}
 
 const CORNER_OF = (sx: number, sy: number): Corner =>
   sx > 0 ? (sy > 0 ? 'tl' : 'bl') : sy > 0 ? 'tr' : 'br';
@@ -264,6 +300,11 @@ export function chainQuarters(
   const h = Math.max(...ys) - Math.min(...ys);
   const mx = Math.min(...xs) + w / 2;
   const my = Math.min(...ys) + h / 2;
+  // A symmetric chain is coloured symmetrically; any other cycles CHAIN_RUNS.
+  const symmetric = mirroredRuns(
+    raw.map((q) => ({ cx: q.cx - x0, cy: q.cy - y0, corner: CORNER_OF(q.sx, q.sy) })),
+    w + 2 * m,
+  );
   return {
     quarters: raw.map((q, i) => {
       // each link waits OUTWARD from the chain's middle and closes in along that line,
@@ -276,7 +317,7 @@ export function chainQuarters(
         cy: q.cy - y0,
         R,
         corner: CORNER_OF(q.sx, q.sy),
-        run: CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName,
+        run: symmetric?.[i] ?? (CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName),
         // crossing: start at the mirror image, -2u, which the CSS reaches at 1.6 × dx
         dx: Math.round((cross ? (-2 * ux) / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
         dy: Math.round((cross ? (-2 * uy) / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
@@ -287,12 +328,14 @@ export function chainQuarters(
   };
 }
 
-/** The site's chain (the hero's big picture and the share image): it zigzags down a portrait box of
- *  3 × 4 radii, and its links cross through each other on their way in. The margin
- *  (0.15 of a slice's radius) is the gap it keeps from the tile's edges, so the gap
- *  scales with the slices, not the screen. A chain that stacks half-discs on one centre line is avoided on purpose:
- *  that is the reference artwork's own figure. */
-export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.15, cross: true } as const;
+/** The site's chain (the hero's big picture and the share image). It LANDS SYMMETRIC: ten
+ *  links in a landscape box of 4 × 3 radii, mirrored left to right in shape and colour
+ *  (two half-discs above, a four-pointed star between them, one half-disc below), so the
+ *  scroll resolves into order. Its links cross through each other on their way in. The
+ *  margin (0.15 of a slice's radius) is the gap it keeps from the tile's edges, so the gap
+ *  scales with the slices, not the screen. Searched among every step string up to ten
+ *  links for a mirror-symmetric chain without a doubled quarter. */
+export const SITE_CHAIN = { steps: 'BABBABBAB', first: 'v', margin: 0.15, cross: true } as const;
 
 /**
  * The QUARTET: four quarters centred on the corners of a 100-unit square, facing one
@@ -301,13 +344,15 @@ export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.15, cross: 
  * With `cross`, each quarter starts at the mirror of its place through the middle
  * (−2u, reached at APART × dx; `reach` multiplies that distance) and travels through
  * the others to land; otherwise it
- * waits outward. `margin` (in units) is added round the square.
+ * waits outward. `margin` (in units) is added round the square. `dot` is the players'
+ * radius (smaller for a full-width stage, where a unit is many pixels).
  */
 export function quartetQuarters(
   margin = 0,
   R = 50,
   cross = false,
   reach = 1,
+  dot = 3.2,
 ): { quarters: Quarter[]; viewBox: string } {
   const away = R * 0.2;
   const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => {
@@ -320,7 +365,7 @@ export function quartetQuarters(
       corner,
       run,
       n: Math.round((11 * R) / 50),
-      dot: 3.2,
+      dot,
       dx: cross ? Math.round(((-2 * reach * ux) / 1.6) * 100) / 100 : cx === 0 ? -away : away,
       dy: cross ? Math.round(((-2 * reach * uy) / 1.6) * 100) / 100 : cy === 0 ? -away : away,
     };
