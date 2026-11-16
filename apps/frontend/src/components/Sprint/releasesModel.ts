@@ -4,6 +4,7 @@ import {
   SPRINT_STAGE_LABEL,
   releaseBlockerShort,
   releaseBlockerText,
+  releaseTitleShort,
   releaseUnverifiedText,
   releasesChecking,
   type ReleaseCheckPr,
@@ -22,9 +23,9 @@ import {
 // test/releasesModel.test.ts. ⚠ The check itself is the SHARED fold (`foldReleaseCheck`, run on the
 // server) — never a second fold here. Each repository is judged on its own: unticking one in the
 // dialog changes nothing about another.
-// ⚠ "released" is never said of a ticket or PR: only a release tag is a release. THE RULE is simple
-// (2026-11-16): the candidate is the NEWEST version tag whose tickets are Complete with no pull request
-// still open. What the tab shows is for the reader to check: tickets the tracker could not give and
+// ⚠ "released" is never said of a ticket or PR: only a release tag is a release. THE CUMULATIVE RULE
+// (2026-11-16): releasing a tag ships everything below it, so the candidate is the tag just below the
+// OLDEST tag that holds a ticket not Complete or with a pull request still open. What the tab shows is for the reader to check: tickets the tracker could not give and
 // pull requests with no ticket are LISTED under their tag, never a block and never a warning.
 // THE ROW (2026-11-16, owner-approved layout): one list, newest at the top, in three bands — every tag
 // NEWER than the candidate (each with all its tickets and reasons), the CANDIDATE, and OLDER tags for
@@ -123,15 +124,16 @@ export function rowBands(repo: Pick<ReleaseRepoCheck, 'tags' | 'olderTags' | 'st
   return { newerHeading: heading, newer, candidate, older: candidate != null ? repo.olderTags : [] };
 }
 
-/** The candidate's label after its header: "checked: this tag’s own changes" / "checked: everything
- *  since 0.380.0-rc". */
+/** The candidate's label after its header: "checked: everything since 0.380.0-rc" / "checked:
+ *  everything up to this tag". */
 export function candidateScopeLabel(repo: Pick<ReleaseRepoCheck, 'baseline'>): string {
-  return repo.baseline != null ? `checked: everything since ${repo.baseline.name}` : 'checked: this tag’s own changes';
+  return repo.baseline != null ? `checked: everything since ${repo.baseline.name}` : 'checked: everything up to this tag';
 }
 
-/** The PRs listed under a tag: the candidate its whole scope, any other tag its own increment. */
-export function tagListedPrIds(tag: Pick<ReleaseTagCheck, 'isCandidate' | 'prIds' | 'scopePrIds'>): number[] {
-  return tag.isCandidate ? tag.scopePrIds : tag.prIds;
+/** The PRs listed under a tag: its whole scope when the fold says so (the candidate after a release),
+ *  else its own increment. */
+export function tagListedPrIds(tag: Pick<ReleaseTagCheck, 'isCandidate' | 'prIds' | 'scopePrIds' | 'listsScope'>): number[] {
+  return (tag.listsScope ?? tag.isCandidate) ? tag.scopePrIds : tag.prIds;
 }
 
 /** A tag's header: "0.394.0 · 15 Nov · a1b2c3d · 4 PRs · 3 tickets" — the parts, so the sha can be a
@@ -148,16 +150,24 @@ export function tagHeader(
   return { name: tag.name, day, shortSha, url: tag.url, counts, text };
 }
 
-/** The reasons a tag does not qualify that its own ticket lines do not show — a reason from an earlier
- *  tag in its scope ("BMD-1040 (from 0.391.0) is In Progress."), the history still read — and tickets
- *  from an earlier tag the tracker could not give. Its own tickets speak on their own lines. Pure. */
-export function tagExplainer(t: Pick<ReleaseTagCheck, 'blockers' | 'unverified' | 'state'>): Array<{ tone: MarkTone; text: string }> {
+/** The reasons a tag does not qualify that its own ticket lines do not show. Its own tickets speak on
+ *  their own lines, and each older tag is listed below it, so an older tag's reasons are not repeated:
+ *  a tag held back ONLY by older tags gets ONE line naming the oldest of them ("Held back by an older
+ *  tag: 0.324.0 — BMD-1061 “…” is In Code Review."). The history still read is a line; on the candidate
+ *  (its scope listed) tickets from an earlier tag the tracker could not give are lines too. Pure. */
+export function tagExplainer(
+  t: Pick<ReleaseTagCheck, 'blockers' | 'unverified' | 'state' | 'isCandidate'>,
+): Array<{ tone: MarkTone; text: string }> {
   const out: Array<{ tone: MarkTone; text: string }> = [];
-  for (const b of t.blockers) {
-    if (b.fromTag == null && b.key != null) continue;
-    out.push({ tone: b.kind === 'checking' ? 'warn' : 'bad', text: releaseBlockerText(b) });
+  for (const b of t.blockers) if (b.kind === 'checking' && b.key == null) out.push({ tone: 'warn', text: releaseBlockerText(b) });
+  const own = t.blockers.some((b) => b.fromTag == null && b.key != null && b.kind !== 'checking');
+  const inherited = t.blockers.filter((b) => b.fromTag != null && b.kind !== 'checking');
+  if (!own && inherited.length > 0) {
+    // Blockers come own first, then the earlier tags newest first: the last one is the oldest tag's.
+    const oldest = inherited[inherited.length - 1]!;
+    out.push({ tone: 'bad', text: `Held back by an older tag: ${oldest.fromTag} — ${releaseBlockerShort({ ...oldest, fromTag: null })}.` });
   }
-  for (const u of t.unverified) if (u.fromTag != null) out.push({ tone: 'unknown', text: `${releaseUnverifiedText(u)}. Check it by hand.` });
+  if (t.isCandidate) for (const u of t.unverified) if (u.fromTag != null) out.push({ tone: 'unknown', text: `${releaseUnverifiedText(u)}. Check it by hand.` });
   return out;
 }
 
@@ -165,20 +175,34 @@ export function tagExplainer(t: Pick<ReleaseTagCheck, 'blockers' | 'unverified' 
  *  "checking…". Pure. */
 export function olderTagSummary(
   check: Pick<ReleaseCheckResult, 'tickets' | 'prs' | 'trackerName'>,
-  tag: Pick<ReleaseTagCheck, 'state' | 'blockers' | 'isCandidate' | 'prIds' | 'scopePrIds'>,
+  tag: Pick<ReleaseTagCheck, 'state' | 'blockers' | 'isCandidate' | 'prIds' | 'scopePrIds' | 'listsScope'>,
 ): { tone: MarkTone; text: string } {
   if (tag.state === 'checking') return { tone: 'warn', text: 'checking…' };
   const listed = tagTickets(check, tag).tickets.map((x) => x.ticket);
   if (tag.state === 'does_not_qualify') {
     const first = listed.find((t) => ticketRank(t) === 0);
-    if (first != null) return { tone: 'bad', text: `${first.key} ${ticketLine(first, check.trackerName).text}` };
+    if (first != null) {
+      const title = releaseTitleShort(first.title);
+      return { tone: 'bad', text: `${first.key}${title != null ? ` “${title}”` : ''} ${ticketLine(first, check.trackerName).text}` };
+    }
     const b = tag.blockers[0];
     return { tone: 'bad', text: b != null ? releaseBlockerShort(b) : 'can’t be released' };
   }
   const complete = listed.filter((t) => t.ready).length;
-  const toCheck = listed.length - complete;
-  const done = complete === 0 ? 'no tickets' : complete === 1 ? '1 ticket Complete' : toCheck === 0 ? `all ${complete} tickets Complete` : `${complete} tickets Complete`;
-  return { tone: 'ok', text: toCheck > 0 ? `${done} · ${toCheck} to check` : done };
+  const cancelled = listed.filter((t) => t.cancelled === true).length;
+  const toCheck = listed.length - complete - cancelled;
+  const done =
+    complete === 0
+      ? cancelled > 0
+        ? null
+        : 'no tickets'
+      : complete === 1
+        ? '1 ticket Complete'
+        : toCheck === 0 && cancelled === 0
+          ? `all ${complete} tickets Complete`
+          : `${complete} tickets Complete`;
+  const parts = [done, cancelled > 0 ? `${cancelled} cancelled` : null, toCheck > 0 ? `${toCheck} to check` : null].filter((x): x is string => x != null);
+  return { tone: 'ok', text: parts.join(' · ') };
 }
 
 /** "… 10 tags shown" under the older band. */
@@ -221,6 +245,11 @@ export function olderShowMore(shown: number, serverWanted: number): { shown: num
   return { shown: next, ask: next > serverWanted ? next : null };
 }
 
+/** The line beside the bar while Refresh runs: "Reading tickets from Jira again". Pure. */
+export function refreshingLine(check: Pick<ReleaseCheckResult, 'trackerName'> | null | undefined): string {
+  return `Reading tickets from ${check?.trackerName ?? 'the tracker'} again`;
+}
+
 /** How often the tab re-reads GET /api/releases while a repo is being checked (or its older band read). */
 export const RELEASES_POLL_MS = 3_000;
 
@@ -232,10 +261,10 @@ export function releasesPollInterval(data: Pick<ReleasesResponse, 'check'> | nul
 export type MarkTone = 'ok' | 'bad' | 'warn' | 'unknown';
 
 /** A ticket's place in a tag's list: 0 stops the tag (not Complete, an open PR), 1 to check (not found,
- *  could not be read, not read yet), 2 Complete. */
-export function ticketRank(t: Pick<ReleaseTicketCheck, 'ready' | 'blocker'>): 0 | 1 | 2 {
+ *  could not be read, not read yet), 2 Complete or Cancelled (neither stops it). */
+export function ticketRank(t: Pick<ReleaseTicketCheck, 'ready' | 'blocker' | 'cancelled'>): 0 | 1 | 2 {
   if (t.blocker != null && t.blocker.kind !== 'checking') return 0;
-  return t.ready ? 2 : 1;
+  return t.ready || t.cancelled === true ? 2 : 1;
 }
 
 /** The ticket's status as the tracker names it, with the workspace's bucket in brackets only when it
@@ -264,10 +293,12 @@ function openPrList(prs: ReadonlyArray<{ repoName: string; number: number }>): s
  *    ? "not found in Jira — check by hand" · "not read yet"
  *    ✓ "Complete" */
 export function ticketLine(
-  t: Pick<ReleaseTicketCheck, 'statusName' | 'stage' | 'done' | 'readState' | 'blocker' | 'unverified' | 'pending' | 'openPrs'>,
+  t: Pick<ReleaseTicketCheck, 'statusName' | 'stage' | 'done' | 'readState' | 'blocker' | 'unverified' | 'pending' | 'openPrs' | 'cancelled'>,
   trackerName: string | null,
 ): { tone: MarkTone; text: string } {
   const tracker = trackerName ?? 'the tracker';
+  // Cancelled never stops a tag: a tick, and the status says why.
+  if (t.cancelled === true) return { tone: 'ok', text: `${ticketStatusWords(t)} — doesn’t stop a release` };
   if (t.blocker?.kind === 'not_done') return { tone: 'bad', text: ticketStatusWords(t) };
   if (t.blocker?.kind === 'open_pr') {
     const n = t.openPrs.length;

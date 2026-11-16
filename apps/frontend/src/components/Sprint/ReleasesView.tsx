@@ -40,6 +40,7 @@ import {
   olderShowMore,
   olderTagSummary,
   openInTrackerWords,
+  refreshingLine,
   repoLatestNote,
   repoProgress,
   repoRowCounts,
@@ -126,17 +127,18 @@ export function ReleasesView(): JSX.Element | null {
             own.
           </p>
           <p>
-            The candidate is the newest version tag on main whose tickets are all Complete, with no pull request still
-            open for any of them in a released repository. After a release, a tag’s tickets are everything merged since
-            that release; before the first release, only what the tag itself added.
+            Releasing a tag ships everything below it. So the candidate is the newest version tag on main where that tag
+            and every tag below it have all their tickets Complete, with no pull request still open for any of them in a
+            released repository. That is the tag just below the oldest tag that can’t be released. Before the first
+            release every tag on main counts; after a release, only the tags since it.
           </p>
           <p>
             Tickets the tracker could not find, and pull requests with no ticket, do not stop a tag. They are listed
             under it so you can check them.
           </p>
           <p>
-            Older tags are listed under the candidate so you can check them. They never change the candidate. After a
-            release, the list stops at that release.
+            Every tag newer than the candidate is listed with why it can’t be released. Older tags are listed under the
+            candidate so you can check them. After a release, the list stops at that release.
           </p>
           <p>Create release tags each candidate with the release suffix, publishes the notes and comments on each ticket.</p>
         </InfoButton>
@@ -157,6 +159,13 @@ export function ReleasesView(): JSX.Element | null {
         </div>
       </div>
 
+      {busy && (
+        // Refresh reads tickets from the tracker again — may take more than a few seconds.
+        <div className="flex items-center gap-2" data-testid="release-refresh-progress">
+          <SprintProgressBar progress={{ kind: 'busy', label: refreshingLine(check) }} className="h-1.5 w-40 shrink-0 rounded-full" testId="release-refresh-progress-bar" />
+          <span className="min-w-0 text-meta text-ui-mute">{refreshingLine(check)}</span>
+        </div>
+      )}
       {refresh.isError && <p className="text-meta text-ui-danger">Couldn’t refresh. Try again.</p>}
       {refresh.data != null && refresh.data.unread.length > 0 && (
         <p className="text-meta text-ui-mute">The tracker did not answer for {refresh.data.unread.join(', ')}.</p>

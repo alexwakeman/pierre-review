@@ -25,11 +25,13 @@ import {
   olderBandView,
   olderShowMore,
   olderTagSummary,
+  refreshingLine,
   readAgoWords,
   rowBands,
   tagHeader,
   ticketDetail,
   ticketLine,
+  ticketRank,
   ticketStatusWords,
   releaseTagsLine,
   releasesPollInterval,
@@ -129,7 +131,7 @@ describe('the header line', () => {
   });
 });
 
-describe('repo rows — the simple rule, newest first', () => {
+describe('repo rows — the cumulative rule, newest first', () => {
   const all = () => ({ prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])], tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
 
   it('acceptance 4: all Complete, no release → "Release v1.2.0 → v1.2.0-rc", no "Latest" beside it, Create release shown', () => {
@@ -137,7 +139,8 @@ describe('repo rows — the simple rule, newest first', () => {
     const api = res.repos[0]!;
     expect(repoRowText(api)).toBe('Release v1.2.0 → v1.2.0-rc');
     expect(repoLatestNote(api)).toBeNull();
-    expect(repoRowCounts(api)).toBe('1 ticket');
+    // No release yet: everything up to v1.2.0 ships.
+    expect(repoRowCounts(api)).toBe('3 tickets');
     expect(repoProgress(api)).toBeNull();
     expect(showCreateRelease(res)).toBe(true);
     expect(defaultTickedRepoIds(res)).toEqual([1]);
@@ -152,7 +155,7 @@ describe('repo rows — the simple rule, newest first', () => {
 
   it('acceptance 16: every tag ruled out → "No tag can be released — <newest>: <reason>"; after a release, "No tag since … can be released"', () => {
     const none = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1', { done: false }), ticket('T2', { done: false }), ticket('T3', { done: false, statusName: 'In PO Review' })] });
-    expect(repoRowText(none.repos[0]!)).toBe('No tag can be released — v1.2.0: T3 is In PO Review');
+    expect(repoRowText(none.repos[0]!)).toBe('No tag can be released — v1.2.0: T3 “T3 title” is In PO Review');
     expect(showCreateRelease(none)).toBe(false);
     const released = repo(1, 'api', [
       { name: 'v1.0.0', d: 1, prs: [1] },
@@ -161,7 +164,7 @@ describe('repo rows — the simple rule, newest first', () => {
       { name: 'v1.2.0', d: 5, prs: [3] },
     ]);
     const res = run({ repos: [released], prs: all().prs, tickets: [ticket('T2', { done: false, statusName: 'In Progress' }), ticket('T3')] });
-    expect(repoRowText(res.repos[0]!)).toBe('No tag since v1.0.0-rc can be released — v1.2.0: T2 (from v1.1.0) is In Progress');
+    expect(repoRowText(res.repos[0]!)).toBe('No tag since v1.0.0-rc can be released — v1.2.0: T2 “T2 title” (from v1.1.0) is In Progress');
   });
 
   it('acceptance 18: an open pull request elsewhere names the repo and number', () => {
@@ -176,11 +179,14 @@ describe('repo rows — the simple rule, newest first', () => {
     expect(ticketLine(res.tickets.find((t) => t.ident === 'T3')!, 'Jira')).toEqual({ tone: 'bad', text: 'Done, but has an open PR: bng-metric-frontend #812' });
   });
 
-  it('acceptance 11: a Cancelled ticket does not qualify — the reason names its status', () => {
+  it('acceptance 11: a Cancelled ticket never stops a tag — a tick, its status and why', () => {
     const res = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false, statusName: "Won't Do", stage: 'cancelled' })] });
-    expect(repoRowText(res.repos[0]!)).toBe('Release v1.1.0 → v1.1.0-rc');
+    expect(repoRowText(res.repos[0]!)).toBe('Release v1.2.0 → v1.2.0-rc');
     // The status name, with the bucket in brackets because it differs.
-    expect(ticketLine(res.tickets.find((t) => t.ident === 'T3')!, 'Jira')).toEqual({ tone: 'bad', text: "Won't Do (Cancelled)" });
+    const t3 = res.tickets.find((t) => t.ident === 'T3')!;
+    expect(ticketLine(t3, 'Jira')).toEqual({ tone: 'ok', text: "Won't Do (Cancelled) — doesn’t stop a release" });
+    expect(ticketRank(t3)).toBe(2);
+    expect(olderTagSummary(res, res.repos[0]!.tags[0]!)).toEqual({ tone: 'ok', text: '1 cancelled' });
   });
 
   it('acceptance 17: not decided yet → "Checking…" with a bar and ONE line', () => {
@@ -195,7 +201,7 @@ describe('repo rows — the simple rule, newest first', () => {
     expect(tagExplainer(api.tags[0]!)).toEqual([{ tone: 'warn', text: 'The history is still being read.' }]);
     // A ticket not read yet: the tickets line.
     const t = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2')], trackerName: 'Jira' });
-    expect(repoProgress(t.repos[0]!)).toEqual({ share: 0, line: 'Reading tickets from Jira: 0 of 1' });
+    expect(repoProgress(t.repos[0]!)).toEqual({ share: 2 / 3, line: 'Reading tickets from Jira: 2 of 3' });
     expect(ticketLine(t.tickets.find((x) => x.ident === 'T3')!, 'Jira')).toEqual({ tone: 'warn', text: 'not read yet' });
   });
 
@@ -211,7 +217,7 @@ describe('repo rows — the simple rule, newest first', () => {
     const res = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2'), ticket('T3', { readState: 'not_found', done: false, statusName: null })] });
     const api = res.repos[0]!;
     expect(repoRowText(api)).toBe('Release v1.2.0 → v1.2.0-rc');
-    expect(repoRowCounts(api)).toBe('1 ticket · 1 to check');
+    expect(repoRowCounts(api)).toBe('3 tickets · 1 to check');
     expect(ticketLine(res.tickets.find((x) => x.ident === 'T3')!, 'Jira')).toEqual({ tone: 'unknown', text: 'not found in Jira — check by hand' });
   });
 
@@ -316,7 +322,7 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
     ]);
     expect(tagHeader(res, b.newer[0]!).text).toBe(`v1.3.0 · 3 Nov · ${sha('v1.3.0').slice(0, 7)} · 4 PRs · 4 tickets`);
     expect(tagHeader(res, b.candidate!).url).toBe(`https://github.com/acme/api/commit/${sha('v1.2.0')}`);
-    expect(candidateScopeLabel(res.repos[0]!)).toBe('checked: this tag’s own changes');
+    expect(candidateScopeLabel(res.repos[0]!)).toBe('checked: everything up to this tag');
   });
 
   it('no candidate: every tag read is in the first band, under "Can’t be released"; no older band', () => {
@@ -324,19 +330,22 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
     const b = rowBands(res.repos[0]!);
     expect(b).toMatchObject({ newerHeading: BAND_WORDS.newerNoCandidate, candidate: null, older: [] });
     expect(b.newer.map((t) => t.name)).toEqual(['v1.2.0', 'v1.1.0']);
-    expect(repoRowText(res.repos[0]!)).toBe('No tag can be released — v1.2.0: T2 is To do');
+    expect(repoRowText(res.repos[0]!)).toBe('No tag can be released — v1.2.0: T2 “T2 title” is To do');
   });
 
   it('50: the older band — 10 shown, one summary line each, "… 10 tags shown" and "Show 50 more"; a press asks the server for 60', () => {
-    const tickets = manyTickets(15);
-    tickets[8] = ticket('T9', { done: false, statusName: 'In Progress', stage: 'in_progress' });
-    const res = run({ repos: [many(15)], prs: manyPrs(15), tickets });
+    const res = run({ repos: [many(15)], prs: manyPrs(15), tickets: manyTickets(15) });
     const api = res.repos[0]!;
     const v = olderBandView(api, 10);
     expect(v.tags).toHaveLength(10);
     expect(v).toMatchObject({ shownLine: '… 10 tags shown', showMore: true, lastReleaseLine: null, progress: null });
     expect(olderTagSummary(res, v.tags[0]!)).toEqual({ tone: 'ok', text: '1 ticket Complete' });
-    expect(olderTagSummary(res, v.tags.find((t) => t.name === 'v1.9.0')!)).toEqual({ tone: 'bad', text: 'T9 In Progress' });
+    // A tag that can't be released: its first ticket, with its title.
+    const tickets = manyTickets(15);
+    tickets[8] = ticket('T9', { done: false, statusName: 'In Progress', stage: 'in_progress' });
+    const held = run({ repos: [many(15)], prs: manyPrs(15), tickets });
+    expect(held.repos[0]!.candidate?.name).toBe('v1.8.0');
+    expect(olderTagSummary(held, held.repos[0]!.tags.find((t) => t.name === 'v1.9.0')!)).toEqual({ tone: 'bad', text: 'T9 “T9 title” In Progress' });
     expect(olderShowMore(10, api.older.wanted)).toEqual({ shown: 60, ask: 60 });
     // The server already holds more than shown: no request, the tags are shown at once.
     expect(olderShowMore(10, 110)).toEqual({ shown: 60, ask: null });
@@ -365,16 +374,33 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
     expect(v).toMatchObject({ lastReleaseLine: 'v1.0.0-rc — last release', showMore: false });
   });
 
-  it('53: while the band reads older history it shows the bar and its line, and hides "Show 50 more"; the tab polls', () => {
+  it('53: while older history is read the row is Checking… with the bar and its line; the tab polls', () => {
     const r = many(3);
     r.tags.push({ name: 'v0.9.0', sha: sha('v0.9.0'), committedAt: day(0), taggedAt: null, onDefaultBranch: null, moved: false });
     r.history = { done: 300, total: 900, complete: false };
     r.defaultBranch = 'main';
     const res = run({ repos: [r], prs: manyPrs(3), tickets: manyTickets(3) });
-    const v = olderBandView(res.repos[0]!, 10);
-    expect(v.progress).toEqual({ share: 300 / 900, line: "Reading main's history: 300 of 900 commits" });
-    expect(v.showMore).toBe(false);
+    expect(repoRowText(res.repos[0]!)).toBe('Checking…');
+    expect(repoProgress(res.repos[0]!)).toEqual({ share: 300 / 900, line: "Reading main's history: 300 of 900 commits" });
     expect(releasesPollInterval({ check: res })).toBe(RELEASES_POLL_MS);
+  });
+
+  it('a tag clear on its own but held back by an older tag says so in ONE line, naming the oldest', () => {
+    const tickets = manyTickets(5);
+    tickets[1] = ticket('T2', { done: false, statusName: 'In Code Review', title: 'Read and price trees' });
+    tickets[2] = ticket('T3', { done: false, statusName: 'In PO Review', title: 'Export' });
+    const res = run({ repos: [many(5)], prs: manyPrs(5), tickets });
+    const b = rowBands(res.repos[0]!);
+    expect(b.candidate?.name).toBe('v1.1.0');
+    const v15 = b.newer.find((t) => t.name === 'v1.5.0')!;
+    expect(tagExplainer(v15)).toEqual([{ tone: 'bad', text: 'Held back by an older tag: v1.2.0 — T2 “Read and price trees” is In Code Review.' }]);
+    // A tag with its own reason: its ticket lines say it; older tags are listed below.
+    expect(tagExplainer(b.newer.find((t) => t.name === 'v1.3.0')!)).toEqual([]);
+  });
+
+  it('Refresh shows a bar with what it reads', () => {
+    expect(refreshingLine({ trackerName: 'Jira' })).toBe('Reading tickets from Jira again');
+    expect(refreshingLine(null)).toBe('Reading tickets from the tracker again');
   });
 
   it('54: a ticket line opens to its detail — type, assignee, last read; PRs in this tag and elsewhere (OPEN, in a tag, not in a tag yet)', () => {

@@ -117,7 +117,7 @@ describe('the snapshot and its changes', () => {
     const before = releaseSnapshotOf(foldReleaseCheck(input()), [API, WEB]);
     const after = foldReleaseCheck(input({ done: { 'PLAT-2': false } }));
     const changes = releaseSnapshotChanges(before, after);
-    expect(changes).toContain('PLAT-2 is In review.');
+    expect(changes).toContain('PLAT-2 “Story two” is In review.');
     expect(changes).toContain('api has no tag that can be released now.');
   });
 
@@ -125,7 +125,7 @@ describe('the snapshot and its changes', () => {
     const before = releaseSnapshotOf(foldReleaseCheck(input()), [API, WEB]);
     const after = foldReleaseCheck(input({ openPrs: [{ repoId: WEB, repoName: 'web', number: 77, url: 'https://github.com/acme/web/pull/77', prId: 7, ticketIdents: [ident('PLAT-3')] }] }));
     const changes = releaseSnapshotChanges(before, after);
-    expect(changes).toContain('PLAT-3 has an open pull request in web (#77).');
+    expect(changes).toContain('PLAT-3 “Story three” has an open pull request in web (#77).');
     expect(changes).toContain('web has no tag that can be released now.');
   });
 
@@ -146,9 +146,9 @@ describe('release notes — code-built, one section per repo', () => {
     const api = releaseNotesSection(facts[0]!);
     expect(api).toContain('## api v1.0.0-rc');
     expect(api).toContain('Built from v1.0.0.');
-    // No release yet: only the candidate tag's own changes, and the notes say so.
-    expect(api).toContain('Earlier changes are not listed.');
-    expect(api).toContain('### Stories in this tag');
+    // No release yet: everything up to the candidate tag ships, and the notes say so.
+    expect(api).toContain('First release: everything up to this tag.');
+    expect(api).toContain('### Stories\n');
     expect(api).toContain('#### [PLAT-1](https://acme.atlassian.net/browse/PLAT-1) Story one');
     // The story's PRs in every repo of the release.
     expect(api).toContain('- [api #10](https://github.com/acme/api/pull/10) Login via SSO');
@@ -162,12 +162,12 @@ describe('release notes — code-built, one section per repo', () => {
     expect(doc.indexOf('## api')).toBeLessThan(doc.indexOf('## web'));
   });
 
-  it('acceptance 47: with a release, the notes list everything since it (no "Earlier changes" line)', () => {
+  it('acceptance 47: with a release, the notes list everything since it (no "First release" line)', () => {
     const res = foldReleaseCheck(input({ released: true }));
     expect(res.repos[0]!.baseline?.name).toBe('v0.9.0-rc');
     const api = releaseNotesSection(releaseNotesInputOf(res, [API])[0]!);
     expect(api).toContain('### Stories\n');
-    expect(api).not.toContain('Earlier changes are not listed.');
+    expect(api).not.toContain('First release');
     expect(api).toContain('Login via SSO');
   });
 

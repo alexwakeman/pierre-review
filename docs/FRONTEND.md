@@ -2919,8 +2919,8 @@ board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`.
 `RELEASES_POLL_MS` (3 s) ONLY while a repo is checking (`refetchInterval` = `releasesPollInterval`, shared
 `releasesChecking`) and stops when none is; nothing renders while `workspaceId` is null; not configured,
 or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE setup line
-(`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick) and SIMPLE (2026-11-16:
-the newest version tag whose tickets are Complete with no open PR). REPO-ORIENTED (no tickets panel, no
+(`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick) and CUMULATIVE (2026-11-16:
+the newest version tag such that it and every tag below it have their tickets Complete with no open PR — the cumulative rule). REPO-ORIENTED (no tickets panel, no
 warnings panel): one row per releasable repo (`repoRowText`: "Release 0.392.0 → 0.392.0-rc", "No tag can be
 released — 0.394.0: BMD-1048 is In PO Review" / "No tag since 0.380.0-rc can be released — …" (the newest
 tag's reason, `newestReason`), "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"),
@@ -2930,8 +2930,8 @@ tickets · 1 to check"), and, while CHECKING only, the progress (`repoProgress`)
 history: 1,200 of 5,400 commits"). A row expands to ONE list, newest at the top, in THREE BANDS (`rowBands`,
 `BAND_WORDS`; the approved layout, 2026-11-16): "Newer than the candidate — can’t be released" (every tag newer
 than the candidate, ALWAYS open, every ticket — with no candidate every tag read, under "Can’t be released"),
-"Candidate" (open, its whole scope, + `candidateScopeLabel` "checked: this tag’s own changes" / "checked:
-everything since 0.380.0-rc") and "Older tags — for checking" (`olderTags`, never part of the walk; ONE
+"Candidate" (open; its whole scope after a release, its own increment before one — `listsScope` — + `candidateScopeLabel` "checked: everything up to this tag" / "checked:
+everything since 0.380.0-rc") and "Older tags — for checking" (`olderTags`, all qualifying by the rule; ONE
 summary line each, `olderTagSummary`: "all 2 tickets Complete", its first reason, "checking…"; a click opens
 it). Each tag header is `tagHeader` (name · day · short sha — a link to the commit through `safeExternalUrl`
 · "4 PRs · 3 tickets"). `tagTickets` orders the tickets: those that stop the tag, then to check, then

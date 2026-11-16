@@ -526,14 +526,14 @@ export const SPRINT_RELEASES = {
       name: REPOS.payments,
       candidate: true,
       text: 'Release v3.2.0 → v3.2.0-rc',
-      counts: '2 tickets · 1 to check',
+      counts: '5 tickets · 1 to check',
       older: '… 2 tags shown',
       tags: [
         {
           name: 'v3.2.0',
           band: 'candidate',
           meta: '15 Oct · 9f8e7d6 · 3 PRs · 2 tickets',
-          scope: 'checked: this tag’s own changes',
+          scope: 'checked: everything up to this tag',
           tickets: [
             { key: 'PAY-120', title: '', tone: 'unknown', status: 'not found in Jira — check by hand' },
             {
@@ -564,8 +564,8 @@ export const SPRINT_RELEASES = {
           name: 'v3.0.0',
           band: 'older',
           meta: '2 Oct · 1a2b3c4 · 1 PR · 1 ticket',
-          summary: { tone: 'bad', text: 'PAY-101 In Progress' },
-          tickets: [{ key: 'PAY-101', title: 'Currency rounding', tone: 'bad', status: 'In Progress' }],
+          summary: { tone: 'ok', text: '1 ticket Complete' },
+          tickets: [{ key: 'PAY-101', title: 'Currency rounding', tone: 'ok', status: 'Done (Complete)' }],
         },
       ],
     },
@@ -581,7 +581,7 @@ export const SPRINT_RELEASES = {
           name: 'v1.9.1',
           band: 'newer',
           meta: '16 Oct · a1b2c3d · 1 PR · 1 ticket',
-          notes: ['PAY-150 (from v1.9.0) is In review.'],
+          notes: ['Held back by an older tag: v1.9.0 — PAY-150 “Saved cards on mobile” is In review.'],
           tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done (Complete)' }],
         },
         {
@@ -612,7 +612,7 @@ export const SPRINT_RELEASES = {
     {
       name: REPOS.ledger,
       candidate: false,
-      text: 'No tag since v0.8.0-rc can be released — v0.9.0: PAY-146 has an open pull request in payments (#611)',
+      text: 'No tag since v0.8.0-rc can be released — v0.9.0: PAY-146 “Rename ledger tables” has an open pull request in payments (#611)',
       tags: [
         {
           name: 'v0.9.0',

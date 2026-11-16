@@ -13,6 +13,18 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- This Sprint → Releases: the candidate is now the tag just below the oldest tag that can't be released, because
+  releasing a tag ships everything below it. A tag whose own tickets are Complete says which older tag holds it
+  back. Before your first release the whole history is checked, and a candidate shows once it has all been read.
+- This Sprint → Releases: every reason names the ticket's title beside its number, for example "BMD-1061
+  “Send the report” is In Code Review".
+- This Sprint → Releases: Refresh shows a progress bar saying what it reads.
+- This Sprint → Releases: a cancelled ticket, such as "Won't Do", no longer stops a release. It is listed with a
+  tick and gets no comment.
+- Release notes for a first release list everything up to the tag.
+
 ## [1.0.55] - 2026-11-17
 
 ### Added

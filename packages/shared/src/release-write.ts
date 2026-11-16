@@ -127,9 +127,9 @@ export interface ReleaseNotesRepo {
   versionTag: string;
   releaseTagName: string;
   stories: ReleaseNotesStory[];
-  /** since_release: everything since the last release; own_tag: only the candidate tag's own changes
-   *  (no release yet), so earlier changes are not listed. */
-  scope: 'since_release' | 'own_tag';
+  /** since_release: everything since the last release; since_start: no release yet, so everything up to
+   *  the candidate tag (the whole history the check read). */
+  scope: 'since_release' | 'since_start';
   untracked: ReleaseNotesPr[];
   bot: ReleaseNotesPr[];
 }
@@ -206,10 +206,10 @@ function prLine(p: ReleaseNotesPr): string {
 /** ONE repo's section — also its GitHub pre-release body. Pure. */
 export function releaseNotesSection(repo: ReleaseNotesRepo): string {
   const lines: string[] = [`## ${notesText(repo.repoName)} ${notesText(repo.releaseTagName)}`, '', `Built from ${notesText(repo.versionTag)}.`];
-  // No release yet: only the candidate tag's own changes are listed.
-  if (repo.scope === 'own_tag') lines.push('', 'Earlier changes are not listed.');
+  // No release yet: everything up to the candidate tag ships, so everything is listed.
+  if (repo.scope === 'since_start') lines.push('', 'First release: everything up to this tag.');
   if (repo.stories.length > 0) {
-    lines.push('', repo.scope === 'own_tag' ? '### Stories in this tag' : '### Stories');
+    lines.push('', '### Stories');
     for (const s of repo.stories) {
       const head = s.title != null && s.title !== '' ? `${mdLink(notesText(s.key), s.url)} ${notesText(s.title)}` : mdLink(notesText(s.key), s.url);
       lines.push('', `#### ${head}`);

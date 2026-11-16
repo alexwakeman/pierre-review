@@ -13,9 +13,10 @@ export default function Page(): JSX.Element {
     <>
       <p>
         <Ui>This Sprint → Releases</Ui> (press <Kbd>4</Kbd> on This Sprint) checks the version tags of each repository you
-        release against your tickets, by itself. The <strong>candidate</strong> is the newest version tag on the default
-        branch whose tickets are all Complete, with no pull request still open for any of them. Ensemble starts at the
-        newest tag and stops at the first one that qualifies. Each repository is checked on its own. Check what the tab
+        release against your tickets, by itself. Releasing a tag ships everything below it, so the{' '}
+        <strong>candidate</strong> is the newest version tag on the default branch where that tag and every tag below it
+        have all their tickets Complete, with no pull request still open for any of them. That is the tag just below
+        the oldest tag that can&rsquo;t be released. Each repository is checked on its own. Check what the tab
         lists, then one press tags every candidate as a release, publishes the release notes and comments on each
         ticket.
       </p>
@@ -59,14 +60,15 @@ export default function Page(): JSX.Element {
           press would create.
         </li>
         <li>
-          &ldquo;No tag can be released — 0.394.0: BMD-1048 is In PO Review&rdquo;: no tag qualifies, and this is why the
+          &ldquo;No tag can be released — 0.394.0: BMD-1048 &ldquo;Edit an area&rdquo; is In PO Review&rdquo;: no tag
+          qualifies, and this is why the
           newest one does not. After a release it reads &ldquo;No tag since 0.380.0-rc can be released — …&rdquo;.
         </li>
         <li>
           &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Reading
           main&rsquo;s history: 1,200 of 5,400 commits&rdquo; or &ldquo;Reading tickets from Jira: 300 of 420&rdquo;. The
-          tab updates by itself until every repository is checked. It often has an answer before the whole history is
-          read: the newest tags are read first.
+          tab updates by itself until every repository is checked. A candidate is shown once the whole history is
+          read, because a tag far down can still hold one back.
         </li>
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
@@ -76,18 +78,19 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <strong>Newer than the candidate — can&rsquo;t be released.</strong> Every newer tag, open, with all its
-          tickets. If no tag can be released, every tag that was checked is here.
+          tickets. A tag whose own tickets are all Complete says which older tag holds it back, for example
+          &ldquo;Held back by an older tag: 0.324.0 — BMD-1061 &ldquo;Send the report&rdquo; is In Code Review&rdquo;. If
+          no tag can be released, every tag that was checked is here.
         </li>
         <li>
-          <strong>Candidate.</strong> The tag to release, with every ticket it covers and what was checked:
-          &ldquo;this tag&rsquo;s own changes&rdquo; before your first release, or &ldquo;everything since
-          0.380.0-rc&rdquo; after one.
+          <strong>Candidate.</strong> The tag to release and what was checked: &ldquo;everything up to this tag&rdquo;
+          before your first release, or &ldquo;everything since 0.380.0-rc&rdquo; after one. After a release it lists
+          every ticket since that release; before your first, the tickets the tag itself added.
         </li>
         <li>
           <strong>Older tags — for checking.</strong> The 10 tags below the candidate, one line each, such as
-          &ldquo;✓ all 2 tickets Complete&rdquo; or &ldquo;✗ BMD-127 In Progress&rdquo;. Select a tag to see its tickets.{' '}
-          <Ui>Show 50 more</Ui> adds the next 50. These tags never change the candidate. After a release the list stops
-          at that release, for example &ldquo;0.380.0-rc — last release&rdquo;.
+          &ldquo;✓ all 2 tickets Complete&rdquo;. Select a tag to see its tickets. <Ui>Show 50 more</Ui> adds the next
+          50. After a release the list stops at that release, for example &ldquo;0.380.0-rc — last release&rdquo;.
         </li>
       </ul>
       <p>
@@ -115,7 +118,7 @@ export default function Page(): JSX.Element {
       <p>
         There is nothing to pick. The first check of a repository reads the history of main once, from the newest
         commit back to your last release (or the first commit), with each commit&rsquo;s pull request — beyond the 90
-        days Ensemble normally syncs. It stops early once the candidate and the older tags you asked for are known. The tickets are then read from your tracker in batches (Jira: up to 100 in one
+        days Ensemble normally syncs. The tickets are then read from your tracker in batches (Jira: up to 100 in one
         request). Later checks read only the commits that are new since the last one. It works within your GitHub rate
         limit and waits when the limit is low.
       </p>
@@ -123,13 +126,13 @@ export default function Page(): JSX.Element {
       <H2 id="the-rules">The rules</H2>
       <ul>
         <li>
-          A tag&rsquo;s tickets: after a release, every ticket merged since that release up to the tag. Before your first
-          release, only the tickets the tag itself added since the tag before it.
+          A tag&rsquo;s tickets are everything releasing it would ship: after a release, every ticket merged since that
+          release up to the tag; before your first release, every ticket merged up to the tag.
         </li>
         <li>
           A tag qualifies when each of its tickets is in your Complete column and has no open pull request into the
-          default branch of any repository you release. A cancelled ticket, such as &ldquo;Won&rsquo;t do&rdquo;, is not
-          Complete.
+          default branch of any repository you release. A ticket in your Cancelled column, such as &ldquo;Won&rsquo;t
+          do&rdquo;, never stops a tag: it is listed with a tick and gets no comment.
         </li>
         <li>
           A ticket the tracker could not find, or has no access to, does not stop a tag. It is listed under the tag for
@@ -164,8 +167,8 @@ export default function Page(): JSX.Element {
         in a repository that failed to tag gets no comment.
       </Warning>
       <Note>
-        After a release, the notes list everything since it. Before your first release they list only the
-        tag&rsquo;s own stories and say &ldquo;Earlier changes are not listed.&rdquo; With AI on, the notes add a
+        After a release, the notes list everything since it. Before your first release they list everything up to the
+        tag and say &ldquo;First release: everything up to this tag.&rdquo; With AI on, the notes add a
         one-paragraph summary per story. Version numbers and counts always come from your
         tags, never from the model. Comments are posted on Jira; other trackers are not supported yet.
       </Note>

@@ -293,7 +293,7 @@ describe('createRelease — the writes, in order, each claimed', () => {
     const res = await create([API, WEB], snap);
     expect(res.outcome).toBe('stopped');
     if (res.outcome !== 'stopped') return;
-    expect(res.changes).toContain('PLAT-2 is In review.');
+    expect(res.changes).toContain('PLAT-2 “Story PLAT-2” is In review.');
     expect(w.calls.tag).toEqual([]);
     expect(w.calls.prerelease).toEqual([]);
     expect(w.calls.comment).toEqual([]);
@@ -307,7 +307,7 @@ describe('createRelease — the writes, in order, each claimed', () => {
     const res = await create([API, WEB], snap);
     expect(res.outcome).toBe('stopped');
     if (res.outcome !== 'stopped') return;
-    expect(res.changes).toContain('PLAT-1 has an open pull request in web (#88).');
+    expect(res.changes).toContain('PLAT-1 “Story PLAT-1” has an open pull request in web (#88).');
     expect(w.calls.tag).toEqual([]);
     expect(await rowCount()).toBe(before);
   });
