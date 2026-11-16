@@ -4,6 +4,7 @@ import {
   SPRINT_STAGE_LABEL,
   releaseBlockerShort,
   releaseBlockerText,
+  releaseSplitWhere,
   releaseTitleShort,
   releaseUnverifiedText,
   releasesChecking,
@@ -304,6 +305,8 @@ export function ticketLine(
     const n = t.openPrs.length;
     return { tone: 'bad', text: `${ticketStatusWords(t)}, but has ${n === 1 ? 'an open PR' : 'open PRs'}: ${openPrList(t.openPrs)}` };
   }
+  // Picked together: its other half sits above a candidate.
+  if (t.blocker?.kind === 'split') return { tone: 'bad', text: `${ticketStatusWords(t)}, but would ship without ${releaseSplitWhere(t.blocker)}` };
   if (t.unverified != null) return { tone: 'unknown', text: `${UNVERIFIED_WORDS[t.unverified](tracker)} — check by hand` };
   if (t.pending) return { tone: 'warn', text: 'not read yet' };
   return { tone: 'ok', text: ticketStatusWords(t) };

@@ -16,7 +16,8 @@ export default function Page(): JSX.Element {
         release against your tickets, by itself. Releasing a tag ships everything below it, so the{' '}
         <strong>candidate</strong> is the newest version tag on the default branch where that tag and every tag below it
         have all their tickets Complete, with no pull request still open for any of them. That is the tag just below
-        the oldest tag that can&rsquo;t be released. Each repository is checked on its own. Check what the tab
+        the oldest tag that can&rsquo;t be released. The repositories are picked together, so no ticket is released
+        with only part of its work. Check what the tab
         lists, then one press tags every candidate as a release, publishes the release notes and comments on each
         ticket.
       </p>
@@ -142,6 +143,12 @@ export default function Page(): JSX.Element {
         <li>
           Pull requests with no ticket never stop a tag and are not warnings. They are listed under the tag, and in the
           notes under untracked or dependency and bot changes.
+        </li>
+        <li>
+          A Complete ticket with work in more than one tag is released whole or not at all. If part of it is above a
+          candidate, in any repository you release, the tags holding the rest can&rsquo;t be released either, for
+          example &ldquo;BMD-1048 &ldquo;Edit an area&rdquo; would ship without bng-metric-backend #539 (in
+          0.326.0)&rdquo;.
         </li>
         <li>Commits with no pull request are noted on their tag.</li>
         <li>Pull requests into a hotfix branch never count.</li>

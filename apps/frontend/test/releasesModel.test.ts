@@ -398,6 +398,24 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
     expect(tagExplainer(b.newer.find((t) => t.name === 'v1.3.0')!)).toEqual([]);
   });
 
+  it('picked together: a ticket whose other half is above a candidate says what it would ship without', () => {
+    const api = many(2);
+    const web = repo(2, 'frontend', [
+      { name: 'w1.0.0', d: 2, prs: [22] },
+      { name: 'w1.1.0', d: 4, prs: [21] },
+    ]);
+    const res = run({
+      repos: [api, web],
+      prs: [...manyPrs(2), pr(21, 2, ['T2']), pr(22, 2, ['W9'])],
+      tickets: [...manyTickets(2), ticket('W9', { done: false, statusName: 'In Progress' })],
+      trackerName: 'Jira',
+    });
+    expect(res.repos[0]!.candidate?.name).toBe('v1.1.0');
+    const t2 = res.tickets.find((t) => t.ident === 'T2')!;
+    expect(ticketLine(t2, 'Jira')).toEqual({ tone: 'bad', text: 'Complete, but would ship without frontend #21 (in w1.1.0)' });
+    expect(ticketRank(t2)).toBe(0);
+  });
+
   it('Refresh shows a bar with what it reads', () => {
     expect(refreshingLine({ trackerName: 'Jira' })).toBe('Reading tickets from Jira again');
     expect(refreshingLine(null)).toBe('Reading tickets from the tracker again');

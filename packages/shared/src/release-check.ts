@@ -32,6 +32,14 @@
 //   • A reason that disqualifies a tag is certain even while other parts of its scope are still read
 //     (more reading only adds tickets), so a tag can be ruled out early.
 //
+// PICKED TOGETHER (owner, 2026-11-16): no Complete ticket may ship half. After each repository's own walk, a
+// ticket with merged work AT OR BELOW one repository's candidate and merged work ABOVE a candidate (any
+// releasable repository, the same one included; "not in a tag yet" and a repository with no candidate count
+// as above) blocks — as `split` — the tags that hold it in each repository where part of it would ship. The
+// candidates are walked again until nothing changes (they only ever move down, so it ends). A repository
+// still CHECKING, or with no version tags, takes no part yet. Cancelled and not-found tickets never block, so
+// they are never split either.
+//
 // RANGES are the per-tag INCREMENTS (previous default-branch tag, tag], derived from the history pass's
 // walked commits (backend releases/history-fold.ts). An increment missing (the pass has not passed the
 // tag below it yet) or stale (its tag moved, or its base is no longer the previous tag) is not read yet.
@@ -311,7 +319,20 @@ export type ReleaseBlocker =
   | { kind: 'not_done'; ident: string; key: string; title?: string | null; statusName: string | null; fromTag: string | null }
   | { kind: 'open_pr'; ident: string; key: string; title?: string | null; prs: ReleaseOpenPr[]; fromTag: string | null }
   /** `ident` null: the history of the scope is not read yet. Otherwise a ticket not read yet. */
-  | { kind: 'checking'; ident: string | null; key: string | null; title?: string | null; fromTag: string | null };
+  | { kind: 'checking'; ident: string | null; key: string | null; title?: string | null; fromTag: string | null }
+  /** Complete, but more of its merged work sits ABOVE a candidate (picked together): releasing this tag
+   *  would ship it without `repoName #number` (in `tagName`; null = not in a tag yet). */
+  | {
+      kind: 'split';
+      ident: string;
+      key: string;
+      title?: string | null;
+      repoName: string;
+      number: number;
+      url: string;
+      tagName: string | null;
+      fromTag: string | null;
+    };
 
 /** A ticket in a tag's scope that the tracker could not give: listed for the reader, never a block. */
 export interface ReleaseUnverified {
@@ -533,7 +554,8 @@ type TicketVerdict =
   | { kind: 'not_done'; statusName: string | null }
   | { kind: 'open_pr'; prs: ReleaseOpenPr[] }
   | { kind: 'checking' }
-  | { kind: 'unverified'; reason: Exclude<ReleaseTicketReadState, 'ok'> };
+  | { kind: 'unverified'; reason: Exclude<ReleaseTicketReadState, 'ok'> }
+  | { kind: 'split'; repoName: string; number: number; url: string; tagName: string | null };
 
 interface TagEval {
   span: number;
@@ -550,7 +572,7 @@ function foldRepo(
   repo: ReleaseCheckRepoInput,
   input: ReleaseCheckInput,
   prById: ReadonlyMap<number, ReleaseCheckPrInput>,
-  verdictOf: (ident: string) => TicketVerdict,
+  verdictOf: (ident: string, repoId: number) => TicketVerdict,
   keyOf: (ident: string) => string,
   readOf: (ident: string) => boolean,
   titleOf: (ident: string) => string | null = () => null,
@@ -562,6 +584,8 @@ function foldRepo(
   candidate: TagEval | null;
   /** PR record id → the version tag whose increment holds it. */
   prTag: Map<number, string>;
+  /** PR record id → the span (version tag after the baseline) that added it; absent = released already. */
+  spanOfPr: Map<number, number>;
   /** The newest tag on the default branch's commit date (ms; null = none): a PR merged after it is in no
    *  tag yet. */
   newestTagAtMs: number | null;
@@ -643,9 +667,13 @@ function foldRepo(
         if (seen.has(ident)) continue;
         seen.add(ident);
         scopeIdents.push(ident);
-        const v = verdictOf(ident);
+        const v = verdictOf(ident, repo.repoId);
         const key = keyOf(ident);
         const title = titleOf(ident);
+        if (v.kind === 'split') {
+          blockers.push({ kind: 'split', ident, key, ...named(title), repoName: v.repoName, number: v.number, url: v.url, tagName: v.tagName, fromTag });
+          continue;
+        }
         if (v.kind === 'not_done') blockers.push({ kind: 'not_done', ident, key, ...named(title), statusName: v.statusName, fromTag });
         else if (v.kind === 'open_pr') blockers.push({ kind: 'open_pr', ident, key, ...named(title), prs: v.prs, fromTag });
         else if (v.kind === 'checking') checking.push({ kind: 'checking', ident, key, ...named(title), fromTag });
@@ -844,7 +872,11 @@ function foldRepo(
     directCommits,
     unverifiedCount: candidate?.unverified.length ?? 0,
   };
-  return { out, evals, olderEvals, spans, candidate, prTag, newestTagAtMs };
+  const spanOfPr = new Map<number, number>();
+  spans.forEach((sp, i) => {
+    for (const id of sp.prIds) spanOfPr.set(id, i);
+  });
+  return { out, evals, olderEvals, spans, candidate, prTag, spanOfPr, newestTagAtMs };
 }
 
 /** Run the release check. Pure. */
@@ -885,6 +917,64 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
   };
   const readOf = (ident: string): boolean => ticketOf(ident).readState !== 'not_read';
 
+  // PICKED TOGETHER: `splitBy` = (repo, ticket) pairs that block, with the merged PR left out. Only grows.
+  const splitBy = new Map<string, Extract<TicketVerdict, { kind: 'split' }>>();
+  const verdictIn = (ident: string, repoId: number): TicketVerdict => {
+    const v = verdictOf(ident);
+    return v.kind === 'ok' ? (splitBy.get(`${repoId}|${ident}`) ?? v) : v;
+  };
+  const repoNameOf = new Map(input.repos.map((r) => [r.repoId, r.name]));
+  const foldAll = () => input.repos.map((repo) => ({ repo, f: foldRepo(repo, input, prById, verdictIn, keyOf, readOf, titleOf) }));
+  let folded = foldAll();
+  for (let round = 0; round < 10_000; round += 1) {
+    // Where each merged PR sits against its repository's candidate. Decided repositories only.
+    type Place = { repoId: number; below: boolean; number: number; url: string; tagName: string | null; at: number };
+    const places = new Map<string, Place[]>();
+    const put = (ident: string, p: Place): void => {
+      const list = places.get(ident) ?? [];
+      if (!list.some((x) => x.repoId === p.repoId && x.number === p.number)) list.push(p);
+      places.set(ident, list);
+    };
+    const decided = new Map<number, { cand: number; newestAt: number | null }>();
+    for (const { repo, f } of folded) {
+      if (f.out.status !== 'candidate' && f.out.status !== 'none') continue;
+      decided.set(repo.repoId, { cand: f.candidate?.span ?? -1, newestAt: f.newestTagAtMs });
+    }
+    for (const { repo, f } of folded) {
+      const d = decided.get(repo.repoId);
+      if (d == null) continue;
+      for (const [id, span] of f.spanOfPr) {
+        const p = prById.get(id);
+        if (p == null) continue;
+        for (const ident of p.ticketIdents) {
+          put(ident, { repoId: repo.repoId, below: span <= d.cand, number: p.number, url: p.url, tagName: f.prTag.get(id) ?? null, at: span });
+        }
+      }
+    }
+    // Merged after the repository's newest tag: in no tag yet — always above.
+    for (const p of input.mergedPrs ?? []) {
+      const d = decided.get(p.repoId);
+      if (d == null || d.newestAt == null || p.mergedAt == null || p.mergedAt.getTime() <= d.newestAt) continue;
+      for (const ident of p.ticketIdents) put(ident, { repoId: p.repoId, below: false, number: p.number, url: p.url, tagName: null, at: Number.MAX_SAFE_INTEGER });
+    }
+    let grew = false;
+    for (const [ident, list] of places) {
+      if (verdictOf(ident).kind !== 'ok') continue;
+      const above = list.filter((p) => !p.below).sort((a, b) => a.at - b.at || a.number - b.number);
+      if (above.length === 0) continue;
+      for (const repoId of new Set(list.filter((p) => p.below).map((p) => p.repoId))) {
+        const k = `${repoId}|${ident}`;
+        if (splitBy.has(k)) continue;
+        // Name a PR in ANOTHER repository first: that is the cross-repository case the reader asked about.
+        const miss = above.find((p) => p.repoId !== repoId) ?? above[0]!;
+        splitBy.set(k, { kind: 'split', repoName: repoNameOf.get(miss.repoId) ?? '', number: miss.number, url: miss.url, tagName: miss.tagName });
+        grew = true;
+      }
+    }
+    if (!grew) break;
+    folded = foldAll();
+  }
+
   const repos: ReleaseRepoCheck[] = [];
   /** ident → per repo: state and PRs. */
   const ticketRepos = new Map<string, Map<number, { state: ReleaseTicketRepoState; prIds: number[] }>>();
@@ -894,8 +984,8 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
   const listedPrIds = new Set<number>();
   const prTagByRepo = new Map<number, Map<number, string>>();
   const newestTagAtByRepo = new Map<number, number | null>();
-  for (const repo of input.repos) {
-    const { out, evals, olderEvals, candidate, prTag, newestTagAtMs } = foldRepo(repo, input, prById, verdictOf, keyOf, readOf, titleOf);
+  for (const { repo, f } of folded) {
+    const { out, evals, olderEvals, candidate, prTag, newestTagAtMs } = f;
     prTagByRepo.set(repo.repoId, prTag);
     newestTagAtByRepo.set(repo.repoId, newestTagAtMs);
     const candidateScope = new Set(candidate?.scopeIdents ?? []);
@@ -924,7 +1014,6 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
 
   // Every PR for each listed ticket in the releasable repos (the ticket detail): the light records
   // (with the tag holding each), the stored merged PRs with no light record, and the open PRs.
-  const repoNameOf = new Map(input.repos.map((r) => [r.repoId, r.name]));
   const listed = new Set(population);
   const ticketPrs = new Map<string, ReleaseTicketPr[]>();
   const addTicketPr = (ident: string, p: ReleaseTicketPr): void => {
@@ -996,7 +1085,10 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
 
   const tickets: ReleaseTicketCheck[] = population.map((ident) => {
     const t = ticketOf(ident);
-    const v = verdictOf(ident);
+    const base = verdictOf(ident);
+    // Picked together: a Complete ticket split across a candidate carries the first split reason found.
+    const split = base.kind === 'ok' ? [...splitBy.entries()].find(([k]) => k.endsWith(`|${ident}`))?.[1] : undefined;
+    const v: TicketVerdict = split ?? base;
     const per = [...(ticketRepos.get(ident) ?? new Map()).entries()]
       .sort((a, z) => a[0] - z[0])
       .map(([repoId, x]) => ({ repoId, state: x.state, prIds: [...x.prIds].sort((p, q) => p - q) }));
@@ -1007,7 +1099,9 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
           ? { kind: 'open_pr', ident, key: t.key, ...named(titleOf(ident)), prs: v.prs, fromTag: null }
           : v.kind === 'checking'
             ? { kind: 'checking', ident, key: t.key, ...named(titleOf(ident)), fromTag: null }
-            : null;
+            : v.kind === 'split'
+              ? { kind: 'split', ident, key: t.key, ...named(titleOf(ident)), repoName: v.repoName, number: v.number, url: v.url, tagName: v.tagName, fromTag: null }
+              : null;
     return {
       ident,
       key: t.key,
@@ -1088,6 +1182,11 @@ function openPrWhere(prs: readonly ReleaseOpenPr[]): string {
   return parts.length <= 1 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
+/** The PR a split ticket would ship without: "bng-metric-backend #539 (in 0.326.0)", "… (not in a tag yet)". Pure. */
+export function releaseSplitWhere(b: { repoName: string; number: number; tagName: string | null }): string {
+  return `${b.repoName} #${b.number} (${b.tagName != null ? `in ${b.tagName}` : 'not in a tag yet'})`;
+}
+
 /** A reason in a few words, no full stop, the ticket's title beside its key: "BMD-1048 “Edit an AREA”
  *  is In PO Review", "BMD-1050 “Habitat export” has an open pull request in web (#812)", "BMD-1040
  *  “Hedgerow validation” (from 0.391.0) is In Progress", "BMD-12 is not read yet". Pure. */
@@ -1099,6 +1198,8 @@ export function releaseBlockerShort(b: ReleaseBlocker): string {
       return `${who(b.key, b.fromTag, b.title)} has ${b.prs.length === 1 ? 'an open pull request' : 'open pull requests'} in ${openPrWhere(b.prs)}`;
     case 'checking':
       return b.key == null ? 'the history is still being read' : `${who(b.key, b.fromTag, b.title)} is not read yet`;
+    case 'split':
+      return `${who(b.key, b.fromTag, b.title)} would ship without ${releaseSplitWhere(b)}`;
   }
 }
 

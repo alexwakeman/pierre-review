@@ -101,6 +101,15 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    too. Proving it needs the whole scope, so the history pass reads down to the baseline or the root first
    (BNG backend, 2026-11-16: 0.324.0 holds BMD-1061 In Code Review, so the candidate is 0.323.0 although
    0.415.0–0.418.0 are clear on their own).
+6. **PICKED TOGETHER (owner, 2026-11-16): no Complete ticket ships half.** After every repository's walk, a
+   ticket with merged work at or below one repository's candidate AND merged work above a candidate — in any
+   releasable repository, the same one included; "not in a tag yet" (merged after the newest tag) and a
+   repository with no candidate count as above — blocks the tags holding it in each repository where part of
+   it would ship: "BMD-1048 “Edit an AREA” would ship without bng-metric-backend #539 (in 0.326.0)." The walks
+   run again until nothing changes (candidates only move down). A repository still checking, or with no
+   version tags, takes no part yet. Cancelled and not-found tickets never block, so they are never split.
+   (BNG, 2026-11-16: backend 0.316.0, frontend 0.328.0 — BMD-1048, BMD-1083 and BMD-1086 had work on both
+   sides.)
 
 - **Tickets the tracker could not give do NOT block** (not found, no access, failed past the retry limit,
   a tracker that cannot read at all). A "not found" or "no access" that comes AFTER an older successful
@@ -336,9 +345,9 @@ Candidate (automatic, deterministic — THE CUMULATIVE RULE, 2026-11-16)
     commits", "Reading tickets from Jira: 0 of 1"); a reason that rules a tag out is still shown at once.
 18. OPEN PR IN ANOTHER RELEASABLE REPO: a Complete ticket with an open PR into the default branch of any
     releasable repo → the tag does not qualify ("T3 has an open pull request in web (#812)."); a merged PR
-    elsewhere is fine. Otherwise each repository is judged on its own (another repository's tag ruled out
-    holds nothing), and an unticked repository is ignored entirely (no row, no block, its PRs count for
-    nothing).
+    elsewhere is fine, unless it leaves part of a ticket above a candidate (57). Otherwise another
+    repository's tag ruled out holds nothing, and an unticked repository is ignored entirely (no row, no
+    block, its PRs count for nothing).
 
 Writes
 19. Confirm creates `<version><release suffix>`, annotated, on the version tag's commit; no Ensemble wording.
@@ -425,6 +434,10 @@ Tag list and ticket detail (the approved layout, 2026-11-16)
     Review").
 56. PROGRESS OVER 5 SECONDS: the history read, the ticket reads and Refresh each show a bar with a line saying
     what is being read.
+57. PICKED TOGETHER: T2's api PR is in v1.1.0 and its web PR in w1.1.0, above web's candidate → api v1.1.0 does
+    not qualify ("T2 would ship without web #21 (in w1.1.0).") and api's candidate drops below it; a PR merged
+    after the newest tag ("not in a tag yet") and a second PR in the SAME repository above its candidate count
+    the same; Cancelled / not-found tickets and a repository still checking take no part.
 54. TICKET DETAIL: a ticket line opens in place to its type, assignee and "Jira status read 4 min ago"; "In this
     tag" lists the tag's PRs naming it (repo, #, title, merged date, author); "Elsewhere" every other PR for it
     in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet" (merged after the newest tag);

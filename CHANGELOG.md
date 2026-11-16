@@ -23,12 +23,15 @@ no internals.
 - This Sprint → Releases: Refresh shows a progress bar saying what it reads.
 - This Sprint → Releases: a cancelled ticket, such as "Won't Do", no longer stops a release. It is listed with a
   tick and gets no comment.
+- This Sprint → Releases: the repositories are picked together. A Complete ticket with work in several tags or
+  repositories is released whole or not at all, and the tag that would ship part of it says what it would
+  ship without.
+- Release notes for a first release list everything up to the tag.
 
 ### Fixed
 
 - This Sprint → Releases: a ticket deleted from Jira since it was last read no longer blocks with its old
   status. It is listed as "not found in Jira — check by hand".
-- Release notes for a first release list everything up to the tag.
 
 ## [1.0.55] - 2026-11-17
 

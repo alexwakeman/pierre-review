@@ -359,11 +359,78 @@ describe('foldReleaseCheck — the cumulative rule, newest first, per repo', () 
     expect(repoOf(run({ repos: [threeTags()], prs: [...threePrs(), pr(20, 2, ['T3'])], tickets: allDone() }), 1).candidate?.name).toBe('v1.2.0');
   });
 
-  it('each repository is judged on its own: a web tag ruled out holds nothing in api', () => {
+  it('a web tag ruled out holds nothing in api when they share no ticket', () => {
     const web = repo(2, 'web', [{ name: 'w1', d: 2, prs: [20] }]);
     const res = run({ repos: [threeTags(), web], prs: [...threePrs(), pr(20, 2, ['W1'])], tickets: [...allDone(), ticket('W1', { done: false })] });
     expect(repoOf(res, 1).candidate?.name).toBe('v1.2.0');
     expect(repoOf(res, 2).status).toBe('none');
+  });
+
+  it('PICKED TOGETHER — a Complete ticket whose web half is above the web candidate holds back the api tag with its api half', () => {
+    // api: v1.0.0 T1 · v1.1.0 T2 · v1.2.0 T3. web: w1.0.0 T2 (its web half) · w1.1.0 W9 (In Progress).
+    const web = repo(2, 'web', [
+      { name: 'w1.0.0', d: 2, prs: [21] },
+      { name: 'w1.1.0', d: 4, prs: [22] },
+    ]);
+    const base = { prs: [...threePrs(), pr(21, 2, ['T2']), pr(22, 2, ['W9'])], tickets: [...allDone(), ticket('W9', { done: false, statusName: 'In Progress' })] };
+    // web's candidate is w1.0.0: T2's web half ships with it, so api may ship its api half — nothing split.
+    const together = run({ repos: [threeTags(), web], ...base });
+    expect(repoOf(together, 1).candidate?.name).toBe('v1.2.0');
+    expect(repoOf(together, 2).candidate?.name).toBe('w1.0.0');
+
+    // Now T2's web half is in w1.1.0, above web's candidate: api must not ship T2 without it.
+    const webLate = repo(2, 'web', [
+      { name: 'w1.0.0', d: 2, prs: [22] },
+      { name: 'w1.1.0', d: 4, prs: [21] },
+    ]);
+    const res = run({ repos: [threeTags(), webLate], ...base });
+    expect(repoOf(res, 2).status).toBe('none');
+    expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
+    expect(reasons(res, 1, 'v1.1.0')).toEqual(['T2 would ship without web #21 (in w1.1.0).']);
+    expect(ticketOf(res, 'T2')).toMatchObject({ ready: false, blocker: { kind: 'split', repoName: 'web', number: 21, tagName: 'w1.1.0' } });
+    // The api tag above it is held back by it.
+    expect(tagOf(res, 1, 'v1.2.0').blockers.map(releaseBlockerText)).toEqual(['T2 (from v1.1.0) would ship without web #21 (in w1.1.0).']);
+  });
+
+  it('PICKED TOGETHER — merged after the newest tag ("not in a tag yet") counts as above', () => {
+    const res = run({
+      repos: [threeTags()],
+      prs: threePrs(),
+      mergedPrs: [{ repoId: 1, repoName: 'api', number: 40, title: 'T2: follow-up', url: 'https://github.com/acme/api/pull/40', prId: 400, authorLogin: null, mergedAt: day(9), ticketIdents: ['T2'] }],
+      tickets: allDone(),
+    });
+    expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
+    expect(reasons(res, 1, 'v1.1.0')).toEqual(['T2 would ship without api #40 (not in a tag yet).']);
+  });
+
+  it('PICKED TOGETHER — the same repo too: a ticket with work on both sides of the candidate holds it back', () => {
+    // T1 in v1.0.0 and again in v1.2.0; T2 (v1.1.0) is In Progress, so the first candidate is v1.0.0 — which
+    // would ship T1 without its v1.2.0 work: no tag can be released.
+    const res = run({
+      repos: [threeTags()],
+      prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T1'])],
+      tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In Progress' })],
+    });
+    expect(repoOf(res, 1).status).toBe('none');
+    expect(reasons(res, 1, 'v1.0.0')).toEqual(['T1 would ship without api #3 (in v1.2.0).']);
+  });
+
+  it('PICKED TOGETHER — Cancelled and not-found tickets are never split, and a checking repo takes no part yet', () => {
+    const webLate = repo(2, 'web', [
+      { name: 'w1.0.0', d: 2, prs: [22] },
+      { name: 'w1.1.0', d: 4, prs: [21] },
+    ]);
+    const prs = [...threePrs(), pr(21, 2, ['T2']), pr(22, 2, ['W9'])];
+    const w9 = ticket('W9', { done: false, statusName: 'In Progress' });
+    const cancelled = run({ repos: [threeTags(), webLate], prs, tickets: [ticket('T1'), ticket('T2', { done: false, statusName: "Won't Do", stage: 'cancelled' }), ticket('T3'), w9] });
+    expect(repoOf(cancelled, 1).candidate?.name).toBe('v1.2.0');
+    const notFound = run({ repos: [threeTags(), webLate], prs, tickets: [ticket('T1'), ticket('T2', { readState: 'not_found', done: false, statusName: null }), ticket('T3'), w9] });
+    expect(repoOf(notFound, 1).candidate?.name).toBe('v1.2.0');
+    // web's only tag is not read yet: web is checking, and T2's web half is not placed — api is not held.
+    const checkingWeb = repo(2, 'web', [{ name: 'w1.0.0', d: 4, prs: [21], noRange: true }]);
+    const checking = run({ repos: [threeTags(), checkingWeb], prs, tickets: allDone() });
+    expect(repoOf(checking, 2).status).toBe('checking');
+    expect(repoOf(checking, 1).candidate?.name).toBe('v1.2.0');
   });
 
   it('acceptance 38: a release tag on main is the baseline; only later version tags are read', () => {
