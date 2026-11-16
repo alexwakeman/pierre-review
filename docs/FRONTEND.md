@@ -4513,23 +4513,18 @@ design); `data-story-section="criteria-map"` (nav "Code per criterion"). NO requ
 its criteria and status, each member's card at its current commit. Absent when the run has no criteria
 or no members (`criteriaMapOffered`); every member without a card ⇒ ONE line, "No pull request has a
 description at its current commit yet."
-- **Shape**: criteria boxes on the left (status chip — the check's measured `TICKET_CRITERION_STATUS_CLASS`,
-  ref, text), the PRs on the right (`memberLabel`, title without its ticket key, "n criteria", a merged mark),
-  ordered by the mean row of their links (`orderMapPrs`, `lib/criteriaMapLayout.ts`; unlinked next,
-  card-less last). Each link is a row in its criterion's box — the PR's ref and the card's "how" — and,
-  with files, a ChevronIcon disclosure listing them; a file opens that PR's Changes tab
-  (`useOpenMemberFile`). An SVG layer (`aria-hidden`) draws one curve per link from the criterion box's
-  right edge at its row to the PR box (entries spread over the box's middle half, `entryY`); hovering a
-  PR or a link (or focusing a link) lights its lines in the accent and dims the rest.
+- **Shape — ONE LIST, NO LINES** (the two-column map with SVG curves was removed 2026-11-16): each
+  criterion is a box (status chip — the check's measured `TICKET_CRITERION_STATUS_CLASS`, ref, text) with
+  one row per link under it: a ChevronIcon, the PR's MERGED / OPEN mark (`PrStateMark`: MergeIcon /
+  PullRequestIcon, its word from `sm` up, `sr-only` below), `memberLabel`, the card's "how" TRUNCATED TO
+  ONE LINE at every width (`min-w-0 flex-1 truncate` in a non-wrapping flex row), and "n files". A click
+  opens the full "how" and the files; a file opens that PR's Changes tab (`useOpenMemberFile`).
 - ⚠ **UNKNOWN IS NEVER ZERO**: an unclaimed criterion is a DASHED box saying "No pull request claims
-  this."; a PR with no current card is a DASHED box saying "No description at its current commit." and
-  has no line; card lines matching no criterion sit under their PR ("Not matched to a criterion (n)").
-- **Two columns from `CRITERIA_MAP_TWO_COLUMN_MIN_PX` (560) of ITS OWN width** (ResizeObserver; never the
-  window), else ONE stacked list with a "Pull requests" list under it and no lines — each link already
-  names its PR in words (`data-layout` `columns` / `stacked`).
+  this."; under the list, each PR with no current card ("No description at its current commit.") or with
+  card lines matching no criterion ("Not matched to a criterion (n)") is named on its own row.
 - The honesty line is said ONCE, behind the heading's ⓘ: the descriptions are AI-written from each PR's
   changes at its current commit, the status is the story check's. Model text through `PrRefText`.
-- Pinned by test/criteriaMap.test.ts and e2e/story-criteria-map.spec.ts (wide, phone, the one-PR design).
+- Pinned by test/criteriaMap.test.ts and e2e/story-criteria-map.spec.ts (the list, one line at phone width, the one-PR design).
 
 ## The build tab — "Implement story" (`kind: 'story-build'`, docs/STORY-BUILD.md)
 

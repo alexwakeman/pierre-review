@@ -2500,7 +2500,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   § The story view → The criteria map). NO model call and NO route: shared `criteria-map.ts` `criteriaMap`
   folds the latest succeeded run's criteria (ref, text, the STORY CHECK's status, `criterionDone`) with
   each member's `card` as the wire already carries it — only the card at the PR's CURRENT synced head
-  (`readCardsAt`), so a PR pushed since is `hasCard: false` and draws no line, never an old card shown as
+  (`readCardsAt`), so a PR pushed since is `hasCard: false` and links to no criterion, never an old card shown as
   current. A card line names a criterion by text or ref (`TicketPrCardCriterion.criterion`), from a run
   that may have worded it differently, so `matchCardCriterion` takes the same text (refs and punctuation
   aside), else the best word overlap (≥ `CRITERIA_MAP_MATCH_MIN` 0.5 of the shorter text, ≥ 2 shared

@@ -101,12 +101,13 @@ export default function Page(): JSX.Element {
           the ticket has none written. See <DocLink to="story-checks/acceptance-criteria">Acceptance criteria</DocLink>.
         </li>
         <li>
-          <strong>How the code meets each criterion</strong>, after a story check: each criterion beside the pull
-          requests whose description says they move it forward, with how and the files (select a line to list them).
-          A criterion no pull request claims says &ldquo;No pull request claims this.&rdquo; A pull request pushed
-          since its description says &ldquo;No description at its current commit.&rdquo; until the next check. The
-          descriptions are written by AI from each pull request&rsquo;s changes; the status is the story
-          check&rsquo;s. On a narrow screen it is one list.
+          <strong>How the code meets each criterion</strong>, after a story check: each criterion with the pull
+          requests whose description says they move it forward listed under it. Each pull request is marked
+          Merged or Open, with one line on how it meets the criterion; select the line to read it in full and see
+          the files. A criterion no pull request claims says &ldquo;No pull request claims this.&rdquo; A pull
+          request pushed since its description is listed below with &ldquo;No description at its current
+          commit.&rdquo; until the next check. The descriptions are written by AI from each pull request&rsquo;s
+          changes; the status is the story check&rsquo;s.
         </li>
         <li>
           <strong>The design</strong>: with two or more pull requests, a drawing of how the pieces fit; with one,

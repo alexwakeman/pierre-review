@@ -237,11 +237,12 @@ export default function Build(): JSX.Element {
         <div className="tile bd-txt bd-right rise">
           <h3>How the code meets each criterion</h3>
           <p>
-            The story view joins each criterion to the pull requests that move it forward: how, and in which files.
-            No new model run: it uses the story check&rsquo;s status and each pull request&rsquo;s description.
+            The story view lists the pull requests that move each criterion forward, merged or open, with one line
+            on how. Open a line for the whole of it and the files. No new model run: it uses the story check&rsquo;s
+            status and each pull request&rsquo;s description.
           </p>
           <p>
-            A criterion no pull request claims says so. A pull request pushed since its description has no lines
+            A criterion no pull request claims says so. A pull request pushed since its description is listed apart
             until the next check.
           </p>
         </div>

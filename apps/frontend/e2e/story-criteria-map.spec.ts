@@ -167,37 +167,43 @@ async function withAi(page: Page): Promise<void> {
 const storyUrl = (ident: string) => `/app/?view=${encodeURIComponent(`ticket:${ident}`)}`;
 
 test.describe('the criteria map', () => {
-  test('joins each criterion to the PRs whose description claims it, and names the rest', async ({ page }) => {
+  test('lists each criterion with the PRs whose description claims it, and names the rest', async ({ page }) => {
     await withAi(page);
     await page.goto(storyUrl(MAP_IDENT));
     const map = page.getByTestId('criteria-map');
     await expect(map.getByRole('heading', { name: 'How the code meets each criterion' })).toBeVisible();
-    // Wide: two columns joined by one line per link (AC1→web, AC2→api, AC3→api).
-    await expect(map.locator('[data-layout="columns"]')).toBeVisible();
-    await expect(map.getByTestId('criteria-map-lines').locator('path')).toHaveCount(3);
+    // One list: no lines.
+    await expect(map.locator('svg path[d^="M "]')).toHaveCount(0);
     // AC4: no card claims it — said, never hidden.
     const ac4 = map.locator('[data-map-criterion="AC4"]');
     await expect(ac4).toContainText('No pull request claims this.');
     await expect(ac4).toContainText('Not met');
-    // The PR pushed since its card carries no line and says why.
+    // The PR pushed since its card is named under the list and says why.
     await expect(map.locator(`[data-map-pr="${P3.id}"]`)).toContainText('No description at its current commit.');
-    // A link's files open on a click.
+    // Each link is marked merged or open, its how on one line; a click opens the full how and the files.
     const ac2 = map.locator('[data-map-criterion="AC2"]');
+    await expect(ac2.locator('[data-pr-state="open"]')).toHaveCount(1);
     await ac2.getByRole('button', { name: /2 files/ }).click();
+    await expect(ac2.getByTestId('criteria-map-detail')).toContainText('writes one line per row, in column order.');
     await expect(ac2.getByRole('button', { name: 'src/reports/csv.ts' })).toBeVisible();
     // The ⓘ says once what the cards are.
     await map.getByRole('button', { name: 'About “How the code meets each criterion”' }).click();
     await expect(page.getByText(/AI writes each description/)).toBeVisible();
   });
 
-  test('stacks at phone width, each link naming its PR in words', async ({ page }) => {
+  test('keeps each how on one line at phone width', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await withAi(page);
     await page.goto(storyUrl(MAP_IDENT));
     const map = page.getByTestId('criteria-map');
-    await expect(map.locator('[data-layout="stacked"]')).toBeVisible();
-    await expect(map.getByTestId('criteria-map-lines')).toHaveCount(0);
     await expect(map.locator('[data-map-criterion="AC1"]')).toContainText(`web#${P2.number}`);
+    const hows = map.getByTestId('criteria-map-how');
+    const n = await hows.count();
+    expect(n).toBe(3);
+    for (let i = 0; i < n; i++) {
+      const box = await hows.nth(i).boundingBox();
+      expect(box!.height).toBeLessThanOrEqual(22);
+    }
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow).toBeLessThanOrEqual(0);
   });

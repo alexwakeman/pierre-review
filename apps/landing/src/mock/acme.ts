@@ -776,13 +776,13 @@ export const BUILD = {
   /**
    * "How the code meets each criterion" for the same ticket (the story view's criteria map,
    * apps/frontend/src/components/Activity/CriteriaMap.tsx): one link per (criterion, pull request) a
-   * pull request's description says it moves forward, with how and the files. Criterion 3 has none,
-   * as the story check and the design agree.
+   * pull request's description says it moves forward, with how and the files, each pull request
+   * merged or open. Criterion 3 has none, as the story check and the design agree.
    */
   criteriaMap: {
     prs: [
-      { id: 'pay', label: 'payments#612', title: 'Partial refunds in RefundPolicy' },
-      { id: 'web', label: 'web#1196', title: 'Refund form' },
+      { id: 'pay', label: 'payments#612', title: 'Partial refunds in RefundPolicy', state: 'merged' },
+      { id: 'web', label: 'web#1196', title: 'Refund form', state: 'open' },
     ],
     links: [
       { n: 1, pr: 'web', how: 'The form asks for an amount below the order total.', files: ['web/src/refunds/RefundForm.tsx'] },

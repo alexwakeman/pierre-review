@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Story view → How the code meets each criterion: one list, with no lines. Each pull request under a
+  criterion is marked Merged or Open, with one line on how it meets the criterion; select it to read it in
+  full and see the files.
+
 ## [1.0.52] - 2026-11-16
 
 ### Changed

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { BUILD } from '../../mock/acme';
 import { SITE_NAME } from '../../lib/site';
 import { Chip, FindingRow, Group, MockFrame } from './kit';
@@ -16,10 +16,10 @@ import { Chip, FindingRow, Group, MockFrame } from './kit';
 //  - TicketCheckMock mirrors the story check (TicketReviewParts.tsx): the criterion statuses, "Asked
 //    for outside the criteria", "Not asked for", and a docs check point with its quote.
 //  - CriteriaMapMock mirrors the story view's "How the code meets each criterion"
-//    (Activity/CriteriaMap.tsx): criteria with their story-check status on the left, the pull requests
-//    on the right, one line per link with the description's "how"; a link opens its files, a pull
-//    request highlights its lines, an unclaimed criterion says so. LIVE. The lines are measured in
-//    the browser only (the prerender shows the words); under 961px it stacks and drops the lines.
+//    (Activity/CriteriaMap.tsx): ONE list, no lines. Each criterion with its story-check status, and
+//    under it each pull request marked Merged or Open with the description's "how" on one line
+//    (truncated at every width); a click opens the full "how" and the files. An unclaimed criterion
+//    says so. LIVE.
 //  - LoopBodyMock mirrors the section the review loop adds to the pull request's description
 //    (apps/backend/src/coding/story-build/loop/pr-body.ts loopBodySection).
 // Every word comes from src/mock/acme.ts BUILD.
@@ -149,126 +149,60 @@ export function TicketCheckMock(): JSX.Element {
 }
 
 const MAP = BUILD.criteriaMap;
-const prLabelOf = (id: string): string => MAP.prs.find((p) => p.id === id)?.label ?? id;
-
-type MapLine = { key: string; pr: string; d: string };
+const prOf = (id: string) => MAP.prs.find((p) => p.id === id);
 
 export function CriteriaMapMock(): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
-  const [hot, setHot] = useState<string | null>(null);
-  const [lines, setLines] = useState<MapLine[]>([]);
-  const box = useRef<HTMLDivElement>(null);
-  const measure = useCallback(() => {
-    const el = box.current;
-    if (el == null) return;
-    const o = el.getBoundingClientRect();
-    if (getComputedStyle(el).display !== 'grid') {
-      setLines([]);
-      return;
-    }
-    const out: MapLine[] = [];
-    const per = new Map<string, number>();
-    const ports = [...el.querySelectorAll<HTMLElement>('[data-cm-link]')];
-    for (const p of ports) {
-      const pr = p.dataset.cmPr!;
-      const target = el.querySelector<HTMLElement>(`[data-cm-prbox="${pr}"]`)?.getBoundingClientRect();
-      const crit = p.closest<HTMLElement>('[data-cm-crit]')?.getBoundingClientRect();
-      if (target == null || crit == null) continue;
-      const all = ports.filter((q) => q.dataset.cmPr === pr).length;
-      const k = per.get(pr) ?? 0;
-      per.set(pr, k + 1);
-      const r = p.getBoundingClientRect();
-      const x1 = crit.right - o.left;
-      const y1 = r.top + 10 - o.top;
-      const x2 = target.left - o.left;
-      const y2 = target.top - o.top + (all <= 1 ? target.height / 2 : target.height / 4 + ((target.height / 2) * k) / (all - 1));
-      const dx = (x2 - x1) / 2;
-      out.push({ key: p.dataset.cmLink!, pr, d: `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}` });
-    }
-    setLines(out);
-  }, []);
-  useEffect(() => {
-    measure();
-    const el = box.current;
-    if (el == null || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [measure, open]);
   return (
     <MockFrame
       live
       title="How the code meets each criterion"
       meta={`${ticket.key} ${ticket.title}`}
       onReset={open != null ? () => setOpen(null) : null}
-      label={`How the code in ${ticket.key} meets each criterion. Criterion 1, met: web 1196's form asks for an amount below the order total, and payments 612's RefundPolicy leaves the order open. Criterion 2, partly met: payments 612 sends the refund email, and the retry path sends it again. Criterion 3, not met: no pull request claims it. Criterion 4, met: payments 612 emits a refund event for the daily ledger. Click a link to see its files.`}
+      label={`How the code in ${ticket.key} meets each criterion. Criterion 1, met: web 1196, open, the form asks for an amount below the order total; payments 612, merged, RefundPolicy leaves the order open. Criterion 2, partly met: payments 612 sends the refund email, and the retry path sends it again. Criterion 3, not met: no pull request claims it. Criterion 4, met: payments 612 emits a refund event for the daily ledger. Click a line to read it in full and see its files.`}
     >
-      <div className="bd-cmap" ref={box}>
-        <ol className="bd-cm-crit">
-          {ticket.criteria.map((c) => {
-            const links = MAP.links.filter((l) => l.n === c.n);
-            return (
-              <li key={c.n} data-cm-crit={c.n} className={links.length === 0 ? 'bd-cm-none' : undefined}>
-                <span className="bd-cm-head">
-                  <Chip tone={TONE[c.status as keyof typeof TONE] ?? 'grey'}>{c.status}</Chip>
-                  <span className="bd-cm-ref">AC{c.n}</span>
-                  <span>{c.text}</span>
-                </span>
-                {links.length === 0 ? (
-                  <span className="bd-cm-empty">No pull request claims this.</span>
-                ) : (
-                  links.map((l) => {
-                    const key = `${c.n}:${l.pr}`;
-                    const isOpen = open === key;
-                    return (
-                      <span key={key} className={`bd-cm-link${hot === l.pr ? ' hot' : ''}`} data-cm-link={key} data-cm-pr={l.pr}>
-                        <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : key)}>
-                          <span className="bd-cm-pr">{prLabelOf(l.pr)}</span>
+      <ol className="bd-cm-crit">
+        {ticket.criteria.map((c) => {
+          const links = MAP.links.filter((l) => l.n === c.n);
+          return (
+            <li key={c.n} className={links.length === 0 ? 'bd-cm-none' : undefined}>
+              <span className="bd-cm-head">
+                <Chip tone={TONE[c.status as keyof typeof TONE] ?? 'grey'}>{c.status}</Chip>
+                <span className="bd-cm-ref">AC{c.n}</span>
+                <span>{c.text}</span>
+              </span>
+              {links.length === 0 ? (
+                <span className="bd-cm-empty">No pull request claims this.</span>
+              ) : (
+                links.map((l) => {
+                  const key = `${c.n}:${l.pr}`;
+                  const isOpen = open === key;
+                  const pr = prOf(l.pr);
+                  const merged = pr?.state === 'merged';
+                  return (
+                    <span key={key} className="bd-cm-link">
+                      <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : key)}>
+                        <span className={`bd-cm-state${merged ? ' merged' : ''}`}>{merged ? 'Merged' : 'Open'}</span>
+                        <span className="bd-cm-pr">{pr?.label ?? l.pr}</span>
+                        <span className="bd-cm-how">{l.how}</span>
+                        <span className="bd-cm-n">{l.files.length === 1 ? '1 file' : `${l.files.length} files`}</span>
+                      </button>
+                      {isOpen ? (
+                        <span className="bd-cm-files">
                           <span>{l.how}</span>
-                          <span className="bd-cm-n">{l.files.length === 1 ? '1 file' : `${l.files.length} files`}</span>
-                        </button>
-                        {isOpen ? (
-                          <span className="bd-cm-files">
-                            {l.files.map((f) => (
-                              <code key={f}>{f}</code>
-                            ))}
-                          </span>
-                        ) : null}
-                      </span>
-                    );
-                  })
-                )}
-              </li>
-            );
-          })}
-        </ol>
-        <span aria-hidden="true" />
-        <ul className="bd-cm-prs">
-          {MAP.prs.map((p) => {
-            const n = new Set(MAP.links.filter((l) => l.pr === p.id).map((l) => l.n)).size;
-            return (
-              <li
-                key={p.id}
-                data-cm-prbox={p.id}
-                className={hot === p.id ? 'hot' : undefined}
-                onMouseEnter={() => setHot(p.id)}
-                onMouseLeave={() => setHot(null)}
-              >
-                <span className="bd-cm-pr">{p.label}</span>
-                <span>{p.title}</span>
-                <span className="bd-cm-n">{n === 1 ? '1 criterion' : `${n} criteria`}</span>
-              </li>
-            );
-          })}
-        </ul>
-        {lines.length > 0 ? (
-          <svg className="bd-cm-lines" aria-hidden="true">
-            {lines.map((l) => (
-              <path key={l.key} d={l.d} className={hot == null ? undefined : hot === l.pr ? 'hot' : 'dim'} />
-            ))}
-          </svg>
-        ) : null}
-      </div>
+                          {l.files.map((f) => (
+                            <code key={f}>{f}</code>
+                          ))}
+                        </span>
+                      ) : null}
+                    </span>
+                  );
+                })
+              )}
+            </li>
+          );
+        })}
+      </ol>
     </MockFrame>
   );
 }
