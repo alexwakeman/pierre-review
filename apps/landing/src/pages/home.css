@@ -995,10 +995,40 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.lb.home .cap-replay {
+.lb.home .cap-nav {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lb.home .story-cap h3 {
+  padding-right: 120px;
+}
+.lb.home .cap-arrow {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink);
+  background: none;
+  border: 1px solid rgba(241, 241, 239, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.lb.home .cap-arrow:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+.lb.home .cap-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.lb.home .cap-replay {
   font: inherit;
   font-size: 13px;
   color: var(--ink);

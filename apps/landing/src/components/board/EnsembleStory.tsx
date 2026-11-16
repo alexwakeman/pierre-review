@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 // ---------------------------------------------------------------------------
 // REVIEW AS AN ENSEMBLE, AS A STORY (the home page's "Review as an ensemble"). The team
 // circle tells one pull request's life in five steps, played once when it comes into
-// view (Replay plays it again):
+// view (Replay plays it again). The ‹ › arrows (or ← → with focus on them) step back and
+// forth: a step shows every earlier step finished, then plays its own part:
 //   1  You open #612. Only You is drawn, marked as its author.
 //   2  Sam and Dana review it at the same time, each from their own machine (two edges
 //      in their colours). Leo and Priya are on the team, drawn faint.
@@ -111,12 +112,29 @@ export function EnsembleStory(): JSX.Element {
     timers.current.forEach((t) => window.clearTimeout(t));
     timers.current = [];
   };
+  // The step the reader moved to with the arrows (null while the story plays by itself).
+  const [picked, setPicked] = useState<number | null>(null);
   const play = (): void => {
     clear();
     setReached(new Set());
     setPlayed(true);
+    setPicked(null);
     for (const ph of PHASES) {
       timers.current.push(window.setTimeout(() => setReached((r) => new Set(r).add(ph)), AT[ph]));
+    }
+  };
+
+  /** Step `k` (1–5): every earlier step finished, then this step's own phases play. Stops the autoplay. */
+  const goTo = (k: number): void => {
+    const n = Math.min(Math.max(k, 1), STORY_STEPS.length);
+    clear();
+    setPlayed(true);
+    setPicked(n);
+    setReached(new Set(PHASES.filter((p) => STEP_OF[p] < n)));
+    const own = PHASES.filter((p) => STEP_OF[p] === n);
+    const first = Math.min(...own.map((p) => AT[p]));
+    for (const ph of own) {
+      timers.current.push(window.setTimeout(() => setReached((r) => new Set(r).add(ph)), AT[ph] - first + 150));
     }
   };
 
@@ -145,7 +163,7 @@ export function EnsembleStory(): JSX.Element {
   }, []);
 
   const last = PHASES.filter((p) => reached.has(p)).pop();
-  const step = last != null ? STEP_OF[last] : 0;
+  const step = picked ?? (last != null ? STEP_OF[last] : 0);
   const cls = ['circle-svg', 'story-svg', still ? 'still' : '', ...PHASES.filter((p) => reached.has(p)).map((p) => `p-${p}`)].filter(Boolean).join(' ');
   const you = byName('You');
   const dana = byName('Dana');
@@ -275,7 +293,16 @@ export function EnsembleStory(): JSX.Element {
           ))}
         </ol>
       ) : (
-      <div className="story-cap" aria-live="polite">
+      <div
+        className="story-cap"
+        aria-live="polite"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' && step > 1) goTo(step - 1);
+          else if (e.key === 'ArrowRight' && step < STORY_STEPS.length) goTo(step + 1);
+          else return;
+          e.preventDefault();
+        }}
+      >
         {step === 0 ? (
           <p className="cap-wait">The life of one pull request.</p>
         ) : (
@@ -287,11 +314,31 @@ export function EnsembleStory(): JSX.Element {
             <p>{STORY_STEPS[step - 1]!.p}</p>
           </>
         )}
-        {played && step === STORY_STEPS.length && (
-          <button type="button" className="cap-replay" onClick={play}>
-            Replay
+        <div className="cap-nav">
+          {played && step === STORY_STEPS.length && (
+            <button type="button" className="cap-replay" onClick={play}>
+              Replay
+            </button>
+          )}
+          <button
+            type="button"
+            className="cap-arrow"
+            aria-label="Previous step"
+            disabled={step <= 1}
+            onClick={() => goTo(step - 1)}
+          >
+            ‹
           </button>
-        )}
+          <button
+            type="button"
+            className="cap-arrow"
+            aria-label="Next step"
+            disabled={step >= STORY_STEPS.length}
+            onClick={() => goTo(step + 1)}
+          >
+            ›
+          </button>
+        </div>
       </div>
       )}
 
