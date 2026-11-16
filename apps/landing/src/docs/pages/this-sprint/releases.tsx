@@ -52,19 +52,15 @@ export default function Page(): JSX.Element {
         <Ui>Refresh</Ui> reads the tickets that are not Complete, not read yet or not found from the tracker again, then
         checks again.
       </p>
-      <H3 id="repository-rows">Repository rows</H3>
-      <p>One row for each repository you release:</p>
+      <H3 id="repositories">Repositories</H3>
+      <p>One line for each repository you release:</p>
       <ul>
         <li>
-          &ldquo;Release 0.392.0 → 0.392.0-rc&rdquo;, with &ldquo;Latest 0.394.0&rdquo; beside it when a newer tag does not
-          qualify, and the counts, for example &ldquo;6 tickets · 1 to check&rdquo;. The last name is the release tag the
-          press would create.
+          &ldquo;0.392.0 → 0.392.0-rc&rdquo;: the candidate and the release tag a release would create, then the
+          candidate&rsquo;s commit (select it to open it on GitHub) and its date, and &ldquo;Latest 0.394.0&rdquo; when a
+          newer tag can&rsquo;t be released yet. <Ui>Release…</Ui> releases it.
         </li>
-        <li>
-          &ldquo;No tag can be released — 0.394.0: BMD-1048 &ldquo;Edit an area&rdquo; is In PO Review&rdquo;: no tag
-          qualifies, and this is why the
-          newest one does not. After a release it reads &ldquo;No tag since 0.380.0-rc can be released — …&rdquo;.
-        </li>
+        <li>&ldquo;No tag can be released&rdquo;, or after a release &ldquo;No tag since 0.380.0-rc can be released&rdquo;.</li>
         <li>
           &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Reading
           main&rsquo;s history: 1,200 of 5,400 commits&rdquo; or &ldquo;Reading tickets from Jira: 300 of 420&rdquo;. The
@@ -74,50 +70,40 @@ export default function Page(): JSX.Element {
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
-      <H3 id="the-tag-list">The tag list</H3>
+      <H3 id="the-ticket-list">The ticket list</H3>
       <p>
-        Select a row to open its tags around the candidate: the 5 later tags above it, the candidate, and the 5
-        earlier tags below it. <Ui>Show 5 later tags</Ui> and <Ui>Show 5 earlier tags</Ui> add 5 more each way. After
-        a release the list stops at that release, for example &ldquo;0.380.0-rc — last release&rdquo;.
+        Below the repositories is one list of tickets for all of them, newest tag first. A ticket with work in two
+        repositories is one card. It sits where its latest tag sits, in either repository. The list opens on the newest
+        ticket in the release candidates, marked ★, with one ticket either side. <Ui>Show 3 later tickets</Ui> and{' '}
+        <Ui>Show 3 earlier tickets</Ui> add more each way.
       </p>
-      <p>Every tag is one line with a mark:</p>
+      <p>Each card has a mark:</p>
       <ul>
-        <li>★ the candidate. Its line is highlighted and names the candidates of your other repositories it is
-          released with, for example &ldquo;paired with bng-metric-frontend 0.328.0&rdquo;. Select a name to go to that
-          tag.</li>
-        <li>✗ in red: the tag&rsquo;s own tickets stop it.</li>
+        <li>✓ the ticket is in the release candidates.</li>
+        <li>✗ in red: the ticket is not Complete, or a pull request for it is still open.</li>
+        <li>⊘ in amber: the ticket is Complete, but another ticket holds it back.</li>
         <li>
-          ⊘ in amber: the tag&rsquo;s own tickets are fine, but another tag holds it back — an older tag, or a ticket
-          whose other part is in a later tag of another repository.
+          ? on a dashed card: the tracker could not give the ticket, for example because it was deleted. It never stops
+          a release. Check it by hand.
         </li>
-        <li>✓ the tag can be released.</li>
       </ul>
       <p>
-        Select a tag to see why. The candidate says what stops the tag above it, with a link to the tag that holds
-        it back, and what was checked: &ldquo;everything up to this tag&rdquo; before your first release, or
-        &ldquo;everything since 0.380.0-rc&rdquo; after one. An amber tag says what holds it back, for example
-        &ldquo;Held back by 0.324.0: BMD-1061 &ldquo;Send the report&rdquo; is In Code Review.&rdquo;
+        A card shows the ticket&rsquo;s status, its latest tag in each repository, and one line. On a card that is not
+        in the candidates, the line says what it waits on, for example &ldquo;Waits on BMD-1061: In Code Review&rdquo;.
+        Select <Ui>Show BMD-1061</Ui> to go to that ticket. On a card in the candidates, the line says what was done, for
+        example &ldquo;9 PRs, last merged 23 Oct by robin&rdquo;.
       </p>
       <p>
-        Each tag shows its date, its commit (select it to open the commit on GitHub), and how many pull requests and
-        tickets it has. In an opened tag, tickets that stop it come first, then tickets to check by hand, then
-        Complete ones:
+        <Ui>Holding the release</Ui>, above the list, is always shown: the ticket that stops each repository&rsquo;s
+        next tag. <Ui>Not in a tag yet</Ui>, at the top, lists tickets whose only work is an open pull request. Pull
+        requests with no ticket are narrow rows between the cards, for example &ldquo;14 PRs with no ticket · 13 by
+        bots&rdquo;. Select one to list them.
       </p>
-      <ul>
-        <li>
-          ✗ a ticket that stops the tag: its status, such as &ldquo;In PO Review&rdquo;, or &ldquo;Complete, but has an
-          open PR: frontend #812&rdquo;. When your Complete, Cancelled or other column has a different name from the
-          tracker&rsquo;s status, it is shown in brackets, for example &ldquo;Won&rsquo;t Do (Cancelled)&rdquo;.
-        </li>
-        <li>? a ticket to check by hand, such as &ldquo;not found in Jira — check by hand&rdquo;.</li>
-        <li>✓ a Complete ticket.</li>
-      </ul>
       <p>
-        Select a ticket to see its type, its assignee, when its status was last read, the pull requests for it in this
-        tag, and its pull requests elsewhere in the repositories you release: open ones, and merged ones with the tag
-        that holds them (or &ldquo;not in a tag yet&rdquo;). <Ui>Open in Jira</Ui> opens the ticket, and <Ui>Story</Ui>{' '}
-        opens its story. Select &ldquo;3 pull requests with no ticket&rdquo; under a tag to list them. Select a pull
-        request to open it.
+        Select a card to see its type, its assignee, when its status was last read, and every pull request for it in
+        the repositories you release: open ones, and merged ones with the tag that holds them (or &ldquo;not in a tag
+        yet&rdquo;). <Ui>Open in Jira</Ui> opens the ticket, and <Ui>Story</Ui> opens its story. Select a pull request to
+        open it.
       </p>
       <H3 id="the-whole-history">The whole history</H3>
       <p>
@@ -140,13 +126,13 @@ export default function Page(): JSX.Element {
           do&rdquo;, never stops a tag: it is listed with a tick and gets no comment.
         </li>
         <li>
-          A ticket the tracker could not find, or has no access to, does not stop a tag. It is listed under the tag for
-          you to check. A ticket that is not read yet keeps the row checking; if the tracker does not answer three times
+          A ticket the tracker could not find, or has no access to, does not stop a tag. It is listed for you to
+          check. A ticket that is not read yet keeps the row checking; if the tracker does not answer three times
           in a row, it is listed as &ldquo;could not be read&rdquo; instead.
         </li>
         <li>
-          Pull requests with no ticket never stop a tag and are not warnings. They are listed under the tag, and in the
-          notes under untracked or dependency and bot changes.
+          Pull requests with no ticket never stop a tag and are not warnings. They are listed between the tickets,
+          and in the notes under untracked or dependency and bot changes.
         </li>
         <li>
           A Complete ticket with work in more than one tag is released whole or not at all. If part of it is above a
@@ -160,10 +146,11 @@ export default function Page(): JSX.Element {
 
       <H2 id="create-a-release">Create a release</H2>
       <p>
-        <Ui>Create release…</Ui> shows only when a repository you can push to has a candidate.
+        <Ui>Release…</Ui> shows on a repository only when it has a candidate and you can push to it. The dialog
+        opens with that repository ticked; you can tick the others too.
       </p>
       <Steps>
-        <li>Untick any repository you do not want to release now. The others are released as they are.</li>
+        <li>Tick the other repositories to release with it. Each ticked one is released as it is.</li>
         <li>Read the release notes, one section per repository, and change them if you want.</li>
         <li>Read the comment each ticket will get.</li>
         <li>

@@ -13,7 +13,7 @@ import {
   SPRINT_RELEASES,
   WHERE,
 } from '../../mock/acme';
-import type { PeriodGrain, ReleaseMark, ReleaseMockTag, ReleaseMockTicket, SprintCard, SprintView } from '../../mock/acme';
+import type { PeriodGrain, ReleaseMark, ReleaseMockCard, ReleaseMockNoTicket, SprintCard, SprintView } from '../../mock/acme';
 import { Act, Chip, CourtBar, Group, HBar, MiniTable, MockFrame, MockTabs, Segmented, Stat } from './kit';
 
 // The Reporting and How we measure pages' mocks. Words and numbers:
@@ -651,28 +651,40 @@ function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
   );
 }
 
-const MARK_GLYPH: Record<ReleaseMark, string> = { ok: '✓', bad: '✗', warn: '!', unknown: '?' };
+/** A card's mark (Sprint/releaseTicketsModel.ts `ticketMark`): ★ the candidate ticket, ✓ in the candidates, ✗ not
+ *  Complete or an open PR, ⊘ (amber) Complete but held back, ? not in the tracker's data. */
+const MARK_GLYPH: Record<ReleaseMark, string> = { anchor: '★', ok: '✓', blocked: '✗', held: '⊘', missing: '?' };
+const MARK_TONE: Record<ReleaseMark, string> = { anchor: 'ok', ok: 'ok', blocked: 'bad', held: 'warn', missing: 'unknown' };
 
-function ReleaseTicketLine({ k }: { k: ReleaseMockTicket }): JSX.Element {
+/** A ticket card: mark, key, title, status, the latest tag per repository and ONE line; the detail on a click. */
+function ReleaseCard({ c }: { c: ReleaseMockCard }): JSX.Element {
   const [open, setOpen] = useState(false);
+  const cls = ['rcard', c.mark === 'anchor' ? 'anchor' : '', c.mark === 'missing' ? 'missing' : ''].filter(Boolean).join(' ');
   return (
-    <li className={`mark ${k.tone}`}>
-      <button type="button" className="tk" aria-expanded={k.detail ? open : undefined} onClick={() => setOpen((o) => !o)} disabled={!k.detail}>
-        <i aria-hidden="true">{MARK_GLYPH[k.tone]}</i> <span className="key">{k.key}</span> {k.title ? `${k.title} ` : ''}
-        <small>{k.status}</small>
-      </button>
-      {open && k.detail ? (
-        <div className="detail">
-          <small>{k.detail.facts}</small>
-          {k.detail.inThisTag.map((l) => (
-            <small key={l}>
-              <b>In this tag</b> {l}
-            </small>
+    <li className={cls}>
+      <button type="button" className="tk" aria-expanded={c.detail ? open : undefined} onClick={() => setOpen((o) => !o)} disabled={!c.detail}>
+        <span className="head">
+          <span className={`mark ${MARK_TONE[c.mark]}`}>
+            <i aria-hidden="true">{MARK_GLYPH[c.mark]}</i>
+          </span>{' '}
+          <span className="key">{c.key}</span> <span className="ti">{c.title || 'No title — not in the tracker’s data'}</span>
+          {c.status ? <small> · {c.status}</small> : null}
+        </span>
+        <span className="sub">
+          {c.tags.map((t) => (
+            <span key={t} className="chip">
+              {t}
+            </span>
           ))}
-          {k.detail.elsewhere.map((l) => (
-            <small key={l}>
-              <b>Elsewhere</b> {l}
-            </small>
+          <small className={`line ${MARK_TONE[c.mark]}`}>{c.line}</small>
+          {c.holder ? <small className="more">Show {c.holder}</small> : null}
+        </span>
+      </button>
+      {open && c.detail ? (
+        <div className="detail">
+          <small>{c.detail.facts}</small>
+          {c.detail.prs.map((l) => (
+            <small key={l}>{l}</small>
           ))}
         </div>
       ) : null}
@@ -680,141 +692,91 @@ function ReleaseTicketLine({ k }: { k: ReleaseMockTicket }): JSX.Element {
   );
 }
 
-function ReleaseTagBody({ t }: { t: ReleaseMockTag }): JSX.Element {
-  const [prsOpen, setPrsOpen] = useState(false);
-  return (
-    <>
-      {(t.notes ?? []).map((n) => (
-        <p key={n} className="note">
-          {n}
-        </p>
-      ))}
-      <ul className="tickets">
-        {t.tickets.map((k) => (
-          <ReleaseTicketLine key={k.key} k={k} />
-        ))}
-      </ul>
-      {t.untracked ? (
-        <>
-          <button type="button" className="untracked" aria-expanded={prsOpen} onClick={() => setPrsOpen((o) => !o)}>
-            · {t.untracked.line}
-          </button>
-          {prsOpen ? (
-            <ul className="tickets">
-              {t.untracked.prs.map((p) => (
-                <li key={p}>
-                  <small>{p}</small>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      ) : null}
-    </>
-  );
-}
-
-function ReleaseTagHead({ t }: { t: ReleaseMockTag }): JSX.Element {
-  return (
-    <span className="tn">
-      {t.name}
-      <small>
-        {' '}
-        · {t.meta}
-        {t.pairs ? ` · paired with ${t.pairs}` : ''}
-      </small>
-    </span>
-  );
-}
-
-/** A row's mark (Sprint/releasesModel.ts `tagMark`): ★ candidate, ✗ its own tickets stop it, ⊘ (amber) held
- *  back by another tag, ✓ can be released. */
-const TAG_MARK_GLYPH = { candidate: '★', blocked: '✗', held: '⊘', ok: '✓' } as const;
-const TAG_MARK_TONE = { candidate: 'ok', blocked: 'bad', held: 'warn', ok: 'ok' } as const;
-
-/** ONE row layout for every tag (closed; a click opens it), the candidate highlighted. */
-function ReleaseTagRow({ t }: { t: ReleaseMockTag }): JSX.Element {
+/** PRs with no ticket between two cards: one narrow row, its list on a click. */
+function ReleaseNoTicket({ n }: { n: ReleaseMockNoTicket }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
-    <div className={t.mark === 'candidate' ? 'tag cand-tag' : 'tag'}>
-      <button type="button" className="tk" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <small className={`mark ${TAG_MARK_TONE[t.mark]}`}>
-          <i aria-hidden="true">{TAG_MARK_GLYPH[t.mark]}</i>{' '}
-        </small>
-        <ReleaseTagHead t={t} />
+    <li className="nt">
+      <button type="button" className="untracked" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        › {n.line}
       </button>
-      {open ? <ReleaseTagBody t={t} /> : null}
-    </div>
+      {open ? (
+        <div className="detail">
+          {n.prs.map((p) => (
+            <small key={p}>{p}</small>
+          ))}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
-/** This Sprint → Releases: the latest release, a row per released repository (the latest version tag and the
- *  candidate) that opens to ONE list of identical rows around the candidate: later tags, the candidate
- *  (highlighted, "paired with" the other candidates), earlier tags; "Show 5 later / earlier tags". */
+/** This Sprint → Releases: the latest release, a strip per released repository (its candidate, the commit that
+ *  would ship, Release…), then ONE list of ticket cards — "Not in a tag yet" and "Holding the release" above it,
+ *  the candidate ticket (★) with one either side, "Show 3 later / earlier tickets". */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(R.repos[0]?.name ?? null);
   return (
     <div className="rp-releases">
       <div className="top">
         <b>{R.latest}</b>
-        <Act tone="go" pressed={open} onClick={() => setOpen((o) => !o)}>
-          {R.action}
-        </Act>
       </div>
       {open ? <p className="dlg">{R.dialog}</p> : null}
       <ul className="repos">
-        {R.repos.map((r) => {
-          const isOpen = expanded === r.name && r.tags.length > 0;
-          return (
-            <li key={r.name} className={r.candidate ? 'cand' : undefined}>
-              <button
-                type="button"
-                className="row"
-                aria-expanded={r.tags.length > 0 ? isOpen : undefined}
-                onClick={() => setExpanded(isOpen ? null : r.name)}
-              >
-                <span className="name">
-                  {r.name}
-                  {r.candidate ? <em aria-label="candidate"> ★</em> : null}
+        {R.repos.map((r) => (
+          <li key={r.name} className={r.candidate ? 'cand' : undefined}>
+            <div className="row">
+              <span className="name">
+                {r.name}
+                {r.candidate ? <em aria-label="candidate"> ★</em> : null}
+              </span>
+              <span className="txt">
+                {r.text}
+                {r.sha ? <small> · <code>{r.sha}</code></small> : null}
+                {r.day ? <small> · {r.day}</small> : null}
+                {r.latest ? <small> · {r.latest}</small> : null}
+              </span>
+              {r.release ? (
+                <Act tone="go" pressed={open} onClick={() => setOpen((o) => !o)}>
+                  Release…
+                </Act>
+              ) : (
+                <span />
+              )}
+            </div>
+            {r.progress ? (
+              <div className="prog">
+                <span className="bar" role="progressbar" aria-label={r.progress.line} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r.progress.share * 100)}>
+                  <span style={{ width: `${Math.round(r.progress.share * 100)}%` }} />
                 </span>
-                <span className="txt">
-                  {r.text}
-                  {r.latest ? <small> · {r.latest}</small> : null}
-                  {r.counts ? <small> · {r.counts}</small> : null}
-                </span>
-              </button>
-              {r.progress ? (
-                <div className="prog">
-                  <span className="bar" role="progressbar" aria-label={r.progress.line} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(r.progress.share * 100)}>
-                    <span style={{ width: `${Math.round(r.progress.share * 100)}%` }} />
-                  </span>
-                  <small>{r.progress.line}</small>
-                </div>
-              ) : null}
-              {isOpen ? (
-                <div className="tags">
-                  {r.moreLater ? (
-                    <p className="note">
-                      <span className="more">{R.showLater}</span>
-                    </p>
-                  ) : null}
-                  {r.tags.map((t) => (
-                    <ReleaseTagRow key={t.name} t={t} />
-                  ))}
-                  {r.lastRelease ? <p className="note">{r.lastRelease}</p> : null}
-                  {r.moreEarlier ? (
-                    <p className="note">
-                      <span className="more">{R.showEarlier}</span>
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </li>
-          );
-        })}
+                <small>{r.progress.line}</small>
+              </div>
+            ) : null}
+          </li>
+        ))}
       </ul>
+      <p className="sec">Not in a tag yet</p>
+      <ul className="cards">
+        {R.notTagged.map((c) => (
+          <ReleaseCard key={c.key} c={c} />
+        ))}
+      </ul>
+      <p className="sec">Holding the release</p>
+      <ul className="cards">
+        {R.holding.map((c) => (
+          <ReleaseCard key={c.key} c={c} />
+        ))}
+      </ul>
+      <p className="sec">
+        <span className="more">⌃ {R.showLater}</span>
+      </p>
+      <ul className="cards">
+        {R.list.map((i) => (i.kind === 'ticket' ? <ReleaseCard key={i.key} c={i} /> : <ReleaseNoTicket key={i.line} n={i} />))}
+      </ul>
+      <p className="sec">
+        <span className="more">⌄ {R.showEarlier}</span>
+      </p>
     </div>
   );
 }

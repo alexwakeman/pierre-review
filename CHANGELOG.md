@@ -28,10 +28,14 @@ no internals.
   ship without and the ticket that is really holding things up, for example "… which waits on
   bng-metric-frontend 0.341.0: BMD-1061 is In Code Review".
 - Release notes for a first release list everything up to the tag.
-- This Sprint → Releases: a repository opens to the 5 tags either side of the candidate, every tag one line with
-  a mark — ★ candidate, red ✗ its own tickets stop it, amber ⊘ another tag holds it back, ✓ can be released.
-  Select a tag to see why. The candidate names the other repositories' candidates it is released with, and
-  links to the tag that stops the one above it. "Show 5 later tags" and "Show 5 earlier tags" add more.
+- This Sprint → Releases is now a list of tickets, newest tag first, with one card per ticket even when its work is
+  in several repositories. It opens on the newest ticket in the release candidates, with "Show 3 later tickets"
+  and "Show 3 earlier tickets". Each card shows its status, its latest tag in each repository, and one line: what
+  it waits on, or what was done. The ticket holding the release is always shown, tickets with only open pull
+  requests sit apart at the top, and pull requests with no ticket are narrow rows between the cards. A ticket the
+  tracker can't find has a dashed card.
+- This Sprint → Releases: each repository shows its candidate's commit, linked to GitHub, and its own Release…
+  button.
 
 ### Fixed
 

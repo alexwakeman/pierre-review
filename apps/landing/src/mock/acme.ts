@@ -472,169 +472,101 @@ export const SPRINT = {
   ] as SprintCard[],
 };
 
-export type ReleaseMark = 'ok' | 'bad' | 'warn' | 'unknown';
+/** A ticket card's mark (Sprint/releaseTicketsModel.ts `ticketMark`); `anchor` = the candidate ticket (★). */
+export type ReleaseMark = 'ok' | 'blocked' | 'held' | 'missing' | 'anchor';
 
-/** A tag row's mark (Sprint/releasesModel.ts `tagMark`). */
-export type ReleaseTagMark = 'candidate' | 'blocked' | 'held' | 'ok';
-
-export interface ReleaseMockTicket {
+export interface ReleaseMockCard {
+  kind: 'ticket';
   key: string;
+  /** '' = not in the tracker's data (a dashed card). */
   title: string;
-  tone: ReleaseMark;
-  /** `ticketLine`'s words: the status (and the bucket when it differs), or why it stops the tag. */
-  status: string;
-  /** The line opened in place (`ticketDetail`): the facts, then the PRs in this tag and elsewhere. */
-  detail?: { facts: string; inThisTag: string[]; elsewhere: string[] };
+  mark: ReleaseMark;
+  /** The tracker's status beside the title; absent when not read. */
+  status?: string;
+  /** The latest tag per repository (`repoTagWords`). */
+  tags: string[];
+  /** `ticketCardLine`: what it waits on, or what was done. */
+  line: string;
+  /** "Show PAY-150" beside a held card's line. */
+  holder?: string;
+  /** Opened in place: the facts, then each PR (`ticketCardPrLines`). */
+  detail?: { facts: string; prs: string[] };
 }
 
-export interface ReleaseMockTag {
-  name: string;
-  mark: ReleaseTagMark;
-  /** `tagHeader` after the name: "15 Oct · a1b2c3d · 2 PRs · 2 tickets". */
-  meta: string;
-  /** The candidate's "paired with …" (`candidatePairs`). */
-  pairs?: string;
-  /** The opened row's lines (`candidateWhy` on the candidate, else `tagExplainer`). */
-  notes?: string[];
-  /** Tickets in the row's order: stops first, then to check, then Complete. */
-  tickets: ReleaseMockTicket[];
-  /** "1 pull request with no ticket" (`noTicketLine`) and its PRs. */
-  untracked?: { line: string; prs: string[] };
+export interface ReleaseMockNoTicket {
+  kind: 'no_ticket';
+  line: string;
+  prs: string[];
 }
 
-/** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`.
- *  One row per repository released from this workspace: the candidate (the NEWEST tag whose tickets are
- *  Complete with no open pull request), one whose newer tags do not qualify, one no tag of which qualifies, one
- *  still being checked (its progress line), one with nothing new. A row opens to ONE list of identical rows
- *  around the candidate (later tags, the candidate highlighted, earlier tags). */
+/** This Sprint → Releases (Sprint/ReleasesView.tsx; the words of Sprint/releaseTicketsModel.ts). Release suffix
+ *  `-rc`. A strip per repository released from this workspace (its candidate, the candidate's commit, Release…),
+ *  then ONE list of ticket cards, newest tag first, opened on the candidate ticket (★) with one either side;
+ *  "Holding the release" and "Not in a tag yet" above it; PRs with no ticket as narrow rows between the cards. */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
-  action: 'Create release…',
-  /** The dialog's ticked repositories (Sprint/ReleaseDialog.tsx). */
+  /** The dialog opened from acme/payments's Release… (Sprint/ReleaseDialog.tsx). */
   dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
-  showLater: 'Show 5 later tags',
-  showEarlier: 'Show 5 earlier tags',
+  showLater: 'Show 3 later tickets',
+  showEarlier: 'Show 3 earlier tickets',
   repos: [
-    {
-      name: REPOS.payments,
-      candidate: true,
-      text: 'Release v3.2.0 → v3.2.0-rc',
-      counts: '5 tickets · 1 to check',
-      moreEarlier: true,
-      tags: [
-        {
-          name: 'v3.2.0',
-          mark: 'candidate',
-          meta: '15 Oct · 9f8e7d6 · 3 PRs · 2 tickets',
-          pairs: 'acme/web v1.8.2',
-          tickets: [
-            { key: 'PAY-120', title: '', tone: 'unknown', status: 'not found in Jira — check by hand' },
-            {
-              key: 'PAY-134',
-              title: 'Payout dates in the export',
-              tone: 'ok',
-              status: 'Done (Complete)',
-              detail: {
-                facts: 'Type: Story · Assignee: Robin Lee · Jira status read 4 min ago',
-                inThisTag: ['payments #612 “PAY-134: export payout dates” merged 15 Oct · alex'],
-                elsewhere: ['web #598 “PAY-134: payout date column” merged 9 Oct · in v1.8.1'],
-              },
-            },
-          ],
-          untracked: { line: '1 pull request with no ticket', prs: ['payments #605 “Tidy the refund logs” merged 14 Oct · sam'] },
-        },
-        {
-          name: 'v3.1.0',
-          mark: 'ok',
-          meta: '10 Oct · 5d4c3b2 · 2 PRs · 2 tickets',
-          tickets: [
-            { key: 'PAY-118', title: 'Refund reasons', tone: 'ok', status: 'Done (Complete)' },
-            { key: 'PAY-121', title: 'Payout retries', tone: 'ok', status: 'Done (Complete)' },
-          ],
-        },
-        {
-          name: 'v3.0.0',
-          mark: 'ok',
-          meta: '2 Oct · 1a2b3c4 · 1 PR · 1 ticket',
-          tickets: [{ key: 'PAY-101', title: 'Currency rounding', tone: 'ok', status: 'Done (Complete)' }],
-        },
-      ],
-    },
-    {
-      name: REPOS.web,
-      candidate: true,
-      text: 'Release v1.8.2 → v1.8.2-rc',
-      latest: 'Latest v1.9.1',
-      counts: '1 ticket',
-      lastRelease: 'v1.8.0-rc — last release',
-      tags: [
-        {
-          name: 'v1.9.1',
-          mark: 'held',
-          meta: '16 Oct · a1b2c3d · 1 PR · 1 ticket',
-          notes: ['Held back by v1.9.0: PAY-150 “Saved cards on mobile” is In review.'],
-          tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done (Complete)' }],
-        },
-        {
-          name: 'v1.9.0',
-          mark: 'blocked',
-          meta: '15 Oct · 7c6b5a4 · 2 PRs · 2 tickets',
-          tickets: [
-            { key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review (Code review)' },
-            { key: 'PAY-149', title: 'Card brand icons', tone: 'ok', status: 'Done (Complete)' },
-          ],
-        },
-        {
-          name: 'v1.8.2',
-          mark: 'candidate',
-          meta: '13 Oct · 3e2d1c0 · 2 PRs · 1 ticket',
-          pairs: 'acme/payments v3.2.0',
-          notes: ['v1.9.0, the tag above it, can’t be released: PAY-150 “Saved cards on mobile” is In review.', 'Checked: everything since v1.8.0-rc.'],
-          tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done (Complete)' }],
-        },
-        {
-          name: 'v1.8.1',
-          mark: 'ok',
-          meta: '9 Oct · 8a9b0c1 · 1 PR · 1 ticket',
-          tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done (Complete)' }],
-        },
-      ],
-    },
-    {
-      name: REPOS.ledger,
-      candidate: false,
-      text: 'No tag since v0.8.0-rc can be released — v0.9.0: PAY-146 “Rename ledger tables” has an open pull request in payments (#611)',
-      tags: [
-        {
-          name: 'v0.9.0',
-          mark: 'blocked',
-          meta: '12 Oct · 4f3e2d1 · 1 PR · 1 ticket',
-          tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'Done (Complete), but has an open PR: payments #611' }],
-        },
-      ],
-    },
-    {
-      name: REPOS.api,
-      candidate: false,
-      text: 'Checking…',
-      progress: { share: 0.44, line: "Reading main's history: 2,380 of 5,400 commits" },
-      tags: [],
-    },
-    { name: 'acme/docs-site', candidate: false, text: 'Nothing new since v4.1.0-rc', tags: [] },
+    { name: REPOS.payments, candidate: true, text: 'v3.2.0 → v3.2.0-rc', sha: '9f8e7d6', day: '15 Oct', release: true },
+    { name: REPOS.web, candidate: true, text: 'v1.8.2 → v1.8.2-rc', sha: '3e2d1c0', day: '13 Oct', latest: 'Latest v1.9.1', release: true },
+    { name: REPOS.ledger, candidate: false, text: 'No tag since v0.8.0-rc can be released' },
+    { name: REPOS.api, candidate: false, text: 'Checking…', progress: { share: 0.44, line: "Reading main's history: 2,380 of 5,400 commits" } },
+    { name: 'acme/docs-site', candidate: false, text: 'Nothing new since v4.1.0-rc' },
   ] as Array<{
     name: string;
     candidate: boolean;
     text: string;
+    sha?: string;
+    day?: string;
     latest?: string;
-    counts?: string;
+    release?: boolean;
     progress?: { share: number; line: string };
-    /** "Show 5 later tags" above the list / "Show 5 earlier tags" below it. */
-    moreLater?: boolean;
-    moreEarlier?: boolean;
-    /** After a release, the older band's last line. */
-    lastRelease?: string;
-    tags: ReleaseMockTag[];
   }>,
+  notTagged: [
+    { kind: 'ticket', key: 'PAY-160', title: 'Split refunds', mark: 'blocked', status: 'In Development', tags: ['acme/payments: open PR'], line: 'Open PR: acme/payments #631' },
+  ] as ReleaseMockCard[],
+  holding: [
+    {
+      kind: 'ticket',
+      key: 'PAY-150',
+      title: 'Saved cards on mobile',
+      mark: 'blocked',
+      status: 'In review',
+      tags: ['acme/web v1.9.0'],
+      line: 'Holds back acme/web',
+      detail: { facts: 'Type: Story · Assignee: Wei Zhang · Jira status read 4 min ago', prs: ['web #622 “PAY-150: saved cards” merged 15 Oct · wei · in v1.9.0'] },
+    },
+    {
+      kind: 'ticket',
+      key: 'PAY-146',
+      title: 'Rename ledger tables',
+      mark: 'blocked',
+      status: 'Done',
+      tags: ['acme/ledger v0.9.0'],
+      line: 'Holds back acme/ledger · open PR: acme/payments #611',
+    },
+  ] as ReleaseMockCard[],
+  list: [
+    { kind: 'ticket', key: 'PAY-152', title: 'Card form labels', mark: 'held', status: 'Done', tags: ['acme/web v1.9.1'], line: 'Waits on PAY-150: In review', holder: 'PAY-150' },
+    { kind: 'no_ticket', line: '1 PR with no ticket', prs: ['payments #605 “Tidy the refund logs” merged 14 Oct · sam · in v3.2.0'] },
+    {
+      kind: 'ticket',
+      key: 'PAY-134',
+      title: 'Payout dates in the export',
+      mark: 'anchor',
+      status: 'Done',
+      tags: ['acme/payments v3.2.0', 'acme/web v1.8.1'],
+      line: '2 PRs, last merged 15 Oct by alex',
+      detail: {
+        facts: 'Type: Story · Assignee: Robin Lee · Jira status read 4 min ago',
+        prs: ['payments #612 “PAY-134: export payout dates” merged 15 Oct · alex · in v3.2.0', 'web #598 “PAY-134: payout date column” merged 9 Oct · sam · in v1.8.1'],
+      },
+    },
+    { kind: 'ticket', key: 'PAY-120', title: '', mark: 'missing', tags: ['acme/payments v3.2.0'], line: 'Not found in Jira — check it by hand' },
+  ] as Array<ReleaseMockCard | ReleaseMockNoTicket>,
 };
 
 // ---- the docs' Getting started: first run and Repos & workspaces ----------------

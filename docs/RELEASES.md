@@ -164,54 +164,56 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    - "Nothing new since 0.390.0-rc" / "No version tags on main yet".
    The tab polls `GET /api/releases` every ~3 s ONLY while a repo is checking, and stops when none is. There
    is no separate tickets panel and nothing to pick.
-3. A row expands to ONE list of IDENTICAL ROWS around the candidate (owner, 2026-11-16): 5 later tags, the
-   candidate, 5 earlier tags — "Show 5 later tags" above, "Show 5 earlier tags" below, each press adds 5
-   (component state, not persisted). No band labels and no reason text until a row is opened:
+2b. ONE STRIP PER REPOSITORY carries its actions: "Release…" (shown only with a candidate the reader can push
+   to — HIDE, never disable) opens the dialog with that repository ticked, and the strip shows the CANDIDATE'S
+   COMMIT — the HEAD that would be released — as a short sha linked to GitHub, with its day.
+3. THE TICKET LIST (owner, 2026-11-16) replaces the per-repository tag rows. ONE list for the whole workspace, a
+   CARD PER TICKET (a ticket in both repositories is one card), newest at the top:
    ```
-   bng-metric-backend   ★ Release 0.316.0 → 0.316.0-rc        Latest 0.418.0   108 tickets · 1 to check
+   bng-metric-backend   ★ 0.316.0 → 0.316.0-rc · e18c3b2 · 23 Oct · Latest 0.418.0        [Release…]
+   bng-metric-frontend  ★ 0.328.0 → 0.328.0-rc · 1e3249f · 27 Oct · Latest 0.420.0        [Release…]
 
-      ⌃ Show 5 later tags
-      ⊘ 0.321.0 · 27 Oct · ed696ec · 1 PR · 0 tickets                                       ›
-      ⊘ 0.320.0 · 27 Oct · c58b791 · 4 PRs · 0 tickets                                      ›
-      ✗ 0.318.0 · …                                                                          ›
-      ⊘ 0.317.0 · 26 Oct · c6762a1 · 1 PR · 1 ticket                                        ›
-   ┃  ★ 0.316.0 · 23 Oct · e18c3b2 · 1 PR · 1 ticket · paired with bng-metric-frontend 0.328.0 ›
-      ✓ 0.315.0 · 23 Oct · 0ca6733 · 1 PR · 0 tickets                                       ›
-      ✓ …                                                                                    ›
-      ⌄ Show 5 earlier tags
+   Not in a tag yet
+   ✗ BMD-1045 PI HABITAT DETAILS: Edit an AREA enhancement · In Code Review                     ›
+       bng-metric-frontend: open PR   Open PR: bng-metric-frontend #518
+   Holding the release
+   ✗ BMD-1061 HABITAT EDITING: Edit Baseline references · In Code Review                        ›
+       bng-metric-backend 0.324.0  bng-metric-frontend 0.341.0   Holds back bng-metric-backend and …
+   ⌃ Show 3 later tickets
+   ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done                ›
+       bng-metric-backend 0.326.0   Waits on BMD-1061: In Code Review   Show BMD-1061
+     › 14 PRs with no ticket · 13 by bots
+   ★ BMD-1082 NEW TEMPLATE: Support the new data structure … · Done                            ›
+       bng-metric-backend 0.316.0   9 PRs, last merged 23 Oct by robin-dunn
+     › 14 PRs with no ticket · 12 by bots
+   ✓ BMD-1028 Trading Summary Page - Hedgerows · Done                                           ›
+   ⌄ Show 3 earlier tickets
    ```
-   - **The mark** (`tagMark`): ★ the candidate; ✗ RED — the tag's OWN tickets stop it (not Complete, an open
-     PR); ⊘ AMBER — held back by something else: an older tag, or a ticket that would ship half (picked
-     together); ✓ green — can be released (every earlier tag); a part-circle while checking.
-   - **The candidate row** is highlighted (accent bar, raised ground) and names the other repositories'
-     candidates it is "paired with" — each a link that opens that repository's row at that tag. Opened, it
-     says WHY it is the candidate (`candidateWhy`): what stops the tag above it, with a link to the tag that
-     holds it back ("0.317.0, the tag above it, can't be released: BMD-1083 “…” would ship without
-     bng-metric-frontend #458 (in 0.357.0). Show bng-metric-frontend 0.357.0"), then "Checked: everything up
-     to this tag" / "… since 0.380.0-rc". After a release it lists every ticket of its scope; before the first
-     release its OWN increment (`listsScope`).
-   - **An opened ⊘ row** says what holds it back, with a link (`tagExplainer`): "Held back by 0.324.0:
-     BMD-1061 “…” is In Code Review." or "Held back by bng-metric-frontend 0.357.0: BMD-1083 “…” would ship
-     without bng-metric-frontend #458 (in 0.357.0)." A link opens the repository row, widens its list to the
-     tag, opens it and scrolls to it.
-   - With no candidate the list is the tags read, ending with the oldest (where the answer is decided). After a
-     release the list stops at the baseline: "0.380.0-rc — last release".
-   - **Each row**: mark · name · date · short sha (the commit on GitHub) · PR count · ticket count · ›.
-   - **Ticket order**: those that stop the tag (not Complete, an open PR), then those to check (not found,
-     could not be read, not read yet), then Complete; ties by key.
-   - **Ticket line**: ✗ / ? / ✓, key, title, the tracker's status name (the workspace's bucket in brackets
-     only when it differs: "Won't Do (Cancelled)"), and why it stops the tag ("Complete, but has an open PR:
-     frontend #812"). A click opens it IN PLACE: "Type: Story · Assignee: Robin Lee · Jira status read 4 min
-     ago"; "In this tag" — the tag's PRs naming it (repo, #, title, merged date, author); "Elsewhere" — every
-     OTHER PR for it in the releasable repos (OPEN, or merged "in 0.390.0" / "not in a tag yet"); "Open in
-     Jira ↗" and "Story" (`useOpenStory()`); each PR opens its PR tab (or GitHub). No description or
-     acceptance criteria. All from the check: DB only, nothing fetched on open.
-   - **"· 3 pull requests with no ticket"** under each tag opens their list (repo, #, title, author, merged
-     date, link).
+   - **Order** (`ticketList`): a ticket sits where its LATEST TAG sits — the newest tag, in any releasable
+     repository, holding its merged work (tags of different repositories by commit date, `tagAt`).
+   - **The window** (`ticketWindow`): it opens on THE CANDIDATE TICKET (★) — the newest ticket all of whose work
+     is in the release candidates — with ONE ticket either side; "Show 3 later tickets" / "Show 3 earlier
+     tickets" add 3 (component state). Past the tickets sent, "Read earlier tags" asks the server for more.
+   - **Holding the release** (`releaseHolders`, always shown, above the list): the ticket that stops the tag
+     just above each repository's candidate — a split followed to its ROOT — once, naming the repositories it
+     holds ("Holds back bng-metric-backend and bng-metric-frontend").
+   - **Not in a tag yet**, apart at the top: tickets whose only work is an open pull request. A ticket with
+     tagged work AND an open PR stays in the list; its line names the open PR.
+   - **The card** is simple: the mark (✓ in the candidates · ✗ RED not Complete or an open PR · ⊘ AMBER Complete
+     but held back · ? the tracker could not give it — a DASHED card, "Not found in Jira — check it by hand",
+     never a block · a part-circle not read yet), key, title, the tracker's status, the latest tag per
+     repository, and ONE line: what it WAITS ON ("Waits on BMD-1061: In Code Review", with "Show BMD-1061"
+     scrolling to the holder; never another held ticket), or for a ✓ card what was DONE ("9 PRs, last merged
+     23 Oct by robin-dunn"). Every PR and tag is behind the arrow: "Type · Assignee · Jira status read 5 hours
+     ago", "Open in Jira", "Story", and each PR (open first, then merged newest first: "merged 23 Oct ·
+     robin-dunn · in 0.316.0", "not in a tag yet", OPEN), each opening its PR tab or GitHub. Nothing is fetched
+     to open it.
+   - **Pull requests with no ticket** are NARROW rows between the cards, consecutive ones grouped ("14 PRs with no
+     ticket · 13 by bots"), opening to their list.
    - "Released" is never said unless a release tag contains it.
 4. No warnings panel: nothing about a pull request with no ticket is a warning (removed 2026-11-16).
-5. **"Create release…"** — shown only with ≥ 1 candidate in a writable repo (HIDE, never disable).
-   Dialog: the releasable repos with a candidate (ticked; each judged on its own, so unticking one only
+5. **"Release…"** on a repository strip — shown only with a candidate in a writable repo (HIDE, never disable).
+   Dialog: the releasable repos with a candidate (that repository ticked first; each judged on its own, so unticking one only
    leaves it out; none ticked hides Confirm); release notes preview (editable); tracker comment preview;
    Confirm.
    Confirm FIRST re-checks the chosen candidate under THE RULE: every ticket in its scope re-read from the
@@ -414,20 +416,17 @@ Simple rule (2026-11-16)
 48. HISTORY READ TO THE END: a candidate needs its whole scope, so the pass reads to the baseline or the root
     before the check names one (`releaseCandidateProven` is then true and the pass rests).
 
-Tag list and ticket detail (the approved layout, 2026-11-16)
-49. ALL NEWER TAGS, EVERY REASON: every tag newer than the candidate is listed, open, with every ticket of its
-    own increment and every reason ("T4 is In Progress." and "T5 is In PO Review.", not just the first, then
-    the older tags' it would ship); a tag clear on its own shows ONE "Held back by an older tag: …" line; the
-    candidate follows with "checked: …". No candidate: every tag read is in that one band.
-50. THE WINDOW: 5 later tags, the candidate and 5 earlier tags by default, every row the same layout and
-    closed; "Show 5 later tags" / "Show 5 earlier tags" add 5 each press; a not-Complete ticket in an older tag
-    moves the candidate below it.
-51. OLDER BAND STOPS AT THE LAST RELEASE: after a release the band lists only the tags between the candidate and
-    the baseline, and ends with "v1.0.0-rc — last release".
-52. TICKET ORDER: inside a tag, the tickets that stop it (not Complete, an open PR) first, then not found / could
-    not be read / not read yet, then Complete; ties by key.
-53. OLDER HISTORY NOT READ: while an older tag is not placed on main yet, the row is "Checking…" with the
-    history bar and line and the tab polls. "Show 5 earlier tags" raises the wanted number (never lowers it).
+The ticket list (owner, 2026-11-16)
+49. ONE CARD PER TICKET: a ticket with PRs in two repositories is one card, placed by its latest tag in either
+    (tags of both repositories by commit date), with the latest tag per repository on it.
+50. THE WINDOW: the list opens on the candidate ticket (★, the newest ticket all in the candidates) with one ticket
+    either side; "Show 3 later / earlier tickets" add 3.
+51. HOLDING THE RELEASE: the ticket stopping the tag above each candidate (a split: its root) is always shown
+    above the list, once, naming the repositories it holds; every ⊘ card says "Waits on <that ticket>".
+52. NOT IN A TAG YET: a ticket whose only work is an open PR is listed apart at the top.
+53. NO-TICKET ROWS: PRs with no ticket are narrow rows between the cards, consecutive ones grouped.
+54. MISSING TICKETS: a ticket the tracker could not give is a dashed card, "Not found in Jira — check it by hand";
+    it never stops a release and is never the candidate ticket.
 55. TICKET TITLES: every reason and every older-tag summary names the ticket's title beside its key, cut at 60
     characters on a word ("BMD-1172 “NEW TEMPLATE: Support individual trees from the new…” is In Code
     Review").
@@ -437,12 +436,10 @@ Tag list and ticket detail (the approved layout, 2026-11-16)
     not qualify ("T2 would ship without web #21 (in w1.1.0).") and api's candidate drops below it; a PR merged
     after the newest tag ("not in a tag yet") and a second PR in the SAME repository above its candidate count
     the same; Cancelled / not-found tickets and a repository still checking take no part.
-54. TICKET DETAIL: a ticket line opens in place to its type, assignee and "Jira status read 4 min ago"; "In this
-    tag" lists the tag's PRs naming it (repo, #, title, merged date, author); "Elsewhere" every other PR for it
-    in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet" (merged after the newest tag);
-    "Open in Jira" and "Story". Nothing is fetched to open it.
-55. UNTRACKED LIST: "· 2 pull requests with no ticket" under each tag (the candidate: its whole scope) opens the
-    list: repo, #, title, author, merged date, each a link.
+58. CARD DETAIL: a card opens in place to its type, assignee and "Jira status read 4 min ago", "Open in Jira",
+    "Story", and every PR for it in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet".
+    Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, last merged 2 Nov by alex").
+59. THE CANDIDATE'S COMMIT: each repository strip shows the candidate tag's commit (short sha, a GitHub link).
 
 ## Implementation
 
@@ -1137,6 +1134,8 @@ candidate.
 
 ### The tag list redesign (2026-11-16, owner)
 
+⚠ SUPERSEDED the same day by § The ticket list below.
+
 The three labelled bands are gone. `ReleasesView` `RepoDetail` draws ONE `<ol>` of `TagRow`s from
 `tagWindow(repo, laterShown, earlierShown)` (5 + candidate + 5; `RELEASE_WINDOW_STEP`); every row is closed
 and identical (`tagMark`, header, ›), the candidate highlighted with its `candidatePairs`. Reasons appear only
@@ -1145,3 +1144,17 @@ in an opened row (`candidateWhy`, `tagExplainer` with `{check, repoId}` for link
 `laterShownFor` widens the window, the row opens and scrolls into view. Removed: `rowBands`, `BAND_WORDS`,
 `olderBandView`, `olderShowMore`, `olderShownLine`, `olderTagSummary`. `RELEASE_OLDER_TAGS_STEP` is 5; the
 server still sends 10 older tags by default, so the first "Show 5 earlier tags" asks nothing.
+
+### The ticket list (2026-11-16, owner)
+
+The per-repository tag rows are gone: `ReleasesView` draws repository STRIPS (candidate, its commit, "Release…"
+opening `ReleaseDialog` with `repoId` ticked) and ONE ticket list from `Sprint/releaseTicketsModel.ts`:
+`ticketList` (cards + no-ticket groups, newest first by `tagAt`; `notTagged` apart; `anchor` = the newest card
+`ticketInCandidates`), `ticketWindow` (anchor ± `TICKET_WINDOW_START`, steps of `TICKET_WINDOW_STEP`),
+`releaseHolders` (the blocker of the tag above each candidate, a split resolved to `root`), `ticketCardLine`.
+The fold adds `tagAt` (the holding tag's commit date) to every `prs[]` entry and `pullRequests[]` line, and
+lists a ticket whose ONLY work is an open PR (`repos: []`); `loadReleaseCheckInput` reads the open PRs BEFORE the
+tickets so their keys are read too. Removed from `releasesModel.ts`: `tagWindow`, `tagMark`, `candidatePairs`,
+`candidateWhy`, `tagExplainer`, `tagHeader`, `tagTickets`, `ticketLine`, `ticketRank`, `ticketBlockerIn`,
+`ticketDetail`, `repoRowText`, `repoRowCounts`, `showCreateRelease` and the window words. The tag-level
+fields (`tags`, `olderTags`, `blockers`) stay on the wire: the holders and the notes read them.

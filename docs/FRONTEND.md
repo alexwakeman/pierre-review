@@ -2920,38 +2920,23 @@ board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`.
 `releasesChecking`) and stops when none is; nothing renders while `workspaceId` is null; not configured,
 or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE setup line
 (`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick) and CUMULATIVE (2026-11-16:
-the newest version tag such that it and every tag below it have their tickets Complete with no open PR — the cumulative rule). REPO-ORIENTED (no tickets panel, no
-warnings panel): one row per releasable repo (`repoRowText`: "Release 0.392.0 → 0.392.0-rc", "No tag can be
-released — 0.394.0: BMD-1048 is In PO Review" / "No tag since 0.380.0-rc can be released — …" (the newest
-tag's reason, `newestReason`), "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"),
-"Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts (`repoRowCounts`: "6
-tickets · 1 to check"), and, while CHECKING only, the progress (`repoProgress`): a bar
-(`Activity/SprintProgressBar`, a share) with ONE line from the server (`progress.line`: "Reading main's
-history: 1,200 of 5,400 commits"). A row expands to ONE list of identical, closed rows around the candidate (`tagWindow`: 5 later, the candidate,
-5 earlier; "Show 5 later tags" / "Show 5 earlier tags", component state) — no band labels, no reason text
-until a row is opened. Each row: `tagMark` (★ candidate · ✗ red, its own tickets · ⊘ `SkipIcon` amber, held
-back by another tag · ✓), name, day, commit, counts, ›. The candidate row is highlighted and "paired with" the
-other repositories' candidates (`candidatePairs`); opened, it says why (`candidateWhy`). Links (`TagLink`)
-set ONE `focus` in `ReleasesView`: the row opens, widens (`laterShownFor`), opens the tag and scrolls to it.
-Each tag header is `tagHeader` (name · day · short sha — a link to the commit through `safeExternalUrl`
-· "4 PRs · 3 tickets"). `tagTickets` orders the tickets: those that stop the tag, then to check, then
-Complete (`ticketRank`), ties by key; `ticketLine` gives the mark (✗ `CloseIcon` / ? `QuestionIcon` / ✓
-`CheckIcon`) and the words ("In PO Review (Product review)" — the bucket only when it differs,
-`ticketStatusWords`; "Complete, but has an open PR: frontend #812"; "not found in Jira — check by hand"). A
-ticket line OPENS IN PLACE to `ticketDetail` (facts "Type: Story · Assignee: Robin Lee · Jira status read 4
-min ago"; "In this tag" / "Elsewhere" PR lines — OPEN, "in 0.390.0", "not in a tag yet"; "Open in Jira" and
-"Story") — all from the check, NO fetch on open. `tagExplainer` keeps only what the ticket lines do not show
-(a reason from an earlier tag, "the history is still being read"). "· 3 pull requests with no ticket"
-(`noTicketLine`) opens their list (`noTicketPrLine`). The earlier tags show 5 (the server sends 10,
-`RELEASE_OLDER_TAGS_DEFAULT`); "Show 5 earlier tags" (`showEarlier`, HIDDEN while the band reads history or
-when nothing more exists) adds 5 and, when the server's band is smaller, POSTs
-`/api/releases/older-tags` (`useShowMoreOlderTags`, then the check is read again); while the band reads, its
-own bar + line (`older.progress`), and the tab POLLS (shared `releasesChecking` includes `older.loading`).
-After a release the band ends with "0.380.0-rc — last release". A PR known only from the history read
-(`prId` null) links to GitHub. "Released" is never said of a ticket.
+the newest version tag such that it and every tag below it have their tickets Complete with no open PR — the cumulative rule). TICKET-ORIENTED (owner, 2026-11-16): one STRIP per releasable repo (`repoStripText`: "0.316.0 → 0.316.0-rc",
+"No tag can be released", "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"), the
+candidate's commit (short sha → GitHub, `safeExternalUrl`) and day, "Latest 0.418.0" (`repoLatestNote`), its
+"Release…" (HIDDEN unless a candidate and push access; opens `ReleaseDialog` with `repoId` ticked), and while
+CHECKING the bar + ONE line (`repoProgress`). Below, `Sprint/releaseTicketsModel.ts`: "Not in a tag yet"
+(`notTagged`: only open PRs), "Holding the release" (`releaseHolders`, always shown), then ONE list of ticket
+cards newest first (`ticketList`, by the latest tag's `tagAt` across repositories) opened on the CANDIDATE
+TICKET ★ ± 1 (`ticketWindow`; "Show 3 later / earlier tickets", component state; "Read earlier tags" POSTs
+`/api/releases/older-tags` past what was sent). PRs with no ticket are narrow grouped rows between cards
+(`noTicketGroupWords`). A card: `ticketMark` (✓ · ✗ `CloseIcon` · ⊘ `SkipIcon` amber · ? `QuestionIcon`, dashed
+card · part-circle), key, title, `ticketCardStatus`, the latest tag per repo (`repoTagWords`) and ONE line
+(`ticketCardLine`: "Waits on BMD-1061: In Code Review" + "Show BMD-1061", which scrolls to and opens the holder
+card; "9 PRs, last merged 23 Oct by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR
+(`ticketCardPrLines`) — all from the check, NO fetch on open. A PR known only from the history read (`prId`
+null) links to GitHub. "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
-fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
-(`showCreateRelease`). The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only
+fold, never a second one here. The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only
 while open; each repo is judged on its own, so only "none ticked" hides Confirm (`confirmStops`); it
 sends `releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = `useRefreshReleases`
 (`POST /api/releases/refresh`: the tickets not Complete, not read yet or not found re-read from the tracker,

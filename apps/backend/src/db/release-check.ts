@@ -394,9 +394,91 @@ export async function loadReleaseCheck(
     }
   }
 
+  // ── The OPEN PRs into the default branch in every releasable repo of the workspace (not only the
+  // ones asked for): a Complete ticket with one does not qualify. THE detection rule on the stored
+  // row, plus its own ticket rows on the site. ──
+  const openPrs: ReleaseCheckOpenPrInput[] = [];
+  /** Ticket keys the open PRs name: a ticket with ONLY open work is listed too ("Not in a tag yet"). */
+  const openKeys: string[] = [];
+  if (tracker != null && ticked.size > 0) {
+    const tickedIds = [...ticked.keys()];
+    const names = new Map<number, { owner: string; name: string; branch: string | null }>();
+    for (const part of chunks(tickedIds)) {
+      for (const r of await db
+        .select({ id: repos.id, owner: repos.owner, name: repos.name, defaultBranch: repos.defaultBranch, defaultBranchName: repos.defaultBranchName })
+        .from(repos)
+        .where(and(eq(repos.accountId, accountId), inArray(repos.id, part)))
+        .execute()) {
+        names.set(r.id, { owner: r.owner, name: r.name, branch: r.defaultBranch ?? r.defaultBranchName ?? null });
+      }
+    }
+    const open: Array<StoredPr & { baseRefName: string | null }> = [];
+    for (const part of chunks([...names.keys()])) {
+      open.push(
+        ...((await db
+          .select({
+            id: pullRequests.id,
+            repoId: pullRequests.repoId,
+            number: pullRequests.number,
+            title: pullRequests.title,
+            headRefName: pullRequests.headRefName,
+            baseRefName: pullRequests.baseRefName,
+            authorId: pullRequests.authorId,
+            ...prLinkColumns(pullRequests),
+          })
+          .from(pullRequests)
+          .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.repoId, part), eq(pullRequests.state, 'open')))
+          .execute()) as Array<StoredPr & { baseRefName: string | null }>),
+      );
+    }
+    const openRows = new Map<number, string[]>();
+    if (siteWhere != null) {
+      for (const part of chunks(open.map((p) => p.id))) {
+        for (const r of await db
+          .select({ prId: trackerTickets.prId, issueKey: trackerTickets.issueKey })
+          .from(trackerTickets)
+          .where(and(siteWhere, inArray(trackerTickets.prId, part)))
+          .execute()) {
+          openRows.set(r.prId, [...(openRows.get(r.prId) ?? []), r.issueKey]);
+        }
+      }
+    }
+    const openAuthors = new Map<number, string>();
+    for (const part of chunks([...new Set(open.map((p) => p.authorId).filter((x): x is number => x != null))])) {
+      for (const u of await db.select({ id: users.id, login: users.githubLogin }).from(users).where(inArray(users.id, part)).execute()) {
+        openAuthors.set(u.id, u.login);
+      }
+    }
+    for (const p of open) {
+      const n = names.get(p.repoId)!;
+      // Into another branch (a hotfix branch): not work still on its way to the default branch.
+      if (p.baseRefName != null && n.branch != null && p.baseRefName !== n.branch) continue;
+      const keys = [
+        ...(detectKeysWithAccess(
+          tracker.access,
+          withParsedLinks(p as { title: string; headRefName: string | null; closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown }),
+        ) ?? []),
+      ];
+      for (const k of openRows.get(p.id) ?? []) if (!keys.includes(k)) keys.push(k);
+      if (keys.length === 0) continue;
+      openKeys.push(...keys);
+      openPrs.push({
+        repoId: p.repoId,
+        repoName: n.name,
+        number: p.number,
+        url: `https://github.com/${n.owner}/${n.name}/pull/${p.number}`,
+        prId: p.id,
+        ticketIdents: keys.map(identOf),
+        title: p.title,
+        authorLogin: p.authorId != null ? (openAuthors.get(p.authorId) ?? null) : null,
+      });
+    }
+  }
+
   // ── The tickets: every store's reads; the freshest successful one wins ──
   const keyByIdent = new Map<string, string>();
   for (const keys of keysByLight.values()) for (const k of keys) keyByIdent.set(identOf(k), k);
+  for (const k of openKeys) if (!keyByIdent.has(identOf(k))) keyByIdent.set(identOf(k), k);
   const idents = [...keyByIdent.keys()];
   const cands = new Map<string, TicketReadCandidate[]>();
   const add = (ident: string, c: TicketReadCandidate): void => {
@@ -533,84 +615,6 @@ export async function loadReleaseCheck(
       authorLogin: l.authorLogin,
     };
   });
-
-  // ── The OPEN PRs into the default branch in every releasable repo of the workspace (not only the
-  // ones asked for): a Complete ticket with one does not qualify. THE detection rule on the stored
-  // row, plus its own ticket rows on the site. ──
-  const openPrs: ReleaseCheckOpenPrInput[] = [];
-  if (tracker != null && ticked.size > 0) {
-    const tickedIds = [...ticked.keys()];
-    const names = new Map<number, { owner: string; name: string; branch: string | null }>();
-    for (const part of chunks(tickedIds)) {
-      for (const r of await db
-        .select({ id: repos.id, owner: repos.owner, name: repos.name, defaultBranch: repos.defaultBranch, defaultBranchName: repos.defaultBranchName })
-        .from(repos)
-        .where(and(eq(repos.accountId, accountId), inArray(repos.id, part)))
-        .execute()) {
-        names.set(r.id, { owner: r.owner, name: r.name, branch: r.defaultBranch ?? r.defaultBranchName ?? null });
-      }
-    }
-    const open: Array<StoredPr & { baseRefName: string | null }> = [];
-    for (const part of chunks([...names.keys()])) {
-      open.push(
-        ...((await db
-          .select({
-            id: pullRequests.id,
-            repoId: pullRequests.repoId,
-            number: pullRequests.number,
-            title: pullRequests.title,
-            headRefName: pullRequests.headRefName,
-            baseRefName: pullRequests.baseRefName,
-            authorId: pullRequests.authorId,
-            ...prLinkColumns(pullRequests),
-          })
-          .from(pullRequests)
-          .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.repoId, part), eq(pullRequests.state, 'open')))
-          .execute()) as Array<StoredPr & { baseRefName: string | null }>),
-      );
-    }
-    const openRows = new Map<number, string[]>();
-    if (siteWhere != null) {
-      for (const part of chunks(open.map((p) => p.id))) {
-        for (const r of await db
-          .select({ prId: trackerTickets.prId, issueKey: trackerTickets.issueKey })
-          .from(trackerTickets)
-          .where(and(siteWhere, inArray(trackerTickets.prId, part)))
-          .execute()) {
-          openRows.set(r.prId, [...(openRows.get(r.prId) ?? []), r.issueKey]);
-        }
-      }
-    }
-    const openAuthors = new Map<number, string>();
-    for (const part of chunks([...new Set(open.map((p) => p.authorId).filter((x): x is number => x != null))])) {
-      for (const u of await db.select({ id: users.id, login: users.githubLogin }).from(users).where(inArray(users.id, part)).execute()) {
-        openAuthors.set(u.id, u.login);
-      }
-    }
-    for (const p of open) {
-      const n = names.get(p.repoId)!;
-      // Into another branch (a hotfix branch): not work still on its way to the default branch.
-      if (p.baseRefName != null && n.branch != null && p.baseRefName !== n.branch) continue;
-      const keys = [
-        ...(detectKeysWithAccess(
-          tracker.access,
-          withParsedLinks(p as { title: string; headRefName: string | null; closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown }),
-        ) ?? []),
-      ];
-      for (const k of openRows.get(p.id) ?? []) if (!keys.includes(k)) keys.push(k);
-      if (keys.length === 0) continue;
-      openPrs.push({
-        repoId: p.repoId,
-        repoName: n.name,
-        number: p.number,
-        url: `https://github.com/${n.owner}/${n.name}/pull/${p.number}`,
-        prId: p.id,
-        ticketIdents: keys.map(identOf),
-        title: p.title,
-        authorLogin: p.authorId != null ? (openAuthors.get(p.authorId) ?? null) : null,
-      });
-    }
-  }
 
   // ── THE TICKET DETAIL's merged stored PRs (GET /api/releases only): every MERGED `pull_requests` row
   // into the default branch of a releasable repo whose ticket rows name one of the check's tickets. ──

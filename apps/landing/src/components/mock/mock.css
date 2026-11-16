@@ -798,7 +798,8 @@
 }
 .lb .rp-releases .repos .row {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr);
+  grid-template-columns: 130px minmax(0, 1fr) auto;
+  align-items: center;
   gap: 8px;
   width: 100%;
   padding: 0;
@@ -813,16 +814,66 @@
   font-size: 12px;
   color: var(--muted);
 }
-.lb .rp-releases .tags {
+.lb .rp-releases .sec {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+/* A ticket card (Sprint/ReleasesView.tsx TicketCard): the candidate ticket is outlined in the accent; a ticket
+   not in the tracker's data is dashed. */
+.lb .rp-releases .cards {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 6px 0 2px 16px;
 }
-.lb .rp-releases .tags .note {
-  margin: 0;
+.lb .rp-releases .rcard {
+  border: 1px solid #2e3036;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.lb .rp-releases .rcard.anchor {
+  border-color: var(--accent, #6b8afd);
+  background: rgba(255, 255, 255, 0.05);
+}
+.lb .rp-releases .rcard.missing {
+  border-style: dashed;
+  background: none;
+}
+.lb .rp-releases .rcard.missing .ti {
+  font-style: italic;
+  color: var(--muted);
+}
+.lb .rp-releases .rcard .tk {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+}
+.lb .rp-releases .rcard .sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding-left: 16px;
+}
+.lb .rp-releases .chip {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #26272c;
   font-size: 12px;
   color: var(--muted);
+}
+.lb .rp-releases .line.bad {
+  color: #e8877b;
+}
+.lb .rp-releases .line.warn,
+.lb .rp-releases .line.unknown {
+  color: #e0b860;
+}
+.lb .rp-releases .nt {
+  padding-left: 12px;
 }
 .lb .rp-releases .prog {
   display: flex;
@@ -846,16 +897,6 @@
   .lb .rp-releases .prog {
     padding-left: 0;
   }
-}
-.lb .rp-releases .tags .tn {
-  font-weight: 600;
-}
-/* The candidate row: an accent bar and a raised ground (Sprint/ReleasesView.tsx TagRow). */
-.lb .rp-releases .tags .cand-tag {
-  border-left: 2px solid var(--accent, #6b8afd);
-  padding-left: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 4px;
 }
 .lb .rp-releases .tk,
 .lb .rp-releases .untracked {
@@ -883,11 +924,6 @@
 .lb .rp-releases .more {
   margin-left: 6px;
   color: var(--gold);
-}
-.lb .rp-releases .tags .tickets li {
-  border-top: 0;
-  padding: 2px 0;
-  font-size: 12px;
 }
 .lb .rp-releases .repos .name {
   font-weight: 600;

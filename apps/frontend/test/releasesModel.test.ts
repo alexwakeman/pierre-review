@@ -1,4 +1,5 @@
 // This Sprint → Releases and Settings → Releases: the pure UI half (components/Sprint/releasesModel.ts,
+// components/Sprint/releaseTicketsModel.ts,
 // components/settings/releasesSectionModel.ts) over REAL results of the shared fold
 // (`foldReleaseCheck`). docs/RELEASES.md § Acceptance checks — numbers in the test names.
 //
@@ -17,35 +18,31 @@ import {
   confirmStops,
   defaultTickedRepoIds,
   editedSections,
-  candidateScopeLabel,
   latestReleaseLine,
-  noTicketLine,
-  noTicketPrLine,
-  refreshingLine,
   readAgoWords,
-  SHOW_EARLIER_WORDS,
-  candidatePairs,
-  candidateWhy,
-  laterShownFor,
-  showEarlier,
-  showLaterWords,
-  tagMark,
-  tagWindow,
-  tagHeader,
-  ticketDetail,
-  ticketLine,
-  ticketRank,
-  ticketStatusWords,
+  refreshingLine,
+  releasableRepos,
   releaseTagsLine,
   releasesPollInterval,
   repoLatestNote,
   repoProgress,
-  repoRowCounts,
-  repoRowText,
-  showCreateRelease,
-  tagExplainer,
-  tagTickets,
+  ticketStatusWords,
 } from '../src/components/Sprint/releasesModel.js';
+import {
+  TICKET_WINDOW_START,
+  TICKET_WINDOW_STEP,
+  noTicketGroupWords,
+  noTicketPrLineOf,
+  releaseHolders,
+  repoStripText,
+  repoTagWords,
+  showTicketsWords,
+  ticketCardLine,
+  ticketCardPrLines,
+  ticketCardStatus,
+  ticketList,
+  ticketWindow,
+} from '../src/components/Sprint/releaseTicketsModel.js';
 import { releaseReposDirty, releaseSuffixChangeWarning } from '../src/components/settings/releasesSectionModel.js';
 
 const SETTINGS = { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' };
@@ -134,32 +131,29 @@ describe('the header line', () => {
   });
 });
 
-describe('repo rows — the cumulative rule, newest first', () => {
+describe('the repository strip — the cumulative rule', () => {
   const all = () => ({ prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])], tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
 
-  it('acceptance 4: all Complete, no release → "Release v1.2.0 → v1.2.0-rc", no "Latest" beside it, Create release shown', () => {
+  it('acceptance 4: all Complete, no release → "v1.2.0 → v1.2.0-rc", no "Latest" beside it; the candidate commit is the tag’s', () => {
     const res = run({ repos: [threeTags()], ...all() });
     const api = res.repos[0]!;
-    expect(repoRowText(api)).toBe('Release v1.2.0 → v1.2.0-rc');
+    expect(repoStripText(api)).toBe('v1.2.0 → v1.2.0-rc');
+    expect(api.candidate?.sha).toBe(sha('v1.2.0'));
     expect(repoLatestNote(api)).toBeNull();
-    // No release yet: everything up to v1.2.0 ships.
-    expect(repoRowCounts(api)).toBe('3 tickets');
     expect(repoProgress(api)).toBeNull();
-    expect(showCreateRelease(res)).toBe(true);
     expect(defaultTickedRepoIds(res)).toEqual([1]);
   });
 
-  it('acceptance 5: an In PO Review ticket in v1.2.0 → "Release v1.1.0 → v1.1.0-rc" with "Latest v1.2.0" beside it', () => {
+  it('acceptance 5: an In PO Review ticket in v1.2.0 → "v1.1.0 → v1.1.0-rc" with "Latest v1.2.0" beside it', () => {
     const res = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false, statusName: 'In PO Review' })] });
-    const api = res.repos[0]!;
-    expect(repoRowText(api)).toBe('Release v1.1.0 → v1.1.0-rc');
-    expect(repoLatestNote(api)).toBe('Latest v1.2.0');
+    expect(repoStripText(res.repos[0]!)).toBe('v1.1.0 → v1.1.0-rc');
+    expect(repoLatestNote(res.repos[0]!)).toBe('Latest v1.2.0');
   });
 
-  it('acceptance 16: every tag ruled out → "No tag can be released — <newest>: <reason>"; after a release, "No tag since … can be released"', () => {
-    const none = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1', { done: false }), ticket('T2', { done: false }), ticket('T3', { done: false, statusName: 'In PO Review' })] });
-    expect(repoRowText(none.repos[0]!)).toBe('No tag can be released — v1.2.0: T3 “T3 title” is In PO Review');
-    expect(showCreateRelease(none)).toBe(false);
+  it('acceptance 16: every tag ruled out → "No tag can be released"; after a release, "No tag since … can be released"', () => {
+    const none = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1', { done: false }), ticket('T2', { done: false }), ticket('T3', { done: false })] });
+    expect(repoStripText(none.repos[0]!)).toBe('No tag can be released');
+    expect(releasableRepos(none)).toEqual([]);
     const released = repo(1, 'api', [
       { name: 'v1.0.0', d: 1, prs: [1] },
       { name: 'v1.0.0-rc', d: 1, commit: 'v1.0.0', taggedAt: 2 },
@@ -167,29 +161,7 @@ describe('repo rows — the cumulative rule, newest first', () => {
       { name: 'v1.2.0', d: 5, prs: [3] },
     ]);
     const res = run({ repos: [released], prs: all().prs, tickets: [ticket('T2', { done: false, statusName: 'In Progress' }), ticket('T3')] });
-    expect(repoRowText(res.repos[0]!)).toBe('No tag since v1.0.0-rc can be released — v1.2.0: T2 “T2 title” (from v1.1.0) is In Progress');
-  });
-
-  it('acceptance 18: an open pull request elsewhere names the repo and number', () => {
-    const res = run({
-      repos: [threeTags()],
-      ...all(),
-      openPrs: [{ repoId: 2, repoName: 'bng-metric-frontend', number: 812, url: 'https://github.com/acme/bng-metric-frontend/pull/812', prId: 5, ticketIdents: ['T3'] }],
-    });
-    expect(repoRowText(res.repos[0]!)).toBe('Release v1.1.0 → v1.1.0-rc');
-    // Its own ticket line carries the reason; the explainer is for reasons from elsewhere.
-    expect(tagExplainer(res.repos[0]!.tags[0]!)).toEqual([]);
-    expect(ticketLine(res.tickets.find((t) => t.ident === 'T3')!, 'Jira')).toEqual({ tone: 'bad', text: 'Done, but has an open PR: bng-metric-frontend #812' });
-  });
-
-  it('acceptance 11: a Cancelled ticket never stops a tag — a tick, its status and why', () => {
-    const res = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false, statusName: "Won't Do", stage: 'cancelled' })] });
-    expect(repoRowText(res.repos[0]!)).toBe('Release v1.2.0 → v1.2.0-rc');
-    // The status name, with the bucket in brackets because it differs.
-    const t3 = res.tickets.find((t) => t.ident === 'T3')!;
-    expect(ticketLine(t3, 'Jira')).toEqual({ tone: 'ok', text: "Won't Do (Cancelled) — doesn’t stop a release" });
-    expect(ticketRank(t3)).toBe(2);
-    expect(tagMark(res.repos[0]!.tags[0]!)).toBe('candidate');
+    expect(repoStripText(res.repos[0]!)).toBe('No tag since v1.0.0-rc can be released');
   });
 
   it('acceptance 17: not decided yet → "Checking…" with a bar and ONE line', () => {
@@ -197,15 +169,11 @@ describe('repo rows — the cumulative rule, newest first', () => {
     r.defaultBranch = 'main';
     r.ranges = r.ranges.filter((x) => x.tagName !== 'v1.2.0');
     r.history = { done: 1200, total: 5400, complete: false };
-    const res = run({ repos: [r], ...all() });
-    const api = res.repos[0]!;
-    expect(repoRowText(api)).toBe('Checking…');
+    const api = run({ repos: [r], ...all() }).repos[0]!;
+    expect(repoStripText(api)).toBe('Checking…');
     expect(repoProgress(api)).toEqual({ share: 1200 / 5400, line: "Reading main's history: 1,200 of 5,400 commits" });
-    expect(tagExplainer(api.tags[0]!)).toEqual([{ tone: 'warn', text: 'The history is still being read.' }]);
-    // A ticket not read yet: the tickets line.
     const t = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2')], trackerName: 'Jira' });
     expect(repoProgress(t.repos[0]!)).toEqual({ share: 2 / 3, line: 'Reading tickets from Jira: 2 of 3' });
-    expect(ticketLine(t.tickets.find((x) => x.ident === 'T3')!, 'Jira')).toEqual({ tone: 'warn', text: 'not read yet' });
   });
 
   it('acceptance 41: the tab polls every ~3 s while a repo is checking, and stops when none is', () => {
@@ -216,199 +184,84 @@ describe('repo rows — the cumulative rule, newest first', () => {
     expect(releasesPollInterval(null)).toBe(false);
   });
 
-  it('acceptance 10: a ticket the tracker could not find → still the candidate; counted "to check" and listed under the tag', () => {
-    const res = run({ repos: [threeTags()], prs: all().prs, tickets: [ticket('T1'), ticket('T2'), ticket('T3', { readState: 'not_found', done: false, statusName: null })] });
-    const api = res.repos[0]!;
-    expect(repoRowText(api)).toBe('Release v1.2.0 → v1.2.0-rc');
-    expect(repoRowCounts(api)).toBe('3 tickets · 1 to check');
-    expect(ticketLine(res.tickets.find((x) => x.ident === 'T3')!, 'Jira')).toEqual({ tone: 'unknown', text: 'not found in Jira — check by hand' });
-  });
-
-  it('acceptance 12 / 24: no version tag after the release → "Nothing new since v1.2.0-rc"; none at all → "No version tags on main yet"', () => {
+  it('acceptance 12 / 24: "Nothing new since v1.2.0-rc"; none at all → "No version tags on main yet"; Release… only with push access', () => {
     const r = repo(1, 'api', [
       { name: 'v1.2.0', d: 5, prs: [3] },
       { name: 'v1.2.0-rc', d: 5, commit: 'v1.2.0', taggedAt: 6 },
     ]);
-    const res = run({ repos: [r], ...all() });
-    expect(repoRowText(res.repos[0]!)).toBe('Nothing new since v1.2.0-rc');
-    expect(showCreateRelease(res)).toBe(false);
-    expect(repoRowText(run({ repos: [repo(2, 'web', [])] }).repos[0]!)).toBe('No version tags on main yet');
-  });
-
-  it('Create release… is HIDDEN when the only candidate is in a repo without push access', () => {
-    const res = run({ repos: [threeTags(false)], ...all() });
-    expect(res.repos[0]!.candidate).not.toBeNull();
-    expect(showCreateRelease(res)).toBe(false);
+    expect(repoStripText(run({ repos: [r], ...all() }).repos[0]!)).toBe('Nothing new since v1.2.0-rc');
+    expect(repoStripText(run({ repos: [repo(2, 'web', [])] }).repos[0]!)).toBe('No version tags on main yet');
+    expect(releasableRepos(run({ repos: [threeTags(false)], ...all() }))).toEqual([]);
   });
 });
 
-describe('the expanded row: the tags read, newest first', () => {
-  it('acceptance 42: each tag newer than the candidate says why it does not qualify; older tags are not read', () => {
-    const res = run({
-      repos: [threeTags()],
-      prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])],
-      tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false, statusName: 'In review' })],
-    });
-    const w = tagWindow(res.repos[0]!, 5, 5);
-    expect(w.later.map((t) => t.name)).toEqual(['v1.2.0']);
-    expect(w.candidate?.name).toBe('v1.1.0');
-    expect(w.earlier.map((t) => t.name)).toEqual(['v1.0.0']);
-    // Its own ticket stops it: the red mark; the opened row's ticket line says why, the explainer adds nothing.
-    expect(tagMark(w.later[0]!)).toBe('blocked');
-    expect(tagMark(w.earlier[0]!)).toBe('ok');
-    expect(tagExplainer(w.later[0]!)).toEqual([]);
-    const t3 = tagTickets(res, w.later[0]!).tickets[0]!.ticket;
-    expect(ticketLine(t3, 'Jira')).toEqual({ tone: 'bad', text: 'In review' });
-    // Why v1.1.0 is the candidate: what stops the tag above it.
-    expect(candidateWhy(res, res.repos[0]!)).toEqual({ text: 'v1.2.0, the tag above it, can’t be released: T3 “T3 title” is In review.', link: null });
-  });
+describe('THE TICKET LIST: one list of ticket cards in tag order (owner, 2026-11-16)', () => {
+  /** `n` tags v1.<i>.0 on day i, each adding PR i naming T<i>. */
+  const many = (n: number) => repo(1, 'api', Array.from({ length: n }, (_, k) => ({ name: `v1.${k + 1}.0`, d: k + 1, prs: [k + 1] })));
+  const manyPrs = (n: number) => Array.from({ length: n }, (_, k) => pr(k + 1, 1, [`T${k + 1}`], { authorLogin: 'alex', mergedAt: day(k + 1, 9) }));
+  const manyTickets = (n: number) => Array.from({ length: n }, (_, k) => ticket(`T${k + 1}`, { statusName: 'Complete', stage: 'done' }));
+  const keys = (items: ReturnType<typeof ticketList>['items']) =>
+    items.map((i) => (i.kind === 'ticket' ? i.ticket.key : `-${i.prs.map((p) => p.number).join(',')}`));
 
-  it('acceptance 7: each tag lists its tickets and its PRs with no ticket (human or bot), never a warning; nothing says "released"', () => {
-    const r = threeTags();
-    r.ranges[2]!.prIds = [3, 4, 5];
+  it('a ticket in both repositories is ONE card, placed by its LATEST tag in either; tags of both repositories in commit-date order', () => {
+    const api = repo(1, 'api', [
+      { name: 'a1', d: 1, prs: [1] },
+      { name: 'a2', d: 4, prs: [2] },
+    ]);
+    const web = repo(2, 'web', [
+      { name: 'w1', d: 2, prs: [21] },
+      { name: 'w2', d: 3, prs: [22] },
+    ]);
     const res = run({
-      repos: [r],
-      prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3']), pr(4, 1, []), pr(5, 1, [], { isBot: true })],
+      repos: [api, web],
+      prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(21, 2, ['T1']), pr(22, 2, ['T3'])],
       tickets: [ticket('T1'), ticket('T2'), ticket('T3')],
     });
-    const v12 = tagTickets(res, res.repos[0]!.tags[0]!);
-    expect(v12.tickets.map((t) => [t.ticket.key, ticketLine(t.ticket, 'Jira').text, t.prs.map((p) => p.number)])).toEqual([['T3', 'Done', [3]]]);
-    expect(v12.noTicket.map((p) => p.number)).toEqual([4, 5]);
-    expect(noTicketLine(v12.noTicket.length)).toBe('2 pull requests with no ticket');
-    expect(noTicketLine(1)).toBe('1 pull request with no ticket');
-    expect(noTicketLine(0)).toBeNull();
-    expect(JSON.stringify(v12)).not.toMatch(/released/i);
+    const l = ticketList(res);
+    // T2 (a2, day 4) · T3 (w2, day 3) · T1 (a1 day 1 and w1 day 2 → day 2): one card each.
+    expect(keys(l.items)).toEqual(['T2', 'T3', 'T1']);
+    const t1 = l.tickets.find((c) => c.ticket.key === 'T1')!;
+    expect(t1.latest.map(repoTagWords)).toEqual(['api a1', 'web w1']);
   });
 
-  it('after a release the candidate lists every ticket in its scope (everything since the release)', () => {
-    const released = repo(1, 'api', [
-      { name: 'v1.0.0', d: 1, prs: [1] },
-      { name: 'v1.0.0-rc', d: 1, commit: 'v1.0.0', taggedAt: 2 },
-      { name: 'v1.1.0', d: 3, prs: [2] },
-      { name: 'v1.2.0', d: 5, prs: [3] },
-    ]);
-    const res = run({ repos: [released], prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])], tickets: [ticket('T2'), ticket('T3')] });
-    const c = tagTickets(res, res.repos[0]!.tags[0]!);
-    expect(c.tickets.map((t) => t.ticket.key)).toEqual(['T2', 'T3']);
-    expect(candidateScopeLabel(res.repos[0]!)).toBe('checked: everything since v1.0.0-rc');
-  });
-});
-
-describe('the three bands, the tag headers and the ticket lines (the approved layout)', () => {
-  /** `n` tags v1.<i>.0, each adding PR i naming T<i>. */
-  const many = (n: number) => repo(1, 'api', Array.from({ length: n }, (_, k) => ({ name: `v1.${k + 1}.0`, d: k + 1, prs: [k + 1] })));
-  const manyPrs = (n: number) => Array.from({ length: n }, (_, k) => pr(k + 1, 1, [`T${k + 1}`], { authorLogin: 'alex' }));
-  const manyTickets = (n: number) => Array.from({ length: n }, (_, k) => ticket(`T${k + 1}`, { statusName: 'Complete', stage: 'done' }));
-
-  it('49: every tag newer than the candidate, each with ALL its tickets in order — stops first, then to check, then Complete; ties by key', () => {
-    const r = many(3);
-    r.ranges[2]!.prIds = [3, 4, 5, 6];
-    const res = run({
-      repos: [r],
-      prs: [...manyPrs(3), pr(4, 1, ['T4']), pr(5, 1, ['T0']), pr(6, 1, ['T9'])],
-      openPrs: [{ repoId: 2, repoName: 'frontend', number: 812, url: 'https://github.com/acme/frontend/pull/812', prId: null, ticketIdents: ['T4'] }],
-      tickets: [
-        ...manyTickets(3),
-        ticket('T4', { statusName: 'Complete', stage: 'done' }),
-        ticket('T0', { readState: 'not_found', done: false, statusName: null }),
-        ticket('T9', { done: false, statusName: 'In PO Review', stage: 'product_review' }),
-      ],
-      trackerName: 'Jira',
-    });
-    const b = tagWindow(res.repos[0]!, 5, 5);
-    expect(b.later.map((t) => t.name)).toEqual(['v1.3.0']);
-    expect(b.candidate?.name).toBe('v1.2.0');
-    const lines = tagTickets(res, b.later[0]!).tickets.map(({ ticket: t }) => [t.key, ticketLine(t, res.trackerName).tone, ticketLine(t, res.trackerName).text]);
-    expect(lines).toEqual([
-      ['T4', 'bad', 'Complete, but has an open PR: frontend #812'],
-      ['T9', 'bad', 'In PO Review (Product review)'],
-      ['T0', 'unknown', 'not found in Jira — check by hand'],
-      ['T3', 'ok', 'Complete'],
-    ]);
-    expect(tagHeader(res, b.later[0]!).text).toBe(`v1.3.0 · 3 Nov · ${sha('v1.3.0').slice(0, 7)} · 4 PRs · 4 tickets`);
-    expect(tagHeader(res, b.candidate!).url).toBe(`https://github.com/acme/api/commit/${sha('v1.2.0')}`);
-    expect(candidateScopeLabel(res.repos[0]!)).toBe('checked: everything up to this tag');
-  });
-
-  it('no candidate: the tags read, no earlier ones', () => {
-    const res = run({ repos: [many(2)], prs: manyPrs(2), tickets: [ticket('T1', { done: false, statusName: 'To do' }), ticket('T2', { done: false, statusName: 'To do' })] });
-    const b = tagWindow(res.repos[0]!, 5, 5);
-    expect(b).toMatchObject({ candidate: null, earlier: [], moreLater: 0, moreEarlier: false });
-    expect(b.later.map((t) => t.name)).toEqual(['v1.2.0', 'v1.1.0']);
-    expect(repoRowText(res.repos[0]!)).toBe('No tag can be released — v1.2.0: T2 “T2 title” is To do');
-  });
-
-  it('THE WINDOW: 5 later tags, the candidate, 5 earlier tags; each way grows by 5; earlier asks the server past what it sent', () => {
-    // v1.9.0 holds an In Progress ticket: the candidate is v1.8.0, with 7 tags above it and 7 below.
+  it('THE CANDIDATE TICKET (★) is the newest ticket all of whose work is in the candidates; the list opens on it with one either side; each way grows by 3', () => {
+    // T9 is In Progress: the candidate is v1.8.0, so T8 is the candidate ticket.
     const tickets = manyTickets(15);
     tickets[8] = ticket('T9', { done: false, statusName: 'In Progress', stage: 'in_progress' });
     const res = run({ repos: [many(15)], prs: manyPrs(15), tickets });
-    const api = res.repos[0]!;
-    expect(api.candidate?.name).toBe('v1.8.0');
-    const w = tagWindow(api, 5, 5);
-    // Later tags end with the one just above the candidate.
-    expect(w.later.map((t) => t.name)).toEqual(['v1.13.0', 'v1.12.0', 'v1.11.0', 'v1.10.0', 'v1.9.0']);
-    expect(w.earlier.map((t) => t.name)).toEqual(['v1.7.0', 'v1.6.0', 'v1.5.0', 'v1.4.0', 'v1.3.0']);
-    expect(w).toMatchObject({ moreLater: 2, moreEarlier: true, lastReleaseLine: null });
-    expect(showLaterWords(w.moreLater)).toBe('Show 2 later tags');
-    expect(showLaterWords(9)).toBe('Show 5 later tags');
-    expect(SHOW_EARLIER_WORDS).toBe('Show 5 earlier tags');
-    const wider = tagWindow(api, 10, 10);
-    expect(wider.later).toHaveLength(7);
-    expect(wider).toMatchObject({ moreLater: 0, moreEarlier: false });
-    // The marks: v1.9.0's own ticket stops it (red); the tags above it are held back by it (amber).
-    expect(w.later.map((t) => tagMark(t))).toEqual(['held', 'held', 'held', 'held', 'blocked']);
-    expect(tagMark(w.candidate!)).toBe('candidate');
-    expect(w.earlier.every((t) => tagMark(t) === 'ok')).toBe(true);
-    // Earlier: the server sent 10; the 15th asks for 15.
-    expect(showEarlier(5, api.older.wanted)).toEqual({ shown: 10, ask: null });
-    expect(showEarlier(10, api.older.wanted)).toEqual({ shown: 15, ask: 15 });
-    // A link to a later tag widens the window to it.
-    expect(laterShownFor(api, 'v1.15.0', 5)).toBe(7);
-    expect(laterShownFor(api, 'v1.10.0', 5)).toBe(5);
+    expect(res.repos[0]!.candidate?.name).toBe('v1.8.0');
+    const l = ticketList(res);
+    expect(l.tickets[l.anchor!]!.ticket.key).toBe('T8');
+    expect(l.tickets[l.anchor!]!.isAnchor).toBe(true);
+    const w = ticketWindow(l, TICKET_WINDOW_START, TICKET_WINDOW_START);
+    expect(keys(w.items)).toEqual(['T9', 'T8', 'T7']);
+    expect(w).toMatchObject({ moreUp: 6, moreDown: 6 });
+    expect(showTicketsWords('later', w.moreUp)).toBe('Show 3 later tickets');
+    const w2 = ticketWindow(l, TICKET_WINDOW_START + TICKET_WINDOW_STEP, TICKET_WINDOW_START);
+    expect(keys(w2.items)).toEqual(['T12', 'T11', 'T10', 'T9', 'T8', 'T7']);
+    expect(showTicketsWords('earlier', 2)).toBe('Show 2 earlier tickets');
+    // Marks: ✗ not Complete; ⊘ Complete but above the candidate; ✓ in it.
+    expect(l.tickets.find((c) => c.ticket.key === 'T9')!.mark).toBe('blocked');
+    expect(l.tickets.find((c) => c.ticket.key === 'T10')!.mark).toBe('held');
+    expect(l.tickets.find((c) => c.ticket.key === 'T7')!.mark).toBe('ok');
   });
 
-  it('51: after a release the older band ends with the release tag: "v1.0.0-rc — last release"', () => {
-    const released = repo(1, 'api', [
-      { name: 'v1.0.0', d: 1, prs: [1] },
-      { name: 'v1.0.0-rc', d: 1, commit: 'v1.0.0', taggedAt: 2 },
-      { name: 'v1.1.0', d: 3, prs: [2] },
-      { name: 'v1.2.0', d: 5, prs: [3] },
-    ]);
-    const res = run({ repos: [released], prs: manyPrs(3), tickets: manyTickets(3) });
-    const v = tagWindow(res.repos[0]!, 5, 5);
-    expect(v.earlier.map((t) => t.name)).toEqual(['v1.1.0']);
-    expect(v).toMatchObject({ lastReleaseLine: 'v1.0.0-rc — last release', moreEarlier: false });
-  });
-
-  it('53: while older history is read the row is Checking… with the bar and its line; the tab polls', () => {
-    const r = many(3);
-    r.tags.push({ name: 'v0.9.0', sha: sha('v0.9.0'), committedAt: day(0), taggedAt: null, onDefaultBranch: null, moved: false });
-    r.history = { done: 300, total: 900, complete: false };
-    r.defaultBranch = 'main';
-    const res = run({ repos: [r], prs: manyPrs(3), tickets: manyTickets(3) });
-    expect(repoRowText(res.repos[0]!)).toBe('Checking…');
-    expect(repoProgress(res.repos[0]!)).toEqual({ share: 300 / 900, line: "Reading main's history: 300 of 900 commits" });
-    expect(releasesPollInterval({ check: res })).toBe(RELEASES_POLL_MS);
-  });
-
-  it('a tag clear on its own but held back by an older tag says so in ONE line, naming the oldest', () => {
+  it('the holding ticket is named, always visible, and every held card says what it waits on — never another held ticket', () => {
     const tickets = manyTickets(5);
-    tickets[1] = ticket('T2', { done: false, statusName: 'In Code Review', title: 'Read and price trees' });
-    tickets[2] = ticket('T3', { done: false, statusName: 'In PO Review', title: 'Export' });
-    const res = run({ repos: [many(5)], prs: manyPrs(5), tickets });
-    const api = res.repos[0]!;
-    expect(api.candidate?.name).toBe('v1.1.0');
-    const v15 = api.tags.find((t) => t.name === 'v1.5.0')!;
-    expect(tagMark(v15)).toBe('held');
-    expect(tagExplainer(v15, { check: res, repoId: 1 })).toEqual([
-      { tone: 'warn', text: 'Held back by v1.2.0: T2 “Read and price trees” is In Code Review.', link: { repoId: 1, tagName: 'v1.2.0' } },
-    ]);
-    // A tag with its own reason: its ticket lines say it; older tags are listed below.
-    expect(tagExplainer(api.tags.find((t) => t.name === 'v1.3.0')!)).toEqual([]);
+    tickets[2] = ticket('T3', { done: false, statusName: 'In Code Review', stage: 'review' });
+    const res = run({ repos: [many(5)], prs: manyPrs(5), tickets, trackerName: 'Jira' });
+    const holders = releaseHolders(res);
+    expect(holders).toEqual([{ ident: 'T3', key: 'T3', title: 'T3 title', text: 'In Code Review', repoNames: ['api'] }]);
+    const l = ticketList(res);
+    const ctx = { holders, repoNames: new Map([[1, 'api']]), trackerName: 'Jira' };
+    const line = (k: string) => ticketCardLine(l.tickets.find((c) => c.ticket.key === k)!, ctx);
+    expect(line('T5')).toMatchObject({ tone: 'warn', text: 'Waits on T3: In Code Review', holder: { ident: 'T3' } });
+    expect(line('T3')).toMatchObject({ tone: 'bad', text: 'Holds back api', holder: null });
+    // Done: what was done.
+    expect(line('T2')).toMatchObject({ tone: 'mute', text: '1 PR, last merged 2 Nov by alex' });
   });
 
-  it('picked together: a ticket whose other half is above a candidate says what it would ship without', () => {
+  it('picked together: a Complete ticket split across repositories waits on the ROOT ticket, not its other half', () => {
     const api = many(2);
     const web = repo(2, 'frontend', [
       { name: 'w1.0.0', d: 2, prs: [22] },
@@ -420,61 +273,84 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
       tickets: [...manyTickets(2), ticket('W9', { done: false, statusName: 'In Progress' })],
       trackerName: 'Jira',
     });
-    expect(res.repos[0]!.candidate?.name).toBe('v1.1.0');
-    // The api tag holding T2's api half is held back (amber). Opened, it follows the chain to the ROOT CAUSE —
-    // frontend w1.0.0's In Progress W9 — and links there, never back and forth between the two halves.
-    const why = 'T2 “T2 title” would ship without frontend #21 (in w1.1.0), which waits on frontend w1.0.0: W9 “W9 title” is In Progress';
-    const v2 = res.repos[0]!.tags.find((t) => t.name === 'v1.2.0')!;
-    expect(tagMark(v2)).toBe('held');
-    expect(tagExplainer(v2, { check: res, repoId: 1 })).toEqual([{ tone: 'warn', text: `Held back: ${why}.`, link: { repoId: 2, tagName: 'w1.0.0' } }]);
-    // The candidate explains itself with the same root; it is paired with no other candidate (frontend has none).
-    expect(candidateWhy(res, res.repos[0]!)).toEqual({ text: `v1.2.0, the tag above it, can’t be released: ${why}.`, link: { repoId: 2, tagName: 'w1.0.0' } });
-    expect(candidatePairs(res, res.repos[0]!)).toEqual([]);
-    const t2 = res.tickets.find((t) => t.ident === 'T2')!;
-    // In the api tag it holds back: the reason. In the frontend tag that holds its other half: just Complete.
-    expect(ticketLine(t2, 'Jira', v2)).toEqual({
-      tone: 'warn',
-      text: 'Complete, but would ship without frontend #21 (in w1.1.0), which waits on frontend w1.0.0: W9 “W9 title” is In Progress',
+    const holders = releaseHolders(res);
+    expect(holders.map((h) => [h.key, h.text, h.repoNames])).toEqual([['W9', 'In Progress', ['api', 'frontend']]]);
+    const l = ticketList(res);
+    const t2 = l.tickets.find((c) => c.ticket.key === 'T2')!;
+    expect(t2.mark).toBe('held');
+    expect(t2.latest.map(repoTagWords)).toEqual(['api v1.2.0', 'frontend w1.1.0']);
+    expect(ticketCardLine(t2, { holders, repoNames: new Map([[1, 'api'], [2, 'frontend']]), trackerName: 'Jira' }).text).toBe('Waits on W9: In Progress');
+  });
+
+  it('pull requests with no ticket are narrow rows BETWEEN the cards, grouped while consecutive', () => {
+    const r = many(4);
+    r.ranges[1]!.prIds = [2, 30, 31];
+    const res = run({
+      repos: [r],
+      prs: [...manyPrs(4), pr(30, 1, [], { isBot: true, mergedAt: day(2, 10) }), pr(31, 1, [], { mergedAt: day(2, 11) })],
+      tickets: manyTickets(4),
     });
-    expect(ticketRank(t2, v2)).toBe(0);
-    const w11 = res.repos[1]!.tags.find((t) => t.name === 'w1.1.0')!;
-    expect(ticketLine(t2, 'Jira', w11)).toEqual({ tone: 'ok', text: 'Complete' });
-    expect(ticketRank(t2, w11)).toBe(2);
-    expect(tagExplainer(w11, { check: res, repoId: 2 })).toEqual([
-      { tone: 'warn', text: 'Held back by w1.0.0: W9 “W9 title” is In Progress.', link: { repoId: 2, tagName: 'w1.0.0' } },
+    const l = ticketList(res);
+    expect(keys(l.items)).toEqual(['T4', 'T3', '-31,30', 'T2', 'T1']);
+    const g = l.items[2]!;
+    expect(g.kind === 'no_ticket' && noTicketGroupWords(g.prs)).toBe('2 PRs with no ticket · 1 by bots');
+    expect(noTicketGroupWords([{ isBot: true }])).toBe('1 PR with no ticket · by a bot');
+    expect(noTicketPrLineOf(res, res.prs.find((p) => p.id === 31)!)).toMatchObject({ label: 'api #31', tail: 'merged 2 Nov · in v1.2.0' });
+  });
+
+  it('a ticket the tracker could not give is still a card, marked missing — it never stops a release', () => {
+    const tickets = manyTickets(3);
+    tickets[1] = ticket('T2', { readState: 'not_found', done: false, statusName: null, title: null });
+    const res = run({ repos: [many(3)], prs: manyPrs(3), tickets, trackerName: 'Jira' });
+    expect(res.repos[0]!.candidate?.name).toBe('v1.3.0');
+    const l = ticketList(res);
+    const t2 = l.tickets.find((c) => c.ticket.key === 'T2')!;
+    expect(t2.mark).toBe('missing');
+    expect(ticketCardLine(t2, { holders: [], repoNames: new Map(), trackerName: 'Jira' })).toMatchObject({ tone: 'unknown', text: 'Not found in Jira — check it by hand' });
+    expect(ticketCardStatus(t2.ticket)).toBeNull();
+    // The candidate ticket is the newest ✓, never a missing one.
+    expect(l.tickets[l.anchor!]!.ticket.key).toBe('T3');
+  });
+
+  it('a Cancelled ticket never stops a tag: a tick and its status', () => {
+    const tickets = manyTickets(3);
+    tickets[2] = ticket('T3', { done: false, statusName: "Won't Do", stage: 'cancelled' });
+    const res = run({ repos: [many(3)], prs: manyPrs(3), tickets });
+    const l = ticketList(res);
+    expect(res.repos[0]!.candidate?.name).toBe('v1.3.0');
+    expect(l.tickets.find((c) => c.ticket.key === 'T3')!.mark).toBe('ok');
+    expect(ticketCardStatus(l.tickets.find((c) => c.ticket.key === 'T3')!.ticket)).toBe("Won't Do");
+  });
+
+  it('NOT IN A TAG YET: a ticket whose only work is an open pull request sits apart at the top; an open PR on a tagged ticket stays on its card', () => {
+    const res = run({
+      repos: [many(2)],
+      prs: manyPrs(2),
+      openPrs: [
+        { repoId: 2, repoName: 'frontend', number: 812, url: 'https://github.com/acme/frontend/pull/812', prId: 9, ticketIdents: ['T7'], title: 'T7: start' },
+        { repoId: 2, repoName: 'frontend', number: 813, url: 'https://github.com/acme/frontend/pull/813', prId: 10, ticketIdents: ['T2'], title: 'T2: more' },
+      ],
+      tickets: [...manyTickets(2), ticket('T7', { done: false, statusName: 'In Development' })],
+      trackerName: 'Jira',
+    });
+    const l = ticketList(res);
+    expect(l.notTagged.map((c) => c.ticket.key)).toEqual(['T7']);
+    expect(l.notTagged[0]!.latest.map(repoTagWords)).toEqual(['frontend: open PR']);
+    expect(keys(l.items)).toEqual(['T2', 'T1']);
+    const t2 = l.tickets.find((c) => c.ticket.key === 'T2')!;
+    expect(t2.mark).toBe('blocked');
+    const holders = releaseHolders(res);
+    expect(ticketCardLine(t2, { holders, repoNames: new Map(), trackerName: 'Jira' }).text).toBe('Holds back api · open PR: frontend #813');
+    // Opened: its PRs, open first, then merged newest first, each with its tag.
+    expect(ticketCardPrLines(t2.ticket).map((x) => [x.label, x.tail])).toEqual([
+      ['frontend #813', 'OPEN'],
+      ['api #2', 'merged 2 Nov · alex · in v1.2.0'],
     ]);
   });
 
   it('Refresh shows a bar with what it reads', () => {
     expect(refreshingLine({ trackerName: 'Jira' })).toBe('Reading tickets from Jira again');
     expect(refreshingLine(null)).toBe('Reading tickets from the tracker again');
-  });
-
-  it('54: a ticket line opens to its detail — type, assignee, last read; PRs in this tag and elsewhere (OPEN, in a tag, not in a tag yet)', () => {
-    const api = many(3);
-    api.ranges[1]!.prIds = [2, 4];
-    const web = repo(2, 'frontend', [{ name: 'w1.0.0', d: 2, prs: [20] }]);
-    const res = run({
-      repos: [api, web],
-      prs: [...manyPrs(3), pr(4, 1, ['T3'], { title: 'T3: schema', mergedAt: day(2), authorLogin: 'sam' }), pr(20, 2, ['T3'], { title: 'T3: page', mergedAt: day(2) })],
-      openPrs: [{ repoId: 2, repoName: 'frontend', number: 812, url: 'https://github.com/acme/frontend/pull/812', prId: 9, ticketIdents: ['T3'], title: 'T3: export button' }],
-      mergedPrs: [{ repoId: 1, repoName: 'api', number: 30, title: 'T3: later', url: 'https://github.com/acme/api/pull/30', prId: 300, authorLogin: 'alex', mergedAt: day(9), ticketIdents: ['T3'] }],
-      tickets: [...manyTickets(2), ticket('T3', { statusName: 'Complete', stage: 'done', typeName: 'Story', assigneeName: 'Robin Lee', readAt: day(10, 11) })],
-      trackerName: 'Jira',
-    });
-    const v13 = res.repos[0]!.tags.find((t) => t.name === 'v1.3.0')!;
-    const t3 = res.tickets.find((t) => t.ident === 'T3')!;
-    const d = ticketDetail(res, v13, t3, day(10, 11).getTime() + 4 * 60_000);
-    expect(d.facts).toEqual(['Type: Story', 'Assignee: Robin Lee', 'Jira status read 4 min ago']);
-    expect(d.inThisTag.map((l) => [l.label, l.title, l.tail])).toEqual([['api #3', '“change 3”', 'merged 1 Nov · alex']]);
-    expect(d.elsewhere.map((l) => [l.label, l.title, l.tail])).toEqual([
-      ['frontend #812', '“T3: export button”', 'OPEN'],
-      ['api #4', '“T3: schema”', 'merged 2 Nov · in v1.2.0'],
-      ['api #30', '“T3: later”', 'merged 9 Nov · not in a tag yet'],
-      ['frontend #20', '“T3: page”', 'merged 2 Nov · in w1.0.0'],
-    ]);
-    // A PR with no ticket, listed under its tag.
-    expect(noTicketPrLine(res, res.prs.find((p) => p.id === 3)!)).toMatchObject({ label: 'api #3', title: '“change 3”', tail: 'merged 1 Nov · alex' });
   });
 
   it('the status words: the bucket in brackets only when it differs; the read age', () => {

@@ -476,6 +476,8 @@ export interface ReleaseTicketPr {
   open: boolean;
   /** The version tag that contains it (merged); null = not known. */
   tagName: string | null;
+  /** That tag's commit date (ISO; null = no tag or not known): the tickets list's order. */
+  tagAt: string | null;
   /** Merged after the repository's newest tag: "not in a tag yet". */
   untagged: boolean;
 }
@@ -529,6 +531,8 @@ export interface ReleaseCheckPr {
   authorLogin: string | null;
   /** The version tag holding it; null = not known. */
   tagName: string | null;
+  /** That tag's commit date (ISO; null = not known): the tickets list's order. */
+  tagAt: string | null;
 }
 
 export interface ReleaseCheckResult {
@@ -1024,7 +1028,10 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
   const listedPrIds = new Set<number>();
   const prTagByRepo = new Map<number, Map<number, string>>();
   const newestTagAtByRepo = new Map<number, number | null>();
+  /** repo → tag name → its commit date (ISO). */
+  const tagAtByRepo = new Map<number, Map<string, string | null>>();
   for (const { repo, f } of folded) {
+    tagAtByRepo.set(repo.repoId, new Map(repo.tags.map((t) => [t.name, iso(t.committedAt)])));
     const { out, evals, olderEvals, candidate, prTag, newestTagAtMs } = f;
     prTagByRepo.set(repo.repoId, prTag);
     newestTagAtByRepo.set(repo.repoId, newestTagAtMs);
@@ -1051,6 +1058,17 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
     for (const t of [...out.tags, ...out.olderTags]) for (const id of t.prIds) listedPrIds.add(id);
     repos.push(out);
   }
+  // A ticket whose ONLY work is an open PR is listed too, with no repository (the tab's "Not in a tag
+  // yet"): it never changes a candidate.
+  for (const p of input.openPrs ?? []) {
+    for (const ident of p.ticketIdents) {
+      if (ticketRepos.has(ident)) continue;
+      ticketRepos.set(ident, new Map());
+      population.push(ident);
+    }
+  }
+  const tagAtOf = (repoId: number, tagName: string | null): string | null =>
+    tagName == null ? null : (tagAtByRepo.get(repoId)?.get(tagName) ?? null);
 
   // Every PR for each listed ticket in the releasable repos (the ticket detail): the light records
   // (with the tag holding each), the stored merged PRs with no light record, and the open PRs.
@@ -1082,6 +1100,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
         mergedAt: iso(p.mergedAt),
         open: false,
         tagName,
+        tagAt: tagAtOf(p.repoId, tagName),
         untagged: tagName == null && untaggedAt(p.repoId, p.mergedAt),
       });
     }
@@ -1100,6 +1119,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
         mergedAt: iso(p.mergedAt),
         open: false,
         tagName: null,
+        tagAt: null,
         untagged: untaggedAt(p.repoId, p.mergedAt),
       });
     }
@@ -1118,6 +1138,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
         mergedAt: null,
         open: true,
         tagName: null,
+        tagAt: null,
         untagged: false,
       });
     }
@@ -1182,6 +1203,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       ticketIdents: [...p.ticketIdents],
       authorLogin: p.authorLogin ?? null,
       tagName: prTagByRepo.get(p.repoId)?.get(p.id) ?? null,
+      tagAt: tagAtOf(p.repoId, prTagByRepo.get(p.repoId)?.get(p.id) ?? null),
     }));
   return { repos, tickets, prs, trackerName: input.trackerName ?? null };
 }
