@@ -1,5 +1,6 @@
 import { Link } from '../../router';
 import { SITE_NAME } from '../../lib/site';
+import { EnsembleStory } from './EnsembleStory';
 
 // ---------------------------------------------------------------------------
 // The home page's three sections after the hero: review as an ensemble (the team
@@ -78,59 +79,6 @@ export function HowItWorks(): JSX.Element {
 }
 
 /** The teammates around one pull request: who they are and which agent they review with. */
-const MATES: { name: string; agent: string }[] = [
-  { name: 'You', agent: 'Claude + Codex' },
-  { name: 'Sam', agent: 'Claude' },
-  { name: 'Dana', agent: 'Codex' },
-  { name: 'Priya', agent: 'Claude' },
-  { name: 'Leo', agent: 'Codex' },
-];
-
-/** The circle: each teammate's own machine around the pull request, which lives on GitHub. */
-function Circle(): JSX.Element {
-  const cx = 300;
-  const cy = 300;
-  const r = 215;
-  const nodes = MATES.map((m, i) => {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / MATES.length;
-    return { ...m, x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
-  });
-  return (
-    <svg
-      className="circle-svg"
-      viewBox="0 0 600 600"
-      role="img"
-      aria-label="Five teammates, each on their own machine with their own Claude or Codex, around one pull request on GitHub. Each one claims a commit there before reviewing it."
-    >
-      <circle cx={cx} cy={cy} r={r} className="c-orbit" />
-      {nodes.map((n) => (
-        <line key={`l-${n.name}`} x1={cx} y1={cy} x2={n.x} y2={n.y} className="c-spoke" />
-      ))}
-      <circle cx={cx} cy={cy} r={92} className="c-hub" />
-      <text x={cx} y={cy - 18} className="c-hub-k">
-        GITHUB
-      </text>
-      <text x={cx} y={cy + 8} className="c-hub-t">
-        #612 acme/payments
-      </text>
-      <text x={cx} y={cy + 32} className="c-hub-s">
-        claims · reviews · threads
-      </text>
-      {nodes.map((n, i) => (
-        <g key={n.name}>
-          <circle cx={n.x} cy={n.y} r={58} className={`c-node c-node-${i % 4}`} />
-          <text x={n.x} y={n.y - 4} className="c-name">
-            {n.name}
-          </text>
-          <text x={n.x} y={n.y + 18} className="c-agent">
-            {n.agent}
-          </text>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
 const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   {
     h: 'No review bot seat',
@@ -142,15 +90,15 @@ const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   },
   {
     h: 'The same review, every time',
-    p: 'Auto review runs on every push, the same way, with Claude and Codex together when you have both. No prompt to write, nothing to remember.',
+    p: 'Auto review runs on every push, the same way, with Claude and Codex together when you have both. A status line on the commit says who is reviewing it, so nobody reviews it twice.',
   },
   {
-    h: 'Shared, and it fixes',
-    p: 'A status line on the commit says who is reviewing it, so nobody reviews it twice. Findings, red CI and SonarCloud issues are fixed on the branch.',
+    h: 'It fixes, then goes back',
+    p: 'When a review finds problems on your pull request, your Ensemble fixes them with your agent and pushes the fix. Red CI and SonarCloud issues too. Then it goes back for review.',
   },
 ];
 
-/** Review as an ensemble: the circle and the four facts beside it. */
+/** Review as an ensemble: the story of one pull request (EnsembleStory) and the four facts beside it. */
 export function EnsembleSection(): JSX.Element {
   return (
     <section id="ensemble" className="section chapter" aria-labelledby="ens-h">
@@ -163,14 +111,7 @@ export function EnsembleSection(): JSX.Element {
       </div>
       <div className="board ensemble">
         <div className="tile circle rise">
-          <Circle />
-          <ul className="vh">
-            {MATES.map((m) => (
-              <li key={m.name}>
-                {m.name}: reviews on their own machine with {m.agent}.
-              </li>
-            ))}
-          </ul>
+          <EnsembleStory />
         </div>
         <div className="ens-points">
           {ENSEMBLE_POINTS.map((pt) => (

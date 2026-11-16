@@ -8,7 +8,7 @@
      scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-quartet (then close): Scene.tsx
      hero       .hero > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
      flow       .board.flow > ol.flow-steps > li.tile (.flow-n, h3, p) · p.flow-loop · p.flow-more
-     ensemble   .board.ensemble > .tile.circle (svg.circle-svg) · .ens-points > .tile (h3, p) · p.ens-more
+     ensemble   .board.ensemble > .tile.circle (EnsembleStory: svg.story-svg + .story-cap) · .ens-points > .tile (h3, p) · p.ens-more
      bots       .board.bots > .tile (h3, p, p.more)
      strip      .strip > .ww-say (h2, p) · ul.ww-tools > li (.ww-mk > .logo-mk, .ww-nm > small)
      proof      .proof > .board > .tile (.n > s, p) · p.src
@@ -730,4 +730,299 @@
 /* ---- Everything else: Open pull requests (components/mock/openPrs.tsx) ---------- */
 .lb.home .op-mock {
   margin-top: var(--gap);
+}
+
+/* ---- review as an ensemble: the story (components/board/EnsembleStory.tsx) ------------ */
+/* One class per phase reached on the svg (p-open … p-merged); each mark shows from its
+   phase. Opacity, transforms and line draws only. `.still` = the finished picture, no motion. */
+.lb.home .ensemble .circle {
+  flex-direction: column;
+  gap: 14px;
+}
+.lb.home .story {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lb.home .story-svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.lb.home .story-svg text {
+  text-anchor: middle;
+  fill: var(--ink);
+  font-family: inherit;
+}
+.lb.home .story-svg :is(.s-mate, .s-hub, .s-author, .s-tag, .s-agent, .s-team, .s-hub-words text) {
+  opacity: 0;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.lb.home .story-svg .s-hub {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.85);
+}
+.lb.home .story-svg .s-edge {
+  fill: none;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0.9s ease, stroke 0.6s ease, opacity 0.6s ease;
+}
+.lb.home .story-svg .e-open {
+  stroke: var(--azure);
+}
+.lb.home .story-svg .e-sam {
+  stroke: var(--mint);
+}
+.lb.home .story-svg .e-dana {
+  stroke: var(--pink);
+}
+.lb.home .story-svg .e-findings {
+  stroke: var(--amber);
+  stroke-dasharray: 0.04 0.03;
+  stroke-dashoffset: 0;
+  opacity: 0;
+}
+.lb.home .story-svg .e-push {
+  stroke: var(--azure);
+}
+/* the team: You first (alone), then Sam and Dana, Leo and Priya faint */
+.lb.home .story-svg .s-mate.m-you {
+  opacity: 1;
+}
+.lb.home .story-svg.p-review .m-sam,
+.lb.home .story-svg.p-review .m-dana,
+.lb.home .story-svg.p-review .s-team {
+  opacity: 1;
+}
+.lb.home .story-svg.p-review .m-faint {
+  opacity: 0.22;
+}
+.lb.home .story-svg .m-you .s-node {
+  fill: var(--deep-dusk);
+  stroke: var(--azure);
+  stroke-width: 3;
+}
+.lb.home .story-svg .m-sam .s-node {
+  fill: var(--deep-meadow);
+  stroke: var(--mint);
+  stroke-width: 3;
+}
+.lb.home .story-svg .m-dana .s-node {
+  fill: var(--deep-bloom);
+  stroke: var(--pink);
+  stroke-width: 3;
+}
+.lb.home .story-svg .m-faint .s-node {
+  fill: var(--surface);
+  stroke: rgba(241, 241, 239, 0.4);
+  stroke-width: 2;
+}
+/* 1 · You open #612 */
+.lb.home .story-svg.p-open :is(.s-hub, .s-author) {
+  opacity: 1;
+  transform: none;
+}
+.lb.home .story-svg.p-open .e-open {
+  stroke-dashoffset: 0;
+}
+.lb.home .story-svg .s-author rect {
+  fill: var(--gold);
+}
+.lb.home .story-svg .s-author text {
+  fill: var(--dark);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.lb.home .story-svg.p-open:not(.p-review) .w-open,
+.lb.home .story-svg.p-review:not(.p-findings) .w-review,
+.lb.home .story-svg.p-findings:not(.p-push) .w-findings,
+.lb.home .story-svg.p-push:not(.p-approve) .w-push,
+.lb.home .story-svg.p-approve:not(.p-merged) .w-approve,
+.lb.home .story-svg.p-merged .w-merged {
+  opacity: 1;
+}
+/* 2 · Sam and Dana review it at once */
+.lb.home .story-svg.p-review :is(.e-sam, .e-dana) {
+  stroke-dashoffset: 0;
+}
+.lb.home .story-svg.p-review:not(.p-findings) :is(.t-reviewing-sam, .t-reviewing-dana) {
+  opacity: 1;
+}
+.lb.home .story-svg.p-findings :is(.e-sam, .e-dana, .e-open) {
+  opacity: 0.35;
+}
+.lb.home .story-svg .s-tag text {
+  font-size: 13px;
+  font-weight: 600;
+}
+.lb.home .story-svg .t-reviewing-sam text {
+  fill: var(--mint);
+}
+.lb.home .story-svg .t-reviewing-dana text {
+  fill: var(--pink);
+}
+/* 3 · the findings come back to You; your Ensemble fixes them and pushes */
+.lb.home .story-svg.p-findings:not(.p-back) :is(.e-findings, .t-findings) {
+  opacity: 1;
+}
+.lb.home .story-svg.p-findings:not(.p-back) .e-findings {
+  animation: story-flow 0.9s linear infinite;
+}
+@keyframes story-flow {
+  to {
+    stroke-dashoffset: -0.07;
+  }
+}
+.lb.home .story-svg .t-findings text {
+  fill: var(--amber);
+}
+.lb.home .story-svg.p-fix:not(.p-back) .s-agent {
+  opacity: 1;
+}
+.lb.home .story-svg .s-agent rect {
+  fill: var(--surface-2);
+  stroke: #b9a3ff;
+  stroke-width: 1.5;
+}
+.lb.home .story-svg .s-agent text {
+  text-anchor: start;
+}
+.lb.home .story-svg .s-agent .a-k {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  fill: #b9a3ff;
+  font-weight: 700;
+}
+.lb.home .story-svg .s-agent .a-t {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.lb.home .story-svg .s-spark {
+  fill: #b9a3ff;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.lb.home .story-svg.p-fix:not(.p-push) .s-spark {
+  animation: story-spark 0.9s ease-in-out infinite;
+}
+@keyframes story-spark {
+  50% {
+    transform: rotate(45deg) scale(1.35);
+    opacity: 0.6;
+  }
+}
+.lb.home .story-svg.p-push .e-push {
+  stroke-dashoffset: 0;
+}
+.lb.home .story-svg.p-push:not(.p-merged) .t-push {
+  opacity: 1;
+}
+.lb.home .story-svg .t-push text {
+  fill: var(--azure);
+}
+/* 4 · back for review: You look it over, then Dana approves */
+.lb.home .story-svg .m-you .s-node {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.lb.home .story-svg.p-back:not(.p-approve) .m-you .s-node {
+  animation: story-look 1.2s ease-in-out 1;
+}
+@keyframes story-look {
+  50% {
+    transform: scale(1.08);
+    stroke-width: 6;
+  }
+}
+.lb.home .story-svg.p-approve .e-dana {
+  stroke: #7fd36b;
+  opacity: 1;
+}
+.lb.home .story-svg.p-approve .t-approved {
+  opacity: 1;
+}
+.lb.home .story-svg .t-approved text {
+  fill: #7fd36b;
+}
+/* 5 · merged */
+.lb.home .story-svg .s-hub-fill {
+  transition: fill 0.7s ease;
+}
+.lb.home .story-svg.p-merged .s-hub-fill {
+  fill: #7fd36b;
+}
+.lb.home .story-svg.p-merged :is(.e-push, .e-open, .e-sam) {
+  opacity: 0.35;
+}
+/* the finished picture: everything at once, nothing moving, no passing labels */
+.lb.home .story-svg.still * {
+  transition: none !important;
+  animation: none !important;
+}
+.lb.home .story-svg.still :is(.e-findings, .t-findings, .s-agent) {
+  opacity: 0;
+}
+/* the caption card */
+.lb.home .story-cap {
+  position: relative;
+  min-height: 118px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 14px 16px;
+}
+.lb.home .story-cap h3 {
+  margin: 4px 0 6px;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+.lb.home .story-cap p {
+  margin: 0;
+  color: #dcdad5;
+  line-height: 1.45;
+}
+.lb.home .story-cap .cap-wait {
+  color: var(--muted);
+}
+.lb.home .cap-n {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.lb.home .cap-replay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: none;
+  border: 1px solid rgba(241, 241, 239, 0.3);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.lb.home .cap-replay:hover {
+  border-color: var(--ink);
+}
+.lb.home .story-all {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.lb.home .story-all li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 6px;
 }
