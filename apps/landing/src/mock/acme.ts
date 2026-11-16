@@ -517,6 +517,7 @@ export const SPRINT_RELEASES = {
     { name: REPOS.web, text: 'v1.8.2 → v1.8.2-rc', sha: '3e2d1c0', day: '13 Oct', latest: 'Latest v1.9.1' },
   ] as Array<{ name: string; text: string; sha: string; day: string; latest?: string }>,
   showBots: 'Show bot PRs',
+  showNoTicket: 'Show PRs with no ticket',
   /** Only the repositories with NO candidate get a line above the list. */
   repos: [
     { name: REPOS.ledger, candidate: false, text: 'No tag since v0.8.0-rc can be released' },

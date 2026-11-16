@@ -102,7 +102,9 @@ export default function Page(): JSX.Element {
         request, and <Ui>Holding the release</Ui> always shows the ticket that stops each repository&rsquo;s next tag.
         Pull requests with no ticket are narrow rows between the cards, for example &ldquo;14 PRs with no ticket · 13 by
         bots&rdquo;. Select one to list them. Bot pull requests are left out of these lists unless you tick{' '}
-        <Ui>Show bot PRs</Ui> at the top of the list.
+        <Ui>Show bot PRs</Ui> at the top of the list. Untick <Ui>Show PRs with no ticket</Ui> to hide these rows. The
+        marks sit on a line down the left side of the list, with a merge mark for each group of pull requests with no
+        ticket.
       </p>
       <p>
         Select a card to see its type, its assignee, when its status was last read, and every pull request for it in

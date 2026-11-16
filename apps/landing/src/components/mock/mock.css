@@ -825,6 +825,55 @@
 .lb .rp-releases .box.apart {
   margin-top: 18px;
 }
+.lb .rp-releases .toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+/* The rail (the PR Activity tab's design): one line, each row's mark in a disc on it. */
+.lb .rp-releases .rail {
+  position: relative;
+}
+.lb .rp-releases .rail::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 11px;
+  width: 1px;
+  background: #2e3036;
+}
+.lb .rp-releases .railrow {
+  position: relative;
+  display: flex;
+  gap: 10px;
+}
+.lb .rp-releases .railrow > .rcard,
+.lb .rp-releases .railrow > div {
+  flex: 1;
+  min-width: 0;
+}
+.lb .rp-releases .disc {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 22px;
+  height: 22px;
+  margin-top: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #1c1d21;
+  box-shadow: 0 0 0 1px #2e3036;
+  font-size: 11px;
+  color: var(--muted);
+}
+.lb .rp-releases .disc i {
+  font-style: normal;
+}
+.lb .rp-releases .nt .untracked {
+  margin-top: 7px;
+}
 .lb .rp-releases .bots {
   display: flex;
   align-items: center;
@@ -897,9 +946,6 @@
 .lb .rp-releases .line.warn,
 .lb .rp-releases .line.unknown {
   color: #e0b860;
-}
-.lb .rp-releases .nt {
-  padding-left: 12px;
 }
 .lb .rp-releases .prog {
   display: flex;

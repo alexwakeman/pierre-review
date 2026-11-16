@@ -657,16 +657,35 @@ const MARK_GLYPH: Record<ReleaseMark, string> = { anchor: '★', ok: '✓', bloc
 const MARK_TONE: Record<ReleaseMark, string> = { anchor: 'ok', ok: 'ok', blocked: 'bad', held: 'warn', missing: 'unknown' };
 
 /** A ticket card: mark, key, title, status, the latest tag per repository and ONE line; the detail on a click. */
-function ReleaseCard({ c, extra }: { c: ReleaseMockCard; extra?: JSX.Element | null }): JSX.Element {
-  const [open, setOpen] = useState(false);
+function ReleaseCard({ c, extra, railed = false }: { c: ReleaseMockCard; extra?: JSX.Element | null; railed?: boolean }): JSX.Element {
   const cls = ['rcard', c.mark === 'anchor' ? 'anchor' : '', c.mark === 'missing' ? 'missing' : ''].filter(Boolean).join(' ');
+  if (railed) {
+    return (
+      <li className="railrow">
+        <span className={`disc mark ${MARK_TONE[c.mark]}`} aria-hidden="true">
+          <i>{MARK_GLYPH[c.mark]}</i>
+        </span>
+        <ReleaseCardBox c={c} extra={extra} cls={cls} railed />
+      </li>
+    );
+  }
+  return <ReleaseCardBox c={c} extra={extra} cls={cls} as="li" />;
+}
+
+function ReleaseCardBox({ c, extra, cls, railed = false, as = 'div' }: { c: ReleaseMockCard; extra?: JSX.Element | null; cls: string; railed?: boolean; as?: 'li' | 'div' }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const Tag = as;
   return (
-    <li className={cls}>
+    <Tag className={cls}>
       <button type="button" className="tk" aria-expanded={c.detail ? open : undefined} onClick={() => setOpen((o) => !o)} disabled={!c.detail}>
         <span className="head">
-          <span className={`mark ${MARK_TONE[c.mark]}`}>
-            <i aria-hidden="true">{MARK_GLYPH[c.mark]}</i>
-          </span>{' '}
+          {railed ? null : (
+            <>
+              <span className={`mark ${MARK_TONE[c.mark]}`}>
+                <i aria-hidden="true">{MARK_GLYPH[c.mark]}</i>
+              </span>{' '}
+            </>
+          )}
           <span className="key">{c.key}</span> <span className="ti">{c.title || 'No title — not in the tracker’s data'}</span>
           {c.status ? <small> · {c.status}</small> : null}
         </span>
@@ -689,7 +708,7 @@ function ReleaseCard({ c, extra }: { c: ReleaseMockCard; extra?: JSX.Element | n
           ))}
         </div>
       ) : null}
-    </li>
+    </Tag>
   );
 }
 
@@ -698,17 +717,22 @@ function ReleaseNoTicket({ n, showBots }: { n: ReleaseMockNoTicket; showBots: bo
   const [open, setOpen] = useState(false);
   const prs = showBots ? [...n.prs, ...(n.bots ?? [])] : n.prs;
   return (
-    <li className="nt">
-      <button type="button" className="untracked" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        › {n.line}
-      </button>
-      {open ? (
-        <div className="detail">
-          {prs.map((p) => (
-            <small key={p}>{p}</small>
-          ))}
-        </div>
-      ) : null}
+    <li className="railrow nt">
+      <span className="disc" aria-hidden="true">
+        <i>⑂</i>
+      </span>
+      <div>
+        <button type="button" className="untracked" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          › {n.line}
+        </button>
+        {open ? (
+          <div className="detail">
+            {prs.map((p) => (
+              <small key={p}>{p}</small>
+            ))}
+          </div>
+        ) : null}
+      </div>
     </li>
   );
 }
@@ -721,6 +745,7 @@ function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
   const [showBots, setShowBots] = useState(false);
+  const [showNoTicket, setShowNoTicket] = useState(true);
   const candidates = (
     <div className="cands">
       <ul>
@@ -765,20 +790,29 @@ function ReleasesPanel(): JSX.Element {
         ))}
       </ul>
       <div className="box">
-        <label className="bots">
-          <input type="checkbox" checked={showBots} onChange={(e) => setShowBots(e.target.checked)} /> <small>{R.showBots}</small>
-        </label>
+        <div className="toggles">
+          <label className="bots">
+            <input type="checkbox" checked={showNoTicket} onChange={(e) => setShowNoTicket(e.target.checked)} /> <small>{R.showNoTicket}</small>
+          </label>
+          {showNoTicket ? (
+            <label className="bots">
+              <input type="checkbox" checked={showBots} onChange={(e) => setShowBots(e.target.checked)} /> <small>{R.showBots}</small>
+            </label>
+          ) : null}
+        </div>
         <p className="sec">
           <span className="more">⌃ {R.showLater}</span>
         </p>
-        <ul className="cards">
-          {R.list.map((i) =>
-            i.kind === 'ticket' ? (
-              <ReleaseCard key={i.key} c={i} extra={i.mark === 'anchor' ? candidates : null} />
-            ) : (
-              <ReleaseNoTicket key={i.line} n={i} showBots={showBots} />
-            ),
-          )}
+        <ul className="cards rail">
+          {R.list
+            .filter((i) => showNoTicket || i.kind === 'ticket')
+            .map((i) =>
+              i.kind === 'ticket' ? (
+                <ReleaseCard key={i.key} c={i} extra={i.mark === 'anchor' ? candidates : null} railed />
+              ) : (
+                <ReleaseNoTicket key={i.line} n={i} showBots={showBots} />
+              ),
+            )}
         </ul>
         <p className="sec">
           <span className="more">⌄ {R.showEarlier}</span>

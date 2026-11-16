@@ -35,6 +35,7 @@ import {
   noTicketGroupWords,
   noTicketPrLineOf,
   noTicketShownPrs,
+  listedItems,
   releaseHolders,
   reposWithoutCandidate,
   repoStripText,
@@ -309,6 +310,9 @@ describe('THE TICKET LIST: one list of ticket cards in tag order (owner, 2026-11
     // Bot PRs are left out of the list unless "Show bot PRs" is ticked; the header still counts them.
     expect(g.kind === 'no_ticket' && noTicketShownPrs(g.prs, false).map((p) => p.number)).toEqual([31]);
     expect(g.kind === 'no_ticket' && noTicketShownPrs(g.prs, true).map((p) => p.number)).toEqual([31, 30]);
+    // "Show PRs with no ticket" unticked: only the ticket cards are left.
+    expect(keys(listedItems(l.items, false))).toEqual(['T4', 'T3', 'T2', 'T1']);
+    expect(keys(listedItems(l.items, true))).toEqual(['T4', 'T3', '-31,30', 'T2', 'T1']);
     expect(noTicketPrLineOf(res, res.prs.find((p) => p.id === 31)!)).toMatchObject({ label: 'api #31', tail: 'merged 2 Nov · in v1.2.0' });
   });
 

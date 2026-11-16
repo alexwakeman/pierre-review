@@ -12,6 +12,7 @@ import {
   CloseIcon,
   ExternalLinkIcon,
   GearIcon,
+  MergeIcon,
   PartialCircleIcon,
   QuestionIcon,
   RefreshIcon,
@@ -42,6 +43,7 @@ import {
   noTicketGroupWords,
   noTicketPrLineOf,
   noTicketShownPrs,
+  listedItems,
   releaseHolders,
   reposWithoutCandidate,
   repoStripText,
@@ -223,7 +225,7 @@ function RepoStrip({ repo }: { repo: ReleaseRepoCheck }): JSX.Element {
 function CandidateBlock({ check, onRelease }: { check: ReleaseCheckResult; onRelease: () => void }): JSX.Element {
   const repos = check.repos.filter((r) => r.candidate != null);
   return (
-    <div className="flex flex-wrap items-end gap-2 pl-[18px] pt-1" data-testid="release-candidates">
+    <div className="flex flex-wrap items-end gap-2 pt-1" data-testid="release-candidates">
       <ul className="min-w-0 space-y-0.5 text-meta">
         {repos.map((r) => {
           const c = r.candidate!;
@@ -277,6 +279,7 @@ function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheck
   const [up, setUp] = useState(TICKET_WINDOW_START);
   const [down, setDown] = useState(TICKET_WINDOW_START);
   const [showBots, setShowBots] = useState(false);
+  const [showNoTicket, setShowNoTicket] = useState(true);
   const [focus, setFocus] = useState<{ ident: string; seq: number } | null>(null);
   const more = useShowMoreOlderTags(workspaceId);
   const w = ticketWindow(list, up, down);
@@ -299,18 +302,28 @@ function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheck
       onFocus={onFocus}
       focus={where === 'hold' && focus?.ident === c.ticket.ident ? focus.seq : null}
       extra={where === 'list' && c.isAnchor ? <CandidateBlock check={check} onRelease={onRelease} /> : null}
+      railed={where === 'list'}
     />
   );
   const hasNoTicket = w.items.some((i) => i.kind === 'no_ticket');
+  const items = listedItems(w.items, showNoTicket);
 
   return (
     <div data-testid="release-tickets">
       <section aria-label="Tickets" className="space-y-1.5 rounded-ui border border-ui-line p-3">
         {hasNoTicket && (
-          <label className="flex w-fit cursor-pointer items-center gap-1.5 text-meta text-ui-mute" data-testid="release-show-bots">
-            <input type="checkbox" checked={showBots} onChange={(e) => setShowBots(e.target.checked)} className={FOCUS_RING} />
-            Show bot PRs
-          </label>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <label className="flex w-fit cursor-pointer items-center gap-1.5 text-meta text-ui-mute" data-testid="release-show-no-ticket">
+              <input type="checkbox" checked={showNoTicket} onChange={(e) => setShowNoTicket(e.target.checked)} className={FOCUS_RING} />
+              Show PRs with no ticket
+            </label>
+            {showNoTicket && (
+              <label className="flex w-fit cursor-pointer items-center gap-1.5 text-meta text-ui-mute" data-testid="release-show-bots">
+                <input type="checkbox" checked={showBots} onChange={(e) => setShowBots(e.target.checked)} className={FOCUS_RING} />
+                Show bot PRs
+              </label>
+            )}
+          </div>
         )}
         {w.moreUp > 0 && (
           <MoreButton onClick={() => setUp((n) => n + TICKET_WINDOW_STEP)} testId="release-show-later">
@@ -319,9 +332,11 @@ function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheck
           </MoreButton>
         )}
         {list.tickets.length === 0 && w.items.length === 0 && <p className="text-meta text-ui-mute">No tickets in the tags read.</p>}
-        <ul className="space-y-1.5" data-testid="release-ticket-list">
-          {w.items.map((i) => (i.kind === 'ticket' ? card(i, 'list') : <NoTicketRow key={i.key} group={i} check={check} showBots={showBots} />))}
-        </ul>
+        <ol className="relative space-y-1.5" data-testid="release-ticket-list">
+          {/* THE RAIL (the PR Activity tab's design): one line behind every row's marker. */}
+          {items.length > 1 && <span aria-hidden className="absolute bottom-4 top-4 left-[11.5px] w-px bg-ui-line" />}
+          {items.map((i) => (i.kind === 'ticket' ? card(i, 'list') : <NoTicketRow key={i.key} group={i} check={check} showBots={showBots} />))}
+        </ol>
         {w.moreDown > 0 ? (
           <MoreButton onClick={() => setDown((n) => n + TICKET_WINDOW_STEP)} testId="release-show-earlier">
             <ChevronIcon dir="down" size={11} className="shrink-0" />
@@ -408,6 +423,7 @@ function TicketCard({
   onFocus,
   focus,
   extra,
+  railed = false,
 }: {
   card: TicketCardModel;
   check: ReleaseCheckResult;
@@ -416,6 +432,8 @@ function TicketCard({
   focus: number | null;
   /** The candidate ticket's candidates and Release… (always shown, under its line). */
   extra?: ReactNode;
+  /** In the ticket list: the mark sits on the rail at the left, not in the card. */
+  railed?: boolean;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLLIElement>(null);
@@ -428,6 +446,9 @@ function TicketCard({
   const line = ticketCardLine(card, ctx);
   const status = ticketCardStatus(t);
   const missing = card.mark === 'missing';
+  const box = `min-w-0 flex-1 rounded-ui border ${
+    card.isAnchor ? 'border-ui-accent bg-ui-raise' : missing ? 'border-dashed border-ui-line bg-transparent' : 'border-ui-line bg-ui-surface'
+  }`;
   return (
     <li
       ref={ref}
@@ -435,10 +456,14 @@ function TicketCard({
       data-key={t.key}
       data-mark={card.mark}
       data-anchor={card.isAnchor || undefined}
-      className={`rounded-ui border ${
-        card.isAnchor ? 'border-ui-accent bg-ui-raise' : missing ? 'border-dashed border-ui-line bg-transparent' : 'border-ui-line bg-ui-surface'
-      }`}
+      className={railed ? 'relative flex gap-2.5' : box}
     >
+      {railed && (
+        <RailMarker tone={card.isAnchor ? 'text-ui-accent' : MARK_CLASS[card.mark]} label={card.isAnchor ? 'The newest ticket in the release candidates' : TICKET_MARK_WORDS[card.mark]}>
+          <TicketMarkIcon mark={card.mark} anchor={card.isAnchor} />
+        </RailMarker>
+      )}
+      <div className={railed ? box : 'contents'}>
       <div
         role="button"
         tabIndex={0}
@@ -453,13 +478,13 @@ function TicketCard({
         className={`flex cursor-pointer flex-col gap-0.5 rounded-ui px-3 py-2 hover:bg-ui-hover ${FOCUS_RING}`}
       >
         <div className="flex min-w-0 items-center gap-1.5 text-body">
-          <TicketMarkIcon mark={card.mark} anchor={card.isAnchor} />
+          {!railed && <TicketMarkIcon mark={card.mark} anchor={card.isAnchor} />}
           <span className={`shrink-0 font-medium ${missing ? 'text-ui-mute' : 'text-ui-ink'}`}>{t.key}</span>
           <span className={`min-w-0 truncate ${missing ? 'italic text-ui-mute' : 'text-ui-ink'}`}>{t.title ?? (missing ? 'No title — not in the tracker’s data' : '')}</span>
           {status != null && <span className="shrink-0 text-meta text-ui-mute">· {status}</span>}
           <ChevronIcon dir={open ? 'down' : 'right'} size={11} className="ml-auto shrink-0 text-ui-mute" />
         </div>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-[18px] text-meta">
+        <div className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta ${railed ? '' : 'pl-[18px]'}`}>
           {card.latest.map((r) => (
             <span key={r.repoId} className="rounded-ui bg-ui-raise px-1.5 text-ui-mute" data-testid="release-ticket-tag">
               {repoTagWords(r)}
@@ -481,12 +506,13 @@ function TicketCard({
         </div>
         {extra}
       </div>
-      {open && <TicketCardDetail card={card} check={check} />}
+      {open && <TicketCardDetail card={card} check={check} railed={railed} />}
+      </div>
     </li>
   );
 }
 
-function TicketCardDetail({ card, check }: { card: TicketCardModel; check: ReleaseCheckResult }): JSX.Element {
+function TicketCardDetail({ card, check, railed }: { card: TicketCardModel; check: ReleaseCheckResult; railed: boolean }): JSX.Element {
   const openStory = useOpenStory();
   const t = card.ticket;
   const tracker = check.trackerName ?? 'Tracker';
@@ -496,7 +522,7 @@ function TicketCardDetail({ card, check }: { card: TicketCardModel; check: Relea
   facts.push(t.readAt != null ? `${tracker} status read ${readAgoWords(t.readAt, Date.now())}` : `${tracker} status not read yet`);
   const href = t.url != null ? safeExternalUrl(t.url) : null;
   return (
-    <div className="space-y-1.5 border-t border-ui-line px-3 py-2 pl-[30px]" data-testid="release-ticket-detail">
+    <div className={`space-y-1.5 border-t border-ui-line px-3 py-2 ${railed ? '' : 'pl-[30px]'}`} data-testid="release-ticket-detail">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 text-meta text-ui-mute">{facts.join(' · ')}</span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -540,13 +566,31 @@ function PrLineList({ lines, check }: { lines: ReleasePrLine[]; check: ReleaseCh
   );
 }
 
-/** Pull requests with no ticket between two cards: one narrow row, its list behind the arrow. */
+/** A row's marker on the rail: its icon in a disc on the line (PrActivityTab's design). */
+function RailMarker({ tone, label, children }: { tone: string; label: string; children: ReactNode }): JSX.Element {
+  return (
+    <span
+      className={`relative z-10 mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ui-surface ring-1 ring-ui-line ${tone}`}
+      title={label}
+    >
+      {children}
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+/** Pull requests with no ticket between two cards: one narrow row (a merge mark on the rail), its list behind
+ *  the arrow. */
 function NoTicketRow({ group, check, showBots }: { group: NoTicketGroup; check: ReleaseCheckResult; showBots: boolean }): JSX.Element {
   const [open, setOpen] = useState(false);
   const shown = noTicketShownPrs(group.prs, showBots);
   const lines = shown.map((p: ReleaseCheckPr) => noTicketPrLineOf(check, p));
   return (
-    <li data-testid="release-no-ticket" className="-my-0.5 pl-3">
+    <li data-testid="release-no-ticket" className="relative flex gap-2.5">
+      <RailMarker tone="text-ui-mute" label="Pull requests with no ticket">
+        <MergeIcon size={12} />
+      </RailMarker>
+      <div className="min-w-0 flex-1 pt-1">
       <button
         type="button"
         aria-expanded={open}
@@ -565,6 +609,7 @@ function NoTicketRow({ group, check, showBots }: { group: NoTicketGroup; check: 
           )}
         </div>
       )}
+      </div>
     </li>
   );
 }

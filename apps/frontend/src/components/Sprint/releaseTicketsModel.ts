@@ -367,3 +367,9 @@ export function reposWithoutCandidate(check: Pick<ReleaseCheckResult, 'repos'>):
 export function noTicketShownPrs<T extends Pick<ReleaseCheckPr, 'isBot'>>(prs: readonly T[], showBots: boolean): T[] {
   return showBots ? [...prs] : prs.filter((p) => !p.isBot);
 }
+
+/** The list's rows: the PRs with no ticket left out when "Show PRs with no ticket" is unticked (tickets the
+ *  tracker could not give are cards, never left out). Pure. */
+export function listedItems(items: readonly TicketListItem[], showNoTicket: boolean): TicketListItem[] {
+  return showNoTicket ? [...items] : items.filter((i) => i.kind === 'ticket');
+}
