@@ -136,12 +136,54 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    - "Nothing new since 0.390.0-rc" / "No version tags on main yet".
    The tab polls `GET /api/releases` every ~3 s ONLY while a repo is checking, and stops when none is. There
    is no separate tickets panel and nothing to pick.
-3. A row expands to the tags read, NEWEST first: each tag newer than the candidate with why it does not
-   qualify, then the candidate with the tickets of its scope (with a baseline: everything since the
-   release). Under each tag, for the reader to check: the tickets the tracker could not give ("BMD-123 not
-   found. Check it by hand.") and "Also includes 3 pull requests with no ticket" with links. A ticket chip
-   opens the story (`useOpenStory()`), a PR its PR tab (or GitHub). "Released" is never said unless a release
-   tag contains it.
+3. A row expands to ONE list, NEWEST at the top, in THREE BANDS (the owner-approved layout, 2026-11-16):
+   ```
+   bng-metric-backend   Release 0.392.0 → 0.392.0-rc   (latest 0.394.0)
+
+     NEWER THAN THE CANDIDATE — CAN'T BE RELEASED
+     ┌ 0.394.0 · 15 Nov · a1b2c3d · 4 PRs · 3 tickets
+     │   ✗ BMD-1048  Edit an AREA …            In PO Review (Product review)
+     │   ? BMD-1099  …                         not found in Jira — check by hand
+     │   ✓ BMD-1051  Hedgerow validation       Complete
+     │   · 1 pull request with no ticket
+     ├ 0.393.0 · 14 Nov · 9f8e7d6 · 2 PRs · 2 tickets
+     │   ✗ BMD-1050  Habitat export            Complete, but has an open PR: frontend #812
+     │   ✓ BMD-1047  …                         Complete
+
+     CANDIDATE
+     ★ 0.392.0 · 13 Nov · 5d4c3b2 · 3 PRs · 2 tickets · checked: this tag's own changes
+         ✓ BMD-1040  …                         Complete
+
+     OLDER TAGS — FOR CHECKING
+     ├ 0.391.0 · 12 Nov · …   ✓ all 2 tickets Complete
+     ├ 0.390.0 · 11 Nov · …   ✗ BMD-127 In Progress
+     │   … 10 tags shown
+     └ [Show 50 more]
+   ```
+   - **Newer band**: EVERY tag newer than the candidate, always open, each with all its tickets (not just the
+     first reason). With no candidate every tag read is here, under "Can't be released" ("Checked so far"
+     while checking); the row line is unchanged.
+   - **Candidate band**: open, every ticket of its scope, with "checked: this tag's own changes" / "checked:
+     everything since 0.380.0-rc".
+   - **Older band** — for checking ONLY, never part of the walk: it NEVER changes the candidate. 10 tags by
+     default, each ONE summary line ("✓ all 2 tickets Complete", its first reason, or "checking…"); a click
+     opens its tickets. "Show 50 more" adds 50 a press (per repo, component state, not persisted). Before the
+     first release each older tag is judged on its OWN increment (the same test, shown as information); after
+     a release the band STOPS at the baseline and its last line is "0.380.0-rc — last release". While older
+     history or tickets are read, the band shows the progress bar and line.
+   - **Each tag header**: name · date · short sha (the commit on GitHub) · PR count · ticket count.
+   - **Ticket order**: those that stop the tag (not Complete, an open PR), then those to check (not found,
+     could not be read, not read yet), then Complete; ties by key.
+   - **Ticket line**: ✗ / ? / ✓, key, title, the tracker's status name (the workspace's bucket in brackets
+     only when it differs: "Won't Do (Cancelled)"), and why it stops the tag ("Complete, but has an open PR:
+     frontend #812"). A click opens it IN PLACE: "Type: Story · Assignee: Robin Lee · Jira status read 4 min
+     ago"; "In this tag" — the tag's PRs naming it (repo, #, title, merged date, author); "Elsewhere" — every
+     OTHER PR for it in the releasable repos (OPEN, or merged "in 0.390.0" / "not in a tag yet"); "Open in
+     Jira ↗" and "Story" (`useOpenStory()`); each PR opens its PR tab (or GitHub). No description or
+     acceptance criteria. All from the check: DB only, nothing fetched on open.
+   - **"· 3 pull requests with no ticket"** under each tag opens their list (repo, #, title, author, merged
+     date, link).
+   - "Released" is never said unless a release tag contains it.
 4. No warnings panel: nothing about a pull request with no ticket is a warning (removed 2026-11-16).
 5. **"Create release…"** — shown only with ≥ 1 candidate in a writable repo (HIDE, never disable).
    Dialog: the releasable repos with a candidate (ticked; each judged on its own, so unticking one only
@@ -244,8 +286,9 @@ Settings
    form the baseline.
 
 Candidate (automatic, deterministic — THE SIMPLE RULE, 2026-11-16)
-4. Tags v1.0.0, v1.1.0, v1.2.0, no release, all tickets Complete → candidate v1.2.0, and nothing older is
-   read (the expanded row lists v1.2.0 only).
+4. Tags v1.0.0, v1.1.0, v1.2.0, no release, all tickets Complete → candidate v1.2.0, and the walk reads
+   nothing older (the candidate band is v1.2.0 alone; v1.1.0 and v1.0.0 appear only in the older band, for
+   checking — acceptance 50).
 5. NEWEST-FIRST STOP: v1.2.0's increment names a ticket In review → candidate v1.1.0; v1.2.0 says "T3 is In
    review."; v1.0.0 is not read.
 6. That ticket moves to Complete (the scan's read or Refresh) → candidate v1.2.0.
@@ -344,7 +387,29 @@ Simple rule (2026-11-16)
     own changes ("Stories in this tag") and "Earlier changes are not listed."
 48. HISTORY STOPS EARLY: once the check names a candidate for every workspace releasing the repo, the history
     pass reads no older page (asked before the first deep page of a run and every 5 pages; the cursor is
-    kept, and the walk goes on if the answer changes).
+    kept, and the walk goes on if the answer changes) — except what the older band needs (53).
+
+Tag list and ticket detail (the approved layout, 2026-11-16)
+49. ALL NEWER TAGS, EVERY REASON: every tag newer than the candidate is listed, open, with every ticket of its
+    own increment and every reason ("T4 is In Progress." and "T5 is In PO Review.", not just the first); the
+    candidate follows with "checked: …". No candidate: every tag read is in that one band.
+50. OLDER BAND: 10 older tags by default, each one summary line ("all 2 tickets Complete" / "T9 In Progress" /
+    "checking…"), never changing the candidate; "… 10 tags shown" and "Show 50 more", which adds the next 50 a
+    press; the answer carries no older tag beyond the wanted number (nor their PRs or tickets).
+51. OLDER BAND STOPS AT THE LAST RELEASE: after a release the band lists only the tags between the candidate and
+    the baseline, and ends with "v1.0.0-rc — last release".
+52. TICKET ORDER: inside a tag, the tickets that stop it (not Complete, an open PR) first, then not found / could
+    not be read / not read yet, then Complete; ties by key.
+53. MORE HISTORY FOR THE BAND: when the pass stopped early and fewer older tags are placed than wanted (or the
+    oldest listed one's increment is not read), the band shows the history bar and line, "Show 50 more" is
+    hidden, the tab polls, and the pass does NOT stop early until the band is covered (or the baseline / root
+    is reached). "Show 50 more" raises the wanted number (never lowers it) and starts the scan.
+54. TICKET DETAIL: a ticket line opens in place to its type, assignee and "Jira status read 4 min ago"; "In this
+    tag" lists the tag's PRs naming it (repo, #, title, merged date, author); "Elsewhere" every other PR for it
+    in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet" (merged after the newest tag);
+    "Open in Jira" and "Story". Nothing is fetched to open it.
+55. UNTRACKED LIST: "· 2 pull requests with no ticket" under each tag (the candidate: its whole scope) opens the
+    list: repo, #, title, author, merged date, each a link.
 
 ## Implementation
 
@@ -955,5 +1020,69 @@ covers finished work — with more onus on the reader to check what is shown. Th
   synced yet counts. A not-Complete ticket with an open PR reads as not Complete (one reason per ticket). With
   a baseline not known yet (a release tag the pass has not placed), the scope is the own increment: its
   reasons are certain, but the tag cannot qualify until the baseline is known. Tags OLDER than the candidate
-  are not in the result (not read); the candidate's row lists every ticket of its scope. The tickets in a
+  are not in the result (not read) — superseded by § Tag list and ticket detail: they are listed in the older
+  band, for checking, and never change the candidate; the candidate's row lists every ticket of its scope. The tickets in a
   candidate's scope that the tracker could not give are in the notes by key and get no tracker comment.
+
+### Tag list and ticket detail (2026-11-16)
+
+The owner approved the row layout of § Releases tab 3: one list in three bands, every reason on every newer
+tag, older tags for checking, a ticket detail in place. THE RULE is unchanged.
+
+- **The fold** (shared `release-check.ts`): after the walk, `foldRepo` evaluates the OLDER BAND — the spans
+  below the candidate, newest first, at most `olderWanted` (`clampOlderTagsWanted`: 10 … 1000), each by the
+  same `evaluate` (own increment with no baseline; spans exist only after the baseline, so after a release the
+  band ends there). It can never change the candidate: it runs after the walk stopped. New on the repo:
+  `olderTags`, `older {wanted, moreAvailable, loading, needsHistory, progress, lastRelease}` — `needsHistory`
+  when fewer than wanted are placed and older version tags are not placed yet (the pass stopped early), or
+  when a listed older tag's own increment is not read; `moreAvailable` = more placed spans or unplaced older
+  version tags. On each tag: `url` (`releaseCommitUrl`), `band`, `noTicketPrIds`. On each PR: `authorLogin`,
+  `tagName` (the version tag whose increment holds it). On each ticket: `stage`, `typeName`, `assigneeName`,
+  `readAt`, `pullRequests` (`ReleaseTicketPr`: the light records with their tag, the stored merged PRs with no
+  light record — `untagged` when merged after the repo's newest tag — and the open PRs), and the repo state
+  `before_candidate`. The result is BOUNDED: `tickets` and `prs` are those of the tags listed; `trackerName`.
+  `releasesChecking` also polls while an older band is `loading`. Inputs: `ReleaseCheckRepoInput.olderWanted`,
+  `ReleaseCheckPrInput.authorLogin`, `ReleaseCheckOpenPrInput.title` / `authorLogin`, `mergedPrs`
+  (`ReleaseCheckMergedPrInput`), `ReleaseCheckTicketInput.stage` / `typeName` / `assigneeName` / `readAt`.
+- **The DB half** (`db/release-check.ts`): `olderWanted` from `releases/older-tags.ts`; the ticket's type and
+  assignee from the chosen successful read (else the freshest successful read with one) across the PR rows,
+  the status rows and the sprint rows; `readAt` = the freshest successful read; `stage` by THE stage resolver.
+  `detail: true` (GET /api/releases only) also loads `mergedPrs`: the MERGED `pull_requests` rows into the
+  default branch of a releasable repo whose `tracker_tickets` rows name one of the check's tickets. The
+  open PRs carry title and author. `releaseCandidateProven` also requires `!older.needsHistory`, so the
+  history pass goes on JUST FAR ENOUGH for the band (asked every 5 deep pages as before).
+- **Migration `0203_ticket_status_detail`** (registered): `tracker_ticket_status.issue_type_name` /
+  `assignee_name`. The batched read stores them (`TicketStatusAnswer.typeName` / `assigneeName`; Jira's
+  search asks `fields=status,summary,issuetype,assignee`; the one-by-one read takes them from `fetchTicket`).
+- **"Show 50 more"**: `POST /api/releases/older-tags?workspace=<id>` `{repoId, wanted}` → the band's size,
+  IN MEMORY per (account, workspace, repo) (`releases/older-tags.ts`: only ever raised, back to 10 after a
+  restart — the tab's count is component state too); a repo not released from the workspace → 404. When it
+  grows, `scheduleTagSync(…, {rescan: true})` (else the catch-up): the walk reads on, then the tickets in a
+  batch. Tier `sync` (it starts GitHub and tracker reads). No new table, so nothing for `verify:isolation`
+  beyond the membership check through `getReleaseRepos`.
+- **Refresh** skips a ticket listed only in older tags (`before_candidate`): it cannot change a candidate.
+- **Frontend** (`releasesModel.ts`): `rowBands`, `BAND_WORDS`, `candidateScopeLabel`, `tagHeader`,
+  `tagTickets` (replaces `tagContents`; `ticketRank` order), `ticketLine` (replaces `ticketMark`),
+  `ticketStatusWords`, `ticketDetail`, `readAgoWords`, `noTicketPrLine`, `olderTagSummary`, `olderBandView`,
+  `olderShowMore`, `openInTrackerWords`; `noTicketLine` now "3 pull requests with no ticket"; `tagExplainer`
+  keeps only reasons the ticket lines do not show (from an earlier tag, the history). `expandedTags` removed.
+  `ReleasesView.tsx`: `Band`, `TagBlock`, `OlderTag`, `TagBody`, `TicketLine` + `TicketDetailBlock`,
+  `NoTicketList`, `PrLineLink`; `hooks/useReleases.ts` `useShowMoreOlderTags`. The E2E fixture (check null)
+  needed no change. Landing mock (`SPRINT_RELEASES`, `ReleasesPanel`): the three bands, older summaries, a
+  ticket detail, the untracked list.
+- **Tests**: `db/release-check.test.ts` (49–54 on the fold, the untracked list per tag, acceptance 14's older
+  band; the DB half: the older band, the commit URL, type / assignee / last read, a stored merged PR "not in a
+  tag yet"; `releaseCandidateProven` false while the band needs history; the in-memory raise),
+  `api/routes/release-settings.test.ts` (the route: 404, 400, never lowered, Default fallback),
+  `api/plugins/rate-limit.test.ts` (`sync`), `tracker/jira/statuses.test.ts` (the fields asked, type),
+  `apps/frontend/test/releasesModel.test.ts` (bands, headers, order, ticket words, older band and "Show 50
+  more", the detail, the untracked line).
+- **Decisions**: the band's size lives in memory, not the DB (the tab's own count is not persisted either; no
+  migration, erasure or isolation surface). The older band is judged by the SAME `evaluate` (with a baseline
+  that is the scope since the release — those tags are inside the candidate's scope anyway). A ticket line
+  lists the tag's OWN increment's tickets (the candidate: its scope); reasons from an earlier tag stay text
+  lines. "Elsewhere" reads stored merged PRs through their `tracker_tickets` rows (a PR the enricher never
+  read is not listed), and a stored merged PR older than the history read shows its date with no tag. The
+  bucket in brackets uses This Sprint's stage labels (`SPRINT_STAGE_LABEL`), so "Done (Complete)" shows for a
+  tracker whose done status is "Done".
+

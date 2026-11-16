@@ -13,12 +13,14 @@ import { defaultReleaseWriteDeps, type ReleaseWriteDeps } from './create.js';
 export const REFRESH_TICKETS_MAX = 500;
 
 /** The tickets Refresh reads again: not Complete, not read yet, or not given by the tracker, by key,
- *  capped. (An open pull request is the DB's answer: reading the ticket again changes nothing.) Pure. */
+ *  capped. (An open pull request is the DB's answer: reading the ticket again changes nothing.) A ticket
+ *  listed only in an OLDER tag (for checking; it cannot change a candidate) is left to the scan. Pure. */
 export function ticketsToRefresh(result: ReleaseCheckResult, cap = REFRESH_TICKETS_MAX): Array<{ ident: string; key: string }> {
   const out: Array<{ ident: string; key: string }> = [];
   for (const t of [...result.tickets].sort((a, b) => a.key.localeCompare(b.key))) {
     if (out.length >= cap) break;
     if (t.blocker?.kind !== 'not_done' && !t.pending && t.unverified == null) continue;
+    if (t.repos.length > 0 && t.repos.every((r) => r.state === 'before_candidate')) continue;
     out.push({ ident: t.ident, key: t.key });
   }
   return out;

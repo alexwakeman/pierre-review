@@ -745,7 +745,8 @@ Sprint → Releases is the reader's press, and it does two tracker things:
   workspace with no PR in hand, through the workspace's access and `prepareTrackerCall` (the sealed token).
   A reader with the optional `readStatuses` reads in bulk — JIRA (`tracker/jira/statuses.ts`): `GET
   /rest/api/3/search/jql` (404 → `/rest/api/2/search` for the rest), JQL `key in (A-1, B-2, …)` with ≤ 100
-  keys, `fields=status,summary,issuetype`, through `jiraGetJson`; Jira refuses the whole JQL (400) when
+  keys, `fields=status,summary,issuetype,assignee` (the type and assignee are stored for the Releases ticket
+  detail, migration 0203), through `jiraGetJson`; Jira refuses the whole JQL (400) when
   one key does not exist, so the batch is SPLIT in two down to that key (`not_found`); a key absent from a
   good answer (moved project) is read on its own. 401 / 403 → `no_access`; any other failure → `failed`.
   Status names and categories go through the same `statusOf`; Done is decided by the workspace's stage

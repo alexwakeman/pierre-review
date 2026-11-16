@@ -2922,12 +2922,27 @@ tag's reason, `newestReason`), "Checking…", "Nothing new since 0.390.0-rc", "N
 "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts (`repoRowCounts`: "6
 tickets · 1 to check"), and, while CHECKING only, the progress (`repoProgress`): a bar
 (`Activity/SprintProgressBar`, a share) with ONE line from the server (`progress.line`: "Reading main's
-history: 1,200 of 5,400 commits"). A row expands to `expandedTags` — the tags READ, newest first (those newer
-than the candidate, then the candidate; older ones are not read) — each with `tagExplainer` (`{tone, text}`:
-why it does not qualify, "BMD-1040 (from 0.391.0) is In Progress."; what it waits for; then "BMD-123 not
-found. Check it by hand.") and `tagContents` (the tickets with `ticketMark` — "not read yet", "not found", an
-open PR included — for the candidate every ticket of its scope; then `noTicket`, "Also includes 3 pull
-requests with no ticket" (`noTicketLine`), and the direct-commit note). A PR known only from the history read
+history: 1,200 of 5,400 commits"). A row expands to ONE list, newest at the top, in THREE BANDS (`rowBands`,
+`BAND_WORDS`; the approved layout, 2026-11-16): "Newer than the candidate — can’t be released" (every tag newer
+than the candidate, ALWAYS open, every ticket — with no candidate every tag read, under "Can’t be released"),
+"Candidate" (open, its whole scope, + `candidateScopeLabel` "checked: this tag’s own changes" / "checked:
+everything since 0.380.0-rc") and "Older tags — for checking" (`olderTags`, never part of the walk; ONE
+summary line each, `olderTagSummary`: "all 2 tickets Complete", its first reason, "checking…"; a click opens
+it). Each tag header is `tagHeader` (name · day · short sha — a link to the commit through `safeExternalUrl`
+· "4 PRs · 3 tickets"). `tagTickets` orders the tickets: those that stop the tag, then to check, then
+Complete (`ticketRank`), ties by key; `ticketLine` gives the mark (✗ `CloseIcon` / ? `QuestionIcon` / ✓
+`CheckIcon`) and the words ("In PO Review (Product review)" — the bucket only when it differs,
+`ticketStatusWords`; "Complete, but has an open PR: frontend #812"; "not found in Jira — check by hand"). A
+ticket line OPENS IN PLACE to `ticketDetail` (facts "Type: Story · Assignee: Robin Lee · Jira status read 4
+min ago"; "In this tag" / "Elsewhere" PR lines — OPEN, "in 0.390.0", "not in a tag yet"; "Open in Jira" and
+"Story") — all from the check, NO fetch on open. `tagExplainer` keeps only what the ticket lines do not show
+(a reason from an earlier tag, "the history is still being read"). "· 3 pull requests with no ticket"
+(`noTicketLine`) opens their list (`noTicketPrLine`). The older band shows 10 (`RELEASE_OLDER_TAGS_DEFAULT`,
+COMPONENT STATE, not persisted); "Show 50 more" (`olderBandView` / `olderShowMore`, HIDDEN while the band
+reads history or when nothing more exists) adds 50 and, when the server's band is smaller, POSTs
+`/api/releases/older-tags` (`useShowMoreOlderTags`, then the check is read again); while the band reads, its
+own bar + line (`older.progress`), and the tab POLLS (shared `releasesChecking` includes `older.loading`).
+After a release the band ends with "0.380.0-rc — last release". A PR known only from the history read
 (`prId` null) links to GitHub. "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
 fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
@@ -2936,7 +2951,7 @@ while open; each repo is judged on its own, so only "none ticked" hides Confirm 
 sends `releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = `useRefreshReleases`
 (`POST /api/releases/refresh`: the tickets not Complete, not read yet or not found re-read from the tracker,
 the answer becomes the check).
-Ticket chips → `useOpenStory()`; PRs → `openPrDetailTab`. Settings → Releases is
+"Story" → `useOpenStory()`; PRs → `openPrDetailTab` (or GitHub). Settings → Releases is
 `settings/ReleasesSection.tsx`: the two suffix boxes with the FIXED "-" beside them (`suffixTypedPart` /
 `suffixFromTyped`; the shared validator), the suffix-change warning (`releasesSectionModel.ts`), and
 "Released from this workspace" — a tick per member repo (home + External), saved WHOLE

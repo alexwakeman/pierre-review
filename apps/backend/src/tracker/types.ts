@@ -163,7 +163,16 @@ export interface TrackerCall {
 /** One ticket's STATUS from a batch read (./ticket-status.ts). `missing`: the batch did not name it
  *  (moved, or not visible) — the caller reads it on its own. */
 export type TicketStatusAnswer =
-  | { state: 'ok'; key: string; title: string | null; status: { name: string; category: JiraStatusCategory | null } | null; url?: string | null }
+  | {
+      state: 'ok';
+      key: string;
+      title: string | null;
+      status: { name: string; category: JiraStatusCategory | null } | null;
+      url?: string | null;
+      /** The ticket's type ("Story") and assignee's display name, when the read gave them. */
+      typeName?: string | null;
+      assigneeName?: string | null;
+    }
   | { state: 'not_found' | 'no_access' | 'failed' | 'missing'; key: string };
 
 export interface TrackerReader {

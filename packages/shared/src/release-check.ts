@@ -33,8 +33,16 @@
 // PROGRESS. While a repository is checking, the fold derives what it waits for (`progress`: the history
 // pass or the tickets, with `releaseScanLine`'s words); the backend overlays the scan's live step.
 //
+// THE ROW'S THREE BANDS (docs/RELEASES.md § Releases tab; Implementation → Tag list and ticket detail):
+// the tags NEWER than the candidate (`tags`, each with every reason), the CANDIDATE (`tags`, last), and
+// the OLDER tags (`olderTags`) — for the reader to check, NEVER part of the walk: they cannot change the
+// candidate. The older band holds at most `olderWanted` tags (RELEASE_OLDER_TAGS_DEFAULT; "Show 50 more"
+// raises it), each judged by the same test on its own scope; after a release it STOPS at the baseline
+// (older tags were released). Tags beyond the wanted number are not in the result (it stays bounded).
+//
 // The fold never reads the clock and never fetches. Timestamps come in as Date and go out as ISO-8601.
 import { tagKind, releaseTagName, type ReleaseSettings, type TagKind } from './releases.js';
+import type { SprintStage } from './sprint-stories.js';
 
 /** A ticket's read state: `ok`, or why the tracker gave nothing; `not_read` = no answer yet. */
 export type ReleaseTicketReadState = 'ok' | 'not_found' | 'no_access' | 'failed' | 'not_read';
@@ -132,6 +140,26 @@ export function releaseScanLine(p: ReleaseScanLineInput): string {
   return p.paused === true ? `${line} (waiting for GitHub's rate limit)` : line;
 }
 
+// ── The older band ──────────────────────────────────────────────────────────────────────────────
+
+/** Older tags listed under the candidate by default (for checking only). */
+export const RELEASE_OLDER_TAGS_DEFAULT = 10;
+/** "Show 50 more": each press adds this many. */
+export const RELEASE_OLDER_TAGS_STEP = 50;
+/** The most older tags one repository's band may ask for (the tag read's own cap). */
+export const RELEASE_OLDER_TAGS_MAX = 1000;
+
+/** A wanted count made safe: an integer in [RELEASE_OLDER_TAGS_DEFAULT, RELEASE_OLDER_TAGS_MAX]. Pure. */
+export function clampOlderTagsWanted(n: number | null | undefined): number {
+  if (n == null || !Number.isFinite(n)) return RELEASE_OLDER_TAGS_DEFAULT;
+  return Math.min(RELEASE_OLDER_TAGS_MAX, Math.max(RELEASE_OLDER_TAGS_DEFAULT, Math.floor(n)));
+}
+
+/** The commit page of a tag on GitHub (the caller still passes it through `safeExternalUrl`). Pure. */
+export function releaseCommitUrl(fullName: string, sha: string): string {
+  return `https://github.com/${fullName}/commit/${sha}`;
+}
+
 // ── Input ──────────────────────────────────────────────────────────────────────────────────────
 
 export interface ReleaseCheckTagInput extends TagOrderKey {
@@ -171,6 +199,8 @@ export interface ReleaseCheckRepoInput {
   /** The history pass (commits walked of an estimate). `complete` = it reached this workspace's
    *  baseline or the root, and no newer head is still being read. Absent = complete. */
   history?: { done: number; total: number; complete: boolean } | null;
+  /** How many tags the OLDER band lists (default RELEASE_OLDER_TAGS_DEFAULT; "Show 50 more" raises it). */
+  olderWanted?: number;
 }
 
 /** A PR merged into the default branch, from the history pass (its LIGHT record). */
@@ -189,6 +219,23 @@ export interface ReleaseCheckPrInput {
   mergedAt: Date | null;
   /** Ticket idents the PR names (`trackerTicketIdent`). */
   ticketIdents: string[];
+  /** The author's GitHub login (null = unknown). */
+  authorLogin?: string | null;
+}
+
+/** A MERGED pull request stored in `pull_requests` (into the default branch of a releasable repo) that
+ *  names a ticket — the ticket detail's "Elsewhere" for a PR with no light record (merged after the
+ *  newest tag, or older than the history read). */
+export interface ReleaseCheckMergedPrInput {
+  repoId: number;
+  repoName: string;
+  number: number;
+  title: string;
+  url: string;
+  prId: number | null;
+  authorLogin: string | null;
+  mergedAt: Date | null;
+  ticketIdents: string[];
 }
 
 /** An OPEN pull request in one of the workspace's releasable repos (a stored `pull_requests` row). */
@@ -201,6 +248,8 @@ export interface ReleaseCheckOpenPrInput {
   prId: number | null;
   /** Ticket idents it names (THE detection rule). */
   ticketIdents: string[];
+  title?: string;
+  authorLogin?: string | null;
 }
 
 export interface ReleaseCheckTicketInput {
@@ -212,6 +261,13 @@ export interface ReleaseCheckTicketInput {
   /** In the workspace's Complete stage — Complete ONLY: a Cancelled ticket ("Won't Do") is false. */
   done: boolean;
   readState: ReleaseTicketReadState;
+  /** The workspace's bucket for its status (This Sprint's stage resolver); null = not read. */
+  stage?: SprintStage | null;
+  /** The ticket's type ("Story") and assignee ("Robin Lee"), when a stored read has them. */
+  typeName?: string | null;
+  assigneeName?: string | null;
+  /** The last SUCCESSFUL read (any store); null = never. */
+  readAt?: Date | null;
 }
 
 export interface ReleaseCheckInput {
@@ -222,6 +278,8 @@ export interface ReleaseCheckInput {
   prs: ReleaseCheckPrInput[];
   /** Open PRs in the workspace's releasable repos that name a ticket. */
   openPrs?: ReleaseCheckOpenPrInput[];
+  /** Merged stored PRs in the releasable repos that name a ticket (the ticket detail only). */
+  mergedPrs?: ReleaseCheckMergedPrInput[];
   tickets: ReleaseCheckTicketInput[];
   /** The workspace's tracker can read tickets (default true). False ⇒ a ticket not read yet never will
    *  be: it is listed as "could not be read", never "checking" forever. */
@@ -265,7 +323,14 @@ export interface ReleaseTagRef {
 /** qualifies (the candidate) · does_not_qualify (a reason in its scope) · checking (not decided yet). */
 export type ReleaseTagState = 'qualifies' | 'does_not_qualify' | 'checking';
 
+/** Where a tag sits in the expanded row: newer than the candidate (or every tag read, with none), the
+ *  candidate, or an older tag listed for checking. */
+export type ReleaseTagBand = 'newer' | 'candidate' | 'older';
+
 export interface ReleaseTagCheck extends ReleaseTagRef {
+  /** The commit on GitHub (`releaseCommitUrl`; pass it through `safeExternalUrl`). */
+  url: string;
+  band: ReleaseTagBand;
   moved: boolean;
   isCandidate: boolean;
   state: ReleaseTagState;
@@ -283,6 +348,24 @@ export interface ReleaseTagCheck extends ReleaseTagRef {
   historyRead: boolean;
   /** Commits with no pull request (direct pushes) in its own increment: a note only. */
   unmatchedCommits: number;
+  /** The PRs listed under it (the candidate: its scope; any other tag: its own) that name no ticket. */
+  noTicketPrIds: number[];
+}
+
+/** The OLDER band of one repository (for checking only — it never changes the candidate). */
+export interface ReleaseOlderBand {
+  /** How many older tags the band lists at most now. */
+  wanted: number;
+  /** More older tags exist than `olderTags` holds (known, or not placed on the default branch yet). */
+  moreAvailable: boolean;
+  /** Still being read: older history or tickets. The tab polls while true. */
+  loading: boolean;
+  /** The history pass must read further for the band (the scan asks this before it stops early). */
+  needsHistory: boolean;
+  /** What it waits for (null = nothing). */
+  progress: ReleaseScanProgress | null;
+  /** The baseline release tag, once the band has reached it — its last line ("0.380.0-rc — last release"). */
+  lastRelease: ReleaseTagRef | null;
 }
 
 /** candidate · none (every tag is ruled out) · checking (not decided yet) · nothing_new. */
@@ -313,6 +396,10 @@ export interface ReleaseRepoCheck {
   progress: ReleaseScanProgress | null;
   /** The version tags read, NEWEST first, down to the candidate (or the tag still being checked). */
   tags: ReleaseTagCheck[];
+  /** Tags OLDER than the candidate, newest first, at most `older.wanted` — for checking only. Empty
+   *  with no candidate. */
+  olderTags: ReleaseTagCheck[];
+  older: ReleaseOlderBand;
   /** Tickets in the candidate's scope. */
   ticketIdents: string[];
   /** Every PR in the candidate's scope. */
@@ -327,8 +414,29 @@ export interface ReleaseRepoCheck {
   unverifiedCount: number;
 }
 
-/** A ticket in one repository: in that repository's candidate scope, or only in a newer tag. */
-export type ReleaseTicketRepoState = 'in_candidate' | 'after_candidate';
+/** A ticket in one repository: in that repository's candidate scope, only in a newer tag, or only in
+ *  an older tag listed for checking. */
+export type ReleaseTicketRepoState = 'in_candidate' | 'after_candidate' | 'before_candidate';
+
+/** One pull request for a ticket in the workspace's releasable repos (the ticket detail). */
+export interface ReleaseTicketPr {
+  /** The light record's id (matches a tag's `prIds`); null = a stored PR with no light record. */
+  id: number | null;
+  /** The stored `pull_requests` id (the PR tab); null = GitHub link only. */
+  prId: number | null;
+  repoId: number;
+  repoName: string;
+  number: number;
+  title: string;
+  url: string;
+  authorLogin: string | null;
+  mergedAt: string | null;
+  open: boolean;
+  /** The version tag that contains it (merged); null = not known. */
+  tagName: string | null;
+  /** Merged after the repository's newest tag: "not in a tag yet". */
+  untagged: boolean;
+}
 
 export interface ReleaseTicketCheck {
   ident: string;
@@ -352,6 +460,14 @@ export interface ReleaseTicketCheck {
   openPrs: ReleaseOpenPr[];
   /** Per releasable repository it appears in (in a tag read). */
   repos: Array<{ repoId: number; state: ReleaseTicketRepoState; prIds: number[] }>;
+  /** The workspace's bucket for its status; null = not read. */
+  stage: SprintStage | null;
+  typeName: string | null;
+  assigneeName: string | null;
+  /** The last successful read (ISO); null = never. */
+  readAt: string | null;
+  /** Every PR for it in the releasable repos — merged (with the tag holding it) and open. */
+  pullRequests: ReleaseTicketPr[];
 }
 
 export interface ReleaseCheckPr {
@@ -366,12 +482,19 @@ export interface ReleaseCheckPr {
   isBot: boolean;
   mergedAt: string | null;
   ticketIdents: string[];
+  authorLogin: string | null;
+  /** The version tag holding it; null = not known. */
+  tagName: string | null;
 }
 
 export interface ReleaseCheckResult {
   repos: ReleaseRepoCheck[];
+  /** The tickets of the tags listed (every band). */
   tickets: ReleaseTicketCheck[];
+  /** The PRs of the tags listed (every band). */
   prs: ReleaseCheckPr[];
+  /** The workspace's tracker ("Jira"); null = none. */
+  trackerName: string | null;
 }
 
 // ── The fold ────────────────────────────────────────────────────────────────────────────────────
@@ -414,7 +537,18 @@ function foldRepo(
   verdictOf: (ident: string) => TicketVerdict,
   keyOf: (ident: string) => string,
   readOf: (ident: string) => boolean,
-): { out: ReleaseRepoCheck; evals: TagEval[]; spans: Span[]; candidate: TagEval | null } {
+): {
+  out: ReleaseRepoCheck;
+  evals: TagEval[];
+  olderEvals: TagEval[];
+  spans: Span[];
+  candidate: TagEval | null;
+  /** PR record id → the version tag whose increment holds it. */
+  prTag: Map<number, string>;
+  /** The newest tag on the default branch's commit date (ms; null = none): a PR merged after it is in no
+   *  tag yet. */
+  newestTagAtMs: number | null;
+} {
   const settings = input.settings;
   const kindOf = (name: string): TagKind | null => tagKind(name, settings);
   const dated = repo.tags.filter((t) => t.committedAt != null);
@@ -540,6 +674,21 @@ function foldRepo(
             : 'none';
 
   const candTag = candidate != null ? ordered[spans[candidate.span]!.tagIdx]! : null;
+
+  // THE OLDER BAND — for the reader to check, AFTER the walk (it never changes the candidate). The
+  // tags below the candidate, newest first, each judged by the same test on its own scope (with no
+  // baseline its own increment); at most `wanted`. Spans exist only after the baseline, so after a
+  // release the band stops there.
+  const wanted = clampOlderTagsWanted(repo.olderWanted);
+  const olderEvals: TagEval[] = [];
+  if (candidate != null) for (let s = candidate.span - 1; s >= 0 && olderEvals.length < wanted; s -= 1) olderEvals.push(evaluate(s));
+  const knownLeft = candidate == null ? 0 : candidate.span - olderEvals.length;
+  // Older version tags whose place on the default branch is not known yet: the history pass stopped
+  // once the candidate was proven, so they may still join the band.
+  const unknownOlder = candTag == null ? 0 : unknownVersions.filter((u) => compareTagOrder(u, candTag) < 0).length;
+  const olderHistoryNeeded =
+    candidate != null && ((olderEvals.length < wanted && knownLeft === 0 && unknownOlder > 0) || olderEvals.some((ev) => !spans[ev.span]!.complete));
+  const olderLoading = olderHistoryNeeded || olderEvals.some((ev) => ev.state === 'checking');
   const suffix = settings.releaseSuffix ?? '';
   const candidateOut =
     candTag == null
@@ -587,13 +736,34 @@ function foldRepo(
     }
   }
 
-  const tagsOut: ReleaseTagCheck[] = evals.map((ev) => {
+  let olderProgress: ReleaseScanProgress | null = null;
+  if (olderLoading) {
+    const h = repo.history;
+    if (olderHistoryNeeded && h != null) {
+      const total = h.total <= 0 ? 0 : Math.max(h.total, h.done + (h.complete ? 0 : 1));
+      const p = { step: 'history' as const, done: h.done, total, branch: repo.defaultBranch ?? null };
+      olderProgress = { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
+    } else if (!olderHistoryNeeded) {
+      const idents = new Set<string>();
+      for (const ev of olderEvals) for (const ident of ev.scopeIdents) idents.add(ident);
+      let read = 0;
+      for (const ident of idents) if (readOf(ident)) read += 1;
+      const p = { step: 'tickets' as const, done: read, total: idents.size, tracker: input.trackerName ?? null };
+      olderProgress = { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
+    }
+  }
+
+  const tagOut = (ev: TagEval, band: ReleaseTagBand): ReleaseTagCheck => {
     const span = spans[ev.span]!;
     const t = ordered[span.tagIdx]!;
+    const isCandidate = ev === candidate;
+    const listed = isCandidate ? ev.scopePrIds : span.prIds;
     return {
       ...ref(t),
+      url: releaseCommitUrl(repo.fullName, t.sha),
+      band,
       moved: t.moved,
-      isCandidate: ev === candidate,
+      isCandidate,
       state: ev.state,
       blockers: ev.blockers,
       unverified: ev.unverified,
@@ -602,8 +772,23 @@ function foldRepo(
       scopePrIds: [...ev.scopePrIds],
       historyRead: span.complete,
       unmatchedCommits: span.unmatched,
+      noTicketPrIds: listed.filter((id) => (prById.get(id)?.ticketIdents.length ?? 0) === 0),
     };
-  });
+  };
+  const tagsOut: ReleaseTagCheck[] = evals.map((ev) => tagOut(ev, ev === candidate ? 'candidate' : 'newer'));
+  const olderOut: ReleaseTagCheck[] = olderEvals.map((ev) => tagOut(ev, 'older'));
+
+  // Which version tag holds each PR (the ticket detail's "in 0.390.0"): the first increment holding it,
+  // named by the version tag on that commit.
+  const prTag = new Map<number, string>();
+  for (let i = 0; i < ordered.length; i += 1) {
+    const r = valid(i);
+    if (r == null) continue;
+    const t = ordered[i]!;
+    const name = kindOf(t.name) === 'version' ? t.name : (ordered.find((o) => o.sha === t.sha && kindOf(o.name) === 'version')?.name ?? t.name);
+    for (const id of r.prIds) if (!prTag.has(id)) prTag.set(id, name);
+  }
+  const newestTagAtMs = ordered.length > 0 ? (ordered[ordered.length - 1]!.committedAt?.getTime() ?? null) : null;
 
   const out: ReleaseRepoCheck = {
     repoId: repo.repoId,
@@ -621,6 +806,15 @@ function foldRepo(
     checking: status === 'checking',
     progress,
     tags: tagsOut,
+    olderTags: olderOut,
+    older: {
+      wanted,
+      moreAvailable: knownLeft > 0 || unknownOlder > 0,
+      loading: olderLoading,
+      needsHistory: olderHistoryNeeded,
+      progress: olderProgress,
+      lastRelease: candidate != null && baselineTag != null && knownLeft === 0 ? ref(baselineTag) : null,
+    },
     ticketIdents: candidate != null ? [...candidate.scopeIdents] : [],
     candidatePrIds: candidate != null ? [...candidate.scopePrIds] : [],
     untrackedPrIds,
@@ -628,7 +822,7 @@ function foldRepo(
     directCommits,
     unverifiedCount: candidate?.unverified.length ?? 0,
   };
-  return { out, evals, spans, candidate };
+  return { out, evals, olderEvals, spans, candidate, prTag, newestTagAtMs };
 }
 
 /** Run the release check. Pure. */
@@ -667,26 +861,108 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
   const ticketRepos = new Map<string, Map<number, { state: ReleaseTicketRepoState; prIds: number[] }>>();
   const population: string[] = [];
   const inScope = new Set<string>();
+  /** Every PR a listed tag holds (the result's `prs` is bounded to these). */
+  const listedPrIds = new Set<number>();
+  const prTagByRepo = new Map<number, Map<number, string>>();
+  const newestTagAtByRepo = new Map<number, number | null>();
   for (const repo of input.repos) {
-    const { out, evals, candidate } = foldRepo(repo, input, prById, verdictOf, keyOf, readOf);
+    const { out, evals, olderEvals, candidate, prTag, newestTagAtMs } = foldRepo(repo, input, prById, verdictOf, keyOf, readOf);
+    prTagByRepo.set(repo.repoId, prTag);
+    newestTagAtByRepo.set(repo.repoId, newestTagAtMs);
     const candidateScope = new Set(candidate?.scopeIdents ?? []);
     for (const ident of candidateScope) inScope.add(ident);
-    for (const ev of evals) {
+    const note = (ev: TagEval, after: ReleaseTicketRepoState): void => {
       for (const id of ev.scopePrIds) {
+        listedPrIds.add(id);
         for (const ident of prById.get(id)?.ticketIdents ?? []) {
           if (!ticketRepos.has(ident)) {
             ticketRepos.set(ident, new Map());
             population.push(ident);
           }
           const per = ticketRepos.get(ident)!;
-          const state: ReleaseTicketRepoState = candidateScope.has(ident) ? 'in_candidate' : 'after_candidate';
+          const state: ReleaseTicketRepoState = candidateScope.has(ident) ? 'in_candidate' : after;
           const cur = per.get(repo.repoId);
           if (cur == null) per.set(repo.repoId, { state, prIds: [id] });
           else if (!cur.prIds.includes(id)) cur.prIds.push(id);
         }
       }
-    }
+    };
+    for (const ev of evals) note(ev, 'after_candidate');
+    for (const ev of olderEvals) note(ev, 'before_candidate');
+    for (const t of [...out.tags, ...out.olderTags]) for (const id of t.prIds) listedPrIds.add(id);
     repos.push(out);
+  }
+
+  // Every PR for each listed ticket in the releasable repos (the ticket detail): the light records
+  // (with the tag holding each), the stored merged PRs with no light record, and the open PRs.
+  const repoNameOf = new Map(input.repos.map((r) => [r.repoId, r.name]));
+  const listed = new Set(population);
+  const ticketPrs = new Map<string, ReleaseTicketPr[]>();
+  const addTicketPr = (ident: string, p: ReleaseTicketPr): void => {
+    if (!listed.has(ident)) return;
+    const list = ticketPrs.get(ident) ?? [];
+    if (list.some((x) => x.repoId === p.repoId && x.number === p.number)) return;
+    list.push(p);
+    ticketPrs.set(ident, list);
+  };
+  const untaggedAt = (repoId: number, mergedAt: Date | null): boolean => {
+    const newest = newestTagAtByRepo.get(repoId);
+    return mergedAt != null && newest != null && mergedAt.getTime() > newest;
+  };
+  for (const p of input.prs) {
+    const tagName = prTagByRepo.get(p.repoId)?.get(p.id) ?? null;
+    for (const ident of p.ticketIdents) {
+      addTicketPr(ident, {
+        id: p.id,
+        prId: p.prId ?? null,
+        repoId: p.repoId,
+        repoName: repoNameOf.get(p.repoId) ?? '',
+        number: p.number,
+        title: p.title,
+        url: p.url,
+        authorLogin: p.authorLogin ?? null,
+        mergedAt: iso(p.mergedAt),
+        open: false,
+        tagName,
+        untagged: tagName == null && untaggedAt(p.repoId, p.mergedAt),
+      });
+    }
+  }
+  for (const p of input.mergedPrs ?? []) {
+    for (const ident of p.ticketIdents) {
+      addTicketPr(ident, {
+        id: null,
+        prId: p.prId,
+        repoId: p.repoId,
+        repoName: p.repoName,
+        number: p.number,
+        title: p.title,
+        url: p.url,
+        authorLogin: p.authorLogin,
+        mergedAt: iso(p.mergedAt),
+        open: false,
+        tagName: null,
+        untagged: untaggedAt(p.repoId, p.mergedAt),
+      });
+    }
+  }
+  for (const p of input.openPrs ?? []) {
+    for (const ident of p.ticketIdents) {
+      addTicketPr(ident, {
+        id: null,
+        prId: p.prId,
+        repoId: p.repoId,
+        repoName: p.repoName,
+        number: p.number,
+        title: p.title ?? '',
+        url: p.url,
+        authorLogin: p.authorLogin ?? null,
+        mergedAt: null,
+        open: true,
+        tagName: null,
+        untagged: false,
+      });
+    }
   }
 
   const tickets: ReleaseTicketCheck[] = population.map((ident) => {
@@ -718,21 +994,32 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       unverified: v.kind === 'unverified' ? v.reason : null,
       openPrs: openOf(ident),
       repos: per,
+      stage: t.readState === 'ok' ? (t.stage ?? null) : null,
+      typeName: t.typeName ?? null,
+      assigneeName: t.assigneeName ?? null,
+      readAt: iso(t.readAt ?? null),
+      pullRequests: [...(ticketPrs.get(ident) ?? [])].sort(
+        (a, b) => a.repoName.localeCompare(b.repoName) || a.number - b.number,
+      ),
     };
   });
 
-  const prs: ReleaseCheckPr[] = input.prs.map((p) => ({
-    id: p.id,
-    prId: p.prId ?? null,
-    repoId: p.repoId,
-    number: p.number,
-    title: p.title,
-    url: p.url,
-    isBot: p.isBot,
-    mergedAt: iso(p.mergedAt),
-    ticketIdents: [...p.ticketIdents],
-  }));
-  return { repos, tickets, prs };
+  const prs: ReleaseCheckPr[] = input.prs
+    .filter((p) => listedPrIds.has(p.id))
+    .map((p) => ({
+      id: p.id,
+      prId: p.prId ?? null,
+      repoId: p.repoId,
+      number: p.number,
+      title: p.title,
+      url: p.url,
+      isBot: p.isBot,
+      mergedAt: iso(p.mergedAt),
+      ticketIdents: [...p.ticketIdents],
+      authorLogin: p.authorLogin ?? null,
+      tagName: prTagByRepo.get(p.repoId)?.get(p.id) ?? null,
+    }));
+  return { repos, tickets, prs, trackerName: input.trackerName ?? null };
 }
 
 // ── Words ───────────────────────────────────────────────────────────────────────────────────────
@@ -806,7 +1093,22 @@ export interface ReleasesRefreshResponse extends ReleasesResponse {
   unread: string[];
 }
 
-/** Any releasable repository still being checked: the tab polls GET /api/releases while true. Pure. */
+/** POST /api/releases/older-tags?workspace=<id> — "Show 50 more": the older band of one releasable
+ *  repository should list `wanted` tags (kept as the larger of this and the current number; in memory,
+ *  per account, workspace and repository). Starts the scan when more history or tickets are needed. */
+export interface ReleaseOlderTagsBody {
+  repoId: number;
+  wanted: number;
+}
+
+export interface ReleaseOlderTagsResponse {
+  workspaceId: number;
+  repoId: number;
+  wanted: number;
+}
+
+/** Any releasable repository still being checked, or its older band still read: the tab polls GET
+ *  /api/releases while true. Pure. */
 export function releasesChecking(r: Pick<ReleasesResponse, 'check'> | null | undefined): boolean {
-  return r?.check?.repos.some((x) => x.checking) === true;
+  return r?.check?.repos.some((x) => x.checking || x.older?.loading === true) === true;
 }

@@ -1422,6 +1422,13 @@
       "when": 1794211200000,
       "tag": "0202_release_history_pass",
       "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "6",
+      "when": 1794297600000,
+      "tag": "0203_ticket_status_detail",
+      "breakpoints": true
     }
   ]
 }

@@ -5899,6 +5899,8 @@ export const releaseRangePrs = sqliteTable(
 // sprint rows; the freshest successful read wins.
 //   state     'ok' | 'not_found' | 'no_access' | 'failed'
 //   attempts  failed reads in a row (a transient failure is "checking" until RELEASE_TICKET_FAILS_MAX, then "could not be read").
+//   issue_type_name / assignee_name   the ticket's type and assignee from the same read (migration 0203;
+//             the Releases ticket detail). NULL = not given, or a row read before 0203.
 export const trackerTicketStatus = sqliteTable(
   'tracker_ticket_status',
   {
@@ -5916,6 +5918,8 @@ export const trackerTicketStatus = sqliteTable(
     statusCategory: text('status_category'),
     title: text('title'),
     url: text('url'),
+    issueTypeName: text('issue_type_name'),
+    assigneeName: text('assignee_name'),
     attempts: integer('attempts').notNull().default(0),
     fetchedAt: integer('fetched_at', { mode: 'timestamp' }),
     checkedAt: integer('checked_at', { mode: 'timestamp' }).notNull(),

@@ -13,7 +13,7 @@ import {
   SPRINT_RELEASES,
   WHERE,
 } from '../../mock/acme';
-import type { PeriodGrain, ReleaseMark, SprintCard, SprintView } from '../../mock/acme';
+import type { PeriodGrain, ReleaseMark, ReleaseMockTag, ReleaseMockTicket, SprintCard, SprintView } from '../../mock/acme';
 import { Act, Chip, CourtBar, Group, HBar, MiniTable, MockFrame, MockTabs, Segmented, Stat } from './kit';
 
 // The Reporting and How we measure pages' mocks. Words and numbers:
@@ -651,10 +651,104 @@ function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
   );
 }
 
-const MARK_GLYPH: Record<ReleaseMark, string> = { ok: '✓', bad: '✗', warn: '!' };
+const MARK_GLYPH: Record<ReleaseMark, string> = { ok: '✓', bad: '✗', warn: '!', unknown: '?' };
+
+function ReleaseTicketLine({ k }: { k: ReleaseMockTicket }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className={`mark ${k.tone}`}>
+      <button type="button" className="tk" aria-expanded={k.detail ? open : undefined} onClick={() => setOpen((o) => !o)} disabled={!k.detail}>
+        <i aria-hidden="true">{MARK_GLYPH[k.tone]}</i> <span className="key">{k.key}</span> {k.title ? `${k.title} ` : ''}
+        <small>{k.status}</small>
+      </button>
+      {open && k.detail ? (
+        <div className="detail">
+          <small>{k.detail.facts}</small>
+          {k.detail.inThisTag.map((l) => (
+            <small key={l}>
+              <b>In this tag</b> {l}
+            </small>
+          ))}
+          {k.detail.elsewhere.map((l) => (
+            <small key={l}>
+              <b>Elsewhere</b> {l}
+            </small>
+          ))}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+function ReleaseTagBody({ t }: { t: ReleaseMockTag }): JSX.Element {
+  const [prsOpen, setPrsOpen] = useState(false);
+  return (
+    <>
+      {(t.notes ?? []).map((n) => (
+        <p key={n} className="note">
+          {n}
+        </p>
+      ))}
+      <ul className="tickets">
+        {t.tickets.map((k) => (
+          <ReleaseTicketLine key={k.key} k={k} />
+        ))}
+      </ul>
+      {t.untracked ? (
+        <>
+          <button type="button" className="untracked" aria-expanded={prsOpen} onClick={() => setPrsOpen((o) => !o)}>
+            · {t.untracked.line}
+          </button>
+          {prsOpen ? (
+            <ul className="tickets">
+              {t.untracked.prs.map((p) => (
+                <li key={p}>
+                  <small>{p}</small>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function ReleaseTagHead({ t }: { t: ReleaseMockTag }): JSX.Element {
+  return (
+    <span className="tn">
+      {t.band === 'candidate' ? <em aria-label="candidate">★ </em> : null}
+      {t.name}
+      <small>
+        {' '}
+        · {t.meta}
+        {t.scope ? ` · ${t.scope}` : ''}
+      </small>
+    </span>
+  );
+}
+
+function OlderReleaseTag({ t }: { t: ReleaseMockTag }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="tag older">
+      <button type="button" className="tk" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <ReleaseTagHead t={t} />
+        {t.summary ? (
+          <small className={`mark ${t.summary.tone}`}>
+            {' '}
+            <i aria-hidden="true">{MARK_GLYPH[t.summary.tone]}</i> {t.summary.text}
+          </small>
+        ) : null}
+      </button>
+      {open ? <ReleaseTagBody t={t} /> : null}
+    </div>
+  );
+}
 
 /** This Sprint → Releases: the latest release, a row per released repository (the latest version tag and the
- *  candidate) that opens to the version tags read, newest first, with why each newer one does not qualify. */
+ *  candidate) that opens to ONE list in three bands — newer than the candidate (each with every reason), the
+ *  candidate, and older tags for checking (one line each; a click opens it). */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
@@ -671,6 +765,9 @@ function ReleasesPanel(): JSX.Element {
       <ul className="repos">
         {R.repos.map((r) => {
           const isOpen = expanded === r.name && r.tags.length > 0;
+          const newer = r.tags.filter((t) => t.band === 'newer');
+          const cand = r.tags.filter((t) => t.band === 'candidate');
+          const older = r.tags.filter((t) => t.band === 'older');
           return (
             <li key={r.name} className={r.candidate ? 'cand' : undefined}>
               <button
@@ -699,33 +796,30 @@ function ReleasesPanel(): JSX.Element {
               ) : null}
               {isOpen ? (
                 <div className="tags">
-                  {r.tags.map((t) => (
+                  {newer.length > 0 ? <p className="band">{cand.length > 0 ? R.bands.newer : R.bands.newerNoCandidate}</p> : null}
+                  {newer.map((t) => (
                     <div key={t.name} className="tag">
-                      <span className="tn">
-                        {t.candidate ? <em aria-label="candidate">★ </em> : null}
-                        {t.name}
-                        {t.candidate ? <small> candidate</small> : null}
-                      </span>
-                      {(t.notes ?? []).map((n) => (
-                        <p key={n} className="note">
-                          {n}
-                        </p>
-                      ))}
-                      <ul className="tickets">
-                        {t.tickets.map((k) => (
-                          <li key={k.key} className={`mark ${k.tone}`}>
-                            <i aria-hidden="true">{MARK_GLYPH[k.tone]}</i> <span className="key">{k.key}</span> {k.title ? `${k.title} ` : ''}
-                            <small>{k.status}</small>
-                          </li>
-                        ))}
-                        {(t.untracked ?? []).map((p) => (
-                          <li key={p} className="mark warn">
-                            <small>No ticket</small> {p}
-                          </li>
-                        ))}
-                      </ul>
+                      <ReleaseTagHead t={t} />
+                      <ReleaseTagBody t={t} />
                     </div>
                   ))}
+                  {cand.length > 0 ? <p className="band">{R.bands.candidate}</p> : null}
+                  {cand.map((t) => (
+                    <div key={t.name} className="tag">
+                      <ReleaseTagHead t={t} />
+                      <ReleaseTagBody t={t} />
+                    </div>
+                  ))}
+                  {older.length > 0 || r.lastRelease ? <p className="band">{R.bands.older}</p> : null}
+                  {older.map((t) => (
+                    <OlderReleaseTag key={t.name} t={t} />
+                  ))}
+                  {r.lastRelease ? <p className="note">{r.lastRelease}</p> : null}
+                  {r.older ? (
+                    <p className="note">
+                      {r.older} <span className="more">{R.showMore}</span>
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
             </li>

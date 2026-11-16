@@ -850,6 +850,41 @@
 .lb .rp-releases .tags .tn {
   font-weight: 600;
 }
+.lb .rp-releases .tags .band {
+  margin: 4px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.lb .rp-releases .tk,
+.lb .rp-releases .untracked {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.lb .rp-releases .tk:disabled {
+  cursor: default;
+}
+.lb .rp-releases .untracked {
+  font-size: 12px;
+  color: var(--muted);
+}
+.lb .rp-releases .detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 2px 18px;
+}
+.lb .rp-releases .more {
+  margin-left: 6px;
+  color: var(--gold);
+}
 .lb .rp-releases .tags .tickets li {
   border-top: 0;
   padding: 2px 0;
@@ -894,6 +929,7 @@
 .lb .rp-releases .mark.bad i {
   color: #e8877b;
 }
-.lb .rp-releases .mark.warn i {
+.lb .rp-releases .mark.warn i,
+.lb .rp-releases .mark.unknown i {
   color: #e0b860;
 }

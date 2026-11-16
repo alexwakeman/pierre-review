@@ -3,6 +3,7 @@ import type {
   CreateReleaseBody,
   CreateReleaseResponse,
   ReleaseDetail,
+  ReleaseOlderTagsResponse,
   ReleasePreviewResponse,
   ReleaseSettingsResponse,
   ReleasesRefreshResponse,
@@ -17,7 +18,7 @@ import { workspaceKey } from './useActivity.js';
 // RELEASES (docs/RELEASES.md) — This Sprint → Releases and Settings → Releases.
 //
 // ⚠ THE TAB FETCHES ONE THING ON MOUNT: `GET /api/releases` (DB + memory only). While ANY repo is still
-// being checked (`releasesChecking`: the scan's ancestry, ranges, PRs or tickets are not all read), it
+// being checked, or its older band read (`releasesChecking`: the history or the tickets), it
 // polls that same GET every RELEASES_POLL_MS (releasesModel.ts `releasesPollInterval`) and stops as soon as none is — never another route. The
 // dialog's preview (notes +
 // comment; it may call the model) runs only while the dialog is OPEN — a reader's click — and a stored
@@ -56,6 +57,22 @@ export function useRefreshReleases(workspaceId: number | null) {
     onSuccess: (data) => {
       const { reread: _r, unread: _u, ...rest } = data;
       qc.setQueryData<ReleasesResponse>(releasesKey(data.workspaceId), rest);
+    },
+  });
+}
+
+/** "Show 50 more" (a reader's press): `POST /api/releases/older-tags` raises one repo's older band; the
+ *  check is read again (it polls while the band is read). */
+export function useShowMoreOlderTags(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<ReleaseOlderTagsResponse, Error, { repoId: number; wanted: number }>({
+    mutationKey: ['releases-older-tags', workspaceKey(workspaceId)],
+    mutationFn: (body) => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.releaseOlderTags(workspaceId, body);
+    },
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: releasesKey(data.workspaceId) });
     },
   });
 }

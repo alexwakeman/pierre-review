@@ -62,7 +62,15 @@ async function oneByOne(reader: TrackerReader, call: TrackerCall, keys: readonly
         calls += 1;
         try {
           const t = await reader.fetchTicket(call, key);
-          answers.set(key, { state: 'ok', key, title: t.title, status: t.status == null ? null : { name: t.status.name, category: t.status.category }, url: t.url ?? null });
+          answers.set(key, {
+            state: 'ok',
+            key,
+            title: t.title,
+            status: t.status == null ? null : { name: t.status.name, category: t.status.category },
+            url: t.url ?? null,
+            typeName: t.issueType?.name ?? null,
+            assigneeName: t.assignee?.name ?? null,
+          });
         } catch (err) {
           answers.set(key, { state: stateOfError(err), key });
         }
@@ -133,7 +141,18 @@ export async function readTicketStatuses(
     const ok = a.state === 'ok';
     const url = ok && a.url != null && a.url.startsWith('https://') ? a.url : baseUrl != null ? adapter.browseUrl(baseUrl, key) : null;
     const values = ok
-      ? { state: 'ok' as const, statusName: a.status?.name ?? null, statusCategory: a.status?.category ?? null, title: a.title, url, attempts: 0, fetchedAt: now, checkedAt: now }
+      ? {
+          state: 'ok' as const,
+          statusName: a.status?.name ?? null,
+          statusCategory: a.status?.category ?? null,
+          title: a.title,
+          url,
+          issueTypeName: a.typeName ?? null,
+          assigneeName: a.assigneeName ?? null,
+          attempts: 0,
+          fetchedAt: now,
+          checkedAt: now,
+        }
       : { state: a.state, attempts: a.state === 'failed' ? (prior.get(ident) ?? 0) + 1 : 0, checkedAt: now };
     await ctx.db
       .insert(t)

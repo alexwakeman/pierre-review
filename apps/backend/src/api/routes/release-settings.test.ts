@@ -293,6 +293,26 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
     expect(foreign.statusCode).toBe(404);
   });
 
+  it('POST /api/releases/older-tags ("Show 50 more") raises one releasable repo\'s older band; 404 for a repo not released from the workspace', async () => {
+    const older = await import('../../releases/older-tags.js');
+    older.__resetOlderTagsWanted();
+    const repoId = (await client.db.select().from(client.schema.repoTags).execute())[0].repoId as number;
+    const post = (body: unknown, ws: number | string = ownWs) => app.inject({ method: 'POST', url: `/api/releases/older-tags?workspace=${ws}`, payload: body as any });
+    // The default needs no scan: nothing grows.
+    const same = await post({ repoId, wanted: 10 });
+    expect(same.statusCode).toBe(200);
+    expect(same.json()).toEqual({ workspaceId: ownWs, repoId, wanted: 10 });
+    expect((await post({ repoId: 999_999, wanted: 60 })).statusCode).toBe(404);
+    expect((await post({ repoId, wanted: 5000 })).statusCode).toBe(400);
+    expect((await post({ repoId })).statusCode).toBe(400);
+    // An unknown workspace id reads as the Default (never a 404).
+    expect((await post({ repoId, wanted: 10 }, 'nope')).json()).toMatchObject({ workspaceId: ownWs });
+    expect(older.olderTagsWanted(1, ownWs, repoId)).toBe(10);
+    older.raiseOlderTagsWanted(1, ownWs, repoId, 60);
+    expect((await post({ repoId, wanted: 10 })).json()).toMatchObject({ wanted: 60 });
+    older.__resetOlderTagsWanted();
+  });
+
   it('the start tag is gone: PUT /api/releases/start-tag is not a route (the check finds its own start)', async () => {
     const res = await app.inject({ method: 'PUT', url: `/api/releases/start-tag?workspace=${ownWs}`, payload: { repoId: 1, tagName: 'v1.0.0' } });
     expect(res.statusCode).toBe(404);

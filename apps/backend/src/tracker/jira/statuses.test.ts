@@ -33,9 +33,16 @@ describe('readJiraStatuses', () => {
     const r = await readJiraStatuses(call, keys);
     expect(r.calls).toBe(6);
     expect(urls.every((u) => u.pathname === '/rest/api/3/search/jql')).toBe(true);
-    expect(urls.every((u) => u.searchParams.get('fields') === 'status,summary,issuetype')).toBe(true);
+    expect(urls.every((u) => u.searchParams.get('fields') === 'status,summary,issuetype,assignee')).toBe(true);
     expect(urls.map((u) => keysOf(u).length)).toEqual([100, 100, 100, 100, 100, 100]);
-    expect(r.answers.get('BMD-7')).toEqual({ state: 'ok', key: 'BMD-7', title: 'BMD-7 title', status: { name: 'In Progress', category: 'indeterminate' } });
+    expect(r.answers.get('BMD-7')).toEqual({
+      state: 'ok',
+      key: 'BMD-7',
+      title: 'BMD-7 title',
+      status: { name: 'In Progress', category: 'indeterminate' },
+      typeName: 'Story',
+      assigneeName: null,
+    });
     expect(r.answers.get('BMD-600')).toMatchObject({ state: 'ok', status: { name: 'Done', category: 'done' } });
     expect(JIRA_STATUS_BATCH).toBe(100);
   });

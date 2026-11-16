@@ -496,6 +496,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // POST /api/releases/refresh — Refresh: re-reads the held tickets from the tracker (the customer's
   // quota, as every tracker call → `search`). No GitHub call.
   if (method === 'POST' && path === '/api/releases/refresh') return [TIERS.search];
+  // POST /api/releases/older-tags — "Show 50 more": raises one repo's older band (in memory) and starts
+  // the background scan, which reads more history (GitHub quota) and their tickets (tracker quota).
+  // "Network work started by a click" → `sync`. EXACT `===`.
+  if (method === 'POST' && path === '/api/releases/older-tags') return [TIERS.sync];
   // POST /api/releases/preview — the "Create release…" dialog: a model summary per story when AI is on
   // (model dollars, the reader's click) → `ai` + `ai_hourly`; no GitHub or tracker call.
   if (method === 'POST' && path === '/api/releases/preview') return [TIERS.ai, TIERS.aiHourly];

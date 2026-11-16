@@ -13,6 +13,17 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- This Sprint → Releases: a repository opens to one list in three parts — every tag newer than the candidate
+  with all its tickets, the candidate, and the 10 older tags below it for checking, one line each, with
+  "Show 50 more". After a release the list stops at that release. Older tags never change the candidate.
+- This Sprint → Releases: each tag shows its date, its commit (a link to GitHub) and how many pull requests and
+  tickets it has. Tickets that stop a tag come first, then those to check by hand, then Complete ones.
+- This Sprint → Releases: select a ticket to see its type, assignee, when its status was read, its pull requests
+  in the tag and elsewhere (open, or the tag that holds them), with "Open in Jira" and "Story". Select "3 pull
+  requests with no ticket" to list them.
+
 ## [1.0.47] - 2026-11-16
 
 ### Changed

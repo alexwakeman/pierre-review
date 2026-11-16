@@ -28,15 +28,21 @@
 //     fresh (for its "waiting for GitHub's rate limit"). Still DB + memory only.
 //   • Bot-ness: `globalAutomationUserIds` (the stored author, or the login's user row) or the light
 //     record's own rule — never the hidden-bots list.
+//   • THE OLDER BAND's size is per (workspace, repo), in memory (releases/older-tags.ts): the fold lists at
+//     most that many older tags. THE TICKET DETAIL (GET /api/releases only, `detail`): each ticket's type,
+//     assignee and last read from the stored reads, and the MERGED stored PRs naming it in the releasable
+//     repos (the "Elsewhere" list) — still DB only.
 import { and, count, desc, eq, gte, inArray, max } from 'drizzle-orm';
 import {
   TRACKER_PROVIDER_LABEL,
+  clampOlderTagsWanted,
   foldReleaseCheck,
   releaseScanLine,
   releaseSettingsConfigured,
   tagKind,
   trackerTicketIdent,
   type ReleaseCheckInput,
+  type ReleaseCheckMergedPrInput,
   type ReleaseCheckResult,
   type ReleaseCheckOpenPrInput,
   type ReleaseCheckPrInput,
@@ -54,6 +60,7 @@ import { getReleaseRepos } from './release-repos.js';
 import { getReleaseSettings } from './release-settings.js';
 import { getRepoTags } from './repo-tags.js';
 import { liveScanStep } from '../releases/scan-state.js';
+import { olderTagsWanted } from '../releases/older-tags.js';
 import { historyView, type HistoryIncrement } from '../releases/history-fold.js';
 import { RELEASE_TICKET_FAILS_MAX } from '../tracker/ticket-status.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
@@ -93,6 +100,8 @@ interface TicketRow {
   statusCategory: string | null;
   fetchedAt: Date | null;
   checkedAt: Date;
+  issueTypeName: string | null;
+  assigneeName: string | null;
 }
 
 /** The ticket from its rows (one per PR): the newest successful read, else the newest attempt. Pure. */
@@ -149,6 +158,8 @@ export interface TicketReadCandidate {
   checkedAt: Date;
   /** status rows: failed reads in a row. */
   attempts?: number;
+  typeName?: string | null;
+  assigneeName?: string | null;
 }
 
 /**
@@ -186,14 +197,16 @@ export interface ReleaseCheckLoaded {
 }
 
 /** Every stored input of the fold for one workspace (the caller checked the settings are set). Only the
- *  RELEASABLE repos among `repoIds` are read (an unticked id is dropped here, whoever asks). */
+ *  RELEASABLE repos among `repoIds` are read (an unticked id is dropped here, whoever asks). `detail`:
+ *  also the ticket detail's merged PRs (GET /api/releases). */
 export async function loadReleaseCheckInput(
   accountId: number,
   workspaceId: number,
   requestedRepoIds: readonly number[],
   settings: ReleaseSettings,
+  opts: { detail?: boolean } = {},
 ): Promise<ReleaseCheckInput> {
-  return (await loadReleaseCheck(accountId, workspaceId, requestedRepoIds, settings)).input;
+  return (await loadReleaseCheck(accountId, workspaceId, requestedRepoIds, settings, opts)).input;
 }
 
 type StoredPr = {
@@ -214,6 +227,7 @@ export async function loadReleaseCheck(
   workspaceId: number,
   requestedRepoIds: readonly number[],
   settings: ReleaseSettings,
+  opts: { detail?: boolean } = {},
 ): Promise<ReleaseCheckLoaded> {
   const ticked = await getReleaseRepos(accountId, workspaceId);
   const repoIds = [...new Set(requestedRepoIds)].filter((id) => ticked.has(id));
@@ -344,6 +358,8 @@ export async function loadReleaseCheck(
     statusCategory: trackerTickets.statusCategory,
     fetchedAt: trackerTickets.fetchedAt,
     checkedAt: trackerTickets.checkedAt,
+    issueTypeName: trackerTickets.issueTypeName,
+    assigneeName: trackerTickets.assigneeName,
   };
   const siteWhere =
     site != null ? and(eq(trackerTickets.accountId, accountId), eq(trackerTickets.provider, site.provider), eq(trackerTickets.apiRoot, site.apiRoot)) : null;
@@ -391,6 +407,8 @@ export async function loadReleaseCheck(
           statusCategory: r.statusCategory,
           fetchedAt: r.fetchedAt,
           checkedAt: r.checkedAt,
+          typeName: r.issueTypeName,
+          assigneeName: r.assigneeName,
         });
       }
     }
@@ -413,6 +431,8 @@ export async function loadReleaseCheck(
           fetchedAt: r.fetchedAt,
           checkedAt: r.checkedAt,
           attempts: r.attempts,
+          typeName: r.issueTypeName,
+          assigneeName: r.assigneeName,
         });
       }
       const srows = await db
@@ -423,6 +443,8 @@ export async function loadReleaseCheck(
           fetchedAt: sprintTickets.fetchedAt,
           title: sprintTickets.title,
           url: sprintTickets.url,
+          issueTypeName: sprintTickets.issueTypeName,
+          assigneeName: sprintTickets.assigneeName,
         })
         .from(sprintTickets)
         .where(and(eq(sprintTickets.accountId, accountId), eq(sprintTickets.workspaceId, workspaceId), inArray(sprintTickets.ident, part)))
@@ -438,6 +460,8 @@ export async function loadReleaseCheck(
           statusCategory: r.statusCategory,
           fetchedAt: r.fetchedAt,
           checkedAt: r.fetchedAt,
+          typeName: r.issueTypeName,
+          assigneeName: r.assigneeName,
         });
       }
     }
@@ -450,14 +474,27 @@ export async function loadReleaseCheck(
     const key = keyByIdent.get(ident)!;
     const lastAt = list.reduce<Date | null>((m, c) => (m == null || c.checkedAt.getTime() > m.getTime() ? c.checkedAt : m), null);
     reads.push({ ident, key, readState, lastAt });
+    const ok = readState === 'ok';
+    // The detail: the chosen read's type and assignee, else the freshest successful read that has one.
+    const okReads = list
+      .filter((c) => c.state === 'ok' && c.fetchedAt != null)
+      .sort((a, b) => b.fetchedAt!.getTime() - a.fetchedAt!.getTime());
+    const pick = (f: (c: TicketReadCandidate) => string | null | undefined): string | null =>
+      (read != null && ok ? f(read) : null) ?? okReads.map(f).find((v) => v != null) ?? null;
     return {
       ident,
       key: read?.key ?? key,
       title: read?.title ?? list.find((c) => c.title != null)?.title ?? null,
       url: read?.url ?? list.find((c) => c.url != null)?.url ?? null,
-      statusName: readState === 'ok' ? (read?.statusName ?? null) : null,
-      done: readState === 'ok' && ticketIsDone(layout, read?.statusName ?? null, read?.statusCategory ?? null),
+      statusName: ok ? (read?.statusName ?? null) : null,
+      done: ok && ticketIsDone(layout, read?.statusName ?? null, read?.statusCategory ?? null),
       readState,
+      stage: ok && (read?.statusName != null || read?.statusCategory != null)
+        ? sprintStageOf(layout ?? { order: [] }, { name: read?.statusName ?? '', category: read?.statusCategory ?? null })
+        : null,
+      typeName: pick((c) => c.typeName),
+      assigneeName: pick((c) => c.assigneeName),
+      readAt: okReads[0]?.fetchedAt ?? null,
     };
   });
 
@@ -485,6 +522,7 @@ export async function loadReleaseCheck(
       // The history pass keeps only PRs merged into the default branch.
       mergedAt: l.mergedAt,
       ticketIdents: (keysByLight.get(l.id) ?? []).map(identOf),
+      authorLogin: l.authorLogin,
     };
   });
 
@@ -535,6 +573,12 @@ export async function loadReleaseCheck(
         }
       }
     }
+    const openAuthors = new Map<number, string>();
+    for (const part of chunks([...new Set(open.map((p) => p.authorId).filter((x): x is number => x != null))])) {
+      for (const u of await db.select({ id: users.id, login: users.githubLogin }).from(users).where(inArray(users.id, part)).execute()) {
+        openAuthors.set(u.id, u.login);
+      }
+    }
     for (const p of open) {
       const n = names.get(p.repoId)!;
       // Into another branch (a hotfix branch): not work still on its way to the default branch.
@@ -554,6 +598,75 @@ export async function loadReleaseCheck(
         url: `https://github.com/${n.owner}/${n.name}/pull/${p.number}`,
         prId: p.id,
         ticketIdents: keys.map(identOf),
+        title: p.title,
+        authorLogin: p.authorId != null ? (openAuthors.get(p.authorId) ?? null) : null,
+      });
+    }
+  }
+
+  // ── THE TICKET DETAIL's merged stored PRs (GET /api/releases only): every MERGED `pull_requests` row
+  // into the default branch of a releasable repo whose ticket rows name one of the check's tickets. ──
+  const mergedPrs: ReleaseCheckMergedPrInput[] = [];
+  if (opts.detail === true && siteWhere != null && ticked.size > 0 && keyByIdent.size > 0) {
+    const tickedIds = new Set(ticked.keys());
+    const byPr = new Map<number, string[]>();
+    for (const part of chunks([...new Set(keyByIdent.values())])) {
+      for (const r of await db
+        .select({ prId: trackerTickets.prId, issueKey: trackerTickets.issueKey })
+        .from(trackerTickets)
+        .where(and(siteWhere, inArray(trackerTickets.issueKey, part)))
+        .execute()) {
+        byPr.set(r.prId, [...(byPr.get(r.prId) ?? []), r.issueKey]);
+      }
+    }
+    const repoInfo = new Map<number, { owner: string; name: string; branch: string | null }>();
+    for (const part of chunks([...tickedIds])) {
+      for (const r of await db
+        .select({ id: repos.id, owner: repos.owner, name: repos.name, defaultBranch: repos.defaultBranch, defaultBranchName: repos.defaultBranchName })
+        .from(repos)
+        .where(and(eq(repos.accountId, accountId), inArray(repos.id, part)))
+        .execute()) {
+        repoInfo.set(r.id, { owner: r.owner, name: r.name, branch: r.defaultBranch ?? r.defaultBranchName ?? null });
+      }
+    }
+    const rows: Array<{ id: number; repoId: number; number: number; title: string; baseRefName: string | null; mergedAt: Date | null; authorId: number | null }> = [];
+    for (const part of chunks([...byPr.keys()])) {
+      rows.push(
+        ...(await db
+          .select({
+            id: pullRequests.id,
+            repoId: pullRequests.repoId,
+            number: pullRequests.number,
+            title: pullRequests.title,
+            baseRefName: pullRequests.baseRefName,
+            mergedAt: pullRequests.mergedAt,
+            authorId: pullRequests.authorId,
+          })
+          .from(pullRequests)
+          .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.id, part), eq(pullRequests.state, 'merged')))
+          .execute()),
+      );
+    }
+    const authors = new Map<number, string>();
+    for (const part of chunks([...new Set(rows.map((p) => p.authorId).filter((x): x is number => x != null))])) {
+      for (const u of await db.select({ id: users.id, login: users.githubLogin }).from(users).where(inArray(users.id, part)).execute()) {
+        authors.set(u.id, u.login);
+      }
+    }
+    for (const p of rows) {
+      const n = repoInfo.get(p.repoId);
+      if (n == null || !tickedIds.has(p.repoId)) continue;
+      if (p.baseRefName != null && n.branch != null && p.baseRefName !== n.branch) continue;
+      mergedPrs.push({
+        repoId: p.repoId,
+        repoName: n.name,
+        number: p.number,
+        title: p.title,
+        url: `https://github.com/${n.owner}/${n.name}/pull/${p.number}`,
+        prId: p.id,
+        authorLogin: p.authorId != null ? (authors.get(p.authorId) ?? null) : null,
+        mergedAt: p.mergedAt,
+        ticketIdents: [...new Set(byPr.get(p.id) ?? [])].map(identOf),
       });
     }
   }
@@ -574,6 +687,7 @@ export async function loadReleaseCheck(
             writable: WRITE_PERMISSIONS.has(r.viewerPermission ?? ''),
             defaultBranch: r.defaultBranch ?? r.defaultBranchName ?? null,
             history: h.history,
+            olderWanted: clampOlderTagsWanted(olderTagsWanted(accountId, workspaceId, r.id)),
             tags: tags
               .filter((t) => t.repoId === r.id)
               .map((t) => ({
@@ -606,6 +720,7 @@ export async function loadReleaseCheck(
         }),
       prs,
       openPrs,
+      mergedPrs,
       tickets,
     },
     reads,
@@ -618,12 +733,16 @@ export async function loadReleaseCheck(
  */
 export function withLiveProgress(result: ReleaseCheckResult, input: Pick<ReleaseCheckInput, 'repos' | 'trackerName'>, now: number = Date.now()): ReleaseCheckResult {
   for (const r of result.repos) {
-    if (!r.checking || r.progress?.step !== 'history') continue;
+    const row = r.checking && r.progress?.step === 'history';
+    const older = r.older.loading && r.older.progress?.step === 'history';
+    if (!row && !older) continue;
     const live = liveScanStep(r.repoId, now);
     if (live == null || live.step !== 'history') continue;
     const repo = input.repos.find((x) => x.repoId === r.repoId);
     const p = { step: live.step, done: live.done, total: live.total, branch: repo?.defaultBranch ?? null, paused: live.paused };
-    r.progress = { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
+    const progress = { step: p.step, done: p.done, total: p.total, line: releaseScanLine(p) };
+    if (row) r.progress = progress;
+    if (older) r.older.progress = { ...progress };
   }
   return result;
 }
@@ -672,8 +791,9 @@ export async function releaseTicketKeysOwed(
 /**
  * THE HISTORY PASS MAY STOP EARLY (docs/RELEASES.md § The release check, rule 4): true when, for EVERY
  * workspace releasing this repo, the check already names a candidate — the newest-first walk found a
- * qualifying tag whose scope is read, so nothing older needs reading. DB only. A view with no workspace id
- * (it cannot be checked) answers false.
+ * qualifying tag whose scope is read, so nothing older needs reading — AND its older band (the candidate +
+ * the wanted older tags, releases/older-tags.ts) needs no older history. DB only. A view with no workspace
+ * id (it cannot be checked) answers false.
  */
 export async function releaseCandidateProven(
   accountId: number,
@@ -686,6 +806,8 @@ export async function releaseCandidateProven(
     const { input } = await loadReleaseCheck(accountId, v.workspaceId, [repoId], v.settings);
     const repo = foldReleaseCheck(input).repos.find((r) => r.repoId === repoId);
     if (repo?.status !== 'candidate') return false;
+    // The older band (candidate + its wanted older tags) still needs older history.
+    if (repo.older.needsHistory) return false;
   }
   return true;
 }
@@ -715,7 +837,7 @@ export async function getReleases(accountId: number, rawWorkspace: string | numb
   const releasable = [...(await getReleaseRepos(accountId, workspaceId)).keys()];
   const withRepos = { ...base, hasReleasableRepos: releasable.length > 0 };
   if (!base.configured || releasable.length === 0) return { ...withRepos, latestReleaseTagAt: null, check: null };
-  const input = await loadReleaseCheckInput(accountId, workspaceId, releasable, settings);
+  const input = await loadReleaseCheckInput(accountId, workspaceId, releasable, settings, { detail: true });
   let latestTagMs: number | null = null;
   for (const r of input.repos) {
     for (const t of r.tags) {

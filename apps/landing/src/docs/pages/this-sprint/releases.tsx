@@ -71,18 +71,51 @@ export default function Page(): JSX.Element {
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
+      <H3 id="the-tag-list">The tag list</H3>
+      <p>Select a row to open one list, newest at the top, in three parts:</p>
+      <ul>
+        <li>
+          <strong>Newer than the candidate — can&rsquo;t be released.</strong> Every newer tag, open, with all its
+          tickets. If no tag can be released, every tag that was checked is here.
+        </li>
+        <li>
+          <strong>Candidate.</strong> The tag to release, with every ticket it covers and what was checked:
+          &ldquo;this tag&rsquo;s own changes&rdquo; before your first release, or &ldquo;everything since
+          0.380.0-rc&rdquo; after one.
+        </li>
+        <li>
+          <strong>Older tags — for checking.</strong> The 10 tags below the candidate, one line each, such as
+          &ldquo;✓ all 2 tickets Complete&rdquo; or &ldquo;✗ BMD-127 In Progress&rdquo;. Select a tag to see its tickets.{' '}
+          <Ui>Show 50 more</Ui> adds the next 50. These tags never change the candidate. After a release the list stops
+          at that release, for example &ldquo;0.380.0-rc — last release&rdquo;.
+        </li>
+      </ul>
       <p>
-        Select a row to see the tags that were read, newest first: each newer tag with why it does not qualify, such as
-        &ldquo;BMD-1048 is In PO Review.&rdquo; or &ldquo;BMD-1050 has an open pull request in web (#812).&rdquo;, then the
-        candidate with its tickets. Older tags are not read. Under each tag you also find what to check by hand: tickets
-        the tracker could not find, such as &ldquo;BMD-123 not found&rdquo;, and &ldquo;Also includes 3 pull requests with no
-        ticket&rdquo;. Select a pull request to open it, or a ticket to open its story.
+        Each tag shows its date, its commit (select it to open the commit on GitHub), and how many pull requests and
+        tickets it has. Under each tag, tickets that stop it come first, then tickets to check by hand, then Complete
+        ones:
+      </p>
+      <ul>
+        <li>
+          ✗ a ticket that stops the tag: its status, such as &ldquo;In PO Review&rdquo;, or &ldquo;Complete, but has an
+          open PR: frontend #812&rdquo;. When your Complete, Cancelled or other column has a different name from the
+          tracker&rsquo;s status, it is shown in brackets, for example &ldquo;Won&rsquo;t Do (Cancelled)&rdquo;.
+        </li>
+        <li>? a ticket to check by hand, such as &ldquo;not found in Jira — check by hand&rdquo;.</li>
+        <li>✓ a Complete ticket.</li>
+      </ul>
+      <p>
+        Select a ticket to see its type, its assignee, when its status was last read, the pull requests for it in this
+        tag, and its pull requests elsewhere in the repositories you release: open ones, and merged ones with the tag
+        that holds them (or &ldquo;not in a tag yet&rdquo;). <Ui>Open in Jira</Ui> opens the ticket, and <Ui>Story</Ui>{' '}
+        opens its story. Select &ldquo;3 pull requests with no ticket&rdquo; under a tag to list them. Select a pull
+        request to open it.
       </p>
       <H3 id="the-whole-history">The whole history</H3>
       <p>
         There is nothing to pick. The first check of a repository reads the history of main once, from the newest
         commit back to your last release (or the first commit), with each commit&rsquo;s pull request — beyond the 90
-        days Ensemble normally syncs. It stops early once the candidate is known. The tickets are then read from your tracker in batches (Jira: up to 100 in one
+        days Ensemble normally syncs. It stops early once the candidate and the older tags you asked for are known. The tickets are then read from your tracker in batches (Jira: up to 100 in one
         request). Later checks read only the commits that are new since the last one. It works within your GitHub rate
         limit and waits when the limit is low.
       </p>

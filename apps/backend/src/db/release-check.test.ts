@@ -244,9 +244,14 @@ describe('foldReleaseCheck — the simple rule, newest first, per repo', () => {
     const res = run({ repos: [threeTags()], prs: threePrs(), tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In Progress' }), ticket('T3')] });
     const api = repoOf(res, 1);
     expect(api.candidate?.name).toBe('v1.2.0');
-    // T2 is not in v1.2.0's scope (no release: only the tag's own increment) and is not read at all.
+    // T2 is not in v1.2.0's scope (no release: only the tag's own increment): it does not change the
+    // candidate. It is listed only in the OLDER band, for checking (judged on v1.1.0's own increment).
     expect(api.ticketIdents).toEqual(['T3']);
-    expect(res.tickets.map((t) => t.ident)).toEqual(['T3']);
+    expect(api.olderTags.map((t) => [t.name, t.state])).toEqual([
+      ['v1.1.0', 'does_not_qualify'],
+      ['v1.0.0', 'qualifies'],
+    ]);
+    expect(ticketOf(res, 'T2')).toMatchObject({ inRelease: false, repos: [{ repoId: 1, state: 'before_candidate', prIds: [2] }] });
   });
 
   it('acceptance 15: BASELINE, WHOLE SCOPE — after a release, a reason from an earlier tag in the scope rules out every later tag, and says which', () => {
@@ -395,6 +400,151 @@ describe('releaseScanLine and releasesChecking — the progress words and the po
     const off = run({ repos: [threeTags()], prs: threePrs(), tickets: allDone() });
     expect(releasesChecking({ check: off })).toBe(false);
     expect(releasesChecking(null)).toBe(false);
+  });
+});
+
+describe('foldReleaseCheck — THE THREE BANDS: newer, candidate, older (acceptance 49–54)', () => {
+  /** `n` version tags v1.<i>.0 (i = 1…n), each adding PR i naming T<i>; all Complete unless listed. */
+  const many = (n: number, extra: TagSpec[] = []) =>
+    repo(1, 'api', [...Array.from({ length: n }, (_, k) => ({ name: `v1.${k + 1}.0`, d: k + 1, prs: [k + 1] })), ...extra]);
+  const manyPrs = (n: number) => Array.from({ length: n }, (_, k) => pr(k + 1, 1, [`T${k + 1}`]));
+  const manyTickets = (n: number, notDone: number[] = []) =>
+    Array.from({ length: n }, (_, k) =>
+      notDone.includes(k + 1) ? ticket(`T${k + 1}`, { done: false, statusName: 'In Progress' }) : ticket(`T${k + 1}`),
+    );
+
+  it('49: EVERY tag newer than the candidate is listed with EVERY reason, newest first; the candidate is last in `tags`', () => {
+    const r = many(4);
+    r.ranges[3]!.prIds = [4, 5];
+    const res = run({
+      repos: [r],
+      prs: [...manyPrs(4), pr(5, 1, ['T5'])],
+      tickets: [...manyTickets(4, [3, 4]), ticket('T5', { done: false, statusName: 'In PO Review' })],
+    });
+    const api = repoOf(res, 1);
+    expect(api.candidate?.name).toBe('v1.2.0');
+    expect(api.tags.map((t) => [t.name, t.band])).toEqual([
+      ['v1.4.0', 'newer'],
+      ['v1.3.0', 'newer'],
+      ['v1.2.0', 'candidate'],
+    ]);
+    // Not just the first reason: both of v1.4.0's tickets.
+    expect(reasons(res, 1, 'v1.4.0')).toEqual(['T4 is In Progress.', 'T5 is In PO Review.']);
+    expect(tagOf(res, 1, 'v1.4.0').url).toBe(`https://github.com/acme/api/commit/${sha('v1.4.0')}`);
+  });
+
+  it('50: THE OLDER BAND — 10 tags by default, each judged on its own increment, for checking only; more raises it', () => {
+    const res = run({ repos: [many(15)], prs: manyPrs(15), tickets: manyTickets(15, [9]) });
+    const api = repoOf(res, 1);
+    // An older tag that does not qualify never changes the candidate.
+    expect(api.candidate?.name).toBe('v1.15.0');
+    expect(api.olderTags.map((t) => t.name)).toEqual(['v1.14.0', 'v1.13.0', 'v1.12.0', 'v1.11.0', 'v1.10.0', 'v1.9.0', 'v1.8.0', 'v1.7.0', 'v1.6.0', 'v1.5.0']);
+    expect(api.olderTags.every((t) => t.band === 'older' && !t.isCandidate)).toBe(true);
+    expect(api.olderTags.find((t) => t.name === 'v1.9.0')).toMatchObject({ state: 'does_not_qualify', blockers: [{ kind: 'not_done', key: 'T9' }] });
+    expect(api.older).toMatchObject({ wanted: 10, moreAvailable: true, loading: false, needsHistory: false, lastRelease: null });
+    // Bounded: the PRs and tickets of tags not listed are not in the answer.
+    expect(res.prs.map((p) => p.id)).not.toContain(4);
+    expect(res.tickets.map((t) => t.ident)).not.toContain('T4');
+    expect(ticketOf(res, 'T9').repos).toEqual([{ repoId: 1, state: 'before_candidate', prIds: [9] }]);
+
+    const r60 = many(15);
+    r60.olderWanted = 60;
+    const more = repoOf(run({ repos: [r60], prs: manyPrs(15), tickets: manyTickets(15) }), 1);
+    expect(more.olderTags).toHaveLength(14);
+    expect(more.older).toMatchObject({ wanted: 60, moreAvailable: false });
+  });
+
+  it('51: AFTER A RELEASE the older band stops at the baseline, which is its last line', () => {
+    const r = many(4, [{ name: 'v1.1.0-rc', d: 1, commit: 'v1.1.0', taggedAt: 2 }]);
+    const res = run({ repos: [r], prs: manyPrs(4), tickets: manyTickets(4) });
+    const api = repoOf(res, 1);
+    expect(api.candidate?.name).toBe('v1.4.0');
+    expect(api.olderTags.map((t) => t.name)).toEqual(['v1.3.0', 'v1.2.0']);
+    expect(api.older).toMatchObject({ moreAvailable: false, lastRelease: { name: 'v1.1.0-rc' } });
+  });
+
+  it('52: NO CANDIDATE — every tag read is in `tags` (newer band), no older band', () => {
+    const res = run({ repos: [many(3)], prs: manyPrs(3), tickets: manyTickets(3, [1, 2, 3]) });
+    const api = repoOf(res, 1);
+    expect(api.status).toBe('none');
+    expect(api.tags.map((t) => t.band)).toEqual(['newer', 'newer', 'newer']);
+    expect(api.olderTags).toEqual([]);
+    expect(api.older).toMatchObject({ moreAvailable: false, loading: false, needsHistory: false, progress: null });
+  });
+
+  it('53: THE PASS STOPPED EARLY — older tags not placed yet: the band needs history (loading, the history line); the poll runs', () => {
+    const r = many(3, [
+      { name: 'v0.9.0', d: 0, onDefaultBranch: null },
+      { name: 'v0.8.0', d: 0, onDefaultBranch: null },
+    ]);
+    r.history = { done: 300, total: 900, complete: false };
+    r.defaultBranch = 'main';
+    const res = run({ repos: [r], prs: manyPrs(3), tickets: manyTickets(3) });
+    const api = repoOf(res, 1);
+    expect(api).toMatchObject({ status: 'candidate', checking: false });
+    expect(api.olderTags.map((t) => t.name)).toEqual(['v1.2.0', 'v1.1.0']);
+    expect(api.older).toMatchObject({ needsHistory: true, loading: true, moreAvailable: true });
+    expect(api.older.progress?.line).toBe("Reading main's history: 300 of 900 commits");
+    expect(releasesChecking({ check: res })).toBe(true);
+    // Enough older tags placed already (10 of 11): no more history for the band.
+    const enough = many(12, [{ name: 'v0.9.0', d: 0, onDefaultBranch: null }]);
+    enough.history = r.history;
+    const e = repoOf(run({ repos: [enough], prs: manyPrs(12), tickets: manyTickets(12) }), 1);
+    expect(e.olderTags).toHaveLength(10);
+    expect(e.older).toMatchObject({ needsHistory: false, loading: false, moreAvailable: true });
+  });
+
+  it('54: THE TICKET DETAIL — every PR for the ticket: in this tag, merged in another tag, open, merged after the newest tag', () => {
+    const api = many(3);
+    const web = repo(2, 'web', [{ name: 'w1.0.0', d: 2, prs: [20] }]);
+    const res = run({
+      repos: [api, web],
+      prs: [...manyPrs(3), pr(4, 1, ['T3']), pr(20, 2, ['T3'], { authorLogin: 'robin' })],
+      openPrs: [{ ...openPr(812, 2, 'web', ['T3']), title: 'T3: export button', authorLogin: 'sam' }],
+      mergedPrs: [
+        { repoId: 1, repoName: 'api', number: 30, title: 'T3: later', url: 'https://github.com/acme/api/pull/30', prId: 300, authorLogin: 'alex', mergedAt: day(9), ticketIdents: ['T3'] },
+        // The same PR as a light record: listed once, with its tag.
+        { repoId: 1, repoName: 'api', number: 4, title: 'change 4', url: 'https://github.com/acme/r/pull/4', prId: 400, authorLogin: 'alex', mergedAt: day(1), ticketIdents: ['T3'] },
+      ],
+      tickets: [...manyTickets(2), ticket('T3', { typeName: 'Story', assigneeName: 'Robin Lee', readAt: day(8), stage: 'done' })],
+    });
+    api.ranges[2]!.prIds = [3];
+    api.ranges[1]!.prIds = [2, 4];
+    const res2 = run({
+      repos: [api, web],
+      prs: [...manyPrs(3), pr(4, 1, ['T3']), pr(20, 2, ['T3'], { authorLogin: 'robin' })],
+      openPrs: [{ ...openPr(812, 2, 'web', ['T3']), title: 'T3: export button', authorLogin: 'sam' }],
+      mergedPrs: [
+        { repoId: 1, repoName: 'api', number: 30, title: 'T3: later', url: 'https://github.com/acme/api/pull/30', prId: 300, authorLogin: 'alex', mergedAt: day(9), ticketIdents: ['T3'] },
+      ],
+      tickets: [...manyTickets(2), ticket('T3', { typeName: 'Story', assigneeName: 'Robin Lee', readAt: day(8), stage: 'done' })],
+      trackerName: 'Jira',
+    });
+    expect(res.tickets.find((t) => t.ident === 'T3')?.pullRequests.filter((p) => p.number === 4)).toHaveLength(1);
+    const t3 = ticketOf(res2, 'T3');
+    expect(t3).toMatchObject({ typeName: 'Story', assigneeName: 'Robin Lee', readAt: day(8).toISOString(), stage: 'done' });
+    expect(res2.trackerName).toBe('Jira');
+    expect(t3.pullRequests.map((p) => [p.repoName, p.number, p.open, p.tagName, p.untagged])).toEqual([
+      ['api', 3, false, 'v1.3.0', false],
+      ['api', 4, false, 'v1.2.0', false],
+      ['api', 30, false, null, true],
+      ['web', 20, false, 'w1.0.0', false],
+      ['web', 812, true, null, false],
+    ]);
+    expect(t3.pullRequests.find((p) => p.number === 20)).toMatchObject({ id: 20, authorLogin: 'robin' });
+    // The open PR still rules the tag out (it is the same open PR).
+    expect(reasons(res2, 1, 'v1.3.0')).toEqual(['T3 has an open pull request in web (#812).']);
+    expect(res2.prs.find((p) => p.id === 4)).toMatchObject({ tagName: 'v1.2.0' });
+  });
+
+  it('a tag lists its PRs with no ticket (`noTicketPrIds`): the candidate its whole scope, any other tag its own', () => {
+    const r = many(2, [{ name: 'v1.0.0-rc', d: 0, commit: 'v0', taggedAt: 0 }]);
+    // ranges[0] is the release tag's (the baseline, oldest).
+    r.ranges[2]!.prIds = [2, 8];
+    r.ranges[1]!.prIds = [1, 7];
+    const res = run({ repos: [r], prs: [...manyPrs(2), pr(7, 1, []), pr(8, 1, [], { isBot: true })], tickets: manyTickets(2) });
+    expect(tagOf(res, 1, 'v1.2.0')).toMatchObject({ isCandidate: true, noTicketPrIds: [8, 7] });
+    expect(repoOf(res, 1).olderTags[0]).toMatchObject({ name: 'v1.1.0', noTicketPrIds: [7] });
   });
 });
 
@@ -707,6 +857,24 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     expect(repo2.candidate).toMatchObject({ name: 'v1.1.0', releaseTagName: 'v1.1.0-rc' });
     expect(repo2.botPrIds).toEqual([l3]);
     expect(repo2.tags.map((t) => t.name)).toEqual(['v1.1.0']);
+    // THE OLDER BAND (for checking): v1.0.0, judged on its own increment; the walk reached the root.
+    expect(repo2.olderTags.map((t) => [t.name, t.state])).toEqual([['v1.0.0', 'qualifies']]);
+    expect(repo2.older).toMatchObject({ wanted: 10, moreAvailable: false, loading: false, needsHistory: false, lastRelease: null });
+    expect(repo2.tags[0]!.url).toBe(`https://github.com/acme/api/commit/${sha('v1.1.0')}`);
+
+    // THE TICKET DETAIL, from stored rows only: type, assignee and last read from the ticket rows; every
+    // PR naming it — the light record with its tag, and a stored merged PR after the newest tag.
+    const p4 = await mkPr(4, 'main', { mergedAt: day(6), updatedAt: day(6), title: 'PLAT-2: follow-up' });
+    await db.insert(trackerTickets).values({ ...tt(p4, 'PLAT-2', 'Done', 'done'), issueTypeName: 'Story', assigneeName: 'Robin Lee' }).execute();
+    const detail = await m.getReleases(1, scope.workspaceId);
+    const plat2 = detail.check!.tickets.find((t) => t.key === 'PLAT-2')!;
+    expect(plat2).toMatchObject({ typeName: 'Story', assigneeName: 'Robin Lee', readAt: now.toISOString(), stage: 'done' });
+    expect(plat2.pullRequests.map((p) => [p.number, p.tagName, p.untagged, p.open, p.prId])).toEqual([
+      [2, 'v1.1.0', false, false, p2],
+      [4, null, true, false, p4],
+    ]);
+    await db.delete(trackerTickets).where(eq(trackerTickets.prId, p4)).execute();
+    await db.delete(pullRequests).where(eq(pullRequests.id, p4)).execute();
 
     // A ticket the tracker refuses is listed for the reader, never a block.
     await db.update(trackerTickets).set({ state: 'no_access', fetchedAt: null }).execute();
@@ -912,6 +1080,44 @@ describe('getReleases (GET /api/releases) — stored rows only', () => {
     // Asking the loader for it directly still reads nothing of it.
     const input = await m.loadReleaseCheckInput(1, scope.workspaceId, [tests.id], SETTINGS);
     expect(input.repos).toEqual([]);
+  });
+
+  it('acceptance 53: THE OLDER BAND keeps the history pass going — not proven while the band needs older history; "Show 50 more" raises it (in memory, never lowered)', async () => {
+    const { db, schema } = client;
+    const { resolveWorkspaceScope } = await import('./queries.js');
+    const { eq } = await import('drizzle-orm');
+    const older = await import('../releases/older-tags.js');
+    const scope = await resolveWorkspaceScope(1, undefined);
+    const api = (await db.select().from(schema.repos).execute()).find((r: any) => r.name === 'api');
+    const views = [{ workspaceId: scope.workspaceId, settings: SETTINGS }];
+    const before = (await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!;
+    expect(before.candidate?.name).toBe('v1.2.0');
+    expect(before.older).toMatchObject({ wanted: 10, needsHistory: false, moreAvailable: false });
+    expect(await m.releaseCandidateProven(1, api.id, views)).toBe(true);
+
+    // The pass stopped early (not at the root) and an older tag is not placed yet: v1.0.0's own
+    // increment is not read, so the band needs more history — the pass may not stop.
+    await db.update(schema.releaseHistoryScans).set({ deepExpectedSha: sha('older') }).where(eq(schema.releaseHistoryScans.repoId, api.id)).execute();
+    await db
+      .insert(schema.repoTags)
+      .values({ accountId: 1, repoId: api.id, name: 'v0.9.0', sha: sha('v0.9.0'), committedAt: day(0), firstSeenAt: day(0), lastSeenAt: day(0) })
+      .execute();
+    const res = await m.getReleases(1, scope.workspaceId);
+    const repo = res.check!.repos.find((r) => r.repoId === api.id)!;
+    expect(repo.candidate?.name).toBe('v1.2.0');
+    expect(repo.older).toMatchObject({ needsHistory: true, loading: true, moreAvailable: true });
+    expect(repo.older.progress?.step).toBe('history');
+    expect(await m.releaseCandidateProven(1, api.id, views)).toBe(false);
+
+    // "Show 50 more": the band's size is raised (never lowered) and read by the check.
+    expect(older.raiseOlderTagsWanted(1, scope.workspaceId, api.id, 60)).toEqual({ wanted: 60, grew: true });
+    expect(older.raiseOlderTagsWanted(1, scope.workspaceId, api.id, 10)).toEqual({ wanted: 60, grew: false });
+    expect((await m.getReleases(1, scope.workspaceId)).check!.repos.find((r) => r.repoId === api.id)!.older.wanted).toBe(60);
+    // Per workspace: another workspace's band is untouched.
+    expect(older.olderTagsWanted(1, scope.workspaceId + 1000, api.id)).toBe(10);
+    older.__resetOlderTagsWanted();
+    await db.delete(schema.repoTags).where(eq(schema.repoTags.name, 'v0.9.0')).execute();
+    await db.update(schema.releaseHistoryScans).set({ deepExpectedSha: null }).where(eq(schema.releaseHistoryScans.repoId, api.id)).execute();
   });
 });
 

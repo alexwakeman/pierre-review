@@ -1,9 +1,12 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   RELEASE_NOTES_SECTION_MAX,
+  RELEASE_OLDER_TAGS_MAX,
   RELEASE_SUFFIX_MAX,
   validateReleaseSettings,
   type CreateReleaseBody,
+  type ReleaseOlderTagsBody,
+  type ReleaseOlderTagsResponse,
   type ReleasePreviewBody,
   type ReleasesRefreshResponse,
   type ReleasesResponse,
@@ -11,7 +14,9 @@ import {
   type SetReleaseSettingsBody,
 } from '@pierre-review/shared';
 import { getReleaseRepos, setReleaseRepos } from '../../db/release-repos.js';
-import { markTagCatchUp } from '../../sync/tags-step.js';
+import { markTagCatchUp, scheduleTagSync } from '../../sync/tags-step.js';
+import { raiseOlderTagsWanted } from '../../releases/older-tags.js';
+import { resolveWorkspaceScope } from '../../db/queries.js';
 import { ReleaseRequestError, createRelease, getReleaseDetail, previewRelease } from '../../releases/create.js';
 import { getReleases } from '../../db/release-check.js';
 import { refreshReleases } from '../../releases/refresh.js';
@@ -41,6 +46,12 @@ import { accountIdOf } from '../plugins/auth.js';
 //   POST /api/releases/refresh?workspace=<id>  Refresh (a reader's press): the tickets the check holds by
 //                                              their own state read again from the tracker
 //                                              (releases/refresh.ts), then the check. Tier `search`.
+//   POST /api/releases/older-tags?workspace=<id>  "Show 50 more": `{repoId, wanted}` → the older band of
+//                                              one RELEASABLE repo lists up to `wanted` tags (raised, never
+//                                              lowered; in memory — releases/older-tags.ts). 404 for a repo
+//                                              not released from the workspace. When it grows, the scan
+//                                              starts in the background (more history and tickets may be
+//                                              read: GitHub + tracker quota) — tier `sync`.
 //   POST /api/releases/preview?workspace=<id>  "Create release…" opening: `{repoIds}` → the snapshot,
 //                                              the notes (a model summary per story when AI is on — a
 //                                              reader's click, never refused by the spend gate) and the
@@ -112,6 +123,34 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as { workspace?: string };
     return refreshReleases(accountIdOf(req), q.workspace);
   });
+
+  app.post(
+    '/api/releases/older-tags',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['repoId', 'wanted'],
+          additionalProperties: false,
+          properties: { repoId: { type: 'integer' }, wanted: { type: 'integer', minimum: 1, maximum: RELEASE_OLDER_TAGS_MAX } },
+        },
+      },
+    },
+    async (req, reply): Promise<ReleaseOlderTagsResponse | { error: string; message: string }> => {
+      const accountId = accountIdOf(req);
+      const q = req.query as { workspace?: string };
+      const body = req.body as ReleaseOlderTagsBody;
+      const { workspaceId } = await resolveWorkspaceScope(accountId, q.workspace);
+      if (!(await getReleaseRepos(accountId, workspaceId)).has(body.repoId)) {
+        reply.status(404);
+        return { error: 'NotFound', message: `Repository ${body.repoId} is not released from this workspace` };
+      }
+      const r = raiseOlderTagsWanted(accountId, workspaceId, body.repoId, body.wanted);
+      // More older tags: the scan reads on (history just far enough, then their tickets in a batch).
+      if (r.grew && !scheduleTagSync(accountId, body.repoId, req.log, { rescan: true })) markTagCatchUp(body.repoId);
+      return { workspaceId, repoId: body.repoId, wanted: r.wanted };
+    },
+  );
 
   app.post(
     '/api/releases/preview',

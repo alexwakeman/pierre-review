@@ -264,6 +264,8 @@ import type {
   FlowSettings,
   FlowActorView,
   ReleaseSettingsResponse,
+  ReleaseOlderTagsBody,
+  ReleaseOlderTagsResponse,
   ReleasesRefreshResponse,
   ReleasesResponse,
   ReleasePreviewBody,
@@ -681,6 +683,12 @@ export const api = {
   refreshReleases: (workspaceId: number) =>
     fetch(withQuery('/api/releases/refresh', workspaceParam(workspaceId)), { method: 'POST' }).then((r) =>
       handle<ReleasesRefreshResponse>(r),
+    ),
+  // "Show 50 more" (a reader's press): one repo's older band lists up to `wanted` tags; the scan reads
+  // on in the background (the tab's poll shows its progress).
+  releaseOlderTags: (workspaceId: number, body: ReleaseOlderTagsBody) =>
+    fetch(withQuery('/api/releases/older-tags', workspaceParam(workspaceId)), jsonBody('POST', body)).then((r) =>
+      handle<ReleaseOlderTagsResponse>(r),
     ),
   // "Create release…": the dialog's preview (notes + comment), Confirm (the writes), one stored release.
   releasePreview: (workspaceId: number, body: ReleasePreviewBody) =>

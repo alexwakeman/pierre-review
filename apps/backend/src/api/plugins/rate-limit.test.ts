@@ -644,6 +644,8 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('GET', '/api/releases/12')).toEqual(['read']);
     expect(tiers('POST', '/api/releases/preview')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/releases/refresh')).toEqual(['search']);
+    // "Show 50 more" starts the scan (history pages + ticket reads): the `sync` bucket.
+    expect(tiers('POST', '/api/releases/older-tags')).toEqual(['sync']);
     expect(tiers('POST', '/api/releases')).toEqual(['search', 'github_write']);
     // The releasable ticks: DB only (the tag sync's catch-up reads GitHub
     // later, in the settle sweep).

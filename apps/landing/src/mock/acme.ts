@@ -516,43 +516,100 @@ export const SPRINT = {
   ] as SprintCard[],
 };
 
-export type ReleaseMark = 'ok' | 'bad' | 'warn';
+export type ReleaseMark = 'ok' | 'bad' | 'warn' | 'unknown';
+
+/** The three bands of an expanded row (Sprint/releasesModel.ts `rowBands`, `BAND_WORDS`). */
+export type ReleaseBand = 'newer' | 'candidate' | 'older';
+
+export interface ReleaseMockTicket {
+  key: string;
+  title: string;
+  tone: ReleaseMark;
+  /** `ticketLine`'s words: the status (and the bucket when it differs), or why it stops the tag. */
+  status: string;
+  /** The line opened in place (`ticketDetail`): the facts, then the PRs in this tag and elsewhere. */
+  detail?: { facts: string; inThisTag: string[]; elsewhere: string[] };
+}
 
 export interface ReleaseMockTag {
   name: string;
-  candidate?: boolean;
-  /** The tag's explainer lines (Sprint/releasesModel.ts `tagExplainer`, then `noTicketLine`). */
+  band: ReleaseBand;
+  /** `tagHeader` after the name: "15 Oct · a1b2c3d · 2 PRs · 2 tickets". */
+  meta: string;
+  /** The candidate's "checked: …" label (`candidateScopeLabel`). */
+  scope?: string;
+  /** An older tag's ONE summary line (`olderTagSummary`). */
+  summary?: { tone: ReleaseMark; text: string };
+  /** Reasons from an earlier tag in the scope (`tagExplainer`). */
   notes?: string[];
-  tickets: Array<{ key: string; title: string; tone: ReleaseMark; status: string }>;
-  /** PRs with no ticket (listed, never a warning). */
-  untracked?: string[];
+  /** Tickets in the row's order: stops first, then to check, then Complete. */
+  tickets: ReleaseMockTicket[];
+  /** "1 pull request with no ticket" (`noTicketLine`) and its PRs. */
+  untracked?: { line: string; prs: string[] };
 }
 
 /** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`.
  *  One row per repository released from this workspace: the candidate (the NEWEST tag whose tickets are
  *  Complete with no open pull request), one whose newer tags do not qualify, one no tag of which qualifies, one
- *  still being checked (its progress line), one with nothing new. */
+ *  still being checked (its progress line), one with nothing new. A row opens to THREE BANDS: newer than the
+ *  candidate, the candidate, older tags for checking. */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
   action: 'Create release…',
   /** The dialog's ticked repositories (Sprint/ReleaseDialog.tsx). */
   dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
+  bands: {
+    newer: 'Newer than the candidate — can’t be released',
+    newerNoCandidate: 'Can’t be released',
+    candidate: 'Candidate',
+    older: 'Older tags — for checking',
+  },
+  showMore: 'Show 50 more',
   repos: [
     {
       name: REPOS.payments,
       candidate: true,
       text: 'Release v3.2.0 → v3.2.0-rc',
       counts: '2 tickets · 1 to check',
+      older: '… 2 tags shown',
       tags: [
         {
           name: 'v3.2.0',
-          candidate: true,
-          notes: ['PAY-120 not found. Check it by hand.', 'Also includes a pull request with no ticket'],
+          band: 'candidate',
+          meta: '15 Oct · 9f8e7d6 · 3 PRs · 2 tickets',
+          scope: 'checked: this tag’s own changes',
           tickets: [
-            { key: 'PAY-134', title: 'Payout dates in the export', tone: 'ok', status: 'Done' },
-            { key: 'PAY-120', title: '', tone: 'warn', status: 'not found' },
+            { key: 'PAY-120', title: '', tone: 'unknown', status: 'not found in Jira — check by hand' },
+            {
+              key: 'PAY-134',
+              title: 'Payout dates in the export',
+              tone: 'ok',
+              status: 'Done (Complete)',
+              detail: {
+                facts: 'Type: Story · Assignee: Robin Lee · Jira status read 4 min ago',
+                inThisTag: ['payments #612 “PAY-134: export payout dates” merged 15 Oct · alex'],
+                elsewhere: ['web #598 “PAY-134: payout date column” merged 9 Oct · in v1.8.1'],
+              },
+            },
           ],
-          untracked: ['#605 Tidy the refund logs'],
+          untracked: { line: '1 pull request with no ticket', prs: ['payments #605 “Tidy the refund logs” merged 14 Oct · sam'] },
+        },
+        {
+          name: 'v3.1.0',
+          band: 'older',
+          meta: '10 Oct · 5d4c3b2 · 2 PRs · 2 tickets',
+          summary: { tone: 'ok', text: 'all 2 tickets Complete' },
+          tickets: [
+            { key: 'PAY-118', title: 'Refund reasons', tone: 'ok', status: 'Done (Complete)' },
+            { key: 'PAY-121', title: 'Payout retries', tone: 'ok', status: 'Done (Complete)' },
+          ],
+        },
+        {
+          name: 'v3.0.0',
+          band: 'older',
+          meta: '2 Oct · 1a2b3c4 · 1 PR · 1 ticket',
+          summary: { tone: 'bad', text: 'PAY-101 In Progress' },
+          tickets: [{ key: 'PAY-101', title: 'Currency rounding', tone: 'bad', status: 'In Progress' }],
         },
       ],
     },
@@ -562,18 +619,38 @@ export const SPRINT_RELEASES = {
       text: 'Release v1.8.2 → v1.8.2-rc',
       latest: 'Latest v1.9.1',
       counts: '1 ticket',
+      lastRelease: 'v1.8.0-rc — last release',
       tags: [
         {
           name: 'v1.9.1',
+          band: 'newer',
+          meta: '16 Oct · a1b2c3d · 1 PR · 1 ticket',
           notes: ['PAY-150 (from v1.9.0) is In review.'],
-          tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done' }],
+          tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done (Complete)' }],
         },
         {
           name: 'v1.9.0',
-          notes: ['PAY-150 is In review.'],
-          tickets: [{ key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review' }],
+          band: 'newer',
+          meta: '15 Oct · 7c6b5a4 · 2 PRs · 2 tickets',
+          tickets: [
+            { key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review (Code review)' },
+            { key: 'PAY-149', title: 'Card brand icons', tone: 'ok', status: 'Done (Complete)' },
+          ],
         },
-        { name: 'v1.8.2', candidate: true, tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done' }] },
+        {
+          name: 'v1.8.2',
+          band: 'candidate',
+          meta: '13 Oct · 3e2d1c0 · 2 PRs · 1 ticket',
+          scope: 'checked: everything since v1.8.0-rc',
+          tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done (Complete)' }],
+        },
+        {
+          name: 'v1.8.1',
+          band: 'older',
+          meta: '9 Oct · 8a9b0c1 · 1 PR · 1 ticket',
+          summary: { tone: 'ok', text: '1 ticket Complete' },
+          tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done (Complete)' }],
+        },
       ],
     },
     {
@@ -583,8 +660,9 @@ export const SPRINT_RELEASES = {
       tags: [
         {
           name: 'v0.9.0',
-          notes: ['PAY-146 has an open pull request in payments (#611).'],
-          tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'Done, 1 open pull request' }],
+          band: 'newer',
+          meta: '12 Oct · 4f3e2d1 · 1 PR · 1 ticket',
+          tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'Done (Complete), but has an open PR: payments #611' }],
         },
       ],
     },
@@ -603,6 +681,10 @@ export const SPRINT_RELEASES = {
     latest?: string;
     counts?: string;
     progress?: { share: number; line: string };
+    /** "… 2 tags shown" under the older band (with "Show 50 more"). */
+    older?: string;
+    /** After a release, the older band's last line. */
+    lastRelease?: string;
     tags: ReleaseMockTag[];
   }>,
 };

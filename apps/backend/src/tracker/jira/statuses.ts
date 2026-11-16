@@ -1,7 +1,7 @@
 // JIRA — MANY TICKETS' STATUSES IN ONE SEARCH (docs/TRACKERS.md § Batched status reads). The release
 // scan and Refresh read every ticket of the tags after the baseline; one GET per ticket was the slow
 // part. Here: ONE search per ≤ JIRA_STATUS_BATCH keys, `key in (A-1, B-2, …)`, fields `status`,
-// `summary` and `issuetype` only, through the ONE outbound helper (`jiraGetJson`) and the workspace's
+// `summary`, `issuetype` and `assignee` only (the Releases ticket detail shows the last two), through the ONE outbound helper (`jiraGetJson`) and the workspace's
 // sealed token.
 //
 //   • `GET /rest/api/3/search/jql` first; a Server / Data Center site has no v3 search (404) → the
@@ -14,7 +14,7 @@
 //   • 401 / 403 → `no_access` for the batch; anything else (timeout, 5xx) → `failed` (retried later).
 // Keys are checked against `isTicketKey` (letters, digits, one hyphen): safe in JQL unquoted.
 import type { TicketStatusAnswer, TrackerCall } from '../types.js';
-import { isTicketKey, jiraAuthHeader, statusOf } from './client.js';
+import { assigneeOf, isTicketKey, jiraAuthHeader, statusOf } from './client.js';
 import { JiraFetchError, jiraGetJson } from './fetch.js';
 
 export const JIRA_STATUS_BATCH = 100;
@@ -38,11 +38,14 @@ export function jiraStatusAnswers(raw: unknown, asked: readonly string[]): Map<s
     if (key == null || !want.has(key)) continue;
     const f = asRecord(r?.fields);
     const status = statusOf(f?.status);
+    const type = asRecord(f?.issuetype);
     out.set(key, {
       state: 'ok',
       key,
       title: typeof f?.summary === 'string' ? f.summary.slice(0, 500) : null,
       status: status == null ? null : { name: status.name, category: status.category },
+      typeName: typeof type?.name === 'string' ? type.name.slice(0, 200) : null,
+      assigneeName: assigneeOf(f?.assignee)?.name.slice(0, 200) ?? null,
     });
   }
   for (const k of asked) if (!out.has(k)) out.set(k, { state: 'missing', key: k });
@@ -63,7 +66,7 @@ export async function readJiraStatuses(
     return false;
   });
   const search = async (part: string[]): Promise<unknown> => {
-    const q = new URLSearchParams({ jql: jiraStatusJql(part), fields: 'status,summary,issuetype', maxResults: String(JIRA_STATUS_BATCH) });
+    const q = new URLSearchParams({ jql: jiraStatusJql(part), fields: 'status,summary,issuetype,assignee', maxResults: String(JIRA_STATUS_BATCH) });
     const get = (path: string): Promise<unknown> => {
       calls += 1;
       return jiraGetJson(`${call.apiRoot}${path}?${q.toString()}`, { authorization: jiraAuthHeader(call.credentials) }, call.policy, call.transport);
