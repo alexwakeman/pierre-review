@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.48] - 2026-11-16
+
 ### Changed
 
 - This Sprint → Releases: a repository opens to one list in three parts — every tag newer than the candidate
