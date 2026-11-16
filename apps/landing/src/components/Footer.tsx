@@ -39,10 +39,9 @@ export default function Footer(): JSX.Element {
     <footer className="lb-foot">
       <div className="flinks">
         <div>
-          <Link to="/everything-else#review">Review</Link>
-          <Link to="/everything-else#fix">Fix</Link>
-          <Link to="/everything-else#ship">Ship</Link>
-          <Link to="/everything-else#see">See</Link>
+          <Link to="/everything-else#open-prs">Open pull requests</Link>
+          <Link to="/everything-else#reporting">Reporting</Link>
+          <Link to="/everything-else#how-we-measure">How we measure</Link>
         </div>
         <div>
           <Link to="/docs">Docs</Link>

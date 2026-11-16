@@ -22,7 +22,7 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 | `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
 | `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
 | `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
-| `/everything-else` | `pages/EverythingElse.tsx` | The Review / Fix / Ship / See chapters, works with, proof, `#reporting` (`ReportingSection`) and `#how-we-measure` (`HowWeMeasureSection`), Why, tiers and questions |
+| `/everything-else` | `pages/EverythingElse.tsx` | `#open-prs` (a workspace's Open pull requests grouped by ticket, the clickable `OpenPrsMock` with its drawer), `#reporting` (`ReportingSection`) and `#how-we-measure` (`HowWeMeasureSection`), Why, tiers and questions |
 | `/contact` | `pages/Contact.tsx` | **Also the licence path** for organisations with more than three users, and where `/pricing` resolves. The only page that talks to a server (`POST /api/contact` → a Slack webhook) |
 | `/docs` and `/docs/**` | `docs/DocsApp.tsx` + `docs/pages/**` | **The user documentation** (below): every screen of the app, AI review, AI Fix, Implement story, merging, every Settings tab, one page per integration, security, licence, FAQ, troubleshooting, the changelog |
 | `/privacy` · `/cookies` · `/terms` | `pages/{Privacy,Cookies,Terms}.tsx` | Legal. Linked from the footer (on `/docs`, the one legal line at the bottom: there is no footer there) and the consent banner. Terms summarise the Ensemble License and defer to it |
@@ -78,16 +78,9 @@ are the app's own; never invent a feature for a mock.
 
 | Mock (`components/mock/…`) | Page | Mirrors (`apps/frontend/src/…`) |
 |---|---|---|
-| `home.tsx` PendingBoardMock, PendingListMock | `/` hero, Review; `/teams` (PendingListMock opened on Waiting on others) | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx`, `PendingAiReviews.tsx` (AI reviews: the newest review per PR, New since the last look, then one "Seen …" block per earlier visit) |
-| `home.tsx` ReviewMock (PR tabs) | `/` Review, `/teams` | `components/PrDetail.tsx` (TAB_LABELS), `ChecksTab.tsx` (the Overview's order), `pr/ReviewDecisionPill.tsx` ("Review required"), `ClaudeReviewTab.tsx`, `TeamReviewLayout.tsx` (Findings: Open, then "Resolved or addressed (n)"; who raised each), `lib/teamReview.ts` (`closedReason`), `ClaudeReviewFollowUp.tsx` `EarlierFindingNote` (an earlier finding's one-line how), `AiFixTab.tsx` |
-| `home.tsx` StoryCheckMock | `/` Review | the story check in `ClaudeReviewTab.tsx` |
-| `home.tsx` FixMock | `/` Fix | `components/AiFixTab.tsx`, `components/AiFix/`, `components/sandbox/SessionView.tsx` (Start fix, the session's tool rows, Push, Pushed to) |
-| `home.tsx` CiMock | `/` Fix | `components/CheckList.tsx`, `Activity/PendingFlaky.tsx` (Re-run failed jobs) |
-| `home.tsx` ConflictsMock | `/` Fix | `components/conflicts/` (`copy.ts`) |
-| `home.tsx` VerdictMock | `/` Ship | `lib/ui.ts` `mergeVerdict`, the PR Overview's Blocked row |
-| `home.tsx` MergeWhenReadyMock | `/` Ship | `components/MergeWhenReadyControl.tsx` |
-| `home.tsx` TrunkMock | `/` Ship | the trunk strip (`/api/branch-status`) |
-| `home.tsx` ChronologyMiniMock, BotsWorthMock | `/` See | `Activity/BottlenecksPanel.tsx`, Bots Monitoring |
+| `home.tsx` PendingListMock | `/ensemble-review`, the Pending docs; `/teams` (PendingListMock opened on Waiting on others) | `components/Activity/AttentionView.tsx`, `pendingTabs.ts` (TAB_LABEL), `pendingLabels.ts`, `ReviewWaitActions.tsx` (Nudge), `PendingFlaky.tsx`, `PendingAiReviews.tsx` (AI reviews: the newest review per PR, New since the last look, then one "Seen …" block per earlier visit) |
+| `home.tsx` ReviewMock (PR tabs) | `/ensemble-review` | `components/PrDetail.tsx` (TAB_LABELS), `ChecksTab.tsx` (the Overview's order), `pr/ReviewDecisionPill.tsx` ("Review required"), `ClaudeReviewTab.tsx`, `TeamReviewLayout.tsx` (Findings: Open, then "Resolved or addressed (n)"; who raised each), `lib/teamReview.ts` (`closedReason`), `ClaudeReviewFollowUp.tsx` `EarlierFindingNote` (an earlier finding's one-line how), `AiFixTab.tsx` |
+| `home.tsx` FixMock | `/ensemble-review` | `components/AiFixTab.tsx`, `components/AiFix/`, `components/sandbox/SessionView.tsx` (Start fix, the session's tool rows, Push, Pushed to) |
 | `teams.tsx` ClaimLinesMock | `/teams` | `components/CheckList.tsx` (the "Ensemble" label, "passed" / "running"), the `ensemble/review-*` line words (`review/claude-review/team-claim.ts`), `Activity/OpenPrsAiReview.tsx` ("Reviewed by @…"), `components/TeamClaimLine.tsx` |
 | `teams.tsx` TeamStandingMock | `/teams` | `components/TeamReviewLayout.tsx` ("Where this PR stands"), `lib/teamReview.ts` (`standingRow`, the grid of "Reviews on this PR"), `lib/claudeReviewColumn.ts` (`CLAUDE_VERDICT_LABEL`, `shortDayTime`) |
 | `reports.tsx` FlowMetricsMock | `/reporting` | `Activity/WorkspaceFlowMetrics`, `Activity/MetricsDetail.tsx` |
@@ -97,6 +90,7 @@ are the app's own; never invent a feature for a mock.
 | `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
 | `build.tsx` CriteriaMapMock | `/build` | `Activity/CriteriaMap.tsx` ("How the code meets each criterion", the story view) |
 | `build.tsx` TicketDesignMock, TicketCheckMock, LoopBodyMock | `/build` | `components/FlowDiagram.tsx` + `StoryDesignSection.tsx` ("Ticket design"), the story check in `ClaudeReviewTab.tsx` / `StoryLayout.tsx`, the loop's PR body (`coding/story-build/loop/pr-body.ts`) |
+| `openPrs.tsx` OpenPrsMock | `/everything-else#open-prs` | `components/Activity/OpenPrsRows.tsx` (the ticket groups, the Review / CI / Threads / AI review columns, the drawer: Can it land, Checks, Reviews, Threads, AI review, Tickets, Pull request), `lib/ui.ts` `mergeVerdict` (the "Can it land" words) |
 | `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
 | `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
 | `reports.tsx` SprintLanesMock (`initialView="releases"` on `/docs/this-sprint/releases`) | `/reporting`, `/docs/this-sprint/overview`, `/docs/this-sprint/releases` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` (the four tabs); the Releases tab: `Sprint/ReleasesView.tsx`, `Sprint/releasesModel.ts` (`repoRowText`, `repoLatestNote`, `repoRowCounts`, `repoProgress`, `rowBands` / `BAND_WORDS` (the three bands), `tagHeader`, `candidateScopeLabel`, `tagExplainer`, `ticketLine`, `ticketDetail`, `olderTagSummary`, `olderBandView`, `noTicketLine`) |

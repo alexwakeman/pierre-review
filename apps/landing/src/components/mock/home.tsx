@@ -2,21 +2,13 @@ import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ACTIONS,
-  ARM,
-  BOT_WORTH,
   CI_FAILURE,
-  CONFLICTS,
-  CONFLICT_WORDS,
-  COURTS,
   FINDINGS,
   FIX,
   FIX_DIFF,
   PENDING,
   PRS,
   PR_VIEW,
-  STORY,
-  TRUNKS,
-  VERDICT,
   pendingTabCount,
   prLabel,
 } from '../../mock/acme';
@@ -25,24 +17,21 @@ import {
   Act,
   CheckRow,
   Chip,
-  CourtBar,
   Diff,
   FindingRow,
   Group,
-  HBar,
   Log,
-  MiniTable,
   MockFrame,
   MockTabs,
   PrRow,
   useAction,
 } from './kit';
 
-// The home page's mocks, one per feature. Words and numbers: src/mock/acme.ts.
+// The product mocks used by /ensemble-review and the docs (Review, Fix, Pending). Words and numbers: src/mock/acme.ts.
 // Each LIVE mock starts in the state the prerendered HTML shows; the app
 // surface it mirrors is listed in apps/landing/README.md.
 
-const { refunds, settings, ledgerRename } = PRS;
+const { refunds } = PRS;
 
 // ---- small shared pieces -------------------------------------------------------
 
@@ -237,47 +226,6 @@ function PendingCards({
   );
 }
 
-/** The hero: the Pending board. Tabs switch the cards; a card opens its detail and its action. */
-export function PendingBoardMock(): JSX.Element {
-  const [tab, setTab] = useState<PendingTabId>('my_turn');
-  const [openId, setOpenId] = useState<PendingCardId | null>('settings');
-  // A new key per visit to a tab, so a finished action starts over when the reader comes back.
-  const [round, setRound] = useState(0);
-  const changed = tab !== 'my_turn' || openId !== 'settings' || round > 0;
-  const go = (t: PendingTabId): void => {
-    setTab(t);
-    setOpenId(PENDING.byTab[t][0] ?? null);
-    setRound((r) => r + 1);
-  };
-  return (
-    <MockFrame
-      live
-      dots
-      title={`Pending · ${PENDING.workspace}`}
-      right={`you: ${PENDING.you}`}
-      onReset={
-        changed
-          ? () => {
-              setTab('my_turn');
-              setOpenId('settings');
-              setRound(0);
-            }
-          : null
-      }
-      label="The Pending board: tabs for My turn, AI reviews, Needs fixing, Ready to land and Waiting on others, each with its own pull requests"
-    >
-      <MockTabs
-        label="Pending tabs"
-        tabs={PENDING.tabs.map((t) => ({ ...t, count: pendingTabCount(t.id) }))}
-        value={tab}
-        onChange={go}
-        boxed
-      >
-        <PendingCards key={round} tab={tab} openId={openId} setOpenId={setOpenId} />
-      </MockTabs>
-    </MockFrame>
-  );
-}
 
 /**
  * Review chapter: My turn and Waiting on others, with a working Nudge. `initialTab`
@@ -466,24 +414,6 @@ export function ReviewMock(): JSX.Element {
   );
 }
 
-export function StoryCheckMock(): JSX.Element {
-  return (
-    <MockFrame
-      title={`${STORY.key} ${STORY.title}`}
-      right={<Chip tone="amber">{STORY.chip}</Chip>}
-      label="The story check for PAY-142: criteria 1 and 4 met, 2 at risk, 3 not met, and one finding from the payments handbook"
-    >
-      {STORY.criteria.map((c) => (
-        <FindingRow key={c.n} chip={c.status} tone={c.tone}>
-          {c.n}. {c.text}
-        </FindingRow>
-      ))}
-      <FindingRow chip="Docs" tone="red">
-        {FINDINGS.docs.source} {FINDINGS.docs.section}: {FINDINGS.docs.text}
-      </FindingRow>
-    </MockFrame>
-  );
-}
 
 // ---- fix -------------------------------------------------------------------------
 
@@ -539,217 +469,16 @@ export function FixMock(): JSX.Element {
   );
 }
 
-export function CiMock(): JSX.Element {
-  return (
-    <Resettable
-      title={`${CI_FAILURE.check} · failed`}
-      right={<Chip>Flaky</Chip>}
-      label="A failed test-api check marked Flaky: the test lost its network connection, and the same check passed on this commit earlier. Re-run failed jobs."
-    >
-      <Log lines={CI_FAILURE.log} />
-      <p className="mk-note">{CI_FAILURE.verdict}</p>
-      <div className="mk-end">
-        <RunButton words={ACTIONS.rerun} tone="go" />
-      </div>
-    </Resettable>
-  );
-}
 
-function ConflictsBody(): JSX.Element {
-  const [pick, setPick] = useState<(typeof CONFLICT_WORDS.choices)[number] | null>(null);
-  const push = useAction();
-  const rows = CONFLICTS.map((c, i) =>
-    i === CONFLICTS.length - 1 && pick ? { ...c, state: pick.state, tone: 'green' as const, note: pick.note } : c,
-  );
-  return (
-    <>
-      <div className="mk-chips" style={{ marginBottom: 8 }}>
-        <Chip tone={pick ? 'green' : 'amber'}>{pick ? CONFLICT_WORDS.allDecided : '1 left'}</Chip>
-      </div>
-      {rows.map((c) => (
-        <FindingRow key={c.file} chip={c.state} tone={c.tone}>
-          <code>{c.file}</code> · {c.note}
-        </FindingRow>
-      ))}
-      <div className="mk-end">
-        {pick ? (
-          push.phase === 'done' ? (
-            <span role="status">
-              <Chip tone="green">{CONFLICT_WORDS.pushed}</Chip>
-            </span>
-          ) : (
-            <Act tone="go" onClick={() => push.run()} disabled={push.phase === 'busy'}>
-              {push.phase === 'busy' ? CONFLICT_WORDS.pushing : CONFLICT_WORDS.commit}
-            </Act>
-          )
-        ) : (
-          CONFLICT_WORDS.choices.map((c) => (
-            <Act key={c.id} onClick={() => setPick(c)}>
-              {c.label}
-            </Act>
-          ))
-        )}
-      </div>
-    </>
-  );
-}
 
-export function ConflictsMock(): JSX.Element {
-  return (
-    <Resettable
-      title={`#${ledgerRename.num} · 3 conflicts`}
-      label="Three merge conflicts on pull request 701: two decided, one in api/routes.py still to decide between ours, theirs or both"
-    >
-      <ConflictsBody />
-    </Resettable>
-  );
-}
 
 // ---- ship ------------------------------------------------------------------------
 
-function VerdictBody(): JSX.Element {
-  const update = useAction(900);
-  const blockers = VERDICT.blockers.filter((b) => !(b.id === 'behind' && update.phase === 'done'));
-  return (
-    <>
-      <div className="mk-chips" style={{ marginBottom: 8 }}>
-        <Chip tone="red">Blocked</Chip>
-        <Chip tone="blue">2 of 3 in stack</Chip>
-        <Chip>Large</Chip>
-      </div>
-      {blockers.map((b, i) => (
-        <FindingRow key={b.id} chip={String(i + 1)} tone={b.tone}>
-          {b.text}
-        </FindingRow>
-      ))}
-      {update.phase !== 'done' ? (
-        <div className="mk-end">
-          <Act onClick={() => update.run()} disabled={update.phase === 'busy'}>
-            {update.phase === 'busy' ? VERDICT.update.busy : VERDICT.update.idle}
-          </Act>
-        </div>
-      ) : null}
-    </>
-  );
-}
 
-export function VerdictMock(): JSX.Element {
-  return (
-    <Resettable
-      title={prLabel(settings)}
-      label="Pull request 1190 is blocked: it needs one more approval, and its branch is behind main. It is 2 of 3 in a stack."
-    >
-      <VerdictBody />
-    </Resettable>
-  );
-}
 
-function ArmBody(): JSX.Element {
-  const [armed, setArmed] = useState(false);
-  return (
-    <>
-      <PrRow title={prLabel(ARM.first.pr)} status={<Chip tone="green">Armed</Chip>} why={ARM.first.why} />
-      <PrRow
-        title={prLabel(ARM.second.pr)}
-        status={armed ? <Chip tone="green">Armed</Chip> : <Act onClick={() => setArmed(true)}>{ARM.button}</Act>}
-        why={
-          armed ? (
-            <>
-              <span role="status">{ARM.armed}</span>
-              <span>· {ARM.second.armed}</span>
-              <Act onClick={() => setArmed(false)}>{ARM.cancel}</Act>
-            </>
-          ) : (
-            ARM.second.idle
-          )
-        }
-      />
-    </>
-  );
-}
 
-export function MergeWhenReadyMock(): JSX.Element {
-  return (
-    <Resettable
-      title="Merge when ready"
-      label="Pull request 476 is armed and merges once one check passes; 482 can be armed to land after it, one at a time"
-    >
-      <ArmBody />
-    </Resettable>
-  );
-}
 
-export function TrunkMock(): JSX.Element {
-  const [open, setOpen] = useState<string | null>(TRUNKS.find((t) => t.tone === 'red')?.repo ?? null);
-  return (
-    <MockFrame
-      live
-      title="Main branches"
-      label="Main branches: acme/payments and acme/api are green; acme/web is red since pull request 1184 merged 35 minutes ago"
-    >
-      {TRUNKS.map((t) => (
-        <CheckRow
-          key={t.repo}
-          name={t.repo}
-          state={t.state}
-          tone={t.tone}
-          note={t.why}
-          open={open === t.repo}
-          onToggle={() => setOpen(open === t.repo ? null : t.repo)}
-        />
-      ))}
-    </MockFrame>
-  );
-}
 
 // ---- see -------------------------------------------------------------------------
 
-export function ChronologyMiniMock(): JSX.Element {
-  return (
-    <MockFrame label="The median pull request's working hours: 3.1 waiting for review, 1.8 with the author, 1.1 waiting to land. 86% of first reviews this sprint arrived within the 4-hour target.">
-      <Group first>Median pull request · working hours</Group>
-      <CourtBar segments={COURTS.map((c) => ({ label: c.short, color: c.color, pct: c.pct, value: c.hours }))} />
-      <Group>Review target · 4 working hours</Group>
-      <div className="mk-fig">
-        <b>86%</b>
-        <span>of first reviews this sprint arrived within it</span>
-      </div>
-    </MockFrame>
-  );
-}
 
-export function BotsWorthMock(): JSX.Element {
-  const [sel, setSel] = useState<string | null>(null);
-  const b = BOT_WORTH.find((x) => x.bot === sel);
-  return (
-    <MockFrame
-      live
-      title="Review bots"
-      label="Review bots compared: CodeRabbit 412 comments, 38% acted on; Copilot 290, 22%; Ensemble 118, 71%"
-    >
-      <MiniTable
-        className="stack"
-        selected={sel}
-        onSelect={(k) => setSel(sel === k ? null : k)}
-        cols={[
-          { key: 'bot', label: 'Bot' },
-          { key: 'comments', label: 'Comments', num: true },
-          { key: 'high', label: 'High' },
-          { key: 'acted', label: 'Acted on', num: true },
-        ]}
-        rows={BOT_WORTH.map((x) => ({
-          _key: x.bot,
-          bot: x.bot,
-          comments: x.comments,
-          high: <HBar parts={[x.high]} colors={[x.ours ? 'var(--verdigris)' : 'var(--lapis)']} />,
-          acted: x.acted,
-        }))}
-      />
-      {b ? (
-        <p className="mk-detail" role="status">
-          <b>{b.bot}</b>: {b.comments} comments, {b.high}% of them major or critical. Your team acted on {b.actedN}.
-        </p>
-      ) : null}
-    </MockFrame>
-  );
-}

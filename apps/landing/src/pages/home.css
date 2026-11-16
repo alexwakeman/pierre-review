@@ -726,3 +726,8 @@
     min-height: 0;
   }
 }
+
+/* ---- Everything else: Open pull requests (components/mock/openPrs.tsx) ---------- */
+.lb.home .op-mock {
+  margin-top: var(--gap);
+}

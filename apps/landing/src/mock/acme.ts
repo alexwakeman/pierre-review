@@ -259,50 +259,12 @@ export const CI_FAILURE = {
   verdict: 'Not your change: the test lost its network connection.',
 };
 
-/** Merge conflicts on #701. The last one waits for a choice. */
-export const CONFLICTS = [
-  { state: 'Applied', tone: 'green', file: 'ledger/post.py', note: 'took theirs' },
-  { state: 'Both applied', tone: 'green', file: 'ledger/models.py', note: 'both' },
-  { state: 'Needs a decision', tone: 'amber', file: 'api/routes.py', note: 'lines 40–52' },
-] as { state: string; tone: Tone; file: string; note: string }[];
 
-export const CONFLICT_WORDS = {
-  choices: [
-    { id: 'ours', label: 'Ours', state: 'Applied', note: 'took ours' },
-    { id: 'theirs', label: 'Theirs', state: 'Applied', note: 'took theirs' },
-    { id: 'both', label: 'Both', state: 'Both applied', note: 'both' },
-  ],
-  allDecided: 'Everything is decided.',
-  commit: 'Commit and push',
-  pushing: 'Pushing…',
-  pushed: 'Pushed',
-};
 
 // ---- ship -----------------------------------------------------------------
 
-export const TRUNKS = [
-  { repo: REPOS.payments, state: 'Green', tone: 'green', why: 'Last run passed 12 min ago' },
-  { repo: REPOS.web, state: 'Red', tone: 'red', why: `e2e-checkout since #${PRS.checkout.num} merged · 35 min` },
-  { repo: REPOS.api, state: 'Green', tone: 'green', why: 'Last run passed 40 min ago' },
-] as { repo: string; state: string; tone: Tone; why: string }[];
 
-/** The merge verdict on #1190: blockers in order. "Update branch" clears the second. */
-export const VERDICT = {
-  blockers: [
-    { id: 'approval', text: 'Needs 1 more approval', tone: 'red' },
-    { id: 'behind', text: 'Branch is behind main', tone: 'amber' },
-  ] as { id: string; text: string; tone: Tone }[],
-  update: { idle: 'Update branch', busy: 'Updating…' },
-};
 
-/** Merge when ready (MergeWhenReadyControl.tsx): the button and the armed state. */
-export const ARM = {
-  button: 'Merge when ready',
-  armed: 'Armed — merging when ready',
-  cancel: 'Cancel auto-merge',
-  first: { pr: PRS.ledgerIndex, why: 'Waiting for 1 check · then merges' },
-  second: { pr: PRS.retry, idle: '2 approvals · 1 check running', armed: `Lands after #${PRS.ledgerIndex.num}, one at a time` },
-};
 
 // ---- reporting --------------------------------------------------------------
 
@@ -459,12 +421,6 @@ export const BOT_SUMMARY = [
   { k: 'Top topic', v: 'Correctness', d: '117 findings' },
 ];
 
-/** The home page's short bots table: comments, share high, share acted on. */
-export const BOT_WORTH = [
-  { bot: 'CodeRabbit', comments: 412, high: 60, acted: '38%', actedN: 157 },
-  { bot: 'Copilot', comments: 290, high: 35, acted: '22%', actedN: 64 },
-  { bot: 'Ensemble', comments: 118, high: 75, acted: '71%', actedN: 84, ours: true },
-];
 
 export const BENCH = {
   bot: 'CodeRabbit',
@@ -841,4 +797,180 @@ export const BUILD = {
     counts: 'Fixed: 3 · Answered: 1 · Pushed back and accepted: 1 · Still open: 0',
     criteria: 'Acceptance criteria: 2 met, 0 not applicable, 0 not met.',
   },
+};
+
+// ---- Open pull requests (Everything else): one workspace, grouped by ticket ---------
+// The words are the app's own (Activity/OpenPrsRows.tsx): the lead status is mergeVerdict's
+// label, capitalised, with its detail; "Changes requested" / "Approved"; "CI failing" /
+// "CI passing" / "CI running"; "2 untouched" / "1 open thread"; "Can it land", "Checks",
+// "Reviews", "Threads", "Tickets", "Pull request", "AI review". Every PR keeps the number
+// and title it has elsewhere on the site.
+
+/** The lead status: the "Can it land" icon and its tone. */
+export type OpenPrLead = 'blocked' | 'conflicts' | 'ready' | 'draft' | 'neutral';
+
+export interface OpenPr {
+  pr: Pr;
+  author: string;
+  /** The row's age ("2h"), and the drawer's Opened / Updated. */
+  age: string;
+  opened: string;
+  updated: string;
+  lead: OpenPrLead;
+  /** mergeVerdict's label, capitalised, and its detail line. */
+  land: string;
+  landDetail: string | null;
+  ci: 'failing' | 'passing' | 'running' | null;
+  review: 'changes' | 'approved' | null;
+  /** Open threads (untouched + replied + likely addressed), untouched, resolved. */
+  threads: { open: number; untouched: number; resolved: number };
+  ai: { verdict: string; tone: Tone; findings: string | null } | 'reviewing' | null;
+  size: { files: number; add: number; del: number };
+  reach: 'Low' | 'Medium' | 'High';
+  draft?: boolean;
+}
+
+export interface OpenPrGroup {
+  ticket: { key: string; title: string } | null;
+  prs: OpenPr[];
+}
+
+export const OPEN_PRS: { workspace: string; groups: OpenPrGroup[]; firstOpen: number } = {
+  workspace: 'Acme payments',
+  firstOpen: PRS.refunds.num,
+  groups: [
+    {
+      ticket: { key: STORY.key, title: STORY.title },
+      prs: [
+        {
+          pr: PRS.refunds,
+          author: 'dana',
+          age: '2h',
+          opened: '3 days ago',
+          updated: '2 hours ago',
+          lead: 'blocked',
+          land: 'Blocked',
+          landDetail: 'required checks or reviews aren’t satisfied',
+          ci: 'failing',
+          review: 'changes',
+          threads: { open: 3, untouched: 2, resolved: 1 },
+          ai: { verdict: 'Request changes', tone: 'red', findings: '1 blocker · 1 major' },
+          size: { files: 14, add: 412, del: 88 },
+          reach: 'High',
+        },
+        {
+          pr: PRS.ledgerIndex,
+          author: 'priya',
+          age: '1d',
+          opened: '2 days ago',
+          updated: 'yesterday',
+          lead: 'ready',
+          land: 'Ready to merge',
+          landDetail: null,
+          ci: 'passing',
+          review: 'approved',
+          threads: { open: 0, untouched: 0, resolved: 2 },
+          ai: { verdict: 'Approve', tone: 'green', findings: '1 nit' },
+          size: { files: 3, add: 46, del: 12 },
+          reach: 'Low',
+        },
+      ],
+    },
+    {
+      ticket: { key: 'WEB-88', title: 'Settings redesign' },
+      prs: [
+        {
+          pr: PRS.checkout,
+          author: 'sam',
+          age: '5h',
+          opened: '4 days ago',
+          updated: '5 hours ago',
+          lead: 'conflicts',
+          land: 'Conflicts',
+          landDetail: 'resolve the conflicts with the base branch',
+          ci: 'passing',
+          review: 'approved',
+          threads: { open: 1, untouched: 0, resolved: 3 },
+          ai: { verdict: 'Comment', tone: 'grey', findings: '2 minor' },
+          size: { files: 9, add: 230, del: 141 },
+          reach: 'Medium',
+        },
+        {
+          pr: PRS.settings,
+          author: 'leo',
+          age: '3d',
+          opened: '3 days ago',
+          updated: '3 days ago',
+          lead: 'draft',
+          land: 'Draft',
+          landDetail: 'mark it ready for review to merge',
+          ci: 'running',
+          review: null,
+          threads: { open: 0, untouched: 0, resolved: 0 },
+          ai: null,
+          size: { files: 6, add: 158, del: 40 },
+          reach: 'Medium',
+          draft: true,
+        },
+      ],
+    },
+    {
+      ticket: { key: 'API-31', title: 'Webhook reliability' },
+      prs: [
+        {
+          pr: PRS.webhooks,
+          author: 'dana',
+          age: '40m',
+          opened: '40 minutes ago',
+          updated: '40 minutes ago',
+          lead: 'blocked',
+          land: 'Blocked',
+          landDetail: 'required checks or reviews aren’t satisfied',
+          ci: 'running',
+          review: null,
+          threads: { open: 0, untouched: 0, resolved: 0 },
+          ai: 'reviewing',
+          size: { files: 4, add: 97, del: 23 },
+          reach: 'Medium',
+        },
+        {
+          pr: PRS.idempotency,
+          author: 'priya',
+          age: '2d',
+          opened: '5 days ago',
+          updated: '2 days ago',
+          lead: 'neutral',
+          land: 'Behind base',
+          landDetail: '3 commits behind — update the branch first',
+          ci: 'passing',
+          review: 'approved',
+          threads: { open: 0, untouched: 0, resolved: 4 },
+          ai: { verdict: 'Approve', tone: 'green', findings: null },
+          size: { files: 5, add: 120, del: 31 },
+          reach: 'Low',
+        },
+      ],
+    },
+    {
+      ticket: null,
+      prs: [
+        {
+          pr: PRS.payouts,
+          author: 'sam',
+          age: '6d',
+          opened: '6 days ago',
+          updated: '6 days ago',
+          lead: 'neutral',
+          land: 'Checks failing',
+          landDetail: 'some non-required checks are failing — GitHub will still merge it',
+          ci: 'failing',
+          review: null,
+          threads: { open: 2, untouched: 2, resolved: 0 },
+          ai: { verdict: 'Comment', tone: 'grey', findings: '1 major · 1 minor' },
+          size: { files: 7, add: 188, del: 64 },
+          reach: 'Medium',
+        },
+      ],
+    },
+  ],
 };
