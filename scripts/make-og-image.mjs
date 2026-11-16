@@ -29,7 +29,7 @@ const font = (w) => `@font-face { font-family: 'Albert Sans'; font-weight: ${w};
 
 // The hero's own Chain (geometry.ts SITE_CHAIN), assembled, so the card cannot drift from the page.
 function chainSvg() {
-  const c = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross, SITE_CHAIN.reach);
+  const c = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross, SITE_CHAIN.reach, SITE_CHAIN.scatter);
   return quartersToSvg(`0 0 ${c.width} ${c.height}`, c.quarters);
 }
 

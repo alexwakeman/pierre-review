@@ -242,6 +242,12 @@ function mirroredRuns(qs: { cx: number; cy: number; corner: Corner }[], width: n
   return runs;
 }
 
+/** A fixed number in [0, 1) for link `i`, draw `k`: the same on every load (no Math.random). */
+const unit = (i: number, k: number): number => {
+  const x = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453;
+  return x - Math.floor(x);
+};
+
 const CORNER_OF = (sx: number, sy: number): Corner =>
   sx > 0 ? (sy > 0 ? 'tl' : 'bl') : sy > 0 ? 'tr' : 'br';
 
@@ -258,8 +264,11 @@ const CORNER_OF = (sx: number, sy: number): Corner =>
  * every link starts on the far side of the box and travels through the middle, past
  * the others, into place. The mirror of a link lies inside the same box, so a crossing
  * chain needs no margin and fills its tile. `reach` multiplies that start distance: above
- * 1 the links start scattered beyond the box, some of them off screen. The offsets
- * assume the CSS factor of 1.6 that board.css applies to --apart.
+ * 1 the links start scattered beyond the box, some of them off screen. `scatter` (0 to
+ * 1) breaks the start's symmetry: each link's start is turned and stretched by its own
+ * fixed amount (the same on every load, and in the prerendered page), so a symmetric
+ * chain starts in disorder and falls into symmetry. The offsets assume the CSS factor
+ * of 1.6 that board.css applies to --apart.
  */
 export function chainQuarters(
   R: number,
@@ -268,6 +277,7 @@ export function chainQuarters(
   margin = 0,
   cross = false,
   reach = 1,
+  scatter = 0,
 ): { quarters: Quarter[]; width: number; height: number } {
   let cx = 0;
   let cy = 0;
@@ -314,6 +324,19 @@ export function chainQuarters(
       const ux = q.cx + (q.sx * R) / 2 - mx;
       const uy = q.cy + (q.sy * R) / 2 - my;
       const len = Math.hypot(ux, uy) || 1;
+      // the crossing start (the mirror point × reach), then this link's own turn and stretch
+      let sx0 = -2 * reach * ux;
+      let sy0 = -2 * reach * uy;
+      if (scatter > 0) {
+        const turn = (unit(i, 1) - 0.5) * 1.6 * scatter; // up to ±46° at scatter 1
+        const stretch = 1 + (unit(i, 2) - 0.45) * 1.1 * scatter;
+        // a link near the middle has almost no mirror distance: give it one of its own
+        const floor = R * 0.9 * scatter * unit(i, 3);
+        const d = Math.max(Math.hypot(sx0, sy0), floor) * stretch;
+        const a = Math.atan2(sy0 || unit(i, 4) - 0.5, sx0 || unit(i, 5) - 0.5) + turn;
+        sx0 = Math.cos(a) * d;
+        sy0 = Math.sin(a) * d;
+      }
       return {
         cx: q.cx - x0,
         cy: q.cy - y0,
@@ -321,8 +344,8 @@ export function chainQuarters(
         corner: CORNER_OF(q.sx, q.sy),
         run: symmetric?.[i] ?? (CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName),
         // crossing: start at the mirror image, -2u, which the CSS reaches at 1.6 × dx
-        dx: Math.round((cross ? (-2 * reach * ux) / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
-        dy: Math.round((cross ? (-2 * reach * uy) / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
+        dx: Math.round((cross ? sx0 / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
+        dy: Math.round((cross ? sy0 / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
       };
     }),
     width: w + 2 * m,
@@ -335,11 +358,12 @@ export function chainQuarters(
  *  middle, three links stepping down on each side), so the scroll resolves into order.
  *  The arch is WIDE (about 1.9 : 1) so it fills the width of a desktop screen and still
  *  lands whole; a 4 : 3 shape would be cut top and bottom at full width. Its links start
- *  scattered (`reach` 1.35 × the mirror distance, some off screen) and cross through each
- *  other on their way in. The margin (0.04 of a slice's radius) keeps the arch just off
+ *  scattered and out of order (`reach` 1.35 × the mirror distance, each turned and
+ *  stretched by its own `scatter`, some off screen), cross through each other, and fall
+ *  into symmetry. The margin (0.04 of a slice's radius) keeps the arch just off
  *  the screen's edges. Found by searching every step string up to ten links for a
  *  mirror-symmetric chain without a doubled quarter. */
-export const SITE_CHAIN = { steps: 'ABBBABBBA', first: 'v', margin: 0.04, cross: true, reach: 1.35 } as const;
+export const SITE_CHAIN = { steps: 'ABBBABBBA', first: 'v', margin: 0.04, cross: true, reach: 1.35, scatter: 0.8 } as const;
 
 /**
  * The QUARTET: four quarters centred on the corners of a 100-unit square, facing one
