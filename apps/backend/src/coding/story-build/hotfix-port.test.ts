@@ -236,7 +236,7 @@ describe('what the agent is told (hotfix only)', () => {
 });
 
 describe('the release check: a hotfix not needed on main', () => {
-  it('a repository with only a hotfix-branch PR for the ticket: no warning, no block (each repo is judged on its own)', () => {
+  it('a repository with only a hotfix-branch PR for the ticket: no block, no warning (an open PR into hotfix/… is not work on its way to main)', () => {
     const at = (d: number): Date => new Date(Date.UTC(2026, 10, d, 12));
     const sha = (c: string): string => c.repeat(40);
     const tag = (name: string, c: string, d: number) => ({ name, sha: sha(c), committedAt: at(d), taggedAt: null, onDefaultBranch: true, moved: false });
@@ -245,23 +245,9 @@ describe('the release check: a hotfix not needed on main', () => {
       sha: sha(c),
       baseTagName: base?.name ?? null,
       baseSha: base ? sha(base.c) : null,
-      method: base ? ('compare' as const) : ('history' as const),
       prIds,
       unresolvedPrNumbers: [],
       unmatchedCommits: 0,
-      truncated: false,
-    });
-    const pr = (id: number, repoId: number, intoDefaultBranch: boolean, state: 'open' | 'merged') => ({
-      id,
-      repoId,
-      number: id,
-      title: `PLAT-1 change ${id}`,
-      url: `https://github.com/acme/r/pull/${id}`,
-      isBot: false,
-      intoDefaultBranch,
-      state,
-      mergedAt: state === 'merged' ? at(2) : null,
-      ticketIdents: ['PLAT-1'],
     });
     const r = foldReleaseCheck({
       settings: { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' },
@@ -276,14 +262,16 @@ describe('the release check: a hotfix not needed on main', () => {
         },
         { repoId: 2, fullName: 'acme/worker', name: 'worker', writable: true, tags: [], ranges: [] },
       ],
-      // api: the main PR, merged and in v1.1.0. worker: the release fix only (into hotfix/…), main not needed.
-      prs: [pr(10, 1, true, 'merged'), pr(20, 2, false, 'open')],
+      // api: the main PR, merged and in v1.1.0. worker: the release fix only (into hotfix/…, open), main
+      // not needed — the DB half never hands in an open PR into another branch (db/release-check.ts).
+      prs: [{ id: 10, repoId: 1, number: 10, title: 'PLAT-1 change', url: 'https://github.com/acme/api/pull/10', isBot: false, mergedAt: at(2), ticketIdents: ['PLAT-1'] }],
+      openPrs: [],
       tickets: [{ ident: 'PLAT-1', key: 'PLAT-1', title: 't', url: null, statusName: 'Done', done: true, readState: 'ok' }],
     });
     const t = r.tickets.find((x) => x.key === 'PLAT-1')!;
     expect(t.blocker).toBeNull();
     expect(t.repos.find((x) => x.repoId === 1)?.state).toBe('in_candidate');
     expect(t.repos.find((x) => x.repoId === 2)).toBeUndefined();
-    expect(r.warnings).toEqual([]);
+    expect(r.repos.find((x) => x.repoId === 1)?.candidate?.name).toBe('v1.1.0');
   });
 });

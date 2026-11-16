@@ -944,7 +944,8 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
   `pull_requests` lends its row (`prId`). ONE writer `sync/release-history.ts`.
 - **`tracker_ticket_status`** (migration 0202) — a ticket's status read in a BATCH, unique `(account_id,
   workspace_id, ident)`: `provider`, `api_root`, `issue_key`, `state` (`ok`·`not_found`·`no_access`·`failed`),
-  `status_name`, `status_category`, `title`, `url`, `attempts` (failed reads in a row), `fetched_at`,
+  `status_name`, `status_category`, `title`, `url`, `attempts` (failed reads in a row; at 3 the release check
+  stops "checking" and lists the ticket as "could not be read"), `fetched_at`,
   `checked_at`. Composite FK to workspaces (cascade; `deleteWorkspace` deletes its rows). ONE writer
   `tracker/ticket-status.ts`; reader `db/release-check.ts`.
 - **`releases`** — one row per "Create release…" press: `workspace_id` (composite FK; `deleteWorkspace`

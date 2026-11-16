@@ -22,14 +22,23 @@ export interface ReleaseSnapshot {
   tickets: Array<{ ident: string; key: string }>;
 }
 
-/** The tickets a release of these repos ships: ready, and wholly in an included repo's candidate
- *  (each repository is judged on its own). Pure. */
-export function releaseShippedTickets(
+/** The tickets in the scope of an included repo's candidate: Complete, or not given by the tracker
+ *  (listed for the reader to check). Each repository is judged on its own. Pure. */
+export function releaseScopeTickets(
   result: Pick<ReleaseCheckResult, 'tickets'>,
   includedRepoIds: readonly number[],
 ): ReleaseTicketCheck[] {
   const inc = new Set(includedRepoIds);
   return result.tickets.filter((t) => t.inRelease && t.repos.some((r) => r.state === 'in_candidate' && inc.has(r.repoId)));
+}
+
+/** The tickets a release of these repos ships and comments on: in a candidate's scope and READY
+ *  (Complete, no open pull request). Pure. */
+export function releaseShippedTickets(
+  result: Pick<ReleaseCheckResult, 'tickets'>,
+  includedRepoIds: readonly number[],
+): ReleaseTicketCheck[] {
+  return releaseScopeTickets(result, includedRepoIds).filter((t) => t.ready);
 }
 
 /** What the dialog shows for these repos (only repos with a candidate count). Pure. */
@@ -60,9 +69,7 @@ export function releaseSnapshotChanges(
 ): string[] {
   const out: string[] = [];
   const repoById = new Map(after.repos.map((r) => [r.repoId, r]));
-  const prById = new Map(after.prs.map((p) => [p.id, p]));
   const repoName = (id: number): string => repoById.get(id)?.name ?? 'a repository';
-  const ctx = { repoName, prNumber: (id: number) => prById.get(id)?.number ?? null };
   const included = before.repos.map((r) => r.repoId);
 
   for (const u of extra.unread ?? []) out.push(`${u.key} could not be read again from the tracker.`);
@@ -70,7 +77,7 @@ export function releaseSnapshotChanges(
     const now = repoById.get(b.repoId);
     const name = repoName(b.repoId);
     if (now == null) out.push(`${name} is no longer in this workspace.`);
-    else if (now.candidate == null) out.push(`${name} has no version tag that is safe to release now.`);
+    else if (now.candidate == null) out.push(`${name} has no tag that can be released now.`);
     else if (now.candidate.name !== b.tagName) out.push(`${name}: the tag to release is now ${now.candidate.name}, not ${b.tagName}.`);
     else if (now.candidate.sha !== b.sha) out.push(`${b.tagName} in ${name} now points at another commit.`);
   }
@@ -83,7 +90,7 @@ export function releaseSnapshotChanges(
   for (const t of before.tickets) {
     if (nowShipped.has(t.ident)) continue;
     const now = ticketByIdent.get(t.ident);
-    if (now?.blocker != null) out.push(releaseBlockerText(now.blocker, ctx));
+    if (now?.blocker != null) out.push(releaseBlockerText(now.blocker));
     else out.push(`${t.key} is no longer in the release.`);
   }
   const had = new Set(before.tickets.map((t) => t.ident));
@@ -120,16 +127,16 @@ export interface ReleaseNotesRepo {
   versionTag: string;
   releaseTagName: string;
   stories: ReleaseNotesStory[];
+  /** since_release: everything since the last release; own_tag: only the candidate tag's own changes
+   *  (no release yet), so earlier changes are not listed. */
+  scope: 'since_release' | 'own_tag';
   untracked: ReleaseNotesPr[];
   bot: ReleaseNotesPr[];
 }
 
-/** The PR ids inside a repo's candidate (every version tag after the baseline up to it). Pure. */
+/** The PR ids in a repo's candidate scope. Pure. */
 export function candidatePrIds(repo: ReleaseCheckResult['repos'][number]): Set<number> {
-  const out = new Set<number>();
-  if (repo.candidate == null) return out;
-  for (const t of repo.tags) if (!t.blocked) for (const id of t.prIds) out.add(id);
-  return out;
+  return repo.candidate == null ? new Set() : new Set(repo.candidatePrIds);
 }
 
 /** The notes' facts for a release of these repos, from the check's result. Pure. */
@@ -148,8 +155,8 @@ export function releaseNotesInputOf(
     if (p == null) return null;
     return { id: p.id, repoName: nameOf.get(p.repoId) ?? '', number: p.number, title: p.title, url: p.url };
   };
-  const shipped = releaseShippedTickets(result, includedRepoIds);
-  const ticketByIdent = new Map(shipped.map((t) => [t.ident, t]));
+  const inScope = releaseScopeTickets(result, includedRepoIds);
+  const ticketByIdent = new Map(inScope.map((t) => [t.ident, t]));
   const storyPrs = (t: ReleaseTicketCheck): ReleaseNotesPr[] => {
     const out: ReleaseNotesPr[] = [];
     for (const r of [...t.repos].sort((a, b) => (nameOf.get(a.repoId) ?? '').localeCompare(nameOf.get(b.repoId) ?? ''))) {
@@ -172,6 +179,7 @@ export function releaseNotesInputOf(
       .filter((t): t is ReleaseTicketCheck => t != null)
       .sort((a, b) => a.key.localeCompare(b.key))
       .map((t) => ({ ident: t.ident, key: t.key, title: t.title, url: t.url, summary: summaries.get(t.ident) ?? null, prs: storyPrs(t) })),
+    scope: r.scope,
     untracked: r.untrackedPrIds.map(prRef).filter((p): p is ReleaseNotesPr => p != null),
     bot: r.botPrIds.map(prRef).filter((p): p is ReleaseNotesPr => p != null),
   }));
@@ -198,8 +206,10 @@ function prLine(p: ReleaseNotesPr): string {
 /** ONE repo's section — also its GitHub pre-release body. Pure. */
 export function releaseNotesSection(repo: ReleaseNotesRepo): string {
   const lines: string[] = [`## ${notesText(repo.repoName)} ${notesText(repo.releaseTagName)}`, '', `Built from ${notesText(repo.versionTag)}.`];
+  // No release yet: only the candidate tag's own changes are listed.
+  if (repo.scope === 'own_tag') lines.push('', 'Earlier changes are not listed.');
   if (repo.stories.length > 0) {
-    lines.push('', '### Stories');
+    lines.push('', repo.scope === 'own_tag' ? '### Stories in this tag' : '### Stories');
     for (const s of repo.stories) {
       const head = s.title != null && s.title !== '' ? `${mdLink(notesText(s.key), s.url)} ${notesText(s.title)}` : mdLink(notesText(s.key), s.url);
       lines.push('', `#### ${head}`);

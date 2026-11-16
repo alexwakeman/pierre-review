@@ -87,6 +87,7 @@ beforeEach(async () => {
   };
   extraPrs = [];
   dropPrs = new Set();
+  openPrs = [];
   // Each test starts with no release rows (the unique tag index spans releases).
   const { releases, releaseItems, releaseTicketComments } = client.schema;
   await client.db.delete(releaseTicketComments).execute();
@@ -114,10 +115,10 @@ function input(): ReleaseCheckInput {
       writable: true,
       tags,
       ranges: [
-        { tagName: 'v1.0.0', sha: v.sha, baseTagName: null, baseSha: null, method: 'history' as const, prIds, unresolvedPrNumbers: [], unmatchedCommits: 0, truncated: false },
+        { tagName: 'v1.0.0', sha: v.sha, baseTagName: null, baseSha: null, prIds, unresolvedPrNumbers: [], unmatchedCommits: 0 },
         ...tags
           .filter((t) => t.name !== 'v1.0.0')
-          .map((t) => ({ tagName: t.name, sha: t.sha, baseTagName: 'v1.0.0', baseSha: v.sha, method: 'compare' as const, prIds: [], unresolvedPrNumbers: [], unmatchedCommits: 0, truncated: false })),
+          .map((t) => ({ tagName: t.name, sha: t.sha, baseTagName: 'v1.0.0', baseSha: v.sha, prIds: [], unresolvedPrNumbers: [], unmatchedCommits: 0 })),
       ],
     };
   };
@@ -128,8 +129,6 @@ function input(): ReleaseCheckInput {
     title,
     url: `https://github.com/acme/${repoId === API ? 'api' : 'web'}/pull/${id}`,
     isBot: false,
-    intoDefaultBranch: true,
-    state: 'merged' as const,
     mergedAt: day(4),
     ticketIdents: keys.map(identOf),
   });
@@ -143,6 +142,7 @@ function input(): ReleaseCheckInput {
       pr(21, WEB, 'Dark mode', ['PLAT-3']),
       ...extraPrs,
     ].filter((p) => !dropPrs.has(p.id)),
+    openPrs: [...openPrs],
     tickets: Object.keys(w.stored).map((key) => ({
       ident: identOf(key),
       key,
@@ -164,6 +164,8 @@ function only(inp: ReleaseCheckInput, repoIds: readonly number[]): ReleaseCheckI
 /** Extra PRs a test adds to the world (an open PR opened after the dialog, …). */
 let extraPrs: ReleaseCheckInput['prs'] = [];
 let dropPrs = new Set<number>();
+/** Open PRs in the releasable repos (what the DB half reads from `pull_requests`). */
+let openPrs: NonNullable<ReleaseCheckInput['openPrs']> = [];
 
 const github: ReleaseGithub = {
   async readTagSha(_owner, name, tag) {
@@ -291,10 +293,22 @@ describe('createRelease — the writes, in order, each claimed', () => {
     const res = await create([API, WEB], snap);
     expect(res.outcome).toBe('stopped');
     if (res.outcome !== 'stopped') return;
-    expect(res.changes).toContain('PLAT-2 is not done (In review).');
+    expect(res.changes).toContain('PLAT-2 is In review.');
     expect(w.calls.tag).toEqual([]);
     expect(w.calls.prerelease).toEqual([]);
     expect(w.calls.comment).toEqual([]);
+    expect(await rowCount()).toBe(before);
+  });
+
+  it('acceptance 21: a pull request opens for a shipped ticket between the dialog and Confirm → Confirm stops (the open PRs re-read from the DB), writes nothing', async () => {
+    const snap = await snapshot([API, WEB]);
+    openPrs = [{ repoId: WEB, repoName: 'web', number: 88, url: 'https://github.com/acme/web/pull/88', prId: 88, ticketIdents: [identOf('PLAT-1')] }];
+    const before = await rowCount();
+    const res = await create([API, WEB], snap);
+    expect(res.outcome).toBe('stopped');
+    if (res.outcome !== 'stopped') return;
+    expect(res.changes).toContain('PLAT-1 has an open pull request in web (#88).');
+    expect(w.calls.tag).toEqual([]);
     expect(await rowCount()).toBe(before);
   });
 

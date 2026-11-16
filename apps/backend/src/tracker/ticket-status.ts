@@ -9,8 +9,9 @@
 //     not name (`missing`) and every key of a reader without one (Linear, GitHub Issues, Notion) are
 //     read ONE BY ONE through the reader's `fetchTicket`, at most PER_TICKET_READS_MAX per call,
 //     PER_TICKET_CONCURRENCY at a time — the rest wait for the next scan.
-//   • not found / no access are statements about the ticket (they hold); a failure is retried and
-//     shown as checking until RELEASE_TICKET_FAILS_HOLD reads in a row failed.
+//   • not found / no access are statements about the ticket (listed for the reader, never a block); a
+//     failure is retried and shown as checking until RELEASE_TICKET_FAILS_MAX reads in a row failed,
+//     then listed as "could not be read" (it stops blocking).
 //   • Read when the scan RECEIVES the range (or on a reader's press) — never when a page is viewed.
 //   ⚠ NEVER INSIDE A TRANSACTION: every network call is awaited before its row is written.
 import { and, eq, inArray } from 'drizzle-orm';
@@ -26,8 +27,9 @@ import type { TicketStatusAnswer, TrackerCall, TrackerReader } from './types.js'
 /** One-by-one reads per call (a reader with no bulk lookup, or keys the batch did not name). */
 export const PER_TICKET_READS_MAX = 40;
 const PER_TICKET_CONCURRENCY = 4;
-/** Failed reads in a row before a ticket HOLDS as "the tracker did not answer". */
-export const RELEASE_TICKET_FAILS_HOLD = 3;
+/** Failed reads in a row before a ticket stops "checking" and is listed as "could not be read: the
+ *  tracker did not answer" (it never blocks). */
+export const RELEASE_TICKET_FAILS_MAX = 3;
 
 export interface TicketStatusReadResult {
   /** Keys asked. */

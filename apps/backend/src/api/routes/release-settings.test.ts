@@ -273,7 +273,9 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
     await call('PUT', ownWs, { releaseSuffix: '-release', hotfixSuffix: '-hotfix' });
     const after = (await get(ownWs)).body;
     expect(after.check.repos[0].baseline).toBeNull();
-    expect(after.check.repos[0].tags.map((t: any) => t.name).sort()).toEqual(['v1.0.0', 'v1.0.0-rc']);
+    // Both are version tags now; the newest qualifies first (nothing older is read).
+    expect(after.check.repos[0]).toMatchObject({ status: 'candidate', candidate: { name: 'v1.0.0-rc' } });
+    expect(after.check.repos[0].tags.map((t: any) => t.name)).toEqual(['v1.0.0-rc']);
     // Unticked → no check, the setup line (an unticked repo is ignored entirely).
     await app.inject({ method: 'PUT', url: `/api/workspaces/${ownWs}/release-repos`, payload: { repoIds: [] } });
     expect((await get(ownWs)).body).toMatchObject({ configured: true, hasReleasableRepos: false, check: null });

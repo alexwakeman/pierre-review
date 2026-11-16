@@ -716,15 +716,15 @@ Owner decision 2026-11-14 ([RELEASES.md](RELEASES.md) § Releases tab 5–6). "C
 Sprint → Releases is the reader's press, and it does two tracker things:
 
 - **Confirm's re-read — a deliberate exception to "read when received, never when viewed".** Before
-  anything is written, EVERY ticket the release ships (the dialog's snapshot ∪ what the check ships now)
-  is read again from the tracker in ONE batch (§ Batched status reads — Jira: one search per 100 keys;
+  anything is written, EVERY ticket in the scope of the chosen candidates (the dialog's snapshot ∪ the
+  scope now, a ticket the tracker could not give included) is read again from the tracker in ONE batch (§ Batched status reads — Jira: one search per 100 keys;
   `releases/create.ts` `rereadTicketStatuses`), so the rows the check reads are the tracker's answer at the
-  press. A ticket that does not answer is a change; any change (a ticket left Done, a moved
-  candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
+  press. A ticket that does not answer is a change; any change (a ticket left Complete, a PR opened for
+  it, a moved candidate, a moved version tag on GitHub) stops Confirm and NOTHING is written. Only the press reads:
   the Releases tab and the dialog's preview read the stored rows (a view still never calls a reader).
 - **Refresh's re-read** (`POST /api/releases/refresh`, `releases/refresh.ts`) — the same exception, the
-  tab's Refresh press: the tickets the check holds by their own state (not Done, unreadable) or still
-  waits for (not read yet), ≤ 500, in ONE batch (§ Batched status reads). Needed because the worker is
+  tab's Refresh press: the tickets that are not Complete, not read yet, or that the tracker could not give
+  (not found, no access, failed), ≤ 500, in ONE batch (§ Batched status reads). Needed because the worker is
   MISSING-ONLY for a merged PR (it never TTL-refreshes one), so a ticket moved to Done after its PRs merged
   would otherwise wait for the scan's TTL. Tier `search`.
 - **RELEASE-RANGE TICKETS — read in BATCHES when the scan RECEIVES the range** (owner decision 2026-11-15,
@@ -734,11 +734,13 @@ Sprint → Releases is the reader's press, and it does two tracker things:
   `db/release-check.ts` `releasePrDetectInput` — the stored row when there is one, else the light record's
   title + head branch) names the keys; the scan reads the statuses of those not read yet, failed and due,
   or older than 10 min (`releaseTicketKeysOwed`) through § Batched status reads, into
-  `tracker_ticket_status`. A ticket with no read yet is `not_read`: "checking", never a blocker. `not_found`
-  / `no_access` hold the tag with the reason; a batched read that FAILED is retried and stays "checking"
-  until 3 failures in a row (`RELEASE_TICKET_FAILS_HOLD`), then holds. A workspace whose tracker cannot
-  read at all (no reader, no credential) holds a `not_read` ticket ("the tracker cannot read it") rather
-  than checking forever.
+  `tracker_ticket_status`. A ticket with no read yet is `not_read`: "checking" (its tag waits for it). A
+  ticket the tracker could not give NEVER blocks (owner, 2026-11-16 — docs/RELEASES.md § Simple rule):
+  `not_found` / `no_access` are LISTED under the tag ("BMD-123 not found") for the reader to check; a
+  batched read that FAILED is retried and stays "checking" until 3 failures in a row
+  (`RELEASE_TICKET_FAILS_MAX`), then is listed as "could not be read: the tracker did not answer" and stops
+  blocking. A workspace whose tracker cannot read at all (no reader, no credential) lists a `not_read`
+  ticket ("the tracker cannot read it") rather than checking forever.
 - **Batched status reads** (`tracker/ticket-status.ts` `readTicketStatuses`) — many tickets' STATUS for one
   workspace with no PR in hand, through the workspace's access and `prepareTrackerCall` (the sealed token).
   A reader with the optional `readStatuses` reads in bulk — JIRA (`tracker/jira/statuses.ts`): `GET

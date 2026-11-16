@@ -850,9 +850,6 @@
 .lb .rp-releases .tags .tn {
   font-weight: 600;
 }
-.lb .rp-releases .tags .held {
-  color: #e0b860;
-}
 .lb .rp-releases .tags .tickets li {
   border-top: 0;
   padding: 2px 0;
@@ -899,7 +896,4 @@
 }
 .lb .rp-releases .mark.warn i {
   color: #e0b860;
-}
-.lb .rp-releases .warns li {
-  font-size: 12px;
 }

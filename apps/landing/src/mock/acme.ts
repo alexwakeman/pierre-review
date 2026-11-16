@@ -521,18 +521,17 @@ export type ReleaseMark = 'ok' | 'bad' | 'warn';
 export interface ReleaseMockTag {
   name: string;
   candidate?: boolean;
-  /** The first tag held back. */
-  held?: boolean;
-  /** The tag's explainer lines (Sprint/releasesModel.ts `tagExplainer`). */
+  /** The tag's explainer lines (Sprint/releasesModel.ts `tagExplainer`, then `noTicketLine`). */
   notes?: string[];
   tickets: Array<{ key: string; title: string; tone: ReleaseMark; status: string }>;
-  /** PRs with no ticket. */
+  /** PRs with no ticket (listed, never a warning). */
   untracked?: string[];
 }
 
 /** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`.
- *  One row per repository released from this workspace: the candidate the check found by itself, a row
- *  no tag of which can be released, one still being checked (its progress line), one with nothing new. */
+ *  One row per repository released from this workspace: the candidate (the NEWEST tag whose tickets are
+ *  Complete with no open pull request), one whose newer tags do not qualify, one no tag of which qualifies, one
+ *  still being checked (its progress line), one with nothing new. */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
   action: 'Create release…',
@@ -543,12 +542,16 @@ export const SPRINT_RELEASES = {
       name: REPOS.payments,
       candidate: true,
       text: 'Release v3.2.0 → v3.2.0-rc',
-      counts: '2 tickets · 1 warning',
+      counts: '2 tickets · 1 to check',
       tags: [
         {
           name: 'v3.2.0',
           candidate: true,
-          tickets: [{ key: 'PAY-134', title: 'Payout dates in the export', tone: 'ok', status: 'Done' }],
+          notes: ['PAY-120 not found. Check it by hand.', 'Also includes a pull request with no ticket'],
+          tickets: [
+            { key: 'PAY-134', title: 'Payout dates in the export', tone: 'ok', status: 'Done' },
+            { key: 'PAY-120', title: '', tone: 'warn', status: 'not found' },
+          ],
           untracked: ['#605 Tidy the refund logs'],
         },
       ],
@@ -562,13 +565,12 @@ export const SPRINT_RELEASES = {
       tags: [
         {
           name: 'v1.9.1',
-          notes: ['Also contains PAY-150 (from v1.9.0).'],
+          notes: ['PAY-150 (from v1.9.0) is In review.'],
           tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done' }],
         },
         {
           name: 'v1.9.0',
-          held: true,
-          notes: ['PAY-150 is not done (In review).'],
+          notes: ['PAY-150 is In review.'],
           tickets: [{ key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review' }],
         },
         { name: 'v1.8.2', candidate: true, tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done' }] },
@@ -577,20 +579,19 @@ export const SPRINT_RELEASES = {
     {
       name: REPOS.ledger,
       candidate: false,
-      text: 'No tag can be released: the oldest tag, v0.9.0, already contains PAY-146 (In progress)',
+      text: 'No tag since v0.8.0-rc can be released — v0.9.0: PAY-146 has an open pull request in payments (#611)',
       tags: [
         {
           name: 'v0.9.0',
-          held: true,
-          notes: ['PAY-146 is not done (In progress).'],
-          tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'In progress' }],
+          notes: ['PAY-146 has an open pull request in payments (#611).'],
+          tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'Done, 1 open pull request' }],
         },
       ],
     },
     {
       name: REPOS.api,
       candidate: false,
-      text: 'Candidate at most v2.3.0 — checking older history (44%)',
+      text: 'Checking…',
       progress: { share: 0.44, line: "Reading main's history: 2,380 of 5,400 commits" },
       tags: [],
     },
@@ -604,7 +605,6 @@ export const SPRINT_RELEASES = {
     progress?: { share: number; line: string };
     tags: ReleaseMockTag[];
   }>,
-  warnings: ['acme/payments #605 has no ticket: Tidy the refund logs.'],
 };
 
 // ---- the docs' Getting started: first run and Repos & workspaces ----------------

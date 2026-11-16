@@ -1,5 +1,5 @@
 // CREATING A RELEASE — the shared PURE half (packages/shared/src/release-write.ts): the snapshot and
-// its change list (acceptance 18, 21), the notes (acceptance 32, 33), the comment's exact lines, the
+// its change list (acceptance 18, 21), the notes (acceptance 32, 33, 47), the comment's exact lines, the
 // summary's digit gate. docs/RELEASES.md § Releases tab, § Release notes.
 import { describe, expect, it } from 'vitest';
 import {
@@ -27,25 +27,38 @@ const API = 1;
 const WEB = 2;
 const ident = (key: string) => `jira:https://acme.atlassian.net#${key}`;
 
-function input(over: { done?: Record<string, boolean>; webTagged?: boolean } = {}): ReleaseCheckInput {
+function input(over: { done?: Record<string, boolean>; webTagged?: boolean; released?: boolean; openPrs?: ReleaseCheckInput['openPrs'] } = {}): ReleaseCheckInput {
   const done = { 'PLAT-1': true, 'PLAT-2': true, 'PLAT-3': true, ...(over.done ?? {}) };
+  // `released`: an earlier release (v0.9.0-rc on v0.9.0) is the baseline, so the scope is everything since.
   const repo = (repoId: number, name: string, prIds: number[]) => ({
     repoId,
     name,
     fullName: `acme/${name}`,
     writable: true,
-    tags: [{ name: 'v1.0.0', sha: sha(`${name}1`), committedAt: day(5), taggedAt: null, onDefaultBranch: true, moved: false }],
+    tags: [
+      ...(over.released === true
+        ? [
+            { name: 'v0.9.0', sha: sha(`${name}0`), committedAt: day(1), taggedAt: null, onDefaultBranch: true, moved: false },
+            { name: 'v0.9.0-rc', sha: sha(`${name}0`), committedAt: day(1), taggedAt: day(2), onDefaultBranch: true, moved: false },
+          ]
+        : []),
+      { name: 'v1.0.0', sha: sha(`${name}1`), committedAt: day(5), taggedAt: null, onDefaultBranch: true, moved: false },
+    ],
     ranges: [
+      ...(over.released === true
+        ? [
+            { tagName: 'v0.9.0', sha: sha(`${name}0`), baseTagName: null, baseSha: null, prIds: [], unresolvedPrNumbers: [], unmatchedCommits: 0 },
+            { tagName: 'v0.9.0-rc', sha: sha(`${name}0`), baseTagName: 'v0.9.0', baseSha: sha(`${name}0`), prIds: [], unresolvedPrNumbers: [], unmatchedCommits: 0 },
+          ]
+        : []),
       {
         tagName: 'v1.0.0',
         sha: sha(`${name}1`),
-        baseTagName: null,
-        baseSha: null,
-        method: 'history' as const,
+        baseTagName: over.released === true ? 'v0.9.0-rc' : null,
+        baseSha: over.released === true ? sha(`${name}0`) : null,
         prIds,
         unresolvedPrNumbers: [],
         unmatchedCommits: 0,
-        truncated: false,
       },
     ],
   });
@@ -56,8 +69,6 @@ function input(over: { done?: Record<string, boolean>; webTagged?: boolean } = {
     title,
     url: `https://github.com/acme/${repoId === API ? 'api' : 'web'}/pull/${number}`,
     isBot,
-    intoDefaultBranch: true,
-    state: 'merged' as const,
     mergedAt: day(4),
     ticketIdents: tickets.map(ident),
   });
@@ -72,6 +83,7 @@ function input(over: { done?: Record<string, boolean>; webTagged?: boolean } = {
       pr(20, WEB, 20, 'SSO button', ['PLAT-1']),
       pr(21, WEB, 21, 'Dark mode', ['PLAT-3']),
     ],
+    openPrs: over.openPrs ?? [],
     tickets: Object.entries(done).map(([key, d]) => ({
       ident: ident(key),
       key,
@@ -105,8 +117,16 @@ describe('the snapshot and its changes', () => {
     const before = releaseSnapshotOf(foldReleaseCheck(input()), [API, WEB]);
     const after = foldReleaseCheck(input({ done: { 'PLAT-2': false } }));
     const changes = releaseSnapshotChanges(before, after);
-    expect(changes).toContain('PLAT-2 is not done (In review).');
-    expect(changes).toContain('api has no version tag that is safe to release now.');
+    expect(changes).toContain('PLAT-2 is In review.');
+    expect(changes).toContain('api has no tag that can be released now.');
+  });
+
+  it('acceptance 21: a pull request opened for a shipped ticket since the dialog opened is named', () => {
+    const before = releaseSnapshotOf(foldReleaseCheck(input()), [API, WEB]);
+    const after = foldReleaseCheck(input({ openPrs: [{ repoId: WEB, repoName: 'web', number: 77, url: 'https://github.com/acme/web/pull/77', prId: 7, ticketIdents: [ident('PLAT-3')] }] }));
+    const changes = releaseSnapshotChanges(before, after);
+    expect(changes).toContain('PLAT-3 has an open pull request in web (#77).');
+    expect(changes).toContain('web has no tag that can be released now.');
   });
 
   it('a moved version tag and an unread ticket are changes', () => {
@@ -126,6 +146,9 @@ describe('release notes — code-built, one section per repo', () => {
     const api = releaseNotesSection(facts[0]!);
     expect(api).toContain('## api v1.0.0-rc');
     expect(api).toContain('Built from v1.0.0.');
+    // No release yet: only the candidate tag's own changes, and the notes say so.
+    expect(api).toContain('Earlier changes are not listed.');
+    expect(api).toContain('### Stories in this tag');
     expect(api).toContain('#### [PLAT-1](https://acme.atlassian.net/browse/PLAT-1) Story one');
     // The story's PRs in every repo of the release.
     expect(api).toContain('- [api #10](https://github.com/acme/api/pull/10) Login via SSO');
@@ -137,6 +160,24 @@ describe('release notes — code-built, one section per repo', () => {
     expect(api).toContain('Bump lodash');
     const doc = releaseNotesDocument(facts.map(releaseNotesSection));
     expect(doc.indexOf('## api')).toBeLessThan(doc.indexOf('## web'));
+  });
+
+  it('acceptance 47: with a release, the notes list everything since it (no "Earlier changes" line)', () => {
+    const res = foldReleaseCheck(input({ released: true }));
+    expect(res.repos[0]!.baseline?.name).toBe('v0.9.0-rc');
+    const api = releaseNotesSection(releaseNotesInputOf(res, [API])[0]!);
+    expect(api).toContain('### Stories\n');
+    expect(api).not.toContain('Earlier changes are not listed.');
+    expect(api).toContain('Login via SSO');
+  });
+
+  it('a ticket the tracker could not give is in the notes (by key), but not commented on', () => {
+    const base = input();
+    base.tickets = base.tickets.map((t) => (t.key === 'PLAT-3' ? { ...t, readState: 'not_found' as const, done: false, title: null, statusName: null } : t));
+    const res = foldReleaseCheck(base);
+    const web = releaseNotesSection(releaseNotesInputOf(res, [WEB]).find((r) => r.repoName === 'web')!);
+    expect(web).toContain('#### [PLAT-3](https://acme.atlassian.net/browse/PLAT-3)');
+    expect(releaseSnapshotOf(res, [WEB]).tickets.map((t) => t.key)).toEqual(['PLAT-1']);
   });
 
   it('acceptance 32 (AI on): a summary per story, inside its story', () => {

@@ -15,7 +15,7 @@ import { ReleaseDetailModal, ReleaseDialog } from './ReleaseDialog.js';
 import {
   expandedTags,
   latestReleaseLine,
-  releaseWarningText,
+  noTicketLine,
   repoLatestNote,
   repoProgress,
   repoRowCounts,
@@ -32,18 +32,18 @@ import {
 //   • Header: "Latest release: none" / "Latest release: 12 Nov", Refresh, the ⓘ with the rules,
 //     "View notes" for the newest release made here, and "Create release…" (SHOWN only with a
 //     candidate in a repo the reader can push to — hidden, never disabled).
-//   • ONE ROW PER RELEASABLE REPO: "Release 0.388.0 → 0.388.0-rc" (+ "Latest 0.394.0" when different,
-//     + "6 tickets · 1 warning"), "No tag can be released: the oldest tag, 0.12.0, already contains
-//     BMD-127 (In Progress)", "Checking…" with a progress bar and ONE line of what the scan is doing, or
-//     "Nothing new since 0.390.0-rc". A standing candidate whose later tags are still read shows a small
-//     "Still reading later tags" bar. A row expands to every tag after the candidate, newest first, each
-//     with its explainer (its own blockers; "Also contains BMD-127 (from 0.312.0)."), then the candidate
-//     tag's own tickets. The check is automatic: there is nothing to pick.
-//   • The warnings, which never block.
+//   • ONE ROW PER RELEASABLE REPO: "Release 0.392.0 → 0.392.0-rc" (+ "Latest 0.394.0" when different,
+//     + "6 tickets · 1 to check"), "No tag can be released — 0.394.0: BMD-1048 is In PO Review",
+//     "Checking…" with a progress bar and ONE line of what the scan is doing, or "Nothing new since
+//     0.390.0-rc". A row expands to the tags read, newest first: each tag newer than the candidate with
+//     why it does not qualify ("BMD-1040 (from 0.391.0) is In Progress."), then the candidate with the
+//     tickets of its scope. Under each tag: tickets the tracker could not give ("BMD-123 not found") and
+//     pull requests with no ticket — for the reader to check, never a block or a warning. The check is
+//     automatic: there is nothing to pick.
 //
 // ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB + memory only); it POLLS that same GET every ~3 s only
-// while a repo is checking (hooks/useReleases.ts). Refresh (a press) reads the held tickets again from the
-// tracker (POST /api/releases/refresh).
+// while a repo is checking (hooks/useReleases.ts). Refresh (a press) reads the tickets not Complete, not read
+// yet or not found again from the tracker (POST /api/releases/refresh).
 // ⚠ Nothing renders while `workspaceId` is null. Not configured, or no repo ticked "Released from this
 // workspace": ONE setup line linking to Settings → Releases.
 // ⚠ A ticket chip opens the story through `useOpenStory()`; a pull request opens its PR tab.
@@ -94,13 +94,13 @@ export function ReleasesView(): JSX.Element | null {
             own.
           </p>
           <p>
-            Version tags on main are checked from the oldest after the last release (or from the very first tag).
-            The first tag with a pull request whose ticket is not Complete holds itself and every later tag; the
-            candidate is the tag before it. A ticket or pull request that could not be read holds its tag too.
+            The candidate is the newest version tag on main whose tickets are all Complete, with no pull request still
+            open for any of them in a released repository. After a release, a tag’s tickets are everything merged since
+            that release; before the first release, only what the tag itself added.
           </p>
           <p>
-            A pull request with no ticket is a warning, not a block. Bot pull requests with no ticket are listed under
-            dependency and bot changes.
+            Tickets the tracker could not find, and pull requests with no ticket, do not stop a tag. They are listed
+            under it so you can check them.
           </p>
           <p>Create release tags each candidate with the release suffix, publishes the notes and comments on each ticket.</p>
         </InfoButton>
@@ -134,8 +134,6 @@ export function ReleasesView(): JSX.Element | null {
         </ul>
       </section>
 
-      <WarningsPanel check={check} />
-
       {dialogOpen && (
         <ReleaseDialog
           workspaceId={workspaceId}
@@ -158,7 +156,7 @@ function RepoRow({ repo, check }: { repo: ReleaseRepoCheck; check: ReleaseCheckR
   const latest = repoLatestNote(repo);
   const progress = repoProgress(repo);
   const expandable = repo.tags.length > 0;
-  const tone = repo.status === 'candidate' ? 'text-ui-ink' : repo.status === 'blocked' ? 'text-ui-warn' : 'text-ui-mute';
+  const tone = repo.status === 'candidate' ? 'text-ui-ink' : repo.status === 'none' ? 'text-ui-warn' : 'text-ui-mute';
   const head = (
     <>
       {expandable && <ChevronIcon dir={open ? 'down' : 'right'} size={12} className="shrink-0 text-ui-mute" />}
@@ -191,7 +189,7 @@ function RepoRow({ repo, check }: { repo: ReleaseRepoCheck; check: ReleaseCheckR
         <div className="flex items-center gap-2 px-3 pb-2 pl-8" data-testid="release-progress">
           <SprintProgressBar
             progress={{ kind: 'share', label: progress.line ?? 'Checking', value: progress.share }}
-            className={progress.small ? 'h-1 w-24 shrink-0 rounded-full' : 'h-1.5 w-40 shrink-0 rounded-full'}
+            className="h-1.5 w-40 shrink-0 rounded-full"
             testId="release-progress-bar"
           />
           {progress.line != null && <span className="min-w-0 text-meta text-ui-mute">{progress.line}</span>}
@@ -216,13 +214,17 @@ function RepoDetail({ repo, check }: { repo: ReleaseRepoCheck; check: ReleaseChe
               <div className="flex flex-wrap items-center gap-2 text-body">
                 {t.isCandidate && <StarIcon size={12} className="text-ui-accent" title="Candidate" />}
                 <span className="font-medium text-ui-ink">{t.name}</span>
-                {t.isCandidate && <span className="text-meta text-ui-mute">candidate</span>}
-                {t.name === repo.firstBlocked && <span className="text-meta text-ui-warn">first tag held back</span>}
+                {t.isCandidate && (
+                  <span className="text-meta text-ui-mute">
+                    {repo.baseline != null ? `candidate · everything since ${repo.baseline.name}` : 'candidate · this tag’s own changes'}
+                  </span>
+                )}
+                {t.state === 'checking' && <span className="text-meta text-ui-mute">checking</span>}
                 {t.moved && <span className="text-meta text-ui-warn">moved to another commit</span>}
               </div>
               {lines.map((l, i) => (
-                <p key={i} className={`text-meta ${t.state === 'held' && i < t.blockers.length ? 'text-ui-warn' : 'text-ui-mute'}`}>
-                  {l}
+                <p key={i} className={`text-meta ${l.tone === 'bad' ? 'text-ui-danger' : l.tone === 'warn' ? 'text-ui-warn' : 'text-ui-mute'}`}>
+                  {l.text}
                 </p>
               ))}
               {c.tickets.length > 0 && (
@@ -232,14 +234,13 @@ function RepoDetail({ repo, check }: { repo: ReleaseRepoCheck; check: ReleaseChe
                   ))}
                 </ul>
               )}
-              {c.untracked.length > 0 && <PrList label="No ticket" prs={c.untracked} check={check} />}
-              {c.bot.length > 0 && <PrList label="Bot" prs={c.bot} check={check} />}
+              {c.noTicket.length > 0 && <PrList label={noTicketLine(c.noTicket.length)!} prs={c.noTicket} check={check} />}
               {t.unmatchedCommits > 0 && (
                 <p className="text-meta text-ui-faint">
                   {t.unmatchedCommits} {t.unmatchedCommits === 1 ? 'commit has' : 'commits have'} no pull request.
                 </p>
               )}
-              {t.prIds.length === 0 && !t.pending && <p className="text-meta text-ui-faint">No pull requests in this tag.</p>}
+              {t.prIds.length === 0 && t.historyRead && <p className="text-meta text-ui-faint">No pull requests in this tag.</p>}
             </li>
           );
         })}
@@ -336,24 +337,5 @@ function TicketChip({ ticket }: { ticket: Pick<ReleaseTicketCheck, 'ident' | 'ke
     >
       {ticket.key}
     </button>
-  );
-}
-
-function WarningsPanel({ check }: { check: ReleaseCheckResult }): JSX.Element | null {
-  if (check.warnings.length === 0) return null;
-  return (
-    <section aria-labelledby="releases-warnings" className="space-y-2">
-      <h3 id="releases-warnings" className="text-body font-semibold text-ui-ink">
-        Warnings
-      </h3>
-      <ul className="space-y-1">
-        {check.warnings.map((w, i) => (
-          <li key={i} className="flex items-start gap-1.5 text-body text-ui-ink">
-            <WarningIcon size={12} className="mt-1 shrink-0 text-ui-warn" />
-            <span>{releaseWarningText(w, check)}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }

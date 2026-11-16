@@ -18,6 +18,10 @@
 //     tip   when the head moved: ONE REST compare `top...head`. A fast-forward → walk the new head down
 //           to the walked head (`top_sha`), newest first, before the deep segment goes on. Anything
 //           else (rewritten history) → everything stored is dropped and the walk starts again.
+//   EARLY   the deep segment STOPS (cursor kept) once `deepEnough` says the release check already names
+//           a candidate for every releasing workspace — the newest-first rule needs nothing older
+//           (docs/RELEASES.md § The release check). Asked before the first deep page of a run and every
+//           DEEP_ENOUGH_EVERY pages; it goes on from the cursor when the answer changes.
 //   BOUNDS  resumable (a page's commits and the cursor are written in one transaction), time-boxed by
 //           the run's `deadline`, stopped while the account's GraphQL budget is low or limited (paused,
 //           never an error). NEVER THROWS.
@@ -41,6 +45,8 @@ const { releaseHistoryScans, releaseHistoryCommits, releaseRangePrs, repoTags } 
 /** The `seq` room of one segment: a tip segment's commits sort above every older one. */
 export const SEQ_SPAN = 1_000_000_000;
 const EPOCH = '1970-01-01T00:00:00Z';
+/** `deepEnough` is asked before the first deep page of a run and then every this many deep pages. */
+export const DEEP_ENOUGH_EVERY = 5;
 
 export interface HistoryLogger {
   info: (msg: string) => void;
@@ -59,6 +65,9 @@ export interface WalkHistoryOptions {
   /** The workspaces releasing this repo (their suffixes decide each one's baseline). */
   views: readonly ReleaseRangeView[];
   deadline?: number;
+  /** The release check already has its answer for every releasing workspace: the deep segment may stop
+   *  (db/release-check.ts `releaseCandidateProven`). Absent = never. */
+  deepEnough?: () => Promise<boolean>;
   log?: HistoryLogger;
   onProgress?: (p: { done: number; total: number; paused: boolean }) => void;
   deps?: {
@@ -81,6 +90,8 @@ export interface WalkHistoryResult {
   paused: boolean;
   /** History was rewritten: everything stored was dropped and the walk started again. */
   restarted: boolean;
+  /** The deep segment stopped early: the release check already has its candidate. */
+  stoppedEarly: boolean;
 }
 
 type ScanRow = typeof releaseHistoryScans.$inferSelect;
@@ -254,7 +265,7 @@ async function storePage(
 export async function walkReleaseHistory(opts: WalkHistoryOptions): Promise<WalkHistoryResult> {
   const { owner, name, repoId, accountId, token, log } = opts;
   const fullName = `${owner}/${name}`;
-  const out: WalkHistoryResult = { pages: 0, compares: 0, walked: 0, complete: false, paused: false, restarted: false };
+  const out: WalkHistoryResult = { pages: 0, compares: 0, walked: 0, complete: false, paused: false, restarted: false, stoppedEarly: false };
   if (opts.views.length === 0) return { ...out, complete: true };
   const nowDate = (): Date => new Date(opts.deps?.now?.() ?? Date.now());
   try {
@@ -366,10 +377,24 @@ export async function walkReleaseHistory(opts: WalkHistoryOptions): Promise<Walk
     };
 
     tell(false);
+    let deepPages = 0;
     for (;;) {
       const tip = row.tipStartSha != null;
       if (!tip && (row.deepExpectedSha == null || deepSatisfied())) break;
       if (stopNow()) break;
+      if (!tip && opts.deepEnough != null && deepPages % DEEP_ENOUGH_EVERY === 0) {
+        let enough = false;
+        try {
+          enough = await opts.deepEnough();
+        } catch (err) {
+          log?.warn(`release history ${fullName}: the early-stop check failed (non-fatal): ${errMsg(err)}`);
+        }
+        if (enough) {
+          out.stoppedEarly = true;
+          break;
+        }
+      }
+      if (!tip) deepPages += 1;
       const oid = tip ? row.tipStartSha! : row.deepStartSha;
       const cursor = tip ? row.tipCursor : row.deepCursor;
       let resp: ReleaseHistoryResponse;
@@ -460,7 +485,7 @@ export async function walkReleaseHistory(opts: WalkHistoryOptions): Promise<Walk
       tell(false);
     }
     if (out.paused) tell(true);
-    out.complete = row.tipStartSha == null && (row.deepExpectedSha == null || deepSatisfied());
+    out.complete = row.tipStartSha == null && (row.deepExpectedSha == null || deepSatisfied() || out.stoppedEarly);
     if (out.walked > 0) log?.info(`release history ${fullName}: ${out.walked} commit(s) walked in ${out.pages} page(s)${out.complete ? ', done' : ''}`);
   } catch (err) {
     log?.warn(`release history ${fullName}: failed (non-fatal): ${errMsg(err)}`);

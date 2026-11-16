@@ -8,18 +8,22 @@
 //     this workspace's baseline up (`release_history_commits`, seq ≥ the newest walked release tag's)
 //     → releases/history-fold.ts `historyView` → each tag's place on the default branch and each tag's
 //     INCREMENT (a missing one is still being read), and the walk's progress (`history`).
-//   • PRs: one per LIGHT record (`release_range_prs`) in an increment; a PR also stored in
-//     `pull_requests` lends its full row (links, author, the PR tab's id). Each repository is judged
-//     on its own: a ticket's PRs elsewhere do not count.
+//   • PRs: one per LIGHT record (`release_range_prs`) in an increment (merged into the default branch
+//     by definition); a PR also stored in `pull_requests` lends its full row (links, author, the PR
+//     tab's id).
+//   • OPEN PRs: the stored `pull_requests` rows still open INTO THE DEFAULT BRANCH (a base not synced yet
+//     counts) in ANY of the workspace's releasable repos, with the tickets THE detection rule names on
+//     them — a Complete ticket with one does not qualify. A hotfix PR (into `hotfix/…`) is not one.
 //   • Tickets: THE detection rule (`releasePrDetectInput` → `detectKeysWithAccess`) on each range PR,
 //     plus a stored PR's own `tracker_tickets` rows, ON THE WORKSPACE'S TRACKER SITE only. A ticket's
 //     reads come from three stores — the PR rows, the batched status rows (`tracker_ticket_status`,
 //     tracker/ticket-status.ts) and the sprint rows — and `bestTicketRead` keeps the freshest
 //     successful one. DONE = the This Sprint stage resolver (`sprintStageOf` over `sprintLayoutFor`)
-//     says Complete (`stage === 'done'`; a Cancelled ticket holds like any not-Done one) — never a
-//     second resolver. A ticket with no read yet is `not_read`: "checking" (the scan reads it in its
-//     next batch) — unless the workspace's tracker cannot read at all (`ticketsReadable` false), when
-//     it holds.
+//     says Complete (`stage === 'done'`; a Cancelled ticket does not qualify, like any not-Done one) —
+//     never a second resolver. A ticket with no read yet is `not_read`: "checking" (the scan reads it
+//     in its next batch); a batched read that failed RELEASE_TICKET_FAILS_MAX times in a row is
+//     `failed` — listed as "could not be read", never a block. A workspace whose tracker cannot read at
+//     all (`ticketsReadable` false) lists its tickets as "could not be read" too.
 //   • PROGRESS: the fold derives it; the scan's live step (releases/scan-state.ts) is laid over it while
 //     fresh (for its "waiting for GitHub's rate limit"). Still DB + memory only.
 //   • Bot-ness: `globalAutomationUserIds` (the stored author, or the login's user row) or the light
@@ -34,6 +38,7 @@ import {
   trackerTicketIdent,
   type ReleaseCheckInput,
   type ReleaseCheckResult,
+  type ReleaseCheckOpenPrInput,
   type ReleaseCheckPrInput,
   type ReleaseCheckTicketInput,
   type ReleaseSettings,
@@ -50,7 +55,7 @@ import { getReleaseSettings } from './release-settings.js';
 import { getRepoTags } from './repo-tags.js';
 import { liveScanStep } from '../releases/scan-state.js';
 import { historyView, type HistoryIncrement } from '../releases/history-fold.js';
-import { RELEASE_TICKET_FAILS_HOLD } from '../tracker/ticket-status.js';
+import { RELEASE_TICKET_FAILS_MAX } from '../tracker/ticket-status.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
 
 const { repos, pullRequests, trackerTickets, sprintTickets, releases, releaseHistoryCommits, releaseRangePrs, trackerTicketStatus, users } = schema;
@@ -149,19 +154,19 @@ export interface TicketReadCandidate {
 /**
  * THE ticket read the release check believes, from every store (a PR's row, the batched status row,
  * the sprint row): the freshest SUCCESSFUL read; with none, the newest attempt's state — a batched
- * read that FAILED fewer than `failsHold` times in a row is "not read yet" (checking, retried), never
- * a hold. Pure.
+ * read that FAILED fewer than `failsMax` times in a row is "not read yet" (checking, retried); past
+ * that it is `failed` ("could not be read", listed, never a block). Pure.
  */
 export function bestTicketRead(
   cands: readonly TicketReadCandidate[],
-  failsHold: number,
+  failsMax: number,
 ): { read: TicketReadCandidate | null; readState: ReleaseTicketReadState } {
   const ms = (d: Date | null): number => (d == null ? 0 : d.getTime());
   const ok = cands.filter((c) => c.state === 'ok' && c.fetchedAt != null).sort((a, b) => ms(b.fetchedAt) - ms(a.fetchedAt));
   if (ok[0] != null) return { read: ok[0], readState: 'ok' };
   const last = [...cands].sort((a, b) => ms(b.checkedAt) - ms(a.checkedAt))[0] ?? null;
   if (last == null) return { read: null, readState: 'not_read' };
-  if (last.state === 'failed' && last.source === 'status' && (last.attempts ?? 0) < failsHold) return { read: last, readState: 'not_read' };
+  if (last.state === 'failed' && last.source === 'status' && (last.attempts ?? 0) < failsMax) return { read: last, readState: 'not_read' };
   const st = last.state as ReleaseTicketReadState;
   return { read: last, readState: READ_STATES.has(st) && st !== 'ok' ? st : 'not_read' };
 }
@@ -441,7 +446,7 @@ export async function loadReleaseCheck(
   const reads: TicketReadInfo[] = [];
   const tickets: ReleaseCheckTicketInput[] = idents.map((ident) => {
     const list = cands.get(ident) ?? [];
-    const { read, readState } = bestTicketRead(list, RELEASE_TICKET_FAILS_HOLD);
+    const { read, readState } = bestTicketRead(list, RELEASE_TICKET_FAILS_MAX);
     const key = keyByIdent.get(ident)!;
     const lastAt = list.reduce<Date | null>((m, c) => (m == null || c.checkedAt.getTime() > m.getTime() ? c.checkedAt : m), null);
     reads.push({ ident, key, readState, lastAt });
@@ -478,12 +483,80 @@ export async function loadReleaseCheck(
       url: l.url,
       isBot,
       // The history pass keeps only PRs merged into the default branch.
-      intoDefaultBranch: true,
-      state: 'merged' as const,
       mergedAt: l.mergedAt,
       ticketIdents: (keysByLight.get(l.id) ?? []).map(identOf),
     };
   });
+
+  // ── The OPEN PRs into the default branch in every releasable repo of the workspace (not only the
+  // ones asked for): a Complete ticket with one does not qualify. THE detection rule on the stored
+  // row, plus its own ticket rows on the site. ──
+  const openPrs: ReleaseCheckOpenPrInput[] = [];
+  if (tracker != null && ticked.size > 0) {
+    const tickedIds = [...ticked.keys()];
+    const names = new Map<number, { owner: string; name: string; branch: string | null }>();
+    for (const part of chunks(tickedIds)) {
+      for (const r of await db
+        .select({ id: repos.id, owner: repos.owner, name: repos.name, defaultBranch: repos.defaultBranch, defaultBranchName: repos.defaultBranchName })
+        .from(repos)
+        .where(and(eq(repos.accountId, accountId), inArray(repos.id, part)))
+        .execute()) {
+        names.set(r.id, { owner: r.owner, name: r.name, branch: r.defaultBranch ?? r.defaultBranchName ?? null });
+      }
+    }
+    const open: Array<StoredPr & { baseRefName: string | null }> = [];
+    for (const part of chunks([...names.keys()])) {
+      open.push(
+        ...((await db
+          .select({
+            id: pullRequests.id,
+            repoId: pullRequests.repoId,
+            number: pullRequests.number,
+            title: pullRequests.title,
+            headRefName: pullRequests.headRefName,
+            baseRefName: pullRequests.baseRefName,
+            authorId: pullRequests.authorId,
+            ...prLinkColumns(pullRequests),
+          })
+          .from(pullRequests)
+          .where(and(eq(pullRequests.accountId, accountId), inArray(pullRequests.repoId, part), eq(pullRequests.state, 'open')))
+          .execute()) as Array<StoredPr & { baseRefName: string | null }>),
+      );
+    }
+    const openRows = new Map<number, string[]>();
+    if (siteWhere != null) {
+      for (const part of chunks(open.map((p) => p.id))) {
+        for (const r of await db
+          .select({ prId: trackerTickets.prId, issueKey: trackerTickets.issueKey })
+          .from(trackerTickets)
+          .where(and(siteWhere, inArray(trackerTickets.prId, part)))
+          .execute()) {
+          openRows.set(r.prId, [...(openRows.get(r.prId) ?? []), r.issueKey]);
+        }
+      }
+    }
+    for (const p of open) {
+      const n = names.get(p.repoId)!;
+      // Into another branch (a hotfix branch): not work still on its way to the default branch.
+      if (p.baseRefName != null && n.branch != null && p.baseRefName !== n.branch) continue;
+      const keys = [
+        ...(detectKeysWithAccess(
+          tracker.access,
+          withParsedLinks(p as { title: string; headRefName: string | null; closingIssues?: unknown; linearLinks?: unknown; linearLinksRoot?: unknown }),
+        ) ?? []),
+      ];
+      for (const k of openRows.get(p.id) ?? []) if (!keys.includes(k)) keys.push(k);
+      if (keys.length === 0) continue;
+      openPrs.push({
+        repoId: p.repoId,
+        repoName: n.name,
+        number: p.number,
+        url: `https://github.com/${n.owner}/${n.name}/pull/${p.number}`,
+        prId: p.id,
+        ticketIdents: keys.map(identOf),
+      });
+    }
+  }
 
   return {
     input: {
@@ -524,16 +597,15 @@ export async function loadReleaseCheck(
                 sha: x.sha,
                 baseTagName: x.baseTagName,
                 baseSha: x.baseSha,
-                method: 'walk' as const,
                 prIds,
                 unresolvedPrNumbers,
                 unmatchedCommits: x.unmatchedCommits,
-                truncated: false,
               };
             }),
           };
         }),
       prs,
+      openPrs,
       tickets,
     },
     reads,
@@ -595,6 +667,27 @@ export async function releaseTicketKeysOwed(
   const { input, reads } = await loadReleaseCheck(accountId, workspaceId, [repoId], settings);
   if (input.ticketsReadable === false) return { keys: [], waiting: 0 };
   return { keys: ticketKeysOwed(reads, nowMs), waiting: reads.filter((r) => r.readState === 'not_read').length };
+}
+
+/**
+ * THE HISTORY PASS MAY STOP EARLY (docs/RELEASES.md § The release check, rule 4): true when, for EVERY
+ * workspace releasing this repo, the check already names a candidate — the newest-first walk found a
+ * qualifying tag whose scope is read, so nothing older needs reading. DB only. A view with no workspace id
+ * (it cannot be checked) answers false.
+ */
+export async function releaseCandidateProven(
+  accountId: number,
+  repoId: number,
+  views: ReadonlyArray<{ workspaceId?: number; settings: ReleaseSettings }>,
+): Promise<boolean> {
+  if (views.length === 0) return false;
+  for (const v of views) {
+    if (v.workspaceId == null || !releaseSettingsConfigured(v.settings)) return false;
+    const { input } = await loadReleaseCheck(accountId, v.workspaceId, [repoId], v.settings);
+    const repo = foldReleaseCheck(input).repos.find((r) => r.repoId === repoId);
+    if (repo?.status !== 'candidate') return false;
+  }
+  return true;
 }
 
 /** GET /api/releases. `rawWorkspace` absent / unknown / unparseable ⇒ the Default workspace. With no

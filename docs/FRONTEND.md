@@ -2914,25 +2914,28 @@ board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`.
 `RELEASES_POLL_MS` (3 s) ONLY while a repo is checking (`refetchInterval` = `releasesPollInterval`, shared
 `releasesChecking`) and stops when none is; nothing renders while `workspaceId` is null; not configured,
 or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE setup line
-(`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick). REPO-ORIENTED (no
-tickets panel): one row per releasable repo (`repoRowText`: "Release 0.388.0 → 0.388.0-rc", "No tag can
-be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)" / "… since 0.380.0-rc: the
-next tag, 0.381.0, contains …", "Candidate at most 0.388.0 — checking older history (40%)" (the early
-upper limit, `upperLimit`), "Checking — 0.390.0 and later cannot be released" (`heldFrom`, the tag before it
-not read yet), "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"), "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts
-(`repoRowCounts`), and the scan's progress (`repoProgress`): a bar (`Activity/SprintProgressBar`, a share)
-with ONE line from the server (`progress.line`: "Reading main's history: 1,200 of 5,400 commits"), or a small bar with
-"Still reading later tags" when a candidate (or a held row) already stands. A row expands to
-`expandedTags` — every tag after the candidate, newest first, then the candidate — each with
-`tagExplainer` (its own blockers' sentences; "Also contains BMD-127 (from 0.312.0)."; "Still being read.")
-and `tagContents` (the tickets with `ticketMark` — "not read yet" included — the PRs with no ticket, bot
-PRs, the direct-commit note). A PR known only from the history read (`prId` null) links to GitHub. "Released" is never said of a ticket.
+(`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick) and SIMPLE (2026-11-16:
+the newest version tag whose tickets are Complete with no open PR). REPO-ORIENTED (no tickets panel, no
+warnings panel): one row per releasable repo (`repoRowText`: "Release 0.392.0 → 0.392.0-rc", "No tag can be
+released — 0.394.0: BMD-1048 is In PO Review" / "No tag since 0.380.0-rc can be released — …" (the newest
+tag's reason, `newestReason`), "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"),
+"Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts (`repoRowCounts`: "6
+tickets · 1 to check"), and, while CHECKING only, the progress (`repoProgress`): a bar
+(`Activity/SprintProgressBar`, a share) with ONE line from the server (`progress.line`: "Reading main's
+history: 1,200 of 5,400 commits"). A row expands to `expandedTags` — the tags READ, newest first (those newer
+than the candidate, then the candidate; older ones are not read) — each with `tagExplainer` (`{tone, text}`:
+why it does not qualify, "BMD-1040 (from 0.391.0) is In Progress."; what it waits for; then "BMD-123 not
+found. Check it by hand.") and `tagContents` (the tickets with `ticketMark` — "not read yet", "not found", an
+open PR included — for the candidate every ticket of its scope; then `noTicket`, "Also includes 3 pull
+requests with no ticket" (`noTicketLine`), and the direct-commit note). A PR known only from the history read
+(`prId` null) links to GitHub. "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
 fold, never a second one here. "Create release…" is HIDDEN unless a writable repo has a candidate
 (`showCreateRelease`). The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only
 while open; each repo is judged on its own, so only "none ticked" hides Confirm (`confirmStops`); it
 sends `releaseSnapshotOf(check, ticked)` and only EDITED ticked sections. Refresh = `useRefreshReleases`
-(`POST /api/releases/refresh`: the held tickets re-read from the tracker, the answer becomes the check).
+(`POST /api/releases/refresh`: the tickets not Complete, not read yet or not found re-read from the tracker,
+the answer becomes the check).
 Ticket chips → `useOpenStory()`; PRs → `openPrDetailTab`. Settings → Releases is
 `settings/ReleasesSection.tsx`: the two suffix boxes with the FIXED "-" beside them (`suffixTypedPart` /
 `suffixFromTyped`; the shared validator), the suffix-change warning (`releasesSectionModel.ts`), and

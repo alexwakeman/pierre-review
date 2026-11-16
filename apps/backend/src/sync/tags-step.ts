@@ -190,6 +190,11 @@ export async function runTagsStep(opts: TagsStepOptions): Promise<TagsStepResult
       defaultBranch: head.branch,
       views,
       deadline,
+      // The newest-first rule: once every releasing workspace has its candidate, nothing older is read.
+      deepEnough: async () => {
+        const { releaseCandidateProven } = await import('../db/release-check.js');
+        return releaseCandidateProven(opts.accountId, opts.repoId, views);
+      },
       ...(opts.log != null ? { log: opts.log } : {}),
       onProgress: (p) => noteScanStep(opts.repoId, { step: 'history', done: p.done, total: p.total, paused: p.paused }),
     });

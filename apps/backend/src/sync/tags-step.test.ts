@@ -17,7 +17,7 @@ vi.mock('./repo-tags.js', () => ({
   REPO_TAGS_READ_CAP_RELEASABLE: 1000,
   syncRepoTagsSafe: (o: unknown) => tagSync(o),
 }));
-const done = { pages: 0, compares: 0, walked: 0, complete: true, paused: false, restarted: false };
+const done = { pages: 0, compares: 0, walked: 0, complete: true, paused: false, restarted: false, stoppedEarly: false };
 const walk = vi.fn(async (_o: unknown) => done);
 const noTickets = { asked: 0, answered: 0, calls: 0, left: 0 };
 const tickets = vi.fn(async (_o: unknown) => noTickets);

@@ -13,6 +13,22 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- This Sprint → Releases: the candidate is now the newest tag whose tickets are Complete with no pull request
+  still open. It checks from the newest tag down and stops at the first one that qualifies. After a release, a
+  tag's tickets are everything merged since that release; before the first release, only what the tag itself
+  added. Each newer tag says why it does not qualify, for example "BMD-1048 is In PO Review" or "BMD-1050 has
+  an open pull request in web (#812)".
+- This Sprint → Releases: a ticket the tracker cannot find no longer holds the release back. It is listed under
+  its tag, "BMD-123 not found", for you to check, and so are pull requests with no ticket.
+- Release notes before the first release list only the tag's own stories and say "Earlier changes are not
+  listed."
+
+### Removed
+
+- This Sprint → Releases: the "Candidate at most …" line and the warnings for pull requests with no ticket.
+
 ## [1.0.46] - 2026-11-16
 
 ### Changed

@@ -1,7 +1,7 @@
 // REFRESH (docs/RELEASES.md § Releases tab 1, acceptance 6) — POST /api/releases/refresh.
 //
-// The READER'S PRESS that reads the check's tickets again NOW, not on the scan's TTL: every ticket the
-// check holds by its OWN state (not Done, or unreadable) or is still waiting for (not read yet), at most
+// The READER'S PRESS that reads the check's tickets again NOW, not on the scan's TTL: every ticket that
+// is not Complete, not read yet, or that the tracker could not give (not found, no access, failed), at most
 // REFRESH_TICKETS_MAX, in ONE batch (tracker/ticket-status.ts — Jira: one search per 100 keys; as Confirm
 // does). Then the check is read again and returned.
 // ⚠ The documented exception to "read when RECEIVED, never when VIEWED" (docs/TRACKERS.md § Releases):
@@ -12,12 +12,13 @@ import { defaultReleaseWriteDeps, type ReleaseWriteDeps } from './create.js';
 
 export const REFRESH_TICKETS_MAX = 500;
 
-/** The tickets Refresh reads again: held by their own state or not read yet, by key, capped. Pure. */
+/** The tickets Refresh reads again: not Complete, not read yet, or not given by the tracker, by key,
+ *  capped. (An open pull request is the DB's answer: reading the ticket again changes nothing.) Pure. */
 export function ticketsToRefresh(result: ReleaseCheckResult, cap = REFRESH_TICKETS_MAX): Array<{ ident: string; key: string }> {
   const out: Array<{ ident: string; key: string }> = [];
   for (const t of [...result.tickets].sort((a, b) => a.key.localeCompare(b.key))) {
     if (out.length >= cap) break;
-    if (t.blocker == null && !t.pending) continue;
+    if (t.blocker?.kind !== 'not_done' && !t.pending && t.unverified == null) continue;
     out.push({ ident: t.ident, key: t.key });
   }
   return out;

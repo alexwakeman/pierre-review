@@ -654,7 +654,7 @@ function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
 const MARK_GLYPH: Record<ReleaseMark, string> = { ok: '✓', bad: '✗', warn: '!' };
 
 /** This Sprint → Releases: the latest release, a row per released repository (the latest version tag and the
- *  candidate) that opens to its version tags and their tickets, and the warnings. */
+ *  candidate) that opens to the version tags read, newest first, with why each newer one does not qualify. */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
@@ -705,7 +705,6 @@ function ReleasesPanel(): JSX.Element {
                         {t.candidate ? <em aria-label="candidate">★ </em> : null}
                         {t.name}
                         {t.candidate ? <small> candidate</small> : null}
-                        {t.held ? <small className="held"> first tag held back</small> : null}
                       </span>
                       {(t.notes ?? []).map((n) => (
                         <p key={n} className="note">
@@ -715,7 +714,7 @@ function ReleasesPanel(): JSX.Element {
                       <ul className="tickets">
                         {t.tickets.map((k) => (
                           <li key={k.key} className={`mark ${k.tone}`}>
-                            <i aria-hidden="true">{MARK_GLYPH[k.tone]}</i> <span className="key">{k.key}</span> {k.title}{' '}
+                            <i aria-hidden="true">{MARK_GLYPH[k.tone]}</i> <span className="key">{k.key}</span> {k.title ? `${k.title} ` : ''}
                             <small>{k.status}</small>
                           </li>
                         ))}
@@ -732,12 +731,6 @@ function ReleasesPanel(): JSX.Element {
             </li>
           );
         })}
-      </ul>
-      <Group>Warnings</Group>
-      <ul className="warns">
-        {R.warnings.map((w) => (
-          <li key={w}>{w}</li>
-        ))}
       </ul>
     </div>
   );

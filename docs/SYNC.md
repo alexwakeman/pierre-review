@@ -272,7 +272,10 @@ runs the step only when releasable.
      The walked commits (`release_history_commits`) and a LIGHT record per PR merged into the default branch
      (`release_range_prs`) are stored page by page with the cursor (`release_history_scans`), so a run
      stopped by its time box or the budget resumes there. The deep segment goes back to every releasing
-     workspace's BASELINE commit (the newest release tag on main — it pauses there) or the root. When the
+     workspace's BASELINE commit (the newest release tag on main — it pauses there) or the root — or STOPS
+     EARLY once every releasing workspace's check already names a candidate (`deepEnough` →
+     `db/release-check.ts` `releaseCandidateProven`, asked every 5 pages; the newest-first rule needs
+     nothing older; 2026-11-16). When the
      head moved: ONE REST compare `top...head` — a fast-forward walks only the new commits (the tip
      segment), anything else (rewritten history) drops the stored walk and starts again. Which tag a commit
      belongs to, and which tags are on main, are derived on READ (`releases/history-fold.ts`), so a tag push

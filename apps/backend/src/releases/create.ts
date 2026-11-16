@@ -3,11 +3,12 @@
 //   previewRelease  POST /api/releases/preview — the dialog: the snapshot Confirm sends back, the notes
 //                   (code-built; a model summary per story when AI is on), the comment preview and the
 //                   selection problems. Reads the DB (and the model); never GitHub or the tracker.
-//   createRelease   POST /api/releases — Confirm. FIRST re-reads every ticket in the release from the
-//                   tracker (the reader's press: the documented exception to "read when RECEIVED, never
-//                   when VIEWED", docs/TRACKERS.md § Releases) and re-checks each version tag's commit on
-//                   GitHub; ANY change stops it and returns the changes — NOTHING is written. Then, in
-//                   order:
+//   createRelease   POST /api/releases — Confirm. FIRST re-checks the chosen candidate under THE rule:
+//                   every ticket in its scope read again from the tracker in ONE batch (the reader's
+//                   press: the documented exception to "read when RECEIVED, never when VIEWED",
+//                   docs/TRACKERS.md § Releases), the open pull requests read from the DB by the check,
+//                   and each version tag's commit on GitHub; ANY change stops it and returns the
+//                   changes — NOTHING is written. Then, in order:
 //                     1. an annotated release tag per repo (a name that exists is REFUSED, never moved);
 //                     2. a GitHub pre-release on each tag that landed, carrying that repo's notes;
 //                     3. a tracker comment per shipped ticket whose repos ALL tagged in this release
@@ -38,6 +39,7 @@ import {
   releaseNotesDocument,
   releaseNotesInputOf,
   releaseNotesSection,
+  releaseScopeTickets,
   releaseSettingsConfigured,
   releaseShippedTickets,
   releaseSnapshotChanges,
@@ -255,7 +257,8 @@ export async function previewRelease(
 
 // ── Create ──────────────────────────────────────────────────────────────────────────────────────
 
-/** The repos and tickets the re-check must cover: the snapshot's plus what the check ships now. */
+/** The tickets the re-check reads again: the snapshot's plus every ticket in the scope of an included
+ *  repo's candidate now (Complete or not given by the tracker). */
 function ticketsToReread(
   result: ReleaseCheckResult,
   included: readonly number[],
@@ -268,7 +271,7 @@ function ticketsToReread(
     out.set(ident, { ident, key: byIdent.get(ident)?.key ?? key });
   };
   for (const t of snapshot.tickets) add(t.ident, t.key);
-  for (const t of releaseShippedTickets(result, included)) add(t.ident, t.key);
+  for (const t of releaseScopeTickets(result, included)) add(t.ident, t.key);
   return [...out.values()];
 }
 

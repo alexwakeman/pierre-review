@@ -105,6 +105,25 @@ afterAll(async () => {
 });
 
 describe('walkReleaseHistory', () => {
+  it('acceptance 48: HISTORY STOPS EARLY — once the release check has its candidate, nothing older is read (asked every few pages; the cursor is kept)', async () => {
+    const commits = chain(700);
+    const calls: Array<{ oid: string; after: string | null }> = [];
+    let asked = 0;
+    // Not proven at the first ask; proven by the next one (after DEEP_ENOUGH_EVERY pages).
+    const r = await m.walkReleaseHistory(opts(sha(commits[0]!), { history: fakeHistory(commits, calls) }, { deepEnough: async () => ++asked > 1 }));
+    expect(asked).toBe(2);
+    expect(r).toMatchObject({ pages: m.DEEP_ENOUGH_EVERY, walked: 100 * m.DEEP_ENOUGH_EVERY, complete: true, stoppedEarly: true });
+    const scan = await m.readHistoryScan(1, repoId);
+    expect(scan?.deepExpectedSha).not.toBeNull();
+    // Proven from the start: no page at all; not proven any more: the walk goes on from the cursor.
+    const again = await m.walkReleaseHistory(opts(sha(commits[0]!), { history: fakeHistory(commits, calls) }, { deepEnough: async () => true }));
+    expect(again).toMatchObject({ pages: 0, stoppedEarly: true, complete: true });
+    calls.length = 0;
+    const rest = await m.walkReleaseHistory(opts(sha(commits[0]!), { history: fakeHistory(commits, calls) }, { deepEnough: async () => false }));
+    expect(rest).toMatchObject({ pages: 2, walked: 200, complete: true, stoppedEarly: false });
+    expect(calls[0]!.after).toBe('500');
+  });
+
   it('no release yet: walks the whole first-parent history newest first, ONE call per 100 commits, and stores light PR records', async () => {
     const commits = chain(250);
     const calls: Array<{ oid: string; after: string | null }> = [];

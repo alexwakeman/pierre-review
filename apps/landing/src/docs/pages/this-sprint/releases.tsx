@@ -13,11 +13,11 @@ export default function Page(): JSX.Element {
     <>
       <p>
         <Ui>This Sprint → Releases</Ui> (press <Kbd>4</Kbd> on This Sprint) checks the version tags of each repository you
-        release against your tickets, by itself. It walks the version tags on the default branch from the oldest after
-        the last release, or from the very first tag when there is no release yet. The first tag with a pull request
-        whose ticket is not Done holds itself and every later tag back. The tag before it is the{' '}
-        <strong>candidate</strong>. Each repository is checked on its own. One press then tags every candidate as a
-        release, publishes the release notes and comments on each ticket.
+        release against your tickets, by itself. The <strong>candidate</strong> is the newest version tag on the default
+        branch whose tickets are all Complete, with no pull request still open for any of them. Ensemble starts at the
+        newest tag and stops at the first one that qualifies. Each repository is checked on its own. Check what the tab
+        lists, then one press tags every candidate as a release, publishes the release notes and comments on each
+        ticket.
       </p>
       <p>
         Ensemble never cuts a version tag and deploys nothing. Your CI, or a person, tags the default branch. The release
@@ -47,70 +47,68 @@ export default function Page(): JSX.Element {
       <p>
         &ldquo;Latest release: none&rdquo; or the date of the latest release, for example &ldquo;Latest release: 12
         Nov&rdquo;. <Ui>View notes</Ui> opens the latest release made here: its steps and its notes.{' '}
-        <Ui>Refresh</Ui> reads the tickets that hold a version tag back from the tracker again, then checks again.
+        <Ui>Refresh</Ui> reads the tickets that are not Complete, not read yet or not found from the tracker again, then
+        checks again.
       </p>
       <H3 id="repository-rows">Repository rows</H3>
       <p>One row for each repository you release:</p>
       <ul>
         <li>
-          &ldquo;Release 0.388.0 → 0.388.0-rc&rdquo;, with &ldquo;Latest 0.394.0&rdquo; beside it when a later tag is held
-          back, and the counts, for example &ldquo;6 tickets · 1 warning&rdquo;. The last name is the release tag the press
-          would create.
+          &ldquo;Release 0.392.0 → 0.392.0-rc&rdquo;, with &ldquo;Latest 0.394.0&rdquo; beside it when a newer tag does not
+          qualify, and the counts, for example &ldquo;6 tickets · 1 to check&rdquo;. The last name is the release tag the
+          press would create.
         </li>
         <li>
-          &ldquo;No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)&rdquo;. After a
-          release it reads &ldquo;No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains …&rdquo;.
-        </li>
-        <li>
-          &ldquo;Candidate at most 0.388.0 — checking older history (40%)&rdquo;, with a progress bar. Ensemble reads the
-          history of main newest first, so it knows early which tag the candidate can be at most: the tag just before the
-          oldest held tag found so far. The candidate is confirmed when the reading reaches your last release (or the
-          first commit) and every ticket is read.
+          &ldquo;No tag can be released — 0.394.0: BMD-1048 is In PO Review&rdquo;: no tag qualifies, and this is why the
+          newest one does not. After a release it reads &ldquo;No tag since 0.380.0-rc can be released — …&rdquo;.
         </li>
         <li>
           &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Reading
-          main&rsquo;s history: 1,200 of 5,400 commits&rdquo; or &ldquo;Reading tickets from Jira: 300 of 420&rdquo;. A
-          candidate already found while later tags are still being read shows with a small &ldquo;Still reading later
-          tags&rdquo; bar. The tab updates by itself until every repository is checked.
+          main&rsquo;s history: 1,200 of 5,400 commits&rdquo; or &ldquo;Reading tickets from Jira: 300 of 420&rdquo;. The
+          tab updates by itself until every repository is checked. It often has an answer before the whole history is
+          read: the newest tags are read first.
         </li>
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
       <p>
-        Select a row to see every tag after the candidate, newest first, then the candidate itself. Each held tag says
-        why: its own tickets that are not Done, with their status, and what it carries from an earlier held tag, such as
-        &ldquo;Also contains BMD-127 (from 0.312.0).&rdquo; Each tag also lists its pull requests with no ticket. Select a
-        pull request to open it, or a ticket to open its story.
+        Select a row to see the tags that were read, newest first: each newer tag with why it does not qualify, such as
+        &ldquo;BMD-1048 is In PO Review.&rdquo; or &ldquo;BMD-1050 has an open pull request in web (#812).&rdquo;, then the
+        candidate with its tickets. Older tags are not read. Under each tag you also find what to check by hand: tickets
+        the tracker could not find, such as &ldquo;BMD-123 not found&rdquo;, and &ldquo;Also includes 3 pull requests with no
+        ticket&rdquo;. Select a pull request to open it, or a ticket to open its story.
       </p>
       <H3 id="the-whole-history">The whole history</H3>
       <p>
         There is nothing to pick. The first check of a repository reads the history of main once, from the newest
         commit back to your last release (or the first commit), with each commit&rsquo;s pull request — beyond the 90
-        days Ensemble normally syncs. The tickets are then read from your tracker in batches (Jira: up to 100 in one
+        days Ensemble normally syncs. It stops early once the candidate is known. The tickets are then read from your tracker in batches (Jira: up to 100 in one
         request). Later checks read only the commits that are new since the last one. It works within your GitHub rate
         limit and waits when the limit is low.
       </p>
-      <H3 id="warnings">Warnings</H3>
-      <p>A pull request with no ticket is listed as a warning. It never holds a release back.</p>
 
       <H2 id="the-rules">The rules</H2>
       <ul>
         <li>
-          A ticket counts as Done only when it is in your Complete column. A cancelled ticket, such as &ldquo;Won&rsquo;t
-          do&rdquo;, is not Done, so it holds the release back like any other unfinished ticket.
+          A tag&rsquo;s tickets: after a release, every ticket merged since that release up to the tag. Before your first
+          release, only the tickets the tag itself added since the tag before it.
         </li>
         <li>
-          A ticket the tracker could not find, or has no access to, holds the release back, with the reason. A ticket
-          that is not read yet only keeps the row checking; if the tracker does not answer three times in a row, it
-          holds the release back too.
+          A tag qualifies when each of its tickets is in your Complete column and has no open pull request into the
+          default branch of any repository you release. A cancelled ticket, such as &ldquo;Won&rsquo;t do&rdquo;, is not
+          Complete.
         </li>
-        <li>Commits with no pull request are noted on their tag. They hold nothing back.</li>
         <li>
-          Only the ticket counts. Its pull requests in other repositories, and its open pull requests, hold nothing
-          back.
+          A ticket the tracker could not find, or has no access to, does not stop a tag. It is listed under the tag for
+          you to check. A ticket that is not read yet keeps the row checking; if the tracker does not answer three times
+          in a row, it is listed as &ldquo;could not be read&rdquo; instead.
         </li>
+        <li>
+          Pull requests with no ticket never stop a tag and are not warnings. They are listed under the tag, and in the
+          notes under untracked or dependency and bot changes.
+        </li>
+        <li>Commits with no pull request are noted on their tag.</li>
         <li>Pull requests into a hotfix branch never count.</li>
-        <li>A bot pull request with no ticket is listed under dependency and bot changes, with no warning.</li>
       </ul>
 
       <H2 id="create-a-release">Create a release</H2>
@@ -122,8 +120,9 @@ export default function Page(): JSX.Element {
         <li>Read the release notes, one section per repository, and change them if you want.</li>
         <li>Read the comment each ticket will get.</li>
         <li>
-          Press <Ui>Confirm</Ui>. Ensemble first reads every ticket in the release again and checks each version tag. If
-          anything changed, it stops, lists what changed and writes nothing.
+          Press <Ui>Confirm</Ui>. Ensemble first checks each candidate again: it reads its tickets again, looks for pull
+          requests opened since, and checks each version tag. If anything changed, it stops, lists what changed and
+          writes nothing.
         </li>
       </Steps>
       <p>Then, in order: the release tags, a GitHub pre-release on each with that repository&rsquo;s notes, and a comment on each ticket whose repositories all tagged. The dialog lists each step and whether it worked.</p>
@@ -132,7 +131,9 @@ export default function Page(): JSX.Element {
         in a repository that failed to tag gets no comment.
       </Warning>
       <Note>
-        With AI on, the notes add a one-paragraph summary per story. Version numbers and counts always come from your
+        After a release, the notes list everything since it. Before your first release they list only the
+        tag&rsquo;s own stories and say &ldquo;Earlier changes are not listed.&rdquo; With AI on, the notes add a
+        one-paragraph summary per story. Version numbers and counts always come from your
         tags, never from the model. Comments are posted on Jira; other trackers are not supported yet.
       </Note>
     </>

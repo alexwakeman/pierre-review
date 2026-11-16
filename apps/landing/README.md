@@ -95,7 +95,7 @@ are the app's own; never invent a feature for a mock.
 | `build.tsx` TicketDesignMock, TicketCheckMock, LoopBodyMock | `/build` | `components/FlowDiagram.tsx` + `StoryDesignSection.tsx` ("Ticket design"), the story check in `ClaudeReviewTab.tsx` / `StoryLayout.tsx`, the loop's PR body (`coding/story-build/loop/pr-body.ts`) |
 | `setup.tsx` AddReposMock | `/docs/getting-started/add-repositories` | `components/Activity/FirstRunOnboarding.tsx` |
 | `setup.tsx` WorkspacesMock | `/docs/getting-started/workspaces` | `components/Activity/WorkspaceManager.tsx` |
-| `reports.tsx` SprintLanesMock (`initialView="releases"` on `/docs/this-sprint/releases`) | `/reporting`, `/docs/this-sprint/overview`, `/docs/this-sprint/releases` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` (the four tabs); the Releases tab: `Sprint/ReleasesView.tsx`, `Sprint/releasesModel.ts` (`repoRowText`, `repoLatestNote`, `repoRowCounts`, `repoProgress`, `tagExplainer`, `ticketMark`, `releaseWarningText`) |
+| `reports.tsx` SprintLanesMock (`initialView="releases"` on `/docs/this-sprint/releases`) | `/reporting`, `/docs/this-sprint/overview`, `/docs/this-sprint/releases` | `Activity/SprintView.tsx`, `SprintBoards.tsx`, `sprintRailModel.ts` (the four tabs); the Releases tab: `Sprint/ReleasesView.tsx`, `Sprint/releasesModel.ts` (`repoRowText`, `repoLatestNote`, `repoRowCounts`, `repoProgress`, `tagExplainer`, `ticketMark`, `noTicketLine`) |
 
 **THE SITE WAS FIVE FEATURE-AREA PAGES** (`/features`, `/bots`, `/pro`, `/pricing`,
 `/how-it-works`) plus an arcade game, and they were removed together. The two role pages

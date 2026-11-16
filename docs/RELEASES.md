@@ -2,8 +2,10 @@
 
 The spec agreed with the owner on 2026-11-14, reworked with the owner on 2026-11-15 after a try on real
 data (releasable repos, each repo judged on its own, the fixed hyphen), and again the same day: the
-candidate is AUTOMATIC — no start tag, the whole reachable history, a progress line while it reads. It is
-the acceptance contract: § Acceptance checks is
+candidate is AUTOMATIC — no start tag, the whole reachable history, a progress line while it reads. On
+2026-11-16 the owner approved a SIMPLER RULE: the candidate is the newest version tag whose tickets are
+Complete with no pull request still open, and the reader checks what is listed. It is the acceptance
+contract: § Acceptance checks is
 what a build of this feature must pass. Implementation notes are added below § Implementation as the
 work lands; keep the spec sections true.
 
@@ -11,8 +13,10 @@ work lands; keep the spec sections true.
 
 Say, per RELEASABLE repository (ticked "Released from this workspace"), which version tag on `main` is
 safe to release, by itself (deterministic, no AI, nothing for the reader to pick): walking the version
-tags oldest → newest after the last release, the tag before the first one that adds a not-Complete ticket.
-Each repository is judged on its own. One reader
+tags NEWEST → oldest after the last release, the first tag whose tickets are all Complete with no pull
+request still open. It is a simple, strict-from-the-latest answer; the reader validates what is shown
+(tickets the tracker could not find, pull requests with no ticket). Each repository is judged on its
+own. One reader
 press tags each safe version with the workspace's release suffix (the tag is the trigger for the
 team's image build; Ensemble deploys nothing), publishes release notes and comments on each shipped
 ticket. A hotfix is an Implement option that builds one fix twice: on the latest release and on
@@ -54,87 +58,99 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
   baseline: the walk starts at the OLDEST version tag on `main` (the whole history the app can reach —
   every tag the tag read returns, beyond the 90-day PR sync). There is no start tag (removed 2026-11-15:
   the app works out the starting point itself).
-- **Range of a version tag** — the PRs merged INTO THE DEFAULT BRANCH after the previous version tag (or the
-  baseline) up to and including that tag's commit. Read in ONE pass over the default branch's FIRST-PARENT
+- **Increment of a version tag** — the PRs merged INTO THE DEFAULT BRANCH after the previous version tag (or the
+  baseline) up to and including that tag's commit.
+- **Scope of a version tag** — the tickets the check reads for it: with a baseline, every PR in (baseline,
+  tag] (the whole content since the last release); with no baseline, ONLY the tag's own increment.
+- **Range** — older word for the increment, still used in code. Read in ONE pass over the default branch's FIRST-PARENT
   history, newest first (GraphQL `history` with each commit's `associatedPullRequests`): each commit belongs
   to the nearest tag at or above it; a commit with no PR is a direct push. The OLDEST tag with no base: every
   first-parent commit down to the root. Each range PR is kept as a LIGHT record (title, head branch, author,
   merge) — no full PR sync; tickets are read in BATCHES (§ Implementation → One history pass).
-- **Done** — the ticket is in the workspace's Complete stage and nothing else (`stage === 'done'`,
+- **Done / Complete** — the ticket is in the workspace's Complete stage and nothing else (`stage === 'done'`,
   `SPRINT_STAGES`; with automatic buckets: the tracker's `done` category minus the names that read as
-  cancelled). ⚠ **A Cancelled ticket ("Won't do", "Duplicate", "Closed as not planned") is NOT Done and
-  holds a tag like any not-Done ticket** (owner, 2026-11-15, reversing the earlier "Won't do counts"):
-  its blocker reads "BMD-12 is not done (Won't Do)." (docs/TRACKERS.md § The status order and buckets).
+  cancelled). ⚠ **A Cancelled ticket ("Won't do", "Duplicate", "Closed as not planned") is NOT Complete and
+  does not qualify, like any other stage** (owner, 2026-11-15, reversing the earlier "Won't do counts"):
+  the reason reads "BMD-12 is Won't Do." (docs/TRACKERS.md § The status order and buckets).
+- **Open PR** — a stored `pull_requests` row still OPEN, into the repo's DEFAULT BRANCH (a base not synced
+  yet counts), in ANY releasable repo of the workspace, whose detected tickets include the ticket. A merged
+  PR anywhere is fine; a closed-unmerged one is ignored; an open PR into `hotfix/…` is not one.
 - **Human vs bot PR** — by author through `globalAutomationUserIds`, never `hiddenBotUserIds`.
 
 ## The release check (one pure fold, deterministic)
 
-**Per releasable repo, on its own:**
+**THE SIMPLE RULE (owner, 2026-11-16). Per releasable repo, on its own:**
 
-1. Baseline = the newest release tag on `main`; none ⇒ start at the oldest version tag on `main`.
-2. Walk the version tags after the baseline OLDEST → NEWEST. Each tag ADDS the PRs (into the default
-   branch) since the version tag before it (the oldest: everything up to it).
-3. The FIRST tag that adds any of these HOLDS ITSELF AND EVERY LATER TAG (tags are cumulative):
-   - a PR linked to a ticket that is not Complete (`stage === 'done'` only — Cancelled ("Won't do") and
-     every other stage hold);
-   - a ticket the tracker could not give (`not_found`, `no_access`, `failed`), with the reason;
-   - a PR GitHub could not give;
-   - more commits than can be read (`too_large`, past 10,000 commits — an honest refusal).
-4. The candidate is the tag just before it; nothing holds ⇒ the latest version tag.
+1. Baseline = the newest release tag on `main` (`<tag><release suffix>`), or none.
+2. Walk the version tags after the baseline NEWEST → OLDEST.
+3. A tag's SCOPE = the tickets named by the PRs merged into the default branch that it covers:
+   - with a baseline: every PR in (baseline, tag] — the whole content since the last release;
+   - with no baseline: ONLY the tag's own increment (the PRs it added since the version tag before it).
+4. The tag QUALIFIES when every ticket in its scope that the tracker returned is Complete (`stage ===
+   'done'` only — Cancelled and every other stage do not qualify) AND has no open PR in any of the
+   workspace's releasable repos.
+5. **The first tag that qualifies is the candidate. The walk stops there** — nothing older is read. The
+   history pass may stop early too: once every releasing workspace's candidate is proven, reading older
+   history is unnecessary (with a baseline it still reads down to the baseline, because the scope needs it).
 
-Readiness is the TICKET being Complete; nothing else about PRs across repositories counts (no "ships whole",
-no "open work"). Authorship never changes a block.
-
-- A human PR with no ticket: a WARNING, never a block.
-- A bot PR with no ticket: no warning; listed under "Dependency and bot changes" in the notes.
-- A bot PR naming a not-done ticket: BLOCKS.
+- **Tickets the tracker could not give do NOT block** (not found, no access, failed past the retry limit,
+  a tracker that cannot read at all): they are listed under the tag — "BMD-123 not found", "BMD-9 could
+  not be read: the tracker did not answer" — for the reader to check. A ticket NOT READ YET (the tracker
+  has not answered, a transient state) makes the tag CHECKING until it is read; after three failed reads
+  in a row it becomes "could not be read" and stops blocking.
+- **PRs with no ticket** (human or bot) never block and are never a warning: listed under the tag ("Also
+  includes 3 pull requests with no ticket") with links. The notes still list them ("Untracked changes",
+  "Dependency and bot changes").
+- **Authorship never changes anything**: a bot PR naming a not-Complete ticket rules its tag out.
+- **Tags newer than the candidate** each say why they do not qualify: "BMD-1048 is In PO Review.",
+  "BMD-1050 has an open pull request in bng-metric-frontend (#812)." With a baseline a reason may come from
+  an earlier tag in the scope, and says which: "BMD-1040 (from 0.391.0) is In Progress."
+- **Work not done yet is CHECKING, never a reason**: a scope the history pass has not read, a ticket not read
+  yet, a newer version tag (or a release tag that may be a newer baseline) whose place on `main` is not
+  known yet. The walk stops at that tag (it may yet qualify). A reason that rules a tag out is certain even
+  while other parts of its scope are still read (more reading only adds tickets), so a tag can be ruled out
+  early.
+- **Early answer**: the history pass reads `main` newest first, so the newest tags are decided first. With no
+  baseline, a tag is the candidate as soon as its own increment is read and its tickets answered; with a
+  baseline, once the pass has reached the baseline.
+- No version tag after the baseline: "Nothing new" — not in the release. A PR into a hotfix branch is in no
+  increment (merged or open).
 - Commits with no PR (direct pushes): a note on their tag only.
-- Work not done yet — a tag whose place on `main` is unknown, a range the history pass has not finished, a
-  ticket not read yet — is CHECKING, never a blocker: the walk stops there. A candidate proven before it
-  stands ("Still reading later tags"); with none the row reads "Checking…". (A ticket "not read yet" in a
-  workspace whose tracker cannot read at all holds instead — it would never be read.)
-- **Newest first, an early upper limit.** The history pass reads `main` newest first, so the newest tags are
-  known first. H = the oldest held tag found so far (tags are cumulative: every tag at or after H is held).
-  Until the pass reaches the baseline (or the root) the candidate is not confirmed, and the row reads
-  "Candidate at most 0.388.0 — checking older history (40%)", 0.388.0 being the tag just before H (the latest
-  tag when none is held yet). When the pass is complete and every ticket read, the candidate is the tag just
-  before the OLDEST held tag (or the latest).
-- No version tag after the baseline: "Nothing new" — not in the release.
-- A PR into a hotfix branch is in no range (merged or open) — it is a separate line.
-- Tags after the first held tag keep being read, so each shows its own reason.
 
-The fold is pure and DB-only on a view (tags, the walked history, light PR records and ticket statuses are
-synced/stored, the scan's live progress is in memory); it never fetches on mount. THE SCAN (the tags step,
-the background) reads `main`'s history once, newest first, and the tickets in batches, within the rate
-budget, and keeps what it read: the next scan reads only the commits newer than the walked head.
+The fold is pure and DB-only on a view (tags, the walked history, light PR records, the open PRs and ticket
+statuses are synced/stored, the scan's live progress is in memory); it never fetches on mount. THE SCAN (the
+tags step, the background) reads `main`'s history once, newest first, and the tickets in batches, within the
+rate budget, and keeps what it read: the next scan reads only the commits newer than the walked head.
 
 ## Releases tab (This Sprint → Releases, the 4th inner tab, key `4`)
 
 1. Header: "Latest release: none" / "Latest release: 12 Nov", Refresh, an ⓘ with the rules in a few lines.
 2. ONE ROW PER RELEASABLE REPO, in plain words:
-   - candidate: "Release 0.388.0 → 0.388.0-rc", with "Latest 0.394.0" beside it when different, and counts
-     "6 tickets · 1 warning";
-   - none: "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In Progress)", or with a
-     baseline "No tag can be released since 0.380.0-rc: the next tag, 0.381.0, contains BMD-127 (In Progress)";
-   - checking: "Candidate at most 0.388.0 — checking older history (40%)" (the early upper limit), or
-     "Checking…", with a PROGRESS BAR and ONE short line of what the scan is doing now — "Reading main's
-     history: 1,200 of 5,400 commits", "Reading tickets from Jira: 300 of 420" (the workspace's tracker). A
-     candidate already proven while later tags are still read shows the candidate AND a small "Still reading
-     later tags" bar;
+   - candidate: "Release 0.392.0 → 0.392.0-rc", with "Latest 0.394.0" beside it when different, and counts
+     "6 tickets · 1 to check" (tickets the tracker could not give);
+   - none: "No tag can be released — 0.394.0: BMD-1048 is In PO Review", or with a baseline "No tag since
+     0.380.0-rc can be released — 0.394.0: BMD-1040 (from 0.391.0) is In Progress" (the newest tag's reason);
+   - checking: "Checking…", with a PROGRESS BAR and ONE short line of what the check waits for — "Reading
+     main's history: 1,200 of 5,400 commits", "Reading tickets from Jira: 300 of 420" (the workspace's
+     tracker). A candidate found early (§ The release check, early answer) is shown as a candidate, with no bar;
    - "Nothing new since 0.390.0-rc" / "No version tags on main yet".
    The tab polls `GET /api/releases` every ~3 s ONLY while a repo is checking, and stops when none is. There
    is no separate tickets panel and nothing to pick.
-3. A row expands to EVERY tag after the candidate, newest first, each with its explainer — its own blockers
-   with status, and for tags after the first held one "Also contains BMD-127 (from 0.312.0)" — then the
-   candidate tag's own tickets. A ticket chip opens the story (`useOpenStory()`), a PR its PR tab. "Released"
-   is never said unless a release tag contains it.
-4. Warnings (untracked human PRs) listed under the rows; never block.
+3. A row expands to the tags read, NEWEST first: each tag newer than the candidate with why it does not
+   qualify, then the candidate with the tickets of its scope (with a baseline: everything since the
+   release). Under each tag, for the reader to check: the tickets the tracker could not give ("BMD-123 not
+   found. Check it by hand.") and "Also includes 3 pull requests with no ticket" with links. A ticket chip
+   opens the story (`useOpenStory()`), a PR its PR tab (or GitHub). "Released" is never said unless a release
+   tag contains it.
+4. No warnings panel: nothing about a pull request with no ticket is a warning (removed 2026-11-16).
 5. **"Create release…"** — shown only with ≥ 1 candidate in a writable repo (HIDE, never disable).
    Dialog: the releasable repos with a candidate (ticked; each judged on its own, so unticking one only
    leaves it out; none ticked hides Confirm); release notes preview (editable); tracker comment preview;
    Confirm.
-   Confirm FIRST re-reads every ticket in the release from the tracker and re-checks each version
-   tag's commit; any change stops it and shows what — nothing is written.
+   Confirm FIRST re-checks the chosen candidate under THE RULE: every ticket in its scope re-read from the
+   tracker in one batch, the open PRs read again from the DB, and each version tag's commit read on
+   GitHub; any change (it no longer qualifies, or another tag is now the candidate) stops it and shows
+   what — nothing is written.
 6. Writes, in order, each claimed (compare-and-set) BEFORE the GitHub/tracker write, NEVER retried:
    1. annotated release tags (an existing name is REFUSED, never moved);
    2. a GitHub pre-release on each release tag carrying that repo's notes;
@@ -151,8 +167,10 @@ budget, and keeps what it read: the next scan reads only the commits newer than 
 
 ## Release notes
 
-One document per release, a section per repo (each section is also that repo's pre-release body).
-Per story: key, title, link, the PRs per repo, and — when `me.ai.enabled` — a one-paragraph summary
+One document per release, a section per repo (each section is also that repo's pre-release body). Each
+section lists the candidate's SCOPE: with a baseline, everything since the last release ("Stories"); with
+none, the candidate tag's own increment ("Stories in this tag") and one line, "Earlier changes are not
+listed." A ticket the tracker could not give is listed by its key (it gets no comment). Per story: key, title, link, the PRs per repo, and — when `me.ai.enabled` — a one-paragraph summary
 from the ticket text and PR titles/descriptions through `ai/provider.ts` (`cheapComplete`, writing
 rules). Without AI the same document minus summaries; never blocked. Version numbers and counts are
 code-derived, never model-written. Then "Untracked changes" and "Dependency and bot changes". Stored
@@ -225,39 +243,46 @@ Settings
 3. Changing the release suffix after a release exists warns; after saving, old release tags no longer
    form the baseline.
 
-Candidate (automatic, deterministic)
-4. Tags v1.0.0, v1.1.0, v1.2.0, no release, all tickets Done → candidate v1.2.0.
-5. v1.1.0's range adds a PR whose ticket is In review → candidate v1.0.0; v1.1.0 names the blocker.
-6. That ticket moves to Done (the worker's read or Refresh) → candidate v1.2.0.
-7. A human PR with no ticket → still a candidate, with a warning naming the PR.
-8. A bot PR with no ticket → no warning; listed under bot changes.
-9. A bot PR naming a not-done ticket → blocks.
-10. A ticket the tracker refused or failed to read (not found, no access, failed) → blocks, with the reason.
-11. CANCELLED HOLDS: "Won't do" with merged code → Cancelled, not Complete: it holds its tag ("T2 is not done
-    (Won't do).").
+Candidate (automatic, deterministic — THE SIMPLE RULE, 2026-11-16)
+4. Tags v1.0.0, v1.1.0, v1.2.0, no release, all tickets Complete → candidate v1.2.0, and nothing older is
+   read (the expanded row lists v1.2.0 only).
+5. NEWEST-FIRST STOP: v1.2.0's increment names a ticket In review → candidate v1.1.0; v1.2.0 says "T3 is In
+   review."; v1.0.0 is not read.
+6. That ticket moves to Complete (the scan's read or Refresh) → candidate v1.2.0.
+7. UNTRACKED PRS LISTED, NOT WARNED: a PR with no ticket (human or bot) never blocks and is no warning; it is
+   listed under its tag ("Also includes 2 pull requests with no ticket"); the notes list it under "Untracked
+   changes" / "Dependency and bot changes".
+8. A bot PR with no ticket → listed like any PR with no ticket; under "Dependency and bot changes" in the notes.
+9. A bot PR naming a not-Complete ticket → its tag does not qualify.
+10. NOT FOUND LISTED, NOT BLOCKING: a ticket the tracker could not give (not found, no access, failed three
+    times, a tracker that cannot read) → the tag still qualifies; the ticket is listed under it ("T3 not
+    found", "T3 could not be read: there is no access to it"), counted "1 to check", in the notes by its key,
+    and gets no comment.
+11. CANCELLED DOES NOT QUALIFY: "Won't do" with merged code → Cancelled, not Complete: "T3 is Won't do."
 12. No version tag after the baseline → "Nothing new", not in the release; no version tag at all → "No
     version tags on main yet".
-13. A merged PR into `hotfix/…` for a not-done ticket blocks no `main` candidate.
-
-Automatic start, checking, each repo on its own
-14. AUTOMATIC START WITH NO RELEASE: there is nothing to pick; with no release tag the walk starts at the
-    OLDEST version tag on main and covers every version tag on main; the oldest tag's range is everything
-    merged into the default branch up to it.
-15. A release tag on main is the baseline: only later version tags are checked.
-16. OLDEST-TAG BLOCKER SENTENCE: the oldest tag holds → "No tag can be released: the oldest tag, 0.12.0,
-    already contains BMD-127 (In Progress)"; with a release → "No tag can be released since 0.380.0-rc: the
-    next tag, 0.381.0, contains BMD-127 (In Progress)".
-17. PROGRESS WHILE CHECKING: while the history pass or a ticket is not read yet, the row reads "Checking…" (or
-    the upper limit, 43) with a progress bar and one line of what the scan is doing ("Reading main's history:
-    1,200 of 5,400 commits", "Reading tickets from Jira: 300 of 420"), never a ticket blocker; a candidate
-    proven before it shows with "Still reading later tags".
-18. An unticked repository is ignored entirely (no row, no block, no warning). A Done ticket ships in one
-    repository whatever its PRs elsewhere; another repository's held tag, or an open PR, holds nothing.
+13. A merged PR into `hotfix/…` is in no `main` tag's scope; an open PR into `hotfix/…` is not an open PR.
+14. NO BASELINE, OWN INCREMENT: no release; v1.1.0 adds a not-Complete ticket, v1.2.0 only Complete ones →
+    candidate v1.2.0 (v1.1.0's ticket is not in v1.2.0's scope, and is not read).
+15. BASELINE, WHOLE SCOPE: after a release on v1.0.0, v1.1.0 adds T2 (In review), v1.2.0 adds T3 (Complete) →
+    v1.2.0 does not qualify ("T2 (from v1.1.0) is In review."), nor does v1.1.0 → "No tag since v1.0.0-rc can
+    be released"; T2 moves to Complete → v1.2.0, whose notes list T2 and T3.
+16. NONE: every tag ruled out → "No tag can be released — v1.2.0: T3 is In PO Review" (the newest tag's reason);
+    with a baseline "No tag since 0.380.0-rc can be released — …".
+17. CHECKING: a ticket not read yet, or a scope not read yet, makes its tag checking — the walk stops there and
+    the row reads "Checking…" with a progress bar and one line ("Reading main's history: 1,200 of 5,400
+    commits", "Reading tickets from Jira: 0 of 1"); a reason that rules a tag out is still shown at once.
+18. OPEN PR IN ANOTHER RELEASABLE REPO: a Complete ticket with an open PR into the default branch of any
+    releasable repo → the tag does not qualify ("T3 has an open pull request in web (#812)."); a merged PR
+    elsewhere is fine. Otherwise each repository is judged on its own (another repository's tag ruled out
+    holds nothing), and an unticked repository is ignored entirely (no row, no block, its PRs count for
+    nothing).
 
 Writes
 19. Confirm creates `<version><release suffix>`, annotated, on the version tag's commit; no Ensemble wording.
 20. An existing release tag name → refused for that repo; the others go ahead.
-21. A ticket leaves Done between opening the dialog and Confirm → Confirm stops, shows it, writes nothing.
+21. A ticket leaves Complete, or a pull request for it opens, between opening the dialog and Confirm → Confirm
+    stops, shows it ("T2 is In review.", "T1 has an open pull request in web (#88)."), writes nothing.
 22. A repo fails to tag → its tickets get no comment; tickets only in other repos do; the result says so.
 23. The comment is posted once per shipped ticket; pressing again writes nothing new.
 24. After success every released repo reads "Nothing new" until the next version tag.
@@ -290,21 +315,22 @@ Port report
 
 History, fetching, polling
 38. HISTORY BEYOND THE 90-DAY SYNC IS READ: every tag the tag read reaches (paged, up to 1000); the history
-    pass reads `main` back to the baseline, or to the root with no release; the oldest tag's range is every
-    first-parent commit down to the root.
+    pass reads `main` back to the baseline, or to the root with no release — unless the candidate is proven
+    first (48). A release tag on main is the baseline: only later version tags are read.
 39. RANGE PRS FROM THE HISTORY READ: a range PR with no `pull_requests` row is read from its LIGHT record
     (title + head branch through THE detection rule, the same tickets a stored PR with that title and branch
-    names); its ticket is read in the scan's next batch; until then the repo is checking.
-40. A ticket the tracker did not answer is checking and retried; after three failed reads in a row it holds
-    ("BMD-12 could not be read: the tracker did not answer.").
+    names); its ticket is read in the scan's next batch; until then its tag is checking.
+40. A ticket the tracker did not answer is checking and retried; after three failed reads in a row it is
+    listed ("BMD-12 could not be read: the tracker did not answer") and stops blocking.
 41. The tab polls `GET /api/releases` every ~3 s while any repo is checking, and stops when none is.
-42. Every tag after the candidate is listed with its own reason; tags after the first held one also say
-    "Also contains BMD-127 (from 0.312.0)."
+42. Every tag newer than the candidate is listed with why it does not qualify; with a baseline a reason from
+    an earlier tag names it ("BMD-1040 (from 0.391.0) is In Progress.").
 
-Fast scan (the one history pass, 2026-11-15)
-43. NEWEST FIRST, AN EARLY UPPER LIMIT: part way through the pass, with 0.390.0 held and 0.388.0 before it, the
-    row reads "Candidate at most 0.388.0 — checking older history (40%)"; nothing held yet → at most the latest
-    tag; the pass complete and every ticket read → the candidate is the tag before the OLDEST held tag.
+Fast scan (the one history pass, 2026-11-15; early answer 2026-11-16)
+43. EARLY ANSWER: part way through the pass with no release, as soon as the newest tag's own increment is read
+    and its tickets answered, the row shows the candidate (no bar); every tag read ruled out while older
+    history is unread → "Checking…" with the history line; with a baseline, the candidate waits until the
+    pass has reached it (a release tag whose place is not known yet is a baseline not known yet).
 44. INCREMENTAL RESCAN: after a complete pass, a new commit on `main` costs one REST compare and one history
     page (only the new commits are read); a force-pushed `main` (the walked head is not an ancestor) is walked
     again from scratch.
@@ -312,6 +338,13 @@ Fast scan (the one history pass, 2026-11-15)
     not exist splits its batch, never fails the rest; Refresh and Confirm read their tickets in one batch too.
 46. NO FULL PR SYNCS: the scan creates no `pull_requests` row; PRs already stored still lend their links,
     author and PR tab.
+
+Simple rule (2026-11-16)
+47. NOTES SCOPE: with a release the notes list everything since it ("Stories"); with none, the candidate tag's
+    own changes ("Stories in this tag") and "Earlier changes are not listed."
+48. HISTORY STOPS EARLY: once the check names a candidate for every workspace releasing the repo, the history
+    pass reads no older page (asked before the first deep page of a run and every 5 pages; the cursor is
+    kept, and the walk goes on if the answer changes).
 
 ## Implementation
 
@@ -694,7 +727,8 @@ the tickets panel said "released" for PRs older than the checked history. The re
 
 > ⚠ SUPERSEDED in part by § One history pass below: the scan (ancestry compares, per-tag compare ranges, the
 > 'history' closed-PR list, the missing-PR full syncs, the PR fetch failures, the worker's priority set) and
-> its progress steps (`ancestry` / `ranges` / `prs`) are REPLACED. The fold's rules stand.
+> its progress steps (`ancestry` / `ranges` / `prs`) are REPLACED. The fold's rules are REPLACED by § Simple
+> rule (2026-11-16).
 
 The owner: no "Start from this tag" — the app works out the starting point; check the WHOLE history it can
 reach, fetch what it does not have, and show what it is doing.
@@ -759,6 +793,9 @@ reach, fetch what it does not have, and show what it is doing.
 
 ### One history pass (2026-11-15, the fast scan)
 
+> ⚠ The fold's upper limit (`upperLimit` / `heldFrom`) and `RELEASE_TICKET_FAILS_HOLD` below are REMOVED by
+> § Simple rule (2026-11-16). The history pass stands (it may now stop early).
+>
 > Supersedes, in § Automatic candidate: the per-tag ancestry compares, the per-tag REST compare ranges, the
 > 'history' range's closed-PR list, the missing-PR full syncs, the PR fetch failures and the tracker worker's
 > release priority set.
@@ -851,3 +888,72 @@ ancestry, one compare per tag, a full single-PR sync per old PR (≤ 120 a burst
   large" any more (the pass reads them whole). Ticket statuses read in a batch are per workspace; an External
   repo's tickets are read through the releasing workspace's tracker. The walked commits of a repo that is
   unticked stay (cheap; a re-tick walks only what is new).
+
+### Simple rule (2026-11-16)
+
+The owner: a ticket that cannot be found (or an old unfinished one) held its tag and every later one, so the
+candidate fell back far into the past. Wanted: a simple, strict-from-the-latest answer — the latest tag that
+covers finished work — with more onus on the reader to check what is shown. The rule: § The release check.
+
+- **The fold** (shared `release-check.ts`, rewritten): spans (each version tag's own increment) as before; THE
+  WALK is NEWEST → OLDEST; `evaluate(tag)` folds its SCOPE (own increment; with a known baseline also every
+  earlier span, newest first, each reason carrying `fromTag`) into `blockers` (`not_done` / `open_pr`, certain
+  reasons) or `checking` (a ticket not read yet, or `ident: null` = history not read: an incomplete span, a
+  release tag whose place is unknown — a baseline not known yet, during which the scope is the own increment —
+  or an unknown version tag newer than the tag, or after a known baseline) and `unverified` (`not_found` /
+  `no_access` / `failed` / `not_read` on a tracker that cannot read — LISTED, never a block). Tag `state`:
+  `qualifies` / `does_not_qualify` / `checking`; the first `qualifies` is the candidate and the walk stops; the
+  first `checking` stops it too. Repo `status` `candidate` / `none` / `checking` / `nothing_new` (`none` only
+  when no tag whose place is unknown is left); `checking` = status checking. New: `ReleaseCheckInput.openPrs`
+  (`ReleaseCheckOpenPrInput`), `ReleaseOpenPr`, `ReleaseUnverified`, repo `scope` (`since_release` / `own_tag`),
+  `newestReason`, `candidatePrIds`, `unverifiedCount`; tag `unverified`, `scopePrIds`, `historyRead`; ticket
+  `unverified`, `openPrs`; words `releaseUnverifiedText`, `releaseBlockerShort` / `releaseBlockerText`
+  rewritten ("BMD-1048 is In PO Review", "BMD-1050 has an open pull request in web (#812)", "BMD-1040 (from
+  0.391.0) is In Progress", "BMD-12 is not read yet", "The history is still being read."). Progress: the
+  history line when the stop waits for history, else the tickets of the tags read.
+- **Removed**: cumulative holding (`alsoHeldBy`, `blocked`, `firstBlocked`, `firstBlocker`, `firstVersion`), the
+  early upper limit (`upperLimit`, `heldFrom`, "Candidate at most …", `releaseProgressPercent`), `unreadable` /
+  `pr_unreadable` / `too_large` blockers, the hold after three failures (`RELEASE_TICKET_FAILS_HOLD` →
+  `RELEASE_TICKET_FAILS_MAX`: the read then stops "checking" and is listed as "could not be read"), untracked-PR
+  warnings (`ReleaseWarning`, `warnings`, `warningCount`, the tab's warnings panel, `releaseWarningText`,
+  `releaseWordsContext`, `shortBlocker`, `repoFirstBlocker`), the "Still reading later tags" bar, the ticket's
+  `unreadable` blocker, `tagRangeKeepFrom` (unused), `RELEASE_SCAN_STEPS`, and from the inputs `method`,
+  `truncated` (ranges) and `intoDefaultBranch` / `state` (PRs: light records are merged by definition) and
+  from `ReleaseCheckPr` `state`.
+- **The DB half** (`db/release-check.ts`): `openPrs` = the stored `pull_requests` rows OPEN in ANY releasable
+  repo of the workspace (whatever repos were asked for), into the repo's default branch (a base not synced
+  yet counts; `hotfix/…` does not), with THE detection rule on the row plus its own `tracker_tickets` rows on
+  the site. `releaseCandidateProven(accountId, repoId, views)` — true when every releasing workspace's check
+  names a candidate.
+- **The history pass** (`sync/release-history.ts`): `deepEnough` (from `sync/tags-step.ts` →
+  `releaseCandidateProven`), asked before the first deep page of a run and every `DEEP_ENOUGH_EVERY` (5) deep
+  pages; true ⇒ the deep segment stops (cursor kept), `stoppedEarly`, `complete`. A later run asks again, so a
+  candidate that stops qualifying lets the walk go on.
+- **Confirm / Refresh**: Confirm re-reads every ticket in the scope of the included candidates
+  (`releaseScopeTickets`) ∪ the snapshot's, then the check (the open PRs from the DB); any difference stops it
+  ("T1 has an open pull request in web (#88)."). Refresh reads the tickets not Complete, not read yet, or not
+  given (never one held only by an open PR). `releaseShippedTickets` = in scope AND ready (comments, snapshot,
+  summaries); `releaseScopeTickets` = in scope (the notes, by key for one the tracker could not give).
+- **Notes**: `ReleaseNotesRepo.scope`; `own_tag` adds "Earlier changes are not listed." and heads the stories
+  "Stories in this tag".
+- **Frontend** (`releasesModel.ts`): `repoRowText` ("No tag can be released — 0.394.0: …", "No tag since
+  0.380.0-rc can be released — …", "Checking…"), `repoRowCounts` ("6 tickets · 1 to check"), `repoProgress` (no
+  small bar), `expandedTags` (the tags read), `tagExplainer` (`{tone, text}` lines: reasons, then "BMD-123 not
+  found. Check it by hand."), `ticketMark` (an open PR marks a Complete ticket), `tagContents` (the candidate
+  lists its scope; `noTicket`), `noTicketLine`. `ReleasesView.tsx`: no warnings panel; the candidate tag says
+  "everything since 0.380.0-rc" or "this tag’s own changes"; the ⓘ states the rule. The E2E fixture (check
+  null) needed no change. Landing mock (`SPRINT_RELEASES`, `ReleasesPanel`): the new rows and reasons, no
+  warnings list.
+- **Tests**: `db/release-check.test.ts` (acceptance 4–18, 38–43 on the pure fold; the DB half: a not-readable
+  tracker lists, a failed read listed after three, the open PR into `main` vs `hotfix/…`,
+  `releaseCandidateProven`), `releases/release-write.test.ts` (21 open PR, 47, a not-found ticket in the notes
+  and not commented), `releases/create.test.ts` (21 both ways), `sync/release-history.test.ts` (48),
+  `coding/story-build/hotfix-port.test.ts` (36 at the fold), `apps/frontend/test/releasesModel.test.ts` (4, 5,
+  7, 10, 11, 12, 16, 17, 18, 41, 42).
+- **Decisions**: an open PR counts only into the DEFAULT branch (an open hotfix PR is not work on its way to
+  `main`; acceptance 36 says a hotfix-only ticket neither blocks nor warns), and an open PR whose base is not
+  synced yet counts. A not-Complete ticket with an open PR reads as not Complete (one reason per ticket). With
+  a baseline not known yet (a release tag the pass has not placed), the scope is the own increment: its
+  reasons are certain, but the tag cannot qualify until the baseline is known. Tags OLDER than the candidate
+  are not in the result (not read); the candidate's row lists every ticket of its scope. The tickets in a
+  candidate's scope that the tracker could not give are in the notes by key and get no tracker comment.

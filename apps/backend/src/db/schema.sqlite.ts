@@ -5898,7 +5898,7 @@ export const releaseRangePrs = sqliteTable(
 // needed (`tracker_tickets` is keyed per PR). The release check reads it beside the PR rows and the
 // sprint rows; the freshest successful read wins.
 //   state     'ok' | 'not_found' | 'no_access' | 'failed'
-//   attempts  failed reads in a row (a transient failure is "checking" until RELEASE_TICKET_FAILS_HOLD).
+//   attempts  failed reads in a row (a transient failure is "checking" until RELEASE_TICKET_FAILS_MAX, then "could not be read").
 export const trackerTicketStatus = sqliteTable(
   'tracker_ticket_status',
   {
