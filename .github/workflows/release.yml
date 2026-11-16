@@ -169,6 +169,7 @@ jobs:
         run: pnpm package
 
       - name: Commit, tag & push (atomic)
+        id: push
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -178,9 +179,27 @@ jobs:
           git tag "v${{ steps.bump.outputs.version }}"
           # Atomic: the commit and tag land together or not at all, so a rejected
           # push never leaves a dangling tag for the next run to collide on.
-          git push --atomic origin HEAD:main "v${{ steps.bump.outputs.version }}"
+          if git push --atomic origin HEAD:main "v${{ steps.bump.outputs.version }}"; then
+            echo "superseded=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # SUPERSEDED: rejected because main moved past this run's commit while it ran (a
+          # pull request merged in the ~20 minutes a release takes). That push started its
+          # own Release, queued behind this one in the `release` group, and it releases these
+          # commits too. Stand down without publishing, instead of failing the run. Any other
+          # rejection (main has NOT moved past us) is still a failure.
+          git fetch --quiet origin main
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ] && git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::notice title=Superseded::main moved past ${GITHUB_SHA::7} while this release ran; the newer push's release ships these commits. Nothing was tagged or published."
+            echo "superseded=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error title=Push rejected::the release push was rejected and main has not moved past ${GITHUB_SHA::7}."
+          exit 1
 
       - name: Publish to npm
+        # A superseded run (see the push step) publishes nothing: the newer run does.
+        if: steps.push.outputs.superseded != 'true'
         working-directory: release
         run: |
           set -euo pipefail

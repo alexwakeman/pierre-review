@@ -972,7 +972,6 @@
 /* the caption card */
 .lb.home .story-cap {
   position: relative;
-  min-height: 118px;
   background: var(--surface-2);
   border-radius: 6px;
   padding: 14px 16px;
@@ -986,6 +985,16 @@
   margin: 0;
   color: #dcdad5;
   line-height: 1.45;
+}
+.lb.home .cap-stack {
+  display: grid;
+}
+.lb.home .cap-stack > * {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+.lb.home .cap-stack > [data-on] {
+  visibility: visible;
 }
 .lb.home .story-cap .cap-wait {
   color: var(--muted);

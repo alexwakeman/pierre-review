@@ -43,6 +43,11 @@ On every release run it:
 6. **Commits & pushes** the bump (`apps/backend/package.json` + `CHANGELOG.md`) as `chore(release): bump to X.Y.Z [skip ci]`
    plus a `vX.Y.Z` git tag to `main`, in a single **atomic** push
    (`git push --atomic`) — so a rejected push never leaves a dangling tag behind.
+   **Superseded:** if the push is rejected because `main` moved past this run's commit while
+   it ran (a pull request merged during the ~20 minutes a release takes), the run stands
+   down GREEN with a "Superseded" notice and publishes nothing: that newer push started its
+   own Release, queued behind this one in the `release` concurrency group, and it ships
+   these commits too. Any other rejection still fails the run.
 7. **Publishes** `./release` to npm with `npm publish --access public`,
    **idempotently** — if `ensemble-review@X.Y.Z` is already on npm (e.g. a re-run;
    the name is read from `release/package.json`, never typed in the workflow),
@@ -219,6 +224,9 @@ the old failure mode, `fatal: tag 'vX.Y.Z' already exists` — or double-publish
 
 Publish is intentionally the **last** step. The rationale:
 
+- **If the push is rejected because `main` moved on** (another merge landed while this
+  release ran), the run is SUPERSEDED: it ends green without publishing, and the newer
+  push's release ships everything. Nothing to do.
 - **If the push fails** (e.g. branch protection rejects the bot), **nothing has
   been published** yet. The version bump only lives in the failed job, so `main`
   is unchanged and you can safely fix the permissions and re-run.
