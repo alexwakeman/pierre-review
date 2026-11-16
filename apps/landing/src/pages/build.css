@@ -155,7 +155,7 @@
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
   gap: var(--gap);
 }
 /* A five-step flow (Automation) fills the row on wide screens; narrower ones use the rules below. */
@@ -297,9 +297,9 @@
   transform: translateY(-50%);
   z-index: 1;
 }
-/* The review rounds: drawn under steps 4 and 5 (each step is 2 of the board's 12 columns). */
+/* The review rounds: drawn under the flow's steps 2 and 3 (5 steps on the board's 12 columns). */
 .lb.build .bd-loop {
-  grid-column: 7 / 11;
+  grid-column: 3 / 9;
   margin: 0;
   padding: 12px 16px;
   border: 2px dashed rgba(241, 241, 239, 0.4);

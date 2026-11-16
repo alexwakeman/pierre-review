@@ -1,0 +1,451 @@
+/* ---------------------------------------------------------------------------
+   BUILD END TO END, AS A STORY (components/board/BuildStory.tsx). The svg carries one
+   class per phase reached (p-press … p-answer); each mark shows from its phase on.
+   Opacity, transforms and line draws only. `.still` = the board after step 8 (the chat
+   overlay of step 9 is listed in the caption instead), nothing moving.
+   --------------------------------------------------------------------------- */
+.lb .bstory {
+  max-width: 920px;
+  margin: 0 auto;
+}
+.lb .bstory-svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  --b-violet: #b9a3ff;
+}
+.lb .bstory-svg text {
+  fill: var(--ink);
+  font-family: inherit;
+  font-size: 15px;
+}
+.lb .bstory-svg .b-card {
+  fill: var(--surface);
+  stroke: rgba(241, 241, 239, 0.18);
+  stroke-width: 1.5;
+  transition: stroke 0.5s ease, opacity 0.5s ease;
+}
+.lb .bstory-svg .b-k {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  fill: var(--muted);
+}
+.lb .bstory-svg .b-ens-k {
+  fill: var(--b-violet);
+}
+.lb .bstory-svg .b-title {
+  font-size: 19px;
+  font-weight: 700;
+}
+.lb .bstory-svg .b-h {
+  font-size: 17px;
+  font-weight: 700;
+}
+.lb .bstory-svg .b-small {
+  font-size: 13px;
+  fill: #cfcdc7;
+}
+.lb .bstory-svg .b-end,
+.lb .bstory-svg .b-ok,
+.lb .bstory-svg .b-new {
+  text-anchor: end;
+}
+.lb .bstory-svg .b-new {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  fill: var(--amber);
+}
+.lb .bstory-svg .b-ok {
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--mint);
+}
+.lb .bstory-svg :is(.b-ac, .b-row, .b-step) rect {
+  fill: var(--surface-2);
+  stroke: transparent;
+  stroke-width: 1.5;
+  transition: stroke 0.5s ease;
+}
+.lb .bstory-svg .l-pay {
+  --lane: var(--azure);
+}
+.lb .bstory-svg .l-api {
+  --lane: var(--mint);
+}
+.lb .bstory-svg .l-web {
+  --lane: var(--pink);
+}
+.lb .bstory-svg .b-mid {
+  text-anchor: middle;
+}
+.lb .bstory-svg .b-num {
+  font-size: 18px;
+  font-weight: 700;
+  fill: var(--lane);
+}
+.lb .bstory-svg .b-lane-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+.lb .bstory-svg .b-lane .b-lane-name {
+  fill: var(--lane);
+}
+
+/* everything that arrives later starts hidden */
+.lb .bstory-svg :is(.b-ac-new, .b-comment, .b-hop, .b-read, .b-added, .b-ok, .b-plan, .b-step, .b-pills, .b-say, .b-dots, .b-sandbox, .b-sandbox-k, .b-stackline, .b-pr, .b-chat, .b-q, .b-a, .b-pointer) {
+  opacity: 0;
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+
+/* 1 · you press Build end to end ---------------------------------------- */
+.lb .bstory-svg .b-button rect {
+  fill: var(--gold);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.lb .bstory-svg .b-button text {
+  text-anchor: middle;
+  font-weight: 700;
+  fill: var(--dark);
+}
+.lb .bstory-svg.p-press .b-button rect {
+  animation: b-press 0.35s ease-in-out 1.15s 1;
+}
+@keyframes b-press {
+  50% {
+    transform: scale(0.94);
+  }
+}
+.lb .bstory-svg .b-pointer {
+  transform: translate(330px, 540px);
+  transition: opacity 0.4s ease, transform 1.1s cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.lb .bstory-svg .b-pointer path {
+  fill: #fff;
+  stroke: var(--dark);
+  stroke-width: 1.5;
+}
+.lb .bstory-svg.p-press:not(.p-fetch) .b-pointer {
+  opacity: 1;
+  transform: translate(150px, 462px);
+}
+
+/* 2 · it reads the ticket ------------------------------------------------- */
+.lb .bstory-svg .b-hop {
+  fill: none;
+  stroke: var(--b-violet);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lb .bstory-svg.p-fetch:not(.p-plan) .h-fetch,
+.lb .bstory-svg.p-fetch .b-read {
+  opacity: 1;
+}
+.lb .bstory-svg.p-fetch:not(.p-assess) .b-ac rect {
+  stroke: var(--b-violet);
+}
+
+/* 3 · it checks it against your code and docs, and adds a criterion -------- */
+.lb .bstory-svg :is(.b-docs, .b-lane) {
+  opacity: 0.55;
+  transition: opacity 0.5s ease;
+}
+.lb .bstory-svg.p-assess :is(.b-docs, .b-lane),
+.lb .bstory-svg.p-assess .b-ok {
+  opacity: 1;
+}
+.lb .bstory-svg.p-assess:not(.p-plan) :is(.b-docs .b-card, .b-lane-card) {
+  stroke: var(--b-violet);
+}
+.lb .bstory-svg.p-refine .b-added {
+  opacity: 1;
+}
+.lb .bstory-svg .b-added rect {
+  stroke: var(--amber);
+}
+
+/* 4 · it plans ------------------------------------------------------------ */
+.lb .bstory-svg.p-plan .b-read {
+  opacity: 0;
+}
+.lb .bstory-svg.p-plan :is(.b-plan, .b-step) {
+  opacity: 1;
+}
+.lb .bstory-svg.p-plan .b-step-2 {
+  transition-delay: 0.35s;
+}
+.lb .bstory-svg.p-plan .b-step-3 {
+  transition-delay: 0.7s;
+}
+.lb .bstory-svg.p-plan .b-step-4 {
+  transition-delay: 1.05s;
+}
+.lb .bstory-svg .b-step .b-line {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 5 · it builds in every repository, in the sandbox ------------------------ */
+.lb .bstory-svg .b-sandbox {
+  fill: none;
+  stroke: var(--b-violet);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 6;
+}
+.lb .bstory-svg .b-sandbox-k {
+  text-anchor: middle;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  fill: var(--b-violet);
+}
+.lb .bstory-svg.p-build:not(.p-prs) :is(.b-sandbox, .b-sandbox-k) {
+  opacity: 1;
+}
+.lb .bstory-svg.p-prs:not(.p-verify) :is(.b-sandbox, .b-sandbox-k) {
+  opacity: 0.35;
+}
+.lb .bstory-svg .b-track {
+  fill: rgba(241, 241, 239, 0.1);
+}
+.lb .bstory-svg .b-fill {
+  fill: var(--lane);
+  transform-box: fill-box;
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: transform 0.5s ease, opacity 0.5s ease;
+}
+.lb .bstory-svg.p-build .b-fill {
+  transform: none;
+}
+.lb .bstory-svg.p-build .b-fill-0 {
+  transition-duration: 2.6s;
+}
+.lb .bstory-svg.p-build .b-fill-1 {
+  transition-duration: 2s;
+}
+.lb .bstory-svg.p-build .b-fill-2 {
+  transition-duration: 2.9s;
+}
+.lb .bstory-svg.p-fix:not(.p-clean) .b-fill {
+  animation: b-work 0.8s ease-in-out infinite;
+}
+@keyframes b-work {
+  50% {
+    opacity: 0.4;
+  }
+}
+.lb .bstory-svg .b-say {
+  text-anchor: middle;
+  font-size: 16px;
+  font-weight: 700;
+}
+.lb .bstory-svg.p-build:not(.p-review) .s-build,
+.lb .bstory-svg.p-review:not(.p-fix) .s-review,
+.lb .bstory-svg.p-fix:not(.p-clean) .s-fix,
+.lb .bstory-svg.p-clean:not(.p-prs) .s-clean,
+.lb .bstory-svg.p-prs:not(.p-ticket) .s-prs,
+.lb .bstory-svg.p-ticket:not(.p-verify) .s-ticket {
+  opacity: 1;
+}
+.lb .bstory-svg .s-review {
+  fill: var(--amber);
+}
+.lb .bstory-svg .s-fix {
+  fill: var(--b-violet);
+}
+.lb .bstory-svg .s-clean {
+  fill: var(--mint);
+}
+.lb .bstory-svg .b-dots circle {
+  fill: var(--b-violet);
+  animation: b-dot 1.2s ease-in-out infinite;
+}
+.lb .bstory-svg .b-dots circle:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.lb .bstory-svg .b-dots circle:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes b-dot {
+  50% {
+    opacity: 0.2;
+  }
+}
+.lb .bstory-svg.p-build:not(.p-comment) .b-dots {
+  opacity: 1;
+}
+
+/* 6 · review rounds: Claude and Codex, a fix, then clean -------------------- */
+.lb .bstory-svg .b-pills rect {
+  fill: var(--surface-2);
+  stroke: var(--amber);
+  stroke-width: 1.5;
+  transition: stroke 0.5s ease;
+}
+.lb .bstory-svg .b-pills text {
+  text-anchor: middle;
+  font-size: 14px;
+  font-weight: 600;
+}
+.lb .bstory-svg.p-review:not(.p-prs) .b-pills {
+  opacity: 1;
+}
+.lb .bstory-svg.p-clean .b-pills rect {
+  stroke: var(--mint);
+}
+
+/* 7 · the pull requests open, in plan order ------------------------------- */
+.lb .bstory-svg.p-prs :is(.b-fill, .b-track) {
+  opacity: 0;
+}
+.lb .bstory-svg .b-track {
+  transition: opacity 0.5s ease;
+}
+.lb .bstory-svg .b-pr {
+  transform: translateY(-10px);
+}
+.lb .bstory-svg .b-pr rect {
+  fill: var(--surface-2);
+  stroke: var(--lane);
+  stroke-width: 2;
+}
+.lb .bstory-svg .b-prnum {
+  font-size: 15px;
+  font-weight: 700;
+}
+.lb .bstory-svg.p-prs .b-pr {
+  opacity: 1;
+  transform: none;
+}
+.lb .bstory-svg.p-prs .b-pr-2 {
+  transition-delay: 0.7s;
+}
+.lb .bstory-svg.p-prs .b-pr-3 {
+  transition-delay: 1.6s;
+}
+.lb .bstory-svg.p-prs .b-pr-4 {
+  transition-delay: 2.5s;
+}
+.lb .bstory-svg .b-stackline {
+  stroke: var(--azure);
+  stroke-width: 4;
+}
+.lb .bstory-svg.p-prs .b-stackline {
+  opacity: 1;
+  transition-delay: 0.9s;
+}
+.lb .bstory-svg .b-need {
+  fill: none;
+  stroke: rgba(241, 241, 239, 0.6);
+  stroke-width: 2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0.7s ease;
+}
+.lb .bstory-svg.p-prs .n-1 {
+  stroke-dashoffset: 0;
+  transition-delay: 1.1s;
+}
+.lb .bstory-svg.p-prs .n-2 {
+  stroke-dashoffset: 0;
+  transition-delay: 2s;
+}
+
+/* 8 · the ticket: the new criterion and a comment --------------------------- */
+.lb .bstory-svg.p-ticket:not(.p-verify) .h-ticket,
+.lb .bstory-svg.p-ticket .b-ac-new,
+.lb .bstory-svg.p-comment .b-comment {
+  opacity: 1;
+}
+.lb .bstory-svg .b-ac-new rect {
+  stroke: var(--amber);
+}
+.lb .bstory-svg .b-comment rect {
+  fill: var(--surface-2);
+  stroke: var(--b-violet);
+  stroke-width: 1.5;
+}
+.lb .bstory-svg .b-links {
+  fill: var(--azure);
+  font-weight: 600;
+}
+
+/* 9 · in Ensemble's ticket view: How to test -------------------------------- */
+.lb .bstory-svg .b-chat {
+  transform: translateY(12px);
+}
+.lb .bstory-svg .b-chat-card {
+  fill: var(--surface);
+  stroke: var(--b-violet);
+  stroke-width: 1.5;
+}
+.lb .bstory-svg.p-verify .b-chat {
+  opacity: 1;
+  transform: none;
+}
+.lb .bstory-svg.p-verify .b-pointer {
+  opacity: 1;
+  transform: translate(340px, 118px);
+}
+.lb .bstory-svg.p-answer .b-pointer {
+  opacity: 0;
+}
+.lb .bstory-svg .b-chip rect {
+  fill: var(--surface-2);
+  stroke: rgba(241, 241, 239, 0.3);
+  stroke-width: 1.5;
+  transition: fill 0.3s ease, stroke 0.3s ease;
+}
+.lb .bstory-svg .b-chip text {
+  text-anchor: middle;
+  font-size: 14px;
+  font-weight: 600;
+}
+.lb .bstory-svg.p-ask .b-chip-go rect {
+  fill: var(--b-violet);
+  stroke: var(--b-violet);
+}
+.lb .bstory-svg.p-ask .b-chip-go text {
+  fill: var(--dark);
+}
+.lb .bstory-svg .b-q rect {
+  fill: var(--surface-2);
+}
+.lb .bstory-svg.p-ask .b-q {
+  opacity: 1;
+}
+.lb .bstory-svg .b-a-n {
+  font-weight: 700;
+  fill: var(--b-violet);
+}
+.lb .bstory-svg.p-answer .b-a {
+  opacity: 1;
+}
+.lb .bstory-svg.p-answer .b-a-1 {
+  transition-delay: 0.6s;
+}
+.lb .bstory-svg.p-answer .b-a-2 {
+  transition-delay: 1.2s;
+}
+.lb .bstory-svg.p-answer .b-a-3 {
+  transition-delay: 1.8s;
+}
+.lb .bstory-svg .b-note {
+  fill: var(--muted);
+}
+.lb .bstory-svg .b-spark {
+  fill: var(--b-violet);
+}
+
+/* the finished picture: the board after step 8, nothing moving, nothing passing */
+.lb .bstory-svg.still * {
+  transition: none !important;
+  animation: none !important;
+}
+.lb .bstory-svg.still :is(.b-chat, .b-pointer, .b-say, .b-dots, .b-hop, .b-pills) {
+  opacity: 0 !important;
+}

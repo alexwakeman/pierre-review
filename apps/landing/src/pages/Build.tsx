@@ -27,7 +27,7 @@ import './build.css';
 
 type Who = 'You' | 'Agent' | typeof SITE_NAME;
 interface FlowStep {
-  who: Who;
+  who?: Who;
   h: string;
   p: ReactNode;
   tone: string;
@@ -42,13 +42,25 @@ const BY_HAND: FlowStep[] = [
   { who: 'You', tone: 'gold', h: 'Push', p: 'A new branch and a new pull request, under your GitHub account. A draft by default.' },
 ];
 
+// The one-click flow: the five steps the home page showed before its animated story took their place.
 const AUTO: FlowStep[] = [
-  { who: 'You', tone: 'gold', h: 'Build end to end', p: <>One press, from the caret on <b>Implement</b> or <b>Fill gaps</b>. Nothing else.</> },
-  { who: SITE_NAME, tone: 'verdigris', h: 'The ticket is refined', p: <>The agent plans against your docs and code, and updates the criteria where they fall short. Every point to settle is taken as <b>Agree</b>.</> },
-  { who: 'Agent', tone: 'lapis', h: 'It builds', p: 'As by hand. Then the branch is pushed to GitHub, with no pull request yet.' },
-  { who: SITE_NAME, tone: 'verdigris', h: 'Review and check', p: 'The branch is reviewed like a pull request, and checked against the ticket’s criteria.' },
-  { who: 'Agent', tone: 'lapis', h: 'Fix, answer or push back', p: 'Every point gets a fix, an answer, or a push back with a reason. Each fix is a new commit.' },
-  { who: SITE_NAME, tone: 'verdigris', h: 'Open the pull request', p: <>Ready for review. The description ends with &ldquo;Review in {SITE_NAME}&rdquo;.</> },
+  {
+    tone: 'verdigris',
+    h: 'Refine and plan',
+    p: 'Your agent reads the ticket against your docs and your code, updates the acceptance criteria where they fall short, and plans the change.',
+  },
+  { tone: 'madder', h: 'Build', p: 'Your Claude or Codex writes the change in a sandbox on your machine.' },
+  {
+    tone: 'lapis',
+    h: 'Review in rounds',
+    p: 'Claude and Codex review the branch against the new criteria. The agent fixes what they find, and they review again.',
+  },
+  { tone: 'gold', h: 'Open the pull request', p: 'Its description says what the review found and what was fixed.' },
+  {
+    tone: 'lapis',
+    h: 'Update the ticket',
+    p: 'The ticket gets the new criteria, and a plain-English comment that links the pull requests.',
+  },
 ];
 
 function Flow({ id, title, steps, children }: { id: string; title: string; steps: FlowStep[]; children?: ReactNode }): JSX.Element {
@@ -57,13 +69,13 @@ function Flow({ id, title, steps, children }: { id: string; title: string; steps
       <h3 id={id} className="bd-wayh rise">
         {title}
       </h3>
-      <ol className="bd-flowsteps" aria-labelledby={id}>
+      <ol className="bd-flowsteps" aria-labelledby={id} style={{ '--cols': steps.length } as React.CSSProperties}>
         {steps.map((s, i) => (
           <li key={s.h} className={`tile ${s.tone} rise`}>
             <span className="bd-fn" aria-hidden="true">
               {i + 1}
             </span>
-            <span className="bd-who">{s.who}</span>
+            {s.who && <span className="bd-who">{s.who}</span>}
             <h4>{s.h}</h4>
             <p>{s.p}</p>
           </li>
@@ -142,7 +154,7 @@ export default function Build(): JSX.Element {
 
       <Flow id="bd-auto-h" title="In one click" steps={AUTO}>
         <p className="bd-loop rise">
-          <span aria-hidden="true">↺</span> Steps 4 and 5 repeat, 4 rounds by default (1 to 6). They stop early when
+          <span aria-hidden="true">↺</span> Steps 2 and 3 repeat, 4 rounds by default (1 to 6). They stop early when
           a round finds nothing open.
         </p>
       </Flow>
