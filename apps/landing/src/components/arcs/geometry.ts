@@ -301,13 +301,15 @@ export const SITE_CHAIN = { steps: 'BABBABBA', first: 'h', margin: 0.15, cross: 
  * With `cross`, each quarter starts at the mirror of its place through the middle
  * (−2u, reached at APART × dx; `reach` multiplies that distance) and travels through
  * the others to land; otherwise it
- * waits outward. `margin` (in units) is added round the square.
+ * waits outward. `margin` (in units) is added round the square. `dot` is the players'
+ * radius (smaller for a full-width stage, where a unit is many pixels).
  */
 export function quartetQuarters(
   margin = 0,
   R = 50,
   cross = false,
   reach = 1,
+  dot = 3.2,
 ): { quarters: Quarter[]; viewBox: string } {
   const away = R * 0.2;
   const q = (cx: number, cy: number, corner: Corner, run: RunName): Quarter => {
@@ -320,7 +322,7 @@ export function quartetQuarters(
       corner,
       run,
       n: Math.round((11 * R) / 50),
-      dot: 3.2,
+      dot,
       dx: cross ? Math.round(((-2 * reach * ux) / 1.6) * 100) / 100 : cx === 0 ? -away : away,
       dy: cross ? Math.round(((-2 * reach * uy) / 1.6) * 100) / 100 : cy === 0 ? -away : away,
     };

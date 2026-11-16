@@ -18,7 +18,7 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Refine, build and review as an ensemble": the hero (the Chain, Poincaré's line), the build flow (`HomeSections.tsx` HowItWorks), review as an ensemble (the circle), dependency updates, and the close (with the Quartet) |
+| `/` | `pages/Home.tsx` | "Refine, build and review as an ensemble": the hero (the claim, Poincaré's line) and then review as an ensemble (the circle) scrolling over the pinned Chain, the build flow (`HomeSections.tsx` HowItWorks), dependency updates, then the close scrolling over the pinned Quartet |
 | `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
 | `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
 | `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
@@ -43,7 +43,9 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 (`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
 `Arcs.tsx` draws a composition; `pieces.tsx` holds the Chain, Quartet, Orchestra and Combo;
 each quarter a layer moved on the compositor by CSS scroll-driven animations as the reader scrolls down,
-`arcMotion.ts` the fallback where those are unsupported, off under reduced motion). No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
+`arcMotion.ts` the fallback where those are unsupported, off under reduced motion). On the home page the
+Chain and the Quartet are SCENES (`Scene.tsx`): pinned full width for one screen while the page scrolls
+over them, coming together and fading up, then dimming as the next section covers them. No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
 `public/og-image.png` are generated (`node scripts/make-favicons.mjs`, `node scripts/make-og-image.mjs`):
 the mark from `packages/shared/src/brand-mark.ts`, the one definition the app's Wordmark also draws. The voice tiles carry a quarter in their corner
 (`assets/arcs/corner.svg`, the same geometry).

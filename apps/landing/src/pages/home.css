@@ -5,7 +5,8 @@
 
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
-     hero       .hero > .say (.kick, h1, .lead, .cmd) · figure.motto · .art.hand (Chain)
+     scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-quartet (then close): Scene.tsx
+     hero       .hero > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
      flow       .board.flow > ol.flow-steps > li.tile (.flow-n, h3, p) · p.flow-loop · p.flow-more
      ensemble   .board.ensemble > .tile.circle (svg.circle-svg) · .ens-points > .tile (h3, p) · p.ens-more
      bots       .board.bots > .tile (h3, p, p.more)
@@ -15,7 +16,7 @@
      why        .board.why4 > .tile (h3, p, p.more)
      tiers      .board.tiers > .tile.gold | .tile.lapis (.k, h3, ul, .cmd)
      faq        .board.faq > .tile (h3, p)
-     close      .board.close > .tile.gold.mid (h2, .cmd) · .tile.art.quartet (Quartet) · .tile.lapis.side
+     close      .board.close > .tile.gold.mid (h2, .cmd) · .tile.lapis.side, over the pinned Quartet
    Under 961px everything restacks to one column.
    =========================================================================== */
 
@@ -56,12 +57,21 @@
 
 /* ---- hero ------------------------------------------------------------- */
 .lb.home .hero {
-  grid-template-rows: auto minmax(150px, auto);
+  /* one screen: the Chain plays behind it as it scrolls away (Home.tsx CHAIN_SCENE) */
+  min-height: 100vh;
+  min-height: 100svh;
+  grid-template-rows: auto auto;
+  align-content: start;
+}
+/* The text sits straight on the faded Chain: no tile ground, a shadow for the bands. */
+.lb.home .hero .say,
+.lb.home .hero .motto {
+  background: transparent;
+  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.9);
 }
 .lb.home .hero .say {
   grid-column: 1 / 8;
   grid-row: 1;
-  background: #000;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
@@ -123,15 +133,12 @@
 .lb.home .hero .motto cite {
   font-style: italic;
 }
-.lb.home .hero .hand {
-  grid-column: 8 / 13;
-  grid-row: 1 / 3;
-}
-.lb.home .hero .hand {
-  /* the tile runs to the screen's right edge; the Chain's own margin (in slice
-     radii) keeps a gap that scales with the slices, not the screen */
-  padding: 0;
-  margin-right: calc(-1 * var(--m));
+/* What scrolls over a scene after its runway starts right there: the runway's length
+   sets when it covers the picture, so no section margin may push it later. */
+@media (prefers-reduced-motion: no-preference) {
+  .lb.home .scene-runway + * {
+    margin-top: 0;
+  }
 }
 
 /* ---- works with ---------------------------------------------------------- */
@@ -391,7 +398,7 @@
 
 /* ---- close -------------------------------------------------------------------- */
 .lb.home .close .mid {
-  grid-column: 1 / 7;
+  grid-column: 1 / 9;
   padding: clamp(28px, 3.4vw, 48px);
   display: flex;
   flex-direction: column;
@@ -405,12 +412,8 @@
   line-height: 1.02;
   max-width: 16ch;
 }
-.lb.home .close .quartet {
-  grid-column: 7 / 10;
-  min-height: 260px;
-}
 .lb.home .close .side {
-  grid-column: 10 / 13;
+  grid-column: 9 / 13;
   padding: 32px;
   display: flex;
   flex-direction: column;
@@ -430,7 +433,6 @@
     grid-template-rows: none;
   }
   .lb.home .hero .say,
-  .lb.home .hero .hand,
   .lb.home .strip .ww-say,
   .lb.home .ww-tools,
   .lb.home .proof .tile,
@@ -448,18 +450,9 @@
     grid-column: 1 / -1;
     grid-row: auto;
   }
-  .lb.home .close .quartet {
-    grid-column: 1 / -1;
-    min-height: 0;
-    aspect-ratio: 4 / 3;
-  }
   .lb.home .hero .motto {
     grid-column: 1 / -1;
     grid-row: auto;
-  }
-  .lb.home .hero .hand {
-    aspect-ratio: 3 / 4;
-    margin-right: 0;
   }
   .lb.home .why4 > .tile {
     grid-column: span 6;

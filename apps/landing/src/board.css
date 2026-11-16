@@ -337,6 +337,105 @@ body:has(.lb) {
     transform: none;
   }
 }
+
+/* ---- scenes (components/arcs/Scene.tsx) ---------------------------------- */
+/* A picture PINNED full width for one screen while the page scrolls over it. The
+   scene is its own view timeline; S (Scene.tsx) is the scroll after its top reaches
+   the screen's top, i.e. `contain 0px` onwards. Opacity and transforms only. */
+.lb .scene {
+  position: relative;
+  view-timeline: --scene block;
+}
+.lb .scene-art {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  margin-inline: calc(-1 * var(--m));
+  overflow: clip;
+  z-index: 0;
+  pointer-events: none;
+}
+.lb .scene-in,
+.lb .scene-out {
+  position: absolute;
+  inset: 0;
+}
+.lb .scene-in {
+  opacity: 0.35; /* FADED_START */
+}
+/* NO LIGHT-MIXING ON A STAGE. Screen-blended layers the size of the screen are
+   re-blended on every scroll frame while they move: measured on a scripted scroll,
+   blended stages dropped most frames (p50 34ms), plain ones matched the old page
+   (p50 17ms). Overlaps are drawn over each other instead. */
+.lb .scene .arcs.blend .layer {
+  mix-blend-mode: normal;
+}
+.lb .scene .arcs.end .arcs-box {
+  left: calc((100cqw - var(--bw)) / 2); /* centred behind the page, not anchored right */
+}
+.lb .scene-over {
+  position: relative;
+  z-index: 1;
+  margin-top: -100vh;
+  margin-top: -100svh;
+}
+.lb .scene-runway {
+  height: var(--sc-runway);
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: scroll()) {
+    .lb .scene .arcs .layer {
+      animation: arc-gather linear both;
+      animation-timeline: --scene;
+      animation-range: contain 0px contain var(--sc-gather);
+    }
+    .lb .scene-in {
+      animation: scene-fade-in linear both;
+      animation-timeline: --scene;
+      animation-range: contain 0px contain var(--sc-in);
+    }
+    .lb .scene-out {
+      animation: scene-fade-out linear both;
+      animation-timeline: --scene;
+      animation-range: contain var(--sc-out-start) contain var(--sc-out-end);
+    }
+  }
+}
+@keyframes scene-fade-in {
+  from {
+    opacity: 0.35; /* FADED_START */
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scene-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.15; /* FADED_END */
+  }
+}
+/* Reduced motion: no pin and no runway; the picture sits assembled and faded behind
+   the text that would have scrolled over it. */
+@media (prefers-reduced-motion: reduce) {
+  .lb .scene-art {
+    position: absolute;
+    inset: 0 0 auto;
+  }
+  .lb .scene-in {
+    opacity: 0.15; /* FADED_END */
+  }
+  .lb .scene-runway {
+    display: none;
+  }
+  .lb .scene-over {
+    margin-top: 0;
+    min-height: 100svh;
+  }
+}
 .lb .tile.art {
   padding: 0;
   background: #000;
