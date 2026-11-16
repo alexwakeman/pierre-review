@@ -19,7 +19,8 @@ import './build.css';
 //   · the build report is a SELF-REPORT ("The agent says"), never a gate on Push;
 //   · Push opens a DRAFT by default; the review loop opens the PR READY for review;
 //   · the review loop posts nothing on GitHub but the branch commits and the pull request;
-//   · Build end to end writes the tracker on Jira only, and never changes the ticket's status;
+//   · Build end to end never changes the ticket's status (it writes the tracker on Jira only today;
+//     the copy stays tracker-general by choice, so name Jira only if a reader could be misled);
 //   · the Ticket design is worked out by the model, and is drawn for a ticket with 2+ pull requests.
 // Button and status words are the app's own. When the product changes one, change this page too.
 // ---------------------------------------------------------------------------
@@ -174,11 +175,11 @@ export default function Build(): JSX.Element {
           <LoopBodyMock />
         </div>
         <div className="tile bd-txt bd-half rise">
-          <h3>The ticket, on Jira</h3>
+          <h3>The ticket, updated</h3>
           <p>
             After <b>Build end to end</b> opens the pull requests, {SITE_NAME} writes the description and criteria
             the plan changed, and comments on the ticket as you, in plain English. It never changes the
-            ticket&rsquo;s status. On other trackers it writes nothing.
+            ticket&rsquo;s status.
           </p>
         </div>
       </section>
