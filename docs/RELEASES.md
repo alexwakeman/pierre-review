@@ -103,7 +103,9 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    0.415.0–0.418.0 are clear on their own).
 
 - **Tickets the tracker could not give do NOT block** (not found, no access, failed past the retry limit,
-  a tracker that cannot read at all): they are listed under the tag — "BMD-123 not found", "BMD-9 could
+  a tracker that cannot read at all). A "not found" or "no access" that comes AFTER an older successful
+  read wins over it — the ticket was deleted or moved (BMD-1026, 2026-11-16); a transient failure never
+  replaces a successful read. They are listed under the tag — "BMD-123 not found", "BMD-9 could
   not be read: the tracker did not answer" — for the reader to check. A ticket NOT READ YET (the tracker
   has not answered, a transient state) makes the tag CHECKING until it is read; after three failed reads
   in a row it becomes "could not be read" and stops blocking.
@@ -925,7 +927,7 @@ ancestry, one compare per tag, a full single-PR sync per old PR (≤ 120 a burst
   id; `prId` when a `pull_requests` row exists); tickets by `releasePrDetectInput` → `detectKeysWithAccess`
   (the stored row when there is one, else the light record — ONE function) plus a stored PR's own
   `tracker_tickets` rows; each ticket's reads from the PR rows, the status rows and the sprint rows through
-  `bestTicketRead` (freshest success wins; a batched read that failed fewer than
+  `bestTicketRead` (freshest success wins, unless a LATER read said not found or no access — that wins, 2026-11-16; a batched read that failed fewer than
   `RELEASE_TICKET_FAILS_HOLD` (3) times in a row is "not read yet"). `releaseTicketKeysOwed` /
   `ticketKeysOwed`: not read, failed and due after `RELEASE_TICKET_RETRY_MS` (2 min), or older than
   `RELEASE_TICKET_TTL_MS` (10 min). Bot-ness: the light record's own rule (`historyAuthorIsBot`: GitHub typed a

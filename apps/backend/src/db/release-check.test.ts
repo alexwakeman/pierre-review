@@ -1252,7 +1252,12 @@ describe('ticketKeysOwed / bestTicketRead', () => {
       ...extra,
     });
     expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'ok', 3), c('sprint', 'ok', 2)], 3).read?.statusName).toBe('S3');
-    expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'not_found', 5)], 3).readState).toBe('ok');
+    // A LATER "not found" / "no access" wins over an older successful read (the ticket was deleted or moved);
+    // an earlier one does not, and a transient failure never replaces a successful read.
+    expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'not_found', 5)], 3).readState).toBe('not_found');
+    expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'no_access', 5)], 3).readState).toBe('no_access');
+    expect(m.bestTicketRead([c('pr', 'ok', 6), c('status', 'not_found', 5)], 3).readState).toBe('ok');
+    expect(m.bestTicketRead([c('pr', 'ok', 1), c('status', 'failed', 5, { attempts: 9 })], 3).readState).toBe('ok');
     expect(m.bestTicketRead([c('status', 'not_found', 5)], 3).readState).toBe('not_found');
     expect(m.bestTicketRead([c('status', 'failed', 5, { attempts: 2 })], 3).readState).toBe('not_read');
     expect(m.bestTicketRead([c('status', 'failed', 5, { attempts: 3 })], 3).readState).toBe('failed');

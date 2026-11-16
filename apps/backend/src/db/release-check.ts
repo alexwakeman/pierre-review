@@ -164,9 +164,11 @@ export interface TicketReadCandidate {
 
 /**
  * THE ticket read the release check believes, from every store (a PR's row, the batched status row,
- * the sprint row): the freshest SUCCESSFUL read; with none, the newest attempt's state — a batched
- * read that FAILED fewer than `failsMax` times in a row is "not read yet" (checking, retried); past
- * that it is `failed` ("could not be read", listed, never a block). Pure.
+ * the sprint row): the freshest SUCCESSFUL read — unless the tracker said `not_found` or `no_access`
+ * AFTER it (a ticket deleted or moved since: BMD-1026, 2026-11-16), which wins; a transient `failed`
+ * never replaces a successful read. With none, the newest attempt's state — a batched read that FAILED
+ * fewer than `failsMax` times in a row is "not read yet" (checking, retried); past that it is `failed`
+ * ("could not be read", listed, never a block). Pure.
  */
 export function bestTicketRead(
   cands: readonly TicketReadCandidate[],
@@ -174,7 +176,13 @@ export function bestTicketRead(
 ): { read: TicketReadCandidate | null; readState: ReleaseTicketReadState } {
   const ms = (d: Date | null): number => (d == null ? 0 : d.getTime());
   const ok = cands.filter((c) => c.state === 'ok' && c.fetchedAt != null).sort((a, b) => ms(b.fetchedAt) - ms(a.fetchedAt));
-  if (ok[0] != null) return { read: ok[0], readState: 'ok' };
+  const refused = cands
+    .filter((c) => c.state === 'not_found' || c.state === 'no_access')
+    .sort((a, b) => ms(b.checkedAt) - ms(a.checkedAt))[0];
+  if (ok[0] != null) {
+    if (refused != null && ms(refused.checkedAt) > ms(ok[0].fetchedAt)) return { read: refused, readState: refused.state as ReleaseTicketReadState };
+    return { read: ok[0], readState: 'ok' };
+  }
   const last = [...cands].sort((a, b) => ms(b.checkedAt) - ms(a.checkedAt))[0] ?? null;
   if (last == null) return { read: null, readState: 'not_read' };
   if (last.state === 'failed' && last.source === 'status' && (last.attempts ?? 0) < failsMax) return { read: last, readState: 'not_read' };
