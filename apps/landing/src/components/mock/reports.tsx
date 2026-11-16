@@ -657,7 +657,7 @@ const MARK_GLYPH: Record<ReleaseMark, string> = { anchor: '★', ok: '✓', bloc
 const MARK_TONE: Record<ReleaseMark, string> = { anchor: 'ok', ok: 'ok', blocked: 'bad', held: 'warn', missing: 'unknown' };
 
 /** A ticket card: mark, key, title, status, the latest tag per repository and ONE line; the detail on a click. */
-function ReleaseCard({ c }: { c: ReleaseMockCard }): JSX.Element {
+function ReleaseCard({ c, extra }: { c: ReleaseMockCard; extra?: JSX.Element | null }): JSX.Element {
   const [open, setOpen] = useState(false);
   const cls = ['rcard', c.mark === 'anchor' ? 'anchor' : '', c.mark === 'missing' ? 'missing' : ''].filter(Boolean).join(' ');
   return (
@@ -680,6 +680,7 @@ function ReleaseCard({ c }: { c: ReleaseMockCard }): JSX.Element {
           {c.holder ? <small className="more">Show {c.holder}</small> : null}
         </span>
       </button>
+      {extra ?? null}
       {open && c.detail ? (
         <div className="detail">
           <small>{c.detail.facts}</small>
@@ -693,8 +694,9 @@ function ReleaseCard({ c }: { c: ReleaseMockCard }): JSX.Element {
 }
 
 /** PRs with no ticket between two cards: one narrow row, its list on a click. */
-function ReleaseNoTicket({ n }: { n: ReleaseMockNoTicket }): JSX.Element {
+function ReleaseNoTicket({ n, showBots }: { n: ReleaseMockNoTicket; showBots: boolean }): JSX.Element {
   const [open, setOpen] = useState(false);
+  const prs = showBots ? [...n.prs, ...(n.bots ?? [])] : n.prs;
   return (
     <li className="nt">
       <button type="button" className="untracked" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -702,7 +704,7 @@ function ReleaseNoTicket({ n }: { n: ReleaseMockNoTicket }): JSX.Element {
       </button>
       {open ? (
         <div className="detail">
-          {n.prs.map((p) => (
+          {prs.map((p) => (
             <small key={p}>{p}</small>
           ))}
         </div>
@@ -711,12 +713,33 @@ function ReleaseNoTicket({ n }: { n: ReleaseMockNoTicket }): JSX.Element {
   );
 }
 
-/** This Sprint → Releases: the latest release, a strip per released repository (its candidate, the commit that
- *  would ship, Release…), then ONE list of ticket cards — "Not in a tag yet" and "Holding the release" above it,
- *  the candidate ticket (★) with one either side, "Show 3 later / earlier tickets". */
+/** This Sprint → Releases: the latest release, a line per repository with NO candidate, then the ticket list in its
+ *  own box — "Show bot PRs", the candidate ticket (★) with each repository's candidate, its commit and ONE
+ *  Release…, one ticket either side, "Show 3 later / earlier tickets" — and below it, apart, "Not in a tag yet"
+ *  and "Holding the release". */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
+  const [showBots, setShowBots] = useState(false);
+  const candidates = (
+    <div className="cands">
+      <ul>
+        {R.candidates.map((c) => (
+          <li key={c.name}>
+            <b>{c.name}</b> {c.text}
+            <small>
+              {' '}
+              · <code>{c.sha}</code> · {c.day}
+              {c.latest ? ` · ${c.latest}` : ''}
+            </small>
+          </li>
+        ))}
+      </ul>
+      <Act tone="go" pressed={open} onClick={() => setOpen((o) => !o)}>
+        Release…
+      </Act>
+    </div>
+  );
   return (
     <div className="rp-releases">
       <div className="top">
@@ -725,25 +748,10 @@ function ReleasesPanel(): JSX.Element {
       {open ? <p className="dlg">{R.dialog}</p> : null}
       <ul className="repos">
         {R.repos.map((r) => (
-          <li key={r.name} className={r.candidate ? 'cand' : undefined}>
+          <li key={r.name}>
             <div className="row">
-              <span className="name">
-                {r.name}
-                {r.candidate ? <em aria-label="candidate"> ★</em> : null}
-              </span>
-              <span className="txt">
-                {r.text}
-                {r.sha ? <small> · <code>{r.sha}</code></small> : null}
-                {r.day ? <small> · {r.day}</small> : null}
-                {r.latest ? <small> · {r.latest}</small> : null}
-              </span>
-              {r.release ? (
-                <Act tone="go" pressed={open} onClick={() => setOpen((o) => !o)}>
-                  Release…
-                </Act>
-              ) : (
-                <span />
-              )}
+              <span className="name">{r.name}</span>
+              <span className="txt">{r.text}</span>
             </div>
             {r.progress ? (
               <div className="prog">
@@ -756,27 +764,40 @@ function ReleasesPanel(): JSX.Element {
           </li>
         ))}
       </ul>
-      <p className="sec">Not in a tag yet</p>
-      <ul className="cards">
-        {R.notTagged.map((c) => (
-          <ReleaseCard key={c.key} c={c} />
-        ))}
-      </ul>
-      <p className="sec">Holding the release</p>
-      <ul className="cards">
-        {R.holding.map((c) => (
-          <ReleaseCard key={c.key} c={c} />
-        ))}
-      </ul>
-      <p className="sec">
-        <span className="more">⌃ {R.showLater}</span>
-      </p>
-      <ul className="cards">
-        {R.list.map((i) => (i.kind === 'ticket' ? <ReleaseCard key={i.key} c={i} /> : <ReleaseNoTicket key={i.line} n={i} />))}
-      </ul>
-      <p className="sec">
-        <span className="more">⌄ {R.showEarlier}</span>
-      </p>
+      <div className="box">
+        <label className="bots">
+          <input type="checkbox" checked={showBots} onChange={(e) => setShowBots(e.target.checked)} /> <small>{R.showBots}</small>
+        </label>
+        <p className="sec">
+          <span className="more">⌃ {R.showLater}</span>
+        </p>
+        <ul className="cards">
+          {R.list.map((i) =>
+            i.kind === 'ticket' ? (
+              <ReleaseCard key={i.key} c={i} extra={i.mark === 'anchor' ? candidates : null} />
+            ) : (
+              <ReleaseNoTicket key={i.line} n={i} showBots={showBots} />
+            ),
+          )}
+        </ul>
+        <p className="sec">
+          <span className="more">⌄ {R.showEarlier}</span>
+        </p>
+      </div>
+      <div className="box apart">
+        <p className="sec">Not in a tag yet</p>
+        <ul className="cards">
+          {R.notTagged.map((c) => (
+            <ReleaseCard key={c.key} c={c} />
+          ))}
+        </ul>
+        <p className="sec">Holding the release</p>
+        <ul className="cards">
+          {R.holding.map((c) => (
+            <ReleaseCard key={c.key} c={c} />
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

@@ -32,10 +32,13 @@ no internals.
   in several repositories. It opens on the newest ticket in the release candidates, with "Show 3 later tickets"
   and "Show 3 earlier tickets". Each card shows its status, its latest tag in each repository, and one line: what
   it waits on, or what was done. The ticket holding the release is always shown, tickets with only open pull
-  requests sit apart at the top, and pull requests with no ticket are narrow rows between the cards. A ticket the
+  requests sit apart, and pull requests with no ticket are narrow rows between the cards. A ticket the
   tracker can't find has a dashed card.
-- This Sprint → Releases: each repository shows its candidate's commit, linked to GitHub, and its own Release…
-  button.
+- This Sprint → Releases: the newest ticket in the release candidates names each repository's candidate and its
+  commit, linked to GitHub, and has one Release… button for all of them. Only repositories with no candidate are
+  listed above the tickets. "Not in a tag yet" and "Holding the release" sit in their own box below the list.
+- This Sprint → Releases: lists of pull requests with no ticket leave out bot pull requests unless you tick "Show
+  bot PRs". The counts still include them.
 
 ### Fixed
 

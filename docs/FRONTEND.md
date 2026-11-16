@@ -2920,16 +2920,18 @@ board: `SprintTabView` mounts `Sprint/ReleasesView.tsx` instead of `SprintView`.
 `releasesChecking`) and stops when none is; nothing renders while `workspaceId` is null; not configured,
 or NO repo ticked "Released from this workspace" (`hasReleasableRepos`) ⇒ ONE setup line
 (`openSettings('releases')`). The check is AUTOMATIC (no start tag, nothing to pick) and CUMULATIVE (2026-11-16:
-the newest version tag such that it and every tag below it have their tickets Complete with no open PR — the cumulative rule). TICKET-ORIENTED (owner, 2026-11-16): one STRIP per releasable repo (`repoStripText`: "0.316.0 → 0.316.0-rc",
-"No tag can be released", "Checking…", "Nothing new since 0.390.0-rc", "No version tags on main yet"), the
-candidate's commit (short sha → GitHub, `safeExternalUrl`) and day, "Latest 0.418.0" (`repoLatestNote`), its
-"Release…" (HIDDEN unless a candidate and push access; opens `ReleaseDialog` with `repoId` ticked), and while
-CHECKING the bar + ONE line (`repoProgress`). Below, `Sprint/releaseTicketsModel.ts`: "Not in a tag yet"
-(`notTagged`: only open PRs), "Holding the release" (`releaseHolders`, always shown), then ONE list of ticket
-cards newest first (`ticketList`, by the latest tag's `tagAt` across repositories) opened on the CANDIDATE
+the newest version tag such that it and every tag below it have their tickets Complete with no open PR — the cumulative rule). TICKET-ORIENTED (owner, 2026-11-16): a line only per releasable repo with NO candidate (`reposWithoutCandidate`,
+`repoStripText`: "No tag can be released", "Checking…" + the bar and ONE line (`repoProgress`), "Nothing new since
+0.390.0-rc", "No version tags on main yet"). Then, in its own bordered box, `Sprint/releaseTicketsModel.ts`: ONE
+list of ticket cards newest first (`ticketList`, by the latest tag's `tagAt` across repositories) opened on the CANDIDATE
 TICKET ★ ± 1 (`ticketWindow`; "Show 3 later / earlier tickets", component state; "Read earlier tags" POSTs
 `/api/releases/older-tags` past what was sent). PRs with no ticket are narrow grouped rows between cards
-(`noTicketGroupWords`). A card: `ticketMark` (✓ · ✗ `CloseIcon` · ⊘ `SkipIcon` amber · ? `QuestionIcon`, dashed
+(`noTicketGroupWords`); bot PRs are left out of their lists unless "Show bot PRs" (top of the box, off,
+component state; `noTicketShownPrs`) is ticked. The ★ card carries `CandidateBlock`: each repo's candidate
+("0.316.0 → 0.316.0-rc"), its commit (short sha → GitHub, `safeExternalUrl`) and day, "Latest 0.418.0"
+(`repoLatestNote`), and ONE "Release…" (HIDDEN unless `showCreateRelease`) opening `ReleaseDialog`. Below
+the list, in a second bordered box: "Not in a tag yet" (`notTagged`: only open PRs) and "Holding the release"
+(`releaseHolders`, always shown). A card: `ticketMark` (✓ · ✗ `CloseIcon` · ⊘ `SkipIcon` amber · ? `QuestionIcon`, dashed
 card · part-circle), key, title, `ticketCardStatus`, the latest tag per repo (`repoTagWords`) and ONE line
 (`ticketCardLine`: "Waits on BMD-1061: In Code Review" + "Show BMD-1061", which scrolls to and opens the holder
 card; "9 PRs, last merged 23 Oct by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR

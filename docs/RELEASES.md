@@ -164,40 +164,47 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    - "Nothing new since 0.390.0-rc" / "No version tags on main yet".
    The tab polls `GET /api/releases` every ~3 s ONLY while a repo is checking, and stops when none is. There
    is no separate tickets panel and nothing to pick.
-2b. ONE STRIP PER REPOSITORY carries its actions: "Release…" (shown only with a candidate the reader can push
-   to — HIDE, never disable) opens the dialog with that repository ticked, and the strip shows the CANDIDATE'S
-   COMMIT — the HEAD that would be released — as a short sha linked to GitHub, with its day.
+2b. Above the list, ONLY the repositories with NO candidate get a line (no version tags, nothing new, none can be
+   released, "Checking…"). The repositories WITH one are named on the candidate ticket (★): each candidate, its
+   COMMIT — the HEAD that would be released — as a short sha linked to GitHub, and its day, with ONE "Release…"
+   for all of them (shown only with a candidate the reader can push to — HIDE, never disable).
 3. THE TICKET LIST (owner, 2026-11-16) replaces the per-repository tag rows. ONE list for the whole workspace, a
    CARD PER TICKET (a ticket in both repositories is one card), newest at the top:
    ```
-   bng-metric-backend   ★ 0.316.0 → 0.316.0-rc · e18c3b2 · 23 Oct · Latest 0.418.0        [Release…]
-   bng-metric-frontend  ★ 0.328.0 → 0.328.0-rc · 1e3249f · 27 Oct · Latest 0.420.0        [Release…]
-
-   Not in a tag yet
-   ✗ BMD-1045 PI HABITAT DETAILS: Edit an AREA enhancement · In Code Review                     ›
-       bng-metric-frontend: open PR   Open PR: bng-metric-frontend #518
-   Holding the release
-   ✗ BMD-1061 HABITAT EDITING: Edit Baseline references · In Code Review                        ›
-       bng-metric-backend 0.324.0  bng-metric-frontend 0.341.0   Holds back bng-metric-backend and …
-   ⌃ Show 3 later tickets
+   bng-library   No version tags on main yet
+   ┌───────────────────────────────────────────────────────────────────────────────────────────┐
+   │ ☐ Show bot PRs                                                                            │
+   │ ⌃ Show 3 later tickets
    ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done                ›
        bng-metric-backend 0.326.0   Waits on BMD-1061: In Code Review   Show BMD-1061
      › 14 PRs with no ticket · 13 by bots
    ★ BMD-1082 NEW TEMPLATE: Support the new data structure … · Done                            ›
        bng-metric-backend 0.316.0   9 PRs, last merged 23 Oct by robin-dunn
+       bng-metric-backend  0.316.0 → 0.316.0-rc · e18c3b2 · 23 Oct · Latest 0.418.0
+       bng-metric-frontend 0.328.0 → 0.328.0-rc · 1e3249f · 27 Oct · Latest 0.420.0   [Release…]
      › 14 PRs with no ticket · 12 by bots
    ✓ BMD-1028 Trading Summary Page - Hedgerows · Done                                           ›
-   ⌄ Show 3 earlier tickets
+   │ ⌄ Show 3 earlier tickets                                                                  │
+   └───────────────────────────────────────────────────────────────────────────────────────────┘
+
+   ┌─ (apart, at the bottom) ──────────────────────────────────────────────────────────────────┐
+   │ Not in a tag yet                                                                          │
+   │ ✗ BMD-1045 PI HABITAT DETAILS: Edit an AREA enhancement · In Code Review                 ›│
+   │     bng-metric-frontend: open PR   Open PR: bng-metric-frontend #518                      │
+   │ Holding the release                                                                       │
+   │ ✗ BMD-1061 HABITAT EDITING: Edit Baseline references · In Code Review                    ›│
+   │     bng-metric-backend 0.324.0  bng-metric-frontend 0.341.0   Holds back bng-metric-…     │
+   └───────────────────────────────────────────────────────────────────────────────────────────┘
    ```
    - **Order** (`ticketList`): a ticket sits where its LATEST TAG sits — the newest tag, in any releasable
      repository, holding its merged work (tags of different repositories by commit date, `tagAt`).
    - **The window** (`ticketWindow`): it opens on THE CANDIDATE TICKET (★) — the newest ticket all of whose work
      is in the release candidates — with ONE ticket either side; "Show 3 later tickets" / "Show 3 earlier
      tickets" add 3 (component state). Past the tickets sent, "Read earlier tags" asks the server for more.
-   - **Holding the release** (`releaseHolders`, always shown, above the list): the ticket that stops the tag
+   - **Holding the release** (`releaseHolders`, always shown, in the box BELOW the list): the ticket that stops the tag
      just above each repository's candidate — a split followed to its ROOT — once, naming the repositories it
      holds ("Holds back bng-metric-backend and bng-metric-frontend").
-   - **Not in a tag yet**, apart at the top: tickets whose only work is an open pull request. A ticket with
+   - **Not in a tag yet**, in that same box below the list: tickets whose only work is an open pull request. A ticket with
      tagged work AND an open PR stays in the list; its line names the open PR.
    - **The card** is simple: the mark (✓ in the candidates · ✗ RED not Complete or an open PR · ⊘ AMBER Complete
      but held back · ? the tracker could not give it — a DASHED card, "Not found in Jira — check it by hand",
@@ -209,11 +216,13 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
      robin-dunn · in 0.316.0", "not in a tag yet", OPEN), each opening its PR tab or GitHub. Nothing is fetched
      to open it.
    - **Pull requests with no ticket** are NARROW rows between the cards, consecutive ones grouped ("14 PRs with no
-     ticket · 13 by bots"), opening to their list.
+     ticket · 13 by bots"), opening to their list. BOT PRs are left out of those lists unless "Show bot PRs" (top
+     of the box, OFF by default, component state) is ticked; the row's words always count them.
    - "Released" is never said unless a release tag contains it.
 4. No warnings panel: nothing about a pull request with no ticket is a warning (removed 2026-11-16).
-5. **"Release…"** on a repository strip — shown only with a candidate in a writable repo (HIDE, never disable).
-   Dialog: the releasable repos with a candidate (that repository ticked first; each judged on its own, so unticking one only
+5. **"Release…"** on the candidate ticket — ONE for every repository with a candidate; shown only with a
+   candidate in a writable repo (HIDE, never disable). Dialog: the releasable repos with a candidate (ticked unless
+   the release tag exists; each judged on its own, so unticking one only
    leaves it out; none ticked hides Confirm); release notes preview (editable); tracker comment preview;
    Confirm.
    Confirm FIRST re-checks the chosen candidate under THE RULE: every ticket in its scope re-read from the
@@ -439,7 +448,9 @@ The ticket list (owner, 2026-11-16)
 58. CARD DETAIL: a card opens in place to its type, assignee and "Jira status read 4 min ago", "Open in Jira",
     "Story", and every PR for it in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet".
     Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, last merged 2 Nov by alex").
-59. THE CANDIDATE'S COMMIT: each repository strip shows the candidate tag's commit (short sha, a GitHub link).
+59. THE CANDIDATE'S COMMIT: the candidate ticket names each repository's candidate and its commit (short sha, a
+    GitHub link), with ONE Release…; only repositories with no candidate get a line above the list.
+60. BOT PRS: a no-ticket row lists only human PRs until "Show bot PRs" is ticked; its words count the bots.
 
 ## Implementation
 
@@ -1158,3 +1169,8 @@ tickets so their keys are read too. Removed from `releasesModel.ts`: `tagWindow`
 `candidateWhy`, `tagExplainer`, `tagHeader`, `tagTickets`, `ticketLine`, `ticketRank`, `ticketBlockerIn`,
 `ticketDetail`, `repoRowText`, `repoRowCounts`, `showCreateRelease` and the window words. The tag-level
 fields (`tags`, `olderTags`, `blockers`) stay on the wire: the holders and the notes read them.
+Then (owner, same day): the per-repository strips went — only repositories with NO candidate get a line
+(`reposWithoutCandidate`); the candidates, their commits and ONE "Release…" (`showCreateRelease`) sit on the ★
+card (`CandidateBlock`); the dialog ticks every releasable repo as before. The list is its own bordered box; "Not
+in a tag yet" and "Holding the release" moved to a second bordered box below it. "Show bot PRs" (off) filters a
+no-ticket row's list (`noTicketShownPrs`).

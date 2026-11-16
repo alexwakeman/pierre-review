@@ -355,3 +355,15 @@ export function repoStripText(repo: ReleaseRepoCheck): string {
   if (repo.status === 'checking') return 'Checking…';
   return repo.baseline != null ? `No tag since ${repo.baseline.name} can be released` : 'No tag can be released';
 }
+
+/** The repositories shown above the list: those with NO candidate (no version tags, nothing new, none can be
+ *  released, still checking). A repository with a candidate is on the candidate ticket. Pure. */
+export function reposWithoutCandidate(check: Pick<ReleaseCheckResult, 'repos'>): ReleaseRepoCheck[] {
+  return check.repos.filter((r) => r.candidate == null);
+}
+
+/** The PRs a no-ticket row lists: bot PRs only when "Show bot PRs" is ticked (off by default); its header
+ *  always counts them. Pure. */
+export function noTicketShownPrs<T extends Pick<ReleaseCheckPr, 'isBot'>>(prs: readonly T[], showBots: boolean): T[] {
+  return showBots ? [...prs] : prs.filter((p) => !p.isBot);
+}

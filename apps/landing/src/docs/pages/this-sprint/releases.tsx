@@ -52,14 +52,12 @@ export default function Page(): JSX.Element {
         <Ui>Refresh</Ui> reads the tickets that are not Complete, not read yet or not found from the tracker again, then
         checks again.
       </p>
-      <H3 id="repositories">Repositories</H3>
-      <p>One line for each repository you release:</p>
+      <H3 id="repositories">Repositories with no candidate</H3>
+      <p>
+        Above the tickets, a repository you release gets a line only when it has no candidate. Repositories with a
+        candidate are named on the candidate ticket (see below).
+      </p>
       <ul>
-        <li>
-          &ldquo;0.392.0 → 0.392.0-rc&rdquo;: the candidate and the release tag a release would create, then the
-          candidate&rsquo;s commit (select it to open it on GitHub) and its date, and &ldquo;Latest 0.394.0&rdquo; when a
-          newer tag can&rsquo;t be released yet. <Ui>Release…</Ui> releases it.
-        </li>
         <li>&ldquo;No tag can be released&rdquo;, or after a release &ldquo;No tag since 0.380.0-rc can be released&rdquo;.</li>
         <li>
           &ldquo;Checking…&rdquo;, with a progress bar and one line of what is happening now, for example &ldquo;Reading
@@ -76,6 +74,12 @@ export default function Page(): JSX.Element {
         repositories is one card. It sits where its latest tag sits, in either repository. The list opens on the newest
         ticket in the release candidates, marked ★, with one ticket either side. <Ui>Show 3 later tickets</Ui> and{' '}
         <Ui>Show 3 earlier tickets</Ui> add more each way.
+      </p>
+      <p>
+        The ★ card names the candidate of each repository, for example &ldquo;bng-metric-backend 0.316.0 →
+        0.316.0-rc&rdquo;, the release tag a release would create, the candidate&rsquo;s commit (select it to open it on
+        GitHub) and its date, and &ldquo;Latest 0.418.0&rdquo; when a newer tag can&rsquo;t be released yet. One{' '}
+        <Ui>Release…</Ui> button releases them together.
       </p>
       <p>Each card has a mark:</p>
       <ul>
@@ -94,10 +98,11 @@ export default function Page(): JSX.Element {
         example &ldquo;9 PRs, last merged 23 Oct by robin&rdquo;.
       </p>
       <p>
-        <Ui>Holding the release</Ui>, above the list, is always shown: the ticket that stops each repository&rsquo;s
-        next tag. <Ui>Not in a tag yet</Ui>, at the top, lists tickets whose only work is an open pull request. Pull
-        requests with no ticket are narrow rows between the cards, for example &ldquo;14 PRs with no ticket · 13 by
-        bots&rdquo;. Select one to list them.
+        Below the list, in a separate box, <Ui>Not in a tag yet</Ui> lists tickets whose only work is an open pull
+        request, and <Ui>Holding the release</Ui> always shows the ticket that stops each repository&rsquo;s next tag.
+        Pull requests with no ticket are narrow rows between the cards, for example &ldquo;14 PRs with no ticket · 13 by
+        bots&rdquo;. Select one to list them. Bot pull requests are left out of these lists unless you tick{' '}
+        <Ui>Show bot PRs</Ui> at the top of the list.
       </p>
       <p>
         Select a card to see its type, its assignee, when its status was last read, and every pull request for it in
@@ -146,11 +151,11 @@ export default function Page(): JSX.Element {
 
       <H2 id="create-a-release">Create a release</H2>
       <p>
-        <Ui>Release…</Ui> shows on a repository only when it has a candidate and you can push to it. The dialog
-        opens with that repository ticked; you can tick the others too.
+        <Ui>Release…</Ui> is on the candidate ticket. It shows only when a repository you can push to has a
+        candidate.
       </p>
       <Steps>
-        <li>Tick the other repositories to release with it. Each ticked one is released as it is.</li>
+        <li>Untick any repository you do not want to release now. The others are released as they are.</li>
         <li>Read the release notes, one section per repository, and change them if you want.</li>
         <li>Read the comment each ticket will get.</li>
         <li>

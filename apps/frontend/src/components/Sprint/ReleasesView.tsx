@@ -32,6 +32,7 @@ import {
   releaseDayWords,
   repoLatestNote,
   repoProgress,
+  showCreateRelease,
   type ReleasePrLine,
 } from './releasesModel.js';
 import {
@@ -40,7 +41,9 @@ import {
   TICKET_WINDOW_STEP,
   noTicketGroupWords,
   noTicketPrLineOf,
+  noTicketShownPrs,
   releaseHolders,
+  reposWithoutCandidate,
   repoStripText,
   repoTagWords,
   showTicketsWords,
@@ -59,15 +62,17 @@ import {
 //
 //   • Header: "Latest release: none" / "Latest release: 12 Nov", the ⓘ with the rules, "View notes" for
 //     the newest release made here, Refresh.
-//   • ONE STRIP PER RELEASABLE REPO: its candidate "0.316.0 → 0.316.0-rc", the candidate's commit (the
-//     HEAD that would be released, linked to GitHub) and day, "Latest 0.420.0", and its actions
-//     ("Release…" — SHOWN only with a candidate the reader can push; hidden, never disabled). A checking
-//     repository shows a bar and ONE line of what the scan is doing.
-//   • THE TICKET LIST (releaseTicketsModel.ts): "Not in a tag yet" (tickets with only open work) apart at
-//     the top; "Holding the release" (always shown); then ONE list of ticket cards in tag order, newest
-//     first, opened on the candidate ticket (★) with one either side, "Show 3 later / earlier tickets".
-//     Pull requests with no ticket are narrow rows between the cards. A card: mark, key, title, status,
-//     the latest tag per repository and ONE line; its PRs and tags open behind the arrow.
+//   • A line per releasable repo with NO candidate (no version tags, nothing new, none can be released, or
+//     "Checking…" with a bar and ONE line). The candidates are on the candidate ticket.
+//   • THE TICKET LIST (releaseTicketsModel.ts), in its own bordered box: ONE list of ticket cards in tag order,
+//     newest first, opened on the candidate ticket (★) with one either side, "Show 3 later / earlier tickets".
+//     The ★ card names each repository's candidate and its commit (the HEAD that would be released) and has
+//     ONE "Release…" for all of them (SHOWN only with a candidate the reader can push — hidden, never
+//     disabled). PRs with no ticket are narrow rows between the cards; bot PRs are left out of their lists
+//     unless "Show bot PRs" is ticked (the counts always name them). A card: mark, key, title, status, the
+//     latest tag per repository and ONE line; its PRs and tags open behind the arrow.
+//   • Below it, apart in a second bordered box: "Not in a tag yet" (tickets with only open work) and "Holding
+//     the release" (always shown).
 //
 // ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB + memory only); it POLLS that same GET every ~3 s only
 // while a repo is checking or its older tags are read (hooks/useReleases.ts). "Show earlier tickets" past
@@ -83,7 +88,7 @@ export function ReleasesView(): JSX.Element | null {
   const q = useReleases(workspaceId);
   const refresh = useRefreshReleases(workspaceId);
   const openSettings = useSettingsModal((s) => s.openSettings);
-  const [dialogRepo, setDialogRepo] = useState<number | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [viewRelease, setViewRelease] = useState<number | null>(null);
   const onRefresh = useCallback(() => refresh.mutate(), [refresh]);
 
@@ -113,6 +118,7 @@ export function ReleasesView(): JSX.Element | null {
   }
   const check = data.check;
   const busy = refresh.isPending;
+  const otherRepos = reposWithoutCandidate(check);
 
   return (
     <div data-testid="releases-view" className="space-y-5 pb-4">
@@ -128,11 +134,12 @@ export function ReleasesView(): JSX.Element | null {
           </p>
           <p>
             The list shows tickets, newest tag first. A ticket sits where its latest tag sits, in any repository. ★ is the
-            newest ticket in the release candidates. ✓ is in the candidates; ✗ is not Complete or has a pull request
-            still open; the amber mark is Complete but held back by another ticket; ? is a ticket the tracker could not
-            give — it does not stop a release, so check it by hand. Narrow rows are pull requests with no ticket.
+            newest ticket in the release candidates: it names each repository’s candidate and its commit, and Release…
+            releases them together. ✓ is in the candidates; ✗ is not Complete or has a pull request still open; the amber
+            mark is Complete but held back by another ticket; ? is a ticket the tracker could not give — it does not stop
+            a release, so check it by hand. Narrow rows are pull requests with no ticket.
           </p>
-          <p>Release… tags the candidate with the release suffix, publishes the notes and comments on each ticket.</p>
+          <p>Release… tags each candidate with the release suffix, publishes the notes and comments on each ticket.</p>
         </InfoButton>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {data.latestRelease != null && (
@@ -158,24 +165,25 @@ export function ReleasesView(): JSX.Element | null {
         <p className="text-meta text-ui-mute">The tracker did not answer for {refresh.data.unread.join(', ')}.</p>
       )}
 
-      <section aria-label="Repositories">
-        <ul className="divide-y divide-ui-line overflow-hidden rounded-ui bg-ui-surface">
-          {check.repos.map((r) => (
-            <RepoStrip key={r.repoId} repo={r} onRelease={() => setDialogRepo(r.repoId)} />
-          ))}
-        </ul>
-      </section>
+      {otherRepos.length > 0 && (
+        <section aria-label="Repositories with no candidate">
+          <ul className="divide-y divide-ui-line overflow-hidden rounded-ui bg-ui-surface">
+            {otherRepos.map((r) => (
+              <RepoStrip key={r.repoId} repo={r} />
+            ))}
+          </ul>
+        </section>
+      )}
 
-      <TicketListView check={check} workspaceId={workspaceId} />
+      <TicketListView check={check} workspaceId={workspaceId} onRelease={() => setDialogOpen(true)} />
 
-      {dialogRepo != null && (
+      {dialogOpen && (
         <ReleaseDialog
           workspaceId={workspaceId}
           check={check}
-          repoId={dialogRepo}
-          onClose={() => setDialogRepo(null)}
+          onClose={() => setDialogOpen(false)}
           onViewRelease={(id) => {
-            setDialogRepo(null);
+            setDialogOpen(false);
             setViewRelease(id);
           }}
         />
@@ -185,50 +193,16 @@ export function ReleasesView(): JSX.Element | null {
   );
 }
 
-/** One releasable repository: its candidate and the commit that would be released, and its actions. */
-function RepoStrip({ repo, onRelease }: { repo: ReleaseRepoCheck; onRelease: () => void }): JSX.Element {
+/** A repository with no candidate: why ("No version tags on main yet", "Nothing new since …", "No tag can be
+ *  released"), or "Checking…" with its bar and ONE line. The candidates live on the candidate ticket. */
+function RepoStrip({ repo }: { repo: ReleaseRepoCheck }): JSX.Element {
   const progress = repoProgress(repo);
-  const latest = repoLatestNote(repo);
-  const c = repo.candidate;
-  const href = c != null ? safeExternalUrl(`https://github.com/${repo.fullName}/commit/${c.sha}`) : null;
-  const day = c != null ? releaseDayWords(c.committedAt) : null;
-  const tone = repo.status === 'candidate' ? 'text-ui-ink' : repo.status === 'none' ? 'text-ui-warn' : 'text-ui-mute';
+  const tone = repo.status === 'none' ? 'text-ui-warn' : 'text-ui-mute';
   return (
     <li data-testid="release-repo-row" data-repo={repo.name} data-status={repo.status} className="px-3 py-2">
       <div className="flex flex-wrap items-center gap-2 text-body">
         <span className="font-medium text-ui-ink">{repo.name}</span>
-        {repo.status === 'candidate' && <StarIcon size={12} className="shrink-0 text-ui-accent" title="Release candidate" />}
         <span className={`min-w-0 ${tone}`}>{repoStripText(repo)}</span>
-        {c != null && (
-          <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
-            ·
-            {href != null ? (
-              <a
-                href={href}
-                target="_blank"
-                rel="noreferrer noopener"
-                data-testid="release-candidate-sha"
-                className={`rounded-ui font-mono text-ui-ink hover:underline ${FOCUS_RING}`}
-                title="The commit this release would ship (HEAD of the candidate tag)"
-              >
-                {c.sha.slice(0, 7)}
-              </a>
-            ) : (
-              <span className="font-mono">{c.sha.slice(0, 7)}</span>
-            )}
-            {day != null && <span>· {day}</span>}
-          </span>
-        )}
-        {latest != null && <span className="text-meta text-ui-mute">· {latest}</span>}
-        {c?.releaseTagExists === true && <span className="text-meta text-ui-warn">{c.releaseTagName} already exists</span>}
-        <span className="ml-auto flex items-center gap-2">
-          {c != null && !repo.writable && <span className="text-meta text-ui-faint">No push access</span>}
-          {c != null && repo.writable && (
-            <Button size="sm" variant="primary" icon={<RocketIcon size={13} />} onClick={onRelease}>
-              Release…
-            </Button>
-          )}
-        </span>
       </div>
       {progress != null && (
         <div className="mt-1 flex items-center gap-2" data-testid="release-progress">
@@ -244,13 +218,65 @@ function RepoStrip({ repo, onRelease }: { repo: ReleaseRepoCheck; onRelease: () 
   );
 }
 
-/** "Not in a tag yet", "Holding the release", then the list around the candidate ticket. */
-function TicketListView({ check, workspaceId }: { check: ReleaseCheckResult; workspaceId: number }): JSX.Element {
+/** The candidates on the candidate ticket: per repository "0.316.0 → 0.316.0-rc · e18c3b2 · 23 Oct", and ONE
+ *  Release… for all of them (HIDDEN unless one can be released by the reader). */
+function CandidateBlock({ check, onRelease }: { check: ReleaseCheckResult; onRelease: () => void }): JSX.Element {
+  const repos = check.repos.filter((r) => r.candidate != null);
+  return (
+    <div className="flex flex-wrap items-end gap-2 pl-[18px] pt-1" data-testid="release-candidates">
+      <ul className="min-w-0 space-y-0.5 text-meta">
+        {repos.map((r) => {
+          const c = r.candidate!;
+          const href = safeExternalUrl(`https://github.com/${r.fullName}/commit/${c.sha}`);
+          const day = releaseDayWords(c.committedAt);
+          const latest = repoLatestNote(r);
+          return (
+            <li key={r.repoId} className="flex flex-wrap items-center gap-x-1.5 text-ui-mute" data-testid="release-candidate" data-repo={r.name}>
+              <span className="font-medium text-ui-ink">{r.name}</span>
+              <span className="text-ui-ink">{repoStripText(r)}</span>
+              <span>·</span>
+              {href != null ? (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  onClick={(e) => e.stopPropagation()}
+                  data-testid="release-candidate-sha"
+                  className={`rounded-ui font-mono text-ui-ink hover:underline ${FOCUS_RING}`}
+                  title="The commit this release would ship (HEAD of the candidate tag)"
+                >
+                  {c.sha.slice(0, 7)}
+                </a>
+              ) : (
+                <span className="font-mono">{c.sha.slice(0, 7)}</span>
+              )}
+              {day != null && <span>· {day}</span>}
+              {latest != null && <span>· {latest}</span>}
+              {!r.writable && <span className="text-ui-faint">· No push access</span>}
+              {c.releaseTagExists && <span className="text-ui-warn">· {c.releaseTagName} already exists</span>}
+            </li>
+          );
+        })}
+      </ul>
+      {showCreateRelease(check) && (
+        <span className="ml-auto" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <Button size="sm" variant="primary" icon={<RocketIcon size={13} />} onClick={onRelease}>
+            Release…
+          </Button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The candidate tickets in their own bordered box; below it, apart, "Not in a tag yet" and "Holding the release". */
+function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheckResult; workspaceId: number; onRelease: () => void }): JSX.Element {
   const list = useMemo(() => ticketList(check), [check]);
   const holders = useMemo(() => releaseHolders(check), [check]);
   const repoNames = useMemo(() => new Map(check.repos.map((r) => [r.repoId, r.name])), [check]);
   const [up, setUp] = useState(TICKET_WINDOW_START);
   const [down, setDown] = useState(TICKET_WINDOW_START);
+  const [showBots, setShowBots] = useState(false);
   const [focus, setFocus] = useState<{ ident: string; seq: number } | null>(null);
   const more = useShowMoreOlderTags(workspaceId);
   const w = ticketWindow(list, up, down);
@@ -265,24 +291,27 @@ function TicketListView({ check, workspaceId }: { check: ReleaseCheckResult; wor
     for (const r of olderToAsk) more.mutate({ repoId: r.repoId, wanted: Math.min(RELEASE_OLDER_TAGS_MAX, r.older.wanted + 10) });
   };
   const card = (c: TicketCardModel, where: string): JSX.Element => (
-    <TicketCard key={`${where}-${c.ticket.ident}`} card={c} check={check} ctx={ctx} onFocus={onFocus} focus={where === 'hold' && focus?.ident === c.ticket.ident ? focus.seq : null} />
+    <TicketCard
+      key={`${where}-${c.ticket.ident}`}
+      card={c}
+      check={check}
+      ctx={ctx}
+      onFocus={onFocus}
+      focus={where === 'hold' && focus?.ident === c.ticket.ident ? focus.seq : null}
+      extra={where === 'list' && c.isAnchor ? <CandidateBlock check={check} onRelease={onRelease} /> : null}
+    />
   );
+  const hasNoTicket = w.items.some((i) => i.kind === 'no_ticket');
 
   return (
-    <div className="space-y-4" data-testid="release-tickets">
-      {list.notTagged.length > 0 && (
-        <section aria-label="Not in a tag yet" className="space-y-1.5" data-testid="release-not-tagged">
-          <h3 className="text-meta font-medium text-ui-mute">Not in a tag yet</h3>
-          <ul className="space-y-1.5">{list.notTagged.map((c) => card(c, 'open'))}</ul>
-        </section>
-      )}
-      {holderCards.length > 0 && (
-        <section aria-label="Holding the release" className="space-y-1.5" data-testid="release-holders">
-          <h3 className="text-meta font-medium text-ui-mute">Holding the release</h3>
-          <ul className="space-y-1.5">{holderCards.map((c) => card(c, 'hold'))}</ul>
-        </section>
-      )}
-      <section aria-label="Tickets" className="space-y-1.5">
+    <div data-testid="release-tickets">
+      <section aria-label="Tickets" className="space-y-1.5 rounded-ui border border-ui-line p-3">
+        {hasNoTicket && (
+          <label className="flex w-fit cursor-pointer items-center gap-1.5 text-meta text-ui-mute" data-testid="release-show-bots">
+            <input type="checkbox" checked={showBots} onChange={(e) => setShowBots(e.target.checked)} className={FOCUS_RING} />
+            Show bot PRs
+          </label>
+        )}
         {w.moreUp > 0 && (
           <MoreButton onClick={() => setUp((n) => n + TICKET_WINDOW_STEP)} testId="release-show-later">
             <ChevronIcon dir="up" size={11} className="shrink-0" />
@@ -291,7 +320,7 @@ function TicketListView({ check, workspaceId }: { check: ReleaseCheckResult; wor
         )}
         {list.tickets.length === 0 && w.items.length === 0 && <p className="text-meta text-ui-mute">No tickets in the tags read.</p>}
         <ul className="space-y-1.5" data-testid="release-ticket-list">
-          {w.items.map((i) => (i.kind === 'ticket' ? card(i, 'list') : <NoTicketRow key={i.key} group={i} check={check} />))}
+          {w.items.map((i) => (i.kind === 'ticket' ? card(i, 'list') : <NoTicketRow key={i.key} group={i} check={check} showBots={showBots} />))}
         </ul>
         {w.moreDown > 0 ? (
           <MoreButton onClick={() => setDown((n) => n + TICKET_WINDOW_STEP)} testId="release-show-earlier">
@@ -315,6 +344,23 @@ function TicketListView({ check, workspaceId }: { check: ReleaseCheckResult; wor
         )}
         {more.isError && <p className="text-meta text-ui-danger">Couldn’t ask for earlier tags. Try again.</p>}
       </section>
+
+      {(list.notTagged.length > 0 || holderCards.length > 0) && (
+        <section aria-label="Not in a tag yet and holding the release" className="mt-8 space-y-4 rounded-ui border border-ui-line p-3" data-testid="release-elsewhere">
+          {list.notTagged.length > 0 && (
+            <div className="space-y-1.5" data-testid="release-not-tagged">
+              <h3 className="text-meta font-medium text-ui-mute">Not in a tag yet</h3>
+              <ul className="space-y-1.5">{list.notTagged.map((c) => card(c, 'open'))}</ul>
+            </div>
+          )}
+          {holderCards.length > 0 && (
+            <div className="space-y-1.5" data-testid="release-holders">
+              <h3 className="text-meta font-medium text-ui-mute">Holding the release</h3>
+              <ul className="space-y-1.5">{holderCards.map((c) => card(c, 'hold'))}</ul>
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -361,12 +407,15 @@ function TicketCard({
   ctx,
   onFocus,
   focus,
+  extra,
 }: {
   card: TicketCardModel;
   check: ReleaseCheckResult;
   ctx: Parameters<typeof ticketCardLine>[1];
   onFocus: (h: ReleaseHolder) => void;
   focus: number | null;
+  /** The candidate ticket's candidates and Release… (always shown, under its line). */
+  extra?: ReactNode;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLLIElement>(null);
@@ -430,6 +479,7 @@ function TicketCard({
             </button>
           )}
         </div>
+        {extra}
       </div>
       {open && <TicketCardDetail card={card} check={check} />}
     </li>
@@ -491,9 +541,10 @@ function PrLineList({ lines, check }: { lines: ReleasePrLine[]; check: ReleaseCh
 }
 
 /** Pull requests with no ticket between two cards: one narrow row, its list behind the arrow. */
-function NoTicketRow({ group, check }: { group: NoTicketGroup; check: ReleaseCheckResult }): JSX.Element {
+function NoTicketRow({ group, check, showBots }: { group: NoTicketGroup; check: ReleaseCheckResult; showBots: boolean }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const lines = group.prs.map((p: ReleaseCheckPr) => noTicketPrLineOf(check, p));
+  const shown = noTicketShownPrs(group.prs, showBots);
+  const lines = shown.map((p: ReleaseCheckPr) => noTicketPrLineOf(check, p));
   return (
     <li data-testid="release-no-ticket" className="-my-0.5 pl-3">
       <button
@@ -507,7 +558,11 @@ function NoTicketRow({ group, check }: { group: NoTicketGroup; check: ReleaseChe
       </button>
       {open && (
         <div className="ml-4 mt-0.5">
-          <PrLineList lines={lines} check={check} />
+          {lines.length > 0 ? (
+            <PrLineList lines={lines} check={check} />
+          ) : (
+            <p className="text-meta text-ui-mute">Only bot PRs — tick “Show bot PRs” to list them.</p>
+          )}
         </div>
       )}
     </li>

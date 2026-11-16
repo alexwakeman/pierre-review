@@ -25,19 +25,16 @@ export function ReleaseDialog({
   check,
   onClose,
   onViewRelease,
-  repoId,
 }: {
   workspaceId: number;
   check: ReleaseCheckResult;
   onClose: () => void;
   onViewRelease: (id: number) => void;
-  /** Opened from one repository's strip: only it is ticked at first (the others can still be ticked). */
-  repoId?: number;
 }): JSX.Element {
   // The repos the dialog offers — fixed for its life, so the preview is read once.
   const offered = useMemo(() => releasableRepos(check), [check]);
   const offeredIds = useMemo(() => offered.map((r) => r.repoId), [offered]);
-  const [ticked, setTicked] = useState<number[]>(() => (repoId != null ? [repoId] : defaultTickedRepoIds(check)));
+  const [ticked, setTicked] = useState<number[]>(() => defaultTickedRepoIds(check));
   const [edits, setEdits] = useState<Map<number, string>>(() => new Map());
   const preview = useReleasePreview(workspaceId, offeredIds, true);
   const create = useCreateRelease(workspaceId);

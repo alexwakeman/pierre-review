@@ -110,6 +110,11 @@ export function releasableRepos(check: Pick<ReleaseCheckResult, 'repos'>): Relea
   return check.repos.filter((r) => r.candidate != null && r.writable);
 }
 
+/** "Release…" is SHOWN (never disabled) only with ≥ 1 candidate in a writable repo. */
+export function showCreateRelease(check: Pick<ReleaseCheckResult, 'repos'> | null | undefined): boolean {
+  return check != null && releasableRepos(check).length > 0;
+}
+
 /** The dialog's first ticks: every releasable repo whose release tag does not exist yet. */
 export function defaultTickedRepoIds(check: Pick<ReleaseCheckResult, 'repos'>): number[] {
   return releasableRepos(check)

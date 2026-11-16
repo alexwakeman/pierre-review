@@ -24,6 +24,7 @@ import {
   releasableRepos,
   releaseTagsLine,
   releasesPollInterval,
+  showCreateRelease,
   repoLatestNote,
   repoProgress,
   ticketStatusWords,
@@ -33,7 +34,9 @@ import {
   TICKET_WINDOW_STEP,
   noTicketGroupWords,
   noTicketPrLineOf,
+  noTicketShownPrs,
   releaseHolders,
+  reposWithoutCandidate,
   repoStripText,
   repoTagWords,
   showTicketsWords,
@@ -193,6 +196,14 @@ describe('the repository strip — the cumulative rule', () => {
     expect(repoStripText(run({ repos: [repo(2, 'web', [])] }).repos[0]!)).toBe('No version tags on main yet');
     expect(releasableRepos(run({ repos: [threeTags(false)], ...all() }))).toEqual([]);
   });
+
+  it('above the list: only the repositories with NO candidate; the ONE Release… shows only with a candidate the reader can push', () => {
+    const lib = repo(2, 'lib', []);
+    const res = run({ repos: [threeTags(), lib], ...all() });
+    expect(reposWithoutCandidate(res).map((r) => r.name)).toEqual(['lib']);
+    expect(showCreateRelease(res)).toBe(true);
+    expect(showCreateRelease(run({ repos: [threeTags(false), lib], ...all() }))).toBe(false);
+  });
 });
 
 describe('THE TICKET LIST: one list of ticket cards in tag order (owner, 2026-11-16)', () => {
@@ -295,6 +306,9 @@ describe('THE TICKET LIST: one list of ticket cards in tag order (owner, 2026-11
     const g = l.items[2]!;
     expect(g.kind === 'no_ticket' && noTicketGroupWords(g.prs)).toBe('2 PRs with no ticket · 1 by bots');
     expect(noTicketGroupWords([{ isBot: true }])).toBe('1 PR with no ticket · by a bot');
+    // Bot PRs are left out of the list unless "Show bot PRs" is ticked; the header still counts them.
+    expect(g.kind === 'no_ticket' && noTicketShownPrs(g.prs, false).map((p) => p.number)).toEqual([31]);
+    expect(g.kind === 'no_ticket' && noTicketShownPrs(g.prs, true).map((p) => p.number)).toEqual([31, 30]);
     expect(noTicketPrLineOf(res, res.prs.find((p) => p.id === 31)!)).toMatchObject({ label: 'api #31', tail: 'merged 2 Nov · in v1.2.0' });
   });
 

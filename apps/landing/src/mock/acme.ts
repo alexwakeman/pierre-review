@@ -497,6 +497,8 @@ export interface ReleaseMockNoTicket {
   kind: 'no_ticket';
   line: string;
   prs: string[];
+  /** Listed only with "Show bot PRs" ticked. */
+  bots?: string[];
 }
 
 /** This Sprint → Releases (Sprint/ReleasesView.tsx; the words of Sprint/releaseTicketsModel.ts). Release suffix
@@ -505,13 +507,18 @@ export interface ReleaseMockNoTicket {
  *  "Holding the release" and "Not in a tag yet" above it; PRs with no ticket as narrow rows between the cards. */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
-  /** The dialog opened from acme/payments's Release… (Sprint/ReleaseDialog.tsx). */
+  /** The dialog opened from the candidate ticket's Release… (Sprint/ReleaseDialog.tsx). */
   dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
   showLater: 'Show 3 later tickets',
   showEarlier: 'Show 3 earlier tickets',
+  /** The candidate ticket's candidates (`CandidateBlock`): one Release… for all. */
+  candidates: [
+    { name: REPOS.payments, text: 'v3.2.0 → v3.2.0-rc', sha: '9f8e7d6', day: '15 Oct' },
+    { name: REPOS.web, text: 'v1.8.2 → v1.8.2-rc', sha: '3e2d1c0', day: '13 Oct', latest: 'Latest v1.9.1' },
+  ] as Array<{ name: string; text: string; sha: string; day: string; latest?: string }>,
+  showBots: 'Show bot PRs',
+  /** Only the repositories with NO candidate get a line above the list. */
   repos: [
-    { name: REPOS.payments, candidate: true, text: 'v3.2.0 → v3.2.0-rc', sha: '9f8e7d6', day: '15 Oct', release: true },
-    { name: REPOS.web, candidate: true, text: 'v1.8.2 → v1.8.2-rc', sha: '3e2d1c0', day: '13 Oct', latest: 'Latest v1.9.1', release: true },
     { name: REPOS.ledger, candidate: false, text: 'No tag since v0.8.0-rc can be released' },
     { name: REPOS.api, candidate: false, text: 'Checking…', progress: { share: 0.44, line: "Reading main's history: 2,380 of 5,400 commits" } },
     { name: 'acme/docs-site', candidate: false, text: 'Nothing new since v4.1.0-rc' },
@@ -519,10 +526,6 @@ export const SPRINT_RELEASES = {
     name: string;
     candidate: boolean;
     text: string;
-    sha?: string;
-    day?: string;
-    latest?: string;
-    release?: boolean;
     progress?: { share: number; line: string };
   }>,
   notTagged: [
@@ -551,7 +554,12 @@ export const SPRINT_RELEASES = {
   ] as ReleaseMockCard[],
   list: [
     { kind: 'ticket', key: 'PAY-152', title: 'Card form labels', mark: 'held', status: 'Done', tags: ['acme/web v1.9.1'], line: 'Waits on PAY-150: In review', holder: 'PAY-150' },
-    { kind: 'no_ticket', line: '1 PR with no ticket', prs: ['payments #605 “Tidy the refund logs” merged 14 Oct · sam · in v3.2.0'] },
+    {
+      kind: 'no_ticket',
+      line: '2 PRs with no ticket · 1 by bots',
+      prs: ['payments #605 “Tidy the refund logs” merged 14 Oct · sam · in v3.2.0'],
+      bots: ['payments #606 “Bump stripe from 14.2 to 14.3” merged 14 Oct · dependabot · in v3.2.0'],
+    },
     {
       kind: 'ticket',
       key: 'PAY-134',
