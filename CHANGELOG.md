@@ -38,7 +38,7 @@ no internals.
   commit, linked to GitHub, and has one Release… button for all of them. Only repositories with no candidate are
   listed above the tickets. "Not in a tag yet" and "Holding the release" sit in their own box below the list.
 - This Sprint → Releases: lists of pull requests with no ticket leave out bot pull requests unless you tick "Show
-  bot PRs". The counts still include them. Untick "Show PRs with no ticket" to hide them altogether.
+  bot PRs". The counts still include them. Pull requests with no ticket are hidden until you tick "Show PRs with no ticket".
 - This Sprint → Releases: the ticket list has a line down its left side, like a pull request's Activity tab, with
   each ticket's mark on it and a merge mark for each group of pull requests with no ticket.
 

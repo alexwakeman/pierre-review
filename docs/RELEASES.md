@@ -173,7 +173,7 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    ```
    bng-library   No version tags on main yet
    ┌───────────────────────────────────────────────────────────────────────────────────────────┐
-   │ ☑ Show PRs with no ticket   ☐ Show bot PRs                                                │
+   │ ☐ Show PRs with no ticket                                                                 │
    │ ⌃ Show 3 later tickets
    ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done                ›
        bng-metric-backend 0.326.0   Waits on BMD-1061: In Code Review   Show BMD-1061
@@ -217,8 +217,8 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
      to open it.
    - **Pull requests with no ticket** are NARROW rows between the cards, consecutive ones grouped ("14 PRs with no
      ticket · 13 by bots"), opening to their list. BOT PRs are left out of those lists unless "Show bot PRs" (top
-     of the box, OFF by default, component state) is ticked; the row's words always count them. Unticking "Show
-     PRs with no ticket" (ON by default) removes those rows altogether; a ticket the tracker could not give is a
+     of the box, OFF by default, component state) is ticked; the row's words always count them. The rows show
+     only while "Show PRs with no ticket" (OFF by default) is ticked; a ticket the tracker could not give is a
      card and stays.
    - **The rail** (the PR Activity tab's design): one vertical line down the left of the list, each row's icon in
      a disc on it — ★ the candidate ticket, ✓, ✗, ⊘, ?, a part-circle — and a merge mark for each group of PRs
@@ -456,7 +456,8 @@ The ticket list (owner, 2026-11-16)
 59. THE CANDIDATE'S COMMIT: the candidate ticket names each repository's candidate and its commit (short sha, a
     GitHub link), with ONE Release…; only repositories with no candidate get a line above the list.
 60. BOT PRS: a no-ticket row lists only human PRs until "Show bot PRs" is ticked; its words count the bots.
-61. NO-TICKET ROWS OFF: unticking "Show PRs with no ticket" leaves only ticket cards (missing tickets included).
+61. NO-TICKET ROWS OFF BY DEFAULT: until "Show PRs with no ticket" is ticked the list holds only ticket cards (missing
+    tickets included).
 62. THE RAIL: every row of the list has its mark in a disc on one vertical line; a no-ticket group has a merge mark.
 
 ## Implementation
@@ -1181,5 +1182,5 @@ Then (owner, same day): the per-repository strips went — only repositories wit
 card (`CandidateBlock`); the dialog ticks every releasable repo as before. The list is its own bordered box; "Not
 in a tag yet" and "Holding the release" moved to a second bordered box below it. "Show bot PRs" (off) filters a
 no-ticket row's list (`noTicketShownPrs`).
-Then: "Show PRs with no ticket" (on; `listedItems`) and the rail — `RailMarker` copies `PrActivityTab`'s disc
+Then: "Show PRs with no ticket" (off by default; `listedItems`) and the rail — `RailMarker` copies `PrActivityTab`'s disc
 and line; `TicketCard railed` moves the mark onto it.

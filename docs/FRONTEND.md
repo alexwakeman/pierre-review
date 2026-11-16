@@ -2927,8 +2927,8 @@ list of ticket cards newest first (`ticketList`, by the latest tag's `tagAt` acr
 TICKET ★ ± 1 (`ticketWindow`; "Show 3 later / earlier tickets", component state; "Read earlier tags" POSTs
 `/api/releases/older-tags` past what was sent). PRs with no ticket are narrow grouped rows between cards
 (`noTicketGroupWords`); bot PRs are left out of their lists unless "Show bot PRs" (top of the box, off,
-component state; `noTicketShownPrs`) is ticked, and are removed altogether by unticking "Show PRs with no
-ticket" (on; `listedItems`). THE RAIL copies `pr/PrActivityTab.tsx`: one `w-px` line behind a disc per row
+component state; `noTicketShownPrs`) is ticked, and are shown at all only while "Show PRs with no ticket"
+(off by default; `listedItems`) is ticked. THE RAIL copies `pr/PrActivityTab.tsx`: one `w-px` line behind a disc per row
 (`RailMarker`) holding the card's mark (`TicketCard railed`) or, for a no-ticket group, `MergeIcon`. The ★ card carries `CandidateBlock`: each repo's candidate
 ("0.316.0 → 0.316.0-rc"), its commit (short sha → GitHub, `safeExternalUrl`) and day, "Latest 0.418.0"
 (`repoLatestNote`), and ONE "Release…" (HIDDEN unless `showCreateRelease`) opening `ReleaseDialog`. Below

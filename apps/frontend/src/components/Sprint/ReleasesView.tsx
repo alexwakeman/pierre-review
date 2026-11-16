@@ -279,7 +279,7 @@ function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheck
   const [up, setUp] = useState(TICKET_WINDOW_START);
   const [down, setDown] = useState(TICKET_WINDOW_START);
   const [showBots, setShowBots] = useState(false);
-  const [showNoTicket, setShowNoTicket] = useState(true);
+  const [showNoTicket, setShowNoTicket] = useState(false);
   const [focus, setFocus] = useState<{ ident: string; seq: number } | null>(null);
   const more = useShowMoreOlderTags(workspaceId);
   const w = ticketWindow(list, up, down);

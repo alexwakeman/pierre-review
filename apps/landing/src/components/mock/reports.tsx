@@ -745,7 +745,7 @@ function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
   const [showBots, setShowBots] = useState(false);
-  const [showNoTicket, setShowNoTicket] = useState(true);
+  const [showNoTicket, setShowNoTicket] = useState(false);
   const candidates = (
     <div className="cands">
       <ul>
