@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.53] - 2026-11-16
+
 ### Changed
 
 - Story view → How the code meets each criterion: one list, with no lines. Each pull request under a
