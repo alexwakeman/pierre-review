@@ -185,6 +185,8 @@ test.describe('the criteria map', () => {
     await expect(ac2.locator('[data-pr-state="open"]')).toHaveCount(1);
     await ac2.getByRole('button', { name: /2 files/ }).click();
     await expect(ac2.getByTestId('criteria-map-detail')).toContainText('writes one line per row, in column order.');
+    // Open, the row drops its one-line copy: the how is said once.
+    await expect(ac2.getByTestId('criteria-map-how')).toHaveText('');
     await expect(ac2.getByRole('button', { name: 'src/reports/csv.ts' })).toBeVisible();
     // The ⓘ says once what the cards are.
     await map.getByRole('button', { name: 'About “How the code meets each criterion”' }).click();

@@ -18,7 +18,7 @@ import { Chip, FindingRow, Group, MockFrame } from './kit';
 //  - CriteriaMapMock mirrors the story view's "How the code meets each criterion"
 //    (Activity/CriteriaMap.tsx): ONE list, no lines. Each criterion with its story-check status, and
 //    under it each pull request marked Merged or Open with the description's "how" on one line
-//    (truncated at every width); a click opens the full "how" and the files. An unclaimed criterion
+//    (truncated at every width); a click opens the full "how" (the row drops its one-line copy) and the files. An unclaimed criterion
 //    says so. LIVE.
 //  - LoopBodyMock mirrors the section the review loop adds to the pull request's description
 //    (apps/backend/src/coding/story-build/loop/pr-body.ts loopBodySection).
@@ -184,7 +184,7 @@ export function CriteriaMapMock(): JSX.Element {
                       <button type="button" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : key)}>
                         <span className={`bd-cm-state${merged ? ' merged' : ''}`}>{merged ? 'Merged' : 'Open'}</span>
                         <span className="bd-cm-pr">{pr?.label ?? l.pr}</span>
-                        <span className="bd-cm-how">{l.how}</span>
+                        <span className="bd-cm-how">{isOpen ? null : l.how}</span>
                         <span className="bd-cm-n">{l.files.length === 1 ? '1 file' : `${l.files.length} files`}</span>
                       </button>
                       {isOpen ? (

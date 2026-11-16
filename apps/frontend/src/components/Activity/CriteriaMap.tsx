@@ -199,7 +199,8 @@ function LinkRow({
       <span className="shrink-0 font-mono text-meta leading-5 text-ui-ink">{label}</span>
       {/* ONE line at every width: the flex row never wraps; the words truncate. */}
       <span className="min-w-0 flex-1 truncate text-meta leading-5 text-ui-ink" data-testid="criteria-map-how">
-        {link.how !== '' ? <PrRefText text={link.how} /> : <span className={MUTED}>No words on how.</span>}
+        {/* Open: the full how sits below, so the row drops its one-line copy. */}
+        {link.how === '' ? <span className={MUTED}>No words on how.</span> : open ? null : <PrRefText text={link.how} />}
       </span>
       {nFiles > 0 && <span className={`shrink-0 text-meta leading-5 ${MUTED}`}>{nFiles === 1 ? '1 file' : `${nFiles} files`}</span>}
     </>

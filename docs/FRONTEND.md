@@ -4518,7 +4518,7 @@ description at its current commit yet."
   one row per link under it: a ChevronIcon, the PR's MERGED / OPEN mark (`PrStateMark`: MergeIcon /
   PullRequestIcon, its word from `sm` up, `sr-only` below), `memberLabel`, the card's "how" TRUNCATED TO
   ONE LINE at every width (`min-w-0 flex-1 truncate` in a non-wrapping flex row), and "n files". A click
-  opens the full "how" and the files; a file opens that PR's Changes tab (`useOpenMemberFile`).
+  opens the full "how" below (the row then drops its one-line copy) and the files; a file opens that PR's Changes tab (`useOpenMemberFile`).
 - ⚠ **UNKNOWN IS NEVER ZERO**: an unclaimed criterion is a DASHED box saying "No pull request claims
   this."; under the list, each PR with no current card ("No description at its current commit.") or with
   card lines matching no criterion ("Not matched to a criterion (n)") is named on its own row.
