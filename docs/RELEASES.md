@@ -105,7 +105,11 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    ticket with merged work at or below one repository's candidate AND merged work above a candidate — in any
    releasable repository, the same one included; "not in a tag yet" (merged after the newest tag) and a
    repository with no candidate count as above — blocks the tags holding it in each repository where part of
-   it would ship: "BMD-1048 “Edit an AREA” would ship without bng-metric-backend #539 (in 0.326.0)." The walks
+   it would ship: "BMD-1048 “Edit an AREA” would ship without bng-metric-backend #539 (in 0.326.0), which waits
+   on bng-metric-backend 0.324.0: BMD-1061 “…” is In Code Review." The reason always ends at the ROOT CAUSE —
+   the tag holding a ticket not Complete or with an open PR, followed through earlier splits (`root`), never
+   back to the other half — and its link goes there. A ticket line says "would ship without" only in the tag
+   it holds back; in the tag that holds its other half it reads Complete (`ticketBlockerIn`). The walks
    run again until nothing changes (candidates only move down). A repository still checking, or with no
    version tags, takes no part yet. Cancelled and not-found tickets never block, so they are never split.
    (BNG, 2026-11-16: backend 0.316.0, frontend 0.328.0 — BMD-1048, BMD-1083 and BMD-1086 had work on both

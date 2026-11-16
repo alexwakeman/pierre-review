@@ -386,10 +386,10 @@ describe('foldReleaseCheck — the cumulative rule, newest first, per repo', () 
     const res = run({ repos: [threeTags(), webLate], ...base });
     expect(repoOf(res, 2).status).toBe('none');
     expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
-    expect(reasons(res, 1, 'v1.1.0')).toEqual(['T2 would ship without web #21 (in w1.1.0).']);
+    expect(reasons(res, 1, 'v1.1.0')).toEqual(['T2 would ship without web #21 (in w1.1.0), which waits on web w1.0.0: W9 is In Progress.']);
     expect(ticketOf(res, 'T2')).toMatchObject({ ready: false, blocker: { kind: 'split', repoName: 'web', number: 21, tagName: 'w1.1.0' } });
     // The api tag above it is held back by it.
-    expect(tagOf(res, 1, 'v1.2.0').blockers.map(releaseBlockerText)).toEqual(['T2 (from v1.1.0) would ship without web #21 (in w1.1.0).']);
+    expect(tagOf(res, 1, 'v1.2.0').blockers.map(releaseBlockerText)).toEqual(['T2 (from v1.1.0) would ship without web #21 (in w1.1.0), which waits on web w1.0.0: W9 is In Progress.']);
   });
 
   it('PICKED TOGETHER — merged after the newest tag ("not in a tag yet") counts as above', () => {
@@ -412,7 +412,7 @@ describe('foldReleaseCheck — the cumulative rule, newest first, per repo', () 
       tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In Progress' })],
     });
     expect(repoOf(res, 1).status).toBe('none');
-    expect(reasons(res, 1, 'v1.0.0')).toEqual(['T1 would ship without api #3 (in v1.2.0).']);
+    expect(reasons(res, 1, 'v1.0.0')).toEqual(['T1 would ship without api #3 (in v1.2.0), which waits on api v1.1.0: T2 is In Progress.']);
   });
 
   it('PICKED TOGETHER — Cancelled and not-found tickets are never split, and a checking repo takes no part yet', () => {

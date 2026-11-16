@@ -3,6 +3,7 @@ import {
   SPRINT_STAGE_LABEL,
   releaseBlockerShort,
   releaseBlockerText,
+  releaseSplitRootText,
   releaseSplitWhere,
   releaseTitleShort,
   releaseUnverifiedText,
@@ -201,8 +202,11 @@ export function candidatePairs(check: Pick<ReleaseCheckResult, 'repos'>, repo: P
  *  an inherited reason the older tag in this repository. */
 function blockerLink(check: Pick<ReleaseCheckResult, 'repos'>, repoId: number, b: ReleaseBlocker): TagLink | null {
   if (b.kind === 'split') {
-    const other = check.repos.find((r) => r.name === b.repoName);
-    return other != null && b.tagName != null ? { repoId: other.repoId, tagName: b.tagName } : null;
+    // The root cause when known (the tag holding a ticket not Complete), else the tag with the work left out.
+    const name = b.root?.repoName ?? b.repoName;
+    const tagName = b.root?.tagName ?? b.tagName;
+    const other = check.repos.find((r) => r.name === name);
+    return other != null && tagName != null ? { repoId: other.repoId, tagName } : null;
   }
   return b.fromTag != null ? { repoId, tagName: b.fromTag } : null;
 }
@@ -264,9 +268,10 @@ export function tagExplainer(
 ): Array<{ tone: MarkTone; text: string; link?: TagLink | null }> {
   const out: Array<{ tone: MarkTone; text: string; link?: TagLink | null }> = [];
   for (const b of t.blockers) if (b.kind === 'checking' && b.key == null) out.push({ tone: 'warn', text: releaseBlockerText(b) });
-  const own = t.blockers.some((b) => b.fromTag == null && b.key != null && b.kind !== 'checking');
-  const inherited = t.blockers.filter((b) => b.fromTag != null && b.kind !== 'checking');
-  if (!own && inherited.length > 0) {
+  const own = t.blockers.some((b) => b.fromTag == null && (b.kind === 'not_done' || b.kind === 'open_pr'));
+  const inherited = t.blockers.filter((b) => b.fromTag != null && (b.kind === 'not_done' || b.kind === 'open_pr'));
+  const ownSplit = t.blockers.some((b) => b.kind === 'split' && b.fromTag == null);
+  if (!own && !ownSplit && inherited.length > 0) {
     // Blockers come own first, then the earlier tags newest first: the last one is the oldest tag's.
     const oldest = inherited[inherited.length - 1]!;
     out.push({
@@ -279,7 +284,7 @@ export function tagExplainer(
     if (b.kind !== 'split' || b.fromTag != null) continue;
     out.push({
       tone: 'warn',
-      text: `Held back by ${b.repoName}${b.tagName != null ? ` ${b.tagName}` : ''}: ${releaseBlockerShort(b)}.`,
+      text: `Held back: ${releaseBlockerShort(b)}.`,
       ...(ctx != null ? { link: blockerLink(ctx.check, ctx.repoId, b) } : {}),
     });
   }
@@ -311,9 +316,24 @@ export type MarkTone = 'ok' | 'bad' | 'warn' | 'unknown';
 
 /** A ticket's place in a tag's list: 0 stops the tag (not Complete, an open PR), 1 to check (not found,
  *  could not be read, not read yet), 2 Complete or Cancelled (neither stops it). */
-export function ticketRank(t: Pick<ReleaseTicketCheck, 'ready' | 'blocker' | 'cancelled'>): 0 | 1 | 2 {
-  if (t.blocker != null && t.blocker.kind !== 'checking') return 0;
+export function ticketRank(
+  t: Pick<ReleaseTicketCheck, 'ready' | 'blocker' | 'cancelled' | 'ident'>,
+  tag?: Pick<ReleaseTagCheck, 'blockers'>,
+): 0 | 1 | 2 {
+  const blocker = ticketBlockerIn(t, tag);
+  if (blocker != null && blocker.kind !== 'checking') return 0;
+  if (t.blocker?.kind === 'split' && blocker == null) return 2;
   return t.ready || t.cancelled === true ? 2 : 1;
+}
+
+/** A ticket's blocker as ONE tag sees it: a split ("would ship without …") only in the tag where it holds
+ *  that tag back — never in the tag that holds the work it would ship without. Pure. */
+export function ticketBlockerIn(
+  t: Pick<ReleaseTicketCheck, 'blocker' | 'ident'>,
+  tag?: Pick<ReleaseTagCheck, 'blockers'>,
+): ReleaseBlocker | null {
+  if (t.blocker?.kind !== 'split' || tag == null) return t.blocker;
+  return tag.blockers.find((b) => b.kind === 'split' && b.ident === t.ident && b.fromTag == null) ?? null;
 }
 
 /** The ticket's status as the tracker names it, with the workspace's bucket in brackets only when it
@@ -342,19 +362,25 @@ function openPrList(prs: ReadonlyArray<{ repoName: string; number: number }>): s
  *    ? "not found in Jira — check by hand" · "not read yet"
  *    ✓ "Complete" */
 export function ticketLine(
-  t: Pick<ReleaseTicketCheck, 'statusName' | 'stage' | 'done' | 'readState' | 'blocker' | 'unverified' | 'pending' | 'openPrs' | 'cancelled'>,
+  t: Pick<ReleaseTicketCheck, 'statusName' | 'stage' | 'done' | 'readState' | 'blocker' | 'unverified' | 'pending' | 'openPrs' | 'cancelled' | 'ident'>,
   trackerName: string | null,
+  tag?: Pick<ReleaseTagCheck, 'blockers'>,
 ): { tone: MarkTone; text: string } {
+  const blocker = ticketBlockerIn(t, tag);
   const tracker = trackerName ?? 'the tracker';
   // Cancelled never stops a tag: a tick, and the status says why.
   if (t.cancelled === true) return { tone: 'ok', text: `${ticketStatusWords(t)} — doesn’t stop a release` };
-  if (t.blocker?.kind === 'not_done') return { tone: 'bad', text: ticketStatusWords(t) };
-  if (t.blocker?.kind === 'open_pr') {
+  if (blocker?.kind === 'not_done') return { tone: 'bad', text: ticketStatusWords(t) };
+  if (blocker?.kind === 'open_pr') {
     const n = t.openPrs.length;
     return { tone: 'bad', text: `${ticketStatusWords(t)}, but has ${n === 1 ? 'an open PR' : 'open PRs'}: ${openPrList(t.openPrs)}` };
   }
   // Picked together: its other half sits above a candidate.
-  if (t.blocker?.kind === 'split') return { tone: 'bad', text: `${ticketStatusWords(t)}, but would ship without ${releaseSplitWhere(t.blocker)}` };
+  if (blocker?.kind === 'split') {
+    return { tone: 'warn', text: `${ticketStatusWords(t)}, but would ship without ${releaseSplitWhere(blocker)}${releaseSplitRootText(blocker.root)}` };
+  }
+  // Complete, and its other half is not held here: as it is.
+  if (t.blocker?.kind === 'split') return { tone: 'ok', text: ticketStatusWords(t) };
   if (t.unverified != null) return { tone: 'unknown', text: `${UNVERIFIED_WORDS[t.unverified](tracker)} — check by hand` };
   if (t.pending) return { tone: 'warn', text: 'not read yet' };
   return { tone: 'ok', text: ticketStatusWords(t) };
@@ -365,7 +391,7 @@ export function ticketLine(
  *  whole scope; any other tag its own increment. Pure. */
 export function tagTickets(
   check: Pick<ReleaseCheckResult, 'tickets' | 'prs'>,
-  tag: Pick<ReleaseTagCheck, 'prIds' | 'scopePrIds' | 'isCandidate'>,
+  tag: Pick<ReleaseTagCheck, 'prIds' | 'scopePrIds' | 'isCandidate'> & Partial<Pick<ReleaseTagCheck, 'blockers'>>,
 ): { tickets: Array<{ ticket: ReleaseTicketCheck; prs: ReleaseCheckPr[] }>; noTicket: ReleaseCheckPr[] } {
   const prById = new Map(check.prs.map((p) => [p.id, p]));
   const prs = tagListedPrIds(tag)
@@ -377,7 +403,10 @@ export function tagTickets(
   const tickets = idents
     .map((ident) => ticketByIdent.get(ident))
     .filter((t): t is ReleaseTicketCheck => t != null)
-    .sort((a, b) => ticketRank(a) - ticketRank(b) || a.key.localeCompare(b.key))
+    .sort((a, b) => {
+      const ctx = tag.blockers != null ? { blockers: tag.blockers } : undefined;
+      return ticketRank(a, ctx) - ticketRank(b, ctx) || a.key.localeCompare(b.key);
+    })
     .map((ticket) => ({ ticket, prs: prs.filter((p) => p.ticketIdents.includes(ticket.ident)) }));
   return { tickets, noTicket: prs.filter((p) => p.ticketIdents.length === 0) };
 }

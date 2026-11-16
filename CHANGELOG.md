@@ -25,7 +25,8 @@ no internals.
   tick and gets no comment.
 - This Sprint → Releases: the repositories are picked together. A Complete ticket with work in several tags or
   repositories is released whole or not at all, and the tag that would ship part of it says what it would
-  ship without.
+  ship without and the ticket that is really holding things up, for example "… which waits on
+  bng-metric-frontend 0.341.0: BMD-1061 is In Code Review".
 - Release notes for a first release list everything up to the tag.
 - This Sprint → Releases: a repository opens to the 5 tags either side of the candidate, every tag one line with
   a mark — ★ candidate, red ✗ its own tickets stop it, amber ⊘ another tag holds it back, ✓ can be released.

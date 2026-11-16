@@ -321,7 +321,9 @@ export type ReleaseBlocker =
   /** `ident` null: the history of the scope is not read yet. Otherwise a ticket not read yet. */
   | { kind: 'checking'; ident: string | null; key: string | null; title?: string | null; fromTag: string | null }
   /** Complete, but more of its merged work sits ABOVE a candidate (picked together): releasing this tag
-   *  would ship it without `repoName #number` (in `tagName`; null = not in a tag yet). */
+   *  would ship it without `repoName #number` (in `tagName`; null = not in a tag yet). `root` = what
+   *  keeps that tag from being released, followed to the end (a ticket not Complete or with an open PR) —
+   *  never another split, so the reason is never circular; null = not known (not in a tag yet). */
   | {
       kind: 'split';
       ident: string;
@@ -331,8 +333,16 @@ export type ReleaseBlocker =
       number: number;
       url: string;
       tagName: string | null;
+      root?: ReleaseSplitRoot | null;
       fromTag: string | null;
     };
+
+/** The root cause behind a split: the tag in `repoName` that holds a ticket not Complete or with an open PR. */
+export interface ReleaseSplitRoot {
+  repoName: string;
+  tagName: string;
+  blocker: Extract<ReleaseBlocker, { kind: 'not_done' } | { kind: 'open_pr' }>;
+}
 
 /** A ticket in a tag's scope that the tracker could not give: listed for the reader, never a block. */
 export interface ReleaseUnverified {
@@ -555,7 +565,7 @@ type TicketVerdict =
   | { kind: 'open_pr'; prs: ReleaseOpenPr[] }
   | { kind: 'checking' }
   | { kind: 'unverified'; reason: Exclude<ReleaseTicketReadState, 'ok'> }
-  | { kind: 'split'; repoName: string; number: number; url: string; tagName: string | null };
+  | { kind: 'split'; repoName: string; number: number; url: string; tagName: string | null; root: ReleaseSplitRoot | null };
 
 interface TagEval {
   span: number;
@@ -671,7 +681,7 @@ function foldRepo(
         const key = keyOf(ident);
         const title = titleOf(ident);
         if (v.kind === 'split') {
-          blockers.push({ kind: 'split', ident, key, ...named(title), repoName: v.repoName, number: v.number, url: v.url, tagName: v.tagName, fromTag });
+          blockers.push({ kind: 'split', ident, key, ...named(title), repoName: v.repoName, number: v.number, url: v.url, tagName: v.tagName, root: v.root, fromTag });
           continue;
         }
         if (v.kind === 'not_done') blockers.push({ kind: 'not_done', ident, key, ...named(title), statusName: v.statusName, fromTag });
@@ -957,6 +967,29 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       if (d == null || d.newestAt == null || p.mergedAt == null || p.mergedAt.getTime() <= d.newestAt) continue;
       for (const ident of p.ticketIdents) put(ident, { repoId: p.repoId, below: false, number: p.number, url: p.url, tagName: null, at: Number.MAX_SAFE_INTEGER });
     }
+    // THE ROOT CAUSE of a PR sitting above its repository's candidate: what stops the tag just above that
+    // candidate (with none, the oldest tag read) — its own ticket, else the older tag it inherits from; a
+    // split there is followed through the split recorded before it (earlier rounds), so it never loops.
+    const rootOf = (repoId: number): ReleaseSplitRoot | null => {
+      const f = folded.find((x) => x.repo.repoId === repoId)?.f;
+      if (f == null) return null;
+      const tags = f.out.tags;
+      const above = tags[tags.length - (f.candidate != null ? 2 : 1)];
+      if (above == null) return null;
+      const hard = (b: ReleaseBlocker): b is Extract<ReleaseBlocker, { kind: 'not_done' } | { kind: 'open_pr' }> =>
+        b.kind === 'not_done' || b.kind === 'open_pr';
+      const own = above.blockers.find((b) => hard(b) && b.fromTag == null);
+      if (own != null && hard(own)) return { repoName: f.out.name, tagName: above.name, blocker: own };
+      const inherited = above.blockers.filter((b) => hard(b) && b.fromTag != null);
+      const oldest = inherited[inherited.length - 1];
+      if (oldest != null && hard(oldest)) return { repoName: f.out.name, tagName: oldest.fromTag!, blocker: { ...oldest, fromTag: null } };
+      for (const b of above.blockers) {
+        if (b.kind !== 'split') continue;
+        const earlier = splitBy.get(`${repoId}|${b.ident}`);
+        if (earlier?.root != null) return earlier.root;
+      }
+      return null;
+    };
     let grew = false;
     for (const [ident, list] of places) {
       if (verdictOf(ident).kind !== 'ok') continue;
@@ -967,7 +1000,14 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
         if (splitBy.has(k)) continue;
         // Name a PR in ANOTHER repository first: that is the cross-repository case the reader asked about.
         const miss = above.find((p) => p.repoId !== repoId) ?? above[0]!;
-        splitBy.set(k, { kind: 'split', repoName: repoNameOf.get(miss.repoId) ?? '', number: miss.number, url: miss.url, tagName: miss.tagName });
+        splitBy.set(k, {
+          kind: 'split',
+          repoName: repoNameOf.get(miss.repoId) ?? '',
+          number: miss.number,
+          url: miss.url,
+          tagName: miss.tagName,
+          root: miss.tagName != null ? rootOf(miss.repoId) : null,
+        });
         grew = true;
       }
     }
@@ -1100,7 +1140,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
           : v.kind === 'checking'
             ? { kind: 'checking', ident, key: t.key, ...named(titleOf(ident)), fromTag: null }
             : v.kind === 'split'
-              ? { kind: 'split', ident, key: t.key, ...named(titleOf(ident)), repoName: v.repoName, number: v.number, url: v.url, tagName: v.tagName, fromTag: null }
+              ? { kind: 'split', ident, key: t.key, ...named(titleOf(ident)), repoName: v.repoName, number: v.number, url: v.url, tagName: v.tagName, root: v.root, fromTag: null }
               : null;
     return {
       ident,
@@ -1187,6 +1227,13 @@ export function releaseSplitWhere(b: { repoName: string; number: number; tagName
   return `${b.repoName} #${b.number} (${b.tagName != null ? `in ${b.tagName}` : 'not in a tag yet'})`;
 }
 
+/** The end of a split reason — what that tag waits on: ", which waits on bng-metric-frontend 0.341.0:
+ *  BMD-1061 “…” is In Code Review"; empty when not known. Pure. */
+export function releaseSplitRootText(root: ReleaseSplitRoot | null | undefined): string {
+  if (root == null) return '';
+  return `, which waits on ${root.repoName} ${root.tagName}: ${releaseBlockerShort({ ...root.blocker, fromTag: null })}`;
+}
+
 /** A reason in a few words, no full stop, the ticket's title beside its key: "BMD-1048 “Edit an AREA”
  *  is In PO Review", "BMD-1050 “Habitat export” has an open pull request in web (#812)", "BMD-1040
  *  “Hedgerow validation” (from 0.391.0) is In Progress", "BMD-12 is not read yet". Pure. */
@@ -1199,7 +1246,7 @@ export function releaseBlockerShort(b: ReleaseBlocker): string {
     case 'checking':
       return b.key == null ? 'the history is still being read' : `${who(b.key, b.fromTag, b.title)} is not read yet`;
     case 'split':
-      return `${who(b.key, b.fromTag, b.title)} would ship without ${releaseSplitWhere(b)}`;
+      return `${who(b.key, b.fromTag, b.title)} would ship without ${releaseSplitWhere(b)}${releaseSplitRootText(b.root)}`;
   }
 }
 

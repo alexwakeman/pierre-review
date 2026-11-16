@@ -569,7 +569,7 @@ function Mark({ tone }: { tone: MarkTone }): JSX.Element {
 
 function TicketLine({ ticket, tag, check }: { ticket: ReleaseTicketCheck; tag: ReleaseTagCheck; check: ReleaseCheckResult }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const m = ticketLine(ticket, check.trackerName);
+  const m = ticketLine(ticket, check.trackerName, tag);
   return (
     <li data-testid="release-ticket" data-key={ticket.key}>
       <button

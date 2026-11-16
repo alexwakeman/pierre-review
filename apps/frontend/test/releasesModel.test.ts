@@ -421,21 +421,28 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
       trackerName: 'Jira',
     });
     expect(res.repos[0]!.candidate?.name).toBe('v1.1.0');
-    // The api tag holding T2's api half is held back (amber), and opens to a line linking the frontend tag.
+    // The api tag holding T2's api half is held back (amber). Opened, it follows the chain to the ROOT CAUSE —
+    // frontend w1.0.0's In Progress W9 — and links there, never back and forth between the two halves.
+    const why = 'T2 “T2 title” would ship without frontend #21 (in w1.1.0), which waits on frontend w1.0.0: W9 “W9 title” is In Progress';
     const v2 = res.repos[0]!.tags.find((t) => t.name === 'v1.2.0')!;
     expect(tagMark(v2)).toBe('held');
-    expect(tagExplainer(v2, { check: res, repoId: 1 })).toEqual([
-      { tone: 'warn', text: 'Held back by frontend w1.1.0: T2 “T2 title” would ship without frontend #21 (in w1.1.0).', link: { repoId: 2, tagName: 'w1.1.0' } },
-    ]);
-    // The candidate explains itself with the same link; it is paired with no other candidate (frontend has none).
-    expect(candidateWhy(res, res.repos[0]!)).toEqual({
-      text: 'v1.2.0, the tag above it, can’t be released: T2 “T2 title” would ship without frontend #21 (in w1.1.0).',
-      link: { repoId: 2, tagName: 'w1.1.0' },
-    });
+    expect(tagExplainer(v2, { check: res, repoId: 1 })).toEqual([{ tone: 'warn', text: `Held back: ${why}.`, link: { repoId: 2, tagName: 'w1.0.0' } }]);
+    // The candidate explains itself with the same root; it is paired with no other candidate (frontend has none).
+    expect(candidateWhy(res, res.repos[0]!)).toEqual({ text: `v1.2.0, the tag above it, can’t be released: ${why}.`, link: { repoId: 2, tagName: 'w1.0.0' } });
     expect(candidatePairs(res, res.repos[0]!)).toEqual([]);
     const t2 = res.tickets.find((t) => t.ident === 'T2')!;
-    expect(ticketLine(t2, 'Jira')).toEqual({ tone: 'bad', text: 'Complete, but would ship without frontend #21 (in w1.1.0)' });
-    expect(ticketRank(t2)).toBe(0);
+    // In the api tag it holds back: the reason. In the frontend tag that holds its other half: just Complete.
+    expect(ticketLine(t2, 'Jira', v2)).toEqual({
+      tone: 'warn',
+      text: 'Complete, but would ship without frontend #21 (in w1.1.0), which waits on frontend w1.0.0: W9 “W9 title” is In Progress',
+    });
+    expect(ticketRank(t2, v2)).toBe(0);
+    const w11 = res.repos[1]!.tags.find((t) => t.name === 'w1.1.0')!;
+    expect(ticketLine(t2, 'Jira', w11)).toEqual({ tone: 'ok', text: 'Complete' });
+    expect(ticketRank(t2, w11)).toBe(2);
+    expect(tagExplainer(w11, { check: res, repoId: 2 })).toEqual([
+      { tone: 'warn', text: 'Held back by w1.0.0: W9 “W9 title” is In Progress.', link: { repoId: 2, tagName: 'w1.0.0' } },
+    ]);
   });
 
   it('Refresh shows a bar with what it reads', () => {
