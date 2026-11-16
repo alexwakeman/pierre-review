@@ -13,7 +13,7 @@ import type { Corner, Quarter, RunName } from './geometry';
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
 //              mirrored across the tile and cross through each other into place as
-//              the reader scrolls down.
+//              the reader scrolls down, landing SYMMETRIC left to right (SITE_CHAIN).
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
