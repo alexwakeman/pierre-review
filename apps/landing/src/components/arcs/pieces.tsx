@@ -13,7 +13,7 @@ import type { Corner, Quarter, RunName } from './geometry';
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
 //              mirrored across the tile and cross through each other into place as
-//              the reader scrolls down, landing SYMMETRIC left to right (SITE_CHAIN).
+//              the reader scrolls down, landing as a wide symmetric arch (SITE_CHAIN).
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -28,7 +28,7 @@ interface PieceProps {
   fit?: 'meet' | 'slice';
 }
 
-const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross);
+const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross, SITE_CHAIN.reach);
 
 export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   return (

@@ -257,8 +257,9 @@ const CORNER_OF = (sx: number, sy: number): Corner =>
  * (a short slide home), or, with `cross`, the MIRROR of its place through that middle:
  * every link starts on the far side of the box and travels through the middle, past
  * the others, into place. The mirror of a link lies inside the same box, so a crossing
- * chain needs no margin and fills its tile. The offsets assume the CSS factor of 1.6
- * that board.css applies to --apart.
+ * chain needs no margin and fills its tile. `reach` multiplies that start distance: above
+ * 1 the links start scattered beyond the box, some of them off screen. The offsets
+ * assume the CSS factor of 1.6 that board.css applies to --apart.
  */
 export function chainQuarters(
   R: number,
@@ -266,6 +267,7 @@ export function chainQuarters(
   first: 'h' | 'v' = 'v',
   margin = 0,
   cross = false,
+  reach = 1,
 ): { quarters: Quarter[]; width: number; height: number } {
   let cx = 0;
   let cy = 0;
@@ -319,8 +321,8 @@ export function chainQuarters(
         corner: CORNER_OF(q.sx, q.sy),
         run: symmetric?.[i] ?? (CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName),
         // crossing: start at the mirror image, -2u, which the CSS reaches at 1.6 × dx
-        dx: Math.round((cross ? (-2 * ux) / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
-        dy: Math.round((cross ? (-2 * uy) / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
+        dx: Math.round((cross ? (-2 * reach * ux) / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
+        dy: Math.round((cross ? (-2 * reach * uy) / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
       };
     }),
     width: w + 2 * m,
@@ -329,13 +331,15 @@ export function chainQuarters(
 }
 
 /** The site's chain (the hero's big picture and the share image). It LANDS SYMMETRIC: ten
- *  links in a landscape box of 4 × 3 radii, mirrored left to right in shape and colour
- *  (two half-discs above, a four-pointed star between them, one half-disc below), so the
- *  scroll resolves into order. Its links cross through each other on their way in. The
- *  margin (0.15 of a slice's radius) is the gap it keeps from the tile's edges, so the gap
- *  scales with the slices, not the screen. Searched among every step string up to ten
- *  links for a mirror-symmetric chain without a doubled quarter. */
-export const SITE_CHAIN = { steps: 'BABBABBAB', first: 'v', margin: 0.15, cross: true } as const;
+ *  links in an arch, mirrored left to right in shape and colour (a half-disc in the
+ *  middle, three links stepping down on each side), so the scroll resolves into order.
+ *  The arch is WIDE (about 1.9 : 1) so it fills the width of a desktop screen and still
+ *  lands whole; a 4 : 3 shape would be cut top and bottom at full width. Its links start
+ *  scattered (`reach` 1.35 × the mirror distance, some off screen) and cross through each
+ *  other on their way in. The margin (0.04 of a slice's radius) keeps the arch just off
+ *  the screen's edges. Found by searching every step string up to ten links for a
+ *  mirror-symmetric chain without a doubled quarter. */
+export const SITE_CHAIN = { steps: 'ABBBABBBA', first: 'v', margin: 0.04, cross: true, reach: 1.35 } as const;
 
 /**
  * The QUARTET: four quarters centred on the corners of a 100-unit square, facing one
