@@ -160,44 +160,39 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    - "Nothing new since 0.390.0-rc" / "No version tags on main yet".
    The tab polls `GET /api/releases` every ~3 s ONLY while a repo is checking, and stops when none is. There
    is no separate tickets panel and nothing to pick.
-3. A row expands to ONE list, NEWEST at the top, in THREE BANDS (the owner-approved layout, 2026-11-16):
+3. A row expands to ONE list of IDENTICAL ROWS around the candidate (owner, 2026-11-16): 5 later tags, the
+   candidate, 5 earlier tags — "Show 5 later tags" above, "Show 5 earlier tags" below, each press adds 5
+   (component state, not persisted). No band labels and no reason text until a row is opened:
    ```
-   bng-metric-backend   Release 0.392.0 → 0.392.0-rc   (latest 0.394.0)
+   bng-metric-backend   ★ Release 0.316.0 → 0.316.0-rc        Latest 0.418.0   108 tickets · 1 to check
 
-     NEWER THAN THE CANDIDATE — CAN'T BE RELEASED
-     ┌ 0.394.0 · 15 Nov · a1b2c3d · 4 PRs · 3 tickets
-     │   ✗ BMD-1048  Edit an AREA …            In PO Review (Product review)
-     │   ? BMD-1099  …                         not found in Jira — check by hand
-     │   ✓ BMD-1051  Hedgerow validation       Complete
-     │   · 1 pull request with no ticket
-     ├ 0.393.0 · 14 Nov · 9f8e7d6 · 2 PRs · 2 tickets
-     │   ✗ BMD-1050  Habitat export            Complete, but has an open PR: frontend #812
-     │   ✓ BMD-1047  …                         Complete
-
-     CANDIDATE
-     ★ 0.392.0 · 13 Nov · 5d4c3b2 · 3 PRs · 2 tickets · checked: everything up to this tag
-         ✓ BMD-1040  …                         Complete
-
-     OLDER TAGS — FOR CHECKING
-     ├ 0.391.0 · 12 Nov · …   ✓ all 2 tickets Complete
-     ├ 0.390.0 · 11 Nov · …   ✓ 1 ticket Complete
-     │   … 10 tags shown
-     └ [Show 50 more]
+      ⌃ Show 5 later tags
+      ⊘ 0.321.0 · 27 Oct · ed696ec · 1 PR · 0 tickets                                       ›
+      ⊘ 0.320.0 · 27 Oct · c58b791 · 4 PRs · 0 tickets                                      ›
+      ✗ 0.318.0 · …                                                                          ›
+      ⊘ 0.317.0 · 26 Oct · c6762a1 · 1 PR · 1 ticket                                        ›
+   ┃  ★ 0.316.0 · 23 Oct · e18c3b2 · 1 PR · 1 ticket · paired with bng-metric-frontend 0.328.0 ›
+      ✓ 0.315.0 · 23 Oct · 0ca6733 · 1 PR · 0 tickets                                       ›
+      ✓ …                                                                                    ›
+      ⌄ Show 5 earlier tags
    ```
-   - **Newer band**: EVERY tag newer than the candidate, always open, each with all its tickets (not just the
-     first reason). A tag clear on its own but held back by an older tag gets ONE line naming the oldest:
-     "Held back by an older tag: 0.324.0 — BMD-1061 “…” is In Code Review." (`tagExplainer`; the older tags'
-     reasons are not repeated). With no candidate every tag read is here, under "Can't be released"
-     ("Checked so far" while checking); the row line is unchanged.
-   - **Candidate band**: open, with "checked: everything up to this tag" / "checked: everything since
-     0.380.0-rc". After a release it lists every ticket of its scope (the release's content); before the first
-     release (its scope is the whole history) it lists its OWN increment, the tags below being the older band
-     (`listsScope`).
-   - **Older band** — for checking: the tags below the candidate, which all qualify by the rule. 10 tags by
-     default, each ONE summary line ("✓ all 2 tickets Complete"); a click opens its OWN tickets. "Show 50 more"
-     adds 50 a press (per repo, component state, not persisted). After a release the band STOPS at the
-     baseline and its last line is "0.380.0-rc — last release".
-   - **Each tag header**: name · date · short sha (the commit on GitHub) · PR count · ticket count.
+   - **The mark** (`tagMark`): ★ the candidate; ✗ RED — the tag's OWN tickets stop it (not Complete, an open
+     PR); ⊘ AMBER — held back by something else: an older tag, or a ticket that would ship half (picked
+     together); ✓ green — can be released (every earlier tag); a part-circle while checking.
+   - **The candidate row** is highlighted (accent bar, raised ground) and names the other repositories'
+     candidates it is "paired with" — each a link that opens that repository's row at that tag. Opened, it
+     says WHY it is the candidate (`candidateWhy`): what stops the tag above it, with a link to the tag that
+     holds it back ("0.317.0, the tag above it, can't be released: BMD-1083 “…” would ship without
+     bng-metric-frontend #458 (in 0.357.0). Show bng-metric-frontend 0.357.0"), then "Checked: everything up
+     to this tag" / "… since 0.380.0-rc". After a release it lists every ticket of its scope; before the first
+     release its OWN increment (`listsScope`).
+   - **An opened ⊘ row** says what holds it back, with a link (`tagExplainer`): "Held back by 0.324.0:
+     BMD-1061 “…” is In Code Review." or "Held back by bng-metric-frontend 0.357.0: BMD-1083 “…” would ship
+     without bng-metric-frontend #458 (in 0.357.0)." A link opens the repository row, widens its list to the
+     tag, opens it and scrolls to it.
+   - With no candidate the list is the tags read, ending with the oldest (where the answer is decided). After a
+     release the list stops at the baseline: "0.380.0-rc — last release".
+   - **Each row**: mark · name · date · short sha (the commit on GitHub) · PR count · ticket count · ›.
    - **Ticket order**: those that stop the tag (not Complete, an open PR), then those to check (not found,
      could not be read, not read yet), then Complete; ties by key.
    - **Ticket line**: ✗ / ? / ✓, key, title, the tracker's status name (the workspace's bucket in brackets
@@ -420,15 +415,15 @@ Tag list and ticket detail (the approved layout, 2026-11-16)
     own increment and every reason ("T4 is In Progress." and "T5 is In PO Review.", not just the first, then
     the older tags' it would ship); a tag clear on its own shows ONE "Held back by an older tag: …" line; the
     candidate follows with "checked: …". No candidate: every tag read is in that one band.
-50. OLDER BAND: 10 older tags by default, each one summary line ("all 2 tickets Complete"); a not-Complete
-    ticket in an older tag moves the candidate below it; "… 10 tags shown" and "Show 50 more", which adds the
-    next 50 a press.
+50. THE WINDOW: 5 later tags, the candidate and 5 earlier tags by default, every row the same layout and
+    closed; "Show 5 later tags" / "Show 5 earlier tags" add 5 each press; a not-Complete ticket in an older tag
+    moves the candidate below it.
 51. OLDER BAND STOPS AT THE LAST RELEASE: after a release the band lists only the tags between the candidate and
     the baseline, and ends with "v1.0.0-rc — last release".
 52. TICKET ORDER: inside a tag, the tickets that stop it (not Complete, an open PR) first, then not found / could
     not be read / not read yet, then Complete; ties by key.
 53. OLDER HISTORY NOT READ: while an older tag is not placed on main yet, the row is "Checking…" with the
-    history bar and line and the tab polls. "Show 50 more" raises the wanted number (never lowers it).
+    history bar and line and the tab polls. "Show 5 earlier tags" raises the wanted number (never lowers it).
 55. TICKET TITLES: every reason and every older-tag summary names the ticket's title beside its key, cut at 60
     characters on a word ("BMD-1172 “NEW TEMPLATE: Support individual trees from the new…” is In Code
     Review").
@@ -1088,7 +1083,7 @@ tag, older tags for checking, a ticket detail in place. THE RULE is unchanged.
 - **Migration `0203_ticket_status_detail`** (registered): `tracker_ticket_status.issue_type_name` /
   `assignee_name`. The batched read stores them (`TicketStatusAnswer.typeName` / `assigneeName`; Jira's
   search asks `fields=status,summary,issuetype,assignee`; the one-by-one read takes them from `fetchTicket`).
-- **"Show 50 more"**: `POST /api/releases/older-tags?workspace=<id>` `{repoId, wanted}` → the band's size,
+- **"Show 5 earlier tags"** (was "Show 50 more"): `POST /api/releases/older-tags?workspace=<id>` `{repoId, wanted}` → the band's size,
   IN MEMORY per (account, workspace, repo) (`releases/older-tags.ts`: only ever raised, back to 10 after a
   restart — the tab's count is component state too); a repo not released from the workspace → 404. When it
   grows, `scheduleTagSync(…, {rescan: true})` (else the catch-up): the walk reads on, then the tickets in a
@@ -1135,3 +1130,14 @@ held back only by older tags gets one line naming the oldest. The history pass's
 no longer bounded to the listed tags' PRs: the candidate's scope (the release's content) is sent whole. Refresh
 shows a busy bar with "Reading tickets from Jira again". Notes for a first release list everything up to the
 candidate.
+
+### The tag list redesign (2026-11-16, owner)
+
+The three labelled bands are gone. `ReleasesView` `RepoDetail` draws ONE `<ol>` of `TagRow`s from
+`tagWindow(repo, laterShown, earlierShown)` (5 + candidate + 5; `RELEASE_WINDOW_STEP`); every row is closed
+and identical (`tagMark`, header, ›), the candidate highlighted with its `candidatePairs`. Reasons appear only
+in an opened row (`candidateWhy`, `tagExplainer` with `{check, repoId}` for links). A link (`TagLink`) sets ONE
+`focus` in `ReleasesView` (with a sequence number so a repeat press acts): the repository row opens,
+`laterShownFor` widens the window, the row opens and scrolls into view. Removed: `rowBands`, `BAND_WORDS`,
+`olderBandView`, `olderShowMore`, `olderShownLine`, `olderTagSummary`. `RELEASE_OLDER_TAGS_STEP` is 5; the
+server still sends 10 older tags by default, so the first "Show 5 earlier tags" asks nothing.

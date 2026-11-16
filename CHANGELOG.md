@@ -27,6 +27,10 @@ no internals.
   repositories is released whole or not at all, and the tag that would ship part of it says what it would
   ship without.
 - Release notes for a first release list everything up to the tag.
+- This Sprint → Releases: a repository opens to the 5 tags either side of the candidate, every tag one line with
+  a mark — ★ candidate, red ✗ its own tickets stop it, amber ⊘ another tag holds it back, ✓ can be released.
+  Select a tag to see why. The candidate names the other repositories' candidates it is released with, and
+  links to the tag that stops the one above it. "Show 5 later tags" and "Show 5 earlier tags" add more.
 
 ### Fixed
 

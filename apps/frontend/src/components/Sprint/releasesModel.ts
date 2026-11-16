@@ -1,6 +1,5 @@
 import {
   RELEASE_OLDER_TAGS_MAX,
-  RELEASE_OLDER_TAGS_STEP,
   SPRINT_STAGE_LABEL,
   releaseBlockerShort,
   releaseBlockerText,
@@ -8,6 +7,7 @@ import {
   releaseTitleShort,
   releaseUnverifiedText,
   releasesChecking,
+  type ReleaseBlocker,
   type ReleaseCheckPr,
   type ReleaseCheckResult,
   type ReleaseRepoCheck,
@@ -95,34 +95,135 @@ export function repoProgress(repo: Pick<ReleaseRepoCheck, 'checking' | 'progress
   return { share, line: p?.line ?? null };
 }
 
-// ── The expanded row: THREE BANDS, newest at the top ──────────────────────────────────────────
+// ── The expanded row: ONE list of identical rows around the candidate ─────────────────────────
+// (owner, 2026-11-16): 5 later tags, the candidate, 5 earlier tags; "Show 5 later tags" / "Show 5 earlier
+// tags" at each end. No band labels and no reason text until a row is opened: a row is its MARK, its
+// header and an expand arrow. The candidate row is highlighted and names the other repositories'
+// candidates it is paired with.
 
-/** The band headings (11px labels). */
-export const BAND_WORDS = {
-  newer: 'Newer than the candidate — can’t be released',
-  newerNoCandidate: 'Can’t be released',
-  newerChecking: 'Checked so far',
-  candidate: 'Candidate',
-  older: 'Older tags — for checking',
-} as const;
+/** Tags added at a time, either way. */
+export const RELEASE_WINDOW_STEP = 5;
 
-export interface RowBands {
-  /** The heading over `newer`; null when there is no newer tag. */
-  newerHeading: string | null;
-  /** Every tag newer than the candidate (or every tag read, with no candidate), newest first. */
-  newer: ReleaseTagCheck[];
-  candidate: ReleaseTagCheck | null;
-  /** Older tags for checking, newest first (as many as the server sent). */
-  older: ReleaseTagCheck[];
+/** A row's mark: the candidate (★), its own tickets stop it (✗ red), held back by something else — an
+ *  older tag, or a ticket that would ship half (⊘ amber), not decided yet, or it can be released (✓). */
+export type TagMark = 'candidate' | 'blocked' | 'held' | 'checking' | 'ok';
+
+/** The mark's words (its tooltip and accessible name). */
+export const TAG_MARK_WORDS: Record<TagMark, string> = {
+  candidate: 'Release candidate',
+  blocked: 'Can’t be released: its own tickets stop it',
+  held: 'Held back by another tag',
+  checking: 'Still checking',
+  ok: 'Can be released',
+};
+
+/** A tag's mark. ✗ only when ITS OWN tickets stop it (not Complete, an open PR); a tag stopped only by an
+ *  older tag or by a ticket whose other half is above a candidate is ⊘ "held back". Pure. */
+export function tagMark(tag: Pick<ReleaseTagCheck, 'isCandidate' | 'state' | 'blockers'>): TagMark {
+  if (tag.isCandidate) return 'candidate';
+  if (tag.state === 'qualifies') return 'ok';
+  if (tag.state === 'checking') return 'checking';
+  const own = tag.blockers.some((b) => b.fromTag == null && (b.kind === 'not_done' || b.kind === 'open_pr'));
+  return own ? 'blocked' : 'held';
 }
 
-/** The three bands of an expanded row. Pure. */
-export function rowBands(repo: Pick<ReleaseRepoCheck, 'tags' | 'olderTags' | 'status'>): RowBands {
+/** The rows shown for the reader's counts: `later` newest first, ending with the tag just above the
+ *  candidate (with no candidate: the oldest tags read, where the answer is decided); `earlier` newest first.
+ *  `moreLater` = later tags not shown; `moreEarlier` = earlier ones not shown (or not sent yet). Pure. */
+export interface TagWindow {
+  later: ReleaseTagCheck[];
+  candidate: ReleaseTagCheck | null;
+  earlier: ReleaseTagCheck[];
+  moreLater: number;
+  moreEarlier: boolean;
+  /** After a release, once every earlier tag is shown: "0.380.0-rc — last release". */
+  lastReleaseLine: string | null;
+}
+
+export function tagWindow(
+  repo: Pick<ReleaseRepoCheck, 'tags' | 'olderTags' | 'older'>,
+  laterShown: number,
+  earlierShown: number,
+): TagWindow {
   const candidate = repo.tags.find((t) => t.isCandidate) ?? null;
   const newer = repo.tags.filter((t) => !t.isCandidate);
-  const heading =
-    newer.length === 0 ? null : candidate != null ? BAND_WORDS.newer : repo.status === 'checking' ? BAND_WORDS.newerChecking : BAND_WORDS.newerNoCandidate;
-  return { newerHeading: heading, newer, candidate, older: candidate != null ? repo.olderTags : [] };
+  const later = newer.slice(Math.max(0, newer.length - laterShown));
+  const older = candidate != null ? repo.olderTags : [];
+  const earlier = older.slice(0, earlierShown);
+  const allEarlier = earlier.length === older.length;
+  return {
+    later,
+    candidate,
+    earlier,
+    moreLater: newer.length - later.length,
+    moreEarlier: candidate != null && (older.length > earlierShown || repo.older.moreAvailable),
+    lastReleaseLine: candidate != null && allEarlier && repo.older.lastRelease != null ? `${repo.older.lastRelease.name} — last release` : null,
+  };
+}
+
+/** "Show 5 later tags" / "Show 3 later tags" (fewer left). Pure. */
+export function showLaterWords(left: number): string {
+  return `Show ${Math.min(RELEASE_WINDOW_STEP, left)} later ${Math.min(RELEASE_WINDOW_STEP, left) === 1 ? 'tag' : 'tags'}`;
+}
+
+/** "Show 5 earlier tags". */
+export const SHOW_EARLIER_WORDS = `Show ${RELEASE_WINDOW_STEP} earlier tags`;
+
+/** What "Show 5 earlier tags" asks for: the reader's new count, and whether the server must send more (its
+ *  older band is smaller). Pure. */
+export function showEarlier(shown: number, serverWanted: number): { shown: number; ask: number | null } {
+  const next = Math.min(RELEASE_OLDER_TAGS_MAX, shown + RELEASE_WINDOW_STEP);
+  return { shown: next, ask: next > serverWanted ? next : null };
+}
+
+/** The later count that shows `tagName` (a link to it), at least `current`. Pure. */
+export function laterShownFor(repo: Pick<ReleaseRepoCheck, 'tags'>, tagName: string, current: number): number {
+  const newer = repo.tags.filter((t) => !t.isCandidate);
+  const i = newer.findIndex((t) => t.name === tagName);
+  return i < 0 ? current : Math.max(current, newer.length - i);
+}
+
+/** A link to one tag of one repository (the row opens there). */
+export interface TagLink {
+  repoId: number;
+  tagName: string;
+}
+
+/** The other repositories' candidates the candidate is released with: "paired with bng-metric-frontend
+ *  0.328.0". Pure. */
+export function candidatePairs(check: Pick<ReleaseCheckResult, 'repos'>, repo: Pick<ReleaseRepoCheck, 'repoId'>): Array<TagLink & { repoName: string }> {
+  return check.repos
+    .filter((r) => r.repoId !== repo.repoId && r.candidate != null)
+    .map((r) => ({ repoId: r.repoId, repoName: r.name, tagName: r.candidate!.name }));
+}
+
+/** The repository a blocker points into, for a link: a split names the repository of the work left out;
+ *  an inherited reason the older tag in this repository. */
+function blockerLink(check: Pick<ReleaseCheckResult, 'repos'>, repoId: number, b: ReleaseBlocker): TagLink | null {
+  if (b.kind === 'split') {
+    const other = check.repos.find((r) => r.name === b.repoName);
+    return other != null && b.tagName != null ? { repoId: other.repoId, tagName: b.tagName } : null;
+  }
+  return b.fromTag != null ? { repoId, tagName: b.fromTag } : null;
+}
+
+/** WHY this is the candidate (the opened candidate row): what stops the tag just above it, with a link to
+ *  the tag (this repository or another) that holds it back. "The latest tag." when none is above. Pure. */
+export function candidateWhy(
+  check: Pick<ReleaseCheckResult, 'repos'>,
+  repo: Pick<ReleaseRepoCheck, 'repoId' | 'tags'>,
+): { text: string; link: TagLink | null } {
+  const newer = repo.tags.filter((t) => !t.isCandidate);
+  const above = newer[newer.length - 1];
+  if (above == null) return { text: 'It is the latest tag.', link: null };
+  const ranked = [
+    ...above.blockers.filter((b) => b.fromTag == null && (b.kind === 'not_done' || b.kind === 'open_pr')),
+    ...above.blockers.filter((b) => b.kind === 'split'),
+    ...above.blockers.filter((b) => b.fromTag != null),
+  ];
+  const b = ranked[0] ?? above.blockers[0];
+  if (b == null) return { text: `${above.name}, the tag above it, can’t be released.`, link: null };
+  return { text: `${above.name}, the tag above it, can’t be released: ${releaseBlockerShort(b)}.`, link: blockerLink(check, repo.repoId, b) };
 }
 
 /** The candidate's label after its header: "checked: everything since 0.380.0-rc" / "checked:
@@ -151,99 +252,46 @@ export function tagHeader(
   return { name: tag.name, day, shortSha, url: tag.url, counts, text };
 }
 
-/** The reasons a tag does not qualify that its own ticket lines do not show. Its own tickets speak on
- *  their own lines, and each older tag is listed below it, so an older tag's reasons are not repeated:
- *  a tag held back ONLY by older tags gets ONE line naming the oldest of them ("Held back by an older
- *  tag: 0.324.0 — BMD-1061 “…” is In Code Review."). The history still read is a line; on the candidate
- *  (its scope listed) tickets from an earlier tag the tracker could not give are lines too. Pure. */
+/** The lines an OPENED row shows above its tickets: the history still read; a tag held back ONLY by older
+ *  tags gets ONE line naming the oldest ("Held back by 0.324.0: BMD-1061 “…” is In Code Review.") with a
+ *  link; each ticket whose other half is above a candidate a line naming that tag, with a link ("Held back
+ *  by bng-metric-frontend 0.357.0: BMD-1083 “…” would ship without bng-metric-frontend #458 (in
+ *  0.357.0)."); on the candidate (its scope listed) tickets from an earlier tag the tracker could not
+ *  give. Its own not-Complete tickets speak on their own lines. Pure. */
 export function tagExplainer(
   t: Pick<ReleaseTagCheck, 'blockers' | 'unverified' | 'state' | 'isCandidate'>,
-): Array<{ tone: MarkTone; text: string }> {
-  const out: Array<{ tone: MarkTone; text: string }> = [];
+  ctx?: { check: Pick<ReleaseCheckResult, 'repos'>; repoId: number },
+): Array<{ tone: MarkTone; text: string; link?: TagLink | null }> {
+  const out: Array<{ tone: MarkTone; text: string; link?: TagLink | null }> = [];
   for (const b of t.blockers) if (b.kind === 'checking' && b.key == null) out.push({ tone: 'warn', text: releaseBlockerText(b) });
   const own = t.blockers.some((b) => b.fromTag == null && b.key != null && b.kind !== 'checking');
   const inherited = t.blockers.filter((b) => b.fromTag != null && b.kind !== 'checking');
   if (!own && inherited.length > 0) {
     // Blockers come own first, then the earlier tags newest first: the last one is the oldest tag's.
     const oldest = inherited[inherited.length - 1]!;
-    out.push({ tone: 'bad', text: `Held back by an older tag: ${oldest.fromTag} — ${releaseBlockerShort({ ...oldest, fromTag: null })}.` });
+    out.push({
+      tone: 'warn',
+      text: `Held back by ${oldest.fromTag}: ${releaseBlockerShort({ ...oldest, fromTag: null })}.`,
+      ...(ctx != null ? { link: blockerLink(ctx.check, ctx.repoId, oldest) } : {}),
+    });
+  }
+  for (const b of t.blockers) {
+    if (b.kind !== 'split' || b.fromTag != null) continue;
+    out.push({
+      tone: 'warn',
+      text: `Held back by ${b.repoName}${b.tagName != null ? ` ${b.tagName}` : ''}: ${releaseBlockerShort(b)}.`,
+      ...(ctx != null ? { link: blockerLink(ctx.check, ctx.repoId, b) } : {}),
+    });
   }
   if (t.isCandidate) for (const u of t.unverified) if (u.fromTag != null) out.push({ tone: 'unknown', text: `${releaseUnverifiedText(u)}. Check it by hand.` });
   return out;
 }
 
-/** An older tag's ONE summary line (collapsed): "all 2 tickets Complete", its first reason, or
- *  "checking…". Pure. */
-export function olderTagSummary(
-  check: Pick<ReleaseCheckResult, 'tickets' | 'prs' | 'trackerName'>,
-  tag: Pick<ReleaseTagCheck, 'state' | 'blockers' | 'isCandidate' | 'prIds' | 'scopePrIds' | 'listsScope'>,
-): { tone: MarkTone; text: string } {
-  if (tag.state === 'checking') return { tone: 'warn', text: 'checking…' };
-  const listed = tagTickets(check, tag).tickets.map((x) => x.ticket);
-  if (tag.state === 'does_not_qualify') {
-    const first = listed.find((t) => ticketRank(t) === 0);
-    if (first != null) {
-      const title = releaseTitleShort(first.title);
-      return { tone: 'bad', text: `${first.key}${title != null ? ` “${title}”` : ''} ${ticketLine(first, check.trackerName).text}` };
-    }
-    const b = tag.blockers[0];
-    return { tone: 'bad', text: b != null ? releaseBlockerShort(b) : 'can’t be released' };
-  }
-  const complete = listed.filter((t) => t.ready).length;
-  const cancelled = listed.filter((t) => t.cancelled === true).length;
-  const toCheck = listed.length - complete - cancelled;
-  const done =
-    complete === 0
-      ? cancelled > 0
-        ? null
-        : 'no tickets'
-      : complete === 1
-        ? '1 ticket Complete'
-        : toCheck === 0 && cancelled === 0
-          ? `all ${complete} tickets Complete`
-          : `${complete} tickets Complete`;
-  const parts = [done, cancelled > 0 ? `${cancelled} cancelled` : null, toCheck > 0 ? `${toCheck} to check` : null].filter((x): x is string => x != null);
-  return { tone: 'ok', text: parts.join(' · ') };
-}
-
-/** "… 10 tags shown" under the older band. */
-export function olderShownLine(n: number): string {
-  return `… ${plural(n, 'tag')} shown`;
-}
-
-/** The older band as the tab draws it, for `shown` (the reader's count: 10, then +50 a press): the tags,
- *  the last line ("0.380.0-rc — last release"), the progress while it reads, and whether "Show 50 more"
- *  is offered (HIDDEN while reading or when nothing more exists). Pure. */
-export function olderBandView(
-  repo: Pick<ReleaseRepoCheck, 'olderTags' | 'older'>,
-  shown: number,
-): {
-  tags: ReleaseTagCheck[];
-  lastReleaseLine: string | null;
-  progress: { share: number; line: string | null } | null;
-  shownLine: string | null;
-  showMore: boolean;
-} {
-  const tags = repo.olderTags.slice(0, shown);
-  const all = tags.length === repo.olderTags.length;
-  const reading = repo.older.loading && repo.older.progress != null;
+/** The older band's progress while it reads (bar share and line); null when it is not reading. Pure. */
+export function olderProgress(repo: Pick<ReleaseRepoCheck, 'older'>): { share: number; line: string | null } | null {
+  if (!(repo.older.loading && repo.older.progress != null)) return null;
   const p = repo.older.progress;
-  const progress = reading ? { share: p == null || p.total <= 0 ? 0 : Math.max(0, Math.min(1, p.done / p.total)), line: p?.line ?? null } : null;
-  const more = repo.olderTags.length > shown || (all && repo.older.moreAvailable);
-  return {
-    tags,
-    lastReleaseLine: all && repo.older.lastRelease != null ? `${repo.older.lastRelease.name} — last release` : null,
-    progress,
-    shownLine: tags.length > 0 && more ? olderShownLine(tags.length) : null,
-    showMore: more && !(repo.older.loading && repo.older.needsHistory),
-  };
-}
-
-/** What "Show 50 more" asks for: the reader's new count, and whether the server must be told (its band
- *  is smaller). Pure. */
-export function olderShowMore(shown: number, serverWanted: number): { shown: number; ask: number | null } {
-  const next = Math.min(RELEASE_OLDER_TAGS_MAX, shown + RELEASE_OLDER_TAGS_STEP);
-  return { shown: next, ask: next > serverWanted ? next : null };
+  return { share: p.total <= 0 ? 0 : Math.max(0, Math.min(1, p.done / p.total)), line: p.line };
 }
 
 /** The line beside the bar while Refresh runs: "Reading tickets from Jira again". Pure. */

@@ -474,8 +474,8 @@ export const SPRINT = {
 
 export type ReleaseMark = 'ok' | 'bad' | 'warn' | 'unknown';
 
-/** The three bands of an expanded row (Sprint/releasesModel.ts `rowBands`, `BAND_WORDS`). */
-export type ReleaseBand = 'newer' | 'candidate' | 'older';
+/** A tag row's mark (Sprint/releasesModel.ts `tagMark`). */
+export type ReleaseTagMark = 'candidate' | 'blocked' | 'held' | 'ok';
 
 export interface ReleaseMockTicket {
   key: string;
@@ -489,14 +489,12 @@ export interface ReleaseMockTicket {
 
 export interface ReleaseMockTag {
   name: string;
-  band: ReleaseBand;
+  mark: ReleaseTagMark;
   /** `tagHeader` after the name: "15 Oct · a1b2c3d · 2 PRs · 2 tickets". */
   meta: string;
-  /** The candidate's "checked: …" label (`candidateScopeLabel`). */
-  scope?: string;
-  /** An older tag's ONE summary line (`olderTagSummary`). */
-  summary?: { tone: ReleaseMark; text: string };
-  /** Reasons from an earlier tag in the scope (`tagExplainer`). */
+  /** The candidate's "paired with …" (`candidatePairs`). */
+  pairs?: string;
+  /** The opened row's lines (`candidateWhy` on the candidate, else `tagExplainer`). */
   notes?: string[];
   /** Tickets in the row's order: stops first, then to check, then Complete. */
   tickets: ReleaseMockTicket[];
@@ -507,33 +505,28 @@ export interface ReleaseMockTag {
 /** This Sprint → Releases (Sprint/ReleasesView.tsx, the words of Sprint/releasesModel.ts). Release suffix `-rc`.
  *  One row per repository released from this workspace: the candidate (the NEWEST tag whose tickets are
  *  Complete with no open pull request), one whose newer tags do not qualify, one no tag of which qualifies, one
- *  still being checked (its progress line), one with nothing new. A row opens to THREE BANDS: newer than the
- *  candidate, the candidate, older tags for checking. */
+ *  still being checked (its progress line), one with nothing new. A row opens to ONE list of identical rows
+ *  around the candidate (later tags, the candidate highlighted, earlier tags). */
 export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
   action: 'Create release…',
   /** The dialog's ticked repositories (Sprint/ReleaseDialog.tsx). */
   dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
-  bands: {
-    newer: 'Newer than the candidate — can’t be released',
-    newerNoCandidate: 'Can’t be released',
-    candidate: 'Candidate',
-    older: 'Older tags — for checking',
-  },
-  showMore: 'Show 50 more',
+  showLater: 'Show 5 later tags',
+  showEarlier: 'Show 5 earlier tags',
   repos: [
     {
       name: REPOS.payments,
       candidate: true,
       text: 'Release v3.2.0 → v3.2.0-rc',
       counts: '5 tickets · 1 to check',
-      older: '… 2 tags shown',
+      moreEarlier: true,
       tags: [
         {
           name: 'v3.2.0',
-          band: 'candidate',
+          mark: 'candidate',
           meta: '15 Oct · 9f8e7d6 · 3 PRs · 2 tickets',
-          scope: 'checked: everything up to this tag',
+          pairs: 'acme/web v1.8.2',
           tickets: [
             { key: 'PAY-120', title: '', tone: 'unknown', status: 'not found in Jira — check by hand' },
             {
@@ -552,9 +545,8 @@ export const SPRINT_RELEASES = {
         },
         {
           name: 'v3.1.0',
-          band: 'older',
+          mark: 'ok',
           meta: '10 Oct · 5d4c3b2 · 2 PRs · 2 tickets',
-          summary: { tone: 'ok', text: 'all 2 tickets Complete' },
           tickets: [
             { key: 'PAY-118', title: 'Refund reasons', tone: 'ok', status: 'Done (Complete)' },
             { key: 'PAY-121', title: 'Payout retries', tone: 'ok', status: 'Done (Complete)' },
@@ -562,9 +554,8 @@ export const SPRINT_RELEASES = {
         },
         {
           name: 'v3.0.0',
-          band: 'older',
+          mark: 'ok',
           meta: '2 Oct · 1a2b3c4 · 1 PR · 1 ticket',
-          summary: { tone: 'ok', text: '1 ticket Complete' },
           tickets: [{ key: 'PAY-101', title: 'Currency rounding', tone: 'ok', status: 'Done (Complete)' }],
         },
       ],
@@ -579,14 +570,14 @@ export const SPRINT_RELEASES = {
       tags: [
         {
           name: 'v1.9.1',
-          band: 'newer',
+          mark: 'held',
           meta: '16 Oct · a1b2c3d · 1 PR · 1 ticket',
-          notes: ['Held back by an older tag: v1.9.0 — PAY-150 “Saved cards on mobile” is In review.'],
+          notes: ['Held back by v1.9.0: PAY-150 “Saved cards on mobile” is In review.'],
           tickets: [{ key: 'PAY-152', title: 'Card form labels', tone: 'ok', status: 'Done (Complete)' }],
         },
         {
           name: 'v1.9.0',
-          band: 'newer',
+          mark: 'blocked',
           meta: '15 Oct · 7c6b5a4 · 2 PRs · 2 tickets',
           tickets: [
             { key: 'PAY-150', title: 'Saved cards on mobile', tone: 'bad', status: 'In review (Code review)' },
@@ -595,16 +586,16 @@ export const SPRINT_RELEASES = {
         },
         {
           name: 'v1.8.2',
-          band: 'candidate',
+          mark: 'candidate',
           meta: '13 Oct · 3e2d1c0 · 2 PRs · 1 ticket',
-          scope: 'checked: everything since v1.8.0-rc',
+          pairs: 'acme/payments v3.2.0',
+          notes: ['v1.9.0, the tag above it, can’t be released: PAY-150 “Saved cards on mobile” is In review.', 'Checked: everything since v1.8.0-rc.'],
           tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done (Complete)' }],
         },
         {
           name: 'v1.8.1',
-          band: 'older',
+          mark: 'ok',
           meta: '9 Oct · 8a9b0c1 · 1 PR · 1 ticket',
-          summary: { tone: 'ok', text: '1 ticket Complete' },
           tickets: [{ key: 'PAY-131', title: 'Card retries back off', tone: 'ok', status: 'Done (Complete)' }],
         },
       ],
@@ -616,7 +607,7 @@ export const SPRINT_RELEASES = {
       tags: [
         {
           name: 'v0.9.0',
-          band: 'newer',
+          mark: 'blocked',
           meta: '12 Oct · 4f3e2d1 · 1 PR · 1 ticket',
           tickets: [{ key: 'PAY-146', title: 'Rename ledger tables', tone: 'bad', status: 'Done (Complete), but has an open PR: payments #611' }],
         },
@@ -637,8 +628,9 @@ export const SPRINT_RELEASES = {
     latest?: string;
     counts?: string;
     progress?: { share: number; line: string };
-    /** "… 2 tags shown" under the older band (with "Show 50 more"). */
-    older?: string;
+    /** "Show 5 later tags" above the list / "Show 5 earlier tags" below it. */
+    moreLater?: boolean;
+    moreEarlier?: boolean;
     /** After a release, the older band's last line. */
     lastRelease?: string;
     tags: ReleaseMockTag[];

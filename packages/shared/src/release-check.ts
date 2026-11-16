@@ -158,8 +158,8 @@ export function releaseScanLine(p: ReleaseScanLineInput): string {
 
 /** Older tags listed under the candidate by default (for checking only). */
 export const RELEASE_OLDER_TAGS_DEFAULT = 10;
-/** "Show 50 more": each press adds this many. */
-export const RELEASE_OLDER_TAGS_STEP = 50;
+/** "Show 5 earlier tags": each press adds this many. */
+export const RELEASE_OLDER_TAGS_STEP = 5;
 /** The most older tags one repository's band may ask for (the tag read's own cap). */
 export const RELEASE_OLDER_TAGS_MAX = 1000;
 

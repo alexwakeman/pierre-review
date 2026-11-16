@@ -17,17 +17,20 @@ import {
   confirmStops,
   defaultTickedRepoIds,
   editedSections,
-  BAND_WORDS,
   candidateScopeLabel,
   latestReleaseLine,
   noTicketLine,
   noTicketPrLine,
-  olderBandView,
-  olderShowMore,
-  olderTagSummary,
   refreshingLine,
   readAgoWords,
-  rowBands,
+  SHOW_EARLIER_WORDS,
+  candidatePairs,
+  candidateWhy,
+  laterShownFor,
+  showEarlier,
+  showLaterWords,
+  tagMark,
+  tagWindow,
   tagHeader,
   ticketDetail,
   ticketLine,
@@ -186,7 +189,7 @@ describe('repo rows — the cumulative rule, newest first', () => {
     const t3 = res.tickets.find((t) => t.ident === 'T3')!;
     expect(ticketLine(t3, 'Jira')).toEqual({ tone: 'ok', text: "Won't Do (Cancelled) — doesn’t stop a release" });
     expect(ticketRank(t3)).toBe(2);
-    expect(olderTagSummary(res, res.repos[0]!.tags[0]!)).toEqual({ tone: 'ok', text: '1 cancelled' });
+    expect(tagMark(res.repos[0]!.tags[0]!)).toBe('candidate');
   });
 
   it('acceptance 17: not decided yet → "Checking…" with a bar and ONE line', () => {
@@ -246,16 +249,18 @@ describe('the expanded row: the tags read, newest first', () => {
       prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])],
       tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false, statusName: 'In review' })],
     });
-    const b = rowBands(res.repos[0]!);
-    expect(b.newerHeading).toBe('Newer than the candidate — can’t be released');
-    expect(b.newer.map((t) => t.name)).toEqual(['v1.2.0']);
-    expect(b.candidate?.name).toBe('v1.1.0');
-    // The tag's own ticket speaks on its own line ("✗ T3 … In review"); the explainer adds nothing.
-    expect(tagExplainer(b.newer[0]!)).toEqual([]);
-    const t3 = tagTickets(res, b.newer[0]!).tickets[0]!.ticket;
+    const w = tagWindow(res.repos[0]!, 5, 5);
+    expect(w.later.map((t) => t.name)).toEqual(['v1.2.0']);
+    expect(w.candidate?.name).toBe('v1.1.0');
+    expect(w.earlier.map((t) => t.name)).toEqual(['v1.0.0']);
+    // Its own ticket stops it: the red mark; the opened row's ticket line says why, the explainer adds nothing.
+    expect(tagMark(w.later[0]!)).toBe('blocked');
+    expect(tagMark(w.earlier[0]!)).toBe('ok');
+    expect(tagExplainer(w.later[0]!)).toEqual([]);
+    const t3 = tagTickets(res, w.later[0]!).tickets[0]!.ticket;
     expect(ticketLine(t3, 'Jira')).toEqual({ tone: 'bad', text: 'In review' });
-    // The older band lists v1.0.0 for checking.
-    expect(b.older.map((t) => t.name)).toEqual(['v1.0.0']);
+    // Why v1.1.0 is the candidate: what stops the tag above it.
+    expect(candidateWhy(res, res.repos[0]!)).toEqual({ text: 'v1.2.0, the tag above it, can’t be released: T3 “T3 title” is In review.', link: null });
   });
 
   it('acceptance 7: each tag lists its tickets and its PRs with no ticket (human or bot), never a warning; nothing says "released"', () => {
@@ -310,55 +315,57 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
       ],
       trackerName: 'Jira',
     });
-    const b = rowBands(res.repos[0]!);
-    expect(b.newer.map((t) => t.name)).toEqual(['v1.3.0']);
+    const b = tagWindow(res.repos[0]!, 5, 5);
+    expect(b.later.map((t) => t.name)).toEqual(['v1.3.0']);
     expect(b.candidate?.name).toBe('v1.2.0');
-    const lines = tagTickets(res, b.newer[0]!).tickets.map(({ ticket: t }) => [t.key, ticketLine(t, res.trackerName).tone, ticketLine(t, res.trackerName).text]);
+    const lines = tagTickets(res, b.later[0]!).tickets.map(({ ticket: t }) => [t.key, ticketLine(t, res.trackerName).tone, ticketLine(t, res.trackerName).text]);
     expect(lines).toEqual([
       ['T4', 'bad', 'Complete, but has an open PR: frontend #812'],
       ['T9', 'bad', 'In PO Review (Product review)'],
       ['T0', 'unknown', 'not found in Jira — check by hand'],
       ['T3', 'ok', 'Complete'],
     ]);
-    expect(tagHeader(res, b.newer[0]!).text).toBe(`v1.3.0 · 3 Nov · ${sha('v1.3.0').slice(0, 7)} · 4 PRs · 4 tickets`);
+    expect(tagHeader(res, b.later[0]!).text).toBe(`v1.3.0 · 3 Nov · ${sha('v1.3.0').slice(0, 7)} · 4 PRs · 4 tickets`);
     expect(tagHeader(res, b.candidate!).url).toBe(`https://github.com/acme/api/commit/${sha('v1.2.0')}`);
     expect(candidateScopeLabel(res.repos[0]!)).toBe('checked: everything up to this tag');
   });
 
-  it('no candidate: every tag read is in the first band, under "Can’t be released"; no older band', () => {
+  it('no candidate: the tags read, no earlier ones', () => {
     const res = run({ repos: [many(2)], prs: manyPrs(2), tickets: [ticket('T1', { done: false, statusName: 'To do' }), ticket('T2', { done: false, statusName: 'To do' })] });
-    const b = rowBands(res.repos[0]!);
-    expect(b).toMatchObject({ newerHeading: BAND_WORDS.newerNoCandidate, candidate: null, older: [] });
-    expect(b.newer.map((t) => t.name)).toEqual(['v1.2.0', 'v1.1.0']);
+    const b = tagWindow(res.repos[0]!, 5, 5);
+    expect(b).toMatchObject({ candidate: null, earlier: [], moreLater: 0, moreEarlier: false });
+    expect(b.later.map((t) => t.name)).toEqual(['v1.2.0', 'v1.1.0']);
     expect(repoRowText(res.repos[0]!)).toBe('No tag can be released — v1.2.0: T2 “T2 title” is To do');
   });
 
-  it('50: the older band — 10 shown, one summary line each, "… 10 tags shown" and "Show 50 more"; a press asks the server for 60', () => {
-    const res = run({ repos: [many(15)], prs: manyPrs(15), tickets: manyTickets(15) });
-    const api = res.repos[0]!;
-    const v = olderBandView(api, 10);
-    expect(v.tags).toHaveLength(10);
-    expect(v).toMatchObject({ shownLine: '… 10 tags shown', showMore: true, lastReleaseLine: null, progress: null });
-    expect(olderTagSummary(res, v.tags[0]!)).toEqual({ tone: 'ok', text: '1 ticket Complete' });
-    // A tag that can't be released: its first ticket, with its title.
+  it('THE WINDOW: 5 later tags, the candidate, 5 earlier tags; each way grows by 5; earlier asks the server past what it sent', () => {
+    // v1.9.0 holds an In Progress ticket: the candidate is v1.8.0, with 7 tags above it and 7 below.
     const tickets = manyTickets(15);
     tickets[8] = ticket('T9', { done: false, statusName: 'In Progress', stage: 'in_progress' });
-    const held = run({ repos: [many(15)], prs: manyPrs(15), tickets });
-    expect(held.repos[0]!.candidate?.name).toBe('v1.8.0');
-    expect(olderTagSummary(held, held.repos[0]!.tags.find((t) => t.name === 'v1.9.0')!)).toEqual({ tone: 'bad', text: 'T9 “T9 title” In Progress' });
-    expect(olderShowMore(10, api.older.wanted)).toEqual({ shown: 60, ask: 60 });
-    // The server already holds more than shown: no request, the tags are shown at once.
-    expect(olderShowMore(10, 110)).toEqual({ shown: 60, ask: null });
-    // All of them shown and none more: no button.
-    const r60 = many(15);
-    r60.olderWanted = 60;
-    const all = run({ repos: [r60], prs: manyPrs(15), tickets: manyTickets(15) }).repos[0]!;
-    expect(olderBandView(all, 60)).toMatchObject({ showMore: false, shownLine: null });
-    // A summary for two Complete tickets.
-    const two = many(3);
-    two.ranges[1]!.prIds = [2, 9];
-    const r2 = run({ repos: [two], prs: [...manyPrs(3), pr(9, 1, ['T99'])], tickets: [...manyTickets(3), ticket('T99', { statusName: 'Complete' })] });
-    expect(olderTagSummary(r2, r2.repos[0]!.olderTags[0]!)).toEqual({ tone: 'ok', text: 'all 2 tickets Complete' });
+    const res = run({ repos: [many(15)], prs: manyPrs(15), tickets });
+    const api = res.repos[0]!;
+    expect(api.candidate?.name).toBe('v1.8.0');
+    const w = tagWindow(api, 5, 5);
+    // Later tags end with the one just above the candidate.
+    expect(w.later.map((t) => t.name)).toEqual(['v1.13.0', 'v1.12.0', 'v1.11.0', 'v1.10.0', 'v1.9.0']);
+    expect(w.earlier.map((t) => t.name)).toEqual(['v1.7.0', 'v1.6.0', 'v1.5.0', 'v1.4.0', 'v1.3.0']);
+    expect(w).toMatchObject({ moreLater: 2, moreEarlier: true, lastReleaseLine: null });
+    expect(showLaterWords(w.moreLater)).toBe('Show 2 later tags');
+    expect(showLaterWords(9)).toBe('Show 5 later tags');
+    expect(SHOW_EARLIER_WORDS).toBe('Show 5 earlier tags');
+    const wider = tagWindow(api, 10, 10);
+    expect(wider.later).toHaveLength(7);
+    expect(wider).toMatchObject({ moreLater: 0, moreEarlier: false });
+    // The marks: v1.9.0's own ticket stops it (red); the tags above it are held back by it (amber).
+    expect(w.later.map((t) => tagMark(t))).toEqual(['held', 'held', 'held', 'held', 'blocked']);
+    expect(tagMark(w.candidate!)).toBe('candidate');
+    expect(w.earlier.every((t) => tagMark(t) === 'ok')).toBe(true);
+    // Earlier: the server sent 10; the 15th asks for 15.
+    expect(showEarlier(5, api.older.wanted)).toEqual({ shown: 10, ask: null });
+    expect(showEarlier(10, api.older.wanted)).toEqual({ shown: 15, ask: 15 });
+    // A link to a later tag widens the window to it.
+    expect(laterShownFor(api, 'v1.15.0', 5)).toBe(7);
+    expect(laterShownFor(api, 'v1.10.0', 5)).toBe(5);
   });
 
   it('51: after a release the older band ends with the release tag: "v1.0.0-rc — last release"', () => {
@@ -369,9 +376,9 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
       { name: 'v1.2.0', d: 5, prs: [3] },
     ]);
     const res = run({ repos: [released], prs: manyPrs(3), tickets: manyTickets(3) });
-    const v = olderBandView(res.repos[0]!, 10);
-    expect(v.tags.map((t) => t.name)).toEqual(['v1.1.0']);
-    expect(v).toMatchObject({ lastReleaseLine: 'v1.0.0-rc — last release', showMore: false });
+    const v = tagWindow(res.repos[0]!, 5, 5);
+    expect(v.earlier.map((t) => t.name)).toEqual(['v1.1.0']);
+    expect(v).toMatchObject({ lastReleaseLine: 'v1.0.0-rc — last release', moreEarlier: false });
   });
 
   it('53: while older history is read the row is Checking… with the bar and its line; the tab polls', () => {
@@ -390,12 +397,15 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
     tickets[1] = ticket('T2', { done: false, statusName: 'In Code Review', title: 'Read and price trees' });
     tickets[2] = ticket('T3', { done: false, statusName: 'In PO Review', title: 'Export' });
     const res = run({ repos: [many(5)], prs: manyPrs(5), tickets });
-    const b = rowBands(res.repos[0]!);
-    expect(b.candidate?.name).toBe('v1.1.0');
-    const v15 = b.newer.find((t) => t.name === 'v1.5.0')!;
-    expect(tagExplainer(v15)).toEqual([{ tone: 'bad', text: 'Held back by an older tag: v1.2.0 — T2 “Read and price trees” is In Code Review.' }]);
+    const api = res.repos[0]!;
+    expect(api.candidate?.name).toBe('v1.1.0');
+    const v15 = api.tags.find((t) => t.name === 'v1.5.0')!;
+    expect(tagMark(v15)).toBe('held');
+    expect(tagExplainer(v15, { check: res, repoId: 1 })).toEqual([
+      { tone: 'warn', text: 'Held back by v1.2.0: T2 “Read and price trees” is In Code Review.', link: { repoId: 1, tagName: 'v1.2.0' } },
+    ]);
     // A tag with its own reason: its ticket lines say it; older tags are listed below.
-    expect(tagExplainer(b.newer.find((t) => t.name === 'v1.3.0')!)).toEqual([]);
+    expect(tagExplainer(api.tags.find((t) => t.name === 'v1.3.0')!)).toEqual([]);
   });
 
   it('picked together: a ticket whose other half is above a candidate says what it would ship without', () => {
@@ -411,6 +421,18 @@ describe('the three bands, the tag headers and the ticket lines (the approved la
       trackerName: 'Jira',
     });
     expect(res.repos[0]!.candidate?.name).toBe('v1.1.0');
+    // The api tag holding T2's api half is held back (amber), and opens to a line linking the frontend tag.
+    const v2 = res.repos[0]!.tags.find((t) => t.name === 'v1.2.0')!;
+    expect(tagMark(v2)).toBe('held');
+    expect(tagExplainer(v2, { check: res, repoId: 1 })).toEqual([
+      { tone: 'warn', text: 'Held back by frontend w1.1.0: T2 “T2 title” would ship without frontend #21 (in w1.1.0).', link: { repoId: 2, tagName: 'w1.1.0' } },
+    ]);
+    // The candidate explains itself with the same link; it is paired with no other candidate (frontend has none).
+    expect(candidateWhy(res, res.repos[0]!)).toEqual({
+      text: 'v1.2.0, the tag above it, can’t be released: T2 “T2 title” would ship without frontend #21 (in w1.1.0).',
+      link: { repoId: 2, tagName: 'w1.1.0' },
+    });
+    expect(candidatePairs(res, res.repos[0]!)).toEqual([]);
     const t2 = res.tickets.find((t) => t.ident === 'T2')!;
     expect(ticketLine(t2, 'Jira')).toEqual({ tone: 'bad', text: 'Complete, but would ship without frontend #21 (in w1.1.0)' });
     expect(ticketRank(t2)).toBe(0);

@@ -75,29 +75,33 @@ export default function Page(): JSX.Element {
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
       <H3 id="the-tag-list">The tag list</H3>
-      <p>Select a row to open one list, newest at the top, in three parts:</p>
+      <p>
+        Select a row to open its tags around the candidate: the 5 later tags above it, the candidate, and the 5
+        earlier tags below it. <Ui>Show 5 later tags</Ui> and <Ui>Show 5 earlier tags</Ui> add 5 more each way. After
+        a release the list stops at that release, for example &ldquo;0.380.0-rc — last release&rdquo;.
+      </p>
+      <p>Every tag is one line with a mark:</p>
       <ul>
+        <li>★ the candidate. Its line is highlighted and names the candidates of your other repositories it is
+          released with, for example &ldquo;paired with bng-metric-frontend 0.328.0&rdquo;. Select a name to go to that
+          tag.</li>
+        <li>✗ in red: the tag&rsquo;s own tickets stop it.</li>
         <li>
-          <strong>Newer than the candidate — can&rsquo;t be released.</strong> Every newer tag, open, with all its
-          tickets. A tag whose own tickets are all Complete says which older tag holds it back, for example
-          &ldquo;Held back by an older tag: 0.324.0 — BMD-1061 &ldquo;Send the report&rdquo; is In Code Review&rdquo;. If
-          no tag can be released, every tag that was checked is here.
+          ⊘ in amber: the tag&rsquo;s own tickets are fine, but another tag holds it back — an older tag, or a ticket
+          whose other part is in a later tag of another repository.
         </li>
-        <li>
-          <strong>Candidate.</strong> The tag to release and what was checked: &ldquo;everything up to this tag&rdquo;
-          before your first release, or &ldquo;everything since 0.380.0-rc&rdquo; after one. After a release it lists
-          every ticket since that release; before your first, the tickets the tag itself added.
-        </li>
-        <li>
-          <strong>Older tags — for checking.</strong> The 10 tags below the candidate, one line each, such as
-          &ldquo;✓ all 2 tickets Complete&rdquo;. Select a tag to see its tickets. <Ui>Show 50 more</Ui> adds the next
-          50. After a release the list stops at that release, for example &ldquo;0.380.0-rc — last release&rdquo;.
-        </li>
+        <li>✓ the tag can be released.</li>
       </ul>
       <p>
+        Select a tag to see why. The candidate says what stops the tag above it, with a link to the tag that holds
+        it back, and what was checked: &ldquo;everything up to this tag&rdquo; before your first release, or
+        &ldquo;everything since 0.380.0-rc&rdquo; after one. An amber tag says what holds it back, for example
+        &ldquo;Held back by 0.324.0: BMD-1061 &ldquo;Send the report&rdquo; is In Code Review.&rdquo;
+      </p>
+      <p>
         Each tag shows its date, its commit (select it to open the commit on GitHub), and how many pull requests and
-        tickets it has. Under each tag, tickets that stop it come first, then tickets to check by hand, then Complete
-        ones:
+        tickets it has. In an opened tag, tickets that stop it come first, then tickets to check by hand, then
+        Complete ones:
       </p>
       <ul>
         <li>

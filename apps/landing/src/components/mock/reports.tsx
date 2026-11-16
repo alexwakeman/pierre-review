@@ -717,29 +717,31 @@ function ReleaseTagBody({ t }: { t: ReleaseMockTag }): JSX.Element {
 function ReleaseTagHead({ t }: { t: ReleaseMockTag }): JSX.Element {
   return (
     <span className="tn">
-      {t.band === 'candidate' ? <em aria-label="candidate">★ </em> : null}
       {t.name}
       <small>
         {' '}
         · {t.meta}
-        {t.scope ? ` · ${t.scope}` : ''}
+        {t.pairs ? ` · paired with ${t.pairs}` : ''}
       </small>
     </span>
   );
 }
 
-function OlderReleaseTag({ t }: { t: ReleaseMockTag }): JSX.Element {
+/** A row's mark (Sprint/releasesModel.ts `tagMark`): ★ candidate, ✗ its own tickets stop it, ⊘ (amber) held
+ *  back by another tag, ✓ can be released. */
+const TAG_MARK_GLYPH = { candidate: '★', blocked: '✗', held: '⊘', ok: '✓' } as const;
+const TAG_MARK_TONE = { candidate: 'ok', blocked: 'bad', held: 'warn', ok: 'ok' } as const;
+
+/** ONE row layout for every tag (closed; a click opens it), the candidate highlighted. */
+function ReleaseTagRow({ t }: { t: ReleaseMockTag }): JSX.Element {
   const [open, setOpen] = useState(false);
   return (
-    <div className="tag older">
+    <div className={t.mark === 'candidate' ? 'tag cand-tag' : 'tag'}>
       <button type="button" className="tk" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <small className={`mark ${TAG_MARK_TONE[t.mark]}`}>
+          <i aria-hidden="true">{TAG_MARK_GLYPH[t.mark]}</i>{' '}
+        </small>
         <ReleaseTagHead t={t} />
-        {t.summary ? (
-          <small className={`mark ${t.summary.tone}`}>
-            {' '}
-            <i aria-hidden="true">{MARK_GLYPH[t.summary.tone]}</i> {t.summary.text}
-          </small>
-        ) : null}
       </button>
       {open ? <ReleaseTagBody t={t} /> : null}
     </div>
@@ -747,8 +749,8 @@ function OlderReleaseTag({ t }: { t: ReleaseMockTag }): JSX.Element {
 }
 
 /** This Sprint → Releases: the latest release, a row per released repository (the latest version tag and the
- *  candidate) that opens to ONE list in three bands — newer than the candidate (each with every reason), the
- *  candidate, and older tags for checking (one line each; a click opens it). */
+ *  candidate) that opens to ONE list of identical rows around the candidate: later tags, the candidate
+ *  (highlighted, "paired with" the other candidates), earlier tags; "Show 5 later / earlier tags". */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;
   const [open, setOpen] = useState(false);
@@ -765,9 +767,6 @@ function ReleasesPanel(): JSX.Element {
       <ul className="repos">
         {R.repos.map((r) => {
           const isOpen = expanded === r.name && r.tags.length > 0;
-          const newer = r.tags.filter((t) => t.band === 'newer');
-          const cand = r.tags.filter((t) => t.band === 'candidate');
-          const older = r.tags.filter((t) => t.band === 'older');
           return (
             <li key={r.name} className={r.candidate ? 'cand' : undefined}>
               <button
@@ -796,28 +795,18 @@ function ReleasesPanel(): JSX.Element {
               ) : null}
               {isOpen ? (
                 <div className="tags">
-                  {newer.length > 0 ? <p className="band">{cand.length > 0 ? R.bands.newer : R.bands.newerNoCandidate}</p> : null}
-                  {newer.map((t) => (
-                    <div key={t.name} className="tag">
-                      <ReleaseTagHead t={t} />
-                      <ReleaseTagBody t={t} />
-                    </div>
-                  ))}
-                  {cand.length > 0 ? <p className="band">{R.bands.candidate}</p> : null}
-                  {cand.map((t) => (
-                    <div key={t.name} className="tag">
-                      <ReleaseTagHead t={t} />
-                      <ReleaseTagBody t={t} />
-                    </div>
-                  ))}
-                  {older.length > 0 || r.lastRelease ? <p className="band">{R.bands.older}</p> : null}
-                  {older.map((t) => (
-                    <OlderReleaseTag key={t.name} t={t} />
+                  {r.moreLater ? (
+                    <p className="note">
+                      <span className="more">{R.showLater}</span>
+                    </p>
+                  ) : null}
+                  {r.tags.map((t) => (
+                    <ReleaseTagRow key={t.name} t={t} />
                   ))}
                   {r.lastRelease ? <p className="note">{r.lastRelease}</p> : null}
-                  {r.older ? (
+                  {r.moreEarlier ? (
                     <p className="note">
-                      {r.older} <span className="more">{R.showMore}</span>
+                      <span className="more">{R.showEarlier}</span>
                     </p>
                   ) : null}
                 </div>

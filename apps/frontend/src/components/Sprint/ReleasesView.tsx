@@ -1,6 +1,5 @@
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  RELEASE_OLDER_TAGS_DEFAULT,
   type ReleaseCheckPr,
   type ReleaseCheckResult,
   type ReleaseRepoCheck,
@@ -19,9 +18,11 @@ import {
   CloseIcon,
   ExternalLinkIcon,
   GearIcon,
+  PartialCircleIcon,
   QuestionIcon,
   RefreshIcon,
   RocketIcon,
+  SkipIcon,
   StarIcon,
   WarningIcon,
 } from '../Icons.js';
@@ -31,29 +32,37 @@ import { FOCUS_RING } from '../ui/cx.js';
 import { SprintProgressBar } from '../Activity/SprintProgressBar.js';
 import { ReleaseDetailModal, ReleaseDialog } from './ReleaseDialog.js';
 import {
-  BAND_WORDS,
+  RELEASE_WINDOW_STEP,
+  SHOW_EARLIER_WORDS,
+  TAG_MARK_WORDS,
+  candidatePairs,
   candidateScopeLabel,
+  candidateWhy,
+  laterShownFor,
   latestReleaseLine,
   noTicketLine,
   noTicketPrLine,
-  olderBandView,
-  olderShowMore,
-  olderTagSummary,
+  olderProgress,
   openInTrackerWords,
   refreshingLine,
   repoLatestNote,
   repoProgress,
   repoRowCounts,
   repoRowText,
-  rowBands,
   showCreateRelease,
+  showEarlier,
+  showLaterWords,
   tagExplainer,
   tagHeader,
+  tagMark,
   tagTickets,
+  tagWindow,
   ticketDetail,
   ticketLine,
   type MarkTone,
   type ReleasePrLine,
+  type TagLink,
+  type TagMark,
 } from './releasesModel.js';
 
 // THIS SPRINT → RELEASES (docs/RELEASES.md § Releases tab) — the 4th This Sprint tab (key 4).
@@ -88,6 +97,8 @@ export function ReleasesView(): JSX.Element | null {
   const openSettings = useSettingsModal((s) => s.openSettings);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewRelease, setViewRelease] = useState<number | null>(null);
+  const [focus, setFocus] = useState<(TagLink & { seq: number }) | null>(null);
+  const onFocus = useCallback((link: TagLink) => setFocus((f) => ({ ...link, seq: (f?.seq ?? 0) + 1 })), []);
   const onRefresh = useCallback(() => refresh.mutate(), [refresh]);
 
   if (workspaceId == null) return null;
@@ -123,8 +134,7 @@ export function ReleasesView(): JSX.Element | null {
         <h2 className="text-title text-ui-ink">{latestReleaseLine(data)}</h2>
         <InfoButton title="How releases are checked">
           <p>
-            Only repositories ticked “Released from this workspace” in Settings are checked. Each one is checked on its
-            own.
+            Only repositories ticked “Released from this workspace” in Settings are checked.
           </p>
           <p>
             Releasing a tag ships everything below it. So the candidate is the newest version tag on main where that tag
@@ -137,8 +147,12 @@ export function ReleasesView(): JSX.Element | null {
             under it so you can check them.
           </p>
           <p>
-            Every tag newer than the candidate is listed with why it can’t be released. Older tags are listed under the
-            candidate so you can check them. After a release, the list stops at that release.
+            The repositories are picked together: no Complete ticket is released with only part of its work, in any
+            repository.
+          </p>
+          <p>
+            A repository opens to its tags around the candidate (★): later tags above, earlier ones below. ✗ means the
+            tag’s own tickets stop it; the amber mark means another tag holds it back. Open a tag to see why.
           </p>
           <p>Create release tags each candidate with the release suffix, publishes the notes and comments on each ticket.</p>
         </InfoButton>
@@ -174,7 +188,7 @@ export function ReleasesView(): JSX.Element | null {
       <section aria-label="Repositories">
         <ul className="divide-y divide-ui-line overflow-hidden rounded-ui bg-ui-surface">
           {check.repos.map((r) => (
-            <RepoRow key={r.repoId} repo={r} check={check} workspaceId={workspaceId} />
+            <RepoRow key={r.repoId} repo={r} check={check} workspaceId={workspaceId} focus={focus} onFocus={onFocus} />
           ))}
         </ul>
       </section>
@@ -195,8 +209,28 @@ export function ReleasesView(): JSX.Element | null {
   );
 }
 
-function RepoRow({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult; workspaceId: number }): JSX.Element {
+/** A link target the reader followed ("paired with …", "Held back by …"): the repo row opens, its window
+ *  widens to the tag, the tag opens and scrolls into view. `seq` makes a repeat press act again. */
+type Focus = TagLink & { seq: number };
+
+function RepoRow({
+  repo,
+  check,
+  workspaceId,
+  focus,
+  onFocus,
+}: {
+  repo: ReleaseRepoCheck;
+  check: ReleaseCheckResult;
+  workspaceId: number;
+  focus: Focus | null;
+  onFocus: (link: TagLink) => void;
+}): JSX.Element {
   const [open, setOpen] = useState(false);
+  const focused = focus != null && focus.repoId === repo.repoId ? focus : null;
+  useEffect(() => {
+    if (focused != null) setOpen(true);
+  }, [focused]);
   const counts = repoRowCounts(repo);
   const latest = repoLatestNote(repo);
   const progress = repoProgress(repo);
@@ -240,132 +274,149 @@ function RepoRow({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: 
           {progress.line != null && <span className="min-w-0 text-meta text-ui-mute">{progress.line}</span>}
         </div>
       )}
-      {open && <RepoDetail repo={repo} check={check} workspaceId={workspaceId} />}
+      {open && <RepoDetail repo={repo} check={check} workspaceId={workspaceId} focus={focused} onFocus={onFocus} />}
     </li>
   );
 }
 
-function RepoDetail({ repo, check, workspaceId }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult; workspaceId: number }): JSX.Element {
-  const bands = rowBands(repo);
-  // The reader's count of older tags (10, then +50 a press). Component state: not persisted.
-  const [shown, setShown] = useState(RELEASE_OLDER_TAGS_DEFAULT);
+/** ONE list of identical rows: 5 later tags, the candidate (highlighted), 5 earlier tags; "Show 5 later
+ *  tags" above and "Show 5 earlier tags" below. Counts are component state, not persisted. */
+function RepoDetail({
+  repo,
+  check,
+  workspaceId,
+  focus,
+  onFocus,
+}: {
+  repo: ReleaseRepoCheck;
+  check: ReleaseCheckResult;
+  workspaceId: number;
+  focus: Focus | null;
+  onFocus: (link: TagLink) => void;
+}): JSX.Element {
+  const [laterShown, setLaterShown] = useState(RELEASE_WINDOW_STEP);
+  const [earlierShown, setEarlierShown] = useState(RELEASE_WINDOW_STEP);
   const more = useShowMoreOlderTags(workspaceId);
-  const older = olderBandView(repo, shown);
-  const onMore = (): void => {
-    const next = olderShowMore(shown, repo.older.wanted);
-    setShown(next.shown);
+  useEffect(() => {
+    if (focus != null) setLaterShown((n) => laterShownFor(repo, focus.tagName, n));
+  }, [focus, repo]);
+  const w = tagWindow(repo, laterShown, earlierShown);
+  const progress = olderProgress(repo);
+  const onEarlier = (): void => {
+    const next = showEarlier(earlierShown, repo.older.wanted);
+    setEarlierShown(next.shown);
     if (next.ask != null) more.mutate({ repoId: repo.repoId, wanted: next.ask });
   };
+  const row = (t: ReleaseTagCheck): JSX.Element => (
+    <TagRow key={t.name} tag={t} repo={repo} check={check} focus={focus?.tagName === t.name ? focus : null} onFocus={onFocus} />
+  );
   return (
-    <div className="space-y-4 px-3 pb-3 pl-8" data-testid="release-repo-detail">
+    <div className="space-y-1 px-3 pb-3 pl-8" data-testid="release-repo-detail">
       {repo.tags.length === 0 && <p className="text-meta text-ui-mute">No version tags after {repo.baseline?.name ?? 'the start'}.</p>}
-      {bands.newerHeading != null && (
-        <Band label={bands.newerHeading} testId="release-band-newer">
-          {bands.newer.map((t) => (
-            <TagBlock key={t.name} tag={t} repo={repo} check={check} />
-          ))}
-        </Band>
+      {w.moreLater > 0 && (
+        <MoreButton onClick={() => setLaterShown((n) => n + RELEASE_WINDOW_STEP)} testId="release-show-later">
+          <ChevronIcon dir="up" size={11} className="shrink-0" />
+          {showLaterWords(w.moreLater)}
+        </MoreButton>
       )}
-      {bands.candidate != null && (
-        <Band label={BAND_WORDS.candidate} testId="release-band-candidate">
-          <TagBlock tag={bands.candidate} repo={repo} check={check} />
-        </Band>
+      <ol className="space-y-px" data-testid="release-tags">
+        {w.later.map(row)}
+        {w.candidate != null && row(w.candidate)}
+        {w.earlier.map(row)}
+      </ol>
+      {w.lastReleaseLine != null && (
+        <p className="pl-2 text-meta text-ui-mute" data-testid="release-last-release">
+          {w.lastReleaseLine}
+        </p>
       )}
-      {bands.candidate != null && (older.tags.length > 0 || older.progress != null || older.lastReleaseLine != null) && (
-        <Band label={BAND_WORDS.older} testId="release-band-older">
-          {older.tags.map((t) => (
-            <OlderTag key={t.name} tag={t} repo={repo} check={check} />
-          ))}
-          {older.lastReleaseLine != null && (
-            <li className="text-meta text-ui-mute" data-testid="release-last-release">
-              {older.lastReleaseLine}
-            </li>
-          )}
-          {older.progress != null && (
-            <li className="flex items-center gap-2" data-testid="release-older-progress">
-              <SprintProgressBar
-                progress={{ kind: 'share', label: older.progress.line ?? 'Reading', value: older.progress.share }}
-                className="h-1.5 w-40 shrink-0 rounded-full"
-                testId="release-older-progress-bar"
-              />
-              {older.progress.line != null && <span className="min-w-0 text-meta text-ui-mute">{older.progress.line}</span>}
-            </li>
-          )}
-          {(older.shownLine != null || older.showMore) && (
-            <li className="flex flex-wrap items-center gap-2">
-              {older.shownLine != null && <span className="text-meta text-ui-mute">{older.shownLine}</span>}
-              {older.showMore && (
-                <Button size="sm" variant="ghost" onClick={onMore} busy={more.isPending} busyLabel="Asking…">
-                  Show 50 more
-                </Button>
-              )}
-            </li>
-          )}
-          {more.isError && <li className="text-meta text-ui-danger">Couldn’t ask for more tags. Try again.</li>}
-        </Band>
+      {progress != null && (
+        <div className="flex items-center gap-2 pl-2" data-testid="release-older-progress">
+          <SprintProgressBar
+            progress={{ kind: 'share', label: progress.line ?? 'Reading', value: progress.share }}
+            className="h-1.5 w-40 shrink-0 rounded-full"
+            testId="release-older-progress-bar"
+          />
+          {progress.line != null && <span className="min-w-0 text-meta text-ui-mute">{progress.line}</span>}
+        </div>
       )}
+      {w.moreEarlier && progress == null && (
+        <MoreButton onClick={onEarlier} busy={more.isPending} testId="release-show-earlier">
+          <ChevronIcon dir="down" size={11} className="shrink-0" />
+          {SHOW_EARLIER_WORDS}
+        </MoreButton>
+      )}
+      {more.isError && <p className="text-meta text-ui-danger">Couldn’t ask for more tags. Try again.</p>}
     </div>
   );
 }
 
-function Band({ label, testId, children }: { label: string; testId: string; children: ReactNode }): JSX.Element {
+function MoreButton({ onClick, busy, testId, children }: { onClick: () => void; busy?: boolean; testId: string; children: ReactNode }): JSX.Element {
   return (
-    <section data-testid={testId} className="space-y-2">
-      <h3 className="text-meta font-medium uppercase tracking-wide text-ui-mute">{label}</h3>
-      <ol className="space-y-3 border-l border-ui-line pl-3">{children}</ol>
-    </section>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy === true}
+      data-testid={testId}
+      className={`inline-flex h-7 items-center gap-1 rounded-ui px-2 text-meta font-medium text-ui-mute hover:bg-ui-hover hover:text-ui-ink touch:h-9 ${FOCUS_RING}`}
+    >
+      {children}
+    </button>
   );
 }
 
-function TagHeaderLine({ tag, repo, check }: { tag: ReleaseTagCheck; repo: ReleaseRepoCheck; check: ReleaseCheckResult }): JSX.Element {
+const TAG_MARK_CLASS: Record<TagMark, string> = {
+  candidate: 'text-ui-accent',
+  blocked: 'text-ui-danger',
+  held: 'text-ui-warn',
+  checking: 'text-ui-mute',
+  ok: 'text-ui-success',
+};
+
+/** A row's mark: ★ candidate, ✗ its own tickets stop it, ⊘ (amber) held back by another tag, ✓ fine. */
+function TagMarkIcon({ mark }: { mark: TagMark }): JSX.Element {
+  const cls = `shrink-0 ${TAG_MARK_CLASS[mark]}`;
+  const title = TAG_MARK_WORDS[mark];
+  if (mark === 'candidate') return <StarIcon size={12} className={cls} title={title} />;
+  if (mark === 'blocked') return <CloseIcon size={11} className={cls} title={title} />;
+  if (mark === 'held') return <SkipIcon size={12} className={cls} title={title} />;
+  if (mark === 'ok') return <CheckIcon size={12} className={cls} title={title} />;
+  return <PartialCircleIcon size={12} className={cls} title={title} />;
+}
+
+/** ONE row layout for every tag, before and after the candidate: mark, name, day, commit, counts, and an
+ *  arrow. Nothing else until it is opened. The candidate row is highlighted and names its pairs. */
+function TagRow({
+  tag,
+  repo,
+  check,
+  focus,
+  onFocus,
+}: {
+  tag: ReleaseTagCheck;
+  repo: ReleaseRepoCheck;
+  check: ReleaseCheckResult;
+  focus: Focus | null;
+  onFocus: (link: TagLink) => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (focus == null) return;
+    setOpen(true);
+    ref.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focus]);
+  const mark = tagMark(tag);
   const h = tagHeader(check, tag);
   const href = safeExternalUrl(h.url);
+  const pairs = tag.isCandidate ? candidatePairs(check, repo) : [];
   return (
-    <>
-      {tag.isCandidate && <StarIcon size={12} className="shrink-0 text-ui-accent" title="Candidate" />}
-      <span className="font-medium text-ui-ink">{h.name}</span>
-      {h.day != null && <span className="text-meta text-ui-mute">· {h.day}</span>}
-      <span className="text-meta text-ui-mute">·</span>
-      {href != null ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          onClick={(e) => e.stopPropagation()}
-          className={`rounded-ui font-mono text-meta text-ui-ink hover:underline ${FOCUS_RING}`}
-          title="Open the commit on GitHub"
-        >
-          {h.shortSha}
-        </a>
-      ) : (
-        <span className="font-mono text-meta text-ui-mute">{h.shortSha}</span>
-      )}
-      <span className="text-meta text-ui-mute">· {h.counts}</span>
-      {tag.isCandidate && <span className="text-meta text-ui-mute">· {candidateScopeLabel(repo)}</span>}
-      {tag.state === 'checking' && !tag.isCandidate && <span className="text-meta text-ui-warn">· checking</span>}
-      {tag.moved && <span className="text-meta text-ui-warn">· moved to another commit</span>}
-    </>
-  );
-}
-
-/** A tag in the newer or candidate band: always open — its header, every ticket, its notes. */
-function TagBlock({ tag, repo, check }: { tag: ReleaseTagCheck; repo: ReleaseRepoCheck; check: ReleaseCheckResult }): JSX.Element {
-  return (
-    <li className="space-y-1" data-testid="release-tag" data-tag={tag.name} data-band={tag.band}>
-      <div className="flex flex-wrap items-center gap-1.5 text-body">
-        <TagHeaderLine tag={tag} repo={repo} check={check} />
-      </div>
-      <TagBody tag={tag} check={check} />
-    </li>
-  );
-}
-
-/** An older tag: ONE summary line; a click opens its tickets. */
-function OlderTag({ tag, repo, check }: { tag: ReleaseTagCheck; repo: ReleaseRepoCheck; check: ReleaseCheckResult }): JSX.Element {
-  const [open, setOpen] = useState(false);
-  const sum = olderTagSummary(check, tag);
-  return (
-    <li className="space-y-1" data-testid="release-tag" data-tag={tag.name} data-band="older">
+    <li
+      ref={ref}
+      data-testid="release-tag"
+      data-tag={tag.name}
+      data-mark={mark}
+      className={`rounded-ui border-l-2 ${tag.isCandidate ? 'border-ui-accent bg-ui-raise' : 'border-transparent'}`}
+    >
       <div
         role="button"
         tabIndex={0}
@@ -377,29 +428,116 @@ function OlderTag({ tag, repo, check }: { tag: ReleaseTagCheck; repo: ReleaseRep
             setOpen((o) => !o);
           }
         }}
-        className={`flex cursor-pointer flex-wrap items-center gap-1.5 rounded-ui text-body hover:bg-ui-hover ${FOCUS_RING}`}
+        className={`flex cursor-pointer flex-wrap items-center gap-1.5 rounded-ui px-2 py-1 text-body hover:bg-ui-hover ${FOCUS_RING}`}
       >
-        <ChevronIcon dir={open ? 'down' : 'right'} size={12} className="shrink-0 text-ui-mute" />
-        <TagHeaderLine tag={tag} repo={repo} check={check} />
-        <span className="inline-flex items-center gap-1 text-meta">
-          <Mark tone={sum.tone} />
-          <span className={sum.tone === 'ok' ? 'text-ui-mute' : MARK_CLASS[sum.tone]}>{sum.text}</span>
-        </span>
+        <TagMarkIcon mark={mark} />
+        <span className={`font-medium ${tag.isCandidate ? 'text-ui-ink' : 'text-ui-ink'}`}>{h.name}</span>
+        {h.day != null && <span className="text-meta text-ui-mute">· {h.day}</span>}
+        <span className="text-meta text-ui-mute">·</span>
+        {href != null ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer noopener"
+            onClick={(e) => e.stopPropagation()}
+            className={`rounded-ui font-mono text-meta text-ui-ink hover:underline ${FOCUS_RING}`}
+            title="Open the commit on GitHub"
+          >
+            {h.shortSha}
+          </a>
+        ) : (
+          <span className="font-mono text-meta text-ui-mute">{h.shortSha}</span>
+        )}
+        <span className="text-meta text-ui-mute">· {h.counts}</span>
+        {tag.moved && <span className="text-meta text-ui-warn">· moved to another commit</span>}
+        {pairs.length > 0 && (
+          <span className="inline-flex flex-wrap items-center gap-1 text-meta text-ui-mute">
+            · paired with
+            {pairs.map((p, i) => (
+              <span key={p.repoId} className="inline-flex items-center">
+                <TagLinkButton link={p} onFocus={onFocus}>
+                  {p.repoName} {p.tagName}
+                </TagLinkButton>
+                {i < pairs.length - 1 ? ',' : ''}
+              </span>
+            ))}
+          </span>
+        )}
+        <ChevronIcon dir={open ? 'down' : 'right'} size={11} className="ml-auto shrink-0 text-ui-mute" />
       </div>
-      {open && <TagBody tag={tag} check={check} />}
+      {open && (
+        <div className="space-y-1 px-2 pb-2 pl-6">
+          {tag.isCandidate && <CandidateWhy repo={repo} check={check} onFocus={onFocus} />}
+          <TagBody tag={tag} repo={repo} check={check} onFocus={onFocus} />
+        </div>
+      )}
     </li>
   );
 }
 
-function TagBody({ tag, check }: { tag: ReleaseTagCheck; check: ReleaseCheckResult }): JSX.Element {
+function TagLinkButton({ link, onFocus, children }: { link: TagLink; onFocus: (link: TagLink) => void; children: ReactNode }): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onFocus(link);
+      }}
+      className={`rounded-ui font-medium text-ui-ink underline decoration-ui-line underline-offset-2 hover:decoration-ui-ink ${FOCUS_RING}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Why it is the candidate: what stops the tag above it (linked), and what was checked. */
+function CandidateWhy({ repo, check, onFocus }: { repo: ReleaseRepoCheck; check: ReleaseCheckResult; onFocus: (link: TagLink) => void }): JSX.Element {
+  const why = candidateWhy(check, repo);
+  return (
+    <div className="space-y-0.5" data-testid="release-candidate-why">
+      <p className="text-meta text-ui-ink">
+        {why.text}
+        {why.link != null && (
+          <>
+            {' '}
+            <TagLinkButton link={why.link} onFocus={onFocus}>
+              Show {check.repos.find((r) => r.repoId === why.link!.repoId)?.name ?? ''} {why.link.tagName}
+            </TagLinkButton>
+          </>
+        )}
+      </p>
+      <p className="text-meta text-ui-mute">{candidateScopeLabel(repo)[0]!.toUpperCase() + candidateScopeLabel(repo).slice(1)}.</p>
+    </div>
+  );
+}
+
+function TagBody({
+  tag,
+  repo,
+  check,
+  onFocus,
+}: {
+  tag: ReleaseTagCheck;
+  repo: ReleaseRepoCheck;
+  check: ReleaseCheckResult;
+  onFocus: (link: TagLink) => void;
+}): JSX.Element {
   const c = tagTickets(check, tag);
-  const lines = tagExplainer(tag);
+  const lines = tagExplainer(tag, { check, repoId: repo.repoId });
   const noTicket = noTicketLine(c.noTicket.length);
   return (
     <div className="space-y-1">
       {lines.map((l, i) => (
         <p key={i} className={`text-meta ${l.tone === 'ok' ? 'text-ui-mute' : MARK_CLASS[l.tone]}`}>
           {l.text}
+          {l.link != null && (
+            <>
+              {' '}
+              <TagLinkButton link={l.link} onFocus={onFocus}>
+                Show {check.repos.find((r) => r.repoId === l.link!.repoId)?.name ?? ''} {l.link.tagName}
+              </TagLinkButton>
+            </>
+          )}
         </p>
       ))}
       {c.tickets.length > 0 && (

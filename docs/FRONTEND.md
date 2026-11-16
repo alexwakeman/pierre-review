@@ -2927,13 +2927,13 @@ tag's reason, `newestReason`), "Checking…", "Nothing new since 0.390.0-rc", "N
 "Latest 0.394.0" beside a candidate that is not the latest (`repoLatestNote`), counts (`repoRowCounts`: "6
 tickets · 1 to check"), and, while CHECKING only, the progress (`repoProgress`): a bar
 (`Activity/SprintProgressBar`, a share) with ONE line from the server (`progress.line`: "Reading main's
-history: 1,200 of 5,400 commits"). A row expands to ONE list, newest at the top, in THREE BANDS (`rowBands`,
-`BAND_WORDS`; the approved layout, 2026-11-16): "Newer than the candidate — can’t be released" (every tag newer
-than the candidate, ALWAYS open, every ticket — with no candidate every tag read, under "Can’t be released"),
-"Candidate" (open; its whole scope after a release, its own increment before one — `listsScope` — + `candidateScopeLabel` "checked: everything up to this tag" / "checked:
-everything since 0.380.0-rc") and "Older tags — for checking" (`olderTags`, all qualifying by the rule; ONE
-summary line each, `olderTagSummary`: "all 2 tickets Complete", its first reason, "checking…"; a click opens
-it). Each tag header is `tagHeader` (name · day · short sha — a link to the commit through `safeExternalUrl`
+history: 1,200 of 5,400 commits"). A row expands to ONE list of identical, closed rows around the candidate (`tagWindow`: 5 later, the candidate,
+5 earlier; "Show 5 later tags" / "Show 5 earlier tags", component state) — no band labels, no reason text
+until a row is opened. Each row: `tagMark` (★ candidate · ✗ red, its own tickets · ⊘ `SkipIcon` amber, held
+back by another tag · ✓), name, day, commit, counts, ›. The candidate row is highlighted and "paired with" the
+other repositories' candidates (`candidatePairs`); opened, it says why (`candidateWhy`). Links (`TagLink`)
+set ONE `focus` in `ReleasesView`: the row opens, widens (`laterShownFor`), opens the tag and scrolls to it.
+Each tag header is `tagHeader` (name · day · short sha — a link to the commit through `safeExternalUrl`
 · "4 PRs · 3 tickets"). `tagTickets` orders the tickets: those that stop the tag, then to check, then
 Complete (`ticketRank`), ties by key; `ticketLine` gives the mark (✗ `CloseIcon` / ? `QuestionIcon` / ✓
 `CheckIcon`) and the words ("In PO Review (Product review)" — the bucket only when it differs,
@@ -2942,9 +2942,9 @@ ticket line OPENS IN PLACE to `ticketDetail` (facts "Type: Story · Assignee: Ro
 min ago"; "In this tag" / "Elsewhere" PR lines — OPEN, "in 0.390.0", "not in a tag yet"; "Open in Jira" and
 "Story") — all from the check, NO fetch on open. `tagExplainer` keeps only what the ticket lines do not show
 (a reason from an earlier tag, "the history is still being read"). "· 3 pull requests with no ticket"
-(`noTicketLine`) opens their list (`noTicketPrLine`). The older band shows 10 (`RELEASE_OLDER_TAGS_DEFAULT`,
-COMPONENT STATE, not persisted); "Show 50 more" (`olderBandView` / `olderShowMore`, HIDDEN while the band
-reads history or when nothing more exists) adds 50 and, when the server's band is smaller, POSTs
+(`noTicketLine`) opens their list (`noTicketPrLine`). The earlier tags show 5 (the server sends 10,
+`RELEASE_OLDER_TAGS_DEFAULT`); "Show 5 earlier tags" (`showEarlier`, HIDDEN while the band reads history or
+when nothing more exists) adds 5 and, when the server's band is smaller, POSTs
 `/api/releases/older-tags` (`useShowMoreOlderTags`, then the check is read again); while the band reads, its
 own bar + line (`older.progress`), and the tab POLLS (shared `releasesChecking` includes `older.loading`).
 After a release the band ends with "0.380.0-rc — last release". A PR known only from the history read
