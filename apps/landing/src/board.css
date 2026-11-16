@@ -250,6 +250,22 @@ body:has(.lb) {
   opacity: 0.6;
   pointer-events: none;
 }
+/* THE CORNER RIPPLE (components/arcs/cornerWave.ts): while a tile plays it, its
+   mask is its own animated copy of corner.svg; the rest of the picture is unchanged. */
+.lb .tile.waving::after {
+  -webkit-mask-image: var(--wave-mask);
+  mask-image: var(--wave-mask);
+}
+/* Where a tile taller than the screen counts as "in view": its corner quarter. */
+.lb .tile .corner-probe {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: min(46%, 220px);
+  aspect-ratio: 1;
+  visibility: hidden;
+  pointer-events: none;
+}
 
 /* ---- the arcs (components/arcs) ---------------------------------------- */
 /* A picture is a stack of LAYERS (one <svg> per quarter) in a box with the

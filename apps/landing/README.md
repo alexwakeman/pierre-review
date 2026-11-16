@@ -48,7 +48,9 @@ Chain and the Quartet are SCENES (`Scene.tsx`): pinned full width for one screen
 over them, coming together and fading up, then dimming as the next section covers them. No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
 `public/og-image.png` are generated (`node scripts/make-favicons.mjs`, `node scripts/make-og-image.mjs`):
 the mark from `packages/shared/src/brand-mark.ts`, the one definition the app's Wordmark also draws. The voice tiles carry a quarter in their corner
-(`assets/arcs/corner.svg`, the same geometry).
+(`assets/arcs/corner.svg`, the same geometry). When one comes fully into view (once per page view) a ripple runs through
+that quarter's bands from the corner outward, three times, each gentler (`cornerWave.ts`: the mask is swapped for the
+tile's own animated copy of `corner.svg`, so nothing else restyles; off under reduced motion).
 
 **PRODUCT PICTURES ARE HTML MOCKS, NOT SCREENSHOTS** — on every page; the site holds no picture of the Ensemble UI. They are built from one kit,
 `components/mock/` (`kit.tsx`: MockFrame, MockTabs, Segmented, Act, PrRow, Chip, FindingRow,
