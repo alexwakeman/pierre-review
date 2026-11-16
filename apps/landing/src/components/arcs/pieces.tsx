@@ -28,7 +28,7 @@ interface PieceProps {
   fit?: 'meet' | 'slice';
 }
 
-const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross, SITE_CHAIN.reach);
+const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross, SITE_CHAIN.reach, SITE_CHAIN.scatter);
 
 export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   return (
