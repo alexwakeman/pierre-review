@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Link } from '../../router';
 import { SITE_NAME } from '../../lib/site';
 import { EnsembleStory } from './EnsembleStory';
@@ -62,8 +63,44 @@ const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   },
 ];
 
+/**
+ * ONE GRADIENT ACROSS THE FOUR BOXES' EDGES (pages/home.css § the spectral edge): every
+ * box's ring is a slice of the same colour wheel, centred on the middle of the four. Each
+ * box is told where that middle is, from its own top-left (--ring-x, --ring-y) and how big
+ * the wheel must be to cover all four (--ring-d). Measured on mount and on every resize;
+ * the turning on scroll is CSS. Before this runs (the prerendered page) each box shows its
+ * own still slice.
+ */
+function useSharedRing(ref: React.RefObject<HTMLDivElement>): void {
+  useEffect(() => {
+    const box = ref.current;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    const tiles = Array.from(box.querySelectorAll<HTMLElement>(':scope > .tile'));
+    const measure = (): void => {
+      // offsets, not getBoundingClientRect: a tile mid-reveal is translated
+      const cx = box.offsetWidth / 2;
+      const cy = box.offsetHeight / 2;
+      const d = Math.hypot(box.offsetWidth, box.offsetHeight) * 1.1;
+      for (const t of tiles) {
+        t.style.setProperty('--ring-x', `${cx - t.offsetLeft}px`);
+        t.style.setProperty('--ring-y', `${cy - t.offsetTop}px`);
+        t.style.setProperty('--ring-d', `${d}px`);
+      }
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(box);
+    return () => {
+      ro.disconnect();
+      for (const t of tiles) ['--ring-x', '--ring-y', '--ring-d'].forEach((v) => t.style.removeProperty(v));
+    };
+  }, [ref]);
+}
+
 /** Review as an ensemble: the story of one pull request (EnsembleStory) and the four facts beside it. */
 export function EnsembleSection(): JSX.Element {
+  const points = useRef<HTMLDivElement>(null);
+  useSharedRing(points);
   return (
     <section id="ensemble" className="section chapter" aria-labelledby="ens-h">
       <div className="chap rise">
@@ -77,7 +114,7 @@ export function EnsembleSection(): JSX.Element {
         <div className="tile circle rise">
           <EnsembleStory />
         </div>
-        <div className="ens-points">
+        <div className="ens-points" ref={points}>
           {ENSEMBLE_POINTS.map((pt) => (
             <div key={pt.h} className="tile rise">
               <h3>{pt.h}</h3>

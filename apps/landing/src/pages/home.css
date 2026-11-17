@@ -598,6 +598,7 @@
   fill: #b9a3ff;
 }
 .lb.home .ens-points {
+  position: relative; /* the boxes' offsetLeft/Top are from here (useSharedRing) */
   grid-column: 7 / 13;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -610,34 +611,27 @@
   flex-direction: column;
   gap: 10px;
 }
-/* THE SPECTRAL EDGE: each box is ringed by the voice tiles' hues, and the colours
-   travel round the ring as the page scrolls. The ring is a big conic gradient (::before)
-   behind the box's own ground (::after, inset by the ring's width); scrolling ROTATES the
-   gradient, a transform, so the compositor does it and nothing repaints. Each box starts a
-   quarter turn on from the one before, so the colour seems to pass from box to box. With no
-   scroll-driven animations (or reduced motion) the ring is still, at each box's start. */
+/* THE SPECTRAL EDGE: the four boxes are ringed by ONE colour wheel of the voice tiles'
+   hues, centred on the middle of the four, so the colour runs on from one box's edge into
+   the next. Each box's ::before is that whole wheel, placed at the middle of the four
+   (--ring-x / --ring-y from the box's top-left, --ring-d across: measured in
+   HomeSections.tsx useSharedRing) and clipped by the box to its own edge: its ground
+   (::after) is inset by the ring's width. Scrolling TURNS the wheel, the same turn for all
+   four (one view timeline on .ens-points): a transform, so the compositor does it and
+   nothing repaints. Before the measurement (the prerendered page) each box shows its own
+   still slice; with no scroll-driven animations, or reduced motion, the wheel stands still. */
 .lb.home .ens-points > .tile {
   isolation: isolate;
   background: transparent;
   border-radius: 6px;
-  --ring-a: 0deg;
-}
-.lb.home .ens-points > .tile:nth-child(2) {
-  --ring-a: 90deg;
-}
-.lb.home .ens-points > .tile:nth-child(3) {
-  --ring-a: 270deg;
-}
-.lb.home .ens-points > .tile:nth-child(4) {
-  --ring-a: 180deg;
 }
 .lb.home .ens-points > .tile::before {
   content: '';
   position: absolute;
   z-index: -2;
-  left: 50%;
-  top: 50%;
-  width: 300%;
+  left: var(--ring-x, 50%);
+  top: var(--ring-y, 50%);
+  width: var(--ring-d, 300%);
   aspect-ratio: 1;
   /* the voice tiles' own hues only (board.css --run-dusk, --run-meadow, --run-bloom):
      plum, violet, azure, teal, mint, and a touch of pink, looping back to plum */
@@ -654,7 +648,7 @@
     var(--pink),
     var(--plum)
   );
-  transform: translate(-50%, -50%) rotate(var(--ring-a));
+  transform: translate(-50%, -50%);
   pointer-events: none;
 }
 .lb.home .ens-points > .tile::after {
@@ -668,8 +662,8 @@
 }
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
-    /* the BOX's own passage through the screen (the ring is far bigger than the box) */
-    .lb.home .ens-points > .tile {
+    /* the four boxes' passage through the screen, shared by all four wheels */
+    .lb.home .ens-points {
       view-timeline: --ring block;
     }
     .lb.home .ens-points > .tile::before {
@@ -682,10 +676,10 @@
 }
 @keyframes ring-turn {
   from {
-    transform: translate(-50%, -50%) rotate(var(--ring-a));
+    transform: translate(-50%, -50%) rotate(0deg);
   }
   to {
-    transform: translate(-50%, -50%) rotate(calc(var(--ring-a) + 360deg));
+    transform: translate(-50%, -50%) rotate(360deg);
   }
 }
 .lb.home .ens-points h3,
