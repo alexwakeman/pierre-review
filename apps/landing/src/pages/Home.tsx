@@ -38,7 +38,7 @@ export default function Home(): JSX.Element {
       <Scene
         className="scene-chain"
         timing={CHAIN_SCENE}
-        art={<Chain label="A chain of banded quarter-circles linked end to end, each in its own run of colour" />}
+        art={<Chain label="Banded quarter-circles, each in its own run of colour, coming together as a tall figure of 8" />}
         before={<Hero />}
         after={<EnsembleSection />}
       />

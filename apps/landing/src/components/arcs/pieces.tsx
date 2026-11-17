@@ -1,5 +1,5 @@
 import { Arcs } from './Arcs';
-import { chainQuarters, quartetQuarters, SITE_CHAIN } from './geometry';
+import { eightQuarters, quartetQuarters, SITE_EIGHT } from './geometry';
 import type { Corner, Quarter, RunName } from './geometry';
 
 // ---------------------------------------------------------------------------
@@ -12,8 +12,8 @@ import type { Corner, Quarter, RunName } from './geometry';
 //              it scrolls into view, and land overlapping.
 //   Chain      quarters linked end to end, each a different voice, whose bands run
 //              on from link to link (the hero's big picture). Its links start
-//              mirrored across the tile and cross through each other into place as
-//              the reader scrolls down, landing as a wide symmetric arch (SITE_CHAIN).
+//              scattered across the screen and cross through each other into place as
+//              the reader scrolls down, landing as a tall figure of 8 (SITE_EIGHT).
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -28,7 +28,7 @@ interface PieceProps {
   fit?: 'meet' | 'slice';
 }
 
-const CHAIN = chainQuarters(100, SITE_CHAIN.steps, SITE_CHAIN.first, SITE_CHAIN.margin, SITE_CHAIN.cross, SITE_CHAIN.reach, SITE_CHAIN.scatter);
+const CHAIN = eightQuarters(100, SITE_EIGHT.margin, SITE_EIGHT.reach, SITE_EIGHT.scatter, SITE_EIGHT.spreadX);
 
 export function Chain({ className, label, lead }: PieceProps): JSX.Element {
   return (
