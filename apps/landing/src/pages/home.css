@@ -610,7 +610,7 @@
   flex-direction: column;
   gap: 10px;
 }
-/* THE SPECTRAL EDGE: each box is ringed by the quarter circles' spectrum, and the colours
+/* THE SPECTRAL EDGE: each box is ringed by the voice tiles' hues, and the colours
    travel round the ring as the page scrolls. The ring is a big conic gradient (::before)
    behind the box's own ground (::after, inset by the ring's width); scrolling ROTATES the
    gradient, a transform, so the compositor does it and nothing repaints. Each box starts a
@@ -639,23 +639,20 @@
   top: 50%;
   width: 300%;
   aspect-ratio: 1;
-  /* the spectrum (components/arcs/geometry.ts SPECTRUM), once round, back to red */
+  /* the voice tiles' own hues only (board.css --run-dusk, --run-meadow, --run-bloom):
+     plum, violet, azure, teal, mint, and a touch of pink, looping back to plum */
   background: conic-gradient(
-    #f80e0f,
-    #ff6a00,
-    #fe9c00,
-    #ffcf00,
-    #d6e92b,
-    #86c246,
-    #52c395,
-    #3faca9,
-    #4ba0e0,
-    #5b7cc1,
-    #6f47a7,
-    #883a9f,
-    #ee0056,
-    #f70e6a,
-    #f80e0f
+    var(--plum),
+    var(--violet),
+    var(--azure),
+    var(--teal),
+    var(--mint),
+    var(--teal),
+    var(--azure),
+    var(--violet),
+    var(--plum),
+    var(--pink),
+    var(--plum)
   );
   transform: translate(-50%, -50%) rotate(var(--ring-a));
   pointer-events: none;
