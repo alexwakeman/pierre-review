@@ -8,8 +8,10 @@ import { CopyCommand } from './CopyCommand';
 // faded under the text, it comes together and brightens as the text scrolls away,
 // then dims again behind "Review as an ensemble".
 //
-// ⚠ "Fully local, no added service" is the claim, and it is exact: the app runs on each
-// person's machine and talks only to GitHub, their tracker and their own AI provider.
+// ⚠ "On your machine" is the claim, and it is exact: the app runs on each person's
+// machine and talks only to GitHub, their tracker and their own AI provider. The voice is
+// ONE PERSON's (it works as well alone); teammates are something that also works.
+// The time it saves is said in words (what you no longer do), never as a number.
 // "Decentralised" describes the REVIEW only (no orchestrator; GitHub is where teammates
 // meet) — never the whole product.
 // ---------------------------------------------------------------------------
@@ -21,11 +23,11 @@ export function Hero(): JSX.Element {
           picture shows through it */}
       <div className="hero-card">
         <div className="tile say">
-          <p className="kick">{SITE_NAME} · a review process and a build pipeline, on your own Claude or Codex</p>
+          <p className="kick">{SITE_NAME} · a software factory on your own machine</p>
           <h1>Refine, build and review as an ensemble.</h1>
           <p className="lead">
-            From ticket to merged pull request with your own Claude or Codex. It runs fully on your team&rsquo;s own
-            machines, with no added service.
+            You decide what to build. {SITE_NAME} does the prompting, checking and re-reviewing, with your own Claude
+            or Codex, on your machine.
           </p>
           <div className="cmd">
             <CopyCommand />

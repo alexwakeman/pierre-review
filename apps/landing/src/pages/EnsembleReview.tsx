@@ -196,9 +196,9 @@ export default function EnsembleReview(): JSX.Element {
         <div className="tile tm-name">
           <h1 id="tm-h1">Review as an ensemble.</h1>
           <p className="tm-lead">
-            No review bot seat. Each teammate reviews with their own Claude Code or Codex, on their own
-            machine. Every pull request gets the same review on every push, checked against its ticket.
-            GitHub is the source of truth.
+            No review bot seat. Your own Claude Code or Codex reviews every pull request on your
+            machine, the same way on every push, checked against its ticket. Add teammates and each runs
+            their own; GitHub keeps you in step.
           </p>
         </div>
         <Shot className="tm-hero-shot">
@@ -221,8 +221,8 @@ export default function EnsembleReview(): JSX.Element {
         <div className="tile tm-txt tm-t-head rise">
           <h2 id="tm-m-h">Between a review bot and a prompt.</h2>
           <p>
-            The process of a review bot, on the plans your team already has, with the ticket and your
-            docs in hand.
+            The process of a review bot, on the plan you already have, with the ticket and your docs in
+            hand.
           </p>
         </div>
         <div className="tile madder tm-t tm-t3 rise">
@@ -240,7 +240,8 @@ export default function EnsembleReview(): JSX.Element {
           <h3>{SITE_NAME}</h3>
           <p>
             The same review on every push, checked against the ticket&rsquo;s acceptance criteria and
-            description, your docs and the earlier threads. Posted to GitHub once, for the whole team.
+            description, your docs and the earlier threads. Posted to GitHub once, however many of you
+            run it.
           </p>
         </div>
       </section>

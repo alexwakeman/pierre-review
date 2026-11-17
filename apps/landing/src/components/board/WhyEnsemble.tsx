@@ -7,7 +7,7 @@ export function WhyEnsemble(): JSX.Element {
     <section className="section chapter why" aria-labelledby="why-h">
       <div className="chap minor rise">
         <h2 id="why-h">Why Ensemble</h2>
-        <p>Built to fit how your team already works.</p>
+        <p>Built to fit how you already work.</p>
       </div>
       <div className="board why4">
         <div className="tile rise">

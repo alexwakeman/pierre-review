@@ -58,9 +58,9 @@ code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background
 .motto span { font-size: 14px; margin-top: 6px; color: #2a1d05; }
 </style></head><body>
 <div class="tile say">
-  <p class="kick">${brandMarkSvg(4)}<span><b>Ensemble</b> · an agentic SDLC on your machine</span></p>
+  <p class="kick">${brandMarkSvg(4)}<span><b>Ensemble</b> · a software factory on your own machine</span></p>
   <h1>Refine, build and review as an ensemble.</h1>
-  <p class="lead">From ticket to merged pull request with your own Claude or Codex. It runs fully on your team’s own machines, with no added service.</p>
+  <p class="lead">You decide what to build. Ensemble does the prompting, checking and re-reviewing, with your own Claude or Codex, on your machine.</p>
   <div class="foot"><code>npx ensemble-review</code><span class="url">ensemble.ac</span></div>
 </div>
 <div class="tile art">${chainSvg()}</div>

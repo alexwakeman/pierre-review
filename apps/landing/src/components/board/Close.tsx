@@ -15,7 +15,7 @@ export function Close(): JSX.Element {
         </div>
       </div>
       <div className="tile lapis side rise">
-        <p>One minute to run. Your first review a few minutes later.</p>
+        <p>One minute to set up. After that, the routine work runs itself.</p>
         <p>
           <Link to="/docs/getting-started/install-and-run">Install and run →</Link>
         </p>
