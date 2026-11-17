@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.55] - 2026-11-17
+
 ### Added
 
 - Implement story: when a build finishes, Ensemble asks the story's chat "How to test" for you. The next time
