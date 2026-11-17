@@ -9,6 +9,7 @@
   margin: 0 auto;
 }
 .lb .bstory-svg {
+  display: block;
   width: 100%;
   height: auto;
   overflow: visible;
@@ -119,7 +120,7 @@
   }
 }
 .lb .bstory-svg .b-pointer {
-  transform: translate(330px, 540px);
+  transform: var(--ptr-start);
   transition: opacity 0.4s ease, transform 1.1s cubic-bezier(0.3, 0.7, 0.3, 1);
 }
 .lb .bstory-svg .b-pointer path {
@@ -129,7 +130,7 @@
 }
 .lb .bstory-svg.p-press:not(.p-fetch) .b-pointer {
   opacity: 1;
-  transform: translate(150px, 462px);
+  transform: var(--ptr-press);
 }
 
 /* 2 · it reads the ticket ------------------------------------------------- */
@@ -389,7 +390,7 @@
 }
 .lb .bstory-svg.p-verify .b-pointer {
   opacity: 1;
-  transform: translate(340px, 118px);
+  transform: var(--ptr-chip);
 }
 .lb .bstory-svg.p-answer .b-pointer {
   opacity: 0;
@@ -448,4 +449,29 @@
 }
 .lb .bstory-svg.still :is(.b-chat, .b-pointer, .b-say, .b-dots, .b-hop, .b-pills) {
   opacity: 0 !important;
+}
+
+/* ONE board per width: WIDE (three columns), or TALL on a phone, where the wide board's
+   words would be about 6px. The tall board's labels are larger, so they read at ~11px. */
+.lb .bstory-tall {
+  display: none;
+}
+@media (max-width: 640px) {
+  .lb .bstory-wide {
+    display: none;
+  }
+  .lb .bstory-tall {
+    display: block;
+  }
+}
+.lb .bstory-tall :is(.b-k, .b-sandbox-k, .b-new) {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+.lb .bstory-tall :is(.b-small, .b-ok, .b-links, .b-ac text, .b-say, .b-step .b-line) {
+  font-size: 14px;
+}
+/* the tall ticket is too narrow for "NEW" beside AC3: its amber outline says it */
+.lb .bstory-tall .b-ac-new .b-new {
+  display: none;
 }

@@ -114,40 +114,126 @@ export const BUILD_STEPS: StoryStep[] = [
   },
 ];
 
-// ---- the picture: a 760 × 520 board --------------------------------------------------------
+// ---- the picture -------------------------------------------------------------------------
+// ONE drawing, TWO geometries: WIDE (three columns, 760 × 520) and TALL for phones (the ticket
+// and Ensemble side by side on top, the docs and repositories below, 400 wide), so the words
+// stay readable on a phone. Both are in the page; CSS shows one by width (no JS, no jump).
 
-/** The three columns. */
-const T = { x: 16, y: 20, w: 224, h: 480 };
-const M = { x: 262, y: 20, w: 212, h: 480 };
-const L = { x: 496, w: 248 };
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+interface Geo {
+  name: 'wide' | 'tall';
+  W: number;
+  H: number;
+  /** The ticket, Ensemble, and the lanes' column. */
+  T: Box;
+  M: Box;
+  L: { x: number; w: number };
+  docsY: number;
+  docsH: number;
+  laneYs: readonly [number, number, number];
+  laneH: number;
+  /** In a lane: the name's baseline, the progress bar, the pull requests' top. */
+  laneLabel: number;
+  laneBar: number;
+  lanePr: number;
+  /** Each planned pull request's left edge, from the lane's left. */
+  prX: readonly [number, number, number, number];
+  /** The ticket's criteria as written on it (shorter when tall). */
+  ac: readonly [string, string, string];
+  /** Where the pills and the status line sit in Ensemble's column, from its top. */
+  pillsY: number;
+  sayY: number;
+  pillW: number;
+  /** The How to test panel, and its answer lines' first baseline and spacing. */
+  chat: Box;
+  ansY: number;
+  ansGap: number;
+  /** The pointer: off the board, on the button, on How to test. */
+  ptr: { start: [number, number]; press: [number, number]; chip: [number, number] };
+}
 
 const LANES = [
-  { name: 'acme/payments', cls: 'l-pay', y: 76 },
-  { name: 'acme/api', cls: 'l-api', y: 216 },
-  { name: 'acme/web', cls: 'l-web', y: 356 },
+  { name: 'acme/payments', cls: 'l-pay' },
+  { name: 'acme/api', cls: 'l-api' },
+  { name: 'acme/web', cls: 'l-web' },
 ] as const;
-const LANE_H = 120;
 
-/** The planned pull requests: lane, column, and what each one needs first. */
+/** The planned pull requests: lane, and what each one needs first. */
 const PRS = [
-  { n: 1, num: '#631', lane: 0, x: 512, plan: 'Store the reason', after: '' },
-  { n: 2, num: '#632', lane: 0, x: 632, plan: 'Fill older refunds', after: 'on ①' },
-  { n: 3, num: '#219', lane: 1, x: 632, plan: 'Reason in the API', after: 'after ①' },
-  { n: 4, num: '#1204', lane: 2, x: 512, plan: 'Picker and export', after: 'after ③' },
+  { n: 1, num: '#631', lane: 0, plan: 'Store the reason', short: 'Store reason', after: '' },
+  { n: 2, num: '#632', lane: 0, plan: 'Fill older refunds', short: 'Old refunds', after: 'on ①' },
+  { n: 3, num: '#219', lane: 1, plan: 'Reason in the API', short: 'Reason in API', after: 'after ①' },
+  { n: 4, num: '#1204', lane: 2, plan: 'Picker and export', short: 'Picker, export', after: 'after ③' },
 ] as const;
 const PR_W = 100;
 const PR_H = 36;
-const prY = (lane: number): number => LANES[lane]!.y + 70;
 const CIRCLED = ['①', '②', '③', '④'];
 
+const WIDE: Geo = {
+  name: 'wide',
+  W: 760,
+  H: 520,
+  T: { x: 16, y: 20, w: 224, h: 480 },
+  M: { x: 262, y: 20, w: 212, h: 480 },
+  L: { x: 496, w: 248 },
+  docsY: 20,
+  docsH: 42,
+  laneYs: [76, 216, 356],
+  laneH: 120,
+  laneLabel: 26,
+  laneBar: 42,
+  lanePr: 70,
+  prX: [16, 136, 136, 16],
+  ac: ['AC1  Staff pick a reason', 'AC2  Reason in the export', 'AC3  Older refunds'],
+  pillsY: 290,
+  sayY: 366,
+  pillW: 90,
+  chat: { x: 252, y: 20, w: 500, h: 480 },
+  ansY: 224,
+  ansGap: 38,
+  ptr: { start: [330, 540], press: [150, 462], chip: [340, 118] },
+};
+
+const TALL: Geo = {
+  name: 'tall',
+  W: 400,
+  H: 870,
+  T: { x: 8, y: 8, w: 188, h: 480 },
+  M: { x: 212, y: 8, w: 180, h: 480 },
+  L: { x: 20, w: 360 },
+  docsY: 500,
+  docsH: 36,
+  laneYs: [548, 646, 744],
+  laneH: 86,
+  laneLabel: 22,
+  laneBar: 33,
+  lanePr: 45,
+  prX: [16, 140, 140, 140],
+  ac: ['AC1  Pick a reason', 'AC2  In the export', 'AC3  Old refunds'],
+  pillsY: 286,
+  sayY: 356,
+  pillW: 74,
+  chat: { x: 8, y: 494, w: 384, h: 368 },
+  ansY: 214,
+  ansGap: 33,
+  ptr: { start: [240, 900], press: [120, 446], chip: [90, 586] },
+};
+
+const laneY = (g: Geo, lane: number): number => g.laneYs[lane]!;
+const prLeft = (g: Geo, i: number): number => g.L.x + g.prX[i]!;
+const prTop = (g: Geo, i: number): number => laneY(g, PRS[i]!.lane) + g.lanePr;
+
 /** The cross-repository order: from the bottom of one block to the top of the one after it. */
-function needs(from: number, to: number): string {
-  const a = PRS[from]!;
-  const b = PRS[to]!;
-  const x1 = a.x + PR_W / 2;
-  const y1 = prY(a.lane) + PR_H + 4;
-  const x2 = b.x + PR_W / 2;
-  const y2 = prY(b.lane) - 6;
+function needs(g: Geo, from: number, to: number): string {
+  const x1 = prLeft(g, from) + PR_W / 2;
+  const y1 = prTop(g, from) + PR_H + 4;
+  const x2 = prLeft(g, to) + PR_W / 2;
+  const y2 = prTop(g, to) - 6;
   const my = (y1 + y2) / 2;
   return `M${x1} ${y1}C${x1} ${my} ${x2} ${my} ${x2} ${y2}`;
 }
@@ -156,296 +242,316 @@ function needs(from: number, to: number): string {
 const POINTER = 'M0 0L0 22L6 16.5L10.5 26L14 24.5L9.5 15L17 15Z';
 
 const ANSWER = [
-  'Merge #631 and #632, then #219, then #1204.',
-  'Refund part of an order and pick a reason.',
-  'Export the CSV: the reason has its own column.',
-  'An older refund says “No reason given”.',
+  'Merge #631, #632, then #219, #1204.',
+  'Refund part of an order; pick a reason.',
+  'Export the CSV: the reason is in it.',
+  'Older refunds say “No reason given”.',
 ];
+
+const LABEL =
+  "Build end to end: you press it on the ticket; Ensemble reads the ticket, checks it against your code and docs and adds a missing criterion, plans four pull requests in three repositories, builds them in a sandbox, reviews and fixes them in rounds, opens them in order with one stacked on another, updates the ticket with a comment, and in Ensemble's ticket view How to test gives you the steps to check it.";
+
+const px = ([x, y]: [number, number]): string => `translate(${x}px, ${y}px)`;
+
+function Board({ g, phases }: { g: Geo; phases: string }): JSX.Element {
+  const { T, M, L } = g;
+  const lanesTop = g.laneYs[0] - 8;
+  const lanesBottom = g.laneYs[2] + g.laneH + 8;
+  const button = T.y + T.h - 56;
+  const comment = { y: T.y + 252, h: button - 8 - (T.y + 252) };
+  const C = g.chat;
+  const chips = [
+    { t: 'How to test', x: 16, w: 116 },
+    { t: 'Integration', x: 140, w: 112 },
+    { t: 'Risks', x: 260, w: 72 },
+  ];
+  const vars = {
+    '--ptr-start': px(g.ptr.start),
+    '--ptr-press': px(g.ptr.press),
+    '--ptr-chip': px(g.ptr.chip),
+  } as React.CSSProperties;
+
+  return (
+    <svg
+      className={`bstory-svg bstory-${g.name} ${phases}`}
+      viewBox={`0 0 ${g.W} ${g.H}`}
+      role="img"
+      aria-label={LABEL}
+      style={vars}
+    >
+      {/* ---- the ticket ------------------------------------------------------ */}
+      <g className="b-ticket">
+        <rect x={T.x} y={T.y} width={T.w} height={T.h} rx={10} className="b-card" />
+        <text x={T.x + 16} y={T.y + 28} className="b-k">
+          TICKET · PAY-139
+        </text>
+        <text x={T.x + 16} y={T.y + 56} className="b-title">
+          Refund reasons
+        </text>
+        <text x={T.x + 16} y={T.y + 78} className="b-title">
+          in the export
+        </text>
+        <text x={T.x + 16} y={T.y + 112} className="b-k">
+          {g.name === 'tall' ? 'CRITERIA' : 'ACCEPTANCE CRITERIA'}
+        </text>
+        {g.ac.slice(0, 2).map((t, i) => (
+          <g key={t} className="b-ac">
+            <rect x={T.x + 12} y={T.y + 124 + i * 42} width={T.w - 24} height={34} rx={5} />
+            <text x={T.x + 22} y={T.y + 146 + i * 42}>
+              {t}
+            </text>
+          </g>
+        ))}
+        <g className="b-ac b-ac-new">
+          <rect x={T.x + 12} y={T.y + 208} width={T.w - 24} height={34} rx={5} />
+          <text x={T.x + 22} y={T.y + 230}>
+            {g.ac[2]}
+          </text>
+          <text x={T.x + T.w - 22} y={T.y + 230} className="b-new">
+            NEW
+          </text>
+        </g>
+
+        <g className="b-comment">
+          <rect x={T.x + 12} y={comment.y} width={T.w - 24} height={comment.h} rx={6} />
+          <text x={T.x + 24} y={comment.y + 24} className="b-k">
+            COMMENT · YOU
+          </text>
+          {g.name === 'tall' ? (
+            <>
+              <text x={T.x + 24} y={comment.y + 50} className="b-links">
+                #631 #632
+              </text>
+              <text x={T.x + 24} y={comment.y + 72} className="b-links">
+                #219 #1204
+              </text>
+            </>
+          ) : (
+            <>
+              <text x={T.x + 24} y={comment.y + 50}>
+                4 pull requests:
+              </text>
+              <text x={T.x + 24} y={comment.y + 72} className="b-links">
+                #631 #632 #219 #1204
+              </text>
+            </>
+          )}
+          <text x={T.x + 24} y={comment.y + 98}>
+            Every refund has a
+          </text>
+          <text x={T.x + 24} y={comment.y + 120}>
+            reason, and so does
+          </text>
+          <text x={T.x + 24} y={comment.y + 142}>
+            the export.
+          </text>
+        </g>
+
+        <g className="b-button">
+          <rect x={T.x + 12} y={button} width={T.w - 24} height={42} rx={7} />
+          <text x={T.x + T.w / 2} y={button + 27}>
+            Build end to end
+          </text>
+        </g>
+      </g>
+
+      {/* the hand-offs between the ticket and Ensemble */}
+      <path d={`M${T.x + T.w + 2} ${T.y + 140}l${M.x - T.x - T.w - 6} 10-${M.x - T.x - T.w - 6} 10`} className="b-hop h-fetch" />
+      <path d={`M${M.x - 2} ${T.y + 310}l-${M.x - T.x - T.w - 6} 10 ${M.x - T.x - T.w - 6} 10`} className="b-hop h-ticket" />
+
+      {/* ---- Ensemble -------------------------------------------------------- */}
+      <g className="b-ens">
+        <rect x={M.x} y={M.y} width={M.w} height={M.h} rx={10} className="b-card b-ens-card" />
+        <path className="b-spark" d={`M${M.x + 22} ${M.y + 14}l3 6 6 3-6 3-3 6-3-6-6-3 6-3z`} />
+        <text x={M.x + 38} y={M.y + 28} className="b-k b-ens-k">
+          {SITE_NAME.toUpperCase()}
+        </text>
+
+        {/* what it read, and what it found */}
+        <g className="b-read">
+          <text x={M.x + 16} y={M.y + 58} className="b-h">
+            The ticket
+          </text>
+          {[
+            { t: 'AC1', s: 'code' },
+            { t: 'AC2', s: 'docs' },
+          ].map((r, i) => (
+            <g key={r.t} className="b-row">
+              <rect x={M.x + 12} y={M.y + 72 + i * 42} width={M.w - 24} height={34} rx={5} />
+              <text x={M.x + 22} y={M.y + 94 + i * 42}>
+                {r.t}
+              </text>
+              <text x={M.x + M.w - 22} y={M.y + 94 + i * 42} className="b-ok">
+                ✓ {r.s}
+              </text>
+            </g>
+          ))}
+          <g className="b-row b-added">
+            <rect x={M.x + 12} y={M.y + 156} width={M.w - 24} height={58} rx={5} />
+            <text x={M.x + 22} y={M.y + 178}>
+              + AC3
+            </text>
+            <text x={M.x + M.w - 22} y={M.y + 178} className="b-new">
+              ADDED
+            </text>
+            <text x={M.x + 22} y={M.y + 202} className="b-small">
+              {g.name === 'tall' ? 'Older refunds: none' : 'Older refunds have none'}
+            </text>
+          </g>
+        </g>
+
+        {/* the plan, then where the build is */}
+        <g className="b-plan">
+          <text x={M.x + 16} y={M.y + 58} className="b-h">
+            The plan
+          </text>
+          {PRS.map((p, i) => (
+            <g key={p.n} className={`b-step b-step-${p.n}`}>
+              <rect x={M.x + 12} y={M.y + 70 + i * 50} width={M.w - 24} height={44} rx={5} />
+              <text x={M.x + 30} y={M.y + 99 + i * 50} className={`b-num b-mid ${LANES[p.lane]!.cls}`}>
+                {CIRCLED[i]}
+              </text>
+              <text x={M.x + 50} y={M.y + 88 + i * 50} className="b-small">
+                {LANES[p.lane]!.name.replace('acme/', '')}
+                {p.after ? ` · ${p.after}` : ''}
+              </text>
+              <text x={M.x + 50} y={M.y + 106 + i * 50} className="b-line">
+                {g.name === 'tall' ? p.short : p.plan}
+              </text>
+            </g>
+          ))}
+        </g>
+
+        <g className="b-status">
+          <g className="b-pills">
+            <rect x={M.x + 12} y={M.y + g.pillsY} width={g.pillW} height={30} rx={15} />
+            <text x={M.x + 12 + g.pillW / 2} y={M.y + g.pillsY + 20}>
+              Claude
+            </text>
+            <rect x={M.x + M.w - 12 - g.pillW} y={M.y + g.pillsY} width={g.pillW} height={30} rx={15} />
+            <text x={M.x + M.w - 12 - g.pillW / 2} y={M.y + g.pillsY + 20}>
+              Codex
+            </text>
+          </g>
+          {[
+            ['s-build', 'Building'],
+            ['s-review', 'Round 1 · 3 open'],
+            ['s-fix', 'Fixing them'],
+            ['s-clean', 'Round 2 · all clear'],
+            ['s-prs', 'Opening pull requests'],
+            ['s-ticket', 'Updating the ticket'],
+          ].map(([c, t]) => (
+            <text key={c} x={M.x + M.w / 2} y={M.y + g.sayY} className={`b-say ${c}`}>
+              {t}
+            </text>
+          ))}
+          <g className="b-dots">
+            {[0, 1, 2].map((i) => (
+              <circle key={i} cx={M.x + M.w / 2 - 16 + i * 16} cy={M.y + g.sayY + 26} r={4} />
+            ))}
+          </g>
+        </g>
+      </g>
+
+      {/* ---- your docs and repositories ------------------------------------- */}
+      <g className="b-docs">
+        <rect x={L.x} y={g.docsY} width={L.w} height={g.docsH} rx={8} className="b-card" />
+        <text x={L.x + 16} y={g.docsY + g.docsH / 2 + 6} className="b-lane-name">
+          Your docs
+        </text>
+        <text x={L.x + L.w - 16} y={g.docsY + g.docsH / 2 + 6} className="b-small b-end">
+          reference library
+        </text>
+      </g>
+
+      <rect x={L.x - 8} y={lanesTop} width={L.w + 16} height={lanesBottom - lanesTop} rx={12} className="b-sandbox" />
+      <text x={L.x + L.w / 2} y={lanesBottom + 22} className="b-sandbox-k">
+        SANDBOX · YOUR MACHINE
+      </text>
+
+      {LANES.map((l, i) => (
+        <g key={l.name} className={`b-lane ${l.cls}`}>
+          <rect x={L.x} y={laneY(g, i)} width={L.w} height={g.laneH} rx={8} className="b-card b-lane-card" />
+          <text x={L.x + 16} y={laneY(g, i) + g.laneLabel} className="b-lane-name">
+            {l.name}
+          </text>
+          <rect x={L.x + 16} y={laneY(g, i) + g.laneBar} width={L.w - 32} height={8} rx={4} className="b-track" />
+          <rect x={L.x + 16} y={laneY(g, i) + g.laneBar} width={L.w - 32} height={8} rx={4} className={`b-fill b-fill-${i}`} />
+        </g>
+      ))}
+
+      {/* the order across repositories, then the pull requests themselves */}
+      <path d={needs(g, 0, 2)} pathLength={1} className="b-need n-1" />
+      <path d={needs(g, 2, 3)} pathLength={1} className="b-need n-2" />
+      <path d={`M${prLeft(g, 0) + PR_W + 2} ${prTop(g, 0) + PR_H / 2}H${prLeft(g, 1) - 2}`} className="b-stackline" />
+      {PRS.map((p, i) => (
+        <g key={p.n} className={`b-pr b-pr-${p.n} ${LANES[p.lane]!.cls}`}>
+          <rect x={prLeft(g, i)} y={prTop(g, i)} width={PR_W} height={PR_H} rx={6} />
+          <text x={prLeft(g, i) + 22} y={prTop(g, i) + 24} className="b-num b-mid">
+            {CIRCLED[i]}
+          </text>
+          <text x={prLeft(g, i) + 40} y={prTop(g, i) + 24} className="b-prnum">
+            {p.num}
+          </text>
+        </g>
+      ))}
+
+      {/* ---- step 9: the ticket in Ensemble, How to test ---------------------- */}
+      <g className="b-chat">
+        <rect x={C.x} y={C.y} width={C.w} height={C.h} rx={10} className="b-chat-card" />
+        <path className="b-spark" d={`M${C.x + 20} ${C.y + 14}l3 6 6 3-6 3-3 6-3-6-6-3 6-3z`} />
+        <text x={C.x + 36} y={C.y + 28} className="b-k b-ens-k">
+          {SITE_NAME.toUpperCase()} · PAY-139
+        </text>
+        <text x={C.x + 16} y={C.y + 60} className="b-h">
+          Ask about this story
+        </text>
+        {chips.map((c, i) => (
+          <g key={c.t} className={`b-chip${i === 0 ? ' b-chip-go' : ''}`}>
+            <rect x={C.x + c.x} y={C.y + 76} width={c.w} height={32} rx={16} />
+            <text x={C.x + c.x + c.w / 2} y={C.y + 97}>
+              {c.t}
+            </text>
+          </g>
+        ))}
+        <g className="b-q">
+          <rect x={C.x + C.w - 16 - Math.min(436, C.w - 48)} y={C.y + 126} width={Math.min(436, C.w - 48)} height={58} rx={8} />
+          <text x={C.x + C.w - Math.min(436, C.w - 48)} y={C.y + 150}>
+            Once these are merged, what must I do
+          </text>
+          <text x={C.x + C.w - Math.min(436, C.w - 48)} y={C.y + 172}>
+            to prove this ticket is done?
+          </text>
+        </g>
+        {ANSWER.map((a, i) => (
+          <g key={a} className={`b-a b-a-${i}`}>
+            <text x={C.x + 24} y={C.y + g.ansY + i * g.ansGap} className="b-a-n">
+              {i + 1}
+            </text>
+            <text x={C.x + 46} y={C.y + g.ansY + i * g.ansGap}>
+              {a}
+            </text>
+          </g>
+        ))}
+        <text x={C.x + 16} y={C.y + C.h - 18} className="b-small b-note">
+          {g.name === 'tall' ? 'It reads, and changes nothing.' : 'It reads the code and the pull requests. It changes nothing.'}
+        </text>
+      </g>
+
+      {/* the reader's pointer */}
+      <g className="b-pointer">
+        <path d={POINTER} />
+      </g>
+    </svg>
+  );
+}
 
 export function BuildStory(): JSX.Element {
   const player = useStory(PHASES, AT, STEP_OF, BUILD_STEPS.length);
-  const cls = `bstory-svg ${player.phaseClasses}`;
-
   return (
     <div className="story bstory" ref={player.root}>
-      <svg
-        className={cls}
-        viewBox="0 0 760 520"
-        role="img"
-        aria-label="Build end to end: you press it on the ticket; Ensemble reads the ticket, checks it against your code and docs and adds a missing criterion, plans four pull requests in three repositories, builds them in a sandbox, reviews and fixes them in rounds, opens them in order with one stacked on another, updates the ticket with a comment, and in Ensemble's ticket view How to test gives you the steps to check it."
-      >
-        {/* ---- left: the ticket ---------------------------------------------- */}
-        <g className="b-ticket">
-          <rect x={T.x} y={T.y} width={T.w} height={T.h} rx={10} className="b-card" />
-          <text x={T.x + 16} y={T.y + 28} className="b-k">
-            TICKET · PAY-139
-          </text>
-          <text x={T.x + 16} y={T.y + 56} className="b-title">
-            Refund reasons
-          </text>
-          <text x={T.x + 16} y={T.y + 78} className="b-title">
-            in the export
-          </text>
-          <text x={T.x + 16} y={T.y + 112} className="b-k">
-            ACCEPTANCE CRITERIA
-          </text>
-          {['AC1  Staff pick a reason', 'AC2  Reason in the export'].map((t, i) => (
-            <g key={t} className="b-ac">
-              <rect x={T.x + 12} y={T.y + 124 + i * 42} width={T.w - 24} height={34} rx={5} />
-              <text x={T.x + 22} y={T.y + 146 + i * 42}>
-                {t}
-              </text>
-            </g>
-          ))}
-          <g className="b-ac b-ac-new">
-            <rect x={T.x + 12} y={T.y + 208} width={T.w - 24} height={34} rx={5} />
-            <text x={T.x + 22} y={T.y + 230}>
-              AC3  Older refunds
-            </text>
-            <text x={T.x + T.w - 22} y={T.y + 230} className="b-new">
-              NEW
-            </text>
-          </g>
-
-          <g className="b-comment">
-            <rect x={T.x + 12} y={T.y + 262} width={T.w - 24} height={156} rx={6} />
-            <text x={T.x + 24} y={T.y + 286} className="b-k">
-              COMMENT · YOU
-            </text>
-            <text x={T.x + 24} y={T.y + 312}>
-              4 pull requests:
-            </text>
-            <text x={T.x + 24} y={T.y + 334} className="b-links">
-              #631 #632 #219 #1204
-            </text>
-            <text x={T.x + 24} y={T.y + 360}>
-              Every refund has a
-            </text>
-            <text x={T.x + 24} y={T.y + 382}>
-              reason, and so does
-            </text>
-            <text x={T.x + 24} y={T.y + 404}>
-              the export.
-            </text>
-          </g>
-
-          <g className="b-button">
-            <rect x={T.x + 12} y={T.y + 424} width={T.w - 24} height={42} rx={7} />
-            <text x={T.x + T.w / 2} y={T.y + 451}>
-              Build end to end
-            </text>
-          </g>
-        </g>
-
-        {/* the hand-offs between the columns */}
-        <path d={`M${T.x + T.w + 4} 160l12 10-12 10`} className="b-hop h-fetch" />
-        <path d={`M${M.x - 4} 330l-12 10 12 10`} className="b-hop h-ticket" />
-
-        {/* ---- middle: Ensemble ---------------------------------------------- */}
-        <g className="b-ens">
-          <rect x={M.x} y={M.y} width={M.w} height={M.h} rx={10} className="b-card b-ens-card" />
-          <path className="b-spark" d={`M${M.x + 22} ${M.y + 14}l3 6 6 3-6 3-3 6-3-6-6-3 6-3z`} />
-          <text x={M.x + 38} y={M.y + 28} className="b-k b-ens-k">
-            {SITE_NAME.toUpperCase()}
-          </text>
-
-          {/* what it read, and what it found */}
-          <g className="b-read">
-            <text x={M.x + 16} y={M.y + 58} className="b-h">
-              The ticket
-            </text>
-            {[
-              { t: 'AC1', s: 'code' },
-              { t: 'AC2', s: 'docs' },
-            ].map((r, i) => (
-              <g key={r.t} className="b-row">
-                <rect x={M.x + 12} y={M.y + 72 + i * 42} width={M.w - 24} height={34} rx={5} />
-                <text x={M.x + 22} y={M.y + 94 + i * 42}>
-                  {r.t}
-                </text>
-                <text x={M.x + M.w - 22} y={M.y + 94 + i * 42} className="b-ok">
-                  ✓ {r.s}
-                </text>
-              </g>
-            ))}
-            <g className="b-row b-added">
-              <rect x={M.x + 12} y={M.y + 156} width={M.w - 24} height={58} rx={5} />
-              <text x={M.x + 22} y={M.y + 178}>
-                + AC3
-              </text>
-              <text x={M.x + M.w - 22} y={M.y + 178} className="b-new">
-                ADDED
-              </text>
-              <text x={M.x + 22} y={M.y + 202} className="b-small">
-                Older refunds have none
-              </text>
-            </g>
-          </g>
-
-          {/* the plan, then where the build is */}
-          <g className="b-plan">
-            <text x={M.x + 16} y={M.y + 58} className="b-h">
-              The plan
-            </text>
-            {PRS.map((p, i) => (
-              <g key={p.n} className={`b-step b-step-${p.n}`}>
-                <rect x={M.x + 12} y={M.y + 70 + i * 50} width={M.w - 24} height={44} rx={5} />
-                <text x={M.x + 30} y={M.y + 99 + i * 50} className={`b-num b-mid ${LANES[p.lane]!.cls}`}>
-                  {CIRCLED[i]}
-                </text>
-                <text x={M.x + 52} y={M.y + 88 + i * 50} className="b-small">
-                  {LANES[p.lane]!.name.replace('acme/', '')}
-                  {p.after ? ` · ${p.after}` : ''}
-                </text>
-                <text x={M.x + 52} y={M.y + 106 + i * 50} className="b-line">
-                  {p.plan}
-                </text>
-              </g>
-            ))}
-          </g>
-
-          <g className="b-status">
-            <g className="b-pills">
-              <rect x={M.x + 12} y={M.y + 290} width={90} height={30} rx={15} className="pill-claude" />
-              <text x={M.x + 57} y={M.y + 310}>
-                Claude
-              </text>
-              <rect x={M.x + 110} y={M.y + 290} width={90} height={30} rx={15} className="pill-codex" />
-              <text x={M.x + 155} y={M.y + 310}>
-                Codex
-              </text>
-            </g>
-            <text x={M.x + M.w / 2} y={M.y + 366} className="b-say s-build">
-              Building
-            </text>
-            <text x={M.x + M.w / 2} y={M.y + 366} className="b-say s-review">
-              Round 1 · 3 open
-            </text>
-            <text x={M.x + M.w / 2} y={M.y + 366} className="b-say s-fix">
-              Fixing them
-            </text>
-            <text x={M.x + M.w / 2} y={M.y + 366} className="b-say s-clean">
-              Round 2 · all clear
-            </text>
-            <text x={M.x + M.w / 2} y={M.y + 366} className="b-say s-prs">
-              Opening 4 pull requests
-            </text>
-            <text x={M.x + M.w / 2} y={M.y + 366} className="b-say s-ticket">
-              Updating the ticket
-            </text>
-            <g className="b-dots">
-              {[0, 1, 2].map((i) => (
-                <circle key={i} cx={M.x + M.w / 2 - 16 + i * 16} cy={M.y + 392} r={4} />
-              ))}
-            </g>
-          </g>
-        </g>
-
-        {/* ---- right: your docs and repositories ------------------------------- */}
-        <g className="b-docs">
-          <rect x={L.x} y={20} width={L.w} height={42} rx={8} className="b-card" />
-          <text x={L.x + 16} y={47} className="b-lane-name">
-            Your docs
-          </text>
-          <text x={L.x + L.w - 16} y={47} className="b-small b-end">
-            reference library
-          </text>
-        </g>
-
-        <rect x={L.x - 8} y={68} width={L.w + 16} height={416} rx={12} className="b-sandbox" />
-        <text x={L.x + L.w / 2} y={506} className="b-sandbox-k">
-          SANDBOX · YOUR MACHINE
-        </text>
-
-        {LANES.map((l, i) => (
-          <g key={l.name} className={`b-lane ${l.cls}`}>
-            <rect x={L.x} y={l.y} width={L.w} height={LANE_H} rx={8} className="b-card b-lane-card" />
-            <text x={L.x + 16} y={l.y + 26} className="b-lane-name">
-              {l.name}
-            </text>
-            <rect x={L.x + 16} y={l.y + 42} width={L.w - 32} height={8} rx={4} className="b-track" />
-            <rect
-              x={L.x + 16}
-              y={l.y + 42}
-              width={L.w - 32}
-              height={8}
-              rx={4}
-              className={`b-fill b-fill-${i}`}
-            />
-          </g>
-        ))}
-
-        {/* the order across repositories, then the pull requests themselves */}
-        <path d={needs(0, 2)} pathLength={1} className="b-need n-1" />
-        <path d={needs(2, 3)} pathLength={1} className="b-need n-2" />
-        <path
-          d={`M${PRS[0].x + PR_W + 2} ${prY(0) + PR_H / 2}H${PRS[1].x - 2}`}
-          className="b-stackline"
-        />
-        {PRS.map((p, i) => (
-          <g key={p.n} className={`b-pr b-pr-${p.n} ${LANES[p.lane]!.cls}`}>
-            <rect x={p.x} y={prY(p.lane)} width={PR_W} height={PR_H} rx={6} />
-            <text x={p.x + 22} y={prY(p.lane) + 24} className="b-num b-mid">
-              {CIRCLED[i]}
-            </text>
-            <text x={p.x + 40} y={prY(p.lane) + 24} className="b-prnum">
-              {p.num}
-            </text>
-          </g>
-        ))}
-
-        {/* ---- step 9: the ticket in Ensemble, How to test ---------------------- */}
-        <g className="b-chat">
-          <rect x={252} y={20} width={500} height={480} rx={10} className="b-chat-card" />
-          <path className="b-spark" d="M272 34l3 6 6 3-6 3-3 6-3-6-6-3 6-3z" />
-          <text x={288} y={48} className="b-k b-ens-k">
-            {SITE_NAME.toUpperCase()} · PAY-139
-          </text>
-          <text x={268} y={80} className="b-h">
-            Ask about this story
-          </text>
-          {[
-            { t: 'How to test', x: 268, w: 116 },
-            { t: 'Integration', x: 392, w: 112 },
-            { t: 'Risks', x: 512, w: 72 },
-          ].map((c, i) => (
-            <g key={c.t} className={`b-chip${i === 0 ? ' b-chip-go' : ''}`}>
-              <rect x={c.x} y={96} width={c.w} height={32} rx={16} />
-              <text x={c.x + c.w / 2} y={117}>
-                {c.t}
-              </text>
-            </g>
-          ))}
-          <g className="b-q">
-            <rect x={300} y={146} width={436} height={58} rx={8} />
-            <text x={316} y={170}>
-              Once these are merged, what must I do
-            </text>
-            <text x={316} y={192}>
-              to prove this ticket is done?
-            </text>
-          </g>
-          {ANSWER.map((a, i) => (
-            <g key={a} className={`b-a b-a-${i}`}>
-              <text x={276} y={244 + i * 40} className="b-a-n">
-                {i + 1}
-              </text>
-              <text x={298} y={244 + i * 40}>
-                {a}
-              </text>
-            </g>
-          ))}
-          <text x={268} y={480} className="b-small b-note">
-            It reads the code and the pull requests. It changes nothing.
-          </text>
-        </g>
-
-        {/* the reader's pointer */}
-        <g className="b-pointer">
-          <path d={POINTER} />
-        </g>
-      </svg>
-
+      <Board g={WIDE} phases={player.phaseClasses} />
+      <Board g={TALL} phases={player.phaseClasses} />
       <StoryCaption steps={BUILD_STEPS} player={player} intro="From one press to an updated ticket." />
     </div>
   );
