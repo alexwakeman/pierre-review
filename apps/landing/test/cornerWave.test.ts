@@ -1,7 +1,7 @@
 // The corner ripple (src/components/arcs/cornerWave.ts): the bands come from corner.svg, and each
 // band's width swells three times, gentler each time, and ends exactly where it started.
 import { describe, expect, it } from 'vitest';
-import { cornerBands, RIPPLE_PEAKS, rippleSeconds, swellTimeline, waveSvg } from '../src/components/arcs/cornerWave';
+import { cornerBands, DWELL_MS, playDelay, RIPPLE_PEAKS, rippleSeconds, SETTLE_MS, swellTimeline, waveSvg } from '../src/components/arcs/cornerWave';
 
 describe('the corner ripple', () => {
   const bands = cornerBands();
@@ -35,5 +35,14 @@ describe('the corner ripple', () => {
     expect(a).toContain('begin="0.78s"');
     expect(waveSvg(2, bands)).not.toBe(a);
     expect(rippleSeconds(14)).toBeCloseTo(2.48, 2);
+  });
+
+  it('waits for the page to settle, and for a tile to stay in view, before it ripples', () => {
+    // a tile on screen as the page opens: not before the page has settled
+    expect(playDelay(0)).toBe(SETTLE_MS);
+    expect(playDelay(200)).toBe(SETTLE_MS - 200);
+    // later: only the dwell, so a fading-in tile has finished
+    expect(playDelay(5000)).toBe(DWELL_MS);
+    expect(playDelay(SETTLE_MS)).toBe(DWELL_MS);
   });
 });

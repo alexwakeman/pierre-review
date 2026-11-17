@@ -256,13 +256,15 @@ body:has(.lb) {
   -webkit-mask-image: var(--wave-mask);
   mask-image: var(--wave-mask);
 }
-/* Where a tile taller than the screen counts as "in view": its corner quarter. */
+/* Where a tile counts as "in view" for its ripple: its corner quarter (cornerWave.ts). */
 .lb .tile .corner-probe {
   position: absolute;
   right: 0;
   bottom: 0;
   width: min(46%, 220px);
   aspect-ratio: 1;
+  /* a short tile clips its corner: watch only the part that can be seen */
+  max-height: 100%;
   visibility: hidden;
   pointer-events: none;
 }
@@ -389,6 +391,11 @@ body:has(.lb) {
 }
 .lb .scene .arcs.end .arcs-box {
   left: calc((100cqw - var(--bw)) / 2); /* centred behind the page, not anchored right */
+}
+/* The hero's figure of 8, a little less bright at every stage of its fade: one still
+   opacity under the scene's own (they multiply), so nothing new moves on a scroll. */
+.lb .scene-chain .scene-out > .arcs {
+  opacity: 0.82;
 }
 .lb .scene-over {
   position: relative;

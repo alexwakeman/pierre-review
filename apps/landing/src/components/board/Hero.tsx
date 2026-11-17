@@ -17,34 +17,38 @@ import { CopyCommand } from './CopyCommand';
 export function Hero(): JSX.Element {
   return (
     <section className="board hero" aria-label={SITE_NAME}>
-      <div className="tile say">
-        <p className="kick">{SITE_NAME} · a review process and a build pipeline, on your own Claude or Codex</p>
-        <h1>Refine, build and review as an ensemble.</h1>
-        <p className="lead">
-          From ticket to merged pull request with your own Claude or Codex. It runs fully on your team&rsquo;s own
-          machines, with no added service.
-        </p>
-        <div className="cmd">
-          <CopyCommand />
-          <code>{INSTALL_COMMAND}</code>
-        </div>
-      </div>
-      <figure className="tile motto">
-        <blockquote>
-          {/* ⚠ Poincaré's own words (the English translation), cut with an ellipsis and
-              never reworded: a reworded line would need "after Poincaré". */}
-          <p>
-            “It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once
-            both the ensemble and the details.”
+      {/* one floating card for the words: the page's dark ground at half strength, so the
+          picture shows through it */}
+      <div className="hero-card">
+        <div className="tile say">
+          <p className="kick">{SITE_NAME} · a review process and a build pipeline, on your own Claude or Codex</p>
+          <h1>Refine, build and review as an ensemble.</h1>
+          <p className="lead">
+            From ticket to merged pull request with your own Claude or Codex. It runs fully on your team&rsquo;s own
+            machines, with no added service.
           </p>
-        </blockquote>
-        <figcaption>
-          <a href="https://en.wikipedia.org/wiki/Henri_Poincar%C3%A9" target="_blank" rel="noreferrer noopener">
-            Henri Poincaré
-          </a>
-          , <cite>Science and Method</cite>, 1908
-        </figcaption>
-      </figure>
+          <div className="cmd">
+            <CopyCommand />
+            <code>{INSTALL_COMMAND}</code>
+          </div>
+        </div>
+        <figure className="tile motto">
+          <blockquote>
+            {/* ⚠ Poincaré's own words (the English translation), cut with an ellipsis and
+                never reworded: a reworded line would need "after Poincaré". */}
+            <p>
+              “It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once
+              both the ensemble and the details.”
+            </p>
+          </blockquote>
+          <figcaption>
+            <a href="https://en.wikipedia.org/wiki/Henri_Poincar%C3%A9" target="_blank" rel="noreferrer noopener">
+              Henri Poincaré
+            </a>
+            , <cite>Science and Method</cite>, 1908
+          </figcaption>
+        </figure>
+      </div>
     </section>
   );
 }

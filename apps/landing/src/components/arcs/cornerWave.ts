@@ -15,6 +15,11 @@ import cornerSvg from '../../assets/arcs/corner.svg?raw';
 // tile's copy carries a unique comment, so it is its own image and its animation
 // starts when that tile's copy loads, not when some other tile's did.
 //
+// WHEN. A tile ripples once its corner has stayed fully in view for DWELL_MS, and never in the
+// page's first SETTLE_MS: a tile on screen as the page opens would otherwise ripple
+// before anyone looks, and a `.rise` tile while it is still fading in. A tile that
+// leaves the view before its ripple starts waits for the next time it is fully in view.
+//
 // Called by useReveal, which skips it under prefers-reduced-motion.
 // ---------------------------------------------------------------------------
 
@@ -26,6 +31,16 @@ export const RIPPLE_EVERY_S = 0.6;
 export const BAND_LAG_S = 0.06;
 
 const STEP_S = 0.025;
+
+/** How long a tile stays fully in view before its ripple starts (ms): long enough to be looked at, short enough for a skim. */
+export const DWELL_MS = 300;
+/** No ripple in the page's first second: a tile already on screen ripples once the page has settled. */
+export const SETTLE_MS = 1000;
+
+/** The wait before a tile that has just come fully into view ripples, `sinceOpenMs` after the page opened. */
+export function playDelay(sinceOpenMs: number): number {
+  return Math.max(DWELL_MS, SETTLE_MS - sinceOpenMs);
+}
 
 interface Band {
   d: string;
@@ -106,31 +121,48 @@ export function startCornerWaves(root: HTMLElement): () => void {
     timers.add(t);
   };
 
-  // "Fully in view": the whole tile, or, for a tile taller than the screen, its corner
-  // (a probe placed where the quarter is), since such a tile is never wholly on screen.
+  // "Fully in view" means the CORNER QUARTER, where the ripple is drawn: a probe placed
+  // over it is what the observer watches. A tall tile is wholly on screen only for a
+  // moment of a scroll (or never, taller than the screen); its corner is there for long.
   const owner = new Map<Element, HTMLElement>();
+  const opened = performance.now();
+  const pending = new Map<Element, number>();
   const io = new IntersectionObserver(
     (entries) => {
       for (const e of entries) {
-        if (e.intersectionRatio < 0.99) continue;
-        const tile = owner.get(e.target);
-        io.unobserve(e.target);
-        if (tile) play(tile);
+        const due = pending.get(e.target);
+        if (e.intersectionRatio < 0.99) {
+          // Out of full view before the ripple started: wait for the next time.
+          if (due != null) {
+            window.clearTimeout(due);
+            timers.delete(due);
+            pending.delete(e.target);
+          }
+          continue;
+        }
+        if (due != null) continue;
+        const target = e.target;
+        const t = window.setTimeout(() => {
+          timers.delete(t);
+          pending.delete(target);
+          io.unobserve(target);
+          const tile = owner.get(target);
+          if (tile) play(tile);
+        }, playDelay(performance.now() - opened));
+        timers.add(t);
+        pending.set(target, t);
       }
     },
-    { threshold: [0.99] },
+    { threshold: [0, 0.99] },
   );
   for (const tile of tiles) {
-    let target: HTMLElement = tile;
-    if (tile.getBoundingClientRect().height > window.innerHeight * 0.95) {
-      target = document.createElement('span');
-      target.className = 'corner-probe';
-      target.setAttribute('aria-hidden', 'true');
-      tile.appendChild(target);
-      probes.push(target);
-    }
-    owner.set(target, tile);
-    io.observe(target);
+    const probe = document.createElement('span');
+    probe.className = 'corner-probe';
+    probe.setAttribute('aria-hidden', 'true');
+    tile.appendChild(probe);
+    probes.push(probe);
+    owner.set(probe, tile);
+    io.observe(probe);
   }
 
   return () => {

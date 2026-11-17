@@ -6,7 +6,7 @@
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
      scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-quartet (then close): Scene.tsx
-     hero       .hero > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
+     hero       .hero > .hero-card > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
      flow       .board.flow > .tile.flow-stage (BuildStory: svg.bstory-svg + .story-cap) · p.flow-more
      ensemble   .board.ensemble > .tile.circle (EnsembleStory: svg.story-svg + .story-cap) · .ens-points > .tile (h3, p) · p.ens-more
      bots       .board.bots > .tile (h3, p, p.more)
@@ -63,19 +63,31 @@
   grid-template-rows: auto auto;
   align-content: start;
 }
-/* The text sits straight on the faded Chain: no tile ground, a shadow for the bands. */
+/* The words float over the picture in ONE CARD: the page's dark ground (--bg, #0f1012)
+   at 50%, so the picture shows through. No blur behind it: a backdrop blur over the
+   moving picture would be redrawn on every scroll frame. */
+.lb.home .hero-card {
+  grid-column: 1 / 8;
+  grid-row: 1 / -1;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(20px, 2.4vw, 32px);
+  padding: clamp(24px, 3vw, 40px);
+  background: rgba(15, 16, 18, 0.5);
+  border: 1px solid rgba(241, 241, 239, 0.1);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+}
 .lb.home .hero .say,
 .lb.home .hero .motto {
   background: transparent;
-  text-shadow: 0 1px 18px rgba(0, 0, 0, 0.9);
+  padding: 0;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6);
 }
 .lb.home .hero .say {
-  grid-column: 1 / 8;
-  grid-row: 1;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  padding: clamp(24px, 3vw, 40px);
 }
 .lb.home .hero .kick {
   font-size: 12px;
@@ -102,8 +114,6 @@
   color: var(--dark);
 }
 .lb.home .hero .motto {
-  grid-column: 1 / 8;
-  grid-row: 2;
   margin: 0;
   display: flex;
   flex-direction: column;
@@ -432,7 +442,6 @@
   .lb.home .hero {
     grid-template-rows: none;
   }
-  .lb.home .hero .say,
   .lb.home .strip .ww-say,
   .lb.home .ww-tools,
   .lb.home .proof .tile,
@@ -450,9 +459,8 @@
     grid-column: 1 / -1;
     grid-row: auto;
   }
-  .lb.home .hero .motto {
+  .lb.home .hero-card {
     grid-column: 1 / -1;
-    grid-row: auto;
   }
   .lb.home .why4 > .tile {
     grid-column: span 6;
@@ -471,8 +479,8 @@
   .lb.home .why4 > .tile {
     grid-column: 1 / -1;
   }
-  .lb.home .hero .motto {
-    padding: 16px;
+  .lb.home .hero-card {
+    padding: 20px;
   }
   .lb.home .hero .motto blockquote {
     font-size: 16px;

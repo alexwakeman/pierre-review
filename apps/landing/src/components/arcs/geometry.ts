@@ -251,57 +251,30 @@ const unit = (i: number, k: number): number => {
 const CORNER_OF = (sx: number, sy: number): Corner =>
   sx > 0 ? (sy > 0 ? 'tl' : 'bl') : sy > 0 ? 'tr' : 'br';
 
+interface RawLink {
+  cx: number;
+  cy: number;
+  /** The way the quarter reaches from its centre: +1 right / down, −1 left / up. */
+  sx: number;
+  sy: number;
+}
+
 /**
- * A chain of quarters of radius `R`, starting with a quarter centred at the origin and
- * reaching right and down. `steps` holds one letter per link after the first; the
- * chain leaves each quarter across the radius it did not come in by, starting with
- * `first` ('h': the horizontal radius, 'v': the vertical one). Returns the quarters
- * shifted so the chain's box (plus `margin` radii all round) starts at (0, 0), and
- * that box's size.
- *
- * Each quarter's assembly offset (dx, dy) is either OUTWARD from the chain's middle
- * (a short slide home), or, with `cross`, the MIRROR of its place through that middle:
- * every link starts on the far side of the box and travels through the middle, past
- * the others, into place. The mirror of a link lies inside the same box, so a crossing
- * chain needs no margin and fills its tile. `reach` multiplies that start distance: above
- * 1 the links start scattered beyond the box, some of them off screen. `scatter` (0 to
- * 1) breaks the start's symmetry: each link's start is turned and stretched by its own
- * fixed amount (the same on every load, and in the prerendered page), so a symmetric
- * chain starts in disorder and falls into symmetry. The offsets assume the CSS factor
- * of 1.6 that board.css applies to --apart.
+ * Raw links (centres and reach, in chain order) → laid-out quarters: shifted so the box
+ * (plus `margin` radii all round) starts at (0, 0), coloured (symmetrically when the
+ * shape is mirror-symmetric), each with its assembly offset (see chainQuarters).
+ * `spreadX` stretches the crossing starts sideways only: a narrow shape on a wide stage
+ * still starts scattered across the screen.
  */
-export function chainQuarters(
+function assemble(
+  raw: RawLink[],
   R: number,
-  steps: string,
-  first: 'h' | 'v' = 'v',
-  margin = 0,
-  cross = false,
-  reach = 1,
-  scatter = 0,
+  margin: number,
+  cross: boolean,
+  reach: number,
+  scatter: number,
+  spreadX = 1,
 ): { quarters: Quarter[]; width: number; height: number } {
-  let cx = 0;
-  let cy = 0;
-  let sx = 1;
-  let sy = 1;
-  let edge = first;
-  const raw: { cx: number; cy: number; sx: number; sy: number }[] = [{ cx, cy, sx, sy }];
-  for (const step of steps) {
-    if (edge === 'h') {
-      if (step === 'B') {
-        cx += sx * R;
-        sx = -sx;
-      }
-      sy = -sy;
-    } else {
-      if (step === 'B') {
-        cy += sy * R;
-        sy = -sy;
-      }
-      sx = -sx;
-    }
-    raw.push({ cx, cy, sx, sy });
-    edge = edge === 'h' ? 'v' : 'h';
-  }
   const xs = raw.flatMap((q) => [q.cx, q.cx + q.sx * R]);
   const ys = raw.flatMap((q) => [q.cy, q.cy + q.sy * R]);
   // a margin all round, so the links still fit while they are apart
@@ -344,7 +317,7 @@ export function chainQuarters(
         corner: CORNER_OF(q.sx, q.sy),
         run: symmetric?.[i] ?? (CHAIN_RUNS[i % CHAIN_RUNS.length] as RunName),
         // crossing: start at the mirror image, -2u, which the CSS reaches at 1.6 × dx
-        dx: Math.round((cross ? sx0 / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
+        dx: Math.round((cross ? (sx0 * spreadX) / 1.6 : (ux / len) * R * 0.16) * 100) / 100,
         dy: Math.round((cross ? sy0 / 1.6 : (uy / len) * R * 0.16) * 100) / 100,
       };
     }),
@@ -353,16 +326,102 @@ export function chainQuarters(
   };
 }
 
-/** The site's chain (the hero's big picture and the share image). It LANDS SYMMETRIC: ten
- *  links in an arch, mirrored left to right in shape and colour (a half-disc in the
- *  middle, three links stepping down on each side), so the scroll resolves into order.
- *  The arch is WIDE (about 1.9 : 1) so it fills the width of a desktop screen and still
- *  lands whole; a 4 : 3 shape would be cut top and bottom at full width. Its links start
- *  scattered and out of order (`reach` 1.35 × the mirror distance, each turned and
- *  stretched by its own `scatter`, some off screen), cross through each other, and fall
- *  into symmetry. The margin (0.04 of a slice's radius) keeps the arch just off
- *  the screen's edges. Found by searching every step string up to ten links for a
- *  mirror-symmetric chain without a doubled quarter. */
+/**
+ * A chain of quarters of radius `R`, starting with a quarter centred at the origin and
+ * reaching right and down. `steps` holds one letter per link after the first; the
+ * chain leaves each quarter across the radius it did not come in by, starting with
+ * `first` ('h': the horizontal radius, 'v': the vertical one). Returns the quarters
+ * shifted so the chain's box (plus `margin` radii all round) starts at (0, 0), and
+ * that box's size.
+ *
+ * Each quarter's assembly offset (dx, dy) is either OUTWARD from the chain's middle
+ * (a short slide home), or, with `cross`, the MIRROR of its place through that middle:
+ * every link starts on the far side of the box and travels through the middle, past
+ * the others, into place. The mirror of a link lies inside the same box, so a crossing
+ * chain needs no margin and fills its tile. `reach` multiplies that start distance: above
+ * 1 the links start scattered beyond the box, some of them off screen. `scatter` (0 to
+ * 1) breaks the start's symmetry: each link's start is turned and stretched by its own
+ * fixed amount (the same on every load, and in the prerendered page), so a symmetric
+ * chain starts in disorder and falls into symmetry. The offsets assume the CSS factor
+ * of 1.6 that board.css applies to --apart.
+ */
+export function chainQuarters(
+  R: number,
+  steps: string,
+  first: 'h' | 'v' = 'v',
+  margin = 0,
+  cross = false,
+  reach = 1,
+  scatter = 0,
+): { quarters: Quarter[]; width: number; height: number } {
+  let cx = 0;
+  let cy = 0;
+  let sx = 1;
+  let sy = 1;
+  let edge = first;
+  const raw: RawLink[] = [{ cx, cy, sx, sy }];
+  for (const step of steps) {
+    if (edge === 'h') {
+      if (step === 'B') {
+        cx += sx * R;
+        sx = -sx;
+      }
+      sy = -sy;
+    } else {
+      if (step === 'B') {
+        cy += sy * R;
+        sy = -sy;
+      }
+      sx = -sx;
+    }
+    raw.push({ cx, cy, sx, sy });
+    edge = edge === 'h' ? 'v' : 'h';
+  }
+  return assemble(raw, R, margin, cross, reach, scatter);
+}
+
+/**
+ * A FIGURE OF 8: two whole discs of radius `R` (four quarters each round one centre),
+ * one on the other, touching at the waist. Its links are in the order a pen draws the
+ * 8 (round the top loop, through the waist, round the bottom), so the colours alternate
+ * warm and cool along it, and they are mirrored left to right like the chain's.
+ * The rest (margin, crossing starts, reach, scatter) is the chain's: see chainQuarters.
+ */
+export function eightQuarters(
+  R: number,
+  margin = 0,
+  reach = 1,
+  scatter = 0,
+  spreadX = 1,
+): { quarters: Quarter[]; width: number; height: number } {
+  const top = 0;
+  const bottom = 2 * R;
+  const raw: RawLink[] = [
+    // the top loop, from the waist on the right, over the top, back down to the waist
+    { cx: 0, cy: top, sx: 1, sy: 1 },
+    { cx: 0, cy: top, sx: 1, sy: -1 },
+    { cx: 0, cy: top, sx: -1, sy: -1 },
+    { cx: 0, cy: top, sx: -1, sy: 1 },
+    // through the waist into the bottom loop, round it and back up
+    { cx: 0, cy: bottom, sx: 1, sy: -1 },
+    { cx: 0, cy: bottom, sx: 1, sy: 1 },
+    { cx: 0, cy: bottom, sx: -1, sy: 1 },
+    { cx: 0, cy: bottom, sx: -1, sy: -1 },
+  ];
+  return assemble(raw, R, margin, true, reach, scatter, spreadX);
+}
+
+/** The site's hero picture: it LANDS AS A TALL FIGURE OF 8,
+ *  two whole discs one on the other (1 : 2), mirrored left to right in shape and colour,
+ *  so the scroll resolves into one calm, ordered figure. Its links start scattered across
+ *  the whole width of the screen (`reach` 1.35 × the mirror distance, `spreadX` 2.4
+ *  sideways, since the 8 is narrow on a wide screen; each turned and stretched by its own
+ *  `scatter`, some off screen), cross through each other, and fall into place. The margin
+ *  (0.04 of a quarter's radius) keeps it just off the screen's top and bottom. */
+export const SITE_EIGHT = { margin: 0.04, reach: 1.35, scatter: 0.8, spreadX: 2.4 } as const;
+
+/** The wide symmetric arch: the hero's shape before the figure of 8, and still the share
+ *  image's (scripts/make-og-image.mjs), whose wide card it fills. */
 export const SITE_CHAIN = { steps: 'ABBBABBBA', first: 'v', margin: 0.04, cross: true, reach: 1.35, scatter: 0.8 } as const;
 
 /**
