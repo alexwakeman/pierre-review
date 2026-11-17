@@ -3,6 +3,7 @@ import { Link } from '../../router';
 import { SITE_NAME } from '../../lib/site';
 import { EnsembleStory } from './EnsembleStory';
 import { BuildStory } from './BuildStory';
+import { snakeMask } from './snake';
 
 // ---------------------------------------------------------------------------
 // The home page's three sections after the hero: review as an ensemble (the team
@@ -63,37 +64,38 @@ const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   },
 ];
 
+const SNAKE_RADIUS = 14;
+const SNAKE_STROKE = 2;
+
 /**
- * ONE GRADIENT ACROSS THE FOUR BOXES' EDGES (pages/home.css § the spectral edge): every
- * box's ring is a slice of the same colour wheel, centred on the middle of the four. Each
- * box is told where that middle is, from its own top-left (--ring-x, --ring-y) and how big
- * the wheel must be to cover all four (--ring-d). Measured on mount and on every resize;
- * the turning on scroll is CSS. Before this runs (the prerendered page) each box shows its
- * own still slice.
+ * THE SNAKE (./snake.ts, pages/home.css § the snake): one line down through the four boxes,
+ * shown as a mask over the shared colour wheel. Measured on mount and on every resize:
+ * the boxes' tops and bottoms in the column, and the wheel's size (well past the column's
+ * corners). Until then the line is not drawn at all.
  */
-function useSharedRing(ref: React.RefObject<HTMLDivElement>): void {
+function useSnake(ref: React.RefObject<HTMLDivElement>): void {
   useEffect(() => {
     const box = ref.current;
-    if (!box || typeof ResizeObserver === 'undefined') return;
+    const line = box?.querySelector<HTMLElement>(':scope > .ens-snake');
+    if (!box || !line || typeof ResizeObserver === 'undefined') return;
     const tiles = Array.from(box.querySelectorAll<HTMLElement>(':scope > .tile'));
     const measure = (): void => {
-      // offsets, not getBoundingClientRect: a tile mid-reveal is translated
-      const cx = box.offsetWidth / 2;
-      const cy = box.offsetHeight / 2;
-      // well past the farthest corner, so no box's edge is ever left uncovered
-      const d = Math.hypot(box.offsetWidth, box.offsetHeight) * 1.6;
-      for (const t of tiles) {
-        t.style.setProperty('--ring-x', `${cx - t.offsetLeft}px`);
-        t.style.setProperty('--ring-y', `${cy - t.offsetTop}px`);
-        t.style.setProperty('--ring-d', `${d}px`);
-      }
+      // offsets, not getBoundingClientRect: the column may be mid-reveal (translated)
+      const w = box.offsetWidth;
+      const h = box.offsetHeight;
+      const boxes = tiles.map((t) => ({ top: t.offsetTop, bottom: t.offsetTop + t.offsetHeight }));
+      line.style.setProperty('--snake', snakeMask(boxes, w, h, SNAKE_RADIUS, SNAKE_STROKE));
+      line.style.setProperty('--wheel-d', `${Math.hypot(w, h) * 1.2}px`);
+      line.classList.add('on');
     };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(box);
     return () => {
       ro.disconnect();
-      for (const t of tiles) ['--ring-x', '--ring-y', '--ring-d'].forEach((v) => t.style.removeProperty(v));
+      line.classList.remove('on');
+      line.style.removeProperty('--snake');
+      line.style.removeProperty('--wheel-d');
     };
   }, [ref]);
 }
@@ -101,7 +103,7 @@ function useSharedRing(ref: React.RefObject<HTMLDivElement>): void {
 /** Review as an ensemble: the story of one pull request (EnsembleStory) and the four facts beside it. */
 export function EnsembleSection(): JSX.Element {
   const points = useRef<HTMLDivElement>(null);
-  useSharedRing(points);
+  useSnake(points);
   return (
     <section id="ensemble" className="section chapter" aria-labelledby="ens-h">
       <div className="chap rise">
@@ -115,16 +117,20 @@ export function EnsembleSection(): JSX.Element {
         <div className="tile circle rise">
           <EnsembleStory />
         </div>
-        <div className="ens-points" ref={points}>
+        <div className="ens-points rise" ref={points}>
           {ENSEMBLE_POINTS.map((pt) => (
-            <div key={pt.h} className="tile rise">
+            <div key={pt.h} className="tile">
               <h3>{pt.h}</h3>
               <p>{pt.p}</p>
             </div>
           ))}
-          <p className="ens-more rise">
+          <p className="ens-more">
             <Link to="/ensemble-review">How ensemble review works →</Link>
           </p>
+          {/* the snake: the colour wheel, seen only through one line down the boxes */}
+          <div className="ens-snake" aria-hidden="true">
+            <div className="ens-wheel" />
+          </div>
         </div>
       </div>
     </section>
