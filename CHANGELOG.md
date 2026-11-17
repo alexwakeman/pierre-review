@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.57] - 2026-11-17
+
 ### Changed
 
 - AI Review: "Where this PR stands" is now "Latest review by each person" and shows each person's newest
