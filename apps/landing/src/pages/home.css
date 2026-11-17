@@ -622,7 +622,8 @@
    still slice; with no scroll-driven animations, or reduced motion, the wheel stands still. */
 .lb.home .ens-points > .tile {
   isolation: isolate;
-  background: transparent;
+  /* what the edge shows if the wheel is ever not drawn (it once read grey on a phone) */
+  background: color-mix(in srgb, var(--violet) 55%, var(--surface));
   border-radius: 6px;
 }
 .lb.home .ens-points > .tile::before {
@@ -631,8 +632,9 @@
   z-index: -2;
   left: var(--ring-x, 50%);
   top: var(--ring-y, 50%);
-  width: var(--ring-d, 300%);
+  width: var(--ring-d, 400%);
   aspect-ratio: 1;
+  opacity: 0.75; /* subtle: an edge, not a rainbow */
   /* the voice tiles' own hues only (board.css --run-dusk, --run-meadow, --run-bloom):
      plum, violet, azure, teal, mint, and a touch of pink, looping back to plum */
   background: conic-gradient(
@@ -674,12 +676,13 @@
     }
   }
 }
+/* slow: a quarter turn over the whole passage of the boxes through the screen */
 @keyframes ring-turn {
   from {
     transform: translate(-50%, -50%) rotate(0deg);
   }
   to {
-    transform: translate(-50%, -50%) rotate(360deg);
+    transform: translate(-50%, -50%) rotate(90deg);
   }
 }
 .lb.home .ens-points h3,

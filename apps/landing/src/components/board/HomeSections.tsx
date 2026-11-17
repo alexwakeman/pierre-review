@@ -80,7 +80,8 @@ function useSharedRing(ref: React.RefObject<HTMLDivElement>): void {
       // offsets, not getBoundingClientRect: a tile mid-reveal is translated
       const cx = box.offsetWidth / 2;
       const cy = box.offsetHeight / 2;
-      const d = Math.hypot(box.offsetWidth, box.offsetHeight) * 1.1;
+      // well past the farthest corner, so no box's edge is ever left uncovered
+      const d = Math.hypot(box.offsetWidth, box.offsetHeight) * 1.6;
       for (const t of tiles) {
         t.style.setProperty('--ring-x', `${cx - t.offsetLeft}px`);
         t.style.setProperty('--ring-y', `${cy - t.offsetTop}px`);
