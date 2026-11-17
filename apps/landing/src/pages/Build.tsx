@@ -115,7 +115,7 @@ export default function Build(): JSX.Element {
         <div className="tile bd-name">
           <h1 id="bd-h1">A ticket in. A pull request out.</h1>
           <p className="bd-lead">
-            One press of <b>Build end to end</b>. {SITE_NAME} gives your own Claude Code or Codex the ticket, your
+            Define the work well, and the rest is one press of <b>Build end to end</b>. {SITE_NAME} gives your own Claude Code or Codex the ticket, your
             docs and your code, in a sandbox on your machine. It refines the ticket, plans, builds, reviews its own
             work in rounds and opens the pull request.
           </p>

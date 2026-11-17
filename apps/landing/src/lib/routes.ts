@@ -54,7 +54,7 @@ export type RouteSeo = {
 export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/': {
     title: `${SITE_NAME} — refine, build and review as an ensemble`,
-    description: `${SITE_NAME} takes a ticket from your tracker, checks it against your docs and code, implements it, reviews it in rounds and opens the pull request. Each teammate reviews with their own Claude or Codex, and GitHub is the source of truth. It runs fully on your machine, with no added service. Free for up to ${FREE_TEAM_SIZE} people: npx ${NPM_PACKAGE}.`,
+    description: `${SITE_NAME} takes a ticket from your tracker, checks it against your docs and code, implements it, reviews it in rounds and opens the pull request, with your own Claude or Codex. You decide what to build; it does the prompting, checking and re-reviewing, on your machine, with no added service. Teammates can join in. Free for up to ${FREE_TEAM_SIZE} people: npx ${NPM_PACKAGE}.`,
   },
   '/build': {
     title: `Build — one click from ticket to pull request · ${SITE_NAME}`,
@@ -62,11 +62,11 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   },
   '/ensemble-review': {
     title: `Ensemble review — no review bot seat, one review per commit · ${SITE_NAME}`,
-    description: `No review bot seat: each teammate reviews with their own Claude or Codex, on their own machine, and each change is checked against its ticket. There is no server between you: GitHub is the source of truth. A status line on each commit stops two people reviewing it twice, and every posted review joins one list. Free for up to ${FREE_TEAM_SIZE} people.`,
+    description: `No review bot seat: your own Claude or Codex reviews every pull request on your machine, the same way on every push, and each change is checked against its ticket. Teammates each run their own, with no server between you: GitHub is the source of truth, and a status line on each commit stops two people reviewing it twice. Free for up to ${FREE_TEAM_SIZE} people.`,
   },
   '/automation': {
     title: `Automation — dependency updates, merged without you · ${SITE_NAME}`,
-    description: `${SITE_NAME} handles Dependabot and Renovate pull requests end to end on your machine: it approves, fixes, resolves conflicts and merges when checks pass, and claims each one on GitHub so only one teammate acts.`,
+    description: `${SITE_NAME} handles Dependabot and Renovate pull requests end to end on your machine: it approves, fixes, resolves conflicts and merges when checks pass, and claims each one on GitHub, so each update is handled once.`,
   },
   '/everything-else': {
     title: `Everything else — open pull requests, reports and how we measure · ${SITE_NAME}`,

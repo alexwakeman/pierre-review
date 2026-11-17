@@ -96,7 +96,7 @@ export default function Automation(): JSX.Element {
           />
         </div>
         <div className="tile verdigris bd-say">
-          <p>One teammate handles each update. Nobody has to open it.</p>
+          <p>Each update is handled once. Nobody has to open it.</p>
         </div>
         <div className="tile gold bd-go">
           <p className="btns">
@@ -163,13 +163,13 @@ export default function Automation(): JSX.Element {
         </div>
       </section>
 
-      {/* ---- once per team ------------------------------------------------ */}
+      {/* ---- once, however many of you ------------------------------------ */}
       <section className="section board bd-verify" aria-labelledby="au-team-h">
         <div className="tile gold bd-vhead rise">
-          <h2 id="au-team-h">Once per team.</h2>
+          <h2 id="au-team-h">Once, however many of you.</h2>
           <p>
-            Every teammate runs {SITE_NAME} on their own machine, and there is no server between you. GitHub keeps
-            the score, the same way it does for reviews.
+            Alone, it just runs. With teammates, each runs {SITE_NAME} on their own machine, with no server between
+            you, and GitHub keeps the score the same way it does for reviews.
           </p>
         </div>
         <div className="tile bd-tier rise">
@@ -238,7 +238,7 @@ export default function Automation(): JSX.Element {
             items={[
               <Link key="d" to="/docs/settings/dependencies">Settings → Dependencies</Link>,
               <Link key="s" to="/docs/security/ai-and-the-sandbox">AI and the sandbox</Link>,
-              <Link key="e" to="/ensemble-review">How the team shares the work</Link>,
+              <Link key="e" to="/ensemble-review">Running it with teammates</Link>,
             ]}
           />
         </div>

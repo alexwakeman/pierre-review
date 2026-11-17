@@ -24,14 +24,16 @@ export function HowItWorks(): JSX.Element {
       <div className="chap rise">
         <h2 id="how-h">One click from ticket to pull request</h2>
         <p>
-          Press Build end to end. {SITE_NAME} refines the ticket, builds it, reviews it until it is clean, opens the
-          pull request and updates the ticket.
+          Spend your time on what the ticket should say, not on prompting and checking. Press Build end to end:{' '}
+          {SITE_NAME} refines the ticket, builds it, reviews it until it is clean, opens the pull requests and updates
+          the ticket.
         </p>
       </div>
       <div className="board flow">
         <div className="tile flow-stage rise">
           <BuildStory />
         </div>
+        <p className="flow-note rise">No prompt to write, no context to paste, no review rounds to sit through.</p>
         <p className="flow-more rise">
           <Link to="/build">How the build works →</Link>
         </p>
@@ -40,23 +42,23 @@ export function HowItWorks(): JSX.Element {
   );
 }
 
-/** The teammates around one pull request: who they are and which agent they review with. */
+/** The four facts beside the review story, in one person's voice, each saying what you no longer do. */
 const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   {
-    h: 'No review bot seat',
-    p: 'Each teammate reviews with their own Claude or Codex, on the plan they already have. Nothing to buy, nothing to host.',
+    h: 'Your plan, no bot seat',
+    p: 'Reviews run on your own Claude or Codex. Nothing to buy, nothing to host.',
   },
   {
     h: 'Checked against the ticket',
-    p: "Each change is checked against its ticket's acceptance criteria and description, and your docs. It says what is met and what is still open.",
+    p: "Every change is checked against its acceptance criteria and your docs, so you don't have to tick them off yourself.",
   },
   {
-    h: 'The same review, every time',
-    p: 'Auto review runs on every push, the same way, with Claude and Codex together when you have both. A status line on the commit says who is reviewing it, so nobody reviews it twice.',
+    h: 'Every push, the same review',
+    p: 'Auto review runs on each push, Claude and Codex together when you have both. With teammates, each commit is reviewed once.',
   },
   {
     h: 'It fixes, then goes back',
-    p: 'When a review finds problems on your pull request, your Ensemble fixes them with your agent and pushes the fix. Red CI and SonarCloud issues too. Then it goes back for review.',
+    p: 'Findings, red CI and SonarCloud issues are fixed by your agent and pushed, then reviewed again. You read the result, not every round.',
   },
 ];
 
@@ -67,8 +69,8 @@ export function EnsembleSection(): JSX.Element {
       <div className="chap rise">
         <h2 id="ens-h">Review as an ensemble</h2>
         <p>
-          The process of a review bot, on the Claude and Codex plans your team already has. Every pull request gets the
-          same review, checked against its ticket.
+          Your Claude and Codex review every pull request, against its ticket, on the plan you already have. Add
+          teammates and their Ensembles join in.
         </p>
       </div>
       <div className="board ensemble">
@@ -113,8 +115,8 @@ export function BotsSection(): JSX.Element {
           <p>When every check passes. If anyone pushes in the meantime, it stops.</p>
         </div>
         <div className="tile gold rise">
-          <h3>Once per team</h3>
-          <p>One teammate&rsquo;s {SITE_NAME} claims each pull request on GitHub, so it is done once.</p>
+          <h3>Once, not twice</h3>
+          <p>Each update is handled once, even when several people run {SITE_NAME}.</p>
           <p className="more">
             <Link to="/automation">Everything it automates →</Link>
           </p>

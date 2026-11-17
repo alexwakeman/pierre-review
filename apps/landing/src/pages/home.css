@@ -7,7 +7,7 @@
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
      scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-eight-out.scene-reverse (then close): Scene.tsx
      hero       .hero > .hero-card > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
-     flow       .board.flow > .tile.flow-stage (BuildStory: svg.bstory-svg + .story-cap) · p.flow-more
+     flow       .board.flow > .tile.flow-stage (BuildStory: svg.bstory-svg + .story-cap) · p.flow-note · p.flow-more
      ensemble   .board.ensemble > .tile.circle (EnsembleStory: svg.story-svg + .story-cap) · .ens-points > .tile (h3, p) · p.ens-more
      bots       .board.bots > .tile (h3, p, p.more)
      strip      .strip > .ww-say (h2, p) · ul.ww-tools > li (.ww-mk > .logo-mk, .ww-nm > small)
@@ -499,6 +499,13 @@
   grid-column: 1 / -1;
   padding: 24px;
 }
+.lb.home .flow-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 4px 6px 0;
+  font-size: 18px;
+  color: #dcdad5;
+}
 .lb.home .flow-more,
 .lb.home .ens-more {
   grid-column: 1 / -1;
@@ -602,6 +609,87 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+/* THE SPECTRAL EDGE: each box is ringed by the quarter circles' spectrum, and the colours
+   travel round the ring as the page scrolls. The ring is a big conic gradient (::before)
+   behind the box's own ground (::after, inset by the ring's width); scrolling ROTATES the
+   gradient, a transform, so the compositor does it and nothing repaints. Each box starts a
+   quarter turn on from the one before, so the colour seems to pass from box to box. With no
+   scroll-driven animations (or reduced motion) the ring is still, at each box's start. */
+.lb.home .ens-points > .tile {
+  isolation: isolate;
+  background: transparent;
+  border-radius: 6px;
+  --ring-a: 0deg;
+}
+.lb.home .ens-points > .tile:nth-child(2) {
+  --ring-a: 90deg;
+}
+.lb.home .ens-points > .tile:nth-child(3) {
+  --ring-a: 270deg;
+}
+.lb.home .ens-points > .tile:nth-child(4) {
+  --ring-a: 180deg;
+}
+.lb.home .ens-points > .tile::before {
+  content: '';
+  position: absolute;
+  z-index: -2;
+  left: 50%;
+  top: 50%;
+  width: 300%;
+  aspect-ratio: 1;
+  /* the spectrum (components/arcs/geometry.ts SPECTRUM), once round, back to red */
+  background: conic-gradient(
+    #f80e0f,
+    #ff6a00,
+    #fe9c00,
+    #ffcf00,
+    #d6e92b,
+    #86c246,
+    #52c395,
+    #3faca9,
+    #4ba0e0,
+    #5b7cc1,
+    #6f47a7,
+    #883a9f,
+    #ee0056,
+    #f70e6a,
+    #f80e0f
+  );
+  transform: translate(-50%, -50%) rotate(var(--ring-a));
+  pointer-events: none;
+}
+.lb.home .ens-points > .tile::after {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 2px;
+  border-radius: 4px;
+  background: var(--surface);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    /* the BOX's own passage through the screen (the ring is far bigger than the box) */
+    .lb.home .ens-points > .tile {
+      view-timeline: --ring block;
+    }
+    .lb.home .ens-points > .tile::before {
+      will-change: transform;
+      animation: ring-turn linear both;
+      animation-timeline: --ring;
+      animation-range: entry 0% exit 100%;
+    }
+  }
+}
+@keyframes ring-turn {
+  from {
+    transform: translate(-50%, -50%) rotate(var(--ring-a));
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(calc(var(--ring-a) + 360deg));
+  }
 }
 .lb.home .ens-points h3,
 .lb.home .bots h3 {
