@@ -32,7 +32,7 @@ export function snakePath(boxes: SnakeBox[], width: number, radius: number, stro
       d += `L${f(other)} ${f(y)}`;
       return;
     }
-    // across the bottom, then turn down into the gap toward the next box's side
+    // along the seam, then round the next box's top corner and down its side
     d += `L${f(other - dir * radius)} ${f(y)}A${r} ${r} 0 0 ${dir > 0 ? 1 : 0} ${f(other)} ${f(y + radius)}`;
   });
   return d;
