@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 
 // ---------------------------------------------------------------------------
 // A SCENE: one big arc picture PINNED to the screen while the page scrolls over it
-// (the home page's Chain under the hero, its Quartet after "Dependency updates").
+// (the home page's figure of 8 under the hero, and the same 8 in reverse after "Dependency
+// updates": it arrives assembled and comes apart).
 //
 //   section.scene                       its own scroll timeline (--scene, a view timeline)
 //     .scene-art   sticky, one screen   the picture, full width, behind everything
@@ -12,7 +13,8 @@ import type { ReactNode } from 'react';
 //                                         then `after` (the next section)
 //
 // THE TIMING, in vh of scroll after the scene's top reaches the screen's top (S):
-//   S 0 → gather     the quarters come together (arc-gather, on every layer)
+//   S 0 → gather     the quarters come together (arc-gather, on every layer); with
+//                    `reverse` they start together and come apart over the same span
 //   S 0 → fadeIn     the picture fades up from FADED_START to full
 //   outStart → outEnd it fades down to FADED_END as `after` slides over it
 // `after` enters at the screen's bottom when S = (height of `before`) + runway − 100vh,
@@ -47,12 +49,16 @@ export function Scene({
   before,
   after,
   className,
+  reverse,
 }: {
   art: ReactNode;
   timing: SceneTiming;
   before?: ReactNode;
   after: ReactNode;
   className?: string;
+  /** Play the gather backwards: the picture arrives assembled and comes APART as the page
+   *  scrolls (the home page's closing 8, the hero's in reverse). */
+  reverse?: boolean;
 }): JSX.Element {
   const t = timing;
   const vars = {
@@ -64,7 +70,7 @@ export function Scene({
   } as React.CSSProperties;
   return (
     <div
-      className={['scene', className].filter(Boolean).join(' ')}
+      className={['scene', reverse && 'scene-reverse', className].filter(Boolean).join(' ')}
       style={vars}
       data-gather={t.gather}
       data-in={t.fadeIn}

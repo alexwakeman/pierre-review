@@ -11,7 +11,8 @@ import { FADED_END, FADED_START } from './Scene';
 //            timeline: from its top edge reaching the viewport's bottom, through
 //            its own height, and 30% of (viewport height − its height) more.
 //   scenes   (Scene.tsx) S = vh scrolled since the scene's top reached the screen's
-//            top; apart = 1 − S / gather, and the two fades from its data-* timing.
+//            top; apart = 1 − S / gather (S / gather for a reverse scene), and the
+//            two fades from its data-* timing.
 // CSS already paints every layer apart, so nothing flashes before this runs.
 // ---------------------------------------------------------------------------
 
@@ -23,6 +24,8 @@ interface SceneTrack {
   fadeIn: HTMLElement | null;
   fadeOut: HTMLElement | null;
   t: { gather: number; fadeIn: number; outStart: number; outEnd: number };
+  /** A reverse scene comes apart: apart = S / gather. */
+  reverse: boolean;
   last: number;
 }
 
@@ -56,6 +59,7 @@ export function startArcMotion(root: HTMLElement): () => void {
       outStart: Number(el.dataset.outStart) || 100,
       outEnd: Number(el.dataset.outEnd) || 160,
     },
+    reverse: el.classList.contains('scene-reverse'),
     last: -1,
   }));
   if (tracks.length === 0 && scenes.length === 0) return () => undefined;
@@ -83,7 +87,7 @@ export function startArcMotion(root: HTMLElement): () => void {
       const S = sceneS[i] ?? 0;
       if (Math.abs(S - sc.last) < 0.05) return;
       sc.last = S;
-      const a = clamp(1 - S / sc.t.gather);
+      const a = sc.reverse ? clamp(S / sc.t.gather) : clamp(1 - S / sc.t.gather);
       const tf = a === 0 ? 'none' : `translate3d(calc(var(--ax) * ${a.toFixed(4)}), calc(var(--ay) * ${a.toFixed(4)}), 0)`;
       for (const l of sc.layers) l.style.transform = tf;
       if (sc.fadeIn) sc.fadeIn.style.opacity = (FADED_START + (1 - FADED_START) * clamp(S / sc.t.fadeIn)).toFixed(3);

@@ -5,7 +5,7 @@
 
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
-     scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-quartet (then close): Scene.tsx
+     scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-eight-out.scene-reverse (then close): Scene.tsx
      hero       .hero > .hero-card > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
      flow       .board.flow > .tile.flow-stage (BuildStory: svg.bstory-svg + .story-cap) · p.flow-more
      ensemble   .board.ensemble > .tile.circle (EnsembleStory: svg.story-svg + .story-cap) · .ens-points > .tile (h3, p) · p.ens-more
@@ -16,7 +16,7 @@
      why        .board.why4 > .tile (h3, p, p.more)
      tiers      .board.tiers > .tile.gold | .tile.lapis (.k, h3, ul, .cmd)
      faq        .board.faq > .tile (h3, p)
-     close      .board.close > .tile.gold.mid (h2, .cmd) · .tile.lapis.side, over the pinned Quartet
+     close      .board.close > .tile.gold.mid (h2, .cmd) · .tile.lapis.side, over the pinned 8 coming apart
    Under 961px everything restacks to one column.
    =========================================================================== */
 

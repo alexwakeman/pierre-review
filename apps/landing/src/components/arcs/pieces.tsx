@@ -1,19 +1,16 @@
 import { Arcs } from './Arcs';
-import { eightQuarters, quartetQuarters, SITE_EIGHT } from './geometry';
+import { eightQuarters, SITE_EIGHT } from './geometry';
 import type { Corner, Quarter, RunName } from './geometry';
 
 // ---------------------------------------------------------------------------
 // The compositions. Every picture on the site is one of these, drawn from the same
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
-//   Quartet    four equal quarters facing one centre, "four sensible people
-//              conversing", in the close at the foot of the page. Its quarters
-//              start well beyond the opposite corners, cross through the middle as
-//              it scrolls into view, and land overlapping.
-//   Chain      quarters linked end to end, each a different voice, whose bands run
-//              on from link to link (the hero's big picture). Its links start
-//              scattered across the screen and cross through each other into place as
-//              the reader scrolls down, landing as a tall figure of 8 (SITE_EIGHT).
+//   Chain      the home page's big picture, twice: quarters, each a different voice,
+//              whose links start scattered across the screen and cross through each
+//              other into place as the reader scrolls down, landing as a tall figure
+//              of 8 (SITE_EIGHT); and after "Dependency updates" the same 8 in reverse,
+//              arriving whole and coming apart (Scene `reverse`).
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -24,7 +21,7 @@ interface PieceProps {
   className?: string;
   label?: string;
   lead?: boolean;
-  /** 'slice' fills a wide stage and crops (the Quartet full width); default 'meet'. */
+  /** 'slice' fills the box and crops; default 'meet'. */
   fit?: 'meet' | 'slice';
 }
 
@@ -39,34 +36,9 @@ export function Chain({ className, label, lead }: PieceProps): JSX.Element {
       quarters={CHAIN.quarters}
       // the links cross through each other on the way in: overlaps mix like light
       blend
-      className={className}
+      className={['eight', className].filter(Boolean).join(' ')}
       label={label}
       fit="meet"
-    />
-  );
-}
-
-// R 62: the quarters overlap in the middle and land on crossing lines. They cross
-// into place like the hero's Chain, starting at TWICE the mirror distance, beyond
-// the opposite corner (the tile clips them until they fly in). The margin leaves
-// room for the corner dots.
-const QUARTET = quartetQuarters(4, 62, true, 2);
-// The STAGE quartet (Home.tsx, pinned full width): it starts just past the mirror of
-// its place (reach 1.15), so the pinned screen is never empty, and its players are
-// small, since a unit there is many pixels.
-const QUARTET_STAGE = quartetQuarters(4, 62, true, 1.15, 1.1);
-
-export function Quartet({ className, label, lead, fit = 'meet', stage }: PieceProps & { stage?: boolean }): JSX.Element {
-  const q = stage ? QUARTET_STAGE : QUARTET;
-  return (
-    <Arcs
-      lead={lead}
-      viewBox={q.viewBox}
-      className={className}
-      label={label}
-      fit={fit}
-      blend
-      quarters={q.quarters}
     />
   );
 }

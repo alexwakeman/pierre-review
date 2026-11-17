@@ -392,9 +392,9 @@ body:has(.lb) {
 .lb .scene .arcs.end .arcs-box {
   left: calc((100cqw - var(--bw)) / 2); /* centred behind the page, not anchored right */
 }
-/* The hero's figure of 8, a little less bright at every stage of its fade: one still
+/* The figure of 8 (the hero's, and the closing one), a little less bright at every stage of its fade: one still
    opacity under the scene's own (they multiply), so nothing new moves on a scroll. */
-.lb .scene-chain .scene-out > .arcs {
+.lb .scene-out > .arcs.eight {
   opacity: 0.82;
 }
 .lb .scene-over {
@@ -412,6 +412,10 @@ body:has(.lb) {
       animation: arc-gather linear both;
       animation-timeline: --scene;
       animation-range: contain 0px contain var(--sc-gather);
+    }
+    /* a reverse scene: the same span, played backwards (together → apart) */
+    .lb .scene.scene-reverse .arcs .layer {
+      animation-direction: reverse;
     }
     .lb .scene-in {
       animation: scene-fade-in linear both;
