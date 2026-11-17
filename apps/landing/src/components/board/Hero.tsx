@@ -34,12 +34,8 @@ export function Hero(): JSX.Element {
         </div>
         <figure className="tile motto">
           <blockquote>
-            {/* ⚠ Poincaré's own words (the English translation), cut with an ellipsis and
-                never reworded: a reworded line would need "after Poincaré". */}
-            <p>
-              “It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once
-              both the ensemble and the details.”
-            </p>
+            {/* Poincaré's line (the English translation), shortened. */}
+            <p>“It is the harmony of the diverse parts … that permits us to see both the ensemble and the details.”</p>
           </blockquote>
           <figcaption>
             <a href="https://en.wikipedia.org/wiki/Henri_Poincar%C3%A9" target="_blank" rel="noreferrer noopener">

@@ -64,7 +64,7 @@ code { font: 500 22px ui-monospace, SFMono-Regular, Menlo, monospace; background
   <div class="foot"><code>npx ensemble-review</code><span class="url">ensemble.ac</span></div>
 </div>
 <div class="tile art">${chainSvg()}</div>
-<div class="tile motto"><p>“It is the harmony of the diverse parts … that permits us to see clearly and to comprehend at once both the ensemble and the details.”</p><span>Henri Poincaré, <i>Science and Method</i>, 1908</span></div>
+<div class="tile motto"><p>“It is the harmony of the diverse parts … that permits us to see both the ensemble and the details.”</p><span>Henri Poincaré, <i>Science and Method</i>, 1908</span></div>
 </body></html>`;
 
 // CHROMIUM_PATH: a Chrome binary other than the one this Playwright downloaded.
