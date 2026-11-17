@@ -601,7 +601,8 @@
   position: relative; /* the boxes' offsetLeft/Top are from here (useSharedRing) */
   grid-column: 7 / 13;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* ONE column at every width: the edge snakes down through the boxes (below) */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--gap);
   align-content: start;
 }
@@ -624,7 +625,6 @@
   isolation: isolate;
   /* what the edge shows if the wheel is ever not drawn (it once read grey on a phone) */
   background: color-mix(in srgb, var(--violet) 55%, var(--surface));
-  border-radius: 6px;
 }
 .lb.home .ens-points > .tile::before {
   content: '';
@@ -657,10 +657,25 @@
   content: '';
   position: absolute;
   z-index: -1;
-  inset: 2px;
-  border-radius: 4px;
   background: var(--surface);
   pointer-events: none;
+}
+/* THE SNAKE: each box keeps only one side edge, its bottom edge and the rounded corner
+   between them, alternating left and right, so the line runs down one side, across the
+   bottom and on down the opposite side of the box below. Odd boxes: left + bottom. */
+.lb.home .ens-points > .tile:nth-child(odd) {
+  border-radius: 0 0 0 14px;
+}
+.lb.home .ens-points > .tile:nth-child(odd)::after {
+  inset: 0 0 2px 2px;
+  border-radius: 0 0 0 12px;
+}
+.lb.home .ens-points > .tile:nth-child(even) {
+  border-radius: 0 0 14px 0;
+}
+.lb.home .ens-points > .tile:nth-child(even)::after {
+  inset: 0 2px 2px 0;
+  border-radius: 0 0 12px 0;
 }
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
@@ -729,9 +744,6 @@
   }
 }
 @media (max-width: 760px) {
-  .lb.home .ens-points {
-    grid-template-columns: 1fr;
-  }
   .lb.home .bots > .tile {
     grid-column: 1 / -1;
     min-height: 0;
