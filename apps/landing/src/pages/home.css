@@ -619,8 +619,10 @@
    side, round the bottom corner, along the seam, round the next box's top corner and down
    its opposite side, every turn the same radius. It is the voice tiles' colour wheel seen
    through that line: .ens-snake covers the column, its MASK is the line (an SVG drawn
-   from the boxes' measured positions, HomeSections.tsx useSnake), and inside it the wheel
-   (.ens-wheel) turns slowly as the page scrolls, a transform on the compositor. The boxes
+   from the boxes' measured positions, HomeSections.tsx useSnake), and inside it a band of
+   colour (.ens-wheel, a straight gradient, never a conic one: a conic centre on the line
+   flashes every hue at once) turns slowly as the page scrolls, a transform on the
+   compositor. The boxes
    sit flush, so every turn of the line is a rounded corner of a box. Not drawn
    until measured (the prerendered page shows plain boxes); still under reduced motion. */
 /* Every corner the line turns through is a rounded corner of a box, the same radius
@@ -655,20 +657,15 @@
   width: var(--wheel-d, 200%);
   aspect-ratio: 1;
   opacity: 0.75; /* subtle: an edge, not a rainbow */
-  /* the voice tiles' own hues only (board.css --run-dusk, --run-meadow, --run-bloom):
-     plum, violet, azure, teal, mint, and a touch of pink, looping back to plum */
-  background: conic-gradient(
+  /* a STRAIGHT band of the voice tiles' cool hues (board.css --run-dusk, --run-meadow):
+     no wheel, so no centre where every colour meets in one point on the line */
+  background: linear-gradient(
+    180deg,
     var(--plum),
-    var(--violet),
-    var(--azure),
-    var(--teal),
-    var(--mint),
-    var(--teal),
-    var(--azure),
-    var(--violet),
-    var(--plum),
-    var(--pink),
-    var(--plum)
+    var(--violet) 25%,
+    var(--azure) 50%,
+    var(--teal) 75%,
+    var(--mint)
   );
   transform: translate(-50%, -50%);
 }

@@ -69,8 +69,8 @@ const SNAKE_STROKE = 2;
 
 /**
  * THE SNAKE (./snake.ts, pages/home.css § the snake): one line down through the four boxes,
- * shown as a mask over the shared colour wheel. Measured on mount and on every resize:
- * the boxes' tops and bottoms in the column, and the wheel's size (well past the column's
+ * shown as a mask over one band of colour. Measured on mount and on every resize:
+ * the boxes' tops and bottoms in the column, and the band's size (well past the column's
  * corners). Until then the line is not drawn at all.
  */
 function useSnake(ref: React.RefObject<HTMLDivElement>): void {
@@ -127,7 +127,7 @@ export function EnsembleSection(): JSX.Element {
           <p className="ens-more">
             <Link to="/ensemble-review">How ensemble review works →</Link>
           </p>
-          {/* the snake: the colour wheel, seen only through one line down the boxes */}
+          {/* the snake: one band of colour, seen only through one line down the boxes */}
           <div className="ens-snake" aria-hidden="true">
             <div className="ens-wheel" />
           </div>
