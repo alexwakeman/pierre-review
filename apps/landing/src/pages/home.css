@@ -598,12 +598,16 @@
   fill: #b9a3ff;
 }
 .lb.home .ens-points {
-  position: relative; /* the boxes' offsetLeft/Top are from here (useSharedRing) */
+  position: relative; /* the boxes' offsetTop and the snake are from here (useSnake) */
   grid-column: 7 / 13;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--gap);
+  /* ONE column at every width, the boxes FLUSH: the snake (below) runs down the seams */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   align-content: start;
+}
+.lb.home .ens-more {
+  margin-top: var(--gap);
 }
 .lb.home .ens-points > .tile {
   padding: 24px;
@@ -611,28 +615,44 @@
   flex-direction: column;
   gap: 10px;
 }
-/* THE SPECTRAL EDGE: the four boxes are ringed by ONE colour wheel of the voice tiles'
-   hues, centred on the middle of the four, so the colour runs on from one box's edge into
-   the next. Each box's ::before is that whole wheel, placed at the middle of the four
-   (--ring-x / --ring-y from the box's top-left, --ring-d across: measured in
-   HomeSections.tsx useSharedRing) and clipped by the box to its own edge: its ground
-   (::after) is inset by the ring's width. Scrolling TURNS the wheel, the same turn for all
-   four (one view timeline on .ens-points): a transform, so the compositor does it and
-   nothing repaints. Before the measurement (the prerendered page) each box shows its own
-   still slice; with no scroll-driven animations, or reduced motion, the wheel stands still. */
-.lb.home .ens-points > .tile {
-  isolation: isolate;
-  /* what the edge shows if the wheel is ever not drawn (it once read grey on a phone) */
-  background: color-mix(in srgb, var(--violet) 55%, var(--surface));
-  border-radius: 6px;
+/* THE SNAKE (components/board/snake.ts): ONE line down through the four boxes, down one
+   side, round the bottom corner, along the seam, round the next box's top corner and down
+   its opposite side, every turn the same radius. It is the voice tiles' colour wheel seen
+   through that line: .ens-snake covers the column, its MASK is the line (an SVG drawn
+   from the boxes' measured positions, HomeSections.tsx useSnake), and inside it the wheel
+   (.ens-wheel) turns slowly as the page scrolls, a transform on the compositor. The boxes
+   sit flush, so every turn of the line is a rounded corner of a box. Not drawn
+   until measured (the prerendered page shows plain boxes); still under reduced motion. */
+/* Every corner the line turns through is a rounded corner of a box, the same radius
+   (SNAKE_RADIUS): a box rounds the bottom corner on its line's side, and the top corner on
+   that side where the line comes in from the box above. The rest stay square. */
+.lb.home .ens-points > .tile:nth-child(odd) {
+  border-radius: 14px 0 0 14px;
 }
-.lb.home .ens-points > .tile::before {
-  content: '';
+.lb.home .ens-points > .tile:first-child {
+  border-top-left-radius: 0; /* the line starts here, straight down */
+}
+.lb.home .ens-points > .tile:nth-child(even) {
+  border-radius: 0 14px 14px 0;
+}
+.lb.home .ens-snake {
   position: absolute;
-  z-index: -2;
-  left: var(--ring-x, 50%);
-  top: var(--ring-y, 50%);
-  width: var(--ring-d, 400%);
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+  -webkit-mask: var(--snake) 0 0 / 100% 100% no-repeat;
+  mask: var(--snake) 0 0 / 100% 100% no-repeat;
+}
+.lb.home .ens-snake.on {
+  visibility: visible;
+}
+.lb.home .ens-wheel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--wheel-d, 200%);
   aspect-ratio: 1;
   opacity: 0.75; /* subtle: an edge, not a rainbow */
   /* the voice tiles' own hues only (board.css --run-dusk, --run-meadow, --run-bloom):
@@ -651,24 +671,14 @@
     var(--plum)
   );
   transform: translate(-50%, -50%);
-  pointer-events: none;
-}
-.lb.home .ens-points > .tile::after {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: 2px;
-  border-radius: 4px;
-  background: var(--surface);
-  pointer-events: none;
 }
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
-    /* the four boxes' passage through the screen, shared by all four wheels */
+    /* the column's passage through the screen */
     .lb.home .ens-points {
       view-timeline: --ring block;
     }
-    .lb.home .ens-points > .tile::before {
+    .lb.home .ens-wheel {
       will-change: transform;
       animation: ring-turn linear both;
       animation-timeline: --ring;
@@ -729,9 +739,6 @@
   }
 }
 @media (max-width: 760px) {
-  .lb.home .ens-points {
-    grid-template-columns: 1fr;
-  }
   .lb.home .bots > .tile {
     grid-column: 1 / -1;
     min-height: 0;
