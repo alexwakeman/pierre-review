@@ -99,9 +99,9 @@ export default function Page(): JSX.Element {
         posts the point again as you, linked to the first comment. On your own pull request, no finding offers it.
       </p>
       <p>
-        <Ui>Where this PR stands</Ui> lists the verdict GitHub holds for each person (approved, changes requested,
-        withdrawn), or their newest review when GitHub holds none, with the date, time and commit. An approval from a
-        replies check counts. If a teammate runs a much older Ensemble, one line suggests they update.
+        <Ui>Latest review by each person</Ui> lists each person's newest review, with the date, time and commit. An
+        approval from a replies check counts. If an earlier Request changes of theirs still blocks the merge, it shows
+        under their row. If a teammate runs a much older Ensemble, one line suggests they update.
       </p>
 
       <H2 id="author-and-reviewer">Author and reviewer</H2>
@@ -137,7 +137,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           On your side, the <Ui>Waiting on others</Ui> row says <Ui>Waiting for a teammate’s Ensemble to review</Ui>.
-          When the teammate's review lands, its verdict shows in <Ui>Where this PR stands</Ui>. Ensemble says this only when a teammate's Ensemble has run
+          When the teammate's review lands, its verdict shows in <Ui>Latest review by each person</Ui>. Ensemble says this only when a teammate's Ensemble has run
           automatic reviews in the workspace in the last two weeks. It cannot see your teammates' settings, so
           otherwise it says nothing.
         </li>

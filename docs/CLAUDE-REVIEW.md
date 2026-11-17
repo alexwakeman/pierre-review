@@ -3189,7 +3189,7 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   `ClaudeReviewResponse.teamClaimTeammates` (the name from the synced `users` table); the tab
   (`TeamClaimLine`, `teammateReviewLine`) says only "Robin Dunn is reviewing this commit with Claude"
   — after a reload and after a restart. A FINISHED teammate review ("… reviewed this commit with
-  Claude · approved") is not printed (2026-11-10): Where this PR stands holds their verdict. Both delete paths and the erasure
+  Claude · approved") is not printed (2026-11-10): Latest review by each person holds their verdict. Both delete paths and the erasure
   delete its rows.
 - ⚠ **A SKIP IS NOT A FAILURE AND WRITES NO ROW** — no retry count, no failure, no daily-cap use. It is
   remembered IN MEMORY per PR (`teamClaimSkipFor`), shown on the AI Review tab ("Auto review skipped:
@@ -3970,16 +3970,17 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
 
 - **The tab's team layout** (2026-11-04; SPA only, `lib/teamReview.ts` + `components/TeamReviewLayout.tsx`;
   docs/FRONTEND.md § The AI Review tab → Team layout). On NOW (never on a past review):
-  - **Where this PR stands** (`standingRows` over `teamView.standings`): one row per Ensemble reviewer,
-    newest first, in the same columns as Reviews on this PR — "You · Request changes · 3 Nov 10:00 ·
-    8a8ec14", "Robin · Approve · 9 Nov 14:04 · abd62e3". ⚠ The row reads WHAT GITHUB HOLDS: the verdict
-    in force (`inForce`) when there is one, even under a newer Comment of the same person; a dismissed
-    one "Approve (withdrawn)"; else the newest review. PR 221269 (2026-11-10): robin-dunn's Ensemble
-    commented, then its replies pass APPROVED; a replies pass is never imported as a teammate row, so
-    `latest` stayed the Comment and the row read "Comment" while GitHub held an approval. The loader
-    now reads the commit of an Ensemble review from its marker (`StandingGithubReview.markerHead`,
-    `inForce.headSha`, `ClaudeReviewWithdrawal.headSha`). No note after the verdict (2026-11-10). A
-    blocking row is flagged. It replaces the single verdict: the summary shows none while it is on
+  - **Latest review by each person** (`standingRows` over `teamView.standings`; "Where this PR stands"
+    until 2026-11-17): one row per Ensemble reviewer, newest first, in the same columns as Reviews on
+    this PR — "You · Comment · 17 Nov 14:14 · 1c66251", "Robin · Approve · 9 Nov 14:04 · abd62e3". ⚠ The
+    row reads THE PERSON'S NEWEST REVIEW (2026-11-17; it read what GitHub holds, so a withdrawn Request
+    changes of 10 Nov hid a Comment of 17 Nov on the head, PR 223735): `latest`, or `inForce` when it is
+    newer. PR 221269 (2026-11-10): robin-dunn's Ensemble commented, then its replies pass APPROVED; a
+    replies pass is never imported as a teammate row, so only `inForce` carries it. The loader reads the
+    commit of an Ensemble review from its marker (`StandingGithubReview.markerHead`, `inForce.headSha`,
+    `ClaudeReviewWithdrawal.headSha`). An EARLIER Request changes still in force is the ONE thing from
+    GitHub's state kept: a flagged line under the row ("Request changes in force · 10 Nov 10:08 ·
+    2105faf"); an earlier withdrawn verdict is not shown there. It replaces the single verdict: the summary shows none while it is on
     screen.
   - **Findings by their state now, across every review** (`teamFindingRows` over
     `teamView.allFindings`): "Open" and a collapsed "Resolved or addressed (n)" whose rows say why
@@ -4166,9 +4167,10 @@ rule, not "newest review leads". Per Ensemble reviewer (the reader, each teammat
   (`dismissed` stays "the newest was dismissed"). Its verdict comes from the dismissed body's marker
   `d=` (never the GitHub state, never guessed: no `d=` ⇒ null); its time, who and reason from the
   synced ReviewDismissedEvent (`reviews.dismissed_*`); its commit from the marker's `h=`. →
-  `ClaudeReviewStanding.withdrawn`; the tab's row reads "Approve (withdrawn)" ("dismissed" when a person
-  did it or it is unknown; lib/teamReview.ts `standingRow` → `reviewOutcomeWord`; the reason is on
-  GitHub, no note on the row since 2026-11-10). ⚠ Ensemble reviews only: a person's own
+  `ClaudeReviewStanding.withdrawn`. Since 2026-11-17 the tab's "Latest review by each person" does
+  not read it (the row is the newest review); "Reviews on this PR" shows the withdrawal through
+  `teamView.decisions` ("Approve (withdrawn)", "dismissed" when a person did it or it is unknown,
+  `reviewOutcomeWord`; the reason is on GitHub). ⚠ Ensemble reviews only: a person's own
   dismissed review is never read as Ensemble's.
 - **DECISIONS NO ROW SHOWS** (`teamDecisions` / `loadTeamDecisions` → `teamView.decisions`): every
   synced Ensemble review that is a DECISIVE replies pass (marker `k=replies` + `d=APPROVE` /

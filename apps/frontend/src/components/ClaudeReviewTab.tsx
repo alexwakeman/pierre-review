@@ -1431,7 +1431,7 @@ export function ClaudesReview({
   // every review's, by their state now (`teamView.allFindings`, server-folded).
   const leadTeammate = leadingTeammateReview(team?.view, team?.reviews);
   const alsoRaised = alsoRaisedByFinding(team?.view);
-  // "Where this PR stands" names each verdict, so the summary does not repeat one.
+  // "Latest review by each person" names each verdict, so the summary does not repeat one.
   const showVerdict = team?.standingsShown !== true;
   const teamRows = team != null ? teamFindingRows(team.view.allFindings ?? [], findings, placement.placed) : null;
   // ONE FINDINGS LIST (no "Previous review" section): each earlier finding's note rides on its row;
@@ -1546,7 +1546,7 @@ export function ClaudesReview({
     <>
       {/* THE NEWEST REVIEW LEADS: a teammate's posted review newer than this one heads the tab. */}
       {/* NO RUN NAME, NO "reviewed … ago" (2026-11-10): who reviewed, with what and when is in
-          "Where this PR stands" and "Reviews on this PR"; the models are behind the ⓘ. The verdict
+          "Latest review by each person" and "Reviews on this PR"; the models are behind the ⓘ. The verdict
           shows here only when no standings do; a review of an older commit says so. */}
       {leadTeammate != null ? <TeammateLeadSection review={leadTeammate} showVerdict={showVerdict} /> : <ReviewSection
         title="Summary"
@@ -1751,7 +1751,7 @@ interface TeamLayout {
   reviews: readonly ClaudeTeammateReview[];
   // Every Claude + Codex pair half's review id (the model is named only for a pair's finding).
   pairReviewIds: ReadonlySet<number>;
-  // "Where this PR stands" is on screen: the summary shows no verdict of its own.
+  // "Latest review by each person" is on screen: the summary shows no verdict of its own.
   standingsShown: boolean;
 }
 

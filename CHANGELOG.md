@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- AI Review: "Where this PR stands" is now "Latest review by each person" and shows each person's newest
+  review. Before, a withdrawn Request changes from last week could show instead of today's review of the
+  latest commit. An earlier Request changes that still blocks the merge shows under that person's row.
+
 ## [1.0.56] - 2026-11-17
 
 ### Changed

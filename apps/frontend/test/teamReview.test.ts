@@ -27,6 +27,7 @@ import {
   visibleReviewItems,
   REVIEWS_LIST_MAX,
   reviewsOnPr,
+  earlierBlockLine,
   standingLine,
   standingRows,
   pointCard,
@@ -78,14 +79,32 @@ describe('where this PR stands', () => {
     expect(shortDayTime('not a date')).toBe('');
   });
 
-  it('a block still in force under a newer Comment of the same person: the row reads the block', () => {
+  it('a block still in force under a newer Comment of the same person: the row reads the Comment, the block under it', () => {
     const later: ClaudeReviewStanding = {
       ...youBlocking,
       latest: { you: true, poster: null, reviewId: 11, verdict: 'COMMENT', at: '2026-11-05T10:00:00Z', headSha: SHA_B },
     };
     const row = standingRows({ reviewers: [later], blocking: later.inForce, latest: later.latest })[0]!;
-    expect(standingLine(row)).toBe(`You · Request changes · ${dt('2026-11-03T10:00:00Z')} · 8a8ec14`);
+    expect(standingLine(row)).toBe(`You · Comment · ${dt('2026-11-05T10:00:00Z')} · 1c4bd65`);
     expect(row.blocking).toBe(true);
+    expect(earlierBlockLine(row.earlierBlock!)).toBe(`Request changes in force · ${dt('2026-11-03T10:00:00Z')} · 8a8ec14`);
+  });
+
+  it('a newest review that IS the block in force: no line under it', () => {
+    const row = standingRows({ reviewers: [youBlocking], blocking: youBlocking.inForce, latest: youBlocking.latest })[0]!;
+    expect(row.earlierBlock).toBeNull();
+    expect(row.blocking).toBe(true);
+  });
+
+  it('an earlier approval still in force under a newer Comment: the row reads the Comment, nothing under it', () => {
+    const approvedThenComment: ClaudeReviewStanding = {
+      ...robinComment,
+      inForce: { you: false, poster: robin, reviewId: 19, verdict: 'APPROVE', at: '2026-11-03T09:00:00Z', headSha: SHA_A },
+    };
+    const row = standingRows({ reviewers: [approvedThenComment], blocking: null, latest: approvedThenComment.latest })[0]!;
+    expect(standingLine(row)).toBe(`Robin · Comment · ${dt('2026-11-04T09:00:00Z')} · 1c4bd65`);
+    expect(row.earlierBlock).toBeNull();
+    expect(row.blocking).toBe(false);
   });
 
   it('a dismissed review says so; an approval in force reads Approve', () => {
@@ -122,7 +141,7 @@ describe('where this PR stands', () => {
     expect(standingRows({ reviewers: [noSha], blocking: null, latest: noSha.latest })[0]!.sha).toBeNull();
   });
 
-  it('PR 221270: an approval withdrawn under a newer Comment reads withdrawn', () => {
+  it('PR 223735: a verdict withdrawn under a newer Comment — the row reads the Comment (the withdrawal is in Reviews on this PR)', () => {
     const robinWithdrawn: ClaudeReviewStanding = {
       ...robinComment,
       withdrawn: {
@@ -135,10 +154,8 @@ describe('where this PR stands', () => {
       },
     };
     const row = standingRows({ reviewers: [robinWithdrawn], blocking: null, latest: robinWithdrawn.latest })[0]!;
-    expect(standingLine(row)).toBe(`Robin · Approve (withdrawn) · ${dt('2026-11-09T14:05:09Z')} · 951c4aa`);
-    // A person's dismissal says "dismissed".
-    const byPerson = { ...robinWithdrawn, withdrawn: { ...robinWithdrawn.withdrawn!, byLimn: false, reason: null } };
-    expect(standingRows({ reviewers: [byPerson], blocking: null, latest: byPerson.latest })[0]!.verdict).toBe('Approve (dismissed)');
+    expect(standingLine(row)).toBe(`Robin · Comment · ${dt('2026-11-04T09:00:00Z')} · 1c4bd65`);
+    expect(row.earlierBlock).toBeNull();
   });
 
   it('nothing to show without standings', () => {

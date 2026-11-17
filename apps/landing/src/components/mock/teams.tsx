@@ -39,16 +39,16 @@ export function ClaimLinesMock(): JSX.Element {
   );
 }
 
-/** "Where this PR stands" on the reader's own pull request: a teammate's approval, the reader's comment. */
+/** "Latest review by each person" on the reader's own pull request: a teammate's approval, the reader's comment. */
 export function TeamStandingMock(): JSX.Element {
   const s = TEAM.standing;
   return (
     <MockFrame
       title={prLabel(s.pr)}
       meta="AI Review"
-      label="Where pull request 612 stands, at its latest commit 8a8ec14: Priya's approval, 3 Nov 14:20 at 1c4bd65, holds on GitHub; your own review, on your own pull request, is a comment."
+      label="The latest review by each person on pull request 612, at its latest commit 8a8ec14: Priya approved, 3 Nov 14:20 at 1c4bd65; your own review, on your own pull request, is a comment."
     >
-      <Group first>Where this PR stands</Group>
+      <Group first>Latest review by each person</Group>
       <p className="mk-head">
         Latest commit <code>{s.head}</code>
       </p>

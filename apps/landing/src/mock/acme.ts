@@ -642,9 +642,9 @@ export const TEAM = {
     skip: 'Reviewed by @sam',
   },
   /**
-   * #612 is dana's (the reader's) own pull request. "Where this PR stands" (TeamReviewLayout.tsx,
+   * #612 is dana's (the reader's) own pull request. "Latest review by each person" (TeamReviewLayout.tsx,
    * lib/teamReview.ts standingRow): one row per person, newest first, in the columns of "Reviews on
-   * this PR" — who · day and 24-hour time · commit · the verdict GitHub holds. No note after it. The
+   * this PR" — who · day and 24-hour time · commit · their newest review's outcome. The
    * author's own review is a Comment.
    */
   standing: {

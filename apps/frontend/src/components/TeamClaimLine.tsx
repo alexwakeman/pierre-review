@@ -11,7 +11,7 @@ import { ReviewingNowIcon } from './Icons.js';
 // so any Limn can review the commit. Renders nothing when none of it applies. What the reader's own
 // auto run did on GitHub ("Marked on GitHub") is not shown (2026-11-10), and neither is a teammate's
 // FINISHED review of this commit ("@robin reviewed this commit with Claude · approved", "Auto review
-// skipped: already reviewed by …") — "Where this PR stands" holds their verdict (2026-11-10). Only a
+// skipped: already reviewed by …") — "Latest review by each person" holds their verdict (2026-11-10). Only a
 // teammate's Limn reviewing NOW is named here.
 // ⚠ A TEAMMATE'S LIVE CLAIM (`mine: false`: their Limn is reviewing this commit now) is cleared only
 // after a confirm that names them — clearing it frees the commit, so this Limn may review it a second

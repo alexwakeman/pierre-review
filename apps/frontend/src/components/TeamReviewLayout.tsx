@@ -4,6 +4,7 @@ import { useMe } from '../hooks/useTriage.js';
 import { dateTime, safeExternalUrl } from '../lib/ui.js';
 import { REVIEW_ITEM_GROUP } from '../lib/reviewStyles.js';
 import {
+  earlierBlockLine,
   itemShows,
   pointCard,
   raisedByLabel,
@@ -44,11 +45,12 @@ function PersonAvatar({ you, poster, size = 16 }: { you: boolean; poster: Claude
 }
 
 /**
- * WHERE THIS PR STANDS: the PR's latest commit (the cross-reference for every review's commit below,
- * in the same 7-character form), then one row per Limn reviewer, newest first, IN THE SAME COLUMNS AS
- * "Reviews on this PR" (`ReviewGridCells`): avatar · who · day and time · commit · what GitHub holds for
- * them. A Request changes still in force is flagged. No note after the verdict (2026-11-10). The latest
- * commit shows whenever it is known; the reviewer rows only on now.
+ * LATEST REVIEW BY EACH PERSON: the PR's latest commit (the cross-reference for every review's commit
+ * below, in the same 7-character form), then one row per Limn reviewer, newest first, IN THE SAME
+ * COLUMNS AS "Reviews on this PR" (`ReviewGridCells`): avatar · who · day and time · commit · their
+ * newest review's outcome (2026-11-17; it was what GitHub holds). An EARLIER Request changes still in
+ * force gets one flagged line under the row. The latest commit shows whenever it is known; the reviewer
+ * rows only on now.
  */
 export function StandingsSection({
   standings,
@@ -64,14 +66,14 @@ export function StandingsSection({
   if (rows.length === 0 && headSha == null) return null;
   return (
     <ReviewSection
-      title="Where this PR stands"
+      title="Latest review by each person"
       info={
-        <InfoButton title="Where this PR stands">
-          <p>The PR’s latest commit, and the verdict each person’s Ensemble holds on GitHub.</p>
+        <InfoButton title="Latest review by each person">
+          <p>The PR’s latest commit, and each person’s newest Ensemble review: when, on which commit, and what it said.</p>
           <p>
-            GitHub keeps a Request changes or an Approve in force until it is dismissed, or the same person
-            reviews again with Request changes or Approve. A Comment does not replace it. A person with no
-            verdict in force shows their newest review.
+            GitHub keeps a Request changes in force until it is dismissed, or the same person approves or
+            requests changes again. A Comment does not replace it. If an earlier Request changes still blocks
+            the merge, it shows under that person’s row.
           </p>
         </InfoButton>
       }
@@ -79,7 +81,7 @@ export function StandingsSection({
       <div className="space-y-2">
         {headSha != null && <HeadCommitLine sha={headSha} prUrl={prUrl} />}
         {rows.length > 0 && (
-          <ul className="space-y-0.5" data-testid="review-standings" aria-label="Where this PR stands">
+          <ul className="space-y-0.5" data-testid="review-standings" aria-label="Latest review by each person">
             {rows.map((r) => (
               <li
                 key={r.key}
@@ -94,9 +96,14 @@ export function StandingsSection({
                   day={r.day}
                   sha={r.sha ?? ''}
                   outcome={r.verdict}
-                  tone={r.blocking ? 'danger' : 'ink'}
+                  tone={r.blocking && r.earlierBlock == null ? 'danger' : 'ink'}
                   what={null}
                 />
+                {r.earlierBlock != null && (
+                  <span className="col-[2/-1] truncate text-ui-danger" data-testid="review-standing-block">
+                    {earlierBlockLine(r.earlierBlock)}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

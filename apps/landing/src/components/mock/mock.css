@@ -737,7 +737,7 @@
   font-size: 11px;
   font-weight: 500;
 }
-/* "Latest commit 8a8ec14", above the "Where this PR stands" lines. */
+/* "Latest commit 8a8ec14", above the "Latest review by each person" lines. */
 .lb .mk-head {
   margin: 0 0 8px;
   color: var(--muted);
@@ -747,7 +747,7 @@
   color: var(--ink);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-/* One "Where this PR stands" row, in the columns of "Reviews on this PR": who · day and time ·
+/* One "Latest review by each person" row, in the columns of "Reviews on this PR": who · day and time ·
    commit · the verdict GitHub holds. */
 .lb .mk-stand {
   display: grid;

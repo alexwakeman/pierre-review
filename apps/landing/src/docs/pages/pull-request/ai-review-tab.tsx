@@ -51,9 +51,10 @@ export default function Page(): JSX.Element {
       <p>The tab reads top to bottom (on a wide screen, the facts and actions sit in a column on the right):</p>
       <ul>
         <li>
-          <b>Where this PR stands</b>: the pull request's latest commit (seven characters; click it to open it on
-          GitHub, or copy the full commit), then one row per person, in the same columns as the reviews below: the
-          verdict GitHub holds for them, with its date, time and commit.
+          <b>Latest review by each person</b>: the pull request's latest commit (seven characters; click it to open it on
+          GitHub, or copy the full commit), then one row per person, in the same columns as the reviews below: their
+          newest review, with its date, time and commit. An earlier Request changes that still blocks the merge shows
+          under the row.
         </li>
         <li>
           <b>

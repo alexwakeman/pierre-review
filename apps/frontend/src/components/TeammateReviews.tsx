@@ -79,16 +79,16 @@ export function TeammateChip({
 }
 
 /**
- * THE SUMMARY WHEN A TEAMMATE'S REVIEW IS THE NEWEST: "Summary", its verdict (unless "Where this PR
- * stands" names it), a link to it on GitHub, and its summary. No "Robin's review" title and no "posted
- * … ago" (2026-11-10): who and when are in "Where this PR stands" and "Reviews on this PR".
+ * THE SUMMARY WHEN A TEAMMATE'S REVIEW IS THE NEWEST: "Summary", its verdict (unless "Latest review
+ * by each person" names it), a link to it on GitHub, and its summary. No "Robin's review" title and no "posted
+ * … ago" (2026-11-10): who and when are in "Latest review by each person" and "Reviews on this PR".
  */
 export function TeammateLeadSection({
   review: r,
   showVerdict = true,
 }: {
   review: ClaudeTeammateReview;
-  // false: "Where this PR stands" already names the verdict.
+  // false: "Latest review by each person" already names the verdict.
   showVerdict?: boolean;
 }): JSX.Element {
   const inRail = useRailWide('review');

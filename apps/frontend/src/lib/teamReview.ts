@@ -2,7 +2,7 @@
 // docs/CLAUDE-REVIEW.md § Teammates' reviews → The tab's team layout). The server folds once
 // (`ClaudeReviewResponse.teamView`: `standings`, `allFindings`); these are the words and the rules the
 // tab applies to it, so they can be tested:
-//   • `standingRows`     — "Where this PR stands": one row per Limn reviewer, what GitHub holds;
+//   • `standingRows`     — "Latest review by each person": one row per Limn reviewer, their newest;
 //   • `splitPointsByState` / `raisedByLabel` / `closedReason` — findings by their state now, across
 //     every review, each naming who raised it;
 //   • `reviewsOnPr`      — "Reviews on this PR": the reader's runs and teammates' posted reviews;
@@ -19,6 +19,7 @@ import {
   type ClaudeFindingSeverity,
   type ClaudeTeammateFinding,
   type ClaudeReviewStanding,
+  type ClaudeReviewStandingRef,
   type ClaudeReviewStandings,
   type ClaudeReviewResponse,
   type ClaudeReviewStatus,
@@ -58,64 +59,68 @@ export function providersLabel(providers: readonly AiProviderId[]): string | nul
   return aiProviderName([...set][0]);
 }
 
-// ---- WHERE THIS PR STANDS ----
+// ---- LATEST REVIEW BY EACH PERSON ----
 
 export interface StandingRow {
   key: string;
   you: boolean;
   poster: ClaudeTeammatePoster | null;
   name: string;
-  // The verdict word as it stands on GitHub ("Approve", "Request changes", "Approve (withdrawn)"); the
-  // newest review's ("Comment") when GitHub holds no verdict of theirs; "Reviewed" when it had none.
+  // Their NEWEST review's outcome ("Comment", "Approve", "Request changes (dismissed)"); "Reviewed"
+  // when it had none.
   verdict: string;
   verdictKind: ClaudeReviewVerdict | null;
   // Day and time, 24-hour clock: "9 Nov 14:04".
   day: string;
   sha: string | null;
   at: string | null;
-  // Their Request changes is still in force (the strictest verdict): the row is flagged.
+  // An EARLIER Request changes of theirs still in force on GitHub (it still blocks the merge); null =
+  // none, or the newest review is that Request changes itself.
+  earlierBlock: { day: string; sha: string | null } | null;
+  // A Request changes of theirs is in force (the newest review or an earlier one): the row is flagged.
   blocking: boolean;
 }
 
-/** The moment a row reads: GitHub's verdict in force, else the withdrawn one, else the newest review. */
-function standingShown(s: ClaudeReviewStanding): { verdict: ClaudeReviewVerdict | null; at: string; headSha: string | null } | null {
+const shortSha = (sha: string | null | undefined): string | null => (sha != null && sha !== '' ? sha.slice(0, 7) : null);
+
+/**
+ * Their NEWEST review, and whether it is the verdict GitHub holds in force: the newest Limn review here,
+ * or the verdict in force when that is newer (a teammate's replies-pass Approve, which no imported
+ * review row carries).
+ */
+function newestShown(s: ClaudeReviewStanding): { ref: ClaudeReviewStandingRef; isForce: boolean } | null {
   const force = s.inForce;
   const latest = s.latest;
-  if (force != null) {
+  if (force != null && (latest == null || (force.reviewId != null && force.reviewId === latest.reviewId) || force.at > latest.at)) {
     // The same review as the newest one: its commit is known there too.
     const same = latest != null && force.reviewId != null && force.reviewId === latest.reviewId;
-    return { verdict: force.verdict, at: force.at, headSha: force.headSha ?? (same ? latest.headSha : null) };
+    return { ref: { ...force, headSha: force.headSha ?? (same ? latest.headSha : null) }, isForce: true };
   }
-  if (s.withdrawn != null) return { verdict: s.withdrawn.verdict, at: s.withdrawn.postedAt, headSha: s.withdrawn.headSha ?? null };
-  return latest != null ? { verdict: latest.verdict, at: latest.at, headSha: latest.headSha } : null;
-}
-
-function standingAt(s: ClaudeReviewStanding): string | null {
-  return standingShown(s)?.at ?? null;
+  return latest != null ? { ref: latest, isForce: false } : null;
 }
 
 /** "withdrawn" when Limn took it back, "dismissed" when a person did or it is not known. */
 const withdrawnWord = (byLimn: boolean | null): string => (byLimn === true ? 'withdrawn' : 'dismissed');
 
 /**
- * ONE REVIEWER'S ROW — WHAT GITHUB HOLDS FOR THEM. GitHub keeps an Approve or a Request changes in
- * force until it is dismissed or replaced by the same person's next decisive review; a Comment never
- * replaces it. So the row reads the verdict IN FORCE (a teammate's replies-pass Approve, which no
- * imported review row carries, included); a dismissed one reads "Approve (withdrawn)"; only with
- * neither does it read their newest review. No explanatory note after it (2026-11-10).
+ * ONE PERSON'S ROW — THEIR NEWEST REVIEW (2026-11-17): outcome, day and time, commit. It is the AI
+ * Review's state, not GitHub's (the PR's own state is read elsewhere). ONE exception: an EARLIER
+ * Request changes still in force (GitHub keeps it until it is dismissed or the same person approves or
+ * requests changes again; a Comment never replaces it) is named under the row, because it still blocks
+ * the merge. A withdrawn or dismissed earlier verdict is not shown here; "Reviews on this PR" lists it.
  */
 export function standingRow(s: ClaudeReviewStanding): StandingRow {
-  const shown = standingShown(s);
+  const newest = newestShown(s);
+  const shown = newest?.ref ?? null;
   const force = s.inForce;
   const verdictKind = shown?.verdict ?? null;
   let verdict: string;
-  if (force == null && s.withdrawn != null) {
-    verdict = reviewOutcomeWord({ verdict: s.withdrawn.verdict, withdrawn: { byLimn: s.withdrawn.byLimn } }) ?? 'Withdrawn';
-  } else if (force == null && s.dismissed) {
+  if (newest != null && !newest.isForce && s.dismissed) {
     verdict = reviewOutcomeWord({ verdict: verdictKind, withdrawn: { byLimn: null } }) ?? 'Dismissed';
   } else {
     verdict = verdictKind != null ? CLAUDE_VERDICT_LABEL[verdictKind] : 'Reviewed';
   }
+  const blockInForce = force != null && force.verdict === 'REQUEST_CHANGES';
   return {
     key: personKey(s),
     you: s.you,
@@ -124,18 +129,19 @@ export function standingRow(s: ClaudeReviewStanding): StandingRow {
     verdict,
     verdictKind,
     day: shown != null ? shortDayTime(shown.at) : '',
-    sha: shown?.headSha != null && shown.headSha !== '' ? shown.headSha.slice(0, 7) : null,
+    sha: shortSha(shown?.headSha),
     at: shown?.at ?? null,
-    blocking: force?.verdict === 'REQUEST_CHANGES',
+    earlierBlock: blockInForce && newest?.isForce !== true ? { day: shortDayTime(force.at), sha: shortSha(force.headSha) } : null,
+    blocking: blockInForce,
   };
 }
 
-/** "Where this PR stands": one line per Limn reviewer, NEWEST FIRST. [] = none. */
+/** "Latest review by each person": one line per Limn reviewer, NEWEST FIRST. [] = none. */
 export function standingRows(standings: ClaudeReviewStandings | null | undefined): StandingRow[] {
   const reviewers = standings?.reviewers ?? [];
   return reviewers
     .filter((s) => s.latest != null || s.inForce != null)
-    .map((s, i) => ({ s, i, at: standingAt(s) }))
+    .map((s, i) => ({ s, i, at: newestShown(s)?.ref.at ?? null }))
     .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? '') || a.i - b.i)
     .map(({ s }) => standingRow(s));
 }
@@ -143,6 +149,11 @@ export function standingRows(standings: ClaudeReviewStandings | null | undefined
 /** The line as text (the row's hover title): "Robin · Approve · 9 Nov 14:04 · abd62e3". */
 export function standingLine(r: StandingRow): string {
   return [r.name, r.verdict, r.day, r.sha].filter((x): x is string => x != null && x !== '').join(' · ');
+}
+
+/** Under a row whose earlier Request changes still holds: "Request changes in force · 10 Nov 10:08 · 2105faf". */
+export function earlierBlockLine(b: NonNullable<StandingRow['earlierBlock']>): string {
+  return ['Request changes in force', b.day, b.sha].filter((x): x is string => x != null && x !== '').join(' · ');
 }
 
 // ---- FINDINGS BY STATE ----
@@ -554,7 +565,7 @@ export function reviewOutcomeWord(item: Pick<ReviewListItem, 'verdict' | 'withdr
   if (item.verdict == null) return w != null ? `${w[0]!.toUpperCase()}${w.slice(1)}` : null;
   const v = CLAUDE_VERDICT_LABEL[item.verdict];
   if (w != null) return `${v} (${w})`;
-  // What the run decided, then what GitHub holds ("Where this PR stands" reads Comment).
+  // What the run decided, then what GitHub holds ("Latest review by each person" reads Comment).
   return item.postedAsComment === true && item.verdict !== 'COMMENT' ? `${v} (posted as Comment)` : v;
 }
 

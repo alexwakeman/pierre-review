@@ -1132,7 +1132,7 @@ until its end is 8px above the pane's bottom, then holds. ⚠ Never its own scro
 would clip the agent log that widens LEFTWARDS out of the `run` piece (`RailWideLeft`). Before, it
 flowed with the page and left an empty column beside the findings once scrolled past. The story view's
 rail still flows (no `sticky`). The slots:
-  - `status` (rail; "Where this PR stands" also in place when narrow, above the run controls):
+  - `status` (rail; "Latest review by each person" also in place when narrow, above the run controls):
     `StandingsSection` (§ Team layout) — ALWAYS headed by the PR's latest commit ("Latest commit
     8a8ec14", `HeadCommitLine`: 7 characters, mono, linked under the PR through `pushedCommitHref` +
     `safeExternalUrl`, a Copy button for the full sha; the cross-reference for every review's commit),
@@ -2140,15 +2140,18 @@ reappears.
   pure rules in `lib/teamReview.ts`, teammate pieces in `components/TeammateReviews.tsx`;
   docs/CLAUDE-REVIEW.md § Teammates' reviews → The tab's team layout). State: `shown: ShownReview |
   null` (null = now). On NOW the tab reads the server's fold, `ClaudeReviewResponse.teamView`:
-  - **Where this PR stands** (`StandingsSection`, `standingRows`): one row per Ensemble reviewer, newest
-    first, IN THE SAME GRID AS "Reviews on this PR" (`REVIEW_ROW_GRID` + `ReviewGridCells`, 2026-11-10):
-    avatar · who · day and time · commit · outcome. ⚠ THE OUTCOME IS WHAT GITHUB HOLDS: the verdict IN
-    FORCE (`inForce`) when there is one — a teammate's replies-pass Approve included, which no imported
-    review row carries (PR 221269: robin's Ensemble commented, then its replies pass approved; the row read
-    "Comment" from `latest`); else a dismissed one, "Approve (withdrawn)" / "(dismissed)"
-    (`reviewOutcomeWord`); else the newest review's verdict. Its day and commit are that review's (the
-    commit from the marker's `h=` for a replies pass). No explanatory note after it (removed
-    2026-11-10). A blocking row's outcome is in the danger ink. While it shows, the summary header and
+  - **Latest review by each person** (`StandingsSection`, `standingRows`; "Where this PR stands" until
+    2026-11-17): one row per Ensemble reviewer, newest first, IN THE SAME GRID AS "Reviews on this PR"
+    (`REVIEW_ROW_GRID` + `ReviewGridCells`, 2026-11-10): avatar · who · day and time · commit · outcome.
+    ⚠ THE ROW IS THEIR NEWEST REVIEW, NOT WHAT GITHUB HOLDS (2026-11-17: PR 223735 showed the reader's
+    withdrawn Request changes of 10 Nov over their 17 Nov Comment on the head commit). Newest = `latest`,
+    or `inForce` when that is newer — a teammate's replies-pass Approve, which no imported review row
+    carries (PR 221269). A newest review that was dismissed reads "Request changes (dismissed)"
+    (`reviewOutcomeWord`); an EARLIER withdrawn/dismissed verdict is not shown here ("Reviews on this
+    PR" lists it). ONE exception: an EARLIER Request changes still in force gets one danger-ink line
+    under the row, "Request changes in force · 10 Nov 10:08 · 2105faf" (`earlierBlock` /
+    `earlierBlockLine`), since it still blocks the merge; when the newest review IS that Request changes,
+    its outcome is in the danger ink instead. While it shows, the summary header and
     `TeammateLeadSection` drop their own verdict (`showVerdict`).
   - **The newest review's summary**, headed "Summary" — never a run name ("Codex's review", "Claude +
     Codex review", "Robin's review") nor "reviewed … ago" / "Posted on GitHub … ago" (2026-11-10): the
@@ -2187,7 +2190,7 @@ reappears.
     `followUpOneLine` (`lib/claudeReviewFollowUp.ts`).
   - **Reviews on this PR** (`ReviewsOnPrSection`, `reviewsOnPr`): every review, the reader's (a pair
     once) and teammates', newest first, IN COLUMNS (2026-11-10, one fixed grid template per row,
-    `REVIEW_ROW_GRID`, shared with Where this PR stands): avatar · who · day and time, 24-hour
+    `REVIEW_ROW_GRID`, shared with Latest review by each person): avatar · who · day and time, 24-hour
     ("10 Nov 14:04", `shortDayTime`, tabular) · commit (7-character mono, the same form as
     "Latest commit") · outcome (verdict, or the status; failed in the danger ink; the reader's POSTED run
     on their OWN PR reads "Approve (posted as Comment)" — `postedAsComment`, from `postedAt` or a
@@ -2204,8 +2207,8 @@ reappears.
     `teamView.decisions` (2026-11-09) add what no row shows: a withdrawn verdict reads "Approve
     (withdrawn)" on its row (`reviewOutcomeWord`), the reader's replies pass shows its Approve /
     Request changes, and a teammate's decisive replies pass is a DECISION-ONLY row (`target: null`:
-    not a button, a link to GitHub). "Where this PR stands" reads a withdrawn verdict the same way
-    ("Approve (withdrawn)").
+    not a button, a link to GitHub). "Latest review by each person" no longer shows an earlier withdrawn
+    verdict (2026-11-17); this list is where it is read.
   - **NEWEST ALWAYS SHOWS** (`nextShownReview` over `newestReviewKey(latest own id, newest teammate
     review)`): when the key changes — a run queued by anyone or anything, a teammate review imported —
     a past pick gives way to now. The first read never moves a pick.

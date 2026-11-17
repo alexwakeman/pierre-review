@@ -449,7 +449,7 @@ export default function EnsembleReview(): JSX.Element {
           </p>
           <p>
             A teammate’s {SITE_NAME} picks it up first, follows up on the points yours raised, and can
-            approve. “Where this PR stands” shows the verdict GitHub holds for each reviewer.
+            approve. “Latest review by each person” shows each reviewer's newest review.
           </p>
         </div>
         <Shot className="tm-right">

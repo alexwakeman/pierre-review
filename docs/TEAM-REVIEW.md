@@ -192,7 +192,7 @@ stateDiagram-v2
 ### What you see when your Ensemble steps aside
 
 - AI Review tab: "Robin Dunn is reviewing this commit with Claude" while it runs. Once Robin's review
-  is done, the tab says nothing more here: his verdict shows in "Where this PR stands". A teammate's live claim has a Clear
+  is done, the tab says nothing more here: his verdict shows in "Latest review by each person". A teammate's live claim has a Clear
   button, with a confirm. It is stored, so it is still there after Ensemble restarts, but only while the
   claim's 25-minute lease could still run. Clear reads the commit's lines on GitHub first and posts
   "Cleared by …" only if the newest line is still a claim: if the teammate has finished, it posts
@@ -460,17 +460,17 @@ sequenceDiagram
   and a dismissed one counts as nothing. "Changes requested → approved → approval dismissed" reads
   as no verdict, matching GitHub's "review required" (since 1.0.2).
 - **A withdrawn approval is never lost** (1.0.14). Ensemble reads each dismissal from the PR timeline:
-  when, who and the message. "Where this PR stands" shows it on the person's row even after their
-  later Comment: "Robin · Approve (withdrawn) · 9 Nov 14:05 · 951c4aa". "Reviews on this PR" keeps the
-  review as "Approve (withdrawn)".
-- **"Where this PR stands" shows what GitHub holds** for each person: their Approve or Request
-  changes while it is in force, even after a later Comment of theirs; else their newest review.
-  A replies check's Approve counts: robin-dunn's Ensemble commented on PR 221269, then its replies check
-  approved, and the row read "Comment" until 2026-11-10. Now it reads "Approve" with that check's
-  time and commit. The rows use the same columns as "Reviews on this PR", with the time on a 24-hour
-  clock. The verdict is
-  the one Ensemble's hidden marker says it posted; a review from an older Ensemble without it reads
-  "Withdrawn". Your own row reads "Comment" when your newest run went to GitHub as a Comment (on
+  when, who and the message. "Reviews on this PR" keeps the review as "Approve (withdrawn)".
+- **"Latest review by each person" shows each person's newest Ensemble review** (2026-11-17; it was
+  "Where this PR stands" and showed what GitHub holds). Before, on PR 223735 your row showed your
+  withdrawn Request changes of 10 Nov, not your Comment of 17 Nov on the head commit. GitHub's state is
+  read elsewhere; this box answers "who reviewed what, and when". A replies check's Approve counts as
+  a review: robin-dunn's Ensemble commented on PR 221269, then its replies check approved, so the row
+  reads "Approve" with that check's time and commit. ONE exception: an earlier Request changes still
+  in force shows under the row ("Request changes in force · 10 Nov 10:08 · 2105faf"), because it
+  still blocks the merge. An earlier withdrawn or dismissed verdict is not shown there. The rows use
+  the same columns as "Reviews on this PR", with the time on a 24-hour clock. The verdict is the one
+  Ensemble's hidden marker says it posted. Your own row reads "Comment" when your newest run went to GitHub as a Comment (on
   your own pull request GitHub takes nothing else), whatever the run decided; "Reviews on this PR"
   keeps the decision and says so: "Approve (posted as Comment)". A pull request with more
   than 50 reviews is read to its end (the reviews tail is paged like the threads), so the newest
@@ -767,7 +767,7 @@ All names and times are illustrative; every step follows the current rules.
 2. 14:01 Robin's and Sam's Ensemble installs both import the review. Each queues #40 ahead of its other automatic reviews: "Queued: needs a verdict (alex's own review would approve)".
 3. 14:02 Robin's Ensemble claims F with Claude first; Sam's Ensemble steps aside ("Robin Dunn is reviewing this commit with Claude").
 4. Robin closes his laptop at 14:05. His claim is not renewed; at 14:27 the lease ends and Sam's Ensemble takes over, reviews F and approves through the § 5 gates.
-5. Alex's Pending "Waiting on others" row showed "Waiting for a teammate's Ensemble to review" until Sam's review synced; then the line goes, and Alex's "Where this PR stands" shows Sam's verdict.
+5. Alex's Pending "Waiting on others" row showed "Waiting for a teammate's Ensemble to review" until Sam's review synced; then the line goes, and Alex's "Latest review by each person" shows Sam's verdict.
 
 ### 9.14 Back after three days
 1. Friday 17:00 Robin shuts his laptop. Over the weekend Dana pushes to #41 (which Robin's Ensemble reviewed on Friday) and Carol's own Ensemble reviews her new PR #42.
@@ -861,7 +861,7 @@ Implement on a ticket a teammate is building, and its Push refuses the teammate'
 
 The Ensemble version rides every posted review's marker. When a teammate's newest review on a PR came
 from an Ensemble older than 1.0.5 (the team minimum, one shared constant), the AI Review tab shows one line
-beside "Where this PR stands": "Robin is on Ensemble 0.1.188 — update for still-open replies and claim
+beside "Latest review by each person": "Robin is on Ensemble 0.1.188 — update for still-open replies and claim
 fixes." A review with no version (a legacy post) reads "an older Ensemble". Nothing else acts on the
 version.
 
