@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.56] - 2026-11-17
+
 ### Changed
 
 - This Sprint → Releases: the candidate is now the tag just below the oldest tag that can't be released, because
