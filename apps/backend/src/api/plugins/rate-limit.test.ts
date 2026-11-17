@@ -145,6 +145,7 @@ describe('tierFor — implement story', () => {
     // Approve automatically (the switch) and the ticket step are DB only; the builds toast is a DB read.
     expect(tiers('POST', '/api/story-builds/7/auto-approve')).toEqual(['read']);
     expect(tiers('POST', '/api/story-builds/7/ticket-review')).toEqual(['read']);
+    expect(tiers('POST', '/api/story-builds/7/how-to-test/seen')).toEqual(['read']);
     expect(tiers('GET', '/api/story-builds/active')).toEqual(['read']);
     // HOTFIX: the bases are DB only; a hotfix build's push is the same github_write route.
     expect(tiers('GET', '/api/story-builds/hotfix-bases')).toEqual(['read']);

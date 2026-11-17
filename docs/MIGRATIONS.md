@@ -1733,6 +1733,12 @@ erase and the export, with `verify:isolation` checks. Additive; journal idx 186,
 build). Additive; journal idx 187, `when` `1792915200000`. [STORY-BUILD.md](STORY-BUILD.md) § Approve
 automatically.
 
+### `0204_story_build_how_to_test` — "How to test" after a build
+
+`ALTER TABLE story_builds ADD how_to_test_key` (text), `how_to_test_chat_id` (integer, NO FK) and
+`how_to_test_seen_at` (timestamp). An existing table, so erasure and export already cover it. Additive; journal
+idx 204, `when` `1794384000000`. [STORY-BUILD.md](STORY-BUILD.md) § How to test after a build.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

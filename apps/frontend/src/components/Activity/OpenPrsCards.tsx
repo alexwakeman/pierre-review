@@ -529,9 +529,11 @@ export function OpenPrsCards({
             // Merged so far orders stacks by the MERGE, newest first — a merged PR's `updatedAt`
             // moves with any later comment, label or branch deletion.
             merged ? (pr) => pr.mergedAt ?? pr.updatedAt : undefined,
+            // Open PRs' rows: tickets that share a PR are ONE group, each PR listed once.
+            { mergeShared: layout === 'rows' && !merged },
           )
         : null,
-    [story, wantsStacks, ticketGate.heldList, ticketData, rows, detectedTickets, merged],
+    [story, wantsStacks, ticketGate.heldList, ticketData, rows, detectedTickets, merged, layout],
   );
   const showStacks = stacked != null && (story != null || stacksWorthShowing(stacked));
   // Each stack's "Merged (n)" panel: ONE request for every stack on the board, only while the

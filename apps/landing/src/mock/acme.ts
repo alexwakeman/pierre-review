@@ -832,6 +832,8 @@ export interface OpenPr {
 
 export interface OpenPrGroup {
   ticket: { key: string; title: string } | null;
+  /** More tickets that share this group's PRs: one group, each ticket on its own line, each PR once. */
+  more?: Array<{ key: string; title: string }>;
   prs: OpenPr[];
 }
 
@@ -878,6 +880,7 @@ export const OPEN_PRS: { workspace: string; groups: OpenPrGroup[]; firstOpen: nu
     },
     {
       ticket: { key: 'WEB-88', title: 'Settings redesign' },
+      more: [{ key: 'WEB-91', title: 'Saved payment methods' }],
       prs: [
         {
           pr: PRS.checkout,

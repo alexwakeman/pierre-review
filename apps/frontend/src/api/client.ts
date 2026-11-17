@@ -346,6 +346,7 @@ import type {
   StoryBuildAutoApproveResponse,
   StoryBuildAutoPushResponse,
   StoryBuildTicketReviewResponse,
+  StoryBuildHowToTestSeenResponse,
   StoryBuildLoopContinueBody,
   StoryBuildLoopRouteResponse,
   StoryBuildLoopSettingsBody,
@@ -2014,6 +2015,9 @@ export const api = {
     fetch(storyBuildPath('autoApprove', { id }), jsonBody('POST', { on })).then((r) => handle<StoryBuildAutoApproveResponse>(r)),
   setStoryBuildTicketReview: (id: number, done: boolean) =>
     fetch(storyBuildPath('ticketReview', { id }), jsonBody('POST', { done })).then((r) => handle<StoryBuildTicketReviewResponse>(r)),
+  // "How to test" after a build: the build tab's pointer was opened or dismissed.
+  setStoryBuildHowToTestSeen: (id: number) =>
+    fetch(storyBuildPath('howToTestSeen', { id }), jsonBody('POST', {})).then((r) => handle<StoryBuildHowToTestSeenResponse>(r)),
   // THE BUILDS TOAST: the workspace's running builds and the ones at a gate.
   // HOTFIX: each repository's latest release (the hotfix base) and whether "Treat as a hotfix" is offered. DB only.
   storyBuildHotfixBases: (workspaceId: number) =>

@@ -9,6 +9,10 @@ import { mergeVerdict } from './ui.js';
 // ONE STACK PER TICKET: a header (the ticket) over its PR cards. The rules:
 //   - A PR naming TWO tickets sits in BOTH stacks; each copy carries `alsoIn` (the OTHER tickets)
 //     so the card can say "also in BMD-1040". `prCount` still counts it ONCE.
+//   - `mergeShared` (Open PRs' grouped rows): tickets that SHARE a PR become ONE group instead —
+//     every ticket stacked in its header (`tickets`, in the between-stack order), each PR listed ONCE
+//     beneath. Sharing is transitive (A shares with B, B with C ⇒ one group). A row whose PR does not
+//     name every ticket of its group carries `ticketKeys` (the ones it names), so the row can say which.
 //   - A PR naming no ticket goes in ONE final "No ticket" stack (`ticket: null`).
 //   - WITHIN a stack the PRs keep the order they arrived in — the caller passes the list already
 //     in the Sort menu's order, so the menu orders every stack the same way and this file never
@@ -30,13 +34,17 @@ export interface StackRow {
   pr: TimelinePr;
   /** The PR's OTHER tickets — each one a stack of its own on this page. [] for most PRs. */
   alsoIn: CardTicket[];
+  /** A merged group only (`mergeShared`): the group's tickets THIS PR names, when not all of them. */
+  ticketKeys?: string[];
 }
 
 export interface OpenPrsStack {
   /** Stable id: `ticket:<KEY>`, or `none` for the no-ticket stack. Keys collapse state too. */
   id: string;
-  /** null = the "No ticket" stack. */
+  /** null = the "No ticket" stack. With `mergeShared`, the group's FIRST ticket. */
   ticket: CardTicket | null;
+  /** Every ticket of the stack, in order: `[ticket]`, more than one for a merged group, `[]` for "No ticket". */
+  tickets: CardTicket[];
   rows: StackRow[];
   /** The latest activity time among the stack's PRs (ISO; `updatedAt` unless the caller picks a clock). */
   latestActivity: string;
@@ -58,7 +66,7 @@ export const stackIdFor = (key: string): string => `ticket:${key}`;
 export const stackDomId = (stackId: string): string =>
   `open-prs-stack-${stackId.replace(/[^A-Za-z0-9_-]/g, '-')}`;
 
-const isDone = (s: OpenPrsStack): boolean => s.ticket?.statusCategory === 'done';
+const isDone = (s: OpenPrsStack): boolean => s.tickets.length > 0 && s.tickets.every((t) => t.statusCategory === 'done');
 
 const KEY_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
@@ -82,9 +90,10 @@ export function stackOpenPrs(
   sortedPrs: readonly TimelinePr[],
   ticketsOf: (pr: TimelinePr) => readonly CardTicket[],
   activityOf: (pr: TimelinePr) => string = (pr) => pr.updatedAt,
+  opts: { mergeShared?: boolean } = {},
 ): StackedOpenPrs {
   const byId = new Map<string, OpenPrsStack>();
-  const none: OpenPrsStack = { id: NO_TICKET_STACK_ID, ticket: null, rows: [], latestActivity: '' };
+  const none: OpenPrsStack = { id: NO_TICKET_STACK_ID, ticket: null, tickets: [], rows: [], latestActivity: '' };
   const seen = new Set<number>();
   let ticketed = 0;
 
@@ -111,7 +120,8 @@ export function stackOpenPrs(
       const id = stackIdFor(t.key);
       let stack = byId.get(id);
       if (stack == null) {
-        stack = { id, ticket: { ...t }, rows: [], latestActivity: '' };
+        const ticket = { ...t };
+        stack = { id, ticket, tickets: [ticket], rows: [], latestActivity: '' };
         byId.set(id, stack);
       } else if (stack.ticket != null) {
         fillGaps(stack.ticket, t);
@@ -121,14 +131,90 @@ export function stackOpenPrs(
     }
   }
 
-  const stacks = [...byId.values()].sort(
-    (a, b) =>
-      Number(isDone(a)) - Number(isDone(b)) ||
-      (a.latestActivity < b.latestActivity ? 1 : a.latestActivity > b.latestActivity ? -1 : 0) ||
-      KEY_COLLATOR.compare(a.ticket?.key ?? '', b.ticket?.key ?? ''),
-  );
+  const order = (a: OpenPrsStack, b: OpenPrsStack): number =>
+    Number(isDone(a)) - Number(isDone(b)) ||
+    (a.latestActivity < b.latestActivity ? 1 : a.latestActivity > b.latestActivity ? -1 : 0) ||
+    KEY_COLLATOR.compare(a.ticket?.key ?? '', b.ticket?.key ?? '');
+  let stacks = [...byId.values()].sort(order);
+  if (opts.mergeShared === true) {
+    const position = new Map<number, number>();
+    sortedPrs.forEach((p, i) => {
+      if (!position.has(p.id)) position.set(p.id, i);
+    });
+    stacks = mergeSharedStacks(stacks, position).sort(order);
+  }
   if (none.rows.length > 0) stacks.push(none);
   return { stacks, prCount: seen.size, ticketedPrCount: ticketed };
+}
+
+/** The merged group's id: its tickets' stack ids, joined (one ticket ⇒ the plain `ticket:<KEY>`). */
+export const groupIdFor = (keys: readonly string[]): string => keys.map(stackIdFor).join('+');
+
+/**
+ * Tickets that share a PR become ONE stack (transitively). The input is in the between-stack order,
+ * so a group's tickets keep it (the first one leads); its rows are each PR once, in the caller's order
+ * (`position`: the index in the already-sorted input — never a comparator of this file's own).
+ */
+function mergeSharedStacks(stacks: readonly OpenPrsStack[], position: ReadonlyMap<number, number>): OpenPrsStack[] {
+  const parent = stacks.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]!]!;
+    return i;
+  };
+  const firstStackOf = new Map<number, number>();
+  stacks.forEach((st, i) => {
+    for (const r of st.rows) {
+      const j = firstStackOf.get(r.pr.id);
+      if (j == null) firstStackOf.set(r.pr.id, i);
+      else {
+        const a = find(i);
+        const b = find(j);
+        if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+      }
+    }
+  });
+  const groups = new Map<number, OpenPrsStack[]>();
+  stacks.forEach((st, i) => {
+    const root = find(i);
+    const g = groups.get(root) ?? [];
+    g.push(st);
+    groups.set(root, g);
+  });
+  const out: OpenPrsStack[] = [];
+  for (const members of groups.values()) {
+    if (members.length === 1) {
+      out.push(members[0]!);
+      continue;
+    }
+    const tickets = members.flatMap((m) => m.tickets);
+    const keys = new Set(tickets.map((t) => t.key));
+    const rows: StackRow[] = [];
+    const where = new Map<number, string[]>();
+    for (const m of members) {
+      for (const r of m.rows) {
+        const named = where.get(r.pr.id);
+        if (named != null) {
+          named.push(...m.tickets.map((t) => t.key));
+          continue;
+        }
+        where.set(r.pr.id, m.tickets.map((t) => t.key));
+        rows.push({ pr: r.pr, alsoIn: r.alsoIn.filter((o) => !keys.has(o.key)) });
+      }
+    }
+    rows.sort((a, b) => (position.get(a.pr.id) ?? 0) - (position.get(b.pr.id) ?? 0));
+    for (const r of rows) {
+      const named = where.get(r.pr.id) ?? [];
+      if (named.length < keys.size) r.ticketKeys = tickets.map((t) => t.key).filter((k) => named.includes(k));
+    }
+    out.push({
+      id: groupIdFor(tickets.map((t) => t.key)),
+      ticket: tickets[0] ?? null,
+      tickets,
+      rows,
+      latestActivity: members.reduce((acc, m) => (m.latestActivity > acc ? m.latestActivity : acc), ''),
+    });
+  }
+  return out;
 }
 
 // ── THE STORY VIEW'S ONE STACK ───────────────────────────────────────────────────────────────────
@@ -181,7 +267,7 @@ export function storyStack(
     if (pr.updatedAt > latestActivity) latestActivity = pr.updatedAt;
   }
   return {
-    stacks: [{ id: storyStackId(input.ticket.ident), ticket, rows, latestActivity }],
+    stacks: [{ id: storyStackId(input.ticket.ident), ticket, tickets: [ticket], rows, latestActivity }],
     prCount: seen.size,
     ticketedPrCount: seen.size,
   };
@@ -196,7 +282,7 @@ export function storyStack(
 /** The ticket keys to ask about — one per ticket stack, in page order (the no-ticket stack has none). */
 export function mergedPanelKeys(stacks: readonly OpenPrsStack[]): string[] {
   const out: string[] = [];
-  for (const s of stacks) if (s.ticket != null && !out.includes(s.ticket.key)) out.push(s.ticket.key);
+  for (const s of stacks) for (const t of s.tickets) if (!out.includes(t.key)) out.push(t.key);
   return out;
 }
 
@@ -214,13 +300,18 @@ export function mergedByStack(
   if (data == null) return out;
   const byKey = new Map(data.tickets.map((t) => [t.key.trim().toUpperCase(), t]));
   for (const s of stacks) {
-    if (s.ticket == null) continue;
-    const t = byKey.get(s.ticket.key.trim().toUpperCase());
-    if (t == null) continue;
-    if (s.ticket.ident != null && t.ident !== s.ticket.ident) continue;
+    // A merged group (`mergeShared`) lists every one of its tickets' merged PRs, each once.
+    const all: TicketMergedPr[] = [];
+    for (const st of s.tickets) {
+      const t = byKey.get(st.key.trim().toUpperCase());
+      if (t == null) continue;
+      if (st.ident != null && t.ident !== st.ident) continue;
+      all.push(...t.prs);
+    }
+    if (all.length === 0) continue;
     const openIds = new Set(s.rows.map((r) => r.pr.id));
     const seen = new Set<number>();
-    const prs = t.prs
+    const prs = all
       .filter((p) => !openIds.has(p.prId) && (seen.has(p.prId) ? false : (seen.add(p.prId), true)))
       .sort((a, b) => (a.mergedAt < b.mergedAt ? 1 : a.mergedAt > b.mergedAt ? -1 : a.prId - b.prId));
     if (prs.length > 0) out.set(s.id, prs);

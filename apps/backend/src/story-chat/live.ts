@@ -44,19 +44,23 @@ import { acquireTree, sweepTreesAtBoot } from './trees.js';
 import { CHAT_DISALLOWED_TOOLS } from '../review/chat-agent.js';
 import { readSessionTicket, defaultSessionTicketSeams, type SessionTicket } from '../sandbox/workspace/ticket.js';
 import { chatTmpBase, chatTmpPrefix } from './tmp.js';
-import { storyChatSystemPrompt, type SeedCheckout, type SeedRepo, type SeedTurn } from './seed.js';
+import { storyChatSystemPrompt, type SeedBuildWork, type SeedCheckout, type SeedRepo, type SeedTurn } from './seed.js';
+import { writeDiffFolder } from './diff-files.js';
 import { projectSkillsIn, readerContextFor, sprintText, type ReaderContext } from './context.js';
 import * as store from './store.js';
 import { readEnv } from '../env-name.js';
 
 
-/** Most PRs a chat checks out (open ones first, then the newest merged). */
-export const STORY_CHAT_MAX_CHECKOUTS = 6;
+/** Most PRs a chat checks out (open ones first, then the newest merged). A safety bound, not a budget:
+ *  every PR of an ordinary story is checked out; any past it are NAMED in the seed, never dropped silently. */
+export const STORY_CHAT_MAX_CHECKOUTS = 30;
 /** The US$ cap of one live agent (a new one starts, told the earlier turns, when it is reached). */
 export const STORY_CHAT_SESSION_BUDGET_USD = 5;
-export const STORY_CHAT_TURNS_PER_QUESTION = 60;
+/** Steps per question: enough to read every part of every diff (reads in one step run together). */
+export const STORY_CHAT_TURNS_PER_QUESTION = 150;
 const ACTIVITY_MAX = 40;
-const DIFF_MAX_CHARS = 2_000_000;
+/** A diff past this is cut (a safety bound: ~500k lines); the INDEX says so. */
+const DIFF_MAX_CHARS = 20_000_000;
 /** Most workspace repositories checked out at their default branch (the rest are named as left out). */
 export const STORY_CHAT_MAX_REPOS = 20;
 const IDLE_MS = STORY_CHAT_IDLE_MINUTES * 60_000;
@@ -103,6 +107,18 @@ export interface StoryChatDeps {
   tmpBase(): string;
   /** A PR's unified diff (GitHub's own, so it works for merged PRs and needs no blobs locally). */
   diff(repo: string, number: number): Promise<string>;
+  /** The story's newest Implement story build: each repository's (or planned PR's) stored work. */
+  buildWork(accountId: number, workspaceId: number, ident: string): Promise<BuildWork[]>;
+}
+
+/** One piece of a build's stored work (a patch), for the chat to read. */
+export interface BuildWork {
+  repo: string;
+  /** "the build's work", or a planned PR's key and title. */
+  label: string;
+  /** Where it is: "not pushed", "pushed to branch X", "pushed as PR #n". */
+  where: string;
+  patch: string;
 }
 
 const realDeps: StoryChatDeps = {
@@ -212,6 +228,10 @@ const realDeps: StoryChatDeps = {
     const [owner, name] = repo.split('/') as [string, string];
     return fetchPrUnifiedDiff(getGithubToken(), owner, name, number);
   },
+  async buildWork(accountId, workspaceId, ident) {
+    const { storyBuildWorkFor } = await import('./build-work.js');
+    return storyBuildWorkFor(accountId, workspaceId, ident);
+  },
 };
 
 let deps: StoryChatDeps = realDeps;
@@ -232,6 +252,10 @@ interface Live {
   note: string | null;
   provider: AgentProvider;
   checkouts: PreparedCheckout[];
+  /** The story's PRs past STORY_CHAT_MAX_CHECKOUTS (named in the seed). */
+  prsLeftOut: string[];
+  /** The story's newest build's stored work, as diff folders. */
+  buildWork: SeedBuildWork[];
   /** Every workspace repository at its default branch. */
   repos: SeedRepo[];
   reposLeftOut: string[];
@@ -310,6 +334,8 @@ export async function prepare(ctx: AgentContext, accountId: number, workspaceId:
     note: null,
     provider,
     checkouts: [],
+    prsLeftOut: [],
+    buildWork: [],
     repos: [],
     reposLeftOut: [],
     extraReadRoots: [],
@@ -339,9 +365,9 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
     if (l.closed) return;
     if (ticket == null) throw new Error('This ticket has no story to ask about yet.');
     l.ticket = ticket;
-    const prs = [...ticket.prs]
-      .sort((a, b) => (a.state === b.state ? b.number - a.number : a.state === 'open' ? -1 : 1))
-      .slice(0, STORY_CHAT_MAX_CHECKOUTS);
+    const sorted = [...ticket.prs].sort((a, b) => (a.state === b.state ? b.number - a.number : a.state === 'open' ? -1 : 1));
+    const prs = sorted.slice(0, STORY_CHAT_MAX_CHECKOUTS);
+    l.prsLeftOut = sorted.slice(STORY_CHAT_MAX_CHECKOUTS).map((p) => `${p.fullName}#${p.number}`);
     const heads = await deps.heads(l.accountId, prs.map((p) => ({ repo: p.fullName, number: p.number })));
     const want = prs.map((p) => ({
       repo: p.fullName,
@@ -376,19 +402,30 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
     l.tmpDir = mkdtempSync(join(base, chatTmpPrefix(resolveDataDir(process.env, homedir()))));
 
     // The clone cache is BLOBLESS (a checkout's history is partial), so each PR's change is GitHub's own
-    // diff, written here for the agent to read.
+    // diff, written here for the agent to read: whole in one file, and as a folder of per-file parts each
+    // small enough for ONE Read (diff-files.ts) — so a big PR is never read in part.
     await Promise.all(
       checkouts.map(async (c) => {
         try {
-          const text = await deps.diff(c.repo, c.number);
-          const file = join(l.tmpDir!, `${c.repo.replace('/', '__')}-${c.number}.diff`);
-          writeFileSync(file, text.length > DIFF_MAX_CHARS ? `${text.slice(0, DIFF_MAX_CHARS)}\n[… cut at ${DIFF_MAX_CHARS} characters]\n` : text);
+          const raw = await deps.diff(c.repo, c.number);
+          const text = raw.length > DIFF_MAX_CHARS ? `${raw.slice(0, DIFF_MAX_CHARS)}\n[… cut at ${DIFF_MAX_CHARS} characters]\n` : raw;
+          const stem = `${c.repo.replace('/', '__')}-${c.number}`;
+          const file = join(l.tmpDir!, `${stem}.diff`);
+          writeFileSync(file, text);
           c.diffFile = file;
+          c.diffIndex = writeDiffFolder(join(l.tmpDir!, 'diffs', stem), `${c.repo}#${c.number} "${c.title}"`, text).index;
         } catch {
           /* no diff: the agent reads the checkout */
         }
       }),
     );
+    // The story's newest Implement story build: its stored work, which may not be on GitHub yet.
+    const work = await deps.buildWork(l.accountId, l.workspaceId, l.ident).catch(() => [] as BuildWork[]);
+    l.buildWork = work.map((w, i) => {
+      const dir = join(l.tmpDir!, 'build', `${i + 1}-${w.repo.replace('/', '__')}`);
+      const got = writeDiffFolder(dir, `${w.repo}: ${w.label} (${w.where})`, w.patch);
+      return { repo: w.repo, label: w.label, where: w.where, index: got.index };
+    });
     const [reader, docs, sprint] = await Promise.all([
       deps.readerContext(l.accountId, l.workspaceId),
       deps.docs(l.accountId, l.workspaceId).catch(() => null),
@@ -413,6 +450,8 @@ async function doPrepare(ctx: AgentContext, l: Live): Promise<void> {
     l.seedParts = {
       ticket,
       checkouts,
+      prsLeftOut: l.prsLeftOut,
+      buildWork: l.buildWork,
       repos: l.repos,
       reposLeftOut: l.reposLeftOut,
       memories: reader.memories,

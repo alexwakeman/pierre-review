@@ -2,8 +2,8 @@
 
 Quick, READ-ONLY questions about ONE story: how to prove it is done once its pull requests are merged
 (manual test steps), what is still missing, how it fits with the rest of the system, what is risky.
-The agent gets the same context a build gets, read-only: the ticket, each PR's diff and checked-out
-code, EVERY workspace repository at its default branch, the reader's Claude project memories,
+The agent gets the same context a build gets, read-only: the ticket, EVERY PR's whole diff and checked-out
+code, the story's newest Implement story build's stored work, EVERY workspace repository at its default branch, the reader's Claude project memories,
 CLAUDE.md files and skills, the reference library, and — beyond builds — the sprint's other stories.
 It runs nothing and changes nothing. Code: `apps/backend/src/story-chat/`, the panel
 `apps/frontend/src/components/Ticket/StoryChat.tsx`, the wire `packages/shared/src/story-chat.ts`.
@@ -21,7 +21,9 @@ story view mounts ─► POST /prepare (keep-alive every 3 min while the panel i
                        │ worktrees of the PR heads (clone-manager, ledgered as kind 'chat')
                        │ every workspace repo at its default branch: the SHARED trees (trees.ts;
                        │   at most 20 repos, the rest named)
-                       │ each PR's unified diff (GitHub REST) → <tmp>/<owner>__<name>-<n>.diff
+                       │ each PR's unified diff (GitHub REST) → <tmp>/<owner>__<name>-<n>.diff, AND
+                       │   as per-file parts <tmp>/diffs/<owner>__<name>-<n>/INDEX.md (diff-files.ts)
+                       │ the newest build's stored patches → <tmp>/build/<i>-<owner>__<name>/INDEX.md
                        │ context.ts: memories, ~/.claude/CLAUDE.md, the projects folder's CLAUDE.md,
                        │   skills (the workspace's sandbox settings choose, as for builds); every
                        │   memory file also written to <tmp>/memory/
@@ -50,17 +52,46 @@ idle 10 min ─► the reaper: session closed, worktrees removed, temp folder de
   the least recently used idle one is closed to make room. A chat answering is never reaped or evicted.
 - **Warm start.** The agent process is up before the question (measured: ~1 s to the first words warm,
   ~4 s more cold). Preparing makes no model call.
-- **The checkouts** are the story's PRs (open first, then the newest merged; at most 6) from Ensemble's
-  clone cache. The cache is BLOBLESS, so a checkout's history is partial: each PR's change is GitHub's
+- **The checkouts** are EVERY PR of the story (open first, then the newest merged), from Ensemble's clone
+  cache. `STORY_CHAT_MAX_CHECKOUTS` (30) is a safety bound, not a budget: any past it are NAMED in the seed
+  (never dropped silently; the cap used to be 6, and the agent then said it had not read a PR at all). The cache is BLOBLESS, so a checkout's history is partial: each PR's change is GitHub's
   own diff, written into the chat's temp folder (`/tmp/limn-q-<install hash>-XXXXXX`) and named in the
   seed. A crash leaves the worktrees to the worktree sweep (`review/worktree-gc.ts`) and the temp
   folders to the boot sweep (`sweepAtBoot`), which also marks cut-off turns failed.
-- **The ready-made questions** (`STORY_CHAT_PRESETS`): How to test, Integration, Risks, Criteria check.
+- **The ready-made questions** (`STORY_CHAT_PRESETS`): How to test, Integration, Risks, Criteria check. "How to
+  test" is also asked BY ENSEMBLE after a build (docs/STORY-BUILD.md § How to test after a build).
+- **No read limit.** The seed tells the agent to read each diff's INDEX, then every part the question needs, and
+  for a whole-story question (test steps, risks, integration, criteria) EVERY part of EVERY PR and of the build's
+  work, before answering — "never answer from part of a diff". `STORY_CHAT_TURNS_PER_QUESTION` is 150 (parallel
+  reads share a step). The old "answer within about 20 reads" line is gone: it made the agent stop part-way.
 - **Saved chats.** `story_chats` + `story_chat_turns` (migration 0192). Ensemble's OWN record — never an
   import of the reader's Claude or Codex sessions (`persistSession: false`). Continuing a saved chat on
   a fresh agent puts its earlier turns in the system prompt (`seed.ts` `earlierText`, newest kept).
 - **Per-turn cost** is the session's running total minus the previous total; Claude's is recorded
   here (`recordAiUsage`, feature `story_chat`, group "chat"); Codex records its own.
+
+## The diffs (`story-chat/diff-files.ts`)
+
+Owner report (2026-11-16): "I did not read the full #620 diff (it was truncated at ~1200 of 1879 lines) or the
+#482 diff at all". The agent's Read returns a bounded slice of a file (~2000 lines, fewer when lines are long, and
+cuts a line at 2000 characters), so ONE diff file per PR was read in part. Now each diff is ALSO a folder:
+
+- `INDEX.md`: the PR, its file and part counts, and one line per changed file — status (changed, added,
+  deleted, renamed from …, or GitHub's "no diff (binary or too large): read the file in the checkout"), its
+  churn and its part files.
+- One file per changed file, in PARTS of at most `DIFF_PART_LINES` (600) lines and `DIFF_PART_CHARS` (40k)
+  characters — one Read returns a part whole — broken at a hunk (`@@`) when one is near (past 70%). A line
+  longer than `DIFF_LINE_MAX` (1500) is wrapped onto lines starting `↪ `; the INDEX says so.
+- Pure (`splitDiff`, `partsOf`, `planDiffFolder`) + one writer; `diff-files.test.ts` pins the bounds and that
+  the parts are the whole file. The one-file `.diff` stays for Grep. `DIFF_MAX_CHARS` is a 20 MB safety cut.
+
+## The build's work (`story-chat/build-work.ts`)
+
+The story's NEWEST Implement story build (a workspace session, not discarded) keeps its work as patches
+(`story_build_repos.patch`, or `story_build_prs.patch` per planned PR). Work not pushed is in no pull request,
+so it is written as diff folders (as above) under `<tmp>/build/` and listed in the seed under "# The Implement
+story build", each with where it is ("not pushed", "pushed to the branch X, with no pull request yet", "pushed as
+PR #n"). DB only.
 
 ## Shared trees
 

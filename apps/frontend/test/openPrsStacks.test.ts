@@ -120,6 +120,80 @@ describe('a PR naming two tickets', () => {
   });
 });
 
+describe('mergeShared: tickets that share a PR are ONE group (Open PRs rows)', () => {
+  const prs = [
+    pr({ id: 1, updatedAt: day(9) }),
+    pr({ id: 2, updatedAt: day(8) }),
+    pr({ id: 3, updatedAt: day(7) }),
+    pr({ id: 4, updatedAt: day(6) }),
+    pr({ id: 5, updatedAt: day(5) }),
+  ];
+  const tickets = by({
+    1: [tk('BMD-1043')],
+    2: [tk('BMD-1040'), tk('BMD-1043')],
+    3: [tk('BMD-1040')],
+    4: [tk('BMD-2000')],
+  });
+  const out = stackOpenPrs(prs, tickets, undefined, { mergeShared: true });
+
+  it('one group per set of tickets that share PRs; every PR once, in the caller’s order', () => {
+    expect(out.stacks.map((s) => [s.tickets.map((t) => t.key), s.rows.map((r) => r.pr.id)])).toEqual([
+      [['BMD-1043', 'BMD-1040'], [1, 2, 3]],
+      [['BMD-2000'], [4]],
+      [[], [5]],
+    ]);
+    expect(out.stacks.reduce((n, s) => n + s.rows.length, 0)).toBe(out.prCount);
+  });
+
+  it('the group leads with its first ticket and has its own id; a lone ticket keeps ticket:<KEY>', () => {
+    expect(out.stacks[0]!.ticket?.key).toBe('BMD-1043');
+    expect(out.stacks[0]!.id).toBe('ticket:BMD-1043+ticket:BMD-1040');
+    expect(out.stacks[1]!.id).toBe('ticket:BMD-2000');
+  });
+
+  it('a row names its tickets only when it is not on every ticket of the group; nothing is "also in"', () => {
+    const rows = out.stacks[0]!.rows;
+    expect(rows.map((r) => r.ticketKeys ?? null)).toEqual([['BMD-1043'], null, ['BMD-1040']]);
+    expect(rows.every((r) => r.alsoIn.length === 0)).toBe(true);
+  });
+
+  it('sharing is transitive', () => {
+    const o = stackOpenPrs(
+      [pr({ id: 1 }), pr({ id: 2 })],
+      by({ 1: [tk('A-1'), tk('A-2')], 2: [tk('A-2'), tk('A-3')] }),
+      undefined,
+      { mergeShared: true },
+    );
+    expect(o.stacks).toHaveLength(1);
+    expect(o.stacks[0]!.tickets.map((t) => t.key).sort()).toEqual(['A-1', 'A-2', 'A-3']);
+  });
+
+  it('a group is done only when every ticket is done; its open ticket leads', () => {
+    const o = stackOpenPrs(
+      [pr({ id: 1, updatedAt: day(9) }), pr({ id: 2, updatedAt: day(1) })],
+      by({ 1: [tk('D-1', { statusCategory: 'done' }), tk('D-2')], 2: [tk('E-1')] }),
+      undefined,
+      { mergeShared: true },
+    );
+    expect(o.stacks.map((s) => s.tickets.map((t) => t.key))).toEqual([['D-2', 'D-1'], ['E-1']]);
+  });
+
+  it('the Merged panel asks for every ticket of a group and lists their merged PRs once', () => {
+    expect(mergedPanelKeys(out.stacks)).toEqual(['BMD-1043', 'BMD-1040', 'BMD-2000']);
+    const m = (prId: number, key: string) => ({
+      key,
+      ident: null,
+      prs: [{ prId, repoId: 1, repoFullName: 'acme/engine', number: prId, title: 'm', authorLogin: 'ada', authorDisplayName: null, authorAvatarUrl: null, mergedAt: day(prId) }],
+    });
+    const got = mergedByStack(out.stacks, { tickets: [m(10, 'BMD-1043'), m(11, 'BMD-1040')] } as never);
+    expect(got.get(out.stacks[0]!.id)?.map((p) => p.prId)).toEqual([11, 10]);
+  });
+
+  it('off by default: a shared PR still sits in both stacks', () => {
+    expect(stackOpenPrs(prs, tickets).stacks.map((s) => s.ticket?.key ?? 'none')).toEqual(['BMD-1043', 'BMD-1040', 'BMD-2000', 'none']);
+  });
+});
+
 describe('the ticket details', () => {
   it('first PR wins each field, a later PR fills a gap', () => {
     const out = stackOpenPrs(

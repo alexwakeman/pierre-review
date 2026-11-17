@@ -19,6 +19,17 @@ export interface SeedCheckout {
   error: string | null;
   /** The PR's full diff, written on the host (the checkout is blobless and the sandbox has no GitHub). */
   diffFile?: string | null;
+  /** The same diff as a folder of per-file parts, each readable whole in one Read: its INDEX (diff-files.ts). */
+  diffIndex?: string | null;
+}
+
+/** A piece of the story's newest Implement story build's stored work, as a diff folder. */
+export interface SeedBuildWork {
+  repo: string;
+  label: string;
+  where: string;
+  /** Its INDEX (diff-files.ts). */
+  index: string;
 }
 
 export interface SeedMemory {
@@ -43,6 +54,10 @@ export interface SeedRepo {
 export interface StoryChatSeedInput {
   ticket: SessionTicket;
   checkouts: readonly SeedCheckout[];
+  /** The story's PRs past the checkout bound, named. */
+  prsLeftOut?: readonly string[];
+  /** The story's newest build's stored work. */
+  buildWork?: readonly SeedBuildWork[];
   /** Every workspace repository at its default branch. */
   repos: readonly SeedRepo[];
   /** Repositories left out (past the cap). */
@@ -117,12 +132,23 @@ export function storyChatSystemPrompt(s: StoryChatSeedInput): string {
     const head = c.headSha ? ` at ${c.headSha.slice(0, 7)}` : '';
     const where = c.path ? `checked out at ${c.path}${head}` : `not checked out (${c.error ?? 'unknown reason'})`;
     lines.push(`- ${c.repo}#${c.number} (${c.state}) "${c.title}": ${where}`);
-    if (c.diffFile) lines.push(`  its full diff: ${c.diffFile}`);
+    if (c.diffIndex) lines.push(`  its diff, file by file: ${c.diffIndex}`);
+    if (c.diffFile) lines.push(`  its diff in one file: ${c.diffFile}`);
+    if (!c.diffIndex && !c.diffFile) lines.push('  its diff could not be fetched: compare the checkout with the repository at its default branch.');
   }
+  if (s.prsLeftOut && s.prsLeftOut.length > 0) lines.push(`Not checked out (too many pull requests): ${s.prsLeftOut.join(', ')}.`);
   lines.push(
-    "Each checkout is a detached copy of the pull request's head, with its files in full. Its git history is partial and cannot be fetched from here: read the PR's diff file for what it changes.",
+    "Each checkout is a detached copy of the pull request's head branch, with its files in full. Its git history is partial and cannot be fetched from here: the diff says what the PR changes. Each diff's INDEX lists every changed file and its parts; each part is small enough to read whole in ONE Read, and together the parts are the whole diff. Nothing in them is cut.",
   );
   lines.push('');
+
+  const work = s.buildWork ?? [];
+  if (work.length > 0) {
+    lines.push('# The Implement story build');
+    lines.push("Ensemble's newest build of this story, as it stored its work. Work that is not pushed is in no pull request yet: read it here.");
+    for (const w of work) lines.push(`- ${w.repo}: ${w.label} (${w.where}). Its diff, file by file: ${w.index}`);
+    lines.push('');
+  }
 
   if (s.repos.length > 0) {
     lines.push("# The workspace's repositories (default branch, read-only)");
@@ -150,7 +176,9 @@ export function storyChatSystemPrompt(s: StoryChatSeedInput): string {
   lines.push(
     [
       '- This chat is READ-ONLY. Read the diffs and the code with Read, Grep and Glob. You cannot run commands, run tests or change files.',
-      '- Start from each PR\'s diff file: it says what changed. Open other code only to answer the question, and answer within about 20 reads; say what you did not check.',
+      "- Read each PR's diff INDEX first. Then read every part the question needs. For a question about the whole story (how to test it, its risks, how it fits, whether it meets its criteria) read EVERY part of EVERY pull request's diff, and of the build's work, before you answer. Read several parts in one step. There is no limit on how much you read.",
+      '- Never answer from part of a diff. If you did not read something, read it before you answer; say what you did not check only when a file could not be read.',
+      '- Use the checkouts and the repositories for the code around the change: callers, configuration, tests, other services. Grep and Glob search them.',
       '- Cite code as path:line from the CHECKOUT (open the file to get the line), never a line number of a diff file.',
       '- Start the answer with the answer itself: no lead-in about what you read or will write.',
       "- For manual test steps, describe what a person does in the running product (screens, API calls, data to set up) and what they should see. Name the environment or flag each step needs.",

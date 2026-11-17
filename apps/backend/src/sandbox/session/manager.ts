@@ -2150,6 +2150,11 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       }
       // A HOTFIX build never runs the review loop (v1): its PRs open on the reader's Push.
       if (e.outcome === 'completed' && e.stored && e.saved && !hotfixBuild) void maybeStartLoop(ctx, { accountId, buildId }).catch(() => {});
+      // HOW TO TEST AFTER A BUILD (docs/STORY-BUILD.md): the story chat's "How to test", once per version of
+      // the stored work, behind the spend gate. Read-only; fired and forgotten (it never throws).
+      if (e.outcome === 'completed' && e.stored && e.saved) {
+        void import('../../story-chat/how-to-test.js').then((m) => m.maybeAskHowToTest(ctx, { accountId, buildId })).catch(() => {});
+      }
     },
     beforeHostTurn() {
       continuations = 0;

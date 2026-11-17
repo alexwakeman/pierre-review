@@ -1040,6 +1040,12 @@ NEVER-stored `autoPushRunning` (the in-process flag). `story_build_repos.push_er
 Since 0186 the switch `auto_push` runs THE REVIEW LOOP (below); the old automatic push is retired, its
 columns kept (the loop's start claim also stamps `auto_push_claimed_at`).
 
+**HOW TO TEST AFTER A BUILD** (migration `0204`; [STORY-BUILD.md](STORY-BUILD.md) § How to test after a build):
+`story_builds.how_to_test_key` (THE CLAIM: the sha-256 of the stored work the story chat's "How to test" was
+asked for, compare-and-set; a failed ask puts the previous value back), `how_to_test_chat_id` (the `story_chats`
+row holding the answer; NO FK, re-scoped by account on read) and `how_to_test_seen_at` (the reader opened or
+dismissed the build tab's pointer; reset by a new ask) — wire `howToTest: {chatId, seen} | null`.
+
 **HOTFIX BUILDS** (migration `0196`; [STORY-BUILD.md](STORY-BUILD.md) § Hotfix builds). `story_builds.hotfix`
 (0/1, written at the claim). Per `story_build_repos` row: `hotfix_tag` (the latest release the RELEASE checkout
 starts at; NULL on an ordinary build and on a read-only repository), `read_only` (no release yet: its change is

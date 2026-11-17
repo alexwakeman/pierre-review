@@ -144,13 +144,17 @@ export interface OpenPrsRowsData {
   offer?: ReactNode;
 }
 
-/** One drawn row: a PR, in a group (or not). A PR in two tickets is two entries. */
+/** One drawn row: a PR, in a group (or not). Tickets that share a PR are ONE group (`mergeShared`),
+ *  so a PR is one entry. */
 interface Entry {
   key: string;
   pr: TimelinePr;
   stackId: string | null;
   alsoIn: CardTicket[];
-  ticketKey: string | null;
+  /** The group's ticket keys (their coverage is the group's, not repeated on the row). */
+  groupKeys: string[];
+  /** A group of several tickets: the ones this PR names, when not all of them; null otherwise. */
+  ticketKeys: string[] | null;
 }
 
 // ---- what the row's icons say (pure, so the panel says the same words) ----
@@ -347,12 +351,19 @@ export function OpenPrsRows(props: OpenPrsRowsData): JSX.Element {
 
   // Every drawable entry, in order (folded groups contribute none), then the drawn window.
   const all: Entry[] = useMemo(() => {
-    if (stacks == null) return rows.map((pr) => ({ key: `${pr.id}`, pr, stackId: null, alsoIn: [], ticketKey: null }));
+    if (stacks == null) return rows.map((pr) => ({ key: `${pr.id}`, pr, stackId: null, alsoIn: [], groupKeys: [], ticketKeys: null }));
     const out: Entry[] = [];
     for (const st of stacks) {
       if (foldedGroups.has(st.id)) continue;
       for (const r of st.rows) {
-        out.push({ key: `${st.id}:${r.pr.id}`, pr: r.pr, stackId: st.id, alsoIn: r.alsoIn, ticketKey: st.ticket?.key ?? null });
+        out.push({
+          key: `${st.id}:${r.pr.id}`,
+          pr: r.pr,
+          stackId: st.id,
+          alsoIn: r.alsoIn,
+          groupKeys: st.tickets.map((t) => t.key),
+          ticketKeys: r.ticketKeys ?? null,
+        });
       }
     }
     return out;
@@ -830,6 +841,8 @@ function PrRow({
               {pr.isDraft && 'Draft · '}
               {repoShort(repo)}#{pr.number}
               {tickets[0] != null && ` · ${tickets[0].key}${tickets.length > 1 ? ` +${tickets.length - 1}` : ''}`}
+              {/* A group of several tickets: say which of them this PR is on, when not all. */}
+              {entry.ticketKeys != null && entry.ticketKeys.length > 0 && ` · ${entry.ticketKeys.join(', ')}`}
             </span>
             <span aria-hidden>·</span>
             <Avatar user={author} size={12} />
@@ -906,8 +919,10 @@ function TicketGroup({
 }): JSX.Element {
   const t = stack.ticket;
   const headId = useId();
-  const href = t != null ? safeExternalUrl(t.url) : null;
   const merged = data.mergedStacks.get(stack.id) ?? [];
+  // Tickets that share PRs are ONE group (lib/openPrsStacks.ts `mergeShared`): each ticket on its own
+  // line, stacked, the chevron on the first; the shared PRs sit once beneath.
+  const keysLabel = stack.tickets.length > 0 ? stack.tickets.map((x) => x.key).join(', ') : 'no ticket';
   return (
     <li role="presentation" className="mt-5 first:mt-0">
       <div
@@ -917,47 +932,28 @@ function TicketGroup({
         tabIndex={-1}
         className="scroll-mt-4 rounded-ui outline-none"
       >
-        {/* ONE line at every width: chevron · key + story name (→ the story view). No PR count. The
-            ticket's status, assignee, criteria met and Re-check live in the story view, one click away. */}
-        <div role="presentation" className="flex min-w-0 items-center gap-3 rounded-ui px-1 py-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        {/* ONE line per ticket at every width: chevron · key + story name (→ the story view). No PR
+            count. The ticket's status, assignee, criteria met and Re-check live in the story view. */}
+        <div role="presentation" className="flex min-w-0 items-start gap-3 rounded-ui px-1 py-1.5">
+          <div className="flex min-w-0 flex-1 items-start gap-1.5">
             <button
               type="button"
               onClick={onFold}
               aria-expanded={!folded}
-              aria-label={folded ? `Show the pull requests for ${t?.key ?? 'no ticket'}` : `Hide the pull requests for ${t?.key ?? 'no ticket'}`}
+              aria-label={folded ? `Show the pull requests for ${keysLabel}` : `Hide the pull requests for ${keysLabel}`}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-ui text-ui-faint hover:bg-ui-hover hover:text-ui-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ui-accent touch:h-10 touch:w-10"
             >
               <ChevronIcon dir={folded ? 'right' : 'down'} size={12} />
             </button>
-            <h3 id={headId} className="m-0 flex min-w-0 flex-1 items-baseline gap-2 text-body font-medium text-ui-ink">
+            <h3 id={headId} className="m-0 flex min-w-0 flex-1 flex-col gap-0.5 text-body font-medium text-ui-ink">
               {t == null ? (
-                <span className="text-ui-mute">No ticket</span>
-              ) : t.ident != null ? (
-                <TicketKeyButton ticket={{ ...t, ident: t.ident }} className="flex min-w-0 items-baseline gap-2 hover:underline touch:min-h-10 touch:flex-1 touch:items-center">
-                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute">
-                    <TicketIcon size={12} className="shrink-0 self-center" />
-                    {t.key}
-                    <span className="sr-only">:</span>
-                  </span>
-                  {t.title != null && <span className="min-w-0 truncate">{t.title}</span>}
-                </TicketKeyButton>
+                <span className="flex min-h-6 items-center text-ui-mute">No ticket</span>
               ) : (
-                <>
-                  {href != null ? (
-                    <a href={href} target="_blank" rel="noreferrer noopener" title={`Open ${cardTicketLabel(t)}`} className="hit inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute hover:underline">
-                      <TicketIcon size={12} className="shrink-0 self-center" />
-                      {t.key}
-                      <span className="sr-only">:</span>
-                    </a>
-                  ) : (
-                    <span className="inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute">
-                      <TicketIcon size={12} className="shrink-0 self-center" />
-                      {t.key}
-                    </span>
-                  )}
-                  {t.title != null && <span className="min-w-0 truncate">{t.title}</span>}
-                </>
+                stack.tickets.map((x) => (
+                  <span key={x.key} data-testid="open-prs-group-ticket" className="flex min-h-6 min-w-0 items-center gap-2">
+                    <TicketHeadLine t={x} />
+                  </span>
+                ))
               )}
             </h3>
           </div>
@@ -970,7 +966,7 @@ function TicketGroup({
             data-testid="open-prs-group-body"
             className="relative pl-[22px] before:absolute before:bottom-1 before:left-[15px] before:top-0 before:w-px before:bg-ui-line max-sm:pl-3 max-sm:before:left-[5px]"
           >
-            <ul role="presentation" aria-label={t != null ? `Pull requests for ${t.key}` : 'Pull requests with no ticket'} className="m-0 list-none p-0">
+            <ul role="presentation" aria-label={t != null ? `Pull requests for ${keysLabel}` : 'Pull requests with no ticket'} className="m-0 list-none p-0">
               {children}
             </ul>
             {complete && merged.length > 0 && <MergedRows stackId={stack.id} prs={merged} onOpen={data.onOpenMerged} />}
@@ -978,6 +974,40 @@ function TicketGroup({
         )}
       </div>
     </li>
+  );
+}
+
+/** One ticket of a group's header: key + story name → the story view (or the tracker, or plain text). */
+function TicketHeadLine({ t }: { t: CardTicket }): JSX.Element {
+  const href = safeExternalUrl(t.url);
+  if (t.ident != null) {
+    return (
+      <TicketKeyButton ticket={{ ...t, ident: t.ident }} className="flex min-w-0 items-baseline gap-2 hover:underline touch:min-h-10 touch:flex-1 touch:items-center">
+        <span className="inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute">
+          <TicketIcon size={12} className="shrink-0 self-center" />
+          {t.key}
+          <span className="sr-only">:</span>
+        </span>
+        {t.title != null && <span className="min-w-0 truncate">{t.title}</span>}
+      </TicketKeyButton>
+    );
+  }
+  return (
+    <>
+      {href != null ? (
+        <a href={href} target="_blank" rel="noreferrer noopener" title={`Open ${cardTicketLabel(t)}`} className="hit inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute hover:underline">
+          <TicketIcon size={12} className="shrink-0 self-center" />
+          {t.key}
+          <span className="sr-only">:</span>
+        </a>
+      ) : (
+        <span className="inline-flex shrink-0 items-center gap-1 font-mono text-meta text-ui-mute">
+          <TicketIcon size={12} className="shrink-0 self-center" />
+          {t.key}
+        </span>
+      )}
+      {t.title != null && <span className="min-w-0 truncate">{t.title}</span>}
+    </>
   );
 }
 
@@ -1186,7 +1216,7 @@ function PrPanelBody({ entry, data, onJump }: { entry: Entry; data: OpenPrsRowsD
           teamClaimSkip={data.teamClaimSkips.get(pr.id) ?? null}
           onOpenReview={() => data.onOpenReview(pr)}
           onOpenFix={() => data.onOpenFix(pr)}
-          ticketPills={data.ticketReviewOn ? cardTicketPills(tickets, data.ticketStates, entry.ticketKey) : []}
+          ticketPills={data.ticketReviewOn ? cardTicketPills(tickets.filter((t) => !entry.groupKeys.includes(t.key)), data.ticketStates) : []}
         />
       )}
     </div>

@@ -208,11 +208,16 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        The agent reads the ticket, each pull request&rsquo;s changes and code, every repository in the workspace, the
-        workspace&rsquo;s reference documents and the sprint&rsquo;s other stories. It also gets your Claude memory,
+        The agent reads the ticket, every pull request&rsquo;s changes in full and its code, the changes of the
+        story&rsquo;s latest <DocLink to="implement-story/overview">Implement story</DocLink> build (pushed or not),
+        every repository in the workspace, the workspace&rsquo;s reference documents and the sprint&rsquo;s other stories. It also gets your Claude memory,
         CLAUDE.md and skills for these projects, the same ones Implement story uses (Settings → Sandbox). It only reads:
         it runs nothing and changes nothing. It gets ready when you open the story, so the first answer starts quickly, and closes after 10 minutes
         without use. Chats are saved with the story: pick an earlier one in the menu to read it or ask a follow-up.
+      </p>
+      <p>
+        When an Implement story build finishes, Ensemble asks <Ui>How to test</Ui> for you, so the steps are waiting here.
+        See <DocLink to="implement-story/push#how-to-test">How to test after a build</DocLink>.
       </p>
 
       <H2 id="why-it-helps">Why it helps</H2>

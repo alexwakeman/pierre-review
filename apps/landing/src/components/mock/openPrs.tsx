@@ -5,7 +5,7 @@ import { MockFrame } from './kit';
 // ---------------------------------------------------------------------------
 // OPEN PULL REQUESTS, grouped by ticket, with the drawer (Everything else). Mirrors
 // apps/frontend Activity/OpenPrsRows.tsx: a ticket line (chevron, key, title) with its
-// PRs inset under it; each row a status icon, the title, then repo#N · author · age;
+// PRs inset under it (tickets that share PRs: one group, a line per ticket, each PR once); each row a status icon, the title, then repo#N · author · age;
 // the Review, CI, Threads and AI review columns. A click opens the docked drawer:
 // Can it land, Checks, Reviews, Threads, the AI review, Tickets, then the pull request
 // (author, opened, updated, size, reach). Words come from mock/acme.ts OPEN_PRS.
@@ -354,24 +354,29 @@ export function OpenPrsMock(): JSX.Element {
               const isFolded = folded.has(key);
               return (
                 <li key={key} className="mk-op-group">
-                  <div className="mk-op-ghead">
+                  <div className={`mk-op-ghead${g.more != null && g.more.length > 0 ? ' multi' : ''}`}>
                     <button
                       type="button"
                       className={`mk-op-fold${isFolded ? ' folded' : ''}`}
                       aria-expanded={!isFolded}
-                      aria-label={`${isFolded ? 'Show' : 'Hide'} the pull requests for ${g.ticket?.key ?? 'no ticket'}`}
+                      aria-label={`${isFolded ? 'Show' : 'Hide'} the pull requests for ${g.ticket != null ? [g.ticket, ...(g.more ?? [])].map((t) => t.key).join(', ') : 'no ticket'}`}
                       onClick={() => fold(key)}
                     >
                       {I.chevron}
                     </button>
                     {g.ticket != null ? (
-                      <h4>
-                        <span className="mk-op-key">
-                          {I.ticket}
-                          {g.ticket.key}
-                        </span>
-                        <span>{g.ticket.title}</span>
-                      </h4>
+                      // Tickets that share PRs are ONE group: each ticket on its own line.
+                      <div className="mk-op-gtickets">
+                        {[g.ticket, ...(g.more ?? [])].map((t) => (
+                          <h4 key={t.key}>
+                            <span className="mk-op-key">
+                              {I.ticket}
+                              {t.key}
+                            </span>
+                            <span>{t.title}</span>
+                          </h4>
+                        ))}
+                      </div>
                     ) : (
                       <h4 className="mk-muted">No ticket</h4>
                     )}
