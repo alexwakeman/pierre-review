@@ -601,9 +601,9 @@
   position: relative; /* the boxes' offsetTop and the snake are from here (useSnake) */
   grid-column: 7 / 13;
   display: grid;
-  /* ONE column at every width, the boxes FLUSH: the snake (below) runs down the seams */
+  /* ONE column at every width, the boxes APART: the snake (below) crosses each gap */
   grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  gap: 32px; /* at least 2 × the corner radius: room for the crossing's two bends */
   align-content: start;
 }
 .lb.home .ens-more {
@@ -615,27 +615,19 @@
   flex-direction: column;
   gap: 10px;
 }
-/* THE SNAKE (components/board/snake.ts): ONE line down through the four boxes, down one
-   side, round the bottom corner, along the seam, round the next box's top corner and down
-   its opposite side, every turn the same radius. It is the voice tiles' colour wheel seen
-   through that line: .ens-snake covers the column, its MASK is the line (an SVG drawn
-   from the boxes' measured positions, HomeSections.tsx useSnake), and inside it a band of
-   colour (.ens-wheel, a straight gradient, never a conic one: a conic centre on the line
+/* THE SNAKE (components/board/snake.ts): ONE line through the four boxes, which stand
+   apart with every corner rounded alike. It runs along the first box's top, down one side,
+   along the bottom, curves down across the gap and back along the next box's top, rounds
+   its corner and runs down its opposite side, and so on; every bend one radius. It is a band
+   of colour seen through that line: .ens-snake covers the column, its MASK is the line (an
+   SVG drawn from the boxes' measured positions, HomeSections.tsx useSnake), and inside it
+   the band (.ens-wheel, a straight gradient, never a conic one: a conic centre on the line
    flashes every hue at once) turns slowly as the page scrolls, a transform on the
-   compositor. The boxes
-   sit flush, so every turn of the line is a rounded corner of a box. Not drawn
-   until measured (the prerendered page shows plain boxes); still under reduced motion. */
-/* Every corner the line turns through is a rounded corner of a box, the same radius
-   (SNAKE_RADIUS): a box rounds the bottom corner on its line's side, and the top corner on
-   that side where the line comes in from the box above. The rest stay square. */
-.lb.home .ens-points > .tile:nth-child(odd) {
-  border-radius: 14px 0 0 14px;
-}
-.lb.home .ens-points > .tile:first-child {
-  border-top-left-radius: 0; /* the line starts here, straight down */
-}
-.lb.home .ens-points > .tile:nth-child(even) {
-  border-radius: 0 14px 14px 0;
+   compositor. Not drawn until measured (the prerendered page shows plain boxes); still
+   under reduced motion. */
+/* Every corner of every box is rounded alike (SNAKE_RADIUS), with the line on it or not. */
+.lb.home .ens-points > .tile {
+  border-radius: 14px;
 }
 .lb.home .ens-snake {
   position: absolute;
