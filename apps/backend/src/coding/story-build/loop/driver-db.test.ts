@@ -90,7 +90,7 @@ function seams(): Partial<import('./seams.js').LoopSeams> {
     waitMs: 200,
     pollMs: 5,
     providers: async () => G.providers as any,
-    storyProvider: () => 'claude',
+    storyProvider: async () => 'claude',
     automaticAllowed: async (_c, _a, what) => {
       G.gateAsks.push(what);
       return G.allowed;

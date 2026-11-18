@@ -1443,6 +1443,13 @@
       "when": 1794470400000,
       "tag": "0205_ai_fix_pushed_commit",
       "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "6",
+      "when": 1794556800000,
+      "tag": "0206_ai_run_profiles",
+      "breakpoints": true
     }
   ]
 }

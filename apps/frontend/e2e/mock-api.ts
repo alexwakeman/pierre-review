@@ -445,6 +445,18 @@ export const ME_RESPONSE: MeResponse = {
     provider: 'claude',
     providerSetting: { value: 'auto', source: 'settings' },
     effortSetting: { value: null, source: 'settings' },
+    // Settings → AI's run profiles, never chosen (NULL): both review vendors on at the usual models,
+    // AI Fix and Implement story on the default provider, 5 review rounds. Settings → AI renders them.
+    runProfiles: {
+      review: {
+        claude: { enabled: true, model: 'claude-opus-5-5', effort: null },
+        codex: { enabled: true, model: 'gpt-6.1-sol', effort: null },
+      },
+      fix: { provider: 'claude', model: 'claude-opus-5-5', effort: null },
+      build: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 },
+      effortSource: 'settings',
+      stored: null,
+    },
     providers: {
       claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
       codex: {
@@ -2248,7 +2260,7 @@ export async function installMockApi(
                   loopOn: b.autoPush === true,
                   loopState: b.loop?.state ?? null,
                   loopRound: b.loop?.round ?? 0,
-                  loopRounds: b.loop?.rounds ?? 4,
+                  loopRounds: b.loop?.rounds ?? 5,
                   ticketWaiting: b.planAutoApprovedAt != null && b.ticketReviewDoneAt == null && s.plan?.latest?.ticketUpdate != null,
                 })
               : null;

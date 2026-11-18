@@ -10,7 +10,7 @@ import {
   type ModelChoice,
 } from '../ai/provider.js';
 import { runCodexSpecialists } from '../ai/codex/specialists.js';
-import { agenticRunEffort, chosenAiEffort } from '../ai/effort.js';
+import { agenticRunEffort, surfaceEffortLevel } from '../ai/effort.js';
 import { loadZod } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
@@ -207,10 +207,10 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const modelChoice: ModelChoice = override
     ? { role: claudeModelChoice(model).role, id: override.model }
     : claudeModelChoice(model);
-  // THE EFFORT (Settings → AI → Effort, ai/effort.ts): the chosen level on a worktree run, one step
+  // THE EFFORT (Settings → AI → Review, this vendor's; ai/effort.ts): the chosen level on a worktree run, one step
   // lower diff-only but never below Default's (diffOnlyEffortAt); Default = each provider's own depth (Claude medium, Codex by role). Read once, at
   // the start, and stored on the run (`ranOn.effort`) so its label says what it used.
-  const level = chosenAiEffort();
+  const level = surfaceEffortLevel('review', provider.id);
   const levelEffort = agenticRunEffort(provider.id, modelChoice, mode);
   const effort: string = override?.effort ?? levelEffort;
   const ran = { ...ranOn(provider, modelChoice), effort };

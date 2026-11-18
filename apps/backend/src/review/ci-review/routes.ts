@@ -10,6 +10,8 @@ import {
   type StartCiReviewResponse,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { preflightFor } from '../../ai/run-choice.js';
+import { singleReviewProvider } from '../claude-review/ai-ready.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { deriveCiReviewState } from './currency.js';
 import {
@@ -100,7 +102,8 @@ export function registerCiReviewRoutes(app: FastifyInstance, ctx: AgentContext):
       reply.status(409);
       return { error: 'NoHead', message: 'This PR has not been synced yet.' };
     }
-    const auth = ctx.llm.detectAuth('ci_review');
+    // The vendor the CI review will run on (Settings → AI → Review), not the default provider.
+    const auth = preflightFor(ctx)(singleReviewProvider(ctx), 'ci_review');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };

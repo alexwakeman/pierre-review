@@ -368,3 +368,29 @@ describe('the conflict run', () => {
     expect((await actions()).some((r) => r.action === 'ai_resolve')).toBe(false);
   });
 });
+
+describe('the dependency fix follows Settings → AI → AI Fix', () => {
+  it('⚠ NO profile ⇒ the usual fix model on the default provider; ONE stored ⇒ its vendor AND its model, together', async () => {
+    const rp = await import('../ai/run-profile.js');
+    const { activeProviderId } = await import('../ai/provider-setting.js');
+    const { DEFAULT_AI_FIX_MODEL } = await import('@pierre-review/shared');
+    const ok = { llm: { detectAuth: () => ({ status: 'ok' as const }), detectProviderAuth: () => ({ status: 'ok' as const }) } };
+    try {
+      rp.setStoredAiRunProfiles(null);
+      expect(auto.dependencyFixChoice(ok)).toEqual({ model: DEFAULT_AI_FIX_MODEL, provider: activeProviderId() });
+      // A stored Codex choice: Codex at the stored depth (Terra = the standard depth) — never the old fixed model.
+      rp.setStoredAiRunProfiles({ fix: { provider: 'codex', model: 'gpt-6.1-terra' } });
+      expect(auto.dependencyFixChoice(ok)).toEqual({ model: 'claude-sonnet-5', provider: 'codex' });
+      // Codex signed out ⇒ Claude at ITS usual fix model, not the stored Codex depth.
+      const codexOut = {
+        llm: {
+          detectAuth: () => ({ status: 'ok' as const }),
+          detectProviderAuth: (p: string) => (p === 'codex' ? { status: 'none' as const, message: 'no' } : { status: 'ok' as const }),
+        },
+      };
+      expect(auto.dependencyFixChoice(codexOut)).toEqual({ model: DEFAULT_AI_FIX_MODEL, provider: 'claude' });
+    } finally {
+      rp.setStoredAiRunProfiles(null);
+    }
+  });
+});

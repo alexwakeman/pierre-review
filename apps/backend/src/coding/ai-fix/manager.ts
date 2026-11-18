@@ -28,7 +28,7 @@ import { getFixableCiItemsForPr } from '../../review/ci-review/persist.js';
 import { getSonarIssuesForPrHead } from '../../sonar/store.js';
 import { freshenSonarForPrHead } from '../../sonar/snapshot.js';
 import { getFixById, insertQueuedFix, markFixRanOn, reconcileOrphanedFixes, updateFixSession } from './persist.js';
-import { activeProviderId } from '../../ai/provider-setting.js';
+import { fixChoice } from '../../ai/run-profile.js';
 import type { AgentProviderId } from '../../ai/provider.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
@@ -289,6 +289,9 @@ export function startReviewFix(
     include?: AutoFixInclude;
     // THE FIX START QUEUE: wait in line when every slot is taken (the auto fix sets it).
     queueIfBusy?: boolean;
+    // The vendor, resolved ONCE by the caller with its model (auto fix: Settings → AI → AI Fix). Absent ⇒
+    // `fixChoice` at the start.
+    provider?: AgentProviderId;
   },
 ): Promise<StartFixResult> {
   return startFix(ctx, {
@@ -300,6 +303,7 @@ export function startReviewFix(
     trigger: input.trigger,
     selection: input.include ? { kind: 'sections', include: input.include } : undefined,
     ...(input.queueIfBusy === true ? { queueIfBusy: true } : {}),
+    ...(input.provider != null ? { provider: input.provider } : {}),
   });
 }
 
@@ -340,8 +344,8 @@ export interface StartFixInput {
   trigger?: AiFixTrigger;
   // seed === 'review': which items. Absent ⇒ the section defaults (every section but style bots).
   selection?: SeedSelection;
-  // THE PER-RUN CHOICE (a manual start's picker, validated by the route). Absent ⇒ the default
-  // provider (Settings → AI) — always so for an automatic fix.
+  // THE PER-RUN CHOICE (a manual start's picker, validated by the route). Absent ⇒ Settings → AI →
+  // AI Fix (`fixChoice`) — always so for an automatic fix.
   provider?: AgentProviderId;
   // REMOVED ("Run tests": tests now run inside the sandbox). Accepted from an older caller and ignored.
   checks?: string[];
@@ -382,8 +386,10 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
   const unattended = trigger === 'auto';
   bindStartQueue({ ctx });
 
-  // THE PROVIDER IS PICKED ONCE, HERE: the request's per-run choice, else the default.
-  const provider: AgentProviderId = input.provider ?? activeProviderId();
+  // THE PROVIDER IS PICKED ONCE, HERE: the request's per-run choice, else Settings → AI → AI Fix
+  // (ai/run-profile.ts `fixChoice`: its vendor, or the other signed-in one when it cannot run; none
+  // stored ⇒ the default provider, as before).
+  const provider: AgentProviderId = input.provider ?? fixChoice(preflightFor(ctx), mode).provider;
   const auth = preflightFor(ctx)(provider, mode);
   if (auth.status !== 'ok') return { status: 'no_auth', message: auth.message };
 
@@ -393,7 +399,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
   // THE ONE BUDGET GATE, for every AUTOMATIC run: the callers ask first; asked again here so no future
   // caller can start an unattended fix past it. Before the claim, so nothing needs releasing.
   const dependencyRun = input.seed === 'plain' || input.preamble != null;
-  if (unattended && !(await automaticRunAllowed(ctx, accountId, dependencyRun ? 'dependency CI fix' : 'auto fix'))) return { status: 'over_budget' };
+  if (unattended && !(await automaticRunAllowed(ctx, accountId, dependencyRun ? 'dependency CI fix' : 'auto fix', provider))) return { status: 'over_budget' };
   // EXTERNAL REPOS (db/external-repos.ts): an UNATTENDED fix never runs on an external repo's PR
   // (the callers skip first; this is the backstop). A reader's press is never refused.
   if (unattended && !(await automationAllowedForPr(accountId, input.prId, ctx))) return { status: 'not_found' };
@@ -486,7 +492,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     // `members: 'all'`: EXTERNAL repos are cloned too (docs/DATA-MODEL.md § External repos).
     const scope = await q.resolveWorkspaceScope(accountId, repoScope.workspaceId, null, { members: 'all' });
 
-    const choice = resolveSandboxAgentChoice({ provider, model: input.model });
+    const choice = resolveSandboxAgentChoice({ provider, model: input.model, surface: 'fix' });
     const nonce = pickReviewNonce([task.text, pr.title, pr.body ?? '', rawDiff]);
     const fixId = await insertQueuedFix(ctx, {
       accountId,

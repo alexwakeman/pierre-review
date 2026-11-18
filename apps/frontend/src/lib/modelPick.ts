@@ -1,20 +1,24 @@
 // THE PER-RUN MODEL PICKER (docs/CODEX-PLAN.md § 6, revised 2026-10-26) — the pure half, so tests can
 // pin it without React. A MANUAL surface with a model menu (AI Review run + follow-up, AI Fix + Plan
-// first) lists the models of EVERY provider that can run its kind right now, the default provider
-// (Settings → AI) first; with one provider ready the menu reads exactly as before. It opens on the
-// default provider's model at the surface's usual depth; a pick stays until the reader changes it or
-// its provider stops being ready (then the menu falls back to the opening choice).
+// first, Implement story's start) lists the models of EVERY provider that can run its kind right now,
+// the default provider (Settings → AI) first; with one provider ready the menu reads exactly as before.
+// It OPENS ON THE SURFACE'S RUN PROFILE (Settings → AI → Review / AI Fix / Implement story,
+// `me.ai.runProfiles`): its vendor and model while that vendor can run, else the first ready provider at
+// the surface's usual depth. A pick is a one-run override of the MODEL (the run keeps the Settings effort
+// for the vendor it runs on); it stays until the reader changes it or its provider stops being ready
+// (then the menu falls back to the opening choice).
 import {
   aiModelPicks,
   aiModelPickValue,
   aiPickerModelFor,
   type AiModelPick,
+  type AiPickerModel,
   type AiProviderId,
   type AiRunKind,
   type ClaudeReviewModel,
   type MeResponse,
 } from '@pierre-review/shared';
-import { aiProviderReadyFor, aiRunnableProviders } from './aiCapabilities.js';
+import { aiProviderReadyFor, aiRunnableProviders, reviewOneVendor, reviewPairVendors } from './aiCapabilities.js';
 import { usageLockLine } from './usageLockout.js';
 import { PAIR_RUN_LABEL, aiRunProvider, pairChatProvider, type ClaudeReview } from '@pierre-review/shared';
 
@@ -37,8 +41,26 @@ export const PAIR_PICK_VALUE = 'pair';
 export const PAIR_PICK_LABEL = PAIR_RUN_LABEL;
 
 /**
+ * The surface's RUN PROFILE as the menu's opening choice (`me.ai.runProfiles`): the review's "one vendor"
+ * at its model, AI Fix's or Implement story's vendor and model. Null on an older server (no profiles) or a
+ * kind no profile covers.
+ */
+export function profileOpening(me: MeResponse | undefined, kind: AiRunKind): { provider: AiProviderId; model: AiPickerModel } | null {
+  const p = me?.ai?.runProfiles;
+  if (p == null) return null;
+  if (kind === 'review') {
+    const one = reviewOneVendor(me);
+    return { provider: one, model: p.review[one].model };
+  }
+  if (kind === 'fix' || kind === 'plan') return { provider: p.fix.provider, model: p.fix.model };
+  if (kind === 'story_build' || kind === 'story_plan') return { provider: p.build.provider, model: p.build.model };
+  return null;
+}
+
+/**
  * Resolve the menu for a kind: `picked` is the reader's last choice (an option value) or null. The
- * opening choice is the default provider's model of the same depth as `usualModel`.
+ * opening choice is the surface's run profile (`profileOpening`) while its vendor is ready, else the
+ * first ready provider's model of the same depth as `usualModel`.
  */
 export function resolveModelPick(
   me: MeResponse | undefined,
@@ -51,7 +73,9 @@ export function resolveModelPick(
   // None ready: the default's own models (the Run gate shows its sign-in line in place of the button).
   const providers = ready.length > 0 ? ready : [defaultProvider];
   const picks = aiModelPicks(providers);
+  const profile = profileOpening(me, kind);
   const opening =
+    (profile != null ? picks.find((p) => p.value === aiModelPickValue(profile.provider, profile.model)) : undefined) ??
     picks.find((p) => p.value === aiModelPickValue(providers[0]!, aiPickerModelFor(providers[0]!, usualModel))) ??
     picks[0]!;
   const chosen = (picked != null ? picks.find((p) => p.value === picked) : undefined) ?? opening;
@@ -59,9 +83,10 @@ export function resolveModelPick(
 }
 
 /**
- * THE AI REVIEW MENU: `resolveModelPick`, plus "Claude + Codex" (last) while BOTH providers can
- * review — and then the default pick. It runs Claude's default review model and Codex's of the same
- * depth at the same time; it falls back to the opening choice when one of them stops being ready.
+ * THE AI REVIEW MENU: `resolveModelPick`, plus "Claude + Codex" (last) while BOTH providers are switched
+ * on in Settings → AI → Review and can review — and then the default pick. Each half runs its vendor's
+ * Settings model and effort, at the same time; it falls back to the opening choice when one of them
+ * stops being ready.
  */
 export function resolveReviewModelPick(
   me: MeResponse | undefined,
@@ -70,8 +95,8 @@ export function resolveReviewModelPick(
   nowMs: number = Date.now(),
 ): ModelPickState {
   const base = resolveModelPick(me, 'review', usualModel, picked === PAIR_PICK_VALUE ? null : picked);
-  const ready = aiRunnableProviders(me, 'review');
-  const pairOffered = ready.includes('claude') && ready.includes('codex');
+  // THE PAIR: the review vendors switched on AND signed in (the server's `reviewPairProviders`).
+  const pairOffered = reviewPairVendors(me).length === 2;
   if (!pairOffered) return { ...base, pairOffered: false, pair: false };
   const pairPick: AiModelPick = {
     provider: 'claude',

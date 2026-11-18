@@ -18,6 +18,13 @@ no internals.
 - Pull request Overview: "Someone else" asks anyone in the workspace for a review. Type a name, pick one or
   more people, and press "Request review". People who merged in the repository come first. If GitHub refuses
   someone (for example, they have no access to the repository), the reason shows on their name.
+- Settings → AI: three blocks, Review, AI Fix and Implement story, set the vendor, model and effort each runs on.
+  Review has one row per vendor, each switched on or off with its own model and effort, so Claude and Codex can
+  review at different efforts. AI Fix and Implement story each have one vendor, model and effort. The run menus
+  open on these and can pick another model for one run. If the AI Fix or Implement story vendor is not signed in or
+  is over its usage limit, the other vendor runs, and the run says so. Until you change a block, it runs as before.
+- Settings → AI → Implement story: "Review rounds" sets how many review rounds a build runs. The start panel opens
+  on it and can still change it for one build.
 
 ### Changed
 
@@ -26,6 +33,10 @@ no internals.
   about). Pick 1. Agree or 2. Keep the story (the 1 and 2 keys work), or Reply. Each answer is saved when you
   pick it. The last step, Review, lists every answer and holds Approve and start. Picking the chosen answer
   again no longer clears it.
+- Implement story: the review loop runs up to 5 rounds by default (was 4).
+- Settings → AI: the single "Effort for reviews and AI Fix" menu is replaced by the effort in each block.
+- Settings → AI review: "Auto reviews use" now offers Claude + Codex or one vendor: the first that is on in
+  Settings → AI and signed in. A vendor switched off there does not review.
 - AI Review: the reason an auto fix did not start is one line, in the Auto fix section, shown after the review
   finishes. It names the cause: AI not signed in, the review or the pull request could not be read, an error,
   the limit of 3 auto fixes in 24 hours, or the daily limit of auto reviews.

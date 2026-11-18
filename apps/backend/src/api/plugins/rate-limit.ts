@@ -134,6 +134,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // THE EFFORT LEVEL: PUT /api/ai/effort (same file, same shape: one validated UPDATE of one column,
   // held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
   if (path === '/api/ai/effort') return [TIERS.read];
+  // THE RUN PROFILES: PUT /api/ai/run-profiles (same file, same shape: one validated UPDATE of one JSON
+  // column, held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
+  if (path === '/api/ai/run-profiles') return [TIERS.read];
   // "USE MY API KEYS FIRST": PUT /api/ai/api-key (same file, same shape: one boolean column, held in
   // memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
   if (path === '/api/ai/api-key') return [TIERS.read];

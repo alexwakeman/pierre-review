@@ -370,10 +370,8 @@ Full detail: docs/MERGE-CI-TRUNK.md. The invariants:
 
 ## The agentic features (Claude or Codex)
 
-Claude Review (+ follow-up, auto review, chat, the per-ticket TICKET review, the CI review,
-design diagrams, Check threads), AI Fix (+ Plan first), the reference-docs
-library, sprint briefs/paths and every one-shot completion, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md (§ Codex, the second provider) ·
-history: docs/CODEX-PLAN.md. Non-negotiables:
+Every review kind (+ chat, diagrams), AI Fix (+ Plan first), reference docs, sprint briefs and
+one-shot completions, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md · docs/CODEX-PLAN.md.
 
 - **ONE switch, `config.aiEnabled` = `ENSEMBLE_AI_DISABLED !== 'true'`.** `registerAgenticRoutes`
   registers NOTHING when off. `MeResponse.ai` carries `enabled` / `runtime` / `auth` / `provider` /
@@ -384,8 +382,8 @@ history: docs/CODEX-PLAN.md. Non-negotiables:
   `query`/loads an SDK, adding the path guard, own-tools hook and isolation (`provider-seam.test.ts`).
   Every system prompt gets the WRITING RULES (`ai/writing-rules.ts`, ASD-STE100).
   The DEFAULT provider is `activeProviderId` (`ENSEMBLE_AI_PROVIDER` = `claude`|`codex`|`auto`, else
-  Settings → AI; `auto` = Claude when both are signed in): it runs every AUTOMATIC run and every
-  surface without a model menu. A MANUAL picker run (AI Review, AI Fix) names `{provider, model}`
+  Settings → AI; `auto` = Claude when both are signed in): it runs every surface without a RUN
+  PROFILE (below). A MANUAL picker run (AI Review, AI Fix, Implement) names `{provider, model}`
   (`ai/run-choice.ts`). A job resolves its provider ONCE; row label, follow-up chain, ledger and
   budget use the RUN's. Every run row stores the `provider` + `model` that RAN, shown ONLY via
   `aiRunLabel`; ⚠ a stored model fed to a new run goes through `requestModelOf`.
@@ -396,12 +394,14 @@ history: docs/CODEX-PLAN.md. Non-negotiables:
   key); `cheapComplete` takes the Agent SDK on the login and the Anthropic API on the key. **No
   caller picks its own credential; no key stored.** Copy never promises subscription
   billing. `REVIEW_BUDGET_USD` (default $6.75). Spend is recorded (`recordAiUsage`), never metered.
-- **EFFORT IS ONE SETTING** (Settings → AI → Effort; `ai/effort.ts` `agenticRunEffort`, read once per
-  run): EVERY review (PR, CI, story check, Check threads), AI Fix + Plan first; SAME word on both providers.
-  Default (NULL) = today: Claude medium, Codex by depth. `REVIEW_EFFORT` wins. ⚠ Opus 5.5 is NOT pinned;
-  only adaptive thinking is. The run stores what it sent (`aiRunLabel(provider, model, effort)`).
-- **CLAUDE + CODEX IS THE DEFAULT REVIEW** (both signed in): halves run AT ONCE, blind, merged at
-  the end. ⚠ One half failing never hides the other's findings (it IS the review).
+- **RUN PROFILES, ONE RESOLVER** (Settings → AI, `ai/run-profile.ts`): REVIEW per vendor {on, model,
+  effort} (EVERY review kind); FIX {provider, model, effort} (AI Fix, Plan first, dependency fixes);
+  BUILD likewise + rounds. Menus never pick effort. Effort read ONCE per run, SAME word on
+  both providers; `REVIEW_EFFORT` wins and locks; Default: Claude medium, Codex by depth.
+  ⚠ NULL = today (auto fix inherits its review's). Vendor signed out/over its limit ⇒ the other
+  at ITS defaults; every gate asks the RUN's vendor. ⚠ Only adaptive thinking is pinned.
+- **CLAUDE + CODEX IS THE DEFAULT REVIEW** (both switched on AND signed in, `reviewPairProviders`):
+  halves run AT ONCE, blind, merged. ⚠ One half failing never hides the other's findings.
 - **CODEX** (every agent kind) runs the pinned CLI directly — `codex exec --json --strict-config` —
   in Ensemble's OWN Codex home `~/.ensemble/codex` (`ensemble ai login codex` or Settings; a ChatGPT sign-in only
   — an OpenAI API key is REFUSED until it can be priced). ⚠ The reader's `~/.codex` is NEVER read or

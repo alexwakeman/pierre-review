@@ -45,6 +45,7 @@ import { pushFix } from './push.js';
 import { fixPushInFlight } from './push-guard.js';
 import { pushWhenDoneHold, pushWhenDoneHoldLine } from './auto-push.js';
 import { requestModelOf } from '../../ai/provider.js';
+import { fixChoice } from '../../ai/run-profile.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
 import { allowFixHost, fixSessionWire, resumeFixSession, subscribeFixSession } from '../../sandbox/session/fix.js';
 import type { ResumeResult } from '../../sandbox/session/manager.js';
@@ -200,10 +201,16 @@ function parseStartBody(
   detect: ManualRunChoiceOptions['detect'],
 ): ParsedStartBody {
   const body = rawBody ?? ({} as GenerateFixBody);
+  // Nothing named ⇒ Settings → AI → AI Fix (ai/run-profile.ts `fixChoice`), else the usual depth.
+  const profile = fixChoice(detect, kind);
   const choice = resolveManualRunChoice(
     { model: (body as { model?: unknown }).model, provider: (body as { provider?: unknown }).provider },
     kind,
-    { defaultModel: DEFAULT_AI_FIX_MODEL, detect },
+    {
+      defaultModel: (p) => (p === profile.provider ? (profile.model ?? DEFAULT_AI_FIX_MODEL) : DEFAULT_AI_FIX_MODEL),
+      detect,
+      defaultProvider: () => profile.provider,
+    },
   );
   if (!choice.ok) return { error: choice.error, message: choice.message };
   const { model, provider } = choice;
@@ -500,7 +507,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
     const provider = aiRunProvider(row.provider, row.model);
     const auth = preflightFor(ctx)(provider, 'fix');
     if (auth.status !== 'ok') return reply.code(400).send({ error: 'NoClaudeAuth', message: auth.message });
-    const choice = resolveSandboxAgentChoice({ provider, model: requestModelOf(row.model) });
+    const choice = resolveSandboxAgentChoice({ provider, model: requestModelOf(row.model), surface: 'fix' });
     return sendFixAction(reply, await resumeFixSession(ctx, accountId, row.id, choice));
   });
 

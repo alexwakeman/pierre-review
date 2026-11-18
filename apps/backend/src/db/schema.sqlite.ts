@@ -80,6 +80,7 @@ import type {
   TicketAssessment,
   AiBudgetSettings,
   AiUsageReading,
+  AiRunProfiles,
   AiFixChangeReport,
   CheckRunReport,
   StoryBuildCandidate,
@@ -188,6 +189,11 @@ export const accounts = sqliteTable('accounts', {
   // NULL = never chosen (Default: each provider's own depth). An explicitly set REVIEW_EFFORT wins
   // over it (ai/effort.ts).
   aiEffort: text('ai_effort'),
+  // 0206. THE AI RUN PROFILES (Settings → AI; shared ai-run-profiles.ts, ai/run-profile.ts): per surface —
+  // the review per vendor {enabled, model, effort}, AI Fix and Implement story {provider, model, effort}
+  // (+ Implement's review rounds). NULL or a missing field = as before (`ai_effort`, the default provider,
+  // the usual models). REVIEW_EFFORT still wins over every effort in it.
+  aiRunProfiles: text('ai_run_profiles', { mode: 'json' }).$type<AiRunProfiles>(),
   // 0184. "USE MY API KEYS FIRST" (Settings → AI): true ⇒ ANTHROPIC_API_KEY (and OPENAI_API_KEY, where
   // Codex may use it) ahead of the sign-in. NULL = never chosen (off). An explicitly set
   // LIMN_AI_USE_API_KEY wins over it (ai/credentials.ts). Only the tick is stored, never a key.
@@ -4797,7 +4803,7 @@ export const storyBuilds = sqliteTable(
     // THE REVIEW LOOP (migration 0186; docs/STORY-BUILD.md § The review loop): with `auto_push` on, the build
     // is pushed, reviewed and fixed for at most `loop_rounds` rounds, then the PR opens. `loop_claimed_at` is
     // the start claim (compare-and-set, once per build); state / round / pause are written at every step.
-    // Always WRITTEN at start (clampLoopRounds; default STORY_BUILD_LOOP_ROUNDS_DEFAULT = 4). The column
+    // Always WRITTEN at start (clampLoopRounds; absent ⇒ Settings → AI, default STORY_BUILD_LOOP_ROUNDS_DEFAULT = 5). The column
     // default 3 is the migration-0186 value and is never relied on.
     loopRounds: integer('loop_rounds').notNull().default(3),
     loopState: text('loop_state'),

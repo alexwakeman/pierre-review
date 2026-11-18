@@ -165,7 +165,8 @@ export async function runLoopStoryCheck(ctx: AgentContext, i: LoopStoryCheckInpu
       import('../../../review/claude-review/manager.js'),
     ]);
     const res = await runTicketReviewAgent({
-      model: DEFAULT_CLAUDE_REVIEW_MODEL,
+      // The vendor's Settings → AI → Review model (ai/run-profile.ts), like every review kind.
+      model: (await import('../../../ai/run-profile.js')).reviewRunModel(i.provider),
       cwd: scratch,
       worktrees: members.map((m) => m.worktreePath).filter((p): p is string => p != null),
       systemPrompt: prompts.ticketReviewSystemPrompt(null, words),

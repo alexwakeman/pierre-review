@@ -70,7 +70,7 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'ai',
-    label: 'AI', summary: 'Provider, sign-in, effort, AI spend, disk space',
+    label: 'AI', summary: 'Provider, sign-in, models and effort, AI spend, disk space',
     aiOnly: true,
     global: ['AiProviderSection', 'ClaudeSpendSection', 'DiskSpaceSection'],
     workspace: [],

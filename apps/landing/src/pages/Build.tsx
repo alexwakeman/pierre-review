@@ -154,7 +154,7 @@ export default function Build(): JSX.Element {
 
       <Flow id="bd-auto-h" title="In one click" steps={AUTO}>
         <p className="bd-loop rise">
-          <span aria-hidden="true">↺</span> Steps 2 and 3 repeat, 4 rounds by default (1 to 6). They stop early when
+          <span aria-hidden="true">↺</span> Steps 2 and 3 repeat, 5 rounds by default (1 to 6). They stop early when
           a round finds nothing open.
         </p>
       </Flow>

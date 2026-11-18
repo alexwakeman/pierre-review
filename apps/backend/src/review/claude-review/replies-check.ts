@@ -22,9 +22,9 @@ import { cleanupCloneCache } from '../clone-manager.js';
 import { prepareMemberWorktrees } from '../ticket-review/prepare.js';
 import { getCiPrContext } from '../ci-review/persist.js';
 import { followUpProvider, preflightFor } from '../../ai/run-choice.js';
-import { activeProviderId } from '../../ai/provider-setting.js';
+import { reviewDefaultProvider, reviewProvidersEnabled } from '../../ai/run-profile.js';
 import { automaticRunAllowed } from '../budget-gate.js';
-import { agenticRunReady } from './ai-ready.js';
+import { agenticRunReady, singleReviewProvider } from './ai-ready.js';
 import {
   AGENTIC_AI_ENABLED,
   REVIEW_APPLY_AUTH_ENV,
@@ -404,6 +404,24 @@ export function groupByProvider(
   return (['claude', 'codex'] as const).filter((p) => by.has(p)).map((p) => ({ provider: p, findingIds: by.get(p)! }));
 }
 
+/**
+ * The vendor that judges ONE thread: its OWNER's (the run that raised it) when that vendor is still
+ * switched on in Settings → AI → Review and can run the kind (`followUpProvider`: signed in, not over its
+ * usage limit); a thread whose owner is switched OFF goes to Review's "one vendor" (`reviewDefaultProvider`),
+ * never to the vendor the reader turned off. No owner ⇒ the one vendor. No review block stored ⇒ both
+ * vendors count as on (as before).
+ */
+export function threadCheckProvider(
+  owner: AiProviderId | null,
+  detect: Parameters<typeof followUpProvider>[2],
+  enabled: readonly AiProviderId[] = reviewProvidersEnabled(),
+  locked?: (p: AiProviderId) => boolean,
+): AiProviderId {
+  const one = () => reviewDefaultProvider(detect, locked);
+  const start = owner != null && enabled.includes(owner) ? owner : one();
+  return followUpProvider(start, 'thread_check', detect, one, locked);
+}
+
 /** AUTOMATIC passes of this PR created at or after `sinceMs` (the per-PR cap's count; rows). */
 export async function countAutoRepliesPassesSince(
   ctx: AgentContext,
@@ -477,7 +495,7 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
     }
     if (auto) {
       // AI not set up: wait, never fail (ai-ready.ts). Over the spend budget: skipped, never queued.
-      if (!agenticRunReady(ctx, 'thread_check')) {
+      if (!agenticRunReady(ctx, 'thread_check', singleReviewProvider(ctx))) {
         claimed.delete(key);
         return { outcome: 'not_ready' };
       }
@@ -499,9 +517,8 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
     // thread Codex raised is judged by Claude while Codex is locked out, as the OTHER provider's
     // (never disputed). Before 2026-11-11 the owner was used whenever it was signed in, so every pass on
     // Codex's threads failed until its limit reset.
-    const groups = groupByProvider(planned.findings, owners, (owner) =>
-      followUpProvider(owner ?? activeProviderId(), 'thread_check', detect),
-    );
+    // A thread whose owner is switched OFF in Settings → AI → Review goes to an enabled vendor (`threadCheckProvider`).
+    const groups = groupByProvider(planned.findings, owners, (owner) => threadCheckProvider(owner, detect));
     // Over the spend budget, or every provider it would use is locked out: skipped, never queued. The
     // gate is asked about the providers the pass RUNS on, not the default.
     if (auto && !a.pressed) {

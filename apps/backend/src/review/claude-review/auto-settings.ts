@@ -568,7 +568,7 @@ function settingChanges(
   if ('autoReviewEnabled' in set && wasOn !== isOn) out.push(['auto_review', `Auto review ${onOff(isOn)}`]);
   if ('autoReviewDailyCap' in set) out.push(['auto_review', 'Auto review daily limit changed']);
   if ('autoReviewProviders' in set) {
-    out.push(['auto_review', next.providers === 'both' ? 'Auto reviews use Claude + Codex' : 'Auto reviews use the default provider']);
+    out.push(['auto_review', next.providers === 'both' ? 'Auto reviews use Claude + Codex' : 'Auto reviews use one vendor']);
   }
   if ('autoDiagramsEnabled' in set) {
     out.push(['auto_review', `Design diagrams after each review ${onOff(next.autoDiagramsEnabled !== false)}`]);

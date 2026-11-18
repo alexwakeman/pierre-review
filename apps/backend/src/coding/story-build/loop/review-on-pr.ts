@@ -6,9 +6,10 @@
 // AI Review tab. A pair is ONE row (the consolidated list; never a fake pair). A NEW head later is reviewed
 // as usual. Best-effort: a failure is logged, and auto review may then review the PR again.
 import { and, eq } from 'drizzle-orm';
-import { DEFAULT_CLAUDE_REVIEW_MODEL, type ClaudeReviewVerdict } from '@pierre-review/shared';
+import { CLAUDE_REVIEW_MODELS, DEFAULT_CLAUDE_REVIEW_MODEL, type ClaudeReviewModel, type ClaudeReviewVerdict } from '@pierre-review/shared';
+import { requestModelOf } from '../../../ai/provider.js';
 import type { AgentContext } from '../../../review/agent-context.js';
-import { insertQueuedReview, saveReviewSuccess } from '../../../review/claude-review/persist.js';
+import { insertQueuedReview, markReviewRanOn, saveReviewSuccess } from '../../../review/claude-review/persist.js';
 import type { LoopFindingRow, LoopReviewRow } from './persist.js';
 import { openFindingsOf } from './wire.js';
 
@@ -35,7 +36,14 @@ export async function markLoopReviewOnPr(
     const verdict = ((lead.pairConsolidation?.verdict ?? lead.verdict) as ClaudeReviewVerdict | null) ?? 'COMMENT';
     const summary = [lead.pairConsolidation?.summary ?? lead.summary ?? '', IMPORTED_LINE(lead.round)].filter((s) => s.trim() !== '').join('\n\n');
     const kept = openFindingsOf(a.findings, new Set(ok.map((r) => r.id)));
-    const id = await insertQueuedReview(ctx, prId, a.headSha, DEFAULT_CLAUDE_REVIEW_MODEL, a.accountId, [], 'manual', lead.provider === 'codex' ? 'codex' : 'claude');
+    // THE MODEL THAT RAN: the loop's review halves run at Settings → AI → Review's model, so the row is
+    // queued at that depth and stamped with the exact id (and effort) the lead half stored.
+    const provider = lead.provider === 'codex' ? 'codex' : 'claude';
+    const depth = lead.model != null ? requestModelOf(lead.model) : null;
+    const asked: ClaudeReviewModel =
+      depth != null && (CLAUDE_REVIEW_MODELS as readonly string[]).includes(depth) ? (depth as ClaudeReviewModel) : DEFAULT_CLAUDE_REVIEW_MODEL;
+    const id = await insertQueuedReview(ctx, prId, a.headSha, asked, a.accountId, [], 'manual', provider);
+    if (lead.model != null) await markReviewRanOn(ctx, id, { provider, model: lead.model, ...(lead.effort ? { effort: lead.effort } : {}) });
     await saveReviewSuccess(ctx, id, {
       // The loop recorded its spend already.
       usageRecorded: true,

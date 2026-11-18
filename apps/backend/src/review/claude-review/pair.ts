@@ -15,6 +15,7 @@ import {
   type AiProviderName,
 } from '@pierre-review/shared';
 import { similarTitles } from './settled-by-reply.js';
+import { reviewProvidersEnabled } from '../../ai/run-profile.js';
 import type { PromptPairInput } from './prompts.js';
 import type { AgentContext } from '../agent-context.js';
 
@@ -25,11 +26,13 @@ export const PAIR_ORDER: readonly [AiProviderId, AiProviderId] = ['claude', 'cod
 export type ProviderPreflight = (provider: AiProviderId, kind: 'review') => { status: 'ok' | 'none'; message?: string };
 
 /**
- * Which providers a pair would run right now, in order: both when both can review, else the one
- * that can (a pair asked for with one provider signed in runs just that one), else none.
+ * Which providers a pair would run right now, in order: the review vendors SWITCHED ON in Settings → AI
+ * (ai/run-profile.ts `reviewProvidersEnabled` — the one pair resolver, `reviewPairProviders`) that can
+ * review — both, else the one that can (a pair asked for with one vendor ready runs just that one),
+ * else none.
  */
 export function pairProvidersReady(detect: ProviderPreflight): AiProviderId[] {
-  return PAIR_ORDER.filter((p) => detect(p, 'review').status === 'ok');
+  return reviewProvidersEnabled().filter((p) => detect(p, 'review').status === 'ok');
 }
 
 // Two findings at most this many lines apart on the same file are "the same place" for the dedupe.

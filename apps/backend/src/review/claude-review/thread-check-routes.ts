@@ -2,6 +2,8 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { and, eq } from 'drizzle-orm';
 import type { StartThreadCheckResponse, ThreadCheckStatusResponse } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
+import { preflightFor } from '../../ai/run-choice.js';
+import { singleReviewProvider } from './ai-ready.js';
 import { getCiPrContext } from '../ci-review/persist.js';
 import { AGENTIC_AI_ENABLED } from './manager.js';
 import { liveThreadCheck, requestThreadCheckCancel, startThreadCheck } from './thread-check.js';
@@ -64,7 +66,9 @@ export function registerThreadCheckRoutes(app: FastifyInstance, ctx: AgentContex
       reply.status(409);
       return { error: 'NoHead', message: 'This pull request has not been synced yet.' };
     }
-    const auth = ctx.llm.detectAuth('thread_check');
+    // The vendor Check threads will run on (Settings → AI → Review), not the default provider.
+    const provider = singleReviewProvider(ctx);
+    const auth = preflightFor(ctx)(provider, 'thread_check');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };
@@ -76,6 +80,7 @@ export function registerThreadCheckRoutes(app: FastifyInstance, ctx: AgentContex
       repoId: pr.repoId,
       headSha: pr.headSha,
       trigger: 'manual',
+      provider,
     });
     if (r.outcome === 'disabled') return featureOff(reply);
     if (r.outcome === 'busy') {

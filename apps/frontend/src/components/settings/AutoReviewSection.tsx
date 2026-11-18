@@ -6,6 +6,7 @@ import {
   AUTO_POST_DEFAULT_APPROVE_LEFTOVERS,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  aiProviderName,
   type ApproveLeftovers,
   type AutoApproveImpact,
   type AutoFixInclude,
@@ -15,7 +16,7 @@ import {
   type PairVerdictStrictness,
 } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
-import { pairReviewReady } from '../../lib/aiCapabilities.js';
+import { pairReviewReady, reviewOneVendor } from '../../lib/aiCapabilities.js';
 import { PAIR_PICK_LABEL } from '../../lib/modelPick.js';
 import { aiReadyFor, useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { AiAuthLine, AiRuntimeSetup } from '../AiSetup.js';
@@ -169,7 +170,10 @@ export function AutoReviewSection(): JSX.Element {
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
   // Both Claude and Codex signed in: the pair choice, and "When Claude and Codex disagree".
-  const pairReady = pairReviewReady(useMe().data);
+  const meData = useMe().data;
+  const pairReady = pairReviewReady(meData);
+  // "One vendor": the first review vendor switched on and signed in (Settings → AI → Review).
+  const oneVendor = aiProviderName(reviewOneVendor(meData));
   // When Claude and Codex disagree (migration 0145): strict unless a stored 'relaxed' says otherwise.
   const storedStrictness: PairVerdictStrictness = stored?.pairStrictness === 'relaxed' ? 'relaxed' : 'strict';
   const [strictness, setStrictness] = useState<PairVerdictStrictness>(storedStrictness);
@@ -324,11 +328,11 @@ export function AutoReviewSection(): JSX.Element {
               onChange={(v) => setProviders(v === 'both' ? 'both' : 'default')}
               options={[
                 { value: 'both' as const, label: `${PAIR_PICK_LABEL} (the default)` },
-                { value: 'default' as const, label: `${ai.providerName} only` },
+                { value: 'default' as const, label: `${oneVendor} only` },
               ]}
             />
             {!pairReady && providers === 'both' && (
-              <span className="text-meta text-ui-mute">Only one is signed in, so it reviews alone.</span>
+              <span className="text-meta text-ui-mute">Only one is on and signed in, so it reviews alone.</span>
             )}
           </div>
           <InfoButton title="Claude + Codex">
@@ -337,8 +341,13 @@ export function AutoReviewSection(): JSX.Element {
               merges the two into one review: a point both raised is shown once.
             </p>
             <p>
-              Both runs count towards each provider’s usage. If only one is signed in when a review
-              starts, that one runs alone. When posting automatically, both go out as one review.
+              Both runs count towards each provider’s usage. If only one is on in Settings → AI and
+              signed in when a review starts, that one runs alone. When posting automatically, both go
+              out as one review.
+            </p>
+            <p>
+              “Only” runs one vendor: the default provider in Settings → AI, or, once Review is set up
+              there, the first vendor that is on and signed in. Each vendor’s model and effort are there too.
             </p>
           </InfoButton>
         </div>

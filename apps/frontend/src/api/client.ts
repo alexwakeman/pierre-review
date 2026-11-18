@@ -191,6 +191,8 @@ import type {
   AiProviderSettingResponse,
   AiEffort,
   AiEffortSettingResponse,
+  AiRunProfiles,
+  AiRunProfilesResponse,
   AiApiKeySettingResponse,
   CodexLoginMethod,
   CodexLoginResponse,
@@ -1125,6 +1127,10 @@ export const api = {
   // set. The read side is `/api/me` (`ai.effortSetting`): invalidate `['me']` after a write.
   setAiEffort: (value: AiEffort | null) =>
     fetch('/api/ai/effort', jsonBody('PUT', { value })).then((r) => handle<AiEffortSettingResponse>(r)),
+  // THE RUN PROFILES (Settings → AI → Review / AI Fix / Implement story): the WHOLE object, which
+  // replaces the stored one (a block sends the stored others back unchanged).
+  setAiRunProfiles: (profiles: AiRunProfiles) =>
+    fetch('/api/ai/run-profiles', jsonBody('PUT', { profiles })).then((r) => handle<AiRunProfilesResponse>(r)),
   // "Use my API keys first" (Settings → AI). Only the tick is sent; the keys stay in Limn's environment.
   setAiApiKey: (value: boolean) =>
     fetch('/api/ai/api-key', jsonBody('PUT', { value })).then((r) => handle<AiApiKeySettingResponse>(r)),

@@ -24,6 +24,17 @@ describe('resolveManualRunChoice', () => {
     expect(resolveManualRunChoice({}, 'review', opts(both, 'codex'))).toEqual({ ok: true, provider: 'codex', model: 'claude-opus-5-5' });
   });
 
+  it('THE RUN PROFILE opens the run: nothing named ⇒ its vendor at ITS model; a picked model (the override) wins for that run', () => {
+    // The surface's profile (ai/run-profile.ts): Codex on Terra; the other vendor at the usual depth.
+    const profiled = {
+      ...opts(both, 'codex'),
+      defaultModel: (p: AiProviderId) => (p === 'codex' ? ('claude-sonnet-5' as const) : ('claude-opus-5-5' as const)),
+    };
+    expect(resolveManualRunChoice({}, 'fix', profiled)).toEqual({ ok: true, provider: 'codex', model: 'claude-sonnet-5' });
+    expect(resolveManualRunChoice({ provider: 'claude' }, 'fix', profiled)).toEqual({ ok: true, provider: 'claude', model: 'claude-opus-5-5' });
+    expect(resolveManualRunChoice({ provider: 'codex', model: 'gpt-6.1-sol' }, 'fix', profiled)).toEqual({ ok: true, provider: 'codex', model: 'claude-opus-5-5' });
+  });
+
   it('a named provider wins over the default; a Codex model maps to the Claude model of its depth', () => {
     expect(resolveManualRunChoice({ provider: 'codex', model: 'gpt-6.1-terra' }, 'fix', opts(both))).toEqual({
       ok: true,

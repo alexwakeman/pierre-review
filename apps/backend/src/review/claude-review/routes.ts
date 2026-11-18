@@ -30,7 +30,6 @@ import {
   REVIEW_POST_MODES,
   findingSourceLabel,
   CLAUDE_REVIEW_STATES_MAX_IDS,
-  DEFAULT_CLAUDE_REVIEW_MODEL,
   storyCommentLead,
   limnSeverityLabel,
   stripStoredStoryLead,
@@ -74,6 +73,7 @@ import { findingCommentUrl, reminderLead } from './posted-state.js';
 import { clearTeamClaim, postedReviewUrl, teamClaimPendingFor, teamClaimSkipFor, teamClaimSkipsFor } from './team-claim.js';
 import { teammateLinesAtHead } from './team-claim-seen.js';
 import { pairProvidersReady, pairRaisedByLead } from './pair.js';
+import { reviewDefaultProvider, reviewRunModel } from '../../ai/run-profile.js';
 import { notApprovedForView } from './not-approved.js';
 import { limnMetaForReview, loadJudgedForPost } from './post-meta.js';
 import { listTeammateReviews } from '../../db/teammate-reviews.js';
@@ -404,19 +404,22 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       const body = (req.body ?? {}) as GenerateReviewBody;
       if (!AGENTIC_AI_ENABLED) return featureOff(reply);
 
-      // CLAUDE + CODEX (pair.ts): both must be able to review now; `model` / `provider` are ignored —
-      // Claude's default review model first, then Codex's of the same depth.
+      // CLAUDE + CODEX (pair.ts): both must be switched on (Settings → AI → Review) and able to review
+      // now; `model` / `provider` are ignored — each half runs its vendor's Settings model and effort.
       const pair = body.pair === true;
-      if (pair && pairProvidersReady(preflightFor(ctx)).length < 2) {
+      const detect = preflightFor(ctx);
+      if (pair && pairProvidersReady(detect).length < 2) {
         reply.status(400);
-        return { error: 'PairUnavailable', message: 'Claude + Codex needs both signed in.' };
+        return { error: 'PairUnavailable', message: 'Claude + Codex needs both on in Settings → AI and signed in.' };
       }
-      // THE PER-RUN CHOICE: the provider named (or the default), the model on it, and its sign-in.
+      // THE PER-RUN CHOICE: the provider named (or Settings → AI's review vendor), the model on it (its
+      // Settings model when none is named), and its sign-in.
       const choice = pair
-        ? ({ ok: true, provider: 'claude', model: DEFAULT_CLAUDE_REVIEW_MODEL } as const)
+        ? ({ ok: true, provider: 'claude', model: reviewRunModel('claude') } as const)
         : resolveManualRunChoice(body, 'review', {
-            defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
-            detect: preflightFor(ctx),
+            defaultModel: reviewRunModel,
+            detect,
+            defaultProvider: () => reviewDefaultProvider(detect),
           });
       if (!choice.ok) {
         reply.status(400);

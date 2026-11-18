@@ -77,6 +77,8 @@ import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
 import { requestModelOf } from '../../ai/provider.js';
+import { fixChoice } from '../../ai/run-profile.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import { trueAuthorId } from '../../db/true-author.js';
 import { automationAllowedForPr } from '../../db/external-repos.js';
 
@@ -199,8 +201,11 @@ export async function maybeStartAutoFix(
     if (!(await automationAllowedForPr(accountId, prId, ctx))) return skip('off');
     const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, prId);
     if (!ws?.enabled) return skip('off');
+    // THE VENDOR AND MODEL, resolved ONCE (Settings → AI → AI Fix, ai/run-profile.ts `fixChoice`): the gate
+    // asks about the vendor the fix will run on, and the start below is handed that same vendor.
+    const profile = fixChoice(preflightFor(ctx), 'fix');
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, no auto fix — the next auto review decides again.
-    if (!(await automaticRunAllowed(ctx, accountId, 'auto fix'))) return skip('over_budget');
+    if (!(await automaticRunAllowed(ctx, accountId, 'auto fix', profile.provider))) return skip('over_budget');
     // THE SANDBOX, before the seed (which may wait on a SonarCloud read): no runtime, or no free slot.
     if (deps.sandbox) {
       const ready = await deps.sandbox();
@@ -299,15 +304,23 @@ export async function maybeStartAutoFix(
       if (now.length > 0 && now.every((k) => refused.has(k))) return skip('already_tried');
     }
 
-    // The review stores what RAN (a Codex id on Codex): ask for the same depth again.
-    const asked = loaded.review != null ? requestModelOf(loaded.review.model) : DEFAULT_AI_FIX_MODEL;
+    // THE MODEL: Settings → AI → AI Fix once a choice is stored there (`profile` above). NONE STORED ⇒ as
+    // before: the review's depth again (the review stores what RAN — a Codex id on Codex — so ask for the
+    // same depth). Either way the start is handed `profile.provider`, the vendor resolved ONCE above (and
+    // asked by the gate), so vendor and model cannot drift apart while the fix waits in the start queue.
+    const asked = profile.configured
+      ? (profile.model ?? DEFAULT_AI_FIX_MODEL)
+      : loaded.review != null
+        ? requestModelOf(loaded.review.model)
+        : DEFAULT_AI_FIX_MODEL;
     const model: AiFixModel = (CLAUDE_REVIEW_MODELS as readonly string[]).includes(asked)
       ? (asked as AiFixModel)
       : DEFAULT_AI_FIX_MODEL;
+    const pinned = { provider: profile.provider };
     const r =
       reviewId != null
-        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include, queueIfBusy: true })
-        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include }, queueIfBusy: true });
+        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include, queueIfBusy: true, ...pinned })
+        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include }, queueIfBusy: true, ...pinned });
     if (r.status === 'queued') {
       const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'started', fixId: r.fixId };
       ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) started: fix ${r.fixId}`);

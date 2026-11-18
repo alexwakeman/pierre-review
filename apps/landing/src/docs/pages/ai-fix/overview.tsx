@@ -70,7 +70,10 @@ export default function Page(): JSX.Element {
         <li>
           Under <Ui>What to fix</Ui>, tick the items the agent should work on.
         </li>
-        <li>Pick the model from the <Ui>Model</Ui> menu.</li>
+        <li>
+          The <Ui>Model</Ui> menu opens on <DocLink to="settings/ai#ai-fix">Settings → AI → AI Fix</DocLink>. Pick
+          another model for this fix if you want to.
+        </li>
         <li>
           Optionally tick <Ui>Plan first</Ui> to talk the fix through before any code changes. See{' '}
           <DocLink to="ai-fix/plan-first">Plan first</DocLink>.

@@ -31,8 +31,8 @@ import type { RepliesReport } from './replies-pass.js';
 // PreToolUse PATH GUARD confines every path to the scratch directory and the worktrees (the PR's own
 // plus the related repos' and linked PRs' read-only checkouts, replies-check.ts); the replies
 // are attacker-influenced. Connectors are isolated by the provider. The model is the STANDARD depth
-// (Claude Sonnet; Codex resolves the role to its own standard model) and the effort is the ONE setting
-// (Settings → AI → Effort, `agenticRunEffort`).
+// (Claude Sonnet; Codex resolves the role to its own standard model) and the effort is the run vendor's
+// Review effort (Settings → AI → Review, `agenticRunEffort`).
 
 export const REPLIES_CHECK_TOOL_NAME = 'mcp__replies__submit_replies';
 const ALLOWED_TOOLS = ['Read', 'Glob', 'Grep', REPLIES_CHECK_TOOL_NAME];

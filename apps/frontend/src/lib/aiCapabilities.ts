@@ -110,11 +110,36 @@ export function aiRunnableProviders(me: MeResponse | undefined, kind: AiRunKind)
   return order.filter((p) => aiProviderReadyFor(me, p, kind));
 }
 
-/** Can a Claude + Codex review run (both signed in and able to review)? Gates the pair choices in
- *  Settings → Auto review, "When Claude and Codex disagree" included. */
+/** The review vendors switched on in Settings → AI → Review (`me.ai.runProfiles`), Claude first. An
+ *  older server sends no profiles: both. */
+export function reviewVendorsOn(me: MeResponse | undefined): AiProviderId[] {
+  const r = me?.ai?.runProfiles?.review;
+  if (r == null) return ['claude', 'codex'];
+  return (['claude', 'codex'] as const).filter((p) => r[p].enabled);
+}
+
+/** THE PAIR (the server's ai/run-profile.ts `reviewPairProviders`): the review vendors switched on AND
+ *  able to review now, Claude first. Two ⇒ Claude + Codex. */
+export function reviewPairVendors(me: MeResponse | undefined): AiProviderId[] {
+  return reviewVendorsOn(me).filter((p) => aiProviderReadyFor(me, p, 'review'));
+}
+
+/**
+ * "ONE VENDOR" for a review (the server's `reviewDefaultProvider`): with no Review choice stored, the
+ * default provider; else the first vendor switched on and signed in (Claude before Codex), else the
+ * first switched on.
+ */
+export function reviewOneVendor(me: MeResponse | undefined): AiProviderId {
+  const fallback: AiProviderId = me?.ai?.provider === 'codex' ? 'codex' : 'claude';
+  const p = me?.ai?.runProfiles;
+  if (p == null || p.stored?.review == null) return fallback;
+  return reviewPairVendors(me)[0] ?? reviewVendorsOn(me)[0] ?? fallback;
+}
+
+/** Can a Claude + Codex review run (both switched on in Settings → AI, signed in and able to review)?
+ *  Gates the pair choices in Settings → Auto review, "When Claude and Codex disagree" included. */
 export function pairReviewReady(me: MeResponse | undefined): boolean {
-  const ready = aiRunnableProviders(me, 'review');
-  return ready.includes('claude') && ready.includes('codex');
+  return reviewPairVendors(me).length === 2;
 }
 
 /**

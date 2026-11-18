@@ -7,15 +7,32 @@
 // automatic review for good — and counts against the daily cap. Checking BEFORE the row exists
 // leaves the PR qualifying, so the first tick after "Set up AI" (or a sign-in) reviews it.
 // A click needs no such guard: the reader sees the failure and can press Review again.
-import { activeRuntimeStatus } from '../../ai/active-runtime.js';
-import type { AiAgentKind } from '@pierre-review/shared';
+import { activeRuntimeStatus, runtimeStatusFor } from '../../ai/active-runtime.js';
+import { activeProviderId } from '../../ai/provider-setting.js';
+import { preflightFor } from '../../ai/run-choice.js';
+import { reviewDefaultProvider } from '../../ai/run-profile.js';
+import type { AiAgentKind, AiProviderId } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 
 /**
- * `kind`: the agent the sweeper is about to start (the pre-flight answers per kind). The download asked
- * about is the ACTIVE provider's (ai/active-runtime.ts): a Codex machine never waits on Claude's.
+ * `kind`: the agent the sweeper is about to start (the pre-flight answers per kind). `provider`: the
+ * vendor the run will use (Settings → AI's run profiles, ai/run-profile.ts); absent ⇒ the ACTIVE
+ * provider (ai/active-runtime.ts): a Codex machine never waits on Claude's download.
  */
-export function agenticRunReady(ctx: Pick<AgentContext, 'llm'>, kind: AiAgentKind): boolean {
-  if (activeRuntimeStatus().runtime !== 'ready') return false;
-  return ctx.llm.detectAuth(kind).status === 'ok';
+export function agenticRunReady(ctx: Pick<AgentContext, 'llm'>, kind: AiAgentKind, provider?: AiProviderId): boolean {
+  if (provider == null || provider === activeProviderId()) {
+    if (activeRuntimeStatus().runtime !== 'ready') return false;
+    return ctx.llm.detectAuth(kind).status === 'ok';
+  }
+  if (runtimeStatusFor(provider).runtime !== 'ready') return false;
+  return preflightFor(ctx)(provider, kind).status === 'ok';
+}
+
+/**
+ * The vendor a SINGLE-RUN review kind (CI review, story check, Check threads) runs on now: Settings →
+ * AI → Review's "one vendor" (ai/run-profile.ts `reviewDefaultProvider`). Its gates — readiness, the
+ * pre-flight, the budget and usage-limit gate — ask about THIS vendor, never the default provider.
+ */
+export function singleReviewProvider(ctx: Pick<AgentContext, 'llm'>): AiProviderId {
+  return reviewDefaultProvider(preflightFor(ctx));
 }

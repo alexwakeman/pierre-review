@@ -153,8 +153,11 @@ From 2026-10-30, still in force:
    card shows the build MARK (`storyBuildMark`: Working… / Waiting for you / Ready to push / Pushed) — a
    status, never a button.
 5. **Gap-filling** against existing ticket PRs reads the stored story check (§ Fill gaps).
-6. **Effort:** Settings → AI → Effort reaches the session's turns (`agenticRunEffort`, read once per
-   session start by `sandbox/drivers/index.ts resolveSandboxAgentChoice`).
+6. **Vendor, model and effort** come from Settings → AI → **Implement story** (`buildChoice`, surface
+   `'build'`; docs/CLAUDE-REVIEW.md § The run profiles), not from one Effort level: the effort is read once
+   per session start (`agenticRunEffort(…, 'build')` in `sandbox/drivers/index.ts resolveSandboxAgentChoice`)
+   and reaches every turn; a session on the OTHER vendor (a fallback or a menu pick) runs at that vendor's
+   Default. `REVIEW_EFFORT` still wins. The loop's REVIEW rounds use the Review profile.
 
 From 2026-11-06 (the workspace session; [SANDBOX.md](SANDBOX.md) has the reasons and measurements):
 D1 memories only, never past sessions · D2 talk before the build · D3 on Docker, the only way out is
@@ -172,13 +175,15 @@ or the description's criteria section — and the write stays the reader's press
 
 From 2026-11-12 (THE REVIEW LOOP, § The review loop):
 - The opt-in is "After the build: review and fix, then open the pull request" — it REUSES
-  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, default 4 since 2026-11-12 — `STORY_BUILD_LOOP_ROUNDS_DEFAULT`, always written at start; the column default 3 is never read, 1..6), set in
+  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, 1..6 — default 5 since 2026-11-18, was 4 — `STORY_BUILD_LOOP_ROUNDS_DEFAULT`; a start that names none, and a loop switched on later with no rounds, take Settings → AI → Implement story → Review rounds, `ai/run-profile.ts` `buildLoopRounds()`; always written at start; the column default 3 is never read), set in
   the Start panel and in the tab until the loop starts. Unticked = the manual flow (Push). The old "Push
   automatically" (one push when the build finishes) is RETIRED: the subject no longer calls
   `maybeAutoPushBuild`.
 - The review is Ensemble's OWN machinery, exactly as a PR review: the code review per target with the
-  providers the workspace's auto review uses (Claude + Codex pair on `both`), and ONE story check across
-  every target per round (`activeProviderId()`, never a pair). Every finding — blockers, warnings, nits and
+  providers the workspace's auto review uses (Claude + Codex pair on `both` — the review vendors ON in
+  Settings → AI and signed in, `seams.ts` through the one pair resolver; each half at its vendor's Review
+  model and effort), and ONE story check across every target per round (`reviewDefaultProvider`, the
+  first review vendor on and signed in, never a pair). Every finding — blockers, warnings, nits and
   QUESTIONS — and every open criterion goes to the agent, which fixes, answers or PUSHES BACK; it may call a
   criterion not applicable, which the next story check judges. A blocker is never settled by pushback alone.
 - Everything the reviewers and the agent say stays IN ENSEMBLE: no GitHub comment or review, no tracker write.
@@ -648,7 +653,7 @@ stores each build's own choice (`story_builds.auto_approve_plan`).
 
 The story view's menu item "Build end to end" is ONE press for the whole build: the plan approved
 automatically (§ Approve automatically: every open point as Agree), the build, THE REVIEW LOOP with
-`STORY_BUILD_LOOP_ROUNDS_DEFAULT` (4) rounds (it stops early when a round finds nothing open; after the last
+Settings → AI's Review rounds (`buildLoopRounds()`, default 5) (it stops early when a round finds nothing open; after the last
 round the PR opens ready anyway, naming what is still open), and then THE TICKET STEP.
 
 - **The start.** The menu press leaves a ONE-SHOT, IN-MEMORY request (`lib/storyBuildTab.ts

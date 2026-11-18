@@ -333,9 +333,12 @@ process), and ONE normalised event for both providers: packages/shared `SandboxA
 `text` partial/final, `tool_call`, `tool_result`, `turn_end`, `error`). The build tab renders only it.
 
 - **The run choice, once** (`index.ts` `resolveSandboxAgentChoice`): the request's `{provider, model}`,
-  already validated by `ai/run-choice.ts` (kind `story_build`); a stored model maps back through
-  `requestModelOf`; the provider resolves the DEPTH to its own model (`getProvider(p).resolveModel`); the
-  effort is THE Settings level for a worktree run (`agenticRunEffort`). The drivers take the result and
+  already validated by `ai/run-choice.ts` (kind `story_build`; nothing named ⇒ Settings → AI →
+  Implement story, `ai/run-profile.ts` `buildChoice`, and for AI Fix `fixChoice`, each with its fallback
+  to the other signed-in vendor — docs/CLAUDE-REVIEW.md § The run profiles); a stored model maps back
+  through `requestModelOf`; the provider resolves the DEPTH to its own model (`getProvider(p).resolveModel`);
+  the effort is the SURFACE's (`surface: 'build' | 'fix'` → `agenticRunEffort(…, surface)`, a worktree
+  run): the profile's effort for its own vendor, Default for the other. The drivers take the result and
   pick nothing (`provider-seam.test.ts` § the sandbox agents: only `claude.ts` / `codex.ts` start a CLI
   in a sandbox, and neither resolves a model or an effort).
 - **Claude** (`claude.ts`, spike 1): `claude -p` stream-json in and out, `--permission-mode plan` for the

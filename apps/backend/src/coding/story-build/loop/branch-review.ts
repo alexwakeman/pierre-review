@@ -120,7 +120,8 @@ export async function runLoopReviewHalf(ctx: AgentContext, i: LoopHalfInput): Pr
       name: i.name,
       prNumber: 0,
       headSha: i.headSha,
-      model: DEFAULT_CLAUDE_REVIEW_MODEL,
+      // The vendor's Settings → AI → Review model (ai/run-profile.ts); its effort follows in the run.
+      model: (await import('../../../ai/run-profile.js')).reviewRunModel(i.provider),
       provider: i.provider,
       mode,
       systemPrompt: systemPromptForMode(mode, specialists, docs?.dir ?? null),

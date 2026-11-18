@@ -77,7 +77,12 @@ test.describe('Implement, plan first', () => {
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await menu.getByRole('menuitem', { name: 'Build end to end' }).click();
     // No Start press: the menu press is the start.
-    expect((await start).postDataJSON()).toMatchObject({ action: 'implement', endToEnd: true, autoApprovePlan: true, autoPush: true, loopRounds: 4 });
+    {
+      const body = (await start).postDataJSON();
+      expect(body).toMatchObject({ action: 'implement', endToEnd: true, autoApprovePlan: true, autoPush: true });
+      // No rounds sent: the server reads Settings → AI → Implement story's itself.
+      expect(body.loopRounds).toBeUndefined();
+    }
     await expect(page.getByTestId('story-build-overlay').getByTestId('story-plan')).toBeVisible();
   });
 

@@ -997,8 +997,8 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   closing turn), ≤ 8 when a section was cut (the prompt then lists the shortlisted folders and says to Read a
   cut file only when its missing part matters); never above `STORY_DOCS_ALIGNMENT_MAX_TURNS` (16);
   `STORY_DOCS_ALIGNMENT_BUDGET_USD` $1.50. ⚠ **Effort**: both providers run it at `low` (`STORY_DOCS_EFFORT`,
-  `spec.claude.effort` / `spec.codex.effort`) — reading comprehension over text it already has. Settings → AI → Effort does NOT reach
-  it (ai/effort.ts: that setting governs only the review, AI Fix and Plan first; every other kind runs a fixed
+  `spec.claude.effort` / `spec.codex.effort`) — reading comprehension over text it already has. The Settings → AI run profiles' effort does NOT reach
+  it (ai/effort.ts: it governs only the reviews, AI Fix, Plan first and Implement story; every other kind runs a fixed
   depth), so this is that fixed depth. Tools are unchanged:
   Read/Glob/Grep + `submit_alignment`; Bash, every write tool, the web and dispatch denied. ⚠ **The path
   guard's ONLY read-only roots are the SHORTLISTED documents' folders** (`storyDocsRoots`) — never the library

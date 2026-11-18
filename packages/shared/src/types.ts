@@ -21,6 +21,7 @@ import type { ToolSwitchesStatus } from './tool-switches.js';
 import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { AiEffortSettingStatus } from './ai-effort.js';
+import type { AiRunProfilesStatus } from './ai-run-profiles.js';
 import type { AiApiKeySettingStatus } from './ai-api-key.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 import type { RepoDocsOffers, RepoDocsUnreadableReason } from './reference-docs-offers.js';
@@ -4025,6 +4026,12 @@ export interface MeResponse {
      * Default) and who chose it (REVIEW_EFFORT wins). Optional: an older server omits it (Default).
      */
     effortSetting?: AiEffortSettingStatus;
+    /**
+     * THE RUN PROFILES (Settings → AI → Review / AI Fix / Implement story; ai-run-profiles.ts): every
+     * surface's vendor, model and effort, resolved. The run menus open on them. Optional: an older
+     * server omits it (every menu then opens as before).
+     */
+    runProfiles?: AiRunProfilesStatus;
     /**
      * "Use my API keys first" (Settings → AI; ai-api-key.ts): the tick, who set it (LIMN_AI_USE_API_KEY
      * wins), and whether ANTHROPIC_API_KEY / OPENAI_API_KEY are set. Optional: an older server omits it.

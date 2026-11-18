@@ -1746,6 +1746,14 @@ Written only by `markFixPushed`; no backfill (an older pushed row shows its bran
 erasure and export already cover it. Additive; journal idx 205, `when` `1794470400000`.
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done.
 
+### `0206_ai_run_profiles` — Settings → AI's per-surface choices
+
+`ALTER TABLE accounts ADD ai_run_profiles` (text JSON, shared `AiRunProfiles`): the review per vendor, AI Fix and
+Implement story (vendor, model, effort; Implement's review rounds). NULL = never chosen, and every missing field
+falls back to `ai_effort`, the default provider and the usual models, so an existing install runs as before. No
+backfill. An existing table, so erasure and export already cover it. Additive; journal idx 206, `when`
+`1794556800000`. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The run profiles.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

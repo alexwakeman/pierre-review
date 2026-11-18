@@ -34,7 +34,7 @@ vi.mock('./team-claim-skip.js', () => ({
   autoProvidersForPr: async () => ['claude'],
 }));
 let aiReady = true;
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => aiReady }));
 let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
 vi.mock('./auto-settings.js', () => ({ listAutoReviewWorkspaces: async () => roster }));
 

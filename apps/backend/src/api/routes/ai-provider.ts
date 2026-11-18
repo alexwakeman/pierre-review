@@ -2,17 +2,21 @@ import type { FastifyInstance } from 'fastify';
 import {
   isAiEffort,
   isAiProviderSetting,
+  parseAiRunProfiles,
   type AiApiKeySettingBody,
   type AiApiKeySettingResponse,
   type AiEffortSettingBody,
   type AiEffortSettingResponse,
   type AiProviderSettingBody,
   type AiProviderSettingResponse,
+  type AiRunProfilesBody,
+  type AiRunProfilesResponse,
 } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { accountIdOf } from '../plugins/auth.js';
 import { activeProviderId, aiProviderEnvSetting, aiProviderSettingStatus } from '../../ai/provider-setting.js';
-import { writeStoredAiEffort, writeStoredAiProvider, writeStoredPrefersApiKey } from '../../ai/provider-store.js';
+import { writeStoredAiEffort, writeStoredAiProvider, writeStoredAiRunProfiles, writeStoredPrefersApiKey } from '../../ai/provider-store.js';
+import { aiRunProfilesStatus } from '../../ai/run-profile-status.js';
 import { apiKeySettingStatus, prefersApiKeyEnvSetting } from '../../ai/credentials.js';
 import { aiEffortEnvSetting, aiEffortSettingStatus } from '../../ai/effort.js';
 import { envName, envNameSet } from '../../env-name.js';
@@ -28,10 +32,18 @@ import { envName, envNameSet } from '../../env-name.js';
 // going keeps its provider. Rate tier: the blanket `read` bucket — a single-column UPDATE that reaches
 // no GitHub API and no model (pinned in rate-limit.test.ts).
 //
-//   PUT /api/ai/effort  AiEffortSettingBody → AiEffortSettingResponse  (Settings → AI → Effort).
-//     `value`: one of the five levels, or null for Default. 400 on anything else. 409 while REVIEW_EFFORT
-//     is set (the environment wins). Same rules as the provider: one column, held in memory
-//     (ai/effort.ts), reaches the next run; `read` tier.
+//   PUT /api/ai/effort  AiEffortSettingBody → AiEffortSettingResponse  (THE COMPAT PATH since the run
+//     profiles: no Settings control sends it now). `value`: one of the five levels, or null for Default.
+//     400 on anything else. 409 while REVIEW_EFFORT is set (the environment wins). Sets the effort of
+//     EVERY surface: the one level is stored and every effort in the run profiles is dropped
+//     (ai/provider-store.ts `writeStoredAiEffort`); held in memory, reaches the next run; `read` tier.
+//
+//   PUT /api/ai/run-profiles  AiRunProfilesBody → AiRunProfilesResponse  (Settings → AI → Review, AI Fix,
+//     Implement story; shared ai-run-profiles.ts). `profiles`: the WHOLE object — it replaces the stored
+//     one. 400 on an unknown field, a model of another vendor, a bad effort or rounds, or no review
+//     vendor left on (`parseAiRunProfiles`, the message says which). Efforts are stored while
+//     REVIEW_EFFORT is set (it still wins at run time; the controls are locked). One column, held in
+//     memory (ai/run-profile.ts), reaches the next run; `read` tier.
 //
 //   PUT /api/ai/api-key  AiApiKeySettingBody → AiApiKeySettingResponse  (Settings → AI → "Use my API keys
 //     first"). `value`: boolean, else 400. 409 while LIMN_AI_USE_API_KEY is set to true or false (the
@@ -70,6 +82,16 @@ export async function aiProviderRoutes(app: FastifyInstance): Promise<void> {
     }
     await writeStoredAiEffort(value ?? null, accountId);
     const res: AiEffortSettingResponse = { setting: aiEffortSettingStatus() };
+    return res;
+  });
+
+  app.put('/api/ai/run-profiles', async (req, reply) => {
+    const accountId = accountIdOf(req);
+    const body = req.body as Partial<AiRunProfilesBody> | null | undefined;
+    const parsed = parseAiRunProfiles(body?.profiles);
+    if (!parsed.ok) return reply.code(400).send({ error: 'BadRequest', message: parsed.message });
+    await writeStoredAiRunProfiles(parsed.value, accountId);
+    const res: AiRunProfilesResponse = { runProfiles: aiRunProfilesStatus() };
     return res;
   });
 

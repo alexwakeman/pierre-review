@@ -35,7 +35,8 @@ import {
   saveThreadCheckSuccess,
 } from './thread-check-persist.js';
 import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
-import { activeProviderId } from '../../ai/provider-setting.js';
+import { reviewDefaultProvider } from '../../ai/run-profile.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import {
   planThreadReview,
   pushReviewThreadsSection,
@@ -111,7 +112,7 @@ export async function planThreadCheck(
   prId: number,
   headSha: string,
   // The provider the check runs on: only ITS earlier judgements carry (`priorAssessmentsForProvider`).
-  provider: AiProviderId = activeProviderId(),
+  provider: AiProviderId = reviewDefaultProvider(),
 ): Promise<{ plan: ThreadPlan; threadCount: number; ownThreadCount: number; newestCommentAt: Date | null } | null> {
   const load = ctx.queries.loadReviewThreads?.bind(ctx.queries);
   if (!load) return null;
@@ -161,7 +162,7 @@ export interface StartThreadCheckArgs {
   // loader's newest comment is recorded instead.
   commentsThrough?: Date | null;
   // The provider to run on — the reader's pick when the check stands in for their manual review
-  // (`startThreadCheckBesideManualReview`). Absent ⇒ the default (`activeProviderId`), read now.
+  // (`startThreadCheckBesideManualReview`). Absent ⇒ Settings → AI's review vendor (`reviewDefaultProvider`), read now.
   provider?: AiProviderId | null;
 }
 
@@ -177,7 +178,7 @@ export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArg
   const auto = a.trigger !== 'manual';
   if (lane.filter((j) => isAuto(j) === auto).length >= (auto ? AUTO_MAX : MANUAL_MAX)) return { outcome: 'busy' };
   claimed.set(key, -1); // reserve synchronously before any await
-  const provider: AiProviderId = a.provider ?? activeProviderId();
+  const provider: AiProviderId = a.provider ?? reviewDefaultProvider(preflightFor(ctx));
 
   let checkId: number;
   let threadsSent: number;

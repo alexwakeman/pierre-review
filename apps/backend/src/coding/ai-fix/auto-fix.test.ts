@@ -204,6 +204,8 @@ describe('maybeStartAutoFix — the author gate', () => {
         include: AUTO_FIX_DEFAULT_INCLUDE,
         // Every slot busy ⇒ it waits in THE FIX START QUEUE instead of a refusal.
         queueIfBusy: true,
+        // The vendor, resolved ONCE with the model (none stored ⇒ the default provider).
+        provider: (await import('../../ai/provider-setting.js')).activeProviderId(),
       },
     ]);
   });
@@ -212,6 +214,45 @@ describe('maybeStartAutoFix — the author gate', () => {
     const prId = await seedPr(aliceId);
     expect(await go(prId, 502)).toEqual({ status: 'not_own' });
     expect(started).toEqual([]);
+  });
+
+  it('⚠ NO AI Fix profile stored ⇒ the review\'s model, as before; ONE stored ⇒ the profile\'s model', async () => {
+    const rp = await import('../../ai/run-profile.js');
+    rp.setStoredAiRunProfiles({ review: { claude: { model: 'claude-opus-5-5' } } });
+    try {
+      // A review block alone changes nothing for the fix: it still inherits the review's depth.
+      await go(await seedPr(viewerId));
+      expect(started[0].model).toBe('claude-sonnet-5');
+      started = [];
+      rp.setStoredAiRunProfiles({ fix: { provider: 'claude', model: 'claude-opus-5-5' } });
+      await go(await seedPr(viewerId));
+      expect(started[0].model).toBe('claude-opus-5-5');
+    } finally {
+      rp.setStoredAiRunProfiles(null);
+    }
+  });
+
+  it('⚠ the Fix profile is resolved ONCE: the vendor the gate asked about travels WITH its model to the start', async () => {
+    const rp = await import('../../ai/run-profile.js');
+    const llm = (ctx as any).llm;
+    rp.setStoredAiRunProfiles({ fix: { provider: 'codex', model: 'gpt-6.1-terra' } });
+    try {
+      // Codex signed in: Codex at the stored model's depth (Terra = the standard depth).
+      (ctx as any).llm = { detectAuth: () => ({ status: 'ok' }), detectProviderAuth: () => ({ status: 'ok' }) };
+      await go(await seedPr(viewerId));
+      expect(started[0]).toMatchObject({ provider: 'codex', model: 'claude-sonnet-5' });
+      started = [];
+      // Codex signed out: the other vendor at ITS usual model (AI Fix's default), not the stored depth.
+      (ctx as any).llm = {
+        detectAuth: () => ({ status: 'ok' }),
+        detectProviderAuth: (p: string) => (p === 'codex' ? { status: 'none', message: 'no' } : { status: 'ok' }),
+      };
+      await go(await seedPr(viewerId));
+      expect(started[0]).toMatchObject({ provider: 'claude', model: 'claude-opus-5-5' });
+    } finally {
+      (ctx as any).llm = llm;
+      rp.setStoredAiRunProfiles(null);
+    }
   });
 
   it('a retired review model falls back to the fixer’s default', async () => {
@@ -375,7 +416,7 @@ describe('maybeStartAutoFix — the skips', () => {
     await setPlan('discarded', 'cancelled');
     expect(await go(prId)).toMatchObject({ status: 'started' });
     // ⚠ AN AUTO FIX NEVER PLANS: the one entry it calls carries no plan option at all.
-    expect(Object.keys(started[0] ?? {}).sort()).toEqual(['accountId', 'include', 'model', 'prId', 'queueIfBusy', 'reviewId', 'trigger']);
+    expect(Object.keys(started[0] ?? {}).sort()).toEqual(['accountId', 'include', 'model', 'prId', 'provider', 'queueIfBusy', 'reviewId', 'trigger']);
   });
 
   it('a finished fix waits unpushed on this head — but not a pushed, empty or older-head one', async () => {

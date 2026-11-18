@@ -55,9 +55,10 @@ import { useLocalStorage } from '../../hooks/useLocalStorage.js';
 // and the project skills (`git ls-tree` in Limn's clone cache). "Change" opens Settings → Sandbox.
 //
 // BUILD END TO END (docs/STORY-BUILD.md § Build end to end): opened from the story view's "Build end to
-// end", the panel is that one start — the plan approved automatically, the review loop (4 rounds), then the
-// Jira ticket updated and commented on — and it STARTS ITSELF once (`takeEndToEndStart`, an in-memory
-// request: a reload never starts it again). It holds back, leaving the Start button, when the run could not
+// end", the panel is that one start — the plan approved automatically, the review loop (Settings → AI →
+// Implement story's rounds, 5 by default; the server reads them), then the Jira ticket updated and
+// commented on — and it STARTS ITSELF once (`takeEndToEndStart`, an in-memory request: a reload never
+// starts it again). It holds back, leaving the Start button, when the run could not
 // start or would need the over-budget confirm (a reader's run is never refused, it asks first).
 // "Set it up myself" goes back to the ordinary panel.
 //
@@ -106,7 +107,12 @@ export function StartPanel({
   const autoApprove = prefs.autoApprovePlan === true;
   const setAutoPush = (on: boolean): void => setPrefs({ ...prefs, autoPush: on });
   const setAutoApprove = (on: boolean): void => setPrefs({ ...prefs, autoApprovePlan: on });
-  const [loopRounds, setLoopRounds] = useState(STORY_BUILD_LOOP_ROUNDS_DEFAULT);
+  // The review loop's rounds open on Settings → AI → Implement story (default 5); a change here is for this
+  // build. ⚠ SENT ONLY WHEN THE READER CHANGED THEM (`pickedRounds`): otherwise the server's
+  // `buildLoopRounds()` decides, so a `/api/me` not yet loaded can never override Settings with 5.
+  const settingsRounds = useSettingsLoopRounds();
+  const [pickedRounds, setLoopRounds] = useState<number | null>(null);
+  const loopRounds = pickedRounds ?? settingsRounds;
   // HOTFIX (docs/STORY-BUILD.md § Hotfix builds): offered only with both suffixes set and a repository with a
   // release (`GET …/hotfix-bases`, DB only, asked while this panel offers a start). Not with Build end to end;
   // the review loop is off for it.
@@ -120,10 +126,10 @@ export function StartPanel({
       provider: pick.chosen.provider,
       model: pick.chosen.model,
       ...(e2e
-        ? { endToEnd: true, autoPush: true, autoApprovePlan: true, loopRounds: STORY_BUILD_LOOP_ROUNDS_DEFAULT }
+        ? { endToEnd: true, autoPush: true, autoApprovePlan: true }
         : hotfix
           ? { hotfix: true, ...(autoApprove ? { autoApprovePlan: true } : {}) }
-          : { ...(autoPush ? { autoPush: true, loopRounds } : {}), ...(autoApprove ? { autoApprovePlan: true } : {}) }),
+          : { ...(autoPush ? { autoPush: true, ...(pickedRounds != null ? { loopRounds: pickedRounds } : {}) } : {}), ...(autoApprove ? { autoApprovePlan: true } : {}) }),
     });
   };
   // The one-shot start of "Build end to end": decided once the sign-in and budget answers are in.
@@ -187,7 +193,7 @@ export function StartPanel({
             <EndToEndInfo />
           </p>
           <p className="mt-1 text-body text-ui-mute">
-            Ensemble approves the plan, reviews and fixes the work for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds, opens the pull
+            Ensemble approves the plan, reviews and fixes the work for up to {settingsRounds} rounds, opens the pull
             request, then updates the Jira ticket and comments on it as you.
           </p>
           <button type="button" className="hit mt-1 text-meta text-ui-ink underline" disabled={busy} onClick={() => setEndToEnd(false)}>
@@ -392,14 +398,21 @@ function HotfixInfo(): JSX.Element {
   );
 }
 
+/** The review loop's rounds from Settings → AI → Implement story (an older server: the default). Shown
+ *  only: the start sends no rounds the reader did not pick, so the server reads Settings itself. */
+function useSettingsLoopRounds(): number {
+  return useMe().data?.ai?.runProfiles?.build.rounds ?? STORY_BUILD_LOOP_ROUNDS_DEFAULT;
+}
+
 /** What "Build end to end" does, behind its ⓘ. */
 function EndToEndInfo(): JSX.Element {
+  const rounds = useSettingsLoopRounds();
   return (
     <InfoButton title={STORY_BUILD_END_TO_END_LABEL}>
       <p>One press runs the whole build:</p>
       <ul className="mt-1 list-disc pl-5">
         <li>The agent plans. Ensemble approves the plan, taking every open point as Agree.</li>
-        <li>The agent builds. Ensemble reviews the work and the agent fixes it, for up to {STORY_BUILD_LOOP_ROUNDS_DEFAULT} rounds; it stops early when nothing is open.</li>
+        <li>The agent builds. Ensemble reviews the work and the agent fixes it, for up to {rounds} rounds (Settings → AI); it stops early when nothing is open.</li>
         <li>Ensemble opens the pull request, ready for review, even if something is still open. The pull request lists it.</li>
         <li>Ensemble updates the Jira ticket from the plan and comments on it as you, saying what changed and linking the pull request. The status does not change.</li>
       </ul>

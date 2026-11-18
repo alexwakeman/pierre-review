@@ -34,7 +34,13 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   Replaces the old `localUser` singleton. Also holds the reader's account-grained settings as overrides-only
   JSON (`blast_radius_config`, `my_turn_settings` — § `accounts.my_turn_settings` below — and
   `feature_settings`, Settings → Features, beside the one-time `features_existing_install` stamp — §
-  `accounts.feature_settings` below).
+  `accounts.feature_settings` below), and the machine's AI choices: `ai_provider` (0128), `ai_effort`
+  (0130; since the run profiles the FALLBACK level a profile that says nothing reads, and what the compat
+  `PUT /api/ai/effort` writes), `ai_use_api_key` (0184) and **`ai_run_profiles`** (0206, JSON, shared
+  `AiRunProfiles`: the review per vendor `{enabled, model, effort}`, `fix` and `build` `{provider, model,
+  effort}` + `build.rounds`; every field optional, missing = as before; NULL = never chosen; one writer
+  `PUT /api/ai/run-profiles`, validated by `parseAiRunProfiles` on write AND on the boot's load —
+  docs/CLAUDE-REVIEW.md § The run profiles). Machine grain, like the spend budget: never per workspace.
 - **`repos`** — the account's repos (`accountId`; unique `(accountId, owner, name)` and
   `(accountId, githubNodeId)`). The `repos_id_account` unique index is NOT a lookup index — it is
   the PARENT KEY of the composite `(repo_id, account_id)` FK on `workspace_repos`.

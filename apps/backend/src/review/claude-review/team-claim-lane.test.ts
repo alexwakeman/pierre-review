@@ -40,7 +40,7 @@ vi.mock('./persist.js', () => ({
   reconcileOrphanedReviews: async () => 0,
   saveReviewSuccess: async () => {},
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 // PRs whose workspace asks for Claude + Codex; PRs the reader authored; PRs a teammate holds on Claude.
 const pairPrs = new Set<number>();
 const ownPrs = new Set<number>();

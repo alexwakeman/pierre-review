@@ -80,7 +80,7 @@ vi.mock('../../tracker/ticket-source.js', () => ({
   }),
 }));
 let aiReady = true;
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => aiReady }));
 // AUTO FIX: the manager hands every SUCCEEDED auto run to THE AUTO FIX QUEUE (which owns the decision).
 const autoFixCalls: Array<{ accountId: number; prId: number; cause: string }> = [];
 vi.mock('../../coding/ai-fix/auto-fix-queue.js', () => ({

@@ -89,6 +89,8 @@ import { asSyncLogger, resyncPrAfterWrite } from '../sync/resync-after-write.js'
 import { notePrChangedForPr, schedulePrSettle } from '../sync/pr-settle.js';
 import type { AgentContext } from '../review/agent-context.js';
 import { automaticRunAllowed } from '../review/budget-gate.js';
+import { fixChoice } from '../ai/run-profile.js';
+import { preflightFor } from '../ai/run-choice.js';
 import {
   AI_RUN_WINDOW_MS,
   aiFixEligibility,
@@ -1368,8 +1370,20 @@ export interface AiFixDeps {
   pollMs: number;
 }
 
+/**
+ * A dependency fix's vendor and model: Settings → AI → AI Fix (ai/run-profile.ts `fixChoice`), resolved
+ * ONCE per start and handed to the start TOGETHER (its budget and usage-limit gate then ask about that
+ * vendor). NONE STORED ⇒ as before: the usual fix model on the default provider. A fallback to the other
+ * vendor runs at ITS usual model, never the stored vendor's.
+ */
+export function dependencyFixChoice(ctx: Pick<AgentContext, 'llm'>): { model: string; provider: 'claude' | 'codex' } {
+  const c = fixChoice(preflightFor(ctx), 'fix');
+  return { model: c.model ?? DEFAULT_AI_FIX_MODEL, provider: c.provider };
+}
+
 const defaultAiFixDeps: AiFixDeps = {
-  allowed: (ctx, accountId) => automaticRunAllowed(ctx, accountId, 'dependency CI fix'),
+  // The gate asks about the vendor the fix will run on (Settings → AI → AI Fix), not the default provider.
+  allowed: (ctx, accountId) => automaticRunAllowed(ctx, accountId, 'dependency CI fix', fixChoice(preflightFor(ctx), 'fix').provider),
   async readFailures(ctx, pr) {
     const { readCiInputs } = await import('../review/ci-review/prepare.js');
     const inputs = await readCiInputs(ctx, {
@@ -1396,11 +1410,11 @@ const defaultAiFixDeps: AiFixDeps = {
     const { startFix } = await import('../coding/ai-fix/manager.js');
     if (input.withCi) {
       // THE COMBINED RUN: the CI-only seed (the CI review's fixable items at the PR's current head) with the
-      // merge REQUIRED, Limn's preamble above it. Unattended, the default provider, pushed below.
+      // merge REQUIRED, Limn's preamble above it. Unattended, Settings → AI → AI Fix, pushed below.
       return startFix(ctx, {
         accountId: input.accountId,
         prId: input.prId,
-        model: DEFAULT_AI_FIX_MODEL,
+        ...dependencyFixChoice(ctx),
         seed: 'review',
         sourceReviewId: null,
         preamble: input.instruction,
@@ -1411,10 +1425,10 @@ const defaultAiFixDeps: AiFixDeps = {
     return startFix(ctx, {
       accountId: input.accountId,
       prId: input.prId,
-      model: DEFAULT_AI_FIX_MODEL,
+      ...dependencyFixChoice(ctx),
       seed: 'plain',
       instruction: input.instruction,
-      // An automatic fix: the default provider, no picker. auto-push.ts never pushes it (not the
+      // An automatic fix: Settings → AI → AI Fix, no picker. auto-push.ts never pushes it (not the
       // reader's own PR) — this file pushes it below, under its own rules.
       trigger: 'auto',
       ...(input.resolveConflicts ? { resolveConflicts: true } : {}),

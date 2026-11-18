@@ -2,7 +2,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { config } from '../../config.js';
 import { globalAutomationUserIds } from '../../db/automation-ids.js';
 import type { AgentContext } from '../agent-context.js';
-import { agenticRunReady } from '../claude-review/ai-ready.js';
+import { agenticRunReady, singleReviewProvider } from '../claude-review/ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { autoReviewAvailable, utcDayStartMs } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
@@ -112,7 +112,7 @@ export async function runCiReviewSweep(
 ): Promise<CiSweepResult> {
   const result: CiSweepResult = { considered: [], queued: [], stopped: null };
   if (!autoReviewAvailable(ctx) || sweeping) return result;
-  if (!agenticRunReady(ctx, 'ci_review')) {
+  if (!agenticRunReady(ctx, 'ci_review', singleReviewProvider(ctx))) {
     result.stopped = 'ai_not_ready';
     return result;
   }
@@ -132,7 +132,7 @@ export async function runCiReviewSweep(
     for (const [accountId, enabled] of byAccount) {
       if (result.stopped) break;
       // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, nothing is queued; the failing sets stay due.
-      if (!(await automaticRunAllowed(ctx, accountId, 'CI review'))) {
+      if (!(await automaticRunAllowed(ctx, accountId, 'CI review', singleReviewProvider(ctx)))) {
         result.overBudget = true;
         continue;
       }

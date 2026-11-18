@@ -21,7 +21,7 @@ vi.mock('./team-claim-skip.js', () => ({
   postAutoSkipLines: async (_ctx: unknown, _a: unknown, skips: unknown[]) => skips.map(() => 'posted'),
   autoProvidersForPr: async () => ['claude'],
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 vi.mock('./auto-settings.js', () => ({
   listAutoReviewWorkspaces: async () => [{ accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 }],
 }));

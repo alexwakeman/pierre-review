@@ -199,15 +199,17 @@ export default function Page(): JSX.Element {
 
       <H2 id="effort">Effort</H2>
       <p>
-        <Ui>Settings → AI</Ui> has one setting, <Ui>Effort for reviews and AI Fix</Ui>, for both providers:{' '}
+        <Ui>Settings → AI</Ui>, <Ui>Review</Ui>, sets each vendor&rsquo;s model and effort:{' '}
         <Ui>Default</Ui>, <Ui>Low</Ui>, <Ui>Medium</Ui>, <Ui>High</Ui>, <Ui>Extra high</Ui> and <Ui>Max</Ui>. Higher
-        effort reads more and finds more, and uses more of your subscription or costs more.
+        effort reads more and finds more, and uses more of your subscription or costs more. The run menu opens on it and
+        can pick another model for one run; the effort stays.
       </p>
       <ul>
         <li>
-          It reaches every review (AI Review, the CI review, the story check and Check threads), AI Fix and Implement
-          story.
+          It reaches every review: AI Review, the CI review, the story check, Check threads and Implement story&rsquo;s
+          review rounds. AI Fix and Implement story have their own blocks.
         </li>
+        <li>In a Claude + Codex review, each half runs at its own vendor&rsquo;s model and effort.</li>
         <li>
           <Ui>Default</Ui> runs Claude at medium and Codex at high on its most thorough model.
         </li>

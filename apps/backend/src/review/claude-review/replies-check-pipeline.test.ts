@@ -53,7 +53,7 @@ vi.mock('../ticket-review/prepare.js', async (orig) => ({
     throw new Error('no clone in tests');
   },
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 
 const HEAD = 'a'.repeat(40);
 const PATH = 'src/mail.ts';
@@ -594,6 +594,27 @@ describe('the provider of the run that owns each thread', () => {
     ]);
     // Codex cannot run here ⇒ its threads go to the default.
     expect(rc.groupByProvider([f(1), f(2)], owners, () => 'claude')).toEqual([{ provider: 'claude', findingIds: [1, 2] }]);
+  });
+
+  it('⚠ a thread whose owner is switched OFF in Settings → AI → Review goes to an ENABLED vendor', async () => {
+    const rp = await import('../../ai/run-profile.js');
+    const ok = () => ({ status: 'ok' as const });
+    const free = () => false;
+    try {
+      // Codex switched off: Codex's thread is judged by Claude, never sent to the vendor the reader turned off.
+      rp.setStoredAiRunProfiles({ review: { codex: { enabled: false } } });
+      expect(rc.threadCheckProvider('codex', ok, undefined, free)).toBe('claude');
+      expect(rc.threadCheckProvider('claude', ok, undefined, free)).toBe('claude');
+      expect(rc.threadCheckProvider(null, ok, undefined, free)).toBe('claude');
+      // Claude switched off: Claude's thread goes to Codex.
+      rp.setStoredAiRunProfiles({ review: { claude: { enabled: false } } });
+      expect(rc.threadCheckProvider('claude', ok, undefined, free)).toBe('codex');
+      // Both on: each thread stays with its owner.
+      rp.setStoredAiRunProfiles({ review: { claude: { model: 'claude-opus-5-5' } } });
+      expect(rc.threadCheckProvider('codex', ok, undefined, free)).toBe('codex');
+    } finally {
+      rp.setStoredAiRunProfiles(null);
+    }
   });
 
   it('a Claude + Codex pair: both halves’ threads are judged, each by its own provider, and the outcome counts both', async () => {

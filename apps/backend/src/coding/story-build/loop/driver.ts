@@ -1,5 +1,5 @@
 // THE REVIEW LOOP — THE STATE MACHINE (docs/STORY-BUILD.md § The review loop). "After the build: review and
-// fix, then open the pull request" (`story_builds.auto_push`; `loop_rounds` = N, default 4):
+// fix, then open the pull request" (`story_builds.auto_push`; `loop_rounds` = N, default 5, from Settings → AI):
 //
 //   built ──maybeStartLoop──► [CLAIM loop_claimed_at] ──► pushing (round 0: each target's branch, no PR)
 //   pushing ──► reviewing k (each target's code review — the workspace's AI review providers, a pair runs
@@ -20,6 +20,7 @@
 //     reader's own); nothing is written to the tracker;
 //   • the session is HELD (no idle close) from the start claim until the PRs open or the loop pauses;
 //   • never throws to the session.
+import { buildLoopRounds } from '../../../ai/run-profile.js';
 import {
   clampLoopRounds,
   STORY_BUILD_LOOP_PAUSE_LINE,
@@ -309,7 +310,12 @@ export async function setLoopSettings(
   const bt = t as any;
   const rows = (await ctx.db
     .update(bt)
-    .set({ ...(o.on !== undefined ? { autoPush: o.on } : {}), ...(o.rounds !== undefined ? { loopRounds: clampLoopRounds(o.rounds) } : {}) })
+    // Switched on with no rounds named, on a build started without the loop ⇒ Settings → AI's rounds (the
+    // row still holds the column default, which nothing relies on).
+    .set({
+      ...(o.on !== undefined ? { autoPush: o.on } : {}),
+      ...(o.rounds !== undefined ? { loopRounds: clampLoopRounds(o.rounds) } : o.on === true && !b.autoPush ? { loopRounds: buildLoopRounds() } : {}),
+    })
     .where(and(eq(bt.id, buildId), eq(bt.accountId, accountId), isNull(bt.loopClaimedAt), isNull(bt.autoPushClaimedAt)))
     .returning({ id: bt.id })
     .execute()) as Array<{ id: number }>;
@@ -532,7 +538,7 @@ async function stepReview(
   );
   const prevCheck = [...checks].filter((c) => c.round < k && c.status === 'succeeded').sort((a, z) => z.round - a.round)[0] ?? null;
   const thisCheck = checks.find((c) => c.round === k && c.status === 'succeeded') ?? null;
-  const storyProvider = seams.storyProvider();
+  const storyProvider = await seams.storyProvider();
 
   // THE GATE, before anything of the round starts (a reader's Continue skips it).
   if (!byReader) {
@@ -748,7 +754,7 @@ async function stepStartFix(ctx: AgentContext, accountId: number, b: StoryBuildR
     }
     seams.session.hold(b.id);
   }
-  const provider = seams.session.provider(b.id) ?? seams.storyProvider();
+  const provider = seams.session.provider(b.id) ?? (await seams.storyProvider());
   if (!byReader && !(await seams.automaticAllowed(ctx, accountId, LOOP_FIX_FEATURE, provider))) {
     await pause(ctx, accountId, b.id, 'budget', 'fixing');
     return;

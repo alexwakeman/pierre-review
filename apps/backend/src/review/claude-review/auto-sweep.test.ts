@@ -64,7 +64,7 @@ vi.mock('./team-claim-skip.js', () => ({
 
 let aiReady = true;
 let providerNow: 'claude' | 'codex' = 'claude';
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => aiReady }));
 
 let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
 vi.mock('./auto-settings.js', () => ({
@@ -80,6 +80,7 @@ const {
   autoReviewWaiting,
   _resetAutoReReviewForTest,
   _setAutoProviderForTest,
+  autoRetryProviderNow,
 } = await import('./auto.js');
 
 const NOW = Date.UTC(2026, 8, 30, 15, 30);
@@ -999,5 +1000,27 @@ describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Re
     const r = await runAutoReviewSweep(makeCtx(), NOW, press);
     expect(r).toMatchObject({ queued: 0, stopped: null });
     expect(r.capped).toBeUndefined();
+  });
+});
+
+describe('the retry rule\'s "current provider"', () => {
+  it('⚠ asks Settings → AI → Review WITH the pre-flight, as startAutoItem does: a signed-out vendor is passed over', async () => {
+    const rp = await import('../../ai/run-profile.js');
+    _setAutoProviderForTest(null);
+    try {
+      rp.setStoredAiRunProfiles({ review: { claude: { model: 'claude-opus-5-5' } } });
+      const llm = (claude: boolean) => ({
+        llm: {
+          detectAuth: () => ({ status: 'ok' }),
+          detectProviderAuth: (p: string) => (p === 'claude' && !claude ? { status: 'none', message: 'no' } : { status: 'ok' }),
+        },
+      });
+      expect(await autoRetryProviderNow(llm(true) as any)).toBe('claude');
+      // Claude signed out: the retry would start on Codex, so the rule compares against Codex.
+      expect(await autoRetryProviderNow(llm(false) as any)).toBe('codex');
+    } finally {
+      rp.setStoredAiRunProfiles(null);
+      _setAutoProviderForTest(() => providerNow);
+    }
   });
 });

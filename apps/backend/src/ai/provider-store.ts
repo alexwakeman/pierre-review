@@ -5,11 +5,12 @@
 // LIMN_AI_PROVIDER / REVIEW_EFFORT wins); this module is the only reader and writer of the columns,
 // apart from the boot's load and the routes' writes it serves.
 import { eq } from 'drizzle-orm';
-import { isAiEffort, isAiProviderSetting, type AiEffort, type AiProviderSetting } from '@pierre-review/shared';
+import { isAiEffort, isAiProviderSetting, parseAiRunProfiles, type AiEffort, type AiProviderSetting, type AiRunProfiles } from '@pierre-review/shared';
 import { db, schema } from '../db/client.js';
 import { LOCAL_ACCOUNT_ID } from '../auth/account.js';
 import { setStoredAiProviderSetting } from './provider-setting.js';
 import { setStoredAiEffort } from './effort.js';
+import { setStoredAiRunProfiles, storedAiRunProfiles } from './run-profile.js';
 import { setStoredPrefersApiKey } from './credentials.js';
 
 /** Read the stored choice into memory (the boot, after migrations). A bad or missing value ⇒ none. */
@@ -62,10 +63,67 @@ export async function loadStoredAiEffort(accountId: number = LOCAL_ACCOUNT_ID): 
 /**
  * Store the Effort level (null ⇒ back to Default) and hold it in memory at once, so the NEXT run uses
  * it. A run already going keeps the effort it started with (and stored).
+ *
+ * THE COMPAT PATH (PUT /api/ai/effort, since the run profiles): the one level is for EVERY surface, so
+ * every effort a run profile stores is dropped in the same write — each surface then falls back to it.
  */
 export async function writeStoredAiEffort(value: AiEffort | null, accountId: number = LOCAL_ACCOUNT_ID): Promise<void> {
-  await db.update(schema.accounts).set({ aiEffort: value }).where(eq(schema.accounts.id, accountId)).execute();
+  const profiles = withoutEfforts(storedAiRunProfiles());
+  await db
+    .update(schema.accounts)
+    .set({ aiEffort: value, aiRunProfiles: profiles })
+    .where(eq(schema.accounts.id, accountId))
+    .execute();
   setStoredAiEffort(value);
+  setStoredAiRunProfiles(profiles);
+}
+
+/** The profiles with every effort removed (so each surface reads the one level); null stays null. */
+export function withoutEfforts(p: AiRunProfiles | null): AiRunProfiles | null {
+  if (p == null) return null;
+  const strip = <T extends { effort?: unknown }>(b: T | undefined): T | undefined => {
+    if (b == null) return undefined;
+    const { effort: _e, ...rest } = b;
+    return Object.keys(rest).length > 0 ? (rest as T) : undefined;
+  };
+  const out: AiRunProfiles = {};
+  if (p.review) {
+    const claude = strip(p.review.claude);
+    const codex = strip(p.review.codex);
+    if (claude || codex) out.review = { ...(claude ? { claude } : {}), ...(codex ? { codex } : {}) };
+  }
+  const fix = strip(p.fix);
+  if (fix) out.fix = fix;
+  const build = strip(p.build);
+  if (build) out.build = build;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Read the stored run profiles into memory (the boot). A read error or a value the validator refuses ⇒ none. */
+export async function loadStoredAiRunProfiles(accountId: number = LOCAL_ACCOUNT_ID): Promise<AiRunProfiles | null> {
+  let value: AiRunProfiles | null = null;
+  try {
+    const rows = await db
+      .select({ v: schema.accounts.aiRunProfiles })
+      .from(schema.accounts)
+      .where(eq(schema.accounts.id, accountId))
+      .limit(1)
+      .execute();
+    const raw = rows[0]?.v;
+    const parsed = raw == null ? null : parseAiRunProfiles(raw);
+    value = parsed?.ok ? parsed.value : null;
+  } catch {
+    value = null;
+  }
+  setStoredAiRunProfiles(value);
+  return value;
+}
+
+/** Store the run profiles (already validated; an empty object ⇒ NULL) and hold them in memory at once. */
+export async function writeStoredAiRunProfiles(value: AiRunProfiles, accountId: number = LOCAL_ACCOUNT_ID): Promise<void> {
+  const v = Object.keys(value).length > 0 ? value : null;
+  await db.update(schema.accounts).set({ aiRunProfiles: v }).where(eq(schema.accounts.id, accountId)).execute();
+  setStoredAiRunProfiles(v);
 }
 
 /** Read the stored "Use my API keys first" box into memory (the boot). A read error or NULL ⇒ off. */

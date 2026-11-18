@@ -45,7 +45,7 @@ vi.mock('./persist.js', () => ({
   reconcileOrphanedReviews: async () => 0,
   saveReviewSuccess: async () => {},
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 vi.mock('./pair.js', async (orig) => ({
   ...(await orig<typeof import('./pair.js')>()),
   readAutoReviewProvidersForPr: async () => 'both',

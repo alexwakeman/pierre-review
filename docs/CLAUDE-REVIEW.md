@@ -473,10 +473,11 @@ ideally be able to pick from any of the models available if I'm signed into both
 I would pick a preference for auto-review in settings."
 
 - **Settings → AI is the DEFAULT** ("Automatic runs and default: Auto / Claude / Codex";
-  `ENSEMBLE_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
-  auto fix, the CI and ticket auto runs, every scheduled one-shot, and every surface without a model
-  menu (Check threads, ticket and CI reviews, diagrams, the docs library, the
-  Open PRs table's one-click review), and it is the menu's opening choice. ⚠ One exception: the
+  `ENSEMBLE_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). ⚠ **Since 2026-11-18 the
+  review, AI Fix and Implement story follow their RUN PROFILE instead** (§ The run profiles): auto
+  review, auto fix, the CI and ticket runs, Check threads and the menus' opening choice read it, and the
+  default provider is only what a profile that says nothing falls back to. The default still decides
+  every scheduled one-shot and every surface with no profile (diagrams, the docs library, chats). ⚠ One exception: the
   Check threads run that starts IN PLACE of a manual review routed `skip` runs on that review's
   provider (the reader's pick, `startThreadCheckBesideManualReview(…, provider)`).
 - **The menus** (`components/ModelPicker.tsx`, `lib/modelPick.ts`): the Claude Review run (and its
@@ -498,7 +499,9 @@ I would pick a preference for auto-review in settings."
   not signed in or unable to run the kind ⇒ 400 `NoClaudeAuth` with its own sentence. No provider ⇒
   a Codex model's own provider, else the default (an older SPA's Claude model is a DEPTH, run on the
   default as before). The answer is the provider and the Claude model of the same depth, which every
-  entry point takes.
+  entry point takes. Since the run profiles, "the default" here is the SURFACE's profile (its vendor;
+  `defaultModel` per provider: the profile's model on its own vendor, the usual depth on the other), and
+  a pick changes the MODEL for one run — the run keeps the Settings effort for the vendor it runs on.
 - **The run's provider, everywhere.** The review manager stores it on the job (`QueueItem.provider`,
   decided at queue time; auto runs read the default then) and hands it to `RunReviewArgs.provider`
   (`review/agent.ts` `runProvider(args.provider)`); AI Fix passes `StartFixInput.provider` to its
@@ -537,7 +540,15 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   is the DEFAULT, now `'both'`; only a stored `'default'` runs one provider (`resolveAutoReviewProviders`
   / `storedAutoReviewProviders`). A stored NULL from before 2026-11-01 therefore reads as the pair.
   With `'both'` and only one provider able to review when a run STARTS, that one runs alone (an
-  ordinary run, no pair; the setting shows "Only one is signed in, so it reviews alone.").
+  ordinary run, no pair; the setting shows "Only one is on and signed in, so it reviews alone.").
+  ⚠ **Since 2026-11-18 (§ The run profiles) "able to review" means SWITCHED ON in Settings → AI →
+  Review AND signed in** — ONE resolver, `ai/run-profile.ts` `reviewPairProviders` (`pair.ts`
+  `pairProvidersReady` wraps it; auto review, the team-claim skip line and the Build loop's
+  `seams.ts` pass `reviewProvidersEnabled()` as the order). `'default'` reads "<one vendor> only": the
+  first vendor on and signed in, Claude before Codex (`reviewDefaultProvider`; no Review block stored ⇒
+  the default provider, as before). Each half runs ITS vendor's Settings model and effort
+  (`reviewRunModel`, the second half's at `startPairSecond`), so the halves may now DIFFER in effort:
+  § Measuring reviews' pair numbers were taken at EQUAL effort.
 - **TWO ORDINARY RUNS, LINKED.** Each half is its own `claude_reviews` row with its own label
   (`aiRunLabel`), its own provider's follow-up chain and thread carry, its own ledger row and its own
   budget reading — nothing about a run changes because it is half of a pair. They are linked by
@@ -826,7 +837,65 @@ reviewer told to raise what it could not confirm. In the eval it ran 49 times an
 the relaxed prompt did not lift Claude alone (43% vs 46%). The user removed it the same day: the
 reviewer prompt is as before, and the pair is what improves recall.
 
-### The effort setting (decided 2026-10-26)
+### The run profiles (decided 2026-11-18)
+
+The user asked for per-surface choices: "Settings → AI holds machine-wide profiles … Run menus open on
+the Settings choice and can override the MODEL for one run". ONE stored object per machine,
+`accounts.ai_run_profiles` (JSON, sqlite `0206`), shaped by shared `ai-run-profiles.ts`, written only by
+`PUT /api/ai/run-profiles` (`parseAiRunProfiles` validates and compacts; the whole object replaces the
+stored one), held in memory by `ai/run-profile.ts` and echoed as `MeResponse.ai.runProfiles` (every
+surface RESOLVED + `stored` + `effortSource`):
+
+- **REVIEW, per vendor {enabled, model, effort}.** Every review kind: the PR review and its follow-ups,
+  the CI review, the story check (ticket review), Check threads, the replies pass and the Build loop's
+  review rounds + story check. `reviewPairProviders(detect)` = the pair (on AND signed in);
+  `reviewDefaultProvider(detect)` = "one vendor" (first on and signed in and NOT over its usage limit,
+  Claude first — the same move as `withCapacity`; all locked ⇒ the first signed in; NO review block ⇒
+  `activeProviderId()`, today); `reviewRunModel(p)` = the depth a review on `p` is queued with. At least
+  one vendor stays on (the validator refuses none; the SPA locks the last switch, and the only one on
+  that is signed in). The MODEL reaches the PR review, its follow-ups, the CI review and the story check
+  (`reviewKindModel`: the queued default until a review block is stored, then that vendor's model, set at
+  run start with the vendor) and the Build loop. ⚠ **Check threads and the replies pass keep their fixed
+  model** (`THREAD_CHECK_MODEL`, `REPLIES_CHECK_MODEL`: short judgement passes over threads); they
+  follow the profile's vendor and effort only.
+- ⚠ **EVERY GATE ASKS THE RUN'S VENDOR**, never the default provider: the sweepers' readiness
+  (`agenticRunReady(ctx, kind, provider)`, `singleReviewProvider(ctx)` for the single-run kinds), the
+  routes' pre-flight (CI review, story check, Check threads), and the budget / usage-limit gate
+  (`automaticRunAllowed(…, provider)`: the CI and ticket sweeps, auto fix with `fixChoice(...).provider`,
+  dependency fixes, the fix manager). An auto fix resolves `fixChoice` ONCE and, with a choice stored,
+  hands the start its vendor with the model, so the pair cannot drift while it waits in the start
+  queue. A dependency fix follows the same rule (`dependencyFixChoice`: NULL ⇒ `DEFAULT_AI_FIX_MODEL`
+  and the start's vendor, as before). The Build loop's imported review row on the new PR is stamped
+  with the lead half's model and effort (`markReviewRanOn`), never a constant.
+- **FIX {provider, model, effort}** (AI Fix, Plan first, auto fix, dependency fixes) via `fixChoice`;
+  **BUILD {provider, model, effort, rounds}** (story_plan, story_build) via `buildChoice` and
+  `buildLoopRounds` (default `STORY_BUILD_LOOP_ROUNDS_DEFAULT` = 5, 1..6; a start's `loopRounds` and the
+  tab's control still win for one build). ⚠ **The FALLBACK** (only with a vendor STORED): that vendor
+  not signed in or over its usage limit at run start ⇒ the other signed-in vendor at ITS usual model
+  (`model: null`) and Default effort; the run row stores what ran. Neither can run ⇒ the stored one,
+  whose pre-flight says why. No vendor stored ⇒ `activeProviderId()` (it moves off a locked provider).
+- **Effort**: `ai/effort.ts` `surfaceEffortLevel(surface, provider)` = `REVIEW_EFFORT`, else the profile
+  (review: that vendor's; fix / build: the block's when the run's vendor IS the block's, else Default),
+  else — the field missing — the old single level (`accounts.ai_effort`). `agenticRunEffort(…, env,
+  surface)` applies the diff-only step-down per vendor from that level. `resolveSandboxAgentChoice`
+  takes `surface: 'fix' | 'build'`. Kinds the effort never reached (diagrams, chats, docs) still don't.
+- ⚠ **NULL / missing = TODAY, exactly**: no block ⇒ the default provider, the usual models, the old
+  level everywhere — and AUTO FIX keeps inheriting its review's depth (`auto-fix.ts`: only
+  `fixChoice(...).configured` switches it to the profile's model). The SPA writes back ONE block per
+  change (`lib/runProfiles.ts`), the others as stored, and never copies an env level in.
+- **Compat**: `PUT /api/ai/effort` stays; it writes `ai_effort` AND drops every profile effort
+  (`provider-store.ts` `withoutEfforts`), so the one level reaches every surface again. No Settings
+  control sends it.
+- **Menus**: `lib/modelPick.ts` `profileOpening` — AI Review opens on the pair (two on and signed in) or
+  the one vendor at its model; AI Fix / Plan first and Implement's start on their profile while its
+  vendor can run. Implement's start panel opens its rounds on `runProfiles.build.rounds`.
+
+### The effort setting (decided 2026-10-26; superseded by § The run profiles)
+
+⚠ **Since 2026-11-18 there is no single Effort control**: each review vendor, AI Fix and Implement story
+has its own effort (§ The run profiles); the stored level below is the fallback a profile that says
+nothing reads, and `PUT /api/ai/effort` the compat path. The rest of this section (the map, Default,
+diff-only, precedence) still holds per surface and vendor.
 
 The user compared Opus 5.5 (pinned at medium, 30 turns) with Codex GPT-6 Astra (high) on one PR and
 asked to "make effort a setting". Settings → AI → **Effort** (`AiProviderSection.tsx` `EffortControl`,
@@ -937,8 +1006,8 @@ pushed").
   review asks the spend gate before each.
 - **Writes are read from git**, never from the event stream (a refused patch emits nothing): the
   changed files are what `git status` shows in the write roots; a change outside them fails the run.
-- **Effort**: Settings → AI → Effort when the reader chose a level (the review, its specialists,
-  AI Fix and Plan first; § The effort setting); otherwise the Default by depth: deep = high,
+- **Effort**: the run profile's effort for the surface and vendor when one is set (the review, its
+  specialists, AI Fix and Plan first; § The run profiles); otherwise the Default by depth: deep = high,
   standard = medium, fast = low, and a diff-only review one step lower (`ai/effort.ts`
   `defaultRunEffort`; `codexReviewEffort` for the chat and Check threads). Default agent timeout 45
   minutes; a stop signals the whole process group.
@@ -1188,8 +1257,8 @@ praise comment already on GitHub is still Ensemble's own comment. The ticket rev
   in the live estimate. Both generate routes (Claude Review and AI Fix) answer 400 for it.
   Retiring a model is now a shared-types + pricing + model-options edit, never a schema edit.
 - **Opus 5.5's effort is no longer pinned** (2026-10-26, § The effort setting): every run is sent
-  an explicit effort (never the API default) — Settings → AI → Effort for the review and AI Fix,
-  else the Default (medium; diff-only medium on Opus, low on Sonnet); `REVIEW_EFFORT` /
+  an explicit effort (never the API default) — the run profile's effort (§ The run profiles) for the
+  review and AI Fix, else the Default (medium; diff-only medium on Opus, low on Sonnet); `REVIEW_EFFORT` /
   `REVIEW_DIFF_ONLY_EFFORT` move both models alike, on the review and AI Fix only. It always gets
   `thinking: { type: 'adaptive' }`, which overrides any `MAX_THINKING_TOKENS=0` the environment
   might carry. ⚠ **Opus 5.5 400s on `thinking: {type:'disabled'}`, on a thinking budget
@@ -1205,7 +1274,7 @@ praise comment already on GitHub is still Ensemble's own comment. The ticket rev
   backend — a running `tsx watch` keeps the old SDK loaded.
 - **AI Fix inherits the offered list and opens on `DEFAULT_AI_FIX_MODEL` = `claude-opus-5-5`**
   (`packages/shared`, ONE spelling), read by the fixer picker (`AiFixTab`) and the core start route (`coding/ai-fix/routes.ts`). Its
-  effort is Settings → AI → Effort (Default medium), decided by the fix manager and carried to
+  effort is Settings → AI → AI Fix's effort (§ The run profiles; Default medium), decided by the fix manager and carried to
   `coding/agent.ts`; the constant carries no effort of its own. `POST /api/pro/prs/:id/ai-fix` checks `model` IN THE HANDLER — there is no ajv
   body schema, because `removeAdditional` would strip `seed`/`reviewText`/`commentTargets`: absent or
   null → the default; a string in `CLAUDE_REVIEW_MODELS` → that model; anything else →
@@ -1688,9 +1757,10 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
 - **PR-level findings** (§ Replies → PR-level findings) are judged in the same pass: a person's PR
   comment after one starts it, its block lists the PR conversation refs, and `replyRef` is required.
 - **The run.** Per thread, the PROVIDER of the run that OWNS it (the first inline-posted finding up
-  the chain, or a PR-level finding's owner; `followUpProvider`: the owner's when it can still run, else the default); one agent run
+  the chain, or a PR-level finding's owner; `threadCheckProvider`: the owner's when it is switched ON in
+  Settings → AI → Review and can still run, else Review's one vendor — never a vendor switched off); one agent run
   per provider group, Claude first, one after the other in the ONE shared review slot. STANDARD depth
-  (`claude-sonnet-5`; Codex resolves the role to Terra), the Effort setting (`agenticRunEffort`),
+  (`claude-sonnet-5`; Codex resolves the role to Terra), that vendor's Review effort (§ The run profiles; `agenticRunEffort`),
   read-only: Read/Glob/Grep in the PR's read-only worktree behind the path guard (no checkout ⇒ the
   finding's hunk), Bash denied (`repliesCheckToolPolicy`), connectors isolated. Per thread the prompt
   carries the finding (severity, title, body, path:line), the code around that line AT THE CURRENT

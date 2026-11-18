@@ -1040,6 +1040,8 @@ describe('the AI runtime download', () => {
     expect(tiers('PUT', '/api/ai/provider')).not.toContain('ai');
     expect(tiers('PUT', '/api/ai/effort')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/effort')).not.toContain('ai');
+    expect(tiers('PUT', '/api/ai/run-profiles')).toEqual(['read']);
+    expect(tiers('PUT', '/api/ai/run-profiles')).not.toContain('ai');
     expect(tiers('PUT', '/api/ai/api-key')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/api-key')).not.toContain('ai');
   });
