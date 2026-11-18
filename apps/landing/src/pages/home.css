@@ -625,9 +625,14 @@
    flashes every hue at once) turns slowly as the page scrolls, a transform on the
    compositor. Not drawn until measured (the prerendered page shows plain boxes); still
    under reduced motion. */
-/* Every corner of every box is rounded alike (SNAKE_RADIUS), with the line on it or not. */
+/* Every corner of every box is rounded alike (SNAKE_RADIUS), with the line on it or not.
+   Their ground and hairline are the hero card's: the page's dark ground (--bg) at 50%,
+   so the picture behind shows through the same way, and its faint edge, so every box's
+   outline reads where the line is not. */
 .lb.home .ens-points > .tile {
   border-radius: 14px;
+  background: rgba(15, 16, 18, 0.5);
+  border: 1px solid rgba(241, 241, 239, 0.1);
 }
 .lb.home .ens-snake {
   position: absolute;
