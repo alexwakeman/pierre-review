@@ -89,7 +89,11 @@ export function PlanDecisionWizard({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    // ⚠ A held key repeats: it must not answer every point after this one.
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
+    // ⚠ React bubbles portal events up the COMPONENT tree: a key pressed in a popover (an ⓘ, a doc list)
+    // reaches this handler although the popover is not inside the wizard's DOM. Only keys from inside count.
+    if (!(rootRef.current?.contains(e.target as Node) ?? false)) return;
     const t = e.target as HTMLElement;
     if (t.closest('textarea, input, select, [contenteditable="true"]') != null) return;
     if (e.key === 'ArrowLeft' && step > 0) {
@@ -131,7 +135,10 @@ export function PlanDecisionWizard({
       <StepStrip contentions={contentions} decided={decided} step={step} go={go} />
       {c != null ? (
         <div data-testid="story-plan-step" data-id={c.id} data-step={step} className="mt-3">
+          {/* ⚠ Keyed by point: each step gets fresh card state (an evidence row's open/closed) and fresh
+              choice buttons, so focus never stays on "Agree" for the next point. */}
           <ContentionCard
+            key={c.id}
             build={build}
             c={c}
             as="div"
@@ -260,7 +267,11 @@ function Choices({ c, chosen, onPick }: { c: BuildPlanContention; chosen: BuildP
             aria-keyshortcuts={o.key}
             aria-label={PLAN_DECISION_WORDS[o.decision]}
             aria-describedby={`${id}-${o.key}`}
-            onClick={() => onPick(o.decision)}
+            // ⚠ The second click of a double-click lands on the NEXT point's button: ignore it.
+            onClick={(e) => {
+              if (e.detail > 1) return;
+              onPick(o.decision);
+            }}
             className={cx(
               'flex w-full items-start gap-2.5 rounded-ui px-3 py-2 text-left ring-1 ring-inset touch:min-h-10',
               FOCUS_RING,

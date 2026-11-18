@@ -142,12 +142,21 @@ test.describe('Implement, plan first', () => {
     await expect(plan.getByTestId('story-plan-steps').locator('button[data-state="answered"]')).toHaveText(['1']);
     await expect(wizard).toContainText('Points to settle (1 of 2 answered)');
 
-    // Back, and the same pick again keeps the answer (no clear) and moves on.
+    // Back, and the same pick again keeps the answer (no clear) and moves on. A double-click's second
+    // click lands on the next point's Agree and is ignored: C2 stays open.
     await step.locator('[data-plan-nav="back"]').click();
     await expect(step.locator('[data-plan-action="agree"]')).toHaveAttribute('aria-pressed', 'true');
-    await step.locator('[data-plan-action="agree"]').click();
+    await step.locator('[data-plan-action="agree"]').dblclick();
     await expect(step).toHaveAttribute('data-id', 'C2');
+    await expect(step.locator('[data-plan-action="agree"]')).toHaveAttribute('aria-pressed', 'false');
     await expect(plan.getByTestId('story-plan-steps').locator('button[data-state="answered"]')).toHaveText(['1']);
+
+    // A key pressed inside the ⓘ popover (a portal) does not pick an answer.
+    await wizard.getByRole('button', { name: /Points to settle/ }).click();
+    await expect(page.getByRole('dialog', { name: 'Points to settle' }).locator('[tabindex="0"]')).toBeFocused();
+    await page.keyboard.press('1');
+    await page.keyboard.press('Escape');
+    await expect(step).toHaveAttribute('data-id', 'C2');
     expect(sentDecisions).toEqual([{ revision: 2, contentionId: 'C1', decision: 'agree' }]);
 
     // Reply: the agent revises the plan (revision 3); the answers carry forward and the wizard opens on the open point.
