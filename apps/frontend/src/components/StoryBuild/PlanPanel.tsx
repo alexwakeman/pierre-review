@@ -1,60 +1,52 @@
-import { useEffect, useId, useState } from 'react';
-import { useIsMutating } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import {
-  BUILD_PLAN_LIMITS,
   type BuildPlanContention,
   type BuildPlanDecision,
-  type BuildPlanEvidence,
   type BuildPlanRevision,
   type BuildPlanView,
   type StoryBuild,
   type StoryBuildSession,
 } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
-import { storyBuildMutationKey, usePlanApprove, usePlanDecision, usePlanReply, useStoryBuildPlanRevision } from '../../hooks/useStoryBuild.js';
+import { usePlanDecision, usePlanReply, useStoryBuildPlanRevision } from '../../hooks/useStoryBuild.js';
 import { TicketReview } from './TicketUpdatePanel.js';
 import {
   CRITERION_STATUS_WORDS,
-  PLAN_DECISION_WORDS,
   contentionsHeading,
   decisionsWithPending,
   droppedLine,
-  evidenceGithubUrl,
-  evidenceLabel,
-  excerptLines,
   isStacked,
-  nextDecision,
-  planApproveState,
+  pickDecision,
   planStageLine,
   stackRows,
 } from '../../lib/buildPlan.js';
 import { REVIEW_CHIP, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionErrorText, sessionTurnRunning } from '../../lib/sandboxSession.js';
 import { storyBuildRefAnchor } from '../../lib/storyBuild.js';
-import { dateTime, safeExternalUrl } from '../../lib/ui.js';
-import { AiRunGate } from '../AiSetup.js';
+import { dateTime } from '../../lib/ui.js';
 import { CopyButton } from '../CopyButton.js';
-import { DocReferenceList } from '../DocReferences.js';
-import { BookIcon, CaretIcon, CheckIcon, ChevronIcon, DatabaseIcon, DiffIcon, ExternalLinkIcon, ScalesIcon, WrenchIcon } from '../Icons.js';
+import { BookIcon, CaretIcon, CheckIcon, ChevronIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { cx } from '../ui/cx.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
+import { PlanDecisionWizard } from './PlanDecisionWizard.js';
+import { ApproveRow, ContentionCard, type DecidedMap } from './PlanParts.js';
 
 // THE PLAN PANEL ("Implement, plan first"; docs/STORY-BUILD.md § Plan first, docs/FRONTEND.md § The build
 // tab). A plan-first session opens with a planning turn Limn sends itself; what the agent proposes comes
 // back as a CHECKED plan revision (`session.plan`: every piece of evidence re-read by Limn). This panel
 // shows the latest one above the conversation: the summary, the repositories, one line per acceptance
-// criterion, each POINT TO SETTLE (where the agent says the story is wrong) with its evidence and Agree /
-// Keep the story / Reply, the planned pull requests in order, and the ticket review. "Approve and start"
-// is enabled only once every point is answered (lib/buildPlan.ts `planApproveState`). Agree / Keep the
-// story is a DB write with no model turn; Reply and Approve are billed turns inside the ONE AiRunGate.
+// criterion, the planned pull requests in order, then the POINTS TO SETTLE (where the agent says the story
+// is wrong) asked ONE AT A TIME in ./PlanDecisionWizard.tsx (Agree / Keep the story / Reply), whose last
+// step lists the answers and holds "Approve and start" (enabled only once every point is answered;
+// lib/buildPlan.ts `planApproveState`), and the ticket review. Earlier and approved revisions list the
+// points read-only. Agree / Keep the story is a DB write with no model turn; Reply and Approve are billed
+// turns inside the ONE AiRunGate.
 // The ticket review (./TicketUpdatePanel.tsx) is ALWAYS shown on the latest revision — the whole ticket,
 // seeded with the plan's draft, else the current text — and "Update ticket" writes it to Jira on the
 // reader's press; nothing else writes the ticket. After approval the plan folds to one line; the ticket
 // review stays until the first build turn ends.
-
-type DecidedMap = Readonly<Record<string, BuildPlanDecision>>;
 
 export function PlanPanel({ build, session }: { build: StoryBuild; session: StoryBuildSession }): JSX.Element | null {
   const plan = session.plan;
@@ -139,7 +131,7 @@ function LatestPlan({ build, session, plan }: { build: StoryBuild; session: Stor
 
   const press = (c: BuildPlanContention, pressed: BuildPlanDecision): void => {
     if (latest == null) return;
-    const decision = nextDecision(decided[c.id], pressed);
+    const decision = pickDecision(decided[c.id], pressed);
     setPending((p) => ({ ...p, [c.id]: decision }));
     setStale(null);
     decide.mutate(
@@ -180,40 +172,48 @@ function LatestPlan({ build, session, plan }: { build: StoryBuild; session: Stor
           rev={latest}
           decided={decided}
           editable
-          card={(c) => (
-            <ContentionActions
-              build={build}
-              plan={plan}
-              rev={latest}
-              c={c}
-              decided={decided[c.id]}
-              running={running}
-              live={session.live}
-              onPress={(d) => press(c, d)}
-              reply={reply}
-            />
-          )}
+          points={
+            latest.contentions.length > 0 ? (
+              // Remounted on a new revision: the wizard opens again on the first open point.
+              <PlanDecisionWizard
+                key={`wizard-${latest.revision}`}
+                build={build}
+                session={session}
+                plan={plan}
+                rev={latest}
+                decided={decided}
+                revising={running || plan.status === 'revising'}
+                onPick={press}
+                reply={reply}
+              />
+            ) : undefined
+          }
         />
       )}
-      {latest != null && <ApproveRow build={build} session={session} rev={latest} decided={decided} />}
+      {/* With points to settle, Approve sits on the wizard's Review step. */}
+      {latest != null && latest.contentions.length === 0 && <ApproveRow build={build} session={session} rev={latest} decided={decided} />}
     </>
   );
 }
 
-/** The parts every revision shows, read-only. `card` adds the answer row under each point (the latest). */
+/**
+ * The parts every revision shows. Read-only, the points are a list. `points` replaces that list on the
+ * latest revision (the decision wizard), and comes after the pull requests so Approve is the last thing
+ * before the ticket review.
+ */
 function RevisionBody({
   build,
   plan,
   rev,
   decided,
-  card,
+  points,
   editable = false,
 }: {
   build: StoryBuild;
   plan: Pick<BuildPlanView, 'replies' | 'fillGaps'>;
   rev: BuildPlanRevision;
   decided: DecidedMap;
-  card?: (c: BuildPlanContention) => JSX.Element;
+  points?: JSX.Element | undefined;
   /** The latest revision before Approve: the ticket review (always shown) can be edited and written to the ticket. */
   editable?: boolean;
 }): JSX.Element {
@@ -227,7 +227,8 @@ function RevisionBody({
       )}
       <PlanRepos rev={rev} />
       <PlanCriteria rev={rev} fillGaps={plan.fillGaps} />
-      {rev.contentions.length > 0 && (
+      {points != null && <PlanStack rev={rev} />}
+      {points == null && rev.contentions.length > 0 && (
         <div data-testid="story-plan-contentions">
           <div className="mb-1.5 flex items-center gap-1.5">
             <h4 className={REVIEW_SUBHEAD}>{contentionsHeading(rev.contentions, decided)}</h4>
@@ -242,9 +243,7 @@ function RevisionBody({
           </div>
           <ul className="space-y-2">
             {rev.contentions.map((c) => (
-              <ContentionCard key={c.id} build={build} c={c} decided={decided[c.id]} replies={plan.replies.filter((r) => r.contentionId === c.id)}>
-                {card?.(c)}
-              </ContentionCard>
+              <ContentionCard key={c.id} build={build} c={c} decided={decided[c.id]} replies={plan.replies.filter((r) => r.contentionId === c.id)} />
             ))}
           </ul>
         </div>
@@ -264,7 +263,7 @@ function RevisionBody({
           </InfoButton>
         </p>
       )}
-      <PlanStack rev={rev} />
+      {points ?? <PlanStack rev={rev} />}
       {editable ? (
         <TicketReview key={rev.revision} build={build} update={rev.ticketUpdate} />
       ) : (
@@ -344,250 +343,6 @@ function PlanCriteria({ rev, fillGaps }: { rev: BuildPlanRevision; fillGaps: boo
   );
 }
 
-// ── one point to settle ──────────────────────────────────────────────────────────────────────────
-
-function ContentionCard({
-  build,
-  c,
-  decided,
-  replies,
-  children,
-}: {
-  build: StoryBuild;
-  c: BuildPlanContention;
-  decided: BuildPlanDecision | undefined;
-  replies: BuildPlanView['replies'];
-  children?: JSX.Element | undefined;
-}): JSX.Element {
-  const titleId = useId();
-  return (
-    <li
-      data-testid="story-plan-contention"
-      data-id={c.id}
-      data-decision={decided ?? ''}
-      aria-labelledby={titleId}
-      className={cx('rounded-ui bg-ui-bg p-3 ring-1 ring-inset', decided != null ? 'ring-ui-line' : 'ring-ui-warn/60')}
-    >
-      <div id={titleId} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <ScalesIcon size={13} className="text-ui-mute" />
-        <span className="font-mono text-meta text-ui-mute">{c.id}</span>
-        {c.about.map((a) => (
-          <span key={a} className={`${REVIEW_CHIP} bg-ui-raise font-mono text-ui-ink`}>
-            {a}
-          </span>
-        ))}
-        {decided != null && (
-          <span data-testid="story-plan-answered" className="ml-auto flex items-center gap-1 text-meta text-ui-ink">
-            <CheckIcon size={12} className="text-ui-success" />
-            {PLAN_DECISION_WORDS[decided]}
-          </span>
-        )}
-      </div>
-      {c.storySays != null && (
-        <p className="mt-2 break-words text-body text-ui-ink">
-          <span className="text-ui-mute">The story says: </span>“{c.storySays}”
-        </p>
-      )}
-      <p className="mt-1.5 break-words text-body text-ui-ink">{c.problem}</p>
-      <dl className="mt-2 grid gap-x-4 gap-y-1.5 text-body sm:grid-cols-2">
-        <div>
-          <dt className={REVIEW_SUBHEAD}>If you agree</dt>
-          <dd className="break-words text-ui-ink">{c.proposal}</dd>
-        </div>
-        <div>
-          <dt className={REVIEW_SUBHEAD}>If you keep the story</dt>
-          <dd className="break-words text-ui-ink">{c.ifKept}</dd>
-        </div>
-      </dl>
-      <div className="mt-2">
-        <h5 className={`${REVIEW_SUBHEAD} mb-1`}>Evidence</h5>
-        <ul className="space-y-1.5">
-          {c.evidence.map((e, i) => (
-            <EvidenceRow key={i} workspaceId={build.workspaceId} e={e} />
-          ))}
-        </ul>
-      </div>
-      {replies.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {replies.map((r, i) => (
-            <li key={i} className="break-words text-meta text-ui-ink">
-              <span className="text-ui-mute">You replied (revision {r.revision}): </span>
-              {r.text}
-            </li>
-          ))}
-        </ul>
-      )}
-      {children}
-    </li>
-  );
-}
-
-function EvidenceRow({ workspaceId, e }: { workspaceId: number; e: BuildPlanEvidence }): JSX.Element {
-  const [open, setOpen] = useState(e.kind !== 'docs');
-  const label = evidenceLabel(e);
-  const url = safeExternalUrl(evidenceGithubUrl(e));
-  const icon = label.kind === 'Docs' ? <BookIcon size={12} /> : label.kind === 'Data' ? <DatabaseIcon size={12} /> : <DiffIcon size={12} />;
-  if (e.kind === 'docs') {
-    return (
-      <li data-testid="story-plan-evidence" data-kind="docs">
-        <div className="text-meta">
-          <DocReferenceList references={[{ ...e, workspaceId: e.workspaceId ?? workspaceId }]} />
-        </div>
-      </li>
-    );
-  }
-  return (
-    <li data-testid="story-plan-evidence" data-kind={e.kind}>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta">
-        <span className="flex items-center gap-1 text-ui-mute">
-          {icon}
-          {label.kind}
-        </span>
-        <button type="button" className="hit inline-flex min-w-0 items-center gap-1 break-all text-left font-mono text-ui-ink hover:underline" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          <ChevronIcon dir={open ? 'down' : 'right'} />
-          {label.where}
-        </button>
-        {label.note != null && label.note !== '' && <span className="text-ui-mute">{label.note}</span>}
-        {url != null && (
-          <a href={url} target="_blank" rel="noreferrer noopener" className="hit text-ui-mute hover:text-ui-ink" aria-label="Open these lines on GitHub">
-            <ExternalLinkIcon size={11} />
-          </a>
-        )}
-      </div>
-      {open && e.kind === 'data_run' && (
-        <div className="mt-1 rounded-ui bg-ui-raise p-2 font-mono text-meta text-ui-ink">
-          <div className="break-all text-ui-mute">
-            $ {e.command.join(' ')} · {dateTime(e.at)}
-          </div>
-          <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-words">{e.excerpt}</pre>
-        </div>
-      )}
-      {open && (e.kind === 'code' || e.kind === 'data_file') && (
-        <pre className="mt-1 max-h-60 overflow-auto rounded-ui bg-ui-raise py-1.5 font-mono text-meta text-ui-ink">
-          {excerptLines(e).map((l) => (
-            <div key={l.n} className="flex">
-              <span aria-hidden className="decorative-mark w-10 shrink-0 select-none pr-2 text-right text-ui-faint">
-                {l.n}
-              </span>
-              <span className="min-w-0 flex-1 whitespace-pre-wrap break-all pr-2">{l.text}</span>
-            </div>
-          ))}
-        </pre>
-      )}
-    </li>
-  );
-}
-
-/** Agree / Keep the story / Reply under a point of the latest revision. */
-function ContentionActions({
-  build,
-  plan,
-  rev,
-  c,
-  decided,
-  running,
-  live,
-  onPress,
-  reply,
-}: {
-  build: StoryBuild;
-  plan: BuildPlanView;
-  rev: BuildPlanRevision;
-  c: BuildPlanContention;
-  decided: BuildPlanDecision | undefined;
-  running: boolean;
-  live: boolean;
-  onPress: (d: BuildPlanDecision) => void;
-  reply: ReturnType<typeof usePlanReply>;
-}): JSX.Element {
-  const [composing, setComposing] = useState(false);
-  const [text, setText] = useState('');
-  const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
-  const trimmed = text.trim();
-  const tooLong = trimmed.length > BUILD_PLAN_LIMITS.reply;
-  const mine = reply.variables?.body.contentionId === c.id;
-  if (running || plan.status === 'revising') {
-    return <p className="mt-2 text-meta text-ui-mute">The agent is revising the plan…</p>;
-  }
-  const send = (): void => {
-    if (trimmed === '' || tooLong) return;
-    reply.mutate(
-      { id: build.id, body: { revision: rev.revision, contentionId: c.id, text: trimmed } },
-      {
-        onSuccess: () => {
-          setText('');
-          setComposing(false);
-        },
-      },
-    );
-  };
-  return (
-    <div className="mt-2.5">
-      <div className="flex flex-wrap items-center gap-1.5" data-noactivate>
-        <Button
-          size="sm"
-          variant={decided === 'agree' ? 'primary' : 'secondary'}
-          aria-pressed={decided === 'agree'}
-          data-plan-action="agree"
-          onClick={() => onPress('agree')}
-        >
-          Agree
-        </Button>
-        <Button
-          size="sm"
-          variant={decided === 'keep_story' ? 'primary' : 'secondary'}
-          aria-pressed={decided === 'keep_story'}
-          data-plan-action="keep"
-          onClick={() => onPress('keep_story')}
-        >
-          Keep the story
-        </Button>
-        {live && (
-          <Button size="sm" variant="ghost" data-plan-action="reply" aria-expanded={composing} onClick={() => setComposing((v) => !v)}>
-            Reply
-          </Button>
-        )}
-      </div>
-      {composing && (
-        <div className="mt-2 space-y-1.5">
-          <textarea
-            aria-label={`Reply to ${c.id}`}
-            className="block w-full resize-y rounded-ui bg-ui-surface px-2 py-1.5 text-body text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint focus:outline-none focus:ring-2 focus:ring-ui-accent"
-            rows={2}
-            placeholder="Tell the agent what you think. It revises the plan."
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                send();
-              }
-            }}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <AiRunGate kind="story_plan" followUp provider={build.provider ?? null} meter={false}>
-              <Button size="sm" data-ai-run data-plan-action="send-reply" disabled={busy || trimmed === '' || tooLong} onClick={send}>
-                Send
-              </Button>
-            </AiRunGate>
-            <Button size="sm" variant="ghost" onClick={() => setComposing(false)}>
-              Cancel
-            </Button>
-            {tooLong && <span className="text-meta text-ui-warn">Keep it under {BUILD_PLAN_LIMITS.reply.toLocaleString('en-GB')} characters.</span>}
-            {mine && reply.error != null && <span className="text-meta text-ui-danger">{planErrorText(reply.error)}</span>}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function planErrorText(err: unknown): string | null {
-  if (err == null) return null;
-  if (err instanceof ApiError && err.code === 'PlanStale') return 'The plan changed. Look at the new revision.';
-  return sessionErrorText(err instanceof ApiError ? err : { message: (err as Error).message });
-}
-
 // ── the pull requests and the ticket update ─────────────────────────────────────────────────────
 
 function PlanStack({ rev }: { rev: BuildPlanRevision }): JSX.Element | null {
@@ -650,42 +405,6 @@ function DraftField({ label, text, testId }: { label: string; text: string; test
         <CopyButton text={text} what={label.toLowerCase()} title={`Copy the ${label.toLowerCase()}, exactly as written`} />
       </div>
       <pre className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-ui bg-ui-raise p-2 font-mono text-meta text-ui-ink">{text}</pre>
-    </div>
-  );
-}
-
-// ── Approve and start ──────────────────────────────────────────────────────────────────────────
-
-function ApproveRow({ build, session, rev, decided }: { build: StoryBuild; session: StoryBuildSession; rev: BuildPlanRevision; decided: DecidedMap }): JSX.Element | null {
-  const approve = usePlanApprove(build.workspaceId, build.ident);
-  const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
-  const state = planApproveState(session, decided);
-  if (!state.shown) return null;
-  const err = planErrorText(approve.error);
-  return (
-    <div data-testid="story-plan-approve-row" className="mt-4 flex flex-wrap items-center gap-2 border-t border-ui-line pt-3">
-      <AiRunGate kind="story_build" followUp provider={session.provider ?? build.provider ?? null}>
-        <Button
-          variant="primary"
-          size="sm"
-          data-ai-run
-          data-story-build-action="approve"
-          icon={<WrenchIcon size={12} />}
-          disabled={!state.enabled || busy}
-          busy={approve.isPending}
-          busyLabel="Starting…"
-          onClick={() => approve.mutate({ id: build.id, body: { revision: rev.revision } })}
-        >
-          Approve and start
-        </Button>
-      </AiRunGate>
-      {state.reason != null && (
-        <span data-testid="story-plan-approve-reason" className="text-meta text-ui-mute">
-          {state.reason}
-        </span>
-      )}
-      {state.enabled && <span className="text-meta text-ui-mute">The agent then builds to the end. You can stop it or message it.</span>}
-      {err != null && <span className="text-meta text-ui-danger">{err}</span>}
     </div>
   );
 }

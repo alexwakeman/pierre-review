@@ -5,9 +5,11 @@ import type { BuildPlanDecisionBody, BuildPlanReplyBody, StoryBuild, StoryDocsAl
 // "IMPLEMENT, PLAN FIRST" against the mocked API (docs/STORY-BUILD.md § Plan first; mock-api.ts keeps
 // ACME-1's session per page). The story view's Implement is a split button whose menu adds "Implement with
 // docs" only while the library has a built document; the tab's docs box is then ticked and Start sends
-// `docs: true`. A new session's checked plan waits in the PLAN PANEL: the evidence, Agree / Keep the story
-// (a DB write, a second press clears), Reply (a new revision), an earlier revision, the draft ticket update
-// with Copy, and "Approve and start" enabled only once every point is answered. After Approve the changes
+// `docs: true`. A new session's checked plan waits in the PLAN PANEL: the evidence, then the points to
+// settle ONE STEP AT A TIME (Agree / Keep the story, a DB write saved on the pick, which moves on; the same
+// pick again keeps it; the 1 and 2 keys), Reply (a new revision, the wizard opening on the first open
+// point), an earlier revision, the draft ticket update with Copy, and the Review step whose "Approve and
+// start" is enabled only once every point is answered. After Approve the changes
 // are the planned PRs in order (the stack view): Push shows on a stacked PR only once the one before it is
 // pushed.
 
@@ -79,8 +81,12 @@ test.describe('Implement, plan first', () => {
     await expect(page.getByTestId('story-build-overlay').getByTestId('story-plan')).toBeVisible();
   });
 
-  test('the plan panel: evidence, answers, a reply, an earlier revision, then Approve and start', async ({ page }) => {
+  test('the plan panel: evidence, one point at a time, a reply, an earlier revision, then Review and Approve and start', async ({ page }) => {
     await withAi(page, { storyBuild: STORY_SESSION_PLAN_READY });
+    const sentDecisions: BuildPlanDecisionBody[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().endsWith('/plan/decisions')) sentDecisions.push(r.postDataJSON() as BuildPlanDecisionBody);
+    });
     await page.goto(tabUrl);
     const view = page.getByTestId('story-build-overlay');
     const plan = view.getByTestId('story-plan');
@@ -90,14 +96,24 @@ test.describe('Implement, plan first', () => {
     await expect(plan.getByTestId('story-plan-pr')).toHaveText([/P1.*Lift the export row cap/, /P2.*Builds on P1/, /P3.*After P2/]);
     await expect(plan.getByTestId('story-plan-dropped')).toHaveText('Ensemble left out 1 point it could not check.');
 
+    // The wizard opens on the first open point: one step, headed with its criteria.
+    const wizard = plan.getByTestId('story-plan-contentions');
+    const step = plan.getByTestId('story-plan-step');
+    await expect(step).toHaveAttribute('data-id', 'C1');
+    await expect(step).toContainText('Point 1 of 2');
+    await expect(step).toContainText('AC3');
+    await expect(plan.getByTestId('story-plan-contention')).toHaveCount(1);
+    await expect(wizard).toContainText('Points to settle (0 of 2 answered)');
+
     // The evidence: Limn's own text of the lines, the docs section, the query Limn saw run.
     const c1 = plan.locator('[data-testid="story-plan-contention"][data-id="C1"]');
     await expect(c1.locator('[data-kind="code"]')).toContainText('MAX_EXPORT_ROWS = 500');
     await expect(c1.locator('[data-kind="code"] a[aria-label="Open these lines on GitHub"]')).toHaveAttribute('href', /github\.com\/acme\/api\/blob\/b{40}\/src\/reports\/export\.ts#L14-L16$/);
     await expect(c1.locator('[data-kind="docs"]')).toContainText('Export guide');
     await expect(c1).toContainText('You replied (revision 1): Is the cap used anywhere else?');
-    const c2 = plan.locator('[data-testid="story-plan-contention"][data-id="C2"]');
-    await expect(c2.locator('[data-kind="data_run"]')).toContainText('psql -c select kind');
+    // Each choice says what the agent then builds.
+    await expect(step.locator('[data-plan-action="agree"]')).toContainText('Remove the 500-row cap for CSV and stream every row.');
+    await expect(step.locator('[data-plan-action="keep"]')).toContainText('Stream up to 500 rows and keep the refusal above that.');
 
     // The draft ticket update keeps the ticket's own lines, and copies them exactly.
     await expect(plan.getByTestId('story-plan-ticket-criteria')).toContainText('GIVEN a report with more than 500 rows');
@@ -105,32 +121,53 @@ test.describe('Implement, plan first', () => {
     await plan.getByTestId('story-plan-ticket-criteria').getByRole('button', { name: 'Copy acceptance criteria' }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('AC3: GIVEN a report with more than 500 rows\nWHEN I select Download CSV\nTHEN the file streams every row');
 
-    // Approve waits for every point.
+    // Next goes past an open point (it stays open); Review lists both open, and Approve waits for every point.
+    await step.locator('[data-plan-nav="next"]').click();
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    await expect(step.locator('[data-kind="data_run"]')).toContainText('psql -c select kind');
+    await step.locator('[data-plan-nav="next"]').click();
+    const review = plan.getByTestId('story-plan-review');
+    await expect(review.getByTestId('story-plan-review-line')).toHaveText([/Point 1.*AC3.*Not answered/, /Point 2.*AC1.*Not answered/]);
     const approve = view.locator('[data-story-build-action="approve"]');
     await expect(approve).toBeDisabled();
     await expect(view.getByTestId('story-plan-approve-reason')).toHaveText('2 points still to answer.');
 
+    // A Review line goes back to its step; a pick is saved at once and moves to the next open point.
+    await review.locator('[data-testid="story-plan-review-line"][data-id="C1"] button').click();
+    await expect(step).toHaveAttribute('data-id', 'C1');
     const decided = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/decisions'));
-    await c1.getByRole('button', { name: 'Agree' }).click();
+    await step.locator('[data-plan-action="agree"]').click();
     expect((await decided).postDataJSON() as BuildPlanDecisionBody).toEqual({ revision: 2, contentionId: 'C1', decision: 'agree' });
-    await expect(c1).toHaveAttribute('data-decision', 'agree');
-    await expect(view.getByTestId('story-plan-approve-reason')).toHaveText('1 point still to answer.');
-    // A second press on the chosen answer clears it.
-    const cleared = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/decisions'));
-    await c1.getByRole('button', { name: 'Agree' }).click();
-    expect(((await cleared).postDataJSON() as BuildPlanDecisionBody).decision).toBeNull();
-    await expect(c1).toHaveAttribute('data-decision', '');
-    await c1.getByRole('button', { name: 'Agree' }).click();
-    await expect(c1).toHaveAttribute('data-decision', 'agree');
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    await expect(plan.getByTestId('story-plan-steps').locator('button[data-state="answered"]')).toHaveText(['1']);
+    await expect(wizard).toContainText('Points to settle (1 of 2 answered)');
 
-    // Reply: the agent revises the plan (revision 3); the answers carry forward.
-    await c2.getByRole('button', { name: 'Reply' }).click();
-    await c2.getByRole('textbox', { name: 'Reply to C2' }).fill('Which two report types?');
+    // Back, and the same pick again keeps the answer (no clear) and moves on. A double-click's second
+    // click lands on the next point's Agree and is ignored: C2 stays open.
+    await step.locator('[data-plan-nav="back"]').click();
+    await expect(step.locator('[data-plan-action="agree"]')).toHaveAttribute('aria-pressed', 'true');
+    await step.locator('[data-plan-action="agree"]').dblclick();
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    await expect(step.locator('[data-plan-action="agree"]')).toHaveAttribute('aria-pressed', 'false');
+    await expect(plan.getByTestId('story-plan-steps').locator('button[data-state="answered"]')).toHaveText(['1']);
+
+    // A key pressed inside the ⓘ popover (a portal) does not pick an answer.
+    await wizard.getByRole('button', { name: /Points to settle/ }).click();
+    await expect(page.getByRole('dialog', { name: 'Points to settle' }).locator('[tabindex="0"]')).toBeFocused();
+    await page.keyboard.press('1');
+    await page.keyboard.press('Escape');
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    expect(sentDecisions).toEqual([{ revision: 2, contentionId: 'C1', decision: 'agree' }]);
+
+    // Reply: the agent revises the plan (revision 3); the answers carry forward and the wizard opens on the open point.
+    await step.getByRole('button', { name: 'Reply' }).click();
+    await step.getByRole('textbox', { name: 'Reply to C2' }).fill('Which two report types?');
     const replied = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/reply'));
-    await c2.getByRole('button', { name: 'Send' }).click();
+    await step.getByRole('button', { name: 'Send' }).click();
     expect((await replied).postDataJSON() as BuildPlanReplyBody).toEqual({ revision: 2, contentionId: 'C2', text: 'Which two report types?' });
     await expect(plan).toContainText('Plan · revision 3');
-    await expect(c1).toHaveAttribute('data-decision', 'agree');
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    await expect(plan.getByTestId('story-plan-steps').locator('button[data-state="answered"]')).toHaveText(['1']);
 
     // An earlier revision, read-only, then back.
     await plan.getByTestId('story-plan-history').click();
@@ -139,7 +176,18 @@ test.describe('Implement, plan first', () => {
     await plan.getByRole('button', { name: 'Back to the latest' }).click();
     await expect(plan).toContainText('Plan · revision 3');
 
-    await c2.getByRole('button', { name: 'Keep the story' }).click();
+    // The 2 key picks Keep the story; the last answer moves to Review, where Approve is enabled.
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    await wizard.focus();
+    const kept = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/decisions'));
+    await page.keyboard.press('2');
+    expect((await kept).postDataJSON() as BuildPlanDecisionBody).toEqual({ revision: 3, contentionId: 'C2', decision: 'keep_story' });
+    await expect(review.getByTestId('story-plan-review-line')).toHaveText([/Point 1.*Agree/, /Point 2.*Keep the story/]);
+    // ← and → move between the steps.
+    await page.keyboard.press('ArrowLeft');
+    await expect(step).toHaveAttribute('data-id', 'C2');
+    await page.keyboard.press('ArrowRight');
+    await expect(review).toBeVisible();
     await expect(approve).toBeEnabled();
     await expect(view.getByTestId('story-plan-approve-reason')).toHaveCount(0);
     const approved = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/approve'));

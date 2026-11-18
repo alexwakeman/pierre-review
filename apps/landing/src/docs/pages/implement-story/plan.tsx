@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { Btn, Card, Chip, DocLink, FindingRow, Group, H2, H3, Illustration, Note, Steps, Ui, Warning } from '../../kit';
+import { Btn, Card, Chip, DocLink, FindingRow, Group, H2, H3, Illustration, Kbd, Note, Steps, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Plan the work',
@@ -9,8 +9,8 @@ export const meta: DocMeta = {
 function PlanPicture(): JSX.Element {
   return (
     <Illustration
-      label="The plan for PAY-142. Acceptance criteria 1 and 4 are Planned, criterion 2 is Already met. One point to settle: the story says no refunds after 30 days, but the payments handbook section 4.2 counts working days; evidence is the handbook section and refunds/policy.py lines 10 to 14. Buttons Agree, Keep the story and Reply. Two pull requests are planned. An Approve and start button."
-      caption="The plan: each criterion, the points to settle with their evidence, the pull requests, then Approve and start."
+      label="The plan for PAY-142. Acceptance criteria 1 and 3 are Planned, criterion 2 is Already met. Two pull requests are planned. Then the points to settle, one at a time: steps 1, 2 and Review. Point 1 of 2, about AC3: the story says no refunds after 30 days, but the payments handbook section 4.2 counts working days; evidence is the handbook section and refunds/policy.py lines 10 to 14. Two numbered choices, 1 Agree and 2 Keep the story, each saying what the agent then builds, then Reply and Next."
+      caption="The plan: each criterion, the pull requests, then the points to settle, one at a time. The last step, Review, holds Approve and start."
       title="The plan"
       meta="PAY-142 Partial refunds"
     >
@@ -18,18 +18,21 @@ function PlanPicture(): JSX.Element {
       <FindingRow chip="Planned" tone="blue">AC1 Partial refund keeps the order open</FindingRow>
       <FindingRow chip="Already met" tone="green">AC2 Customer gets one email</FindingRow>
       <FindingRow chip="Planned" tone="blue">AC3 No refunds after 30 days</FindingRow>
-      <Group>Points to settle (0 of 1 answered)</Group>
-      <Card title="30 days or 30 working days?" chip={<Chip tone="amber">AC3</Chip>}>
-        The story says: no refunds after 30 days. Evidence: Payments handbook §4.2 · refunds/policy.py lines 10–14.
-      </Card>
-      <p>
-        <Btn>Agree</Btn> <Btn>Keep the story</Btn> <Btn>Reply</Btn>
-      </p>
       <Group>The pull requests</Group>
       <FindingRow chip="P1">acme/payments · refund window check</FindingRow>
       <FindingRow chip="P2">acme/payments · partial refund state · Builds on P1</FindingRow>
+      <Group>Points to settle (0 of 2 answered)</Group>
       <p>
-        <Btn tone="go">Approve and start</Btn>
+        <Chip tone="gold">1</Chip> <Chip>2</Chip> <Chip>Review</Chip>
+      </p>
+      <Card title="Point 1 of 2" chip={<Chip tone="amber">AC3</Chip>}>
+        The story says: no refunds after 30 days. The payments handbook counts 30 working days. Evidence: Payments
+        handbook §4.2 · refunds/policy.py lines 10–14.
+      </Card>
+      <FindingRow chip="1. Agree">Count 30 working days, as the handbook does.</FindingRow>
+      <FindingRow chip="2. Keep the story">Count 30 calendar days.</FindingRow>
+      <p>
+        <Btn>Reply</Btn> <Btn>Next</Btn>
       </p>
     </Illustration>
   );
@@ -78,18 +81,27 @@ export default function Page(): JSX.Element {
       </p>
 
       <H2 id="settle-the-points">Settle the points</H2>
-      <p>For each point, press one of:</p>
+      <p>
+        The plan asks the points one at a time, for example <Ui>Point 2 of 4</Ui> with the acceptance criteria it is
+        about. For each point, pick one of:
+      </p>
       <ul>
         <li>
-          <Ui>Agree</Ui>: build what the agent suggests.
+          <Ui>1. Agree</Ui>: build what the agent suggests.
         </li>
         <li>
-          <Ui>Keep the story</Ui>: build what the story says.
+          <Ui>2. Keep the story</Ui>: build what the story says.
         </li>
         <li>
           <Ui>Reply</Ui>: tell the agent what you think. It revises the plan.
         </li>
       </ul>
+      <p>
+        Each answer is saved when you pick it, and the plan moves to the next open point. Press <Kbd>1</Kbd> or{' '}
+        <Kbd>2</Kbd> to pick, and <Kbd>←</Kbd> or <Kbd>→</Kbd> to move. <Ui>Back</Ui>, <Ui>Next</Ui> and the numbered
+        steps go to any point; a point you skip stays open. If you close the tab, the plan opens again on the first
+        open point.
+      </p>
       <p>
         The heading counts your answers, for example <Ui>Points to settle (2 of 3 answered)</Ui>. You can also talk to the
         agent freely in the conversation: <Ui>Ask a question, or tell the agent what to change in the plan.</Ui> When a
@@ -124,6 +136,10 @@ export default function Page(): JSX.Element {
       <H2 id="approve-and-start">Approve and start</H2>
       <Steps>
         <li>Answer every point to settle.</li>
+        <li>
+          On the last step, <Ui>Review</Ui>, check your answers. Each line shows a point and your answer; press it to
+          go back to that point. An open point says <Ui>Not answered</Ui>.
+        </li>
         <li>
           Press <Ui>Approve and start</Ui>. Ensemble reads the ticket again and the agent switches to building.
         </li>
