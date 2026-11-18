@@ -19,8 +19,9 @@ import './live.css';
 //    onToggle). It is role="group" with the same `label`, so its controls stay
 //    reachable. Its FIRST state is what the prerendered HTML shows, complete
 //    without JS; the client render (main.tsx, createRoot — no hydration) starts
-//    from that same state and adds the "Try it" hint, which never appears in the
-//    static HTML because nothing there can be clicked yet.
+//    from that same state. Once the reader changes something, the title bar shows a
+//    "Reset" button (in the browser only).
+//    There is no "Try it" label: the mocks simply work when clicked.
 //
 // LAYOUT: below 961px every multi-column piece restacks (mock.css) rather than
 // shrinking; text never drops under 11px (labels) or 12px (sentences).
@@ -99,14 +100,14 @@ export function MockFrame({
   meta?: ReactNode;
   right?: ReactNode;
   dots?: boolean;
-  /** Clickable: role="group", a "Try it" hint in the browser. */
+  /** Clickable: role="group"; a "Reset" button once the reader changed something. */
   live?: boolean;
   /** Shown as a "Reset" button once the reader has changed something. */
   onReset?: (() => void) | null;
   className?: string;
   children: ReactNode;
 }): JSX.Element {
-  const hint = live && IN_BROWSER;
+  const hint = Boolean(live && IN_BROWSER && onReset);
   const bar = title !== undefined || meta !== undefined || right !== undefined || hint;
   return (
     <div
@@ -128,13 +129,9 @@ export function MockFrame({
           {right !== undefined ? <span className="mk-right">{right}</span> : null}
           {hint ? (
             <span className="mk-try">
-              {onReset ? (
-                <button type="button" className="mk-reset" onClick={onReset}>
-                  Reset
-                </button>
-              ) : (
-                <span aria-hidden="true">Try it</span>
-              )}
+              <button type="button" className="mk-reset" onClick={onReset ?? undefined}>
+                Reset
+              </button>
             </span>
           ) : null}
         </div>
