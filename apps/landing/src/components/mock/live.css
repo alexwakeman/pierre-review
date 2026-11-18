@@ -19,22 +19,17 @@
   outline-offset: 2px;
 }
 
-/* The hint in the title bar: "Try it", then "Reset" once something changed. */
+/* "Reset" in the title bar, once the reader has changed something. */
 .lb .mk-try {
   margin-left: auto;
   font-size: 11.5px;
   letter-spacing: 0.04em;
   color: #c9c6bf;
-  padding: 1px 7px;
-  border: 1px dashed #4a4b52;
+  border: 1px solid #4a4b52;
   border-radius: 3px;
 }
 .lb .mk-bar .mk-right + .mk-try {
   margin-left: 0;
-}
-.lb .mk-try:has(.mk-reset) {
-  border-style: solid;
-  padding: 0;
 }
 .lb .mk-reset {
   font: inherit;

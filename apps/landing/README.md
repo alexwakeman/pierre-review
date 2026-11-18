@@ -65,10 +65,10 @@ text with an `aria-label` summary and restacks under 961px.
 **THE MOCKS ARE CLICKABLE.** A `live` MockFrame is `role="group"`; its tabs are a real tablist
 (arrow keys, Home/End), its buttons run (Fix → diff → Push → "Pushed to …", Re-run failed jobs →
 "Re-run requested.", Merge when ready → "Armed — merging when ready"), its rows open, and its
-settings selects and checkboxes change what the section shows. The title bar says "Try it", then
-"Reset" once something changed. The FIRST state is what the prerendered HTML shows, complete
-without JS; the client's fresh `createRoot` render (no hydration) starts from the same state, and
-adds the "Try it" hint only in the browser. A "working…" step lasts under a second and is skipped
+settings selects and checkboxes change what the section shows. There is no "Try it" label; the title
+bar shows "Reset" once something changed (in the browser only). The FIRST state is what the
+prerendered HTML shows, complete without JS; the client's fresh `createRoot` render (no hydration)
+starts from the same state. A "working…" step lasts under a second and is skipped
 under `prefers-reduced-motion`.
 
 ### The mocks mirror the app
