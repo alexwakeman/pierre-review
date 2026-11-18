@@ -48,11 +48,13 @@ import {
   fixMergeBlockedLine,
   fixMergeLine,
   fixPushable,
+  fixPushFooter,
   fixRepoStatus,
   fixSessionHoldsPr,
   fixSessionShown,
   fixSessionStatusLine,
   leftOutLine,
+  type FixPushFooter,
 } from '../lib/aiFixSession.js';
 import { ApprovedPlanNote, PlanHistory } from './AiFix/PlanPanel.js';
 import { useClaudeReview, useClaudeReviewById } from '../hooks/useClaudeReview.js';
@@ -206,7 +208,8 @@ function FixerSection({
   // A live session holds the PR: the picker waits until it ends.
   // THE FIX START QUEUE: a fix waiting for a free sandbox holds the PR too (it starts by itself).
   const waiting = data?.waiting ?? null;
-  const holdsPr = fixSessionHoldsPr(session) || fixStarting || waiting != null;
+  // A push on its way holds it too (`AiFix.pushing`: the session closed before the push): no "New fix" until it settles.
+  const holdsPr = fixSessionHoldsPr(session) || fixStarting || waiting != null || fix?.pushing === true;
 
   // The picker: the server's items for this review, the reader's ticks on top. A new review (or a
   // hand-over) starts from the defaults again.
@@ -689,6 +692,10 @@ function FixResult({
   const pushable = fixPushable(fix);
   const errorTone = fixErrorTone(fix);
   const leftOut = (fix.leftOut ?? []).filter((x) => x.files.length > 0);
+  // THE PUSH FOOTER's line (`fixPushFooter`): an AUTOMATIC push that failed (never retried), or "Push when done"
+  // held. Drawn HERE, not in PushControls, so the reason shows even when Push is not offered (no write access,
+  // a merge the reader cannot push, an invalid merge).
+  const footer = fixPushFooter(fix, { headRef: headInfo?.headRef ?? pr.headRefName ?? null, repoFullName: pr.repoFullName });
 
   return (
     <div className="mt-3 border-t border-ui-line pt-3">
@@ -703,9 +710,8 @@ function FixResult({
         {runLabelOf(fix)}
         {fix.finishedAt && <> · {relativeTime(fix.finishedAt)}</>}
       </p>
-      {/* An AUTOMATIC push that failed (auto-push.ts): recorded on the succeeded row's `error`,
-          never retried — Push below still works. */}
-      {fix.pushedAt == null && errorTone === 'warn' && (
+      {/* A row's own error. An AUTOMATIC push that failed is the push footer's line (`fixPushFooter`). */}
+      {fix.pushedAt == null && errorTone === 'warn' && !(fix.error ?? '').startsWith('Automatic push failed') && (
         <p className="mb-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-warn">
           {fix.error}
         </p>
@@ -759,6 +765,16 @@ function FixResult({
             <FileDiffView files={diffFiles} />
           </div>
         </div>
+      )}
+      {footer.kind === 'failed' && (
+        <p data-testid="ai-fix-push-line" className="mt-3 rounded-ui bg-ui-raise p-2 text-meta text-ui-warn">
+          {footer.line}
+        </p>
+      )}
+      {footer.kind === 'held' && (
+        <p data-testid="ai-fix-push-line" className="mt-3 text-meta text-ui-mute">
+          {footer.line}
+        </p>
       )}
       {pushable && (
         <PushControls
@@ -833,11 +849,19 @@ function MergeResult({ merge, headSha }: { merge: AiFixMerge; headSha: string | 
   );
 }
 
-function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
+function PushedCard({ fix, footer }: { fix: AiFix; footer: Extract<FixPushFooter, { kind: 'pushed' }> }): JSX.Element {
   return (
-    <div className="mb-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-success">
+    <div data-testid="ai-fix-pushed" className="mb-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-success">
       <div>
-        Pushed to <span className="font-mono">{fix.pushedBranch}</span>
+        Pushed to <span className="font-mono">{footer.branch}</span>
+        {footer.commitUrl != null && (
+          <>
+            {' · '}
+            <a href={safeExternalUrl(footer.commitUrl)} target="_blank" rel="noreferrer" className="hit font-mono underline">
+              {footer.shortSha}
+            </a>
+          </>
+        )}
         {fix.pushedPrUrl && (
           <>
             {' · '}
@@ -853,6 +877,7 @@ function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
         )}
         {fix.pushedAt && <> · {relativeTime(fix.pushedAt)}</>}
       </div>
+      {footer.automatic && <div className="mt-0.5">Pushed automatically</div>}
       {fix.commitMessage && (
         <div className="mt-1 font-mono text-meta text-ui-success">
           {fix.commitMessage}
@@ -948,8 +973,17 @@ function PushControls({
     }
   }, [headInfo, mergeOnly]);
 
-  // A pushed fix — to the PR's own branch or to a new one — is a record, nothing more.
-  if (fix.pushedAt != null) return <PushedCard fix={fix} />;
+  // THE PUSH FOOTER (lib/aiFixSession.ts `fixPushFooter`): a pushed fix — to the PR's own branch or to a new
+  // one — is a record, nothing more; while an automatic push runs there is no button.
+  const footer = fixPushFooter(fix, { headRef: headInfo?.headRef ?? pr.headRefName ?? null, repoFullName: pr.repoFullName });
+  if (footer.kind === 'pushed') return <PushedCard fix={fix} footer={footer} />;
+  if (footer.kind === 'pushing') {
+    return (
+      <p data-testid="ai-fix-pushing" className="mt-3 text-meta text-ui-mute">
+        Pushing to {footer.branch != null ? <span className="font-mono">{footer.branch}</span> : 'the PR branch'}…
+      </p>
+    );
+  }
 
   if (!viewerCanPush) {
     return (
@@ -982,6 +1016,7 @@ function PushControls({
 
   return (
     <div className="mt-3 rounded-ui bg-ui-surface p-2">
+      {/* The failed / held line sits above this box (FixResult), so it shows when Push is not offered too. */}
       {fix.commitMessage && (
         <div
           className="mb-2 rounded-ui bg-ui-surface px-2 py-1 font-mono text-meta text-ui-ink"

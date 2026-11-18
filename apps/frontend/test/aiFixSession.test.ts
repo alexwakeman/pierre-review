@@ -11,6 +11,7 @@ import {
   fixMergeBlockedLine,
   fixMergeLine,
   fixPushable,
+  fixPushFooter,
   fixRepoStatus,
   fixSessionHoldsPr,
   fixSessionShown,
@@ -138,5 +139,59 @@ describe('the tab', () => {
   it('has no separate conflict run: no ConflictAiCard, no "Also resolve" box', () => {
     expect(src).not.toMatch(/ConflictAiCard|useConflictAiResolve|startConflictAiRun|Also resolve merge conflicts/);
     expect(src).toMatch(/<MergeResult\b/);
+  });
+});
+
+describe('fixPushFooter — THE PUSH FOOTER', () => {
+  const base = {
+    pushedAt: null,
+    pushedBranch: null,
+    pushedCommitSha: null,
+    pushedAutomatically: false,
+    pushing: false,
+    pushHold: null,
+    error: null,
+  };
+  const o = { headRef: 'feature/x', repoFullName: 'acme/app' };
+
+  it('a pushed fix is a record: the branch and the commit, linked; "Pushed automatically" when not a press', () => {
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'feature/x', pushedCommitSha: 'c0ffee1234', pushedAutomatically: true }, o)).toEqual({
+      kind: 'pushed',
+      branch: 'feature/x',
+      sha: 'c0ffee1234',
+      shortSha: 'c0ffee1',
+      commitUrl: 'https://github.com/acme/app/commit/c0ffee1234',
+      automatic: true,
+    });
+  });
+
+  it('a fix pushed before the commit was stored shows the branch only', () => {
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'feature/x' }, o)).toMatchObject({ kind: 'pushed', sha: null, commitUrl: null, automatic: false });
+  });
+
+  it('⚠ pushed wins over everything: a stale pushing flag, an old failure or hold never bring Push back', () => {
+    const f = { ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'b', pushing: true, error: 'Automatic push failed: x', pushHold: { line: 'h' } };
+    expect(fixPushFooter(f, o).kind).toBe('pushed');
+  });
+
+  it('⚠ an automatic push on its way: no button, the branch named', () => {
+    expect(fixPushFooter({ ...base, pushing: true, pushHold: { line: 'h' } }, o)).toEqual({ kind: 'pushing', branch: 'feature/x' });
+    expect(fixPushFooter({ ...base, pushing: true }, { ...o, headRef: null })).toEqual({ kind: 'pushing', branch: null });
+  });
+
+  it('a failed automatic push keeps Push, with the reason above it', () => {
+    expect(fixPushFooter({ ...base, error: 'Automatic push failed: the branch moved since the fix was made.' }, o)).toEqual({
+      kind: 'failed',
+      line: 'Automatic push failed: the branch moved since the fix was made.',
+    });
+  });
+
+  it('"Push when done" held: the session line above Push; any other row error is not the footer\'s', () => {
+    expect(fixPushFooter({ ...base, pushHold: { line: 'Not pushed: this is not your pull request. Press Push to push to its branch.' } }, o)).toMatchObject({ kind: 'held' });
+    expect(fixPushFooter({ ...base, error: 'The sandbox was closed after 30 minutes idle.' }, o)).toEqual({ kind: 'plain' });
+  });
+
+  it('an older server (no push fields) reads as plain Push', () => {
+    expect(fixPushFooter({ pushedAt: null, pushedBranch: null, error: null }, o)).toEqual({ kind: 'plain' });
   });
 });

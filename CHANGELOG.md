@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- AI Fix: after "Push when done" or "Push automatically" pushes a fix, the tab says "Pushed to" the branch with
+  the commit, and no longer offers Push for a fix that is already pushed. While the push runs it says "Pushing
+  to" the branch. A failed automatic push says why and keeps Push.
+
 ## [1.0.64] - 2026-11-18
 
 ### Changed

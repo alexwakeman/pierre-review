@@ -144,3 +144,39 @@ export function fixMergeBlockedLine(m: Pick<AiFixMerge, 'status'> | null | undef
   if (m.status !== 'invalid' && m.status !== 'missing') return null;
   return 'The merge did not pass Ensemble’s check, so nothing can be pushed. Ask for more, or discard.';
 }
+
+// ── THE PUSH FOOTER (docs/CLAUDE-REVIEW.md § Push when done): what the bottom of a finished fix shows ──────────
+// ONE pure fold of the wire (AiFix.pushedAt / pushing / pushHold / error), so the footer never offers Push while
+// an automatic push ("Push when done", "Push automatically") is on its way or after it landed. A new state (a
+// review loop's "Reviewing, round k of N") is one more member here, ranked where it belongs.
+export type FixPushFooter =
+  // A record, nothing more: no Push. `sha` null on a fix pushed before the commit was stored.
+  | { kind: 'pushed'; branch: string | null; sha: string | null; shortSha: string | null; commitUrl: string | null; automatic: boolean }
+  // An automatic push runs: no button.
+  | { kind: 'pushing'; branch: string | null }
+  // Push, with one line above it: the automatic push failed (never retried), or "Push when done" held.
+  | { kind: 'failed'; line: string }
+  | { kind: 'held'; line: string }
+  // Push, as it is.
+  | { kind: 'plain' };
+
+export function fixPushFooter(
+  fix: Pick<AiFix, 'pushedAt' | 'pushedBranch' | 'pushedCommitSha' | 'pushedAutomatically' | 'pushing' | 'pushHold' | 'error'>,
+  o: { headRef: string | null; repoFullName: string },
+): FixPushFooter {
+  if (fix.pushedAt != null) {
+    const sha = fix.pushedCommitSha != null && fix.pushedCommitSha !== '' ? fix.pushedCommitSha : null;
+    return {
+      kind: 'pushed',
+      branch: fix.pushedBranch,
+      sha,
+      shortSha: sha != null ? short(sha) : null,
+      commitUrl: sha != null ? `https://github.com/${o.repoFullName}/commit/${sha}` : null,
+      automatic: fix.pushedAutomatically === true,
+    };
+  }
+  if (fix.pushing === true) return { kind: 'pushing', branch: o.headRef };
+  if (fix.error != null && fix.error.startsWith('Automatic push failed')) return { kind: 'failed', line: fix.error };
+  if (fix.pushHold != null && fix.pushHold.line !== '') return { kind: 'held', line: fix.pushHold.line };
+  return { kind: 'plain' };
+}

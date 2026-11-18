@@ -1574,8 +1574,32 @@ export function aiFixBuilt(prId: number): AiFix {
     pushedPrNumber: null,
     pushedPrUrl: null,
     pushedAt: null,
+    pushedCommitSha: null,
+    pushedAutomatically: false,
+    pushWhenDone: true,
+    pushing: false,
+    pushHold: null,
     createdAt: iso(0.002),
     finishedAt: iso(0.001),
+  };
+}
+
+/**
+ * THE PUSH FOOTER's states of a finished fix ("Push when done" ticked): its automatic push on its way, landed,
+ * or failed (Push stays).
+ */
+export function aiFixAutoPush(prId: number, state: 'pushing' | 'pushed' | 'failed'): AiFix {
+  const b = aiFixBuilt(prId);
+  const closed = { ...b.session!, live: false, resumable: state === 'failed' };
+  if (state === 'pushing') return { ...b, session: closed, pushing: true };
+  if (state === 'failed') return { ...b, session: closed, error: 'Automatic push failed: the branch moved since the fix was made.' };
+  return {
+    ...b,
+    session: { ...closed, phase: 'pushed' },
+    pushedBranch: 'feature/e2e-branch',
+    pushedAt: iso(0),
+    pushedCommitSha: 'c0ffee'.padEnd(40, '0'),
+    pushedAutomatically: true,
   };
 }
 
@@ -2931,7 +2955,8 @@ export async function installMockApi(
             const pushBody = route.request().postDataJSON() as { target?: string } | null;
             if (aiFix.merge != null && (aiFix.merge.status !== 'valid' || pushBody?.target !== 'existing'))
               return json(route, { error: 'NotPushable', message: 'Nothing is pushed.' }, 409);
-            aiFix = { ...aiFix, pushedBranch: 'feature/e2e-branch', pushedAt: iso(0), session: { ...aiFix.session!, phase: 'pushed', live: false, resumable: false } };
+            if (aiFix.pushedAt != null) return json(route, { error: 'NotPushable', message: 'This fix is already pushed.' }, 409);
+            aiFix = { ...aiFix, pushedBranch: 'feature/e2e-branch', pushedAt: iso(0), pushedCommitSha: 'e'.repeat(40), pushedAutomatically: false, session: { ...aiFix.session!, phase: 'pushed', live: false, resumable: false } };
             return json(route, { pushedBranch: 'feature/e2e-branch', commitSha: 'e'.repeat(40) });
           }
         }

@@ -1102,7 +1102,10 @@ Erased with the build row. [STORY-BUILD.md](STORY-BUILD.md) § Build end to end.
 
 ONE row per fix run (history kept; a re-run is a new row), account-scoped, in `accountScopedTables()` and
 both delete paths. `push_when_done` (migration `0190`, bool, default 0): a MANUAL fix's "Push when done" tick
-([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done). **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
+([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done). `pushed_commit_sha` (migration `0205`, text): the commit the
+push left on the branch (the merge path: the fix on top of the merge); NULL while unpushed and on rows pushed
+before `0205`. `pushed_automatically` (`0205`, bool, default 0): the push was not a press (Push when done, Push
+automatically, the Dependencies policy). Both written ONLY by `markFixPushed`. **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
 sessions): `session_phase` (shared `SandboxSessionPhase`; NULL = a row of the removed shell-less fixer, read
 as history), and `status` is DERIVED from it (shared `aiFixStatusForPhase`), never written apart. `sandbox_ref`
 (NULL once torn down), `agent_ref`, `runtime`, `session_json` (boot steps, conversation, repositories, the

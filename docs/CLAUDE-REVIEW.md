@@ -4741,6 +4741,27 @@ report · "this is not your pull request" — a teammate's branch is pushed only
 session, so a reader who wants to talk first unticks it. An automatic fix never reads the tick (its own rule is
 "Push automatically", above).
 
+**The footer after an automatic push** (2026-11-18; both paths — Push when done and Push automatically). The
+push runs AFTER the session closed, so the close's `done` reaches the SPA before the push lands. Three things
+keep the AI Fix tab honest:
+- **`AiFix.pushing`** (`push-guard.ts` `fixPushInFlight`): a push runs, or one is on its way. `afterBuildTurn`
+  marks it (`notePushPending`) when its close WILL push — Push when done's `pushWhenDoneReady`, or the auto
+  fix's gate parts 1–3 (`autoPushSkip(…, {closing: true})`) — and `onClosed` clears it once the push settles
+  (pushed, failed or skipped). The SPA polls `['ai-fix', prId]` while `pushing` (`useAiFix`) — the ONLY path:
+  ⚠ no second `done` goes on the fix stream (the route closes it on the close's `done`, and a late one for the OLD fix
+  would end and mark finished the stream of a NEWER fix on the PR). While `pushing` the tab
+  hides "New fix" (`holdsPr`). In memory: a restart reads false, and the guards below keep a press safe.
+- **The footer is ONE pure fold, `fixPushFooter`** (`lib/aiFixSession.ts`), ranked: pushed ("Pushed to
+  `<branch>` · `<short sha>`" linked to the commit through `safeExternalUrl`, plus "Pushed automatically" when it
+  was not a press; a fix pushed before migration 0205 shows the branch only) → pushing ("Pushing to
+  `<branch>`…", no button) → failed ("Automatic push failed: `<reason>`" above Push) → held (Push when done's one
+  line, `AiFix.pushHold`, computed on read) → plain Push. ⚠ The failed / held line is drawn by `FixResult`, not
+  `PushControls`, so the reason shows when Push is not offered (no write access, an invalid merge). A later "reviewing round k of N" is one more state.
+  On the transition to pushed the SPA runs `invalidateAfterPrWrite` (the head, CI and mergeability moved).
+- **One push per fix**: `pushFixHeld` refuses a fix whose `pushedAt` is set (`409 NotPushable`, "This fix is
+  already pushed."), so a stale tab's Push never opens a second branch and PR. `markFixPushed` stores
+  `pushed_commit_sha` and `pushed_automatically` (migration 0205).
+
 ### The fix start queue (`coding/ai-fix/start-queue.ts`, 2026-11-12)
 
 Up to `ENSEMBLE_SANDBOX_MAX_BUILDS` (3) fixes BUILD at once (story builds share the slots; the open-session cap,

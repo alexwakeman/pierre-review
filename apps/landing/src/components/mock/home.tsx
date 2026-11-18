@@ -287,9 +287,10 @@ function FixFlow(): JSX.Element {
     return (
       <div className="mk-done" role="status">
         <Chip tone="green">
-          {FIX.pushedTo} {PR_VIEW.branch}
+          {FIX.pushedTo} {PR_VIEW.branch} · <code>{FIX.pushedSha}</code>
         </Chip>
         <p className="mk-note">
+          {push.phase !== 'done' && <>{FIX.pushedAuto}. </>}
           {n} item{n === 1 ? '' : 's'} fixed in <code>{FIX_DIFF.file}</code>.
         </p>
       </div>

@@ -42,8 +42,14 @@ export default function Page(): JSX.Element {
       </p>
       <p>
         It waits for your press instead, and the session says why, when the agent says something is not fixed, its
-        report does not cover every item or is missing, or the pull request is someone else&rsquo;s. Untick it to keep
-        talking to the agent before anything is pushed: a push ends the session.
+        report does not cover every item or is missing, or the pull request is someone else&rsquo;s. The same line
+        shows above <Ui>Push</Ui>. Untick it to keep talking to the agent before anything is pushed: a push ends the
+        session.
+      </p>
+      <p>
+        While the push runs, the tab says <Ui>Pushing to</Ui> the branch, with no button. Then it says{' '}
+        <Ui>Pushed to</Ui> the branch with the commit, which links to GitHub, and <Ui>Pushed automatically</Ui>. If the
+        push fails, the tab says <Ui>Automatic push failed</Ui> and why, and <Ui>Push</Ui> stays.
       </p>
 
       <H2 id="push">Push a fix</H2>
@@ -63,7 +69,8 @@ export default function Page(): JSX.Element {
           </ul>
         </li>
         <li>
-          Press <Ui>Push</Ui> (or <Ui>Push + open PR</Ui>). The tab says <Ui>Pushing…</Ui>, then <Ui>Pushed.</Ui>
+          Press <Ui>Push</Ui> (or <Ui>Push + open PR</Ui>). The tab says <Ui>Pushing…</Ui>, then <Ui>Pushed to</Ui> the
+          branch with the commit.
         </li>
       </Steps>
       <Warning>
@@ -184,6 +191,7 @@ export default function Page(): JSX.Element {
         With Push automatically on, code an agent wrote reaches your branch with no person reading it first, and it is
         not built or tested by Ensemble before the push. Your CI and the next auto review are the checks. If the push fails,
         the <Ui>AI Fix</Ui> tab says <Ui>Automatic push failed</Ui> and Ensemble does not try again; you can push by hand.
+        A fix that was pushed shows <Ui>Pushed automatically</Ui> and has no Push button.
       </Warning>
       <Note>
         Limits stop a loop of fix, review, fix: at most 3 automatic fixes per pull request a day, no new one while a fix

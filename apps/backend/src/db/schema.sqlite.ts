@@ -2193,6 +2193,12 @@ export const aiFixes = sqliteTable(
     pushedPrNumber: integer('pushed_pr_number'),
     pushedPrUrl: text('pushed_pr_url'),
     pushedAt: integer('pushed_at', { mode: 'timestamp' }),
+    // 0205 — the commit the push left on the branch (AiFixPushResult.commitSha; the merge path: the fix on
+    // top of the merge). NULL on rows pushed before 0205 and on every unpushed row.
+    pushedCommitSha: text('pushed_commit_sha'),
+    // 0205 — the push was not a press: "Push when done", "Push automatically" or the Dependencies policy.
+    // 0 on a pressed push and on every row pushed before 0205.
+    pushedAutomatically: integer('pushed_automatically', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

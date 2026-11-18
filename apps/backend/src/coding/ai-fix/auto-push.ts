@@ -44,13 +44,8 @@ export async function maybeAutoPushFix(
 ): Promise<AutoPushDecision> {
   const { accountId, fixId } = input;
   try {
-    const row = await getFixById(ctx, accountId, fixId);
-    if (!row || row.trigger !== 'auto') return { status: 'skipped', reason: 'not_auto' };
-    if (row.status !== 'succeeded' || !fixRowHasWork(row) || row.pushedAt != null)
-      return { status: 'skipped', reason: 'not_pushable' };
-    const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, row.prId);
-    if (!ws?.enabled || !ws.settings.autoPush) return { status: 'skipped', reason: 'off' };
-    if (!(await deps.prAuthorIsAccount(ctx, accountId, row.prId))) return { status: 'skipped', reason: 'not_own' };
+    const skip = await autoPushSkip(ctx, accountId, fixId, deps);
+    if (skip != null) return { status: 'skipped', reason: skip };
 
     const out = await deps.pushFix(ctx, { accountId, fixId, target: 'existing', origin: 'auto' });
     if (out.ok) {
@@ -67,6 +62,24 @@ export async function maybeAutoPushFix(
     ctx.log.warn(`auto push: fix ${fixId} failed: ${message}`);
     return { status: 'failed', message };
   }
+}
+
+/** Gate parts 1–3 (the header): why this auto fix is NOT pushed by itself; null = push it. Read-only. */
+export async function autoPushSkip(
+  ctx: AgentContext,
+  accountId: number,
+  fixId: number,
+  deps: Pick<AutoPushDeps, 'prAuthorIsAccount'> = defaultDeps,
+  // `closing`: asked by the fix session as its build turn ends, BEFORE the close that makes the row succeeded.
+  o: { closing?: boolean } = {},
+): Promise<Extract<AutoPushDecision, { status: 'skipped' }>['reason'] | null> {
+  const row = await getFixById(ctx, accountId, fixId);
+  if (!row || row.trigger !== 'auto') return 'not_auto';
+  if ((o.closing !== true && row.status !== 'succeeded') || !fixRowHasWork(row) || row.pushedAt != null) return 'not_pushable';
+  const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, row.prId);
+  if (!ws?.enabled || !ws.settings.autoPush) return 'off';
+  if (!(await deps.prAuthorIsAccount(ctx, accountId, row.prId))) return 'not_own';
+  return null;
 }
 
 /** The one sentence the AI Fix tab shows after "Automatic push failed:". */
@@ -174,7 +187,8 @@ export async function maybePushWhenDone(
     const own = await deps.prAuthorIsAccount(ctx, accountId, row.prId);
     const hold = pushWhenDoneHold(row, { hasWork: fixRowHasWork(row), own });
     if (hold != null) return { status: 'skipped', reason: hold.hold === 'not_own' ? 'not_own' : hold.hold === 'off' ? 'off' : 'not_pushable' };
-    const out = await deps.pushFix(ctx, { accountId, fixId, target: 'existing', origin: 'reader_pressed' });
+    // The ledger's origin stays 'reader_pressed' (the reader's tick asked for it); the row says it was not a press.
+    const out = await deps.pushFix(ctx, { accountId, fixId, target: 'existing', origin: 'reader_pressed', automatic: true });
     if (out.ok) {
       ctx.log.info(`push when done: fix ${fixId} pushed to ${out.result.pushedBranch}`);
       return { status: 'pushed', branch: out.result.pushedBranch };

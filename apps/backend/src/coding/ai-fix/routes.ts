@@ -1,4 +1,4 @@
-import { mergeWire, readMergeState } from '../../sandbox/session/fix-merge.js';
+import { fixRowHasWork, mergeWire, readMergeState } from '../../sandbox/session/fix-merge.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   AI_FIX_MAX_INSTRUCTION_CHARS,
@@ -42,6 +42,8 @@ import { planStateOf } from './plan.js';
 import { registerAutoFixRoutes } from './auto-fix-routes.js';
 import { startWaitingFor } from './start-queue.js';
 import { pushFix } from './push.js';
+import { fixPushInFlight } from './push-guard.js';
+import { pushWhenDoneHold, pushWhenDoneHoldLine } from './auto-push.js';
 import { requestModelOf } from '../../ai/provider.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
 import { allowFixHost, fixSessionWire, resumeFixSession, subscribeFixSession } from '../../sandbox/session/fix.js';
@@ -87,7 +89,22 @@ function tsToIso(v: Date | number | null | undefined): string | null {
 //   provider absent          → the model's own provider when it is Codex's, else the default
 //   a model of the other provider, or a provider not signed in ⇒ 400 with one sentence
 
-function rowToAiFix(row: AiFixRow): AiFix {
+/**
+ * PUSH WHEN DONE's hold on a finished, unpushed manual fix (auto-push.ts `pushWhenDoneHold`), computed on read:
+ * the one line the AI Fix tab repeats above Push. null when the tick was off, the fix is pushed or has nothing
+ * to push. `own` is read only when the rest can hold (a DB-only read).
+ */
+async function pushHoldOf(ctx: AgentContext, accountId: number, row: AiFixRow): Promise<{ line: string } | null> {
+  if (row.pushWhenDone !== true || (row.trigger ?? 'manual') !== 'manual' || row.status !== 'succeeded' || row.pushedAt != null) return null;
+  const hasWork = fixRowHasWork(row);
+  if (!hasWork) return null;
+  const { prAuthorIsAccount } = await import('./auto-fix.js');
+  const own = await prAuthorIsAccount(ctx, accountId, row.prId).catch(() => false);
+  const line = pushWhenDoneHoldLine(pushWhenDoneHold(row, { hasWork, own }));
+  return line != null ? { line } : null;
+}
+
+function rowToAiFix(row: AiFixRow, pushHold: { line: string } | null = null): AiFix {
   // THE WORKSPACE SESSION the fix ran in (null on a row of the removed shell-less fixer). Never throws.
   let wire: ReturnType<typeof fixSessionWire> = { session: null, leftOut: [] };
   try {
@@ -127,6 +144,12 @@ function rowToAiFix(row: AiFixRow): AiFix {
     pushedPrNumber: row.pushedPrNumber,
     pushedPrUrl: row.pushedPrUrl,
     pushedAt: tsToIso(row.pushedAt),
+    pushedCommitSha: row.pushedCommitSha ?? null,
+    pushedAutomatically: row.pushedAutomatically === true,
+    // PUSH WHEN DONE / PUSH AUTOMATICALLY (docs/CLAUDE-REVIEW.md § Push when done): what the tab's footer reads.
+    pushWhenDone: row.pushWhenDone === true,
+    pushing: row.pushedAt == null && fixPushInFlight(row.id),
+    pushHold,
     createdAt: tsToIso(row.createdAt) ?? new Date(0).toISOString(),
     finishedAt: tsToIso(row.finishedAt),
   };
@@ -327,7 +350,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         authMessage: auth.status === 'none' ? auth.message : undefined,
         viewerCanPush,
         headInfo,
-        fix: latest ? rowToAiFix(latest) : null,
+        fix: latest ? rowToAiFix(latest, await pushHoldOf(ctx, accountId, latest)) : null,
         history: history.map(rowToSummary),
         // THE FIX START QUEUE: the PR's next fix waits for a free sandbox.
         waiting: startWaitingFor(accountId, prId),
@@ -694,7 +717,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       if (!row) return reply.code(404).send({ error: 'not found' });
       const pr = await getFixPrContext(ctx, accountId, row.prId);
       if (!pr) return reply.code(404).send({ error: 'not found' });
-      return reply.send(rowToAiFix(row));
+      return reply.send(rowToAiFix(row, await pushHoldOf(ctx, accountId, row)));
     },
   );
 
@@ -739,7 +762,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         case 'not_found':
           return reply.code(404).send({ error: 'not found' });
         case 'not_pushable':
-          return reply.code(409).send({ error: 'NotPushable' });
+          return reply.code(409).send({ error: 'NotPushable', message: out.message });
         case 'no_write':
           return reply.code(403).send({ error: 'NoWriteAccess' });
         case 'head_unavailable':

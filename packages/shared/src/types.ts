@@ -9780,6 +9780,21 @@ export interface AiFix {
   pushedPrNumber: number | null;
   pushedPrUrl: string | null;
   pushedAt: string | null;
+  // The commit the push left on the branch (migration 0205). null on a fix pushed before it. Optional: an
+  // older server omits it.
+  pushedCommitSha?: string | null;
+  // The push was not a press: "Push when done", "Push automatically" or the Dependencies policy.
+  pushedAutomatically?: boolean;
+  // THE PUSH FOOTER (docs/CLAUDE-REVIEW.md § Push when done; the SPA's `fixPushFooter`). Optional: an older
+  // server omits them.
+  //   pushWhenDone  the reader ticked "Push when done" at start.
+  //   pushing       a push runs now, or an automatic one is on its way (the close that pushes). In memory on
+  //                 the server: a restart reads false. The SPA polls while it is true.
+  //   pushHold      "Push when done" was ticked but the fix waits for Push: the session's one line, computed
+  //                 on read. null otherwise.
+  pushWhenDone?: boolean;
+  pushing?: boolean;
+  pushHold?: { line: string } | null;
   createdAt: string;
   finishedAt: string | null;
 }

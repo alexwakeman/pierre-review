@@ -165,6 +165,20 @@ describe('maybeAutoPushFix — the gate', () => {
   });
 });
 
+describe('autoPushSkip — asked by the closing session (the footer says "Pushing…" only when the close will push)', () => {
+  it('a running row counts as succeeded only while closing; the rest of the gate still applies', async () => {
+    const fixId = await seedFix({ status: 'running' });
+    expect(await mod.autoPushSkip(ctx, 1, fixId, deps())).toBe('not_pushable');
+    expect(await mod.autoPushSkip(ctx, 1, fixId, deps(), { closing: true })).toBeNull();
+    own = false;
+    expect(await mod.autoPushSkip(ctx, 1, fixId, deps(), { closing: true })).toBe('not_own');
+    own = true;
+    await setWs({ autoFixSettings: null });
+    expect(await mod.autoPushSkip(ctx, 1, fixId, deps(), { closing: true })).toBe('off');
+    expect(await mod.autoPushSkip(ctx, 1, await seedFix({ status: 'running', pushedAt: new Date() }), deps(), { closing: true })).toBe('not_pushable');
+  });
+});
+
 describe('loadSeedThreads — who is a style bot', () => {
   it('⚠ the workspace’s stored role beats the login seed, both ways', async () => {
     const { loadSeedThreads } = await import('./thread-candidates.js');

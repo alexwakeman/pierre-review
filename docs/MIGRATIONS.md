@@ -1739,6 +1739,13 @@ automatically.
 `how_to_test_seen_at` (timestamp). An existing table, so erasure and export already cover it. Additive; journal
 idx 204, `when` `1794384000000`. [STORY-BUILD.md](STORY-BUILD.md) § How to test after a build.
 
+### `0205_ai_fix_pushed_commit` — what an AI Fix push left
+
+`ALTER TABLE ai_fixes ADD pushed_commit_sha` (text) and `pushed_automatically` (integer bool, NOT NULL DEFAULT 0).
+Written only by `markFixPushed`; no backfill (an older pushed row shows its branch only). An existing table, so
+erasure and export already cover it. Additive; journal idx 205, `when` `1794470400000`.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

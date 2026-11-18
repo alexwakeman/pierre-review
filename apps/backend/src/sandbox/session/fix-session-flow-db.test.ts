@@ -656,9 +656,10 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
       const r = await AF.startFix(ctx, { accountId: 1, prId: pr.id, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Fix it.', trigger: 'auto' });
       expect(r.status).toBe('queued');
       const fixId = (r as { fixId: number }).fixId;
-      const f = await until(pr.id, (x) => x.session?.phase === 'pushed', 'pushed automatically');
+      const f = await until(pr.id, (x) => x.session?.phase === 'pushed' && x.pushing === false, 'pushed automatically');
       expect(f.status).toBe('succeeded');
       expect(f.pushedAt).not.toBeNull();
+      expect(f).toMatchObject({ pushedCommitSha: 'c0ffee', pushedAutomatically: true });
       expect(pushes.length).toBe(before.pushes + 1);
       expect(pushes.at(-1)).toMatchObject({ prNumber: 44, target: { kind: 'existing', headRef: 'feature/export' } });
       // The session was gone before the push (it never pushes from inside a live session).
@@ -701,7 +702,9 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
       const end = Date.now() + 10_000;
       while (refused === 0 && Date.now() < end) await new Promise((res) => setTimeout(res, 20));
       expect(refused).toBe(1);
-      await until(pr.id, (x) => x.session?.phase === 'built' && x.pushedAt == null && !AF.isFixRunning(pr.id), 'closed, push refused');
+      const failed = await until(pr.id, (x) => x.session?.phase === 'built' && x.pushedAt == null && x.pushing === false && !AF.isFixRunning(pr.id), 'closed, push refused');
+      // The failure is on the row; Push stays on offer (the SPA's footer reads `error`).
+      expect(failed.error).toBe('Automatic push failed: the branch moved since the fix was made.');
       // The reader takes over, then the resumed session closes (idle): nothing is pushed again.
       ctx.coding.applyAndPush = async (a: any) => {
         refused += 1;
@@ -738,12 +741,24 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     const clean = await ownPr(46);
     reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: own', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
     const before = pushes.length;
+    // The AI Fix tab's stream: ONE `done` (the close's). The settled push sends none — a late `done` would
+    // end the stream of a newer fix on this PR; the SPA reads the push through its poll while `pushing`.
+    const { subscribeFixStream } = await import('../../coding/ai-fix/stream.js');
+    const dones: number[] = [];
+    const unsub = subscribeFixStream(clean.id, (e) => {
+      if (e.type === 'done' && e.fixId != null) dones.push(e.fixId);
+    });
     const r = await post(`/api/pro/prs/${clean.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.', pushWhenDone: true });
     expect(r.statusCode).toBe(202);
     const cleanId = r.json().fixId;
-    const f = await until(clean.id, (x) => x.session?.phase === 'pushed', 'pushed when done');
+    const f = await until(clean.id, (x) => x.session?.phase === 'pushed' && x.pushing === false, 'pushed when done');
     expect(f.trigger).toBe('manual');
     expect(f.pushedAt).not.toBeNull();
+    // THE PUSH FOOTER's facts: the commit, not a press, nothing on its way, no hold.
+    expect(f).toMatchObject({ pushedCommitSha: 'c0ffee', pushedAutomatically: true, pushWhenDone: true, pushing: false, pushHold: null });
+    await new Promise((res) => setTimeout(res, 100));
+    unsub();
+    expect(dones).toEqual([cleanId]);
     expect(pushes.length).toBe(before + 1);
     expect(pushes.at(-1)).toMatchObject({ prNumber: 46, target: { kind: 'existing' } });
     expect(M.liveSession(F.fixKey(cleanId))).toBeNull();
@@ -763,6 +778,8 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     const held = await until(theirs.id, (x) => x.session?.phase === 'built' && notices(x).length > 0 && M.liveSession(F.fixKey(heldId)) != null, 'held');
     expect(notices(held)).toContain('Not pushed: this is not your pull request. Press Push to push to its branch.');
     expect(held.pushedAt).toBeNull();
+    // The footer repeats the hold above Push.
+    expect(held).toMatchObject({ pushWhenDone: true, pushing: false, pushHold: { line: 'Not pushed: this is not your pull request. Press Push to push to its branch.' } });
     expect(pushes.length).toBe(before + 1);
     await M._closeAllSessionsForTest();
     // A discarded session never pushes on its close.

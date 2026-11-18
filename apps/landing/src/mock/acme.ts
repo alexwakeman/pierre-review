@@ -241,6 +241,9 @@ export const FIX = {
   push: 'Push',
   pushing: 'Pushing…',
   pushedTo: 'Pushed to',
+  // The commit the push left (the app links it to GitHub) and the line an automatic push adds.
+  pushedSha: '4f2c9a1',
+  pushedAuto: 'Pushed automatically',
 };
 
 export const FIX_DIFF = {

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { AiFix, AiFixPickerPreview, SandboxRuntimeStatus } from '@pierre-review/shared';
-import { AI_FIX_PREVIEW_MERGE, aiFixBuilt, aiFixMerged, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
+import { AI_FIX_PREVIEW_MERGE, aiFixAutoPush, aiFixBuilt, aiFixMerged, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
 
 // AI FIX ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions; docs/FRONTEND.md § The AI Fix tab)
 // against the mocked API (mock-api.ts keeps the PR's fix per page). The picker stays; Start fix boots the
@@ -132,6 +132,27 @@ test.describe('AI Fix in the sandbox', () => {
     await page.getByRole('button', { name: 'Push', exact: true }).click();
     expect((await pushReq).postDataJSON().target).toBe('existing');
     await expect(page.getByText('Pushed to')).toBeVisible();
+  });
+
+  test('Push when done: while the push runs there is no Push', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixAutoPush(PR_ID, 'pushing') });
+    await expect(page.getByTestId('ai-fix-pushing')).toContainText('Pushing to feature/e2e-branch…');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
+  });
+
+  test('Push when done landed: "Pushed to <branch> · <sha>", pushed automatically, no Push', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixAutoPush(PR_ID, 'pushed') });
+    const pushed = page.getByTestId('ai-fix-pushed');
+    await expect(pushed).toContainText('Pushed to feature/e2e-branch');
+    await expect(pushed.getByRole('link', { name: 'c0ffee0' })).toHaveAttribute('href', /\/commit\/c0ffee0{34}$/);
+    await expect(pushed).toContainText('Pushed automatically');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
+  });
+
+  test('a failed automatic push says why and keeps Push', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixAutoPush(PR_ID, 'failed') });
+    await expect(page.getByTestId('ai-fix-push-line')).toHaveText('Automatic push failed: the branch moved since the fix was made.');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toBeVisible();
   });
 
   test('a merge that fails Ensemble’s check offers no Push and says why', async ({ page }) => {

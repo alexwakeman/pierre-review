@@ -42,7 +42,7 @@ import { aiFixBaseRef, dropAiFixBaseRefs } from '../../coding/story-build/base-r
 import { normalizeChangeReport } from '../../coding/ai-fix/review-seed.js';
 import { emitFixStream } from '../../coding/ai-fix/stream.js';
 import { capDiff } from '../../coding/ai-fix/cap-diff.js';
-import { isFixPushing } from '../../coding/ai-fix/push-guard.js';
+import { clearPushPending, isFixPushing, notePushPending } from '../../coding/ai-fix/push-guard.js';
 import { getFixById, updateFixSession, type AiFixRow } from '../../coding/ai-fix/persist.js';
 import type { FixAgentReport } from '../../platform/contract.js';
 import type { SandboxAgentChoice } from '../drivers/index.js';
@@ -548,12 +548,24 @@ function fixSubject(
       const l = l0 as Live;
       if (merge) await storeMergeTurn(l);
       else await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath });
-      if (unattended) return 'close';
+      if (unattended) {
+        // PUSH AUTOMATICALLY: when the close will push, the AI Fix tab says "Pushing…" from now until the push
+        // settles (push-guard.ts `notePushPending`; `onClosed` clears it). Gate parts 1–3, read-only.
+        if (facts.trigger === 'auto') {
+          const { autoPushSkip } = await import('../../coding/ai-fix/auto-push.js');
+          const skip = await autoPushSkip(ctx, accountId, fixId, undefined, { closing: true }).catch(() => 'failed');
+          if (skip == null) notePushPending(fixId);
+        }
+        return 'close';
+      }
       // PUSH WHEN DONE (coding/ai-fix/auto-push.ts): a clean manual fix on the reader's own PR closes, and its
       // close pushes. Otherwise the session stays open and says, in one line, why it did not push.
       const { pushWhenDoneReady } = await import('../../coding/ai-fix/auto-push.js');
       const ready = await pushWhenDoneReady(ctx, accountId, fixId).catch(() => ({ push: false as const, line: null }));
-      if (ready.push) return 'close';
+      if (ready.push) {
+        notePushPending(fixId);
+        return 'close';
+      }
       if (ready.line != null) notice(l, ready.line);
       return 'keep';
     },
@@ -582,24 +594,36 @@ function fixSubject(
           .then((m) => m.evaluateAutoFix(ctx, { accountId, prId: facts.prId, cause: 'fix_closed' }))
           .catch(() => {});
       };
-      // PUSH WHEN DONE: a MANUAL fix the reader asked to push once it is done (the close above was its own:
-      // `afterBuildTurn` closed a clean fix). Every rule is read again at push time.
-      if (phase === 'built' && !unattended && facts.trigger !== 'auto') {
-        const r = await row();
-        if (r?.pushWhenDone === true && r.status === 'succeeded' && fixRowHasWork(r)) {
-          const { maybePushWhenDone } = await import('../../coding/ai-fix/auto-push.js');
-          void maybePushWhenDone(ctx, { accountId, fixId }).catch(() => {}).finally(queueNext);
-          return;
+      // THE PUSH SETTLED (pushed, failed or skipped): the AI Fix tab stops saying "Pushing…". The SPA learns it
+      // from its poll while `AiFix.pushing` — never a second `done` on the fix stream: that stream closed on the
+      // close's own `done`, and a late `done` would end (and mark finished) the stream of a NEWER fix on this PR.
+      const settled = (): void => {
+        clearPushPending(fixId);
+        queueNext();
+      };
+      try {
+        // PUSH WHEN DONE: a MANUAL fix the reader asked to push once it is done (the close above was its own:
+        // `afterBuildTurn` closed a clean fix). Every rule is read again at push time.
+        if (phase === 'built' && !unattended && facts.trigger !== 'auto') {
+          const r = await row();
+          if (r?.pushWhenDone === true && r.status === 'succeeded' && fixRowHasWork(r)) {
+            const { maybePushWhenDone } = await import('../../coding/ai-fix/auto-push.js');
+            void maybePushWhenDone(ctx, { accountId, fixId }).catch(() => {}).finally(settled);
+            return;
+          }
         }
-      }
-      if (phase === 'built' && unattended && facts.trigger === 'auto') {
-        const r = await row();
-        if (r?.status === 'succeeded' && fixRowHasWork(r)) {
-          const { maybeAutoPushFix } = await import('../../coding/ai-fix/auto-push.js');
-          void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {}).finally(queueNext);
-          return;
+        if (phase === 'built' && unattended && facts.trigger === 'auto') {
+          const r = await row();
+          if (r?.status === 'succeeded' && fixRowHasWork(r)) {
+            const { maybeAutoPushFix } = await import('../../coding/ai-fix/auto-push.js');
+            void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {}).finally(settled);
+            return;
+          }
         }
+      } catch {
+        /* a failed read pushes nothing; the pending mark is cleared below */
       }
+      clearPushPending(fixId);
       queueNext();
     },
   };

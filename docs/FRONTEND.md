@@ -2438,8 +2438,15 @@ sessions.
   from "Fixes on top of the merge". ⚠ Push shows only when `fixPushable` (a VALID merge; without a
   merge, a patch) and, with a merge, offers ONLY the PR's own branch (no "New branch"); a refused merge
   also swaps the status line (`fixMergeBlockedLine`) and the repo row reads "Merge not valid".
-- **An automatic push that failed** shows the succeeded row's `error` ("Automatic push failed: …")
-  in an amber line above the summary; Push still works and clears it.
+- **THE PUSH FOOTER is ONE pure fold, `fixPushFooter`** (`lib/aiFixSession.ts`, pinned by
+  `test/aiFixSession.test.ts`), ranked: **pushed** (`PushedCard`: "Pushed to <branch> · <short sha>" — the sha
+  linked to the commit through `safeExternalUrl`; branch only on a fix pushed before migration 0205 — plus
+  "Pushed automatically" when it was not a press; no Push) → **pushing** (`AiFix.pushing`: "Pushing to
+  <branch>…", no button) → **failed** (an automatic push's `error`, "Automatic push failed: …", in an amber line
+  above Push; Push still works and clears it) → **held** (`AiFix.pushHold.line`, "Push when done" waiting, above
+  Push) → plain Push. ⚠ `useAiFix` polls at `SESSION_POLL_MS` while `pushing` (the push runs after the session
+  closed, so no session stream reports it) and runs `invalidateAfterPrWrite` once when the fix turns pushed.
+  A new state (a review loop's round) is one more member of the fold.
 - **`FixReport`** renders the validated `changeReport` under the summary and ABOVE the "no
   changes" branch (a run that judged every item wrong produces no diff, and that is the run whose
   "Not addressed" list matters most): per changed file the summary and ref chips labelled with the
