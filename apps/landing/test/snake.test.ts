@@ -1,5 +1,6 @@
 // The snake beside the review story (src/components/board/snake.ts): one unbroken line
-// through boxes that stand apart, alternating sides, every bend one radius.
+// through boxes that stand apart, alternating sides, dropping from each far corner to
+// the box below, every bend one radius.
 import { describe, expect, it } from 'vitest';
 import { snakeMask, snakePath } from '../src/components/board/snake';
 
@@ -25,8 +26,8 @@ describe('the snake', () => {
 
   it('bends with one radius everywhere: the boxes’ corners and each crossing', () => {
     const arcs = d.match(/A[\d.]+ [\d.]+/g) ?? [];
-    // the first top corner, a bottom corner per box, three bends per crossing
-    expect(arcs).toHaveLength(1 + boxes.length + 3 * (boxes.length - 1));
+    // the first top corner, a bottom corner per box, one drop per gap
+    expect(arcs).toHaveLength(1 + boxes.length + (boxes.length - 1));
     expect(new Set(arcs)).toEqual(new Set(['A13 13']));
   });
 
@@ -36,11 +37,11 @@ describe('the snake', () => {
     expect(d.endsWith('L14 495')).toBe(true); // box 4 (right side) ends bottom-left
   });
 
-  it('crosses each gap inside the gap, back onto the next box’s top edge', () => {
-    // box 1 → 2: down at x = 399 − 3 × 13 = 360, from the first bottom to the next top
-    expect(d).toContain('A13 13 0 0 1 360 112');
-    expect(d).toContain('L360 120');
-    expect(d).toContain('A13 13 0 0 0 373 133');
+  it('drops to the box below from the far corner of the box above', () => {
+    // box 1 → 2: along the bottom to x = 399 − 13, bend down to the right edge, straight down
+    expect(d).toContain('L386 99A13 13 0 0 1 399 112L399 218');
+    // box 2 → 3: the same on the left
+    expect(d).toContain('L14 231A13 13 0 0 0 1 244L1 350');
   });
 
   it('makes a mask the size of the column', () => {

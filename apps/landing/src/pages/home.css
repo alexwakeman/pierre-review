@@ -603,7 +603,7 @@
   display: grid;
   /* ONE column at every width, the boxes APART: the snake (below) crosses each gap */
   grid-template-columns: minmax(0, 1fr);
-  gap: 32px; /* at least 2 × the corner radius: room for the crossing's two bends */
+  gap: 32px;
   align-content: start;
 }
 .lb.home .ens-more {
@@ -617,8 +617,8 @@
 }
 /* THE SNAKE (components/board/snake.ts): ONE line through the four boxes, which stand
    apart with every corner rounded alike. It runs along the first box's top, down one side,
-   along the bottom, curves down across the gap and back along the next box's top, rounds
-   its corner and runs down its opposite side, and so on; every bend one radius. It is a band
+   along the bottom to the far corner, where it drops straight across the gap onto the
+   next box's opposite side, and so on; every bend one radius. It is a band
    of colour seen through that line: .ens-snake covers the column, its MASK is the line (an
    SVG drawn from the boxes' measured positions, HomeSections.tsx useSnake), and inside it
    the band (.ens-wheel, a straight gradient, never a conic one: a conic centre on the line

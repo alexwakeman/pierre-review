@@ -2,11 +2,11 @@
 // THE SNAKE beside the review story (HomeSections.tsx, pages/home.css § the snake): ONE
 // line through the boxes, which stand APART with every corner rounded alike. It starts
 // along the first box's top edge, rounds its top-left corner, runs down its left side,
-// rounds its bottom-left corner and runs along its bottom; near the far end it curves
-// down across the gap and back along the next box's top edge, rounds that box's top-right
-// corner and runs down its RIGHT side, and so on, alternating, ending along the last box's
-// bottom where its far corner begins. Every bend has one radius: the boxes' own corners,
-// traced exactly, and the two curves of each crossing. Pure geometry here; the page draws
+// rounds its bottom-left corner and runs along its bottom to the far corner, where it bends
+// down and drops straight across the gap onto the RIGHT side of the box below, runs down
+// it, and so on, alternating, ending along the last box's bottom where its far corner
+// begins. Every bend has one radius: the boxes' own corners where the line traces them,
+// and the drop at each far corner. Pure geometry here; the page draws
 // it as a mask over one band of colour.
 // ---------------------------------------------------------------------------
 
@@ -18,8 +18,7 @@ export interface SnakeBox {
 /**
  * The SVG path of the snake through `boxes` (top to bottom) in a column `width` wide.
  * `radius` is the boxes' corner radius; the line's centre sits half a `stroke` inside each
- * box's edge, so it bends with radius − stroke / 2 and traces the corners exactly. The gap
- * between two boxes must be at least 2 × radius − 2 × stroke for the crossing to fit.
+ * box's edge, so it bends with radius − stroke / 2 and traces the corners exactly.
  */
 export function snakePath(boxes: SnakeBox[], width: number, radius: number, stroke: number): string {
   if (boxes.length === 0) return '';
@@ -48,13 +47,9 @@ export function snakePath(boxes: SnakeBox[], width: number, radius: number, stro
       d += `L${f(other - dir * R)} ${f(y)}`;
       return;
     }
-    // along the bottom, then the crossing: curve down into the gap, down, curve back
-    // along the next box's top edge, round its top corner on that side
-    const x = other - dir * 3 * R; // where the crossing runs down
-    const t = next.top + h;
-    d += `L${f(x - dir * R)} ${f(y)}${arc(dir > 0 ? 1 : 0, x, y + R)}`;
-    d += `L${f(x)} ${f(t - R)}${arc(dir > 0 ? 0 : 1, x + dir * R, t)}`;
-    d += `L${f(other - dir * R)} ${f(t)}${arc(dir > 0 ? 1 : 0, other, t + R)}`;
+    // along the bottom to the far corner, then down from it: one bend, and straight down
+    // the gap onto the next box's side (the next loop carries on down it)
+    d += `L${f(other - dir * R)} ${f(y)}${arc(dir > 0 ? 1 : 0, other, y + R)}`;
   });
   return d;
 }
