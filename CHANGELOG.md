@@ -13,11 +13,19 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- AI Review: the reason an auto fix did not start is one line, in the Auto fix section, shown after the review
+  finishes. It names the cause: AI not signed in, the review or the pull request could not be read, an error,
+  the limit of 3 auto fixes in 24 hours, or the daily limit of auto reviews.
+
 ### Fixed
 
 - AI Fix: after "Push when done" or "Push automatically" pushes a fix, the tab says "Pushed to" the branch with
   the commit, and no longer offers Push for a fix that is already pushed. While the push runs it says "Pushing
   to" the branch. A failed automatic push says why and keeps Push.
+- AI Review: with Claude + Codex reviews, an auto fix now waits for both reviews to finish. It no longer says
+  "No auto fix: the fixer could not start." while the review runs.
 
 ## [1.0.64] - 2026-11-18
 

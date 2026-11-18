@@ -10,7 +10,7 @@
 //   pnpm --filter @pierre-review/backend test ai-fix/auto-fix-queue
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { AUTO_FIX_CI_REVIEW_WAIT_MS, AUTO_FIX_CI_WAIT_MAX_MS, AUTO_FIX_REVIEW_WAIT_MS } from '@pierre-review/shared';
+import { AUTO_FIX_CI_REVIEW_WAIT_MS, AUTO_FIX_CI_WAIT_MAX_MS, AUTO_FIX_DAILY_CAP, AUTO_FIX_QUEUE_LINE, AUTO_FIX_REVIEW_WAIT_MS } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import type { AutoFixQueueDeps } from './auto-fix-queue.js';
 
@@ -51,13 +51,21 @@ async function pr(o: { ciStatus?: string | null; head?: string } = {}): Promise<
   return row.id;
 }
 
-async function aiReview(prId: number, o: { status?: string; trigger?: string; head?: string } = {}): Promise<number> {
+async function aiReview(prId: number, o: { status?: string; trigger?: string; head?: string; pairId?: number; pairRole?: 'first' | 'second' } = {}): Promise<number> {
   const [row] = await db
     .insert(schema.claudeReviews)
-    .values({ accountId: 1, prId, headSha: o.head ?? 'h1', status: o.status ?? 'succeeded', model: 'claude-opus-5-5', trigger: o.trigger ?? 'auto' })
+    .values({ accountId: 1, prId, headSha: o.head ?? 'h1', status: o.status ?? 'succeeded', model: 'claude-opus-5-5', trigger: o.trigger ?? 'auto', pairId: o.pairId ?? null, pairRole: o.pairRole ?? null })
     .returning()
     .execute();
   return row.id;
+}
+
+/** A Claude + Codex pair at the head: the first half's id is the pair id, on both rows. */
+async function pair(prId: number, first: string, second: string): Promise<{ firstId: number; secondId: number }> {
+  const firstId = await aiReview(prId, { status: first, pairRole: 'first' });
+  await db.update(schema.claudeReviews).set({ pairId: firstId }).where((await import('drizzle-orm')).eq(schema.claudeReviews.id, firstId)).execute();
+  const secondId = await aiReview(prId, { status: second, pairId: firstId, pairRole: 'second' });
+  return { firstId, secondId };
 }
 
 async function ciReview(prId: number, status = 'succeeded'): Promise<void> {
@@ -73,6 +81,8 @@ let live: { running: number; failing: number } | null = null;
 let ciItems = 0;
 let starts: Array<{ reviewId: number | null }> = [];
 let answer: { status: string; fixId?: number; reason?: any } = { status: 'started', fixId: 9 };
+let busyPairs = new Set<number>();
+let usage: { used: number; cap: number } | null = null;
 
 const deps: AutoFixQueueDeps = {
   isOwn: async () => own,
@@ -83,6 +93,8 @@ const deps: AutoFixQueueDeps = {
   ciReviewHeld: () => ciHeld,
   liveChecks: async () => (live == null ? null : { headSha: 'h1', total: 3, running: live.running, failing: live.failing, complete: true }),
   ciItemsAtHead: async () => ciItems,
+  pairBusy: async (pairId) => busyPairs.has(pairId),
+  autoReviewUsage: async () => usage,
   start: async (_c, input) => {
     starts.push({ reviewId: input.reviewId });
     return answer;
@@ -123,6 +135,8 @@ beforeEach(() => {
   ciItems = 0;
   starts = [];
   answer = { status: 'started', fixId: 9 };
+  busyPairs = new Set();
+  usage = null;
   Q._resetAutoFixQueueForTest();
 });
 
@@ -222,5 +236,136 @@ describe('the auto fix queue', () => {
     await db.update(schema.pullRequests).set({ headSha: 'h2' }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, id)).execute();
     autoReviewOn = false;
     expect(await decide(id, NOW + 120_000, 'sweep')).toMatchObject({ status: 'idle', reason: 'nothing_to_fix', headSha: 'h2' });
+  });
+
+  it('⚠ A PAIR IN FLIGHT IS ONE REVIEW RUNNING: a succeeded half whose other half runs is a wait, never a source or a skip', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    // Claude finished first; Codex is still running.
+    await pair(id, 'succeeded', 'running');
+    expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'review_running', until: null, line: AUTO_FIX_QUEUE_LINE.review_running });
+    expect(starts).toEqual([]);
+    // The other order, and a queued half: the same wait.
+    const id2 = await pr({ ciStatus: 'success' });
+    await pair(id2, 'queued', 'succeeded');
+    expect(await decide(id2)).toMatchObject({ status: 'waiting', reason: 'review_running' });
+    expect(starts).toEqual([]);
+  });
+
+  it('⚠ a pair still MERGING (both halves done) is still in flight; once it ends the half seeds', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    const { firstId, secondId } = await pair(id, 'succeeded', 'succeeded');
+    busyPairs.add(firstId);
+    expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'review_running' });
+    expect(starts).toEqual([]);
+    busyPairs.clear();
+    expect(await decide(id, NOW, 'sweep')).toMatchObject({ status: 'started', source: 'review' });
+    // The newest succeeded auto half names the pair (the seed reads the consolidated view).
+    expect(starts).toEqual([{ reviewId: secondId }]);
+  });
+
+  it('⚠ a pair that ENDED with one half failed (its cover pass done) still seeds from the half that succeeded', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    const { firstId } = await pair(id, 'succeeded', 'failed');
+    expect(await decide(id)).toMatchObject({ status: 'started', source: 'review' });
+    expect(starts).toEqual([{ reviewId: firstId }]);
+  });
+
+  it('⚠ one half failed: the pair is in flight while the other half’s COVER PASS runs (pairBusy), and seeds once it ends', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    const { firstId } = await pair(id, 'succeeded', 'failed');
+    // The cover (a `kind = 'replies'` row, no pair_id) runs: only the in-process fact says so.
+    await db.insert(schema.claudeReviews).values({ accountId: 1, prId: id, headSha: 'h1', status: 'running', model: 'claude-opus-5-5', trigger: 'auto', kind: 'replies' }).execute();
+    busyPairs.add(firstId);
+    expect(await decide(id, NOW, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_running', until: null });
+    expect(starts).toEqual([]);
+    busyPairs.clear();
+    expect(await decide(id, NOW + 60_000, 'sweep')).toMatchObject({ status: 'started', source: 'review' });
+    expect(starts).toEqual([{ reviewId: firstId }]);
+  });
+
+  it('⚠ a NEWER review of the head still queued or running holds the older succeeded one (never a stale seed)', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    const older = await aiReview(id);
+    await aiReview(id, { status: 'running' });
+    expect(await decide(id, NOW, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_running' });
+    const id2 = await pr({ ciStatus: 'success' });
+    await aiReview(id2);
+    await aiReview(id2, { status: 'queued', trigger: 'manual' });
+    expect(await decide(id2, NOW, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_running' });
+    expect(starts).toEqual([]);
+    // An OLDER in-flight row does not hold a newer succeeded one.
+    const id3 = await pr({ ciStatus: 'success' });
+    await aiReview(id3, { status: 'running' });
+    const newer = await aiReview(id3);
+    expect(await decide(id3, NOW, 'sweep')).toMatchObject({ status: 'started', source: 'review' });
+    expect(starts).toEqual([{ reviewId: newer }]);
+    expect(newer).toBeGreaterThan(older);
+  });
+
+  it('⚠ a review of the PR this process holds (no row yet) holds the source on the sweep, never on the review’s own end', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    const rid = await aiReview(id);
+    reviewHeld = true;
+    expect(await decide(id, NOW, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_running' });
+    expect(starts).toEqual([]);
+    // The review's own end hook runs while its claim is still held.
+    expect(await decide(id, NOW, 'review')).toMatchObject({ status: 'started', source: 'review' });
+    expect(starts).toEqual([{ reviewId: rid }]);
+  });
+
+  it('a fault from the start names itself and is decided again by the sweep (it may pass)', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    await aiReview(id);
+    answer = { status: 'skipped', reason: 'no_ai_login' };
+    expect(await decide(id)).toMatchObject({ status: 'idle', reason: 'no_ai_login', line: AUTO_FIX_QUEUE_LINE.no_ai_login });
+    for (const reason of ['review_unavailable', 'pr_unavailable', 'error'] as const) {
+      answer = { status: 'skipped', reason };
+      expect(await decide(id, NOW, 'sweep')).toMatchObject({ status: 'idle', reason, line: AUTO_FIX_QUEUE_LINE[reason] });
+    }
+    // Unchanged facts, yet the sweep asks again: the sign-in came back.
+    answer = { status: 'started', fixId: 11 };
+    expect(await decide(id, NOW + 60_000, 'sweep')).toMatchObject({ status: 'started', fixId: 11 });
+  });
+
+  it('the auto FIX cap prints its number from the constant', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    await aiReview(id);
+    answer = { status: 'skipped', reason: 'cap' };
+    const s = await decide(id);
+    expect(s).toMatchObject({ status: 'idle', reason: 'cap' });
+    expect(s!.line).toContain(String(AUTO_FIX_DAILY_CAP));
+  });
+
+  it('⚠ REVIEW_CAPPED: the AI review is due but today’s auto review cap is reached ⇒ said, never a wait forever', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    usage = { used: 20, cap: 20 };
+    const s = await decide(id);
+    expect(s).toMatchObject({ status: 'idle', reason: 'review_capped', line: 'No auto review today: the limit of 20 is reached.' });
+    expect(starts).toEqual([]);
+    // Under the cap: the usual wait.
+    usage = { used: 19, cap: 20 };
+    expect(await decide(id, NOW + 60_000, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_due' });
+    // With CI causes at the cap: the CI-only fix goes at once (the review will not come).
+    usage = { used: 20, cap: 20 };
+    const id2 = await pr({ ciStatus: 'failure' });
+    live = { running: 0, failing: 1 };
+    await ciReview(id2);
+    ciItems = 1;
+    expect(await decide(id2)).toMatchObject({ status: 'started', source: 'ci' });
+  });
+
+  it('review_capped is decided again by the sweep (a new day resets the cap)', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    usage = { used: 5, cap: 5 };
+    expect(await decide(id)).toMatchObject({ reason: 'review_capped' });
+    usage = { used: 0, cap: 5 };
+    expect(await decide(id, NOW + 60_000, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_due' });
+  });
+
+  it('a RUNNING review is never asked about the cap (it is coming)', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    reviewHeld = true;
+    usage = { used: 20, cap: 20 };
+    expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'review_running' });
   });
 });

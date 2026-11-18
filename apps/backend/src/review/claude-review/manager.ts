@@ -48,7 +48,7 @@ import {
 import { PAIR_ORDER, pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
 import { consolidatePair, notStartedHalf } from './pair-consolidate.js';
 import { coverTarget } from './pair.js';
-import { markPairBusy } from './pair-view.js';
+import { markPairBusy, markPairCovering } from './pair-view.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import {
   linkReraisedFindings,
@@ -909,6 +909,9 @@ function startPairCover(item: QueueItem): void {
   const cover = p?.cover;
   if (!p || !cover) return;
   p.cover = undefined;
+  // ⚠ Held from now (synchronously, before the pair's seat is visibly free) until the cover ends: the
+  // auto fix queue must not seed from the half that succeeded while the cover still runs.
+  markPairCovering(p.pairId, true);
   void (async () => {
     let out: AutoPostOutcome | null = null;
     let hold: PairCoverHold | null = null;
@@ -933,6 +936,9 @@ function startPairCover(item: QueueItem): void {
       });
     } catch (err) {
       first.ctx.log.warn(`claude review pr ${first.prId}: cover check: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      // Released BEFORE the run-end hooks: their auto fix kick then reads the finished cover.
+      markPairCovering(p.pairId, false);
     }
     try {
       out = await runEnded(first, { ...cover.end, cover: hold });
@@ -2252,6 +2258,8 @@ export async function finishInterruptedPairs(
         (async () => {
           let hold: PairCoverHold | null = null;
           if (covers) {
+            // The auto fix queue waits for this cover (as for a live pair's, `startPairCover`).
+            markPairCovering(pairId, true);
             try {
               const m = await import('./replies-check.js');
               const { coverReviewId } = await m.runCoverCheck(ctx, {
@@ -2272,6 +2280,8 @@ export async function finishInterruptedPairs(
               });
             } catch (err) {
               ctx.log.warn(`claude review pr ${r.prId}: cover check: ${err instanceof Error ? err.message : String(err)}`);
+            } finally {
+              markPairCovering(pairId, false);
             }
           }
           await runEnded(item, { reviewId: survivor.id, succeeded: true, cover: hold }, { slackSignal: false });

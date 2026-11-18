@@ -14,12 +14,23 @@
 //   3. CI FAILED and the CI review of this head is running or due ⇒ `ci_review`, at most
 //      AUTO_FIX_CI_REVIEW_WAIT_MS (its causes are what a CI fix works from).
 //   4. THE SOURCE. A succeeded AUTO AI review of THIS head ⇒ a review fix (its seed carries the CI
-//      causes too). Else CI causes at this head: an AI review of this head running or expected ⇒
+//      causes too). ⚠ A CLAUDE + CODEX PAIR IS ONE REVIEW: a succeeded half whose pair is still queued,
+//      running or merging is NOT a source — the pair is a review RUNNING (`review_running`, a wait, never
+//      a skip). ⚠ One half failed ⇒ the other's COVER PASS of its findings is part of the review: the pair
+//      is in flight until the cover ends (pair-view.ts `isPairCovering`). Then the half's id seeds, and the
+//      seed reads the consolidated pair view (manager.ts `loadSourceReview`, the succeeded cover too).
+//      ⚠ A NEWER review of this head still queued or running (a comment-triggered re-review, a press) is
+//      a review RUNNING too — never seed from the older one; nor, outside that review's own end hook,
+//      while this process holds a review of the PR (`reviewHeld`: one waiting in the lane has no row).
+//      Else CI causes at this head: an AI review of this head running or expected ⇒
 //      `review_running` / `review_due`, at most AUTO_FIX_REVIEW_WAIT_MS after the CI was ready (one fix
-//      covers both); then a CI-ONLY fix. Neither ⇒ `nothing_to_fix`.
+//      covers both); then a CI-ONLY fix. Neither ⇒ `nothing_to_fix`. `review_due` with the workspace's
+//      AUTO REVIEW daily cap reached (the sweeper's own count, `readAutoReviewUsage` — the same fold as
+//      the cap toast) ⇒ `review_capped`, never a wait that cannot end.
 //   5. `maybeStartAutoFix` (auto-fix.ts) — every gate of the auto fix (budget, sandbox, a fix waiting
 //      for Push, the daily cap, already tried). A TRANSIENT refusal (sandbox busy, over budget, no
-//      sandbox, a fix still holding the PR) is a wait the sweep retries; the rest end until the PR changes.
+//      sandbox, a fix still holding the PR) is a wait the sweep retries; the rest end until the PR changes,
+//      except the faults and `review_capped` (shared AUTO_FIX_QUEUE_REDECIDE), decided again every sweep.
 //
 // Each fix is its own run, its own commit and (under "Push automatically") its own push.
 // ⚠ Never throws. ⚠ Starts nothing on a PR that is not the reader's own (`prAuthorIsAccount`).
@@ -28,7 +39,9 @@ import {
   AUTO_FIX_CI_REVIEW_WAIT_MS,
   AUTO_FIX_CI_WAIT_MAX_MS,
   AUTO_FIX_QUEUE_LINE,
+  AUTO_FIX_QUEUE_REDECIDE,
   AUTO_FIX_REVIEW_WAIT_MS,
+  autoReviewCappedLine,
   type AutoFixQueueReason,
   type AutoFixQueueState,
   type ClaudeAutoFixSkipReason,
@@ -48,6 +61,11 @@ export interface AutoFixQueueDeps {
   ciReviewHeld(accountId: number, prId: number): boolean;
   liveChecks(ctx: AgentContext, accountId: number, pr: { owner: string; name: string; number: number }): Promise<PrHeadCheckCounts | null>;
   ciItemsAtHead(ctx: AgentContext, accountId: number, prId: number): Promise<number>;
+  /** A Claude + Codex pair (by `pair_id`) not ended in this process: merging, or its cover pass running
+   *  (pair-view.ts `isPairBusy` / `isPairCovering`). */
+  pairBusy(pairId: number): Promise<boolean>;
+  /** Today's auto reviews against the workspace's cap — the sweeper's own count; null when unknown / off. */
+  autoReviewUsage(ctx: AgentContext, accountId: number, workspaceId: number): Promise<{ used: number; cap: number } | null>;
   start(ctx: AgentContext, input: { accountId: number; prId: number; reviewId: number | null }): Promise<{ status: string; fixId?: number; reason?: ClaudeAutoFixSkipReason }>;
 }
 
@@ -78,6 +96,17 @@ const defaultDeps: AutoFixQueueDeps = {
   async ciItemsAtHead(ctx, accountId, prId) {
     const { getFixableCiItemsForPr } = await import('../../review/ci-review/persist.js');
     return (await getFixableCiItemsForPr(ctx, accountId, prId).catch(() => [])).length;
+  },
+  async pairBusy(pairId) {
+    const m = await import('../../review/claude-review/pair-view.js');
+    return m.isPairBusy(pairId) || m.isPairCovering(pairId);
+  },
+  async autoReviewUsage(ctx, accountId, workspaceId) {
+    const { readWorkspaceAutoReview, readAutoReviewUsage } = await import('../../review/claude-review/auto-settings.js');
+    const settings = await readWorkspaceAutoReview(ctx, accountId, workspaceId);
+    if (!settings) return null;
+    const u = await readAutoReviewUsage(ctx, accountId, workspaceId, settings);
+    return u ? { used: u.used, cap: u.cap } : null;
   },
   async start(ctx, input) {
     const { maybeStartAutoFix } = await import('./auto-fix.js');
@@ -147,7 +176,10 @@ const SKIP_REASON: Partial<Record<ClaudeAutoFixSkipReason, AutoFixQueueReason>> 
   no_sandbox: 'no_sandbox',
   over_budget: 'over_budget',
   head_moved: 'review_due',
-  not_started: 'not_started',
+  no_ai_login: 'no_ai_login',
+  review_unavailable: 'review_unavailable',
+  pr_unavailable: 'pr_unavailable',
+  error: 'error',
 };
 
 interface PrFacts {
@@ -174,17 +206,44 @@ async function prFacts(ctx: AgentContext, accountId: number, prId: number): Prom
   return { headSha: r.headSha, ciStatus: r.ciStatus, open: r.state === 'open', draft: r.draft === true, owner: r.owner, name: r.name, number: r.number };
 }
 
-/** The newest FULL AI review of this head (any status), and whether a succeeded AUTO one exists. */
-async function reviewAtHead(ctx: AgentContext, accountId: number, prId: number, head: string): Promise<{ anyId: number | null; autoSucceededId: number | null }> {
+const IN_FLIGHT = new Set(['queued', 'running']);
+
+/**
+ * The newest FULL AI review of this head (any status), and the succeeded AUTO one that may seed a fix.
+ * ⚠ A Claude + Codex pair is ONE review: a succeeded half whose pair has not ENDED (the other half queued
+ * or running, the pair merging, or its cover pass running) is no source — `reviewInFlight` instead, and
+ * the queue waits. ⚠ So is one with a NEWER review of this head queued or running.
+ */
+async function reviewAtHead(
+  ctx: AgentContext,
+  accountId: number,
+  prId: number,
+  head: string,
+  deps: Pick<AutoFixQueueDeps, 'pairBusy'>,
+): Promise<{ anyId: number | null; autoSucceededId: number | null; reviewInFlight: boolean }> {
   const { claudeReviews: cr } = ctx.schema;
   const rows = (await ctx.db
-    .select({ id: cr.id, status: cr.status, trigger: cr.trigger })
+    .select({ id: cr.id, status: cr.status, trigger: cr.trigger, pairId: cr.pairId })
     .from(cr)
     .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId), eq(cr.headSha, head), isNull(cr.kind)))
     .orderBy(desc(cr.id))
     .limit(10)
-    .execute()) as Array<{ id: number; status: string; trigger: string }>;
-  return { anyId: rows[0]?.id ?? null, autoSucceededId: rows.find((r) => r.status === 'succeeded' && r.trigger === 'auto')?.id ?? null };
+    .execute()) as Array<{ id: number; status: string; trigger: string; pairId: number | null }>;
+  const anyId = rows[0]?.id ?? null;
+  const ok = rows.find((r) => r.status === 'succeeded' && r.trigger === 'auto');
+  if (!ok) return { anyId, autoSucceededId: null, reviewInFlight: false };
+  // A newer review of this head still queued or running (rows are newest first).
+  if (rows.some((r) => r.id > ok.id && IN_FLIGHT.has(r.status))) return { anyId, autoSucceededId: null, reviewInFlight: true };
+  if (ok.pairId == null) return { anyId, autoSucceededId: ok.id, reviewInFlight: false };
+  const pairId = ok.pairId;
+  // Both halves carry `pair_id` (the first's id); read them all, not only the ten newest at the head.
+  const halves = (await ctx.db
+    .select({ status: cr.status })
+    .from(cr)
+    .where(and(eq(cr.accountId, accountId), eq(cr.prId, prId), eq(cr.pairId, pairId)))
+    .execute()) as Array<{ status: string }>;
+  const inFlight = halves.some((h) => IN_FLIGHT.has(h.status)) || (await deps.pairBusy(pairId));
+  return inFlight ? { anyId, autoSucceededId: null, reviewInFlight: true } : { anyId, autoSucceededId: ok.id, reviewInFlight: false };
 }
 
 /** The newest CI review of this head: its id and status ('none' when there is none). */
@@ -255,13 +314,15 @@ export async function evaluateAutoFix(
     const prev = entries.get(key);
     const e: Entry = prev && prev.head === head ? prev : { state: prev?.state as AutoFixQueueState, head, ciWaitFrom: null, ciReviewWaitFrom: null, readyAt: null, sig: '' };
 
-    const [rev, ci, last] = await Promise.all([reviewAtHead(ctx, accountId, prId, head), ciReviewAtHead(ctx, accountId, prId, head), latestFix(ctx, accountId, prId)]);
+    const [rev, ci, last] = await Promise.all([reviewAtHead(ctx, accountId, prId, head, deps), ciReviewAtHead(ctx, accountId, prId, head), latestFix(ctx, accountId, prId)]);
     const fixSig = last.sig;
     const running = deps.fixRunning(prId);
-    const sig = [head, pr.ciStatus ?? '', rev.anyId ?? '', rev.autoSucceededId ?? '', ci.id ?? '', ci.status, fixSig, running ? 1 : 0].join('|');
+    const sig = [head, pr.ciStatus ?? '', rev.anyId ?? '', rev.autoSucceededId ?? '', rev.reviewInFlight ? 1 : 0, ci.id ?? '', ci.status, fixSig, running ? 1 : 0].join('|');
 
     // THE SWEEP'S ECONOMY: nothing changed and the last decision was final ⇒ keep it (no reads, no start).
-    if (input.cause === 'sweep' && prev != null && prev.head === head && prev.sig === sig && prev.state.status !== 'waiting' && prev.state.reason !== 'not_started') {
+    // A fault, or the auto review cap, is decided again (it may have passed: a sign-in, a new day).
+    const redecide = prev?.state.reason != null && AUTO_FIX_QUEUE_REDECIDE.has(prev.state.reason);
+    if (input.cause === 'sweep' && prev != null && prev.head === head && prev.sig === sig && prev.state.status !== 'waiting' && !redecide) {
       return prev.state;
     }
 
@@ -314,11 +375,24 @@ export async function evaluateAutoFix(
 
     // 4. The source.
     let reviewId: number | null = rev.autoSucceededId;
+    // A review of the PR this process still holds (one waiting in the lane has no row yet) is newer than
+    // the source: wait for it. Not on a review's own end hook (cause 'review'): its claim is still held then.
+    if (reviewId != null && input.cause !== 'review' && deps.reviewHeld(prId)) return wait('review_running', null);
     if (reviewId == null) {
       const ciItems = ws.ciFailures ? await deps.ciItemsAtHead(ctx, accountId, prId) : 0;
-      const reviewRunning = deps.reviewHeld(prId);
+      // A Claude + Codex pair not ended, or a newer review of this head, is a review RUNNING.
+      const reviewRunning = rev.reviewInFlight || deps.reviewHeld(prId);
       // An AI review of this head is coming: running, settling, or due (auto review on and none at this head).
-      const reviewExpected = reviewRunning || deps.reviewWaiting(prId, accountId) || (ws.autoReviewOn && rev.anyId == null);
+      let reviewExpected = reviewRunning || deps.reviewWaiting(prId, accountId) || (ws.autoReviewOn && rev.anyId == null);
+      // DUE, but the workspace's auto review cap is reached today: it will not come. Say so (with no CI
+      // causes), or go on to the CI-only fix at once — never a wait that cannot end.
+      if (reviewExpected && !reviewRunning) {
+        const usage = await deps.autoReviewUsage(ctx, accountId, ws.workspaceId).catch(() => null);
+        if (usage != null && usage.used >= usage.cap) {
+          if (ciItems === 0) return put('idle', 'review_capped', { line: autoReviewCappedLine(usage.cap) });
+          reviewExpected = false;
+        }
+      }
       if (reviewExpected) {
         const until = (e.readyAt ?? nowMs) + AUTO_FIX_REVIEW_WAIT_MS;
         // Nothing for CI to fix: the review alone decides, however long it takes (no limit shown).
@@ -333,7 +407,7 @@ export async function evaluateAutoFix(
     const source = reviewId != null ? 'review' : 'ci';
     if (r.status === 'started') return put('started', null, { fixId: r.fixId ?? null, source });
     if (r.status === 'skipped' && r.reason != null) {
-      const reason = SKIP_REASON[r.reason] ?? 'not_started';
+      const reason = SKIP_REASON[r.reason] ?? 'error';
       return TRANSIENT.has(reason) ? wait(reason, null) : put('idle', reason, { source });
     }
     return null;

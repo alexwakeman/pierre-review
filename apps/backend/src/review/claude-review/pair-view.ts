@@ -42,6 +42,22 @@ export function isPairBusy(pairId: number): boolean {
   return busyPairs.has(pairId);
 }
 
+// Pairs (by `pair_id`) whose COVER PASS runs in this process (manager.ts `startPairCover`, and the boot's
+// end of a pair a restart interrupted): one half failed, the other is checking its open findings. The
+// pair HAS ended (the tab reads it as done; NOT `busyPairs`), but its cover is a `kind = 'replies'` row
+// with no `pair_id`, so only this says the review is not complete yet. ⚠ THE AUTO FIX QUEUE waits on it
+// (auto-fix-queue.ts `pairBusy`): a fix seeded before the cover ends leaves out the failed half's findings.
+const coveringPairs = new Set<number>();
+
+export function markPairCovering(pairId: number, on: boolean): void {
+  if (on) coveringPairs.add(pairId);
+  else coveringPairs.delete(pairId);
+}
+
+export function isPairCovering(pairId: number): boolean {
+  return coveringPairs.has(pairId);
+}
+
 // ---- small pure rules ----
 
 /** The provider that ran a half, as a finding source. */

@@ -162,24 +162,29 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Why an auto fix did not start</H3>
       <p>
-        The <Ui>AI Review</Ui> tab says <Ui>Auto fix started. See the AI Fix tab.</Ui> when one starts. When one could
-        not start for a reason you can fix on this computer, it says why:
+        The <Ui>Auto fix</Ui> section of the <Ui>AI Review</Ui> tab says <Ui>Auto fix started. See the AI Fix tab.</Ui>{' '}
+        when one starts. When one did not start, the same line says why, once the review has finished:
       </p>
       <MiniTable
-        cols={[{ key: 'r', label: 'No auto fix: …' }]}
+        cols={[{ key: 'r', label: 'The line' }]}
         rows={[
-          { _key: '1', r: 'the fixer could not start' },
-          { _key: '2', r: 'your AI spend budget is reached' },
-          { _key: '3', r: 'no container runtime is running on this computer' },
+          { _key: '1', r: 'No auto fix: AI is not signed in on this computer.' },
+          { _key: '2', r: 'No auto fix: the review could not be read.' },
+          { _key: '3', r: 'No auto fix: the pull request could not be read from GitHub.' },
+          { _key: '4', r: 'No auto fix: an error stopped it.' },
+          { _key: '5', r: 'Paused: the AI spend limit is reached.' },
+          { _key: '6', r: 'Paused: no container runtime is running on this computer.' },
+          { _key: '7', r: 'No auto fix: 3 already ran on this pull request in the last 24 hours.' },
+          { _key: '8', r: 'No auto review today: the limit of 20 is reached.' },
         ]}
       />
       <p>
-        Other skips are not shown: nothing to fix, a finished fix waiting to be pushed, the daily limit, new commits, or
-        auto AI Fix off.
+        The last line uses your workspace&apos;s daily limit of auto reviews. A reason appears only after the review finishes. With
+        auto AI Fix off there is no line.
       </p>
       <p>
-        When the sandbox is busy or the AI spend limit is reached, Ensemble tries again by itself. The rest wait until the
-        pull request changes.
+        Ensemble tries again by itself after an error, a sign-in, a busy sandbox, the AI spend limit, or a new day. The
+        rest wait until the pull request changes.
       </p>
 
       <H2 id="push-automatically">Push automatically</H2>

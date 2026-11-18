@@ -8090,9 +8090,8 @@ export interface ClaudeReviewResponse {
   // The auto-review sweeper is HOLDING this PR's next auto review, and why (in memory; a manual run
   // is NOT locked by it). null/absent = not waiting.
   autoReviewWaiting?: ClaudeAutoReviewWaiting | null;
-  // What happened after the LATEST review if it was an auto review on the reader's own PR: an auto
-  // fix was started, or skipped and why. In memory (a restart forgets it). null/absent = nothing.
-  autoFix?: ClaudeAutoFixOutcome | null;
+  // ⚠ `autoFix` (the per-review "No auto fix: …" outcome) is DELETED 2026-11-18: the reason is the auto
+  // fix queue's ONE line (`GET /api/pro/prs/:id/ai-fix/auto`, shared auto-fix-queue.ts).
   // The FAILED AUTO run at the PR's current synced head that a reader's Retry would re-run: the latest
   // AUTO row at that head failed and no AUTO run there succeeded — MANUAL rows at the head (even
   // later ones) are ignored (docs/CLAUDE-REVIEW.md § Retries). null = none; ABSENT = an older server
@@ -8220,7 +8219,7 @@ export interface ClaudeTeammateVerdictWait {
 }
 
 /** At most this many AUTO fixes per PR in any rolling 24 hours (coding/ai-fix/auto-fix.ts). Shared
- *  so the Claude Review tab's skip line prints the same number the gate counts to. */
+ *  so the auto fix queue's `cap` line prints the same number the gate counts to. */
 export const AUTO_FIX_DAILY_CAP = 3;
 
 /** Why an auto fix was NOT started after an auto review of the reader's own PR. */
@@ -8237,8 +8236,13 @@ export type ClaudeAutoFixSkipReason =
   | 'already_tried'
   // The PR moved on after the review; the next review will decide.
   | 'head_moved'
-  // The fixer refused to start (no AI sign-in, review gone…).
-  | 'not_started'
+  // FAULTS (the queue's sweep decides again each minute): no AI sign-in on this computer; the review
+  // could not be read; the PR could not be read from GitHub (or has no head); anything else (the
+  // message goes to the log, never the UI).
+  | 'no_ai_login'
+  | 'review_unavailable'
+  | 'pr_unavailable'
+  | 'error'
   // No container runtime on this computer: AI Fix runs only in the sandbox (docs/SANDBOX.md).
   | 'no_sandbox'
   // Every sandbox session is taken, or another session is building (one build per computer). Never

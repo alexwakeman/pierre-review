@@ -4666,9 +4666,10 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   ⚠ **THE SANDBOX** (`fixSandboxReadiness`, never reserving; the runtime's answer reused 30 s): no
   container runtime ⇒ **`no_sandbox`**, every session taken or another session building ⇒
   **`sandbox_busy`** (or `fix_in_progress` when it is THIS PR's own fix that holds a session) —
-  recorded, never queued, the next auto review decides. Then the first of these that holds SKIPS it, logged and kept in memory per
-  review (`autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix`; the AI Review tab shows a line only
-  for a started fix or a fault the reader can fix — `not_started`, `over_budget`, `no_sandbox`, 2026-11-10):
+  recorded, never queued, the next auto review decides. Then the first of these that holds SKIPS it, logged
+  and returned to THE AUTO FIX QUEUE, whose ONE line says it (§ The auto fix queue; the per-review
+  `autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix` and the tab's "No auto fix: …" line are DELETED
+  2026-11-18):
   `nothing_to_fix` (empty seed), `head_moved` (synced head ≠ reviewed head), `fix_in_progress`
   (a fix SESSION holds the PR — booting, building, a manual one open for follow-ups, a Plan first
   waiting; `startFix` claims it SYNCHRONOUSLY right after the check, so a click racing the auto
@@ -4677,7 +4678,10 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   asked only when an unpushed fix sits on neither, the LIVE head: the fixer builds on the live
   head, so a lagging sync must not hide a waiting fix), `cap` (`AUTO_FIX_DAILY_CAP` = 3 rows with `trigger='auto'`
   for the PR created in the last 24h, shared constant), `already_tried` (the latest auto fix AT THIS
-  HEAD listed every item this review would send under `unaddressed`). Otherwise
+  HEAD listed every item this review would send under `unaddressed`). The FAULTS (2026-11-18: the
+  catch-all `not_started` was split) — `review_unavailable` (the seed's review could not be read),
+  `no_ai_login` (the start answered `no_auth`), `pr_unavailable` (`not_found` / `no_head`), `error`
+  (a throw or any other start answer; the message is LOGGED, never shown). Otherwise
   `startReviewFix(…, {model: the review's model (a retired one → DEFAULT_AI_FIX_MODEL), trigger:
   'auto', include})` — the button's own start as an UNATTENDED session: build mode at once, ONE
   build turn (Claude capped by `--max-budget-usd` `AI_FIX_BUDGET_USD`, default 5, and `--max-turns`
@@ -4811,13 +4815,39 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
 3. CI failed and the CI review of this head is running, or due (none yet, auto review on) ⇒ `ci_review`, at
    most `AUTO_FIX_CI_REVIEW_WAIT_MS` (15 min);
 4. THE SOURCE: a succeeded AUTO review of THIS head ⇒ a review fix (its seed already carries the CI causes).
+   ⚠ **A CLAUDE + CODEX PAIR IS ONE REVIEW PASS** (2026-11-18): a succeeded half whose pair has not ENDED —
+   the other half (same `pair_id`) queued or running, or the pair merging (`isPairBusy`) — is NO source; the
+   pair is a review RUNNING (`review_running`), a wait, never a skip. Before, the first half to finish was
+   taken, the seed read the pair view as running, and `not_started` was shown during the run. ⚠ One half
+   failed ⇒ the pair stays in flight until the other's COVER PASS ends (`isPairCovering`, set by
+   `startPairCover` and the boot's end of an interrupted pair, released before `runEnded`): the cover is a
+   `kind = 'replies'` row with no `pair_id`, and a fix seeded earlier left out the failed half's findings.
+   Then the half's id seeds and `loadSourceReview` reads the consolidated view plus the succeeded cover.
+   ⚠ **A NEWER review of the head queued or running** (a comment-triggered re-review, a press; a row newer
+   than the succeeded one) holds it too (`review_running`), and so does `reviewHeldForPr` (a lane item has
+   no row yet) — except on the review's own end hook (cause `review`, its claim still held).
    Else CI causes at this head: an AI review of the head running (`reviewHeldForPr`), settling
    (`autoReviewWaiting`) or expected (auto review on, no full review row at the head) ⇒ `review_running` /
    `review_due`, at most `AUTO_FIX_REVIEW_WAIT_MS` (15 min) after CI was ready — one fix covers both; then a
-   CI-ONLY fix. No CI causes and a review expected ⇒ wait for it, unbounded. Neither ⇒ `nothing_to_fix`;
+   CI-ONLY fix. No CI causes and a review expected ⇒ wait for it, unbounded. Neither ⇒ `nothing_to_fix`.
+   ⚠ **`review_capped`** (2026-11-18): the review is due or settling (not running) but the workspace's AUTO
+   REVIEW daily cap is reached — the sweeper's own count, `readAutoReviewUsage` (`getAutoReviewCandidates(…,
+   {limit: 0}).autoToday` vs the cap in force), the fold `AutoReviewCapToast` reads, asked ONLY on this
+   branch. With no CI causes ⇒ idle "No auto review today: the limit of N is reached." (the cap printed);
+   with CI causes ⇒ the CI-only fix at once. Never "Waiting for the AI review" for a review that cannot come;
 5. `maybeStartAutoFix` (every gate above). TRANSIENT refusals (`sandbox_busy`, `over_budget`, `no_sandbox`,
    `fix_in_progress`) are WAITS the sweep retries; the rest (`fix_waiting`, `cap`, `already_tried`,
-   `nothing_to_fix`) end until the PR's facts change.
+   `nothing_to_fix`) end until the PR's facts change — except the faults (`no_ai_login`,
+   `review_unavailable`, `pr_unavailable`, `error`) and `review_capped`, which the sweep decides again every
+   minute even on unchanged facts (shared `AUTO_FIX_QUEUE_REDECIDE`: a sign-in, a passing outage, a new
+   UTC day). An unknown skip reason reads `error`.
+
+**THE ONE LINE** (2026-11-18). Every word is shared `AUTO_FIX_QUEUE_LINE` (`cap` prints `AUTO_FIX_DAILY_CAP`;
+`review_capped` is `autoReviewCappedLine(cap)`). The AI Review tab shows it ONLY in the Auto fix section;
+an ENDED line (status `idle`) is hidden while the PR's latest review is queued or running
+(`autoFixQueueLineShown`, frontend `lib/claudeAutoReview.ts`) — a reason appears only after the review
+finished. Waits always show. "Nothing to fix." and "A finished fix is waiting for you to push it." are the
+queue's quiet lines as before; auto fix off has no queue (no line).
 
 The managers REGISTER their in-process facts (`bindAutoFixQueueFacts`: a fix running, a review queued or
 settling, a CI review held) when they load; ⚠ the queue never imports a manager — its fire-and-forget import

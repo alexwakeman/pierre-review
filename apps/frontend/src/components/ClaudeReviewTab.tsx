@@ -132,7 +132,6 @@ import { RepliesCheckLine } from './RepliesCheckLine.js';
 import { AiStatusLine } from './AiStatusLine.js';
 import {
   AUTO_REVIEW_WAITING_LABEL,
-  autoFixOutcomeLine,
   autoReviewWhyLine,
   autoSweepResultLine,
   failedAutoReviewLine,
@@ -2469,15 +2468,9 @@ export function ClaudeReviewTab({
             </div>
           )}
 
-          {/* After an auto review of the reader's own PR: the auto fix started (a skip says nothing). */}
-          {viewingLatest && autoFixOutcomeLine(data?.autoFix) != null && (
-            <div className="mt-2 text-meta text-ui-mute">
-              {autoFixOutcomeLine(data?.autoFix)}
-            </div>
-          )}
-
-          {/* THE AUTO FIX QUEUE: what the next auto fix waits for, and this PR's auto fixes. */}
-          <AutoFixQueuePanel prId={pr.id} />
+          {/* THE AUTO FIX QUEUE: the ONE auto fix line (what the next auto fix waits for, or why none
+              started — only once the review finished), and this PR's auto fixes. */}
+          <AutoFixQueuePanel prId={pr.id} reviewInFlight={isRunning || autoHold != null} />
 
           {/* Team claims: a teammate's Limn reviewing now, or a pending line to clear. */}
           <TeamClaimLine prId={pr.id} data={data} />

@@ -7,7 +7,7 @@
 //     PR's CURRENT head (the AI review and the CI review of that head), so nothing already fixed is sent.
 // Each fix is its own run and its own push. This file is the wire contract and the plain words.
 
-import type { AiFixStatus } from './types.js';
+import { AUTO_FIX_DAILY_CAP, type AiFixStatus } from './types.js';
 
 /** How long a CI fix waits for the AI review of the same head. */
 export const AUTO_FIX_REVIEW_WAIT_MS = 15 * 60_000;
@@ -32,7 +32,13 @@ export type AutoFixQueueReason =
   | 'cap'
   | 'already_tried'
   | 'nothing_to_fix'
-  | 'not_started';
+  // the auto review that would seed the fix will not run today (the workspace's daily cap)
+  | 'review_capped'
+  // faults: the fix did not start (the sweep decides again each minute, so a passing one clears)
+  | 'no_ai_login'
+  | 'review_unavailable'
+  | 'pr_unavailable'
+  | 'error';
 
 export type AutoFixQueueStatus = 'waiting' | 'started' | 'idle';
 
@@ -64,11 +70,29 @@ export const AUTO_FIX_QUEUE_LINE: Record<AutoFixQueueReason, string> = {
   over_budget: 'Paused: the AI spend limit is reached.',
   no_sandbox: 'Paused: no container runtime is running on this computer.',
   fix_waiting: 'A finished fix is waiting for you to push it.',
-  cap: 'No more auto fixes on this pull request today.',
+  cap: `No auto fix: ${AUTO_FIX_DAILY_CAP} already ran on this pull request in the last 24 hours.`,
   already_tried: 'The last auto fix could not address these points. Nothing changed since.',
   nothing_to_fix: 'Nothing to fix.',
-  not_started: 'The auto fix could not start.',
+  review_capped: 'No auto review today: the daily limit is reached.',
+  no_ai_login: 'No auto fix: AI is not signed in on this computer.',
+  review_unavailable: 'No auto fix: the review could not be read.',
+  pr_unavailable: 'No auto fix: the pull request could not be read from GitHub.',
+  error: 'No auto fix: an error stopped it.',
 };
+
+/** `review_capped` with the workspace's cap in force (the sweeper's own number). */
+export function autoReviewCappedLine(cap: number): string {
+  return `No auto review today: the limit of ${cap} is reached.`;
+}
+
+/** The ended reasons the sweep decides again each minute (a fault that may pass; a cap that resets). */
+export const AUTO_FIX_QUEUE_REDECIDE: ReadonlySet<AutoFixQueueReason> = new Set<AutoFixQueueReason>([
+  'review_capped',
+  'no_ai_login',
+  'review_unavailable',
+  'pr_unavailable',
+  'error',
+]);
 
 /** One auto fix of a PR, for the AI Review tab's history (newest first). */
 export interface AutoFixHistoryRow {

@@ -186,7 +186,6 @@ beforeEach(() => {
   running = false;
   started = [];
   startAnswer = { status: 'queued', fixId: 77 };
-  mod._resetAutoFixForTest();
 });
 
 describe('maybeStartAutoFix — the author gate', () => {
@@ -207,15 +206,12 @@ describe('maybeStartAutoFix — the author gate', () => {
         queueIfBusy: true,
       },
     ]);
-    expect(mod.autoFixOutcomeFor(501, 1)).toEqual(r);
-    expect(mod.autoFixOutcomeFor(501, 2)).toBeNull(); // owner-scoped
   });
 
   it('⚠ someone else’s PR → no fix, nothing recorded', async () => {
     const prId = await seedPr(aliceId);
     expect(await go(prId, 502)).toEqual({ status: 'not_own' });
     expect(started).toEqual([]);
-    expect(mod.autoFixOutcomeFor(502, 1)).toBeNull();
   });
 
   it('a retired review model falls back to the fixer’s default', async () => {
@@ -312,7 +308,6 @@ describe('maybeStartAutoFix — the workspace switch', () => {
     expect(await go(prId, 520)).toEqual({ reviewId: 520, status: 'skipped', reason: 'off' });
     expect(loadInputs.length).toBe(before);
     expect(started).toEqual([]);
-    expect(mod.autoFixOutcomeFor(520, 1)).toMatchObject({ reason: 'off' });
 
     await db.update(ws).set({ autoFixEnabled: true }).where(eq(ws.id, wsId)).execute();
     expect(await go(prId, 521)).toEqual({ reviewId: 521, status: 'started', fixId: 77 });
@@ -347,7 +342,6 @@ describe('maybeStartAutoFix — the skips', () => {
     const prId = await seedPr(viewerId);
     expect(await go(prId, 509)).toEqual({ status: 'not_auto' });
     expect(started).toEqual([]);
-    expect(mod.autoFixOutcomeFor(509, 1)).toBeNull();
   });
 
   it('nothing to fix', async () => {
@@ -355,7 +349,6 @@ describe('maybeStartAutoFix — the skips', () => {
     const prId = await seedPr(viewerId);
     expect(await go(prId, 510)).toEqual({ reviewId: 510, status: 'skipped', reason: 'nothing_to_fix' });
     expect(started).toEqual([]);
-    expect(mod.autoFixOutcomeFor(510, 1)?.status).toBe('skipped');
   });
 
   it('the PR moved on after the review', async () => {
@@ -466,11 +459,35 @@ describe('maybeStartAutoFix — the skips', () => {
     expect(await go(prId)).toMatchObject({ status: 'started' });
   });
 
-  it('a refusal from the fixer is recorded, never thrown', async () => {
-    startAnswer = { status: 'no_auth' };
-    expect(await go(await seedPr(viewerId))).toMatchObject({ reason: 'not_started' });
+  it('a refusal from the fixer is returned, never thrown', async () => {
     startAnswer = { status: 'already_running' };
     expect(await go(await seedPr(viewerId))).toMatchObject({ reason: 'fix_in_progress' });
+  });
+
+  it('⚠ THE FAULTS each get their own reason (no catch-all "could not start")', async () => {
+    const cases: Array<[any, string]> = [
+      [{ status: 'no_auth', message: 'not signed in' }, 'no_ai_login'],
+      [{ status: 'review_unavailable' }, 'review_unavailable'],
+      [{ status: 'not_found' }, 'pr_unavailable'],
+      [{ status: 'no_head' }, 'pr_unavailable'],
+      [{ status: 'no_instruction' }, 'error'],
+    ];
+    for (const [answer, reason] of cases) {
+      startAnswer = answer;
+      expect(await go(await seedPr(viewerId))).toMatchObject({ status: 'skipped', reason });
+    }
+  });
+
+  it('the review cannot be read ⇒ review_unavailable; a throw ⇒ error (the message to the log only)', async () => {
+    seed = null;
+    expect(await go(await seedPr(viewerId))).toMatchObject({ status: 'skipped', reason: 'review_unavailable' });
+    seed = { headSha: 'h1', model: 'claude-sonnet-5', items: [item('F1', 'Null deref')] };
+    const warned: string[] = [];
+    const loud = { ...ctx, log: { ...ctx.log, warn: (m: string) => warned.push(m) } } as any;
+    const throwing = { ...deps(), startReviewFix: (async () => { throw new Error('boom at 0xdead'); }) as any };
+    const r = await mod.maybeStartAutoFix(loud, { accountId: 1, prId: await seedPr(viewerId), reviewId: 4242 }, throwing, NOW);
+    expect(r).toEqual({ reviewId: 4242, status: 'skipped', reason: 'error' });
+    expect(warned.some((m) => m.includes('boom at 0xdead'))).toBe(true);
   });
 });
 
@@ -532,7 +549,7 @@ describe('ticket items in the review seed', () => {
 describe('maybeStartAutoFix — the sandbox (AI Fix runs only as a sandboxed session)', () => {
   const withSandbox = (answer: any) => ({ ...deps(), sandbox: async () => answer });
 
-  it('⚠ no container runtime ⇒ skipped "no_sandbox" before the seed; nothing started, recorded for the tab', async () => {
+  it('⚠ no container runtime ⇒ skipped "no_sandbox" before the seed; nothing started', async () => {
     const prId = await seedPr(viewerId);
     const reviewId = 990 + prId;
     const before = loadInputs.length;
@@ -540,8 +557,6 @@ describe('maybeStartAutoFix — the sandbox (AI Fix runs only as a sandboxed ses
     expect(r).toEqual({ reviewId, status: 'skipped', reason: 'no_sandbox' });
     expect(loadInputs.length).toBe(before);
     expect(started).toEqual([]);
-    expect(mod.autoFixOutcomeFor(reviewId, 1)).toEqual(r);
-    expect(mod.autoFixOutcomeFor(reviewId, 2)).toBeNull();
   });
 
   it('a busy machine ⇒ the start WAITS IN LINE ("sandbox_busy" while it waits); busy because THIS PR’s fix holds a session ⇒ "fix_in_progress"', async () => {

@@ -39,7 +39,6 @@ import type { AgentContext } from '../agent-context.js';
 import { anyProviderPreflight, preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
 import { autoReviewWaiting } from './auto.js';
 import { isAutoPostingNow } from './auto-post.js';
-import { autoFixOutcomeFor } from '../../coding/ai-fix/auto-fix.js';
 import { isFixRunning } from '../../coding/ai-fix/manager.js';
 import {
   autoReviewHold,
@@ -289,12 +288,6 @@ export function registerClaudeReviewRoutes(app: FastifyInstance, ctx: AgentConte
       autoReviewWaiting: autoReview ? null : autoReviewWaiting(id, accountId),
       autoReviewWhy,
       teammateVerdictWait,
-      // A pair's auto fix ran from whichever half the hook named (the first when the second failed).
-      autoFix: review
-        ? ([review.id, ...(review.pair?.halves ?? []).map((h) => h.reviewId).filter((rid) => rid !== review.id).reverse()]
-            .map((rid) => autoFixOutcomeFor(rid, accountId))
-            .find((o) => o != null) ?? null)
-        : null,
       // The failed auto run at the current head a reader's Retry would re-run (manual rows ignored).
       failedAutoAtHead: await getFailedAutoAtHead(ctx, id, accountId),
       currentThreadAssessments: threads.shown.items,

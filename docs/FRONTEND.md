@@ -1147,11 +1147,15 @@ rail still flows (no `sticky`). The slots:
     ("@robin reviewed this commit with Claude · approved", "Auto review skipped: already reviewed by
     …") and never "Waiting for a teammate's Ensemble to review": all removed 2026-11-10, the standings
     hold the teammate's verdict; Pending's "Waiting on others" row keeps its line), live progress + Stop (no live token
-    or cost readout), failures, an auto fix that STARTED or failed on a fault the reader can fix
-    (`autoFixOutcomeLine`: `not_started` / `over_budget` / `no_sandbox`; routine skips such as "auto AI
-    Fix is off" say nothing), THE AUTO FIX SECTION (`AutoFixQueuePanel`, own PRs with auto AI Fix on or any
+    or cost readout), failures, THE AUTO FIX SECTION (`AutoFixQueuePanel`, own PRs with auto AI Fix on or any
     auto fix: what the next auto fix waits for with "(up to N min)", and the PR's auto fixes behind a
-    disclosure, each with Open → the AI Fix tab; docs/CLAUDE-REVIEW.md § The auto fix queue), the replies pass ONLY while it runs (status + Cancel) or when the newest
+    disclosure, each with Open → the AI Fix tab; docs/CLAUDE-REVIEW.md § The auto fix queue). ⚠ It holds THE
+    ONE auto fix line (2026-11-18, replacing the 2026-11-10 rule): the per-review "No auto fix: …" line
+    (`autoFixOutcomeLine`) is DELETED; the queue's line says why no auto fix started — the faults
+    (`no_ai_login`, `review_unavailable`, `pr_unavailable`, `error`), `over_budget`, `no_sandbox`, BOTH caps
+    (`cap` with `AUTO_FIX_DAILY_CAP`, `review_capped` with the workspace's auto review cap) — and an ENDED
+    line is hidden while the PR's review is queued or running (`autoFixQueueLineShown`, the tab passes
+    `reviewInFlight`), so a reason shows only after the review finished, the replies pass ONLY while it runs (status + Cancel) or when the newest
     one failed (`RepliesCheckLine`; NO "Check replies" button, removed 2026-11-10 — the pass starts by
     itself); its ⓘ ("Review only, or review and post") sits beside the section
     title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Ensemble reviews so far ·
