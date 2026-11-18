@@ -280,6 +280,24 @@ They share the ticket the way auto reviews share a commit: through GitHub, with 
 
 ---
 
+### Asking anyone in the workspace (2026-11-18)
+
+A person can ask any teammate for a review from the PR's Overview, not only the suggested reviewers.
+Under Suggested (or under Requested, once Suggested is gone) a **Someone else** link opens a box.
+The reader types a name and picks one or more people. **Request review** sends a GitHub review
+request to each of them, the same request the Suggested "Assign" button sends.
+
+- **Who is offered**: everyone who opened or merged a PR in the PR's workspace. People who merged a
+  PR in this repo come first, then people who merged elsewhere in the workspace, then anyone active in
+  the last 90 days. The reader, the PR's author, bots and anyone already asked are left out. The list
+  comes from Ensemble's own data. Ensemble does not ask GitHub who has access.
+- **GitHub decides.** Someone without access to the repo cannot be asked. GitHub refuses, and the
+  refusal shows on that person's chip ("@bob can’t be asked to review: they don’t have access to
+  acme/api."). The others are still asked. Ensemble does not send that request again.
+- **It only adds.** The box never removes a reviewer who is already asked.
+- Only a reader who can push to the repo sees the link. Each request is the reader's own GitHub write,
+  not an Ensemble bot's.
+
 ## 4. Author and reviewer
 
 ```mermaid
@@ -797,6 +815,7 @@ All names and times are illustrative; every step follows the current rules.
 - Edit or delete a teammate's comment, or resolve a teammate's or a person's thread.
 - Reopen a thread more than once, or post more than one pushback per thread.
 - Reopen a thread, or start a new thread about an open point, on the reader's own PR.
+- Remove a reviewer someone asked. "Someone else" only adds people (§ 3).
 - Retry a GitHub write that failed — except its own status lines (up to 5 tries) and a refused
   verdict, which is sent once more as a plain comment.
 - Treat its findings, reminders or any of its replies as a person's reply.

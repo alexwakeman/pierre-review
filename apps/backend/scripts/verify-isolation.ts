@@ -196,6 +196,14 @@ check(
   'getReviewerCandidate(B.pr, A) returns null (IDOR blocked)',
   (await q.getReviewerCandidate(B.prId, 1)) === null,
 );
+// "Someone else" (GET /api/prs/:id/askable-people) — DB only, so both halves.
+const { getAskablePeople } = await import('../src/db/askable-people.js');
+check('getAskablePeople(A.pr, A) returns the people', (await getAskablePeople(A.prId, 1, null)) != null);
+check('getAskablePeople(B.pr, A) returns null (IDOR blocked)', (await getAskablePeople(B.prId, 1, null)) === null);
+check(
+  "getAskablePeople(A.pr, A, B's workspace) falls back to A's Default",
+  (await getAskablePeople(A.prId, 1, defaultB))?.workspaceId === defaultA,
+);
 
 check('markPrViewed(A.pr, A) succeeds', (await q.markPrViewed(A.prId, 1)) === true);
 check('markPrViewed(B.pr, A) returns false (IDOR blocked)', (await q.markPrViewed(B.prId, 1)) === false);

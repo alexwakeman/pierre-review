@@ -830,6 +830,12 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/prs/42/request-reviewers')).toEqual(['github_write']);
   });
 
+  // "Someone else" (the PR pane's picker) is DB only: who authored or merged a PR in the workspace.
+  // `read`, decided; the press rides `request-reviewers` (github_write).
+  it('puts the "Someone else" people list on read', () => {
+    expect(tiers('GET', '/api/prs/42/askable-people')).toEqual(['read']);
+  });
+
   // The Changes tab's two click-gated file reads: a gap marker's "Show N hidden lines" (one file's
   // raw text) and "Load full diff" (both sides + the merge base). Spelled with their exact segments
   // — `files/contents` (GitHub's own plural) or `file/content` must NOT ride the detail bucket.

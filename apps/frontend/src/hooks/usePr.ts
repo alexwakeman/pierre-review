@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AskablePeopleResponse,
   MentionCandidate,
   PrDetail,
   PrFileContentResponse,
@@ -12,6 +13,7 @@ import type {
   ThreadDetail,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
+import { workspaceScopeKey } from '../store/filters.js';
 
 // 45 minutes. Detail carries the bulky hydrated TEXT (bodies, diff hunks); a
 // 7-day in-memory gcTime meant every PR/thread/file-diff opened in a session
@@ -105,6 +107,19 @@ export function useReviewerCandidate(id: number, enabled: boolean) {
     queryKey: ['reviewer-candidate', id],
     queryFn: () => api.reviewerCandidate(id),
     enabled,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 5,
+  });
+}
+
+// "Someone else" — the workspace people the PR pane's picker offers (DB only). Enabled only once the
+// reader opens the picker: nothing fetches on mount. Its own LIVE key with the `ws:<id>` segment
+// (never persisted); every reviewer request refreshes it (`requestReviewersOptions`).
+export function useAskablePeople(prId: number, workspaceId: number | null, enabled: boolean) {
+  return useQuery<AskablePeopleResponse>({
+    queryKey: ['askable-people', prId, workspaceScopeKey(workspaceId ?? 0)],
+    queryFn: () => api.askablePeople(prId, workspaceId as number),
+    enabled: enabled && workspaceId != null,
     staleTime: 1000 * 60,
     gcTime: 1000 * 60 * 5,
   });

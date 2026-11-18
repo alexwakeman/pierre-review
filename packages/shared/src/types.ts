@@ -11118,6 +11118,21 @@ export interface ReviewerCandidateResponse {
   users: User[];
 }
 
+/** One person the PR pane's "Someone else" picker offers. `isMaintainer` = has merged a PR in THIS
+ *  PR's repo (the picker's shield); `mergedInWorkspace` = has merged one anywhere in the workspace. */
+export interface AskablePerson extends MentionCandidate {
+  mergedInWorkspace: boolean;
+}
+
+/** GET /api/prs/:id/askable-people?workspace=<id> — DB only, fetched when the reader opens the picker.
+ *  Everyone who authored or merged a PR in the workspace (plus the PR's own repo), best first: merged
+ *  here, merged in the workspace, active in the last 90 days, then the rest. The reader, the PR's
+ *  author, automation and anyone already requested are left out. */
+export interface AskablePeopleResponse {
+  workspaceId: number;
+  people: AskablePerson[];
+}
+
 // Per-vendor rollup carried by the bot_signal card.
 export interface BotSignalVendorStat {
   kind: AutomatedReviewerKind; // vendor, in-house, or Limn's own (widened from ReviewBotKind for the bot-triage platform)

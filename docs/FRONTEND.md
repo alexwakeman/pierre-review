@@ -3890,7 +3890,9 @@ The server contract is [BACKEND.md](BACKEND.md) § Waiting on others. On screen:
   1 review waiting on them"), and asks only on "Ask @robin". ⚠ NOTHING FETCHES ON MOUNT: the board's
   rule holds. Both HIDE (never disable) without request rights (`viewerCanPush` on the card,
   `viewerCanRequest` in the pane) and under the target (`nudgeOffered`, `askSomeoneElseOffered`).
-  A request refreshes `invalidateAfterPrWrite` plus `['review-waits' | 'reviewer-candidate', id]`.
+  A request refreshes `invalidateAfterPrWrite` plus `['review-waits' | 'reviewer-candidate' |
+  'askable-people', id]`. GitHub refusing the person comes back as a 422 in plain English
+  (docs/API.md); every one of these buttons shows the route's `message` as is.
 - **The PR pane's "Requested" row** (`ChecksTab` `RequestedReviewersRow`) reads
   `GET /api/prs/:id/review-waits` on an open PR (`usePrReviewWaits`, live, never persisted): each
   chip gets its working-hours wait (amber past the target), a Nudge where offered, and under the row
@@ -4143,6 +4145,33 @@ non-empty answer per PR for the session (`seenSuggestions`, bounded at 50, survi
 remount) while the PR is open and not a draft, and `SuggestedReviewersRow` drops anyone already on
 the "Requested" row (user id, or a team by slug / `owner/slug`). Someone asked from the row keeps a
 "Requested" tick until the refetched detail lists them above. The server gate is unchanged.
+
+Because the server empties it, the Suggested row is gone on most PRs that already have a reviewer —
+so the "Someone else" picker (below) never lives ONLY inside it.
+
+### The "Someone else" picker (asking anyone in the workspace)
+
+`components/ReviewerPicker.tsx`, mounted by `ChecksTab` in the People section: at the END of the
+Suggested row when that row shows, otherwise on its own `Ask` row under Requested. Shown on any OPEN
+PR (drafts too) where `pr.viewerCanPush`, once the PR's OWN workspace is known (`Repo.workspaceId`
+off `useRepos()`, never the selector — the PR may be open from another workspace). Hidden, never
+disabled.
+
+- **Nothing fetches on mount.** "Someone else" is a link; opening it enables
+  `useAskablePeople(prId, workspaceId, open)` (`GET /api/prs/:id/askable-people`, DB only, key
+  `['askable-people', prId, 'ws:<id>']`, live, never persisted).
+- A text box with a dropdown filtered by what is typed — the ONE people matcher,
+  `orderMentionSuggestions` (`MentionTextarea.tsx`), so merged-here people keep the shield and sort
+  first. Picks become removable chips; Backspace in an empty box removes the last unsent chip.
+- **Asking only — it removes nobody.** "Request review" sends ONE request per chip through
+  `useRequestReviewers(prId, 'pick:<login>')`, so one refusal never sinks the others and each chip
+  shows its own outcome ("Asked", or the route's 422 words — "@bob can’t be asked to review: they
+  don’t have access to acme/api."). ⚠ A chip that was sent (any outcome, read off the mutation cache)
+  is NEVER sent again: no retry offer. The button shows only while an unsent chip exists.
+- The picks are capped client-side at GitHub's ceiling, `REVIEW_REQUEST_LIMIT` (15) less who is
+  already requested (`lib/reviewerPicker.ts` `pickRoom`); at the cap the box is replaced by one line.
+- A request refreshes `['askable-people', prId]` with the rest of the request set
+  (`requestReviewersOptions`), so whoever was asked leaves the list.
 
 ### Suggested reviewers on a `reviewer_routing` card — one Assign per suggestion
 

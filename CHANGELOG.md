@@ -13,7 +13,15 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Pull request Overview: "Someone else" asks anyone in the workspace for a review. Type a name, pick one or
+  more people, and press "Request review". People who merged in the repository come first. If GitHub refuses
+  someone (for example, they have no access to the repository), the reason shows on their name.
+
 ### Changed
+
+- Asking for a review: when GitHub refuses a person, the message now says who and why in plain English.
 
 - AI Review: the reason an auto fix did not start is one line, in the Auto fix section, shown after the review
   finishes. It names the cause: AI not signed in, the review or the pull request could not be read, an error,

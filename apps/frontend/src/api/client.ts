@@ -1,3 +1,4 @@
+import type { AskablePeopleResponse } from '@pierre-review/shared';
 import type {
   JiraAcFieldSettingsBody,
   JiraAcFieldSettingsResponse,
@@ -814,6 +815,10 @@ export const api = {
   // "Ask someone else" — the one person to ask. CLICK-gated (it reads CODEOWNERS).
   reviewerCandidate: (id: number) =>
     get<ReviewerCandidateResponse>(`/api/prs/${id}/reviewer-candidate`),
+  // "Someone else": the workspace people to ask for a review, mergers first (DB only; fetched when
+  // the reader opens the picker).
+  askablePeople: (prId: number, workspaceId: number) =>
+    get<AskablePeopleResponse>(`/api/prs/${prId}/askable-people?${workspaceParam(workspaceId)}`),
   thread: (id: number) => get<ThreadDetail>(`/api/threads/${id}`),
   // @mention candidates for a PR, pre-ranked by proximity (self + bots excluded), each
   // flagged `isMaintainer` for this PR's repo.

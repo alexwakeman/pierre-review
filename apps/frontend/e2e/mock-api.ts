@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  AskablePeopleResponse,
   StoryChatListResponse,
   StoryChatLive,
   PrTabSummariesResponse,
@@ -166,6 +167,14 @@ const ME: User = { id: 1, githubLogin: 'me-user', displayName: 'Me', avatarUrl: 
 const ALICE: User = { id: 2, githubLogin: 'alice', displayName: 'Alice', avatarUrl: null, isBot: false };
 const BOB: User = { id: 3, githubLogin: 'bob', displayName: 'Bob', avatarUrl: null, isBot: false };
 const USERS: User[] = [ME, ALICE, BOB];
+// The PR pane's "Someone else" picker (GET /api/prs/:id/askable-people): mergers first.
+const ASKABLE_PEOPLE: AskablePeopleResponse = {
+  workspaceId: 1,
+  people: [
+    { ...ALICE, isMaintainer: true, mergedInWorkspace: true },
+    { ...BOB, isMaintainer: false, mergedInWorkspace: false },
+  ],
+};
 
 // ── THE WORKSPACE COMES FIRST, AND THE WHOLE CONSOLE DEPENDS ON IT ─────────────────────────────
 // A workspace is the app's ONLY scope. The store starts with `workspaceId: null` and NOTHING
@@ -2440,6 +2449,9 @@ export async function installMockApi(
       // "Ask someone else" — click-gated; nobody to suggest in the fixtures.
       if (path.match(/\/api\/prs\/\d+\/reviewer-candidate$/))
         return json(route, { candidate: null, users: [] } satisfies ReviewerCandidateResponse);
+      // "Someone else" — fetched when the picker opens: Alice has merged here, Bob has not.
+      if (path.match(/\/api\/prs\/\d+\/askable-people$/))
+        return json(route, ASKABLE_PEOPLE);
 
       if (path.endsWith('/api/me')) {
         if (opts.timeline !== false) return json(route, ME_RESPONSE);
@@ -2977,6 +2989,7 @@ export async function installMockApi(
 
 export const fixtures = {
   PRS,
+  ASKABLE_PEOPLE,
   INBOX_IDS,
   REPO,
   USERS,

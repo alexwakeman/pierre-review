@@ -851,6 +851,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // selects and a calendar fold, no GitHub, no model. `read`, DECIDED (spelled exactly) rather than
   // inherited from the blanket.
   if (!mutating && /^\/api\/prs\/\d+\/review-waits$/.test(path)) return [TIERS.read];
+  // GET /api/prs/<id>/askable-people — the PR pane's "Someone else" picker: who authored or merged a
+  // PR in the workspace, grouped in two selects. No GitHub, no model. `read`, DECIDED (spelled
+  // exactly); asking rides the existing `request-reviewers` write (github_write).
+  if (!mutating && /^\/api\/prs\/\d+\/askable-people$/.test(path)) return [TIERS.read];
   // GET /api/threads/<id> hydrates the same way.
   if (!mutating && /^\/api\/threads\/\d+$/.test(path)) return [TIERS.prDetail, TIERS.read];
   // POST /api/prs/<id>/refresh — the PrDetail live poll (~every 5s while a PR pane is

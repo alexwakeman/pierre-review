@@ -111,6 +111,22 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
 
+      <H3 id="someone-else">Asking someone else</H3>
+      <p>
+        To ask anyone in the workspace for a review, press <Ui>Someone else</Ui>. It sits at the end of{' '}
+        <Ui>Suggested</Ui>, or on its own line once nobody is suggested. Type a name and pick one or more people,
+        then press <Ui>Request review</Ui>. Each person gets a GitHub review request.
+      </p>
+      <p>
+        The list holds everyone who opened or merged a pull request in the workspace. People who merged in this
+        repository come first. You, the author, bots and anyone already asked are left out.
+      </p>
+      <Note>
+        GitHub asks only people with access to the repository. If it refuses someone, the reason shows on their
+        name, and the others are still asked. You need push access to see <Ui>Someone else</Ui>. It never removes a
+        reviewer.
+      </Note>
+
       <H2 id="about">About</H2>
       <p>
         <Ui>Ticket</Ui> (the linked tickets, where the workspace has a tracker, or "No ticket found"),{' '}
