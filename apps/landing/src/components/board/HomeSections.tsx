@@ -26,7 +26,8 @@ export function HowItWorks(): JSX.Element {
       <div className="chap rise">
         <h2 id="how-h">One click from ticket to pull request</h2>
         <p>
-          Spend your time on what the ticket should say, not on prompting and checking. Press Build end to end:{' '}
+          Spend more time on the spec and the design and less time prompting and checking. Press Build end to
+          end:{' '}
           {SITE_NAME} refines the ticket, builds it, reviews it until it is clean, opens the pull requests and updates
           the ticket.
         </p>
@@ -109,8 +110,8 @@ export function EnsembleSection(): JSX.Element {
       <div className="chap rise">
         <h2 id="ens-h">Review as an ensemble</h2>
         <p>
-          Your Claude and Codex review every pull request, against its ticket, on the plan you already have. Add
-          teammates and their Ensembles join in.
+          Your team&rsquo;s pull requests: all reviewed automatically on your behalf. You stay in control, with no
+          seat or extra account needed.
         </p>
       </div>
       <div className="board ensemble">
