@@ -283,13 +283,10 @@ function SuggestedReviewersRow({
   pr,
   suggestions: all,
   usersById,
-  someoneElse,
 }: {
   pr: PrDetailT;
   suggestions: ReviewerSuggestion[];
   usersById: Map<number, User>;
-  /** The "Someone else" picker, at the end of the row (null when the reader can't ask). */
-  someoneElse: React.ReactNode;
 }): JSX.Element | null {
   const request = useRequestReviewers(pr.id);
   const [requested, setRequested] = useState<Set<string>>(new Set());
@@ -360,7 +357,6 @@ function SuggestedReviewersRow({
             </div>
           );
         })}
-        {someoneElse}
       </div>
       {request.isError && (
         <div className="mt-1 text-meta text-ui-danger">
@@ -1138,13 +1134,13 @@ export function ChecksTab({
           pr={pr}
           suggestions={suggestions}
           usersById={suggestUsersById}
-          someoneElse={someoneElse}
         />
       )}
 
-      {/* "Someone else" on its own line when the Suggested row is not shown — the server empties
-          Suggested once anyone is requested, so most PRs with a reviewer reach the picker here. */}
-      {!suggestedRowVisible && someoneElse != null && <Row label="Ask">{someoneElse}</Row>}
+      {/* "Someone else" ALWAYS on its own row, in ONE tree slot, under Suggested (or Requested). The
+          server empties Suggested once anyone is requested, so a picker mounted inside that row
+          would remount closed and empty mid-send, losing a chip's "Asked" or its refusal. */}
+      {someoneElse != null && <Row label="Ask">{someoneElse}</Row>}
 
       {botGroups.length > 0 && (
         <Row label="Bots">

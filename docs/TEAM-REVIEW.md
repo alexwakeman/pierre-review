@@ -283,7 +283,8 @@ They share the ticket the way auto reviews share a commit: through GitHub, with 
 ### Asking anyone in the workspace (2026-11-18)
 
 A person can ask any teammate for a review from the PR's Overview, not only the suggested reviewers.
-Under Suggested (or under Requested, once Suggested is gone) a **Someone else** link opens a box.
+Under Suggested (or under Requested, once Suggested is gone), on its own line, a **Someone else**
+link opens a box.
 The reader types a name and picks one or more people. **Request review** sends a GitHub review
 request to each of them, the same request the Suggested "Assign" button sends.
 

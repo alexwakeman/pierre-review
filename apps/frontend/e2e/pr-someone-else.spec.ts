@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { PrDetail, RequestReviewersBody } from '@pierre-review/shared';
+import type { PrDetail, RequestReviewersBody, SuggestedReviewersResponse } from '@pierre-review/shared';
 import { installMockApi, prDetailFor } from './mock-api.js';
 
 // THE PR PANE'S "SOMEONE ELSE" PICKER (docs/FRONTEND.md § The "Someone else" picker):
@@ -7,6 +7,7 @@ import { installMockApi, prDetailFor } from './mock-api.js';
 //   • typing filters the dropdown; picked people become removable chips
 //   • "Request review" sends ONE request per person: GitHub refusing one (a 422) lands on that
 //     person's chip, the other is asked, and a sent chip is never offered again
+//   • the picker keeps its chips when a request empties the Suggested row (one tree slot)
 //   • no link where the reader cannot push (hide, never disable)
 
 const PR_ID = 101;
@@ -17,12 +18,39 @@ interface Harness {
   peopleHits: () => number;
 }
 
-async function setup(page: Page, { canPush }: { canPush: boolean }): Promise<Harness> {
+async function setup(
+  page: Page,
+  { canPush, suggestAlice = false }: { canPush: boolean; suggestAlice?: boolean },
+): Promise<Harness> {
   await installMockApi(page);
   const detail: PrDetail = { ...prDetailFor(PR_ID), state: 'open', viewerCanPush: canPush, authorId: 1 };
+  // Like the server: Suggested lists @alice until anyone is requested, then empties; the refetched
+  // detail lists her on Requested.
+  let aliceAsked = false;
+  if (suggestAlice) {
+    await page.route(
+      (u) => u.pathname === `/api/prs/${PR_ID}/suggested-reviewers`,
+      (r) => {
+        const body: SuggestedReviewersResponse = aliceAsked
+          ? { suggestedReviewers: [], users: [] }
+          : {
+              suggestedReviewers: [
+                { kind: 'user', login: 'alice', userId: 2, teamSlug: null, teamName: null, reason: 'reviewed here', source: 'history' },
+              ],
+              users: [],
+            };
+        return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      },
+    );
+  }
   await page.route(
     (u) => u.pathname === `/api/prs/${PR_ID}`,
-    (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(detail) }),
+    (r) =>
+      r.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(aliceAsked ? { ...detail, requestedReviewers: [{ userId: 2, teamName: null }] } : detail),
+      }),
   );
   let hits = 0;
   page.on('request', (req) => {
@@ -35,6 +63,7 @@ async function setup(page: Page, { canPush }: { canPush: boolean }): Promise<Har
     if (body.userIds?.includes(3)) {
       return route.fulfill({ status: 422, json: { error: 'ReviewerRefused', message: BOB_REFUSAL } });
     }
+    if (body.userIds?.includes(2)) aliceAsked = true;
     return route.fulfill({ json: { status: 'ok', requestedLogins: ['alice'] } });
   });
   await page.goto(`/app/?view=pr-detail:${PR_ID}`);
@@ -80,6 +109,24 @@ test.describe('PR Overview: Someone else', () => {
     await expect(page.getByRole('button', { name: 'Request review', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Done', exact: true })).toBeVisible();
 
+    expect(bodies).toEqual([{ userIds: [2] }, { userIds: [3] }]);
+  });
+
+  test('keeps both outcomes when the request empties the Suggested row', async ({ page }) => {
+    const { bodies } = await setup(page, { canPush: true, suggestAlice: true });
+    await expect(page.getByText('reviewed here')).toBeVisible();
+    await page.getByTestId('someone-else').click();
+    const box = page.getByRole('combobox', { name: 'Find someone to ask for a review' });
+    await box.fill('ali');
+    await box.press('Enter');
+    await box.fill('bo');
+    await box.press('Enter');
+    await page.getByRole('button', { name: 'Request review', exact: true }).click();
+
+    // Suggested goes away (alice is now requested) — the picker stays open with both outcomes.
+    await expect(page.getByText('reviewed here')).toHaveCount(0);
+    await expect(chip(page, 'alice').getByRole('status')).toHaveText('Asked');
+    await expect(chip(page, 'bob').getByRole('alert')).toHaveText(BOB_REFUSAL);
     expect(bodies).toEqual([{ userIds: [2] }, { userIds: [3] }]);
   });
 

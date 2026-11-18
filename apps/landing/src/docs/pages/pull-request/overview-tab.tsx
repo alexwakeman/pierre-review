@@ -113,8 +113,8 @@ export default function Page(): JSX.Element {
 
       <H3 id="someone-else">Asking someone else</H3>
       <p>
-        To ask anyone in the workspace for a review, press <Ui>Someone else</Ui>. It sits at the end of{' '}
-        <Ui>Suggested</Ui>, or on its own line once nobody is suggested. Type a name and pick one or more people,
+        To ask anyone in the workspace for a review, press <Ui>Someone else</Ui>. It sits on its own line under{' '}
+        <Ui>Suggested</Ui>, or under <Ui>Requested</Ui> once nobody is suggested. Type a name and pick one or more people,
         then press <Ui>Request review</Ui>. Each person gets a GitHub review request.
       </p>
       <p>

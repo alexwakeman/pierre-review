@@ -4147,12 +4147,14 @@ the "Requested" row (user id, or a team by slug / `owner/slug`). Someone asked f
 "Requested" tick until the refetched detail lists them above. The server gate is unchanged.
 
 Because the server empties it, the Suggested row is gone on most PRs that already have a reviewer —
-so the "Someone else" picker (below) never lives ONLY inside it.
+so the "Someone else" picker (below) never lives inside it.
 
 ### The "Someone else" picker (asking anyone in the workspace)
 
-`components/ReviewerPicker.tsx`, mounted by `ChecksTab` in the People section: at the END of the
-Suggested row when that row shows, otherwise on its own `Ask` row under Requested. Shown on any OPEN
+`components/ReviewerPicker.tsx`, mounted by `ChecksTab` in the People section on its OWN `Ask` row,
+right under Suggested (or Requested). ⚠ ONE tree slot, never inside the Suggested row: a successful
+request empties Suggested, and a picker inside it would remount closed and empty, losing the other
+chips' "Asked" / refusal before the reader sees them. Shown on any OPEN
 PR (drafts too) where `pr.viewerCanPush`, once the PR's OWN workspace is known (`Repo.workspaceId`
 off `useRepos()`, never the selector — the PR may be open from another workspace). Hidden, never
 disabled.
