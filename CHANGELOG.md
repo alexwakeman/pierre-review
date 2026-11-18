@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.64] - 2026-11-18
+
+### Changed
+
+- Maintenance release: no changes you would notice.
+
 ## [1.0.63] - 2026-11-18
 
 ### Changed
