@@ -616,7 +616,8 @@
   gap: 10px;
 }
 /* THE SNAKE (components/board/snake.ts): ONE line through the four boxes, which stand
-   apart with every corner rounded alike. It runs along the first box's top, down one side,
+   apart with every corner rounded alike. It rounds the first box's top-right corner, runs
+   along its top, down one side,
    along the bottom to the far corner, where it drops straight across the gap onto the
    next box's opposite side, and so on; every bend one radius. It is a band
    of colour seen through that line: .ens-snake covers the column, its MASK is the line (an

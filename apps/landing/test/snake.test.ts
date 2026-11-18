@@ -20,21 +20,21 @@ describe('the snake', () => {
     expect(d.replace(/^M[\d. ]+/, '')).toMatch(/^([LA][\d. -]+)+$/);
   });
 
-  it('starts along the first box’s top edge, where its top-right corner begins', () => {
-    expect(d).toMatch(/^M386 1L14 1A13 13 0 0 0 1 14/);
+  it('starts round the first box’s top-right corner, then along its top', () => {
+    expect(d).toMatch(/^M399 14A13 13 0 0 0 386 1L14 1A13 13 0 0 0 1 14/);
   });
 
   it('bends with one radius everywhere: the boxes’ corners and each crossing', () => {
     const arcs = d.match(/A[\d.]+ [\d.]+/g) ?? [];
-    // the first top corner, a bottom corner per box, one drop per gap
-    expect(arcs).toHaveLength(1 + boxes.length + (boxes.length - 1));
+    // the first box's two top corners, a bottom corner per box, one drop per gap, the last far corner
+    expect(arcs).toHaveLength(2 + boxes.length + (boxes.length - 1) + 1);
     expect(new Set(arcs)).toEqual(new Set(['A13 13']));
   });
 
-  it('runs down alternate sides and ends along the last box’s bottom, where its far corner begins', () => {
+  it('runs down alternate sides and ends round the last box’s far bottom corner', () => {
     expect(d).toContain('L1 86'); // box 1 down the left
     expect(d).toContain('L399 218'); // box 2 down the right
-    expect(d.endsWith('L14 495')).toBe(true); // box 4 (right side) ends bottom-left
+    expect(d.endsWith('L14 495A13 13 0 0 1 1 482')).toBe(true); // box 4 (right side) ends round its bottom-left
   });
 
   it('drops to the box below from the far corner of the box above', () => {

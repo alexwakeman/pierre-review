@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // THE SNAKE beside the review story (HomeSections.tsx, pages/home.css § the snake): ONE
 // line through the boxes, which stand APART with every corner rounded alike. It starts
-// along the first box's top edge, rounds its top-left corner, runs down its left side,
+// at the foot of the first box's top-right corner, rounds it, runs along the top, rounds
+// its top-left corner, runs down its left side,
 // rounds its bottom-left corner and runs along its bottom to the far corner, where it bends
 // down and drops straight across the gap onto the RIGHT side of the box below, runs down
-// it, and so on, alternating, ending along the last box's bottom where its far corner
-// begins. Every bend has one radius: the boxes' own corners where the line traces them,
+// it, and so on, alternating, ending round the last box's far bottom corner. Every bend has one radius: the boxes' own corners where the line traces them,
 // and the drop at each far corner. Pure geometry here; the page draws
 // it as a mask over one band of colour.
 // ---------------------------------------------------------------------------
@@ -30,9 +30,10 @@ export function snakePath(boxes: SnakeBox[], width: number, radius: number, stro
   const r = f(R);
   const arc = (sweep: number, x: number, y: number): string => `A${r} ${r} 0 0 ${sweep} ${f(x)} ${f(y)}`;
 
-  // box 0: from the start of its top-right corner, leftward along the top, round the top-left corner
+  // box 0: from the foot of its top-right corner, round that corner, leftward along the top,
+  // round the top-left corner
   const top0 = boxes[0]!.top + h;
-  let d = `M${f(right - R)} ${f(top0)}L${f(left + R)} ${f(top0)}${arc(0, left, top0 + R)}`;
+  let d = `M${f(right)} ${f(top0 + R)}${arc(0, right - R, top0)}L${f(left + R)} ${f(top0)}${arc(0, left, top0 + R)}`;
 
   boxes.forEach((b, i) => {
     const side = i % 2 === 0 ? left : right; // the edge this box's line runs down
@@ -43,8 +44,8 @@ export function snakePath(boxes: SnakeBox[], width: number, radius: number, stro
     d += `L${f(side)} ${f(y - R)}${arc(dir > 0 ? 0 : 1, side + dir * R, y)}`;
     const next = boxes[i + 1];
     if (!next) {
-      // the last box: along its bottom to where its far corner begins
-      d += `L${f(other - dir * R)} ${f(y)}`;
+      // the last box: along its bottom and round its far corner, ending at its foot
+      d += `L${f(other - dir * R)} ${f(y)}${arc(dir > 0 ? 0 : 1, other, y - R)}`;
       return;
     }
     // along the bottom to the far corner, then down from it: one bend, and straight down
