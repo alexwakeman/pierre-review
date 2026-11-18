@@ -272,7 +272,7 @@
   padding-bottom: 6px;
 }
 .lb.home .chap p {
-  grid-column: 6 / 13;
+  grid-column: 7 / 13; /* a clear column after the heading's (1 / 6): a long heading never crowds it */
   font-size: clamp(19px, 1.75vw, 25px);
   line-height: 1.3;
   color: #dcdad5;

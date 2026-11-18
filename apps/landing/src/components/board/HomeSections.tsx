@@ -28,8 +28,8 @@ export function HowItWorks(): JSX.Element {
         <p>
           Spend more time on the spec and the design and less time prompting and checking. Press Build end to
           end:{' '}
-          {SITE_NAME} refines the ticket, builds it, reviews it until it is clean, opens the pull requests and updates
-          the ticket.
+          {SITE_NAME} refines the ticket against your docs and the existing code, builds it, reviews it until it is
+          clean, opens the pull requests and updates the ticket.
         </p>
       </div>
       <div className="board flow">
