@@ -15,6 +15,11 @@ no internals.
 
 ### Changed
 
+- Implement: the plan asks the points to settle one at a time ("Point 2 of 4", with the acceptance criteria it is
+  about). Pick 1. Agree or 2. Keep the story (the 1 and 2 keys work), or Reply. Each answer is saved when you
+  pick it. The last step, Review, lists every answer and holds Approve and start. Picking the chosen answer
+  again no longer clears it.
+
 - AI Review: the reason an auto fix did not start is one line, in the Auto fix section, shown after the review
   finishes. It names the cause: AI not signed in, the review or the pull request could not be read, an error,
   the limit of 3 auto fixes in 24 hours, or the daily limit of auto reviews.

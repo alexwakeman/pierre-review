@@ -2,7 +2,9 @@
 //
 // Pins: "Approve and start" is enabled only on a live session waiting for the reader whose latest
 // revision has every point answered (and the one line that says why not); presses in flight lay over the
-// server's answers and a second press on the chosen answer clears it; the stage line; the dropped line;
+// server's answers; the decision wizard's steps (it opens on the first open point, else Review; a pick
+// moves to the next open point; picking the chosen answer keeps it; the Review lines); the stage line;
+// the dropped line;
 // the evidence labels and the GitHub link (only for a well-formed repository and sha); the stack's
 // "builds on" / "after" words; which planned PR may be pushed now (the one before it in its repository
 // pushed, an empty one skipped over, a cross-repository dependency pushed) and what Push all reaches.
@@ -11,6 +13,8 @@
 import { describe, expect, it } from 'vitest';
 import type { BuildPlanEvidence, BuildPlanPr, BuildPlanRevision, BuildPlanView, StoryBuildPr, StoryBuildSession } from '@pierre-review/shared';
 import {
+  aboutLine,
+  clampStep,
   contentionsHeading,
   criteriaBoxLabel,
   ticketReviewSeed,
@@ -21,14 +25,18 @@ import {
   evidenceGithubUrl,
   evidenceLabel,
   excerptLines,
-  nextDecision,
+  firstOpenStep,
+  pickDecision,
   planApproveState,
+  planReviewLines,
+  planStepLabel,
   planStageLine,
   previousInRepo,
   prPushState,
   prsByRepo,
   pushAllPrCount,
   stackRows,
+  stepAfterPick,
 } from '../src/lib/buildPlan.js';
 
 const at = '2026-11-08T10:00:00.000Z';
@@ -122,10 +130,10 @@ describe('decisions', () => {
     expect(decisionsWithPending(server, { C1: 'keep_story', C2: null })).toEqual({ C1: 'keep_story' });
   });
 
-  it('a second press on the chosen answer clears it', () => {
-    expect(nextDecision('agree', 'agree')).toBeNull();
-    expect(nextDecision('agree', 'keep_story')).toBe('keep_story');
-    expect(nextDecision(undefined, 'agree')).toBe('agree');
+  it('a second press on the chosen answer keeps it (the wizard never clears an answer)', () => {
+    expect(pickDecision('agree', 'agree')).toBe('agree');
+    expect(pickDecision('agree', 'keep_story')).toBe('keep_story');
+    expect(pickDecision(undefined, 'keep_story')).toBe('keep_story');
   });
 
   it('counts the answered points in the heading', () => {
@@ -307,5 +315,44 @@ describe('the ticket review', () => {
     expect(criteriaBoxLabel(null)).toBe('Acceptance criteria');
     expect(ticketUpdateConfirm({ description: null, acceptanceCriteria: 'x' })).toBe("Replace the ticket's acceptance criteria in Jira?");
     expect(ticketUpdateConfirm({ description: 'x', acceptanceCriteria: 'y' })).toBe("Replace the ticket's description and acceptance criteria in Jira?");
+  });
+});
+
+describe('the decision wizard', () => {
+  const four = ['C1', 'C2', 'C3', 'C4'].map((id) => ({ id }));
+
+  it('opens on the first open point, else on Review', () => {
+    expect(firstOpenStep(four, {})).toBe(0);
+    expect(firstOpenStep(four, { C1: 'agree', C2: 'keep_story' })).toBe(2);
+    expect(firstOpenStep(four, { C1: 'agree', C3: 'agree' })).toBe(1);
+    expect(firstOpenStep(four, { C1: 'agree', C2: 'agree', C3: 'agree', C4: 'keep_story' })).toBe(4);
+    expect(firstOpenStep([], {})).toBe(0);
+  });
+
+  it('a pick moves to the next open point after it, else to Review', () => {
+    expect(stepAfterPick(four, { C1: 'agree' }, 0)).toBe(1);
+    expect(stepAfterPick(four, { C1: 'agree', C2: 'agree' }, 0)).toBe(2);
+    // An open point BEFORE the pick is not gone back to: Review flags it.
+    expect(stepAfterPick(four, { C3: 'agree', C4: 'agree' }, 2)).toBe(4);
+    expect(stepAfterPick(four, { C4: 'agree' }, 3)).toBe(4);
+  });
+
+  it('keeps a step inside the range when the points change', () => {
+    expect(clampStep(7, four)).toBe(4);
+    expect(clampStep(-1, four)).toBe(0);
+    expect(clampStep(2, four)).toBe(2);
+  });
+
+  it('heads a step "Point 2 of 4" with its criteria', () => {
+    expect(planStepLabel(1, 4)).toBe('Point 2 of 4');
+    expect(aboutLine(['AC2', 'AC4'])).toBe('AC2, AC4');
+    expect(aboutLine([])).toBeNull();
+  });
+
+  it('lists every point on Review with its answer, an open one with none', () => {
+    expect(planReviewLines(revision().contentions, { C2: 'keep_story' })).toEqual([
+      { id: 'C1', step: 0, label: 'Point 1', about: 'AC2', problem: 'The cap is 500.', choice: null },
+      { id: 'C2', step: 1, label: 'Point 2', about: 'AC3', problem: 'No such report.', choice: 'Keep the story' },
+    ]);
   });
 });

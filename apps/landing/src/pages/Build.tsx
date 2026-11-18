@@ -36,7 +36,7 @@ interface FlowStep {
 const BY_HAND: FlowStep[] = [
   { who: 'You', tone: 'gold', h: 'Press Implement', p: <>On the ticket&rsquo;s story view, from This Sprint. Then <b>Start</b>.</> },
   { who: 'Agent', tone: 'lapis', h: 'It plans first', p: 'It reads the ticket, the code, the data and your reference docs, and writes a plan. It changes no files.' },
-  { who: 'You', tone: 'gold', h: 'Settle the plan', p: <>Each point: <b>Agree</b>, <b>Keep the story</b> or <b>Reply</b>. Then <b>Approve and start</b>.</> },
+  { who: 'You', tone: 'gold', h: 'Settle the plan', p: <>One point at a time: <b>Agree</b>, <b>Keep the story</b> or <b>Reply</b>. Then <b>Approve and start</b> on Review.</> },
   { who: 'Agent', tone: 'lapis', h: 'It builds in the sandbox', p: 'It writes the code, runs the repositories’ own tests and reports on each criterion.' },
   { who: 'You', tone: 'gold', h: 'Read the diffs', p: 'One diff per pull request, in plan order. Ask for changes in the conversation.' },
   { who: 'You', tone: 'gold', h: 'Push', p: 'A new branch and a new pull request, under your GitHub account. A draft by default.' },

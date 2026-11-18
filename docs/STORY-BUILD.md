@@ -24,7 +24,8 @@ session** (since 2026-11-07):
    a past session (owner decision D1). It takes seconds once the image is local.
 2. **Plan** (§ Plan first). Ensemble sends the opening turn itself: the agent investigates the code, the data
    and (with docs) the reference documents, and submits a STRUCTURED PLAN that Ensemble checks on the host.
-   The reader settles each point of contention (Agree / Keep the story / Reply) and talks to the agent
+   The reader settles the points of contention one step at a time (Agree / Keep the story / Reply), then
+   checks every answer on a last Review step that holds Approve and start, and talks to the agent
    in the tab; chat turns run in plan mode (the agent reads but does not change files).
 3. **Build.** **Approve and start** reads the ticket again and switches the agent to build mode. It implements,
    runs the repositories' own tests — integration tests too, against real services from the compose
@@ -87,7 +88,10 @@ without a plan": a session whose agent never sends a usable plan can only be mes
   ONE **Update ticket** press writes only what changed. Nothing in the build or the review loop writes
   the tracker.
 - **Revisions** (`story_build_plans`): every usable plan is a revision (≤ 12; an identical resubmission is
-  none). Agree / Keep the story are stored at once on the LATEST revision (no turn). Reply stores the
+  none). Agree / Keep the story are stored at once on the LATEST revision (no turn): the panel asks the
+  points in a WIZARD, one step per point ("Point 2 of 4" + its AC refs), and each pick is saved as it is
+  made, so a closed tab or a reload reopens on the first open point; its last step, Review, lists the
+  answers and holds Approve and start (docs/FRONTEND.md § The build tab). Reply stores the
   reply and sends a revision turn. A free message is a revision turn only when its answer has a block. An
   answer carries to the next revision when the contention's id AND fingerprint (its problem + evidence)
   are unchanged. No usable plan after an opening, reply or (no plan yet) message turn ⇒ ONE automatic

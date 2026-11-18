@@ -4700,14 +4700,25 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     pure half `lib/buildPlan.ts`, pinned by `test/buildPlan.test.ts`): "Plan · revision N" (+ With docs,
     ⓘ, an "Earlier revisions" menu → `GET …/plan?revision=`, read-only), the stage line
     (`planStageLine`: planning / revising / the checks' one-line failure), the summary, Repositories,
-    the criteria checklist (story view numbering; a ref scrolls to the Ticket panel), **Points to
-    settle** — one card per contention with the story's words, the problem, "If you agree" / "If you
-    keep the story", its EVIDENCE (code and data files as Ensemble's own numbered excerpt in plain mono —
+    the criteria checklist (story view numbering; a ref scrolls to the Ticket panel), the PR stack in
+    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the dropped line ("Ensemble left out
+    1 point it could not check.", reasons behind ⓘ), then the **Points to settle** as a STEP-BY-STEP
+    WIZARD (`StoryBuild/PlanDecisionWizard.tsx`, latest revision only; earlier and approved revisions
+    keep the read-only list, one card per point, with the stack after it): a step strip ("1 · 2 ·
+    Review", answered ticked, open ringed, any step reachable), ONE point per step headed "Point 2 of 4"
+    + its AC refs, the story's words, the problem, its EVIDENCE (code and data files as Ensemble's own numbered excerpt in plain mono —
     NOT the syntax highlighter, so no new code ground for `codeTokens.test.ts` — with a GitHub link at
     the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
-    time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
-    the dropped line ("Ensemble left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
-    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket review** — on the latest
+    time and recorded lines), the reader's earlier replies, then TWO numbered choices in the Claude Code
+    style, **1. Agree** and **2. Keep the story**, each with what the agent then builds (the 1 / 2 keys
+    pick and ← / → move while focus is in the wizard), a quieter **Reply** (the composer), and Back /
+    Next (Next passes an open point; it stays open). The last step, **Review**, lists every point in one
+    line (AC refs, the problem, the answer or "Not answered"; each line goes back to its step) and holds
+    **Approve and start**. ⚠ THE STEP IS DERIVED ONCE PER REVISION: the wizard opens on the first open
+    point (else Review) on mount, and the panel remounts it on a new revision (`key`); after that only
+    the reader moves it, so a teammate's or a second tab's answer never moves the step (helpers
+    `firstOpenStep` / `stepAfterPick` / `planReviewLines` in `lib/buildPlan.ts`). Below it, the
+    **ticket review** — on the latest
     revision ALWAYS (and after Approve until the first build turn ends), `StoryBuild/TicketUpdatePanel.tsx`
     `TicketReview`: the WHOLE ticket in two boxes (Description, Acceptance criteria — "(in the
     description)" when the ticket keeps them there, and then the box follows the description's section
@@ -4720,13 +4731,15 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     block), "(edited)" / "Back to the draft"; on a Jira ticket ONE **Update ticket** sends only the
     changed fields, asks once, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update;
     else "Updating the ticket works with Jira only. Copy the text instead." On an older or approved
-    revision the draft is preformatted text with a `CopyButton` — and **Approve and
-    start** (`AiRunGate kind="story_build" followUp`; enabled only by `planApproveState`: live,
-    `plan_ready`, every point answered — else its one line beside it). Agree / Keep the story post
-    `plan/decisions` at once on their OWN mutation (no turn, never blocked by a billed press), laid over
-    the read optimistically (`decisionsWithPending`); a second press on the chosen one clears it; the
-    answer is seated into the read. Reply opens a composer under the card (`plan/reply`, `story_plan`
-    gate). While a turn runs the card's buttons read "The agent is revising the plan…". 409 PlanStale
+    revision the draft is preformatted text with a `CopyButton`. **Approve and start** (on Review; on a
+    plan with no points, below the panel as before) is `AiRunGate kind="story_build" followUp`, enabled
+    only by `planApproveState`: live, `plan_ready`, every point answered — else its one line beside it.
+    A pick posts `plan/decisions` at once on its OWN mutation (no turn, never blocked by a billed press),
+    laid over the read optimistically (`decisionsWithPending`), then moves to the next open point after
+    it, else Review; picking the chosen answer again KEEPS it (no toggle-to-clear; the wizard never
+    sends `null`, though the route still takes it); the answer is seated into the read. Reply opens a
+    composer under the choices (`plan/reply`, `story_plan` gate). While a turn runs the step shows "The
+    agent is revising the plan…" instead of the choices. 409 PlanStale
     says "The plan changed. Look at the new revision." After Approve it folds to "Approved plan ·
     revision N · time" (expandable, read-only). The composer's words change for a plan session and
     **Start build is never offered on one** (`sessionCanStartBuild` is false when `plan` is set); a
