@@ -1,5 +1,5 @@
-// THE REVIEW LOOP'S FIX PASS — what the build agent is told after a review round (docs/STORY-BUILD.md § The
-// review loop → The fix pass). PURE. REVIEW.md lists EVERY open item of the round:
+// THE REVIEW LOOP'S FIX PASS — what the fix agent is told after a review round (docs/STORY-BUILD.md § The
+// review loop → The fix pass). PURE and SHARED (coding/review-loop/): no build, target or session. REVIEW.md lists EVERY open item of the round:
 //   F<n>   a finding of this round (blocker, warning, question, nit — questions INCLUDED, praise never);
 //          a finding the reviewer RAISED AGAIN (its earlier one still open, or the agent's pushback not
 //          accepted) carries the reviewer's words on it;
@@ -10,9 +10,9 @@
 // character budget, the lowest-priority items are left out and NAMED; a left-out item is not counted
 // against the agent (it stays open and comes back next round).
 import type { ClaudeFindingSeverity } from '@pierre-review/shared';
-import { budgetCut, REVIEW_ITEM_BODY_MAX, REVIEW_SEED_CHAR_BUDGET } from '../../ai-fix/review-seed.js';
-import { pickReviewNonce } from '../../../review/claude-review/prompts.js';
-import { REVIEW_RESPONSE_CHECKER, REVIEW_RESPONSE_FILE } from '../../../sandbox/workspace/review-response.js';
+import { budgetCut, REVIEW_ITEM_BODY_MAX, REVIEW_SEED_CHAR_BUDGET } from '../ai-fix/review-seed.js';
+import { pickReviewNonce } from '../../review/claude-review/prompts.js';
+import { REVIEW_RESPONSE_CHECKER, REVIEW_RESPONSE_FILE } from './response.js';
 
 export interface LoopSeedFinding {
   findingId: number;

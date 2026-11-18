@@ -1,4 +1,4 @@
-// THE REVIEW LOOP'S ANSWERS (sandbox/workspace/review-response.ts): ONE validator text, compiled on the host
+// THE REVIEW LOOP'S ANSWERS (coding/review-loop/response.ts; read out by sandbox/workspace/review-response.ts): ONE validator text, compiled on the host
 // and embedded in the checker. Pinned: every shown ref answered once; an unknown ref, a repeat or a bad
 // action named and dropped; `not_applicable` only on a criterion (AC) or missing item (M); the reply's
 // length; the checker script runs the SAME text (OK / problems, exit 0 / 1).
@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { REVIEW_RESPONSE_REPLY_MAX, reviewResponseCheckerSource, validateReviewResponse } from './review-response.js';
+import { REVIEW_RESPONSE_REPLY_MAX, reviewResponseCheckerSource, validateReviewResponse } from '../../coding/review-loop/response.js';
 
 const SHOWN = ['F1', 'F2', 'AC3', 'M1'];
 const dir = mkdtempSync(join(tmpdir(), 'limn-review-response-'));

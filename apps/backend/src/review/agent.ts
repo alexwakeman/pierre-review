@@ -18,7 +18,7 @@ import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
-  prepBranchWorktree,
+  prepHeadWorktree,
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
@@ -249,7 +249,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       onProgress({ phase: 'cloning', reviewMode: mode });
       // THE REVIEW LOOP reviews a BRANCH with no PR: its commit through the branch checkout.
       ({ repoCloneDir, worktreePath } = args.checkout
-        ? await prepBranchWorktree(args.owner, args.name, { remoteRef: args.checkout.remoteRef, destRef: args.checkout.destRef, sha: args.checkout.sha })
+        ? await prepHeadWorktree(args.owner, args.name, args.checkout)
         : await prepWorktree(
             args.owner,
             args.name,

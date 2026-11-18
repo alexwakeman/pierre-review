@@ -1059,7 +1059,9 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
 
 ## The review response (`workspace/review-response.ts`)
 
-The review loop's fix pass (docs/STORY-BUILD.md § The review loop). Before each fix turn the host writes
+The review loop's fix pass (docs/STORY-BUILD.md § The review loop). The vocabulary, THE ONE validator text
+and the checker script are the shared loop core's (`coding/review-loop/response.ts`); this module reads the
+agent's file out of the sandbox and checks it with that validator. Before each fix turn the host writes
 REVIEW.md into the layout root (the items, fenced, with refs `F<n>` / `AC<n>` / `M<n>`), the refs file
 `.limn/review-refs.json` and the checker `/home/agent/.limn/review-response-check.cjs`, and removes any
 earlier `.limn/review-response.json`. The agent ends the turn by writing that file —

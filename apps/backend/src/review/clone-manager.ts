@@ -367,6 +367,71 @@ export async function prepBranchWorktree(
 }
 
 /**
+ * WHERE A BRANCH REVIEW'S HEAD COMMIT COMES FROM (docs/CLAUDE-REVIEW.md § Reviewing a branch → The head
+ * source). Either
+ *   • a REMOTE branch — `remoteRef` on GitHub, fetched into the namespaced `destRef` only when `sha` is not
+ *     already in the clone cache (the Build loop's branches: it pushed them first); or
+ *   • a LOCAL PINNED REF — `localRef`, a ref under `refs/pierre/local/` in Ensemble's clone cache
+ *     (review/local-refs.ts) that already points at `sha`: a commit GitHub has never seen. It is NEVER
+ *     fetched (GitHub does not have it) and nothing here pushes it.
+ * The shape is told apart by `localRef` alone, so every existing `{ remoteRef, destRef, sha }` is unchanged.
+ */
+export type BranchHeadSource = { remoteRef: string; destRef: string; sha: string } | { localRef: string; sha: string };
+
+/** THE ONE NAMESPACE of local pinned refs (review/local-refs.ts owns the layout and the sweep). */
+export const LOCAL_PINNED_REF_PREFIX = 'refs/pierre/local/';
+
+export const isLocalHead = (h: BranchHeadSource): h is { localRef: string; sha: string } => 'localRef' in h;
+
+/**
+ * A local head, checked under the repo lock (the caller holds it): the clone exists, the ref is in the ONE
+ * namespace and points at `sha`. Throws a plain line otherwise. No network, no token.
+ */
+async function localHeadLocked(owner: string, name: string, h: { localRef: string; sha: string }): Promise<string> {
+  const dir = repoCloneDir(owner, name);
+  if (!existsSync(join(dir, '.git'))) throw new Error(`Ensemble has no copy of ${owner}/${name} to review.`);
+  if (!h.localRef.startsWith(LOCAL_PINNED_REF_PREFIX)) throw new Error('Not a local ref Ensemble keeps.');
+  let at = '';
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--verify', '--quiet', `${h.localRef}^{commit}`], { timeout: 10_000, maxBuffer: 1024 * 1024 });
+    at = stdout.trim();
+  } catch {
+    at = '';
+  }
+  if (at === '' || at !== h.sha) throw new Error('The commit to review is no longer in Ensemble\'s copy of the repository.');
+  return dir;
+}
+
+/** The token for an optional lazy blob fetch: a local head reads without one when `gh` gives none. */
+function optionalToken(token: string | undefined): string | null {
+  if (token != null) return token;
+  try {
+    return getGithubToken();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A WORKTREE AT A BRANCH REVIEW'S HEAD, from either head source (`BranchHeadSource`). A remote head is
+ * exactly `prepBranchWorktree`; a local head is checked out from the clone cache with no fetch at all.
+ * Detached; the caller owns its removal (`removeWorktreeLocked`).
+ */
+export async function prepHeadWorktree(
+  owner: string,
+  name: string,
+  head: BranchHeadSource,
+  token?: string,
+): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  if (!isLocalHead(head)) return prepBranchWorktree(owner, name, { remoteRef: head.remoteRef, destRef: head.destRef, sha: head.sha }, token);
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, head);
+    const worktreePath = await addWorktree(dir, head.sha, { owner, name });
+    return { repoCloneDir: dir, worktreePath, sha: head.sha };
+  });
+}
+
+/**
  * `prepBranchWorktree` WITHOUT the worktree: the same clone, fetch and `pinRef` rules under the same
  * repo lock, so the commit is known (and pinned) before anything reads its files. The sandbox's repo
  * store uses it to learn the base commit, then copies the objects from the reader's own clone when that
@@ -440,17 +505,42 @@ export async function localPrDiff(
 }
 
 /**
- * A BRANCH's diff in the clone cache (the story build's review loop, coding/story-build/loop/): three-dot
- * `base...head`, both commits ensured in the store (fetched by sha when missing — GitHub serves a pushed
- * commit by its sha). No PR, no gh. The same lock, blobless lazy fetch and token rules as `localPrDiff`.
+ * A BRANCH's diff in the clone cache (the review loop, coding/review-loop/): three-dot `base...head`.
+ * `head` is a sha (a REMOTE head: fetched by sha when missing — GitHub serves a pushed commit by its sha)
+ * or a `BranchHeadSource`. A LOCAL head (`localRef`) is never fetched: it must already be in the clone cache
+ * under its pinned ref; only a missing BASE is fetched (GitHub has the base). No PR, no gh. The same lock,
+ * blobless lazy fetch and token rules as `localPrDiff`.
  */
 export async function localBranchDiff(
   owner: string,
   name: string,
   baseSha: string,
-  headSha: string,
-  token: string = getGithubToken(),
+  head: string | BranchHeadSource,
+  token?: string,
 ): Promise<string> {
+  if (typeof head !== 'string' && isLocalHead(head)) return localHeadDiff(owner, name, baseSha, head, token);
+  const headSha = typeof head === 'string' ? head : head.sha;
+  return remoteBranchDiff(owner, name, baseSha, headSha, token ?? getGithubToken());
+}
+
+async function localHeadDiff(owner: string, name: string, baseSha: string, head: { localRef: string; sha: string }, token: string | undefined): Promise<string> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, head);
+    if (!(await hasCommit(dir, baseSha))) {
+      const tok = token ?? getGithubToken();
+      await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, tok), baseSha]);
+    }
+    const tok = optionalToken(token);
+    const { stdout } = await execFileAsync(
+      'git',
+      [...(tok != null ? insteadOfArgs(tok) : []), '-C', dir, 'diff', '--no-color', '--no-ext-diff', `${baseSha}...${head.sha}`],
+      { timeout: 300_000, maxBuffer: 512 * 1024 * 1024 },
+    );
+    return stdout;
+  });
+}
+
+async function remoteBranchDiff(owner: string, name: string, baseSha: string, headSha: string, token: string): Promise<string> {
   return withRepoLock(`${owner}/${name}`, async () => {
     const dir = await ensureClone(owner, name, token);
     for (const sha of [baseSha, headSha]) {

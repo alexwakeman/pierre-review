@@ -2427,11 +2427,30 @@ PR yet with THIS machinery — the same runner, prompts, findings schema, provid
 and stores the result in its own `story_build_reviews` / `story_build_review_findings` rows, never in
 `claude_reviews` (until the PR opens, below). Nothing is posted to GitHub. The seams:
 
-- **The diff**: `review/clone-manager.ts localBranchDiff(owner, name, baseSha, headSha)` (three-dot, both
-  commits in the clone cache, no gh) and `review/prepare.ts prepareBranchReview` — `prepareReview`'s tail
-  is the shared `preparedFromDiff`, so a PR review is unchanged. It is on the `ctx.review` contract.
-- **The checkout**: `RunReviewArgs.checkout {remoteRef, destRef, sha}` makes `runReview` use
-  `prepBranchWorktree` instead of a PR head (`prNumber` 0, unused). Absent ⇒ exactly as before.
+- **ONE shared half** (`coding/review-loop/branch-review.ts runBranchReviewHalf`, docs/STORY-BUILD.md §
+  Where the pieces live): repository, base, HEAD SOURCE, provider, prior findings in; a result out; no row,
+  no GitHub write, no slot. Build's `loop/branch-review.ts` is an adapter (its pushed branch as the head);
+  every later branch review (AI Fix's rounds, the local review) calls the same half.
+- **The head source** (`review/clone-manager.ts BranchHeadSource`): either a REMOTE branch `{remoteRef,
+  destRef, sha}` — fetched into the namespaced `destRef` only when `sha` is not in the clone cache (Build's
+  loop pushed it first) — or a LOCAL PINNED REF `{localRef, sha}`: a commit Ensemble made itself in the
+  clone cache and has NOT pushed. A local head is NEVER fetched (GitHub does not have it): the ref must be
+  in the ONE namespace and point at `sha`, else a plain refusal; only a missing BASE is fetched.
+- **The diff**: `localBranchDiff(owner, name, baseSha, head)` (three-dot in the clone cache, no gh; `head` a
+  sha or a head source) and `review/prepare.ts prepareBranchReview` (`localRef` optional) — `prepareReview`'s
+  tail is the shared `preparedFromDiff`, so a PR review is unchanged. It is on the `ctx.review` contract.
+- **The checkout**: `RunReviewArgs.checkout` (a head source) makes `runReview` use `prepHeadWorktree`
+  (`prepBranchWorktree` for a remote head; a detached worktree straight from the clone cache for a local
+  one) instead of a PR head (`prNumber` 0, unused). Absent ⇒ exactly as before.
+- **Local pinned refs** (`review/local-refs.ts`): ONE namespace, `refs/pierre/local/<kind>/<id>/<name>`.
+  `git-ops.ts commitPatchToLocalRef` makes one: the patch's tree on the base (`treeOfPatch`, no fetch when
+  the base is local), ONE commit by the reader with parent the base — `pushFastForward`'s commit minus the
+  push — pinned there; an unchanged tree pins the base. Nothing is pushed and no team claim moves.
+  ⚠ **ONE SWEEP RULE**: a ref is kept while its owner HOLDS it in this process (`holdLocalRefs`) or its
+  kind's registered keeper (`registerLocalRefKeeper`, for a resumable row) keeps the id; a keeper that
+  throws keeps its whole kind; a malformed ref is kept. Everything else goes — on DISCARD
+  (`dropLocalRefs(owner, name, kind, id)`) and at BOOT (`sweepLocalRefs`, after listen, never awaited,
+  bounded by a deadline and a delete cap). Nothing creates one yet outside tests.
 - **The prompt**: `buildUserPrompt`'s optional `subject: {kind:'branch', branch}` changes the header
   ("branch X (no pull request yet)"), "What the branch is for", and the follow-up words: the replies are
   "The build agent's answers" (the agent's response to each finding, as a `FindingReply`), and prior
@@ -2452,8 +2471,9 @@ and stores the result in its own `story_build_reviews` / `story_build_review_fin
   (`not_applicable` / `answer`), and `buildSubmitTicketReviewShape(z, { notApplicable: true })` adds the
   `notApplicable` verdicts (`accepted` | `rejected` + why) — only on request, so the ticket goldens and the
   Codex schema are unchanged otherwise. Not applicable is BUILD-SCOPED: no shared criterion status.
-  Feature `story_loop_check`, provider `activeProviderId()`, never a pair.
-- **When the PR opens** (§ Auto review): `loop/review-on-pr.ts markLoopReviewOnPr` writes the CLOSING
+  ONE reusable check, `coding/review-loop/story-check.ts runBranchStoryCheck` (targets with head sources);
+  Build calls it with feature `story_loop_check` and the review vendor (`storyCheckProvider`), never a pair.
+- **When the PR opens** (§ Auto review): `coding/review-loop/review-on-pr.ts markLoopReviewOnPr` writes the CLOSING
   review as ONE `claude_reviews` row at the PR head — `trigger 'manual'` (never the daily auto cap),
   `kind` NULL, the lead half's provider/model, the consolidated findings, NOT posted — so the first-review
   rule finds a row and auto review does not review that head again. A new head is reviewed as usual. A

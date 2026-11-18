@@ -25,7 +25,6 @@ import {
   clampLoopRounds,
   STORY_BUILD_LOOP_PAUSE_LINE,
   type AiProviderId,
-  type ClaudeReviewPairConsolidation,
   type ClaudeReviewTicket,
   type StoryBuild,
   type StoryBuildLoop,
@@ -33,7 +32,7 @@ import {
   type StoryBuildLoopState,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../../review/agent-context.js';
-import { REVIEW_REFS_FILE, REVIEW_RESPONSE_CHECKER, REVIEW_RESPONSE_FILE, reviewResponseCheckerSource } from '../../../sandbox/workspace/review-response.js';
+import { REVIEW_REFS_FILE, REVIEW_RESPONSE_CHECKER, REVIEW_RESPONSE_FILE, reviewResponseCheckerSource } from '../../review-loop/response.js';
 import { HEAD_MOVED_LOOP_LINE } from '../../git-ops.js';
 import { getStoryBuildRow, listStoryBuildRepoRows, updateStoryBuildRepo, type StoryBuildRow } from '../persist.js';
 import { listPlannedPrRows, updateStoryBuildPr } from '../plan-persist.js';
@@ -65,12 +64,14 @@ import {
   type LoopStep,
 } from './persist.js';
 import { prOpenFacts } from './pr-facts.js';
-import { buildLoopFixInstruction, buildLoopFixSeed, type LoopSeedCriterion, type LoopSeedFinding } from './seed.js';
+import { buildLoopFixInstruction, buildLoopFixSeed, type LoopSeedCriterion, type LoopSeedFinding } from '../../review-loop/seed.js';
 import { defaultLoopSeams, type LoopSeams } from './seams.js';
 import { LOOP_CHECK_FEATURE } from './story-check.js';
 import { isLive, loopTargets, reviewBaseOf, type LoopTarget } from './targets.js';
-import { loopBodySummaryOf, notCheckedFindingsOf, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen, runWireOf, toStoryBuildLoop } from './wire.js';
-import { markLoopReviewOnPr } from './review-on-pr.js';
+import { loopBodySummaryOf, runWireOf, toStoryBuildLoop } from './wire.js';
+import { pairConsolidationRecord, pairRoleOf } from '../../review-loop/branch-review.js';
+import { nextAfterReview, notCheckedFindingsOf, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
+import { markLoopReviewOnPr } from '../../review-loop/review-on-pr.js';
 import { loopBodySection } from './pr-body.js';
 
 export const LOOP_FIX_FEATURE = 'story_loop_fix';
@@ -496,8 +497,6 @@ function ticketOf(b: StoryBuildRow): ClaudeReviewTicket {
   };
 }
 
-const PAIR_ROLE = (n: number, total: number): 'first' | 'second' | null => (total < 2 ? null : n === 0 ? 'first' : 'second');
-
 /** REVIEW k: the code review of every target that needs one, and the round's story check. */
 async function stepReview(
   ctx: AgentContext,
@@ -625,7 +624,7 @@ async function stepReview(
           headSha: t.loopPushedSha!,
           provider: p,
           model: null,
-          pairRole: PAIR_ROLE(n, providers.length),
+          pairRole: pairRoleOf(n, providers.length),
           status: allowed ? 'running' : 'skipped',
         });
         if (!allowed) {
@@ -721,8 +720,7 @@ async function stepReview(
       const c = await seams.consolidate(ctx, accountId, runWireOf(x, fs), runWireOf(y, fs)).catch(() => null);
       if (c) {
         for (const [dropped, keep] of Object.entries(c.mergedFrom)) await updateLoopFinding(ctx, accountId, Number(dropped), { mergedInto: keep });
-        const record: ClaudeReviewPairConsolidation = { how: c.how, summary: c.summary, verdict: c.verdict, sourceOf: c.sourceOf, mergedFrom: c.mergedFrom, failedHalf: null, at: seams.now().toISOString() };
-        await updateLoopReview(ctx, accountId, x.id, { pairConsolidation: record });
+        await updateLoopReview(ctx, accountId, x.id, { pairConsolidation: pairConsolidationRecord(c, seams.now()) });
       }
     }
   }
@@ -736,7 +734,7 @@ async function stepReview(
   const open = roundOpen(k, await listLoopReviews(ctx, accountId, b.id), await listLoopFindings(ctx, accountId, b.id), checksNow.find((c) => c.round === k) ?? null, checksNow);
   const total = open.findings + open.criteria;
   seams.session.notice(b.id, total === 0 ? `Review round ${k}: nothing is open.` : `Review round ${k}: ${open.findings} ${open.findings === 1 ? 'finding' : 'findings'} and ${open.criteria} ${open.criteria === 1 ? 'criterion' : 'criteria'} to answer.`);
-  return total === 0 || k >= b.loopRounds + 1 ? 'open' : 'fix';
+  return nextAfterReview(open, k, b.loopRounds);
 }
 
 /** FIX k: write REVIEW.md, then start the host's build turn. The turn's end continues (`afterLoopFixTurn`). */

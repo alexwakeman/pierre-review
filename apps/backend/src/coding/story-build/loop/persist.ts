@@ -20,6 +20,7 @@ import type {
   TicketAssessment,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../../review/agent-context.js';
+import type { StoryCheckClaim } from '../../review-loop/story-check.js';
 import { updateStoryBuild, updateStoryBuildRepo } from '../persist.js';
 import { updateStoryBuildPr } from '../plan-persist.js';
 
@@ -332,11 +333,8 @@ export interface LoopStoryCheckMember {
   headSha: string;
 }
 
-export interface LoopClaim {
-  ref: string;
-  kind: 'not_applicable' | 'answer';
-  text: string;
-}
+/** The build agent's note on one criterion (the shared story check's claim). */
+export type LoopClaim = StoryCheckClaim;
 
 export interface LoopStoryCheckRow {
   id: number;

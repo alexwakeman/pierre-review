@@ -153,6 +153,18 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // WORKTREE_SWEEP_MAX_MS, after listen so it never delays serving.
   kickWorktreeSweep('boot');
 
+  // THE LOCAL PINNED REFS (review/local-refs.ts): unpushed commits Ensemble made in its clone cache under
+  // `refs/pierre/local/*`. A run that needs one holds it in this process, so after a restart only what a
+  // registered keeper still needs survives. After listen, never awaited, bounded, never fatal.
+  void import('./review/local-refs.js')
+    .then(({ sweepLocalRefs }) => sweepLocalRefs())
+    .then((r) => {
+      if (r.deleted > 0) console.log(`clone cache: removed ${r.deleted} leftover local refs`);
+    })
+    .catch(() => {
+      /* repair, never a precondition */
+    });
+
   // The one-off cleanup of the transcripts older Limn agent runs left under ~/.claude/projects
   // (ai/session-litter.ts): once per machine (a flag in the data dir), only Limn-named directories,
   // in the background, bounded. After listen, never awaited. Never from a scratch backend: the folder

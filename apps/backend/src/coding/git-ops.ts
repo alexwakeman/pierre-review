@@ -7,8 +7,11 @@ import {
   prepBranchWorktree,
   prepWorktree,
   removeWorktreeLocked,
+  repoCloneDir,
   resolveBranchCommit,
+  withRepoLock,
 } from '../review/clone-manager.js';
+import type { LocalRefKey } from '../review/local-refs.js';
 import {
   createPullRequest,
   fetchPrHeadInfo,
@@ -595,13 +598,7 @@ export async function pushFastForward(a: {
   const { repoCloneDir } = await resolveBranchCommit(a.owner, a.name, { remoteRef: `refs/heads/${a.branch}`, destRef: a.destRef, sha: a.pushedSha }, token);
   const { stdout: parentTree } = await execGit(['-C', repoCloneDir, 'rev-parse', `${a.pushedSha}^{tree}`]);
   if (parentTree.trim() === a.tree && extra.length === 0) return { commitSha: a.pushedSha, pushed: false };
-  const { authorName, authorEmail } = await readerAuthor(a.accountId);
-  const args = ['-C', repoCloneDir, 'commit-tree', a.tree, '-p', a.pushedSha];
-  for (const p of extra) args.push('-p', p);
-  args.push('-m', a.message);
-  const env = { ...process.env, GIT_AUTHOR_NAME: authorName, GIT_AUTHOR_EMAIL: authorEmail, GIT_COMMITTER_NAME: authorName, GIT_COMMITTER_EMAIL: authorEmail };
-  const { stdout } = await execGit(args, undefined, env);
-  const commitSha = stdout.trim();
+  const commitSha = await readerCommitTree(a.accountId, repoCloneDir, a.tree, [a.pushedSha, ...extra], a.message);
   // Keep the new commit reachable in the shared clone (the next round's checkout and diff read it).
   await execGit(['-C', repoCloneDir, 'update-ref', a.destRef, commitSha]);
   await pushRef({
@@ -619,6 +616,49 @@ export async function pushFastForward(a: {
   const { noteTicketBranchMoved } = await import('./story-build/build-claim-flow.js');
   await noteTicketBranchMoved({ accountId: a.accountId, owner: a.owner, name: a.name, branch: a.branch, from: a.pushedSha, to: commitSha });
   return { commitSha, pushed: true };
+}
+
+/** ONE commit by the reader with tree `tree` and these parents, written into the clone (never pushed here). */
+async function readerCommitTree(accountId: number, repoCloneDir: string, tree: string, parents: readonly string[], message: string): Promise<string> {
+  const { authorName, authorEmail } = await readerAuthor(accountId);
+  const args = ['-C', repoCloneDir, 'commit-tree', tree];
+  for (const p of parents) args.push('-p', p);
+  args.push('-m', message);
+  const env = { ...process.env, GIT_AUTHOR_NAME: authorName, GIT_AUTHOR_EMAIL: authorEmail, GIT_COMMITTER_NAME: authorName, GIT_COMMITTER_EMAIL: authorEmail };
+  const { stdout } = await execGit(args, undefined, env);
+  return stdout.trim();
+}
+
+/**
+ * A LOCAL COMMIT FROM A PATCH, NEVER PUSHED (docs/CLAUDE-REVIEW.md § Reviewing a branch → The head source):
+ * the tree the patch makes on `baseSha` (`treeOfPatch`: no fetch when the base is already in the clone
+ * cache), then `pushFastForward`'s commit — ONE commit by the reader, parent `baseSha` — MINUS THE PUSH,
+ * pinned under a LOCAL ref (review/local-refs.ts `refs/pierre/local/<kind>/<id>/<name>`) so a branch review
+ * reads it as its head with no GitHub round-trip. An unchanged tree makes no commit: the ref pins `baseSha`
+ * (`changed: false`). Nothing reaches GitHub and no team claim moves. The caller owns the ref (hold it while
+ * it runs; drop it on discard).
+ */
+export async function commitPatchToLocalRef(a: {
+  accountId: number;
+  owner: string;
+  name: string;
+  /** The base branch: only fetched from when `baseSha` is not in the clone cache yet. */
+  baseRef: string;
+  baseSha: string;
+  patch: string;
+  message: string;
+  key: LocalRefKey;
+}): Promise<{ commitSha: string; treeSha: string; ref: string; changed: boolean }> {
+  const treeSha = await treeOfPatch(a.accountId, a.owner, a.name, a.baseRef, a.baseSha, a.patch);
+  const dir = repoCloneDir(a.owner, a.name);
+  return withRepoLock(`${a.owner}/${a.name}`, async () => {
+    const { stdout: baseTree } = await execGit(['-C', dir, 'rev-parse', `${a.baseSha}^{tree}`]);
+    const changed = baseTree.trim() !== treeSha;
+    const commitSha = changed ? await readerCommitTree(a.accountId, dir, treeSha, [a.baseSha], a.message) : a.baseSha;
+    const { pinLocalRefLocked } = await import('../review/local-refs.js');
+    const ref = await pinLocalRefLocked(dir, a.key, commitSha);
+    return { commitSha, treeSha, ref, changed };
+  });
 }
 
 const execFileAsync = promisify(execFile);

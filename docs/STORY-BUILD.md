@@ -520,10 +520,31 @@ claim ([TEAM-REVIEW.md](TEAM-REVIEW.md) § Implement and Fill gaps is the plain-
 
 "After the build: review and fix, then open the pull request" — a SOFTWARE FACTORY with adversarial,
 iterative review. Owner decisions: § Owner decisions (2026-11-12). Modules: `driver.ts` (the state machine,
-never throws to the session), `targets.ts`, `branch-review.ts` (one code-review half), `story-check.ts`,
-`seed.ts` (REVIEW.md), `pr-body.ts` + `pr-facts.ts`, `review-on-pr.ts`, `wire.ts` (the folds and the wire
+never throws to the session), `targets.ts`, `branch-review.ts` (one code-review half of a pushed target branch),
+`story-check.ts` (the round's story check over the targets), `pr-body.ts` + `pr-facts.ts`, `wire.ts` (the wire
 mapper), `persist.ts`, `seams.ts` (lazy defaults; tests swap them with `setStoryLoopSeamsForTests`),
-`routes.ts`. The agent's report: `sandbox/workspace/review-response.ts` (docs/SANDBOX.md § The review response).
+`routes.ts`. The agent's report is read out of the sandbox by `sandbox/workspace/review-response.ts`
+(docs/SANDBOX.md § The review response).
+
+### Where the pieces live: the shared loop core (`coding/review-loop/`)
+
+The SUBJECT-INDEPENDENT parts of the loop live in `coding/review-loop/`, so a loop over another subject (AI
+Fix's internal rounds, the local branch review) runs the SAME folds and never forks one. They take a
+repository, a base sha, a HEAD SOURCE (docs/CLAUDE-REVIEW.md § Reviewing a branch → The head source),
+criteria, prior findings and a provider list — never a `story_builds` row:
+
+| Module | What | Build calls it from |
+|---|---|---|
+| `rounds.ts` | THE STOP RULE `nextAfterReview(open, k, N)` (nothing open, or the closing review k = N + 1 ⇒ `open`; else `fix`), `roundOpen`, `openFindingsOf`, `openCriteriaOf`, `effectiveClaimVerdicts`/`acceptedNa`, the carried `notChecked*`, the next round's follow-up input `priorForTarget`. Pure, over STRUCTURAL rows. | `driver.ts`, `wire.ts` |
+| `seed.ts` | REVIEW.md (`buildLoopFixSeed`), the fix turn's message, `responseLine` | `driver.ts` |
+| `response.ts` | the answer vocabulary (`fixed`/`answered`/`pushed_back`/`not_applicable`), THE ONE validator text and the checker script | `driver.ts`, `sandbox/workspace/review-response.ts` |
+| `branch-review.ts` | `runBranchReviewHalf` (one provider half: prepare, route, prompt, run, follow-up steps), the pair (`consolidateBranchPair`, `pairConsolidationRecord`, `pairRoleOf`), who reviews (`branchReviewProviders`, `storyCheckProvider`, through ai/run-profile.ts) | `loop/branch-review.ts` (the remote head of the pushed branch), `seams.ts` |
+| `story-check.ts` | `runBranchStoryCheck` (ticket-review pieces over branches; `claimVerdictsOf`) | `loop/story-check.ts` |
+| `review-on-pr.ts` | `markLoopReviewOnPr` (the closing review as ONE `claude_reviews` row at the PR head) | `driver.ts` |
+
+Build keeps its state machine, targets, pushes, claims, persistence and composite keys. Its `loop/branch-review.ts`
+and `loop/story-check.ts` are thin adapters: each target's head is its pushed loop branch
+(`refs/heads/<branch>`, fetched into `refs/pierre/story-loop/<buildId>` only when missing).
 
 - **Targets.** A TARGET is one branch that becomes one PR: a `story_build_repos` row with a patch (a
   one-patch-per-repository build) or a `story_build_prs` row (plan first), in stack order. Every claim,

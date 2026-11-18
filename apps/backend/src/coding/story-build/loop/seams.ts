@@ -91,35 +91,10 @@ export function defaultLoopSeams(): LoopSeams {
     now: () => new Date(),
     waitMs: 10 * 60_000,
     pollMs: 20_000,
-    async providers(ctx, accountId, workspaceId) {
-      const [{ resolveAutoReviewProviders }, { automaticRunProviders, isLockedOut, anyUsageLockout }, { preflightFor }, { reviewDefaultProvider, reviewProvidersEnabled }] = await Promise.all([
-        import('../../../review/claude-review/pair.js'),
-        import('../../../ai/usage-lockout.js'),
-        import('../../../ai/run-choice.js'),
-        import('../../../ai/run-profile.js'),
-      ]);
-      const { readWorkspaceAutoReview } = await import('../../../review/claude-review/auto-settings.js');
-      const ws = await readWorkspaceAutoReview(ctx, accountId, workspaceId).catch(() => null);
-      const pair = resolveAutoReviewProviders(ws?.autoReviewProviders ?? null) === 'both';
-      const detect = preflightFor(ctx);
-      // THE ONE PAIR RESOLVER's rule (ai/run-profile.ts): only the review vendors switched on in Settings →
-      // AI; "one vendor" = the first on and signed in.
-      return automaticRunProviders({
-        defaultProvider: reviewDefaultProvider(detect),
-        pair,
-        order: reviewProvidersEnabled(),
-        ready: (p) => detect(p, 'review').status === 'ok',
-        locked: (p) => anyUsageLockout() && isLockedOut(p),
-      });
-    },
+    // THE ONE PAIR RESOLVER's rule, shared with every review loop (coding/review-loop/branch-review.ts).
+    providers: async (ctx, accountId, workspaceId) => (await import('../../review-loop/branch-review.js')).branchReviewProviders(ctx, accountId, workspaceId),
     // The story check is a review kind: Settings → AI's review vendor (the first on and signed in).
-    async storyProvider() {
-      const [{ reviewDefaultProvider }, { detectProviderAuth }] = await Promise.all([
-        import('../../../ai/run-profile.js'),
-        import('../../../review/auth.js'),
-      ]);
-      return reviewDefaultProvider((p, k) => detectProviderAuth(p, k));
-    },
+    storyProvider: async () => (await import('../../review-loop/branch-review.js')).storyCheckProvider(),
     async automaticAllowed(ctx, accountId, what, provider) {
       const { automaticRunAllowed } = await import('../../../review/budget-gate.js');
       return automaticRunAllowed(ctx, accountId, what, provider);
@@ -130,11 +105,7 @@ export function defaultLoopSeams(): LoopSeams {
       end: async (line, outcome, log) => (await import('./review-lines.js')).endLoopReviewLine(line, outcome, log),
     },
     runStoryCheck: async (ctx, i) => (await import('./story-check.js')).runLoopStoryCheck(ctx, i),
-    async consolidate(ctx, accountId, a, b) {
-      const { consolidateHalves } = await import('../../../review/claude-review/pair-consolidate.js');
-      const r = await consolidateHalves(ctx, accountId, null, a, b);
-      return { summary: r.summary, verdict: r.verdict, how: r.how, sourceOf: r.sourceOf, mergedFrom: r.mergedFrom };
-    },
+    consolidate: async (ctx, accountId, a, b) => (await import('../../review-loop/branch-review.js')).consolidateBranchPair(ctx, accountId, a, b),
     canPush: async (ctx, accountId, repoId) => (await import('../../ai-fix/pr-context.js')).getViewerCanPush(ctx, accountId, repoId),
     pushNewBranch: async (a) => (await import('../../git-ops.js')).pushNewBranch(a),
     pushFastForward: async (a) => (await import('../../git-ops.js')).pushFastForward(a),
