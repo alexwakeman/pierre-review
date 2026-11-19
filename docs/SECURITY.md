@@ -121,6 +121,34 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   "The host owns the commit and the push" is unchanged: the patch (or, for a merge, the bundle of the
   agent's commits) leaves the sandbox, and the host checks it, applies or rebuilds it, and pushes it.
 
+### Local branch reviews — the bundle intake (`local-review/`, 2026-11-19)
+
+`ensemble mcp` / `ensemble review` (docs/CLAUDE-REVIEW.md § Reviewing a local branch) make `POST
+/api/local-reviews` the one route that takes UPLOADED GIT DATA and spends model money on it. The server has no
+auth and the cross-origin guard lets a header-less client through by design (that is how the CLI reaches it), so:
+
+- **NO PATH IS EVER ACCEPTED.** The git work that reads the reader's repository runs in the CLIENT (the reader's
+  own process); the server takes only a bundle plus facts, so no "read any local folder" surface opens on an
+  unauthenticated API. An unknown body field (a `path`) is ignored, never read.
+- **The client runs none of the repository's programs**: hooks and fsmonitor off, no external diff, and a path
+  with a `filter` attribute (Git LFS, git-crypt) is left at HEAD's version — its clean filter is never run.
+  Only the line-ending settings are read from the reader's system/global config.
+- **The bundle is untrusted.** Capped at 25 MB (the route's own `bodyLimit` is its base64 plus 512 KB; the
+  global limit is unchanged); written to a fresh `mkdtemp` file the server names; it must carry ONE
+  `refs/heads/…` head equal to the `headSha` the body names; its pack is indexed with
+  `index-pack --fsck-objects` (every object checked; not `git fetch <bundle>`, which ignores
+  `fetch.fsckObjects` before git 2.46) with hooks off, and the head must connect to the base. It lands only
+  under the ONE local-ref namespace (`refs/pierre/local/local-review/<id>/head`), never a branch, never pushed;
+  all of it under the repo lock, outside any transaction. A refusal is a plain line with no git output beyond
+  one sanitized error (a tokenized URL is stripped).
+- **The repository is a SYNCED one of this account** (origin owner/name, home workspace, first sync finished);
+  anything else is refused before any git or model work.
+- **Rate tier** `ai` + `ai_hourly` + `sync` on the start (model runs, a ≤ 25 MB intake and a base fetch from
+  GitHub), spelled EXACTLY in `tierFor`; the GETs (including the ≤ 50 s long-poll) and cancel are `read`. ONE
+  run in flight per (repository, branch) bounds a client that loops on start.
+- **A reader's click**: never refused by the spend budget, recorded in the ledger. Nothing is posted, pushed or
+  claimed; no auto fix follows.
+
 ### Sandboxed checks — REMOVED 2026-11-07
 
 AI Fix's "Run tests" (2026-10-30, `coding/checks/`) ran a repository's DECLARED checks in an OS
@@ -178,7 +206,7 @@ blocked host simply stays blocked. Full design and per-OS setup: [SANDBOX.md](SA
 | A repository's compose file escalates | Ensemble runs compose on the HOST from a POLICED model (`sandbox/services/policy.ts`, checked on every `up`): the whole file is refused for privileged mode, capabilities, devices, host namespaces, host mounts (the socket included), loosened security options, outside builds or unlisted registries. Services join only the session network. |
 | Changes reach GitHub unseen | Work leaves the sandbox ONLY as a patch per repository; the HOST pushes on the reader's press. Implement: a NEW branch, never forced, the default branch and a stacked PR's head protected, a DRAFT PR by default; `push.ts defangGithubText` breaks closing keywords and `@mentions` in the PR body and commit message. AI Fix: only the PR repository, to the PR's own branch (`pushFix`, HEAD_MOVED refused); with no press only under the workspace's "Push automatically" (an own-PR auto fix, OFF by default) or dependency automation's policy (a trusted bot's PR, OFF by default). Implement / Fill gaps with no press only under the reader's own tick, "After the build: review and fix, then open the pull request" (OFF by default; THE REVIEW LOOP, docs/STORY-BUILD.md § The review loop): GitHub sees only the branch (pushed with no PR), one NEW commit per fix pass (fast-forward, the live ref checked first, never forced) and, at the end, the PR — ready for review, the READER'S (origin `reader`, no ledger, no trailer). The reviews, the agent's answers and the criteria verdicts stay in Ensemble: no comment, no GitHub review, no tracker write. Every write is a claim row inserted before it, never retried; a restart pauses and Continue re-reads the live ref before anything new. A branch override (the rename after `BRANCH_EXISTS`, on Push or on the loop's Continue) goes through the same `assertPushTarget` before any lookup. Rate tiers: Push `github_write`; `…/loop/continue` `ai` + `ai_hourly` + `github_write` (it may start reviews, a fix turn and pushes); `…/auto-push`, `…/loop/settings`, `…/loop/stop` and `GET …/loop` are DB only: `read`. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills, copied as files, size-capped, symlinks skipped. Past sessions are NEVER imported (no transcript is copied or resumed; Claude Code runs with `--no-session-persistence`). |
-| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer (Implement and AI Fix share both), idle teardown; Ensemble labels on every resource, swept at boot and on discard (`ensemble sandbox prune`). Every turn is a reader's press except an UNATTENDED fix's one build turn, which asks the spend gate first and runs under Claude's `--max-budget-usd`, and the review loop's reviews and fix turns, each of which asks the ONE spend gate first (a refusal pauses the loop; only the reader's Continue skips it, for the one step it resumes); usage recorded per turn. |
+| Resource exhaustion · leftovers · spend | Per-session caps, a total services cap, ≤ 2 open sessions, one build turn per computer (Implement and AI Fix share both), idle teardown; Ensemble labels on every resource, swept at boot and on discard (`ensemble sandbox prune`). Every turn is a reader's press except an UNATTENDED fix's ONE FIX LOOP (its build turn, then AI Fix's own review rounds and fix turns), each automatic step of which asks the spend gate first (a refusal STOPS that loop) under Claude's `--max-budget-usd`, and the Implement review loop's reviews and fix turns, each of which asks the ONE spend gate first (a refusal pauses the loop; only the reader's Continue skips it, for the one step it resumes); usage recorded per turn and per review, under the provider that ran it. AI Fix's review rounds read a LOCAL commit in Ensemble's clone cache: nothing reaches GitHub until the push. |
 
 Routes and tiers: `api/plugins/rate-limit.ts` (a session start, a message, Start build / Start fix and
 Resume `ai` + `ai_hourly`; the pushes `github_write`; the rest `read`). The removed shell-less plan and build agents

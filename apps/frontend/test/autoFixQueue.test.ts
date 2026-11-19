@@ -74,4 +74,16 @@ describe('the fix start queue line', () => {
     expect(fixWaitingLine({ position: 2 })).toBe('Waiting for a free sandbox (2nd in line). It starts by itself.');
     expect(fixWaitingLine({ position: 12 })).toBe('Waiting for a free sandbox (12th in line). It starts by itself.');
   });
+
+  it('behind the fix of another PR of the same ticket: says whose, and offers Start now on a press only', async () => {
+    const { fixCanStartNow, fixWaitingLine } = await import('../src/lib/aiFixProgress.js');
+    expect(fixWaitingLine({ position: 1, blockedBy: { prNumber: 12 } })).toBe('Waiting for the fix of #12 (same ticket).');
+    expect(fixWaitingLine({ position: 2, blockedBy: null })).toBe('Waiting for a free sandbox (2nd in line). It starts by itself.');
+    expect(fixCanStartNow({ trigger: 'manual', blockedBy: { prNumber: 12 } })).toBe(true);
+    expect(fixCanStartNow({ trigger: 'auto', blockedBy: { prNumber: 12 } })).toBe(false);
+    expect(fixCanStartNow({ trigger: 'manual', blockedBy: null })).toBe(false);
+    expect(fixCanStartNow({ trigger: 'manual' })).toBe(false);
+    expect(fixCanStartNow(null)).toBe(false);
+    expect(AUTO_FIX_QUEUE_LINE.ticket_fix_running).toBe('Waiting for the fix of another pull request of the same ticket.');
+  });
 });

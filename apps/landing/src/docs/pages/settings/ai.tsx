@@ -3,7 +3,7 @@ import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, Steps, Tip, Ui 
 
 export const meta: DocMeta = {
   title: 'AI',
-  summary: 'Choose the provider, sign in, set the effort, the spend budget and the disk space Ensemble may use.',
+  summary: 'Choose the provider, sign in, set the models and effort, the spend budget and the disk space Ensemble may use.',
 };
 
 export default function Page(): JSX.Element {
@@ -24,8 +24,9 @@ export default function Page(): JSX.Element {
         otherwise whichever one is.
       </p>
       <p>
-        AI Review and AI Fix have their own model menu. When both Claude and Codex are signed in, the menu lists both
-        and starts on this provider. When both are signed in, reviews run on both by default; see{' '}
+        AI Review, AI Fix and Implement story have their own model menu. When both Claude and Codex are signed in, the
+        menu lists both and starts on the choice in{' '}
+        <DocLink to="settings/ai#run-settings">Review, AI Fix and Implement story</DocLink>. When both are signed in, reviews run on both by default; see{' '}
         <DocLink to="ai-review/claude-and-codex">Claude and Codex together</DocLink>.
       </p>
       <p>
@@ -104,25 +105,64 @@ export default function Page(): JSX.Element {
         environment, and the box shows that value, locked.
       </p>
 
-      <H2 id="effort">Effort</H2>
+      <H2 id="run-settings">Review, AI Fix and Implement story</H2>
       <p>
-        <Ui>Effort for reviews and AI Fix</Ui> sets how hard the AI works. Higher effort reads more and finds more, and
-        uses more of your plan or costs more. It applies to every review (AI Review, the CI review, the story check and
-        Check threads), AI Fix and Implement, on both Claude and Codex.
+        Three blocks say which vendor, model and effort each AI feature runs on. The run menus of AI Review, AI Fix and
+        Implement story open on these, and can pick another model for one run. A run picked that way keeps the effort set
+        here for its vendor. A vendor that is not signed in shows its sign-in line instead.
       </p>
+      <Illustration label="The Review block: Claude on with Claude Opus 5.5 at High, Codex on with GPT-6.1 Sol at Default." caption="The Review block, one row per vendor.">
+        <SettingsRow label="Claude" hint="On · Claude Opus 5.5 (most thorough)" control={<Pill tone="grey">High</Pill>} />
+        <SettingsRow label="Codex" hint="On · Codex · GPT-6.1 Sol (most thorough)" control={<Pill tone="grey">Default</Pill>} />
+      </Illustration>
+      <H3 id="review">Review</H3>
+      <p>
+        One row per vendor: <Ui>On</Ui>, a model and an effort. Every review uses them: AI Review, auto reviews, the CI
+        review, the story check, Check threads and the review rounds of Implement story and AI Fix.
+      </p>
+      <ul>
+        <li>
+          With both on and signed in, Claude and Codex review together as one review, each at its own model and effort.
+          See <DocLink to="ai-review/claude-and-codex">Claude and Codex together</DocLink>.
+        </li>
+        <li>With one on, it reviews alone. One vendor must stay on.</li>
+        <li>
+          A workspace whose auto reviews use one vendor runs the first one that is on and signed in, Claude before Codex.
+        </li>
+      </ul>
+      <H3 id="ai-fix">AI Fix</H3>
+      <p>
+        A vendor, a model and an effort for AI Fix, Plan first and auto fix, and <Ui>Review rounds</Ui>: how many times
+        Ensemble reviews a fix and the agent answers, before anything is pushed. It is 5 by default, from 1 to 6, and
+        applies to every fix, manual and automatic. The reviews use the Review settings above. Changing only the rounds
+        leaves auto fix on its review&rsquo;s model. See <DocLink to="ai-fix/push-and-auto-fix#review-rounds">Review rounds</DocLink>.
+      </p>
+      <H3 id="implement-story">Implement story</H3>
+      <p>
+        A vendor, a model and an effort for Implement story&rsquo;s plan and build, and <Ui>Review rounds</Ui>: how many
+        times the review loop reviews and fixes the work before it opens the pull request. It is 5 by default, from 1 to
+        6. The start panel opens on this number and can change it for one build.
+      </p>
+      <p>
+        If the AI Fix or Implement story vendor is not signed in or is over its usage limit when a run starts, the other
+        signed-in vendor runs, at its usual model and Default effort. The run shows what it used.
+      </p>
+      <H3 id="effort">Effort</H3>
+      <p>Higher effort reads more and finds more, and uses more of your plan or costs more.</p>
       <ul>
         <li>
           <Ui>Default</Ui> runs Claude at medium, and Codex at high on its most thorough model. A review of a small
           change from its diff alone can run one level lower.
         </li>
         <li>
-          <Ui>Low</Ui>, <Ui>Medium</Ui>, <Ui>High</Ui>, <Ui>Extra high</Ui> and <Ui>Max</Ui> set the level for every
-          run.
+          <Ui>Low</Ui>, <Ui>Medium</Ui>, <Ui>High</Ui>, <Ui>Extra high</Ui> and <Ui>Max</Ui> set the level for that
+          vendor&rsquo;s runs.
         </li>
       </ul>
-      <p>Each run shows the effort it used beside its model.</p>
+      <p>Each run shows the model and effort it used. Until you change a block, it runs as it did before.</p>
       <Note>
-        If the menu is greyed out with <Ui>Set by REVIEW_EFFORT.</Ui>, the effort was fixed when Ensemble started.
+        If every effort menu is greyed out with <Ui>Effort is set by REVIEW_EFFORT.</Ui>, the effort was fixed when
+        Ensemble started.
       </Note>
 
       <H2 id="ai-spend">AI spend</H2>

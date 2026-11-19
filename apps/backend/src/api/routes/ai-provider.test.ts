@@ -6,6 +6,8 @@
 //   3. an explicitly set LIMN_AI_PROVIDER wins: /api/me says `source: 'env'` and the PUT is a 409;
 //   4. the Effort level (PUT /api/ai/effort) follows the same three rules: stored + held + reported,
 //      read back at boot, and REVIEW_EFFORT wins (409); null goes back to Default.
+//   5. the run profiles (PUT /api/ai/run-profiles): validated, stored, held, reported and read back at
+//      boot; the effort compat path drops every profile effort.
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,6 +53,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  (await import('../../ai/run-profile.js')).setStoredAiRunProfiles(null);
   setting?.setStoredAiProviderSetting(null);
   effort?.setStoredAiEffort(null);
   delete process.env.REVIEW_EFFORT;
@@ -166,5 +169,90 @@ describe('the effort level', () => {
     const { db, schema } = await import('../../db/client.js');
     const rows = await db.select({ v: schema.accounts.aiEffort }).from(schema.accounts).execute();
     expect(rows.every((r) => r.v == null)).toBe(true);
+  });
+});
+
+const putProfiles = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/ai/run-profiles', payload: payload as object });
+
+describe('the run profiles', () => {
+  it('start from today: both review vendors on at the usual models, the old level, rounds 5', async () => {
+    const p = (await me()).runProfiles;
+    expect(p.review.claude).toEqual({ enabled: true, model: 'claude-opus-5-5', effort: null });
+    expect(p.review.codex).toEqual({ enabled: true, model: 'gpt-6.1-sol', effort: null });
+    // AI Fix's own review rounds (its loop) default to 5 too.
+    expect(p.fix).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 });
+    expect(p.build).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 });
+    expect(p.effortSource).toBe('settings');
+  });
+
+  it('refuses a bad body with one sentence: no profiles, an unknown field, a model of the other vendor, a bad effort or rounds, no review vendor on', async () => {
+    for (const bad of [
+      {},
+      { profiles: { review: { gemini: {} } } },
+      { profiles: { review: { claude: { model: 'gpt-6.1-sol' } } } },
+      { profiles: { fix: { provider: 'codex', model: 'claude-opus-5-5' } } },
+      { profiles: { fix: { model: 'claude-opus-5-5' } } },
+      { profiles: { build: { effort: 'ultra' } } },
+      { profiles: { build: { rounds: 7 } } },
+      { profiles: { build: { rounds: 0 } } },
+      { profiles: { fix: { rounds: 7 } } },
+      { profiles: { review: { claude: { enabled: false }, codex: { enabled: false } } } },
+    ]) {
+      const res = await putProfiles(bad);
+      expect(res.statusCode, JSON.stringify(bad)).toBe(400);
+      expect(typeof res.json().message).toBe('string');
+    }
+  });
+
+  it('stores the whole object, holds it for the next run, reports it and reads it back at boot', async () => {
+    const profiles = {
+      review: { claude: { enabled: true, model: 'claude-sonnet-5', effort: 'high' }, codex: { enabled: false, effort: 'low' } },
+      fix: { provider: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh', rounds: 2 },
+      build: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 3 },
+    };
+    const res = await putProfiles({ profiles });
+    expect(res.statusCode).toBe(200);
+    const p = res.json().runProfiles;
+    expect(p.review.claude).toEqual({ enabled: true, model: 'claude-sonnet-5', effort: 'high' });
+    expect(p.review.codex).toEqual({ enabled: false, model: 'gpt-6.1-sol', effort: 'low' });
+    expect(p.fix).toEqual({ provider: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh', rounds: 2 });
+    expect(p.build).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 3 });
+    expect((await me()).runProfiles).toEqual(p);
+    expect(effort.agenticRunEffort('claude', { role: 'deep' }, 'worktree')).toBe('high');
+    expect(effort.agenticRunEffort('codex', { role: 'deep' }, 'worktree', process.env, 'fix')).toBe('xhigh');
+    const rp = await import('../../ai/run-profile.js');
+    rp.setStoredAiRunProfiles(null);
+    expect(await store.loadStoredAiRunProfiles(1)).toEqual(profiles);
+    expect(rp.buildLoopRounds()).toBe(3);
+    expect(rp.fixLoopRounds()).toBe(2);
+  });
+
+  it('the effort compat path sets every surface: the one level, every profile effort dropped', async () => {
+    expect((await putEffort({ value: 'medium' })).statusCode).toBe(200);
+    const p = (await me()).runProfiles;
+    expect([p.review.claude.effort, p.review.codex.effort, p.fix.effort, p.build.effort]).toEqual(['medium', 'medium', 'medium', 'medium']);
+    // The rest of the profiles stay.
+    expect(p.review.codex.enabled).toBe(false);
+    expect(p.build.rounds).toBe(3);
+  });
+
+  it('REVIEW_EFFORT wins over every profile effort (the controls lock)', async () => {
+    process.env.REVIEW_EFFORT = 'max';
+    try {
+      const p = (await me()).runProfiles;
+      expect(p.effortSource).toBe('env');
+      expect([p.review.claude.effort, p.fix.effort, p.build.effort]).toEqual(['max', 'max', 'max']);
+    } finally {
+      delete process.env.REVIEW_EFFORT;
+    }
+  });
+
+  it('an empty object goes back to none (NULL)', async () => {
+    expect((await putProfiles({ profiles: {} })).statusCode).toBe(200);
+    const { db, schema } = await import('../../db/client.js');
+    const rows = await db.select({ v: schema.accounts.aiRunProfiles }).from(schema.accounts).execute();
+    expect(rows.every((r) => r.v == null)).toBe(true);
+    expect((await import('../../ai/run-profile.js')).storedAiRunProfiles()).toBeNull();
+    expect((await putEffort({ value: null })).statusCode).toBe(200);
   });
 });

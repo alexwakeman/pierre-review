@@ -1,10 +1,13 @@
-// THE EFFORT SETTING and THE ONE RESOLVER for "what effort does this run send?" (packages/shared
-// `ai-effort.ts` holds the levels, the words and the provider map — the identity, see its header).
+// THE ONE RESOLVER for "what effort does this run send?" (packages/shared `ai-effort.ts` holds the
+// levels, the words and the provider map — the identity, see its header).
 //
-// THE CHOICE: an explicitly set REVIEW_EFFORT (one of the five levels) WINS and locks the Settings
-// control; otherwise the level stored per machine (`accounts.ai_effort`, PUT /api/ai/effort, loaded at
-// boot by ai/provider-store.ts), held HERE in memory so a change reaches the next run with no restart.
-// Neither ⇒ DEFAULT (null). No DB import here, for the same reason as ai/provider-setting.ts.
+// THE CHOICE, PER SURFACE AND VENDOR (2026-11-18, the run profiles — ai/run-profile.ts): an explicitly
+// set REVIEW_EFFORT (one of the five levels) WINS everywhere and locks every effort control; otherwise
+// the surface's profile (Settings → AI: the review per vendor, AI Fix and Implement story each for their
+// own vendor); a profile that says nothing ⇒ the OLD SINGLE LEVEL (`accounts.ai_effort`, PUT
+// /api/ai/effort — now the compat path that resets every surface to it), held HERE in memory so a
+// change reaches the next run with no restart. Nothing ⇒ DEFAULT (null). No DB import here, for the
+// same reason as ai/provider-setting.ts.
 //
 // WHO IT REACHES (`agenticRunEffort`): EVERY REVIEW — the PR review (lead, specialists, follow-up
 // re-reviews), the CI review, the story check (`ticket_review`) and Check threads (2026-11-01) — plus
@@ -29,8 +32,9 @@
 // ⚠ Opus 5.5 is no longer PINNED on the review and AI Fix: a chosen level or REVIEW_EFFORT moves it like
 // any model. Every other kind still runs it at medium. What stays fixed everywhere is adaptive thinking
 // (review/model-options.ts).
-import { AI_EFFORTS, isAiEffort, stepDownEffort, type AiEffort, type AiEffortSettingStatus } from '@pierre-review/shared';
+import { AI_EFFORTS, isAiEffort, stepDownEffort, type AiEffort, type AiEffortSettingStatus, type AiRunSurface } from '@pierre-review/shared';
 import type { AgentProviderId, ModelChoice, ModelRole } from './provider.js';
+import { profileEffortLevel } from './run-profile.js';
 
 export const REVIEW_EFFORT_ENV = 'REVIEW_EFFORT';
 export const REVIEW_DIFF_ONLY_EFFORT_ENV = 'REVIEW_DIFF_ONLY_EFFORT';
@@ -57,7 +61,8 @@ export function aiEffortEnvSetting(env: NodeJS.ProcessEnv = process.env): AiEffo
   return envEffort(env, REVIEW_EFFORT_ENV);
 }
 
-/** THE chosen level, read at call time: REVIEW_EFFORT, else the stored one, else null (Default). */
+/** THE OLD SINGLE LEVEL, read at call time: REVIEW_EFFORT, else the stored one, else null (Default).
+ *  A run reads `surfaceEffortLevel` instead (the profiles fall back to this). */
 export function chosenAiEffort(env: NodeJS.ProcessEnv = process.env): AiEffort | null {
   return aiEffortEnvSetting(env) ?? storedEffort;
 }
@@ -104,18 +109,32 @@ export function diffOnlyEffortAt(level: AiEffort, atDefault: AiEffort): AiEffort
 }
 
 /**
- * THE EFFORT of a review / AI Fix / Plan first / story plan / story build run on `provider`: the chosen level on a worktree run;
+ * THE LEVEL a surface runs `provider` at (null ⇒ Default): REVIEW_EFFORT when set, else the surface's
+ * run profile (Settings → AI; ai/run-profile.ts — the review's per vendor, AI Fix's and Implement's for
+ * their own vendor, Default for the other), else — no profile says — the old single level.
+ */
+export function surfaceEffortLevel(surface: AiRunSurface, provider: AgentProviderId, env: NodeJS.ProcessEnv = process.env): AiEffort | null {
+  const fromEnv = aiEffortEnvSetting(env);
+  if (fromEnv) return fromEnv;
+  const fromProfile = profileEffortLevel(surface, provider);
+  return fromProfile === undefined ? storedEffort : fromProfile;
+}
+
+/**
+ * THE EFFORT of a review / AI Fix / Plan first / story plan / story build run on `provider`: the
+ * surface's level (`surfaceEffortLevel`; `surface` defaults to the review) on a worktree run;
  * diff-only, REVIEW_DIFF_ONLY_EFFORT when set (at any level, on both providers), else
- * `diffOnlyEffortAt`; Default ⇒ `defaultRunEffort`. Read once per run, at its start; the run stores
- * what it used.
+ * `diffOnlyEffortAt` — per vendor, from that vendor's level; Default ⇒ `defaultRunEffort`. Read once
+ * per run, at its start; the run stores what it used.
  */
 export function agenticRunEffort(
   provider: AgentProviderId,
   choice: Pick<ModelChoice, 'role'>,
   mode: 'diff_only' | 'worktree',
   env: NodeJS.ProcessEnv = process.env,
+  surface: AiRunSurface = 'review',
 ): AiEffort {
-  const level = chosenAiEffort(env);
+  const level = surfaceEffortLevel(surface, provider, env);
   const atDefault = defaultRunEffort(provider, choice.role, mode);
   if (mode === 'worktree') return level ?? atDefault;
   const fromEnv = envEffort(env, REVIEW_DIFF_ONLY_EFFORT_ENV);
@@ -123,3 +142,21 @@ export function agenticRunEffort(
   return level == null ? atDefault : diffOnlyEffortAt(level, atDefault);
 }
 
+
+/**
+ * `agenticRunEffort` with ONE RUN'S LEVEL named by the reader for that run only (a local branch review's
+ * `effort` argument): it stands in for the surface's level — a diff-only run one step lower, as the
+ * setting. A set REVIEW_EFFORT still wins and locks it; REVIEW_DIFF_ONLY_EFFORT still decides diff-only.
+ * `oneRun` null ⇒ exactly `agenticRunEffort`.
+ */
+export function runEffortFor(
+  provider: AgentProviderId,
+  choice: Pick<ModelChoice, 'role'>,
+  mode: 'diff_only' | 'worktree',
+  oneRun: AiEffort | null,
+  env: NodeJS.ProcessEnv = process.env,
+): AiEffort {
+  if (oneRun == null || aiEffortEnvSetting(env) != null) return agenticRunEffort(provider, choice, mode, env);
+  if (mode === 'worktree') return oneRun;
+  return envEffort(env, REVIEW_DIFF_ONLY_EFFORT_ENV) ?? diffOnlyEffortAt(oneRun, defaultRunEffort(provider, choice.role, mode));
+}

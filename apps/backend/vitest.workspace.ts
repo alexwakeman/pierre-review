@@ -30,6 +30,8 @@ export const SLOW_TESTS = [
   'src/coding/git.test.ts',
   'src/coding/merge.test.ts',
   'src/review/worktree-gc.test.ts',
+  // A local branch review on real git: the client's snapshot in a scratch clone, the bundle intake (~1.6 s).
+  'src/local-review/*-real.test.ts',
   // A story build on a real scratch worktree per case (git init/add/commit/diff, ~1.5 s each).
   'src/coding/story-build/push-branch.test.ts',
   // The fake Codex CLI: one node process per run (two on a retry), many on real git worktrees.
@@ -85,6 +87,8 @@ export const SLOW_TESTS = [
   'src/sandbox/session/plan-session-flow-db.test.ts',
   // Moved 2026-11-09 by the time budget: real git, a scratch store and sandbox repositories per case
   'src/sandbox/session/fix-merge-store-real.test.ts',
+  // Real git: an AI Fix sibling overlay committed in a scratch clone cache, mirrored (per-session copy and a scratch store) and extracted with sh
+  'src/sandbox/session/fix-overlay-real.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every

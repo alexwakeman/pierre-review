@@ -15,7 +15,7 @@ const AGENT_COLS = [
 const AGENT_ROWS = [
   { _key: 'review', agent: 'AI Review, CI review, story checks', reads: 'The pull request and its code', shell: 'No', where: 'Your computer' },
   { _key: 'chat', agent: 'Chats, briefs, summaries', reads: 'The review, ticket or docs they are about', shell: 'No', where: 'Your computer' },
-  { _key: 'fix', agent: 'AI Fix', reads: 'The repository', shell: 'Yes', where: 'The sandbox' },
+  { _key: 'fix', agent: 'AI Fix', reads: 'The pull request’s repository, and the workspace’s other repositories read only', shell: 'Yes', where: 'The sandbox' },
   { _key: 'impl', agent: 'Implement story', reads: 'The workspace’s repositories', shell: 'Yes', where: 'The sandbox' },
 ];
 

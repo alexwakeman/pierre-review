@@ -48,6 +48,10 @@ export interface AiFixRow {
   pushedPrNumber: number | null;
   pushedPrUrl: string | null;
   pushedAt: Date | number | null;
+  /** 0205: the commit the push left; NULL before 0205 and while unpushed. */
+  pushedCommitSha?: string | null;
+  /** 0205: the push was not a press (Push when done, Push automatically, the Dependencies policy). */
+  pushedAutomatically?: boolean | null;
   createdAt: Date | number | null;
   finishedAt: Date | number | null;
   // LEGACY JSON, written only by the removed comments seed (plugin migration 0024). Never read.
@@ -81,6 +85,8 @@ export interface AiFixRow {
   // 0178 — the merge (sandbox/session/fix-merge.ts `FixMergeState`) and the agent's commits (base64 bundle).
   mergeJson?: Record<string, unknown> | null;
   mergeBundle?: string | null;
+  // 0210 — the sibling state the fix was built against (sibling-stale.ts `FixSiblingState[]`). NULL = none read.
+  siblingStateJson?: unknown[] | null;
 }
 
 /** The session columns a fix session writes (fix.ts). Scoped by account. */
@@ -107,6 +113,7 @@ export interface FixSessionPatch {
   numTurns?: number | null;
   mergeJson?: Record<string, unknown> | null;
   mergeBundle?: string | null;
+  siblingStateJson?: unknown[] | null;
 }
 
 export async function updateFixSession(ctx: AgentContext, accountId: number, id: number, patch: FixSessionPatch): Promise<void> {
@@ -211,7 +218,7 @@ export async function markFixRanOn(ctx: AgentContext, id: number, ran: AiRanOn):
 export async function markFixPushed(
   ctx: AgentContext,
   id: number,
-  input: { pushedBranch: string; pushedPrNumber?: number; pushedPrUrl?: string },
+  input: { pushedBranch: string; pushedPrNumber?: number; pushedPrUrl?: string; commitSha?: string | null; automatic?: boolean },
 ): Promise<void> {
   const t = ctx.schema.aiFixes;
   await ctx.db
@@ -220,6 +227,8 @@ export async function markFixPushed(
       pushedBranch: input.pushedBranch,
       pushedPrNumber: input.pushedPrNumber ?? null,
       pushedPrUrl: input.pushedPrUrl ?? null,
+      pushedCommitSha: input.commitSha ?? null,
+      pushedAutomatically: input.automatic === true,
       pushedAt: new Date(),
       // A push that lands clears an earlier AUTOMATIC push's failure (`markFixPushFailed`).
       error: null,

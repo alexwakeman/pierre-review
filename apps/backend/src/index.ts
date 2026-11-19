@@ -66,9 +66,11 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
     // set, still wins). Never fails the boot: a read error means "not chosen" (auto).
     // The Effort level beside it (REVIEW_EFFORT, when set, wins); a read error means Default.
     // And "Use my API keys first" (LIMN_AI_USE_API_KEY, when set, wins); a read error means off.
-    const { loadStoredAiEffort, loadStoredAiProvider, loadStoredPrefersApiKey } = await import('./ai/provider-store.js');
+    // And the run profiles (Settings → AI → Review / AI Fix / Implement story); a bad value means none.
+    const { loadStoredAiEffort, loadStoredAiProvider, loadStoredAiRunProfiles, loadStoredPrefersApiKey } = await import('./ai/provider-store.js');
     await loadStoredAiProvider(me?.id);
     await loadStoredAiEffort(me?.id);
+    await loadStoredAiRunProfiles(me?.id);
     await loadStoredPrefersApiKey(me?.id);
     // LIMN FINDINGS ARE BOTS (db/limn-bots.ts): stored finding comments go to their poster's
     // `limn:` bot (and edited-away ones back to their person) before anything reads them. DB only,
@@ -150,6 +152,18 @@ export async function start(): Promise<{ app: FastifyInstance; port: number }> {
   // Remove the per-run checkouts nothing needs any more — in the background, bounded by
   // WORKTREE_SWEEP_MAX_MS, after listen so it never delays serving.
   kickWorktreeSweep('boot');
+
+  // THE LOCAL PINNED REFS (review/local-refs.ts): unpushed commits Ensemble made in its clone cache under
+  // `refs/pierre/local/*`. A run that needs one holds it in this process, so after a restart only what a
+  // registered keeper still needs survives. After listen, never awaited, bounded, never fatal.
+  void import('./review/local-refs.js')
+    .then(({ sweepLocalRefs }) => sweepLocalRefs())
+    .then((r) => {
+      if (r.deleted > 0) console.log(`clone cache: removed ${r.deleted} leftover local refs`);
+    })
+    .catch(() => {
+      /* repair, never a precondition */
+    });
 
   // The one-off cleanup of the transcripts older Limn agent runs left under ~/.claude/projects
   // (ai/session-litter.ts): once per machine (a flag in the data dir), only Limn-named directories,

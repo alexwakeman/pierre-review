@@ -55,7 +55,7 @@ vi.mock('../ticket-review/prepare.js', async (orig) => ({
     throw new Error('no clone in tests');
   },
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 
 // ---- the fake checkouts: a real temp dir per ref; the backend's default branch carries the fix ----
 const checkoutCalls: ReviewRunPeer[][] = [];

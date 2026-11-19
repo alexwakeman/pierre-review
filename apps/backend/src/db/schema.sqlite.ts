@@ -80,6 +80,7 @@ import type {
   TicketAssessment,
   AiBudgetSettings,
   AiUsageReading,
+  AiRunProfiles,
   AiFixChangeReport,
   CheckRunReport,
   StoryBuildCandidate,
@@ -188,6 +189,11 @@ export const accounts = sqliteTable('accounts', {
   // NULL = never chosen (Default: each provider's own depth). An explicitly set REVIEW_EFFORT wins
   // over it (ai/effort.ts).
   aiEffort: text('ai_effort'),
+  // 0206. THE AI RUN PROFILES (Settings → AI; shared ai-run-profiles.ts, ai/run-profile.ts): per surface —
+  // the review per vendor {enabled, model, effort}, AI Fix and Implement story {provider, model, effort}
+  // (+ Implement's review rounds). NULL or a missing field = as before (`ai_effort`, the default provider,
+  // the usual models). REVIEW_EFFORT still wins over every effort in it.
+  aiRunProfiles: text('ai_run_profiles', { mode: 'json' }).$type<AiRunProfiles>(),
   // 0184. "USE MY API KEYS FIRST" (Settings → AI): true ⇒ ANTHROPIC_API_KEY (and OPENAI_API_KEY, where
   // Codex may use it) ahead of the sign-in. NULL = never chosen (off). An explicitly set
   // LIMN_AI_USE_API_KEY wins over it (ai/credentials.ts). Only the tick is stored, never a key.
@@ -2193,6 +2199,12 @@ export const aiFixes = sqliteTable(
     pushedPrNumber: integer('pushed_pr_number'),
     pushedPrUrl: text('pushed_pr_url'),
     pushedAt: integer('pushed_at', { mode: 'timestamp' }),
+    // 0205 — the commit the push left on the branch (AiFixPushResult.commitSha; the merge path: the fix on
+    // top of the merge). NULL on rows pushed before 0205 and on every unpushed row.
+    pushedCommitSha: text('pushed_commit_sha'),
+    // 0205 — the push was not a press: "Push when done", "Push automatically" or the Dependencies policy.
+    // 0 on a pressed push and on every row pushed before 0205.
+    pushedAutomatically: integer('pushed_automatically', { mode: 'boolean' }).notNull().default(false),
     createdAt: integer('created_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -2254,11 +2266,278 @@ export const aiFixes = sqliteTable(
     // NULL = the run had no merge.
     mergeJson: text('merge_json', { mode: 'json' }).$type<Record<string, unknown>>(),
     mergeBundle: text('merge_bundle'),
+    // 0207 — AI FIX'S OWN REVIEW LOOP (docs/CLAUDE-REVIEW.md § AI Fix → The review loop; coding/ai-fix/loop.ts).
+    // loop_state NULL (never ran) | 'reviewing' | 'fixing' | 'done' | 'stopped'; loop_round the current round
+    // (1-based for the whole fix: a reader's follow-up runs the loop again and the numbers go on);
+    // loop_first_round the first round of the current run; loop_rounds N (Settings → AI → AI Fix, read at the
+    // run's start); loop_stop why it ended (shared `AiFixLoopStop`); loop_base_sha the PR base commit the
+    // rounds review against; loop_review_id the claude_reviews row the closing review became at the PUSHED
+    // head (markLoopReviewOnPr; soft, no FK).
+    loopState: text('loop_state'),
+    loopRound: integer('loop_round').notNull().default(0),
+    loopFirstRound: integer('loop_first_round').notNull().default(0),
+    loopRounds: integer('loop_rounds'),
+    loopStop: text('loop_stop'),
+    loopBaseSha: text('loop_base_sha'),
+    loopReviewId: integer('loop_review_id'),
+    loopFinishedAt: integer('loop_finished_at', { mode: 'timestamp' }),
+    // 0210 — THE SIBLING STATE the fix was built against (docs/SANDBOX.md § AI Fix sessions → Scope): JSON
+    // FixSiblingState[] (coding/ai-fix/sibling-stale.ts), one per open PR of the same ticket read at its head —
+    // its head SHA, the overlaid AI Fix (or null) and its patch hash, the sibling's built fix ids then. Written with
+    // each stored patch (never by a boot or Resume alone). Staleness is computed on read. NULL = no sibling was read.
+    siblingStateJson: text('sibling_state_json', { mode: 'json' }).$type<unknown[]>(),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),
     statusIdx: index('af_account_status').on(t.accountId, t.status),
     sessionPhaseIdx: index('af_account_session_phase').on(t.accountId, t.sessionPhase),
+  }),
+);
+
+// ---- AI Fix's own review loop (migration 0207; docs/CLAUDE-REVIEW.md § AI Fix → The review loop) ----
+// The Build loop's shape (story_build_reviews …) keyed by the FIX: (account_id, fix_id, round). `ai_fixes` has
+// no `(id, account_id)` unique (an ADOPTED table, see above), so `fix_id` is SOFT (no FK): every read and
+// write is account-scoped, both delete paths prune these rows with the fix's (db/ai-fix-loop-prune.ts) and the
+// erasure deletes them explicitly. Build's tables are untouched.
+//
+// ai_fix_loop_reviews — ONE row per code-review RUN of a round (one provider half). `head_sha` is the LOCAL
+// commit reviewed (refs/pierre/local/ai-fix-loop/<fixId>/r<round>, never pushed); `work_key` names the work it
+// is (the patch's hash, or the checked merge result) so the push can tell whether the closing review covers
+// what it pushed. Status: 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled'.
+export const aiFixLoopReviews = sqliteTable(
+  'ai_fix_loop_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    repoId: integer('repo_id').notNull(),
+    baseSha: text('base_sha').notNull(),
+    headSha: text('head_sha').notNull(),
+    localRef: text('local_ref'),
+    workKey: text('work_key'),
+    provider: text('provider'),
+    model: text('model'),
+    effort: text('effort'),
+    pairRole: text('pair_role'),
+    // The round's place in ITS loop run (> rounds = the closing review) and that run's N, fixed at the run's start.
+    step: integer('step'),
+    rounds: integer('rounds'),
+    status: text('status').notNull(),
+    reviewMode: text('review_mode'),
+    summary: text('summary'),
+    verdict: text('verdict'),
+    followUp: text('follow_up', { mode: 'json' }).$type<Record<string, unknown>>(),
+    pairConsolidation: text('pair_consolidation', { mode: 'json' }).$type<Record<string, unknown>>(),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    runUx: uniqueIndex('ai_fix_loop_reviews_run').on(t.fixId, t.round, t.provider),
+    idAccountUx: uniqueIndex('ai_fix_loop_reviews_id_account').on(t.id, t.accountId),
+    accountIdx: index('ai_fix_loop_reviews_account_idx').on(t.accountId, t.fixId, t.round),
+  }),
+);
+
+// ai_fix_loop_findings — the findings of one loop review run, plus the fix agent's answer (`response` 'fixed' |
+// 'answered' | 'pushed_back' | 'not_reported', its text and the round it answered). `prior_finding_id` /
+// `merged_into` are SOFT.
+export const aiFixLoopFindings = sqliteTable(
+  'ai_fix_loop_findings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    reviewId: integer('review_id').notNull(),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    severity: text('severity').notNull(),
+    path: text('path').notNull(),
+    line: integer('line'),
+    side: text('side').notNull().default('RIGHT'),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    suggestion: text('suggestion'),
+    diffHunk: text('diff_hunk'),
+    anchored: integer('anchored', { mode: 'boolean' }).notNull().default(false),
+    fileInDiff: integer('file_in_diff', { mode: 'boolean' }).notNull().default(false),
+    priorFindingId: integer('prior_finding_id'),
+    lens: text('lens'),
+    mergedInto: integer('merged_into'),
+    ref: text('ref'),
+    response: text('response'),
+    responseText: text('response_text'),
+    responseRound: integer('response_round'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('ai_fix_loop_findings_review_idx').on(t.reviewId),
+    accountIdx: index('ai_fix_loop_findings_account_idx').on(t.accountId, t.fixId, t.round),
+    reviewAccountFk: foreignKey({
+      name: 'ai_fix_loop_findings_review_account_fk',
+      columns: [t.reviewId, t.accountId],
+      foreignColumns: [aiFixLoopReviews.id, aiFixLoopReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ai_fix_loop_story_checks — the round's story check, only when the PR's ticket criteria are in the fix (the
+// ticket review's assessment; `claims` the agent's criterion notes shown, `claim_verdicts` the checker's word
+// on each "not applicable" note).
+export const aiFixLoopStoryChecks = sqliteTable(
+  'ai_fix_loop_story_checks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    status: text('status').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    assessment: text('assessment', { mode: 'json' }).$type<Record<string, unknown>>(),
+    claims: text('claims', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    claimVerdicts: text('claim_verdicts', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    roundUx: uniqueIndex('ai_fix_loop_story_checks_round').on(t.fixId, t.round),
+    accountIdx: index('ai_fix_loop_story_checks_account_idx').on(t.accountId, t.fixId),
+  }),
+);
+
+// ai_fix_loop_ac_responses — the fix agent's answer per criterion ('AC3') or missing item ('M1') after a round's
+// review: 'fixed' | 'not_applicable' | 'cannot_meet' | 'answered' | 'pushed_back' | 'not_reported'.
+export const aiFixLoopAcResponses = sqliteTable(
+  'ai_fix_loop_ac_responses',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    ref: text('ref').notNull(),
+    response: text('response').notNull(),
+    text: text('text'),
+  },
+  (t) => ({
+    refUx: uniqueIndex('ai_fix_loop_ac_responses_ref').on(t.fixId, t.round, t.ref),
+    accountIdx: index('ai_fix_loop_ac_responses_account_idx').on(t.accountId, t.fixId),
+  }),
+);
+
+// ---- Local branch reviews (CORE, migration 0209; docs/CLAUDE-REVIEW.md § Reviewing a local branch) ----
+// local_reviews — ONE row per run of `ensemble mcp` / `ensemble review` (a code review of a branch nobody pushed
+// yet, + its story check; or the story check alone). `local_ref` is the pinned bundle head
+// (refs/pierre/local/local-review/<id>/head, dropped when the run ends). ⚠ ONE RUN IN FLIGHT per (account,
+// repo, branch): the partial unique index `local_reviews_one_running` (… WHERE status = 'running') lives in the
+// .sql only. `reviewers` / `assessment` / `answers` are JSON (shapes: local-review/persist.ts).
+export const localReviews = sqliteTable(
+  'local_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status').notNull(),
+    branch: text('branch').notNull(),
+    baseRef: text('base_ref'),
+    baseSha: text('base_sha').notNull(),
+    headSha: text('head_sha').notNull(),
+    localRef: text('local_ref'),
+    includeUncommitted: integer('include_uncommitted', { mode: 'boolean' }).notNull().default(false),
+    uncommittedChanges: integer('uncommitted_changes', { mode: 'boolean' }).notNull().default(false),
+    subjects: text('subjects', { mode: 'json' }).$type<string[]>(),
+    providerChoice: text('provider_choice'),
+    effortChoice: text('effort_choice'),
+    reviewers: text('reviewers', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    summary: text('summary'),
+    verdict: text('verdict'),
+    pairConsolidation: text('pair_consolidation', { mode: 'json' }).$type<Record<string, unknown>>(),
+    ticketKey: text('ticket_key'),
+    ticketIdent: text('ticket_ident'),
+    ticketTitle: text('ticket_title'),
+    ticketUrl: text('ticket_url'),
+    ticketNote: text('ticket_note'),
+    storyStatus: text('story_status'),
+    storyProvider: text('story_provider'),
+    storyModel: text('story_model'),
+    storyFailure: text('story_failure'),
+    assessment: text('assessment', { mode: 'json' }).$type<Record<string, unknown>>(),
+    claims: text('claims', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    claimVerdicts: text('claim_verdicts', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    answers: text('answers', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    priorReviewId: integer('prior_review_id'),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    idAccountUx: uniqueIndex('local_reviews_id_account').on(t.id, t.accountId),
+    branchIdx: index('local_reviews_branch_idx').on(t.accountId, t.repoId, t.branch, t.id),
+  }),
+);
+
+// local_review_findings — the findings of one local review run (`half` 0/1: which provider half raised it), plus
+// the agent's answer from a LATER run of the same branch (`response` 'fixed' | 'answered' | 'pushed_back',
+// `response_review_id` the run that carried it). `prior_finding_id` / `merged_into` are SOFT.
+export const localReviewFindings = sqliteTable(
+  'local_review_findings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    localReviewId: integer('local_review_id').notNull(),
+    half: integer('half').notNull().default(0),
+    provider: text('provider'),
+    severity: text('severity').notNull(),
+    path: text('path').notNull(),
+    line: integer('line'),
+    side: text('side').notNull().default('RIGHT'),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    suggestion: text('suggestion'),
+    diffHunk: text('diff_hunk'),
+    anchored: integer('anchored', { mode: 'boolean' }).notNull().default(false),
+    fileInDiff: integer('file_in_diff', { mode: 'boolean' }).notNull().default(false),
+    priorFindingId: integer('prior_finding_id'),
+    lens: text('lens'),
+    mergedInto: integer('merged_into'),
+    response: text('response'),
+    responseText: text('response_text'),
+    responseReviewId: integer('response_review_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('local_review_findings_review_idx').on(t.accountId, t.localReviewId),
+    reviewAccountFk: foreignKey({
+      name: 'local_review_findings_review_account_fk',
+      columns: [t.localReviewId, t.accountId],
+      foreignColumns: [localReviews.id, localReviews.accountId],
+    }).onDelete('cascade'),
   }),
 );
 
@@ -2805,6 +3084,8 @@ export const sandboxWorkspaceSettings = sqliteTable(
     diskGb: integer('disk_gb'),
     /** Migration 0175: the picked compose files, JSON `SandboxServiceStackChoice[]`; NULL = none. */
     servicesJson: text('services_json'),
+    /** Migration 0208: AI Fix loads every workspace repository (read only). NULL = on; false = the narrow set. */
+    fixAllRepos: integer('fix_all_repos', { mode: 'boolean' }),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -4791,7 +5072,7 @@ export const storyBuilds = sqliteTable(
     // THE REVIEW LOOP (migration 0186; docs/STORY-BUILD.md § The review loop): with `auto_push` on, the build
     // is pushed, reviewed and fixed for at most `loop_rounds` rounds, then the PR opens. `loop_claimed_at` is
     // the start claim (compare-and-set, once per build); state / round / pause are written at every step.
-    // Always WRITTEN at start (clampLoopRounds; default STORY_BUILD_LOOP_ROUNDS_DEFAULT = 4). The column
+    // Always WRITTEN at start (clampLoopRounds; absent ⇒ Settings → AI, default STORY_BUILD_LOOP_ROUNDS_DEFAULT = 5). The column
     // default 3 is the migration-0186 value and is never relied on.
     loopRounds: integer('loop_rounds').notNull().default(3),
     loopState: text('loop_state'),

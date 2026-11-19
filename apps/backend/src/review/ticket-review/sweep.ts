@@ -3,7 +3,7 @@ import { isTrackerIdent, parseTicketIdent } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
-import { agenticRunReady } from '../claude-review/ai-ready.js';
+import { agenticRunReady, singleReviewProvider } from '../claude-review/ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { autoReviewAvailable } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
@@ -166,7 +166,7 @@ export async function runTicketReviewSweep(
   const ticketsForPr = providers.ticketsForPr;
   if (!autoReviewAvailable(ctx)) return result;
   if (sweeping) return result;
-  if (!agenticRunReady(ctx, 'ticket_review')) {
+  if (!agenticRunReady(ctx, 'ticket_review', singleReviewProvider(ctx))) {
     result.stopped = 'ai_not_ready';
     return result;
   }
@@ -187,7 +187,7 @@ export async function runTicketReviewSweep(
       // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, read nothing and queue nothing. The PR
       // snapshot, the kicks and the change cursor are left as they are, so every change made while
       // paused is still "changed" on the first tick back under the limit.
-      if (!(await automaticRunAllowed(ctx, accountId, 'ticket review'))) {
+      if (!(await automaticRunAllowed(ctx, accountId, 'ticket review', singleReviewProvider(ctx)))) {
         result.overBudget = true;
         continue;
       }

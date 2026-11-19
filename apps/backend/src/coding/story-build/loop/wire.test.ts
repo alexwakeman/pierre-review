@@ -1,11 +1,12 @@
-// THE REVIEW LOOP'S PURE FOLDS (loop/wire.ts) that carry state ACROSS rounds:
+// THE REVIEW LOOP'S PURE FOLDS (loop/wire.ts and the shared round rule, coding/review-loop/rounds.ts) that carry state ACROSS rounds:
 //   • an ACCEPTED "not applicable" stays settled on later rounds (no claim is sent again for it);
 //   • a finding a round's review left 'not_checked' stays open: counted, carried into the next round's
 //     follow-up input (`carried: true`), and in the PR body's "still open".
 import { describe, expect, it } from 'vitest';
 import type { TicketAssessment } from '@pierre-review/shared';
 import type { LoopFindingRow, LoopReviewRow, LoopStoryCheckRow } from './persist.js';
-import { acceptedNa, effectiveClaimVerdicts, loopBodySummaryOf, notCheckedIdsOf, openCriteriaOf, priorForTarget, roundOpen } from './wire.js';
+import { loopBodySummaryOf } from './wire.js';
+import { acceptedNa, effectiveClaimVerdicts, notCheckedIdsOf, openCriteriaOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
 
 const crit = (ref: string, status: string): TicketAssessment['criteria'][number] =>
   ({ ref, index: 0, text: ref, status, explanation: null, deliveredBy: [], evidence: [], expectedIn: null }) as unknown as TicketAssessment['criteria'][number];

@@ -45,6 +45,12 @@ export interface SandboxWorkspaceSettings {
   services: SandboxServiceStackChoice[];
   /** "Always allow" hosts (sandbox_allowed_hosts), normalised, sorted. */
   alwaysAllowedHosts: string[];
+  /**
+   * AI Fix loads every workspace repository, read only at its default branch, beside the PR's own (at most
+   * `AI_FIX_REPOS_MAX`, the most related first; docs/SANDBOX.md § AI Fix sessions). Default on (migration
+   * 0208: a NULL column reads as on). Off ⇒ the PR's repository and its ticket's other repositories only.
+   */
+  fixAllRepos: boolean;
 }
 
 /** PUT replaces the whole setting: a field left out goes back to its default. */
@@ -55,7 +61,11 @@ export interface SandboxWorkspaceSettingsBody {
   globalProxyEnv?: boolean;
   resources?: Partial<SandboxResourceChoice>;
   services?: SandboxServiceStackChoice[];
+  fixAllRepos?: boolean;
 }
+
+/** At most this many repositories in one AI Fix session, the PR's own included (the rest are named, not loaded). */
+export const AI_FIX_REPOS_MAX = 12;
 
 export const SANDBOX_MEMORY_PROJECTS_MAX = 50;
 export const SANDBOX_PATH_MAX = 1024;

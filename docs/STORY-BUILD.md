@@ -24,7 +24,8 @@ session** (since 2026-11-07):
    a past session (owner decision D1). It takes seconds once the image is local.
 2. **Plan** (§ Plan first). Ensemble sends the opening turn itself: the agent investigates the code, the data
    and (with docs) the reference documents, and submits a STRUCTURED PLAN that Ensemble checks on the host.
-   The reader settles each point of contention (Agree / Keep the story / Reply) and talks to the agent
+   The reader settles the points of contention one step at a time (Agree / Keep the story / Reply), then
+   checks every answer on a last Review step that holds Approve and start, and talks to the agent
    in the tab; chat turns run in plan mode (the agent reads but does not change files).
 3. **Build.** **Approve and start** reads the ticket again and switches the agent to build mode. It implements,
    runs the repositories' own tests — integration tests too, against real services from the compose
@@ -87,7 +88,10 @@ without a plan": a session whose agent never sends a usable plan can only be mes
   ONE **Update ticket** press writes only what changed. Nothing in the build or the review loop writes
   the tracker.
 - **Revisions** (`story_build_plans`): every usable plan is a revision (≤ 12; an identical resubmission is
-  none). Agree / Keep the story are stored at once on the LATEST revision (no turn). Reply stores the
+  none). Agree / Keep the story are stored at once on the LATEST revision (no turn): the panel asks the
+  points in a WIZARD, one step per point ("Point 2 of 4" + its AC refs), and each pick is saved as it is
+  made, so a closed tab or a reload reopens on the first open point; its last step, Review, lists the
+  answers and holds Approve and start (docs/FRONTEND.md § The build tab). Reply stores the
   reply and sends a revision turn. A free message is a revision turn only when its answer has a block. An
   answer carries to the next revision when the contention's id AND fingerprint (its problem + evidence)
   are unchanged. No usable plan after an opening, reply or (no plan yet) message turn ⇒ ONE automatic
@@ -149,8 +153,11 @@ From 2026-10-30, still in force:
    card shows the build MARK (`storyBuildMark`: Working… / Waiting for you / Ready to push / Pushed) — a
    status, never a button.
 5. **Gap-filling** against existing ticket PRs reads the stored story check (§ Fill gaps).
-6. **Effort:** Settings → AI → Effort reaches the session's turns (`agenticRunEffort`, read once per
-   session start by `sandbox/drivers/index.ts resolveSandboxAgentChoice`).
+6. **Vendor, model and effort** come from Settings → AI → **Implement story** (`buildChoice`, surface
+   `'build'`; docs/CLAUDE-REVIEW.md § The run profiles), not from one Effort level: the effort is read once
+   per session start (`agenticRunEffort(…, 'build')` in `sandbox/drivers/index.ts resolveSandboxAgentChoice`)
+   and reaches every turn; a session on the OTHER vendor (a fallback or a menu pick) runs at that vendor's
+   Default. `REVIEW_EFFORT` still wins. The loop's REVIEW rounds use the Review profile.
 
 From 2026-11-06 (the workspace session; [SANDBOX.md](SANDBOX.md) has the reasons and measurements):
 D1 memories only, never past sessions · D2 talk before the build · D3 on Docker, the only way out is
@@ -168,13 +175,15 @@ or the description's criteria section — and the write stays the reader's press
 
 From 2026-11-12 (THE REVIEW LOOP, § The review loop):
 - The opt-in is "After the build: review and fix, then open the pull request" — it REUSES
-  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, default 4 since 2026-11-12 — `STORY_BUILD_LOOP_ROUNDS_DEFAULT`, always written at start; the column default 3 is never read, 1..6), set in
+  `story_builds.auto_push` as the switch, with a rounds number N (`loop_rounds`, 1..6 — default 5 since 2026-11-18, was 4 — `STORY_BUILD_LOOP_ROUNDS_DEFAULT`; a start that names none, and a loop switched on later with no rounds, take Settings → AI → Implement story → Review rounds, `ai/run-profile.ts` `buildLoopRounds()`; always written at start; the column default 3 is never read), set in
   the Start panel and in the tab until the loop starts. Unticked = the manual flow (Push). The old "Push
   automatically" (one push when the build finishes) is RETIRED: the subject no longer calls
   `maybeAutoPushBuild`.
 - The review is Ensemble's OWN machinery, exactly as a PR review: the code review per target with the
-  providers the workspace's auto review uses (Claude + Codex pair on `both`), and ONE story check across
-  every target per round (`activeProviderId()`, never a pair). Every finding — blockers, warnings, nits and
+  providers the workspace's auto review uses (Claude + Codex pair on `both` — the review vendors ON in
+  Settings → AI and signed in, `seams.ts` through the one pair resolver; each half at its vendor's Review
+  model and effort), and ONE story check across every target per round (`reviewDefaultProvider`, the
+  first review vendor on and signed in, never a pair). Every finding — blockers, warnings, nits and
   QUESTIONS — and every open criterion goes to the agent, which fixes, answers or PUSHES BACK; it may call a
   criterion not applicable, which the next story check judges. A blocker is never settled by pushback alone.
 - Everything the reviewers and the agent say stays IN ENSEMBLE: no GitHub comment or review, no tracker write.
@@ -511,10 +520,41 @@ claim ([TEAM-REVIEW.md](TEAM-REVIEW.md) § Implement and Fill gaps is the plain-
 
 "After the build: review and fix, then open the pull request" — a SOFTWARE FACTORY with adversarial,
 iterative review. Owner decisions: § Owner decisions (2026-11-12). Modules: `driver.ts` (the state machine,
-never throws to the session), `targets.ts`, `branch-review.ts` (one code-review half), `story-check.ts`,
-`seed.ts` (REVIEW.md), `pr-body.ts` + `pr-facts.ts`, `review-on-pr.ts`, `wire.ts` (the folds and the wire
+never throws to the session), `targets.ts`, `branch-review.ts` (one code-review half of a pushed target branch),
+`story-check.ts` (the round's story check over the targets), `pr-body.ts` + `pr-facts.ts`, `wire.ts` (the wire
 mapper), `persist.ts`, `seams.ts` (lazy defaults; tests swap them with `setStoryLoopSeamsForTests`),
-`routes.ts`. The agent's report: `sandbox/workspace/review-response.ts` (docs/SANDBOX.md § The review response).
+`routes.ts`. The agent's report is read out of the sandbox by `sandbox/workspace/review-response.ts`
+(docs/SANDBOX.md § The review response).
+
+### Where the pieces live: the shared loop core (`coding/review-loop/`)
+
+The SUBJECT-INDEPENDENT parts of the loop live in `coding/review-loop/`, so a loop over another subject (AI
+Fix's internal rounds, the local branch review) runs the SAME folds and never forks one. They take a
+repository, a base sha, a HEAD SOURCE (docs/CLAUDE-REVIEW.md § Reviewing a branch → The head source),
+criteria, prior findings and a provider list — never a `story_builds` row:
+
+| Module | What | Build calls it from |
+|---|---|---|
+| `rounds.ts` | THE STOP RULE `nextAfterReview(open, k, N, {onlyCannotMeet})` (nothing open, the closing review k = N + 1, or only criteria the agent CANNOT MEET (`onlyCannotMeetLeft` over `cannotMeetOf`) ⇒ `open`; else `fix`), `roundOpen`, `openFindingsOf`, `openCriteriaOf`, `effectiveClaimVerdicts`/`acceptedNa`, the carried `notChecked*`, the next round's follow-up input `priorForTarget`. Pure, over STRUCTURAL rows. | `driver.ts`, `wire.ts` |
+| `seed.ts` | REVIEW.md (`buildLoopFixSeed`; `subject: 'fix'` for AI Fix's words), the fix turn's message (Build's `buildLoopFixInstruction`, byte-identical; AI Fix's `buildAiFixLoopFixInstruction`), `responseLine`; goldens `review-loop/__fixtures__/loop-seed-golden.json` | `driver.ts` |
+| `response.ts` | the answer vocabulary (`fixed`/`answered`/`pushed_back`/`not_applicable`/`cannot_meet`), THE ONE validator text and the checker script | `driver.ts`, `sandbox/workspace/review-response.ts` |
+| `branch-review.ts` | `runBranchReviewHalf` (one provider half: prepare, route, prompt, run, follow-up steps), the pair (`consolidateBranchPair`, `pairConsolidationRecord`, `pairRoleOf`), who reviews (`branchReviewProviders`, `storyCheckProvider`, through ai/run-profile.ts) | `loop/branch-review.ts` (the remote head of the pushed branch), `seams.ts` |
+| `story-check.ts` | `runBranchStoryCheck` (ticket-review pieces over branches; `claimVerdictsOf`) | `loop/story-check.ts` |
+| `review-on-pr.ts` | `markLoopReviewOnPr` (the closing review as ONE `claude_reviews` row at the PR head) | `driver.ts` |
+
+AI Fix's own review loop (`coding/ai-fix/loop.ts`; docs/CLAUDE-REVIEW.md § AI Fix → The review loop) is the
+second subject: ONE target (the PR's repository), a LOCAL pinned head per round (nothing pushed), its own
+`ai_fix_loop_*` tables, and the same stop rule, seed, checker, review half, story check and closing-review import.
+The local branch review (`local-review/run.ts`; docs/CLAUDE-REVIEW.md § Reviewing a local branch) is the third:
+ONE review pass per reader request (no fix turns, no rounds), a LOCAL pinned head from an uploaded bundle, its own
+`local_reviews` tables (each provider half read as a structural run), and the same review half, pair consolidation,
+`priorForTarget` follow-up, response validator (for the reader agent's `answers[]`), story check and
+`openCriteriaOf` / `cannot_meet` vocabulary. `runBranchReviewHalf` gained two OPTIONAL inputs for it (`effort`:
+one run's level; `ledgerFeature`: Codex's ledger feature) — absent for Build and AI Fix, so their runs are unchanged.
+
+Build keeps its state machine, targets, pushes, claims, persistence and composite keys. Its `loop/branch-review.ts`
+and `loop/story-check.ts` are thin adapters: each target's head is its pushed loop branch
+(`refs/heads/<branch>`, fetched into `refs/pierre/story-loop/<buildId>` only when missing).
 
 - **Targets.** A TARGET is one branch that becomes one PR: a `story_build_repos` row with a patch (a
   one-patch-per-repository build) or a `story_build_prs` row (plan first), in stack order. Every claim,
@@ -558,10 +598,17 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   re-raised as a finding of the round, with the agent's earlier answer), the refs file and the checker,
   then `startHostBuildTurn` (the build slot, claimed in one tick; refused ⇒ waits, then `build_busy`).
   `afterLoopFixTurn` reads `.limn/review-response.json`: `fixed` / `answered` / `pushed_back` per finding,
-  `not_applicable` too per criterion; a missing ref is `not_reported` (open again); `fixed` on a target whose
+  `not_applicable` and `cannot_meet` too per criterion; a missing ref is `not_reported` (open again); `fixed` on a target whose
   tree did not change is stored `answered`. The answers ARE the replies the next review judges. A turn
   that ended without its work STORED (the session closing, a failed store) pauses `fix_failed` /
   `session_closed` instead of pushing the old work.
+- **"Cannot meet"** (2026-11-18; both loops). The agent may answer a criterion or missing item `cannot_meet` with a
+  REQUIRED reason (the checker refuses it on a finding, and without a reason). It is NEVER turned into accepted:
+  the story check gets it as an answer (context), not a claim to judge, and the criterion stays NOT MET
+  everywhere — the coverage strip (`loopCoverage` carries the reason), the round's answers, the PR body ("Not
+  met, and the agent says these cannot be done: AC2: <reason>") and the story view. THE STOP: after a review, no
+  open finding and EVERY open criterion one the agent said it cannot meet in its answers to the round before ⇒
+  the loop ends (Build: the PRs open; AI Fix: `cannot_meet`) instead of spending the remaining rounds on it.
 - **What stays open across rounds** (`wire.ts`). An ACCEPTED "not applicable" stays settled on every later
   round (`effectiveClaimVerdicts`: the newest verdict per ref, an earlier `accepted` carried unless a later
   check rejects it) — the criterion leaves the seed, so no claim is sent for it again, and the next check's
@@ -644,7 +691,7 @@ stores each build's own choice (`story_builds.auto_approve_plan`).
 
 The story view's menu item "Build end to end" is ONE press for the whole build: the plan approved
 automatically (§ Approve automatically: every open point as Agree), the build, THE REVIEW LOOP with
-`STORY_BUILD_LOOP_ROUNDS_DEFAULT` (4) rounds (it stops early when a round finds nothing open; after the last
+Settings → AI's Review rounds (`buildLoopRounds()`, default 5) (it stops early when a round finds nothing open; after the last
 round the PR opens ready anyway, naming what is still open), and then THE TICKET STEP.
 
 - **The start.** The menu press leaves a ONE-SHOT, IN-MEMORY request (`lib/storyBuildTab.ts

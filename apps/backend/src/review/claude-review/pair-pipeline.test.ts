@@ -43,7 +43,7 @@ vi.mock('../../platform/event-hooks.js', () => ({
 vi.mock('../../sonar/post.js', () => ({ maybeAutoPostSonar: async () => {} }));
 vi.mock('../../coding/ai-fix/auto-fix.js', () => ({ maybeStartAutoFix: async () => ({ status: 'not_own' }) }));
 vi.mock('../diagrams/trigger.js', () => ({ maybeDrawDiagramsAfterReview: async () => {} }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 // THE COVER PASS's agent (replies-check-agent.ts): scripted, and records how many auto posts had
 // happened when it ran (the post must wait for it).
 const coverCalls: Array<{ provider: string; autoPostsSoFar: number }> = [];

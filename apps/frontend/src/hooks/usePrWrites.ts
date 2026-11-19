@@ -287,6 +287,7 @@ export function requestReviewersOptions(qc: QueryClient, prId: number, reviewerK
       // request event syncs) and takes the person off the candidate list. Only this write moves them.
       void qc.invalidateQueries({ queryKey: ['review-waits', prId] });
       void qc.invalidateQueries({ queryKey: ['reviewer-candidate', prId] });
+      void qc.invalidateQueries({ queryKey: ['askable-people', prId] });
       // A sibling still in flight: refresh the PR's own detail only (staleTime:Infinity +
       // persisted), and leave the board to whichever request lands last.
       if (qc.isMutating({ mutationKey: requestReviewersMutationKey(prId) }) > 1) {

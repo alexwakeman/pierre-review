@@ -25,8 +25,9 @@ export type ManualRunChoice =
   | { ok: false; error: 'UnknownProvider' | 'ModelNotOffered' | 'ModelNotOnProvider' | 'NoClaudeAuth'; message: string };
 
 export interface ManualRunChoiceOptions {
-  /** The model when the request names none (the surface's usual depth). */
-  defaultModel: ClaudeReviewModel;
+  /** The model when the request names none: the surface's usual depth, or — per provider — its run
+   *  profile's (Settings → AI; ai/run-profile.ts). */
+  defaultModel: ClaudeReviewModel | ((provider: AiProviderId) => ClaudeReviewModel);
   /** The pre-flight for a named provider and kind (review/auth.ts `detectProviderAuth`). */
   detect(provider: AiProviderId, kind: AiRunKind): { status: 'ok' | 'none'; message?: string };
   /** The default provider (Settings → AI). Defaults to `activeProviderId()`. */
@@ -75,7 +76,8 @@ export function resolveManualRunChoice(
   if (pre.status !== 'ok') {
     return { ok: false, error: 'NoClaudeAuth', message: pre.message ?? `${aiProviderName(provider)} is not signed in.` };
   }
-  return { ok: true, provider, model: model != null ? aiPickerRequestModel(model) : opts.defaultModel };
+  const fallback = typeof opts.defaultModel === 'function' ? opts.defaultModel(provider) : opts.defaultModel;
+  return { ok: true, provider, model: model != null ? aiPickerRequestModel(model) : fallback };
 }
 
 /**

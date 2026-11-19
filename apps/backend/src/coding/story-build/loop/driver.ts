@@ -1,5 +1,5 @@
 // THE REVIEW LOOP — THE STATE MACHINE (docs/STORY-BUILD.md § The review loop). "After the build: review and
-// fix, then open the pull request" (`story_builds.auto_push`; `loop_rounds` = N, default 4):
+// fix, then open the pull request" (`story_builds.auto_push`; `loop_rounds` = N, default 5, from Settings → AI):
 //
 //   built ──maybeStartLoop──► [CLAIM loop_claimed_at] ──► pushing (round 0: each target's branch, no PR)
 //   pushing ──► reviewing k (each target's code review — the workspace's AI review providers, a pair runs
@@ -20,11 +20,11 @@
 //     reader's own); nothing is written to the tracker;
 //   • the session is HELD (no idle close) from the start claim until the PRs open or the loop pauses;
 //   • never throws to the session.
+import { buildLoopRounds } from '../../../ai/run-profile.js';
 import {
   clampLoopRounds,
   STORY_BUILD_LOOP_PAUSE_LINE,
   type AiProviderId,
-  type ClaudeReviewPairConsolidation,
   type ClaudeReviewTicket,
   type StoryBuild,
   type StoryBuildLoop,
@@ -32,7 +32,7 @@ import {
   type StoryBuildLoopState,
 } from '@pierre-review/shared';
 import type { AgentContext } from '../../../review/agent-context.js';
-import { REVIEW_REFS_FILE, REVIEW_RESPONSE_CHECKER, REVIEW_RESPONSE_FILE, reviewResponseCheckerSource } from '../../../sandbox/workspace/review-response.js';
+import { REVIEW_REFS_FILE, REVIEW_RESPONSE_CHECKER, REVIEW_RESPONSE_FILE, reviewResponseCheckerSource } from '../../review-loop/response.js';
 import { HEAD_MOVED_LOOP_LINE } from '../../git-ops.js';
 import { getStoryBuildRow, listStoryBuildRepoRows, updateStoryBuildRepo, type StoryBuildRow } from '../persist.js';
 import { listPlannedPrRows, updateStoryBuildPr } from '../plan-persist.js';
@@ -64,12 +64,14 @@ import {
   type LoopStep,
 } from './persist.js';
 import { prOpenFacts } from './pr-facts.js';
-import { buildLoopFixInstruction, buildLoopFixSeed, type LoopSeedCriterion, type LoopSeedFinding } from './seed.js';
+import { buildLoopFixInstruction, buildLoopFixSeed, type LoopSeedCriterion, type LoopSeedFinding } from '../../review-loop/seed.js';
 import { defaultLoopSeams, type LoopSeams } from './seams.js';
 import { LOOP_CHECK_FEATURE } from './story-check.js';
 import { isLive, loopTargets, reviewBaseOf, type LoopTarget } from './targets.js';
-import { loopBodySummaryOf, notCheckedFindingsOf, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen, runWireOf, toStoryBuildLoop } from './wire.js';
-import { markLoopReviewOnPr } from './review-on-pr.js';
+import { loopBodySummaryOf, runWireOf, toStoryBuildLoop } from './wire.js';
+import { pairConsolidationRecord, pairRoleOf } from '../../review-loop/branch-review.js';
+import { cannotMeetOf, nextAfterReview, notCheckedFindingsOf, onlyCannotMeetLeft, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
+import { markLoopReviewOnPr } from '../../review-loop/review-on-pr.js';
 import { loopBodySection } from './pr-body.js';
 
 export const LOOP_FIX_FEATURE = 'story_loop_fix';
@@ -309,7 +311,12 @@ export async function setLoopSettings(
   const bt = t as any;
   const rows = (await ctx.db
     .update(bt)
-    .set({ ...(o.on !== undefined ? { autoPush: o.on } : {}), ...(o.rounds !== undefined ? { loopRounds: clampLoopRounds(o.rounds) } : {}) })
+    // Switched on with no rounds named, on a build started without the loop ⇒ Settings → AI's rounds (the
+    // row still holds the column default, which nothing relies on).
+    .set({
+      ...(o.on !== undefined ? { autoPush: o.on } : {}),
+      ...(o.rounds !== undefined ? { loopRounds: clampLoopRounds(o.rounds) } : o.on === true && !b.autoPush ? { loopRounds: buildLoopRounds() } : {}),
+    })
     .where(and(eq(bt.id, buildId), eq(bt.accountId, accountId), isNull(bt.loopClaimedAt), isNull(bt.autoPushClaimedAt)))
     .returning({ id: bt.id })
     .execute()) as Array<{ id: number }>;
@@ -490,8 +497,6 @@ function ticketOf(b: StoryBuildRow): ClaudeReviewTicket {
   };
 }
 
-const PAIR_ROLE = (n: number, total: number): 'first' | 'second' | null => (total < 2 ? null : n === 0 ? 'first' : 'second');
-
 /** REVIEW k: the code review of every target that needs one, and the round's story check. */
 async function stepReview(
   ctx: AgentContext,
@@ -532,7 +537,7 @@ async function stepReview(
   );
   const prevCheck = [...checks].filter((c) => c.round < k && c.status === 'succeeded').sort((a, z) => z.round - a.round)[0] ?? null;
   const thisCheck = checks.find((c) => c.round === k && c.status === 'succeeded') ?? null;
-  const storyProvider = seams.storyProvider();
+  const storyProvider = await seams.storyProvider();
 
   // THE GATE, before anything of the round starts (a reader's Continue skips it).
   if (!byReader) {
@@ -619,7 +624,7 @@ async function stepReview(
           headSha: t.loopPushedSha!,
           provider: p,
           model: null,
-          pairRole: PAIR_ROLE(n, providers.length),
+          pairRole: pairRoleOf(n, providers.length),
           status: allowed ? 'running' : 'skipped',
         });
         if (!allowed) {
@@ -715,8 +720,7 @@ async function stepReview(
       const c = await seams.consolidate(ctx, accountId, runWireOf(x, fs), runWireOf(y, fs)).catch(() => null);
       if (c) {
         for (const [dropped, keep] of Object.entries(c.mergedFrom)) await updateLoopFinding(ctx, accountId, Number(dropped), { mergedInto: keep });
-        const record: ClaudeReviewPairConsolidation = { how: c.how, summary: c.summary, verdict: c.verdict, sourceOf: c.sourceOf, mergedFrom: c.mergedFrom, failedHalf: null, at: seams.now().toISOString() };
-        await updateLoopReview(ctx, accountId, x.id, { pairConsolidation: record });
+        await updateLoopReview(ctx, accountId, x.id, { pairConsolidation: pairConsolidationRecord(c, seams.now()) });
       }
     }
   }
@@ -727,10 +731,21 @@ async function stepReview(
   if (!checkOk) return pause(ctx, accountId, b.id, 'review_failed', 'reviewing', null);
 
   const checksNow = await listLoopStoryChecks(ctx, accountId, b.id);
-  const open = roundOpen(k, await listLoopReviews(ctx, accountId, b.id), await listLoopFindings(ctx, accountId, b.id), checksNow.find((c) => c.round === k) ?? null, checksNow);
+  const checkNow = checksNow.find((c) => c.round === k) ?? null;
+  const open = roundOpen(k, await listLoopReviews(ctx, accountId, b.id), await listLoopFindings(ctx, accountId, b.id), checkNow, checksNow);
   const total = open.findings + open.criteria;
-  seams.session.notice(b.id, total === 0 ? `Review round ${k}: nothing is open.` : `Review round ${k}: ${open.findings} ${open.findings === 1 ? 'finding' : 'findings'} and ${open.criteria} ${open.criteria === 1 ? 'criterion' : 'criteria'} to answer.`);
-  return total === 0 || k >= b.loopRounds + 1 ? 'open' : 'fix';
+  // THE cannot_meet STOP: every open item is a criterion the agent said (last round, with a reason) it cannot
+  // meet. It stays NOT MET (the PR body says so); spending the remaining rounds on it changes nothing.
+  const onlyCannotMeet = k > 1 && onlyCannotMeetLeft(open, openCriteriaOf(checkNow, checksNow), cannotMeetOf(await listLoopAcResponses(ctx, accountId, b.id), k - 1));
+  seams.session.notice(
+    b.id,
+    total === 0
+      ? `Review round ${k}: nothing is open.`
+      : onlyCannotMeet
+        ? `Review round ${k}: only criteria the agent says cannot be done are open, so the review stops.`
+        : `Review round ${k}: ${open.findings} ${open.findings === 1 ? 'finding' : 'findings'} and ${open.criteria} ${open.criteria === 1 ? 'criterion' : 'criteria'} to answer.`,
+  );
+  return nextAfterReview(open, k, b.loopRounds, { onlyCannotMeet });
 }
 
 /** FIX k: write REVIEW.md, then start the host's build turn. The turn's end continues (`afterLoopFixTurn`). */
@@ -748,7 +763,7 @@ async function stepStartFix(ctx: AgentContext, accountId: number, b: StoryBuildR
     }
     seams.session.hold(b.id);
   }
-  const provider = seams.session.provider(b.id) ?? seams.storyProvider();
+  const provider = seams.session.provider(b.id) ?? (await seams.storyProvider());
   if (!byReader && !(await seams.automaticAllowed(ctx, accountId, LOOP_FIX_FEATURE, provider))) {
     await pause(ctx, accountId, b.id, 'budget', 'fixing');
     return;
@@ -882,7 +897,8 @@ export async function afterLoopFixTurn(
     const byRef = new Map(items.map((it) => [it.ref, it]));
     for (const f of findings) {
       const it = byRef.get(f.ref!);
-      const action = it ? (it.action === 'not_applicable' ? 'answered' : it.action) : 'not_reported';
+      // A finding has no "not applicable" / "cannot meet" (the checker refuses them): read as an answer.
+      const action = it ? (it.action === 'not_applicable' || it.action === 'cannot_meet' ? 'answered' : it.action) : 'not_reported';
       await updateLoopFinding(ctx, accountId, f.id, { response: action, responseText: it?.reply ?? null, responseRound: k });
     }
     for (const r of acs) {

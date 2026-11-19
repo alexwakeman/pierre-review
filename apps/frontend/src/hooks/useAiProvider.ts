@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { AiEffort, AiProviderSetting, CodexLoginMethod, CodexLoginResponse } from '@pierre-review/shared';
+import type { AiEffort, AiProviderSetting, AiRunProfiles, CodexLoginMethod, CodexLoginResponse, MeResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { AI_BUDGET_QUERY_KEY } from './useAiBudget.js';
+import { meWithRunProfiles } from '../lib/runProfiles.js';
 
 // THE AI PROVIDER CHOICE and LIMN'S OWN CODEX SIGN-IN (Settings → AI). The choice is READ from
 // `/api/me` (`ai.provider`, `ai.providerSetting`, `ai.providers`), so a write invalidates `['me']` —
@@ -27,6 +28,36 @@ export function useSetAiEffort() {
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ['me'] });
     },
+  });
+}
+
+/**
+ * The run profiles (Settings → AI → Review / AI Fix / Implement story). Each write sends the WHOLE object,
+ * built from `me.ai.runProfiles`, so:
+ *   • the new value goes into `['me']` BEFORE the PUT (`meWithRunProfiles`, the server's own fold): a
+ *     control never jumps back to the old value mid-save; an error puts the old `/api/me` back;
+ *   • the PUT's answer replaces it, and the save stays pending until `/api/me` is read back — the
+ *     controls are disabled meanwhile, so the next edit is never built from the value before this one
+ *     and two quick edits cannot undo each other.
+ */
+export function useSetAiRunProfiles() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (profiles: AiRunProfiles) => api.setAiRunProfiles(profiles),
+    onMutate: async (profiles) => {
+      // An in-flight `/api/me` read must not land over the optimistic value.
+      await qc.cancelQueries({ queryKey: ['me'] });
+      const before = qc.getQueryData<MeResponse>(['me']);
+      qc.setQueryData<MeResponse | undefined>(['me'], (old) => meWithRunProfiles(old, profiles));
+      return { before };
+    },
+    onError: (_err, _profiles, c) => {
+      if (c?.before !== undefined) qc.setQueryData(['me'], c.before);
+    },
+    onSuccess: (res) => {
+      qc.setQueryData<MeResponse>(['me'], (old) => (old?.ai && res?.runProfiles ? { ...old, ai: { ...old.ai, runProfiles: res.runProfiles } } : old));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['me'] }),
   });
 }
 

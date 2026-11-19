@@ -89,6 +89,8 @@ import { asSyncLogger, resyncPrAfterWrite } from '../sync/resync-after-write.js'
 import { notePrChangedForPr, schedulePrSettle } from '../sync/pr-settle.js';
 import type { AgentContext } from '../review/agent-context.js';
 import { automaticRunAllowed } from '../review/budget-gate.js';
+import { fixChoice } from '../ai/run-profile.js';
+import { preflightFor } from '../ai/run-choice.js';
 import {
   AI_RUN_WINDOW_MS,
   aiFixEligibility,
@@ -145,7 +147,10 @@ const {
 const ACTIONS_PER_TICK = 6;
 /** How long an AI fix — a CI fix or a conflict run — may take (the sandbox's boot — a first image pull is slow — then its one build turn)
  *  before it is given up on. */
-const AI_FIX_TIMEOUT_MS = 90 * 60_000;
+// An AI fix now runs its OWN review loop before it is pushable (coding/ai-fix/loop.ts: up to N fix turns and
+// N + 1 reviews, each turn up to SANDBOX_TURN_MAX_MINUTES): the deadline RESTARTS at every loop step (`loopStep`
+// changes), so it bounds one stuck step, never a loop that is making progress.
+const AI_FIX_TIMEOUT_MS = 4 * 60 * 60_000;
 /** The automation log's window and length. */
 const LOG_DAYS = 14;
 const LOG_MAX = 40;
@@ -1355,6 +1360,8 @@ export interface AiFixDeps {
     hasWork?: boolean;
     mergeReason?: string | null;
     ciItems?: number;
+    /** The review loop's position (`<round>:<state>`), null when it never ran: a change is progress. */
+    loopStep?: string | null;
   } | null>;
   push: (ctx: AgentContext, accountId: number, fixId: number) => Promise<{ ok: true; sha: string } | { ok: false; message: string }>;
   /** Does an AI Fix session (anyone's — a reader's click or an earlier automatic one) hold the PR? */
@@ -1368,8 +1375,20 @@ export interface AiFixDeps {
   pollMs: number;
 }
 
+/**
+ * A dependency fix's vendor and model: Settings → AI → AI Fix (ai/run-profile.ts `fixChoice`), resolved
+ * ONCE per start and handed to the start TOGETHER (its budget and usage-limit gate then ask about that
+ * vendor). NONE STORED ⇒ as before: the usual fix model on the default provider. A fallback to the other
+ * vendor runs at ITS usual model, never the stored vendor's.
+ */
+export function dependencyFixChoice(ctx: Pick<AgentContext, 'llm'>): { model: string; provider: 'claude' | 'codex' } {
+  const c = fixChoice(preflightFor(ctx), 'fix');
+  return { model: c.model ?? DEFAULT_AI_FIX_MODEL, provider: c.provider };
+}
+
 const defaultAiFixDeps: AiFixDeps = {
-  allowed: (ctx, accountId) => automaticRunAllowed(ctx, accountId, 'dependency CI fix'),
+  // The gate asks about the vendor the fix will run on (Settings → AI → AI Fix), not the default provider.
+  allowed: (ctx, accountId) => automaticRunAllowed(ctx, accountId, 'dependency CI fix', fixChoice(preflightFor(ctx), 'fix').provider),
   async readFailures(ctx, pr) {
     const { readCiInputs } = await import('../review/ci-review/prepare.js');
     const inputs = await readCiInputs(ctx, {
@@ -1396,27 +1415,30 @@ const defaultAiFixDeps: AiFixDeps = {
     const { startFix } = await import('../coding/ai-fix/manager.js');
     if (input.withCi) {
       // THE COMBINED RUN: the CI-only seed (the CI review's fixable items at the PR's current head) with the
-      // merge REQUIRED, Limn's preamble above it. Unattended, the default provider, pushed below.
+      // merge REQUIRED, Limn's preamble above it. Unattended, Settings → AI → AI Fix, pushed below.
       return startFix(ctx, {
         accountId: input.accountId,
         prId: input.prId,
-        model: DEFAULT_AI_FIX_MODEL,
+        ...dependencyFixChoice(ctx),
         seed: 'review',
         sourceReviewId: null,
         preamble: input.instruction,
         resolveConflicts: true,
         trigger: 'auto',
+        // Today's narrow scope: a dependency bump needs no other repository (docs/SANDBOX.md § AI Fix sessions).
+        narrow: true,
       });
     }
     return startFix(ctx, {
       accountId: input.accountId,
       prId: input.prId,
-      model: DEFAULT_AI_FIX_MODEL,
+      ...dependencyFixChoice(ctx),
       seed: 'plain',
       instruction: input.instruction,
-      // An automatic fix: the default provider, no picker. auto-push.ts never pushes it (not the
+      // An automatic fix: Settings → AI → AI Fix, no picker. auto-push.ts never pushes it (not the
       // reader's own PR) — this file pushes it below, under its own rules.
       trigger: 'auto',
+      narrow: true,
       ...(input.resolveConflicts ? { resolveConflicts: true } : {}),
     });
   },
@@ -1424,7 +1446,7 @@ const defaultAiFixDeps: AiFixDeps = {
     const { getFixById } = await import('../coding/ai-fix/persist.js');
     const row = await getFixById(ctx, accountId, fixId);
     if (!row) return null;
-    const r = row as { status: string; patch?: string | null; error?: string | null; provider?: string | null; mergeJson?: unknown; mergeBundle?: string | null; reviewItems?: string | null };
+    const r = row as { status: string; patch?: string | null; error?: string | null; provider?: string | null; mergeJson?: unknown; mergeBundle?: string | null; reviewItems?: string | null; loopState?: string | null; loopRound?: number | null };
     const { fixRowHasWork, readMergeState } = await import('../sandbox/session/fix-merge.js');
     const merge = readMergeState(r.mergeJson ?? null);
     let ciItems = 0;
@@ -1442,6 +1464,7 @@ const defaultAiFixDeps: AiFixDeps = {
       provider: r.provider ?? null,
       hasWork: fixRowHasWork(r),
       mergeReason: merge && merge.status !== 'valid' ? (merge.reason ?? 'The merge is not ready.') : null,
+      loopStep: r.loopState ? `${r.loopRound ?? 0}:${r.loopState}` : null,
     };
   },
   async push(ctx, accountId, fixId) {
@@ -1534,9 +1557,15 @@ async function watchFixAndPush(
   what: 'ci' | 'conflicts' = 'ci',
 ): Promise<void> {
   try {
-    const deadline = Date.now() + AI_FIX_TIMEOUT_MS;
+    let deadline = Date.now() + AI_FIX_TIMEOUT_MS;
     let state = await deps.fixState(ctx, pr.accountId, fixId);
+    let step = state?.loopStep ?? null;
     while (state != null && (state.status === 'queued' || state.status === 'running')) {
+      // The review loop moved on (a new round, a fix turn): the wait restarts — it bounds ONE stuck step.
+      if ((state.loopStep ?? null) !== step) {
+        step = state.loopStep ?? null;
+        deadline = Date.now() + AI_FIX_TIMEOUT_MS;
+      }
       if (Date.now() > deadline) {
         // The session would run on (and spend) with nobody waiting for it: stop it first.
         await deps.stop(ctx, pr.accountId, pr.id, fixId).catch(() => {});

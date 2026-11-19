@@ -17,7 +17,7 @@ vi.mock('./manager.js', () => ({
   autoPendingPrIds: () => new Set(),
   enqueueAutoReview: () => 'queued',
 }));
-vi.mock('./ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 vi.mock('./auto-settings.js', () => ({ listAutoReviewWorkspaces: async () => [] }));
 
 const { autoReviewDue } = await import('./auto.js');

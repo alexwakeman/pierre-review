@@ -1,10 +1,13 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  AskablePeopleResponse,
   StoryChatListResponse,
   StoryChatLive,
   PrTabSummariesResponse,
   ActiveReviewsResponse,
   AiFix,
+  AiFixLoop,
+  AiFixLoopRound,
   AiFixPickerPreview,
   AiFixResponse,
   AiBudgetResponse,
@@ -136,6 +139,7 @@ import type {
 // build the Pending tabs from the shipped list rather than re-typing it.
 import {
   AI_BUDGET_DEFAULTS,
+  AI_FIX_LOOP_STOP_LINE,
   aiKindsAll,
   DO_NEXT_RULES,
   LARGE_PR_CODE_LOC_DEFAULT,
@@ -166,6 +170,14 @@ const ME: User = { id: 1, githubLogin: 'me-user', displayName: 'Me', avatarUrl: 
 const ALICE: User = { id: 2, githubLogin: 'alice', displayName: 'Alice', avatarUrl: null, isBot: false };
 const BOB: User = { id: 3, githubLogin: 'bob', displayName: 'Bob', avatarUrl: null, isBot: false };
 const USERS: User[] = [ME, ALICE, BOB];
+// The PR pane's "Someone else" picker (GET /api/prs/:id/askable-people): mergers first.
+const ASKABLE_PEOPLE: AskablePeopleResponse = {
+  workspaceId: 1,
+  people: [
+    { ...ALICE, isMaintainer: true, mergedInWorkspace: true },
+    { ...BOB, isMaintainer: false, mergedInWorkspace: false },
+  ],
+};
 
 // ── THE WORKSPACE COMES FIRST, AND THE WHOLE CONSOLE DEPENDS ON IT ─────────────────────────────
 // A workspace is the app's ONLY scope. The store starts with `workspaceId: null` and NOTHING
@@ -436,6 +448,18 @@ export const ME_RESPONSE: MeResponse = {
     provider: 'claude',
     providerSetting: { value: 'auto', source: 'settings' },
     effortSetting: { value: null, source: 'settings' },
+    // Settings → AI's run profiles, never chosen (NULL): both review vendors on at the usual models,
+    // AI Fix and Implement story on the default provider, 5 review rounds. Settings → AI renders them.
+    runProfiles: {
+      review: {
+        claude: { enabled: true, model: 'claude-opus-5-5', effort: null },
+        codex: { enabled: true, model: 'gpt-6.1-sol', effort: null },
+      },
+      fix: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 },
+      build: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 },
+      effortSource: 'settings',
+      stored: null,
+    },
     providers: {
       claude: { auth: 'ok', route: 'login', message: null, runtime: 'ready' },
       codex: {
@@ -1574,9 +1598,94 @@ export function aiFixBuilt(prId: number): AiFix {
     pushedPrNumber: null,
     pushedPrUrl: null,
     pushedAt: null,
+    pushedCommitSha: null,
+    pushedAutomatically: false,
+    pushWhenDone: true,
+    pushing: false,
+    pushHold: null,
     createdAt: iso(0.002),
     finishedAt: iso(0.001),
   };
+}
+
+/** A finished, unpushed fix built while #12 (the same ticket's other PR) was at an older state (AiFix.stale). */
+export function aiFixStale(prId: number): AiFix {
+  const b = aiFixBuilt(prId);
+  return { ...b, session: { ...b.session!, live: false, resumable: true }, stale: { line: '#12 changed after this fix was built.' } };
+}
+
+/**
+ * THE PUSH FOOTER's states of a finished fix ("Push when done" ticked): its automatic push on its way, landed,
+ * or failed (Push stays).
+ */
+export function aiFixAutoPush(prId: number, state: 'pushing' | 'pushed' | 'failed'): AiFix {
+  const b = aiFixBuilt(prId);
+  const closed = { ...b.session!, live: false, resumable: state === 'failed' };
+  if (state === 'pushing') return { ...b, session: closed, pushing: true };
+  if (state === 'failed') return { ...b, session: closed, error: 'Automatic push failed: the branch moved since the fix was made.' };
+  return {
+    ...b,
+    session: { ...closed, phase: 'pushed' },
+    pushedBranch: 'feature/e2e-branch',
+    pushedAt: iso(0),
+    pushedCommitSha: 'c0ffee'.padEnd(40, '0'),
+    pushedAutomatically: true,
+  };
+}
+
+/**
+ * AI FIX'S OWN REVIEW LOOP (AiFix.loop): round 1 found two findings, the agent fixed one and pushed back on the
+ * other, and said a criterion cannot be met; round 2 is reviewing now (no Push), or — `ended` — round 2 found
+ * only that criterion, so the loop stopped and the fix waits for Push.
+ */
+export function aiFixLooping(prId: number, state: 'reviewing' | 'ended'): AiFix {
+  const b = aiFixBuilt(prId);
+  const round1: AiFixLoopRound = {
+    round: 1,
+    step: 1,
+    closing: false,
+    headSha: 'a1'.padEnd(40, '0'),
+    review: 'succeeded',
+    providers: ['claude'],
+    verdict: 'REQUEST_CHANGES',
+    summary: 'Two things to fix.',
+    storyCheck: 'succeeded',
+    open: { findings: 2, criteria: 1 },
+    counts: { found: 3, fixed: 1, answered: 0, pushedBack: 1, cannotMeet: 1 },
+    findings: [
+      { id: 1, round: 1, severity: 'blocker', path: 'src/reports/route.ts', line: 12, title: 'The limit is not checked', body: 'Check it.', raisedBy: 'claude', response: { action: 'fixed', text: 'Added the check.', round: 1 } },
+      { id: 2, round: 1, severity: 'nit', path: 'src/reports/route.ts', line: 30, title: 'Rename the helper', body: 'Name it better.', raisedBy: 'claude', response: { action: 'pushed_back', text: 'The name matches the module.', round: 1 } },
+    ],
+    criteria: [{ ref: 'AC2', status: 'not_met', text: 'Export to PDF', explanation: 'No PDF export.', response: { action: 'cannot_meet', text: 'The PDF library is not in this repository.' } }],
+    fix: 'done',
+  };
+  const round2: AiFixLoopRound = {
+    ...round1,
+    round: 2,
+    step: 2,
+    headSha: 'b2'.padEnd(40, '0'),
+    review: state === 'reviewing' ? 'running' : 'succeeded',
+    summary: state === 'reviewing' ? null : 'Only the PDF criterion is open.',
+    open: state === 'reviewing' ? { findings: 0, criteria: 0 } : { findings: 0, criteria: 1 },
+    counts: state === 'reviewing' ? { found: 0, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 } : { found: 1, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 },
+    findings: [],
+    criteria: state === 'reviewing' ? [] : [{ ...round1.criteria[0]!, response: null }],
+    fix: 'none',
+  };
+  const loop: AiFixLoop = {
+    state: state === 'reviewing' ? 'reviewing' : 'stopped',
+    round: 2,
+    firstRound: 1,
+    rounds: 5,
+    stop: state === 'reviewing' ? null : 'cannot_meet',
+    stopLine: state === 'reviewing' ? null : AI_FIX_LOOP_STOP_LINE.cannot_meet,
+    running: state === 'reviewing',
+    history: [round1, round2],
+    cannotMeet: state === 'reviewing' ? [] : [{ ref: 'AC2', text: 'Export to PDF', reason: 'The PDF library is not in this repository.' }],
+    importedReviewId: null,
+  };
+  if (state === 'reviewing') return { ...b, status: 'running', loop };
+  return { ...b, loop };
 }
 
 /** The picker of a PR that conflicts with main: the merge item first (ticked), then the CI failures. */
@@ -1702,6 +1811,7 @@ const SANDBOX_SETTINGS: SandboxWorkspaceSettings = {
   resources: { cpus: null, memoryGb: null, diskGb: null },
   services: [],
   alwaysAllowedHosts: [],
+  fixAllRepos: true,
 };
 
 const CSV_PATCH = [
@@ -2133,6 +2243,8 @@ export async function installMockApi(
     autoFixActive?: AutoFixActiveResponse;
     // THE FIX START QUEUE: the PR's fix waits for a free sandbox (cleared by Cancel).
     aiFixWaiting?: AiFixResponse['waiting'];
+    /** "Start now" refused (e.g. 429 from the rate limit): its status and body. */
+    aiFixStartNowRefusal?: { status: number; body: { error: string; message: string } };
   } = {},
 ): Promise<void> {
   // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
@@ -2215,7 +2327,7 @@ export async function installMockApi(
                   loopOn: b.autoPush === true,
                   loopState: b.loop?.state ?? null,
                   loopRound: b.loop?.round ?? 0,
-                  loopRounds: b.loop?.rounds ?? 4,
+                  loopRounds: b.loop?.rounds ?? 5,
                   ticketWaiting: b.planAutoApprovedAt != null && b.ticketReviewDoneAt == null && s.plan?.latest?.ticketUpdate != null,
                 })
               : null;
@@ -2416,6 +2528,9 @@ export async function installMockApi(
       // "Ask someone else" — click-gated; nobody to suggest in the fixtures.
       if (path.match(/\/api\/prs\/\d+\/reviewer-candidate$/))
         return json(route, { candidate: null, users: [] } satisfies ReviewerCandidateResponse);
+      // "Someone else" — fetched when the picker opens: Alice has merged here, Bob has not.
+      if (path.match(/\/api\/prs\/\d+\/askable-people$/))
+        return json(route, ASKABLE_PEOPLE);
 
       if (path.endsWith('/api/me')) {
         if (opts.timeline !== false) return json(route, ME_RESPONSE);
@@ -2845,7 +2960,7 @@ export async function installMockApi(
       if (path === '/api/pro/ai-fixes/auto-active') return json(route, opts.autoFixActive ?? ({ workspaceId: WORKSPACE.id, fixes: [] } satisfies AutoFixActiveResponse));
       // AI FIX (only when the spec asked for it): the tab's read, the CI-only picker, the session presses.
       if (aiFixOn) {
-        const prFix = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix(\/[a-z/]+)?$/);
+        const prFix = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix(\/[a-z/-]+)?$/);
         if (prFix) {
           const prId = Number(prFix[1]);
           const rest = prFix[2] ?? '';
@@ -2883,6 +2998,14 @@ export async function installMockApi(
           if (rest === '/cancel') {
             aiFixWaiting = null;
             return json(route, { status: 'cancelled' });
+          }
+          // "Start now": a press waiting behind the same ticket's fix starts at once (the mock: it is built).
+          if (rest === '/start-now' && method === 'POST') {
+            if (opts.aiFixStartNowRefusal) return json(route, opts.aiFixStartNowRefusal.body, opts.aiFixStartNowRefusal.status);
+            if (aiFixWaiting?.blockedBy == null || aiFixWaiting.trigger !== 'manual') return json(route, { error: 'NotWaiting', message: 'This fix is not waiting any more.' }, 404);
+            aiFixWaiting = null;
+            aiFix = (opts.aiFixOnStart ?? aiFixBuilt)(prId);
+            return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
           }
           if (rest === '/stream' || rest === '/status') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'done', status: aiFix?.status ?? 'idle', fixId: aiFix?.id ?? null })}\n\n` });
         }
@@ -2931,7 +3054,8 @@ export async function installMockApi(
             const pushBody = route.request().postDataJSON() as { target?: string } | null;
             if (aiFix.merge != null && (aiFix.merge.status !== 'valid' || pushBody?.target !== 'existing'))
               return json(route, { error: 'NotPushable', message: 'Nothing is pushed.' }, 409);
-            aiFix = { ...aiFix, pushedBranch: 'feature/e2e-branch', pushedAt: iso(0), session: { ...aiFix.session!, phase: 'pushed', live: false, resumable: false } };
+            if (aiFix.pushedAt != null) return json(route, { error: 'NotPushable', message: 'This fix is already pushed.' }, 409);
+            aiFix = { ...aiFix, pushedBranch: 'feature/e2e-branch', pushedAt: iso(0), pushedCommitSha: 'e'.repeat(40), pushedAutomatically: false, session: { ...aiFix.session!, phase: 'pushed', live: false, resumable: false } };
             return json(route, { pushedBranch: 'feature/e2e-branch', commitSha: 'e'.repeat(40) });
           }
         }
@@ -2952,6 +3076,7 @@ export async function installMockApi(
 
 export const fixtures = {
   PRS,
+  ASKABLE_PEOPLE,
   INBOX_IDS,
   REPO,
   USERS,

@@ -34,7 +34,13 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   Replaces the old `localUser` singleton. Also holds the reader's account-grained settings as overrides-only
   JSON (`blast_radius_config`, `my_turn_settings` — § `accounts.my_turn_settings` below — and
   `feature_settings`, Settings → Features, beside the one-time `features_existing_install` stamp — §
-  `accounts.feature_settings` below).
+  `accounts.feature_settings` below), and the machine's AI choices: `ai_provider` (0128), `ai_effort`
+  (0130; since the run profiles the FALLBACK level a profile that says nothing reads, and what the compat
+  `PUT /api/ai/effort` writes), `ai_use_api_key` (0184) and **`ai_run_profiles`** (0206, JSON, shared
+  `AiRunProfiles`: the review per vendor `{enabled, model, effort}`, `fix` and `build` `{provider, model,
+  effort}` + `build.rounds`; every field optional, missing = as before; NULL = never chosen; one writer
+  `PUT /api/ai/run-profiles`, validated by `parseAiRunProfiles` on write AND on the boot's load —
+  docs/CLAUDE-REVIEW.md § The run profiles). Machine grain, like the spend budget: never per workspace.
 - **`repos`** — the account's repos (`accountId`; unique `(accountId, owner, name)` and
   `(accountId, githubNodeId)`). The `repos_id_account` unique index is NOT a lookup index — it is
   the PARENT KEY of the composite `(repo_id, account_id)` FK on `workspace_repos`.
@@ -1102,7 +1108,10 @@ Erased with the build row. [STORY-BUILD.md](STORY-BUILD.md) § Build end to end.
 
 ONE row per fix run (history kept; a re-run is a new row), account-scoped, in `accountScopedTables()` and
 both delete paths. `push_when_done` (migration `0190`, bool, default 0): a MANUAL fix's "Push when done" tick
-([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done). **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
+([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done). `pushed_commit_sha` (migration `0205`, text): the commit the
+push left on the branch (the merge path: the fix on top of the merge); NULL while unpushed and on rows pushed
+before `0205`. `pushed_automatically` (`0205`, bool, default 0): the push was not a press (Push when done, Push
+automatically, the Dependencies policy). Both written ONLY by `markFixPushed`. **Since migration `0177` a run IS a workspace session** ([SANDBOX.md](SANDBOX.md) § AI Fix
 sessions): `session_phase` (shared `SandboxSessionPhase`; NULL = a row of the removed shell-less fixer, read
 as history), and `status` is DERIVED from it (shared `aiFixStatusForPhase`), never written apart. `sandbox_ref`
 (NULL once torn down), `agent_ref`, `runtime`, `session_json` (boot steps, conversation, repositories, the
@@ -1115,12 +1124,67 @@ pending/valid/invalid/missing + `reason`, the checked merge and result shas, the
 NULL = no merge) and `merge_bundle` (the agent's commits as a base64 git bundle ≤ 4 MB, kept only while the
 merge is VALID and unpushed; cleared on push, discard and a failed close). With a merge, `patch` is the fix
 ON TOP of the merge. The plan columns (`plan`, `plan_transcript`, `plan_status`, …) and `checks` are history only.
+**Since `0210`, `sibling_state_json`** (JSON `FixSiblingState[]`, `coding/ai-fix/sibling-stale.ts`): one entry
+per open PR of the same ticket the fix read at its head — `{prId, number, repoId, headSha, overlayFixId,
+overlayPatchHash, builtFixIds, at}` (`overlayFixId` = the sibling's built, unpushed AI Fix laid on that head, soft,
+no FK; NULL = the head alone; `builtFixIds` = the sibling's built, unpushed fixes at that read). Written WITH EACH
+STORED PATCH (`storeFixTurn`), never by a boot or a Resume alone; a sibling that failed to mirror keeps its earlier
+entry; NULL = no sibling read (older rows, dependency fixes). STALENESS and "builds on an unpushed fix" are DERIVED
+on read (`fixSiblingFacts`, against `pull_requests.head_sha` and the siblings' `ai_fixes` rows), never stored ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The fix start queue). `ai_fixes` is not in the data
+export (unchanged); erasure deletes the rows as before.
 
 The plan, docs and Accept columns (`plan_json`, `transcript_json`, `design_json`, `docs_*`, `accepted_*`,
 the repository rows' `checks_*` and `worktree_path`) are DORMANT since the plan/build flow was removed
 (2026-11-07, [STORY-BUILD.md](STORY-BUILD.md) § Rows from the old flow): only its old rows carry them, and
 `coding/story-build/legacy.ts` settles and discards those rows.
 
+
+### `ai_fixes.loop_*` and `ai_fix_loop_*` — AI Fix's own review loop (migration `0207`)
+
+docs/CLAUDE-REVIEW.md § AI Fix → The review loop. On `ai_fixes`: `loop_state` (NULL never ran · `reviewing` ·
+`fixing` · `done` · `stopped`), `loop_round` (1-based for the whole fix; a reader's follow-up starts a new run and
+the numbers go on), `loop_first_round`, `loop_rounds` (N, read from Settings → AI → AI Fix when a run starts),
+`loop_stop` (shared `AiFixLoopStop`), `loop_base_sha` (the PR base commit the rounds review against),
+`loop_review_id` (the `claude_reviews` row the CLOSING review became at the PUSHED head; soft) and
+`loop_finished_at`. While the loop works the row's `status` reads `running` (the ONE exception to "derived from
+the phase", `fix.ts` `statusNow`).
+
+Four tables keyed `(account_id, fix_id, round)`, the Build loop's shape (`story_build_reviews` …) — Build's own
+tables are untouched: `ai_fix_loop_reviews` (one row per provider half: `head_sha` = the LOCAL commit reviewed,
+`local_ref` under `refs/pierre/local/ai-fix-loop/<fixId>/r<k>`, `work_key` = the work it reviewed — the patch's
+sha256 or `merge:<result sha>` — which the push compares before importing; `step` / `rounds` = the round's place in
+ITS loop run and that run's N, fixed at the run's start, since a reader's follow-up runs are contiguous; unique
+`(fix_id, round, provider)`),
+`ai_fix_loop_findings` (the findings + the agent's `response` / `response_text` / `response_round`; FK to its run
+`(review_id, account_id)` cascade), `ai_fix_loop_story_checks` (unique `(fix_id, round)`) and
+`ai_fix_loop_ac_responses` (`fixed` · `not_applicable` · `cannot_meet` · `answered` · `pushed_back` ·
+`not_reported`; unique `(fix_id, round, ref)`). ⚠ `fix_id` is SOFT (`ai_fixes` has no `(id, account_id)` unique):
+every query is account-scoped; both PR-keyed delete paths prune them with the fix (`db/ai-fix-loop-prune.ts`,
+BEFORE the `ai_fixes` delete); the erasure deletes them explicitly and `accountScopedTables()` lists them.
+
+### `local_reviews` and `local_review_findings` — local branch reviews (migration `0209`)
+
+docs/CLAUDE-REVIEW.md § Reviewing a local branch (`ensemble mcp` / `ensemble review`). CORE.
+`local_reviews` is ONE ROW PER RUN: `repo_id`, `workspace_id` (the repository's HOME workspace when it ran),
+`kind` (`review` · `story`), `status` (`running` · `succeeded` · `failed` · `cancelled`), `branch`, `base_ref` /
+`base_sha` / `head_sha` (the reviewed commit — a snapshot of uncommitted changes when `uncommitted_changes`),
+`local_ref` (`refs/pierre/local/local-review/<id>/head`, dropped when the run ends), `subjects` (JSON),
+`provider_choice` / `effort_choice` (the reader's per-run choice, NULL = Settings), `reviewers` (JSON, one entry
+per provider half: provider, model, effort, status, failure, `pairRole`, its follow-up record), `summary` /
+`verdict` / `pair_consolidation` (the ONE consolidated review), the ticket (`ticket_key`, `ticket_ident`,
+`ticket_title`, `ticket_url`, or `ticket_note`: why there is none), the story check (`story_status`,
+`story_provider`, `story_model`, `story_failure`, `assessment`, `claims`, `claim_verdicts`), `answers` (JSON: the
+answers the start carried, as used), `prior_review_id` (soft), `failure_reason`, the summed `cost_usd` /
+`input_tokens` / `output_tokens`. Unique `(id, account_id)`; index `(account_id, repo_id, branch, id)`.
+⚠ **ONE RUN IN FLIGHT per (account, repo, branch)** is the PARTIAL unique index `local_reviews_one_running …
+WHERE status = 'running'`, in the `.sql` only (the start's insert IS the claim). A restart fails `running` rows.
+`local_review_findings`: one row per finding of a run, `half` (0/1: which provider half raised it — the shared
+loop core reads a half as run `id * 2 + half`, never stored), the finding columns of the loop tables,
+`merged_into` (the pair), and the agent's LATER answer (`response` `fixed` · `answered` · `pushed_back`,
+`response_text`, `response_review_id` = the run that carried it). FK `(local_review_id, account_id)` →
+`local_reviews (id, account_id)` cascade. Both carry `account_id` (cascade from `accounts`), are erased explicitly
+and listed in `accountScopedTables()`, and are in the account export (`localReviews`, `localReviewFindings`).
+No `claude_reviews` / `ticket_reviews` row is ever written for a local review.
 ## `sandbox_allowed_hosts` — the sandbox's "Always allow" hosts (CORE; migration `0173`)
 
 ONE row per host rule a reader allowed for every sandbox session of ONE workspace — a denied host's
@@ -1130,7 +1194,7 @@ The allow-list). PRESENCE IS THE FACT; the rule is stored normalised (`validateR
 `db/sandbox-allowed-hosts.ts`; a session reads it once at start (`startEgress`) and adds to it on a
 click. Composite FK onto `workspaces (id, account_id)`, cascade; erased and exported with the account.
 
-## `sandbox_workspace_settings` — Settings → Sandbox (CORE; migrations `0174`, `0175`)
+## `sandbox_workspace_settings` — Settings → Sandbox (CORE; migrations `0174`, `0175`, `0208`)
 
 ONE row per (account, workspace), unique `(account_id, workspace_id)` — the one upsert uses that EXACT
 target. NO ROW = every default. Columns: `local_folder` (DORMANT since 2026-11-10: the reader's clones are
@@ -1140,7 +1204,9 @@ the ticked project folders), `user_claude_md` (default on), `user_skills` (defau
 likewise: the agent starts where the default rule says),
 `global_proxy_env` (default off), `cpus` / `memory_gb` / `disk_gb` (NULL = Ensemble's default), `services_json`
 (migration `0175`; NULL = no compose files; else JSON `[{repo, file, egress}]`, the files Ensemble may run for a
-session, [SANDBOX.md](SANDBOX.md) § Services). Per workspace,
+session, [SANDBOX.md](SANDBOX.md) § Services), `fix_all_repos` (migration `0208`, integer bool; NULL = ON, the
+default: an AI Fix loads every workspace repository read only, at most 12; `0` = the narrow set; [SANDBOX.md](SANDBOX.md)
+§ AI Fix sessions → Scope). Per workspace,
 nothing inherited; PUT replaces the whole row. The ONE reader/writer is `db/sandbox-settings.ts`
 ([SANDBOX.md](SANDBOX.md) § The workspace mirror). Composite FK onto `workspaces (id, account_id)`,
 cascade; erased and exported with the account.

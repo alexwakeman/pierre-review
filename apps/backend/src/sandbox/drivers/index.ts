@@ -4,8 +4,9 @@
 // EVERY MODEL CALL STILL GOES THROUGH THE PROVIDER CHOICE: the request's `{provider, model}` is validated
 // by ai/run-choice.ts (`resolveManualRunChoice`, kind `story_build`) before it reaches here; a stored
 // model (a re-booted session) is mapped back through `requestModelOf`; each provider resolves the DEPTH
-// to its own model (`getProvider(p).resolveModel`), and the effort is THE Settings level
-// (`agenticRunEffort`, a worktree run: the agent has the whole workspace).
+// to its own model (`getProvider(p).resolveModel`), and the effort is the SURFACE's (Settings → AI → AI Fix
+// for a fix / Plan first, → Implement story for a build; `agenticRunEffort`, a worktree run: the agent has
+// the whole workspace).
 import type { AiProviderId } from '@pierre-review/shared';
 import { agenticRunEffort } from '../../ai/effort.js';
 import { claudeModelChoice, getProvider, requestModelOf } from '../../ai/provider.js';
@@ -19,13 +20,13 @@ import type { SandboxAgentChoice, SandboxAgentDriver, SandboxAgentStartOptions }
  * session's start; the session stores what it returns.
  */
 export function resolveSandboxAgentChoice(
-  choice: { provider: AiProviderId; model: string },
+  choice: { provider: AiProviderId; model: string; surface: 'fix' | 'build' },
   env: NodeJS.ProcessEnv = process.env,
 ): SandboxAgentChoice {
   const model = claudeModelChoice(requestModelOf(choice.model));
   // Claude keeps the exact id; Codex resolves a Claude id by its role (ai/providers/codex.ts).
   const resolved = getProvider(choice.provider).resolveModel(model);
-  return { provider: choice.provider, model: resolved, effort: agenticRunEffort(choice.provider, model, 'worktree', env) };
+  return { provider: choice.provider, model: resolved, effort: agenticRunEffort(choice.provider, model, 'worktree', env, choice.surface) };
 }
 
 /** Start the session's agent on its provider. */

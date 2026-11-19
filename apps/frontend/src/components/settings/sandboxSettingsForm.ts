@@ -15,6 +15,8 @@ export interface SandboxDraft {
   memoryGb: string;
   diskGb: string;
   services: SandboxServiceStackChoice[];
+  /** AI Fix reads every workspace repository (read only). Default on. */
+  fixAllRepos: boolean;
 }
 
 const num = (n: number | null): string => (n == null ? '' : String(n));
@@ -29,6 +31,8 @@ export function sandboxDraftOf(s: SandboxWorkspaceSettings): SandboxDraft {
     memoryGb: num(s.resources.memoryGb),
     diskGb: num(s.resources.diskGb),
     services: s.services.map((x) => ({ repo: x.repo, file: x.file, egress: [...x.egress] })),
+    // An older server without the field: on (its default).
+    fixAllRepos: s.fixAllRepos !== false,
   };
 }
 
@@ -47,6 +51,7 @@ export function sandboxBodyOf(d: SandboxDraft): SandboxWorkspaceSettingsBody {
     globalProxyEnv: d.globalProxyEnv,
     resources: { cpus: intOrNull(d.cpus), memoryGb: intOrNull(d.memoryGb), diskGb: intOrNull(d.diskGb) },
     services: d.services,
+    fixAllRepos: d.fixAllRepos,
   };
 }
 

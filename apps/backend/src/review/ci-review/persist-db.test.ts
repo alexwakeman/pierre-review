@@ -18,7 +18,7 @@ const DB_PATH = `${process.env.LIMN_TEST_RUN_DIR ?? '/tmp'}/pierre-ci-review-per
 process.env.DATABASE_URL = DB_PATH;
 process.env.DISABLE_SCHEDULER = 'true';
 
-vi.mock('../claude-review/ai-ready.js', () => ({ agenticRunReady: () => true }));
+vi.mock('../claude-review/ai-ready.js', async (orig) => ({ ...(await orig<typeof import('../claude-review/ai-ready.js')>()), agenticRunReady: () => true }));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

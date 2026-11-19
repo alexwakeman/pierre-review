@@ -1147,11 +1147,15 @@ rail still flows (no `sticky`). The slots:
     ("@robin reviewed this commit with Claude · approved", "Auto review skipped: already reviewed by
     …") and never "Waiting for a teammate's Ensemble to review": all removed 2026-11-10, the standings
     hold the teammate's verdict; Pending's "Waiting on others" row keeps its line), live progress + Stop (no live token
-    or cost readout), failures, an auto fix that STARTED or failed on a fault the reader can fix
-    (`autoFixOutcomeLine`: `not_started` / `over_budget` / `no_sandbox`; routine skips such as "auto AI
-    Fix is off" say nothing), THE AUTO FIX SECTION (`AutoFixQueuePanel`, own PRs with auto AI Fix on or any
+    or cost readout), failures, THE AUTO FIX SECTION (`AutoFixQueuePanel`, own PRs with auto AI Fix on or any
     auto fix: what the next auto fix waits for with "(up to N min)", and the PR's auto fixes behind a
-    disclosure, each with Open → the AI Fix tab; docs/CLAUDE-REVIEW.md § The auto fix queue), the replies pass ONLY while it runs (status + Cancel) or when the newest
+    disclosure, each with Open → the AI Fix tab; docs/CLAUDE-REVIEW.md § The auto fix queue). ⚠ It holds THE
+    ONE auto fix line (2026-11-18, replacing the 2026-11-10 rule): the per-review "No auto fix: …" line
+    (`autoFixOutcomeLine`) is DELETED; the queue's line says why no auto fix started — the faults
+    (`no_ai_login`, `review_unavailable`, `pr_unavailable`, `error`), `over_budget`, `no_sandbox`, BOTH caps
+    (`cap` with `AUTO_FIX_DAILY_CAP`, `review_capped` with the workspace's auto review cap) — and an ENDED
+    line is hidden while the PR's review is queued or running (`autoFixQueueLineShown`, the tab passes
+    `reviewInFlight`), so a reason shows only after the review finished, the replies pass ONLY while it runs (status + Cancel) or when the newest
     one failed (`RepliesCheckLine`; NO "Check replies" button, removed 2026-11-10 — the pass starts by
     itself); its ⓘ ("Review only, or review and post") sits beside the section
     title. Then "Reviews on this PR" (`ReviewsOnPrSection`): THE REVIEW COUNT ("4 Ensemble reviews so far ·
@@ -2438,8 +2442,28 @@ sessions.
   from "Fixes on top of the merge". ⚠ Push shows only when `fixPushable` (a VALID merge; without a
   merge, a patch) and, with a merge, offers ONLY the PR's own branch (no "New branch"); a refused merge
   also swaps the status line (`fixMergeBlockedLine`) and the repo row reads "Merge not valid".
-- **An automatic push that failed** shows the succeeded row's `error` ("Automatic push failed: …")
-  in an amber line above the summary; Push still works and clears it.
+- **THE PUSH FOOTER is ONE pure fold, `fixPushFooter`** (`lib/aiFixSession.ts`, pinned by
+  `test/aiFixSession.test.ts`), ranked: **pushed** (`PushedCard`: "Pushed to <branch> · <short sha>" — the sha
+  linked to the commit through `safeExternalUrl`; branch only on a fix pushed before migration 0205 — plus
+  "Pushed automatically" when it was not a press; no Push) → **pushing** (`AiFix.pushing`: "Pushing to
+  <branch>…", no button) → **failed** (an automatic push's `error`, "Automatic push failed: …", in an amber line
+  above Push; Push still works and clears it) → **held** (`AiFix.pushHold.line`, "Push when done" waiting, above
+  Push; else `AiFix.stale.line`, "#12 changed after this fix was built." — ONE line, the hold wins) → plain Push.
+  The waiting line (`fixWaitingLine`, lib/aiFixProgress.ts) reads `waiting.blockedBy` ("Waiting for the fix of #12
+  (same ticket).") and, on a press only (`fixCanStartNow`), offers **Start now** (`useStartFixNow`) with an ⓘ. A fifth member, **reviewing** (AI Fix's own review loop works, `aiFixLoopRunning(fix.loop)`,
+  ranked after pushed), renders NOTHING: no Push while the loop runs, and the round is already said once. ⚠
+  `useAiFix` polls at `SESSION_POLL_MS` while `pushing` (the push runs after the session closed, so no session
+  stream reports it) AND while the loop runs (its rounds change the row, not the session stream), and runs
+  `invalidateAfterPrWrite` once when the fix turns pushed.
+- **THE REVIEW LOOP (2026-11-18; `components/AiFix/FixLoopSection.tsx`, folds in `lib/aiFixSession.ts`;
+  backend docs/CLAUDE-REVIEW.md § AI Fix → The review loop).** Under the session view: "Review rounds" (ⓘ), Stop
+  while it works (the ONE cancel route), the stop line (`AiFix.loop.stopLine`, shared `AI_FIX_LOOP_STOP_LINE`), the
+  cannot-meet lines (`fixLoopCannotMeetLines` → shared `cannotMeetLine`: the criterion stays NOT MET), and the
+  rounds strip (`fixLoopStrip`: "Round k" by the round's STEP in its own run, "Closing review" past that run's N;
+  found / fixed / answered / pushed back / cannot meet, zeros left out). ⚠ **Counts only for a SUCCEEDED review** — a
+  running, failed, skipped or stopped one shows none (unknown is never zero). ⚠ **The progress sentence
+  (`fixLoopStatusLine`) is said ONCE**: in the session's status line when the session view shows
+  (`showProgress={false}`), else in the section; never in the footer.
 - **`FixReport`** renders the validated `changeReport` under the summary and ABOVE the "no
   changes" branch (a run that judged every item wrong produces no diff, and that is the run whose
   "Not addressed" list matters most): per changed file the summary and ref chips labelled with the
@@ -3879,7 +3903,9 @@ The server contract is [BACKEND.md](BACKEND.md) § Waiting on others. On screen:
   1 review waiting on them"), and asks only on "Ask @robin". ⚠ NOTHING FETCHES ON MOUNT: the board's
   rule holds. Both HIDE (never disable) without request rights (`viewerCanPush` on the card,
   `viewerCanRequest` in the pane) and under the target (`nudgeOffered`, `askSomeoneElseOffered`).
-  A request refreshes `invalidateAfterPrWrite` plus `['review-waits' | 'reviewer-candidate', id]`.
+  A request refreshes `invalidateAfterPrWrite` plus `['review-waits' | 'reviewer-candidate' |
+  'askable-people', id]`. GitHub refusing the person comes back as a 422 in plain English
+  (docs/API.md); every one of these buttons shows the route's `message` as is.
 - **The PR pane's "Requested" row** (`ChecksTab` `RequestedReviewersRow`) reads
   `GET /api/prs/:id/review-waits` on an open PR (`usePrReviewWaits`, live, never persisted): each
   chip gets its working-hours wait (amber past the target), a Nudge where offered, and under the row
@@ -4132,6 +4158,35 @@ non-empty answer per PR for the session (`seenSuggestions`, bounded at 50, survi
 remount) while the PR is open and not a draft, and `SuggestedReviewersRow` drops anyone already on
 the "Requested" row (user id, or a team by slug / `owner/slug`). Someone asked from the row keeps a
 "Requested" tick until the refetched detail lists them above. The server gate is unchanged.
+
+Because the server empties it, the Suggested row is gone on most PRs that already have a reviewer —
+so the "Someone else" picker (below) never lives inside it.
+
+### The "Someone else" picker (asking anyone in the workspace)
+
+`components/ReviewerPicker.tsx`, mounted by `ChecksTab` in the People section on its OWN `Ask` row,
+right under Suggested (or Requested). ⚠ ONE tree slot, never inside the Suggested row: a successful
+request empties Suggested, and a picker inside it would remount closed and empty, losing the other
+chips' "Asked" / refusal before the reader sees them. Shown on any OPEN
+PR (drafts too) where `pr.viewerCanPush`, once the PR's OWN workspace is known (`Repo.workspaceId`
+off `useRepos()`, never the selector — the PR may be open from another workspace). Hidden, never
+disabled.
+
+- **Nothing fetches on mount.** "Someone else" is a link; opening it enables
+  `useAskablePeople(prId, workspaceId, open)` (`GET /api/prs/:id/askable-people`, DB only, key
+  `['askable-people', prId, 'ws:<id>']`, live, never persisted).
+- A text box with a dropdown filtered by what is typed — the ONE people matcher,
+  `orderMentionSuggestions` (`MentionTextarea.tsx`), so merged-here people keep the shield and sort
+  first. Picks become removable chips; Backspace in an empty box removes the last unsent chip.
+- **Asking only — it removes nobody.** "Request review" sends ONE request per chip through
+  `useRequestReviewers(prId, 'pick:<login>')`, so one refusal never sinks the others and each chip
+  shows its own outcome ("Asked", or the route's 422 words — "@bob can’t be asked to review: they
+  don’t have access to acme/api."). ⚠ A chip that was sent (any outcome, read off the mutation cache)
+  is NEVER sent again: no retry offer. The button shows only while an unsent chip exists.
+- The picks are capped client-side at GitHub's ceiling, `REVIEW_REQUEST_LIMIT` (15) less who is
+  already requested (`lib/reviewerPicker.ts` `pickRoom`); at the cap the box is replaced by one line.
+- A request refreshes `['askable-people', prId]` with the rest of the request set
+  (`requestReviewersOptions`), so whoever was asked leaves the list.
 
 ### Suggested reviewers on a `reviewer_routing` card — one Assign per suggestion
 
@@ -4689,14 +4744,25 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     pure half `lib/buildPlan.ts`, pinned by `test/buildPlan.test.ts`): "Plan · revision N" (+ With docs,
     ⓘ, an "Earlier revisions" menu → `GET …/plan?revision=`, read-only), the stage line
     (`planStageLine`: planning / revising / the checks' one-line failure), the summary, Repositories,
-    the criteria checklist (story view numbering; a ref scrolls to the Ticket panel), **Points to
-    settle** — one card per contention with the story's words, the problem, "If you agree" / "If you
-    keep the story", its EVIDENCE (code and data files as Ensemble's own numbered excerpt in plain mono —
+    the criteria checklist (story view numbering; a ref scrolls to the Ticket panel), the PR stack in
+    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the dropped line ("Ensemble left out
+    1 point it could not check.", reasons behind ⓘ), then the **Points to settle** as a STEP-BY-STEP
+    WIZARD (`StoryBuild/PlanDecisionWizard.tsx`, latest revision only; earlier and approved revisions
+    keep the read-only list, one card per point, with the stack after it): a step strip ("1 · 2 ·
+    Review", answered ticked, open ringed, any step reachable), ONE point per step headed "Point 2 of 4"
+    + its AC refs, the story's words, the problem, its EVIDENCE (code and data files as Ensemble's own numbered excerpt in plain mono —
     NOT the syntax highlighter, so no new code ground for `codeTokens.test.ts` — with a GitHub link at
     the base sha through `safeExternalUrl`; docs through `DocReferenceList`; a data run as the command,
-    time and recorded lines), the reader's earlier replies, and **Agree / Keep the story / Reply** —
-    the dropped line ("Ensemble left out 1 point it could not check.", reasons behind ⓘ), the PR stack in
-    order ("Builds on P1", "After P2"; the stack reason behind ⓘ), the **ticket review** — on the latest
+    time and recorded lines), the reader's earlier replies, then TWO numbered choices in the Claude Code
+    style, **1. Agree** and **2. Keep the story**, each with what the agent then builds (the 1 / 2 keys
+    pick and ← / → move while focus is in the wizard), a quieter **Reply** (the composer), and Back /
+    Next (Next passes an open point; it stays open). The last step, **Review**, lists every point in one
+    line (AC refs, the problem, the answer or "Not answered"; each line goes back to its step) and holds
+    **Approve and start**. ⚠ THE STEP IS DERIVED ONCE PER REVISION: the wizard opens on the first open
+    point (else Review) on mount, and the panel remounts it on a new revision (`key`); after that only
+    the reader moves it, so a teammate's or a second tab's answer never moves the step (helpers
+    `firstOpenStep` / `stepAfterPick` / `planReviewLines` in `lib/buildPlan.ts`). Below it, the
+    **ticket review** — on the latest
     revision ALWAYS (and after Approve until the first build turn ends), `StoryBuild/TicketUpdatePanel.tsx`
     `TicketReview`: the WHOLE ticket in two boxes (Description, Acceptance criteria — "(in the
     description)" when the ticket keeps them there, and then the box follows the description's section
@@ -4709,13 +4775,15 @@ One ticket's build session, full-main overlay `data-testid="story-build-overlay"
     block), "(edited)" / "Back to the draft"; on a Jira ticket ONE **Update ticket** sends only the
     changed fields, asks once, `useUpdateTicket`, never retried — docs/TRACKERS.md § The ticket update;
     else "Updating the ticket works with Jira only. Copy the text instead." On an older or approved
-    revision the draft is preformatted text with a `CopyButton` — and **Approve and
-    start** (`AiRunGate kind="story_build" followUp`; enabled only by `planApproveState`: live,
-    `plan_ready`, every point answered — else its one line beside it). Agree / Keep the story post
-    `plan/decisions` at once on their OWN mutation (no turn, never blocked by a billed press), laid over
-    the read optimistically (`decisionsWithPending`); a second press on the chosen one clears it; the
-    answer is seated into the read. Reply opens a composer under the card (`plan/reply`, `story_plan`
-    gate). While a turn runs the card's buttons read "The agent is revising the plan…". 409 PlanStale
+    revision the draft is preformatted text with a `CopyButton`. **Approve and start** (on Review; on a
+    plan with no points, below the panel as before) is `AiRunGate kind="story_build" followUp`, enabled
+    only by `planApproveState`: live, `plan_ready`, every point answered — else its one line beside it.
+    A pick posts `plan/decisions` at once on its OWN mutation (no turn, never blocked by a billed press),
+    laid over the read optimistically (`decisionsWithPending`), then moves to the next open point after
+    it, else Review; picking the chosen answer again KEEPS it (no toggle-to-clear; the wizard never
+    sends `null`, though the route still takes it); the answer is seated into the read. Reply opens a
+    composer under the choices (`plan/reply`, `story_plan` gate). While a turn runs the step shows "The
+    agent is revising the plan…" instead of the choices. 409 PlanStale
     says "The plan changed. Look at the new revision." After Approve it folds to "Approved plan ·
     revision N · time" (expandable, read-only). The composer's words change for a plan session and
     **Start build is never offered on one** (`sessionCanStartBuild` is false when `plan` is set); a

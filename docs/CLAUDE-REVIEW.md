@@ -473,10 +473,11 @@ ideally be able to pick from any of the models available if I'm signed into both
 I would pick a preference for auto-review in settings."
 
 - **Settings → AI is the DEFAULT** ("Automatic runs and default: Auto / Claude / Codex";
-  `ENSEMBLE_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). It decides auto review,
-  auto fix, the CI and ticket auto runs, every scheduled one-shot, and every surface without a model
-  menu (Check threads, ticket and CI reviews, diagrams, the docs library, the
-  Open PRs table's one-click review), and it is the menu's opening choice. ⚠ One exception: the
+  `ENSEMBLE_AI_PROVIDER` still wins, `auto` = Claude when both are signed in). ⚠ **Since 2026-11-18 the
+  review, AI Fix and Implement story follow their RUN PROFILE instead** (§ The run profiles): auto
+  review, auto fix, the CI and ticket runs, Check threads and the menus' opening choice read it, and the
+  default provider is only what a profile that says nothing falls back to. The default still decides
+  every scheduled one-shot and every surface with no profile (diagrams, the docs library, chats). ⚠ One exception: the
   Check threads run that starts IN PLACE of a manual review routed `skip` runs on that review's
   provider (the reader's pick, `startThreadCheckBesideManualReview(…, provider)`).
 - **The menus** (`components/ModelPicker.tsx`, `lib/modelPick.ts`): the Claude Review run (and its
@@ -498,7 +499,9 @@ I would pick a preference for auto-review in settings."
   not signed in or unable to run the kind ⇒ 400 `NoClaudeAuth` with its own sentence. No provider ⇒
   a Codex model's own provider, else the default (an older SPA's Claude model is a DEPTH, run on the
   default as before). The answer is the provider and the Claude model of the same depth, which every
-  entry point takes.
+  entry point takes. Since the run profiles, "the default" here is the SURFACE's profile (its vendor;
+  `defaultModel` per provider: the profile's model on its own vendor, the usual depth on the other), and
+  a pick changes the MODEL for one run — the run keeps the Settings effort for the vendor it runs on.
 - **The run's provider, everywhere.** The review manager stores it on the job (`QueueItem.provider`,
   decided at queue time; auto runs read the default then) and hands it to `RunReviewArgs.provider`
   (`review/agent.ts` `runProvider(args.provider)`); AI Fix passes `StartFixInput.provider` to its
@@ -537,7 +540,15 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   is the DEFAULT, now `'both'`; only a stored `'default'` runs one provider (`resolveAutoReviewProviders`
   / `storedAutoReviewProviders`). A stored NULL from before 2026-11-01 therefore reads as the pair.
   With `'both'` and only one provider able to review when a run STARTS, that one runs alone (an
-  ordinary run, no pair; the setting shows "Only one is signed in, so it reviews alone.").
+  ordinary run, no pair; the setting shows "Only one is on and signed in, so it reviews alone.").
+  ⚠ **Since 2026-11-18 (§ The run profiles) "able to review" means SWITCHED ON in Settings → AI →
+  Review AND signed in** — ONE resolver, `ai/run-profile.ts` `reviewPairProviders` (`pair.ts`
+  `pairProvidersReady` wraps it; auto review, the team-claim skip line and the Build loop's
+  `seams.ts` pass `reviewProvidersEnabled()` as the order). `'default'` reads "<one vendor> only": the
+  first vendor on and signed in, Claude before Codex (`reviewDefaultProvider`; no Review block stored ⇒
+  the default provider, as before). Each half runs ITS vendor's Settings model and effort
+  (`reviewRunModel`, the second half's at `startPairSecond`), so the halves may now DIFFER in effort:
+  § Measuring reviews' pair numbers were taken at EQUAL effort.
 - **TWO ORDINARY RUNS, LINKED.** Each half is its own `claude_reviews` row with its own label
   (`aiRunLabel`), its own provider's follow-up chain and thread carry, its own ledger row and its own
   budget reading — nothing about a run changes because it is half of a pair. They are linked by
@@ -826,7 +837,65 @@ reviewer told to raise what it could not confirm. In the eval it ran 49 times an
 the relaxed prompt did not lift Claude alone (43% vs 46%). The user removed it the same day: the
 reviewer prompt is as before, and the pair is what improves recall.
 
-### The effort setting (decided 2026-10-26)
+### The run profiles (decided 2026-11-18)
+
+The user asked for per-surface choices: "Settings → AI holds machine-wide profiles … Run menus open on
+the Settings choice and can override the MODEL for one run". ONE stored object per machine,
+`accounts.ai_run_profiles` (JSON, sqlite `0206`), shaped by shared `ai-run-profiles.ts`, written only by
+`PUT /api/ai/run-profiles` (`parseAiRunProfiles` validates and compacts; the whole object replaces the
+stored one), held in memory by `ai/run-profile.ts` and echoed as `MeResponse.ai.runProfiles` (every
+surface RESOLVED + `stored` + `effortSource`):
+
+- **REVIEW, per vendor {enabled, model, effort}.** Every review kind: the PR review and its follow-ups,
+  the CI review, the story check (ticket review), Check threads, the replies pass and the Build loop's
+  review rounds + story check. `reviewPairProviders(detect)` = the pair (on AND signed in);
+  `reviewDefaultProvider(detect)` = "one vendor" (first on and signed in and NOT over its usage limit,
+  Claude first — the same move as `withCapacity`; all locked ⇒ the first signed in; NO review block ⇒
+  `activeProviderId()`, today); `reviewRunModel(p)` = the depth a review on `p` is queued with. At least
+  one vendor stays on (the validator refuses none; the SPA locks the last switch, and the only one on
+  that is signed in). The MODEL reaches the PR review, its follow-ups, the CI review and the story check
+  (`reviewKindModel`: the queued default until a review block is stored, then that vendor's model, set at
+  run start with the vendor) and the Build loop. ⚠ **Check threads and the replies pass keep their fixed
+  model** (`THREAD_CHECK_MODEL`, `REPLIES_CHECK_MODEL`: short judgement passes over threads); they
+  follow the profile's vendor and effort only.
+- ⚠ **EVERY GATE ASKS THE RUN'S VENDOR**, never the default provider: the sweepers' readiness
+  (`agenticRunReady(ctx, kind, provider)`, `singleReviewProvider(ctx)` for the single-run kinds), the
+  routes' pre-flight (CI review, story check, Check threads), and the budget / usage-limit gate
+  (`automaticRunAllowed(…, provider)`: the CI and ticket sweeps, auto fix with `fixChoice(...).provider`,
+  dependency fixes, the fix manager). An auto fix resolves `fixChoice` ONCE and, with a choice stored,
+  hands the start its vendor with the model, so the pair cannot drift while it waits in the start
+  queue. A dependency fix follows the same rule (`dependencyFixChoice`: NULL ⇒ `DEFAULT_AI_FIX_MODEL`
+  and the start's vendor, as before). The Build loop's imported review row on the new PR is stamped
+  with the lead half's model and effort (`markReviewRanOn`), never a constant.
+- **FIX {provider, model, effort}** (AI Fix, Plan first, auto fix, dependency fixes) via `fixChoice`;
+  **BUILD {provider, model, effort, rounds}** (story_plan, story_build) via `buildChoice` and
+  `buildLoopRounds` (default `STORY_BUILD_LOOP_ROUNDS_DEFAULT` = 5, 1..6; a start's `loopRounds` and the
+  tab's control still win for one build). ⚠ **The FALLBACK** (only with a vendor STORED): that vendor
+  not signed in or over its usage limit at run start ⇒ the other signed-in vendor at ITS usual model
+  (`model: null`) and Default effort; the run row stores what ran. Neither can run ⇒ the stored one,
+  whose pre-flight says why. No vendor stored ⇒ `activeProviderId()` (it moves off a locked provider).
+- **Effort**: `ai/effort.ts` `surfaceEffortLevel(surface, provider)` = `REVIEW_EFFORT`, else the profile
+  (review: that vendor's; fix / build: the block's when the run's vendor IS the block's, else Default),
+  else — the field missing — the old single level (`accounts.ai_effort`). `agenticRunEffort(…, env,
+  surface)` applies the diff-only step-down per vendor from that level. `resolveSandboxAgentChoice`
+  takes `surface: 'fix' | 'build'`. Kinds the effort never reached (diagrams, chats, docs) still don't.
+- ⚠ **NULL / missing = TODAY, exactly**: no block ⇒ the default provider, the usual models, the old
+  level everywhere — and AUTO FIX keeps inheriting its review's depth (`auto-fix.ts`: only
+  `fixChoice(...).configured` switches it to the profile's model). The SPA writes back ONE block per
+  change (`lib/runProfiles.ts`), the others as stored, and never copies an env level in.
+- **Compat**: `PUT /api/ai/effort` stays; it writes `ai_effort` AND drops every profile effort
+  (`provider-store.ts` `withoutEfforts`), so the one level reaches every surface again. No Settings
+  control sends it.
+- **Menus**: `lib/modelPick.ts` `profileOpening` — AI Review opens on the pair (two on and signed in) or
+  the one vendor at its model; AI Fix / Plan first and Implement's start on their profile while its
+  vendor can run. Implement's start panel opens its rounds on `runProfiles.build.rounds`.
+
+### The effort setting (decided 2026-10-26; superseded by § The run profiles)
+
+⚠ **Since 2026-11-18 there is no single Effort control**: each review vendor, AI Fix and Implement story
+has its own effort (§ The run profiles); the stored level below is the fallback a profile that says
+nothing reads, and `PUT /api/ai/effort` the compat path. The rest of this section (the map, Default,
+diff-only, precedence) still holds per surface and vendor.
 
 The user compared Opus 5.5 (pinned at medium, 30 turns) with Codex GPT-6 Astra (high) on one PR and
 asked to "make effort a setting". Settings → AI → **Effort** (`AiProviderSection.tsx` `EffortControl`,
@@ -937,8 +1006,8 @@ pushed").
   review asks the spend gate before each.
 - **Writes are read from git**, never from the event stream (a refused patch emits nothing): the
   changed files are what `git status` shows in the write roots; a change outside them fails the run.
-- **Effort**: Settings → AI → Effort when the reader chose a level (the review, its specialists,
-  AI Fix and Plan first; § The effort setting); otherwise the Default by depth: deep = high,
+- **Effort**: the run profile's effort for the surface and vendor when one is set (the review, its
+  specialists, AI Fix and Plan first; § The run profiles); otherwise the Default by depth: deep = high,
   standard = medium, fast = low, and a diff-only review one step lower (`ai/effort.ts`
   `defaultRunEffort`; `codexReviewEffort` for the chat and Check threads). Default agent timeout 45
   minutes; a stop signals the whole process group.
@@ -1188,8 +1257,8 @@ praise comment already on GitHub is still Ensemble's own comment. The ticket rev
   in the live estimate. Both generate routes (Claude Review and AI Fix) answer 400 for it.
   Retiring a model is now a shared-types + pricing + model-options edit, never a schema edit.
 - **Opus 5.5's effort is no longer pinned** (2026-10-26, § The effort setting): every run is sent
-  an explicit effort (never the API default) — Settings → AI → Effort for the review and AI Fix,
-  else the Default (medium; diff-only medium on Opus, low on Sonnet); `REVIEW_EFFORT` /
+  an explicit effort (never the API default) — the run profile's effort (§ The run profiles) for the
+  review and AI Fix, else the Default (medium; diff-only medium on Opus, low on Sonnet); `REVIEW_EFFORT` /
   `REVIEW_DIFF_ONLY_EFFORT` move both models alike, on the review and AI Fix only. It always gets
   `thinking: { type: 'adaptive' }`, which overrides any `MAX_THINKING_TOKENS=0` the environment
   might carry. ⚠ **Opus 5.5 400s on `thinking: {type:'disabled'}`, on a thinking budget
@@ -1205,7 +1274,7 @@ praise comment already on GitHub is still Ensemble's own comment. The ticket rev
   backend — a running `tsx watch` keeps the old SDK loaded.
 - **AI Fix inherits the offered list and opens on `DEFAULT_AI_FIX_MODEL` = `claude-opus-5-5`**
   (`packages/shared`, ONE spelling), read by the fixer picker (`AiFixTab`) and the core start route (`coding/ai-fix/routes.ts`). Its
-  effort is Settings → AI → Effort (Default medium), decided by the fix manager and carried to
+  effort is Settings → AI → AI Fix's effort (§ The run profiles; Default medium), decided by the fix manager and carried to
   `coding/agent.ts`; the constant carries no effort of its own. `POST /api/pro/prs/:id/ai-fix` checks `model` IN THE HANDLER — there is no ajv
   body schema, because `removeAdditional` would strip `seed`/`reviewText`/`commentTargets`: absent or
   null → the default; a string in `CLAUDE_REVIEW_MODELS` → that model; anything else →
@@ -1688,9 +1757,10 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
 - **PR-level findings** (§ Replies → PR-level findings) are judged in the same pass: a person's PR
   comment after one starts it, its block lists the PR conversation refs, and `replyRef` is required.
 - **The run.** Per thread, the PROVIDER of the run that OWNS it (the first inline-posted finding up
-  the chain, or a PR-level finding's owner; `followUpProvider`: the owner's when it can still run, else the default); one agent run
+  the chain, or a PR-level finding's owner; `threadCheckProvider`: the owner's when it is switched ON in
+  Settings → AI → Review and can still run, else Review's one vendor — never a vendor switched off); one agent run
   per provider group, Claude first, one after the other in the ONE shared review slot. STANDARD depth
-  (`claude-sonnet-5`; Codex resolves the role to Terra), the Effort setting (`agenticRunEffort`),
+  (`claude-sonnet-5`; Codex resolves the role to Terra), that vendor's Review effort (§ The run profiles; `agenticRunEffort`),
   read-only: Read/Glob/Grep in the PR's read-only worktree behind the path guard (no checkout ⇒ the
   finding's hunk), Bash denied (`repliesCheckToolPolicy`), connectors isolated. Per thread the prompt
   carries the finding (severity, title, body, path:line), the code around that line AT THE CURRENT
@@ -2357,11 +2427,31 @@ PR yet with THIS machinery — the same runner, prompts, findings schema, provid
 and stores the result in its own `story_build_reviews` / `story_build_review_findings` rows, never in
 `claude_reviews` (until the PR opens, below). Nothing is posted to GitHub. The seams:
 
-- **The diff**: `review/clone-manager.ts localBranchDiff(owner, name, baseSha, headSha)` (three-dot, both
-  commits in the clone cache, no gh) and `review/prepare.ts prepareBranchReview` — `prepareReview`'s tail
-  is the shared `preparedFromDiff`, so a PR review is unchanged. It is on the `ctx.review` contract.
-- **The checkout**: `RunReviewArgs.checkout {remoteRef, destRef, sha}` makes `runReview` use
-  `prepBranchWorktree` instead of a PR head (`prNumber` 0, unused). Absent ⇒ exactly as before.
+- **ONE shared half** (`coding/review-loop/branch-review.ts runBranchReviewHalf`, docs/STORY-BUILD.md §
+  Where the pieces live): repository, base, HEAD SOURCE, provider, prior findings in; a result out; no row,
+  no GitHub write, no slot. Build's `loop/branch-review.ts` is an adapter (its pushed branch as the head);
+  every later branch review (AI Fix's rounds, the local review) calls the same half.
+- **The head source** (`review/clone-manager.ts BranchHeadSource`): either a REMOTE branch `{remoteRef,
+  destRef, sha}` — fetched into the namespaced `destRef` only when `sha` is not in the clone cache (Build's
+  loop pushed it first) — or a LOCAL PINNED REF `{localRef, sha}`: a commit Ensemble made itself in the
+  clone cache and has NOT pushed. A local head is NEVER fetched (GitHub does not have it): the ref must be
+  in the ONE namespace and point at `sha`, else a plain refusal; only a missing BASE is fetched.
+- **The diff**: `localBranchDiff(owner, name, baseSha, head)` (three-dot in the clone cache, no gh; `head` a
+  sha or a head source) and `review/prepare.ts prepareBranchReview` (`localRef` optional) — `prepareReview`'s
+  tail is the shared `preparedFromDiff`, so a PR review is unchanged. It is on the `ctx.review` contract.
+- **The checkout**: `RunReviewArgs.checkout` (a head source) makes `runReview` use `prepHeadWorktree`
+  (`prepBranchWorktree` for a remote head; a detached worktree straight from the clone cache for a local
+  one) instead of a PR head (`prNumber` 0, unused). Absent ⇒ exactly as before.
+- **Local pinned refs** (`review/local-refs.ts`): ONE namespace, `refs/pierre/local/<kind>/<id>/<name>`.
+  `git-ops.ts commitPatchToLocalRef` makes one: the patch's tree on the base (`treeOfPatch`, no fetch when
+  the base is local), ONE commit by the reader with parent the base — `pushFastForward`'s commit minus the
+  push — pinned there; an unchanged tree pins the base. Nothing is pushed and no team claim moves.
+  ⚠ **ONE SWEEP RULE**: a ref is kept while its owner HOLDS it in this process (`holdLocalRefs`) or its
+  kind's registered keeper (`registerLocalRefKeeper`, for a resumable row) keeps the id; a keeper that
+  throws keeps its whole kind; a malformed ref is kept. Everything else goes — on DISCARD
+  (`dropLocalRefs(owner, name, kind, id)`) and at BOOT (`sweepLocalRefs`, after listen, never awaited,
+  bounded by a deadline and a delete cap). Owners: AI Fix's rounds (`ai-fix-loop`, a resumable fix keeps
+  them) and the local review (`local-review`, kept only while its run is `running`).
 - **The prompt**: `buildUserPrompt`'s optional `subject: {kind:'branch', branch}` changes the header
   ("branch X (no pull request yet)"), "What the branch is for", and the follow-up words: the replies are
   "The build agent's answers" (the agent's response to each finding, as a `FindingReply`), and prior
@@ -2382,12 +2472,131 @@ and stores the result in its own `story_build_reviews` / `story_build_review_fin
   (`not_applicable` / `answer`), and `buildSubmitTicketReviewShape(z, { notApplicable: true })` adds the
   `notApplicable` verdicts (`accepted` | `rejected` + why) — only on request, so the ticket goldens and the
   Codex schema are unchanged otherwise. Not applicable is BUILD-SCOPED: no shared criterion status.
-  Feature `story_loop_check`, provider `activeProviderId()`, never a pair.
-- **When the PR opens** (§ Auto review): `loop/review-on-pr.ts markLoopReviewOnPr` writes the CLOSING
+  ONE reusable check, `coding/review-loop/story-check.ts runBranchStoryCheck` (targets with head sources);
+  Build calls it with feature `story_loop_check` and the review vendor (`storyCheckProvider`), never a pair.
+- **When the PR opens** (§ Auto review): `coding/review-loop/review-on-pr.ts markLoopReviewOnPr` writes the CLOSING
   review as ONE `claude_reviews` row at the PR head — `trigger 'manual'` (never the daily auto cap),
   `kind` NULL, the lead half's provider/model, the consolidated findings, NOT posted — so the first-review
   rule finds a row and auto review does not review that head again. A new head is reviewed as usual. A
   failed write is logged; auto review then reviews the PR.
+
+## Reviewing a local branch (`ensemble mcp` / `ensemble review`, 2026-11-19)
+
+The reader's coding agent — Claude Code, Codex — asks the RUNNING Ensemble to review the branch it is working
+on, BEFORE anything is pushed, with the SAME branch review the loops use (§ Reviewing a branch). Two clients:
+
+- **`ensemble mcp`** (`local-review/mcp-server.ts`): a stdio MCP server. Claude Code: `claude mcp add ensemble
+  -- npx ensemble-review mcp`; Codex: `[mcp_servers.ensemble] command = "npx", args = ["ensemble-review",
+  "mcp"]`, with `startup_timeout_sec = 60` (a first `npx` download outlasts the 10 s default) and
+  `tool_timeout_sec = 120`. Hand-rolled newline JSON-RPC (initialize, ping, tools/list, tools/call), node: built-ins only,
+  exactly as `ai/codex/workspace-mcp.ts` and for the same reasons: NO `@modelcontextprotocol/sdk` (only
+  `ai/runtime.ts` may load an AI package; `scripts/build-release.mjs` walks the entry's imports and runs it from
+  the release tree). ⚠ Stdout IS the protocol: nothing else prints there.
+- **`ensemble review [--json] [--no-uncommitted] [--ticket KEY] [--base REF] [--provider p] [--effort e]
+  [--story] [--list] [--id n]`** (`local-review/cli-review.ts`): the same, waiting in the terminal (Ctrl-C
+  cancels the run); `--json` prints the tools' projection. Exit 0 when the run succeeded.
+
+**Tools**: `review_local_branch` (start; `includeUncommitted`, `ticket`, `base`, `provider`, `effort`,
+`answers[]`, `path`), `get_local_review` (status + findings + criteria; waits ≤ 50 s while it runs — a review
+takes minutes and MCP clients time out tool calls), `list_local_reviews`, `cancel_local_review`, `check_story`
+(the story check alone). Results are PLAIN JSON (`local-review/view.ts`, one projection for both clients):
+file, line, severity, title, body, who raised it; the criteria with their status, `open`, `cannotMeet`; one
+`next` line telling the agent what to do.
+
+**The client** (`local-review/client.ts`, `snapshot.ts`) — the reader's own process, in the reader's repository:
+
+- **Finds the backend** through `<dataDir>/server.lock` (`instance-lock.ts readInstanceLock`: a live pid's
+  port) and calls `127.0.0.1:<port>` with a loopback Host and no Origin. No lock / a stale one / a refused
+  connection ⇒ ONE line, "Ensemble is not running. Start it with: npx ensemble-review" — it never starts one
+  (one backend per data dir; it owns the DB, the ledger and the clone cache). AI off ⇒ the routes are not
+  registered, and their 404 — the app's own not-found message (`Route POST /api/…`, a space; Fastify's
+  default has a colon: both are matched) — reads as ONE line naming `ENSEMBLE_AI_DISABLED` (the only way the
+  routes are missing; the Settings → Features switch leaves them registered, and the start then refuses with
+  the pre-flight's own sentence).
+- **The scope**: `merge-base(HEAD, base)..HEAD` PLUS the uncommitted TRACKED changes (`git diff HEAD`'s paths:
+  staged or not) unless opted out. UNTRACKED FILES ARE NEVER INCLUDED. The base: `--base`, else the upstream
+  when it is ANOTHER origin branch (a stacked branch), else `origin/HEAD` (or origin/main, origin/master). It
+  must be on a branch of origin (`for-each-ref --contains`), else a plain refusal; the server re-checks
+  (below). Nothing to send (no commits, no changes) is a refusal too.
+- **⚠ THE READER'S .git IS READ, NEVER WRITTEN.** Reads run with `store.ts`'s hardened env (`sourceGitEnv`: no
+  system/global config, no lazy fetch, NO OPTIONAL LOCKS — no index refresh) and `SOURCE_GIT_CONFIG` (hooks
+  off, no fsmonitor). The snapshot commit is built in a TEMP repository (`GIT_DIR`, `GIT_INDEX_FILE`,
+  `GIT_OBJECT_DIRECTORY` there): HEAD's tree read into a temp index, the changed paths hashed in. ⚠ git
+  FRESHENS (touches) an existing object it is asked to write — in an ALTERNATE too — so every blob and tree is
+  written with NO alternate; the reader's objects are borrowed (`GIT_ALTERNATE_OBJECT_DIRECTORIES`) only by
+  commands that read, and by the snapshot commit (new by its timestamp). `snapshot-real.test.ts` pins every
+  file under `.git` (path, mtime, size, bytes), the refs, `git status` and `count-objects`.
+- **Line endings and filters.** `core.autocrlf` / `core.eol` / `core.safecrlf` are read (`git config --get`,
+  read-only) from EVERY scope — Git for Windows sets autocrlf in the SYSTEM config, which the hardened env
+  hides — and passed as `-c` to the diff and the hashing, so the blobs are what the reader would commit. A
+  changed path with a `filter` attribute (Git LFS, git-crypt) is LEFT AT HEAD's version and named in the start
+  result (`leftOutFiltered`): the filter is the reader's program and LFS writes into `.git/lfs`, so it never
+  runs.
+- **Every spawned git** handles EPIPE on its stdin (a command that reads none may exit before the write is
+  flushed; an unhandled one would kill `ensemble mcp`).
+- **Sends** a git BUNDLE (base..head, one branch, ≤ 25 MB) with the branch name, the base ref, the commit
+  subjects, the optional ticket / provider / effort / answers. NEVER a filesystem path.
+
+**The server** (`local-review/run.ts`, routes in `local-review/routes.ts`, registered by
+`registerAgenticRoutes`):
+
+1. **The repository**: origin owner/name → this account's repo (any case), which must have a HOME workspace
+   and a finished first sync (`sync_state.last_full_sync_at`), else a plain refusal. That workspace gives the
+   review settings, the reference docs and the tracker.
+2. **Who reviews** (before the claim): the reader's `provider` for this run, else Settings → AI → Review
+   through THE ONE PAIR RESOLVER (`reviewPairProviders`: both on and signed in ⇒ the PAIR; else the review
+   vendor). Nobody able to run ⇒ a refusal with the pre-flight's OWN sentence (`whyNoProvider`: switched off,
+   not signed in, not installed, over its usage limit), never a fixed "not signed in". The story check: the review vendor (`storyCheckProvider`), never a
+   pair. `effort` (one run only) stands in for the setting's level (`ai/effort.ts runEffortFor`; diff-only one
+   step lower; REVIEW_EFFORT still wins); the story check keeps the setting's.
+3. **THE CLAIM**: ONE RUN IN FLIGHT per (account, repository, branch) — the insert of a `running` row is the
+   claim (partial unique index `local_reviews_one_running`); a second start returns the running id
+   (`alreadyRunning`).
+4. **THE INTAKE** (`clone-manager.ts fetchBundleIntoClone`, under the repo lock, OUTSIDE any transaction): the
+   base fetched from GitHub by its sha when the cache lacks it (a base GitHub lacks is refused); the bundle
+   must name ONE branch at `headSha`; its pack goes through `index-pack --fsck-objects --fix-thin` (not `git
+   fetch <bundle>`: before git 2.46 a bundle fetch ignores `fetch.fsckObjects`), then the head's objects must
+   connect (`rev-list --objects --missing=allow-promisor`, the clone being blobless) and it is pinned as
+   `refs/pierre/local/local-review/<id>/head`. A refusal fails the run with the plain line (422 `bad_bundle`).
+   ⚠ The start waits for the intake at most `intakeWaitMs` (20 s) — a first clone of the repository, or a
+   sync holding the repo lock, can take minutes, and Codex times an MCP tool call out at 60 s by default — then
+   answers with the id; the intake goes on behind it and a later refusal FAILS the run (read with get). ⚠
+   From the claim on, EVERY failure (the intake, the answers' writes, the background run) finishes the row and
+   releases the hold, the in-process entry and the ref (`giveUp`): a row left `running` would hold the branch
+   and make every read wait its full long-poll. A cancel during the intake is honoured right after it (no
+   answers written, no ticket read, no review) and at the top of the background run.
+   The ref is HELD while the run reads it, dropped at its end; the kind's keeper keeps only `running` rows (a
+   restart fails those first: `reconcileLocalReviewsOnStartup`).
+5. **The review** (background): `runBranchReviewHalf` per provider with head `{localRef, sha}`, `byReader: true`,
+   feature `local_review` (Codex's own ledger row too: `ledgerFeature`). A PAIR runs AT ONCE, blind, and is
+   consolidated (`consolidateBranchPair`) into ONE review — one summary, one verdict, duplicates
+   `merged_into`; a finding both raised reads `raisedBy: [claude, codex]`. One half failing never hides the
+   other's findings.
+6. **The story check** beside it, when a ticket resolves: the `ticket` argument, else `extractTicketKeys` —
+   WITH the workspace's project keys on the branch name and each commit subject; WITHOUT them only upper-case
+   keys in a subject (read as a PR title is), never the branch (the precision rule), and the note says "pass
+   the ticket". The ticket is read through `readSessionTicket` (the story view's fold; the tracker read FRESH
+   — the LABELLED "reader asked" exception, docs/TRACKERS.md). `runBranchStoryCheck` with feature
+   `local_review_check`. No ticket ⇒ a `ticketNote`, the code review still runs; a story-only run fails with it.
+
+**Follow-up**: a later start on the same branch may carry `answers[]` to the branch's latest succeeded run —
+`F<finding id>` (`fixed` / `answered` / `pushed_back`) and `AC<n>` / `M<n>` (`fixed` / `not_applicable` /
+`cannot_meet`, a reason required) — checked with THE review loop's validator (`validateReviewResponse`, the
+shown refs being that run's open findings and criteria); an unknown ref is dropped and listed in
+`ignoredAnswers`, reworded for THIS surface (`localAnswerProblems`: `answers[n]`, the open refs — never the
+loop's REVIEW.md / `items`). Answers sent to a branch whose run is still going are not used, and
+`ignoredAnswers` says so. `next` is for an AGENT (the tools, `--json`); the CLI's text ends with a line for a
+PERSON. A story check that did not finish is said in `next`, never "Nothing to fix". A finding's answer lands on it and the next review judges it through `priorForTarget` (the
+reply as `FindingReply`), exactly as the loops. A criterion's answer becomes a story-check claim
+(`not_applicable` judged, the rest context); **`cannot_meet` stays NOT MET** and the criterion carries its
+reason (`cannotMeet`), the review loop's vocabulary (`cannotMeetLine`).
+
+**A READER'S CLICK, AND NOTHING ELSE.** Never asked of the spend gate (the specialists' start included); spend
+recorded under `local_review` / `local_review_check` (Reports → AI usage: code review / story review). No
+claude_reviews row, no ticket_reviews row, no post, no push, no team claim, no My Turn card, no Slack, NO AUTO
+FIX — `run-db.test.ts` pins it (rows counted, the auto-fix and auto-post seams mocked and never reached).
+Storage: `local_reviews` + `local_review_findings` (docs/DATA-MODEL.md); routes: docs/API.md § Local reviews;
+the intake's security: docs/SECURITY.md § Local branch reviews.
 
 ## Ticket review (one review per ticket, across its PRs)
 
@@ -4556,9 +4765,12 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
 
 - **EVERY RUN IS A SANDBOXED WORKSPACE SESSION** (2026-11-07; `sandbox/session/fix.ts`, the mechanics in
   [SANDBOX.md](SANDBOX.md) § AI Fix sessions): manual, Plan first, the unattended AUTO FIX and dependency
-  automation's fix, on Claude Code or Codex (the run choice / `activeProviderId`). The PR's repository and
-  those of its ticket's other PRs (2026-11-10; not the whole workspace) are mirrored at the reader's layout
-  (memories as in Implement); the PR's repository is checked out at the
+  automation's fix, on Claude Code or Codex (the run choice / `activeProviderId`). EVERY workspace repository
+  is mirrored at the reader's layout, read only at its default branch beside the PR's (2026-11-19, reversing the
+  2026-11-10 narrowing; at most 12, the PR's own first, then its ticket's, the reader's related repos, the rest by
+  name; Settings → Sandbox → "AI Fix reads every repository", per workspace, ON by default; dependency automation's
+  fix stays narrow), with the workspace's reference documents as files (memories as in Implement). ⚠ The fix's
+  REVIEW ROUNDS keep the review's own scope (related repos, docs), never this set. The PR's repository is checked out at the
   PR's head sha and is the ONLY one pushed — to the PR's own branch, as before. Edits in other
   repositories are listed ("left out") and never stored. The agent has a shell INSIDE the sandbox and
   runs the repository's own tests itself (`limn-svc` for services, as in Implement). The shell-less
@@ -4666,9 +4878,10 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   ⚠ **THE SANDBOX** (`fixSandboxReadiness`, never reserving; the runtime's answer reused 30 s): no
   container runtime ⇒ **`no_sandbox`**, every session taken or another session building ⇒
   **`sandbox_busy`** (or `fix_in_progress` when it is THIS PR's own fix that holds a session) —
-  recorded, never queued, the next auto review decides. Then the first of these that holds SKIPS it, logged and kept in memory per
-  review (`autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix`; the AI Review tab shows a line only
-  for a started fix or a fault the reader can fix — `not_started`, `over_budget`, `no_sandbox`, 2026-11-10):
+  recorded, never queued, the next auto review decides. Then the first of these that holds SKIPS it, logged
+  and returned to THE AUTO FIX QUEUE, whose ONE line says it (§ The auto fix queue; the per-review
+  `autoFixOutcomeFor` → `ClaudeReviewResponse.autoFix` and the tab's "No auto fix: …" line are DELETED
+  2026-11-18):
   `nothing_to_fix` (empty seed), `head_moved` (synced head ≠ reviewed head), `fix_in_progress`
   (a fix SESSION holds the PR — booting, building, a manual one open for follow-ups, a Plan first
   waiting; `startFix` claims it SYNCHRONOUSLY right after the check, so a click racing the auto
@@ -4677,7 +4890,10 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   asked only when an unpushed fix sits on neither, the LIVE head: the fixer builds on the live
   head, so a lagging sync must not hide a waiting fix), `cap` (`AUTO_FIX_DAILY_CAP` = 3 rows with `trigger='auto'`
   for the PR created in the last 24h, shared constant), `already_tried` (the latest auto fix AT THIS
-  HEAD listed every item this review would send under `unaddressed`). Otherwise
+  HEAD listed every item this review would send under `unaddressed`). The FAULTS (2026-11-18: the
+  catch-all `not_started` was split) — `review_unavailable` (the seed's review could not be read),
+  `no_ai_login` (the start answered `no_auth`), `pr_unavailable` (`not_found` / `no_head`), `error`
+  (a throw or any other start answer; the message is LOGGED, never shown). Otherwise
   `startReviewFix(…, {model: the review's model (a retired one → DEFAULT_AI_FIX_MODEL), trigger:
   'auto', include})` — the button's own start as an UNATTENDED session: build mode at once, ONE
   build turn (Claude capped by `--max-budget-usd` `AI_FIX_BUDGET_USD`, default 5, and `--max-turns`
@@ -4706,10 +4922,12 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   write access re-checked, the PR settled). A failure is written to the succeeded row's `error`
   ("Automatic push failed: …", shown in the AI Fix tab) and NEVER retried; a later manual push
   clears it. Otherwise it waits for Push.
-  ⚠ **LOOP SAFETY.** A pushed fix makes a new head → an auto re-review (which verifies it) → maybe
-  another fix. Without Push automatically every turn needs a PERSON pressing Push (an unpushed fix
-  blocks the next one); with it the bound is the cap (3 per PR per 24h) plus the auto-review daily
-  cap. `already_tried` stops the push-free loop (a fix that
+  ⚠ **LOOP SAFETY.** Every fix now reviews ITS OWN work before it can be pushed (§ The review loop below), and
+  the closing review becomes the PR's AI review at the PUSHED head — so auto review skips that head and no auto
+  fix chains from it (the queue says `reviewed_by_fix`). The old push → auto re-review → fix chain survives only
+  through a head the loop did not review (a stopped loop, a later commit). Without Push automatically every turn
+  needs a PERSON pressing Push (an unpushed fix blocks the next one); with it the OUTER bound is the cap (3 per PR
+  per 24h, rarely reached now) plus the auto-review daily cap. `already_tried` stops the push-free loop (a fix that
   changed nothing, retried on every comment-triggered review). Items match across reviews by
   (kind, thread id, story index, path, title) — refs and finding ids are per review — so a finding
   a later review RE-WORDS counts as new and only the cap stops it. There is no "discard" for a fix,
@@ -4724,13 +4942,76 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   out but the allow-list proxy, no GitHub credential, host-side push — docs/SECURITY.md § Workspace
   sessions).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
-  auto fix, under "Push automatically".
+  auto fix, under "Push automatically". Never while its review loop works (`409 NotPushable`, "Ensemble is still
+  reviewing the fix. Wait, or press Stop.").
+
+### The review loop (`coding/ai-fix/loop.ts`; migration 0207; 2026-11-18)
+
+AI Fix reviews its OWN work with a full review cycle after each fix turn, as Implement story's loop does
+(docs/STORY-BUILD.md § The review loop; the SHARED core is `coding/review-loop/`: the round and stop rule, the
+REVIEW.md seed, the answers file and its checker, the branch review half, the branch story check,
+`markLoopReviewOnPr`). Manual, auto and dependency automation's fixes alike; Plan first's chat turns never run it.
+
+- **When.** After every BUILD turn that ended well (`completed` / `max_turns`) with work to push
+  (`fixRowHasWork`) — the first turn, Start fix after a plan, every reader follow-up. The fix session decides it
+  in `afterBuildTurn` (`markFixLoopPending`, BEFORE the phase is saved, so the row never reads `succeeded` in
+  between) and starts it from `afterBuildTurnEnded` (`startFixLoop`, a compare-and-set claim on the row). No
+  review vendor on and signed in ⇒ no loop; the row records `no_reviewer` and the fix goes on as before.
+- **A round.** Round k reviews a LOCAL commit of the work in Ensemble's clone cache — `commitPatchToLocalRef`
+  (the patch on the PR head) under `refs/pierre/local/ai-fix-loop/<fixId>/r<k>`, or, with the MERGE item, the
+  CHECKED merge result pinned there — against the PR base branch's tip (pinned once per run; a merge's own base
+  commit). NOTHING is pushed and no claim line moves. The review providers are Settings → AI → Review's through
+  THE ONE PAIR RESOLVER (`branchReviewProviders`): a Claude + Codex pair is ONE pass, its halves AT ONCE and
+  blind, consolidated. A story check runs beside it ONLY when the fix carries the PR's ticket criteria (an
+  included S-item; `fixLoopTicket`). Prior rounds' findings and the agent's answers feed the follow-up.
+- **The stop rule** (shared `nextAfterReview`): nothing open ⇒ `clean`; the closing review (step N + 1) ⇒
+  `rounds`; every open item a criterion the agent said it CANNOT MEET last round, with a reason ⇒ `cannot_meet`
+  (`onlyCannotMeetLeft`; the criterion STAYS NOT MET everywhere). Otherwise a host-started fix turn
+  (`startHostBuildTurn`) seeded with REVIEW.md in AI Fix's words (`buildLoopFixSeed({subject: 'fix'})`,
+  `buildAiFixLoopFixInstruction`; goldens `review-loop/__fixtures__/loop-seed-golden.json`): every F / AC / M
+  item answered in `.limn/review-response.json`, and the fix report written again. A "fixed" whose work did not
+  change reads as an answer. N = Settings → AI → AI Fix → Review rounds (the FIX profile's `rounds`, default 5,
+  1–6, read when a run starts; `fixLoopRounds`).
+- **Spend.** Every automatic step of an UNATTENDED fix asks THE ONE gate first, under `ai_fix_loop_review`,
+  `ai_fix_loop_check` and `ai_fix_loop_fix`; a refusal STOPS the loop (`budget`), never queued or retried. A
+  manual fix's rounds are part of the reader's click (never asked). Each review half and each fix turn stores and
+  is ledgered under ITS OWN provider: the reviews run on the REVIEW profile, the fix turns on the FIX profile, so
+  one fix may run two providers. `AI_FIX_BUDGET_USD` stays Claude's per-process cap of an unattended session.
+- **The session** is HELD (no idle close) while the loop works; the row reads `running` (the fix stream sends
+  progress, dependency automation's poll keeps waiting); a reader's message is refused ("Wait for the review round
+  to finish, or press Stop."). Stop (`…/ai-fix/cancel`) ends the loop (`stopped`): a manual session stays open
+  with the fix kept, an unattended one is discarded. A restart ends a working loop as `interrupted`.
+- **The end.** The loop records why (shared `AI_FIX_LOOP_STOP_LINE`), then the session's own end
+  (`afterFixLoopEnded`): an unattended fix closes and the EXISTING push rules decide (Push automatically, the
+  Dependencies policy); a manual fix asks Push when done (unless the reader pressed Stop). Every rule is re-read at
+  push time, unchanged.
+- **After the push** (`importLoopReviewAfterPush`, from `pushFix`): the CLOSING review is written as the PR's
+  `claude_reviews` row at the PUSHED head (`markLoopReviewOnPr`: `trigger 'manual'`, NOT posted, the consolidated
+  findings; `ai_fixes.loop_review_id`) — only when it reviewed exactly what was pushed (the round's `work_key`:
+  the patch's hash, or `merge:<result sha>`). The pushed commit's sha differs from the local one; the tree is the
+  same, so the lines anchor. Auto review then skips that head (its first-review rule), and the auto fix queue
+  reads it as `reviewed_by_fix` (`headReviewedByFixLoop`), not as a review to wait for. A push to a NEW branch
+  imports nothing until its PR is synced (it never is: auto review reviews it).
+- **Storage** (migration 0207): `ai_fix_loop_reviews` / `_findings` / `_story_checks` / `_ac_responses` keyed
+  `(account_id, fix_id, round)`, plus `ai_fixes.loop_*`. The local refs are held while the loop reads them and
+  kept after a restart only for a resumable fix (the `ai-fix-loop` keeper, registered before the boot sweep);
+  discard and push drop them.
+- **Shown** (the AI Fix tab, `components/AiFix/FixLoopSection.tsx`): the rounds strip (round k: found / fixed /
+  answered / pushed back / cannot meet — counts only once that round's review SUCCEEDED; "Round k" / "Closing
+  review" from the review row's stored `step` / `rounds`; each round's points behind a toggle), the progress
+  ("Reviewing, round 2 of 5.", said ONCE — the session's status line) with Stop, the stop line, and the criteria
+  the agent says cannot be done ("Not met: the agent says this cannot be done: <reason>"). The push footer has a
+  `reviewing` state (no Push, no line). The AI Review tab shows only the imported closing review.
+- **A story check that did not finish** stops the loop (`review_failed`, as Build pauses): its criteria are
+  unknown, never "none open", so the loop never ends `clean` on a failed check.
+- **Dependency automation's wait** (`watchFixAndPush`, 4 h) restarts at every loop step (`loopStep`), so it bounds
+  one stuck step, never a loop making progress.
 
 ### Push when done (`coding/ai-fix/auto-push.ts` `pushWhenDoneHold`; migration 0190; 2026-11-12)
 
 A MANUAL fix (the picker's Start fix, or Plan first's build) carries the reader's "Push when done" tick (ON by
-default in the SPA, remembered per browser; `ai_fixes.push_when_done`). After every BUILD turn the session asks
-`pushWhenDoneReady`: PUSH when the turn left work (`fixRowHasWork`), the agent's report is valid with nothing
+default in the SPA, remembered per browser; `ai_fixes.push_when_done`). After every BUILD turn — and when the turn
+ran its review loop, after the LOOP ends (§ The review loop) — the session asks `pushWhenDoneReady`: PUSH when the turn left work (`fixRowHasWork`), the agent's report is valid with nothing
 `unaddressed` and nothing `notReported`, and the PR is the reader's OWN (`prAuthorIsAccount`) — then
 `afterBuildTurn` answers `'close'`, and the close (`onClosed`, phase `built`) pushes through `maybePushWhenDone`
 → `pushFix` 'existing' (the Push button's path: never forced, HEAD_MOVED refused, write access re-checked;
@@ -4740,6 +5021,28 @@ agent says 2 items are not fixed. Ask for more, or press Push." · its report do
 report · "this is not your pull request" — a teammate's branch is pushed only on a press). A push ends a fix
 session, so a reader who wants to talk first unticks it. An automatic fix never reads the tick (its own rule is
 "Push automatically", above).
+
+**The footer after an automatic push** (2026-11-18; both paths — Push when done and Push automatically). The
+push runs AFTER the session closed, so the close's `done` reaches the SPA before the push lands. Three things
+keep the AI Fix tab honest:
+- **`AiFix.pushing`** (`push-guard.ts` `fixPushInFlight`): a push runs, or one is on its way. `afterBuildTurn`
+  marks it (`notePushPending`) when its close WILL push — Push when done's `pushWhenDoneReady`, or the auto
+  fix's gate parts 1–3 (`autoPushSkip(…, {closing: true})`) — and `onClosed` clears it once the push settles
+  (pushed, failed or skipped). The SPA polls `['ai-fix', prId]` while `pushing` (`useAiFix`) — the ONLY path:
+  ⚠ no second `done` goes on the fix stream (the route closes it on the close's `done`, and a late one for the OLD fix
+  would end and mark finished the stream of a NEWER fix on the PR). While `pushing` the tab
+  hides "New fix" (`holdsPr`). In memory: a restart reads false, and the guards below keep a press safe.
+- **The footer is ONE pure fold, `fixPushFooter`** (`lib/aiFixSession.ts`), ranked: pushed ("Pushed to
+  `<branch>` · `<short sha>`" linked to the commit through `safeExternalUrl`, plus "Pushed automatically" when it
+  was not a press; a fix pushed before migration 0205 shows the branch only) → pushing ("Pushing to
+  `<branch>`…", no button) → failed ("Automatic push failed: `<reason>`" above Push) → held (Push when done's one
+  line, `AiFix.pushHold`, computed on read) → plain Push. ⚠ The failed / held line is drawn by `FixResult`, not
+  `PushControls`, so the reason shows when Push is not offered (no write access, an invalid merge). While the
+  review loop works the footer is `reviewing` ("Reviewing, round 2 of 5.", no Push), ranked right after pushed.
+  On the transition to pushed the SPA runs `invalidateAfterPrWrite` (the head, CI and mergeability moved).
+- **One push per fix**: `pushFixHeld` refuses a fix whose `pushedAt` is set (`409 NotPushable`, "This fix is
+  already pushed."), so a stale tab's Push never opens a second branch and PR. `markFixPushed` stores
+  `pushed_commit_sha` and `pushed_automatically` (migration 0205).
 
 ### The fix start queue (`coding/ai-fix/start-queue.ts`, 2026-11-12)
 
@@ -4768,6 +5071,51 @@ session closed), plus the auto fix queue's minute sweep as a backstop.
 - **In memory**: a restart drops the line (an auto fix is asked again by the sweep; a reader presses again).
   Pinned by `start-queue.test.ts` and `fix-session-flow-db.test.ts` (five PRs at once: three build together,
   two wait, all five finish with no further press).
+- **ONE TICKET AT A TIME** (`coding/ai-fix/ticket-line.ts`, OWNER DECISION 2026-11-19). A fix READS the open
+  PRs of its ticket (the ≤ 3-ticket lookup: `ticketsForPr` → `ticketPrIds`) that sit in ANOTHER repository it
+  loads, at their head (`fix.ts` `lineReadsFor`: the session's own repository set rules and `siblingHeads`; a
+  same-repository sibling, or one in a repository it does not load, is not read and never blocks). While a fix of
+  one of THOSE PRs RUNS — from its start's check through its boot, its agent turns and its own review loop — the
+  start WAITS in this line (whatever `queueIfBusy` says), so no fix works from a sibling's outdated head. The check
+  and the hold are ONE tick after the async lookups (`tryHoldTicketLine`): two starts of one ticket at once never
+  block each other — the first holds, the second waits. A hold is a TOKEN: a start's bail releases its own token;
+  the session releases by fix id only once `startFixSession` bound it, so an older session never releases a newer
+  start's hold. The pump SKIPS a ticket-blocked entry (those behind it may start; each entry is tried once per pass)
+  and tries it again when the holder stops running: `releaseTicketLine` (bound to the pump) runs from the fix's
+  `onPhase` the moment its status stops reading `running` — built with the loop ended (the loop's end releases it in
+  a `finally`, `withTicketLineReleased`), or a Plan first's PLAN TURN starting — and from its close (failed, stopped,
+  discarded, pushed), and from every bail path of the start. **No jumping**: a DIRECT start (a press, the auto
+  sweep) of a PR whose ticket already has an entry waiting goes in line behind it (`sameTicketWaiting`); a start the
+  queue itself runs (`queuedPlaceOf`) is exempt and, when it has to wait again (blocked again, or Start now with no
+  slot), KEEPS ITS PLACE (its `queuedAt`). Order among waiting fixes is the same (presses first, then auto, oldest
+  first). **Plan first's Start fix TAKES THE LINE** (`approvePlan` → `approveWithLine`): blocked ⇒ the build waits
+  like a press (`202 {fixId, status:'waiting', position, blockedBy}`, the waiting line, Start now). A reader's
+  follow-up turn in a built manual session does NOT take it (a sibling's fix built meanwhile reads stale, below).
+  Dependency automation's narrow fixes neither wait nor hold. The answer is `202 {…, status: 'waiting', position,
+  blockedBy: {prNumber}}`; `waiting` carries `blockedBy`; the AI Fix tab says "Waiting for the fix of #12 (same
+  ticket)." The next fix READS the holder's built, unpushed fix laid on its head (docs/SANDBOX.md § AI Fix sessions →
+  Scope, "The overlay").
+- **START NOW** (`POST /api/pro/prs/:id/ai-fix/start-now`, rate tier `ai` + `ai_hourly`): a reader's PRESS (or a
+  Plan first's waiting Start fix) waiting behind the same ticket's fix starts at once against what the siblings have
+  now (`startQueuedNow` → the entry's `runNow`, `StartFixInput.skipTicketLine`: it still HOLDS the line, it only
+  skips the check). No slot free ⇒ it waits for the slot only (`skipLine`), in its old place. An auto fix always
+  waits: `409 AutoFixWaits` ("This automatic fix starts by itself when the fix of #12 ends."); nothing waiting ⇒
+  `404 NotWaiting`. Its refusals use the start route's words (the seed's `NothingToFix` line).
+- **STALE, NEVER RE-RUN** (`coding/ai-fix/sibling-stale.ts`; `ai_fixes.sibling_state_json`, migration 0210).
+  What the fix read of each sibling (its head SHA, the overlaid fix and its patch hash, the sibling's built fix ids)
+  is stored WITH EACH STORED PATCH — never by a boot or Resume alone, so a Resume never clears staleness; a sibling
+  that failed to mirror keeps its earlier entry. ON READ (`fixSiblingFacts`, the columns it needs only), a finished
+  UNPUSHED fix is STALE when a sibling's synced head moved (not counting the push of the very fix it overlaid), the
+  overlaid fix was discarded or changed, or a NEWER built fix of that sibling exists — except one built ON TOP OF
+  this fix (its own sibling state overlays this fix: it follows it). ONE line in the AI Fix tab (`AiFix.stale`: "#12
+  changed after this fix was built.", the push footer's held line); "Push automatically" (`autoPushSkip` →
+  `'stale'`, gate part 3½) and "Push when done" (`pushWhenDoneHold` → `'stale'`) do NOT push it — it waits for the
+  reader with `pushHold` ("Not pushed: #12 changed after this fix was built. Check it, then press Push."). The
+  reader's Push still pushes. Nothing is re-run automatically.
+- **BUILT ON AN UNPUSHED FIX**: while a sibling fix this one overlaid is built and NOT pushed, the same two automatic
+  pushes HOLD it too (`'overlay_unpushed'`; "Not pushed: it builds on #12's AI Fix, which is not pushed yet."): its
+  code would land before the code it builds on. Pushed (the head is that push) ⇒ fine; discarded ⇒ stale. A press
+  pushes.
 
 ### The auto fix queue (`coding/ai-fix/auto-fix-queue.ts`, 2026-11-12)
 
@@ -4790,13 +5138,46 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
 3. CI failed and the CI review of this head is running, or due (none yet, auto review on) ⇒ `ci_review`, at
    most `AUTO_FIX_CI_REVIEW_WAIT_MS` (15 min);
 4. THE SOURCE: a succeeded AUTO review of THIS head ⇒ a review fix (its seed already carries the CI causes).
+   ⚠ **A CLAUDE + CODEX PAIR IS ONE REVIEW PASS** (2026-11-18): a succeeded half whose pair has not ENDED —
+   the other half (same `pair_id`) queued or running, or the pair merging (`isPairBusy`) — is NO source; the
+   pair is a review RUNNING (`review_running`), a wait, never a skip. Before, the first half to finish was
+   taken, the seed read the pair view as running, and `not_started` was shown during the run. ⚠ One half
+   failed ⇒ the pair stays in flight until the other's COVER PASS ends (`isPairCovering`, set by
+   `startPairCover` and the boot's end of an interrupted pair, released before `runEnded`): the cover is a
+   `kind = 'replies'` row with no `pair_id`, and a fix seeded earlier left out the failed half's findings.
+   Then the half's id seeds and `loadSourceReview` reads the consolidated view plus the succeeded cover.
+   ⚠ **A NEWER review of the head queued or running** (a comment-triggered re-review, a press; a row newer
+   than the succeeded one) holds it too (`review_running`), and so does `reviewHeldForPr` (a lane item has
+   no row yet) — except on the review's own end hook (cause `review`, its claim still held).
    Else CI causes at this head: an AI review of the head running (`reviewHeldForPr`), settling
    (`autoReviewWaiting`) or expected (auto review on, no full review row at the head) ⇒ `review_running` /
    `review_due`, at most `AUTO_FIX_REVIEW_WAIT_MS` (15 min) after CI was ready — one fix covers both; then a
-   CI-ONLY fix. No CI causes and a review expected ⇒ wait for it, unbounded. Neither ⇒ `nothing_to_fix`;
+   CI-ONLY fix. No CI causes and a review expected ⇒ wait for it, unbounded. Neither ⇒ `nothing_to_fix`.
+   ⚠ **`reviewed_by_fix`** (2026-11-18): the head is the PUSH of an AI fix whose OWN review loop reviewed it (its
+   closing review imported there, `trigger 'manual'`; `headReviewedByFixLoop`: an `ai_fixes` row with that
+   `pushed_commit_sha` and a `loop_review_id`). With no CI causes it is idle with that reason — REVIEWED, never a
+   wait for an auto review that will not come, and no auto fix starts from that review. CI causes at that head
+   still start a CI-only fix.
+   ⚠ **`review_capped`** (2026-11-18): the review is due or settling (not running) but the workspace's AUTO
+   REVIEW daily cap is reached — the sweeper's own count, `readAutoReviewUsage` (`getAutoReviewCandidates(…,
+   {limit: 0}).autoToday` vs the cap in force), the fold `AutoReviewCapToast` reads, asked ONLY on this
+   branch. With no CI causes ⇒ idle "No auto review today: the limit of N is reached." (the cap printed);
+   with CI causes ⇒ the CI-only fix at once. Never "Waiting for the AI review" for a review that cannot come;
 5. `maybeStartAutoFix` (every gate above). TRANSIENT refusals (`sandbox_busy`, `over_budget`, `no_sandbox`,
-   `fix_in_progress`) are WAITS the sweep retries; the rest (`fix_waiting`, `cap`, `already_tried`,
-   `nothing_to_fix`) end until the PR's facts change.
+   `fix_in_progress`) are WAITS the sweep retries — a start that went into THE FIX START QUEUE reads its place
+   there (`bindAutoFixStartPlace`): behind the same ticket's running fix it is `ticket_fix_running` ("Waiting for
+   the fix of #12 (same ticket).", step 1¼ too); the rest (`fix_waiting`, `cap`, `already_tried`,
+   `nothing_to_fix`) end until the PR's facts change — except the faults (`no_ai_login`,
+   `review_unavailable`, `pr_unavailable`, `error`) and `review_capped`, which the sweep decides again every
+   minute even on unchanged facts (shared `AUTO_FIX_QUEUE_REDECIDE`: a sign-in, a passing outage, a new
+   UTC day). An unknown skip reason reads `error`.
+
+**THE ONE LINE** (2026-11-18). Every word is shared `AUTO_FIX_QUEUE_LINE` (`cap` prints `AUTO_FIX_DAILY_CAP`;
+`review_capped` is `autoReviewCappedLine(cap)`). The AI Review tab shows it ONLY in the Auto fix section;
+an ENDED line (status `idle`) is hidden while the PR's latest review is queued or running
+(`autoFixQueueLineShown`, frontend `lib/claudeAutoReview.ts`) — a reason appears only after the review
+finished. Waits always show. "Nothing to fix." and "A finished fix is waiting for you to push it." are the
+queue's quiet lines as before; auto fix off has no queue (no line).
 
 The managers REGISTER their in-process facts (`bindAutoFixQueueFacts`: a fix running, a review queued or
 settling, a CI review held) when they load; ⚠ the queue never imports a manager — its fire-and-forget import

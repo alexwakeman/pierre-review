@@ -1,4 +1,5 @@
 import { inArray, lt } from 'drizzle-orm';
+import { pruneAiFixLoopForPrs } from './ai-fix-loop-prune.js';
 import type { FastifyBaseLogger } from 'fastify';
 import { db, runTransaction, schema } from './client.js';
 import { config } from '../config.js';
@@ -130,6 +131,8 @@ async function deletePrSubtree(
   await pruneCiReviewsForPrs(tx, prIds);
   // AI Fix runs (core since migration 0074 / pg 0061; the plugin's retention hook used to prune
   // them). No FKs — explicit, pr-keyed.
+  // Their review loops' rows first (migration 0207; soft fix_id): db/ai-fix-loop-prune.ts.
+  await pruneAiFixLoopForPrs(tx, prIds);
   await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
   // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin's `pruneProByPrIds`
   // used to take them). No FKs — explicit, pr-keyed.

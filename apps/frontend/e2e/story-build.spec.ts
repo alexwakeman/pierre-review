@@ -237,29 +237,55 @@ test.describe('Implement story', () => {
     const view = page.getByTestId('story-build-overlay');
     const box = view.getByTestId('story-build-start-auto-push');
     await expect(box).toContainText('After the build: review and fix, then open the pull request');
-    // Ticked by default, so the rounds show: 4 by default, 1 to 6. Unticked, they go.
+    // Ticked by default, so the rounds show: Settings → AI's number (5 by default), 1 to 6. Unticked, they go.
     await expect(box.getByRole('checkbox')).toBeChecked();
     await box.getByRole('checkbox').uncheck();
     await expect(view.getByTestId('story-build-loop-rounds')).toHaveCount(0);
     await box.getByRole('checkbox').check();
     const rounds = view.getByTestId('story-build-loop-rounds');
-    await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('4');
-    await rounds.getByRole('button', { name: 'More rounds' }).click();
     await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('5');
+    await rounds.getByRole('button', { name: 'More rounds' }).click();
+    await expect(rounds.getByTestId('story-build-loop-rounds-value')).toHaveText('6');
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
-    expect((await start).postDataJSON()).toMatchObject({ autoPush: true, loopRounds: 5 });
+    expect((await start).postDataJSON()).toMatchObject({ autoPush: true, loopRounds: 6 });
     const line = view.getByTestId('story-build-auto-push');
     await expect(line).toHaveAttribute('data-state', 'on');
     // The tab's own rounds control writes the loop's settings.
     const fewer = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/settings'));
     await view.getByTestId('story-build-loop-rounds').getByRole('button', { name: 'Fewer rounds' }).click();
-    expect((await fewer).postDataJSON()).toEqual({ rounds: 4 });
-    await expect(view.getByTestId('story-build-loop-rounds-value')).toHaveText('4');
+    expect((await fewer).postDataJSON()).toEqual({ rounds: 5 });
+    await expect(view.getByTestId('story-build-loop-rounds-value')).toHaveText('5');
     const off = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/loop/settings'));
     await line.getByRole('checkbox').click(); // a controlled box: the state is asserted below, once the write answers
     expect((await off).postDataJSON()).toEqual({ on: false });
     await expect(line).toHaveAttribute('data-state', 'off');
+  });
+
+  test('review loop: a criterion the agent says it cannot meet stays not met, with its reason', async ({ page }) => {
+    const base = STORY_SESSION_LOOP.loop!;
+    const [r1, r2] = base.history;
+    // Round 1: the agent says AC2 cannot be done; round 2's story check still finds it not met.
+    const loop = {
+      ...base,
+      state: 'done' as const,
+      pause: null,
+      pauseLine: null,
+      canContinue: false,
+      next: null,
+      history: [
+        { ...r1!, acResponses: [{ ref: 'AC2', response: 'cannot_meet' as const, text: 'The 500-row cap is set by the billing service, not this repository.' }] },
+        { ...r2!, storyCheck: r1!.storyCheck, claimVerdicts: [], open: { findings: 0, followUps: 0, criteria: 2 } },
+      ],
+    };
+    await withAi(page, { ...STORY_SESSION_LOOP, loop });
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const coverage = page.getByTestId('story-build-overlay').getByTestId('story-build-loop-coverage');
+    await expect(coverage.locator('[data-ref="AC2"]')).toHaveAttribute('data-state', 'open');
+    await expect(coverage).toContainText('1 of 3 met');
+    await expect(coverage.getByTestId('story-build-loop-cannot-meet')).toContainText(
+      'AC2 Not met: the agent says this cannot be done: The 500-row cap is set by the billing service, not this repository.',
+    );
   });
 
   test('review loop: rounds, the agent’s answers, Continue on a spend-limit pause', async ({ page }) => {
@@ -486,7 +512,12 @@ test.describe('Implement story', () => {
     await expect(view.getByTestId('story-build-start-auto-push').getByRole('checkbox')).toBeChecked();
     const start = page.waitForRequest((r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/story-builds');
     await view.getByTestId('story-build-start-button').click();
-    expect((await start).postDataJSON()).toMatchObject({ autoApprovePlan: true, autoPush: true, loopRounds: 4 });
+    {
+      const body = (await start).postDataJSON();
+      expect(body).toMatchObject({ autoApprovePlan: true, autoPush: true });
+      // Rounds left as Settings has them: none sent, the server reads Settings → AI → Implement story's.
+      expect(body.loopRounds).toBeUndefined();
+    }
     // Until the plan is approved, the tab's own switch changes it.
     const setting = view.getByTestId('story-build-auto-approve');
     await expect(setting.getByRole('checkbox')).toBeChecked();

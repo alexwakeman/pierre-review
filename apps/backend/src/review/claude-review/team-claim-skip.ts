@@ -264,26 +264,28 @@ async function postOne(
 }
 
 /**
- * The providers an auto review of this PR would run with right now (the workspace's pair, else the
- * default provider), ignoring usage limits — whose context a skipped line goes on. Never empty: the
+ * The providers an auto review of this PR would run with right now (the workspace's pair, else Settings
+ * → AI's review vendor), ignoring usage limits — whose context a skipped line goes on. Never empty: the
  * default provider when none can review. Never throws.
  */
 export async function autoProvidersForPr(ctx: AgentContext, accountId: number, prId: number): Promise<AiProviderId[]> {
-  const [{ readAutoReviewProvidersForPr, PAIR_ORDER }, { automaticRunProviders }, { activeProviderId }, { preflightFor }] =
+  const [{ readAutoReviewProvidersForPr }, { automaticRunProviders }, { reviewDefaultProvider, reviewProvidersEnabled }, { preflightFor }] =
     await Promise.all([
       import('./pair.js'),
       import('../../ai/usage-lockout.js'),
-      import('../../ai/provider-setting.js'),
+      import('../../ai/run-profile.js'),
       import('../../ai/run-choice.js'),
     ]);
-  const fallback = activeProviderId();
+  let fallback = reviewDefaultProvider();
   try {
     const detect = preflightFor(ctx);
+    fallback = reviewDefaultProvider(detect);
     const pair = (await readAutoReviewProvidersForPr(ctx, accountId, prId)) === 'both';
+    // THE ONE PAIR RESOLVER's rule (ai/run-profile.ts): only the review vendors switched on.
     const out = automaticRunProviders({
       defaultProvider: fallback,
       pair,
-      order: PAIR_ORDER,
+      order: reviewProvidersEnabled(),
       ready: (p) => detect(p, 'review').status === 'ok',
       locked: () => false,
     });

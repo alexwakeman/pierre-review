@@ -6,11 +6,16 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { SandboxSessionPhase } from '@pierre-review/shared';
+import type { AiFixLoop, AiFixLoopRound } from '@pierre-review/shared';
 import {
   fixErrorTone,
   fixMergeBlockedLine,
   fixMergeLine,
   fixPushable,
+  fixLoopCannotMeetLines,
+  fixLoopStatusLine,
+  fixLoopStrip,
+  fixPushFooter,
   fixRepoStatus,
   fixSessionHoldsPr,
   fixSessionShown,
@@ -138,5 +143,142 @@ describe('the tab', () => {
   it('has no separate conflict run: no ConflictAiCard, no "Also resolve" box', () => {
     expect(src).not.toMatch(/ConflictAiCard|useConflictAiResolve|startConflictAiRun|Also resolve merge conflicts/);
     expect(src).toMatch(/<MergeResult\b/);
+  });
+});
+
+describe('fixPushFooter — THE PUSH FOOTER', () => {
+  const base = {
+    pushedAt: null,
+    pushedBranch: null,
+    pushedCommitSha: null,
+    pushedAutomatically: false,
+    pushing: false,
+    pushHold: null,
+    error: null,
+  };
+  const o = { headRef: 'feature/x', repoFullName: 'acme/app' };
+
+  it('a pushed fix is a record: the branch and the commit, linked; "Pushed automatically" when not a press', () => {
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'feature/x', pushedCommitSha: 'c0ffee1234', pushedAutomatically: true }, o)).toEqual({
+      kind: 'pushed',
+      branch: 'feature/x',
+      sha: 'c0ffee1234',
+      shortSha: 'c0ffee1',
+      commitUrl: 'https://github.com/acme/app/commit/c0ffee1234',
+      automatic: true,
+    });
+  });
+
+  it('a fix pushed before the commit was stored shows the branch only', () => {
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'feature/x' }, o)).toMatchObject({ kind: 'pushed', sha: null, commitUrl: null, automatic: false });
+  });
+
+  it('⚠ pushed wins over everything: a stale pushing flag, an old failure or hold never bring Push back', () => {
+    const f = { ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'b', pushing: true, error: 'Automatic push failed: x', pushHold: { line: 'h' } };
+    expect(fixPushFooter(f, o).kind).toBe('pushed');
+  });
+
+  it('⚠ an automatic push on its way: no button, the branch named', () => {
+    expect(fixPushFooter({ ...base, pushing: true, pushHold: { line: 'h' } }, o)).toEqual({ kind: 'pushing', branch: 'feature/x' });
+    expect(fixPushFooter({ ...base, pushing: true }, { ...o, headRef: null })).toEqual({ kind: 'pushing', branch: null });
+  });
+
+  it('a failed automatic push keeps Push, with the reason above it', () => {
+    expect(fixPushFooter({ ...base, error: 'Automatic push failed: the branch moved since the fix was made.' }, o)).toEqual({
+      kind: 'failed',
+      line: 'Automatic push failed: the branch moved since the fix was made.',
+    });
+  });
+
+  it('"Push when done" held: the session line above Push; any other row error is not the footer\'s', () => {
+    expect(fixPushFooter({ ...base, pushHold: { line: 'Not pushed: this is not your pull request. Press Push to push to its branch.' } }, o)).toMatchObject({ kind: 'held' });
+    expect(fixPushFooter({ ...base, error: 'The sandbox was closed after 30 minutes idle.' }, o)).toEqual({ kind: 'plain' });
+    // STALE (AiFix.stale): ONE line above Push; a push hold for it wins (it says the same, as a hold).
+    expect(fixPushFooter({ ...base, stale: { line: '#12 changed after this fix was built.' } }, o)).toEqual({ kind: 'held', line: '#12 changed after this fix was built.' });
+    expect(fixPushFooter({ ...base, stale: { line: '#12 changed after this fix was built.' }, pushHold: { line: 'Not pushed: #12 changed after this fix was built. Check it, then press Push.' } }, o)).toEqual({
+      kind: 'held',
+      line: 'Not pushed: #12 changed after this fix was built. Check it, then press Push.',
+    });
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', stale: { line: 'x' } }, o).kind).toBe('pushed');
+  });
+
+  it('an older server (no push fields) reads as plain Push', () => {
+    expect(fixPushFooter({ pushedAt: null, pushedBranch: null, error: null }, o)).toEqual({ kind: 'plain' });
+  });
+});
+
+describe('THE REVIEW LOOP — the footer, the status line, the rounds strip', () => {
+  const round = (n: number, over: Partial<AiFixLoopRound> = {}): AiFixLoopRound => ({
+    round: n,
+    step: n,
+    closing: false,
+    headSha: null,
+    review: 'succeeded',
+    providers: ['claude'],
+    verdict: 'COMMENT',
+    summary: null,
+    storyCheck: null,
+    open: { findings: 0, criteria: 0 },
+    counts: { found: 0, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 },
+    findings: [],
+    criteria: [],
+    fix: 'none',
+    ...over,
+  });
+  const loop = (over: Partial<AiFixLoop> = {}): AiFixLoop => ({
+    state: 'reviewing',
+    round: 2,
+    firstRound: 1,
+    rounds: 5,
+    stop: null,
+    stopLine: null,
+    running: true,
+    history: [],
+    cannotMeet: [],
+    importedReviewId: null,
+    ...over,
+  });
+  const o = { headRef: 'feature/x', repoFullName: 'acme/app' };
+  const base = { pushedAt: null, pushedBranch: null, pushedCommitSha: null, pushedAutomatically: false, pushing: false, pushHold: null, error: null };
+
+  it('⚠ while the loop works there is no Push: "Reviewing, round 2 of 5."; pushed still wins', () => {
+    expect(fixPushFooter({ ...base, loop: loop() }, o)).toEqual({ kind: 'reviewing', line: 'Reviewing, round 2 of 5.' });
+    expect(fixPushFooter({ ...base, loop: loop({ state: 'fixing' }) }, o)).toEqual({ kind: 'reviewing', line: 'Fixing, round 2 of 5.' });
+    expect(fixPushFooter({ ...base, loop: loop({ round: 6 }) }, o)).toEqual({ kind: 'reviewing', line: 'Reviewing, the closing round.' });
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'b', loop: loop() }, o).kind).toBe('pushed');
+    // Ended: the usual footer.
+    expect(fixPushFooter({ ...base, loop: loop({ state: 'done', stop: 'clean' }) }, o)).toEqual({ kind: 'plain' });
+  });
+
+  it('the status line says the loop works and nothing is pushed; null once it ended', () => {
+    expect(fixLoopStatusLine(loop())).toBe('Reviewing, round 2 of 5. Nothing is pushed until the review ends.');
+    expect(fixLoopStatusLine(loop({ state: 'fixing' }))).toBe('Fixing, round 2 of 5. The agent is answering the review.');
+    expect(fixLoopStatusLine(loop({ state: 'stopped', stop: 'budget' }))).toBeNull();
+    expect(fixLoopStatusLine(null)).toBeNull();
+  });
+
+  it('the strip: round k found / fixed / answered / pushed back / cannot meet, zeros left out, no counts before a review succeeded; the closing review named', () => {
+    const rows = fixLoopStrip({
+      history: [
+        round(1, { fix: 'done', counts: { found: 4, fixed: 2, answered: 1, pushedBack: 0, cannotMeet: 1 } }),
+        round(2, { review: 'running' }),
+        round(6, { step: 6, closing: true, counts: { found: 0, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 } }),
+        round(7, { step: 1, review: 'failed' }),
+      ],
+    });
+    expect(rows.map((r) => `${r.title}|${r.status}|${r.tone}|${r.cells.map((c) => `${c.n} ${c.label}`).join(', ')}`)).toEqual([
+      'Round 1|Reviewed|open|4 found, 2 fixed, 1 answered, 1 cannot meet',
+      // ⚠ unknown is never zero: a review not succeeded shows no counts.
+      'Round 2|Reviewing|running|',
+      'Closing review|Reviewed|ok|0 found',
+      'Round 1|Review failed|bad|',
+    ]);
+    expect(fixLoopStrip({ history: [round(3, { fix: 'running', counts: { found: 2, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 } })] })[0]).toMatchObject({ status: 'Fixing', tone: 'running' });
+  });
+
+  it('a criterion the agent cannot meet stays NOT MET, with its reason', () => {
+    expect(fixLoopCannotMeetLines({ cannotMeet: [{ ref: 'AC2', text: 'Export to PDF', reason: 'No PDF library here.' }] })).toEqual([
+      { ref: 'AC2', text: 'Export to PDF', line: 'Not met: the agent says this cannot be done: No PDF library here.' },
+    ]);
   });
 });

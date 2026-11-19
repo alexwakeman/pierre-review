@@ -1,9 +1,9 @@
-// THE REVIEW LOOP'S FIX PASS (loop/seed.ts): REVIEW.md lists every open item — findings by severity with
+// THE REVIEW LOOP'S FIX PASS (coding/review-loop/seed.ts, the shared loop core): REVIEW.md lists every open item — findings by severity with
 // questions INCLUDED and praise never, criteria and missing items by their own refs, a rejected "not
 // applicable" note re-shown with the checker's reason — fenced with the nonce; over the budget the lowest
 // priority is left out and NAMED; the instruction names the report and the checker.
 import { describe, expect, it } from 'vitest';
-import { buildLoopFixInstruction, buildLoopFixSeed, responseLine, type LoopSeedFinding } from './seed.js';
+import { buildLoopFixInstruction, buildLoopFixSeed, responseLine, type LoopSeedFinding } from '../../review-loop/seed.js';
 
 const NONCE = 'feedfacefeedface';
 const f = (id: number, severity: LoopSeedFinding['severity'], over: Partial<LoopSeedFinding> = {}): LoopSeedFinding => ({

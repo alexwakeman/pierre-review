@@ -21,6 +21,7 @@ import type { ToolSwitchesStatus } from './tool-switches.js';
 import type { SonarIssue } from './sonar.js';
 import type { AiPickerModel, AiProviderSetting } from './ai-run-label.js';
 import type { AiEffortSettingStatus } from './ai-effort.js';
+import type { AiRunProfilesStatus } from './ai-run-profiles.js';
 import type { AiApiKeySettingStatus } from './ai-api-key.js';
 import type { ReferenceDocCitation, ReviewDocReference } from './reference-docs.js';
 import type { RepoDocsOffers, RepoDocsUnreadableReason } from './reference-docs-offers.js';
@@ -4025,6 +4026,12 @@ export interface MeResponse {
      * Default) and who chose it (REVIEW_EFFORT wins). Optional: an older server omits it (Default).
      */
     effortSetting?: AiEffortSettingStatus;
+    /**
+     * THE RUN PROFILES (Settings → AI → Review / AI Fix / Implement story; ai-run-profiles.ts): every
+     * surface's vendor, model and effort, resolved. The run menus open on them. Optional: an older
+     * server omits it (every menu then opens as before).
+     */
+    runProfiles?: AiRunProfilesStatus;
     /**
      * "Use my API keys first" (Settings → AI; ai-api-key.ts): the tick, who set it (LIMN_AI_USE_API_KEY
      * wins), and whether ANTHROPIC_API_KEY / OPENAI_API_KEY are set. Optional: an older server omits it.
@@ -8090,9 +8097,8 @@ export interface ClaudeReviewResponse {
   // The auto-review sweeper is HOLDING this PR's next auto review, and why (in memory; a manual run
   // is NOT locked by it). null/absent = not waiting.
   autoReviewWaiting?: ClaudeAutoReviewWaiting | null;
-  // What happened after the LATEST review if it was an auto review on the reader's own PR: an auto
-  // fix was started, or skipped and why. In memory (a restart forgets it). null/absent = nothing.
-  autoFix?: ClaudeAutoFixOutcome | null;
+  // ⚠ `autoFix` (the per-review "No auto fix: …" outcome) is DELETED 2026-11-18: the reason is the auto
+  // fix queue's ONE line (`GET /api/pro/prs/:id/ai-fix/auto`, shared auto-fix-queue.ts).
   // The FAILED AUTO run at the PR's current synced head that a reader's Retry would re-run: the latest
   // AUTO row at that head failed and no AUTO run there succeeded — MANUAL rows at the head (even
   // later ones) are ignored (docs/CLAUDE-REVIEW.md § Retries). null = none; ABSENT = an older server
@@ -8220,7 +8226,7 @@ export interface ClaudeTeammateVerdictWait {
 }
 
 /** At most this many AUTO fixes per PR in any rolling 24 hours (coding/ai-fix/auto-fix.ts). Shared
- *  so the Claude Review tab's skip line prints the same number the gate counts to. */
+ *  so the auto fix queue's `cap` line prints the same number the gate counts to. */
 export const AUTO_FIX_DAILY_CAP = 3;
 
 /** Why an auto fix was NOT started after an auto review of the reader's own PR. */
@@ -8237,8 +8243,13 @@ export type ClaudeAutoFixSkipReason =
   | 'already_tried'
   // The PR moved on after the review; the next review will decide.
   | 'head_moved'
-  // The fixer refused to start (no AI sign-in, review gone…).
-  | 'not_started'
+  // FAULTS (the queue's sweep decides again each minute): no AI sign-in on this computer; the review
+  // could not be read; the PR could not be read from GitHub (or has no head); anything else (the
+  // message goes to the log, never the UI).
+  | 'no_ai_login'
+  | 'review_unavailable'
+  | 'pr_unavailable'
+  | 'error'
   // No container runtime on this computer: AI Fix runs only in the sandbox (docs/SANDBOX.md).
   | 'no_sandbox'
   // Every sandbox session is taken, or another session is building (one build per computer). Never
@@ -9780,6 +9791,31 @@ export interface AiFix {
   pushedPrNumber: number | null;
   pushedPrUrl: string | null;
   pushedAt: string | null;
+  // The commit the push left on the branch (migration 0205). null on a fix pushed before it. Optional: an
+  // older server omits it.
+  pushedCommitSha?: string | null;
+  // The push was not a press: "Push when done", "Push automatically" or the Dependencies policy.
+  pushedAutomatically?: boolean;
+  // THE PUSH FOOTER (docs/CLAUDE-REVIEW.md § Push when done; the SPA's `fixPushFooter`). Optional: an older
+  // server omits them.
+  //   pushWhenDone  the reader ticked "Push when done" at start.
+  //   pushing       a push runs now, or an automatic one is on its way (the close that pushes). In memory on
+  //                 the server: a restart reads false. The SPA polls while it is true.
+  //   pushHold      "Push when done" was ticked but the fix waits for Push: the session's one line, computed
+  //                 on read. null otherwise.
+  pushWhenDone?: boolean;
+  pushing?: boolean;
+  pushHold?: { line: string } | null;
+  // THE SIBLING STATE (docs/CLAUDE-REVIEW.md § AI Fix → The fix start queue): an UNPUSHED, finished fix built
+  // while another PR of the same ticket was at an older state — that PR's head moved, the fix of it this one
+  // read was discarded or changed, or a newer fix of it was built. ONE line ("#12 changed after this fix was
+  // built."), computed on read; automatic pushes hold it (`pushHold`), a press still pushes. Never a re-run.
+  // null/absent ⇒ not stale (or pushed, or an older server).
+  stale?: { line: string } | null;
+  // AI FIX'S OWN REVIEW LOOP (shared ai-fix-loop.ts; docs/CLAUDE-REVIEW.md § AI Fix → The review loop): the
+  // rounds, what each found and what the fix turn did, why it stopped. null/absent ⇒ it never ran (an older
+  // row, a fix with nothing to push). While it runs, `status` reads 'running' and nothing is pushed.
+  loop?: import('./ai-fix-loop.js').AiFixLoop | null;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -9845,19 +9881,29 @@ export interface AiFixResponse {
   waiting?: AiFixWaiting | null;
 }
 
-/** `POST …/ai-fix` (and `…/plan`) when every sandbox is busy: the start waits in line (202). */
+/**
+ * `POST …/ai-fix` (and `…/plan`, `…/start-now`) when the start waits in line (202): every sandbox is busy, or a
+ * fix of the same ticket runs (`blockedBy`).
+ */
 export interface AiFixWaitingResponse {
   fixId: null;
   status: 'waiting';
   position: number;
+  /** A fix of another PR of the same ticket runs; this one starts when it ends. Absent/null ⇒ a sandbox wait. */
+  blockedBy?: { prNumber: number } | null;
 }
 
-/** THE FIX START QUEUE (coding/ai-fix/start-queue.ts): this PR's fix waits for a free sandbox. */
+/**
+ * THE FIX START QUEUE (coding/ai-fix/start-queue.ts): this PR's fix waits for a free sandbox, or (`blockedBy`)
+ * for the fix of another PR of the same ticket to stop running (coding/ai-fix/ticket-line.ts).
+ */
 export interface AiFixWaiting {
   /** 1 = next. */
   position: number;
   queuedAt: string;
   trigger: AiFixTrigger;
+  /** The running fix of the same ticket it waits for. Absent/null ⇒ it waits for a sandbox only. */
+  blockedBy?: { prNumber: number } | null;
 }
 
 export interface AiFixStatusResponse {
@@ -11097,6 +11143,21 @@ export interface ReviewerCandidateResponse {
     pendingReviews: number | null;
   } | null;
   users: User[];
+}
+
+/** One person the PR pane's "Someone else" picker offers. `isMaintainer` = has merged a PR in THIS
+ *  PR's repo (the picker's shield); `mergedInWorkspace` = has merged one anywhere in the workspace. */
+export interface AskablePerson extends MentionCandidate {
+  mergedInWorkspace: boolean;
+}
+
+/** GET /api/prs/:id/askable-people?workspace=<id> — DB only, fetched when the reader opens the picker.
+ *  Everyone who authored or merged a PR in the workspace (plus the PR's own repo), best first: merged
+ *  here, merged in the workspace, active in the last 90 days, then the rest. The reader, the PR's
+ *  author, automation and anyone already requested are left out. */
+export interface AskablePeopleResponse {
+  workspaceId: number;
+  people: AskablePerson[];
 }
 
 // Per-vendor rollup carried by the bot_signal card.

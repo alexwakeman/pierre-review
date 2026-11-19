@@ -85,8 +85,9 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Effort</H3>
       <p>
-        At <Ui>Default</Ui> effort, Codex runs at high on its most thorough model. The same Effort setting applies to
-        both providers. See <DocLink to="settings/ai#effort">Effort</DocLink>.
+        At <Ui>Default</Ui> effort, Codex runs at high on its most thorough model. Codex has its own model and effort
+        for reviews, and can be the vendor for AI Fix and Implement story. See{' '}
+        <DocLink to="settings/ai#run-settings">Review, AI Fix and Implement story</DocLink>.
       </p>
 
       <H2 id="limits">Limits and your data</H2>

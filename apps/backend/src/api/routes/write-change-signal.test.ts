@@ -480,6 +480,32 @@ describe('refusals raise nothing', () => {
     expectNoSignal();
   });
 
+  // "Someone else" asks a workspace person who may lack access: GitHub's 422 is a 422 in plain
+  // English, naming the person (the SPA puts it on their chip). Any other failure stays a 502.
+  it('GitHub refusing a reviewer (422) is a 422 naming them, and raises nothing', async () => {
+    requestReviewers.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'GitHub REST POST /repos/acme/a/pulls/1/requested_reviewers -> 422: {"message":"Reviews may only be requested from collaborators. One or more of the users or teams you specified is not a collaborator of the acme/a repository."}',
+        ),
+        { status: 422 },
+      ),
+    );
+    const res = await inject('POST', `/api/prs/${openPr}/request-reviewers`, { userIds: [carolId] });
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ error: 'ReviewerRefused' });
+    expect(res.json().message).toMatch(/^@carol-dev can’t be asked to review: they don’t have access to acme\//);
+    expectNoSignal();
+  });
+
+  it('any other reviewer-request failure stays a 502', async () => {
+    requestReviewers.mockRejectedValueOnce(Object.assign(new Error('GitHub REST POST /x -> 500: boom'), { status: 500 }));
+    const res = await inject('POST', `/api/prs/${openPr}/request-reviewers`, { userIds: [carolId] });
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ error: 'GitHubError' });
+    expectNoSignal();
+  });
+
   it('another account’s PR / thread 404s and raises nothing, for either account', async () => {
     const a = await inject('POST', `/api/prs/${foreignPrId}/close`);
     const b = await inject('POST', `/api/threads/${foreignThreadId}/resolve`, { resolved: true });

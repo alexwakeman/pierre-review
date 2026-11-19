@@ -139,9 +139,11 @@ async function openWaitingOnReview(page: Page): Promise<Harness> {
     const body = route.request().postDataJSON() as RequestReviewersBody;
     bodies.push(body);
     if (body.teamSlugs?.length) {
+      // GitHub's refusal is a 422 in plain English (the route's `ReviewerRefused`); the card reads it
+      // the same way it reads a 502.
       return route.fulfill({
-        status: 502,
-        json: { error: 'GitHubError', message: 'acme/core is not a collaborator on this repository.' },
+        status: 422,
+        json: { error: 'ReviewerRefused', message: '@core can’t be asked to review: they don’t have access to acme/web.' },
       });
     }
     if (body.userIds?.includes(2)) await aliceHeld;
@@ -207,7 +209,7 @@ test.describe('Pending: one Assign per suggested reviewer', () => {
     // A failure shows GitHub's words on its own row and offers the retry.
     await assignTeam.click();
     await expect(row(page, TEAM_REASON).getByRole('alert')).toHaveText(
-      'acme/core is not a collaborator on this repository.',
+      '@core can’t be asked to review: they don’t have access to acme/web.',
     );
     await expect(assignTeam).toBeEnabled();
 

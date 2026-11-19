@@ -44,6 +44,8 @@ import { TERMINAL_LABEL } from './AutoMergeBanner.js';
 import { usePrArmedIntent, usePrStoppedIntent } from '../hooks/useAutoMerge.js';
 import { usePrReviewWaits, useSuggestedReviewers } from '../hooks/usePr.js';
 import { AskSomeoneElse, NudgeButton, ReviewTargetNote } from './ReviewWaitActions.js';
+import { ReviewerPicker } from './ReviewerPicker.js';
+import { useRepos } from '../hooks/useTimeline.js';
 import {
   holderOverTarget,
   nudgeOffered,
@@ -258,22 +260,8 @@ function rememberSuggestions(prId: number, data: SuggestedReviewersResponse): vo
 // for someone with push access, a one-click "Assign" that requests them on GitHub. Shown
 // only when the server returned suggestions (it gates on open + non-draft + no reviewers/
 // reviews). Combines CODEOWNERS ownership (users + @org/team) with history-based picks.
-function SuggestedReviewersRow({
-  pr,
-  suggestions: all,
-  usersById,
-}: {
-  pr: PrDetailT;
-  suggestions: ReviewerSuggestion[];
-  usersById: Map<number, User>;
-}): JSX.Element | null {
-  const request = useRequestReviewers(pr.id);
-  const [requested, setRequested] = useState<Set<string>>(new Set());
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const keyOf = (s: ReviewerSuggestion): string =>
-    s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login}`;
-  // Anyone already on the "Requested" row above is not a suggestion any more. A person asked from
-  // THIS row keeps a "Requested" tick until the refetched detail lists them up there.
+// Anyone already on the "Requested" row is not a suggestion any more.
+function unrequestedSuggestions(pr: PrDetailT, all: ReviewerSuggestion[]): ReviewerSuggestion[] {
   const requestedUserIds = new Set(
     pr.requestedReviewers.flatMap((r) => (r.userId != null ? [r.userId] : [])),
   );
@@ -288,7 +276,26 @@ function SuggestedReviewersRow({
           (t) => t != null && t !== '' && requestedTeams.has(t.toLowerCase()),
         )
       : s.userId != null && requestedUserIds.has(s.userId);
-  const suggestions = all.filter((s) => !alreadyRequested(s));
+  return all.filter((s) => !alreadyRequested(s));
+}
+
+function SuggestedReviewersRow({
+  pr,
+  suggestions: all,
+  usersById,
+}: {
+  pr: PrDetailT;
+  suggestions: ReviewerSuggestion[];
+  usersById: Map<number, User>;
+}): JSX.Element | null {
+  const request = useRequestReviewers(pr.id);
+  const [requested, setRequested] = useState<Set<string>>(new Set());
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const keyOf = (s: ReviewerSuggestion): string =>
+    s.kind === 'team' ? `team:${s.teamSlug}` : `user:${s.login}`;
+  // A person asked from THIS row keeps a "Requested" tick until the refetched detail lists them on
+  // the Requested row (and `unrequestedSuggestions` drops them).
+  const suggestions = unrequestedSuggestions(pr, all);
   if (suggestions.length === 0) return null;
 
   const assign = (s: ReviewerSuggestion): void => {
@@ -719,6 +726,10 @@ export function ChecksTab({
   // ThreadList/index.tsx for the shape, and note the workspace must come from the PR's repo
   // (`Repo.workspaceId`), never from the selector.
   const setThreadBotFilter = useFilters((s) => s.setThreadBotFilter);
+  // "Someone else" reads the PR's OWN workspace (`Repo.workspaceId`), never the selector: this PR may
+  // be open from another workspace (a deep link, a restored tab, a search hit).
+  const { data: repos } = useRepos();
+  const workspaceId = repos?.find((r) => r.id === pr.repoId)?.workspaceId ?? null;
   const botGroups = (() => {
     const byKind = new Map<ReviewBotKind, { threads: number; unresolved: number }>();
     for (const t of pr.threads) {
@@ -738,11 +749,20 @@ export function ChecksTab({
       .sort((a, b) => b.threads - a.threads);
   })();
 
+  // "Someone else" (ReviewerPicker): any open PR the reader can push to, once its workspace is
+  // known — hidden, never disabled. Draft PRs too (GitHub takes review requests on drafts).
+  const someoneElse =
+    pr.state === 'open' && pr.viewerCanPush && workspaceId != null ? (
+      <ReviewerPicker key={pr.id} pr={pr} workspaceId={workspaceId} />
+    ) : null;
+  const suggestedRowVisible = unrequestedSuggestions(pr, suggestions).length > 0;
+
   // The People section renders only when one of its rows does.
   const peopleVisible =
     reviewsRowVisible(pr) ||
     pr.requestedReviewers.length > 0 ||
-    suggestions.length > 0 ||
+    suggestedRowVisible ||
+    someoneElse != null ||
     botGroups.length > 0 ||
     (slowBots.length > 0 && onShowBotActivity != null);
 
@@ -1109,9 +1129,18 @@ export function ChecksTab({
 
       {pr.requestedReviewers.length > 0 && <RequestedReviewersRow pr={pr} usersById={usersById} />}
 
-      {suggestions.length > 0 && (
-        <SuggestedReviewersRow pr={pr} suggestions={suggestions} usersById={suggestUsersById} />
+      {suggestedRowVisible && (
+        <SuggestedReviewersRow
+          pr={pr}
+          suggestions={suggestions}
+          usersById={suggestUsersById}
+        />
       )}
+
+      {/* "Someone else" ALWAYS on its own row, in ONE tree slot, under Suggested (or Requested). The
+          server empties Suggested once anyone is requested, so a picker mounted inside that row
+          would remount closed and empty mid-send, losing a chip's "Asked" or its refusal. */}
+      {someoneElse != null && <Row label="Ask">{someoneElse}</Row>}
 
       {botGroups.length > 0 && (
         <Row label="Bots">

@@ -10,7 +10,7 @@ import {
   type ModelChoice,
 } from '../ai/provider.js';
 import { runCodexSpecialists } from '../ai/codex/specialists.js';
-import { agenticRunEffort, chosenAiEffort } from '../ai/effort.js';
+import { aiEffortEnvSetting, runEffortFor, surfaceEffortLevel } from '../ai/effort.js';
 import { loadZod } from '../ai/runtime.js';
 import type { RunReviewArgs, RunReviewResult } from '../platform/contract.js';
 import { config } from '../config.js';
@@ -18,7 +18,7 @@ import { submitReviewShape, type SubmitReviewPayload } from './schema.js';
 import { applyClaudeReviewAuth } from './auth.js';
 import {
   cleanupCloneCache,
-  prepBranchWorktree,
+  prepHeadWorktree,
   prepWorktree,
   removeWorktreeLocked,
 } from './clone-manager.js';
@@ -207,11 +207,13 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
   const modelChoice: ModelChoice = override
     ? { role: claudeModelChoice(model).role, id: override.model }
     : claudeModelChoice(model);
-  // THE EFFORT (Settings → AI → Effort, ai/effort.ts): the chosen level on a worktree run, one step
+  // THE EFFORT (Settings → AI → Review, this vendor's; ai/effort.ts): the chosen level on a worktree run, one step
   // lower diff-only but never below Default's (diffOnlyEffortAt); Default = each provider's own depth (Claude medium, Codex by role). Read once, at
   // the start, and stored on the run (`ranOn.effort`) so its label says what it used.
-  const level = chosenAiEffort();
-  const levelEffort = agenticRunEffort(provider.id, modelChoice, mode);
+  // A reader's level for THIS run (`args.effort`, a local branch review) stands in for the setting's.
+  const oneRun = args.effort != null && aiEffortEnvSetting() == null ? args.effort : null;
+  const level = oneRun ?? surfaceEffortLevel('review', provider.id);
+  const levelEffort = runEffortFor(provider.id, modelChoice, mode, oneRun);
   const effort: string = override?.effort ?? levelEffort;
   const ran = { ...ranOn(provider, modelChoice), effort };
   const fail = (failureReason: string | undefined, aborted: boolean): RunReviewResult => ({
@@ -249,7 +251,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
       onProgress({ phase: 'cloning', reviewMode: mode });
       // THE REVIEW LOOP reviews a BRANCH with no PR: its commit through the branch checkout.
       ({ repoCloneDir, worktreePath } = args.checkout
-        ? await prepBranchWorktree(args.owner, args.name, { remoteRef: args.checkout.remoteRef, destRef: args.checkout.destRef, sha: args.checkout.sha })
+        ? await prepHeadWorktree(args.owner, args.name, args.checkout)
         : await prepWorktree(
             args.owner,
             args.name,
@@ -321,7 +323,7 @@ export async function runReview(args: RunReviewArgs): Promise<RunReviewResult> {
     // (The model choice itself is resolved above the `try`, so even a run that fails early is labelled.)
     const codexEffort = effort;
     const codexUsage = args.usage
-      ? { accountId: args.usage.accountId, seam: 'agent' as const, feature: 'claude_review', prId: args.usage.prId, repoId: args.usage.repoId ?? null }
+      ? { accountId: args.usage.accountId, seam: 'agent' as const, feature: args.usage.feature ?? 'claude_review', prId: args.usage.prId, repoId: args.usage.repoId ?? null }
       : undefined;
     let system = args.systemPrompt;
     let leadBudgetUsd = config.reviewBudgetUsd;

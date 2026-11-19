@@ -36,7 +36,8 @@ import {
 } from './persist.js';
 import { readCiInputs } from './prepare.js';
 import { buildCiReviewPrompt, ciReviewSystemPrompt, ciReviewUntrustedTexts } from './prompts.js';
-import { activeProviderId } from '../../ai/provider-setting.js';
+import { reviewDefaultProvider, reviewKindModel } from '../../ai/run-profile.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 import { reconcileCiReview, reconcileWithoutModel } from './reconcile.js';
@@ -359,7 +360,9 @@ async function runPipeline(
     const nonce = pickReviewNonce(ciReviewUntrustedTexts(promptPr, plan));
     // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
     // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
-    const providerId = activeProviderId();
+    const providerId = reviewDefaultProvider(preflightFor(ctx));
+    // …and its model: Settings → AI → Review's for that vendor (none stored ⇒ the queued one, as before).
+    job.model = reviewKindModel(providerId, job.model);
     const words = promptTools(providerId);
     // The run row names what runs it from here on (the provider and its model id), whatever the outcome.
     await markCiReviewRanOn(ctx, accountId, runId, {

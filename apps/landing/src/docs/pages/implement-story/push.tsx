@@ -135,7 +135,9 @@ export default function Page(): JSX.Element {
         <li>
           The agent deals with every point: blockers, warnings, nits, questions and unmet criteria. It fixes the code,
           answers, or pushes back with a reason. It can say a criterion does not apply to this work; the next check
-          judges that.
+          judges that. It can also say the work cannot meet a criterion, and why. That criterion stays not met, and its
+          reason shows under the criteria and in the pull request&rsquo;s description. When only such criteria are left,
+          the rounds stop.
         </li>
         <li>Ensemble pushes each fix as a new commit on the branch, then reviews again.</li>
         <li>

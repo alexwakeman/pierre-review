@@ -133,6 +133,11 @@ export default function Page(): JSX.Element {
           <code>npx ensemble-review ai install</code> and <code>npx ensemble-review ml install</code> download the AI
           runtimes or the comment-scoring model now, instead of when Ensemble first needs them.
         </li>
+        <li>
+          <code>npx ensemble-review review</code> asks the running Ensemble to review the branch you are on, before you
+          push, and prints the result. <code>npx ensemble-review mcp</code> gives the same review to Claude Code or
+          Codex as an MCP server. See <DocLink to="ai-review/local-branch">Review a local branch</DocLink>.
+        </li>
       </ul>
 
       <Tip>

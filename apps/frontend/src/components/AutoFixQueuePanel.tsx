@@ -11,6 +11,7 @@ import { useAiCapabilities } from '../hooks/useAiCapabilities.js';
 import { useFilters } from '../store/filters.js';
 import { ChevronIcon } from './Icons.js';
 import { InfoButton } from './InfoModal.js';
+import { autoFixQueueLineShown } from '../lib/claudeAutoReview.js';
 
 // THE AUTO FIX QUEUE in the AI Review tab (docs/CLAUDE-REVIEW.md § AI Fix → The auto fix queue): what the
 // next automatic fix of this PR waits for (one line, with the latest it waits), and every auto fix of the
@@ -61,7 +62,8 @@ const when = (iso: string): string => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
-export function AutoFixQueuePanel({ prId }: { prId: number }): JSX.Element | null {
+/** `reviewInFlight`: the PR's latest AI review is queued or running (an ended reason waits for it to finish). */
+export function AutoFixQueuePanel({ prId, reviewInFlight = false }: { prId: number; reviewInFlight?: boolean }): JSX.Element | null {
   // An AI surface: with AI off its routes are not registered, so ask nothing.
   const q = useAutoFixPanel(prId, useAiCapabilities().enabled);
   const openAiFix = useFilters((s) => s.openAiFixFromReview);
@@ -83,7 +85,7 @@ export function AutoFixQueuePanel({ prId }: { prId: number }): JSX.Element | nul
           </ul>
           <p className="mt-2">Each fix is pushed on its own when Push automatically is on (Settings → Workspace → Auto review).</p>
         </InfoButton>
-        {d.queue != null && (
+        {d.queue != null && autoFixQueueLineShown(d.queue, reviewInFlight) && (
           <span data-testid="auto-fix-queue-line" data-status={d.queue.status} data-reason={d.queue.reason ?? undefined} className="text-meta text-ui-mute">
             {autoFixQueueText(d.queue, now)}
           </span>

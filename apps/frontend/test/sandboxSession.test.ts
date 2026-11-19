@@ -232,6 +232,7 @@ describe('Settings → Sandbox form', () => {
     resources: { cpus: null, memoryGb: 12, diskGb: null },
     services: [{ repo: 'DEFRA/bng-metric-backend', file: 'compose.yml', egress: [] }],
     alwaysAllowedHosts: ['registry.example.com'],
+    fixAllRepos: true,
   };
 
   it('sends the WHOLE setting (the PUT replaces it)', () => {
@@ -243,6 +244,7 @@ describe('Settings → Sandbox form', () => {
       globalProxyEnv: false,
       resources: { cpus: 6, memoryGb: 12, diskGb: null },
       services: [{ repo: 'DEFRA/bng-metric-backend', file: 'compose.yml', egress: [] }],
+      fixAllRepos: true,
     });
     // The removed settings are never sent.
     expect(Object.keys(sandboxBodyOf(d))).not.toContain('localFolder');
@@ -268,6 +270,15 @@ describe('Settings → Sandbox form', () => {
     expect(sandboxDraftDirty(sandboxDraftOf(saved), saved)).toBe(false);
     expect(sandboxDraftDirty({ ...sandboxDraftOf(saved), memoryGb: '12' }, saved)).toBe(false);
     expect(sandboxDraftDirty({ ...sandboxDraftOf(saved), userSkills: true }, saved)).toBe(true);
+    expect(sandboxDraftDirty({ ...sandboxDraftOf(saved), fixAllRepos: false }, saved)).toBe(true);
+  });
+
+  it('"AI Fix reads every repository": the saved value, sent with the whole setting; an older server without it reads as on', () => {
+    expect(sandboxBodyOf({ ...sandboxDraftOf(saved), fixAllRepos: false }).fixAllRepos).toBe(false);
+    expect(sandboxDraftOf({ ...saved, fixAllRepos: false }).fixAllRepos).toBe(false);
+    const { fixAllRepos: _gone, ...older } = saved;
+    void _gone;
+    expect(sandboxDraftOf(older as SandboxWorkspaceSettings).fixAllRepos).toBe(true);
   });
 
   it('turns the default ticks into an explicit list on the first change', () => {

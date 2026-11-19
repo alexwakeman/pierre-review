@@ -50,6 +50,9 @@ export interface PushFixInput {
   target: 'existing' | 'new';
   branch?: string;
   origin?: LimnActionOrigin;
+  /** Not a press: "Push when done", "Push automatically" or the Dependencies policy. Stored with the push
+   *  (`pushed_automatically`) so the AI Fix tab can say so. Default: true for origin 'auto' / 'policy'. */
+  automatic?: boolean;
 }
 
 export async function pushFix(
@@ -74,8 +77,15 @@ async function pushFixHeld(
   const limnRun = { origin: input.origin ?? ('reader_pressed' as const), source: { table: 'ai_fixes', id: fixId } };
   const session = await import('../../sandbox/session/fix.js');
   if (session.fixTurnRunning(fixId)) return { ok: false, code: 'not_pushable', message: 'The agent is still working. Wait, or press Stop.' };
+  // THE REVIEW LOOP (loop.ts): nothing is pushed while Ensemble reviews the fix or the agent answers it.
+  const loop = await import('./loop.js');
+  if (loop.fixLoopActive(fixId)) return { ok: false, code: 'not_pushable', message: 'Ensemble is still reviewing the fix. Wait, or press Stop.' };
   const row = await getFixById(ctx, accountId, fixId);
   if (!row) return { ok: false, code: 'not_found', message: 'Fix not found.' };
+  // ⚠ ONE PUSH PER FIX: a stale tab's Push after "Push when done" / "Push automatically" landed would open a
+  // SECOND branch and PR (target 'new'), or fail confusingly on the moved head (target 'existing').
+  if (row.pushedAt != null) return { ok: false, code: 'not_pushable', message: 'This fix is already pushed.' };
+  const automatic = input.automatic ?? (limnRun.origin === 'auto' || limnRun.origin === 'policy');
   const merge = readMergeState(row.mergeJson ?? null);
   if (merge != null && merge.status !== 'valid')
     return { ok: false, code: 'not_pushable', message: `Nothing is pushed: ${merge.reason ?? 'the merge is not ready yet.'}` };
@@ -117,7 +127,9 @@ async function pushFixHeld(
         fixMessage: commitMessage,
         limnOrigin: limnRun.origin,
       });
-      await markFixPushed(ctx, fixId, { pushedBranch: result.pushedBranch });
+      await markFixPushed(ctx, fixId, { pushedBranch: result.pushedBranch, commitSha: result.commitSha, automatic });
+      // The loop's CLOSING review becomes the PR's AI review at the pushed head (not posted).
+      if (result.commitSha) await loop.importLoopReviewAfterPush(ctx, { accountId, fixId, repoId: pr.repoId, prNumber: pr.number, pushedSha: result.commitSha });
       if (row.sessionPhase != null) await session.closeFixAfterPush(ctx, accountId, fixId).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: closing the session after the push failed'));
       return { ok: true, result };
     } catch (err) {
@@ -165,7 +177,15 @@ async function pushFixHeld(
       pushedBranch: result.pushedBranch,
       pushedPrNumber: result.prNumber,
       pushedPrUrl: result.prUrl,
+      commitSha: result.commitSha,
+      automatic,
     });
+    // THE REVIEW LOOP'S CLOSING REVIEW becomes the PR's AI review at the PUSHED head (loop.ts; not posted): auto
+    // review skips that head, no auto fix chains from it. A new branch's PR is not synced yet: nothing is written.
+    if (result.commitSha) {
+      const prNumber = target.kind === 'existing' ? pr.number : result.prNumber;
+      if (prNumber != null) await loop.importLoopReviewAfterPush(ctx, { accountId, fixId, repoId: pr.repoId, prNumber, pushedSha: result.commitSha });
+    }
     // The session ends with the push (no follow-up after a push: a new fix starts from the next review).
     if (row.sessionPhase != null) await session.closeFixAfterPush(ctx, accountId, fixId).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: closing the session after the push failed'));
     return { ok: true, result };

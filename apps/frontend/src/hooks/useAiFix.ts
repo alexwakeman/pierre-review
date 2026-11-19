@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type {
   AutoFixActiveResponse,
@@ -11,7 +11,8 @@ import type {
   GenerateFixBody,
   SandboxNetworkAllowBody,
 } from '@pierre-review/shared';
-import { api } from '../api/client.js';
+import { aiFixLoopRunning } from '@pierre-review/shared';
+import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
 import { DETAIL_GC_TIME } from './usePr.js';
@@ -23,7 +24,8 @@ import type { SessionStreamState } from '../lib/sandboxSession.js';
 // gated by the caller.
 
 export function useAiFix(prId: number | null, enabled: boolean) {
-  return useQuery<AiFixResponse>({
+  const qc = useQueryClient();
+  const q = useQuery<AiFixResponse>({
     queryKey: ['ai-fix', prId],
     queryFn: () => api.aiFix(prId as number),
     enabled: prId != null && enabled,
@@ -32,10 +34,27 @@ export function useAiFix(prId: number | null, enabled: boolean) {
     refetchInterval: (q) => {
       // THE FIX START QUEUE: a fix waiting for a free sandbox starts by itself; follow it.
       if (q.state.data?.waiting != null) return SESSION_POLL_MS;
+      // AN AUTOMATIC PUSH ON ITS WAY ("Push when done", "Push automatically"): it runs after the session closed,
+      // so no session stream reports it. Follow it until it lands or fails.
+      if (q.state.data?.fix?.pushing === true) return SESSION_POLL_MS;
+      // AI FIX'S OWN REVIEW LOOP: its reviews run with no turn in the session; follow the rounds until it ends.
+      if (aiFixLoopRunning(q.state.data?.fix?.loop)) return SESSION_POLL_MS;
       const s = q.state.data?.fix?.session;
       return s != null && s.live && s.phase !== 'ready' && s.phase !== 'built' ? SESSION_POLL_MS : false;
     },
   });
+  // A push this tab did not press (an automatic one) moved the PR's head, CI and mergeability: THE ONE WRITE SET
+  // (prCacheSync.ts), once, when this fix is first seen pushed after being seen unpushed.
+  const fixId = q.data?.fix?.id ?? null;
+  const pushed = q.data?.fix?.pushedAt != null;
+  const seen = useRef<{ id: number; pushed: boolean } | null>(null);
+  useEffect(() => {
+    if (prId == null || fixId == null) return;
+    const prev = seen.current;
+    seen.current = { id: fixId, pushed };
+    if (prev != null && prev.id === fixId && !prev.pushed && pushed) void invalidateAfterPrWrite(qc, prId);
+  }, [prId, fixId, pushed, qc]);
+  return q;
 }
 
 /**
@@ -192,6 +211,18 @@ export function useCancelFix(prId: number) {
   });
 }
 
+/** "Start now" (a press waiting behind the same ticket's running fix): it starts at once. Shares the start's key. */
+export function useStartFixNow(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: aiFixStartMutationKey(prId),
+    mutationFn: () => api.startAiFixNow(prId),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    // A refused start (409 NoRuntime, 429) is shown under the line (FixWaitingLine); the runtime may have gone.
+    onError: () => void qc.invalidateQueries({ queryKey: SANDBOX_RUNTIME_KEY }),
+  });
+}
+
 export function usePushFix(prId: number) {
   const qc = useQueryClient();
   return useMutation({
@@ -201,6 +232,11 @@ export function usePushFix(prId: number) {
       void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
       // A push moves the PR's head, CI and mergeability: THE ONE WRITE SET (prCacheSync.ts).
       void invalidateAfterPrWrite(qc, prId);
+    },
+    // A 409 means this tab's fix is stale (`NotPushable`: already pushed, being pushed; HEAD_MOVED): read it
+    // again, so an already-pushed fix's footer turns into "Pushed to …" instead of offering Push.
+    onError: (e) => {
+      if (e instanceof ApiError && e.status === 409) void qc.invalidateQueries({ queryKey: ['ai-fix', prId] });
     },
   });
 }

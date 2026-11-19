@@ -157,9 +157,9 @@ export default function Page(): JSX.Element {
         <DocLink to="settings/ai-usage-and-spend">AI usage and spend</DocLink>.
       </p>
       <Note>
-        How hard each review works is one setting for Claude and Codex together: <Ui>Settings → AI</Ui>,{' '}
-        <Ui>Effort for reviews and AI Fix</Ui>. Higher effort reads more and finds more, and uses more of your
-        subscription. See <DocLink to="ai-review/run-a-review#effort">Run a review</DocLink>.
+        Each vendor&rsquo;s review model and effort are in <Ui>Settings → AI</Ui>, <Ui>Review</Ui>. Higher effort
+        reads more and finds more, and uses more of your subscription. See{' '}
+        <DocLink to="ai-review/run-a-review#effort">Run a review</DocLink>.
       </Note>
     </>
   );

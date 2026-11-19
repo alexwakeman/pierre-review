@@ -4,6 +4,7 @@ import type {
   AddReviewCommentBody,
   AddReviewCommentResult,
   ApprovePrBody,
+  AskablePeopleResponse,
   ApprovePrResult,
   RequestChangesBody,
   RequestChangesResult,
@@ -75,6 +76,8 @@ import {
 } from '../../db/queries.js';
 import { originForPostedBody } from '../../db/limn-actions.js';
 import { resolveArmedQueues, withArmedQueueFields } from '../../db/merge-queue.js';
+import { getAskablePeople } from '../../db/askable-people.js';
+import { githubErrorStatus, reviewRequestRefusal } from '../../github/review-request-refusal.js';
 // The watcher's live marks (yields + queue-disabled fallbacks). Read-only, and the reason this
 // import is not a layering smell: every one of them is a LIVE observation of GitHub made inside
 // the tick, so the runner is the only thing that can own them, and the route only reports them.
@@ -1971,13 +1974,31 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
     return out;
   });
 
+  // "Someone else": the people the PR pane's picker offers to ask for a review — everyone who
+  // authored or merged a PR in the `?workspace=` (absent/unknown ⇒ Default, never a 404) plus the PR's
+  // own repo, mergers first (db/askable-people.ts). DB only (`read`, decided in tierFor); fetched when
+  // the reader opens the picker. Asking goes through POST …/request-reviewers below. 404 when the PR
+  // is not the caller's. Contract row in docs/API.md.
+  app.get('/api/prs/:id/askable-people', { schema: idParamSchema }, async (req, reply) => {
+    const { id } = req.params as { id: number };
+    const { workspace } = (req.query ?? {}) as { workspace?: string };
+    const resp = await getAskablePeople(id, accountIdOf(req), workspace);
+    if (!resp) {
+      reply.status(404);
+      return { error: 'NotFound', message: `PR ${id} not found` };
+    }
+    const out: AskablePeopleResponse = resp;
+    return out;
+  });
+
   // Request reviewers on a PR (powers each Pending routing card's per-suggestion "Assign"
   // button, a waiting row's "Nudge" / "Ask someone else" and the PR pane's, one reviewer per request — contract row in docs/API.md). Server
   // re-checks write access (WRITE/MAINTAIN/ADMIN — push-style, no author exclusion:
   // an author may request reviewers on their own PR). The given user ids are resolved
   // to GitHub logins (the PR author + bots + unknown ids dropped); GitHub itself gates
-  // that each login is a repo collaborator. The refreshed request state arrives on the
-  // next sync (reviewRequests are re-derived each pass).
+  // that each login is a repo collaborator — its refusal (a GitHub 422) comes back as a 422
+  // `ReviewerRefused` in plain English; any other GitHub failure is a 502 `GitHubError`. The
+  // refreshed request state arrives on the next sync (reviewRequests are re-derived each pass).
   app.post(
     '/api/prs/:id/request-reviewers',
     { schema: requestReviewersSchema },
@@ -2048,11 +2069,23 @@ export async function prRoutes(app: FastifyInstance): Promise<void> {
         };
         return result;
       } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // GitHub WOULD NOT ASK THEM (422: most often "not a collaborator"): the reader's words, on that
+        // person's chip. Nothing was requested, so a second press is safe. Anything else stays a 502.
+        if (githubErrorStatus(err) === 422) {
+          reply.status(422);
+          return {
+            error: 'ReviewerRefused',
+            message: reviewRequestRefusal({
+              errText: message,
+              logins,
+              teamSlugs: teams,
+              repoFullName: `${ctx.owner}/${ctx.name}`,
+            }),
+          };
+        }
         reply.status(502);
-        return {
-          error: 'GitHubError',
-          message: err instanceof Error ? err.message : String(err),
-        };
+        return { error: 'GitHubError', message };
       }
     },
   );

@@ -13,6 +13,72 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Review a local branch from Claude Code or Codex: add Ensemble as an MCP server
+  (`claude mcp add ensemble -- npx ensemble-review mcp`) and your coding agent can ask the running Ensemble to review
+  the branch it is working on, uncommitted changes included, before anything is pushed. It gets the findings and,
+  when Ensemble finds the ticket, the acceptance criteria not yet met; it can answer them and review again.
+  `ensemble review` does the same in the terminal. Nothing is posted or pushed. Reports → AI usage counts these runs
+  as code review and story review.
+- Pull request Overview: "Someone else" asks anyone in the workspace for a review. Type a name, pick one or
+  more people, and press "Request review". People who merged in the repository come first. If GitHub refuses
+  someone (for example, they have no access to the repository), the reason shows on their name.
+- Settings → AI: three blocks, Review, AI Fix and Implement story, set the vendor, model and effort each runs on.
+  Review has one row per vendor, each switched on or off with its own model and effort, so Claude and Codex can
+  review at different efforts. AI Fix and Implement story each have one vendor, model and effort. The run menus
+  open on these and can pick another model for one run. If the AI Fix or Implement story vendor is not signed in or
+  is over its usage limit, the other vendor runs, and the run says so. Until you change a block, it runs as before.
+- Settings → AI → Implement story: "Review rounds" sets how many review rounds a build runs. The start panel opens
+  on it and can still change it for one build.
+- AI Fix: every fix, manual or automatic, is reviewed by Ensemble before anything is pushed. The agent fixes,
+  answers or pushes back on each point, and Ensemble reviews again, up to 5 rounds. The AI Fix tab shows each round
+  ("Reviewing, round 2 of 5.") with Stop, and Push shows once the rounds end. After the push, the last review is
+  the pull request's AI review of the new commit, so auto review does not review it again. Settings → AI → AI Fix →
+  "Review rounds" sets the number (1 to 6).
+- AI Fix and Implement story: the agent can say a criterion cannot be done, and why. It stays not met, the reason
+  shows beside it (and in the pull request's description for Implement), and the review rounds stop when only such
+  criteria are left.
+- AI Fix: the sandbox also holds the workspace's other repositories, read only at their default branch, so the agent
+  can check code that calls or serves the pull request. A repository with another open pull request of the same
+  ticket is at that pull request's latest commit instead. At most 12: the pull request's own, its ticket's, your
+  related repositories, then the rest by name; the session names the ones it did not load. Settings → Sandbox → "AI Fix
+  reads every repository" (on by default) switches this off for a workspace. AI Fix still pushes only to the pull
+  request's branch. Dependency fixes keep the short list.
+- AI Fix: fixes of pull requests of the same ticket in different repositories take turns. While a fix of #12 runs, a
+  fix that reads #12 waits ("Waiting for the fix of #12 (same ticket).") and starts by itself when that fix is built,
+  stopped or failed. It then reads #12 with its fix applied, even if that fix is not pushed yet. Start now starts a
+  waiting fix at once. Plan first's Start fix waits the same way.
+- AI Fix: when another pull request of the ticket changes after a fix is built, the fix says "#12 changed after this
+  fix was built." Push automatically and Push when done do not push it, and do not push a fix that builds on another
+  pull request's fix that is not pushed yet. Push still pushes it. Nothing runs again by itself.
+- AI Fix: the workspace's reference documents come into the sandbox, read only, as they do for Implement story:
+  the ticket's own choice, else the whole library when it is small, else the sections that best match the pull
+  request's words and changed files.
+
+### Changed
+
+- Asking for a review: when GitHub refuses a person, the message now says who and why in plain English.
+- Implement: the plan asks the points to settle one at a time ("Point 2 of 4", with the acceptance criteria it is
+  about). Pick 1. Agree or 2. Keep the story (the 1 and 2 keys work), or Reply. Each answer is saved when you
+  pick it. The last step, Review, lists every answer and holds Approve and start. Picking the chosen answer
+  again no longer clears it.
+- Implement story: the review loop runs up to 5 rounds by default (was 4).
+- Settings → AI: the single "Effort for reviews and AI Fix" menu is replaced by the effort in each block.
+- Settings → AI review: "Auto reviews use" now offers Claude + Codex or one vendor: the first that is on in
+  Settings → AI and signed in. A vendor switched off there does not review.
+- AI Review: the reason an auto fix did not start is one line, in the Auto fix section, shown after the review
+  finishes. It names the cause: AI not signed in, the review or the pull request could not be read, an error,
+  the limit of 3 auto fixes in 24 hours, or the daily limit of auto reviews.
+
+### Fixed
+
+- AI Fix: after "Push when done" or "Push automatically" pushes a fix, the tab says "Pushed to" the branch with
+  the commit, and no longer offers Push for a fix that is already pushed. While the push runs it says "Pushing
+  to" the branch. A failed automatic push says why and keeps Push.
+- AI Review: with Claude + Codex reviews, an auto fix now waits for both reviews to finish. It no longer says
+  "No auto fix: the fixer could not start." while the review runs.
+
 ## [1.0.64] - 2026-11-18
 
 ### Changed

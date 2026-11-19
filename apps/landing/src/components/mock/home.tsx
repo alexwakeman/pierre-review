@@ -272,7 +272,7 @@ export function PendingListMock({ initialTab = 'my_turn' }: { initialTab?: 'my_t
 
 // ---- one pull request ----------------------------------------------------------
 
-/** AI Fix: tick findings → Start fix → (Push when done: Pushed) or the diff → Push → Pushed. */
+/** AI Fix: tick findings → Start fix → the review rounds → (Push when done: Pushed) or the diff → Push → Pushed. */
 function FixFlow(): JSX.Element {
   const [ticked, setTicked] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(FIX.items.map((i) => [i.id, i.on])),
@@ -287,9 +287,10 @@ function FixFlow(): JSX.Element {
     return (
       <div className="mk-done" role="status">
         <Chip tone="green">
-          {FIX.pushedTo} {PR_VIEW.branch}
+          {FIX.pushedTo} {PR_VIEW.branch} · <code>{FIX.pushedSha}</code>
         </Chip>
         <p className="mk-note">
+          {push.phase !== 'done' && <>{FIX.pushedAuto}. </>}
           {n} item{n === 1 ? '' : 's'} fixed in <code>{FIX_DIFF.file}</code>.
         </p>
       </div>
@@ -303,6 +304,13 @@ function FixFlow(): JSX.Element {
         </div>
         <Log lines={FIX.session} />
         <p className="mk-note">{FIX.said}</p>
+        {/* AI Fix's own review rounds, before the push (the app's FixLoopSection). */}
+        <div className="mk-chips" style={{ marginBottom: 8 }} aria-label={FIX.roundsTitle}>
+          {FIX.rounds.map((r) => (
+            <Chip key={r}>{r}</Chip>
+          ))}
+        </div>
+        <p className="mk-note">{FIX.roundsLine}</p>
         <Diff file={FIX_DIFF.file} lines={FIX_DIFF.lines} />
         <div className="mk-end">
           <Act onClick={() => fix.reset()} disabled={push.phase === 'busy'}>

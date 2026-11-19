@@ -187,6 +187,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
       { slug: 'overview' },
       { slug: 'run-a-review' },
       { slug: 'claude-and-codex' },
+      { slug: 'local-branch' },
       { slug: 'auto-review' },
       { slug: 'follow-ups' },
       { slug: 'replies-pass' },

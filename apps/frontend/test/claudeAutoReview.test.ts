@@ -1,11 +1,11 @@
-// Auto review's quiet states (lib/claudeAutoReview.ts): the header's "waiting" words, the one line
-// about the auto fix, and the Open PRs strip's AI Fix pill.
+// Auto review's quiet states (lib/claudeAutoReview.ts): the header's "waiting" words, when the Auto fix
+// section's one line shows, and the Open PRs strip's AI Fix pill.
 import { describe, expect, it } from 'vitest';
-import type { ClaudeReviewPrState } from '@pierre-review/shared';
+import { AUTO_FIX_DAILY_CAP, AUTO_FIX_QUEUE_LINE, autoReviewCappedLine, type ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   AUTO_REVIEW_WAITING_LABEL,
   anyFixRunning,
-  autoFixOutcomeLine,
+  autoFixQueueLineShown,
   autoReviewWhyLine,
   autoSweepResultLine,
   failedAutoReviewLine,
@@ -61,26 +61,25 @@ describe('auto review waiting', () => {
   });
 });
 
-describe('autoFixOutcomeLine', () => {
-  it('nothing recorded ⇒ no line', () => {
-    expect(autoFixOutcomeLine(null)).toBeNull();
-    expect(autoFixOutcomeLine(undefined)).toBeNull();
+describe('the ONE auto fix line (2026-11-18): a reason only after the review finished', () => {
+  it('no queue ⇒ nothing', () => {
+    expect(autoFixQueueLineShown(null, false)).toBe(false);
+    expect(autoFixQueueLineShown(undefined, true)).toBe(false);
   });
-  it('a started fix points at the AI Fix tab', () => {
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'started', fixId: 2 })).toBe(
-      'Auto fix started. See the AI Fix tab.',
-    );
+  it('an ended reason is hidden while the review is queued or running, shown once it finished', () => {
+    expect(autoFixQueueLineShown({ status: 'idle' }, true)).toBe(false);
+    expect(autoFixQueueLineShown({ status: 'idle' }, false)).toBe(true);
   });
-  it('a skip shows only a fault the reader can fix here', () => {
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'no_sandbox' })).toBe(
-      'No auto fix: no container runtime is running on this computer.',
-    );
-    expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason: 'over_budget' })).toBe(
-      'No auto fix: your AI spend budget is reached.',
-    );
-    for (const reason of ['off', 'cap', 'fix_waiting', 'nothing_to_fix', 'head_moved'] as const) {
-      expect(autoFixOutcomeLine({ reviewId: 1, status: 'skipped', reason })).toBeNull();
-    }
+  it('a wait, or a started fix, always shows (it is what the queue does now)', () => {
+    expect(autoFixQueueLineShown({ status: 'waiting' }, true)).toBe(true);
+    expect(autoFixQueueLineShown({ status: 'started' }, true)).toBe(true);
+  });
+  it('the words: specific faults, both caps with their numbers, no catch-all', () => {
+    expect(AUTO_FIX_QUEUE_LINE.no_ai_login).toBe('No auto fix: AI is not signed in on this computer.');
+    expect(AUTO_FIX_QUEUE_LINE.error).toBe('No auto fix: an error stopped it.');
+    expect(AUTO_FIX_QUEUE_LINE.cap).toContain(`${AUTO_FIX_DAILY_CAP} already ran`);
+    expect(autoReviewCappedLine(20)).toBe('No auto review today: the limit of 20 is reached.');
+    expect(Object.values(AUTO_FIX_QUEUE_LINE).some((l) => /could not start/.test(l))).toBe(false);
   });
 });
 

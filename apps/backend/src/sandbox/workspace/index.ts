@@ -177,7 +177,7 @@ export async function prepareSessionWorkspace(runtime: SandboxRuntime, container
   const hotfix = a.hotfix != null ? hotfixSeedOf(mirror, mainMirror ?? null, a.hotfix) : null;
   const seed =
     a.fix != null
-      ? buildSeed({ ...common, kind: 'fix', fix: a.fix })
+      ? buildSeed({ ...common, kind: 'fix', fix: a.fix, docs })
       : buildSeed({ ...common, ticket: a.ticket!, mode: a.mode ?? 'implement', planFirst: a.planFirst === true, docs, ...(hotfix ? { hotfix } : {}) });
   await runtime.copyIn(container, seed.files);
   return { mirror, seed, notes, ...(mainMirror ? { mainMirror } : {}) };

@@ -5,7 +5,6 @@
 // import time).
 import type { AiProviderId, ClaudeReview, SandboxSessionStreamEvent } from '@pierre-review/shared';
 import type { AgentContext } from '../../../review/agent-context.js';
-import { activeProviderId } from '../../../ai/provider-setting.js';
 import type { ReadReviewResponseResult } from '../../../sandbox/workspace/review-response.js';
 import type { PushNewBranchArgs } from '../../git-ops.js';
 import type { LoopHalfInput, LoopHalfResult } from './branch-review.js';
@@ -21,8 +20,8 @@ export interface LoopSeams {
   pollMs: number;
   /** Who reviews the code (the workspace's AI review setting, signed-in providers, locked-out ones dropped). */
   providers(ctx: AgentContext, accountId: number, workspaceId: number): Promise<AiProviderId[]>;
-  /** Who runs the story check (the default provider). */
-  storyProvider(): AiProviderId;
+  /** Who runs the story check (Settings → AI → Review's "one vendor": the first on and signed in). */
+  storyProvider(): Promise<AiProviderId>;
   automaticAllowed(ctx: AgentContext, accountId: number, what: string, provider: AiProviderId): Promise<boolean>;
   runHalf(ctx: AgentContext, i: LoopHalfInput): Promise<LoopHalfResult>;
   /** The half's review claim lines on the branch head (review-lines.ts): pending before, the final line after. */
@@ -92,25 +91,10 @@ export function defaultLoopSeams(): LoopSeams {
     now: () => new Date(),
     waitMs: 10 * 60_000,
     pollMs: 20_000,
-    async providers(ctx, accountId, workspaceId) {
-      const [{ PAIR_ORDER, resolveAutoReviewProviders }, { automaticRunProviders, isLockedOut, anyUsageLockout }, { preflightFor }] = await Promise.all([
-        import('../../../review/claude-review/pair.js'),
-        import('../../../ai/usage-lockout.js'),
-        import('../../../ai/run-choice.js'),
-      ]);
-      const { readWorkspaceAutoReview } = await import('../../../review/claude-review/auto-settings.js');
-      const ws = await readWorkspaceAutoReview(ctx, accountId, workspaceId).catch(() => null);
-      const pair = resolveAutoReviewProviders(ws?.autoReviewProviders ?? null) === 'both';
-      const detect = preflightFor(ctx);
-      return automaticRunProviders({
-        defaultProvider: activeProviderId(),
-        pair,
-        order: PAIR_ORDER,
-        ready: (p) => detect(p, 'review').status === 'ok',
-        locked: (p) => anyUsageLockout() && isLockedOut(p),
-      });
-    },
-    storyProvider: () => activeProviderId(),
+    // THE ONE PAIR RESOLVER's rule, shared with every review loop (coding/review-loop/branch-review.ts).
+    providers: async (ctx, accountId, workspaceId) => (await import('../../review-loop/branch-review.js')).branchReviewProviders(ctx, accountId, workspaceId),
+    // The story check is a review kind: Settings → AI's review vendor (the first on and signed in).
+    storyProvider: async () => (await import('../../review-loop/branch-review.js')).storyCheckProvider(),
     async automaticAllowed(ctx, accountId, what, provider) {
       const { automaticRunAllowed } = await import('../../../review/budget-gate.js');
       return automaticRunAllowed(ctx, accountId, what, provider);
@@ -121,11 +105,7 @@ export function defaultLoopSeams(): LoopSeams {
       end: async (line, outcome, log) => (await import('./review-lines.js')).endLoopReviewLine(line, outcome, log),
     },
     runStoryCheck: async (ctx, i) => (await import('./story-check.js')).runLoopStoryCheck(ctx, i),
-    async consolidate(ctx, accountId, a, b) {
-      const { consolidateHalves } = await import('../../../review/claude-review/pair-consolidate.js');
-      const r = await consolidateHalves(ctx, accountId, null, a, b);
-      return { summary: r.summary, verdict: r.verdict, how: r.how, sourceOf: r.sourceOf, mergedFrom: r.mergedFrom };
-    },
+    consolidate: async (ctx, accountId, a, b) => (await import('../../review-loop/branch-review.js')).consolidateBranchPair(ctx, accountId, a, b),
     canPush: async (ctx, accountId, repoId) => (await import('../../ai-fix/pr-context.js')).getViewerCanPush(ctx, accountId, repoId),
     pushNewBranch: async (a) => (await import('../../git-ops.js')).pushNewBranch(a),
     pushFastForward: async (a) => (await import('../../git-ops.js')).pushFastForward(a),

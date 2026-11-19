@@ -70,7 +70,7 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   },
   {
     id: 'ai',
-    label: 'AI', summary: 'Provider, sign-in, effort, AI spend, disk space',
+    label: 'AI', summary: 'Provider, sign-in, models and effort, AI spend, disk space',
     aiOnly: true,
     global: ['AiProviderSection', 'ClaudeSpendSection', 'DiskSpaceSection'],
     workspace: [],
@@ -95,7 +95,7 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   // workspace's local folder, notes, services, allowed hosts and resources.
   {
     id: 'sandbox',
-    label: 'Sandbox', summary: 'Where Implement runs: runtime, folder, notes, services',
+    label: 'Sandbox', summary: 'Where Implement and AI Fix run: runtime, notes, services, AI Fix repositories',
     aiOnly: true,
     global: ['SandboxRuntimeSection'],
     workspace: ['SandboxSection'],

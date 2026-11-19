@@ -1,6 +1,5 @@
 import {
-  type ClaudeAutoFixOutcome,
-  type ClaudeAutoFixSkipReason,
+  type AutoFixQueueState,
   type ClaudeAutoReviewWaiting,
   type ClaudeAutoReviewWhy,
   type AutoReviewSweepResponse,
@@ -11,8 +10,7 @@ import {
 } from '@pierre-review/shared';
 
 // The words for auto review's quiet states: why the next auto review is waiting (the Claude Review
-// header), what happened to the auto fix after one (one line under it), and the Open PRs strip's
-// AI Fix pill. Pure, so they are tested without a DOM.
+// header), when the Auto fix section's one line shows, and the Open PRs strip's AI Fix pill. Pure, so they are tested without a DOM.
 
 export const AUTO_REVIEW_WAITING_LABEL: Record<ClaudeAutoReviewWaiting, string> = {
   // Never produced any more (auto review no longer waits for CI); kept while the shared type has it.
@@ -34,21 +32,17 @@ export function autoReviewWhyLine(why: ClaudeAutoReviewWhy | null | undefined): 
 /** The reader's own PR waits for a teammate's Limn verdict (the server only says so with evidence). */
 export const TEAMMATE_VERDICT_WAIT_LINE = 'Waiting for a teammate’s Ensemble to review';
 
-// A SKIP is shown only when it is a fault the reader can fix on this computer (2026-11-10: the routine
-// skips — off, nothing to fix, a fix already waiting, the daily cap, new commits — said nothing the
-// reader acts on, and are no longer shown).
-const FAULT_TEXT: Partial<Record<ClaudeAutoFixSkipReason, string>> = {
-  not_started: 'the fixer could not start',
-  over_budget: 'your AI spend budget is reached',
-  no_sandbox: 'no container runtime is running on this computer',
-};
+// THE AUTO FIX LINE (2026-11-18): ONE line, the Auto fix section's (the queue's, `AutoFixQueuePanel`); the
+// per-review "No auto fix: …" line is gone. A reason (an ended decision: a fault, a cap, nothing to fix)
+// is shown only once the review has FINISHED — while the PR's review is queued or running (a Claude +
+// Codex pair: either half, or the merge) an ended line is stale and the queue decides again when it ends.
+// Waits ("Waiting for the CI jobs…") always show: they are what the queue is doing now.
 
-/** One line for the AI Review tab, or null when there is nothing to say. */
-export function autoFixOutcomeLine(outcome: ClaudeAutoFixOutcome | null | undefined): string | null {
-  if (outcome == null) return null;
-  if (outcome.status === 'started') return 'Auto fix started. See the AI Fix tab.';
-  const fault = FAULT_TEXT[outcome.reason];
-  return fault != null ? `No auto fix: ${fault}.` : null;
+/** Does the queue's line show? Pure. `reviewInFlight`: the PR's latest AI review is queued or running. */
+export function autoFixQueueLineShown(q: Pick<AutoFixQueueState, 'status'> | null | undefined, reviewInFlight: boolean): boolean {
+  if (q == null) return false;
+  if (q.status === 'waiting' || q.status === 'started') return true;
+  return !reviewInFlight;
 }
 
 /** The Open PRs strip's AI Fix pill, or null. */

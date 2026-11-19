@@ -74,7 +74,8 @@ import {
   type PromptPrior,
 } from './prompts.js';
 import { reconcileTicketReview, type TicketReport } from './reconcile.js';
-import { activeProviderId } from '../../ai/provider-setting.js';
+import { reviewDefaultProvider, reviewKindModel } from '../../ai/run-profile.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
@@ -357,7 +358,9 @@ async function runPipeline(
   const { ctx, accountId, runId } = job;
   // The provider, resolved ONCE: the prompts are worded for it and the same provider runs them
   // (review/run-provider.ts). A provider that records its own usage (Codex) bills `usageRecord`.
-  const providerId = activeProviderId();
+  const providerId = reviewDefaultProvider(preflightFor(ctx));
+  // …and its model: Settings → AI → Review's for that vendor (none stored ⇒ the queued one, as before).
+  job.model = reviewKindModel(providerId, job.model);
   const words = promptTools(providerId);
   const usageRecord = { accountId, seam: 'agent' as const, feature: 'ticket_review', prId: job.originPrId };
   // The run row names what runs it from here on (the provider and its model id), whatever the outcome.

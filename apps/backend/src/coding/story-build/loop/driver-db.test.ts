@@ -90,7 +90,7 @@ function seams(): Partial<import('./seams.js').LoopSeams> {
     waitMs: 200,
     pollMs: 5,
     providers: async () => G.providers as any,
-    storyProvider: () => 'claude',
+    storyProvider: async () => 'claude',
     automaticAllowed: async (_c, _a, what) => {
       G.gateAsks.push(what);
       return G.allowed;
@@ -359,6 +359,27 @@ describe('the review loop', () => {
     expect(G.opened).toHaveLength(1);
     expect(G.opened[0].body).toContain('Still open: 1');
     expect(G.opened[0].body).toContain('blocker · src/x.ts: Still broken');
+  });
+
+  it('⚠ CANNOT MEET: when only criteria the agent says it cannot meet are open, the loop stops and the PR opens — the criterion still NOT MET, with the reason in the body', async () => {
+    G.script.findings = () => [];
+    G.script.criteria = () => [criterion('AC1', 'met', 'Refund a card'), criterion('AC2', 'not_met', 'Email the buyer')];
+    G.script.answers = (shown) => shown.map((ref) => ({ ref, action: 'cannot_meet', reply: 'Email is sent by the billing service, not this code.' }));
+    const id = await readyBuild({ rounds: 3, only: 'api' });
+    await D.maybeStartLoop(ctx, { accountId: 1, buildId: id });
+    const b = await until(id, (x) => x.loopState === 'done', 'done');
+    // Round 1: AC2 open ⇒ one fix pass (the agent: cannot meet); round 2: only AC2 open ⇒ stop, not round 3.
+    expect(b.loopRound).toBe(2);
+    expect(G.fixTurns).toHaveLength(1);
+    expect((await LP.listLoopAcResponses(ctx, 1, id)).map((r) => `${r.round}:${r.ref}:${r.response}`)).toEqual(['1:AC2:cannot_meet']);
+    expect(G.opened).toHaveLength(1);
+    expect(G.opened[0].body).toContain('0 not applicable, 1 not met.');
+    expect(G.opened[0].body).toContain('Not met, and the agent says these cannot be done:');
+    expect(G.opened[0].body).toContain('- AC2: Email is sent by the billing service, not this code.');
+    // Never turned into "accepted": the wire's latest check still says not met, no claim verdict.
+    const loop = await D.storyLoopWire(ctx, 1, b);
+    expect(loop!.history.at(-1)!.storyCheck!.assessment!.criteria.find((c) => c.ref === 'AC2')!.status).toBe('not_met');
+    expect(loop!.history.flatMap((h) => h.claimVerdicts)).toEqual([]);
   });
 
   it('pauses on the spend gate; Continue is the reader\'s run, the next automatic step asks again', async () => {

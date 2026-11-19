@@ -66,6 +66,8 @@ let api = 0;
 let web = 0;
 /** The repositories of the PR's ticket's other PRs (fix.ts `relatedRepoIds`). */
 let relatedIds = (): number[] => [web];
+/** Settings → Sandbox of the workspace (null ⇒ every default: "AI Fix reads every repository" ON). */
+let sandboxSettings: any = null;
 let prA = 0;
 let prB = 0;
 let prC = 0;
@@ -136,6 +138,8 @@ function scriptFake(rt: import('../runtime/fake.js').FakeRuntime): void {
     return 0;
   });
   rt.onExec((argv) => argv[0] === 'rm' && argv[1] === '-f', { code: 0 });
+  // The reference documents made read only (root).
+  rt.onExec((argv) => argv[0] === 'sh' && /chown -R root:root/.test(argv[2] ?? ''), { code: 0 });
   rt.onExec((argv) => argv[0] === 'sh' && /git apply --index --binary/.test(argv[2] ?? ''), { code: 0 });
   rt.onExec((argv) => argv[0] === 'pkill', { code: 0 });
   // Claude Code: the recorded stream. A user turn replays the chat segment in chat mode and the build
@@ -208,7 +212,7 @@ beforeAll(async () => {
   const claudeDir = join(scratch, 'claude');
   M.setSessionDepsForTests({
     runtime: () => fake,
-    settings: async () => null,
+    settings: async () => sandboxSettings,
     places: () => ({ claude: { claudeDir, projectsDir: join(claudeDir, 'projects'), litter: [] }, home: '/nowhere', dataDir: '/nowhere/.limn' }),
     mirrorSeams: {
       prepare: async (req) => {
@@ -228,6 +232,9 @@ beforeAll(async () => {
     credentialEnv: () => ({}),
     usageSink: { record: async (r) => void usage.push(r), noteClaudeRateLimit: () => {} },
   });
+  // AI FIX'S OWN REVIEW LOOP (coding/ai-fix/loop.ts) is pinned in coding/ai-fix/loop-db.test.ts: here no review
+  // vendor is signed in, so a fix goes on exactly as it did before the loop (the row records 'no_reviewer').
+  (await import('../../coding/ai-fix/loop.js')).setFixLoopSeamsForTests({ providers: async () => [] });
   F.setFixSessionDepsForTests({
     // The ticket's other PR is in acme/web: that repository comes too (read only).
     relatedRepoIds: async () => relatedIds(),
@@ -251,6 +258,8 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
+    // The review loop's imported review writes through a transaction (claude-review/persist.ts).
+    runTransaction: client.runTransaction,
     log: { info() {}, warn() {}, error() {} },
     accountIdOf: (req: any) => Number(req.headers['x-acct'] ?? 1),
     llm: { detectAuth: () => ({ status: 'ok' }), detectProviderAuth: () => ({ status: 'ok' }) },
@@ -282,6 +291,7 @@ afterEach(() => {
 afterAll(async () => {
   await M?._closeAllSessionsForTest();
   M?.setSessionDepsForTests(null);
+  (await import('../../coding/ai-fix/loop.js')).setFixLoopSeamsForTests(null);
   F?.setFixSessionDepsForTests(null);
   await app?.close();
   await closeDb?.();
@@ -461,6 +471,8 @@ describe('a manual AI Fix session, end to end', () => {
 
   it('Plan first: one chat turn, `planned`; a message is a chat turn; Start fix builds; no report ⇒ every item "not reported"; Discard ⇒ cancelled', async () => {
     relatedIds = () => [];
+    // Settings → Sandbox → "AI Fix reads every repository" OFF: the narrow set.
+    sandboxSettings = { ...(await import('../../db/sandbox-settings.js')).defaultSandboxSettings(wsId), fixAllRepos: false };
     extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
     reportAnswer = null;
     const r = await post(`/api/pro/prs/${prA}/ai-fix/plan`, { seed: 'review' });
@@ -468,7 +480,7 @@ describe('a manual AI Fix session, end to end', () => {
     const id = r.json().fixId as number;
     let f = await until(prA, (x) => x.id === id && x.session?.phase === 'ready' && x.session.conversation.some((c) => c.kind === 'turn'), 'the plan turn');
     expect(f.status).toBe('planned');
-    // ONLY the repositories the job needs: no other PR on the ticket ⇒ the PR's repository alone.
+    // The switch off: ONLY the repositories of the job: no other PR on the ticket ⇒ the PR's repository alone.
     expect(f.session!.repos.map((x) => x.fullName)).toEqual(['acme/api']);
     expect(f.session!.boot.find((b) => b.key === 'repos')).toMatchObject({ state: 'done', detail: '1 of 1 cloned' });
     expect(f.session!.mode).toBe('chat');
@@ -508,6 +520,7 @@ describe('a manual AI Fix session, end to end', () => {
     const st = await get(`/api/pro/ai-fixes/${id}/session/stream`);
     expect(st.body.split('\n\n').filter(Boolean).map((l) => JSON.parse(l.replace(/^data: /, '')).type)).toEqual(['snapshot', 'done']);
     relatedIds = () => [web];
+    sandboxSettings = null;
   });
 });
 
@@ -656,9 +669,10 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
       const r = await AF.startFix(ctx, { accountId: 1, prId: pr.id, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Fix it.', trigger: 'auto' });
       expect(r.status).toBe('queued');
       const fixId = (r as { fixId: number }).fixId;
-      const f = await until(pr.id, (x) => x.session?.phase === 'pushed', 'pushed automatically');
+      const f = await until(pr.id, (x) => x.session?.phase === 'pushed' && x.pushing === false, 'pushed automatically');
       expect(f.status).toBe('succeeded');
       expect(f.pushedAt).not.toBeNull();
+      expect(f).toMatchObject({ pushedCommitSha: 'c0ffee', pushedAutomatically: true });
       expect(pushes.length).toBe(before.pushes + 1);
       expect(pushes.at(-1)).toMatchObject({ prNumber: 44, target: { kind: 'existing', headRef: 'feature/export' } });
       // The session was gone before the push (it never pushes from inside a live session).
@@ -701,7 +715,9 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
       const end = Date.now() + 10_000;
       while (refused === 0 && Date.now() < end) await new Promise((res) => setTimeout(res, 20));
       expect(refused).toBe(1);
-      await until(pr.id, (x) => x.session?.phase === 'built' && x.pushedAt == null && !AF.isFixRunning(pr.id), 'closed, push refused');
+      const failed = await until(pr.id, (x) => x.session?.phase === 'built' && x.pushedAt == null && x.pushing === false && !AF.isFixRunning(pr.id), 'closed, push refused');
+      // The failure is on the row; Push stays on offer (the SPA's footer reads `error`).
+      expect(failed.error).toBe('Automatic push failed: the branch moved since the fix was made.');
       // The reader takes over, then the resumed session closes (idle): nothing is pushed again.
       ctx.coding.applyAndPush = async (a: any) => {
         refused += 1;
@@ -738,12 +754,24 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     const clean = await ownPr(46);
     reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: own', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
     const before = pushes.length;
+    // The AI Fix tab's stream: ONE `done` (the close's). The settled push sends none — a late `done` would
+    // end the stream of a newer fix on this PR; the SPA reads the push through its poll while `pushing`.
+    const { subscribeFixStream } = await import('../../coding/ai-fix/stream.js');
+    const dones: number[] = [];
+    const unsub = subscribeFixStream(clean.id, (e) => {
+      if (e.type === 'done' && e.fixId != null) dones.push(e.fixId);
+    });
     const r = await post(`/api/pro/prs/${clean.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.', pushWhenDone: true });
     expect(r.statusCode).toBe(202);
     const cleanId = r.json().fixId;
-    const f = await until(clean.id, (x) => x.session?.phase === 'pushed', 'pushed when done');
+    const f = await until(clean.id, (x) => x.session?.phase === 'pushed' && x.pushing === false, 'pushed when done');
     expect(f.trigger).toBe('manual');
     expect(f.pushedAt).not.toBeNull();
+    // THE PUSH FOOTER's facts: the commit, not a press, nothing on its way, no hold.
+    expect(f).toMatchObject({ pushedCommitSha: 'c0ffee', pushedAutomatically: true, pushWhenDone: true, pushing: false, pushHold: null });
+    await new Promise((res) => setTimeout(res, 100));
+    unsub();
+    expect(dones).toEqual([cleanId]);
     expect(pushes.length).toBe(before + 1);
     expect(pushes.at(-1)).toMatchObject({ prNumber: 46, target: { kind: 'existing' } });
     expect(M.liveSession(F.fixKey(cleanId))).toBeNull();
@@ -763,6 +791,8 @@ describe('refusals, unattended runs, teardown, restart and resume', () => {
     const held = await until(theirs.id, (x) => x.session?.phase === 'built' && notices(x).length > 0 && M.liveSession(F.fixKey(heldId)) != null, 'held');
     expect(notices(held)).toContain('Not pushed: this is not your pull request. Press Push to push to its branch.');
     expect(held.pushedAt).toBeNull();
+    // The footer repeats the hold above Push.
+    expect(held).toMatchObject({ pushWhenDone: true, pushing: false, pushHold: { line: 'Not pushed: this is not your pull request. Press Push to push to its branch.' } });
     expect(pushes.length).toBe(before + 1);
     await M._closeAllSessionsForTest();
     // A discarded session never pushes on its close.
@@ -859,5 +889,524 @@ describe('five PRs at once (the fix start queue, three build slots by default)',
     expect(all.every((f) => f.status === 'succeeded')).toBe(true);
     delete process.env.LIMN_SANDBOX_RECLAIM_IDLE_SECONDS;
     await M._closeAllSessionsForTest();
+  });
+});
+
+describe("AI Fix's own review loop, through the real session (coding/ai-fix/loop.ts)", () => {
+  it('reviews the fix before anything is pushed: round 1 finds a point, the agent answers in a host fix turn, round 2 is clean; then Push when done pushes and the closing review becomes the PR\'s AI review at the PUSHED head', async () => {
+    const L = await import('../../coding/ai-fix/loop.js');
+    const { and, eq } = await import('drizzle-orm');
+    // The reader's own PR (Push when done pushes only that).
+    await db.update(schema.accounts).set({ githubLogin: 'me-flow' }).where(eq(schema.accounts.id, 1)).execute();
+    const found = (await db.select().from(schema.users).where(eq(schema.users.githubLogin, 'Me-Flow')).execute())[0];
+    const meId = found?.id ?? (await db.insert(schema.users).values({ githubLogin: 'Me-Flow', githubNodeId: 'U_me_flow' }).returning().execute())[0].id;
+    const [pr] = await db
+      .insert(schema.pullRequests)
+      .values({ accountId: 1, repoId: api, githubNodeId: 'PR-60', number: 60, title: 'Own PR 60', body: null, state: 'open', headSha: HEAD, baseRefName: 'main', authorId: meId, openedAt: new Date(), updatedAt: new Date() })
+      .returning()
+      .execute();
+    extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+    reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: own', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+    const halves: any[] = [];
+    const committed: any[] = [];
+    L.setFixLoopSeamsForTests({
+      waitMs: 5_000,
+      pollMs: 10,
+      providers: async () => ['claude'],
+      storyProvider: async () => 'claude',
+      automaticAllowed: async () => true,
+      ticket: async () => null,
+      commitRound: async (a) => {
+        committed.push({ round: a.round, patch: a.patch });
+        return { head: { localRef: `refs/pierre/local/ai-fix-loop/${a.fixId}/r${a.round}`, sha: String(a.round).repeat(40) }, workKey: L.fixWorkKey({ patch: a.patch, merge: a.merge }) };
+      },
+      baseSha: async () => 'b'.repeat(40),
+      runHalf: async (_c, i) => {
+        halves.push(i);
+        const first = halves.length === 1;
+        // The agent's answer turn changes the code (a second file).
+        if (first) extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH2, ['src/a.ts', 'src/b.ts'], '') : out('', [], ''));
+        return {
+          status: 'succeeded',
+          failureReason: null,
+          reviewMode: 'diff_only',
+          summary: first ? 'One point.' : 'Clean.',
+          verdict: first ? 'REQUEST_CHANGES' : 'APPROVE',
+          findings: first ? [{ path: 'src/a.ts', line: 1, side: 'RIGHT', severity: 'warning', title: 'Check the input', body: 'It may be empty.', suggestion: null, diffHunk: null, anchored: true, fileInDiff: true, priorFindingId: null, lens: null }] : [],
+          followUp: null,
+          ranOn: { provider: 'claude', model: 'claude-opus-5-5', effort: null },
+          costUsd: 0.1,
+          inputTokens: 1,
+          outputTokens: 1,
+          numTurns: 1,
+        } as any;
+      },
+      session: {
+        readResponse: async (_id: number, shown: readonly string[]) => ({ kind: 'ok' as const, check: { payload: { items: shown.map((ref) => ({ ref, action: 'fixed' as const, reply: 'Checked the input.' })) }, problems: [], notReported: [] } }),
+      } as any,
+    });
+    try {
+      const before = pushes.length;
+      const sentBefore = sentToClaude.length;
+      const r = await post(`/api/pro/prs/${pr.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.', pushWhenDone: true });
+      expect(r.statusCode).toBe(202);
+      const fixId = r.json().fixId as number;
+      const f = await until(pr.id, (x) => x.session?.phase === 'pushed' && x.pushing === false, 'pushed after the loop');
+      // ONE push, after the loop: two reviews of LOCAL commits (never pushed), one host fix turn between them.
+      expect(pushes.length).toBe(before + 1);
+      expect(halves.map((h) => h.head.sha)).toEqual(['1'.repeat(40), '2'.repeat(40)]);
+      expect(halves.every((h) => h.byReader === true && h.feature === 'ai_fix_loop_review')).toBe(true);
+      // ⚠ THE REVIEW KEEPS ITS OWN SCOPE: the fix session loaded acme/web too (read only), but each review round
+      // reviews the PR's repository from the clone cache; it is never handed the session's repositories.
+      expect(f.session!.repos.map((x) => x.fullName)).toEqual(['acme/api', 'acme/web']);
+      expect(halves.every((h) => h.repo.repoId === api && h.repo.fullName === 'acme/api')).toBe(true);
+      expect(JSON.stringify(halves)).not.toContain('acme/web');
+      expect(committed.map((c) => c.patch)).toEqual([PATCH, PATCH2]);
+      expect(sentToClaude.slice(sentBefore).some((t) => t.startsWith('Ensemble reviewed your fix (round 1 of 5).'))).toBe(true);
+      expect(f.loop).toMatchObject({ state: 'done', stop: 'clean', rounds: 5, firstRound: 1, running: false });
+      expect(f.loop!.history.map((h) => [h.round, h.counts.found, h.counts.fixed])).toEqual([
+        [1, 1, 1],
+        [2, 0, 0],
+      ]);
+      // THE CLOSING REVIEW, at the PUSHED head ('c0ffee'), as the PR's AI review: manual trigger, not posted.
+      const cr = await db.select().from(schema.claudeReviews).where(and(eq(schema.claudeReviews.prId, pr.id), eq(schema.claudeReviews.headSha, 'c0ffee'))).execute();
+      expect(cr).toHaveLength(1);
+      expect(cr[0]).toMatchObject({ status: 'succeeded', trigger: 'manual', postedAt: null });
+      expect(f.loop!.importedReviewId ?? (await rowOf(fixId)).loopReviewId).toBe(cr[0].id);
+      // The auto fix queue reads that head as reviewed by the fix.
+      expect(await L.headReviewedByFixLoop(ctx, 1, pr.id, 'c0ffee')).toBe(true);
+    } finally {
+      L.setFixLoopSeamsForTests({ providers: async () => [] });
+      await M._closeAllSessionsForTest();
+    }
+  });
+});
+
+// ---- CROSS-REPO AI FIX (docs/SANDBOX.md § AI Fix sessions → Scope) -----------------------------------------
+describe('the repositories and documents of a fix (Settings → Sandbox → "AI Fix reads every repository")', () => {
+  it('fixRepoSet (pure): the PR repo, the ticket repos, the related repos, then the rest by name; at most 12, the rest named', () => {
+    const members = [
+      { repoId: 1, fullName: 'acme/api' },
+      { repoId: 2, fullName: 'acme/web' },
+      { repoId: 3, fullName: 'acme/zeta' },
+      ...Array.from({ length: 12 }, (_, i) => ({ repoId: 100 + i, fullName: `acme/r${String(i).padStart(2, '0')}` })),
+    ];
+    // Narrow: the PR repo and the ticket's repos in the workspace (99 is not a member); no cap.
+    expect(F.fixRepoSet({ prRepoId: 1, members, ticketRepoIds: [2, 99], declaredRepoIds: [3], wide: false })).toEqual({ ids: [1, 2], notLoaded: [] });
+    // Wide: ticket (web), declared (zeta), then by name; 15 members ⇒ 12 loaded, 3 named.
+    const w = F.fixRepoSet({ prRepoId: 1, members, ticketRepoIds: [2], declaredRepoIds: [3, 99], wide: true });
+    expect(w.ids).toEqual([1, 2, 3, 100, 101, 102, 103, 104, 105, 106, 107, 108]);
+    expect(w.notLoaded).toEqual(['acme/r09', 'acme/r10', 'acme/r11']);
+    expect(F.notLoadedNote(w.notLoaded)).toBe('AI Fix loads at most 12 repositories. Not loaded: acme/r09, acme/r10, acme/r11.');
+    // A Resume replaces the earlier boot's note (it recognises its own), never stacks a second copy.
+    expect(F.isNotLoadedNote(F.notLoadedNote(w.notLoaded))).toBe(true);
+    expect(F.isNotLoadedNote('One generated or lock file is left out of it.')).toBe(false);
+    // Under the cap: everyone, nothing named.
+    expect(F.fixRepoSet({ prRepoId: 2, members: members.slice(0, 3), ticketRepoIds: [], declaredRepoIds: [], wide: true })).toEqual({ ids: [2, 1, 3], notLoaded: [] });
+  });
+
+  it('switch ON (the default): every member up to 12, the most related first, the rest named in ONE note; pushes stay the PR repo; Resume recomputes; a dependency fix stays narrow', async () => {
+    const { eq, inArray } = await import('drizzle-orm');
+    const q = await import('../../db/queries.js');
+    const extras: number[] = [];
+    for (const name of ['zz-declared', ...Array.from({ length: 14 }, (_, i) => `r${String(i).padStart(2, '0')}`)]) {
+      const [r] = await db.insert(schema.repos).values({ accountId: 1, githubNodeId: `R-x-${name}`, owner: 'acme', name, defaultBranch: 'main', viewerPermission: 'WRITE' }).returning().execute();
+      extras.push(r.id);
+    }
+    await q.resolveWorkspaceScope(1, null);
+    const declared = extras[0]!;
+    await (await import('../../db/related-repos.js')).setRelatedRepos(1, wsId, api, [declared]);
+    const [pr] = await db
+      .insert(schema.pullRequests)
+      .values({ accountId: 1, repoId: api, githubNodeId: 'PR-70', number: 70, title: 'Wide fix', body: null, state: 'open', headSha: HEAD, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+      .returning()
+      .execute();
+    try {
+      // The agent also edits two read-only repositories: left out, never pushed.
+      extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : path.endsWith('/r00') || path.endsWith('/zz-declared') ? out('diff --git a/x b/x\n', ['x'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: wide', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      const prepBefore = G.prepared.length;
+      const r = await post(`/api/pro/prs/${pr.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.' });
+      expect(r.statusCode).toBe(202);
+      const fixId = r.json().fixId as number;
+      const f = await until(pr.id, (x) => x.session?.phase === 'built', 'built (wide)');
+      // 17 members: api, web (the ticket), zz-declared (related), then r00..r08 by name = 12; r09..r13 named.
+      const loaded = f.session!.repos.map((x) => x.fullName).sort();
+      expect(loaded).toEqual(['acme/api', 'acme/web', 'acme/zz-declared', ...Array.from({ length: 9 }, (_, i) => `acme/r0${i}`)].sort());
+      expect(f.session!.notes.filter((n) => n.startsWith('AI Fix loads at most'))).toEqual(['AI Fix loads at most 12 repositories. Not loaded: acme/r09, acme/r10, acme/r11, acme/r12, acme/r13.']);
+      expect(f.session!.boot.find((b) => b.key === 'repos')).toMatchObject({ state: 'done', detail: '12 of 12 cloned' });
+      // Every other repository at its default branch, read only; the PR repo at the PR head.
+      const reqs = G.prepared.slice(prepBefore);
+      expect(reqs.find((p) => p.name === 'api')).toMatchObject({ remoteRef: 'refs/pull/70/head', baseSha: HEAD });
+      expect(reqs.filter((p) => p.name !== 'api').every((p) => p.baseRef === 'HEAD' && p.baseSha === null)).toBe(true);
+      // The seed: the read-only context paragraph in FIX.md; no docs here (none built).
+      const box = `limn-${(await rowOf(fixId)).sandboxRef}-sandbox`;
+      const fixMd = fake.files(box).get('/workspace/FIX.md')!.toString();
+      expect(fixMd).toContain('The other repositories here are read-only context.');
+      expect(fixMd).toContain('A change that another repository needs is out of scope');
+      expect(f.session!.boot.some((b) => b.key === 'docs')).toBe(false);
+      // Only the PR repo's patch is stored; the other edits are left out.
+      expect(f.patch).toBe(PATCH);
+      expect((f.leftOut ?? []).map((x) => x.fullName).sort()).toEqual(['acme/r00', 'acme/zz-declared']);
+      // Push: only acme/api, to the PR's branch.
+      const before = pushes.length;
+      const p = await post(`/api/pro/ai-fixes/${fixId}/push`, { target: 'existing' });
+      expect(p.statusCode).toBe(200);
+      expect(pushes.length).toBe(before + 1);
+      expect(pushes.at(-1)).toMatchObject({ owner: 'acme', name: 'api', prNumber: 70 });
+      await until(pr.id, (x) => x.session?.phase === 'pushed', 'pushed (wide)');
+
+      // RESUME RECOMPUTES AT BOOT: a second fix, closed with work; the switch turned OFF before Resume.
+      const r2 = await post(`/api/pro/prs/${pr.id}/ai-fix`, { seed: 'plain', instruction: 'Again.' });
+      const id2 = r2.json().fixId as number;
+      const second = await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'built', 'built (second)');
+      expect(second.session!.notes.filter((n) => F.isNotLoadedNote(n))).toHaveLength(1);
+      await M._idleCloseForTest(id2, 'fix');
+      await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'built' && M.liveSession(F.fixKey(id2)) == null, 'closed');
+      sandboxSettings = { ...(await import('../../db/sandbox-settings.js')).defaultSandboxSettings(wsId), fixAllRepos: false };
+      expect((await post(`/api/pro/ai-fixes/${id2}/resume`)).statusCode).toBe(202);
+      const resumed = await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'built' && M.liveSession(F.fixKey(id2)) != null, 'resumed');
+      expect(resumed.session!.repos.map((x) => x.fullName)).toEqual(['acme/api', 'acme/web']);
+      // The first boot's "Not loaded" note is gone: the Resume's set has none past the cap (never stacked or stale).
+      expect(resumed.session!.notes.filter((n) => F.isNotLoadedNote(n))).toEqual([]);
+      await post(`/api/pro/ai-fixes/${id2}/discard`, {});
+      await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'discarded', 'discarded');
+      sandboxSettings = null;
+
+      // DEPENDENCY AUTOMATION's fix keeps the narrow set (and no documents), with the switch ON.
+      const d = await AF.startFix(ctx, { accountId: 1, prId: pr.id, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Bump.', trigger: 'auto', narrow: true });
+      expect(d.status).toBe('queued');
+      const dep = await until(pr.id, (x) => x.id === (d as { fixId: number }).fixId && x.session != null && x.session.repos.length > 0, 'dependency fix booted');
+      expect(dep.session!.repos.map((x) => x.fullName)).toEqual(['acme/api', 'acme/web']);
+      await until(pr.id, (x) => x.id === (d as { fixId: number }).fixId && !AF.isFixRunning(pr.id), 'dependency fix closed');
+    } finally {
+      sandboxSettings = null;
+      await M._closeAllSessionsForTest();
+      await (await import('../../db/related-repos.js')).setRelatedRepos(1, wsId, api, []);
+      await db.delete(schema.workspaceRepos).where(inArray(schema.workspaceRepos.repoId, extras)).execute();
+      await db.delete(schema.repos).where(inArray(schema.repos.id, extras)).execute();
+      void eq;
+    }
+  });
+
+  it('siblingHeads (pure): a loaded repository shows its newest open sibling PR; older ones and one in the PR\'s own repository are named', () => {
+    const names = new Map([[1, 'acme/api'], [2, 'acme/web'], [3, 'acme/ui']]);
+    const sib = (repoId: number, number: number, updatedAtMs: number) => ({ prId: number, repoId, number, headRefName: `feat/${number}`, updatedAtMs });
+    const r = F.siblingHeads({ prRepoId: 1, loadedRepoIds: [1, 2], prs: [sib(2, 12, 30), sib(1, 40, 20), sib(2, 11, 10), sib(3, 7, 5)], repoNames: names });
+    expect([...r.heads.entries()].map(([id, p]) => [id, p.number])).toEqual([[2, 12]]);
+    expect(r.note).toBe("Pull requests of the same ticket: not checked out: #40 in acme/api (this PR's repository), #11 in acme/web (#12 is loaded).");
+    expect(F.isSiblingNote(r.note!)).toBe(true);
+    expect(F.siblingHeads({ prRepoId: 1, loadedRepoIds: [1, 2], prs: [], repoNames: names })).toEqual({ heads: new Map(), note: null });
+  });
+
+  it('siblingStateToStore (pure, ④): this boot\'s reads; a sibling that failed to mirror keeps its earlier entry; nothing read ⇒ write nothing', () => {
+    const e = (prId: number, headSha: string) => ({ prId, number: prId, repoId: 2, headSha, overlayFixId: null, overlayPatchHash: null, at: 1 });
+    expect(F.siblingStateToStore(null, [e(1, 'a')])).toBeNull();
+    expect(F.siblingStateToStore({ read: [], failedPrIds: [] }, [e(1, 'a')])).toBeNull();
+    expect(F.siblingStateToStore({ read: [e(1, 'b')], failedPrIds: [] }, [e(1, 'a')])).toEqual([e(1, 'b')]);
+    expect(F.siblingStateToStore({ read: [], failedPrIds: [1] }, [e(1, 'a'), e(2, 'x')])).toEqual([e(1, 'a')]);
+  });
+
+  it('withTicketLineReleased (⑨): the loop\'s end releases the fix\'s hold even when it throws; another fix\'s hold stays', async () => {
+    const TL = await import('../../coding/ai-fix/ticket-line.js');
+    const h = TL.tryHoldTicketLine({ accountId: 1, prId: 777001, number: 1, reads: [] });
+    TL.bindTicketLineFix(777001, (h as { token: number }).token, 9001);
+    await expect(F.withTicketLineReleased(777001, 9002, async () => {})).resolves.toBeUndefined();
+    expect(TL.holdsTicketLine(777001)).toBe(true);
+    await expect(F.withTicketLineReleased(777001, 9001, async () => { throw new Error('read failed'); })).rejects.toThrow('read failed');
+    expect(TL.holdsTicketLine(777001)).toBe(false);
+  });
+
+  it('siblingOverlayPlan (pure): a built fix is laid on its head only when that head has not moved; a merge fix never', () => {
+    const fix = { fixId: 4, baseSha: HEAD, patch: PATCH, merge: false };
+    expect(F.siblingOverlayPlan({ number: 12, fix: null, liveHead: HEAD })).toEqual({ apply: false, note: null });
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: HEAD })).toEqual({ apply: true });
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: WEB })).toEqual({ apply: false, note: "#12's AI Fix is not applied: #12 changed after it was built." });
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: null })).toEqual({ apply: false, note: "#12's AI Fix is not applied: its head could not be read." });
+    expect(F.siblingOverlayPlan({ number: 12, fix: { ...fix, merge: true }, liveHead: HEAD })).toEqual({ apply: false, note: "#12's AI Fix is not applied: it resolves merge conflicts." });
+    // ⑫ pushed meanwhile: the head IS that fix.
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: WEB, pushedSha: WEB })).toEqual({ apply: false, note: "#12's AI Fix is pushed: its code is in #12's head." });
+    const note = F.siblingOverlayNote(["#12's AI Fix is not applied: #12 changed after it was built."])!;
+    expect(F.isSiblingNote(note)).toBe(true);
+    expect(F.siblingOverlayNote([])).toBeNull();
+  });
+
+  it('a sibling PR\'s repository is read at THAT PR\'s head (read only, left out); the default branch otherwise; a dependency fix keeps default branches', async () => {
+    const sibs = [
+      { prId: 9001, repoId: web, number: 12, headRefName: 'feature/export-ui', updatedAtMs: 2 },
+      { prId: 9002, repoId: web, number: 11, headRefName: 'feature/old', updatedAtMs: 1 },
+    ];
+    F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null, siblingOpenPrs: async () => sibs });
+    try {
+      extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('diff --git a/x b/x\n', ['x'], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: sib', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      const prepBefore = G.prepared.length;
+      const r = await post(`/api/pro/prs/${prC}/ai-fix`, { seed: 'plain', instruction: 'Fix it.' });
+      expect(r.statusCode).toBe(202);
+      const fixId = r.json().fixId as number;
+      const f = await until(prC, (x) => x.id === fixId && x.session?.phase === 'built', 'built (sibling)');
+      const reqs = G.prepared.slice(prepBefore);
+      expect(reqs.find((p) => p.name === 'web')).toMatchObject({ baseRef: 'feature/export-ui', baseSha: null, remoteRef: 'refs/pull/12/head' });
+      expect(reqs.find((p) => p.name === 'api')!.remoteRef).toMatch(/^refs\/pull\/\d+\/head$/);
+      expect(f.session!.notes.filter((n) => F.isSiblingNote(n))).toEqual(['Pull requests of the same ticket: not checked out: #11 in acme/web (#12 is loaded).']);
+      const box = `limn-${(await rowOf(fixId)).sandboxRef}-sandbox`;
+      expect(fake.files(box).get('/workspace/CLAUDE.md')!.toString()).toMatch(/acme\/web: `[^`]+` \(from PR #12's head, feature\/export-ui, at [0-9a-f]{7}; branch `[^`]+`\)\. Read only: another pull request of the same ticket, not merged yet\. Edits here are left out\./);
+      // Still only the PR repository's patch; the sibling's edits are left out.
+      expect(f.patch).toBe(PATCH);
+      expect((f.leftOut ?? []).map((x) => x.fullName)).toEqual(['acme/web']);
+      await post(`/api/pro/ai-fixes/${fixId}/discard`, {});
+      await until(prC, (x) => x.id === fixId && x.session?.phase === 'discarded', 'discarded (sibling)');
+
+      // Dependency automation's narrow fix: default branches, no sibling heads.
+      const before2 = G.prepared.length;
+      const d = await AF.startFix(ctx, { accountId: 1, prId: prC, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Bump.', trigger: 'auto', narrow: true });
+      const depId = (d as { fixId: number }).fixId;
+      await until(prC, (x) => x.id === depId && !AF.isFixRunning(prC), 'dependency fix closed (sibling)');
+      expect(G.prepared.slice(before2).find((p) => p.name === 'web')).toMatchObject({ baseRef: 'HEAD', baseSha: null });
+    } finally {
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
+  });
+
+  it('ONE TICKET AT A TIME: a fix of #50 waits while the fix of #12 (same ticket) runs, then boots with #12\'s built fix laid on its head (its BASE), labelled; staleness on read; Push when done holds a stale fix, a press pushes; a moved head ⇒ no overlay + a note', { timeout: 60_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    const OVERLAY = 'f'.repeat(40);
+    const H2 = '9'.repeat(40);
+    const mk = async (repoId: number, number: number, ref: string): Promise<number> =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({ accountId: 1, repoId, githubNodeId: `PR-T-${number}`, number, title: `Ticket PR ${number}`, body: null, state: 'open', headSha: HEAD, headRefName: ref, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+          .returning()
+          .execute()
+      )[0].id;
+    const prUi = await mk(web, 12, 'feature/ui');
+    const prApi = await mk(api, 50, 'feature/api');
+    // The fake mirror clones a head-less sibling at WEB: #50's synced head is that commit (what A reads of it).
+    await db.update(schema.pullRequests).set({ headSha: WEB }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prApi)).execute();
+    const overlays: any[] = [];
+    let liveHead: string | null = HEAD;
+    // Each fix changes its own PR's repository only (B's boot lays the overlay: from then on B extracts).
+    let prRepo = '/web';
+    const sibOf = (p: number) =>
+      p === prApi ? [{ prId: prUi, repoId: web, number: 12, headRefName: 'feature/ui', updatedAtMs: 2 }] : p === prUi ? [{ prId: prApi, repoId: api, number: 50, headRefName: 'feature/api', updatedAtMs: 1 }] : [];
+    F.setFixSessionDepsForTests({
+      relatedRepoIds: async () => relatedIds(),
+      contextTicket: async () => null,
+      siblingOpenPrs: async (_c, _a, p) => sibOf(p),
+      ticketSiblingPrIds: async (_c, _a, p) => sibOf(p).map((x) => x.prId),
+      siblingLiveHead: async () => liveHead,
+      overlayCommit: async (a) => {
+        overlays.push(a);
+        prRepo = '/api';
+        return { localRef: `refs/pierre/local/ai-fix-overlay/${a.siblingFixId}/for-${a.forFixId}`, sha: OVERLAY };
+      },
+    });
+    try {
+      extractAnswer = (path) => (path.endsWith(prRepo) ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: t', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      let release: () => void = () => {};
+      gate = new Promise<void>((r) => (release = r));
+      const a = await post(`/api/pro/prs/${prUi}/ai-fix`, { seed: 'plain', instruction: 'Fix the UI.' });
+      expect(a.statusCode).toBe(202);
+      const fixA = a.json().fixId as number;
+      // #12's fix runs: #50's press waits in line, says for whom, and holds no sandbox.
+      const b = await post(`/api/pro/prs/${prApi}/ai-fix`, { seed: 'plain', instruction: 'Fix the API.' });
+      expect(b.statusCode).toBe(202);
+      expect(b.json()).toEqual({ fixId: null, status: 'waiting', position: 1, blockedBy: { prNumber: 12 } });
+      expect(((await get(`/api/pro/prs/${prApi}/ai-fix`)).json() as AiFixResponse).waiting).toMatchObject({ position: 1, trigger: 'manual', blockedBy: { prNumber: 12 } });
+      expect(AF.isFixRunning(prApi)).toBe(false);
+      // #12's fix is built (its review loop ended: no reviewer here) ⇒ the line is released and #50's fix starts by itself.
+      release();
+      gate = null;
+      await until(prUi, (x) => x.id === fixA && x.session?.phase === 'built', 'A built');
+      const fb = await until(prApi, (x) => x.id != null && x.session?.phase === 'built', 'B built');
+      const fixB = fb.id;
+      // The sibling repository's BASE is the overlay: #12's head plus its unpushed fix, a LOCAL commit in Ensemble's clone cache.
+      expect(overlays).toEqual([expect.objectContaining({ owner: 'acme', name: 'web', number: 12, headSha: HEAD, patch: PATCH, siblingFixId: fixA, forFixId: fixB })]);
+      const webReq = G.prepared.filter((p) => p.name === 'web' && p.pinRef === `refs/pierre/ai-fix/${fixB}/${web}`).at(-1);
+      expect(webReq).toMatchObject({ baseSha: OVERLAY, localRef: `refs/pierre/local/ai-fix-overlay/${fixA}/for-${fixB}` });
+      expect(webReq.remoteRef).toBeUndefined();
+      const box = `limn-${(await rowOf(fixB)).sandboxRef}-sandbox`;
+      expect(fake.files(box).get('/workspace/CLAUDE.md')!.toString()).toMatch(/acme\/web: `[^`]+` \(from PR #12's head plus its AI Fix not pushed yet, at fffffff; branch `[^`]+`\)\. Read only: another pull request of the same ticket, not merged yet\. Edits here are left out\./);
+      // Only the agent's own edits are left out — never the overlay (it is the base).
+      expect(fb.leftOut ?? []).toEqual([]);
+      expect(fb.patch).toBe(PATCH);
+      // What B read is recorded; it is not stale.
+      expect((await rowOf(fixB)).siblingStateJson).toEqual([expect.objectContaining({ prId: prUi, number: 12, repoId: web, headSha: HEAD, overlayFixId: fixA })]);
+      expect(fb.stale ?? null).toBeNull();
+      // ① B was built ON TOP OF A's fix: B's newer fix does not make A stale.
+      expect((await readFix(prUi)).stale ?? null).toBeNull();
+      // ② B builds on A's fix, which is NOT PUSHED: Push when done (and Push automatically) hold B, and say why.
+      await db.update(schema.aiFixes).set({ pushWhenDone: true }).where((await import('drizzle-orm')).eq(schema.aiFixes.id, fixB)).execute();
+      const { maybePushWhenDone, pushWhenDoneReady } = await import('../../coding/ai-fix/auto-push.js');
+      const pushFix = vi.fn();
+      expect(await maybePushWhenDone(ctx, { accountId: 1, fixId: fixB }, { pushFix, prAuthorIsAccount: async () => true })).toEqual({ status: 'skipped', reason: 'overlay_unpushed' });
+      expect(await pushWhenDoneReady(ctx, 1, fixB, { prAuthorIsAccount: async () => true })).toEqual({ push: false, line: "Not pushed: it builds on #12's AI Fix, which is not pushed yet." });
+
+      // #12 gets a new head ⇒ B reads STALE; Push when done holds it with that reason; the reader's Push still pushes.
+      await db.update(schema.pullRequests).set({ headSha: H2 }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prUi)).execute();
+      expect((await readFix(prApi)).stale).toEqual({ line: '#12 changed after this fix was built.' });
+      expect(await maybePushWhenDone(ctx, { accountId: 1, fixId: fixB }, { pushFix, prAuthorIsAccount: async () => true })).toEqual({ status: 'skipped', reason: 'stale' });
+      expect(pushFix).not.toHaveBeenCalled();
+      expect(await pushWhenDoneReady(ctx, 1, fixB, { prAuthorIsAccount: async () => true })).toEqual({ push: false, line: 'Not pushed: #12 changed after this fix was built. Check it, then press Push.' });
+      const pressed = await post(`/api/pro/ai-fixes/${fixB}/push`, { target: 'existing' });
+      expect(pressed.statusCode).toBe(200);
+      expect(pushes.at(-1)).toMatchObject({ name: 'api', prNumber: 50 });
+
+      // #12 moved since its fix was built ⇒ a new fix of #50 reads #12's head WITHOUT the overlay, and says why.
+      liveHead = H2;
+      prRepo = '/api';
+      const c = await post(`/api/pro/prs/${prApi}/ai-fix`, { seed: 'plain', instruction: 'Again.' });
+      expect(c.statusCode).toBe(202);
+      const fixC = c.json().fixId as number;
+      const fc = await until(prApi, (x) => x.id === fixC && x.session?.phase === 'built', 'C built');
+      expect(overlays).toHaveLength(1);
+      expect(G.prepared.filter((p) => p.pinRef === `refs/pierre/ai-fix/${fixC}/${web}`).at(-1)).toMatchObject({ baseSha: H2, remoteRef: 'refs/pull/12/head' });
+      expect(fc.session!.notes).toContain("Pull requests of the same ticket: #12's AI Fix is not applied: #12 changed after it was built.");
+      expect((await rowOf(fixC)).siblingStateJson).toEqual([expect.objectContaining({ prId: prUi, headSha: H2, overlayFixId: null })]);
+
+      // ④ RESUME NEVER CLEARS STALENESS: #12 moves again ⇒ C is stale; a Resume boots with #12's new head but runs
+      // no turn, so the stored state (the head C's patch was built on) and the stale line stay.
+      await M._idleCloseForTest(fixC, 'fix');
+      await until(prApi, (x) => x.id === fixC && x.session?.phase === 'built' && M.liveSession(F.fixKey(fixC)) == null, 'C closed');
+      const H3 = '8'.repeat(40);
+      await db.update(schema.pullRequests).set({ headSha: H3 }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prUi)).execute();
+      liveHead = H3;
+      expect((await readFix(prApi)).stale).toEqual({ line: '#12 changed after this fix was built.' });
+      expect((await post(`/api/pro/ai-fixes/${fixC}/resume`)).statusCode).toBe(202);
+      await until(prApi, (x) => x.id === fixC && x.session?.phase === 'built' && M.liveSession(F.fixKey(fixC)) != null, 'C resumed');
+      expect(G.prepared.filter((p) => p.pinRef === `refs/pierre/ai-fix/${fixC}/${web}`).at(-1)).toMatchObject({ baseSha: H3 });
+      expect((await rowOf(fixC)).siblingStateJson).toEqual([expect.objectContaining({ prId: prUi, headSha: H2 })]);
+      expect((await readFix(prApi)).stale).toEqual({ line: '#12 changed after this fix was built.' });
+    } finally {
+      gate = null;
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
+  });
+
+  it('START NOW, plan first and the repositories read: a press waiting behind the running fix of a PR it reads starts at once; an auto fix waits; a same-repository sibling never blocks; Plan first\'s Start fix takes the line', { timeout: 60_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    const mk = async (repoId: number, number: number): Promise<number> =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({ accountId: 1, repoId, githubNodeId: `PR-S-${number}`, number, title: `S ${number}`, body: null, state: 'open', headSha: HEAD, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+          .returning()
+          .execute()
+      )[0].id;
+    const p1 = await mk(api, 61);
+    const p2 = await mk(web, 62);
+    const p3 = await mk(api, 63);
+    const repoOf = new Map([[p1, api], [p2, web], [p3, api]]);
+    const numOf = new Map([[p1, 61], [p2, 62], [p3, 63]]);
+    const all = [p1, p2, p3];
+    const sib = (p: number) => all.filter((x) => x !== p).map((x) => ({ prId: x, repoId: repoOf.get(x)!, number: numOf.get(x)!, headRefName: null, updatedAtMs: x }));
+    F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null, siblingOpenPrs: async (_c, _a, p) => sib(p), ticketSiblingPrIds: async (_c, _a, p) => all.filter((x) => x !== p) });
+    try {
+      extractAnswer = (path) => (path.endsWith('/api') || path.endsWith('/web') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: s', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      let release: () => void = () => {};
+      gate = new Promise<void>((r) => (release = r));
+      expect((await post(`/api/pro/prs/${p1}/ai-fix`, { seed: 'plain', instruction: 'One.' })).statusCode).toBe(202);
+      // ⑤ #63 is in #61's OWN repository: the fix of #63 does not read #61 at its head, so it never waits for it.
+      const same = await post(`/api/pro/prs/${p3}/ai-fix`, { seed: 'plain', instruction: 'Same repo.' });
+      expect(same.json()).toMatchObject({ status: 'queued' });
+      // An AUTO fix of #62 (acme/web: it reads #61 in acme/api) always waits; Start now refuses it, clearly.
+      const auto = await AF.startFix(ctx, { accountId: 1, prId: p2, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Auto.', trigger: 'auto' });
+      expect(auto).toMatchObject({ status: 'waiting' });
+      const refused = await post(`/api/pro/prs/${p2}/ai-fix/start-now`);
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toBe('AutoFixWaits');
+      // The reader's press replaces the waiting auto fix (keeping its place) and waits; Start now runs it at once.
+      const w = await post(`/api/pro/prs/${p2}/ai-fix`, { seed: 'plain', instruction: 'Two.' });
+      expect(w.json()).toMatchObject({ status: 'waiting', blockedBy: { prNumber: 61 } });
+      const now = await post(`/api/pro/prs/${p2}/ai-fix/start-now`);
+      expect(now.statusCode).toBe(202);
+      expect(now.json()).toMatchObject({ status: 'queued' });
+      expect(AF.isFixRunning(p2)).toBe(true);
+      expect(((await get(`/api/pro/prs/${p2}/ai-fix`)).json() as AiFixResponse).waiting ?? null).toBeNull();
+      // Nothing waits any more: a second press of Start now is a 404; another account never reaches it.
+      expect((await post(`/api/pro/prs/${p2}/ai-fix/start-now`)).statusCode).toBe(404);
+      expect((await post(`/api/pro/prs/${p2}/ai-fix/start-now`, {}, 2)).statusCode).toBe(404);
+      release();
+      gate = null;
+      for (const p of [p1, p2, p3]) await until(p, (x) => x.session?.phase === 'built', `${p} built`);
+      await M._closeAllSessionsForTest();
+
+      // ③ PLAN FIRST: the plan turn releases the line; Start fix (the build) takes it again — and waits like a press.
+      const plan = await post(`/api/pro/prs/${p2}/ai-fix/plan`, { seed: 'plain', instruction: 'Plan it.' });
+      expect(plan.statusCode).toBe(202);
+      const planId = plan.json().fixId as number;
+      await until(p2, (x) => x.id === planId && x.status === 'planned' && x.session?.phase === 'ready', 'planned');
+      gate = new Promise<void>((r) => (release = r));
+      // #61's fix starts meanwhile (the plan does not hold the line) …
+      expect((await post(`/api/pro/prs/${p1}/ai-fix`, { seed: 'plain', instruction: 'One again.' })).json()).toMatchObject({ status: 'queued' });
+      // … so the plan's Start fix waits for it, says whom for, and offers Start now.
+      const appr = await post(`/api/pro/ai-fixes/${planId}/plan/approve`, {});
+      expect(appr.statusCode).toBe(202);
+      expect(appr.json()).toMatchObject({ fixId: planId, status: 'waiting', blockedBy: { prNumber: 61 } });
+      expect(((await get(`/api/pro/prs/${p2}/ai-fix`)).json() as AiFixResponse).waiting).toMatchObject({ trigger: 'manual', blockedBy: { prNumber: 61 } });
+      const go = await post(`/api/pro/prs/${p2}/ai-fix/start-now`);
+      expect(go.statusCode).toBe(202);
+      expect(go.json()).toMatchObject({ fixId: planId, status: 'queued' });
+      release();
+      gate = null;
+      await until(p2, (x) => x.id === planId && x.session?.phase === 'built', 'plan built');
+    } finally {
+      gate = null;
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
+  });
+
+  it('the reference documents: built ⇒ the docs step copies them read only and FIX.md points at them; none ⇒ no step; a dependency fix never gets them', async () => {
+    const SECTION = '<!-- limn:section -->\n# Export\n\nThe CSV uses commas.\n';
+    const LIB = {
+      workspaceId: wsId,
+      dir: '/lib',
+      docs: [{ slug: 'api', title: 'API guide', sections: [{ path: 'api/sections/01-export.md', title: 'Export', summary: '', depth: 1, trail: [], headings: [] }] }],
+      read: (p: string) => (p === 'api/sections/01-export.md' ? SECTION : p === 'api/CONTENTS.md' ? '# Contents' : null),
+    } as any;
+    const asked: any[] = [];
+    F.setFixSessionDepsForTests({
+      relatedRepoIds: async () => relatedIds(),
+      contextTicket: async () => null,
+      docsAvailable: async () => true,
+      chooseDocs: async (_c, _a, _w, pr) => {
+        asked.push(pr);
+        return { ok: true, lib: LIB, index: '# Index\n- api', libraryHash: 'h1', choice: { source: 'search', sections: ['api/sections/01-export.md'], about: 'pull request' } };
+      },
+    });
+    try {
+      extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: docs', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      const r = await post(`/api/pro/prs/${prC}/ai-fix`, { seed: 'plain', instruction: 'Fix it.' });
+      const fixId = r.json().fixId as number;
+      const f = await until(prC, (x) => x.id === fixId && x.session?.phase === 'built', 'built (docs)');
+      expect(f.session!.boot.find((b) => b.key === 'docs')).toMatchObject({ state: 'done', detail: '1 section' });
+      // The PR-shaped chooser got the PR's title, description and changed paths (pnpm-lock is not in PR.diff).
+      expect(asked.at(-1)).toMatchObject({ prId: prC, title: 'Fix the export 43', paths: ['src/a.ts'], withTicket: true });
+      const files = fake.files(`limn-${(await rowOf(fixId)).sandboxRef}-sandbox`);
+      expect(files.get('/home/agent/.limn/docs/api/sections/01-export.md')!.toString()).toBe(SECTION);
+      expect(files.get('/workspace/DOCS.md')!.toString()).toContain('They may not apply to this pull request');
+      expect(files.get('/home/agent/.limn/docs/SHORTLIST.md')!.toString()).toContain("the pull request's words and changed files");
+      expect(files.get('/workspace/FIX.md')!.toString()).toContain('The other repositories here and the reference documents in `/home/agent/.limn/docs/` are read-only context.');
+      await post(`/api/pro/ai-fixes/${fixId}/discard`, {});
+      await until(prC, (x) => x.id === fixId && x.session?.phase === 'discarded', 'discarded (docs)');
+
+      // A dependency fix: no docs step, whatever the library holds.
+      const before = asked.length;
+      const d = await AF.startFix(ctx, { accountId: 1, prId: prC, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Bump.', trigger: 'auto', narrow: true });
+      const depId = (d as { fixId: number }).fixId;
+      const dep = await until(prC, (x) => x.id === depId && !AF.isFixRunning(prC), 'dependency fix closed (docs)');
+      expect(dep.session!.boot.some((b) => b.key === 'docs')).toBe(false);
+      expect(asked.length).toBe(before);
+    } finally {
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
   });
 });

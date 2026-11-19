@@ -250,6 +250,9 @@ beforeAll(async () => {
     credentialEnv: () => ({}),
     usageSink: { record: async () => {}, noteClaudeRateLimit: () => {} },
   });
+  // AI FIX'S OWN REVIEW LOOP (coding/ai-fix/loop.ts) is pinned in coding/ai-fix/loop-db.test.ts: here no review
+  // vendor is signed in, so a fix goes on exactly as it did before the loop (the row records 'no_reviewer').
+  (await import('../../coding/ai-fix/loop.js')).setFixLoopSeamsForTests({ providers: async () => [] });
   F.setFixSessionDepsForTests({
     contextTicket: async () => null,
     mergePlan: async () => ({ baseSha: B, mergeBaseSha: MB }),
@@ -288,6 +291,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await M?._closeAllSessionsForTest();
   M?.setSessionDepsForTests(null);
+  (await import('../../coding/ai-fix/loop.js')).setFixLoopSeamsForTests(null);
   F?.setFixSessionDepsForTests(null);
   await app?.close();
   await closeDb?.();

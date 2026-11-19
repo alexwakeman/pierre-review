@@ -2,7 +2,6 @@ import { runHasOpenPoints, withoutUnbackedOpenPoints } from './open-point-prose.
 import {
   aiRunProvider,
   CLAUDE_REVIEW_MAX_TICKETS,
-  DEFAULT_CLAUDE_REVIEW_MODEL,
   TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW,
   type ActiveReview,
   type ClaudeReviewModel,
@@ -20,7 +19,7 @@ import type { CompareDiffResult } from '../../github/compare.js';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
-import { agenticRunReady } from './ai-ready.js';
+import { agenticRunReady, singleReviewProvider } from './ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
 import { detectWake, FORCE_RELEASE_MS, runsToInterrupt, WATCHDOG_TICK_MS } from './run-watchdog.js';
 import {
@@ -45,10 +44,10 @@ import {
   type PromptPairInput,
   type PromptPeer,
 } from './prompts.js';
-import { PAIR_ORDER, pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
+import { pairProvidersReady, readAutoReviewProvidersForPr } from './pair.js';
 import { consolidatePair, notStartedHalf } from './pair-consolidate.js';
 import { coverTarget } from './pair.js';
-import { markPairBusy } from './pair-view.js';
+import { markPairBusy, markPairCovering } from './pair-view.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import {
   linkReraisedFindings,
@@ -63,7 +62,7 @@ import {
 import { loadAuthorReviewAnchor, loadStandingBlockAnchors, mergeAuthorAnchor, mergeStandingBlocks } from './teammate-anchor.js';
 import { planThreadReview, reconcileThreads, type ThreadPlan } from './threads.js';
 import { currentThreadAssessmentsForPrs, priorAssessmentsForProvider } from './thread-judgements.js';
-import { activeProviderId } from '../../ai/provider-setting.js';
+import { reviewDefaultProvider, reviewProvidersEnabled, reviewRunModel } from '../../ai/run-profile.js';
 import type { AgentProviderId } from '../../ai/provider.js';
 import { dropSettledReraises, similarTitles } from './settled-by-reply.js';
 import { attachFindingThreads } from './finding-replies.js';
@@ -394,8 +393,8 @@ export async function startReview(
   accountId: number,
   prId: number,
   model: ClaudeReviewModel,
-  // The per-run choice (ai/run-choice.ts, validated by the route). Absent ⇒ the default provider.
-  provider: AgentProviderId = activeProviderId(),
+  // The per-run choice (ai/run-choice.ts, validated by the route). Absent ⇒ Settings → AI's review vendor.
+  provider: AgentProviderId = reviewDefaultProvider(preflightFor(ctx)),
   // TRAILING: `fresh` ⇒ a from-scratch run (QueueItem.fresh). `pair` ⇒ a CLAUDE + CODEX PAIR: Claude
   // first, then Codex (`provider` is ignored); with only one of them able to review, just that one
   // runs (the route refuses a pair it cannot run). Absent ⇒ an ordinary run.
@@ -425,6 +424,9 @@ export async function startReview(
     const ready = open.length > 0 ? open : signedIn;
     if (ready.length > 0) provider = ready[0]!;
     if (ready.length === 2) pair = { role: 'first', pairId: 0, secondProvider: ready[1]! };
+    // Each half runs ITS vendor's Settings model (ai/run-profile.ts): the first half's here, the second's
+    // at its start (`startPairSecond`).
+    model = reviewRunModel(provider);
   }
 
   let reviewId: number;
@@ -627,14 +629,15 @@ async function startAutoItem(a: AutoItem): Promise<void> {
   const sayNotReady = () => {
     if (!sayOnPr) return;
     postAutoSkipLinesLater(ctx, { accountId, prId }, async () => {
-      const { activeRuntimeStatus } = await import('../../ai/active-runtime.js');
-      return [{ provider: activeProviderId(), reason: 'not_ready', notSetUp: activeRuntimeStatus().runtime !== 'ready' }];
+      const { runtimeStatusFor } = await import('../../ai/active-runtime.js');
+      const provider = singleReviewProvider(ctx);
+      return [{ provider, reason: 'not_ready', notSetUp: runtimeStatusFor(provider).runtime !== 'ready' }];
     });
   };
   try {
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
-    if (!agenticRunReady(ctx, 'review')) {
+    if (!agenticRunReady(ctx, 'review', singleReviewProvider(ctx))) {
       sayNotReady();
       return;
     }
@@ -652,9 +655,10 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // every provider is locked does a press run anyway (the reader's choice).
     const pick = (lockedOk: boolean): AgentProviderId[] =>
       automaticRunProviders({
-        defaultProvider: activeProviderId(),
+        // Settings → AI → Review: only the vendors switched on; "one vendor" = the first on and signed in.
+        defaultProvider: reviewDefaultProvider(detect),
         pair: wantsPair,
-        order: PAIR_ORDER,
+        order: reviewProvidersEnabled(),
         ready: (p) => detect(p, 'review').status === 'ok',
         locked: (p) => !lockedOk && isLockedOut(p, nowMs),
       });
@@ -664,7 +668,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       ctx.log.info(`auto claude review pr ${prId}: skipped — no provider outside its usage limit`);
       // Each provider that would have run: over its usage limit (with its end), else not signed in.
       if (sayOnPr) {
-        const wanted: AgentProviderId[] = wantsPair ? [...PAIR_ORDER] : [activeProviderId()];
+        const wanted: AgentProviderId[] = wantsPair ? reviewProvidersEnabled() : [reviewDefaultProvider(detect)];
         const skips = wanted.flatMap((p): AutoSkip[] => {
           if (isLockedOut(p, nowMs)) return [{ provider: p, reason: 'usage_limit', untilMs: usageLockout(p, nowMs)?.untilMs ?? null }];
           // A pair half that is simply not signed in is not a skip of a review it would run.
@@ -697,7 +701,8 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     if (a.retryOfReviewId != null) {
       if (!(await isAutoRetryStillDue(ctx, prId, accountId, prCtx.headSha, a.retryOfReviewId, a.pressed === true))) return;
     } else if (await isAutoReReviewSettled(ctx, prId, accountId, prCtx.headSha, a.commentsAtMs ?? null)) return;
-    const model = DEFAULT_CLAUDE_REVIEW_MODEL;
+    // The vendor's Settings model (ai/run-profile.ts); a pair's second half takes its own at its start.
+    let model = reviewRunModel(provider);
     // TEAM CLAIMS (team-claim.ts, always on): a teammate's Limn already holds
     // this head for this provider ⇒ drop the item with NO row (a skip is not a failure: no retry
     // count, no daily-cap use; the tab shows it from memory). Otherwise claim it. Never throws.
@@ -722,6 +727,7 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     }
     if (claim.kind === 'skip' && pair?.secondProvider) {
       provider = pair.secondProvider;
+      model = reviewRunModel(provider);
       pair = undefined;
       claim = await claimFor(provider);
     }
@@ -909,6 +915,9 @@ function startPairCover(item: QueueItem): void {
   const cover = p?.cover;
   if (!p || !cover) return;
   p.cover = undefined;
+  // ⚠ Held from now (synchronously, before the pair's seat is visibly free) until the cover ends: the
+  // auto fix queue must not seed from the half that succeeded while the cover still runs.
+  markPairCovering(p.pairId, true);
   void (async () => {
     let out: AutoPostOutcome | null = null;
     let hold: PairCoverHold | null = null;
@@ -933,6 +942,9 @@ function startPairCover(item: QueueItem): void {
       });
     } catch (err) {
       first.ctx.log.warn(`claude review pr ${first.prId}: cover check: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      // Released BEFORE the run-end hooks: their auto fix kick then reads the finished cover.
+      markPairCovering(p.pairId, false);
     }
     try {
       out = await runEnded(first, { ...cover.end, cover: hold });
@@ -1255,11 +1267,13 @@ async function startPairSecond(first: QueueItem): Promise<void> {
       why = 'stopped';
       return;
     }
+    // ITS vendor's Settings model (ai/run-profile.ts), which may differ from the first half's.
+    const model = reviewRunModel(provider);
     const reviewId = await insertQueuedReview(
       ctx,
       prId,
       first.headSha,
-      first.model,
+      model,
       accountId,
       [],
       first.trigger,
@@ -1275,7 +1289,7 @@ async function startPairSecond(first: QueueItem): Promise<void> {
       accountId,
       reviewId,
       prId,
-      model: first.model,
+      model,
       provider,
       headSha: first.headSha,
       prCtx: first.prCtx,
@@ -2252,6 +2266,8 @@ export async function finishInterruptedPairs(
         (async () => {
           let hold: PairCoverHold | null = null;
           if (covers) {
+            // The auto fix queue waits for this cover (as for a live pair's, `startPairCover`).
+            markPairCovering(pairId, true);
             try {
               const m = await import('./replies-check.js');
               const { coverReviewId } = await m.runCoverCheck(ctx, {
@@ -2272,6 +2288,8 @@ export async function finishInterruptedPairs(
               });
             } catch (err) {
               ctx.log.warn(`claude review pr ${r.prId}: cover check: ${err instanceof Error ? err.message : String(err)}`);
+            } finally {
+              markPairCovering(pairId, false);
             }
           }
           await runEnded(item, { reviewId: survivor.id, succeeded: true, cover: hold }, { slackSignal: false });

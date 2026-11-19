@@ -40,13 +40,18 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <b>Reviews you start.</b> In the <Ui>Model</Ui> menu of <Ui>Run a review</Ui>, <Ui>Claude + Codex</Ui> is
-          listed last while both providers can review, and it is the default. Pick a single model from the menu to
-          review with that one only.
+          listed last while both are on in <DocLink to="settings/ai#review">Settings → AI → Review</DocLink> and
+          signed in, and it is the default. Pick a single model from the menu to review with that one only.
         </li>
         <li>
           <b>Automatic reviews.</b> <Ui>Settings → AI review</Ui>, <Ui>Auto reviews use</Ui>:{' '}
-          <Ui>Claude + Codex (the default)</Ui>, or your default provider only. If only one is signed in when a review
-          starts, that one reviews alone and the setting says <Ui>Only one is signed in, so it reviews alone.</Ui>
+          <Ui>Claude + Codex (the default)</Ui>, or one vendor only: the first that is on and signed in, Claude before
+          Codex. If only one is on and signed in when a review starts, that one reviews alone and the setting says{' '}
+          <Ui>Only one is on and signed in, so it reviews alone.</Ui>
+        </li>
+        <li>
+          Each half runs at its own vendor&rsquo;s model and effort from <Ui>Settings → AI → Review</Ui>. The results
+          above were measured with both at the same effort.
         </li>
       </ul>
 

@@ -70,7 +70,10 @@ export default function Page(): JSX.Element {
         <li>
           Under <Ui>What to fix</Ui>, tick the items the agent should work on.
         </li>
-        <li>Pick the model from the <Ui>Model</Ui> menu.</li>
+        <li>
+          The <Ui>Model</Ui> menu opens on <DocLink to="settings/ai#ai-fix">Settings → AI → AI Fix</DocLink>. Pick
+          another model for this fix if you want to.
+        </li>
         <li>
           Optionally tick <Ui>Plan first</Ui> to talk the fix through before any code changes. See{' '}
           <DocLink to="ai-fix/plan-first">Plan first</DocLink>.
@@ -125,21 +128,39 @@ export default function Page(): JSX.Element {
 
       <H2 id="push-or-discard">Push or discard</H2>
       <p>
+        Before <Ui>Push</Ui> shows, Ensemble reviews the fix and the agent answers the review, for a few rounds. See{' '}
+        <DocLink to="ai-fix/push-and-auto-fix#review-rounds">Review rounds before the push</DocLink>.
+      </p>
+      <p>
         <Ui>Push</Ui> sends the change, as one commit with the agent's commit message, to the pull request's branch, or
         to a new branch with a new pull request. <Ui>Discard</Ui> removes the sandbox and pushes nothing. See{' '}
         <DocLink to="ai-fix/push-and-auto-fix">Push the fix, and auto fix</DocLink>.
       </p>
       <Warning>
-        The fix is pushed as it is. Ensemble does not build or test it again before the push; the agent's own test runs in
-        the sandbox are the only ones. Your CI runs on the pushed commit as usual.
+        The fix is pushed as it is. Ensemble reviews it but does not build or test it again before the push; the agent's
+        own test runs in the sandbox are the only ones. Your CI runs on the pushed commit as usual.
       </Warning>
 
       <H2 id="the-sandbox">The sandbox</H2>
       <p>The sandbox is a container on your computer, made for this fix and removed after it.</p>
       <ul>
         <li>
-          It holds the pull request's repository, at the pull request's latest commit, and the repositories of the
-          other pull requests of its ticket, read only. Other workspace repositories are not loaded.
+          It holds the pull request's repository, at the pull request's latest commit, and the workspace's other
+          repositories, read only at their default branch, so the agent can check code that calls or serves the pull
+          request. A repository with another open pull request of the same ticket is at that pull request&rsquo;s
+          latest commit instead, so the agent sees the change that is not merged yet. At most 12 repositories: the pull request's own, the ones of its ticket's other pull requests, your
+          related repositories, then the rest by name. The session names the ones it did not load.{' '}
+          <Ui>Settings → Sandbox → AI Fix reads every repository</Ui> (on by default) turns this off: then only the
+          pull request's repository and its ticket's come. A dependency fix always gets the short list.
+        </li>
+        <li>
+          When the workspace has reference documents, the relevant sections come in too, read only: the ticket's own
+          choice, else the whole library when it is small, else the sections that best match the pull request's words
+          and changed files.
+        </li>
+        <li>
+          Only the pull request's repository is pushed. A change the agent makes in another repository is shown under{' '}
+          <Ui>Left out</Ui> and never pushed.
         </li>
         <li>
           The agent has a shell there, so it can run the project's own tests, lint and type checks, and start the
@@ -162,6 +183,27 @@ export default function Page(): JSX.Element {
         on. See{' '}
         <DocLink to="security/ai-and-the-sandbox">AI and the sandbox</DocLink> for the full safety story.
       </p>
+      <H3 id="one-ticket-at-a-time">Pull requests of the same ticket</H3>
+      <p>
+        A fix reads the other open pull requests of its ticket that are in another repository. Fixes of those pull
+        requests take turns, so no fix works from another pull request&rsquo;s old code. While a fix of #12 runs, a fix
+        that reads #12 waits, and the tab says <Ui>Waiting for the fix of #12 (same ticket).</Ui> It starts by itself
+        when the fix of #12 is built, stopped or failed. <Ui>Start now</Ui> starts your fix at once, with #12 as it is
+        now. <Ui>Start fix</Ui> after <Ui>Plan first</Ui> waits the same way. Automatic fixes always wait.
+      </p>
+      <ul>
+        <li>
+          When the other pull request has a finished fix you have not pushed, the sandbox shows its repository with
+          that fix applied, read only. The session names it <Ui>PR #12&rsquo;s head plus its AI Fix not pushed yet</Ui>.
+          If that pull request changed since its fix was made, the fix is not applied, and the session says so.
+        </li>
+        <li>
+          When the other pull request changes after your fix is built, the tab says{' '}
+          <Ui>#12 changed after this fix was built.</Ui> A new fix of #12 built on top of yours does not count. The fix is
+          not pushed automatically then, and neither is a fix that builds on a fix of #12 that is not pushed yet.{' '}
+          <Ui>Push</Ui> still pushes it. Nothing runs again by itself.
+        </li>
+      </ul>
     </>
   );
 }

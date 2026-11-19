@@ -367,6 +367,22 @@ describe('POST /api/pro/ai-fixes/:fixId/push — as-is, no trunk step', () => {
     // The result carries only what happened: no strategy, no "resolved conflicts", no force.
     expect(res.json()).toEqual({ pushedBranch: 'feature', commitSha: 'c0ffee' });
     expect(markFixPushed).toHaveBeenCalledTimes(1);
+    // The row keeps the commit, and a press is not an automatic push.
+    expect((markFixPushed.mock.calls[0] as unknown[])[2]).toMatchObject({ pushedBranch: 'feature', commitSha: 'c0ffee', automatic: false });
+    await app.close();
+  });
+
+  it('⚠ an already-pushed fix ⇒ 409 NotPushable, nothing pushed (a stale tab after Push when done)', async () => {
+    const persist = await import('./persist.js');
+    vi.mocked(persist.getFixById).mockResolvedValueOnce({ ...SUCCEEDED_FIX, pushedAt: new Date(), pushedBranch: 'feature' } as never);
+    const app = await build();
+    for (const payload of [{ target: 'new', branch: 'feature-ai-fix' }]) {
+      const res = await push(app, payload);
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({ error: 'NotPushable', message: 'This fix is already pushed.' });
+    }
+    expect(applyAndPush).not.toHaveBeenCalled();
+    expect(markFixPushed).not.toHaveBeenCalled();
     await app.close();
   });
 

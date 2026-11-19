@@ -1739,6 +1739,62 @@ automatically.
 `how_to_test_seen_at` (timestamp). An existing table, so erasure and export already cover it. Additive; journal
 idx 204, `when` `1794384000000`. [STORY-BUILD.md](STORY-BUILD.md) § How to test after a build.
 
+### `0205_ai_fix_pushed_commit` — what an AI Fix push left
+
+`ALTER TABLE ai_fixes ADD pushed_commit_sha` (text) and `pushed_automatically` (integer bool, NOT NULL DEFAULT 0).
+Written only by `markFixPushed`; no backfill (an older pushed row shows its branch only). An existing table, so
+erasure and export already cover it. Additive; journal idx 205, `when` `1794470400000`.
+[CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Push when done.
+
+### `0206_ai_run_profiles` — Settings → AI's per-surface choices
+
+`ALTER TABLE accounts ADD ai_run_profiles` (text JSON, shared `AiRunProfiles`): the review per vendor, AI Fix and
+Implement story (vendor, model, effort; Implement's review rounds). NULL = never chosen, and every missing field
+falls back to `ai_effort`, the default provider and the usual models, so an existing install runs as before. No
+backfill. An existing table, so erasure and export already cover it. Additive; journal idx 206, `when`
+`1794556800000`. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The run profiles.
+
+### `0207_ai_fix_review_loop` — AI Fix's own review loop
+
+`ALTER TABLE ai_fixes ADD loop_state, loop_round (NOT NULL DEFAULT 0), loop_first_round (NOT NULL DEFAULT 0),
+loop_rounds, loop_stop, loop_base_sha, loop_review_id, loop_finished_at`; `CREATE TABLE ai_fix_loop_reviews` (with `step` / `rounds`: the round's place in its run),
+`ai_fix_loop_findings` (FK `(review_id, account_id)` → the runs, cascade), `ai_fix_loop_story_checks`,
+`ai_fix_loop_ac_responses`, each with `account_id` → `accounts` cascade and `fix_id` SOFT (`ai_fixes` is an
+ADOPTED table with no `(id, account_id)` unique to point at). New account-bearing tables: erased explicitly and
+listed in `accountScopedTables()`; both PR-keyed delete paths prune them (`db/ai-fix-loop-prune.ts`). No backfill:
+an older fix reads `loop: null`. Additive; journal idx 207, `when` `1794643200000`.
+[DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes.loop_*`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix → The review loop.
+
+### `0208_sandbox_fix_all_repos` — AI Fix reads every repository
+
+`ALTER TABLE sandbox_workspace_settings ADD fix_all_repos` (integer bool, nullable, no default): Settings → Sandbox →
+"AI Fix reads every repository". NULL = ON (no backfill: an existing row and a missing row both read as on); `0` =
+the narrow set. Read and written only by `db/sandbox-settings.ts`. An existing table, so erasure and export already
+cover it (the export lists the column). Additive; journal idx 208, `when` `1794729600000`.
+[SANDBOX.md](SANDBOX.md) § AI Fix sessions → Scope; [DATA-MODEL.md](DATA-MODEL.md) § `sandbox_workspace_settings`.
+
+### `0209_local_reviews` — local branch reviews
+
+`CREATE TABLE local_reviews` (one row per `ensemble mcp` / `ensemble review` run; `account_id` → `accounts`
+cascade; unique `(id, account_id)`; index `(account_id, repo_id, branch, id)`; the PARTIAL unique index
+`local_reviews_one_running (account_id, repo_id, branch) WHERE status = 'running'` — the start's claim, kept out of
+`schema.sqlite.ts` like `workspaces_one_default`) and `local_review_findings` (FK `(local_review_id, account_id)` →
+`local_reviews (id, account_id)` cascade). New account-bearing tables: erased explicitly, listed in
+`accountScopedTables()`, exported. No backfill. Additive; journal idx 209, `when` `1794816000000`.
+[DATA-MODEL.md](DATA-MODEL.md) § `local_reviews`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Reviewing a local branch.
+
+### `0210_ai_fix_sibling_state` — what an AI Fix read of its ticket's other PRs
+
+`ALTER TABLE ai_fixes ADD sibling_state_json` (text JSON, nullable, no default, no backfill): per open PR of the
+same ticket the fix read at its head: `{prId, number, repoId, headSha, overlayFixId, overlayPatchHash, builtFixIds,
+at}` — that head SHA, the sibling's built, unpushed AI Fix laid on it (or null) and its patch hash, and the sibling's
+built fix ids at that read. Written WITH EACH STORED PATCH (a build turn's), never by a boot or a Resume alone; a
+sibling whose repository failed to mirror keeps its earlier entry. NULL = none read (every older row reads "not stale").
+Staleness is computed on read, never stored. An existing account-scoped table: erasure already deletes it
+(`ai_fixes` is not in the data export). Additive; journal idx 210, `when` `1794902400000`.
+[DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The fix start queue;
+[SANDBOX.md](SANDBOX.md) § AI Fix sessions → Scope.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

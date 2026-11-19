@@ -110,7 +110,7 @@ describe('Settings → Auto review', () => {
     expect(pairReviewReady(me({ codex: true }))).toBe(false);
     expect(pairReviewReady(undefined)).toBe(false);
     const s = src('components/settings/AutoReviewSection.tsx');
-    expect(s).toContain('const pairReady = pairReviewReady(useMe().data);');
+    expect(s).toContain('const pairReady = pairReviewReady(meData);');
     // The whole block is behind the gate, with its ⓘ.
     const gate = s.indexOf('{pairReady && (');
     expect(gate).toBeGreaterThan(-1);

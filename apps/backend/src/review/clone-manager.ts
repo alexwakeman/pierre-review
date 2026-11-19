@@ -1,7 +1,11 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import {
+  closeSync,
+  createReadStream,
   existsSync,
   mkdirSync,
+  openSync,
+  readSync,
   readdirSync,
   rmSync,
   statSync,
@@ -367,6 +371,94 @@ export async function prepBranchWorktree(
 }
 
 /**
+ * WHERE A BRANCH REVIEW'S HEAD COMMIT COMES FROM (docs/CLAUDE-REVIEW.md § Reviewing a branch → The head
+ * source). Either
+ *   • a REMOTE branch — `remoteRef` on GitHub, fetched into the namespaced `destRef` only when `sha` is not
+ *     already in the clone cache (the Build loop's branches: it pushed them first); or
+ *   • a LOCAL PINNED REF — `localRef`, a ref under `refs/pierre/local/` in Ensemble's clone cache
+ *     (review/local-refs.ts) that already points at `sha`: a commit GitHub has never seen. It is NEVER
+ *     fetched (GitHub does not have it) and nothing here pushes it.
+ * The shape is told apart by `localRef` alone, so every existing `{ remoteRef, destRef, sha }` is unchanged.
+ */
+export type BranchHeadSource = { remoteRef: string; destRef: string; sha: string } | { localRef: string; sha: string };
+
+/** THE ONE NAMESPACE of local pinned refs (review/local-refs.ts owns the layout and the sweep). */
+export const LOCAL_PINNED_REF_PREFIX = 'refs/pierre/local/';
+
+export const isLocalHead = (h: BranchHeadSource): h is { localRef: string; sha: string } => 'localRef' in h;
+
+/**
+ * A local head, checked under the repo lock (the caller holds it): the clone exists, the ref is in the ONE
+ * namespace and points at `sha`. Throws a plain line otherwise. No network, no token.
+ */
+async function localHeadLocked(owner: string, name: string, h: { localRef: string; sha: string }): Promise<string> {
+  const dir = repoCloneDir(owner, name);
+  if (!existsSync(join(dir, '.git'))) throw new Error(`Ensemble has no copy of ${owner}/${name} to review.`);
+  if (!h.localRef.startsWith(LOCAL_PINNED_REF_PREFIX)) throw new Error('Not a local ref Ensemble keeps.');
+  let at = '';
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--verify', '--quiet', `${h.localRef}^{commit}`], { timeout: 10_000, maxBuffer: 1024 * 1024 });
+    at = stdout.trim();
+  } catch {
+    at = '';
+  }
+  if (at === '' || at !== h.sha) throw new Error('The commit to review is no longer in Ensemble\'s copy of the repository.');
+  return dir;
+}
+
+/** The token for an optional lazy blob fetch: a local head reads without one when `gh` gives none. */
+function optionalToken(token: string | undefined): string | null {
+  if (token != null) return token;
+  try {
+    return getGithubToken();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A WORKTREE AT A BRANCH REVIEW'S HEAD, from either head source (`BranchHeadSource`). A remote head is
+ * exactly `prepBranchWorktree`; a local head is checked out from the clone cache with no fetch at all.
+ * Detached; the caller owns its removal (`removeWorktreeLocked`).
+ */
+export async function prepHeadWorktree(
+  owner: string,
+  name: string,
+  head: BranchHeadSource,
+  token?: string,
+): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  if (!isLocalHead(head)) return prepBranchWorktree(owner, name, { remoteRef: head.remoteRef, destRef: head.destRef, sha: head.sha }, token);
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, head);
+    const worktreePath = await addWorktree(dir, head.sha, { owner, name });
+    return { repoCloneDir: dir, worktreePath, sha: head.sha };
+  });
+}
+
+/**
+ * A LOCAL COMMIT (a ref under `refs/pierre/local/`, pointing at `sha`) as a sandbox base: checked under the repo
+ * lock, NEVER fetched, and `pinRef` (the session's own base ref) pointed at it so it outlives the local ref. No
+ * worktree. The AI Fix sibling overlay (sandbox/workspace/store.ts `resolveBase`).
+ */
+export async function resolveLocalCommit(owner: string, name: string, h: { localRef: string; sha: string; pinRef?: string }): Promise<{ repoCloneDir: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, h);
+    if (h.pinRef) await git(['-C', dir, 'update-ref', h.pinRef, h.sha]);
+    return { repoCloneDir: dir, sha: h.sha };
+  });
+}
+
+/** `resolveLocalCommit` with a detached worktree at the commit (its blobs hydrated); the caller removes it. */
+export async function prepLocalCommitWorktree(owner: string, name: string, h: { localRef: string; sha: string; pinRef?: string }): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, h);
+    if (h.pinRef) await git(['-C', dir, 'update-ref', h.pinRef, h.sha]);
+    const worktreePath = await addWorktree(dir, h.sha, { owner, name });
+    return { repoCloneDir: dir, worktreePath, sha: h.sha };
+  });
+}
+
+/**
  * `prepBranchWorktree` WITHOUT the worktree: the same clone, fetch and `pinRef` rules under the same
  * repo lock, so the commit is known (and pinned) before anything reads its files. The sandbox's repo
  * store uses it to learn the base commit, then copies the objects from the reader's own clone when that
@@ -440,17 +532,42 @@ export async function localPrDiff(
 }
 
 /**
- * A BRANCH's diff in the clone cache (the story build's review loop, coding/story-build/loop/): three-dot
- * `base...head`, both commits ensured in the store (fetched by sha when missing — GitHub serves a pushed
- * commit by its sha). No PR, no gh. The same lock, blobless lazy fetch and token rules as `localPrDiff`.
+ * A BRANCH's diff in the clone cache (the review loop, coding/review-loop/): three-dot `base...head`.
+ * `head` is a sha (a REMOTE head: fetched by sha when missing — GitHub serves a pushed commit by its sha)
+ * or a `BranchHeadSource`. A LOCAL head (`localRef`) is never fetched: it must already be in the clone cache
+ * under its pinned ref; only a missing BASE is fetched (GitHub has the base). No PR, no gh. The same lock,
+ * blobless lazy fetch and token rules as `localPrDiff`.
  */
 export async function localBranchDiff(
   owner: string,
   name: string,
   baseSha: string,
-  headSha: string,
-  token: string = getGithubToken(),
+  head: string | BranchHeadSource,
+  token?: string,
 ): Promise<string> {
+  if (typeof head !== 'string' && isLocalHead(head)) return localHeadDiff(owner, name, baseSha, head, token);
+  const headSha = typeof head === 'string' ? head : head.sha;
+  return remoteBranchDiff(owner, name, baseSha, headSha, token ?? getGithubToken());
+}
+
+async function localHeadDiff(owner: string, name: string, baseSha: string, head: { localRef: string; sha: string }, token: string | undefined): Promise<string> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, head);
+    if (!(await hasCommit(dir, baseSha))) {
+      const tok = token ?? getGithubToken();
+      await git(['-C', dir, 'fetch', '--no-tags', '--force', tokenizedUrl(owner, name, tok), baseSha]);
+    }
+    const tok = optionalToken(token);
+    const { stdout } = await execFileAsync(
+      'git',
+      [...(tok != null ? insteadOfArgs(tok) : []), '-C', dir, 'diff', '--no-color', '--no-ext-diff', `${baseSha}...${head.sha}`],
+      { timeout: 300_000, maxBuffer: 512 * 1024 * 1024 },
+    );
+    return stdout;
+  });
+}
+
+async function remoteBranchDiff(owner: string, name: string, baseSha: string, headSha: string, token: string): Promise<string> {
   return withRepoLock(`${owner}/${name}`, async () => {
     const dir = await ensureClone(owner, name, token);
     for (const sha of [baseSha, headSha]) {
@@ -699,4 +816,136 @@ export function cleanupCloneCache(now: number = Date.now()): void {
   } catch {
     /* cleanup is advisory; never let it break a review run */
   }
+}
+
+/** A bundle the clone cache will not take: one plain line for the reader (never git's raw output). */
+export class BundleRefusedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BundleRefusedError';
+  }
+}
+
+/**
+ * A READER'S BRANCH, FROM A GIT BUNDLE (docs/CLAUDE-REVIEW.md § Reviewing a local branch; docs/SECURITY.md §
+ * Local branch reviews). Under the repo lock: the clone is made when missing, the BASE is fetched from GitHub
+ * by its sha when the cache lacks it (a base GitHub does not have is refused), then the bundle's pack is indexed
+ * with every object checked (`index-pack --strict`: fsck and links; hooks off; no FETCH_HEAD) and its ONE head
+ * pinned as `destRef` — a LOCAL PINNED REF (review/local-refs.ts). The head must be
+ * `headSha`. Nothing is pushed; no path from the request is read (the caller wrote the bundle to its own temp
+ * file). Throws `BundleRefusedError` with a plain line, or the underlying error for a failure of ours.
+ */
+export async function fetchBundleIntoClone(
+  owner: string,
+  name: string,
+  b: { bundlePath: string; baseSha: string; headSha: string; destRef: string },
+  token: string | null,
+): Promise<{ repoCloneDir: string }> {
+  if (!/^[0-9a-f]{40}$/.test(b.baseSha) || !/^[0-9a-f]{40}$/.test(b.headSha)) throw new BundleRefusedError('The base and head must be commit ids.');
+  if (!b.destRef.startsWith(LOCAL_PINNED_REF_PREFIX)) throw new Error('Not a local ref Ensemble keeps.');
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = existsSync(join(repoCloneDir(owner, name), '.git'))
+      ? repoCloneDir(owner, name)
+      : await ensureClone(owner, name, token ?? getGithubToken());
+    if (!(await hasCommit(dir, b.baseSha))) {
+      try {
+        if (token == null) throw new Error('no token');
+        await git(['-C', dir, 'fetch', '--no-tags', '--force', '--no-write-fetch-head', tokenizedUrl(owner, name, token), b.baseSha]);
+      } catch {
+        /* refused below */
+      }
+      if (!(await hasCommit(dir, b.baseSha))) {
+        throw new BundleRefusedError(`The base commit ${b.baseSha.slice(0, 12)} is not on GitHub. Push the base branch, or review against a base GitHub has.`);
+      }
+    }
+    let heads: string;
+    try {
+      ({ stdout: heads } = await execFileAsync('git', ['-C', dir, 'bundle', 'list-heads', b.bundlePath], { timeout: 30_000, maxBuffer: 1024 * 1024 }));
+    } catch {
+      throw new BundleRefusedError('The upload is not a git bundle.');
+    }
+    const list = heads
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const [sha, ref] = l.split(/\s+/, 2);
+        return { sha: sha ?? '', ref: ref ?? '' };
+      });
+    if (list.length !== 1 || list[0]!.sha !== b.headSha || !/^refs\/heads\/[A-Za-z0-9._/-]{1,200}$/.test(list[0]!.ref)) {
+      throw new BundleRefusedError('The bundle must carry exactly one branch, at the head commit it names.');
+    }
+    // THE PACK, CHECKED: the bundle's pack goes through `index-pack --fsck-objects` (every object fsck'd; a thin
+    // pack's bases come from the clone, a blobless clone's from GitHub), then the head's objects must connect
+    // (`rev-list --objects`, a blobless clone's missing blobs allowed). Not `git fetch <bundle>`: before git 2.46
+    // a bundle fetch ignores fetch.fsckObjects.
+    const offset = bundlePackOffset(b.bundlePath);
+    if (offset == null) throw new BundleRefusedError('The upload is not a git bundle.');
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(
+          'git',
+          [...(token != null ? insteadOfArgs(token) : []), '-c', 'core.hooksPath=/dev/null', '-C', dir, 'index-pack', '--fsck-objects', '--fix-thin', '--stdin'],
+          { stdio: ['pipe', 'ignore', 'pipe'] },
+        );
+        let stderr = '';
+        const timer = setTimeout(() => child.kill('SIGKILL'), 300_000);
+        child.stderr.on('data', (c: Buffer) => {
+          if (stderr.length < 8192) stderr += c.toString('utf8');
+        });
+        child.on('error', reject);
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          if (code === 0) resolve();
+          else reject(Object.assign(new Error('index-pack failed'), { stderr }));
+        });
+        child.stdin.on('error', () => {});
+        createReadStream(b.bundlePath, { start: offset }).pipe(child.stdin);
+      });
+    } catch (err) {
+      const line = (err as { stderr?: string }).stderr?.split('\n').find((l) => /error|fatal/i.test(l))?.replace(/https:\/\/[^@\s]+@/g, 'https://') ?? '';
+      throw new BundleRefusedError(`Ensemble could not read the bundle${line ? `: ${line.replace(/^(fatal|error):\s*/i, '').trim().slice(0, 200)}` : '.'}`);
+    }
+    try {
+      await execFileAsync('git', ['-C', dir, 'rev-list', '--quiet', '--objects', '--missing=allow-promisor', b.headSha, '--not', b.baseSha], {
+        env: { ...process.env, GIT_NO_LAZY_FETCH: '1' },
+        timeout: 300_000,
+        maxBuffer: 1024 * 1024,
+      });
+    } catch {
+      throw new BundleRefusedError('The bundle is missing objects of the head commit.');
+    }
+    await git(['-C', dir, 'update-ref', b.destRef, b.headSha]).catch(() => {
+      throw new BundleRefusedError('The bundle did not give the head commit it names.');
+    });
+    const { stdout } = await execFileAsync('git', ['-C', dir, 'rev-parse', '--verify', '--quiet', `${b.destRef}^{commit}`], { timeout: 10_000, maxBuffer: 1024 * 1024 }).catch(() => ({ stdout: '' }));
+    if (stdout.trim() !== b.headSha) throw new BundleRefusedError('The bundle did not give the head commit it names.');
+    return { repoCloneDir: dir };
+  });
+}
+
+/**
+ * Where a bundle's PACK starts (after its header: the signature, capabilities, prerequisites, refs and a blank
+ * line), or null when the file is not a v2 / v3 bundle. Reads at most the first 1 MB.
+ */
+export function bundlePackOffset(path: string): number | null {
+  let head: Buffer;
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      head = Buffer.alloc(1024 * 1024);
+      const n = readSync(fd, head, 0, head.length, 0);
+      head = head.subarray(0, n);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+  const text = head.toString('latin1');
+  if (!text.startsWith('# v2 git bundle\n') && !text.startsWith('# v3 git bundle\n')) return null;
+  const end = text.indexOf('\n\n');
+  if (end < 0) return null;
+  const pack = end + 2;
+  return text.slice(pack, pack + 4) === 'PACK' ? pack : null;
 }

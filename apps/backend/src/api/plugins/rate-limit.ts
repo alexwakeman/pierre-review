@@ -134,6 +134,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // THE EFFORT LEVEL: PUT /api/ai/effort (same file, same shape: one validated UPDATE of one column,
   // held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
   if (path === '/api/ai/effort') return [TIERS.read];
+  // THE RUN PROFILES: PUT /api/ai/run-profiles (same file, same shape: one validated UPDATE of one JSON
+  // column, held in memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
+  if (path === '/api/ai/run-profiles') return [TIERS.read];
   // "USE MY API KEYS FIRST": PUT /api/ai/api-key (same file, same shape: one boolean column, held in
   // memory — no model, no GitHub, no process). `read`, decided; EXACT `===`.
   if (path === '/api/ai/api-key') return [TIERS.read];
@@ -594,12 +597,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // Spelled out so the family cannot drift with the /api/pro/ catch-all below, which would park the
   // teardown and the stream on `ai`, FOLLOWING THE TOKEN:
   //   POST /api/pro/prs/:id/ai-fix/plan                       boots a sandbox + a plan turn   → ai + ai_hourly
+  //   POST /api/pro/prs/:id/ai-fix/start-now                  a waiting press starts now      → ai + ai_hourly
   //   POST /api/pro/ai-fixes/:fixId/(message|plan/message)    one agent turn                  → ai + ai_hourly
   //   POST /api/pro/ai-fixes/:fixId/plan/approve · …/resume   a build turn / a sandbox boot   → ai + ai_hourly
   //   POST …/discard · …/plan/discard · …/network/allow       a teardown / one allow-list row → read
   //   GET  …/session/stream                                   attaches to a running session   → read
   // (The start, POST /api/pro/prs/:id/ai-fix, is a generating POST of the catch-all: ai + ai_hourly.)
-  if (mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/plan$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  if (mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/(plan|start-now)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
   if (mutating && /^\/api\/pro\/ai-fixes\/\d+\/(message|plan\/message|plan\/approve|resume)$/.test(path))
     return [TIERS.ai, TIERS.aiHourly];
   if (/^\/api\/pro\/ai-fixes\/\d+\/(discard|plan\/discard|network\/allow|session\/stream)$/.test(path)) return [TIERS.read];
@@ -638,6 +642,18 @@ function tierFor(method: string, path: string): readonly Tier[] {
   if (path === '/api/story-chats' || path.startsWith('/api/story-chats/')) {
     if (mutating && path === '/api/story-chats/ask') return [TIERS.ai, TIERS.aiHourly];
     if (mutating && path === '/api/story-chats/prepare') return [TIERS.sync];
+    return [TIERS.read];
+  }
+  // REVIEW A LOCAL BRANCH (local-review/routes.ts; docs/CLAUDE-REVIEW.md § Reviewing a local branch). FOLLOWING
+  // THE TOKEN:
+  //   POST /api/local-reviews            one review run (one or two model halves + the story check) AND git work:
+  //                                      a bundle of up to 25 MB fetched (fsck) into the clone cache, and the
+  //                                      base fetched FROM GITHUB by its sha when the cache lacks it   → ai + ai_hourly + sync
+  //   GET list / GET :id (a long-poll ≤ 50 s) / POST :id/cancel: DB and memory only                 → read
+  // ⚠ Spelled EXACTLY here (the GitHub-touching start included): the `hitsGithub` alternation further down is
+  // anchored to `/api/prs/\d+/` and never sees this family.
+  if (path === '/api/local-reviews' || path.startsWith('/api/local-reviews/')) {
+    if (mutating && path === '/api/local-reviews') return [TIERS.ai, TIERS.aiHourly, TIERS.sync];
     return [TIERS.read];
   }
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
@@ -851,6 +867,10 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // selects and a calendar fold, no GitHub, no model. `read`, DECIDED (spelled exactly) rather than
   // inherited from the blanket.
   if (!mutating && /^\/api\/prs\/\d+\/review-waits$/.test(path)) return [TIERS.read];
+  // GET /api/prs/<id>/askable-people — the PR pane's "Someone else" picker: who authored or merged a
+  // PR in the workspace, grouped in two selects. No GitHub, no model. `read`, DECIDED (spelled
+  // exactly); asking rides the existing `request-reviewers` write (github_write).
+  if (!mutating && /^\/api\/prs\/\d+\/askable-people$/.test(path)) return [TIERS.read];
   // GET /api/threads/<id> hydrates the same way.
   if (!mutating && /^\/api\/threads\/\d+$/.test(path)) return [TIERS.prDetail, TIERS.read];
   // POST /api/prs/<id>/refresh — the PrDetail live poll (~every 5s while a PR pane is

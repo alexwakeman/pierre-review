@@ -63,13 +63,14 @@ function matchesQuery(user: MentionCandidate, query: string): boolean {
  *
  * The cap is applied AFTER the hoist and that order is the whole point: sorting only
  * the visible eight leaves a maintainer who ranks ninth by proximity absent from a
- * list whose job is to reach exactly them.
+ * list whose job is to reach exactly them. Also the PR pane's "Someone else" picker
+ * (ReviewerPicker.tsx) — ONE matcher for every people box.
  */
-export function orderMentionSuggestions(
-  candidates: MentionCandidate[],
+export function orderMentionSuggestions<T extends MentionCandidate>(
+  candidates: readonly T[],
   query: string,
   limit = MAX_SUGGESTIONS,
-): MentionCandidate[] {
+): T[] {
   const matched = candidates.filter((u) => matchesQuery(u, query));
   const maintainers = matched.filter((u) => u.isMaintainer);
   const others = matched.filter((u) => !u.isMaintainer);

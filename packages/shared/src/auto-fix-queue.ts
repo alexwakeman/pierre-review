@@ -7,7 +7,7 @@
 //     PR's CURRENT head (the AI review and the CI review of that head), so nothing already fixed is sent.
 // Each fix is its own run and its own push. This file is the wire contract and the plain words.
 
-import type { AiFixStatus } from './types.js';
+import { AUTO_FIX_DAILY_CAP, type AiFixStatus } from './types.js';
 
 /** How long a CI fix waits for the AI review of the same head. */
 export const AUTO_FIX_REVIEW_WAIT_MS = 15 * 60_000;
@@ -25,6 +25,8 @@ export type AutoFixQueueReason =
   | 'fix_running'
   | 'push_settling'
   | 'sandbox_busy'
+  // a fix of another PR of the same ticket runs (the fix start queue's per-ticket line)
+  | 'ticket_fix_running'
   | 'over_budget'
   | 'no_sandbox'
   // ended, until the PR changes
@@ -32,7 +34,16 @@ export type AutoFixQueueReason =
   | 'cap'
   | 'already_tried'
   | 'nothing_to_fix'
-  | 'not_started';
+  // the head is the push of an AI fix whose OWN review loop reviewed it (its closing review is the PR's AI
+  // review at that head): no auto fix starts from that review
+  | 'reviewed_by_fix'
+  // the auto review that would seed the fix will not run today (the workspace's daily cap)
+  | 'review_capped'
+  // faults: the fix did not start (the sweep decides again each minute, so a passing one clears)
+  | 'no_ai_login'
+  | 'review_unavailable'
+  | 'pr_unavailable'
+  | 'error';
 
 export type AutoFixQueueStatus = 'waiting' | 'started' | 'idle';
 
@@ -61,14 +72,34 @@ export const AUTO_FIX_QUEUE_LINE: Record<AutoFixQueueReason, string> = {
   fix_running: 'A fix is running. The next one starts when it ends, from what is still open then.',
   push_settling: 'Waiting for the pushed fix to reach the pull request.',
   sandbox_busy: 'Waiting for a free sandbox.',
+  ticket_fix_running: 'Waiting for the fix of another pull request of the same ticket.',
   over_budget: 'Paused: the AI spend limit is reached.',
   no_sandbox: 'Paused: no container runtime is running on this computer.',
   fix_waiting: 'A finished fix is waiting for you to push it.',
-  cap: 'No more auto fixes on this pull request today.',
+  cap: `No auto fix: ${AUTO_FIX_DAILY_CAP} already ran on this pull request in the last 24 hours.`,
   already_tried: 'The last auto fix could not address these points. Nothing changed since.',
   nothing_to_fix: 'Nothing to fix.',
-  not_started: 'The auto fix could not start.',
+  reviewed_by_fix: 'The AI fix reviewed this commit before it pushed it. No auto fix starts from that review.',
+  review_capped: 'No auto review today: the daily limit is reached.',
+  no_ai_login: 'No auto fix: AI is not signed in on this computer.',
+  review_unavailable: 'No auto fix: the review could not be read.',
+  pr_unavailable: 'No auto fix: the pull request could not be read from GitHub.',
+  error: 'No auto fix: an error stopped it.',
 };
+
+/** `review_capped` with the workspace's cap in force (the sweeper's own number). */
+export function autoReviewCappedLine(cap: number): string {
+  return `No auto review today: the limit of ${cap} is reached.`;
+}
+
+/** The ended reasons the sweep decides again each minute (a fault that may pass; a cap that resets). */
+export const AUTO_FIX_QUEUE_REDECIDE: ReadonlySet<AutoFixQueueReason> = new Set<AutoFixQueueReason>([
+  'review_capped',
+  'no_ai_login',
+  'review_unavailable',
+  'pr_unavailable',
+  'error',
+]);
 
 /** One auto fix of a PR, for the AI Review tab's history (newest first). */
 export interface AutoFixHistoryRow {
@@ -130,4 +161,42 @@ export function autoFixRowLine(r: Pick<AutoFixActiveRow, 'status' | 'failed' | '
   if (r.status === 'succeeded') return 'Ready to push';
   if (r.status === 'cancelled') return 'Stopped';
   return 'Ended';
+}
+
+// ── AI FIX'S OWN REVIEW LOOP: why it stopped (shared ai-fix-loop.ts; docs/CLAUDE-REVIEW.md § AI Fix → The
+// review loop). ONE line each, shown in the AI Fix tab and named in the docs. A loop that stopped for any
+// reason leaves the fix as built: the existing push rules still decide (it is never queued or retried) — except
+// Stop on an UNATTENDED fix, which discards it, so 'stopped' never claims the fix is kept.
+export type AiFixLoopStop =
+  // ended as planned
+  | 'clean'
+  | 'rounds'
+  | 'cannot_meet'
+  // stopped early
+  | 'budget'
+  | 'stopped'
+  | 'review_failed'
+  | 'fix_failed'
+  | 'no_reviewer'
+  | 'session_closed'
+  | 'interrupted'
+  | 'not_pushable';
+
+export const AI_FIX_LOOP_STOP_LINE: Record<AiFixLoopStop, string> = {
+  clean: 'Reviewed: nothing is open.',
+  rounds: 'Reviewed: the review rounds are used up. What is still open is listed below.',
+  cannot_meet: 'Stopped: only criteria the agent says cannot be done are open.',
+  budget: 'Stopped: the AI spend limit is reached. The fix so far is kept.',
+  stopped: 'You stopped the review.',
+  review_failed: 'Stopped: the review did not finish. The fix so far is kept.',
+  fix_failed: 'Stopped: the agent could not finish the fixes. The fix so far is kept.',
+  no_reviewer: 'Not reviewed: no AI review vendor is on and signed in.',
+  session_closed: 'Stopped: the session closed. The fix so far is kept.',
+  interrupted: 'Stopped: Ensemble restarted during the review. The fix so far is kept.',
+  not_pushable: 'Stopped: the latest changes cannot be pushed.',
+};
+
+/** THE PER-TICKET LINE's words (a fix waits for the fix of another PR of the same ticket). Pure. */
+export function ticketFixWaitLine(prNumber: number): string {
+  return `Waiting for the fix of #${prNumber} (same ticket).`;
 }

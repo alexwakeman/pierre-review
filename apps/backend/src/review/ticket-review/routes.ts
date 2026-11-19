@@ -23,7 +23,8 @@ import { getReviewPrContext } from '../claude-review/persist.js';
 import { postStoryGapsComment } from './post-item.js';
 import { deriveTicketReviewState, readLiveMembers, ticketHash } from './fingerprint.js';
 import { config } from '../../config.js';
-import { agenticRunReady } from '../claude-review/ai-ready.js';
+import { agenticRunReady, singleReviewProvider } from '../claude-review/ai-ready.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import { autoReviewAvailable } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { automaticRunAllowed } from '../budget-gate.js';
@@ -148,8 +149,8 @@ async function statesFor(
     autoBase = {
       accountId,
       enabled: new Map(roster.map((w) => [w.workspaceId, w.enabledAtMs])),
-      aiReady: agenticRunReady(ctx, 'ticket_review'),
-      overBudget: roster.length > 0 && !(await automaticRunAllowed(ctx, accountId, 'ticket review')),
+      aiReady: agenticRunReady(ctx, 'ticket_review', singleReviewProvider(ctx)),
+      overBudget: roster.length > 0 && !(await automaticRunAllowed(ctx, accountId, 'ticket review', singleReviewProvider(ctx))),
       laneRoom: ticketAutoLaneRoom(),
       dailyCap: config.ticketReviewDailyCap,
       readerUserId: await readerUserIdOf(ctx, accountId).catch(() => null),
@@ -224,7 +225,8 @@ export function registerTicketReviewRoutes(app: FastifyInstance, ctx: AgentConte
       reply.status(404);
       return { error: 'NotFound', message: `PR ${body.prId} not found` };
     }
-    const auth = ctx.llm.detectAuth('ticket_review');
+    // The vendor the story check will run on (Settings → AI → Review), not the default provider.
+    const auth = preflightFor(ctx)(singleReviewProvider(ctx), 'ticket_review');
     if (auth.status === 'none') {
       reply.status(400);
       return { error: 'NoClaudeAuth', message: auth.message };

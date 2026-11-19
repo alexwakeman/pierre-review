@@ -91,6 +91,7 @@ import {
   storyLoopWire,
 } from '../../coding/story-build/loop/driver.js';
 import { clampLoopRounds } from '@pierre-review/shared';
+import { buildLoopRounds } from '../../ai/run-profile.js';
 import { defaultSandboxSettings, readSandboxSettings, type SandboxSettingsRow } from '../../db/sandbox-settings.js';
 import { resolveSandboxAgentChoice, startSandboxAgent, type SandboxAgentChoice, type SandboxAgentDriver, type SandboxUsageSink } from '../drivers/index.js';
 import { credentialModeLine } from '../proxy/credentials.js';
@@ -591,7 +592,7 @@ export interface StartSessionArgs {
   docs?: boolean;
   /** "Push and open the pull request when the build finishes" (coding/story-build/auto-push.ts). */
   autoPush?: boolean;
-  /** With `autoPush`: the review loop's rounds (clamped 1..6; default 4, STORY_BUILD_LOOP_ROUNDS_DEFAULT). */
+  /** With `autoPush`: the review loop's rounds (clamped 1..6). Absent ⇒ Settings → AI → Implement story rounds (ai/run-profile.ts `buildLoopRounds`, default 5). */
   loopRounds?: number;
   /** "Approve the plan automatically" (plan.ts `afterChatTurn`). */
   autoApprovePlan?: boolean;
@@ -707,7 +708,7 @@ export async function startSession(ctx: AgentContext, a: StartSessionArgs): Prom
   if (a.docs === true || a.autoPush === true || a.autoApprovePlan === true || a.endToEnd === true) {
     await updateStoryBuild(ctx, a.accountId, id, {
       ...(a.docs === true ? { withDocs: true } : {}),
-      ...(a.autoPush === true ? { autoPush: true, loopRounds: clampLoopRounds(a.loopRounds) } : {}),
+      ...(a.autoPush === true ? { autoPush: true, loopRounds: a.loopRounds !== undefined ? clampLoopRounds(a.loopRounds) : buildLoopRounds() } : {}),
       ...(a.autoApprovePlan === true ? { autoApprovePlan: true } : {}),
       ...(a.endToEnd === true ? { endToEnd: true } : {}),
     }).catch(() => {});
@@ -777,7 +778,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     stopIfClosing(l);
 
     const settings = (await deps.settings(accountId, l.workspaceId)) ?? defaultSandboxSettings(l.workspaceId);
-    const repos = await deps.repos(ctx, accountId, await sub.repoIds(memberRepoIds));
+    const repos = await deps.repos(ctx, accountId, await sub.repoIds(memberRepoIds, { l, settings }));
     if (repos.length === 0) throw new SessionFail('No repository in this workspace to work in.');
     const places = deps.places();
     const resolved = resolveWorkspaceLayout(
@@ -1646,7 +1647,8 @@ export async function discardSession(ctx: AgentContext, accountId: number, build
 export type ResumeResult = SessionActionResult | { status: 'no_runtime'; message: string } | { status: 'too_many'; message: string } | { status: 'not_resumable'; message: string };
 
 /** Resume's shared checks, then the boot (any subject). The caller checked the row is resumable. */
-export async function resumeLive(make: () => Live): Promise<ResumeResult | null> {
+/** `memberRepoIds`: the workspace's members NOW, for a subject that recomputes its set at boot (AI Fix). */
+export async function resumeLive(make: () => Live, memberRepoIds: readonly number[] = []): Promise<ResumeResult | null> {
   const { maxOpen } = sessionLimits();
   if (openSessionCount() >= maxOpen) return { status: 'too_many', message: tooManyLine(maxOpen) };
   const detected = await deps.runtime().detect();
@@ -1655,7 +1657,7 @@ export async function resumeLive(make: () => Live): Promise<ResumeResult | null>
   if (live.has(l.key) || openSessionCount() >= maxOpen) return { status: 'not_ready', message: 'This session is running.' };
   live.set(l.key, l);
   await setPhase(l, 'booting', { error: null, completedAt: null });
-  void boot(l, []);
+  void boot(l, memberRepoIds);
   return null;
 }
 
@@ -1670,7 +1672,7 @@ export async function resumeSession(ctx: AgentContext, accountId: number, buildI
     return { status: 'not_resumable', message: 'Only a session with stored changes or a plan can be resumed. Start again instead.' };
   }
   const provider: AiProviderId = row.provider === 'codex' ? 'codex' : 'claude';
-  const choice = resolveSandboxAgentChoice({ provider, model: row.model ?? 'claude-sonnet-5' });
+  const choice = resolveSandboxAgentChoice({ provider, model: row.model ?? 'claude-sonnet-5', surface: 'build' });
   const r = await resumeLive(() => {
     const state = readSessionState(row.sessionJson);
     state.boot = [];

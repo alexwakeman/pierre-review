@@ -385,7 +385,7 @@ describe('the routes: Claude + Codex start, Post (one review)', () => {
     const a = await app({ claude: true, codex: false });
     const r = await a.inject({ method: 'POST', url: '/api/prs/1/claude-review', payload: { pair: true } });
     expect(r.statusCode).toBe(400);
-    expect(r.json()).toEqual({ error: 'PairUnavailable', message: 'Claude + Codex needs both signed in.' });
+    expect(r.json()).toEqual({ error: 'PairUnavailable', message: 'Claude + Codex needs both on in Settings → AI and signed in.' });
     const bad = await a.inject({ method: 'POST', url: '/api/prs/1/claude-review', payload: { pair: 'true' } });
     expect(bad.statusCode).toBe(400);
   });

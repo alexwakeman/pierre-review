@@ -31,7 +31,7 @@ process.env.DISABLE_SCHEDULER = 'true';
 
 // `aiReady` lets one test hold the kick's own immediate sweep back, so the NEXT tick sees the kick.
 let aiReady = true;
-vi.mock('../claude-review/ai-ready.js', () => ({ agenticRunReady: () => aiReady }));
+vi.mock('../claude-review/ai-ready.js', async (orig) => ({ ...(await orig<typeof import('../claude-review/ai-ready.js')>()), agenticRunReady: () => aiReady }));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 let db: any;

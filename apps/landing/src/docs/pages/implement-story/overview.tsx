@@ -161,7 +161,7 @@ export default function Page(): JSX.Element {
       <Steps>
         <li>The agent plans. Ensemble approves the plan, taking every open point as Agree.</li>
         <li>
-          The agent builds. Ensemble reviews the work and the agent fixes it, for up to 4 rounds. It stops early when a round
+          The agent builds. Ensemble reviews the work and the agent fixes it, for up to 5 rounds (Settings → AI). It stops early when a round
           finds nothing open.
         </li>
         <li>
@@ -225,7 +225,10 @@ export default function Page(): JSX.Element {
           gets up to two automatic continuations, each of which asks your spend budget first. Every turn uses your own
           subscription or key, and the session's <Ui>Spend</Ui> panel shows what it has used.
         </li>
-        <li>Settings → AI → Effort reaches the session's turns too.</li>
+        <li>
+          The session runs on the vendor, model and effort in Settings → AI → Implement story. Its review rounds use
+          the Review settings.
+        </li>
       </ul>
       <H3>Stop and discard</H3>
       <Note>

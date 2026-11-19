@@ -58,6 +58,18 @@ export default function Page(): JSX.Element {
         <code>.claude/skills</code> come with its code, and the AI is told where each one is. The build tab counts all
         of this before you press <Ui>Start</Ui>.
       </p>
+      <H3>AI Fix reads every repository</H3>
+      <p>
+        On by default. An AI Fix gets every repository of the workspace, read only at its default branch (or at the
+        latest commit of another open pull request of the same ticket), beside the
+        pull request&rsquo;s own: at most 12, the pull request&rsquo;s own first, then its ticket&rsquo;s, your related
+        repositories, and the rest by name. The session names the ones it did not load. Turn it off for only the pull
+        request&rsquo;s repository and the repositories of its ticket&rsquo;s other pull requests. AI Fix pushes only to
+        the pull request&rsquo;s branch either way, and a dependency fix always gets the short list.
+      </p>
+      <Illustration label="The AI Fix reads every repository switch, on." caption="The AI Fix repositories switch for one workspace.">
+        <SettingsRow label="AI Fix reads every repository" control={<Toggle on />} />
+      </Illustration>
       <H3>Hosts always allowed</H3>
       <p>
         The sandbox reaches the internet only through Ensemble&rsquo;s network filter. Add a host here to allow it for

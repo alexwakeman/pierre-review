@@ -60,6 +60,13 @@ export interface RepoBaseRequest {
    * `refs/pull/<n>/head` (a fork's head included). Absent ⇒ `refs/heads/<baseRef>` (or `HEAD`).
    */
   remoteRef?: string;
+  /**
+   * A LOCAL commit Ensemble made in its OWN clone cache and never pushed (review/local-refs.ts: a ref under
+   * `refs/pierre/local/`), named with `baseSha` (required then): an AI Fix's sibling OVERLAY — the sibling PR's
+   * head with its built, unpushed fix on top (sandbox/session/fix.ts `bases`). Nothing is fetched for it, and the
+   * reader's clone is never read for it (it does not have the commit). Absent ⇒ a commit GitHub has.
+   */
+  localRef?: string;
 }
 
 /** A complete depth-1 repository on the host, ready to stream in. */
@@ -106,7 +113,16 @@ export async function shallowFromClone(cloneDir: string, sha: string): Promise<P
 
 export const defaultMirrorSeams: MirrorSeams = {
   async prepare(req) {
-    const { prepBranchWorktree, removeWorktreeLocked } = await import('../../review/clone-manager.js');
+    const { prepBranchWorktree, prepLocalCommitWorktree, removeWorktreeLocked } = await import('../../review/clone-manager.js');
+    if (req.localRef != null) {
+      if (req.baseSha == null) throw new Error('A local commit needs its id.');
+      const wt = await prepLocalCommitWorktree(req.owner, req.name, { localRef: req.localRef, sha: req.baseSha, pinRef: req.pinRef });
+      try {
+        return await shallowFromClone(wt.repoCloneDir, wt.sha);
+      } finally {
+        await removeWorktreeLocked(req.owner, req.name, wt.repoCloneDir, wt.worktreePath).catch(() => {});
+      }
+    }
     const remoteRef = req.remoteRef ?? (req.baseRef === 'HEAD' ? 'HEAD' : `refs/heads/${req.baseRef}`);
     const wt = await prepBranchWorktree(req.owner, req.name, {
       remoteRef,

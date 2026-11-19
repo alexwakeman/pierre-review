@@ -269,6 +269,24 @@ describe('the seed of an AI Fix session', () => {
   it('⚠ a plain fix (dependency automation): FIX.md byte-for-byte the golden', () =>
     golden('seed-fix-plain.md', buildSeed(fixInput({ task: { kind: 'plain', text: 'The test job fails: fix it.' }, shownRefs: [], unattended: true, contextTicket: null })).fixMd!));
 
+  it('the read-only context paragraph (docs/SANDBOX.md § AI Fix sessions → Scope): other repositories, the reference documents, or neither', () => {
+    const para = (md: string): string | undefined => md.split('\n').find((l) => l.includes('read-only context'));
+    // Other repositories only (the golden).
+    expect(para(buildSeed(fixInput()).fixMd!)).toBe('The other repositories here are read-only context. Use them to check contracts across repositories, for example an API that this PR calls or serves. A change that another repository needs is out of scope: do not make it, and name it in the `summary` of your report.');
+    // Repositories and documents.
+    const withDocs = buildSeed({ ...fixInput(), docs: { dir: '/home/agent/.limn/docs' } });
+    expect(para(withDocs.fixMd!)).toContain('The other repositories here and the reference documents in `/home/agent/.limn/docs/` are read-only context.');
+    expect(para(withDocs.fixMd!)).toContain('For the documents, start at INDEX.md.');
+    // The PR's repository alone: no paragraph, and the repositories section says so.
+    const alone = fixInput();
+    const one = buildSeed({ ...alone, layout: { ...alone.layout, repos: alone.layout.repos.slice(0, 1) } });
+    expect(para(one.fixMd!)).toBeUndefined();
+    expect(one.claudeMd).toContain("The pull request's repository is cloned here, on the branch `limn/fix-pr-77` with no remote:");
+    // The PR's repository alone, with documents: the documents only.
+    const oneDocs = buildSeed({ ...alone, layout: { ...alone.layout, repos: alone.layout.repos.slice(0, 1) }, docs: { dir: '/d' } });
+    expect(para(oneDocs.fixMd!)).toMatch(/^The reference documents in `\/d\/` are read-only context\./);
+  });
+
   it('writes FIX.md, PR.diff, the context TICKET.md, the refs and the checker; never into a repository', () => {
     const s = buildSeed(fixInput());
     expect(s.files.map((f) => f.path)).toEqual([

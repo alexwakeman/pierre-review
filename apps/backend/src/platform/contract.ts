@@ -4,6 +4,7 @@ import type {
   FastifyBaseLogger,
 } from 'fastify';
 import type {
+  AiEffort,
   BotWindowKind,
   CheckLogsResponse,
   ClaudeFindingSeverity,
@@ -384,15 +385,21 @@ export interface RunReviewArgs {
   // WHO TO BILL, for a provider that writes its own ledger row (Codex: a ChatGPT run is US$ 0, so the
   // manager's cost-gated row would never be written; ai/provider.ts `usageRecord`). Claude ignores it
   // and the manager records Claude's run exactly as before. Core-only.
-  usage?: { accountId: number; prId: number | null; repoId?: number | null };
+  // `feature` names the ledger row Codex writes (absent ⇒ 'claude_review'; a local branch review passes its own).
+  usage?: { accountId: number; prId: number | null; repoId?: number | null; feature?: string };
+  // ONE RUN'S EFFORT, named by the reader for this run only (a local branch review's `effort` argument):
+  // used in place of Settings → AI → Review's level (a diff-only run one step lower, as the setting). A set
+  // REVIEW_EFFORT still wins. Absent ⇒ exactly as before. Core-only.
+  effort?: AiEffort;
   // Asked before EACH specialist starts on a CODEX deep review, where Limn runs them as separate runs
   // (ai/codex/specialists.ts `allowStart`; the manager passes the spend-budget gate for an automatic
   // review). Claude's specialists are sub-agents of the one run and never ask it. Core-only.
   allowSpecialistStart?: (lens: string) => boolean | Promise<boolean>;
-  // A BRANCH with no PR (the story build's review loop, coding/story-build/loop/): a worktree run checks
-  // out this commit through `prepBranchWorktree` instead of fetching a PR head. `prNumber` is then 0 and
+  // A BRANCH with no PR (the review loop, coding/review-loop/): a worktree run checks out this commit
+  // through `prepHeadWorktree` instead of fetching a PR head — a REMOTE branch ({remoteRef, destRef, sha})
+  // or a LOCAL PINNED REF ({localRef, sha}: review/local-refs.ts, never fetched). `prNumber` is then 0 and
   // unused. Absent ⇒ exactly as before. Core-only.
-  checkout?: { remoteRef: string; destRef: string; sha: string };
+  checkout?: { remoteRef: string; destRef: string; sha: string } | { localRef: string; sha: string };
 }
 
 /** One peer a deep review checks out read-only (RunReviewArgs.peers). */
@@ -606,9 +613,9 @@ export interface ReviewSeam {
   // Fetch (gh pr diff) + noise-strip + per-file metrics + cap — everything the plugin needs
   // to route + build the prompt, keeping every diff primitive in core so anchoring is stable.
   prepareReview(args: { owner: string; name: string; prNumber: number }): Promise<PreparedReview>;
-  // THE REVIEW LOOP (coding/story-build/loop/): the same preparation for a BRANCH with no pull request —
-  // the clone cache's `base...head` diff. Core-only.
-  prepareBranchReview(args: { owner: string; name: string; baseSha: string; headSha: string }): Promise<PreparedReview>;
+  // THE REVIEW LOOP (coding/review-loop/): the same preparation for a BRANCH with no pull request — the
+  // clone cache's `base...head` diff. `localRef`: the head is a LOCAL PINNED REF (never fetched). Core-only.
+  prepareBranchReview(args: { owner: string; name: string; baseSha: string; headSha: string; localRef?: string }): Promise<PreparedReview>;
   // Run the SDK review (clone/worktree, submit_review MCP, auth policy, cost); returns anchored
   // findings. Streams progress via onProgress; abortable via the AbortController.
   runReview(args: RunReviewArgs): Promise<RunReviewResult>;

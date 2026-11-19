@@ -124,7 +124,7 @@
 import type { ClaudeAutoReviewWaiting } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import type { AgentContext } from '../agent-context.js';
-import { agenticRunReady } from './ai-ready.js';
+import { agenticRunReady, singleReviewProvider } from './ai-ready.js';
 import {
   AUTO_RETRY_BACKOFF_FIRST_MS,
   AUTO_RETRY_BACKOFF_LATER_MS,
@@ -422,14 +422,18 @@ export interface AutoSweepPress {
 
 let sweeping = false;
 
-// The DEFAULT provider now (Settings → AI): an automatic run goes to it. Lazy, so this module's
-// import stays light; a test may pin it.
-const defaultProviderOf = async (): Promise<'claude' | 'codex'> =>
-  (await import('../../ai/provider-setting.js')).activeProviderId();
-let currentProviderOf: () => Promise<'claude' | 'codex'> = defaultProviderOf;
+// The vendor an automatic run goes to now: Settings → AI → Review's "one vendor", asked WITH the
+// pre-flight (`singleReviewProvider`) exactly as `startAutoItem` (manager.ts) asks it, so the retry rule's
+// "current provider" is the one the retry would start on. A test may pin it.
+const defaultProviderOf = async (ctx: AgentContext): Promise<'claude' | 'codex'> => singleReviewProvider(ctx);
+let currentProviderOf: (ctx: AgentContext) => Promise<'claude' | 'codex'> = defaultProviderOf;
 /** Test hook. */
 export function _setAutoProviderForTest(p: (() => 'claude' | 'codex') | null): void {
   currentProviderOf = p ? async () => p() : defaultProviderOf;
+}
+/** The retry rule's "current provider" (exported for its test). */
+export function autoRetryProviderNow(ctx: AgentContext): Promise<'claude' | 'codex'> {
+  return currentProviderOf(ctx);
 }
 
 /**
@@ -458,7 +462,7 @@ export async function runAutoReviewSweep(
   }
   // AI not set up yet (no runtime, or no Claude credential): queue nothing, so no PR gets a failed
   // row that would use up its one automatic review. The PRs still qualify on a later tick.
-  if (!agenticRunReady(ctx, 'review')) {
+  if (!agenticRunReady(ctx, 'review', singleReviewProvider(ctx))) {
     result.stopped = 'ai_not_ready';
     // THE SKIPPED LINE (team-claim-skip.ts): the tick says so on each due head, once. A press does not
     // (the SPA shows its own line, and the next tick posts).
@@ -658,7 +662,7 @@ export async function runAutoReviewSweep(
       for (const cand of res.retry ?? []) {
         if (!only(cand.prId) || waiting.has(cand.prId)) continue;
         if (await heldByTeammate(cand.prId, cand.headSha)) continue;
-        providerNow ??= await currentProviderOf().catch(() => cand.provider);
+        providerNow ??= await autoRetryProviderNow(ctx).catch(() => cand.provider);
         // The usage reading's reset, read only when the rule could need it (a usage limit whose
         // error names no time, on the same provider).
         let usageResetAtMs: number | null = null;
@@ -1051,11 +1055,10 @@ async function postSkippedHeads(ctx: AgentContext, heads: readonly SkippedHead[]
       let skips: Array<import('./team-claim-skip.js').AutoSkip>;
       if (h.reason === 'not_ready') {
         if (!notReady) {
-          const [{ activeProviderId }, { activeRuntimeStatus }] = await Promise.all([
-            import('../../ai/provider-setting.js'),
-            import('../../ai/active-runtime.js'),
-          ]);
-          notReady = { provider: activeProviderId(), notSetUp: activeRuntimeStatus().runtime !== 'ready' };
+          // The vendor the review would run on (Settings → AI → Review), as the readiness gate asked.
+          const { runtimeStatusFor } = await import('../../ai/active-runtime.js');
+          const provider = singleReviewProvider(ctx);
+          notReady = { provider, notSetUp: runtimeStatusFor(provider).runtime !== 'ready' };
         }
         skips = [{ provider: notReady.provider, reason: 'not_ready', notSetUp: notReady.notSetUp }];
       } else {

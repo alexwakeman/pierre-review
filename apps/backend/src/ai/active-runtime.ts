@@ -10,5 +10,10 @@ import { withAiSwitch } from './tool-switches.js';
 // ⚠ AI SWITCHED OFF in Settings → Features reads as 'absent' here (ai/tool-switches.ts), so every surface
 // that asks shows the not-set-up line and every automatic run waits, with the download left on disk.
 export function activeRuntimeStatus(): AiRuntimeStatus {
-  return withAiSwitch(activeProviderId() === 'codex' ? getCodexRuntimeStatus() : getAiRuntimeStatus());
+  return runtimeStatusFor(activeProviderId());
+}
+
+/** One provider's download (a run resolved to a vendor other than the default asks about ITS program). */
+export function runtimeStatusFor(provider: 'claude' | 'codex'): AiRuntimeStatus {
+  return withAiSwitch(provider === 'codex' ? getCodexRuntimeStatus() : getAiRuntimeStatus());
 }

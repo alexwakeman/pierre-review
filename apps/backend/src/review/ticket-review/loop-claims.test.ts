@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildTicketReviewPrompt, membersIndex, type PromptMember } from './prompts.js';
 import { buildSubmitTicketReviewShape } from './schema.js';
-import { claimVerdictsOf } from '../../coding/story-build/loop/story-check.js';
+import { claimVerdictsOf } from '../../coding/review-loop/story-check.js';
 import { shapeToJsonSchema, toStrictJsonSchema } from '../../ai/result-schemas.js';
 
 const member = (over: Partial<PromptMember> = {}): PromptMember => ({

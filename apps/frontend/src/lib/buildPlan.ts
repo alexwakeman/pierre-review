@@ -49,9 +49,69 @@ export function decisionsWithPending(
   return out;
 }
 
-/** A press on a card's button: the chosen one again clears it; another one sets it. */
-export function nextDecision(current: BuildPlanDecision | undefined, pressed: BuildPlanDecision): BuildPlanDecision | null {
-  return current === pressed ? null : pressed;
+// ── the decision wizard (components/StoryBuild/PlanDecisionWizard.tsx) ──────────────────────────
+//
+// One step per point of contention, in the plan's order, then a last "Review" step (index =
+// contentions.length) that holds "Approve and start". The step the wizard OPENS on is derived here, once
+// per revision (on mount, and the wizard remounts on a new revision); after that only the reader moves it,
+// so a teammate's or a second tab's answer never moves the reader's step.
+
+/**
+ * A pick on a step. The chosen answer again KEEPS it (the wizard then moves on); to change an answer the
+ * reader picks the other one. Never null: the wizard never clears an answer.
+ */
+export function pickDecision(_current: BuildPlanDecision | undefined, pressed: BuildPlanDecision): BuildPlanDecision {
+  return pressed;
+}
+
+/** The step the wizard opens on: the first unanswered point, else Review (`contentions.length`). */
+export function firstOpenStep(contentions: readonly Pick<BuildPlanContention, 'id'>[], decided: Readonly<Record<string, unknown>>): number {
+  const i = contentions.findIndex((c) => decided[c.id] == null);
+  return i < 0 ? contentions.length : i;
+}
+
+/**
+ * Where a pick on step `index` moves to: the next unanswered point after it, else Review. `decided` is
+ * the answers WITH the pick laid over them.
+ */
+export function stepAfterPick(contentions: readonly Pick<BuildPlanContention, 'id'>[], decided: Readonly<Record<string, unknown>>, index: number): number {
+  for (let i = index + 1; i < contentions.length; i++) if (decided[contentions[i]!.id] == null) return i;
+  return contentions.length;
+}
+
+/** A step index kept inside the wizard's range (0 … Review). */
+export function clampStep(step: number, contentions: readonly unknown[]): number {
+  return Math.max(0, Math.min(step, contentions.length));
+}
+
+/** "Point 2 of 4". */
+export function planStepLabel(index: number, total: number): string {
+  return `Point ${index + 1} of ${total}`;
+}
+
+/** The criteria a point is about, in one line ("AC2, AC4"); null when it names none. */
+export function aboutLine(about: readonly string[]): string | null {
+  return about.length > 0 ? about.join(', ') : null;
+}
+
+export interface PlanReviewLine {
+  id: string;
+  /** The step to go back to. */
+  step: number;
+  /** "Point 2". */
+  label: string;
+  about: string | null;
+  problem: string;
+  /** The reader's answer in words ("Agree"); null while open. */
+  choice: string | null;
+}
+
+/** The Review step's lines: one per point, with the answer or null (open). */
+export function planReviewLines(contentions: readonly BuildPlanContention[], decided: Readonly<Record<string, BuildPlanDecision | undefined>>): PlanReviewLine[] {
+  return contentions.map((c, i) => {
+    const d = decided[c.id];
+    return { id: c.id, step: i, label: `Point ${i + 1}`, about: aboutLine(c.about), problem: c.problem, choice: d != null ? PLAN_DECISION_WORDS[d] : null };
+  });
 }
 
 // ── Approve and start ──────────────────────────────────────────────────────────────────────────

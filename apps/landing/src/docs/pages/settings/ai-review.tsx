@@ -40,7 +40,8 @@ export default function Page(): JSX.Element {
         <li>Drafts wait until they are marked ready.</li>
         <li>
           A reviewed pull request is reviewed again when new commits are pushed, or when a person or a review bot adds
-          review comments. Ensemble&rsquo;s own comments never start a review. Pushes and comments that arrive close
+          review comments. Ensemble&rsquo;s own comments never start a review, and neither does a commit an AI fix
+          pushed: Ensemble already reviewed it before the push. Pushes and comments that arrive close
           together wait until the pull request has been quiet for 5 minutes (20 minutes at most).
         </li>
         <li>

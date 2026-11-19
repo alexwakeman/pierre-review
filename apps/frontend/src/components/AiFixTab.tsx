@@ -1,4 +1,4 @@
-import { fixWaitingLine } from '../lib/aiFixProgress.js';
+import { fixCanStartNow, fixWaitingLine } from '../lib/aiFixProgress.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
@@ -31,6 +31,7 @@ import {
   useAiFix,
   useAiFixPreview,
   useCancelFix,
+  useStartFixNow,
   useDiscardFix,
   useFixAllow,
   useFixMessage,
@@ -48,13 +49,17 @@ import {
   fixMergeBlockedLine,
   fixMergeLine,
   fixPushable,
+  fixPushFooter,
   fixRepoStatus,
   fixSessionHoldsPr,
   fixSessionShown,
+  fixLoopStatusLine,
   fixSessionStatusLine,
   leftOutLine,
+  type FixPushFooter,
 } from '../lib/aiFixSession.js';
 import { ApprovedPlanNote, PlanHistory } from './AiFix/PlanPanel.js';
+import { FixLoopSection } from './AiFix/FixLoopSection.js';
 import { useClaudeReview, useClaudeReviewById } from '../hooks/useClaudeReview.js';
 import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
 import { ApiError } from '../api/client.js';
@@ -167,8 +172,9 @@ function FixerSection({
   const setPrDetailTab = useFilters((s) => s.setPrDetailTab);
 
   // THE PER-RUN MODEL MENU (lib/modelPick.ts): every signed-in provider that can run a fix, opening on
-  // the DEFAULT provider's model at the shared default's depth (Opus 5.5, at Settings → AI → Effort,
-  // read server-side) — the same constant the start route falls back to.
+  // Settings → AI → AI Fix's vendor and model (none stored ⇒ the default provider at the shared default's
+  // depth, Opus 5.5 — the same constant the start route falls back to). The effort is AI Fix's, read
+  // server-side.
   const modelPick = useModelPick('fix', DEFAULT_AI_FIX_MODEL);
   // The info text names the provider the menu PICKED (the run about to start), not the default.
   const pickedName = aiProviderName(modelPick.chosen.provider);
@@ -206,7 +212,8 @@ function FixerSection({
   // A live session holds the PR: the picker waits until it ends.
   // THE FIX START QUEUE: a fix waiting for a free sandbox holds the PR too (it starts by itself).
   const waiting = data?.waiting ?? null;
-  const holdsPr = fixSessionHoldsPr(session) || fixStarting || waiting != null;
+  // A push on its way holds it too (`AiFix.pushing`: the session closed before the push): no "New fix" until it settles.
+  const holdsPr = fixSessionHoldsPr(session) || fixStarting || waiting != null || fix?.pushing === true;
 
   // The picker: the server's items for this review, the reader's ticks on top. A new review (or a
   // hand-over) starts from the defaults again.
@@ -322,7 +329,7 @@ function FixerSection({
           </p>
         ) : (
           <>
-            {waiting != null && <FixWaitingLine prId={pr.id} line={fixWaitingLine(waiting)} />}
+            {waiting != null && <FixWaitingLine prId={pr.id} line={fixWaitingLine(waiting)} startNow={fixCanStartNow(waiting)} />}
 
             {!holdsPr && !fixSource && !reviewLoading && !preview.isLoading && (
               <div className="flex flex-wrap items-center gap-2">
@@ -446,6 +453,10 @@ function FixerSection({
               <FixSession pr={pr} fix={fix} session={session} partials={stream.partials} headRef={data?.headInfo?.headRef ?? pr.headRefName ?? null} />
             )}
 
+            {/* AI FIX'S OWN REVIEW LOOP: the rounds, what each found and what the agent did, why it stopped. */}
+            {/* The progress sentence is said ONCE: in the session's status line when that shows, else here. */}
+            {fix?.loop != null && <FixLoopSection prId={pr.id} loop={fix.loop} showProgress={!(sessionShown && session != null)} />}
+
             {fix && !turnRunning && session?.phase !== 'booting' && (
               <FixResult
                 pr={pr}
@@ -545,7 +556,7 @@ function FixSession({
     <div data-testid="ai-fix-session" className="mt-3">
       <p data-testid="ai-fix-session-status" className="flex flex-wrap items-center gap-2 text-meta text-ui-mute">
         {fix.trigger === 'auto' && <AutoFixChip />}
-        <span>{fixMergeBlockedLine(fix.merge, session) ?? fixSessionStatusLine(session, fix.unattended === true)}</span>
+        <span>{fixLoopStatusLine(fix.loop) ?? fixMergeBlockedLine(fix.merge, session) ?? fixSessionStatusLine(session, fix.unattended === true)}</span>
         {session.model != null && <span>· {aiRunLabel(session.provider, session.model, session.effort)}</span>}
       </p>
       <SharedSessionView
@@ -689,6 +700,10 @@ function FixResult({
   const pushable = fixPushable(fix);
   const errorTone = fixErrorTone(fix);
   const leftOut = (fix.leftOut ?? []).filter((x) => x.files.length > 0);
+  // THE PUSH FOOTER's line (`fixPushFooter`): an AUTOMATIC push that failed (never retried), or "Push when done"
+  // held. Drawn HERE, not in PushControls, so the reason shows even when Push is not offered (no write access,
+  // a merge the reader cannot push, an invalid merge).
+  const footer = fixPushFooter(fix, { headRef: headInfo?.headRef ?? pr.headRefName ?? null, repoFullName: pr.repoFullName });
 
   return (
     <div className="mt-3 border-t border-ui-line pt-3">
@@ -703,9 +718,8 @@ function FixResult({
         {runLabelOf(fix)}
         {fix.finishedAt && <> · {relativeTime(fix.finishedAt)}</>}
       </p>
-      {/* An AUTOMATIC push that failed (auto-push.ts): recorded on the succeeded row's `error`,
-          never retried — Push below still works. */}
-      {fix.pushedAt == null && errorTone === 'warn' && (
+      {/* A row's own error. An AUTOMATIC push that failed is the push footer's line (`fixPushFooter`). */}
+      {fix.pushedAt == null && errorTone === 'warn' && !(fix.error ?? '').startsWith('Automatic push failed') && (
         <p className="mb-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-warn">
           {fix.error}
         </p>
@@ -759,6 +773,16 @@ function FixResult({
             <FileDiffView files={diffFiles} />
           </div>
         </div>
+      )}
+      {footer.kind === 'failed' && (
+        <p data-testid="ai-fix-push-line" className="mt-3 rounded-ui bg-ui-raise p-2 text-meta text-ui-warn">
+          {footer.line}
+        </p>
+      )}
+      {footer.kind === 'held' && (
+        <p data-testid="ai-fix-push-line" className="mt-3 text-meta text-ui-mute">
+          {footer.line}
+        </p>
       )}
       {pushable && (
         <PushControls
@@ -833,11 +857,19 @@ function MergeResult({ merge, headSha }: { merge: AiFixMerge; headSha: string | 
   );
 }
 
-function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
+function PushedCard({ fix, footer }: { fix: AiFix; footer: Extract<FixPushFooter, { kind: 'pushed' }> }): JSX.Element {
   return (
-    <div className="mb-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-success">
+    <div data-testid="ai-fix-pushed" className="mb-2 rounded-ui bg-ui-raise p-2 text-meta text-ui-success">
       <div>
-        Pushed to <span className="font-mono">{fix.pushedBranch}</span>
+        Pushed to <span className="font-mono">{footer.branch}</span>
+        {footer.commitUrl != null && (
+          <>
+            {' · '}
+            <a href={safeExternalUrl(footer.commitUrl)} target="_blank" rel="noreferrer" className="hit font-mono underline">
+              {footer.shortSha}
+            </a>
+          </>
+        )}
         {fix.pushedPrUrl && (
           <>
             {' · '}
@@ -853,6 +885,7 @@ function PushedCard({ fix }: { fix: AiFix }): JSX.Element {
         )}
         {fix.pushedAt && <> · {relativeTime(fix.pushedAt)}</>}
       </div>
+      {footer.automatic && <div className="mt-0.5">Pushed automatically</div>}
       {fix.commitMessage && (
         <div className="mt-1 font-mono text-meta text-ui-success">
           {fix.commitMessage}
@@ -928,7 +961,7 @@ function PushControls({
   fix: AiFix;
   headInfo: PrHeadInfo | null;
   viewerCanPush: boolean;
-}): JSX.Element {
+}): JSX.Element | null {
   const push = usePushFix(pr.id);
 
   const canPushSameBranch = headInfo?.canPushSameBranch ?? false;
@@ -948,8 +981,20 @@ function PushControls({
     }
   }, [headInfo, mergeOnly]);
 
-  // A pushed fix — to the PR's own branch or to a new one — is a record, nothing more.
-  if (fix.pushedAt != null) return <PushedCard fix={fix} />;
+  // THE PUSH FOOTER (lib/aiFixSession.ts `fixPushFooter`): a pushed fix — to the PR's own branch or to a new
+  // one — is a record, nothing more; while an automatic push runs there is no button.
+  const footer = fixPushFooter(fix, { headRef: headInfo?.headRef ?? pr.headRefName ?? null, repoFullName: pr.repoFullName });
+  if (footer.kind === 'pushed') return <PushedCard fix={fix} footer={footer} />;
+  // THE REVIEW LOOP works: nothing is pushed until it ends, so no Push. The round is already said once (the
+  // session's status line, or the loop section), so the footer says nothing.
+  if (footer.kind === 'reviewing') return null;
+  if (footer.kind === 'pushing') {
+    return (
+      <p data-testid="ai-fix-pushing" className="mt-3 text-meta text-ui-mute">
+        Pushing to {footer.branch != null ? <span className="font-mono">{footer.branch}</span> : 'the PR branch'}…
+      </p>
+    );
+  }
 
   if (!viewerCanPush) {
     return (
@@ -982,6 +1027,7 @@ function PushControls({
 
   return (
     <div className="mt-3 rounded-ui bg-ui-surface p-2">
+      {/* The failed / held line sits above this box (FixResult), so it shows when Push is not offered too. */}
       {fix.commitMessage && (
         <div
           className="mb-2 rounded-ui bg-ui-surface px-2 py-1 font-mono text-meta text-ui-ink"
@@ -1055,11 +1101,31 @@ function PushControls({
 }
 
 /** THE FIX START QUEUE: the PR's fix waits for a free sandbox; Cancel takes it out of line (nothing ran). */
-function FixWaitingLine({ prId, line }: { prId: number; line: string | null }): JSX.Element {
+function FixWaitingLine({ prId, line, startNow }: { prId: number; line: string | null; startNow: boolean }): JSX.Element {
   const cancel = useCancelFix(prId);
+  const now = useStartFixNow(prId);
   return (
     <div data-testid="ai-fix-waiting" className="mb-3 flex flex-wrap items-center gap-2 rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-ink">
       <span>{line}</span>
+      {startNow && (
+        <>
+          <InfoButton title="Waiting for the same ticket">
+            <p>
+              A pull request of this ticket that this fix reads is being fixed. This fix starts when that one ends: built,
+              stopped or failed. When it is built and not pushed, this fix reads it with that fix applied.
+            </p>
+            <p className="mt-2">Start now starts it at once, with that pull request as it is now.</p>
+          </InfoButton>
+          <button type="button" data-testid="ai-fix-start-now" className={BTN_PRIMARY} disabled={now.isPending || cancel.isPending} onClick={() => now.mutate()}>
+            Start now
+          </button>
+        </>
+      )}
+      {now.isError && (
+        <span data-testid="ai-fix-start-now-error" className="w-full text-meta text-ui-danger">
+          {errText(now.error)}
+        </span>
+      )}
       <button type="button" className={BTN_SECONDARY} disabled={cancel.isPending} onClick={() => cancel.mutate()}>
         Cancel
       </button>

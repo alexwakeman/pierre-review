@@ -19,6 +19,8 @@ describe('tierFor — AI generation', () => {
     // AI Fix's workspace session: a boot, a turn, Start fix and Resume spend an agent run; the
     // teardown, an Allow click and the stream are reads.
     expect(tiers('POST', '/api/pro/prs/12/ai-fix/plan')).toEqual(['ai', 'ai_hourly']);
+    // "Start now" (a press waiting behind the same ticket's fix) boots a sandbox and a build turn.
+    expect(tiers('POST', '/api/pro/prs/12/ai-fix/start-now')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);
@@ -197,6 +199,20 @@ describe('tierFor — implement story', () => {
 
 // The CI review: only the start spends model money (and reads the head's checks and logs); the
 // batched states read is DB-only and a POST only because it carries a list.
+describe('tierFor — local branch review', () => {
+  it('bills the start as AI generation plus git work (the bundle intake and the base fetch from GitHub)', () => {
+    expect(tiers('POST', '/api/local-reviews')).toEqual(['ai', 'ai_hourly', 'sync']);
+  });
+  it('keeps the reads, the long-poll and cancel on read', () => {
+    expect(tiers('GET', '/api/local-reviews')).toEqual(['read']);
+    expect(tiers('GET', '/api/local-reviews/12')).toEqual(['read']);
+    expect(tiers('POST', '/api/local-reviews/12/cancel')).toEqual(['read']);
+  });
+  it('spells the path exactly: a look-alike gets nothing from it', () => {
+    expect(tiers('POST', '/api/local-reviewsx')).toEqual(['read']);
+  });
+});
+
 describe('tierFor — CI review', () => {
   it('bills only the start as AI generation', () => {
     expect(tiers('POST', '/api/ci-reviews')).toEqual(['ai', 'ai_hourly']);
@@ -830,6 +846,12 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('POST', '/api/prs/42/request-reviewers')).toEqual(['github_write']);
   });
 
+  // "Someone else" (the PR pane's picker) is DB only: who authored or merged a PR in the workspace.
+  // `read`, decided; the press rides `request-reviewers` (github_write).
+  it('puts the "Someone else" people list on read', () => {
+    expect(tiers('GET', '/api/prs/42/askable-people')).toEqual(['read']);
+  });
+
   // The Changes tab's two click-gated file reads: a gap marker's "Show N hidden lines" (one file's
   // raw text) and "Load full diff" (both sides + the merge base). Spelled with their exact segments
   // — `files/contents` (GitHub's own plural) or `file/content` must NOT ride the detail bucket.
@@ -1034,6 +1056,8 @@ describe('the AI runtime download', () => {
     expect(tiers('PUT', '/api/ai/provider')).not.toContain('ai');
     expect(tiers('PUT', '/api/ai/effort')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/effort')).not.toContain('ai');
+    expect(tiers('PUT', '/api/ai/run-profiles')).toEqual(['read']);
+    expect(tiers('PUT', '/api/ai/run-profiles')).not.toContain('ai');
     expect(tiers('PUT', '/api/ai/api-key')).toEqual(['read']);
     expect(tiers('PUT', '/api/ai/api-key')).not.toContain('ai');
   });

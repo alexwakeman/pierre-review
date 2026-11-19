@@ -1,3 +1,4 @@
+import { aiRunProfilesStatus } from '../../ai/run-profile-status.js';
 import type { FastifyInstance } from 'fastify';
 import type {
   AiKindStatus,
@@ -214,6 +215,7 @@ function agenticAiStatus(): MeResponse['ai'] {
       provider,
       providerSetting: aiProviderSettingStatus(),
       effortSetting: aiEffortSettingStatus(),
+      runProfiles: aiRunProfilesStatus(),
       apiKeySetting: apiKeySettingStatus(),
       providers: {
         claude: { auth: 'none', route: 'none', message: null, runtime: 'absent', runtimeMessage: null },
@@ -256,7 +258,8 @@ function agenticAiStatus(): MeResponse['ai'] {
     provider,
     providerSetting: aiProviderSettingStatus(),
     effortSetting: aiEffortSettingStatus(),
-      apiKeySetting: apiKeySettingStatus(),
+    runProfiles: aiRunProfilesStatus(),
+    apiKeySetting: apiKeySettingStatus(),
     providers: {
       claude: {
         auth: claudeRoute === 'none' ? 'none' : 'ok',

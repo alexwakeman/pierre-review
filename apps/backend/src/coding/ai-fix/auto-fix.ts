@@ -1,8 +1,8 @@
 // AUTO FIX — after an AUTO Claude review succeeds on the reader's OWN pull request, start ONE
 // review-seeded AI Fix (CORE, free, local-only, like the rest of the agentic surface).
 //
-// THE GATE, in order (the first that fails decides; every skip is logged and kept in memory for the
-// Claude Review tab's one line, `autoFixOutcomeFor`):
+// THE GATE, in order (the first that fails decides; every skip is logged and returned to THE AUTO FIX
+// QUEUE, whose ONE line in the Auto fix section says it — auto-fix-queue.ts, shared AUTO_FIX_QUEUE_LINE):
 //   0. the PR's author IS the account's own GitHub user (pull_requests.author_id → users.github_login
 //      vs accounts.github_login, case-insensitive). Anyone else's PR: nothing happens and nothing is
 //      recorded — fixing someone else's branch is never automatic;
@@ -25,6 +25,10 @@
 //   5. `cap`             — AUTO_FIX_DAILY_CAP auto fixes already started on this PR in the last 24h;
 //   6. `already_tried`   — the latest auto fix AT THIS HEAD reported every item this review would
 //                          send as not addressed (nobody has pushed since, so nothing changed).
+//   FAULTS (each its own reason since 2026-11-18, when `not_started` was split): `review_unavailable`
+//   (the seed's review could not be read), `no_ai_login` (the start found no AI sign-in),
+//   `pr_unavailable` (the PR or its head could not be read), `error` (anything else, thrown or an
+//   unmapped start answer — the message is LOGGED, never shown). The queue's sweep decides them again.
 // Then `startReviewFix(…, trigger: 'auto')` — the button's own start, as an UNATTENDED session: one
 // build turn, then the session closes (the row stays resumable); the auto push follows the close.
 // ⚠ AN AUTO FIX NEVER PLANS: plan mode is a person steering and approving, so only the manual
@@ -73,37 +77,14 @@ import { getFixPrContext } from './pr-context.js';
 import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/auto-settings.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
 import { requestModelOf } from '../../ai/provider.js';
+import { fixChoice } from '../../ai/run-profile.js';
+import { preflightFor } from '../../ai/run-choice.js';
 import { trueAuthorId } from '../../db/true-author.js';
 import { automationAllowedForPr } from '../../db/external-repos.js';
 
 // At most AUTO_FIX_DAILY_CAP (shared) AUTO fixes per PR in any rolling AUTO_FIX_WINDOW_MS.
 export { AUTO_FIX_DAILY_CAP };
 export const AUTO_FIX_WINDOW_MS = 24 * 60 * 60 * 1000;
-
-// reviewId → the outcome, with its owner. Bounded: the oldest entry goes first.
-const OUTCOMES_MAX = 500;
-const outcomes = new Map<number, { accountId: number; outcome: ClaudeAutoFixOutcome }>();
-
-function record(accountId: number, outcome: ClaudeAutoFixOutcome): void {
-  outcomes.delete(outcome.reviewId);
-  outcomes.set(outcome.reviewId, { accountId, outcome });
-  while (outcomes.size > OUTCOMES_MAX) {
-    const first = outcomes.keys().next().value;
-    if (first === undefined) break;
-    outcomes.delete(first);
-  }
-}
-
-/** The recorded auto-fix outcome of one review, for its owner only. */
-export function autoFixOutcomeFor(reviewId: number, accountId: number): ClaudeAutoFixOutcome | null {
-  const o = outcomes.get(reviewId);
-  return o && o.accountId === accountId ? o.outcome : null;
-}
-
-/** Test hook. */
-export function _resetAutoFixForTest(): void {
-  outcomes.clear();
-}
 
 /** Is the PR's author the account's own GitHub user? Unknown on either side ⇒ false. */
 export async function prAuthorIsAccount(
@@ -211,7 +192,6 @@ export async function maybeStartAutoFix(
   const { accountId, prId, reviewId } = input;
   const skip = (reason: ClaudeAutoFixSkipReason): AutoFixDecision => {
     const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'skipped', reason };
-    if (reviewId != null) record(accountId, outcome);
     ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) skipped: ${reason}`);
     return outcome;
   };
@@ -221,8 +201,11 @@ export async function maybeStartAutoFix(
     if (!(await automationAllowedForPr(accountId, prId, ctx))) return skip('off');
     const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, prId);
     if (!ws?.enabled) return skip('off');
+    // THE VENDOR AND MODEL, resolved ONCE (Settings → AI → AI Fix, ai/run-profile.ts `fixChoice`): the gate
+    // asks about the vendor the fix will run on, and the start below is handed that same vendor.
+    const profile = fixChoice(preflightFor(ctx), 'fix');
     // THE CLAUDE SPEND BUDGET (ai/budget.ts): over it, no auto fix — the next auto review decides again.
-    if (!(await automaticRunAllowed(ctx, accountId, 'auto fix'))) return skip('over_budget');
+    if (!(await automaticRunAllowed(ctx, accountId, 'auto fix', profile.provider))) return skip('over_budget');
     // THE SANDBOX, before the seed (which may wait on a SonarCloud read): no runtime, or no free slot.
     if (deps.sandbox) {
       const ready = await deps.sandbox();
@@ -240,7 +223,7 @@ export async function maybeStartAutoFix(
         : include.ciFailures
           ? { review: null, seed: await (deps.loadCiOnlySeed ?? lazyCiOnlySeed)(ctx, { accountId, prId, selection: { kind: 'sections', include } }) }
           : { review: null, seed: { items: [], sentRefs: [], text: '' } };
-    if (!loaded) return skip('not_started');
+    if (!loaded) return skip('review_unavailable');
     if (loaded.review != null && loaded.review.trigger !== 'auto') return { status: 'not_auto' };
     if (loaded.seed.sentRefs.length === 0) return skip('nothing_to_fix');
 
@@ -321,18 +304,25 @@ export async function maybeStartAutoFix(
       if (now.length > 0 && now.every((k) => refused.has(k))) return skip('already_tried');
     }
 
-    // The review stores what RAN (a Codex id on Codex): ask for the same depth again.
-    const asked = loaded.review != null ? requestModelOf(loaded.review.model) : DEFAULT_AI_FIX_MODEL;
+    // THE MODEL: Settings → AI → AI Fix once a choice is stored there (`profile` above). NONE STORED ⇒ as
+    // before: the review's depth again (the review stores what RAN — a Codex id on Codex — so ask for the
+    // same depth). Either way the start is handed `profile.provider`, the vendor resolved ONCE above (and
+    // asked by the gate), so vendor and model cannot drift apart while the fix waits in the start queue.
+    const asked = profile.configured
+      ? (profile.model ?? DEFAULT_AI_FIX_MODEL)
+      : loaded.review != null
+        ? requestModelOf(loaded.review.model)
+        : DEFAULT_AI_FIX_MODEL;
     const model: AiFixModel = (CLAUDE_REVIEW_MODELS as readonly string[]).includes(asked)
       ? (asked as AiFixModel)
       : DEFAULT_AI_FIX_MODEL;
+    const pinned = { provider: profile.provider };
     const r =
       reviewId != null
-        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include, queueIfBusy: true })
-        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include }, queueIfBusy: true });
+        ? await deps.startReviewFix(ctx, { accountId, prId, reviewId, model, trigger: 'auto', include, queueIfBusy: true, ...pinned })
+        : await (deps.startFix ?? lazyStartFix)(ctx, { accountId, prId, model, seed: 'review', sourceReviewId: null, trigger: 'auto', selection: { kind: 'sections', include }, queueIfBusy: true, ...pinned });
     if (r.status === 'queued') {
       const outcome: ClaudeAutoFixOutcome = { reviewId: reviewId ?? 0, status: 'started', fixId: r.fixId };
-      if (reviewId != null) record(accountId, outcome);
       ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) started: fix ${r.fixId}`);
       return outcome;
     }
@@ -342,12 +332,17 @@ export async function maybeStartAutoFix(
     // Waiting in THE FIX START QUEUE (it starts by itself), or the line was full.
     if (r.status === 'waiting' || r.status === 'too_many' || r.status === 'build_busy') return skip('sandbox_busy');
     if (r.status === 'over_budget') return skip('over_budget');
-    ctx.log.info(`auto fix pr ${prId} (review ${reviewId}) not started: ${r.status}`);
-    return skip('not_started');
+    // THE FAULTS, each its own reason (the queue's one line says which; the sweep decides again).
+    if (r.status === 'no_auth') return skip('no_ai_login');
+    if (r.status === 'review_unavailable') return skip('review_unavailable');
+    if (r.status === 'not_found' || r.status === 'no_head') return skip('pr_unavailable');
+    ctx.log.warn(`auto fix pr ${prId} (review ${reviewId}) not started: ${r.status}`);
+    return skip('error');
   } catch (err) {
+    // The message goes to the log only: the line says "an error stopped it".
     ctx.log.warn(
       `auto fix pr ${prId} (review ${reviewId}) failed to start: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return skip('not_started');
+    return skip('error');
   }
 }

@@ -44,6 +44,7 @@ import {
   type StoryBuildStartResponse,
 } from '@pierre-review/shared';
 import { preflightFor, resolveManualRunChoice } from '../../ai/run-choice.js';
+import { buildChoice } from '../../ai/run-profile.js';
 import { getStoryBuildRow, listStoryBuildRepoRows, listStoryBuildRowsFor, storyBuildRepoNames, toStoryBuildSummary } from '../../coding/story-build/persist.js';
 import { registerStoryBuildBuildRoutes } from '../../coding/story-build/routes-build.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
@@ -303,10 +304,14 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       // `members: 'all'`: the session clones EVERY member, EXTERNAL repos included (an infrastructure
       // repo the ticket's config change lands in — docs/DATA-MODEL.md § External repos).
       const scope = await resolveWorkspaceScope(accountId, typeof rawWs === 'number' || typeof rawWs === 'string' ? rawWs : null, null, { members: 'all' });
-      // A MANUAL run with a model menu (the reader's pick, validated); the default depth is deep.
+      // A MANUAL run with a model menu (the reader's pick, validated). Nothing named ⇒ Settings → AI →
+      // Implement story (ai/run-profile.ts `buildChoice`), else the usual depth (deep).
+      const detect = preflightFor(ctx);
+      const profile = buildChoice(detect);
       const picked = resolveManualRunChoice({ provider: body.provider, model: body.model }, 'story_build', {
-        defaultModel: DEFAULT_CLAUDE_REVIEW_MODEL,
-        detect: preflightFor(ctx),
+        defaultModel: (p) => (p === profile.provider ? (profile.model ?? DEFAULT_CLAUDE_REVIEW_MODEL) : DEFAULT_CLAUDE_REVIEW_MODEL),
+        detect,
+        defaultProvider: () => profile.provider,
       });
       if (!picked.ok) {
         const code: StoryBuildErrorCode = picked.error === 'ModelNotOnProvider' || picked.error === 'NoClaudeAuth' ? picked.error : 'BadRequest';
@@ -349,7 +354,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
         autoApprovePlan: body.autoApprovePlan === true || body.endToEnd === true,
         endToEnd: body.endToEnd === true,
         ...(hotfix ? { hotfix: true } : {}),
-        choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model }),
+        choice: resolveSandboxAgentChoice({ provider: picked.provider, model: picked.model, surface: 'build' }),
       });
       if (r.outcome === 'no_runtime') return fail(reply, 409, 'NoRuntime', r.message);
       if (r.outcome === 'too_many') return fail(reply, 409, 'TooManySessions', r.message);
