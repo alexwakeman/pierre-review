@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.67] - 2026-11-19
+
 ### Added
 
 - Story checks read code outside the ticket: the workspace's other repositories at their default branch (related
