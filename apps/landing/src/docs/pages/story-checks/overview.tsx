@@ -194,6 +194,31 @@ export default function Page(): JSX.Element {
         <DocLink to="ai-review/verdicts-and-posting">Verdicts and posting</DocLink>.
       </Warning>
 
+      <H2 id="code-outside-the-ticket">Code outside the ticket</H2>
+      <p>
+        A story check also reads code that is not part of the ticket, so it can check how the repositories fit
+        together and see work that is already done:
+      </p>
+      <ul>
+        <li>
+          the workspace&rsquo;s other repositories, at their default branch: your related repositories first, then the
+          rest by name, at most 12. The check names the ones it left out;
+        </li>
+        <li>open pull requests in related repositories on the same branch as a ticket pull request, but not linked to the ticket.</li>
+      </ul>
+      <p>
+        A criterion that only this code does counts as <Ui>Met</Ui> and says where: &ldquo;Already in acme/api (no PR
+        on this ticket)&rdquo; or &ldquo;In api#88 (same branch, not linked to the ticket)&rdquo;. Counts name these
+        apart, for example &ldquo;3 of 4 met, 1 already outside the ticket&rdquo;. Work that belongs in a repository
+        with no pull request reads &ldquo;No PR yet in acme/api&rdquo;. It is never posted, because there is no pull
+        request to post it on.
+      </p>
+      <Note>
+        A change in that code does not start a new check, so a line such as &ldquo;Already in acme/api&rdquo; can be a
+        little out of date until the next check. Turn it off in{' '}
+        <DocLink to="settings/ai-review#story-checks-read-every-repository">Settings → AI review</DocLink>.
+      </Note>
+
       <H2 id="when-a-check-is-out-of-date">When a check is out of date</H2>
       <p>
         A check is tied to the ticket text and to each pull request&rsquo;s latest commit. It goes out of date when

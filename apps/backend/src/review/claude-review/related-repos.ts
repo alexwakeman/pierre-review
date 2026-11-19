@@ -83,6 +83,18 @@ export function sharedTicketKeys(
   return shared.filter((k) => deliberate.has(k));
 }
 
+/**
+ * RULE 1, shared (the story check's unlinked same-branch PRs reuse it — review/ticket-review/outside.ts):
+ * the NEWEST open PR (highest number) whose head branch is exactly `branch`, or undefined. Pure.
+ */
+export function sameBranchPr<T extends { headRefName: string | null; number: number }>(
+  open: readonly T[],
+  branch: string | null | undefined,
+): T | undefined {
+  if (!branch) return undefined;
+  return [...open].sort((a, b) => b.number - a.number).find((c) => c.headRefName === branch);
+}
+
 interface CandidatePr {
   prId: number;
   repoId: number;
@@ -286,7 +298,7 @@ export async function relatedRepoCompanions(
         ticketKeys: shared,
       });
       // 1. Same head branch name.
-      const sameBranch = branch ? open.find((c) => c.headRefName === branch) : undefined;
+      const sameBranch = sameBranchPr(open, branch);
       if (sameBranch) {
         out.push(asPeer(sameBranch, 'same_branch', sharedTicketKeys(me, { title: sameBranch.title, branch: sameBranch.headRefName }, allowKeys)));
         changes++;

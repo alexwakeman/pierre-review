@@ -1795,6 +1795,16 @@ Staleness is computed on read, never stored. An existing account-scoped table: e
 [DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The fix start queue;
 [SANDBOX.md](SANDBOX.md) § AI Fix sessions → Scope.
 
+### `0211_story_check_all_repos` — story checks read every repository
+
+`ALTER TABLE workspaces ADD story_check_all_repos` (integer, nullable, no default, no backfill): Settings → AI
+review → "Story checks read every repository". NULL = ON (every existing workspace reads on), 0 = the ticket's
+PRs only. The ONE writer is `setWorkspaceAutoReview`. What a run read outside the ticket needs NO column: it
+rides the existing `ticket_reviews.assessment` JSON (`outside`), and is never in the fingerprint. An existing
+account-scoped table: erasure and the export already cover it. Additive; journal idx 211, `when`
+`1794988800000`. [DATA-MODEL.md](DATA-MODEL.md) § `workspaces.storyCheckAllRepos`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
+§ Ticket review → OUTSIDE THE TICKET.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

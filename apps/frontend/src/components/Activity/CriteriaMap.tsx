@@ -147,10 +147,17 @@ function CriterionBox({
           <span className="min-w-0 break-words leading-5 text-ui-ink">{criterionTextOnly(row.text, row.ref)}</span>
         </span>
       </div>
-      {unclaimed ? (
-        <p className={`mt-1 text-meta ${MUTED}`} data-testid="criteria-map-unclaimed">
-          No pull request claims this.
+      {row.outside != null && (
+        <p className={`mt-1 text-meta ${MUTED}`} data-testid="criteria-map-outside">
+          {row.outside}
         </p>
+      )}
+      {unclaimed ? (
+        row.outside != null ? null : (
+          <p className={`mt-1 text-meta ${MUTED}`} data-testid="criteria-map-unclaimed">
+            No pull request claims this.
+          </p>
+        )
       ) : (
         <ul className="mt-1 min-w-0 space-y-0.5" aria-label={`Pull requests for ${row.ref}`}>
           {row.links.map((l) => (

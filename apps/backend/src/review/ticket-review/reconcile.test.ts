@@ -8,10 +8,15 @@
 //      Claude named in `expectedIn` (else null), with a path only when a member owns it.
 //   5. `met_outside_code` survives only with a citation of a comment IN THE PROMPT; `metBy` is the
 //      stored comment; a delivering PR makes it `met`; it is never an item.
+//   6. Code outside the ticket: a met only it delivers stays met, labelled apart; expectedIn may name an
+//      outside repository, which owns no PR and is never a post target.
 //
 //   pnpm --filter @pierre-review/backend test ticket-review/reconcile
 import { describe, expect, it } from 'vitest';
+import { criterionCounts, criterionOutsideWords, ticketCriteriaSentence } from '@pierre-review/shared';
 import { namePrRefs, reconcileTicketReview, type ReconcileMember } from './reconcile.js';
+import { withNoPrIn } from './persist.js';
+import { storyGapTarget } from './post-item.js';
 
 const members: ReconcileMember[] = [
   { ref: 'PR1', prId: 11, repoId: 1, repo: 'acme/api', checkedOut: true },
@@ -243,5 +248,85 @@ describe('reconcileTicketReview — met outside code changes', () => {
       ['met', [11], null],
       ['met_outside_code', [], { commentId: '10001', author: 'Dana Lee', createdAt: '2026-03-04T10:00:00.000Z' }],
     ]);
+  });
+});
+
+// 6. CODE OUTSIDE THE TICKET (outside.ts): a `met` only an outside source delivers stays met, labelled apart
+//    (`outside`, from the STORED list); an unread source, or a member delivering it too, never labels it;
+//    an `expectedIn` naming an outside repository carries `outsideRepo` and owns no PR.
+describe('reconcileTicketReview — code outside the ticket', () => {
+  const outside = {
+    sources: [
+      { ref: 'X1', kind: 'repo' as const, repoId: 7, repo: 'acme/docs', prId: null, number: null, sha: 'd1', read: true },
+      { ref: 'X2', kind: 'unlinked_pr' as const, repoId: 8, repo: 'acme/mail', prId: 88, number: 88, sha: 'e1', read: true },
+      { ref: 'X3', kind: 'repo' as const, repoId: 9, repo: 'acme/old', prId: null, number: null, sha: null, read: false },
+    ],
+    leftOut: ['acme/zulu'],
+  };
+  const report = {
+    alignment: 'partly_aligned',
+    summary: 'X1 already has it.',
+    criteria: [
+      { text: 'CSV', status: 'met', explanation: 'In X1.', metOutsideTicket: 'X1' },
+      { text: 'PDF', status: 'met', explanation: 'x', metOutsideTicket: '[x2]' },
+      { text: 'Email', status: 'met', explanation: 'x', metOutsideTicket: 'X3' },
+    ],
+    missing: [{ title: 'Docs page', explanation: 'x', expectedIn: { repo: 'ACME/docs' } }],
+  };
+
+  it('counts a met only outside code delivers as met, labelled apart, and stores what it read', () => {
+    const { assessment, items } = reconcileTicketReview(ticket, members, report, new Map(), outside);
+    expect(assessment.criteria.map((c) => [c.status, c.deliveredBy, c.outside?.kind ?? null])).toEqual([
+      ['met', [], 'repo'],
+      ['met', [], 'unlinked_pr'],
+      // X3 could not be read: it delivers nothing, and a met nobody can point at is not a met.
+      ['unclear', [], null],
+    ]);
+    expect(assessment.criteria[1]!.outside).toEqual({ kind: 'unlinked_pr', repoId: 8, repo: 'acme/mail', prId: 88, number: 88 });
+    // Prose names the source the way the reader knows it.
+    expect(assessment.criteria[0]!.explanation).toBe('In acme/docs.');
+    expect(assessment.summary).toBe('acme/docs already has it.');
+    expect(assessment.outside).toEqual(outside);
+    // The shared count: still met, distinguishable.
+    const c = criterionCounts(assessment.criteria);
+    expect([c.met, c.metOutsideTicket]).toEqual([2, 2]);
+    expect(ticketCriteriaSentence(assessment)).toBe('2 of 3 criteria met, 2 already outside the ticket.');
+    expect(criterionOutsideWords(assessment.criteria[0]!.outside!)).toBe('Already in acme/docs (no PR on this ticket)');
+    expect(criterionOutsideWords(assessment.criteria[1]!.outside!)).toBe('In mail#88 (same branch, not linked to the ticket)');
+    // The missing item belongs in a repository with no PR on the ticket: it owns no PR.
+    expect(assessment.missing[0]!.expectedIn).toEqual({ prId: null, repoId: 7, outsideRepo: 'acme/docs' });
+    expect(items.find((i) => i.status === 'missing')?.ownerPrId).toBeNull();
+  });
+
+  it('a member delivering it too makes it a plain met; no list ⇒ no label and no stored context', () => {
+    const both = reconcileTicketReview(ticket, members, {
+      alignment: 'aligned',
+      criteria: [{ text: 'CSV', status: 'met', deliveredBy: ['PR1'], metOutsideTicket: 'X1' }],
+    }, new Map(), outside).assessment;
+    expect(both.criteria[0]!.status).toBe('met');
+    expect(both.criteria[0]!.outside).toBeUndefined();
+    const none = reconcileTicketReview(ticket, members, report).assessment;
+    expect(none.criteria.map((c) => c.status)).toEqual(['unclear', 'unclear', 'unclear']);
+    expect(none.outside).toBeUndefined();
+    expect(none.missing[0]!.expectedIn).toBeNull();
+  });
+
+  it('⚠ an expectedIn naming an outside repository never resolves to a PR, and is never a post target', () => {
+    const r = reconcileTicketReview(ticket, members, {
+      alignment: 'not_aligned',
+      criteria: [{ text: 'CSV', status: 'not_met', explanation: 'x', expectedIn: { repo: 'acme/docs' } }],
+    }, new Map(), outside);
+    const crit = r.assessment.criteria[0]!;
+    expect(crit.expectedIn).toEqual({ prId: null, repoId: 7, outsideRepo: 'acme/docs' });
+    const raw = r.items[0]!;
+    expect(raw.ownerPrId).toBeNull();
+    const item = withNoPrIn(
+      { id: 1, ticketReviewId: 1, ref: raw.ref, status: raw.status, title: raw.title, body: raw.body, ownerPrId: null, path: null, line: null, priorItemId: null, posted: null },
+      r.assessment,
+    );
+    expect(item.noPrIn).toBe('acme/docs');
+    expect(storyGapTarget(item, 11)).toBeNull();
+    // An ordinary ownerless item still lands on the PR the reader is viewing.
+    expect(storyGapTarget({ ownerPrId: null }, 11)).toBe(11);
   });
 });

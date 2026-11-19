@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { WRITING_RULES } from '../../ai/writing-rules.js';
 import type { WorkspaceLayout } from './layout.js';
-import { buildSeed, fixSessionBranch, sessionBranch, ticketMarkdown, type SeedInput } from './seed.js';
+import { buildSeed, fixSessionBranch, sessionBranch, planCriteriaRefs, ticketMarkdown, type SeedInput } from './seed.js';
 import type { SessionTicket } from './ticket.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__');
@@ -107,6 +107,30 @@ describe('the seed', () => {
         'fill_gaps',
       ),
     ));
+
+  // CODE OUTSIDE THE TICKET (2026-11-19, a deliberate new golden): a criterion met only in another
+  // repository's default branch is DONE and says where — never "already met by the existing pull requests";
+  // one met only by an UNLINKED same-branch PR is a GAP (the loops' rule, shared `criterionDoneForBuild`).
+  const outsideTicket: SessionTicket = {
+    ...ticket,
+    fresh: false,
+    gaps: {
+      criteria: [
+        { ref: 'AC1', text: ticket.criteria[0]!.text, verdict: 'met', outside: { kind: 'repo', repo: 'acme/api', number: null } },
+        { ref: 'AC2', text: ticket.criteria[1]!.text, verdict: 'met', outside: { kind: 'unlinked_pr', repo: 'acme/web', number: 88 } },
+      ],
+      missing: [],
+      note: null,
+    },
+  };
+  it('⚠ Fill gaps with code outside the ticket: TICKET.md byte-for-byte the golden', () => {
+    const md = ticketMarkdown(outsideTicket, 'fill_gaps');
+    golden('seed-ticket-fill-gaps-outside.md', md);
+    expect(md).toContain("_(already in acme/api, outside this ticket's pull requests: do not build it)_");
+    expect(md).not.toContain('already met by the existing pull requests');
+    expect(md).toContain('_(a gap: only acme/web#88 does it, on the same branch but not linked to the ticket: build this)_');
+    expect(planCriteriaRefs(outsideTicket, 'fill_gaps').gaps).toEqual(['AC2']);
+  });
 
   // PLAN FIRST: the plan section, rule 1, the checker and its context; docs and Fill gaps variants.
   const gapsTicket: SessionTicket = {

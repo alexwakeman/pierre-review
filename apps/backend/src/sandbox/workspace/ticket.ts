@@ -27,6 +27,8 @@ export interface SessionTicketGap {
   verdict: string;
   /** 'met_outside_code' only: the person's ticket comment it rests on. */
   metBy?: { author: string; createdAt: string } | null;
+  /** 'met' only: delivered ONLY by code outside the ticket's pull requests. */
+  outside?: { kind: 'repo' | 'unlinked_pr'; repo: string; number: number | null } | null;
 }
 
 export interface SessionTicket {
@@ -164,6 +166,7 @@ export async function readSessionTicket(
               text: c.text,
               verdict: c.verdict,
               ...(c.metBy != null ? { metBy: { author: c.metBy.author, createdAt: c.metBy.createdAt } } : {}),
+              ...(c.outside != null ? { outside: { kind: c.outside.kind, repo: c.outside.repo, number: c.outside.number } } : {}),
             })),
             missing: cov.missing.map((m) => ({ ref: m.ref, text: m.text })),
             note: cov.note,

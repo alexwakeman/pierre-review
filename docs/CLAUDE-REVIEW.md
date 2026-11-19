@@ -2727,6 +2727,77 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   namespaced ref under the repo lock, never FETCH_HEAD), where its work has landed. A merged member is
   `checkedOut` when that checkout exists. Every checkout is a path-guard root and is removed in the
   pipeline's `finally`.
+- **OUTSIDE THE TICKET** (2026-11-19; `outside.ts`, the ONE door `readOutsideForStoryCheck`). With the
+  workspace's "Story checks read every repository" on (Settings → AI review; `workspaces.story_check_all_repos`,
+  migration `0211`, NULL = ON), a story check ALSO reads, read-only and behind the same path guard:
+  - **the workspace's OTHER repositories** (no PR on the ticket) at their DEFAULT BRANCH — a fresh tip
+    from Ensemble's clone cache, the same read as a merged member's (`prepDefaultBranchCheckouts`, at most
+    `OUTSIDE_CHECKOUT_CONCURRENCY` (4) at a time). Order (`outsideRepoSet`, AI Fix's `fixRepoSet` idea):
+    repositories declared related to ANY member's repository first, then the rest by owner/name; at most
+    `STORY_CHECK_OUTSIDE_REPOS_MAX` (12, the same as `AI_FIX_REPOS_MAX`) — repositories read as members do
+    not count — and the rest NAMED (`leftOut`), never read;
+  - **unlinked same-branch PRs**: an OPEN PR in a repository related to a member's, on that member's BRANCH
+    NAME, that is NOT on the ticket — the PR review's rule 1 (`related-repos.ts` `sameBranchPr`) — at its
+    head (`prepPeerWorktrees`); at most `STORY_CHECK_UNLINKED_PRS_MAX` (= the PR review's peer cap, 4).
+    ⚠ Never a FORK's PR (`pull_requests.is_cross_repository`: its branch name is chosen in someone else's
+    repository) and never a branch name equal to either repository's DEFAULT branch (`branchNameMatchable`;
+    no other "generic" names are guessed).
+  - **Bounded, cancellable, remembered.** At most `OUTSIDE_CHECKOUT_CONCURRENCY` (4) sources at a time, each
+    within `OUTSIDE_CHECKOUT_TIMEOUT_MS` (120 s — a first clone of a big repository fits, one inaccessible
+    repository cannot stall the run): past it the source is "not read" and the run goes on (a checkout that
+    finishes later is removed at once). The run's abort signal (Stop; the branch check's abort) stops the
+    waiting. A source that failed or timed out is not tried again by any run for `OUTSIDE_FAILURE_BACKOFF_MS`
+    (10 min, in memory).
+  ⚠ ONE WORKSPACE: the run's own (`ticket_reviews.workspace_id`); a relation must sit in it with both
+  repositories members now. A source that cannot be checked out is NAMED (`read: false`) and skipped,
+  never fails the run. The prompt gets a short "# Outside the ticket (n)" section (refs `X1`…: server text
+  only — repo, number, default branch, SHA, path; no PR title, no author's branch name): NOT the story's
+  work; use it to check contracts across repositories and to see whether a criterion is already
+  delivered; never a card for it. `MEMBERS.md` lists them under "Outside the ticket (not the story's
+  work)", each labelled "(no PR on this ticket)" / "(same branch, not linked to the ticket)", plus
+  "Not read (past the limit of repositories): …". The REVIEW LOOP's branch check
+  (`coding/review-loop/story-check.ts` — Implement's loop, AI Fix's loop, the local branch review) goes
+  through the SAME door with its targets as members (same switch, same caps; a PR on a target's own
+  branch in its repository is the target itself, never "unlinked") AND the ticket's OWN PRs (stored members,
+  `ticketPrsOf`, or the caller's `ticketPrs`): their repositories are never "no PR on this ticket" and they
+  are never "not linked". Only the targets' branches look for unlinked PRs. Its outside read runs ALONGSIDE
+  the target checkouts, and its `finally` runs the deferred clone-cache eviction like the ticket review.
+  - **The verdict: MET, LABELLED APART.** A criterion ONLY outside code delivers is `met` with
+    `metOutsideTicket: 'X2'`; the server (reconcile.ts) keeps it only for a source it READ, leaves
+    `deliveredBy` empty, and writes `TicketCriterion.outside {kind, repoId, repo, prId, number}` from the
+    run's STORED list (never model text). A member delivering it too ⇒ a plain met, no label. The SPA:
+    "Already in acme/api (no PR on this ticket)" / "In api#88 (same branch, not linked to the ticket)"
+    (shared `criterionOutsideWords`) under the done line and in the criteria map. Every count keeps it IN
+    `met` and names it apart (`criterionCounts().metOutsideTicket`; ", 1 already outside the ticket").
+  - **`expectedIn` may name an outside REPOSITORY** (`expectedIn.repo`): stored as `{prId: null, repoId,
+    outsideRepo}`. Its item owns no PR; on read it carries `noPrIn` (persist.ts `withNoPrIn`) and is NEVER a
+    post target (`storyGapTarget` → null; `storyGapGroups` skips it): "No PR yet in acme/api". A repository
+    where the run read an UNLINKED same-branch PR carries `outsideUnlinkedPr` (the item's `noPrUnlinked`) and
+    reads "acme/web#88 is on the same branch but not linked to the ticket" — never "No PR yet" (shared
+    `noPrWords`). Auto-posting already skips ownerless items; AI Fix only takes items its PR owns.
+  - **X refs in prose** are rewritten to the repository / `name#88` only for refs the run handed out, and only
+    standing alone in the prompt's own form ("X2", "(X2)") — never inside a name ("X11-server", "acme/X2").
+  - The "Untrusted input" rule names every file read — outside repositories and unlinked PRs included — as
+    DATA.
+  - **The loops are stricter (owner decision 2026-11-19).** In the REVIEW LOOPS' stop rules (Implement's,
+    AI Fix's, the local branch review's open criteria — `rounds.ts` `openCriteriaOf`) and in Fill gaps
+    (TICKET.md, `planCriteriaRefs`), a criterion met ONLY by an UNLINKED PR is NOT done: it stays open
+    (status `met_unlinked`, "met only in a pull request on the same branch that is not linked to the
+    ticket: deliver it in this work"), because nothing on the ticket delivers it. One met by another
+    repository's DEFAULT BRANCH is done. ONE predicate, shared `criterionDoneForBuild`. The ticket review
+    itself keeps both as met, labelled apart.
+  - ⚠ **THE SWITCH IS AN INPUT, THE CODE IS NOT.** The fingerprint carries the run's workspace switch — OFF
+    appends one part (`outside:off`), ON adds nothing — so turning it off, or back on after a run made while
+    off, makes the latest run stale (no reason named, like a version bump), while every run from before the
+    switch existed keeps its fingerprint (no mass re-run; `TICKET_REVIEW_VERSION` NOT bumped). Every live
+    fingerprint asks the right workspace: the run's own (`getTicketStateInputs().latest.workspaceId`), the
+    sweeper's chosen one, the sprint refresh's.
+  - ⚠ **CONTEXT, NOT INPUTS.** No outside SHA and no unlinked PR enters the fingerprint (fingerprint.ts),
+    so a push to some repository's main never re-runs (and re-bills) every story check. A verdict that
+    leans on outside code can therefore be slightly out of date until the ticket's next run — said
+    behind the ⓘ. What a run read is stored on the run (`assessment.outside {sources, leftOut}`) and shown
+    as ONE short line under the results ("Also read 3 other repositories and api#88 (same branch, not
+    linked to the ticket). Left out: acme/x.").
 - **The agent** (`agent.ts`): cwd is a scratch dir holding `MEMBERS.md`; every checkout is
   an `additionalDirectories` entry behind the PreToolUse PATH GUARD (`review/path-guard.ts`); tools
   Read/Glob/Grep + `submit_ticket_review`; `Bash`, writes, web and sub-agents denied; no specialists;

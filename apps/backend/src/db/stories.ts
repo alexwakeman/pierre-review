@@ -116,6 +116,8 @@ export function reviewSummaryOf(
     id,
     alignment: a.alignment,
     met: count('met'),
+    // Of `met`: only code outside the ticket delivers it (named apart, still met).
+    metOutsideTicket: a.criteria.filter((c) => c.status === 'met' && c.outside != null).length,
     metOutsideCode: count('met_outside_code'),
     partlyMet: count('partly_met'),
     notMet: count('not_met'),

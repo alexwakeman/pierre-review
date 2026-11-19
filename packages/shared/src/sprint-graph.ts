@@ -263,6 +263,8 @@ export interface SprintTicketCheck {
   /** "Met outside code changes" (shared `criterionDone`): done, never a gap, named apart. Absent from
    *  an older server (read as 0). */
   metOutsideCode?: number;
+  /** Of `met`: only code outside the ticket's PRs delivers it — met, named apart. Absent = 0. */
+  metOutsideTicket?: number;
   partlyMet: number;
   notMet: number;
   /** Criteria the check could not settle (unclear or not checked). */

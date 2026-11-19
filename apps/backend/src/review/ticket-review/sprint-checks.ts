@@ -7,6 +7,7 @@ import { getTicketStateInputs, type TicketStateInputs } from './persist.js';
 import { jiraMemberIds, jiraStoryFor, ticketCommentsFor } from './prepare.js';
 import { newCommentsMakeStale } from '../../tracker/comments.js';
 import { latestAllMet } from './auto-plan.js';
+import { storyCheckAllReposOn } from './outside.js';
 
 // THIS SPRINT → "REFRESH" ALSO RUNS TICKET CHECKS (docs/CLAUDE-REVIEW.md § Ticket review → Started by
 // a sprint refresh). A MANUAL press of This Sprint's Refresh (POST /api/sprint-stories/refresh) starts
@@ -57,8 +58,9 @@ export interface SprintCheckDeps {
   /** Sprint tickets (not ghosts) with their PRs in this workspace, graph order. */
   candidates(accountId: number, workspaceId: number): Promise<SprintCheckCandidate[]>;
   states(accountId: number, idents: readonly string[]): Promise<Map<string, TicketStateInputs>>;
-  /** The ticket's live fingerprint; null = no stored story or no members. */
-  live(accountId: number, ident: string): Promise<SprintCheckLive | null>;
+  /** The ticket's live fingerprint, as a run in `workspaceId` would store it (its "Story checks read every
+   *  repository" switch included); null = no stored story or no members. */
+  live(accountId: number, ident: string, workspaceId: number): Promise<SprintCheckLive | null>;
   held(accountId: number, ident: string): boolean;
   start(a: StartTicketArgs): Promise<StartTicketResult>;
 }
@@ -122,7 +124,7 @@ const DEFAULT_DEPS = (ctx: AgentContext): SprintCheckDeps => ({
     return t.sprint.map((x) => ({ ident: x.ident, key: x.key, title: x.title, prs: prs.get(x.ident) ?? [] }));
   },
   states: (accountId, idents) => getTicketStateInputs(ctx, accountId, idents),
-  live: async (accountId, ident) => {
+  live: async (accountId, ident, workspaceId) => {
     const memberIds = await jiraMemberIds(accountId, ident);
     if (memberIds.length === 0) return null;
     const ticket = await jiraStoryFor(accountId, ident, memberIds);
@@ -131,7 +133,7 @@ const DEFAULT_DEPS = (ctx: AgentContext): SprintCheckDeps => ({
     const commentIds = (await ticketCommentsFor(accountId, ident)).map((c) => c.id);
     const hash = ticketHash(ticket);
     return {
-      fingerprint: fingerprint(hash, members),
+      fingerprint: fingerprint(hash, members, { outsideOff: !(await storyCheckAllReposOn(ctx, accountId, workspaceId)) }),
       ticketHash: hash,
       members,
       commentIds,
@@ -166,7 +168,7 @@ export async function runSprintTicketChecks(
     for (const c of examine.slice(0, SPRINT_CHECK_EXAMINE_MAX)) {
       const st = states.get(c.ident);
       if (st?.runningRunId != null) continue;
-      const pick = sprintCheckPickOf(c, st, await deps.live(accountId, c.ident));
+      const pick = sprintCheckPickOf(c, st, await deps.live(accountId, c.ident, workspaceId));
       if (pick != null) picks.push(pick);
     }
     let started = 0;

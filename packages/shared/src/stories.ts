@@ -50,6 +50,8 @@ export interface StoryReviewSummary {
   met: number;
   /** "Met outside code changes": done (shared `criterionDone`), counted apart. Absent from an older server. */
   metOutsideCode?: number;
+  /** Of `met`: only code outside the ticket's PRs delivers it — met, named apart. Absent from an older server. */
+  metOutsideTicket?: number;
   partlyMet: number;
   notMet: number;
   unclear: number;

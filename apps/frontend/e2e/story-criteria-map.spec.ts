@@ -193,6 +193,35 @@ test.describe('the criteria map', () => {
     await expect(page.getByText(/AI writes each description/)).toBeVisible();
   });
 
+  test('a criterion met only by code outside the ticket says where, and the check names what it also read', async ({ page }) => {
+    await withAi(page);
+    // AC4 is already done in a workspace repository with no PR on the ticket (docs/CLAUDE-REVIEW.md §
+    // Ticket review → Outside the ticket): met, labelled apart.
+    const outsideCheck: TicketReview = {
+      ...MAP_CHECK,
+      assessment: {
+        ...MAP_CHECK.assessment!,
+        criteria: MAP_CHECK.assessment!.criteria.map((c) =>
+          c.ref === 'AC4' ? { ...c, status: 'met', outside: { kind: 'repo', repoId: 99, repo: 'acme/audit', prId: null, number: null } } : c,
+        ),
+        outside: {
+          sources: [{ ref: 'X1', kind: 'repo', repoId: 99, repo: 'acme/audit', prId: null, number: null, sha: 'f'.repeat(40), read: true }],
+          leftOut: ['acme/zeta'],
+        },
+      },
+    };
+    await page.route((u) => u.pathname.endsWith(`/api/ticket-reviews/${MAP_CHECK.id}`), (r) => r.fulfill(json(outsideCheck)));
+    await page.goto(storyUrl(MAP_IDENT));
+    const ac4 = page.getByTestId('criteria-map').locator('[data-map-criterion="AC4"]');
+    await expect(ac4).toContainText('Met');
+    await expect(ac4.getByTestId('criteria-map-outside')).toHaveText('Already in acme/audit (no PR on this ticket)');
+    await expect(ac4.getByTestId('criteria-map-unclaimed')).toHaveCount(0);
+    // The criterion row says it too, and the check's one line names what it read and left out.
+    const story = page.getByTestId('story-review');
+    await expect(story.getByTestId('criterion-outside')).toHaveText('Already in acme/audit (no PR on this ticket)');
+    await expect(story.getByTestId('story-check-outside')).toContainText('Also read 1 other repository. Left out: acme/zeta.');
+  });
+
   test('keeps each how on one line at phone width', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 900 });
     await withAi(page);

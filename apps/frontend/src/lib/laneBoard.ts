@@ -28,6 +28,7 @@
 import {
   SPRINT_STAGE_LABEL,
   criteriaDoneWords,
+  outsideTicketWords,
   sprintStageIsOpen,
   personNameKey,
   sprintLaneSummary,
@@ -384,7 +385,8 @@ export function ticketCardCriteria(
   if (c != null && c.total > 0) {
     // Outside-code criteria are done but named apart: "3 met + 1 outside code of 5 criteria".
     const noun = c.total === 1 ? 'criterion' : 'criteria';
-    const text = (c.metOutsideCode ?? 0) > 0 ? `${criteriaDoneWords(c)} ${noun}` : `${c.met} of ${c.total} ${noun} met`;
+    // …and those only code outside the ticket delivers are met, named apart: ", 1 already outside the ticket".
+    const text = `${(c.metOutsideCode ?? 0) > 0 ? `${criteriaDoneWords(c)} ${noun}` : `${c.met} of ${c.total} ${noun} met`}${outsideTicketWords(c)}`;
     return { text, stale: c.stale, running };
   }
   const count = n.brief.criteriaCount;

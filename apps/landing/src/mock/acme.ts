@@ -714,6 +714,17 @@ export const BUILD = {
     notAsked: { pr: 'web #1196', text: 'A refunds filter on the orders list' },
   },
   /**
+   * A criterion of the build page's ticket that CODE OUTSIDE THE TICKET already does (docs/CLAUDE-REVIEW.md §
+   * Ticket review → OUTSIDE THE TICKET): met, with no pull request on the ticket, labelled apart in the
+   * app's own words (shared `criterionOutsideWords`). Shown by TicketCheckMock and CriteriaMapMock.
+   */
+  outsideCriterion: {
+    n: 5,
+    text: 'Refunds show on the monthly statement',
+    status: 'Met',
+    words: 'Already in acme/statements (no PR on this ticket)',
+  },
+  /**
    * "How the code meets each criterion" for the same ticket (the story view's criteria map,
    * apps/frontend/src/components/Activity/CriteriaMap.tsx): one link per (criterion, pull request) a
    * pull request's description says it moves forward, with how and the files, each pull request

@@ -19,6 +19,12 @@
 //   • A MEMBER THAT COULD NOT BE CHECKED OUT may deliver anything. While one exists, no criterion
 //     may be `not_met` — it reads `unclear` (the prompt says so too; this is the guarantee) — and no
 //     missing item becomes a postable item.
+//   • CODE OUTSIDE THE TICKET (outside.ts; refs 'X1'…): a `met` no member delivers stays `met` when it
+//     names (`metOutsideTicket`) a source the prompt handed out — labelled apart (`outside`, built from
+//     the run's STORED list, never model text). Delivered by a member as well ⇒ a plain met (no label).
+//     An X ref anywhere else (`deliveredBy`, `evidence`) is stripped like any unknown ref. `expectedIn`
+//     may name an outside REPOSITORY (`outsideRepo`): its item has no PR to be posted on (persist.ts
+//     `noPrIn`), never the reader's.
 //   • Unreported ⇒ `not_checked` (no report at all: alignment `not_checked` and the one row).
 //
 // The summary keeps only its leading prose (shared `storySummaryProse`): no list, no heading, cut at
@@ -42,6 +48,8 @@ import {
   type TicketExpectedIn,
   type TicketMissingItem,
   type TicketNotRequestedItem,
+  type TicketOutsideContext,
+  type TicketOutsideSource,
 } from '@pierre-review/shared';
 import {
   TICKET_CRITERION_TEXT_CHARS,
@@ -64,6 +72,9 @@ export interface ReconcileMember {
   number?: number;
   checkedOut: boolean;
 }
+
+/** What the run read outside the ticket, as stored (outside.ts `PreparedOutside.context`). */
+export type ReconcileOutside = TicketOutsideContext;
 
 // The report as it may arrive: every field optional and untrusted (the tool schema is advisory —
 // the server re-checks everything).
@@ -105,16 +116,37 @@ function cleanLine(n: unknown): number | null {
 
 /**
  * The prompt names members by ref (PR1, PR2, …) so the server can verify citations; the reader
- * knows them as name#number. Rewrites every ref in the model's prose that names a member.
+ * knows them as name#number. Rewrites every ref in the model's prose that names a member — and every
+ * outside ref (X1, X2, …) the run handed out, as 'owner/name' or 'name#88'.
  */
-export function namePrRefs(text: string | null, members: readonly ReconcileMember[]): string | null {
+export function namePrRefs(
+  text: string | null,
+  members: readonly ReconcileMember[],
+  outside: readonly TicketOutsideSource[] = [],
+): string | null {
   if (text == null) return null;
   const byRef = new Map(members.map((m) => [m.ref.toUpperCase(), m]));
-  return text.replace(/\bPR\s?(\d+)\b/gi, (whole, n: string) => {
+  const named = text.replace(/\bPR\s?(\d+)\b/gi, (whole, n: string) => {
     const m = byRef.get(`PR${n}`);
     if (m?.number == null) return whole;
     return `${m.repo.split('/').pop() ?? m.repo}#${m.number}`;
   });
+  if (outside.length === 0) return named;
+  // ONLY the refs this run handed out, ONLY in the form the prompt writes them: a capital X and digits,
+  // standing alone ("X2", "(X2)", "X2,") — never inside a name ("X11-server", "acme/X2", "v.X2", "x2").
+  const byX = new Map(outside.map((x) => [x.ref, x]));
+  return named.replace(/(?<![\w./#-])X(\d{1,4})(?![\w/#-]|\.\w)/g, (whole, n: string) => {
+    const x = byX.get(`X${Number(n)}`);
+    if (x == null || `X${Number(n)}` !== `X${n}`) return whole;
+    return x.kind === 'unlinked_pr' && x.number != null ? `${x.repo.split('/').pop() ?? x.repo}#${x.number}` : x.repo;
+  });
+}
+
+/** 'X2', 'x2', '[X2]', 'X 2' → the outside source the prompt handed out, else null. */
+function outsideSourceOf(raw: unknown, outside: readonly TicketOutsideSource[]): TicketOutsideSource | null {
+  if (typeof raw !== 'string') return null;
+  const m = /^\[?\s*x\s*(\d{1,4})\s*\]?$/i.exec(raw.trim());
+  return m ? (outside.find((x) => x.ref.toUpperCase() === `X${Number(m[1])}`) ?? null) : null;
 }
 
 /** Ref → member, case- and space-folded ('pr 2' and 'PR2' are the same ref). */
@@ -127,6 +159,7 @@ function expectedInOf(
   raw: unknown,
   member: (ref: unknown) => ReconcileMember | null,
   members: readonly ReconcileMember[],
+  outside: readonly TicketOutsideSource[] = [],
 ): TicketExpectedIn | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -136,6 +169,20 @@ function expectedInOf(
     const name = r.repo.trim().toLowerCase();
     const inRepo = members.find((x) => x.repo.toLowerCase() === name);
     if (inRepo) return { prId: null, repoId: inRepo.repoId };
+    // A workspace repository with no PR on the ticket (an outside REPOSITORY, never an unlinked PR's: it
+    // is not the ticket's PR either). Named from the run's own list; never a post target.
+    // A related repository whose only source is an UNLINKED same-branch PR counts too: the work has no PR
+    // on the ticket there — but that PR is named ("acme/web#88 is on the same branch…"), never "No PR yet".
+    const out = outside.find((x) => x.kind === 'repo' && x.repo.toLowerCase() === name) ?? outside.find((x) => x.repo.toLowerCase() === name);
+    if (out) {
+      const unlinked = outside.find((x) => x.kind === 'unlinked_pr' && x.repoId === out.repoId && x.prId != null && x.number != null);
+      return {
+        prId: null,
+        repoId: out.repoId,
+        outsideRepo: out.repo,
+        ...(unlinked != null ? { outsideUnlinkedPr: { prId: unlinked.prId!, number: unlinked.number! } } : {}),
+      };
+    }
   }
   return null;
 }
@@ -152,8 +199,14 @@ export function reconcileTicketReview(
   // The PEOPLE's comments IN THE PROMPT by ref (prompts.ts `ticketCommentsBlock(…).shownRefs`): the only
   // citations a `met_outside_code` may make. Absent / empty ⇒ no such verdict survives.
   comments: ReadonlyMap<string, Pick<TicketComment, 'id' | 'author' | 'createdAt'>> = new Map(),
+  // CODE OUTSIDE THE TICKET the run read (outside.ts). Absent / empty ⇒ exactly as before.
+  outsideCtx: ReconcileOutside | null = null,
 ): ReconciledTicketReview {
   const member = memberIndex(members);
+  // Only sources that were READ can deliver anything; every handed-out ref still names prose.
+  const outsideAll = outsideCtx?.sources ?? [];
+  const outsideRead = outsideAll.filter((x) => x.read);
+  const named = (t: string | null): string | null => namePrRefs(t, members, outsideAll);
   const anyUnchecked = members.some((m) => !m.checkedOut);
   const unchecked = (): TicketCriterion[] =>
     ticket.acceptanceCriteria
@@ -223,6 +276,8 @@ export function reconcileTicketReview(
 
       let status = c.status as ClaudeTicketCriterionStatus;
       let metBy: TicketCriterionMetBy | null = null;
+      // Code outside the ticket delivers it — kept only for a source the run READ.
+      const outsideSrc = delivered.size === 0 ? outsideSourceOf(c.metOutsideTicket, outsideRead) : null;
       if (status === 'met_outside_code') {
         const cited = (() => {
           const ref = commentRefOf(c.metByComment);
@@ -231,17 +286,20 @@ export function reconcileTicketReview(
         // A PR delivers it after all: that is a plain met.
         if (delivered.size > 0) status = 'met';
         // No comment it can point at, or the model also said where the code should go: not shown.
-        else if (cited == null || expectedInOf(c.expectedIn, member, members) != null) status = 'unclear';
+        // A comment it cannot point at, but code outside the ticket it can: a met, labelled apart.
+        else if (cited == null && outsideSrc != null) status = 'met';
+        else if (cited == null || expectedInOf(c.expectedIn, member, members, outsideAll) != null) status = 'unclear';
         else metBy = { commentId: cited.id, author: cited.author.trim() || 'Someone', createdAt: cited.createdAt };
       }
-      // A "met" nobody can point at is not a met.
-      if (status === 'met' && delivered.size === 0) status = 'unclear';
+      // A "met" nobody can point at is not a met — code outside the ticket counts as pointing.
+      const outside = status === 'met' && delivered.size === 0 ? outsideSrc : null;
+      if (status === 'met' && delivered.size === 0 && outside == null) status = 'unclear';
       // An unread member may be the one that delivers it.
       if (status === 'not_met' && anyUnchecked) status = 'unclear';
 
       const expectedIn =
         status === 'not_met' || status === 'partly_met' || status === 'unclear'
-          ? expectedInOf(c.expectedIn, member, members)
+          ? expectedInOf(c.expectedIn, member, members, outsideAll)
           : null;
       const index = criteria.length;
       criteria.push({
@@ -249,11 +307,14 @@ export function reconcileTicketReview(
         index,
         text,
         status,
-        explanation: namePrRefs(clip(c.explanation, TICKET_EXPLANATION_CHARS), members),
+        explanation: named(clip(c.explanation, TICKET_EXPLANATION_CHARS)),
         deliveredBy: members.map((m) => m.prId).filter((id) => delivered.has(id)),
         evidence,
         expectedIn,
         ...(metBy != null ? { metBy } : {}),
+        ...(outside != null
+          ? { outside: { kind: outside.kind, repoId: outside.repoId, repo: outside.repo, prId: outside.prId, number: outside.number } }
+          : {}),
       });
       criterionWhere.push(where(c, expectedIn?.prId ?? null));
     }
@@ -264,13 +325,13 @@ export function reconcileTicketReview(
   for (const g of reported.missing ?? []) {
     if (missing.length >= TICKET_GAP_LIST_MAX) break;
     if (!g) continue;
-    const title = namePrRefs(clip(g.title, TICKET_GAP_TITLE_CHARS), members);
+    const title = named(clip(g.title, TICKET_GAP_TITLE_CHARS));
     if (!title) continue;
-    const expectedIn = expectedInOf(g.expectedIn, member, members);
+    const expectedIn = expectedInOf(g.expectedIn, member, members, outsideAll);
     missing.push({
       ref: storyMissingRef(missing.length),
       title,
-      explanation: namePrRefs(clip(g.explanation, TICKET_EXPLANATION_CHARS), members),
+      explanation: named(clip(g.explanation, TICKET_EXPLANATION_CHARS)),
       expectedIn,
     });
     missingWhere.push(where(g, expectedIn?.prId ?? null));
@@ -280,13 +341,13 @@ export function reconcileTicketReview(
   for (const g of reported.notRequested ?? []) {
     if (notRequested.length >= TICKET_GAP_LIST_MAX) break;
     if (!g) continue;
-    const title = namePrRefs(clip(g.title, TICKET_GAP_TITLE_CHARS), members);
+    const title = named(clip(g.title, TICKET_GAP_TITLE_CHARS));
     if (!title) continue;
     const m = member(g.pr);
     const w = where(g, m?.prId ?? null);
     notRequested.push({
       title,
-      explanation: namePrRefs(clip(g.explanation, TICKET_EXPLANATION_CHARS), members),
+      explanation: named(clip(g.explanation, TICKET_EXPLANATION_CHARS)),
       prId: m?.prId ?? null,
       path: w.path,
       line: w.line,
@@ -301,10 +362,14 @@ export function reconcileTicketReview(
     alignment,
     // TWO PLAIN SENTENCES: only the prose before any list or heading, cut at a sentence end (the
     // criteria and missing items below carry the detail).
-    summary: namePrRefs(storySummaryProse(typeof reported.summary === 'string' ? reported.summary : null), members),
+    summary: named(storySummaryProse(typeof reported.summary === 'string' ? reported.summary : null)),
     criteria: criteria.length > 0 ? criteria : unchecked(),
     missing,
     notRequested,
+    // What the run read beyond the ticket's PRs (context, never in the fingerprint).
+    ...(outsideCtx != null && (outsideCtx.sources.length > 0 || outsideCtx.leftOut.length > 0)
+      ? { outside: { sources: outsideCtx.sources.map((x) => ({ ...x })), leftOut: [...outsideCtx.leftOut] } }
+      : {}),
   };
 
   const items: TicketItemWrite[] = [];

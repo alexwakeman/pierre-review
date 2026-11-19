@@ -91,6 +91,7 @@ describe('the switch and its floor', () => {
       autoFixEnabled: false,
       // Automatic design diagrams are ON by default (0126).
       autoDiagramsEnabled: true,
+      storyCheckAllRepos: true,
       // Claude + Codex is the default (2026-11-01); with one signed in, that one runs alone.
       autoReviewProviders: 'both',
       pairStrictness: 'strict',
@@ -380,6 +381,30 @@ describe('GET / PUT /api/workspaces/:id/auto-review', () => {
     expect(bad.statusCode).toBe(400);
     const back = await app.inject({ method: 'PUT', url, payload: { autoDiagramsEnabled: true } });
     expect(back.json().autoReview.autoDiagramsEnabled).toBe(true);
+  });
+
+  it('storyCheckAllRepos (ON by default) round-trips through PUT and GET; a non-boolean is a 400', async () => {
+    const app = await build();
+    const url = `/api/workspaces/${wsA2}/auto-review`;
+    expect((await app.inject({ method: 'GET', url })).json().autoReview.storyCheckAllRepos).toBe(true);
+    const put = await app.inject({ method: 'PUT', url, payload: { storyCheckAllRepos: false } });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toMatchObject({ workspaceId: wsA2, autoReview: { storyCheckAllRepos: false } });
+    expect((await app.inject({ method: 'GET', url })).json()).toEqual(put.json());
+    expect((await app.inject({ method: 'PUT', url, payload: { storyCheckAllRepos: 'no' } })).statusCode).toBe(400);
+    // Another account cannot write it.
+    expect(await s.setWorkspaceAutoReview(ctx, 2, wsA2, { storyCheckAllRepos: true })).toBeNull();
+    const back = await app.inject({ method: 'PUT', url, payload: { storyCheckAllRepos: true } });
+    expect(back.json().autoReview.storyCheckAllRepos).toBe(true);
+    // Each real flip is one settings-history line, like the diagrams switch.
+    const client = await import('../../db/client.js');
+    const { eq } = await import('drizzle-orm');
+    const t = client.schema.workspaceSettingEvents;
+    const lines = ((await client.db.select().from(t).where(eq(t.workspaceId, wsA2)).execute()) as Array<{ summary: string }>).map((r) => r.summary);
+    expect(lines.filter((l) => l.startsWith('Story checks read every repository'))).toEqual([
+      'Story checks read every repository switched off',
+      'Story checks read every repository switched on',
+    ]);
   });
 
   it('dailyCap round-trips; anything but an integer 1..500 is a 400 and writes nothing', async () => {

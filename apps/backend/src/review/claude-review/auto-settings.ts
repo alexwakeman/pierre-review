@@ -213,6 +213,8 @@ interface AutoRow {
   enabledAt: Date | number | null;
   autoFixEnabled: boolean | null;
   autoDiagramsEnabled: boolean | null;
+  // Story checks read every repository (migration 0211): NULL = on.
+  storyCheckAllRepos?: boolean | null;
   dailyCap: number | null;
   autoPostEnabled: boolean | null;
   autoPostSettings: StoredAutoPostSettings | null;
@@ -230,6 +232,8 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
     autoFixEnabled: row?.autoFixEnabled === true,
     // ON unless explicitly switched off (0126).
     autoDiagramsEnabled: row?.autoDiagramsEnabled !== false,
+    // ON unless explicitly switched off (0211).
+    storyCheckAllRepos: row?.storyCheckAllRepos !== false,
     autoReviewProviders: resolveAutoReviewProviders(row?.providers),
     pairStrictness: resolvePairStrictness(row?.pairStrictness),
     autoPost: resolveAutoPostSettings(row?.autoPostEnabled, row?.autoPostSettings, row?.approveLeftovers),
@@ -376,6 +380,7 @@ const autoCols = (w: AgentContext['schema'][string]) => ({
   enabledAt: w.autoReviewEnabledAt,
   autoFixEnabled: w.autoFixEnabled,
   autoDiagramsEnabled: w.autoDiagramsEnabled,
+  storyCheckAllRepos: w.storyCheckAllRepos,
   dailyCap: w.autoReviewDailyCap,
   autoPostEnabled: w.autoPostEnabled,
   autoPostSettings: w.autoPostSettings,
@@ -427,6 +432,7 @@ export async function setWorkspaceAutoReview(
     enabled,
     autoFixEnabled,
     autoDiagramsEnabled,
+    storyCheckAllRepos,
     dailyCap,
     autoPost,
     autoFix,
@@ -453,6 +459,9 @@ export async function setWorkspaceAutoReview(
   // Only a stored false is off (ON by default, 0126).
   const diagramsWas = existing.autoDiagramsEnabled !== false;
   const diagrams = autoDiagramsEnabled ?? diagramsWas;
+  // Only a stored false is off (ON by default, 0211).
+  const allReposWas = existing.storyCheckAllRepos !== false;
+  const allRepos = storyCheckAllRepos ?? allReposWas;
   const capOverride =
     dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
@@ -502,6 +511,8 @@ export async function setWorkspaceAutoReview(
     enabledAt: review.enabledAt,
     autoFixEnabled: fix,
     autoDiagramsEnabled: diagrams,
+    // NULL stays NULL until someone changes it (overrides only).
+    storyCheckAllRepos: storyCheckAllRepos !== undefined && storyCheckAllRepos !== allReposWas ? storyCheckAllRepos : (existing.storyCheckAllRepos ?? null),
     dailyCap: capOverride,
     autoPostEnabled: postAfter.enabled,
     autoPostSettings: postOverrides,
@@ -517,6 +528,9 @@ export async function setWorkspaceAutoReview(
   }
   if (autoDiagramsEnabled !== undefined && autoDiagramsEnabled !== diagramsWas) {
     set.autoDiagramsEnabled = autoDiagramsEnabled;
+  }
+  if (storyCheckAllRepos !== undefined && storyCheckAllRepos !== allReposWas) {
+    set.storyCheckAllRepos = allRepos;
   }
   if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
     set.autoReviewDailyCap = capOverride;
@@ -572,6 +586,9 @@ function settingChanges(
   }
   if ('autoDiagramsEnabled' in set) {
     out.push(['auto_review', `Design diagrams after each review ${onOff(next.autoDiagramsEnabled !== false)}`]);
+  }
+  if ('storyCheckAllRepos' in set) {
+    out.push(['auto_review', `Story checks read every repository ${onOff(next.storyCheckAllRepos !== false)}`]);
   }
   if ('autoFixEnabled' in set) out.push(['auto_fix', `Auto fix ${onOff(next.autoFixEnabled === true)}`]);
   if ('autoFixSettings' in set) {
@@ -775,6 +792,7 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             enabled: { type: 'boolean' },
             autoFixEnabled: { type: 'boolean' },
             autoDiagramsEnabled: { type: 'boolean' },
+            storyCheckAllRepos: { type: 'boolean' },
             autoReviewProviders: { type: 'string', enum: ['default', 'both'] },
             pairStrictness: { type: 'string', enum: ['strict', 'relaxed'] },
             // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.

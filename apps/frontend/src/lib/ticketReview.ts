@@ -2,11 +2,14 @@ import {
   TICKET_REVIEW_MAX_PRS,
   TICKET_REVIEW_STATES_MAX,
   criteriaDoneWords,
+  outsideTicketWords,
+  noPrWords,
   jiraApiRoot,
   ticketIdentForLink,
   type ClaudeTicketAlignment,
   type TicketCriterion,
   type TicketExpectedIn,
+  type TicketOutsideContext,
   type TicketPrCard,
   type TicketPrCardChange,
   type TicketPrCardInterfaceKind,
@@ -94,12 +97,14 @@ export function deliveredByLabel(
   return labels.length > 0 ? `Done in ${joinAnd(labels)}` : null;
 }
 
-/** Where unmet work belongs: "Belongs in api#88", or "Belongs in api" (a repo with no PR yet). */
+/** Where unmet work belongs: "Belongs in api#88", "Belongs in api" (a member's repo with no PR for it yet),
+ *  or "No PR yet in acme/api" (a workspace repository with no PR on the ticket — nothing to post on). */
 export function expectedInLabel(
   e: TicketExpectedIn | null | undefined,
   members: readonly TicketReviewMember[],
 ): string | null {
   if (e == null) return null;
+  if (e.prId == null && e.outsideRepo != null && e.outsideRepo !== '') return noPrWords(e.outsideRepo, e.outsideUnlinkedPr ?? null);
   if (e.prId != null) {
     const m = members.find((x) => x.prId === e.prId);
     if (m != null) return `Belongs in ${memberLabel(m)}`;
@@ -109,6 +114,32 @@ export function expectedInLabel(
     if (m != null) return `Belongs in ${memberLabel(m).replace(/#\d+$/, '')}`;
   }
   return null;
+}
+
+/** "No PR yet in acme/api", or "acme/web#88 is on the same branch but not linked to the ticket" (shared
+ *  `noPrWords`). */
+export const noPrYetLabel = (repo: string, unlinked: { number: number } | null = null): string => noPrWords(repo, unlinked);
+
+/**
+ * CODE OUTSIDE THE TICKET in ONE short line (the run's `assessment.outside`): what it also read, what could
+ * not be read and what was left out past the cap — "Also read 3 other repositories and api#88 (same
+ * branch, not linked to the ticket). Left out: acme/x, acme/y." null when there is nothing to say.
+ */
+export function outsideReadLine(o: TicketOutsideContext | null | undefined): string | null {
+  if (o == null || (o.sources.length === 0 && o.leftOut.length === 0)) return null;
+  const label = (x: TicketOutsideContext['sources'][number]): string =>
+    x.kind === 'unlinked_pr' && x.number != null ? memberLabel({ repo: x.repo, number: x.number }) : x.repo;
+  const repos = o.sources.filter((x) => x.kind === 'repo' && x.read).length;
+  const prs = o.sources.filter((x) => x.kind === 'unlinked_pr' && x.read).map(label);
+  const failed = o.sources.filter((x) => !x.read).map(label);
+  const read: string[] = [];
+  if (repos > 0) read.push(plural(repos, 'other repository', 'other repositories'));
+  if (prs.length > 0) read.push(`${joinAnd(prs)} (same branch, not linked to the ticket)`);
+  const out: string[] = [];
+  if (read.length > 0) out.push(`Also read ${joinAnd(read)}.`);
+  if (failed.length > 0) out.push(`Could not read ${joinAnd(failed)}.`);
+  if (o.leftOut.length > 0) out.push(`Left out: ${o.leftOut.join(', ')}.`);
+  return out.join(' ');
 }
 
 // ---- currency ----
@@ -279,11 +310,12 @@ export function ticketAutoCheckWords(
 
 // ---- coverage ----
 
-/** "4 of 6 met" / "4 met + 1 outside code of 6"; null when the run had no criteria. */
+/** "4 of 6 met" / "4 met + 1 outside code of 6" / "4 of 6 met, 1 already outside the ticket"; null when
+ *  the run had no criteria. */
 export function coverageLabel(counts: TicketReviewState['counts']): string | null {
   if (counts == null || counts.total === 0) return null;
   const outside = counts.metOutsideCode ?? 0;
-  return outside > 0 ? criteriaDoneWords(counts) : `${counts.met} of ${counts.total} met`;
+  return `${outside > 0 ? criteriaDoneWords(counts) : `${counts.met} of ${counts.total} met`}${outsideTicketWords(counts)}`;
 }
 
 export type CoverageTone = 'ok' | 'partial' | 'bad' | 'muted';
@@ -390,7 +422,8 @@ export function missingItems(items: readonly TicketReviewItem[]): TicketReviewIt
   return items.filter((i) => i.status === 'missing');
 }
 
-/** Where Post puts the comment: the item's owner PR, else the PR being viewed. */
+/** Where Post puts the comment: the item's owner PR, else the PR being viewed. ⚠ An item whose work
+ *  belongs in a repository with no PR on the ticket (`noPrIn`) has no target — `storyGapGroups` skips it. */
 export function postTargetOf(
   item: Pick<TicketReviewItem, 'ownerPrId'>,
   viewedPrId: number,
@@ -421,6 +454,8 @@ export function storyGapGroups(
   const groups = new Map<number, StoryGapGroup>();
   for (const item of review.items) {
     if (item.posted != null) continue;
+    // No PR to post on (the server's `storyGapTarget` agrees): "No PR yet in acme/api".
+    if (item.ownerPrId == null && item.noPrIn != null) continue;
     const t = postTargetOf(item, viewedPrId, review.members);
     const g = groups.get(t.prId) ?? { prId: t.prId, label: t.label, itemIds: [] };
     g.itemIds.push(item.id);

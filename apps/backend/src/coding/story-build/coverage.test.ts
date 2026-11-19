@@ -58,3 +58,23 @@ describe('foldCoverage', () => {
     expect(storyBuildIsGap({ verdict: 'something_new' as never })).toBe(true);
   });
 });
+
+// 3. CODE OUTSIDE THE TICKET: `outside` rides the fold; a default-branch met is done, an UNLINKED-PR met is a gap.
+describe('foldCoverage — code outside the ticket', () => {
+  it('carries outside; only the unlinked one is a gap', () => {
+    const a: TicketAssessment = {
+      ...ASSESSMENT,
+      criteria: [
+        { ref: 'AC1', index: 0, text: 'Refund by card', status: 'met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null, outside: { kind: 'repo', repoId: 7, repo: 'acme/api', prId: null, number: null } },
+        { ref: 'AC2', index: 1, text: 'Email a receipt', status: 'met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null, outside: { kind: 'unlinked_pr', repoId: 8, repo: 'acme/mail', prId: 88, number: 88 } },
+      ],
+      missing: [],
+    };
+    const c = foldCoverage({ criteria: CRITERIA, check: { ...LATEST, assessment: a }, state: 'checked', prs: [PR], note: null });
+    expect(c.criteria.map((x) => [x.ref, x.outside?.kind ?? null, x.coveredByPrIds])).toEqual([
+      ['AC1', 'repo', []],
+      ['AC2', 'unlinked_pr', []],
+    ]);
+    expect(gapRefs(c)).toEqual(['AC2']);
+  });
+});

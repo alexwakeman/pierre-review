@@ -122,6 +122,9 @@ export interface LocalReviewCriterion {
   cannotMeet: string | null;
   /** The checker accepted the agent's "not applicable" note. */
   notApplicable: boolean;
+  /** A met criterion only code OUTSIDE the ticket delivers, in words ("Already in acme/api (no PR on this
+   *  ticket)"; shared `criterionOutsideWords`). Absent otherwise. */
+  outside?: string;
 }
 
 export interface LocalReviewReviewer {

@@ -114,3 +114,15 @@ describe("a 'not_checked' finding stays in the chain", () => {
     expect(roundOpen(2, pair, findings, null).findings).toBe(0);
   });
 });
+
+// 4. The PR body's counts name code outside the ticket apart: a default-branch met is met (and counted apart),
+//    an unlinked-PR met is open but not "not met".
+describe('the PR body counts code outside the ticket apart', () => {
+  it('outsideTicket and unlinked', () => {
+    const out = (ref: string, kind: 'repo' | 'unlinked_pr') =>
+      ({ ...crit(ref, 'met'), outside: { kind, repoId: 1, repo: 'acme/x', prId: kind === 'repo' ? null : 8, number: kind === 'repo' ? null : 8 } }) as TicketAssessment['criteria'][number];
+    const c = check(1, [crit('AC1', 'met'), out('AC2', 'repo'), out('AC3', 'unlinked_pr'), crit('AC4', 'not_met')], []);
+    const body = loopBodySummaryOf({ reviews: [], findings: [], checks: [c], acResponses: [], finalRound: 1, providers: ['claude'] }, null);
+    expect(body.criteria).toEqual({ met: 2, outsideTicket: 1, notApplicable: [], notMet: 1, unlinked: 1 });
+  });
+});

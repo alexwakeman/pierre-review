@@ -62,4 +62,22 @@ describe('loopBodySection', () => {
     expect(body).not.toContain('Built with');
     expect(storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null })).not.toContain('Review in Ensemble');
   });
+
+  it('names criteria met outside the ticket apart, in the counts\' own words', () => {
+    const s = loopBodySection({
+      reviews: 2,
+      providers: ['claude'],
+      fixed: 1,
+      answered: 0,
+      pushedBackAccepted: 0,
+      stillOpen: [],
+      criteria: { met: 4, outsideTicket: 1, notApplicable: [], notMet: 0, unlinked: 1 },
+    });
+    expect(s).toContain(
+      'Acceptance criteria: 4 met, 1 already outside the ticket, 0 not applicable, 0 not met, 1 only in a pull request on the same branch that is not linked to the ticket.',
+    );
+    const plain = loopBodySection({ reviews: 1, providers: ['claude'], fixed: 0, answered: 0, pushedBackAccepted: 0, stillOpen: [], criteria: { met: 2, notApplicable: [], notMet: 1 } });
+    expect(plain).toContain('Acceptance criteria: 2 met, 0 not applicable, 1 not met.');
+  });
 });
+

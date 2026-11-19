@@ -17,6 +17,15 @@ import type { AgentContext } from '../agent-context.js';
 // rows and the plugin's current membership; a difference means the run no longer describes the
 // ticket, and the auto sweeper re-runs it.
 //
+// ⚠ CODE OUTSIDE THE TICKET IS NOT AN INPUT (outside.ts): the other repositories' default-branch tips and
+// the unlinked same-branch PRs a run read are CONTEXT. None of their SHAs enters the fingerprint, so a push
+// to some repository's main never re-runs (and re-bills) every story check; a verdict that leans on that
+// code ("Already in acme/api") can therefore be slightly out of date until the ticket's next run.
+// ⚠ THE SWITCH IS AN INPUT: the workspace's "Story checks read every repository" OFF appends one part
+// ('outside:off'). ON adds NOTHING, so every run from before the switch existed (which read no outside
+// code either way) keeps its fingerprint — no mass re-run, no TICKET_REVIEW_VERSION bump — while turning
+// the switch off, or back on after a run made while off, makes the latest run stale (no reason named).
+//
 // ⚠ PURE AND CLOCK-FREE. Nothing derived from `Date.now()` may enter it, or a ticket nobody touched
 // would re-run (and re-bill) on a timer. Bump TICKET_REVIEW_VERSION when what a run produces for the
 // same inputs changes (the prompt's rules, the reconcile) — every stored run then reads stale once.
@@ -39,12 +48,13 @@ export function ticketHash(
   return sha256([t.title ?? '', t.description ?? '', t.acceptanceCriteria ?? ''].join('\u0000'));
 }
 
-/** sha256(version | ticketHash | sorted "prId:headSha:state"). Member order does not matter. */
-export function fingerprint(hash: string, members: readonly FingerprintMember[]): string {
+/** sha256(version | ticketHash | sorted "prId:headSha:state" [| 'outside:off']). Member order does not
+ *  matter. `outsideOff`: the run's workspace has "Story checks read every repository" OFF (see the header). */
+export function fingerprint(hash: string, members: readonly FingerprintMember[], opts: { outsideOff?: boolean } = {}): string {
   const parts = members
     .map((m) => `${m.prId}:${m.headSha}:${m.state}`)
     .sort();
-  return sha256([`v${TICKET_REVIEW_VERSION}`, hash, ...parts].join('\n'));
+  return sha256([`v${TICKET_REVIEW_VERSION}`, hash, ...parts, ...(opts.outsideOff === true ? ['outside:off'] : [])].join('\n'));
 }
 
 /** A PR's member state: open, merged, or null (closed without merging — never a member). */
@@ -166,6 +176,8 @@ export function criteriaCounts(a: TicketAssessment | null): TicketReviewState['c
   const c = criterionCounts(a.criteria);
   return {
     met: c.met,
+    // Of `met`: only code outside the ticket delivers it (named apart, still met).
+    metOutsideTicket: c.metOutsideTicket,
     metOutsideCode: c.metOutsideCode,
     partlyMet: c.partlyMet,
     notMet: c.notMet,
@@ -192,7 +204,8 @@ export function deriveTicketReviewState(args: {
     members: readonly FingerprintMember[];
   } | null;
   runningRunId: number | null;
-  live: { ticketHash: string; members: readonly FingerprintMember[] } | null;
+  // `outsideOff`: the latest run's workspace has "Story checks read every repository" off now.
+  live: { ticketHash: string; members: readonly FingerprintMember[]; outsideOff?: boolean } | null;
   // A person commented since the latest run AND it still has a criterion not done
   // (tracker/comments.ts `newCommentsMakeStale`). Never part of the fingerprint.
   newCommentsStale?: boolean;
@@ -214,7 +227,7 @@ export function deriveTicketReviewState(args: {
   // fingerprint with no listed reason is a TICKET_REVIEW_VERSION bump: stale, nothing to name.
   let moved = latest != null && latest.fingerprint == null;
   if (latest != null && latest.fingerprint != null && live != null) {
-    moved = fingerprint(live.ticketHash, live.members) !== latest.fingerprint;
+    moved = fingerprint(live.ticketHash, live.members, { outsideOff: live.outsideOff === true }) !== latest.fingerprint;
     if (moved) {
       const { reasons, changedPrIds } = staleReasons(latest, live);
       base.staleBecause = reasons;

@@ -54,13 +54,14 @@ export function criteriaCheckOf(
 ): PrCriteriaCheck | null {
   const criteria = run?.assessment?.criteria;
   if (run == null || !Array.isArray(criteria) || criteria.length === 0) return null;
-  const { met, metOutsideCode, partlyMet, notMet, unsettled } = criterionCounts(criteria);
+  const { met, metOutsideTicket, metOutsideCode, partlyMet, notMet, unsettled } = criterionCounts(criteria);
   return {
     ident: member.ident,
     key: run.key,
     title: run.title,
     reviewId: run.id,
     met,
+    ...(metOutsideTicket > 0 ? { metOutsideTicket } : {}),
     metOutsideCode,
     partlyMet,
     notMet,

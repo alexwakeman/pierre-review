@@ -23,7 +23,7 @@ export interface LocalReviewView {
     failure?: string;
     summary: string | null;
     open: number;
-    criteria: Array<{ ref: string; status: string; open: boolean; text: string; explanation: string | null; cannotMeet?: string; notApplicable?: true }>;
+    criteria: Array<{ ref: string; status: string; open: boolean; text: string; explanation: string | null; cannotMeet?: string; notApplicable?: true; outside?: string }>;
   };
   /** What to do next (an agent reads this). */
   next: string;
@@ -75,6 +75,7 @@ export function reviewView(r: LocalReview): LocalReviewView {
         explanation: c.explanation,
         ...(c.cannotMeet ? { cannotMeet: c.cannotMeet } : {}),
         ...(c.notApplicable ? { notApplicable: true as const } : {}),
+        ...(c.outside ? { outside: c.outside } : {}),
       })),
     };
   }
@@ -139,6 +140,7 @@ export function reviewText(r: LocalReview): string {
     for (const c of s.criteria) {
       const mark = c.open ? 'OPEN' : 'ok  ';
       out.push(`  ${mark} ${c.ref} ${c.status.replace(/_/g, ' ')}${c.notApplicable ? ' (not applicable, accepted)' : ''} — ${c.text}`);
+      if (c.outside) out.push(`       ${c.outside}`);
       if (c.cannotMeet) out.push(`       Cannot meet: ${c.cannotMeet}`);
     }
   }

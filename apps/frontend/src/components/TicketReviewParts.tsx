@@ -25,6 +25,7 @@ import {
   STORY_MISSING_HEADING,
   TICKET_CRITERION_STATUS_LABEL,
   criterionDone,
+  criterionOutsideWords,
   criterionTextOnly,
   storySummaryProse,
   type ClaudeFindingSide,
@@ -56,6 +57,8 @@ import {
   memberPrIdsOf,
   membersWithCards,
   missingItems,
+  noPrYetLabel,
+  outsideReadLine,
   postGapsButtonLabel,
   storyGapGroups,
   notRequestedPostedLabel,
@@ -301,9 +304,11 @@ export function CriterionRow({
   const ref = <CriterionRef label={c.ref} doneIn={doneIn} codeIn={codeIn} belongs={belongs} />;
   // MET is one compact line: tick, ref, criterion, who delivered it. MET OUTSIDE CODE CHANGES is the
   // same done line with a comment mark, its label, and the comment it rests on (a button that opens
-  // the ticket's Comments at it).
+  // the ticket's Comments at it). A MET only code OUTSIDE the ticket delivers is met, labelled apart
+  // under the criterion ("Already in acme/api (no PR on this ticket)").
   if (criterionDone(c.status)) {
     const outside = c.status === 'met_outside_code';
+    const elsewhere = c.status === 'met' && c.outside != null ? criterionOutsideWords(c.outside) : null;
     const cite = outside ? metByWords(c.metBy, formatDate) : null;
     const line = (
       <>
@@ -316,6 +321,11 @@ export function CriterionRow({
         </span>
         <span className="min-w-0 break-words leading-5">
           {criterionTextOnly(c.text, c.ref)}
+          {elsewhere != null && (
+            <span className="block text-meta text-ui-mute" data-testid="criterion-outside">
+              {elsewhere}
+            </span>
+          )}
           {outside && (
             <span className="block text-meta text-ui-mute">
               {TICKET_CRITERION_STATUS_LABEL.met_outside_code}
@@ -543,6 +553,9 @@ export function MissingRow({
           Belongs in <MemberPrLink member={{ repo: owner.repo, number: owner.number, label: memberLabel(owner) }} />
         </div>
       )}
+      {owner == null && item.noPrIn != null && (
+        <div className={`mt-0.5 text-meta ${MUTED}`}>{noPrYetLabel(item.noPrIn, item.noPrUnlinked ?? null)}</div>
+      )}
       {item.path != null && item.path !== '' && (
         <div className="mt-0.5">
           <EvidenceRef
@@ -655,6 +668,7 @@ export function TicketResults({
   const byRef = useMemo(() => itemsByRef(review.items), [review.items]);
   const missing = useMemo(() => missingItems(review.items), [review.items]);
   const summary = useMemo(() => storySummaryProse(a?.summary), [a?.summary]);
+  const outsideLine = outsideReadLine(a?.outside);
   if (a == null) return <p className={`text-meta ${MUTED}`}>No result stored.</p>;
   const ctx = { review, viewedPrId, changedPaths, onOpenInChanges };
   const autoPostFailed = autoPostFailureLine(review.autoPost);
@@ -687,6 +701,22 @@ export function TicketResults({
           />
           .
         </p>
+      )}
+      {outsideLine != null && (
+        <div className="flex items-start gap-1" data-testid="story-check-outside">
+          <p className={`min-w-0 text-meta ${MUTED}`}>
+            <PrRefText text={outsideLine} />
+          </p>
+          <InfoButton title="Code outside the ticket">
+            <p>
+              The story check also reads this workspace’s other repositories at their default branch, and open pull
+              requests on the same branch that are not linked to the ticket. It is not the story’s work: it shows
+              whether a criterion is already done elsewhere, and how the repositories fit together.
+            </p>
+            <p>A criterion only that code does is met, and says where. A change there does not start a new check.</p>
+            <p>Turn it off in Settings → AI review.</p>
+          </InfoButton>
+        </div>
       )}
     </div>
   );

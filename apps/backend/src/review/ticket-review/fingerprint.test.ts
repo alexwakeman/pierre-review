@@ -117,3 +117,37 @@ describe('deriveTicketReviewState', () => {
     ).toBe('stale');
   });
 });
+
+// ⚠ CODE OUTSIDE THE TICKET IS CONTEXT, NOT AN INPUT (outside.ts): a run that read another repository's
+// default branch stays CURRENT when that branch moves; a member's push still makes it stale.
+describe('fingerprint — code outside the ticket', () => {
+  const h = ticketHash(story);
+  const latest = (outsideSha: string) => ({
+    id: 9,
+    fingerprint: fingerprint(h, [a, b]),
+    ticketHash: h,
+    alignment: 'aligned' as const,
+    assessment: {
+      alignment: 'aligned' as const,
+      summary: null,
+      criteria: [],
+      missing: [],
+      notRequested: [],
+      outside: {
+        sources: [{ ref: 'X1', kind: 'repo' as const, repoId: 7, repo: 'acme/docs', prId: null, number: null, sha: outsideSha, read: true }],
+        leftOut: [],
+      },
+    },
+    completedAt: new Date(0),
+    members: [a, b],
+  });
+
+  it('an outside SHA moving changes nothing; a member head moving makes the run stale', () => {
+    const live = { ticketHash: h, members: [a, b] };
+    expect(deriveTicketReviewState({ ident: 'i', latest: latest('d1'), runningRunId: null, live }).status).toBe('current');
+    expect(deriveTicketReviewState({ ident: 'i', latest: latest('d2'), runningRunId: null, live }).status).toBe('current');
+    const pushed = { ticketHash: h, members: [a, { ...b, headSha: 'ccc' }] };
+    const s = deriveTicketReviewState({ ident: 'i', latest: latest('d1'), runningRunId: null, live: pushed });
+    expect([s.status, s.staleBecause]).toEqual(['stale', ['pr_pushed']]);
+  });
+});

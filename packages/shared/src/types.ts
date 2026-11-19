@@ -4494,6 +4494,8 @@ export interface SetWorkspaceAutoReviewBody {
   autoFixEnabled?: boolean;
   // The automatic design-diagram switch (`WorkspaceAutoReviewSettings.autoDiagramsEnabled`).
   autoDiagramsEnabled?: boolean;
+  // "Story checks read every repository" (`WorkspaceAutoReviewSettings.storyCheckAllRepos`).
+  storyCheckAllRepos?: boolean;
   // Who runs auto reviews (`WorkspaceAutoReviewSettings.autoReviewProviders`).
   autoReviewProviders?: AutoReviewProviders;
   // How a Claude + Codex pair's verdict is folded (`WorkspaceAutoReviewSettings.pairStrictness`).
@@ -4547,6 +4549,12 @@ export interface WorkspaceAutoReviewSettings {
   // diagrams). ON by default (anything but a stored false reads ON); independent of `enabled`. Off
   // stops only the automatic draw — the Draw / Redraw button still works.
   autoDiagramsEnabled: boolean;
+  // STORY CHECKS READ EVERY REPOSITORY (`workspaces.story_check_all_repos`, migration 0211;
+  // docs/CLAUDE-REVIEW.md § Ticket review → Outside the ticket). Every story check (manual or auto, and
+  // the review loop's) also reads this workspace's other repositories at their default branch (at most
+  // STORY_CHECK_OUTSIDE_REPOS_MAX) and open same-branch PRs not linked to the ticket. ON by default
+  // (anything but a stored false reads ON); independent of `enabled`. Absent from an older server.
+  storyCheckAllRepos?: boolean;
   // WHO RUNS AUTO REVIEWS (`workspaces.auto_review_providers`, migration 0135): 'default' = the
   // default provider (Settings → AI); 'both' = Claude, then Codex, as one PAIR (docs/CLAUDE-REVIEW.md
   // § Claude + Codex). With 'both' and only one provider signed in when a run starts, that one runs.
@@ -8744,6 +8752,15 @@ export function repeatRunLimit(cap: number): number {
 // change in each RELATED REPO (Settings → Workspace → Related repos), together. Kept at 4 when related
 // repos joined: each peer is a full checkout plus prompt bytes, and a related repo is one peer at most.
 export const TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW = 4;
+// CODE OUTSIDE THE TICKET (docs/CLAUDE-REVIEW.md § Ticket review → Outside the ticket): a story check
+// also reads the workspace's OTHER repositories (no PR on the ticket), read-only at their default
+// branch — repositories declared related to a member's repository first, then the rest by owner/name —
+// at most this many; the rest are NAMED (`TicketOutsideContext.leftOut`). The same cap as AI Fix's
+// (`AI_FIX_REPOS_MAX`). Per-workspace switch `WorkspaceAutoReviewSettings.storyCheckAllRepos`.
+export const STORY_CHECK_OUTSIDE_REPOS_MAX = 12;
+// …and at most this many OPEN PRs in a related repository on a member's branch name that are NOT
+// linked to the ticket, read at their head (the PR review's peer cap).
+export const STORY_CHECK_UNLINKED_PRS_MAX = TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW;
 
 // ---- Related repos (Settings → Workspace; docs/CLAUDE-REVIEW.md § Related repos) ----
 // Repos in one workspace the reader reviews together (a frontend and its backend). SYMMETRIC: a pair
@@ -8910,6 +8927,52 @@ export interface TicketEvidence {
 export interface TicketExpectedIn {
   prId: number | null;
   repoId: number | null;
+  // A workspace repository with NO PR on the ticket (`TicketOutsideContext.repos`), as 'owner/name' —
+  // server-written from the run's own list. Such work has nowhere to be posted: its item reads "No PR
+  // yet in acme/api" and is never a post target. Absent on every other expectedIn.
+  outsideRepo?: string | null;
+  // With `outsideRepo`: an OPEN PR there on a member's branch that is NOT linked to the ticket (the run read
+  // it): "acme/web#88 is on the same branch but not linked to the ticket" — never "No PR yet".
+  outsideUnlinkedPr?: { prId: number; number: number } | null;
+}
+
+// Code OUTSIDE the ticket's PRs that a story check read as context (docs/CLAUDE-REVIEW.md § Ticket
+// review → Outside the ticket). `ref` is the prompt's ('X1'…).
+//   repo         a workspace repository with no PR on the ticket, at its default branch
+//   unlinked_pr  an OPEN PR in a related repository on a member's branch name, NOT linked to the ticket
+export interface TicketOutsideSource {
+  ref: string;
+  kind: 'repo' | 'unlinked_pr';
+  repoId: number;
+  // 'owner/name'
+  repo: string;
+  // unlinked_pr only (else null).
+  prId: number | null;
+  number: number | null;
+  // The commit read: the default branch's tip, or the PR's head (null when it could not be read).
+  sha: string | null;
+  // false = it could not be checked out (named, skipped; never fails the run).
+  read: boolean;
+}
+
+// What a run read beyond the ticket's PRs. CONTEXT, NOT INPUTS: never in the fingerprint, so a push to
+// some default branch never re-runs a check — a verdict that leans on it can be slightly out of date
+// until the next run.
+export interface TicketOutsideContext {
+  sources: TicketOutsideSource[];
+  // Workspace repositories past STORY_CHECK_OUTSIDE_REPOS_MAX, 'owner/name' — named, not read.
+  leftOut: string[];
+}
+
+// A criterion MET only by code outside the ticket's PRs: counted as met, labelled apart ("Already in
+// acme/api (no PR on this ticket)" / "In api#88 (same branch, not linked to the ticket)"). Server-built
+// from the run's `TicketOutsideContext` (never from model text).
+export interface TicketCriterionOutside {
+  kind: TicketOutsideSource['kind'];
+  repoId: number;
+  repo: string;
+  prId: number | null;
+  number: number | null;
 }
 
 // One acceptance criterion's verdict across every member. `ref` is 'AC1'…, `index` 0-based in
@@ -8927,6 +8990,9 @@ export interface TicketCriterion {
   // `met_outside_code` only: the person's ticket comment that says it was done, copied from the
   // STORED comment the run was given (never from model text). Absent on every other status.
   metBy?: TicketCriterionMetBy | null;
+  // `met` only, with an empty `deliveredBy`: the code OUTSIDE the ticket that delivers it. Absent on
+  // every other criterion (and on runs before outside code was read).
+  outside?: TicketCriterionOutside | null;
 }
 
 // The ticket comment a "Met outside code changes" verdict rests on.
@@ -8965,6 +9031,9 @@ export interface TicketAssessment {
   // The reference-library passages the run used for this story: supporting, contradicting or context
   // (docs/REFERENCE-DOCS.md § Use in reviews). Absent = the run did not read the library.
   references?: ReviewDocReference[];
+  // The code outside the ticket's PRs the run read (or named and left out). Absent = none (the
+  // workspace switch off, no other repository, or a run from before it).
+  outside?: TicketOutsideContext;
 }
 
 // One unmet / partly met criterion or missing item — the thing that can be posted to GitHub.
@@ -8980,6 +9049,12 @@ export interface TicketReviewItem {
   // Claude's explanation ('' when none).
   body: string;
   ownerPrId: number | null;
+  // Computed on read: the work belongs in a workspace repository with NO PR on the ticket
+  // ('owner/name', the item's `expectedIn.outsideRepo`). Such an item is NEVER a post target — there
+  // is no PR to post it on ("No PR yet in acme/api"). Absent otherwise.
+  noPrIn?: string | null;
+  // With `noPrIn`: the unlinked same-branch PR in that repository (`expectedIn.outsideUnlinkedPr`).
+  noPrUnlinked?: { prId: number; number: number } | null;
   path: string | null;
   line: number | null;
   // The same item on the previous run of this ticket (matched by kind + folded text), else null.
@@ -9028,6 +9103,9 @@ export interface TicketReviewState {
     // "Met outside code changes" (a person's comment) — done, but counted apart from `met`. Absent
     // from an older server (read as 0).
     metOutsideCode?: number;
+    // Of `met`, how many only code OUTSIDE the ticket's PRs delivers (`TicketCriterion.outside`) —
+    // included in `met`, named apart. Absent from an older server (read as 0).
+    metOutsideTicket?: number;
     partlyMet: number;
     notMet: number;
     unclear: number;

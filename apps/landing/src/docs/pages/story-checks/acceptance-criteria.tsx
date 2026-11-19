@@ -93,7 +93,9 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <Ui>Met</Ui>: a pull request delivers it. The check names the pull request (&ldquo;Done in #612&rdquo;)
-          and the evidence.
+          and the evidence. When only code outside the ticket does it, the criterion says so: &ldquo;Already in
+          acme/api (no PR on this ticket)&rdquo;. See{' '}
+          <DocLink to="story-checks/overview#code-outside-the-ticket">Code outside the ticket</DocLink>.
         </li>
         <li>
           <Ui>Met outside code changes</Ui>: no pull request delivers it and none needs to, because a person&rsquo;s
@@ -121,8 +123,9 @@ export default function Page(): JSX.Element {
       <H2 id="how-the-counts-work">How the counts work</H2>
       <p>
         &ldquo;Met&rdquo; and &ldquo;Met outside code changes&rdquo; both count as done, but they are counted apart,
-        for example &ldquo;4 met + 1 outside code of 6&rdquo;. Partly met, Not met and Can&rsquo;t tell all count as
-        not done. The number on a This Sprint card comes from the same latest check.
+        for example &ldquo;4 met + 1 outside code of 6&rdquo;. A criterion met only by code outside the ticket
+        counts as met and is named apart: &ldquo;4 of 6 met, 1 already outside the ticket&rdquo;. Partly met, Not
+        met and Can&rsquo;t tell all count as not done. The number on a This Sprint card comes from the same latest check.
       </p>
       <Note>
         A verdict is AI&rsquo;s reading of the code against the ticket. Each one names its evidence so you can check

@@ -679,6 +679,22 @@ export function toItem(r: TicketItemRow, runCreatedAt: Date | null): TicketRevie
   };
 }
 
+/**
+ * `noPrIn`, computed on read: an item with no owner PR whose criterion / missing item belongs in a
+ * workspace repository with NO PR on the ticket (`expectedIn.outsideRepo`, reconcile.ts). Such an item
+ * is never a post target (post-item.ts `storyGapTarget`). Pure.
+ */
+export function withNoPrIn(item: TicketReviewItem, assessment: TicketAssessment | null): TicketReviewItem {
+  if (item.ownerPrId != null || assessment == null) return item;
+  const e =
+    item.status === 'missing'
+      ? assessment.missing.find((m) => m.ref === item.ref)?.expectedIn
+      : assessment.criteria.find((c) => c.ref === item.ref)?.expectedIn;
+  const repo = e?.prId == null ? (e?.outsideRepo ?? null) : null;
+  if (repo == null || repo === '') return item;
+  return { ...item, noPrIn: repo, ...(e?.outsideUnlinkedPr != null ? { noPrUnlinked: e.outsideUnlinkedPr } : {}) };
+}
+
 function toWire(
   r: TicketReviewRow,
   members: TicketReviewMember[],
@@ -710,7 +726,7 @@ function toWire(
     summary: r.summary,
     assessment: r.status === 'succeeded' ? (r.assessment ?? null) : null,
     members,
-    items: items.map((i) => toItem(i, created)),
+    items: items.map((i) => withNoPrIn(toItem(i, created), r.status === 'succeeded' ? (r.assessment ?? null) : null)),
     autoPost: ticketAutoPostWireOf(r.autoPost),
   };
 }
@@ -829,6 +845,8 @@ async function latestRowsByIdent(
 export interface TicketStateInputs {
   latest: {
     id: number;
+    // The run's workspace (whose "Story checks read every repository" its fingerprint carries).
+    workspaceId: number;
     fingerprint: string | null;
     ticketHash: string | null;
     alignment: ClaudeTicketAlignment | null;
@@ -888,6 +906,7 @@ export async function getTicketStateInputs(
         s != null
           ? {
               id: s.id,
+              workspaceId: s.workspaceId,
               fingerprint: s.fingerprint,
               ticketHash: s.ticketHash,
               alignment: asAlignment(s.alignment),

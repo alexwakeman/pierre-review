@@ -213,6 +213,16 @@ export default function Page(): JSX.Element {
         .
       </p>
 
+      <H2 id="story-checks-read-every-repository">Story checks read every repository</H2>
+      <p>
+        <Ui>Story checks read every repository</Ui> is on by default. A story check then also reads this
+        workspace&rsquo;s repositories that have no pull request on the ticket, at their default branch: your related
+        repositories first, then the rest by name, at most 12. It also reads open pull requests in related
+        repositories that are on the same branch as a pull request on the ticket but are not linked to it. See{' '}
+        <DocLink to="story-checks/overview#code-outside-the-ticket">Code outside the ticket</DocLink>.
+      </p>
+      <p>Turn it off to check only the ticket&rsquo;s own pull requests.</p>
+
       <H2 id="related-repos">Related repos</H2>
       <p>
         When a change in one repository depends on another (a front end and its API, for example), link them. When AI

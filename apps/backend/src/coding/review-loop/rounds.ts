@@ -15,6 +15,7 @@ import type {
 } from '@pierre-review/shared';
 import type { PriorFindingForFollowUp, PriorReviewForFollowUp } from '../../review/claude-review/follow-up.js';
 import { responseLine } from './seed.js';
+import { criterionDoneForBuild } from '@pierre-review/shared';
 
 /** One review run of a round (one provider half on one target). */
 export interface LoopRunLike {
@@ -62,7 +63,10 @@ export interface LoopCheckLike {
   claimVerdicts: StoryBuildLoopClaimVerdict[] | null;
 }
 
-export type OpenCriterion = { ref: string; status: 'not_met' | 'partly_met' | 'unclear' | 'missing'; text: string; explanation: string | null };
+// 'met_unlinked': the story check found it met ONLY by an open PR on the same branch that is NOT linked to
+// the ticket (`TicketCriterion.outside.kind === 'unlinked_pr'`). The loop keeps working on it (shared
+// `criterionDoneForBuild`); one met by another repository's DEFAULT BRANCH is done.
+export type OpenCriterion = { ref: string; status: 'not_met' | 'partly_met' | 'unclear' | 'missing' | 'met_unlinked'; text: string; explanation: string | null };
 
 export interface RoundOpen {
   findings: number;
@@ -104,6 +108,9 @@ export function effectiveClaimVerdicts(check: LoopCheckLike | null, checks: read
 export const acceptedNa = (check: LoopCheckLike | null, checks: readonly LoopCheckLike[] = []): Set<string> =>
   new Set(effectiveClaimVerdicts(check, checks).filter((v) => v.verdict === 'accepted').map((v) => v.ref.toUpperCase()));
 
+/** Met ONLY by an unlinked same-branch PR: not done for a loop (`criterionDoneForBuild`). */
+const metOnlyUnlinked = (c: { status: string; outside?: { kind: 'repo' | 'unlinked_pr' } | null }): boolean => !criterionDoneForBuild(c.status, c.outside ?? null) && c.status === 'met';
+
 /** The open criteria of a story check (accepted "not applicable" notes, this round's or earlier, settle one). */
 export function openCriteriaOf(check: LoopCheckLike | null, checks: readonly LoopCheckLike[] = []): OpenCriterion[] {
   const a = check?.status === 'succeeded' ? check.assessment : null;
@@ -111,8 +118,13 @@ export function openCriteriaOf(check: LoopCheckLike | null, checks: readonly Loo
   const na = acceptedNa(check, checks);
   return [
     ...a.criteria
-      .filter((c) => OPEN_CRITERION.has(c.status) && !na.has(c.ref.toUpperCase()))
-      .map((c) => ({ ref: c.ref, status: c.status as 'not_met' | 'partly_met' | 'unclear', text: c.text, explanation: c.explanation })),
+      .filter((c) => (OPEN_CRITERION.has(c.status) || metOnlyUnlinked(c)) && !na.has(c.ref.toUpperCase()))
+      .map((c) => ({
+        ref: c.ref,
+        status: metOnlyUnlinked(c) ? ('met_unlinked' as const) : (c.status as 'not_met' | 'partly_met' | 'unclear'),
+        text: c.text,
+        explanation: c.explanation,
+      })),
     ...a.missing.filter((m) => !na.has(m.ref.toUpperCase())).map((m) => ({ ref: m.ref, status: 'missing' as const, text: m.title, explanation: m.explanation })),
   ];
 }
