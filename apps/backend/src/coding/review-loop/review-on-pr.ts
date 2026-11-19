@@ -6,12 +6,15 @@
 // included — ready to post by hand in the PR's AI Review tab. A pair is ONE row (the consolidated list; never
 // a fake pair). A NEW head later is reviewed as usual. Best-effort: a failure is logged, and auto review may
 // then review the PR again. SUBJECT-INDEPENDENT: the runs and findings are structural (any loop's rows).
+// AI Fix's import also passes `followUp` (the closing round's judgement of the PR's earlier findings), so the
+// row resolves the threads the fix dealt with (coding/ai-fix/loop-pr-prior.ts). Build passes none.
 import { and, eq } from 'drizzle-orm';
 import {
   CLAUDE_REVIEW_MODELS,
   DEFAULT_CLAUDE_REVIEW_MODEL,
   type ClaudeFindingSeverity,
   type ClaudeFindingSide,
+  type ClaudeReviewFollowUpRecord,
   type ClaudeReviewModel,
   type ClaudeReviewPairConsolidation,
   type ClaudeReviewVerdict,
@@ -53,6 +56,8 @@ export interface ImportedFindingLike {
   anchored: boolean;
   fileInDiff: boolean;
   lens: string | null;
+  /** The PR finding this one re-raises (claude_review_findings.id); absent / null ⇒ none. */
+  priorFindingId?: number | null;
 }
 
 /** Build's line under the imported summary. */
@@ -74,6 +79,8 @@ export async function markLoopReviewOnPr(
     findings: readonly ImportedFindingLike[];
     line?: (round: number) => string;
     who?: string;
+    /** The closing round's judgement of the PR's earlier findings (AI Fix: loop-pr-prior.ts); absent ⇒ none. */
+    followUp?: ClaudeReviewFollowUpRecord | null;
   },
 ): Promise<number | null> {
   try {
@@ -111,6 +118,7 @@ export async function markLoopReviewOnPr(
       outputTokens: null,
       numTurns: null,
       excludedFiles: [],
+      followUp: a.followUp ?? null,
       findings: kept.map((f) => ({
         path: f.path,
         line: f.line,
@@ -123,6 +131,7 @@ export async function markLoopReviewOnPr(
         anchored: f.anchored,
         fileInDiff: f.fileInDiff,
         lens: (f.lens as never) ?? null,
+        priorFindingId: f.priorFindingId ?? null,
         included: true,
       })),
     });

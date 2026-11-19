@@ -76,6 +76,8 @@ import {
   type FixLoopReviewRow,
 } from './loop-persist.js';
 import { toAiFixLoop } from './loop-wire.js';
+import { mergePrPrior, prFollowUpForImport, prPriorFindingIdOf, prPriorReviewOf } from './loop-pr-prior.js';
+import type { PriorReviewForFollowUp } from '../../review/claude-review/follow-up.js';
 import { fixLoopRounds } from '../../ai/run-profile.js';
 import { holdLocalRefs } from '../../review/local-refs.js';
 
@@ -123,6 +125,8 @@ export interface FixLoopSeams {
   ticket(ctx: AgentContext, accountId: number, row: AiFixRow): Promise<{ ident: string; ticket: ClaudeReviewTicket } | null>;
   /** Hold the owner's local refs while the loop reads them. Returns the release. */
   holdRefs(fixId: number): () => void;
+  /** The PR's still-open earlier findings for one review half (loop-pr-prior.ts); null ⇒ none. */
+  prPrior(ctx: AgentContext, a: { accountId: number; prId: number; provider: AiProviderId; inPair: boolean }): Promise<PriorReviewForFollowUp | null>;
   session: {
     hold(fixId: number): void;
     release(fixId: number): void;
@@ -213,6 +217,7 @@ export function defaultFixLoopSeams(): FixLoopSeams {
     },
     ticket: async (ctx, accountId, row) => fixLoopTicket(ctx, accountId, row),
     holdRefs: (fixId) => holdLocalRefs(FIX_LOOP_REF_KIND, fixId),
+    prPrior: async (ctx, a) => (await import('./loop-pr-prior.js')).loadPrPriorForFixLoop(ctx, a),
     session: {
       hold: (id) => void mgr().then((x) => x.holdSession(key(id), 'AI Fix review loop')),
       release: (id) => void mgr().then((x) => x.releaseSession(key(id))),
@@ -588,7 +593,12 @@ async function stepReview(
         baseSha,
         head,
         provider: p,
-        prior: priorForTarget(reviews, findings, FIX_TARGET.kind, FIX_TARGET.id, k, p),
+        // The loop's own earlier round AND the PR's still-open earlier findings (loop-pr-prior.ts), so the
+        // closing round judges what the fix was for and the import can resolve those threads.
+        prior: mergePrPrior(
+          priorForTarget(reviews, findings, FIX_TARGET.kind, FIX_TARGET.id, k, p),
+          await seams.prPrior(ctx, { accountId, prId: facts.prId, provider: p, inPair: providers.length > 1 }),
+        ),
         abort: a.abort,
         byReader: a.byReader,
         feature: FIX_LOOP_REVIEW_FEATURE,
@@ -923,7 +933,13 @@ export async function importLoopReviewAfterPush(
     const runs = reviews.filter((r) => r.round === last);
     const key = fixWorkKey({ patch: row.patch, merge: readMergeState(row.mergeJson ?? null) });
     if (!runs.every((r) => r.workKey === key)) return null;
-    const findings = await listFixLoopFindings(ctx, a.accountId, a.fixId);
+    // A re-raise of a PR finding keeps its link to it; a link to the loop's own earlier round has no PR row.
+    const findings = (await listFixLoopFindings(ctx, a.accountId, a.fixId)).map((f) => ({ ...f, priorFindingId: prPriorFindingIdOf(f.priorFindingId) }));
+    // THE PR'S EARLIER FINDINGS, as the closing round judged them (loop-pr-prior.ts).
+    const prId = row.prId;
+    const judgedIds = runs.flatMap((r) => r.followUp?.items ?? []).map((it) => prPriorFindingIdOf(it.priorFindingId)).filter((x): x is number => x != null);
+    const prPrior = prId != null ? await prPriorReviewOf(ctx, { accountId: a.accountId, prId, findingIds: judgedIds }) : null;
+    const followUp = prFollowUpForImport(runs, prPrior);
     const { markLoopReviewOnPr } = await import('../review-loop/review-on-pr.js');
     const id = await markLoopReviewOnPr(ctx, {
       accountId: a.accountId,
@@ -935,8 +951,15 @@ export async function importLoopReviewAfterPush(
       findings,
       line: (round) => `Reviewed in Ensemble's AI fix before it was pushed (round ${round}).`,
       who: `ai fix ${a.fixId}`,
+      followUp,
     });
     if (id != null) await setFixLoop(ctx, a.accountId, a.fixId, { loopReviewId: id });
+    // Close the PR's threads the closing round found fixed (the reader's own PR: "Resolve my Ensemble threads
+    // when addressed"; the row is a manual one, so the workspace's auto path never applies). Never throws.
+    if (id != null && followUp != null && prId != null) {
+      const { maybeAutoResolveFindings } = await import('../../review/claude-review/auto-resolve.js');
+      await maybeAutoResolveFindings(ctx, { accountId: a.accountId, prId, reviewId: id });
+    }
     return id;
   } catch (err) {
     ctx.log.warn(`ai fix ${a.fixId}: the loop's review was not added to the PR: ${errMsg(err)}`);

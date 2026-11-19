@@ -4992,6 +4992,19 @@ REVIEW.md seed, the answers file and its checker, the branch review half, the br
   same, so the lines anchor. Auto review then skips that head (its first-review rule), and the auto fix queue
   reads it as `reviewed_by_fix` (`headReviewedByFixLoop`), not as a review to wait for. A push to a NEW branch
   imports nothing until its PR is synced (it never is: auto review reviews it).
+- **The PR's earlier findings** (`loop-pr-prior.ts`, 2026-11-19). Because auto review skips the pushed head, the
+  loop itself must judge what the PR's posted findings asked for, or their threads stay open forever. So EVERY
+  round's follow-up input is the loop's own earlier round PLUS the PR's still-open earlier findings, loaded as a
+  PR review on that half's provider loads them (`loadPriorReviewForFollowUp` + `attachFindingThreads`, settled-by-reply
+  ones left out; a pair half: its own provider's only). ⚠ TWO ID SPACES: a PR finding rides the loop NEGATED
+  (`-id`, carried), so a negative `priorFindingId` (a follow-up item or a re-raise) is the PR's and never
+  collides with a loop finding. The import restores them: `prFollowUpForImport` turns the closing round's
+  negated items into the imported row's `follow_up` (anchored on the newest PR review that raised one), a
+  re-raise keeps its PR `prior_finding_id` (a loop-only link is dropped), and `maybeAutoResolveFindings` runs on
+  the row — path B only (the reader's own PR, "Resolve my Ensemble threads when addressed"; the row is manual).
+  Still-open replies and pushback are NOT written (the row is never posted); the next review's chain anchors on
+  the row and carries what is still open. A failed read of the PR findings costs only them (the loop reviews its
+  own rounds, as before).
 - **Storage** (migration 0207): `ai_fix_loop_reviews` / `_findings` / `_story_checks` / `_ac_responses` keyed
   `(account_id, fix_id, round)`, plus `ai_fixes.loop_*`. The local refs are held while the loop reads them and
   kept after a restart only for a resumable fix (the `ai-fix-loop` keeper, registered before the boot sweep);

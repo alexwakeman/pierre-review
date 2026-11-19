@@ -73,6 +73,9 @@ no internals.
 
 ### Fixed
 
+- AI Fix: the review rounds now also check the points earlier AI reviews posted on the pull request. After the
+  push, the AI Review tab shows which ones the fix dealt with, and on your own pull request Ensemble resolves those
+  threads. Before, they stayed open and showed as current findings.
 - AI Fix: after "Push when done" or "Push automatically" pushes a fix, the tab says "Pushed to" the branch with
   the commit, and no longer offers Push for a fix that is already pushed. While the push runs it says "Pushing
   to" the branch. A failed automatic push says why and keeps Push.
