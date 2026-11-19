@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Claude now runs on your Anthropic API key by default. When `ANTHROPIC_API_KEY` is set, every Claude run uses it,
+  even while you are signed in to Claude Code. "Use my API keys first" in Settings → AI is now ticked unless you
+  untick it. Without a key, Ensemble still falls back to a Claude Code login; the docs and Settings link to
+  Anthropic's terms on that use.
+
 ## [1.0.67] - 2026-11-19
 
 ### Added

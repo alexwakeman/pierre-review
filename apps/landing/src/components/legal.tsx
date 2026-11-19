@@ -36,10 +36,13 @@ export function LegalPage({
   title,
   intro,
   pigment = 'lapis',
+  dateLine,
   children,
 }: {
   title: string;
   intro: ReactNode;
+  /** The date tile's text. Defaults to the legal pages' shared "Last updated" line. */
+  dateLine?: string;
   /** The header's one pigment tile, so the three documents read apart. */
   pigment?: Pigment;
   children: ReactNode;
@@ -52,7 +55,7 @@ export function LegalPage({
           <h1>{title}</h1>
         </div>
         <div className={`tile ${pigment} lg-date`}>
-          <p>Last updated {LEGAL_LAST_UPDATED}</p>
+          <p>{dateLine ?? `Last updated ${LEGAL_LAST_UPDATED}`}</p>
         </div>
       </header>
       <article className="lg-col">

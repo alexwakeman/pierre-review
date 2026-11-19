@@ -22,8 +22,8 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Do the AI features cost extra?</H3>
       <p>
-        Not from Ensemble. They run on your own Claude or ChatGPT plan, or your own Anthropic API key, so they use your
-        plan&rsquo;s limits or your API bill. See{' '}
+        Not from Ensemble. They run on your own Anthropic API key or ChatGPT plan, so they use your API bill or your
+        plan&rsquo;s limits. See{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>
 

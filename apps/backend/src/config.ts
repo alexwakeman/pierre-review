@@ -351,10 +351,9 @@ export const config = {
   //
   // EVERY model call — agent runs and one-shot completions alike — takes ONE credential ladder
   // (ai/credentials.ts), read at call time:
-  //   1. the user's own Claude Code login (default; a `claude` sign-in on disk or
-  //      CLAUDE_CODE_OAUTH_TOKEN). Any ANTHROPIC_API_KEY is hidden from the run so the login pays;
-  //   2. else ANTHROPIC_API_KEY from the environment.
-  // LIMN_AI_USE_API_KEY=true — prefer ANTHROPIC_API_KEY over the login when both exist.
+  //   1. ANTHROPIC_API_KEY from the environment (default);
+  //   2. else the user's own Claude Code login (a `claude` sign-in on disk or CLAUDE_CODE_OAUTH_TOKEN).
+  // LIMN_AI_USE_API_KEY=false (or the Settings box unticked) — the login first when both exist.
   // LIMN_AI_DISABLED=true is the kill switch for a team that forbids AI tooling — hides every
   // AI surface (`MeResponse.ai.enabled` false), registers no agentic route and refuses every
   // one-shot completion.

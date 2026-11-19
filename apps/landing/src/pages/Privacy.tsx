@@ -123,7 +123,7 @@ export default function Privacy(): JSX.Element {
           <li>
             <T>AI features send content to your AI provider</T> — diffs, comments and ticket
             text for the pull request being reviewed or fixed. They use your own AI agent: a
-            Claude Code login or Anthropic API key (Anthropic), or Codex on a ChatGPT plan
+            Anthropic API key or Claude Code login (Anthropic), or Codex on a ChatGPT plan
             (OpenAI). The content goes from your machine to that provider under your agreement
             with them. We never see it.
           </li>

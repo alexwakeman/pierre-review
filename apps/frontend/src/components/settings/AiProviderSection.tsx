@@ -59,6 +59,7 @@ const EFFORT_OPTIONS: readonly SelectOption<string>[] = [
 // control shows it, disabled. A vendor not signed in shows its sign-in line instead of controls.
 //
 // "USE MY API KEYS FIRST" (PUT /api/ai/api-key, read back as `ai.apiKeySetting`; shared ai-api-key.ts):
+// TICKED BY DEFAULT (ai/credentials.ts header: Anthropic's terms ask Agent SDK tools for API keys) —
 // ANTHROPIC_API_KEY ahead of the Claude Code sign-in (OPENAI_API_KEY for Codex is not used yet). The ⓘ
 // names both variables; the line under the box says which are set. LIMN_AI_USE_API_KEY wins, disabled.
 
@@ -453,7 +454,19 @@ function ApiKeyControl({ setting }: { setting: AiApiKeySettingStatus }): JSX.Ele
             .env file). When this is ticked and the key is set, every Claude run uses the key, even while you are signed in
             to Claude Code. Anthropic bills the key per token, and Ensemble shows its spend in US$.
           </p>
-          <p className="mt-2">When this is not ticked, Ensemble uses your Claude Code sign-in, and the key only when you are not signed in.</p>
+          <p className="mt-2">
+            This is ticked by default. When it is not ticked, Ensemble uses your Claude Code sign-in, and the key only when
+            you are not signed in. Anthropic&rsquo;s terms limit how tools built on its Agent SDK may use a plan sign-in:{' '}
+            <a
+              className="underline"
+              href="https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use"
+              target="_blank"
+              rel="noreferrer"
+            >
+              read them
+            </a>{' '}
+            before you untick this.
+          </p>
           <p className="mt-2">
             Codex: Ensemble looks for <code>OPENAI_API_KEY</code>. Codex runs on an API key are not available yet, so Codex
             keeps using your ChatGPT sign-in.

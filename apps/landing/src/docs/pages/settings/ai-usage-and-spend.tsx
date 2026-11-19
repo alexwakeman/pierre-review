@@ -24,18 +24,18 @@ export default function Page(): JSX.Element {
       <p>Ensemble picks one Claude credential, in this order:</p>
       <ol>
         <li>
-          <b>Your Claude Code login on this computer</b> (a Claude Pro, Max, Ultra, Team or Enterprise subscription). Run{' '}
-          <code>claude</code> in a terminal and sign in. Runs then use your subscription&rsquo;s usage.
+          <b>An Anthropic API key</b>, set as <code>ANTHROPIC_API_KEY</code> in the environment Ensemble starts in. Runs are
+          billed by Anthropic at API prices.
         </li>
         <li>
-          <b>An Anthropic API key</b>, set as <code>ANTHROPIC_API_KEY</code> in the environment Ensemble starts in. Runs are
-          then billed by Anthropic at API prices.
+          <b>A Claude Code login on this computer</b>, only when no key is set. Runs then use your plan&rsquo;s usage.
+          Read <DocLink to="settings/how-providers-treat-your-work#your-claude-login">Using a Claude login</DocLink> first.
         </li>
       </ol>
       <p>
-        When both exist, Ensemble uses the login and hides the key from the run, so a subscription run is never billed to
-        the key by accident. To use the key first, tick <Ui>Use my API keys first</Ui> in Settings → AI (or start Ensemble
-        with <code>ENSEMBLE_AI_USE_API_KEY=true</code>). Ensemble stores
+        When both exist, Ensemble uses the key. To put the login first, untick <Ui>Use my API keys first</Ui> in
+        Settings → AI (or start Ensemble with <code>ENSEMBLE_AI_USE_API_KEY=false</code>); the key is then hidden from
+        login runs, so they are never billed to it by accident. Ensemble stores
         neither: it reads the login Claude Code already keeps, and the key only from the environment.
       </p>
       <Note title="Different from Claude Code on its own">
@@ -45,7 +45,7 @@ export default function Page(): JSX.Element {
           API key for authentication instead of your Claude subscription (Pro, Max, Ultra, Team, or Enterprise plans),
           resulting in API usage charges rather than using your subscription&rsquo;s included usage.
         </Quote>
-        Inside Ensemble the order is reversed, as above, unless you tick <Ui>Use my API keys first</Ui>.
+        Ensemble does the same by default.
       </Note>
       <H3>Codex</H3>
       <p>

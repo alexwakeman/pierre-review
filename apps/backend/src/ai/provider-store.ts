@@ -126,9 +126,10 @@ export async function writeStoredAiRunProfiles(value: AiRunProfiles, accountId: 
   setStoredAiRunProfiles(v);
 }
 
-/** Read the stored "Use my API keys first" box into memory (the boot). A read error or NULL ⇒ off. */
+/** Read the stored "Use my API key" box into memory (the boot). NULL or a read error ⇒ ON (the key
+ *  first, ai/credentials.ts header); only a stored false puts the Claude Code login first. */
 export async function loadStoredPrefersApiKey(accountId: number = LOCAL_ACCOUNT_ID): Promise<boolean> {
-  let value = false;
+  let value = true;
   try {
     const rows = await db
       .select({ v: schema.accounts.aiUseApiKey })
@@ -136,9 +137,9 @@ export async function loadStoredPrefersApiKey(accountId: number = LOCAL_ACCOUNT_
       .where(eq(schema.accounts.id, accountId))
       .limit(1)
       .execute();
-    value = rows[0]?.v === true;
+    value = rows[0]?.v !== false;
   } catch {
-    value = false;
+    value = true;
   }
   setStoredPrefersApiKey(value);
   return value;

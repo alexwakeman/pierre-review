@@ -329,7 +329,7 @@ export function HowWeMeasureSection(): JSX.Element {
               <>
                 Available only from npm: <code>{INSTALL_COMMAND}</code>. Needs Node 20 or later.
               </>,
-              'Runs on your own AI agent tooling. Reviews and fixes use your Claude Code login, an Anthropic API key or Codex on your ChatGPT plan.',
+              'Runs on your own AI agent tooling. Reviews and fixes use your Anthropic API key or Codex on your ChatGPT plan.',
               <>
                 Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
                 people use it. More users than that need a licence —{' '}

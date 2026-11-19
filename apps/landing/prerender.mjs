@@ -186,7 +186,8 @@ for (const path of PRERENDER_PATHS) {
 // route list does. It was 10; the restructure took the site to six,
 // /how-we-measure took it to seven, /contact to eight, and /teams to nine; folding
 // Getting started into the docs took it to eight; the 2026-11 restructure took it to nine
-// (home, Build, Ensemble review, Automation, Everything else, contact, the three legal ones).
+// (home, Build, Ensemble review, Automation, Everything else, contact, the three legal ones); /about
+// took it to ten.
 if (written.length !== PRERENDER_PATHS.length) {
   throw new Error(
     `prerendered ${written.length} routes but PRERENDER_PATHS has ${PRERENDER_PATHS.length} — ` +

@@ -119,6 +119,28 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- About: sub-headings and quotations ------------------------------- */
+.lb.legal .lg-h3 {
+  font-size: clamp(19px, 17px + 0.4vw, 21px);
+  line-height: 1.25;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 1.6em;
+}
+.lb.legal .lg-quote {
+  margin: 0;
+  border-left: 3px solid var(--gold);
+  padding: 4px 0 4px 18px;
+}
+.lb.legal .lg-quote blockquote {
+  margin: 0;
+  color: var(--ink);
+}
+.lb.legal .lg-quote figcaption {
+  margin-top: 8px;
+  font-size: 14px;
+}
+
 /* ---- the callout ------------------------------------------------------ */
 .lb.legal .lg-note {
   background: var(--surface);

@@ -217,28 +217,13 @@ export default function Page(): JSX.Element {
 
       <H2 id="your-claude-login">Using your own Claude login</H2>
       <p>
-        Ensemble is a program you run on your own computer. When it uses Claude, it uses the Claude Code login you made
-        yourself, through Anthropic&rsquo;s own sign-in, for your own work. Ensemble never sees, stores or forwards that
-        login, there is no Ensemble server in between, and no one else&rsquo;s requests go through your account.
+        Ensemble uses your Anthropic API key by default. What Anthropic&rsquo;s terms say about running it on a Claude
+        Code login instead, and what is not settled, is on the{' '}
+        <a className="dx-link" href="/about#your-claude-login">
+          About page
+        </a>
+        .
       </p>
-      <p>Anthropic&rsquo;s policy recommends API keys for products built on its Agent SDK, which Ensemble uses:</p>
-      <Quote source={A_LEGAL_T} href={A_LEGAL}>
-        Developers building products or services that interact with Claude&apos;s capabilities, including those using
-        the Agent SDK, should use API key authentication through Claude Console or a supported cloud provider.
-        Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to
-        route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users.
-      </Quote>
-      <p>
-        Ensemble offers no Claude sign-in of its own and routes nothing on anyone&rsquo;s behalf: each person runs Ensemble
-        with their own access. Anthropic&rsquo;s plan limits assume ordinary, individual use, and its consumer terms
-        limit automated access outside an API key (<ExtLink href={A_CONSUMER}>{A_CONSUMER_T}</ExtLink>).
-      </p>
-      <Note title="When to choose an API key">
-        An Anthropic API key works exactly the same in Ensemble and is a first-class choice. Choose it when your
-        organisation prefers commercial terms, when you want API billing kept apart from personal plans, or when you
-        run a lot of automatic reviews, fixes or dependency updates. See{' '}
-        <DocLink to="integrations/claude#set-it-up">Set up Claude</DocLink>.
-      </Note>
 
       <H2 id="caveats">Caveats</H2>
       <ul>

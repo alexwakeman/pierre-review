@@ -38,6 +38,7 @@ vi.mock('../ai/codex/kinds/review.js', () => ({ CODEX_REVIEW_KINDS: ['review'] }
 vi.mock('../ai/codex/kinds/fix.js', () => ({ CODEX_FIX_KINDS: [] }));
 
 import { applyClaudeReviewAuth, detectClaudeAuth, hasAmbientClaudeAuth } from './auth.js';
+import { setStoredPrefersApiKey } from '../ai/credentials.js';
 
 let home: string;
 let prevHome: string | undefined;
@@ -55,6 +56,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setStoredPrefersApiKey(true);
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
   if (prevApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
@@ -74,7 +76,14 @@ const seedStoredKey = (key = 'sk-ant-stored-should-never-be-used'): void => {
 };
 
 describe('detectClaudeAuth — two rungs', () => {
-  it('reports the ambient subscription first, even when an API key is also present', () => {
+  it('BY DEFAULT reports the API key first, even when a subscription is also signed in', () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
+    expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'api_key' });
+  });
+
+  it('box unticked: reports the ambient subscription first, even when an API key is also present', () => {
+    setStoredPrefersApiKey(false);
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
     expect(detectClaudeAuth()).toEqual({ status: 'ok', method: 'oauth_token' });
@@ -107,7 +116,8 @@ describe('detectClaudeAuth — two rungs', () => {
 describe('applyClaudeReviewAuth — what it does to process.env', () => {
   it('⚠ AMBIENT STRIPS THE API KEY FOR THE RUN, and the restore puts it back', () => {
     // Load-bearing: the Agent SDK prefers an API key when it sees one, so leaving it in place
-    // would silently meter every review instead of drawing on the subscription.
+    // would silently meter every review instead of drawing on the subscription (box unticked).
+    setStoredPrefersApiKey(false);
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
     const restore = applyClaudeReviewAuth(true);

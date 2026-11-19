@@ -32,9 +32,9 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS SIX CONTENT PAGES plus the three legal ones (and the docs, whose
+ * THE SITE IS SEVEN CONTENT PAGES plus the three legal ones (and the docs, whose
  * routes come from the docs manifest): home, Build, Ensemble review, Automation,
- * Everything else and Contact. (2026-11: /teams 301s to /ensemble-review, and
+ * Everything else, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
  * /reporting and /how-we-measure 301 to their sections of /everything-else.) The earlier feature-area pages (/features, /bots, /pro, /pricing,
  * /how-it-works, /arcade) and then the two role pages (/for-developers,
  * /for-managers) were retired; their URLs survive as aliases. The Getting started
@@ -75,6 +75,10 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,
     description: `${SITE_NAME} is free for individuals, and for organisations where no more than ${FREE_TEAM_SIZE} people use it. More users than that need a licence: ask for one here. Questions and bug reports are welcome too.`,
+  },
+  '/about': {
+    title: `About — ${SITE_NAME}`,
+    description: `What ${SITE_NAME} is, and what Anthropic's terms say about running it on your own Claude login: the exact wording, how ${SITE_NAME} uses a login, and what is not settled.`,
   },
   '/privacy': {
     title: `Privacy policy — ${SITE_NAME}`,

@@ -1,9 +1,9 @@
 // THE API-KEY PREFERENCE (Settings → AI → "Use my API keys first"): one switch, per machine, that puts
 // the API key in the reader's environment ahead of the subscription sign-in.
 //
-//   • Claude reads ANTHROPIC_API_KEY. Ticked + the key set ⇒ every Claude run uses the key (billed by
-//     Anthropic per token), even while Claude Code is signed in. Unticked ⇒ the sign-in first, the key
-//     only when there is no sign-in.
+//   • Claude reads ANTHROPIC_API_KEY. Ticked (THE DEFAULT; never chosen = ticked) + the key set ⇒ every
+//     Claude run uses the key (billed by Anthropic per token), even while Claude Code is signed in.
+//     Unticked ⇒ the sign-in first, the key only when there is no sign-in.
 //   • Codex reads OPENAI_API_KEY. Codex runs on an API key are not available yet (Limn cannot price
 //     them), so a ChatGPT sign-in is still used first; the box only orders the key ahead of a key stored
 //     in Limn's Codex folder.
