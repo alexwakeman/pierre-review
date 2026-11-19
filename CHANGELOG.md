@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.65] - 2026-11-19
+
 ### Added
 
 - Review a local branch from Claude Code or Codex: add Ensemble as an MCP server
