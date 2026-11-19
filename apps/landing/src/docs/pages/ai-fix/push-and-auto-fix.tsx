@@ -59,8 +59,12 @@ export default function Page(): JSX.Element {
           stop and the fix is kept as it is.
         </li>
         <li>
+          Each round also checks the points the pull request&rsquo;s earlier AI reviews posted: fixed or still open.
+        </li>
+        <li>
           After the push, the last review shows in the <Ui>AI Review</Ui> tab as the review of the pushed commit. It is not
-          posted, auto review does not review that commit again, and no auto fix starts from it.
+          posted, auto review does not review that commit again, and no auto fix starts from it. On your own pull
+          request, Ensemble resolves the threads of the earlier points that review found fixed, with a short reply.
         </li>
       </ul>
 

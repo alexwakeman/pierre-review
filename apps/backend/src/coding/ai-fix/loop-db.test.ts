@@ -14,6 +14,8 @@
 //   • the merge item: the round reviews the checked merge result (its key), against the merge's base;
 //   • after the push the closing review becomes the PR's AI review at the PUSHED head — only when it reviewed
 //     exactly what was pushed;
+//   • every round's follow-up also judges the PR's earlier findings (negated ids); the import stores the
+//     closing round's judgement of them, ids restored, as the PR row's follow-up;
 //   • a restart stops a working loop ('interrupted'); the local refs' keeper keeps only resumable fixes.
 import { rmSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +45,8 @@ interface Script {
   answers: (shown: readonly string[], round: number) => Array<{ ref: string; action: string; reply: string }>;
   /** The patch a fix turn leaves. */
   patchAfter: (round: number) => string;
+  /** The half's follow-up items over its prior (absent ⇒ no follow-up). */
+  followUp?: (round: number, priorIds: number[]) => Array<{ priorFindingId: number; status: string }>;
 }
 
 const G = {
@@ -59,6 +63,7 @@ const G = {
   consolidated: 0,
   hangReview: false,
   ticket: null as null | { ident: string; ticket: any },
+  prPrior: null as any,
   script: null as unknown as Script,
 };
 
@@ -88,6 +93,7 @@ function seams(): Partial<import('./loop.js').FixLoopSeams> {
     },
     ticket: async () => G.ticket,
     holdRefs: () => () => {},
+    prPrior: async () => G.prPrior,
     commitRound: async (a) => {
       G.commits.push({ round: a.round, patch: a.patch, merge: a.merge });
       const sha = a.merge?.resultSha ?? String(a.round).repeat(40);
@@ -112,7 +118,15 @@ function seams(): Partial<import('./loop.js').FixLoopSeams> {
         summary: `Round ${round}.`,
         verdict: fs.length > 0 ? 'REQUEST_CHANGES' : 'APPROVE',
         findings: fs.map((f) => ({ path: f.path, line: 3, side: 'RIGHT', severity: f.severity as any, title: f.title, body: 'b', suggestion: null, diffHunk: null, anchored: true, fileInDiff: true, priorFindingId: f.priorFindingId ?? null, lens: null })),
-        followUp: null,
+        followUp: G.script.followUp
+          ? {
+              priorReviewId: i.prior?.reviewId ?? 0,
+              priorHeadSha: i.prior?.headSha ?? '',
+              headMoved: true,
+              changesSinceShown: false,
+              items: G.script.followUp(round, (i.prior?.findings ?? []).map((f) => f.id)).map((it) => ({ ref: 'P1', sent: true, carried: false, explanation: 'x', how: 'h', path: 'a.ts', line: 3, side: 'RIGHT', severity: 'warning', title: 't', headMoved: true, ...it })),
+            }
+          : null,
         ranOn: { provider: i.provider, model: 'm', effort: null },
         costUsd: 0.1,
         inputTokens: 1,
@@ -198,7 +212,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  Object.assign(G, { allowed: () => true, providers: ['claude'], gateAsks: [], halves: [], checks: [], files: [], fixTurns: [], ended: [], commits: [], bases: [], consolidated: 0, hangReview: false, ticket: null, script: defaultScript() });
+  Object.assign(G, { allowed: () => true, providers: ['claude'], gateAsks: [], halves: [], checks: [], files: [], fixTurns: [], ended: [], commits: [], bases: [], consolidated: 0, hangReview: false, ticket: null, prPrior: null, script: defaultScript() });
   L.setFixLoopSeamsForTests(seams());
 });
 
@@ -438,6 +452,41 @@ describe("AI Fix's own review loop", () => {
     await until(id2, ended, 'ended');
     await db.update(schema.aiFixes).set({ patch: 'diff --git a/z b/z\n+late\n' }).where(eq(schema.aiFixes.id, id2)).execute();
     expect(await L.importLoopReviewAfterPush(ctx, { accountId: 1, fixId: id2, repoId, prNumber: 7, pushedSha: 'g'.repeat(40) })).toBeNull();
+  });
+
+  it('the PR’s earlier findings: every round judges them; the import keeps the closing round’s word as the PR follow-up', async () => {
+    const { insertQueuedReview, saveReviewSuccess } = await import('../../review/claude-review/persist.js');
+    const prHead = 'p'.repeat(40);
+    const prReview = await insertQueuedReview(ctx, prId, prHead, 'claude-opus-5-5' as any, 1, [], 'auto', 'claude');
+    await saveReviewSuccess(ctx, prReview, {
+      usageRecorded: true, scope: null, summary: 's', verdict: 'COMMENT', costUsd: null, inputTokens: null, outputTokens: null, numTurns: null, excludedFiles: [],
+      findings: [{ path: 'a.ts', line: 3, side: 'RIGHT', severity: 'warning', title: 'Posted point', body: 'b', suggestion: null, diffHunk: null, anchored: true, fileInDiff: true, lens: null, included: true }],
+    } as any);
+    const { eq } = await import('drizzle-orm');
+    const [prFinding] = await db.select().from(schema.claudeReviewFindings).where(eq(schema.claudeReviewFindings.reviewId, prReview)).execute();
+    const pf = prFinding.id as number;
+    G.prPrior = { reviewId: prReview, headSha: prHead, findings: [{ id: pf, headSha: prHead, path: 'a.ts', line: 3, side: 'RIGHT', severity: 'warning', title: 'Posted point', body: 'b', suggestion: null, diffHunk: null, anchored: true, fileInDiff: true, posted: true, carried: false }] };
+    // Round 1 re-raises the PR point (not addressed yet); round 2 finds it addressed.
+    G.script.findings = (round) => (round === 1 ? [{ severity: 'warning', path: 'a.ts', title: 'Posted point', priorFindingId: -pf }] : []);
+    G.script.followUp = (round, ids) => ids.filter((x) => x < 0).map((x) => ({ priorFindingId: x, status: round === 1 ? 'not_addressed' : 'addressed' }));
+    const id = await builtFix();
+    await L.startFixLoop(ctx, { accountId: 1, fixId: id, byReader: true });
+    const r = await until(id, ended, 'ended');
+    expect(r).toMatchObject({ loopStop: 'clean', loopRound: 2 });
+    // Both rounds were shown the PR finding, negated and carried.
+    // Round 1 has no loop round: the PR finding alone. Round 2: the loop's own re-raise first, then the PR's.
+    expect(G.halves[0].prior.findings.map((f: any) => [f.id, f.carried])).toEqual([[-pf, true]]);
+    const r2 = G.halves[1].prior.findings.map((f: any) => [f.id, f.carried]);
+    expect(r2).toHaveLength(2);
+    expect(r2[0][0]).toBeGreaterThan(0);
+    expect(r2[1]).toEqual([-pf, true]);
+    const pushed = 'q'.repeat(40);
+    const imported = await L.importLoopReviewAfterPush(ctx, { accountId: 1, fixId: id, repoId, prNumber: 7, pushedSha: pushed });
+    expect(imported).not.toBeNull();
+    const [cr] = await db.select().from(schema.claudeReviews).where(eq(schema.claudeReviews.id, imported)).execute();
+    const fu = typeof cr.followUp === 'string' ? JSON.parse(cr.followUp) : cr.followUp;
+    expect(fu).toMatchObject({ priorReviewId: prReview, priorHeadSha: prHead });
+    expect(fu.items.map((i: any) => [i.priorFindingId, i.status, i.carried])).toEqual([[pf, 'addressed', true]]);
   });
 
   it('restart: a working loop is stopped (interrupted), its running runs cancelled; the refs keeper keeps only resumable fixes', async () => {
