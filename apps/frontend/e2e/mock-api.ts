@@ -1805,6 +1805,7 @@ const SANDBOX_SETTINGS: SandboxWorkspaceSettings = {
   resources: { cpus: null, memoryGb: null, diskGb: null },
   services: [],
   alwaysAllowedHosts: [],
+  fixAllRepos: true,
 };
 
 const CSV_PATCH = [

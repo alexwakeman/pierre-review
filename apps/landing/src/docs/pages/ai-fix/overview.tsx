@@ -145,8 +145,21 @@ export default function Page(): JSX.Element {
       <p>The sandbox is a container on your computer, made for this fix and removed after it.</p>
       <ul>
         <li>
-          It holds the pull request's repository, at the pull request's latest commit, and the repositories of the
-          other pull requests of its ticket, read only. Other workspace repositories are not loaded.
+          It holds the pull request's repository, at the pull request's latest commit, and the workspace's other
+          repositories, read only at their default branch, so the agent can check code that calls or serves the pull
+          request. At most 12 repositories: the pull request's own, the ones of its ticket's other pull requests, your
+          related repositories, then the rest by name. The session names the ones it did not load.{' '}
+          <Ui>Settings → Sandbox → AI Fix reads every repository</Ui> (on by default) turns this off: then only the
+          pull request's repository and its ticket's come. A dependency fix always gets the short list.
+        </li>
+        <li>
+          When the workspace has reference documents, the relevant sections come in too, read only: the ticket's own
+          choice, else the whole library when it is small, else the sections that best match the pull request's words
+          and changed files.
+        </li>
+        <li>
+          Only the pull request's repository is pushed. A change the agent makes in another repository is shown under{' '}
+          <Ui>Left out</Ui> and never pushed.
         </li>
         <li>
           The agent has a shell there, so it can run the project's own tests, lint and type checks, and start the

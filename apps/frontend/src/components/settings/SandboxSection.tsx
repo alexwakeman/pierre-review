@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
+  AI_FIX_REPOS_MAX,
   SANDBOX_RESOURCE_DEFAULTS,
   SANDBOX_RESOURCE_LIMITS,
   SANDBOX_SERVICE_STACKS_MAX,
@@ -142,6 +143,24 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
             </span>
           )}
         </label>
+
+        <div className="flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-2 text-body text-ui-ink">
+            <CheckInput data-testid="sandbox-fix-all-repos" checked={draft.fixAllRepos} onChange={(e) => set({ fixAllRepos: e.target.checked })} />
+            AI Fix reads every repository
+          </label>
+          <InfoButton title="AI Fix reads every repository">
+            <div className="space-y-2">
+              <p>
+                On: an AI Fix gets every repository of this workspace, read only at its default branch, so it can check code that
+                calls or serves the pull request. At most {AI_FIX_REPOS_MAX} repositories: the pull request’s own, its ticket’s,
+                your related repositories, then the rest by name. The session names the ones it did not load.
+              </p>
+              <p>Off: only the pull request’s repository and the repositories of its ticket’s other pull requests.</p>
+              <p>AI Fix still pushes only to the pull request’s branch. Dependency fixes always get the short list.</p>
+            </div>
+          </InfoButton>
+        </div>
 
         <ServicesEditor workspaceId={workspaceId} services={draft.services} onChange={(services) => set({ services })} />
 

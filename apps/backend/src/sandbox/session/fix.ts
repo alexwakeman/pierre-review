@@ -53,6 +53,8 @@ import { getFixById, updateFixSession, type AiFixRow } from '../../coding/ai-fix
 import type { FixAgentReport } from '../../platform/contract.js';
 import type { SandboxAgentChoice } from '../drivers/index.js';
 import { fixSessionBranch, readSessionTicket, type FixSeedInput, type RepoBaseRequest, type SessionTicket } from '../workspace/index.js';
+import { diffPaths, type DocsPick, type FixDocsSubject } from '../workspace/docs-choose.js';
+import { SANDBOX_DOCS_DIR } from '../workspace/docs.js';
 import { readFixReport, removeFixReport } from '../workspace/fix-report.js';
 import {
   afterFixLoopTurn,
@@ -66,7 +68,7 @@ import {
   startFixLoop,
   stopFixLoop,
 } from '../../coding/ai-fix/loop.js';
-import type { AiFixLoopStop } from '@pierre-review/shared';
+import { AI_FIX_REPOS_MAX, type AiFixLoopStop } from '@pierre-review/shared';
 import { defaultMirrorSeams } from '../workspace/mirror.js';
 import {
   extractMergeTurn,
@@ -160,10 +162,27 @@ export interface FixSessionDeps {
   /** The PR's ticket, for context (a manual fix only). Never fatal: null. */
   contextTicket(ctx: AgentContext, accountId: number, workspaceId: number, prId: number): Promise<SessionTicket | null>;
   /**
-   * The repositories of the OTHER pull requests of this PR's tickets (open or merged): with the PR's own,
-   * the only ones a fix session loads (docs/SANDBOX.md § AI Fix sessions). Never fatal: [].
+   * The repositories of the OTHER pull requests of this PR's tickets (open or merged): loaded right after the
+   * PR's own (docs/SANDBOX.md § AI Fix sessions → Scope). Never fatal: [].
+   */
+  /**
+   * The reader-declared RELATED REPOS of the PR's repository in this workspace (db/related-repos.ts), for the
+   * load order of a wide fix (docs/SANDBOX.md § AI Fix sessions → Scope). Never fatal: [].
    */
   relatedRepoIds(ctx: AgentContext, accountId: number, prId: number): Promise<number[]>;
+  declaredRelatedRepoIds(accountId: number, workspaceId: number, repoId: number): Promise<number[]>;
+  /** The workspace's member repositories now (External included), for Resume. Never fatal: []. */
+  memberRepoIds(accountId: number, workspaceId: number): Promise<number[]>;
+  /** `owner/name` of each repository (the "rest by name" order and the "Not loaded" note). */
+  repoNames(ctx: AgentContext, accountId: number, repoIds: readonly number[]): Promise<Array<{ repoId: number; fullName: string }>>;
+  /** The workspace has built reference documents (and agentic features are on). Never fatal: false. */
+  docsAvailable(accountId: number, workspaceId: number): Promise<boolean>;
+  /**
+   * THE PR-SHAPED DOCS CHOOSER (docs-choose.ts `chooseFixDocs`): DB and disk only, never a model call.
+   * `withTicket: false` (an UNATTENDED fix) skips the ticket's own choice: its Check against docs result (per-criterion
+   * verdicts) would reach the agent through DOCS.md, the drift the no-TICKET.md rule keeps out.
+   */
+  chooseDocs(ctx: AgentContext, accountId: number, workspaceId: number, pr: Omit<FixDocsSubject, 'ticketIdent'> & { prId: number; withTicket: boolean }): Promise<DocsPick>;
   /** The merge: the base tip (pinned; `baseSha` on Resume) and the merge base, from Limn's clone cache. */
   mergePlan(a: MergeRepoInput & { baseSha?: string | null }): Promise<MergePlan>;
   /** The host's check of the agent's commits (coding/ai-fix/merge-verify.ts), in Limn's clone cache. */
@@ -171,6 +190,48 @@ export interface FixSessionDeps {
 }
 
 const defaultFixDeps: FixSessionDeps = {
+  async declaredRelatedRepoIds(accountId, workspaceId, repoId) {
+    try {
+      const { getRelatedRepoPairs } = await import('../../db/related-repos.js');
+      const pairs = (await getRelatedRepoPairs(accountId, workspaceId)) ?? [];
+      return pairs.flatMap((p) => (p.repoId === repoId ? [p.relatedRepoId] : p.relatedRepoId === repoId ? [p.repoId] : []));
+    } catch {
+      return [];
+    }
+  },
+  async memberRepoIds(accountId, workspaceId) {
+    const q = await import('../../db/queries.js');
+    // `members: 'all'`, as the start reads them (coding/ai-fix/manager.ts).
+    return (await q.resolveWorkspaceScope(accountId, workspaceId, null, { members: 'all' })).repoIds;
+  },
+  async repoNames(ctx, accountId, repoIds) {
+    if (repoIds.length === 0) return [];
+    const { and, eq, inArray } = await import('drizzle-orm');
+    const r = ctx.schema.repos;
+    const rows = (await ctx.db
+      .select({ repoId: r.id, owner: r.owner, name: r.name })
+      .from(r)
+      .where(and(eq(r.accountId, accountId), inArray(r.id, [...new Set(repoIds)])))
+      .execute()) as Array<{ repoId: number; owner: string; name: string }>;
+    return rows.map((x) => ({ repoId: x.repoId, fullName: `${x.owner}/${x.name}` }));
+  },
+  async docsAvailable(accountId, workspaceId) {
+    const { sessionDocsAvailable } = await import('./manager.js');
+    return config.aiEnabled && (await sessionDocsAvailable(accountId, workspaceId).catch(() => false));
+  },
+  async chooseDocs(ctx, accountId, workspaceId, pr) {
+    const { chooseFixDocs } = await import('../workspace/docs-choose.js');
+    let ticketIdent: string | null = null;
+    if (pr.withTicket) {
+      try {
+        const { getTicketSource } = await import('../../tracker/ticket-source.js');
+        ticketIdent = (await getTicketSource().ticketsForPr(accountId, pr.prId))[0]?.ident ?? null;
+      } catch {
+        ticketIdent = null;
+      }
+    }
+    return chooseFixDocs(ctx, accountId, workspaceId, { ticketIdent, title: pr.title, body: pr.body, paths: pr.paths });
+  },
   async mergePlan(a) {
     const { resolveMergePlan } = await import('../../coding/ai-fix/merge-host.js');
     return resolveMergePlan(a);
@@ -235,6 +296,46 @@ export function capFixDiff(diff: string): { text: string; note: string | null } 
   if (c.omittedFiles.length > 0) notes.push(`It is cut: ${c.omittedFiles.length} files are not in it (${c.omittedFiles.slice(0, 20).join(', ')}${c.omittedFiles.length > 20 ? ', …' : ''}).`);
   if (diff.trim() === '') notes.push('GitHub did not give the diff: read the change with git in the repository.');
   return { text: c.diff === '' ? '' : `${c.diff}\n`, note: notes.length > 0 ? notes.join(' ') : null };
+}
+
+// ---- the scope -------------------------------------------------------------------------------------------
+
+/**
+ * AN AI FIX'S REPOSITORIES, in load order (docs/SANDBOX.md § AI Fix sessions → Scope). Pure.
+ *   narrow (`wide: false`): the PR's repository, then its ticket's other repositories in the workspace. No cap.
+ *   wide: the PR's repository, its ticket's repositories, the reader's related repositories (db/related-repos.ts),
+ *         then every other member by `owner/name`; at most `max` (AI_FIX_REPOS_MAX), the rest NAMED in `notLoaded`.
+ * Only workspace members are loaded (the PR's own repository always).
+ */
+export function fixRepoSet(a: {
+  prRepoId: number;
+  members: ReadonlyArray<{ repoId: number; fullName: string }>;
+  ticketRepoIds: readonly number[];
+  declaredRepoIds: readonly number[];
+  wide: boolean;
+  max?: number;
+}): { ids: number[]; notLoaded: string[] } {
+  const members = new Map(a.members.map((m) => [m.repoId, m.fullName]));
+  const inWs = (id: number): boolean => members.has(id);
+  const narrow = [a.prRepoId, ...a.ticketRepoIds.filter(inWs)];
+  if (!a.wide) return { ids: [...new Set(narrow)], notLoaded: [] };
+  const rest = [...a.members]
+    .sort((x, y) => x.fullName.toLowerCase().localeCompare(y.fullName.toLowerCase()) || x.repoId - y.repoId)
+    .map((m) => m.repoId);
+  const ordered = [...new Set([...narrow, ...a.declaredRepoIds.filter(inWs), ...rest])];
+  const max = Math.max(1, a.max ?? AI_FIX_REPOS_MAX);
+  return { ids: ordered.slice(0, max), notLoaded: ordered.slice(max).map((id) => members.get(id) ?? `repository ${id}`) };
+}
+
+/** The ONE boot note for the repositories past the cap: named, never dropped silently. */
+export function notLoadedNote(fullNames: readonly string[], max: number = AI_FIX_REPOS_MAX): string {
+  return `${NOT_LOADED_PREFIX}${max} repositories. Not loaded: ${fullNames.join(', ')}.`;
+}
+const NOT_LOADED_PREFIX = 'AI Fix loads at most ';
+
+/** A note `notLoadedNote` wrote (a Resume drops the earlier boot's before it writes its own). Pure. */
+export function isNotLoadedNote(note: string): boolean {
+  return note.startsWith(NOT_LOADED_PREFIX);
 }
 
 // ---- one fix per PR -------------------------------------------------------------------------------------
@@ -350,6 +451,8 @@ export interface FixSessionStart {
   nonce: string;
   /** The "Resolve merge conflicts" item: merge this base branch first. null ⇒ no merge. */
   merge?: { baseRef: string } | null;
+  /** Dependency automation's fix: today's narrow set (the PR's repository and its ticket's), no reference docs. */
+  narrow?: boolean;
 }
 
 /** What the state keeps about the fix, so Resume and the wire need no GitHub call. */
@@ -370,6 +473,8 @@ interface FixFacts {
   diffNote: string | null;
   /** The merge item's base branch (the commits are in `ai_fixes.merge_json`). Absent ⇒ no merge. */
   mergeBaseRef?: string | null;
+  /** Dependency automation's fix: the narrow repository set and no reference docs, on Resume too. Absent ⇒ false. */
+  narrow?: boolean;
 }
 
 type FixState = SessionStateJson & { fix?: FixFacts };
@@ -399,6 +504,7 @@ export function startFixSession(ctx: AgentContext, a: FixSessionStart): void {
     nonce: a.nonce,
     diffNote: a.diff.note,
     ...(a.merge ? { mergeBaseRef: a.merge.baseRef } : {}),
+    ...(a.narrow ? { narrow: true } : {}),
   };
   bindFixClaim(a.pr.prId, a.fixId);
   const subject = fixSubject(ctx, { fixId: a.fixId, accountId: a.accountId, facts: state.fix, task: a.task, diff: a.diff.text, unattended: a.unattended, planFirst: a.planFirst });
@@ -474,14 +580,29 @@ function fixSubject(
       contextTicket = unattended ? null : await fixDeps.contextTicket(ctx, accountId, l.workspaceId, facts.prId).catch(() => null);
       state.criteria = contextTicket ? criteriaLines(contextTicket) : [];
       state.openPoints = contextTicket ? openPointLines(contextTicket) : [];
+      // THE REFERENCE DOCUMENTS (docs/SANDBOX.md § AI Fix sessions → What the agent finds): when the workspace has
+      // a built library, decided at every boot (Resume too). Dependency automation's fix stays without them.
+      state.withDocs = facts.narrow === true ? false : await fixDeps.docsAvailable(accountId, l.workspaceId).catch(() => false);
+      if (!state.withDocs) state.docs = null;
       return `#${facts.number} at ${facts.headSha.slice(0, 7)}`;
     },
-    async repoIds(memberRepoIds) {
-      // ONLY what the job needs: the PR's repository, and the workspace repositories of its ticket's other
-      // pull requests (read only). Not every workspace repository: each one costs load time.
-      const members = new Set(memberRepoIds);
-      const related = await fixDeps.relatedRepoIds(ctx, accountId, facts.prId).catch(() => []);
-      return [...new Set([facts.prRepoId, ...related.filter((id) => members.has(id))])];
+    async repoIds(memberRepoIds, o) {
+      // THE SCOPE (docs/SANDBOX.md § AI Fix sessions → Scope), recomputed at every boot (Resume too): the PR's
+      // repository, its ticket's other repositories, and — with Settings → Sandbox → "AI Fix reads every
+      // repository" on (the default) — the reader's related repositories and then the rest by name, at most
+      // AI_FIX_REPOS_MAX. Every repository but the PR's is read only (`bases`). Dependency automation: narrow.
+      const ticketRepoIds = await fixDeps.relatedRepoIds(ctx, accountId, facts.prId).catch(() => []);
+      const wide = facts.narrow !== true && (o?.settings.fixAllRepos ?? true);
+      // ONE copy of the "Not loaded" note, the current one: a Resume recomputes the set, so an earlier boot's
+      // note is dropped first (never stacked, never left stale when the set narrowed).
+      if (o) stateOf(o.l).notes = stateOf(o.l).notes.filter((n) => !isNotLoadedNote(n));
+      if (!wide) return fixRepoSet({ prRepoId: facts.prRepoId, members: memberRepoIds.map((repoId) => ({ repoId, fullName: '' })), ticketRepoIds, declaredRepoIds: [], wide: false }).ids;
+      const workspaceId = o?.l.workspaceId ?? null;
+      const declaredRepoIds = workspaceId == null ? [] : await fixDeps.declaredRelatedRepoIds(accountId, workspaceId, facts.prRepoId).catch(() => []);
+      const named = await fixDeps.repoNames(ctx, accountId, memberRepoIds).catch(() => []);
+      const set = fixRepoSet({ prRepoId: facts.prRepoId, members: named, ticketRepoIds, declaredRepoIds, wide: true });
+      if (set.notLoaded.length > 0 && o) stateOf(o.l).notes.push(notLoadedNote(set.notLoaded));
+      return set.ids;
     },
     async bases(l, repos) {
       if (facts.mergeBaseRef) {
@@ -514,6 +635,29 @@ function fixSubject(
         }
       }
       return { bases, labels };
+    },
+    async prepareDocs(l0) {
+      const l = l0 as Live;
+      const pick = await fixDeps
+        // An unattended fix gets no ticket-derived documents either (no TICKET.md, no ticket's Check against docs).
+        .chooseDocs(ctx, accountId, l.workspaceId, { prId: facts.prId, title: facts.title, body: facts.body, paths: diffPaths(o.diff), withTicket: !unattended })
+        .catch((err: unknown) => ({ ok: false as const, reason: scrub(err) }));
+      if (!pick.ok || !l.container || !l.layoutRoot) {
+        l.state.docs = null;
+        return { dir: null, detail: pick.ok ? null : pick.reason };
+      }
+      const { planDocsCopy, copyDocsIn } = await import('../workspace/docs.js');
+      const copy = planDocsCopy(pick.lib, pick.index, pick.choice);
+      try {
+        await copyDocsIn(l.runtime, l.container, copy);
+        await l.runtime.copyIn(l.container, [{ path: `${l.layoutRoot.replace(/\/$/, '')}/DOCS.md`, content: copy.docsMd }]);
+      } catch (err) {
+        // Optional context: the fix goes on without the documents (one line), never fails for them.
+        l.state.docs = null;
+        return { dir: null, detail: `The reference documents could not be copied in: ${scrub(err)}` };
+      }
+      l.state.docs = { source: pick.choice.source, libraryHash: pick.libraryHash, sections: copy.sections };
+      return { dir: SANDBOX_DOCS_DIR, detail: `${copy.sections.length} ${copy.sections.length === 1 ? 'section' : 'sections'}` };
     },
     branch: () => fixSessionBranch(facts.number),
     seed(layout) {
@@ -1056,10 +1200,12 @@ export async function resumeFixSession(ctx: AgentContext, accountId: number, fix
     state.services = null;
     state.unattended = false;
     state.action = 'fix';
+    // THE SCOPE IS RECOMPUTED AT BOOT (docs/SANDBOX.md § AI Fix sessions → Scope): the workspace's members now.
+    const members = await fixDeps.memberRepoIds(accountId, r.workspaceId ?? 0).catch(() => [] as number[]);
     out = await resumeLive(() => {
       const subject = fixSubject(ctx, { fixId, accountId, facts, task: { kind: facts.taskKind, text: r.prompt ?? '' }, diff: capped.text, unattended: false, planFirst: false });
       return newLive(ctx, subject, { accountId, workspaceId: r.workspaceId ?? 0, choice, state, resume: true });
-    });
+    }, members);
   } catch (err) {
     // ⚠ Every bail path gives the PR back, or this PR's fixer wedges for the process's lifetime.
     if (!liveSession(fixKey(fixId))) releaseFixPr(r.prId, fixId);

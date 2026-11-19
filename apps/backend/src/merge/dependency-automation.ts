@@ -1425,6 +1425,8 @@ const defaultAiFixDeps: AiFixDeps = {
         preamble: input.instruction,
         resolveConflicts: true,
         trigger: 'auto',
+        // Today's narrow scope: a dependency bump needs no other repository (docs/SANDBOX.md § AI Fix sessions).
+        narrow: true,
       });
     }
     return startFix(ctx, {
@@ -1436,6 +1438,7 @@ const defaultAiFixDeps: AiFixDeps = {
       // An automatic fix: Settings → AI → AI Fix, no picker. auto-push.ts never pushes it (not the
       // reader's own PR) — this file pushes it below, under its own rules.
       trigger: 'auto',
+      narrow: true,
       ...(input.resolveConflicts ? { resolveConflicts: true } : {}),
     });
   },

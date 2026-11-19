@@ -35,6 +35,7 @@ export function defaultSandboxSettings(workspaceId: number): SandboxSettingsRow 
     globalProxyEnv: false,
     resources: { cpus: null, memoryGb: null, diskGb: null },
     services: [],
+    fixAllRepos: true,
   };
 }
 
@@ -99,6 +100,8 @@ export async function readSandboxSettings(accountId: number, workspaceId: number
     globalProxyEnv: r.globalProxyEnv,
     resources: { cpus: r.cpus, memoryGb: r.memoryGb, diskGb: r.diskGb },
     services: parseServices(r.servicesJson),
+    // Migration 0208: NULL (a row from before, or never chosen) reads as ON.
+    fixAllRepos: r.fixAllRepos !== false,
   };
 }
 
@@ -160,6 +163,7 @@ export async function writeSandboxSettings(accountId: number, workspaceId: numbe
       body.services == null || body.services.length === 0
         ? null
         : JSON.stringify(body.services.map((c) => ({ repo: c.repo, file: normalize(c.file), egress: [...new Set(c.egress)].sort() }))),
+    fixAllRepos: body.fixAllRepos ?? true,
     updatedAt: new Date(),
   };
   await db

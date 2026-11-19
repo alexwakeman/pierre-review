@@ -33,6 +33,14 @@ no internals.
 - AI Fix and Implement story: the agent can say a criterion cannot be done, and why. It stays not met, the reason
   shows beside it (and in the pull request's description for Implement), and the review rounds stop when only such
   criteria are left.
+- AI Fix: the sandbox also holds the workspace's other repositories, read only at their default branch, so the agent
+  can check code that calls or serves the pull request. At most 12: the pull request's own, its ticket's, your
+  related repositories, then the rest by name; the session names the ones it did not load. Settings → Sandbox → "AI Fix
+  reads every repository" (on by default) switches this off for a workspace. AI Fix still pushes only to the pull
+  request's branch. Dependency fixes keep the short list.
+- AI Fix: the workspace's reference documents come into the sandbox, read only, as they do for Implement story:
+  the ticket's own choice, else the whole library when it is small, else the sections that best match the pull
+  request's words and changed files.
 
 ### Changed
 

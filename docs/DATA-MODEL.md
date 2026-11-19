@@ -1162,7 +1162,7 @@ The allow-list). PRESENCE IS THE FACT; the rule is stored normalised (`validateR
 `db/sandbox-allowed-hosts.ts`; a session reads it once at start (`startEgress`) and adds to it on a
 click. Composite FK onto `workspaces (id, account_id)`, cascade; erased and exported with the account.
 
-## `sandbox_workspace_settings` — Settings → Sandbox (CORE; migrations `0174`, `0175`)
+## `sandbox_workspace_settings` — Settings → Sandbox (CORE; migrations `0174`, `0175`, `0208`)
 
 ONE row per (account, workspace), unique `(account_id, workspace_id)` — the one upsert uses that EXACT
 target. NO ROW = every default. Columns: `local_folder` (DORMANT since 2026-11-10: the reader's clones are
@@ -1172,7 +1172,9 @@ the ticked project folders), `user_claude_md` (default on), `user_skills` (defau
 likewise: the agent starts where the default rule says),
 `global_proxy_env` (default off), `cpus` / `memory_gb` / `disk_gb` (NULL = Ensemble's default), `services_json`
 (migration `0175`; NULL = no compose files; else JSON `[{repo, file, egress}]`, the files Ensemble may run for a
-session, [SANDBOX.md](SANDBOX.md) § Services). Per workspace,
+session, [SANDBOX.md](SANDBOX.md) § Services), `fix_all_repos` (migration `0208`, integer bool; NULL = ON, the
+default: an AI Fix loads every workspace repository read only, at most 12; `0` = the narrow set; [SANDBOX.md](SANDBOX.md)
+§ AI Fix sessions → Scope). Per workspace,
 nothing inherited; PUT replaces the whole row. The ONE reader/writer is `db/sandbox-settings.ts`
 ([SANDBOX.md](SANDBOX.md) § The workspace mirror). Composite FK onto `workspaces (id, account_id)`,
 cascade; erased and exported with the account.

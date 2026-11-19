@@ -382,6 +382,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       memoryGb: schema.sandboxWorkspaceSettings.memoryGb,
       diskGb: schema.sandboxWorkspaceSettings.diskGb,
       servicesJson: schema.sandboxWorkspaceSettings.servicesJson,
+      fixAllRepos: schema.sandboxWorkspaceSettings.fixAllRepos,
       updatedAt: schema.sandboxWorkspaceSettings.updatedAt,
     })
     .from(schema.sandboxWorkspaceSettings)

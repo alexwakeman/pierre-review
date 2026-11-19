@@ -54,6 +54,7 @@ const settingsBody = {
     userClaudeMd: { type: 'boolean' },
     userSkills: { type: 'boolean' },
     globalProxyEnv: { type: 'boolean' },
+    fixAllRepos: { type: 'boolean' },
     resources: {
       type: 'object',
       additionalProperties: false,

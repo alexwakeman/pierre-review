@@ -58,6 +58,10 @@
     "src/ml/markers.test.ts": {
       "testMs": 5000,
       "reason": "Its first case to run (the parity cases skip without packages/ml) pays the marker tables' first build. Measured 2.1s."
+    },
+    "src/sandbox/session/fix-session-flow-db.test.ts": {
+      "fileMs": 10000,
+      "reason": "18 cases through the real fix session machine on one throwaway database (the fake runtime, no process); the cross-repo case boots 12 repositories. None slow alone (the slowest under 1s). Measured 4.8 to 5.2s for the file, on the 5s line."
     }
   }
 }

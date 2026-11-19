@@ -365,6 +365,10 @@ export interface StartFixInput {
   // Set by the reader's press (the start route) and the auto fix; never by dependency automation (its
   // own tick retries) nor by the queue's own re-run.
   queueIfBusy?: boolean;
+  // DEPENDENCY AUTOMATION's fix: the session keeps the NARROW scope (the PR's repository and its ticket's, no
+  // reference docs), whatever Settings → Sandbox → "AI Fix reads every repository" says (docs/SANDBOX.md § AI Fix
+  // sessions → Scope).
+  narrow?: boolean;
 }
 
 export function startFix(ctx: AgentContext, input: StartFixInput): Promise<StartFixResult> {
@@ -532,6 +536,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
         headSha: head.headSha,
       },
       merge: wantsMerge ? { baseRef: head.baseRef || pr.baseRefName || pr.defaultBranch || 'main' } : null,
+      ...(input.narrow === true ? { narrow: true } : {}),
       choice,
       planFirst: mode === 'plan',
       unattended,

@@ -778,7 +778,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
     stopIfClosing(l);
 
     const settings = (await deps.settings(accountId, l.workspaceId)) ?? defaultSandboxSettings(l.workspaceId);
-    const repos = await deps.repos(ctx, accountId, await sub.repoIds(memberRepoIds));
+    const repos = await deps.repos(ctx, accountId, await sub.repoIds(memberRepoIds, { l, settings }));
     if (repos.length === 0) throw new SessionFail('No repository in this workspace to work in.');
     const places = deps.places();
     const resolved = resolveWorkspaceLayout(
@@ -1647,7 +1647,8 @@ export async function discardSession(ctx: AgentContext, accountId: number, build
 export type ResumeResult = SessionActionResult | { status: 'no_runtime'; message: string } | { status: 'too_many'; message: string } | { status: 'not_resumable'; message: string };
 
 /** Resume's shared checks, then the boot (any subject). The caller checked the row is resumable. */
-export async function resumeLive(make: () => Live): Promise<ResumeResult | null> {
+/** `memberRepoIds`: the workspace's members NOW, for a subject that recomputes its set at boot (AI Fix). */
+export async function resumeLive(make: () => Live, memberRepoIds: readonly number[] = []): Promise<ResumeResult | null> {
   const { maxOpen } = sessionLimits();
   if (openSessionCount() >= maxOpen) return { status: 'too_many', message: tooManyLine(maxOpen) };
   const detected = await deps.runtime().detect();
@@ -1656,7 +1657,7 @@ export async function resumeLive(make: () => Live): Promise<ResumeResult | null>
   if (live.has(l.key) || openSessionCount() >= maxOpen) return { status: 'not_ready', message: 'This session is running.' };
   live.set(l.key, l);
   await setPhase(l, 'booting', { error: null, completedAt: null });
-  void boot(l, []);
+  void boot(l, memberRepoIds);
   return null;
 }
 

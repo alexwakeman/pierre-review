@@ -2980,6 +2980,8 @@ export const sandboxWorkspaceSettings = sqliteTable(
     diskGb: integer('disk_gb'),
     /** Migration 0175: the picked compose files, JSON `SandboxServiceStackChoice[]`; NULL = none. */
     servicesJson: text('services_json'),
+    /** Migration 0208: AI Fix loads every workspace repository (read only). NULL = on; false = the narrow set. */
+    fixAllRepos: integer('fix_all_repos', { mode: 'boolean' }),
     updatedAt: integer('updated_at', { mode: 'timestamp' })
       .notNull()
       .default(sql`(unixepoch())`),

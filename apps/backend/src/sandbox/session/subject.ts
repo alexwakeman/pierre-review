@@ -8,6 +8,7 @@
 // task); the machine calls it at fixed points and never reads a subject's table itself.
 import type { BuildPlanSource, SandboxAgentMode, SandboxSessionPhase, SandboxTurnOutcome, SandboxTurnUsage } from '@pierre-review/shared';
 import type { SandboxUsageAccount } from '../drivers/index.js';
+import type { SandboxSettingsRow } from '../../db/sandbox-settings.js';
 import type { RepoBaseRequest, MirrorResult, FixSeedInput, SessionTicket, WorkspaceLayout } from '../workspace/index.js';
 
 /** The registry key: ids of two tables never collide. */
@@ -97,8 +98,11 @@ export interface SessionSubject {
   hasStoredWork(): Promise<boolean>;
   /** The subject boot step: read the ticket / the task. Throws SessionFail to stop. Returns its detail. */
   readSubject(l: SubjectLive): Promise<string | null>;
-  /** The repositories to mirror (the workspace's, plus a resumed session's own). */
-  repoIds(memberRepoIds: readonly number[]): Promise<number[]>;
+  /**
+   * The repositories to mirror (the workspace's, plus a resumed session's own), in load order. `o`: the
+   * live session and the workspace's Settings → Sandbox (AI Fix reads `fixAllRepos`; read at every boot).
+   */
+  repoIds(memberRepoIds: readonly number[], o?: { l: SubjectLive; settings: SandboxSettingsRow }): Promise<number[]>;
   bases(l: SubjectLive, repos: readonly SessionRepoInfo[]): Promise<SubjectBases>;
   branch(): string;
   /** What the seed fold gets (the layout says where each repository will be). */

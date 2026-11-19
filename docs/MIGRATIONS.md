@@ -1765,6 +1765,14 @@ listed in `accountScopedTables()`; both PR-keyed delete paths prune them (`db/ai
 an older fix reads `loop: null`. Additive; journal idx 207, `when` `1794643200000`.
 [DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes.loop_*`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix → The review loop.
 
+### `0208_sandbox_fix_all_repos` — AI Fix reads every repository
+
+`ALTER TABLE sandbox_workspace_settings ADD fix_all_repos` (integer bool, nullable, no default): Settings → Sandbox →
+"AI Fix reads every repository". NULL = ON (no backfill: an existing row and a missing row both read as on); `0` =
+the narrow set. Read and written only by `db/sandbox-settings.ts`. An existing table, so erasure and export already
+cover it (the export lists the column). Additive; journal idx 208, `when` `1794729600000`.
+[SANDBOX.md](SANDBOX.md) § AI Fix sessions → Scope; [DATA-MODEL.md](DATA-MODEL.md) § `sandbox_workspace_settings`.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

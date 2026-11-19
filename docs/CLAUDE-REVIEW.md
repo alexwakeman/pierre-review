@@ -4646,9 +4646,12 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
 
 - **EVERY RUN IS A SANDBOXED WORKSPACE SESSION** (2026-11-07; `sandbox/session/fix.ts`, the mechanics in
   [SANDBOX.md](SANDBOX.md) § AI Fix sessions): manual, Plan first, the unattended AUTO FIX and dependency
-  automation's fix, on Claude Code or Codex (the run choice / `activeProviderId`). The PR's repository and
-  those of its ticket's other PRs (2026-11-10; not the whole workspace) are mirrored at the reader's layout
-  (memories as in Implement); the PR's repository is checked out at the
+  automation's fix, on Claude Code or Codex (the run choice / `activeProviderId`). EVERY workspace repository
+  is mirrored at the reader's layout, read only at its default branch beside the PR's (2026-11-19, reversing the
+  2026-11-10 narrowing; at most 12, the PR's own first, then its ticket's, the reader's related repos, the rest by
+  name; Settings → Sandbox → "AI Fix reads every repository", per workspace, ON by default; dependency automation's
+  fix stays narrow), with the workspace's reference documents as files (memories as in Implement). ⚠ The fix's
+  REVIEW ROUNDS keep the review's own scope (related repos, docs), never this set. The PR's repository is checked out at the
   PR's head sha and is the ONLY one pushed — to the PR's own branch, as before. Edits in other
   repositories are listed ("left out") and never stored. The agent has a shell INSIDE the sandbox and
   runs the repository's own tests itself (`limn-svc` for services, as in Implement). The shell-less

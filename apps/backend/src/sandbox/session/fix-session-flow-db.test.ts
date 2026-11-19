@@ -66,6 +66,8 @@ let api = 0;
 let web = 0;
 /** The repositories of the PR's ticket's other PRs (fix.ts `relatedRepoIds`). */
 let relatedIds = (): number[] => [web];
+/** Settings → Sandbox of the workspace (null ⇒ every default: "AI Fix reads every repository" ON). */
+let sandboxSettings: any = null;
 let prA = 0;
 let prB = 0;
 let prC = 0;
@@ -136,6 +138,8 @@ function scriptFake(rt: import('../runtime/fake.js').FakeRuntime): void {
     return 0;
   });
   rt.onExec((argv) => argv[0] === 'rm' && argv[1] === '-f', { code: 0 });
+  // The reference documents made read only (root).
+  rt.onExec((argv) => argv[0] === 'sh' && /chown -R root:root/.test(argv[2] ?? ''), { code: 0 });
   rt.onExec((argv) => argv[0] === 'sh' && /git apply --index --binary/.test(argv[2] ?? ''), { code: 0 });
   rt.onExec((argv) => argv[0] === 'pkill', { code: 0 });
   // Claude Code: the recorded stream. A user turn replays the chat segment in chat mode and the build
@@ -208,7 +212,7 @@ beforeAll(async () => {
   const claudeDir = join(scratch, 'claude');
   M.setSessionDepsForTests({
     runtime: () => fake,
-    settings: async () => null,
+    settings: async () => sandboxSettings,
     places: () => ({ claude: { claudeDir, projectsDir: join(claudeDir, 'projects'), litter: [] }, home: '/nowhere', dataDir: '/nowhere/.limn' }),
     mirrorSeams: {
       prepare: async (req) => {
@@ -467,6 +471,8 @@ describe('a manual AI Fix session, end to end', () => {
 
   it('Plan first: one chat turn, `planned`; a message is a chat turn; Start fix builds; no report ⇒ every item "not reported"; Discard ⇒ cancelled', async () => {
     relatedIds = () => [];
+    // Settings → Sandbox → "AI Fix reads every repository" OFF: the narrow set.
+    sandboxSettings = { ...(await import('../../db/sandbox-settings.js')).defaultSandboxSettings(wsId), fixAllRepos: false };
     extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
     reportAnswer = null;
     const r = await post(`/api/pro/prs/${prA}/ai-fix/plan`, { seed: 'review' });
@@ -474,7 +480,7 @@ describe('a manual AI Fix session, end to end', () => {
     const id = r.json().fixId as number;
     let f = await until(prA, (x) => x.id === id && x.session?.phase === 'ready' && x.session.conversation.some((c) => c.kind === 'turn'), 'the plan turn');
     expect(f.status).toBe('planned');
-    // ONLY the repositories the job needs: no other PR on the ticket ⇒ the PR's repository alone.
+    // The switch off: ONLY the repositories of the job: no other PR on the ticket ⇒ the PR's repository alone.
     expect(f.session!.repos.map((x) => x.fullName)).toEqual(['acme/api']);
     expect(f.session!.boot.find((b) => b.key === 'repos')).toMatchObject({ state: 'done', detail: '1 of 1 cloned' });
     expect(f.session!.mode).toBe('chat');
@@ -514,6 +520,7 @@ describe('a manual AI Fix session, end to end', () => {
     const st = await get(`/api/pro/ai-fixes/${id}/session/stream`);
     expect(st.body.split('\n\n').filter(Boolean).map((l) => JSON.parse(l.replace(/^data: /, '')).type)).toEqual(['snapshot', 'done']);
     relatedIds = () => [web];
+    sandboxSettings = null;
   });
 });
 
@@ -949,6 +956,11 @@ describe("AI Fix's own review loop, through the real session (coding/ai-fix/loop
       expect(pushes.length).toBe(before + 1);
       expect(halves.map((h) => h.head.sha)).toEqual(['1'.repeat(40), '2'.repeat(40)]);
       expect(halves.every((h) => h.byReader === true && h.feature === 'ai_fix_loop_review')).toBe(true);
+      // ⚠ THE REVIEW KEEPS ITS OWN SCOPE: the fix session loaded acme/web too (read only), but each review round
+      // reviews the PR's repository from the clone cache; it is never handed the session's repositories.
+      expect(f.session!.repos.map((x) => x.fullName)).toEqual(['acme/api', 'acme/web']);
+      expect(halves.every((h) => h.repo.repoId === api && h.repo.fullName === 'acme/api')).toBe(true);
+      expect(JSON.stringify(halves)).not.toContain('acme/web');
       expect(committed.map((c) => c.patch)).toEqual([PATCH, PATCH2]);
       expect(sentToClaude.slice(sentBefore).some((t) => t.startsWith('Ensemble reviewed your fix (round 1 of 5).'))).toBe(true);
       expect(f.loop).toMatchObject({ state: 'done', stop: 'clean', rounds: 5, firstRound: 1, running: false });
@@ -965,6 +977,162 @@ describe("AI Fix's own review loop, through the real session (coding/ai-fix/loop
       expect(await L.headReviewedByFixLoop(ctx, 1, pr.id, 'c0ffee')).toBe(true);
     } finally {
       L.setFixLoopSeamsForTests({ providers: async () => [] });
+      await M._closeAllSessionsForTest();
+    }
+  });
+});
+
+// ---- CROSS-REPO AI FIX (docs/SANDBOX.md § AI Fix sessions → Scope) -----------------------------------------
+describe('the repositories and documents of a fix (Settings → Sandbox → "AI Fix reads every repository")', () => {
+  it('fixRepoSet (pure): the PR repo, the ticket repos, the related repos, then the rest by name; at most 12, the rest named', () => {
+    const members = [
+      { repoId: 1, fullName: 'acme/api' },
+      { repoId: 2, fullName: 'acme/web' },
+      { repoId: 3, fullName: 'acme/zeta' },
+      ...Array.from({ length: 12 }, (_, i) => ({ repoId: 100 + i, fullName: `acme/r${String(i).padStart(2, '0')}` })),
+    ];
+    // Narrow: the PR repo and the ticket's repos in the workspace (99 is not a member); no cap.
+    expect(F.fixRepoSet({ prRepoId: 1, members, ticketRepoIds: [2, 99], declaredRepoIds: [3], wide: false })).toEqual({ ids: [1, 2], notLoaded: [] });
+    // Wide: ticket (web), declared (zeta), then by name; 15 members ⇒ 12 loaded, 3 named.
+    const w = F.fixRepoSet({ prRepoId: 1, members, ticketRepoIds: [2], declaredRepoIds: [3, 99], wide: true });
+    expect(w.ids).toEqual([1, 2, 3, 100, 101, 102, 103, 104, 105, 106, 107, 108]);
+    expect(w.notLoaded).toEqual(['acme/r09', 'acme/r10', 'acme/r11']);
+    expect(F.notLoadedNote(w.notLoaded)).toBe('AI Fix loads at most 12 repositories. Not loaded: acme/r09, acme/r10, acme/r11.');
+    // A Resume replaces the earlier boot's note (it recognises its own), never stacks a second copy.
+    expect(F.isNotLoadedNote(F.notLoadedNote(w.notLoaded))).toBe(true);
+    expect(F.isNotLoadedNote('One generated or lock file is left out of it.')).toBe(false);
+    // Under the cap: everyone, nothing named.
+    expect(F.fixRepoSet({ prRepoId: 2, members: members.slice(0, 3), ticketRepoIds: [], declaredRepoIds: [], wide: true })).toEqual({ ids: [2, 1, 3], notLoaded: [] });
+  });
+
+  it('switch ON (the default): every member up to 12, the most related first, the rest named in ONE note; pushes stay the PR repo; Resume recomputes; a dependency fix stays narrow', async () => {
+    const { eq, inArray } = await import('drizzle-orm');
+    const q = await import('../../db/queries.js');
+    const extras: number[] = [];
+    for (const name of ['zz-declared', ...Array.from({ length: 14 }, (_, i) => `r${String(i).padStart(2, '0')}`)]) {
+      const [r] = await db.insert(schema.repos).values({ accountId: 1, githubNodeId: `R-x-${name}`, owner: 'acme', name, defaultBranch: 'main', viewerPermission: 'WRITE' }).returning().execute();
+      extras.push(r.id);
+    }
+    await q.resolveWorkspaceScope(1, null);
+    const declared = extras[0]!;
+    await (await import('../../db/related-repos.js')).setRelatedRepos(1, wsId, api, [declared]);
+    const [pr] = await db
+      .insert(schema.pullRequests)
+      .values({ accountId: 1, repoId: api, githubNodeId: 'PR-70', number: 70, title: 'Wide fix', body: null, state: 'open', headSha: HEAD, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+      .returning()
+      .execute();
+    try {
+      // The agent also edits two read-only repositories: left out, never pushed.
+      extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : path.endsWith('/r00') || path.endsWith('/zz-declared') ? out('diff --git a/x b/x\n', ['x'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: wide', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      const prepBefore = G.prepared.length;
+      const r = await post(`/api/pro/prs/${pr.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.' });
+      expect(r.statusCode).toBe(202);
+      const fixId = r.json().fixId as number;
+      const f = await until(pr.id, (x) => x.session?.phase === 'built', 'built (wide)');
+      // 17 members: api, web (the ticket), zz-declared (related), then r00..r08 by name = 12; r09..r13 named.
+      const loaded = f.session!.repos.map((x) => x.fullName).sort();
+      expect(loaded).toEqual(['acme/api', 'acme/web', 'acme/zz-declared', ...Array.from({ length: 9 }, (_, i) => `acme/r0${i}`)].sort());
+      expect(f.session!.notes.filter((n) => n.startsWith('AI Fix loads at most'))).toEqual(['AI Fix loads at most 12 repositories. Not loaded: acme/r09, acme/r10, acme/r11, acme/r12, acme/r13.']);
+      expect(f.session!.boot.find((b) => b.key === 'repos')).toMatchObject({ state: 'done', detail: '12 of 12 cloned' });
+      // Every other repository at its default branch, read only; the PR repo at the PR head.
+      const reqs = G.prepared.slice(prepBefore);
+      expect(reqs.find((p) => p.name === 'api')).toMatchObject({ remoteRef: 'refs/pull/70/head', baseSha: HEAD });
+      expect(reqs.filter((p) => p.name !== 'api').every((p) => p.baseRef === 'HEAD' && p.baseSha === null)).toBe(true);
+      // The seed: the read-only context paragraph in FIX.md; no docs here (none built).
+      const box = `limn-${(await rowOf(fixId)).sandboxRef}-sandbox`;
+      const fixMd = fake.files(box).get('/workspace/FIX.md')!.toString();
+      expect(fixMd).toContain('The other repositories here are read-only context.');
+      expect(fixMd).toContain('A change that another repository needs is out of scope');
+      expect(f.session!.boot.some((b) => b.key === 'docs')).toBe(false);
+      // Only the PR repo's patch is stored; the other edits are left out.
+      expect(f.patch).toBe(PATCH);
+      expect((f.leftOut ?? []).map((x) => x.fullName).sort()).toEqual(['acme/r00', 'acme/zz-declared']);
+      // Push: only acme/api, to the PR's branch.
+      const before = pushes.length;
+      const p = await post(`/api/pro/ai-fixes/${fixId}/push`, { target: 'existing' });
+      expect(p.statusCode).toBe(200);
+      expect(pushes.length).toBe(before + 1);
+      expect(pushes.at(-1)).toMatchObject({ owner: 'acme', name: 'api', prNumber: 70 });
+      await until(pr.id, (x) => x.session?.phase === 'pushed', 'pushed (wide)');
+
+      // RESUME RECOMPUTES AT BOOT: a second fix, closed with work; the switch turned OFF before Resume.
+      const r2 = await post(`/api/pro/prs/${pr.id}/ai-fix`, { seed: 'plain', instruction: 'Again.' });
+      const id2 = r2.json().fixId as number;
+      const second = await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'built', 'built (second)');
+      expect(second.session!.notes.filter((n) => F.isNotLoadedNote(n))).toHaveLength(1);
+      await M._idleCloseForTest(id2, 'fix');
+      await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'built' && M.liveSession(F.fixKey(id2)) == null, 'closed');
+      sandboxSettings = { ...(await import('../../db/sandbox-settings.js')).defaultSandboxSettings(wsId), fixAllRepos: false };
+      expect((await post(`/api/pro/ai-fixes/${id2}/resume`)).statusCode).toBe(202);
+      const resumed = await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'built' && M.liveSession(F.fixKey(id2)) != null, 'resumed');
+      expect(resumed.session!.repos.map((x) => x.fullName)).toEqual(['acme/api', 'acme/web']);
+      // The first boot's "Not loaded" note is gone: the Resume's set has none past the cap (never stacked or stale).
+      expect(resumed.session!.notes.filter((n) => F.isNotLoadedNote(n))).toEqual([]);
+      await post(`/api/pro/ai-fixes/${id2}/discard`, {});
+      await until(pr.id, (x) => x.id === id2 && x.session?.phase === 'discarded', 'discarded');
+      sandboxSettings = null;
+
+      // DEPENDENCY AUTOMATION's fix keeps the narrow set (and no documents), with the switch ON.
+      const d = await AF.startFix(ctx, { accountId: 1, prId: pr.id, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Bump.', trigger: 'auto', narrow: true });
+      expect(d.status).toBe('queued');
+      const dep = await until(pr.id, (x) => x.id === (d as { fixId: number }).fixId && x.session != null && x.session.repos.length > 0, 'dependency fix booted');
+      expect(dep.session!.repos.map((x) => x.fullName)).toEqual(['acme/api', 'acme/web']);
+      await until(pr.id, (x) => x.id === (d as { fixId: number }).fixId && !AF.isFixRunning(pr.id), 'dependency fix closed');
+    } finally {
+      sandboxSettings = null;
+      await M._closeAllSessionsForTest();
+      await (await import('../../db/related-repos.js')).setRelatedRepos(1, wsId, api, []);
+      await db.delete(schema.workspaceRepos).where(inArray(schema.workspaceRepos.repoId, extras)).execute();
+      await db.delete(schema.repos).where(inArray(schema.repos.id, extras)).execute();
+      void eq;
+    }
+  });
+
+  it('the reference documents: built ⇒ the docs step copies them read only and FIX.md points at them; none ⇒ no step; a dependency fix never gets them', async () => {
+    const SECTION = '<!-- limn:section -->\n# Export\n\nThe CSV uses commas.\n';
+    const LIB = {
+      workspaceId: wsId,
+      dir: '/lib',
+      docs: [{ slug: 'api', title: 'API guide', sections: [{ path: 'api/sections/01-export.md', title: 'Export', summary: '', depth: 1, trail: [], headings: [] }] }],
+      read: (p: string) => (p === 'api/sections/01-export.md' ? SECTION : p === 'api/CONTENTS.md' ? '# Contents' : null),
+    } as any;
+    const asked: any[] = [];
+    F.setFixSessionDepsForTests({
+      relatedRepoIds: async () => relatedIds(),
+      contextTicket: async () => null,
+      docsAvailable: async () => true,
+      chooseDocs: async (_c, _a, _w, pr) => {
+        asked.push(pr);
+        return { ok: true, lib: LIB, index: '# Index\n- api', libraryHash: 'h1', choice: { source: 'search', sections: ['api/sections/01-export.md'], about: 'pull request' } };
+      },
+    });
+    try {
+      extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: docs', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      const r = await post(`/api/pro/prs/${prC}/ai-fix`, { seed: 'plain', instruction: 'Fix it.' });
+      const fixId = r.json().fixId as number;
+      const f = await until(prC, (x) => x.id === fixId && x.session?.phase === 'built', 'built (docs)');
+      expect(f.session!.boot.find((b) => b.key === 'docs')).toMatchObject({ state: 'done', detail: '1 section' });
+      // The PR-shaped chooser got the PR's title, description and changed paths (pnpm-lock is not in PR.diff).
+      expect(asked.at(-1)).toMatchObject({ prId: prC, title: 'Fix the export 43', paths: ['src/a.ts'], withTicket: true });
+      const files = fake.files(`limn-${(await rowOf(fixId)).sandboxRef}-sandbox`);
+      expect(files.get('/home/agent/.limn/docs/api/sections/01-export.md')!.toString()).toBe(SECTION);
+      expect(files.get('/workspace/DOCS.md')!.toString()).toContain('They may not apply to this pull request');
+      expect(files.get('/home/agent/.limn/docs/SHORTLIST.md')!.toString()).toContain("the pull request's words and changed files");
+      expect(files.get('/workspace/FIX.md')!.toString()).toContain('The other repositories here and the reference documents in `/home/agent/.limn/docs/` are read-only context.');
+      await post(`/api/pro/ai-fixes/${fixId}/discard`, {});
+      await until(prC, (x) => x.id === fixId && x.session?.phase === 'discarded', 'discarded (docs)');
+
+      // A dependency fix: no docs step, whatever the library holds.
+      const before = asked.length;
+      const d = await AF.startFix(ctx, { accountId: 1, prId: prC, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Bump.', trigger: 'auto', narrow: true });
+      const depId = (d as { fixId: number }).fixId;
+      const dep = await until(prC, (x) => x.id === depId && !AF.isFixRunning(prC), 'dependency fix closed (docs)');
+      expect(dep.session!.boot.some((b) => b.key === 'docs')).toBe(false);
+      expect(asked.length).toBe(before);
+    } finally {
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
       await M._closeAllSessionsForTest();
     }
   });

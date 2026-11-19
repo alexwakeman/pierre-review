@@ -92,7 +92,23 @@ describe('sandbox settings', () => {
       resources: { cpus: null, memoryGb: null, diskGb: null },
       services: [],
       alwaysAllowedHosts: [],
+      fixAllRepos: true,
     });
+  });
+
+  it('"AI Fix reads every repository": ON by default and when left out of a PUT; a stored NULL (migration 0208) reads as ON', async () => {
+    const off = await call('PUT', `/api/workspaces/${own}/sandbox`, { fixAllRepos: false });
+    expect(off.status).toBe(200);
+    expect(off.body).toMatchObject({ fixAllRepos: false });
+    expect((await call('GET', `/api/workspaces/${own}/sandbox`)).body).toMatchObject({ fixAllRepos: false });
+    expect((await call('PUT', `/api/workspaces/${own}/sandbox`, {})).body).toMatchObject({ fixAllRepos: true });
+    // A row written before the column (NULL): on.
+    const t = client.schema.sandboxWorkspaceSettings;
+    const { eq } = await import('drizzle-orm');
+    await client.db.update(t).set({ fixAllRepos: null }).where(eq(t.workspaceId, own)).execute();
+    expect((await call('GET', `/api/workspaces/${own}/sandbox`)).body).toMatchObject({ fixAllRepos: true });
+    // The shape: a boolean only.
+    expect((await call('PUT', `/api/workspaces/${own}/sandbox`, { fixAllRepos: 'yes' })).status).toBe(400);
   });
 
   it('PUT replaces the whole setting', async () => {
