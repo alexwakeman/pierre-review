@@ -10,20 +10,31 @@
 //            moves to a band heading above the lane's cards, as the design grid's layer names do. Below
 //            the columns' minimum widths the board scrolls inside its own box (snapping to columns),
 //            never the page. A PHONE gets `StackedLaneBoard` instead: lanes down, each lane's columns
-//            down, the arrows as a visible numbered list (the redesign; docs/redesign/DESIGN.md § 6).
-//   ARROWS   routed by lib/designGrid.ts `routeArrow` through the padding round each card and the grid's
-//            gaps, re-measured by a ResizeObserver. A critical arrow is drawn in the accent. A labelled
-//            arrow carries a number, keyed below the board. HOVERING an arrow's line or its number (or
-//            focusing the number) shows what the arrow means in a popover beside the number, on the
-//            side that covers the fewest cards (lib/avoidRects.ts); it closes
-//            when the pointer leaves. No click, no pin. The numbers are in the tab order. The same
-//            arrows are also an sr-only list.
+//            down, the arrows as a visible list (the redesign; docs/redesign/DESIGN.md § 6).
+//   ARROWS   CRITICAL PATH VIEW ONLY (Theme and People hand the board none): routed by
+//            lib/designGrid.ts `routeArrow` through the padding round each card and the grid's gaps,
+//            re-measured by a ResizeObserver, drawn as the heavier ink line. Each arrow's WORDS are drawn
+//            beside it, ALWAYS (no hover, no number, no key): lib/designGrid.ts `fitArrowLabels` gives
+//            each label the free box round its arrow, so it never covers a card; words that do not fit
+//            are cut with an ellipsis (the full sentence is the label's tooltip). A board with labels
+//            gets wider column gaps to hold them. The same arrows are also an sr-only list.
+//            (The design grid keeps the numbered markers and hover popovers of the shared ArrowLayer.)
 import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { autoUpdate, FloatingPortal, useDismiss, useFocus, useHover, useInteractions, useRole } from '@floating-ui/react';
 import { usePlacedFloating } from './ui/floating.js';
 import { avoidRects } from '../lib/avoidRects.js';
 import { HOVER_PANEL_CLASS } from './HoverPopover.js';
-import { geometryOf, placeArrowLabels, routePoints, separateArrowRuns, type ArrowGeometry, type PlacedCard } from '../lib/designGrid.js';
+import {
+  fitArrowLabels,
+  geometryOf,
+  placeArrowLabels,
+  routePoints,
+  separateArrowRuns,
+  type ArrowGeometry,
+  type Box,
+  type FittedLabel,
+  type PlacedCard,
+} from '../lib/designGrid.js';
 import type { BoardLayout } from '../lib/laneBoard.js';
 import { ArrowIcon, ChevronIcon } from './Icons.js';
 import { cx, FOCUS_RING } from './ui/cx.js';
@@ -35,6 +46,60 @@ const NONE_OCCUPIED: ReadonlyArray<{ row: number; col: number }> = [];
 
 export interface RoutedPath extends ArrowGeometry {
   key: string;
+  /** Its always-on label's box (only when the hook was given `labels`); null = no room, not drawn. */
+  label?: FittedLabel | null;
+}
+
+/** The always-on label box: padding and the gap it keeps from cards (px), its widest. */
+const LABEL_PAD_X = 4;
+const LABEL_PAD_Y = 2;
+const LABEL_MARGIN = 4;
+const LABEL_MAX_W = 176;
+const LABEL_MIN_W = 40;
+
+/** Width of a text in the board's meta font, measured on a canvas (one per font). */
+function textMeasurer(font: string): (s: string) => number {
+  const ctx = typeof document !== 'undefined' ? document.createElement('canvas').getContext('2d') : null;
+  if (ctx == null) return (s) => s.length * 7;
+  ctx.font = font;
+  return (s) => ctx.measureText(s).width;
+}
+
+/** Each label takes the free box round its arrow: never over a card, nor over another label. Sets each
+ *  routed path's `label`. */
+function fitLabels(
+  grid: HTMLElement,
+  g: DOMRect,
+  routed: RoutedPath[],
+  texts: ReadonlyMap<string, string>,
+  cardEls: Iterable<HTMLElement>,
+  slotEls: Iterable<HTMLElement>,
+): void {
+  const css = getComputedStyle(grid);
+  const fs = css.getPropertyValue('--fs-meta').trim() || '12px';
+  const lineH = parseFloat(css.getPropertyValue('--lh-meta')) || 16;
+  const measureText = textMeasurer(`500 ${fs} ${css.fontFamily}`);
+  const boxOf = (el: HTMLElement): Box => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left - g.left, y: r.top - g.top, w: r.width, h: r.height };
+  };
+  // The cards, and the board's own words (column and lane headings, a cell's "n tickets").
+  const cardBoxes = [...cardEls, ...grid.querySelectorAll<HTMLElement>('[data-label-obstacle]')].map(boxOf);
+  // Never above the first lane (the column headings), never past the grid.
+  const top = Math.min(...[...slotEls].map((el) => boxOf(el).y), g.height);
+  const withText = routed.flatMap((p) => {
+    const text = texts.get(p.key);
+    return text == null ? [] : [{ p, text }];
+  });
+  const fitted = fitArrowLabels(
+    withText.map(({ p, text }) => ({ at: [p.lx, p.ly] as const, text })),
+    cardBoxes,
+    { x: 0, y: top, w: g.width, h: g.height - top },
+    { measure: measureText, lineH, padX: LABEL_PAD_X, padY: LABEL_PAD_Y, margin: LABEL_MARGIN, maxW: LABEL_MAX_W, minW: LABEL_MIN_W },
+  );
+  withText.forEach(({ p }, i) => {
+    p.label = fitted[i] ?? null;
+  });
 }
 
 /**
@@ -49,6 +114,8 @@ export function useRoutedArrows(
   arrows: ReadonlyArray<{ key: string; from: string; to: string }>,
   narrowPx: number,
   occupied: ReadonlyArray<{ row: number; col: number }> = NONE_OCCUPIED,
+  /** Arrow key → the words to draw beside it, always (the lane board). Absent = no labels. Memoised. */
+  wordsOf?: ReadonlyMap<string, string>,
 ): {
   gridRef: React.MutableRefObject<HTMLDivElement | null>;
   cardRef: (id: string) => (el: HTMLElement | null) => void;
@@ -116,13 +183,14 @@ export function useRoutedArrows(
       ly: labels[i]![1],
       key: keys[i]!,
     }));
+    if (wordsOf != null && wordsOf.size > 0) fitLabels(grid, g, next, wordsOf, cards.current.values(), slots.current.values());
     // Only a CHANGED drawing re-renders — a resize that moves nothing must not loop.
-    const sig = next.map((p) => `${p.key}:${p.d}`).join('|');
+    const sig = next.map((p) => `${p.key}:${p.d}:${p.label == null ? '' : `${p.label.x},${p.label.y},${p.label.w},${p.label.lines}`}`).join('|');
     if (sig !== lastSig.current) {
       lastSig.current = sig;
       setPaths(next);
     }
-  }, [cells, arrows, narrowPx, occupied]);
+  }, [cells, arrows, narrowPx, occupied, wordsOf]);
 
   useLayoutEffect(() => {
     measure();
@@ -134,6 +202,10 @@ export function useRoutedArrows(
     for (const el of cards.current.values()) ro.observe(el);
     return () => ro.disconnect();
   }, [measure]);
+  // The narrow flip re-lays the grid: cards can MOVE without resizing, which no ResizeObserver sees.
+  useLayoutEffect(() => {
+    measure();
+  }, [narrow, measure]);
 
   const cardRef = useCallback(
     (id: string) => (el: HTMLElement | null) => {
@@ -495,7 +567,7 @@ const TOGGLE_CLASS = `inline-flex items-center gap-0.5 rounded-ui px-1 text-meta
 
 export function LaneBoard<L, C>(props: LaneBoardProps<L, C>): JSX.Element {
   // A PHONE stacks the board (lanes down, then each lane's columns down) — a five-column grid at
-  // 390px left every card a sliver. Every fact survives: the arrows become a visible numbered list.
+  // 390px left every card a sliver. Every fact survives: the arrows become a visible list.
   // Below lg the grid is too narrow too (at 768 a collapsed column's name clipped to "C" and every
   // card footer truncated), so the stacked board runs up to lg, two cards to a row from md.
   const desktop = useIsDesktop();
@@ -513,10 +585,11 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
       [...l.hidden.keys(), ...l.opened.keys()].flatMap((id) => (colOf.has(id) ? [{ row: l.row, col: colOf.get(id)! }] : [])),
     );
   }, [layout.columns, layout.lanes]);
-  const { gridRef, cardRef, slotRef, paths, narrow, cardRects } = useRoutedArrows(cells, arrows, NARROW_PX, occupied);
-  const numbers = useMemo(() => new Map(arrows.filter((a) => a.n != null).map((a) => [a.key, a.n!])), [arrows]);
-  const details = useMemo(() => new Map(arrows.map((a) => [a.key, { label: a.label, text: a.text }])), [arrows]);
-  const critical = useMemo(() => new Set(arrows.filter((a) => a.critical).map((a) => a.key)), [arrows]);
+  const labels = useMemo(() => new Map(arrows.flatMap((a) => (a.label != null ? [[a.key, a.label] as const] : []))), [arrows]);
+  const { gridRef, cardRef, slotRef, paths, narrow, cardRects } = useRoutedArrows(cells, arrows, NARROW_PX, occupied, labels);
+  // Every arrow on the board is a critical-path link: all drawn as the heavier ink line.
+  const critical = useMemo(() => new Set(arrows.map((a) => a.key)), [arrows]);
+  const labelled = labels.size > 0;
   const col0 = narrow ? 1 : 2;
   // Grid rows (1-based; row 1 is the header). Narrow: each lane gets a band row above its cards.
   const laneIndexOfRow = useMemo(() => {
@@ -538,7 +611,8 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
       <div className={cx('w-full overflow-x-auto', narrow && 'snap-x snap-proximity')}>
         <div
           ref={gridRef}
-          className={cx('relative grid gap-y-1 pb-1 pr-1', narrow ? 'gap-x-8' : 'gap-x-12')}
+          // Labels live in the column gaps, so a board with labels gets wider ones.
+          className={cx('relative grid gap-y-1 pb-1 pr-1', labelled ? 'gap-x-24' : narrow ? 'gap-x-8' : 'gap-x-12')}
           // The end room is PADDING outside a content box as wide as before (the box less `pr-1`), and
           // never narrower than its tracks' minimums, so no column gets narrower and the room always
           // follows the last column.
@@ -559,13 +633,15 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
             />
           ))}
 
-          <ArrowLayer paths={paths} numbers={numbers} critical={critical} details={details} avoid={cardRects} />
+          <ArrowLayer paths={paths} numbers={NO_NUMBERS} critical={critical} />
+          <InlineArrowLabels paths={paths} texts={labels} />
 
           {/* Header row: the columns. */}
           {!narrow && <div aria-hidden style={{ gridRow: 1, gridColumn: 1 }} />}
           {layout.columns.map((c) => (
             <div
               key={c.id}
+              data-label-obstacle
               className="relative z-10 flex min-w-0 snap-start flex-wrap items-end gap-x-1.5 self-end pb-1.5 text-body font-medium text-ui-ink"
               style={{ gridRow: 1, gridColumn: c.index + col0 }}
             >
@@ -589,6 +665,7 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
           {layout.lanes.map((l) => (
             <Fragment key={l.id}>
               <div
+                data-label-obstacle
                 className={`relative z-10 min-w-0 break-words py-2.5 ${narrow ? '' : 'pr-1'}`}
                 style={narrow ? { gridRow: gridRow(l.row) - 1, gridColumn: '1 / -1' } : { gridRow: `${gridRow(l.row)} / span ${l.span}`, gridColumn: 1 }}
               >
@@ -601,6 +678,7 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
                   return (
                     <div
                       key={`h:${l.id}:${colId}`}
+                      data-label-obstacle
                       className="relative z-10 self-center px-1 text-meta text-ui-mute"
                       style={{ gridRow: gridRow(l.row), gridColumn: c.index + col0 }}
                     >
@@ -623,10 +701,37 @@ function GridLaneBoard<L, C>({ label, layout, laneWidth, renderLane, renderCard,
         </div>
       </div>
       {legend}
-      <ArrowKey items={layout.key} />
-      <ArrowList label="Dependencies" items={arrows} />
+      <ArrowList label="Critical path links" items={arrows} />
     </div>
     </ObstaclesContext.Provider>
+  );
+}
+
+const NO_NUMBERS: ReadonlyMap<string, number> = new Map();
+
+/** The lane board's arrow words, drawn ALWAYS in the free box `fitArrowLabels` gave each (never over a
+ *  card). Visual only: the sr-only list reads every arrow's full sentence. */
+function InlineArrowLabels({ paths, texts }: { paths: readonly RoutedPath[]; texts: ReadonlyMap<string, string> }): JSX.Element {
+  return (
+    <>
+      {paths.map((p) => {
+        const box = p.label;
+        const text = texts.get(p.key);
+        if (box == null || text == null) return null;
+        return (
+          <span
+            key={`t:${p.key}`}
+            aria-hidden
+            data-testid="arrow-label"
+            title={box.cut ? text : undefined}
+            className="absolute z-20 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-ui bg-ui-bg px-1 py-0.5 text-center text-meta font-medium text-ui-mute"
+            style={{ left: box.x, top: box.y, width: 'max-content', maxWidth: box.w, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: box.lines }}
+          >
+            {text}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
@@ -648,8 +753,8 @@ const NO_REF = (): void => {};
  * THE PHONE BOARD: each lane is a section (its header, then one block per column that holds its
  * cards: "In progress 2" over the cards, two to a row). A collapsed column keeps its per-lane
  * "n tickets" toggle, and its header toggle moves to a "Complete 3 · Show" line above the board. The
- * ARROWS cannot be routed through a stack, so they become a VISIBLE list under the board (every
- * arrow's full sentence, numbered as on the wide board; the cards still wear the waiting mark).
+ * ARROWS (Critical path only) cannot be routed through a stack, so they become a VISIBLE list under the
+ * board (every arrow's full sentence; the cards still wear the waiting mark).
  */
 function StackedLaneBoard<L, C>({ label, layout, renderLane, renderCard, onToggleColumn, onToggleCell, legend }: LaneBoardProps<L, C>): JSX.Element {
   const collapsible = layout.columns.filter((c) => c.collapsible);
@@ -724,24 +829,20 @@ function StackedLaneBoard<L, C>({ label, layout, renderLane, renderCard, onToggl
       {legend}
       {deps.length > 0 && (
         <div className="pt-3">
-          <p className="text-meta font-medium text-ui-mute">Dependencies</p>
+          <p className="text-meta font-medium text-ui-mute">Critical path links</p>
           <ol aria-hidden className="mt-1 space-y-1.5 text-meta text-ui-mute">
             {deps.map((a) => (
               <li key={a.key} className="flex items-start gap-1.5">
-                {a.n != null ? (
-                  <span className={`mt-px shrink-0 ${NUMBER_CLASS}`}>{a.n}</span>
-                ) : (
-                  <span className="mt-px flex w-4 shrink-0 justify-center">
-                    <ArrowIcon size={11} />
-                  </span>
-                )}
-                <span className={a.critical ? 'text-ui-ink' : undefined}>{a.text}</span>
+                <span className="mt-px flex w-4 shrink-0 justify-center">
+                  <ArrowIcon size={11} />
+                </span>
+                <span className="text-ui-ink">{a.text}</span>
               </li>
             ))}
           </ol>
         </div>
       )}
-      <ArrowList label="Dependencies" items={deps} />
+      <ArrowList label="Critical path links" items={deps} />
     </div>
   );
 }

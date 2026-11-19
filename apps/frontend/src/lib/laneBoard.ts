@@ -2,11 +2,11 @@
 //
 // ONE board shape draws all three This Sprint views (components/LaneBoard.tsx): COLUMNS across (the
 // workspace's status buckets in order — Code review, Product review and the rest), LANES down
-// (a critical path, a theme or a person), one TicketCard per ticket in a padded slot, and right-angled
-// arrows through the gaps (lib/designGrid.ts `routeArrow`, the design grid's router). The first half of
-// this file is the generic layout (which grid row and column each card takes, which arrows can be
-// drawn, the numbered key); the second half builds each view's lanes, cards and arrows from
-// `SprintGraphResponse`.
+// (a critical path, a theme or a person), one TicketCard per ticket in a padded slot, and — on the
+// Critical path view ONLY — right-angled arrows through the gaps (lib/designGrid.ts `routeArrow`, the
+// design grid's router). The first half of this file is the generic layout (which grid row and column
+// each card takes, which arrows can be drawn); the second half builds each view's lanes, cards and
+// arrows from `SprintGraphResponse`.
 //
 //   COLUMNS   `statusLayout.columns`, verbatim. "Outside the sprint" is added at the LEFT only for the
 //             Critical path view and only when a path names a ticket outside the sprint; "Status not
@@ -15,9 +15,10 @@
 //             won't-do tickets still fits;
 //             a lane's own "n tickets" opens THAT lane's cell only (`expanded`, `cellKey`).
 //   LANES     each lane is as many grid rows as its fullest cell; an empty lane is not drawn.
-//   ARROWS    a `depends_on` edge, drawn FROM the ticket waited on TO the one that waits (the flow of
-//             work). Only between two DRAWN cards — a card in a collapsed column draws no arrow. A
-//             labelled arrow carries a number; arrows with the same words share one.
+//   ARROWS    CRITICAL PATH VIEW ONLY (owner, 2026-11-19: Theme and People draw no lines): a
+//             `depends_on` edge between two tickets of one path, drawn FROM the ticket waited on TO the
+//             one that waits (the flow of work). Only between two DRAWN cards — a card in a collapsed
+//             column draws no arrow. Its words (the edge's why) are drawn beside it, always.
 //
 //   ORDER     the Critical path and Theme lanes are sorted by their PULL REQUEST count (distinct PRs of any
 //             state on the lane's drawn cards), most first; ties keep the view's own order (a path's risk,
@@ -76,10 +77,8 @@ export interface BoardArrowDef {
   /** Card ids: the arrow runs from → to. */
   from: string;
   to: string;
-  /** The words keyed under the board; null = an unnumbered arrow. */
+  /** The words drawn beside the arrow; null = none. */
   label: string | null;
-  /** Drawn in the accent (on a critical path). */
-  critical: boolean;
   /** How the arrow reads aloud (the sr-only list). */
   text: string;
 }
@@ -92,9 +91,7 @@ export interface BoardLayout<L, C> {
    *  whose cards this lane shows (with their counts, so the cell can offer "Hide"). */
   lanes: Array<BoardLaneDef<L> & { row: number; span: number; size: number; hidden: Map<string, number>; opened: Map<string, number> }>;
   cards: Array<BoardCardDef<C> & { row: number; col: number }>;
-  arrows: Array<BoardArrowDef & { key: string; n: number | null }>;
-  /** The numbered key under the board: one entry per distinct label, in first-seen order. */
-  key: Array<{ n: number; label: string }>;
+  arrows: Array<BoardArrowDef & { key: string }>;
   rows: number;
 }
 
@@ -258,26 +255,15 @@ export function layoutBoard<L, C>(input: {
   }
   const placed = new Set(cards.map((c) => c.id));
   const arrows: BoardLayout<L, C>['arrows'] = [];
-  const numbers = new Map<string, number>();
-  const key: BoardLayout<L, C>['key'] = [];
   const drawn = new Set<string>();
   for (const a of input.arrows) {
     if (a.from === a.to || !placed.has(a.from) || !placed.has(a.to)) continue;
     const k = `${a.from}>${a.to}`;
     if (drawn.has(k)) continue;
     drawn.add(k);
-    let n: number | null = null;
-    if (a.label != null) {
-      n = numbers.get(a.label) ?? null;
-      if (n == null) {
-        n = numbers.size + 1;
-        numbers.set(a.label, n);
-        key.push({ n, label: a.label });
-      }
-    }
-    arrows.push({ ...a, key: k, n });
+    arrows.push({ ...a, key: k });
   }
-  return { columns, lanes, cards, arrows, key, rows: row };
+  return { columns, lanes, cards, arrows, rows: row };
 }
 
 // ── This Sprint's three views ────────────────────────────────────────────────────────────────────
@@ -458,19 +444,6 @@ export function criticalIdents(paths: SprintPaths | null | undefined): Set<strin
   return new Set((paths?.paths ?? []).flatMap((p) => p.idents));
 }
 
-/** Two tickets next to each other on a critical path (either order) — the link between them is drawn
- *  in the accent. */
-function criticalPairs(paths: SprintPaths | null | undefined): Set<string> {
-  const out = new Set<string>();
-  for (const p of paths?.paths ?? []) {
-    for (let i = 1; i < p.idents.length; i += 1) {
-      out.add(`${p.idents[i - 1]}|${p.idents[i]}`);
-      out.add(`${p.idents[i]}|${p.idents[i - 1]}`);
-    }
-  }
-  return out;
-}
-
 /** What one card carries. */
 export interface SprintCardData {
   node: SprintGraphNode;
@@ -580,8 +553,8 @@ function needs(cards: ReadonlyArray<BoardCardDef<SprintCardData>>): { outside: b
 }
 
 /** CRITICAL PATH: one lane per stored path (by PR count, then riskiest first as stored), its tickets in
- *  the path's order; a ticket outside the sprint sits in "Outside the sprint". Every arrow on it is
- *  critical. */
+ *  the path's order; a ticket outside the sprint sits in "Outside the sprint". Its arrows are the
+ *  board's only lines: every `depends_on` edge between two of the path's tickets. */
 export function pathsBoard(i: BoardInput): SprintBoard {
   const byIdent = new Map(i.nodes.map((n) => [n.ident, n]));
   const keep = i.keep ?? (() => true);
@@ -607,42 +580,12 @@ export function pathsBoard(i: BoardInput): SprintBoard {
         from: cardIdOf(id, e.to),
         to: cardIdOf(id, e.from),
         label,
-        critical: true,
         text: arrowText(byIdent.get(e.from)!, byIdent.get(e.to)!, label),
       });
     }
   });
   const prsOf = new Map(lanes.map((l) => [l.id, l.data.kind === 'path' ? l.data.prs : 0]));
   return { columns: sprintColumns(i.columns, needs(cards)), lanes: byPrCount(lanes, (id) => prsOf.get(id) ?? 0), cards, arrows };
-}
-
-/** The `depends_on` arrows between two sprint tickets (Theme and People): critical when the two sit
- *  next to each other on a stored path. `labelOf` words the key. */
-function sprintArrows(
-  i: BoardInput,
-  laneOf: Map<string, string>,
-  labelOf: (waits: SprintGraphNode, on: SprintGraphNode, e: SprintGraphEdge) => string | null,
-): BoardArrowDef[] {
-  const byIdent = new Map(i.nodes.map((n) => [n.ident, n]));
-  const pairs = criticalPairs(i.paths);
-  const out: BoardArrowDef[] = [];
-  for (const e of i.edges) {
-    if (e.kind !== 'depends_on') continue;
-    const lf = laneOf.get(e.from);
-    const lt = laneOf.get(e.to);
-    if (lf == null || lt == null) continue;
-    const waits = byIdent.get(e.from)!;
-    const on = byIdent.get(e.to)!;
-    const label = labelOf(waits, on, e);
-    out.push({
-      from: cardIdOf(lt, e.to),
-      to: cardIdOf(lf, e.from),
-      label,
-      critical: pairs.has(`${e.from}|${e.to}`),
-      text: arrowText(waits, on, label),
-    });
-  }
-  return out;
 }
 
 const sprintOnly = (nodes: ReadonlyArray<SprintGraphNode>): SprintGraphNode[] => nodes.filter((n) => !n.ghost);
@@ -696,8 +639,8 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
       },
     };
   });
-  const arrows = sprintArrows(i, laneOf, (_w, _o, e) => why(e));
-  return { columns, lanes, cards, arrows };
+  // No arrows: only the Critical path view draws lines (the cards keep their "waiting" mark).
+  return { columns, lanes, cards, arrows: [] };
 }
 
 export const UNASSIGNED_LABEL = 'Unassigned';
@@ -722,8 +665,7 @@ export function assigneeLabel(node: Pick<SprintGraphNode, 'assignee'>, personOfN
 /** PEOPLE: one lane per assignee, ALPHABETICAL, Unassigned last — never by load (prep, not scoring;
  *  the owner kept this on 2026-10-26 when the other views moved to PR order). A person is
  *  `SprintGraphResponse.people`'s (the shared Members identity), matched on the tracker spelling; an
- *  assignee it does not list gets a lane under the tracker's name. An arrow between two people's lanes
- *  is a hand-off, keyed "<person> waits on <person>"; one inside a lane keys the brief's why. */
+ *  assignee it does not list gets a lane under the tracker's name. No arrows (Critical path only). */
 export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson> }): SprintBoard {
   const nodes = sprintOnly(i.nodes).filter(i.keep ?? (() => true));
   const critical = criticalIdents(i.paths);
@@ -768,13 +710,8 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
       },
     };
   });
-  const labelOfLane = new Map(order.map((l) => [l.id, l.label]));
-  const arrows = sprintArrows(i, laneOf, (waits, on, e) => {
-    const a = laneOf.get(waits.ident)!;
-    const b = laneOf.get(on.ident)!;
-    return a === b ? why(e) : `${labelOfLane.get(a)} waits on ${labelOfLane.get(b)}`;
-  });
-  return { columns, lanes, cards, arrows };
+  // No arrows: only the Critical path view draws lines (the cards keep their "waiting" mark).
+  return { columns, lanes, cards, arrows: [] };
 }
 
 // ── Under the Critical path board ────────────────────────────────────────────────────────────────

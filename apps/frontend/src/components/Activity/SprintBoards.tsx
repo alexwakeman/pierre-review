@@ -62,7 +62,8 @@ import { cx, FOCUS_RING } from '../ui/cx.js';
 // the key. Under each board, a key to the card borders (the shared `BorderKey`). Every card is a
 // TicketCard: a click shows its story in the TRAY over the board (`actions.onSelect`, as does a
 // call-out's ticket key); its corner arrow opens the ticket's story tab (`actions.onOpen`). A Complete column's
-// "n tickets" opens that lane's cell only.
+// "n tickets" opens that lane's cell only. ARROWS: the Critical path board only, each with its words beside
+// it; Theme and People draw none (owner, 2026-11-19).
 //
 // ROW ORDER: every view's rows are sorted by their pull request count, most first (lib/laneBoard.ts
 // `byPrCount`; the owner's rule, 2026-10-26); each row header says its count. "No theme" and
@@ -472,7 +473,8 @@ function PathsInfo({ aiEnabled }: { aiEnabled: boolean }): JSX.Element {
         </p>
       )}
       <p>
-        Each row is one path. Its tickets sit in their columns, and an arrow runs from the ticket waited on to the one that waits.
+        Each row is one path. Its tickets sit in their columns, and an arrow runs from the ticket waited on to the one that waits,
+        with the reason beside it.
         A ticket outside the sprint sits faint, in &ldquo;Outside the sprint&rdquo;.
       </p>
       <p>
