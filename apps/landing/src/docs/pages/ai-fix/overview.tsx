@@ -147,7 +147,8 @@ export default function Page(): JSX.Element {
         <li>
           It holds the pull request's repository, at the pull request's latest commit, and the workspace's other
           repositories, read only at their default branch, so the agent can check code that calls or serves the pull
-          request. At most 12 repositories: the pull request's own, the ones of its ticket's other pull requests, your
+          request. A repository with another open pull request of the same ticket is at that pull request&rsquo;s
+          latest commit instead, so the agent sees the change that is not merged yet. At most 12 repositories: the pull request's own, the ones of its ticket's other pull requests, your
           related repositories, then the rest by name. The session names the ones it did not load.{' '}
           <Ui>Settings → Sandbox → AI Fix reads every repository</Ui> (on by default) turns this off: then only the
           pull request's repository and its ticket's come. A dependency fix always gets the short list.

@@ -17,8 +17,9 @@
 // SCOPE (owner decision D3; narrowed 2026-11-10): the PR's repository, plus the workspace repositories of
 // the other pull requests of its ticket, mirrored at the reader's paths, memories as in Implement; the PR's
 // repository is checked out at the PR's HEAD SHA, fetched through the base repository's
-// `refs/pull/<n>/head` (a fork's head included); every other repository is on its default branch, and its
-// edits are shown ("left out") and never stored as a patch.
+// `refs/pull/<n>/head` (a fork's head included); a repository holding an open pull request of the same ticket
+// (a SIBLING, `siblingHeads`) is at that PR's head; every other repository is on its default branch. Edits
+// outside the PR's repository are shown ("left out") and never stored as a patch.
 //
 // THE REPORT is a validated JSON file (workspace/fix-report.ts): the host reads it after every build turn,
 // checks it with the same validator the in-sandbox checker runs, and normalises it against the extracted
@@ -170,6 +171,11 @@ export interface FixSessionDeps {
    * load order of a wide fix (docs/SANDBOX.md § AI Fix sessions → Scope). Never fatal: [].
    */
   relatedRepoIds(ctx: AgentContext, accountId: number, prId: number): Promise<number[]>;
+  /**
+   * The OPEN pull requests of this PR's tickets other than this one (its SIBLINGS), newest update first. Each one's
+   * repository is loaded at that PR's head, read only (`siblingHeads`). Never fatal: [].
+   */
+  siblingOpenPrs(ctx: AgentContext, accountId: number, prId: number): Promise<SiblingPr[]>;
   declaredRelatedRepoIds(accountId: number, workspaceId: number, repoId: number): Promise<number[]>;
   /** The workspace's member repositories now (External included), for Resume. Never fatal: []. */
   memberRepoIds(accountId: number, workspaceId: number): Promise<number[]>;
@@ -264,6 +270,31 @@ const defaultFixDeps: FixSessionDeps = {
       return [];
     }
   },
+  async siblingOpenPrs(ctx, accountId, prId) {
+    try {
+      const { getTicketSource } = await import('../../tracker/ticket-source.js');
+      const { defaultStoryBuildInputSeams } = await import('../../coding/story-build/inputs.js');
+      const { and, eq, inArray, ne } = await import('drizzle-orm');
+      const tickets = await getTicketSource().ticketsForPr(accountId, prId);
+      const ids = new Set<number>();
+      for (const t of tickets.slice(0, 3)) {
+        for (const id of await defaultStoryBuildInputSeams.ticketPrIds(ctx, accountId, t.ident).catch(() => [])) ids.add(id);
+      }
+      ids.delete(prId);
+      if (ids.size === 0) return [];
+      const pr = ctx.schema.pullRequests;
+      const rows = (await ctx.db
+        .select({ prId: pr.id, repoId: pr.repoId, number: pr.number, headRefName: pr.headRefName, updatedAt: pr.updatedAt })
+        .from(pr)
+        .where(and(eq(pr.accountId, accountId), inArray(pr.id, [...ids]), eq(pr.state, 'open'), ne(pr.id, prId)))
+        .execute()) as Array<{ prId: number; repoId: number; number: number; headRefName: string | null; updatedAt: Date }>;
+      return rows
+        .map((r) => ({ prId: r.prId, repoId: r.repoId, number: r.number, headRefName: r.headRefName, updatedAtMs: r.updatedAt.getTime() }))
+        .sort((a, b) => b.updatedAtMs - a.updatedAtMs || b.number - a.number);
+    } catch {
+      return [];
+    }
+  },
   async contextTicket(ctx, accountId, workspaceId, prId) {
     try {
       const { getTicketSource } = await import('../../tracker/ticket-source.js');
@@ -336,6 +367,51 @@ const NOT_LOADED_PREFIX = 'AI Fix loads at most ';
 /** A note `notLoadedNote` wrote (a Resume drops the earlier boot's before it writes its own). Pure. */
 export function isNotLoadedNote(note: string): boolean {
   return note.startsWith(NOT_LOADED_PREFIX);
+}
+
+// ---- sibling pull requests -------------------------------------------------------------------------------
+
+/** An open pull request of the same ticket as the fixed PR, in this workspace (`siblingOpenPrs`). */
+export interface SiblingPr {
+  prId: number;
+  repoId: number;
+  number: number;
+  headRefName: string | null;
+  updatedAtMs: number;
+}
+
+const SIBLING_NOTE_PREFIX = 'Pull requests of the same ticket: ';
+
+/**
+ * WHICH SIBLING PR EACH REPOSITORY SHOWS (docs/SANDBOX.md § AI Fix sessions → Scope). Pure. A loaded repository
+ * other than the PR's own that has an open sibling is checked out at that sibling's head (read only), so the
+ * agent reads the ticket's other unmerged changes, not the default branch. Several open siblings in one
+ * repository: the most recently updated one (`prs` comes newest first); the others are named. A sibling in the
+ * PR's OWN repository cannot be checked out (the PR's head is), so it is named. `repoNames` maps repoId →
+ * owner/name for the note.
+ */
+export function siblingHeads(a: {
+  prRepoId: number;
+  loadedRepoIds: readonly number[];
+  prs: readonly SiblingPr[];
+  repoNames: ReadonlyMap<number, string>;
+}): { heads: Map<number, SiblingPr>; note: string | null } {
+  const loaded = new Set(a.loadedRepoIds);
+  const heads = new Map<number, SiblingPr>();
+  const unshown: string[] = [];
+  for (const p of a.prs) {
+    const name = a.repoNames.get(p.repoId) ?? 'another repository';
+    if (p.repoId === a.prRepoId) unshown.push(`#${p.number} in ${name} (this PR's repository)`);
+    else if (!loaded.has(p.repoId)) continue;
+    else if (heads.has(p.repoId)) unshown.push(`#${p.number} in ${name} (#${heads.get(p.repoId)!.number} is loaded)`);
+    else heads.set(p.repoId, p);
+  }
+  return { heads, note: unshown.length > 0 ? `${SIBLING_NOTE_PREFIX}not checked out: ${unshown.join(', ')}.` : null };
+}
+
+/** A note `siblingHeads` wrote (a Resume drops the earlier boot's). Pure. */
+export function isSiblingNote(note: string): boolean {
+  return note.startsWith(SIBLING_NOTE_PREFIX);
 }
 
 // ---- one fix per PR -------------------------------------------------------------------------------------
@@ -624,11 +700,28 @@ function fixSubject(
       }
       const bases = new Map<number, RepoBaseRequest>();
       const labels = new Map<number, { label: string; note: string | null }>();
+      // SIBLING PRs (open PRs of the same ticket) are read at THEIR head, not the default branch. Dependency
+      // automation's narrow fix keeps the default branches.
+      const siblings = facts.narrow === true ? [] : await fixDeps.siblingOpenPrs(ctx, accountId, facts.prId).catch(() => []);
+      const sib = siblingHeads({
+        prRepoId: facts.prRepoId,
+        loadedRepoIds: repos.map((r) => r.repoId),
+        prs: siblings,
+        repoNames: new Map(repos.map((r) => [r.repoId, `${r.owner}/${r.name}`])),
+      });
+      const st = stateOf(l);
+      st.notes = st.notes.filter((n) => !isSiblingNote(n));
+      if (sib.note) st.notes.push(sib.note);
       for (const r of repos) {
         const pinRef = aiFixBaseRef(fixId, r.repoId);
         if (r.repoId === facts.prRepoId) {
           bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: facts.headRef, baseSha: facts.headSha, remoteRef: `refs/pull/${facts.number}/head`, pinRef });
           labels.set(r.repoId, { label: `PR #${facts.number}'s head, ${facts.headRef},`, note: 'This is the repository AI Fix pushes.' });
+        } else if (sib.heads.has(r.repoId)) {
+          // The sibling's CURRENT head (baseSha null: the ref's tip), through the base repository's pull ref.
+          const p = sib.heads.get(r.repoId)!;
+          bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: p.headRefName ?? 'HEAD', baseSha: null, remoteRef: `refs/pull/${p.number}/head`, pinRef });
+          labels.set(r.repoId, { label: `PR #${p.number}'s head${p.headRefName ? `, ${p.headRefName},` : ''}`, note: 'Read only: another pull request of the same ticket, not merged yet. Edits here are left out.' });
         } else {
           bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: 'HEAD', baseSha: null, pinRef });
           labels.set(r.repoId, { label: r.defaultBranch ?? 'the default branch', note: 'Read only: edits here are left out.' });

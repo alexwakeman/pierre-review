@@ -60,7 +60,8 @@ export default function Page(): JSX.Element {
       </p>
       <H3>AI Fix reads every repository</H3>
       <p>
-        On by default. An AI Fix gets every repository of the workspace, read only at its default branch, beside the
+        On by default. An AI Fix gets every repository of the workspace, read only at its default branch (or at the
+        latest commit of another open pull request of the same ticket), beside the
         pull request&rsquo;s own: at most 12, the pull request&rsquo;s own first, then its ticket&rsquo;s, your related
         repositories, and the rest by name. The session names the ones it did not load. Turn it off for only the pull
         request&rsquo;s repository and the repositories of its ticket&rsquo;s other pull requests. AI Fix pushes only to

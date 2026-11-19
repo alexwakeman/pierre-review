@@ -40,7 +40,8 @@ no internals.
   shows beside it (and in the pull request's description for Implement), and the review rounds stop when only such
   criteria are left.
 - AI Fix: the sandbox also holds the workspace's other repositories, read only at their default branch, so the agent
-  can check code that calls or serves the pull request. At most 12: the pull request's own, its ticket's, your
+  can check code that calls or serves the pull request. A repository with another open pull request of the same
+  ticket is at that pull request's latest commit instead. At most 12: the pull request's own, its ticket's, your
   related repositories, then the rest by name; the session names the ones it did not load. Settings → Sandbox → "AI Fix
   reads every repository" (on by default) switches this off for a workspace. AI Fix still pushes only to the pull
   request's branch. Dependency fixes keep the short list.

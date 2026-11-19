@@ -1089,6 +1089,54 @@ describe('the repositories and documents of a fix (Settings → Sandbox → "AI 
     }
   });
 
+  it('siblingHeads (pure): a loaded repository shows its newest open sibling PR; older ones and one in the PR\'s own repository are named', () => {
+    const names = new Map([[1, 'acme/api'], [2, 'acme/web'], [3, 'acme/ui']]);
+    const sib = (repoId: number, number: number, updatedAtMs: number) => ({ prId: number, repoId, number, headRefName: `feat/${number}`, updatedAtMs });
+    const r = F.siblingHeads({ prRepoId: 1, loadedRepoIds: [1, 2], prs: [sib(2, 12, 30), sib(1, 40, 20), sib(2, 11, 10), sib(3, 7, 5)], repoNames: names });
+    expect([...r.heads.entries()].map(([id, p]) => [id, p.number])).toEqual([[2, 12]]);
+    expect(r.note).toBe("Pull requests of the same ticket: not checked out: #40 in acme/api (this PR's repository), #11 in acme/web (#12 is loaded).");
+    expect(F.isSiblingNote(r.note!)).toBe(true);
+    expect(F.siblingHeads({ prRepoId: 1, loadedRepoIds: [1, 2], prs: [], repoNames: names })).toEqual({ heads: new Map(), note: null });
+  });
+
+  it('a sibling PR\'s repository is read at THAT PR\'s head (read only, left out); the default branch otherwise; a dependency fix keeps default branches', async () => {
+    const sibs = [
+      { prId: 9001, repoId: web, number: 12, headRefName: 'feature/export-ui', updatedAtMs: 2 },
+      { prId: 9002, repoId: web, number: 11, headRefName: 'feature/old', updatedAtMs: 1 },
+    ];
+    F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null, siblingOpenPrs: async () => sibs });
+    try {
+      extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('diff --git a/x b/x\n', ['x'], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: sib', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      const prepBefore = G.prepared.length;
+      const r = await post(`/api/pro/prs/${prC}/ai-fix`, { seed: 'plain', instruction: 'Fix it.' });
+      expect(r.statusCode).toBe(202);
+      const fixId = r.json().fixId as number;
+      const f = await until(prC, (x) => x.id === fixId && x.session?.phase === 'built', 'built (sibling)');
+      const reqs = G.prepared.slice(prepBefore);
+      expect(reqs.find((p) => p.name === 'web')).toMatchObject({ baseRef: 'feature/export-ui', baseSha: null, remoteRef: 'refs/pull/12/head' });
+      expect(reqs.find((p) => p.name === 'api')!.remoteRef).toMatch(/^refs\/pull\/\d+\/head$/);
+      expect(f.session!.notes.filter((n) => F.isSiblingNote(n))).toEqual(['Pull requests of the same ticket: not checked out: #11 in acme/web (#12 is loaded).']);
+      const box = `limn-${(await rowOf(fixId)).sandboxRef}-sandbox`;
+      expect(fake.files(box).get('/workspace/CLAUDE.md')!.toString()).toMatch(/acme\/web: `[^`]+` \(from PR #12's head, feature\/export-ui, at [0-9a-f]{7}; branch `[^`]+`\)\. Read only: another pull request of the same ticket, not merged yet\. Edits here are left out\./);
+      // Still only the PR repository's patch; the sibling's edits are left out.
+      expect(f.patch).toBe(PATCH);
+      expect((f.leftOut ?? []).map((x) => x.fullName)).toEqual(['acme/web']);
+      await post(`/api/pro/ai-fixes/${fixId}/discard`, {});
+      await until(prC, (x) => x.id === fixId && x.session?.phase === 'discarded', 'discarded (sibling)');
+
+      // Dependency automation's narrow fix: default branches, no sibling heads.
+      const before2 = G.prepared.length;
+      const d = await AF.startFix(ctx, { accountId: 1, prId: prC, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Bump.', trigger: 'auto', narrow: true });
+      const depId = (d as { fixId: number }).fixId;
+      await until(prC, (x) => x.id === depId && !AF.isFixRunning(prC), 'dependency fix closed (sibling)');
+      expect(G.prepared.slice(before2).find((p) => p.name === 'web')).toMatchObject({ baseRef: 'HEAD', baseSha: null });
+    } finally {
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
+  });
+
   it('the reference documents: built ⇒ the docs step copies them read only and FIX.md points at them; none ⇒ no step; a dependency fix never gets them', async () => {
     const SECTION = '<!-- limn:section -->\n# Export\n\nThe CSV uses commas.\n';
     const LIB = {
