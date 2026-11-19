@@ -130,10 +130,8 @@ export default function Page(): JSX.Element {
           Open <Ui>Settings</Ui>, then the <Ui>AI</Ui> tab.
         </li>
         <li>
-          Under <Ui>AI spend</Ui>, tick or untick the budget, and type Ensemble&rsquo;s share.
-        </li>
-        <li>
-          Select <Ui>Save</Ui>.
+          Under <Ui>AI spend</Ui>, tick or untick the budget, and type Ensemble&rsquo;s share. It saves as you
+          change it.
         </li>
       </Steps>
 

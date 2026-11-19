@@ -21,7 +21,7 @@ export default function Page(): JSX.Element {
         When <Ui>Use reference docs in AI Review</Ui> is on, AI Review reads this workspace&rsquo;s Docs while it checks
         a pull request and its story. It starts at the library&rsquo;s contents, reads only the sections that matter to
         the change, and says where the work or the story disagrees with them, citing each section. It is off by
-        default. Select <Ui>Save</Ui> after you change it.
+        default. It saves as soon as you change it.
       </p>
       <Illustration label="The Use reference docs in AI Review switch, on." caption="One switch per workspace.">
         <SettingsRow label="Use reference docs in AI Review" hint="Applies to this workspace only." control={<Toggle on />} />
@@ -46,7 +46,7 @@ export default function Page(): JSX.Element {
           the <Ui>API token</Ui>.
         </li>
         <li>
-          Select <Ui>Test connection</Ui>, then <Ui>Save</Ui>.
+          Leave the token box (or press Enter) to save, then select <Ui>Test connection</Ui>.
         </li>
       </Steps>
       <p>
@@ -59,7 +59,7 @@ export default function Page(): JSX.Element {
           At notion.so/my-integrations, create an internal integration with &ldquo;Read content&rdquo; only.
         </li>
         <li>
-          Paste its token into <Ui>Integration token</Ui>, select <Ui>Test connection</Ui>, then <Ui>Save</Ui>.
+          Paste its token into <Ui>Integration token</Ui> and press Enter to save it, then select <Ui>Test connection</Ui>.
         </li>
         <li>
           In Notion, share each page with the integration (the page&rsquo;s ••• menu → <Ui>Connections</Ui>). Its child
@@ -76,8 +76,7 @@ export default function Page(): JSX.Element {
       <H3>About the tokens</H3>
       <Note>
         Each token is stored sealed (encrypted) on your computer and is never shown again. Beside a saved token,{' '}
-        <Ui>Replace</Ui> lets you type a new one and <Ui>Remove</Ui> deletes it when you save. <Ui>Keep it</Ui> cancels
-        a removal.
+        <Ui>Replace</Ui> lets you type a new one, saved when you press Enter or leave the box. <Ui>Remove</Ui> deletes it.
       </Note>
     </>
   );

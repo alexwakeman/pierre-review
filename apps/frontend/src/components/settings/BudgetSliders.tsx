@@ -27,8 +27,10 @@ const THUMB_PX = 14;
  * behaviour lives in flowSettingsForm.ts, where it is tested; this is layout only.
  *
  * ⚠ A SLIDER RESTING ON ITS DEFAULT SENDS NOTHING. The tick under each track marks the default, and
- * `setBudgetFromSlider` writes '' when a thumb lands on it, so Save stays disabled and the workspace
+ * `setBudgetFromSlider` writes '' when a thumb lands on it, so nothing is written and the workspace
  * keeps following the product default (the overrides-only rule `buildFlowSettingsBody` enforces).
+ * The section saves as you go (./autosave.tsx): a slider change is written after a short pause, so
+ * a drag sends one write, not one per step.
  */
 export function BudgetSliders({
   form,

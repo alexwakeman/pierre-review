@@ -130,8 +130,8 @@ export default function Page(): JSX.Element {
         See <DocLink to="integrations/slack">Slack</DocLink>.
       </p>
       <Note>
-        Every token and webhook is stored sealed on your computer and is never shown again. Removing or replacing one
-        takes effect when you save.
+        Every token and webhook is stored sealed on your computer and is never shown again. A new one saves when you
+        press Enter or leave the box; <Ui>Remove</Ui> deletes it at once.
       </Note>
     </>
   );

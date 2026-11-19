@@ -88,9 +88,9 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           Under <Ui>Jira API access (optional)</Ui>, type your <Ui>Email</Ui> (Cloud only) and{' '}
-          <Ui>API token</Ui>, and press <Ui>Check connection</Ui>.
+          <Ui>API token</Ui> (it saves when you press Enter or leave the box), and press <Ui>Check connection</Ui>.
         </li>
-        <li>Save. Ensemble starts reading the tickets of open pull requests in the background.</li>
+        <li>Ensemble starts reading the tickets of open pull requests in the background. There is no Save button.</li>
       </Steps>
       <JiraSettings />
       <Note>
@@ -237,7 +237,7 @@ export default function Page(): JSX.Element {
       />
       <Tip>
         Pointing the Base URL at a different Jira site removes the saved token, so a token is never sent to a site it
-        was not made for. Save the token again after you move.
+        was not made for. Enter the token again after you move.
       </Tip>
       <p>
         Confluence pages on the same Atlassian site can use this Jira connection. See{' '}

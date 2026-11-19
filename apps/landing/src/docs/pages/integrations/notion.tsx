@@ -59,16 +59,16 @@ export default function Page(): JSX.Element {
           <Ui>Notion</Ui>.
         </li>
         <li>
-          Paste the <Ui>Database URL</Ui>: the link of the database that holds your tickets. Save.
+          Paste the <Ui>Database URL</Ui>: the link of the database that holds your tickets. It saves as you type.
         </li>
         <li>
-          Under <Ui>Notion as an issue tracker</Ui>, paste the <Ui>Integration token</Ui> and save.
+          Under <Ui>Notion as an issue tracker</Ui>, paste the <Ui>Integration token</Ui> and press Enter to save it.
         </li>
         <li>
           Press <Ui>Read database</Ui>. Ensemble reads the database&rsquo;s properties and suggests a mapping.
         </li>
         <li>
-          Check each property in the mapping, then save. Until you do, the section says &ldquo;Not mapped yet. Nothing
+          Check each property in the mapping. Each choice saves at once. Until the mapping is complete, the section says &ldquo;Not mapped yet. Nothing
           is read until it is.&rdquo;
         </li>
       </Steps>
@@ -123,7 +123,7 @@ export default function Page(): JSX.Element {
       <H2 id="notion-pages-in-docs">Notion pages in Docs</H2>
       <Steps>
         <li>
-          Open <Ui>Settings → Docs</Ui>. Under <Ui>Notion</Ui>, paste the <Ui>Integration token</Ui>, save, and press{' '}
+          Open <Ui>Settings → Docs</Ui>. Under <Ui>Notion</Ui>, paste the <Ui>Integration token</Ui>, press Enter to save it, and press{' '}
           <Ui>Test connection</Ui>.
         </li>
         <li>Share the pages you want with the integration in Notion.</li>

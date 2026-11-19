@@ -63,7 +63,7 @@ export default function Page(): JSX.Element {
             acme/payments · acme/web
           </p>
           <p>
-            <Btn>Bot</Btn> <Btn>Person</Btn> <Btn>Save price</Btn>
+            <Btn>Bot</Btn> <Btn>Person</Btn>
           </p>
         </Card>
       </Illustration>
@@ -84,12 +84,12 @@ export default function Page(): JSX.Element {
       </ul>
       <H3>Name</H3>
       <p>
-        You can pick the vendor and give the bot a label for this workspace. It does not change whether it counts as a
-        bot.
+        You can pick the vendor and give the bot a label for this workspace. Both save as you change them. It does not
+        change whether it counts as a bot.
       </p>
       <H3>Price for this Workspace</H3>
       <p>
-        Type a monthly price in US dollars, choose <Ui>flat</Ui> or <Ui>per seat</Ui>, and select <Ui>Save price</Ui>.
+        Type a monthly price in US dollars and choose <Ui>flat</Ui> or <Ui>per seat</Ui>. It saves when you stop typing.
         Type 0 for a free bot. A seat is a person who opened a pull request in this workspace&rsquo;s repositories in
         the last 30 days, so a per-seat monthly figure moves with the team. Clear the box to remove the price.
       </p>

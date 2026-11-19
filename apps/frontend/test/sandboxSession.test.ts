@@ -28,7 +28,7 @@ import {
   shortBytes,
   visiblePartialText,
 } from '../src/lib/sandboxSession.js';
-import { addComposePicks, sandboxBodyOf, sandboxDraftDirty, sandboxDraftOf, sandboxMemoryTicks } from '../src/components/settings/sandboxSettingsForm.js';
+import { addComposePicks, sandboxBodyOf, sandboxDraftDirty, sandboxDraftOf, sandboxDraftProblem, sandboxMemoryTicks } from '../src/components/settings/sandboxSettingsForm.js';
 
 const at = '2026-11-07T10:00:00.000Z';
 
@@ -234,6 +234,15 @@ describe('Settings → Sandbox form', () => {
     alwaysAllowedHosts: ['registry.example.com'],
     fixAllRepos: true,
   };
+
+  it('holds back a resource that is not a whole number in range (settings save as you go)', () => {
+    const d = sandboxDraftOf(saved);
+    expect(sandboxDraftProblem(d)).toBeNull();
+    expect(sandboxDraftProblem({ ...d, cpus: '' })).toBeNull();
+    expect(sandboxDraftProblem({ ...d, cpus: '2.5' })).toBe('CPUs must be a whole number from 1 to 64.');
+    expect(sandboxDraftProblem({ ...d, memoryGb: '1' })).toBe('Memory must be a whole number from 2 to 256.');
+    expect(sandboxDraftProblem({ ...d, diskGb: 'lots' })).toMatch(/^Disk /);
+  });
 
   it('sends the WHOLE setting (the PUT replaces it)', () => {
     const d = { ...sandboxDraftOf(saved), cpus: '6' };

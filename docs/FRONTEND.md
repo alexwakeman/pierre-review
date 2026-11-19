@@ -5151,6 +5151,25 @@ the source.
   targeted `bot-settings-panel` on Bots Monitoring → Classification, which is Settings → Bots since
   2026-11-03 (`BotSettingsPanel` deleted; the capture needs re-pointing).
 
+## Settings save as you go — there is NO Save button (`components/settings/autosave.tsx`)
+
+Every section writes a change as the reader makes it (2026-11-19). Toggles, selects and radios write
+at once (`useAutoSave(...).now()` beside the state change); a typed value writes after ~700ms and at
+once on blur / Enter (`flush()`); an invalid draft is never written and `SaveState` says why
+(`invalid`). A SECRET (tracker / Sonar / wiki tokens, the Slack webhook, a tracker base URL that
+would drop the token) writes ONLY on blur / Enter of a non-empty value, then clears. Destructive or
+costly actions (Remove a token, Copy from another workspace, downloads, sign out) keep their own
+button. A failed write shows beside the field and as ONE `SettingsSaveToast` in the toast cluster.
+
+- ⚠ **A section seeds its draft in an EFFECT, so its first render with data holds an UNSEEDED
+  draft that reads as a change** (a tracker provider `''` vs stored `jira` = `provider: null`).
+  `useAutoSave`'s unmount flush is deferred and skipped on a StrictMode remount — a synchronous one
+  switched the tracker off just by opening Settings. Never add a write path that fires from mount.
+- ⚠ **A section that re-seeds its WHOLE draft on a stored change must use `useEchoGuard`**: the
+  reply to write 1 otherwise overwrites edit 2 made while write 1 was in flight. Per-field seeding
+  (IssueLinks, AutoReview, Sonar) needs no guard.
+- `useAutoSave` never sends the same draft twice and never overlaps two writes of one section.
+
 ## Colour schemes (`lib/colorSchemes.ts`, Settings → Appearance)
 
 Nine schemes: the two defaults (Ensemble Light, Ensemble Dark) and seven named ones — LIGHT: Solarized

@@ -13,6 +13,14 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Settings save as you go: there is no Save button on any Settings tab. A switch, choice or tick saves at once;
+  a typed value saves when you stop typing or leave the box, and a value that is not allowed is not saved and
+  says why beside the box. A token, API key or Slack webhook saves when you press Enter or leave the box, and is
+  never shown again. Each section says "Saved" when its change is stored; a change that could not be saved says
+  so beside it and in the corner of the window.
+
 ## [1.0.67] - 2026-11-19
 
 ### Added

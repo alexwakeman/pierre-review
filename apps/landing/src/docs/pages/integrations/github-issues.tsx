@@ -41,14 +41,14 @@ export default function Page(): JSX.Element {
           Open <Ui>Settings → Integrations</Ui>. Under <Ui>Issue tracker</Ui>, set <Ui>Provider</Ui> to{' '}
           <Ui>GitHub Issues</Ui>.
         </li>
-        <li>Save. There are no other fields.</li>
+        <li>It saves at once. There are no other fields.</li>
       </Steps>
       <Illustration label="The Issue tracker section with GitHub Issues detected" caption="GitHub Issues needs nothing set up.">
         <SettingsRow label="Provider" control={<TextBox value="GitHub Issues (detected)" />} />
         <p className="muted">Uses the issues each PR closes or links. Nothing to set up.</p>
         <p className="muted">Picked automatically: acme/payments uses GitHub Issues.</p>
       </Illustration>
-      <Note>To stop Ensemble using GitHub Issues, set Provider to <Ui>None</Ui> and save. A saved choice always wins over the automatic one.</Note>
+      <Note>To stop Ensemble using GitHub Issues, set Provider to <Ui>None</Ui>. A choice you make always wins over the automatic one.</Note>
 
       <H2 id="how-pull-requests-link-to-issues">How pull requests link to issues</H2>
       <p>Linking is exact: a pull request&rsquo;s tickets are the issues GitHub says it closes.</p>

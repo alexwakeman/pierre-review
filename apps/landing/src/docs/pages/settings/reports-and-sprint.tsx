@@ -50,7 +50,7 @@ export default function Page(): JSX.Element {
       </Illustration>
       <p>
         The first-look default follows published review guidance that a first response should take at most one
-        working day. Select <Ui>Reset to defaults</Ui> to go back to these values, then <Ui>Save</Ui>.
+        working day. Select <Ui>Reset to defaults</Ui> to go back to these values.
       </p>
 
       <H2 id="sprint-cadence">Sprint cadence and comparison window</H2>
@@ -85,9 +85,9 @@ export default function Page(): JSX.Element {
         <DocLink to="reports/reporting-window">The reporting window</DocLink>.
       </p>
       <Warning title="Changing the sprint length moves the boundaries">
-        Saving a new length or start date moves this workspace&rsquo;s period boundaries. Reports already made are kept
-        unchanged and stay readable under <Ui>Earlier cadences</Ui> at the bottom of Reports. Ensemble warns you before you
-        save.
+        A new length or start date moves this workspace&rsquo;s period boundaries. Reports already made are kept
+        unchanged and stay readable under <Ui>Earlier cadences</Ui> at the bottom of Reports. The section says so beside the
+        sprint length.
       </Warning>
       <Note>
         This Sprint reads its sprint from your tracker or from GitHub milestones, not from this setting. See{' '}

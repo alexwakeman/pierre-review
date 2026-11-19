@@ -67,11 +67,12 @@ export default function Page(): JSX.Element {
           <Ui>Post when a pull request merges</Ui>.
         </li>
         <li>
-          Press <Ui>Save</Ui>, then <Ui>Send test</Ui> and check the channel.
+          Press <Ui>Send test</Ui> and check the channel. Every choice saves as you make it; the webhook URL saves when
+          you press Enter or leave the box.
         </li>
       </Steps>
       <Note>
-        The webhook URL is stored on your computer and never shown again. To change it, enter a new URL and save.
+        The webhook URL is stored on your computer and never shown again. To change it, enter a new URL and press Enter.
         Each workspace has its own channel, or none. Up to 12 workspaces can have a digest.
       </Note>
 
