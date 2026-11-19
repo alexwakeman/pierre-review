@@ -1955,6 +1955,12 @@ export const api = {
     fetch(`/api/pro/prs/${prId}/ai-fix`, jsonBody('POST', body)).then((r) =>
       handle<{ fixId: number; status: string }>(r),
     ),
+  // "START NOW": a press waiting behind the fix of another PR of the same ticket starts at once (202 queued, or
+  // waiting for a free sandbox only). 404 NotWaiting when nothing of that kind waits.
+  startAiFixNow: (prId: number) =>
+    fetch(`/api/pro/prs/${prId}/ai-fix/start-now`, jsonBody('POST')).then((r) =>
+      handle<{ fixId: number | null; status: string }>(r),
+    ),
   cancelAiFix: (prId: number) =>
     fetch(`/api/pro/prs/${prId}/ai-fix/cancel`, jsonBody('POST')).then((r) =>
       handle<{ status: string }>(r),

@@ -193,6 +193,13 @@ describe('fixPushFooter — THE PUSH FOOTER', () => {
   it('"Push when done" held: the session line above Push; any other row error is not the footer\'s', () => {
     expect(fixPushFooter({ ...base, pushHold: { line: 'Not pushed: this is not your pull request. Press Push to push to its branch.' } }, o)).toMatchObject({ kind: 'held' });
     expect(fixPushFooter({ ...base, error: 'The sandbox was closed after 30 minutes idle.' }, o)).toEqual({ kind: 'plain' });
+    // STALE (AiFix.stale): ONE line above Push; a push hold for it wins (it says the same, as a hold).
+    expect(fixPushFooter({ ...base, stale: { line: '#12 changed after this fix was built.' } }, o)).toEqual({ kind: 'held', line: '#12 changed after this fix was built.' });
+    expect(fixPushFooter({ ...base, stale: { line: '#12 changed after this fix was built.' }, pushHold: { line: 'Not pushed: #12 changed after this fix was built. Check it, then press Push.' } }, o)).toEqual({
+      kind: 'held',
+      line: 'Not pushed: #12 changed after this fix was built. Check it, then press Push.',
+    });
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', stale: { line: 'x' } }, o).kind).toBe('pushed');
   });
 
   it('an older server (no push fields) reads as plain Push', () => {

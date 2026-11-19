@@ -45,6 +45,13 @@ no internals.
   related repositories, then the rest by name; the session names the ones it did not load. Settings → Sandbox → "AI Fix
   reads every repository" (on by default) switches this off for a workspace. AI Fix still pushes only to the pull
   request's branch. Dependency fixes keep the short list.
+- AI Fix: fixes of pull requests of the same ticket in different repositories take turns. While a fix of #12 runs, a
+  fix that reads #12 waits ("Waiting for the fix of #12 (same ticket).") and starts by itself when that fix is built,
+  stopped or failed. It then reads #12 with its fix applied, even if that fix is not pushed yet. Start now starts a
+  waiting fix at once. Plan first's Start fix waits the same way.
+- AI Fix: when another pull request of the ticket changes after a fix is built, the fix says "#12 changed after this
+  fix was built." Push automatically and Push when done do not push it, and do not push a fix that builds on another
+  pull request's fix that is not pushed yet. Push still pushes it. Nothing runs again by itself.
 - AI Fix: the workspace's reference documents come into the sandbox, read only, as they do for Implement story:
   the ticket's own choice, else the whole library when it is small, else the sections that best match the pull
   request's words and changed files.

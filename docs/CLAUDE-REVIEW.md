@@ -5071,6 +5071,51 @@ session closed), plus the auto fix queue's minute sweep as a backstop.
 - **In memory**: a restart drops the line (an auto fix is asked again by the sweep; a reader presses again).
   Pinned by `start-queue.test.ts` and `fix-session-flow-db.test.ts` (five PRs at once: three build together,
   two wait, all five finish with no further press).
+- **ONE TICKET AT A TIME** (`coding/ai-fix/ticket-line.ts`, OWNER DECISION 2026-11-19). A fix READS the open
+  PRs of its ticket (the ≤ 3-ticket lookup: `ticketsForPr` → `ticketPrIds`) that sit in ANOTHER repository it
+  loads, at their head (`fix.ts` `lineReadsFor`: the session's own repository set rules and `siblingHeads`; a
+  same-repository sibling, or one in a repository it does not load, is not read and never blocks). While a fix of
+  one of THOSE PRs RUNS — from its start's check through its boot, its agent turns and its own review loop — the
+  start WAITS in this line (whatever `queueIfBusy` says), so no fix works from a sibling's outdated head. The check
+  and the hold are ONE tick after the async lookups (`tryHoldTicketLine`): two starts of one ticket at once never
+  block each other — the first holds, the second waits. A hold is a TOKEN: a start's bail releases its own token;
+  the session releases by fix id only once `startFixSession` bound it, so an older session never releases a newer
+  start's hold. The pump SKIPS a ticket-blocked entry (those behind it may start; each entry is tried once per pass)
+  and tries it again when the holder stops running: `releaseTicketLine` (bound to the pump) runs from the fix's
+  `onPhase` the moment its status stops reading `running` — built with the loop ended (the loop's end releases it in
+  a `finally`, `withTicketLineReleased`), or a Plan first's PLAN TURN starting — and from its close (failed, stopped,
+  discarded, pushed), and from every bail path of the start. **No jumping**: a DIRECT start (a press, the auto
+  sweep) of a PR whose ticket already has an entry waiting goes in line behind it (`sameTicketWaiting`); a start the
+  queue itself runs (`queuedPlaceOf`) is exempt and, when it has to wait again (blocked again, or Start now with no
+  slot), KEEPS ITS PLACE (its `queuedAt`). Order among waiting fixes is the same (presses first, then auto, oldest
+  first). **Plan first's Start fix TAKES THE LINE** (`approvePlan` → `approveWithLine`): blocked ⇒ the build waits
+  like a press (`202 {fixId, status:'waiting', position, blockedBy}`, the waiting line, Start now). A reader's
+  follow-up turn in a built manual session does NOT take it (a sibling's fix built meanwhile reads stale, below).
+  Dependency automation's narrow fixes neither wait nor hold. The answer is `202 {…, status: 'waiting', position,
+  blockedBy: {prNumber}}`; `waiting` carries `blockedBy`; the AI Fix tab says "Waiting for the fix of #12 (same
+  ticket)." The next fix READS the holder's built, unpushed fix laid on its head (docs/SANDBOX.md § AI Fix sessions →
+  Scope, "The overlay").
+- **START NOW** (`POST /api/pro/prs/:id/ai-fix/start-now`, rate tier `ai` + `ai_hourly`): a reader's PRESS (or a
+  Plan first's waiting Start fix) waiting behind the same ticket's fix starts at once against what the siblings have
+  now (`startQueuedNow` → the entry's `runNow`, `StartFixInput.skipTicketLine`: it still HOLDS the line, it only
+  skips the check). No slot free ⇒ it waits for the slot only (`skipLine`), in its old place. An auto fix always
+  waits: `409 AutoFixWaits` ("This automatic fix starts by itself when the fix of #12 ends."); nothing waiting ⇒
+  `404 NotWaiting`. Its refusals use the start route's words (the seed's `NothingToFix` line).
+- **STALE, NEVER RE-RUN** (`coding/ai-fix/sibling-stale.ts`; `ai_fixes.sibling_state_json`, migration 0210).
+  What the fix read of each sibling (its head SHA, the overlaid fix and its patch hash, the sibling's built fix ids)
+  is stored WITH EACH STORED PATCH — never by a boot or Resume alone, so a Resume never clears staleness; a sibling
+  that failed to mirror keeps its earlier entry. ON READ (`fixSiblingFacts`, the columns it needs only), a finished
+  UNPUSHED fix is STALE when a sibling's synced head moved (not counting the push of the very fix it overlaid), the
+  overlaid fix was discarded or changed, or a NEWER built fix of that sibling exists — except one built ON TOP OF
+  this fix (its own sibling state overlays this fix: it follows it). ONE line in the AI Fix tab (`AiFix.stale`: "#12
+  changed after this fix was built.", the push footer's held line); "Push automatically" (`autoPushSkip` →
+  `'stale'`, gate part 3½) and "Push when done" (`pushWhenDoneHold` → `'stale'`) do NOT push it — it waits for the
+  reader with `pushHold` ("Not pushed: #12 changed after this fix was built. Check it, then press Push."). The
+  reader's Push still pushes. Nothing is re-run automatically.
+- **BUILT ON AN UNPUSHED FIX**: while a sibling fix this one overlaid is built and NOT pushed, the same two automatic
+  pushes HOLD it too (`'overlay_unpushed'`; "Not pushed: it builds on #12's AI Fix, which is not pushed yet."): its
+  code would land before the code it builds on. Pushed (the head is that push) ⇒ fine; discarded ⇒ stale. A press
+  pushes.
 
 ### The auto fix queue (`coding/ai-fix/auto-fix-queue.ts`, 2026-11-12)
 
@@ -5119,7 +5164,9 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
    branch. With no CI causes ⇒ idle "No auto review today: the limit of N is reached." (the cap printed);
    with CI causes ⇒ the CI-only fix at once. Never "Waiting for the AI review" for a review that cannot come;
 5. `maybeStartAutoFix` (every gate above). TRANSIENT refusals (`sandbox_busy`, `over_budget`, `no_sandbox`,
-   `fix_in_progress`) are WAITS the sweep retries; the rest (`fix_waiting`, `cap`, `already_tried`,
+   `fix_in_progress`) are WAITS the sweep retries — a start that went into THE FIX START QUEUE reads its place
+   there (`bindAutoFixStartPlace`): behind the same ticket's running fix it is `ticket_fix_running` ("Waiting for
+   the fix of #12 (same ticket).", step 1¼ too); the rest (`fix_waiting`, `cap`, `already_tried`,
    `nothing_to_fix`) end until the PR's facts change — except the faults (`no_ai_login`,
    `review_unavailable`, `pr_unavailable`, `error`) and `review_capped`, which the sweep decides again every
    minute even on unchanged facts (shared `AUTO_FIX_QUEUE_REDECIDE`: a sign-in, a passing outage, a new

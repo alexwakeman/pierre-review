@@ -211,6 +211,18 @@ export function useCancelFix(prId: number) {
   });
 }
 
+/** "Start now" (a press waiting behind the same ticket's running fix): it starts at once. Shares the start's key. */
+export function useStartFixNow(prId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: aiFixStartMutationKey(prId),
+    mutationFn: () => api.startAiFixNow(prId),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ['ai-fix', prId] }),
+    // A refused start (409 NoRuntime, 429) is shown under the line (FixWaitingLine); the runtime may have gone.
+    onError: () => void qc.invalidateQueries({ queryKey: SANDBOX_RUNTIME_KEY }),
+  });
+}
+
 export function usePushFix(prId: number) {
   const qc = useQueryClient();
   return useMutation({

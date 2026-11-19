@@ -1124,6 +1124,14 @@ pending/valid/invalid/missing + `reason`, the checked merge and result shas, the
 NULL = no merge) and `merge_bundle` (the agent's commits as a base64 git bundle ≤ 4 MB, kept only while the
 merge is VALID and unpushed; cleared on push, discard and a failed close). With a merge, `patch` is the fix
 ON TOP of the merge. The plan columns (`plan`, `plan_transcript`, `plan_status`, …) and `checks` are history only.
+**Since `0210`, `sibling_state_json`** (JSON `FixSiblingState[]`, `coding/ai-fix/sibling-stale.ts`): one entry
+per open PR of the same ticket the fix read at its head — `{prId, number, repoId, headSha, overlayFixId,
+overlayPatchHash, builtFixIds, at}` (`overlayFixId` = the sibling's built, unpushed AI Fix laid on that head, soft,
+no FK; NULL = the head alone; `builtFixIds` = the sibling's built, unpushed fixes at that read). Written WITH EACH
+STORED PATCH (`storeFixTurn`), never by a boot or a Resume alone; a sibling that failed to mirror keeps its earlier
+entry; NULL = no sibling read (older rows, dependency fixes). STALENESS and "builds on an unpushed fix" are DERIVED
+on read (`fixSiblingFacts`, against `pull_requests.head_sha` and the siblings' `ai_fixes` rows), never stored ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The fix start queue). `ai_fixes` is not in the data
+export (unchanged); erasure deletes the rows as before.
 
 The plan, docs and Accept columns (`plan_json`, `transcript_json`, `design_json`, `docs_*`, `accepted_*`,
 the repository rows' `checks_*` and `worktree_path`) are DORMANT since the plan/build flow was removed

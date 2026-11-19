@@ -597,12 +597,13 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // Spelled out so the family cannot drift with the /api/pro/ catch-all below, which would park the
   // teardown and the stream on `ai`, FOLLOWING THE TOKEN:
   //   POST /api/pro/prs/:id/ai-fix/plan                       boots a sandbox + a plan turn   → ai + ai_hourly
+  //   POST /api/pro/prs/:id/ai-fix/start-now                  a waiting press starts now      → ai + ai_hourly
   //   POST /api/pro/ai-fixes/:fixId/(message|plan/message)    one agent turn                  → ai + ai_hourly
   //   POST /api/pro/ai-fixes/:fixId/plan/approve · …/resume   a build turn / a sandbox boot   → ai + ai_hourly
   //   POST …/discard · …/plan/discard · …/network/allow       a teardown / one allow-list row → read
   //   GET  …/session/stream                                   attaches to a running session   → read
   // (The start, POST /api/pro/prs/:id/ai-fix, is a generating POST of the catch-all: ai + ai_hourly.)
-  if (mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/plan$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
+  if (mutating && /^\/api\/pro\/prs\/\d+\/ai-fix\/(plan|start-now)$/.test(path)) return [TIERS.ai, TIERS.aiHourly];
   if (mutating && /^\/api\/pro\/ai-fixes\/\d+\/(message|plan\/message|plan\/approve|resume)$/.test(path))
     return [TIERS.ai, TIERS.aiHourly];
   if (/^\/api\/pro\/ai-fixes\/\d+\/(discard|plan\/discard|network\/allow|session\/stream)$/.test(path)) return [TIERS.read];

@@ -1,4 +1,4 @@
-import { fixWaitingLine } from '../lib/aiFixProgress.js';
+import { fixCanStartNow, fixWaitingLine } from '../lib/aiFixProgress.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMutating } from '@tanstack/react-query';
 import {
@@ -31,6 +31,7 @@ import {
   useAiFix,
   useAiFixPreview,
   useCancelFix,
+  useStartFixNow,
   useDiscardFix,
   useFixAllow,
   useFixMessage,
@@ -328,7 +329,7 @@ function FixerSection({
           </p>
         ) : (
           <>
-            {waiting != null && <FixWaitingLine prId={pr.id} line={fixWaitingLine(waiting)} />}
+            {waiting != null && <FixWaitingLine prId={pr.id} line={fixWaitingLine(waiting)} startNow={fixCanStartNow(waiting)} />}
 
             {!holdsPr && !fixSource && !reviewLoading && !preview.isLoading && (
               <div className="flex flex-wrap items-center gap-2">
@@ -1100,11 +1101,31 @@ function PushControls({
 }
 
 /** THE FIX START QUEUE: the PR's fix waits for a free sandbox; Cancel takes it out of line (nothing ran). */
-function FixWaitingLine({ prId, line }: { prId: number; line: string | null }): JSX.Element {
+function FixWaitingLine({ prId, line, startNow }: { prId: number; line: string | null; startNow: boolean }): JSX.Element {
   const cancel = useCancelFix(prId);
+  const now = useStartFixNow(prId);
   return (
     <div data-testid="ai-fix-waiting" className="mb-3 flex flex-wrap items-center gap-2 rounded-ui bg-ui-raise px-3 py-2 text-meta text-ui-ink">
       <span>{line}</span>
+      {startNow && (
+        <>
+          <InfoButton title="Waiting for the same ticket">
+            <p>
+              A pull request of this ticket that this fix reads is being fixed. This fix starts when that one ends: built,
+              stopped or failed. When it is built and not pushed, this fix reads it with that fix applied.
+            </p>
+            <p className="mt-2">Start now starts it at once, with that pull request as it is now.</p>
+          </InfoButton>
+          <button type="button" data-testid="ai-fix-start-now" className={BTN_PRIMARY} disabled={now.isPending || cancel.isPending} onClick={() => now.mutate()}>
+            Start now
+          </button>
+        </>
+      )}
+      {now.isError && (
+        <span data-testid="ai-fix-start-now-error" className="w-full text-meta text-ui-danger">
+          {errText(now.error)}
+        </span>
+      )}
       <button type="button" className={BTN_SECONDARY} disabled={cancel.isPending} onClick={() => cancel.mutate()}>
         Cancel
       </button>

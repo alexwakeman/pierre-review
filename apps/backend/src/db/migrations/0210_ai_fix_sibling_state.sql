@@ -1,0 +1,12 @@
+-- AI FIX: THE SIBLING STATE A FIX WAS BUILT AGAINST (2026-11-19; docs/CLAUDE-REVIEW.md § AI Fix → The fix start
+-- queue, docs/SANDBOX.md § AI Fix sessions → Scope). CORE, additive.
+--
+--   ai_fixes.sibling_state_json   JSON array, one entry per open pull request of the same ticket whose repository
+--                                 the fix read at that PR's head: {prId, number, repoId, headSha, overlayFixId,
+--                                 overlayPatchHash, builtFixIds, at}. overlayFixId = the sibling's built, unpushed AI
+--                                 Fix that was applied on top of its head (NULL = none); builtFixIds = the sibling's
+--                                 built, unpushed fixes at that read. Written WITH EACH STORED PATCH (the build turn's),
+--                                 never by a boot or a Resume alone; a sibling that failed to mirror keeps its entry.
+--                                 NULL = no sibling was read (every older row, every dependency fix).
+-- Staleness is computed ON READ from it (coding/ai-fix/sibling-stale.ts); nothing is re-run.
+ALTER TABLE `ai_fixes` ADD COLUMN `sibling_state_json` text;

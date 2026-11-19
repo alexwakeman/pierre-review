@@ -9806,6 +9806,12 @@ export interface AiFix {
   pushWhenDone?: boolean;
   pushing?: boolean;
   pushHold?: { line: string } | null;
+  // THE SIBLING STATE (docs/CLAUDE-REVIEW.md § AI Fix → The fix start queue): an UNPUSHED, finished fix built
+  // while another PR of the same ticket was at an older state — that PR's head moved, the fix of it this one
+  // read was discarded or changed, or a newer fix of it was built. ONE line ("#12 changed after this fix was
+  // built."), computed on read; automatic pushes hold it (`pushHold`), a press still pushes. Never a re-run.
+  // null/absent ⇒ not stale (or pushed, or an older server).
+  stale?: { line: string } | null;
   // AI FIX'S OWN REVIEW LOOP (shared ai-fix-loop.ts; docs/CLAUDE-REVIEW.md § AI Fix → The review loop): the
   // rounds, what each found and what the fix turn did, why it stopped. null/absent ⇒ it never ran (an older
   // row, a fix with nothing to push). While it runs, `status` reads 'running' and nothing is pushed.
@@ -9875,19 +9881,29 @@ export interface AiFixResponse {
   waiting?: AiFixWaiting | null;
 }
 
-/** `POST …/ai-fix` (and `…/plan`) when every sandbox is busy: the start waits in line (202). */
+/**
+ * `POST …/ai-fix` (and `…/plan`, `…/start-now`) when the start waits in line (202): every sandbox is busy, or a
+ * fix of the same ticket runs (`blockedBy`).
+ */
 export interface AiFixWaitingResponse {
   fixId: null;
   status: 'waiting';
   position: number;
+  /** A fix of another PR of the same ticket runs; this one starts when it ends. Absent/null ⇒ a sandbox wait. */
+  blockedBy?: { prNumber: number } | null;
 }
 
-/** THE FIX START QUEUE (coding/ai-fix/start-queue.ts): this PR's fix waits for a free sandbox. */
+/**
+ * THE FIX START QUEUE (coding/ai-fix/start-queue.ts): this PR's fix waits for a free sandbox, or (`blockedBy`)
+ * for the fix of another PR of the same ticket to stop running (coding/ai-fix/ticket-line.ts).
+ */
 export interface AiFixWaiting {
   /** 1 = next. */
   position: number;
   queuedAt: string;
   trigger: AiFixTrigger;
+  /** The running fix of the same ticket it waits for. Absent/null ⇒ it waits for a sandbox only. */
+  blockedBy?: { prNumber: number } | null;
 }
 
 export interface AiFixStatusResponse {

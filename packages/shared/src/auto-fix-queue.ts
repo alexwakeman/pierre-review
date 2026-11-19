@@ -25,6 +25,8 @@ export type AutoFixQueueReason =
   | 'fix_running'
   | 'push_settling'
   | 'sandbox_busy'
+  // a fix of another PR of the same ticket runs (the fix start queue's per-ticket line)
+  | 'ticket_fix_running'
   | 'over_budget'
   | 'no_sandbox'
   // ended, until the PR changes
@@ -70,6 +72,7 @@ export const AUTO_FIX_QUEUE_LINE: Record<AutoFixQueueReason, string> = {
   fix_running: 'A fix is running. The next one starts when it ends, from what is still open then.',
   push_settling: 'Waiting for the pushed fix to reach the pull request.',
   sandbox_busy: 'Waiting for a free sandbox.',
+  ticket_fix_running: 'Waiting for the fix of another pull request of the same ticket.',
   over_budget: 'Paused: the AI spend limit is reached.',
   no_sandbox: 'Paused: no container runtime is running on this computer.',
   fix_waiting: 'A finished fix is waiting for you to push it.',
@@ -192,3 +195,8 @@ export const AI_FIX_LOOP_STOP_LINE: Record<AiFixLoopStop, string> = {
   interrupted: 'Stopped: Ensemble restarted during the review. The fix so far is kept.',
   not_pushable: 'Stopped: the latest changes cannot be pushed.',
 };
+
+/** THE PER-TICKET LINE's words (a fix waits for the fix of another PR of the same ticket). Pure. */
+export function ticketFixWaitLine(prNumber: number): string {
+  return `Waiting for the fix of #${prNumber} (same ticket).`;
+}

@@ -2448,7 +2448,9 @@ sessions.
   "Pushed automatically" when it was not a press; no Push) → **pushing** (`AiFix.pushing`: "Pushing to
   <branch>…", no button) → **failed** (an automatic push's `error`, "Automatic push failed: …", in an amber line
   above Push; Push still works and clears it) → **held** (`AiFix.pushHold.line`, "Push when done" waiting, above
-  Push) → plain Push. A fifth member, **reviewing** (AI Fix's own review loop works, `aiFixLoopRunning(fix.loop)`,
+  Push; else `AiFix.stale.line`, "#12 changed after this fix was built." — ONE line, the hold wins) → plain Push.
+  The waiting line (`fixWaitingLine`, lib/aiFixProgress.ts) reads `waiting.blockedBy` ("Waiting for the fix of #12
+  (same ticket).") and, on a press only (`fixCanStartNow`), offers **Start now** (`useStartFixNow`) with an ⓘ. A fifth member, **reviewing** (AI Fix's own review loop works, `aiFixLoopRunning(fix.loop)`,
   ranked after pushed), renders NOTHING: no Push while the loop runs, and the round is already said once. ⚠
   `useAiFix` polls at `SESSION_POLL_MS` while `pushing` (the push runs after the session closed, so no session
   stream reports it) AND while the loop runs (its rounds change the row, not the session stream), and runs

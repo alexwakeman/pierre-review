@@ -156,6 +156,31 @@ describe('the auto fix queue', () => {
     expect(starts).toEqual([]);
   });
 
+  it('a start waiting behind the fix of another PR of the same ticket says so (the fix start queue\'s per-ticket line)', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    await aiReview(id);
+    try {
+      Q.bindAutoFixStartPlace((_a, p) => (p === id ? { position: 1, blockedBy: 12 } : null));
+      expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'ticket_fix_running', line: 'Waiting for the fix of #12 (same ticket).' });
+      // Its start goes into the line now (the start answers 'sandbox_busy': it waits).
+      Q.bindAutoFixStartPlace(() => null);
+      answer = { status: 'skipped', reason: 'sandbox_busy' };
+      Q._resetAutoFixQueueForTest();
+      let placed = false;
+      const realStart = deps.start;
+      deps.start = async (c, i) => {
+        placed = true;
+        return realStart(c, i);
+      };
+      Q.bindAutoFixStartPlace((_a, p) => (placed && p === id ? { position: 1, blockedBy: 12 } : null));
+      expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'ticket_fix_running' });
+      deps.start = realStart;
+    } finally {
+      Q.bindAutoFixStartPlace(() => null);
+    }
+    expect(AUTO_FIX_QUEUE_LINE.ticket_fix_running).toBe('Waiting for the fix of another pull request of the same ticket.');
+  });
+
   it('a fix pushed from this head waits for the push to reach the PR (never fixes the same head twice)', async () => {
     const id = await pr({ ciStatus: 'success' });
     await aiReview(id);

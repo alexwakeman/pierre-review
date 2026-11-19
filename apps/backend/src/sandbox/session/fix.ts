@@ -18,8 +18,12 @@
 // the other pull requests of its ticket, mirrored at the reader's paths, memories as in Implement; the PR's
 // repository is checked out at the PR's HEAD SHA, fetched through the base repository's
 // `refs/pull/<n>/head` (a fork's head included); a repository holding an open pull request of the same ticket
-// (a SIBLING, `siblingHeads`) is at that PR's head; every other repository is on its default branch. Edits
-// outside the PR's repository are shown ("left out") and never stored as a patch.
+// (a SIBLING, `siblingHeads`) is at that PR's head — with that sibling's built, unpushed AI Fix laid on top as
+// ONE local commit (THE OVERLAY, `siblingOverlayPlan`; its base when the head has not moved since); every other
+// repository is on its default branch. Edits outside the PR's repository are shown ("left out") and never stored
+// as a patch. What each sibling was read at is stored for the STALE flag (coding/ai-fix/sibling-stale.ts).
+// ONE TICKET AT A TIME (coding/ai-fix/ticket-line.ts): the session releases the per-ticket line the moment it
+// stops running (`onPhase`), and on its close.
 //
 // THE REPORT is a validated JSON file (workspace/fix-report.ts): the host reads it after every build turn,
 // checks it with the same validator the in-sandbox checker runs, and normalises it against the extracted
@@ -118,6 +122,8 @@ import {
   type SessionActionResult,
 } from './manager.js';
 import { extractRepoPatch, PatchTooLargeError, restoreRepoPatch } from './patches.js';
+import { bindTicketLineFix, releaseTicketLine } from '../../coding/ai-fix/ticket-line.js';
+import { patchHash, readSiblingState, type FixSiblingState } from '../../coding/ai-fix/sibling-stale.js';
 import { emptySessionState, readSessionState, toStoryBuildSession, type SessionStateJson } from './state.js';
 import type { SessionKey, SessionSubject, SubjectLive } from './subject.js';
 
@@ -176,6 +182,24 @@ export interface FixSessionDeps {
    * repository is loaded at that PR's head, read only (`siblingHeads`). Never fatal: [].
    */
   siblingOpenPrs(ctx: AgentContext, accountId: number, prId: number): Promise<SiblingPr[]>;
+  /**
+   * THE PER-TICKET LINE's lookup (coding/ai-fix/ticket-line.ts): every OTHER pull request of this PR's tickets
+   * (≤ 3 tickets, open or not), the same lookup as `siblingOpenPrs`. Never fatal: [].
+   */
+  ticketSiblingPrIds(ctx: AgentContext, accountId: number, prId: number): Promise<number[]>;
+  /**
+   * THE SIBLING OVERLAY's candidate (docs/SANDBOX.md § AI Fix sessions → Scope): the sibling PR's latest fix that
+   * is built, not pushed, not discarded and has a patch (null when there is none), and the ids of every such fix
+   * (what the STALE flag compares against later). Never fatal: none.
+   */
+  siblingBuiltFix(ctx: AgentContext, accountId: number, prId: number): Promise<{ latest: SiblingBuiltFix | null; builtIds: number[] }>;
+  /** The sibling PR's head on GitHub NOW (the overlay applies only on the head its fix was built on). */
+  siblingLiveHead(ctx: AgentContext, accountId: number, pr: { owner: string; name: string; number: number }): Promise<string | null>;
+  /**
+   * The overlay commit: the sibling fix's patch on the sibling's head, ONE local commit in Ensemble's clone cache
+   * (never the reader's clone, never pushed), pinned under `refs/pierre/local/ai-fix-overlay/<siblingFixId>/…`.
+   */
+  overlayCommit(a: { accountId: number; owner: string; name: string; number: number; headRef: string; headSha: string; patch: string; siblingFixId: number; forFixId: number }): Promise<{ localRef: string; sha: string }>;
   declaredRelatedRepoIds(accountId: number, workspaceId: number, repoId: number): Promise<number[]>;
   /** The workspace's member repositories now (External included), for Resume. Never fatal: []. */
   memberRepoIds(accountId: number, workspaceId: number): Promise<number[]>;
@@ -270,17 +294,49 @@ const defaultFixDeps: FixSessionDeps = {
       return [];
     }
   },
+  async ticketSiblingPrIds(ctx, accountId, prId) {
+    return ticketPrIdsOf(ctx, accountId, prId);
+  },
+  async siblingBuiltFix(ctx, accountId, prId) {
+    const { and, desc, eq, isNull, isNotNull } = await import('drizzle-orm');
+    const t = ctx.schema.aiFixes;
+    const rows = (await ctx.db
+      .select({ id: t.id, baseSha: t.baseSha, patch: t.patch, mergeJson: t.mergeJson })
+      .from(t)
+      .where(and(eq(t.accountId, accountId), eq(t.prId, prId), eq(t.status, 'succeeded'), eq(t.sessionPhase, 'built'), isNull(t.pushedAt), isNotNull(t.patch)))
+      .orderBy(desc(t.id))
+      .limit(50)
+      .execute()) as Array<{ id: number; baseSha: string; patch: string | null; mergeJson: unknown }>;
+    const r = rows[0];
+    const latest = r && r.patch ? { fixId: r.id, baseSha: r.baseSha, patch: r.patch, merge: r.mergeJson != null } : null;
+    return { latest, builtIds: rows.map((x) => x.id) };
+  },
+  async siblingLiveHead(ctx, accountId, pr) {
+    return (await ctx.github.fetchPrHeadInfo(accountId, pr.owner, pr.name, pr.number)).headSha || null;
+  },
+  async overlayCommit(a) {
+    const cm = await import('../../review/clone-manager.js');
+    const { getAccessToken } = await import('../../auth/account.js');
+    const token = await getAccessToken(a.accountId);
+    // The sibling's head into Ensemble's clone cache (through the base repository's pull ref), then the patch.
+    await cm.resolveBranchCommit(a.owner, a.name, { remoteRef: `refs/pull/${a.number}/head`, destRef: 'refs/pierre/sandbox-base', sha: a.headSha }, token);
+    const { commitPatchToLocalRef } = await import('../../coding/git-ops.js');
+    const got = await commitPatchToLocalRef({
+      accountId: a.accountId,
+      owner: a.owner,
+      name: a.name,
+      baseRef: a.headRef,
+      baseSha: a.headSha,
+      patch: a.patch,
+      message: `AI fix of #${a.number}, not pushed`,
+      key: { kind: SIBLING_OVERLAY_REF_KIND, id: a.siblingFixId, name: `for-${a.forFixId}` },
+    });
+    return { localRef: got.ref, sha: got.commitSha };
+  },
   async siblingOpenPrs(ctx, accountId, prId) {
     try {
-      const { getTicketSource } = await import('../../tracker/ticket-source.js');
-      const { defaultStoryBuildInputSeams } = await import('../../coding/story-build/inputs.js');
       const { and, eq, inArray, ne } = await import('drizzle-orm');
-      const tickets = await getTicketSource().ticketsForPr(accountId, prId);
-      const ids = new Set<number>();
-      for (const t of tickets.slice(0, 3)) {
-        for (const id of await defaultStoryBuildInputSeams.ticketPrIds(ctx, accountId, t.ident).catch(() => [])) ids.add(id);
-      }
-      ids.delete(prId);
+      const ids = new Set(await ticketPrIdsOf(ctx, accountId, prId));
       if (ids.size === 0) return [];
       const pr = ctx.schema.pullRequests;
       const rows = (await ctx.db
@@ -308,7 +364,68 @@ const defaultFixDeps: FixSessionDeps = {
   },
 };
 
+/** Every OTHER pull request of this PR's tickets (≤ 3 tickets; open or not). Never throws: []. */
+async function ticketPrIdsOf(ctx: AgentContext, accountId: number, prId: number): Promise<number[]> {
+  try {
+    const { getTicketSource } = await import('../../tracker/ticket-source.js');
+    const { defaultStoryBuildInputSeams } = await import('../../coding/story-build/inputs.js');
+    const tickets = await getTicketSource().ticketsForPr(accountId, prId);
+    const ids = new Set<number>();
+    for (const t of tickets.slice(0, 3)) {
+      for (const id of await defaultStoryBuildInputSeams.ticketPrIds(ctx, accountId, t.ident).catch(() => [])) ids.add(id);
+    }
+    ids.delete(prId);
+    return [...ids];
+  } catch {
+    return [];
+  }
+}
+
 let fixDeps: FixSessionDeps = defaultFixDeps;
+
+/** THE PER-TICKET LINE's lookup (coding/ai-fix/manager.ts): the other PRs of this PR's tickets. Never throws. */
+export function ticketSiblingPrIds(ctx: AgentContext, accountId: number, prId: number): Promise<number[]> {
+  return fixDeps.ticketSiblingPrIds(ctx, accountId, prId).catch(() => []);
+}
+
+/** THE SCOPE's repository set (the session's `repoIds`; the per-ticket line asks the same before the start). */
+async function fixLoadedRepoSet(
+  ctx: AgentContext,
+  accountId: number,
+  a: { prId: number; prRepoId: number; workspaceId: number | null; memberRepoIds: readonly number[]; wide: boolean },
+): Promise<{ ids: number[]; notLoaded: string[] }> {
+  const ticketRepoIds = await fixDeps.relatedRepoIds(ctx, accountId, a.prId).catch(() => []);
+  if (!a.wide) return fixRepoSet({ prRepoId: a.prRepoId, members: a.memberRepoIds.map((repoId) => ({ repoId, fullName: '' })), ticketRepoIds, declaredRepoIds: [], wide: false });
+  const declaredRepoIds = a.workspaceId == null ? [] : await fixDeps.declaredRelatedRepoIds(accountId, a.workspaceId, a.prRepoId).catch(() => []);
+  const named = await fixDeps.repoNames(ctx, accountId, a.memberRepoIds).catch(() => []);
+  return fixRepoSet({ prRepoId: a.prRepoId, members: named, ticketRepoIds, declaredRepoIds, wide: true });
+}
+
+/**
+ * THE PER-TICKET LINE's "reads" (coding/ai-fix/ticket-line.ts): the open PRs of this PR's ticket the fix would READ
+ * AT THEIR HEAD — in ANOTHER repository the fix loads (`fixLoadedRepoSet`, the workspace's Settings → Sandbox), the
+ * one `siblingHeads` checks out there. A same-repository sibling, or one outside the loaded set, is not read at its
+ * head and never blocks. `loadedRepoIds` given (a live session's repositories) ⇒ that set. Never throws: [].
+ */
+export async function lineReadsFor(
+  ctx: AgentContext,
+  accountId: number,
+  a: { prId: number; prRepoId: number; workspaceId: number; memberRepoIds?: readonly number[]; loadedRepoIds?: readonly number[] },
+): Promise<number[]> {
+  try {
+    const prs = await fixDeps.siblingOpenPrs(ctx, accountId, a.prId).catch(() => [] as SiblingPr[]);
+    if (prs.length === 0) return [];
+    let loaded = a.loadedRepoIds;
+    if (loaded == null) {
+      const settings = await sessionDeps().settings(accountId, a.workspaceId).catch(() => null);
+      loaded = (await fixLoadedRepoSet(ctx, accountId, { prId: a.prId, prRepoId: a.prRepoId, workspaceId: a.workspaceId, memberRepoIds: a.memberRepoIds ?? [], wide: settings?.fixAllRepos ?? true })).ids;
+    }
+    const sib = siblingHeads({ prRepoId: a.prRepoId, loadedRepoIds: loaded, prs, repoNames: new Map() });
+    return [...sib.heads.values()].map((p) => p.prId);
+  } catch {
+    return [];
+  }
+}
 
 export function setFixSessionDepsForTests(d: Partial<FixSessionDeps> | null): void {
   fixDeps = d == null ? defaultFixDeps : { ...defaultFixDeps, ...d };
@@ -409,9 +526,42 @@ export function siblingHeads(a: {
   return { heads, note: unshown.length > 0 ? `${SIBLING_NOTE_PREFIX}not checked out: ${unshown.join(', ')}.` : null };
 }
 
-/** A note `siblingHeads` wrote (a Resume drops the earlier boot's). Pure. */
+/** A note `siblingHeads` (or the overlay) wrote (a Resume drops the earlier boot's). Pure. */
 export function isSiblingNote(note: string): boolean {
   return note.startsWith(SIBLING_NOTE_PREFIX);
+}
+
+/** A sibling PR's built, unpushed AI Fix (`siblingBuiltFix`): the OVERLAY candidate. */
+export interface SiblingBuiltFix {
+  fixId: number;
+  /** The sibling's head the fix was built on (`ai_fixes.base_sha`). */
+  baseSha: string;
+  patch: string;
+  /** The fix resolved merge conflicts: its patch sits on a merge, so it is not applied as an overlay. */
+  merge: boolean;
+}
+
+/** The local-ref kind of the overlay commits (review/local-refs.ts): `ai-fix-overlay/<siblingFixId>/for-<fixId>`. */
+export const SIBLING_OVERLAY_REF_KIND = 'ai-fix-overlay';
+
+/**
+ * WHETHER A SIBLING'S BUILT FIX IS LAID ON ITS HEAD (docs/SANDBOX.md § AI Fix sessions → Scope, "The overlay").
+ * Pure. Applied only when the sibling's head now is the head its fix was built on; a fix that resolved merge
+ * conflicts is never applied (its patch sits on a merge). The skip says why, in the ONE sibling note's words.
+ */
+export function siblingOverlayPlan(a: { number: number; fix: SiblingBuiltFix | null; liveHead: string | null; pushedSha?: string | null }): { apply: true } | { apply: false; note: string | null } {
+  if (a.fix == null) return { apply: false, note: null };
+  if (a.fix.merge) return { apply: false, note: `#${a.number}'s AI Fix is not applied: it resolves merge conflicts.` };
+  if (a.liveHead == null) return { apply: false, note: `#${a.number}'s AI Fix is not applied: its head could not be read.` };
+  // Pushed meanwhile: the head IS that fix, so its code is in what this fix reads.
+  if (a.pushedSha != null && a.liveHead === a.pushedSha) return { apply: false, note: `#${a.number}'s AI Fix is pushed: its code is in #${a.number}'s head.` };
+  if (a.liveHead !== a.fix.baseSha) return { apply: false, note: `#${a.number}'s AI Fix is not applied: #${a.number} changed after it was built.` };
+  return { apply: true };
+}
+
+/** The one boot note of the overlay skips (prefixed like the sibling note, so a Resume drops it too). Pure. */
+export function siblingOverlayNote(skips: readonly string[]): string | null {
+  return skips.length > 0 ? `${SIBLING_NOTE_PREFIX}${skips.join(' ')}` : null;
 }
 
 // ---- one fix per PR -------------------------------------------------------------------------------------
@@ -447,6 +597,18 @@ export function fixIdHoldingPr(prId: number): number | null {
 }
 
 export const fixKey = (fixId: number): SessionKey => `fix:${fixId}`;
+
+/**
+ * The end of a fix's review loop, with THE PER-TICKET LINE released afterwards however it went (a read that
+ * throws included): the loop ended, so the fix stopped running — unless another loop run is active.
+ */
+export async function withTicketLineReleased(prId: number, fixId: number, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } finally {
+    if (!fixLoopActive(fixId)) releaseTicketLine(prId, { fixId });
+  }
+}
 
 /** fixId → its live subject's "the review loop ended" step (coding/ai-fix/loop.ts calls `afterFixLoopEnded`). */
 const loopEnders = new Map<number, (stop: AiFixLoopStop | null) => Promise<void>>();
@@ -529,6 +691,9 @@ export interface FixSessionStart {
   merge?: { baseRef: string } | null;
   /** Dependency automation's fix: today's narrow set (the PR's repository and its ticket's), no reference docs. */
   narrow?: boolean;
+  /** The start's hold of THE PER-TICKET LINE (coding/ai-fix/ticket-line.ts): bound to the fix id here; the session
+   *  releases it when it stops running. null/absent ⇒ none (a narrow fix). */
+  ticketLineToken?: number | null;
 }
 
 /** What the state keeps about the fix, so Resume and the wire need no GitHub call. */
@@ -583,6 +748,7 @@ export function startFixSession(ctx: AgentContext, a: FixSessionStart): void {
     ...(a.narrow ? { narrow: true } : {}),
   };
   bindFixClaim(a.pr.prId, a.fixId);
+  if (a.ticketLineToken != null) bindTicketLineFix(a.pr.prId, a.ticketLineToken, a.fixId);
   const subject = fixSubject(ctx, { fixId: a.fixId, accountId: a.accountId, facts: state.fix, task: a.task, diff: a.diff.text, unattended: a.unattended, planFirst: a.planFirst });
   const l = newLive(ctx, subject, { accountId: a.accountId, workspaceId: a.workspaceId, choice: a.choice, state, resume: false });
   registerLive(l, a.memberRepoIds);
@@ -605,6 +771,10 @@ function fixSubject(
   let loopNext = false;
   // The merge (fix-merge.ts), once `bases` resolved it; written to `ai_fixes.merge_json` as it changes.
   let merge: FixMergeState | null = null;
+  // THE SIBLINGS this boot reads (repoId → what `bases` chose), stored on the row after the mirror (`afterMirror`).
+  let siblingRead = new Map<number, Omit<FixSiblingState, 'headSha' | 'at'> & { headSha: string | null }>();
+  // What this boot read of them (`afterMirror`), written with the next stored patch (`storeFixTurn`).
+  let bootSiblings: BootSiblings | null = null;
   const saveMerge = (extra: { mergeBundle?: string | null } = {}): Promise<void> =>
     updateFixSession(ctx, accountId, fixId, { mergeJson: merge as unknown as Record<string, unknown>, ...extra });
   const stateOf = (l: SubjectLive): FixState => (l as Live).state as FixState;
@@ -667,16 +837,16 @@ function fixSubject(
       // repository, its ticket's other repositories, and — with Settings → Sandbox → "AI Fix reads every
       // repository" on (the default) — the reader's related repositories and then the rest by name, at most
       // AI_FIX_REPOS_MAX. Every repository but the PR's is read only (`bases`). Dependency automation: narrow.
-      const ticketRepoIds = await fixDeps.relatedRepoIds(ctx, accountId, facts.prId).catch(() => []);
-      const wide = facts.narrow !== true && (o?.settings.fixAllRepos ?? true);
       // ONE copy of the "Not loaded" note, the current one: a Resume recomputes the set, so an earlier boot's
       // note is dropped first (never stacked, never left stale when the set narrowed).
       if (o) stateOf(o.l).notes = stateOf(o.l).notes.filter((n) => !isNotLoadedNote(n));
-      if (!wide) return fixRepoSet({ prRepoId: facts.prRepoId, members: memberRepoIds.map((repoId) => ({ repoId, fullName: '' })), ticketRepoIds, declaredRepoIds: [], wide: false }).ids;
-      const workspaceId = o?.l.workspaceId ?? null;
-      const declaredRepoIds = workspaceId == null ? [] : await fixDeps.declaredRelatedRepoIds(accountId, workspaceId, facts.prRepoId).catch(() => []);
-      const named = await fixDeps.repoNames(ctx, accountId, memberRepoIds).catch(() => []);
-      const set = fixRepoSet({ prRepoId: facts.prRepoId, members: named, ticketRepoIds, declaredRepoIds, wide: true });
+      const set = await fixLoadedRepoSet(ctx, accountId, {
+        prId: facts.prId,
+        prRepoId: facts.prRepoId,
+        workspaceId: o?.l.workspaceId ?? null,
+        memberRepoIds,
+        wide: facts.narrow !== true && (o?.settings.fixAllRepos ?? true),
+      });
       if (set.notLoaded.length > 0 && o) stateOf(o.l).notes.push(notLoadedNote(set.notLoaded));
       return set.ids;
     },
@@ -712,21 +882,49 @@ function fixSubject(
       const st = stateOf(l);
       st.notes = st.notes.filter((n) => !isSiblingNote(n));
       if (sib.note) st.notes.push(sib.note);
+      siblingRead = new Map();
+      const overlaySkips: string[] = [];
       for (const r of repos) {
         const pinRef = aiFixBaseRef(fixId, r.repoId);
         if (r.repoId === facts.prRepoId) {
           bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: facts.headRef, baseSha: facts.headSha, remoteRef: `refs/pull/${facts.number}/head`, pinRef });
           labels.set(r.repoId, { label: `PR #${facts.number}'s head, ${facts.headRef},`, note: 'This is the repository AI Fix pushes.' });
         } else if (sib.heads.has(r.repoId)) {
-          // The sibling's CURRENT head (baseSha null: the ref's tip), through the base repository's pull ref.
           const p = sib.heads.get(r.repoId)!;
-          bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: p.headRefName ?? 'HEAD', baseSha: null, remoteRef: `refs/pull/${p.number}/head`, pinRef });
-          labels.set(r.repoId, { label: `PR #${p.number}'s head${p.headRefName ? `, ${p.headRefName},` : ''}`, note: 'Read only: another pull request of the same ticket, not merged yet. Edits here are left out.' });
+          const readOnly = 'Read only: another pull request of the same ticket, not merged yet. Edits here are left out.';
+          // THE OVERLAY (docs/SANDBOX.md § AI Fix sessions → Scope): the sibling's built, unpushed AI Fix laid on its
+          // head, when that head has not moved since — ONE local commit in Ensemble's clone cache, the sibling
+          // repository's BASE (so the left-out extraction never counts it as this agent's edit).
+          const builtNow = await fixDeps.siblingBuiltFix(ctx, accountId, p.prId).catch(() => ({ latest: null, builtIds: [] as number[] }));
+          const built = builtNow.latest;
+          const live = built != null && !built.merge ? await fixDeps.siblingLiveHead(ctx, accountId, { owner: r.owner, name: r.name, number: p.number }).catch(() => null) : null;
+          // The head moved: was it the push of that very fix (pushed since the read above)?
+          const pushedSha = built != null && live != null && live !== built.baseSha ? ((await getFixById(ctx, accountId, built.fixId).catch(() => null))?.pushedCommitSha ?? null) : null;
+          const plan = siblingOverlayPlan({ number: p.number, fix: built, liveHead: live, pushedSha });
+          let overlay: { localRef: string; sha: string } | null = null;
+          if (plan.apply && built) {
+            overlay = await fixDeps
+              .overlayCommit({ accountId, owner: r.owner, name: r.name, number: p.number, headRef: p.headRefName ?? 'HEAD', headSha: built.baseSha, patch: built.patch, siblingFixId: built.fixId, forFixId: fixId })
+              .catch(() => null);
+            if (overlay == null) overlaySkips.push(`#${p.number}'s AI Fix is not applied: it could not be laid on its head.`);
+          } else if (!plan.apply && plan.note) overlaySkips.push(plan.note);
+          if (overlay && built) {
+            bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: p.headRefName ?? 'HEAD', baseSha: overlay.sha, localRef: overlay.localRef, pinRef });
+            labels.set(r.repoId, { label: `PR #${p.number}'s head plus its AI Fix not pushed yet,`, note: readOnly });
+            siblingRead.set(r.repoId, { prId: p.prId, number: p.number, repoId: r.repoId, headSha: built.baseSha, overlayFixId: built.fixId, overlayPatchHash: patchHash(built.patch), builtFixIds: builtNow.builtIds });
+          } else {
+            // The sibling's CURRENT head (the one just read, else the ref's tip), through the base repository's pull ref.
+            bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: p.headRefName ?? 'HEAD', baseSha: live, remoteRef: `refs/pull/${p.number}/head`, pinRef });
+            labels.set(r.repoId, { label: `PR #${p.number}'s head${p.headRefName ? `, ${p.headRefName},` : ''}`, note: readOnly });
+            siblingRead.set(r.repoId, { prId: p.prId, number: p.number, repoId: r.repoId, headSha: live, overlayFixId: null, overlayPatchHash: null, builtFixIds: builtNow.builtIds });
+          }
         } else {
           bases.set(r.repoId, { repoId: r.repoId, owner: r.owner, name: r.name, baseRef: 'HEAD', baseSha: null, pinRef });
           labels.set(r.repoId, { label: r.defaultBranch ?? 'the default branch', note: 'Read only: edits here are left out.' });
         }
       }
+      const skipNote = siblingOverlayNote(overlaySkips);
+      if (skipNote) st.notes.push(skipNote);
       return { bases, labels };
     },
     async prepareDocs(l0) {
@@ -776,6 +974,20 @@ function fixSubject(
         throw new SessionFail(`The pull request's repository could not be cloned: ${why}`);
       }
       prRepoPath = at.path;
+      // WHAT THIS BOOT READ OF ITS SIBLINGS (coding/ai-fix/sibling-stale.ts): the head each one was at (the
+      // overlay's base, else the commit cloned) and the overlaid fix. Kept in memory: it is STORED only when a build
+      // turn stores the patch built against it (`storeFixTurn`) — a Resume with no new turn never clears staleness.
+      const read: FixSiblingState[] = [];
+      const failedPrIds: number[] = [];
+      for (const [repoId, x] of siblingRead) {
+        const cloned = mirror.repos.find((m) => m.repoId === repoId);
+        if (!cloned) {
+          failedPrIds.push(x.prId);
+          continue;
+        }
+        read.push({ ...x, headSha: x.headSha ?? cloned.sha, at: Date.now() });
+      }
+      bootSiblings = { read, failedPrIds };
       if (merge && l.container) await prepareMerge(l as Live, at.path, bases.get(facts.prRepoId));
     },
     async restore(l, mirror) {
@@ -809,7 +1021,7 @@ function fixSubject(
     async afterBuildTurn(l0) {
       const l = l0 as Live;
       if (merge) await storeMergeTurn(l);
-      else await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath });
+      else await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath, siblings: bootSiblings });
       // A LOOP FIX TURN: the loop goes on in `afterBuildTurnEnded` (the answers, the next review).
       if (l.loopTurn === true) return 'keep';
       // THE REVIEW LOOP comes next when the turn ended well with work to push: the session stays, the row keeps
@@ -843,6 +1055,9 @@ function fixSubject(
     },
     onPhase(l, phase) {
       const status = statusNow(phase);
+      // THE PER-TICKET LINE (coding/ai-fix/ticket-line.ts): released the moment this fix stops running (built with
+      // its review loop ended, a Plan first's plan turn starting, or closed); the next fix of the ticket may start.
+      if (status !== 'running') releaseTicketLine(facts.prId, { fixId });
       if (status === 'running') emitFixStream(facts.prId, { type: 'progress', status, fixId, progress: progressOf(l as Live, phase) });
       else emitFixStream(facts.prId, { type: 'done', status, fixId });
     },
@@ -896,25 +1111,30 @@ function fixSubject(
 
   /** THE LOOP ENDED (or never started): status from the phase again, the tab told, then `finishTurn`. */
   async function afterLoop(stop: AiFixLoopStop | null): Promise<void> {
-    const l = liveSession(fixKey(fixId));
-    const r = await row();
-    if (r?.sessionPhase) await updateFixSession(ctx, accountId, fixId, { status: aiFixStatusForPhase(r.sessionPhase as SandboxSessionPhase, { pushed: r.pushedAt != null }) });
-    if (!l || l.closing) return;
-    subject.onPhase?.(l, l.phase);
-    // The reader pressed Stop: nothing is closed or pushed by itself (an unattended fix's Stop discards it).
-    if (stop === 'stopped') return;
-    await finishTurn(l, { closeBy: 'loop' });
+    await withTicketLineReleased(facts.prId, fixId, async () => {
+      const l = liveSession(fixKey(fixId));
+      const r = await row();
+      if (r?.sessionPhase) await updateFixSession(ctx, accountId, fixId, { status: aiFixStatusForPhase(r.sessionPhase as SandboxSessionPhase, { pushed: r.pushedAt != null }) });
+      if (!l || l.closing) return;
+      subject.onPhase?.(l, l.phase);
+      // The reader pressed Stop: nothing is closed or pushed by itself (an unattended fix's Stop discards it).
+      if (stop === 'stopped') return;
+      await finishTurn(l, { closeBy: 'loop' });
+    });
   }
   loopEnders.set(fixId, afterLoop);
 
   async function onClosedInner(l: SubjectLive, phase: SandboxSessionPhase): Promise<void> {
     loopEnders.delete(fixId);
+    releaseTicketLine(facts.prId, { fixId });
     releaseFixPr(facts.prId, fixId);
     const state = stateOf(l);
     if (phase === 'discarded' || phase === 'failed' || phase === 'pushed') {
       await dropAiFixBaseRefs(state.repos.map((r) => r.fullName), fixId).catch(() => {});
-      // The review loop's local commits (refs/pierre/local/ai-fix-loop/<fixId>/…) go with the fix.
+      // The review loop's local commits (refs/pierre/local/ai-fix-loop/<fixId>/…) go with the fix, and the overlay
+      // commits other fixes laid this fix on (refs/pierre/local/ai-fix-overlay/<fixId>/…).
       await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
+      await dropSiblingOverlayRefs(facts.fullName, fixId);
       // The merge's commits are kept only while the fix can still be pushed.
       if (merge) await updateFixSession(ctx, accountId, fixId, { mergeBundle: null }).catch(() => {});
     }
@@ -1061,7 +1281,7 @@ function fixSubject(
         ? `Ensemble checked the merge commit: ${m.baseRef} is merged${m.conflictedFiles.length > 0 ? ` and ${m.conflictedFiles.length === 1 ? 'the conflict is' : `the ${m.conflictedFiles.length} conflicts are`} resolved` : ''}.`
         : `Nothing will be pushed: ${m.reason}`,
     );
-    await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath }, { patch, files, gitMessage, error, merge: m });
+    await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath, siblings: bootSiblings }, { patch, files, gitMessage, error, merge: m });
   }
 
   return subject;
@@ -1080,10 +1300,28 @@ function progressOf(l: Live, phase: SandboxSessionPhase): AiFixProgress {
 }
 
 /** After a build turn: the PR repository's patch + the report, normalised; every other edit left out. */
+/** What a boot read of the ticket's other PRs (`afterMirror`); the PRs whose repository failed to mirror apart. */
+interface BootSiblings {
+  read: FixSiblingState[];
+  failedPrIds: number[];
+}
+
+/**
+ * THE SIBLING STATE a stored patch was built against (`ai_fixes.sibling_state_json`). Pure. This boot's reads; a
+ * sibling whose repository failed to mirror keeps its earlier entry (never cleared by a failure). null ⇒ write
+ * nothing (no sibling read at all: the stored state stays as it is).
+ */
+export function siblingStateToStore(boot: BootSiblings | null, stored: readonly FixSiblingState[]): FixSiblingState[] | null {
+  if (boot == null) return null;
+  const kept = stored.filter((e) => boot.failedPrIds.includes(e.prId));
+  const out = [...boot.read, ...kept];
+  return out.length > 0 ? out : null;
+}
+
 async function storeFixTurn(
   ctx: AgentContext,
   l: Live,
-  o: { fixId: number; accountId: number; facts: FixFacts; prRepoPath: string | null },
+  o: { fixId: number; accountId: number; facts: FixFacts; prRepoPath: string | null; siblings: BootSiblings | null },
   // A fix with the merge: the fix ON TOP of the merge, already read out (storeMergeTurn).
   pre?: { patch: string; files: string[]; gitMessage: string | null; error: string | null; merge: FixMergeState },
 ): Promise<void> {
@@ -1140,6 +1378,12 @@ async function storeFixTurn(
     error,
     finishedAt: new Date(),
   });
+  // The patch just stored was built against what this boot read of the siblings: store it with it.
+  if (o.siblings != null) {
+    const prev = readSiblingState((await getFixById(ctx, o.accountId, o.fixId).catch(() => null))?.siblingStateJson ?? null);
+    const next = siblingStateToStore(o.siblings, prev);
+    if (next != null) await updateFixSession(ctx, o.accountId, o.fixId, { siblingStateJson: next }).catch(() => {});
+  }
 
   // Every OTHER mirrored repository: the files it changed, shown and never stored as a patch.
   const leftOut: AiFixLeftOutRepo[] = [];
@@ -1238,7 +1482,10 @@ export async function discardFixSession(ctx: AgentContext, accountId: number, fi
   const state = readSessionState(r.sessionJson);
   await dropAiFixBaseRefs(state.repos.map((x) => x.fullName), fixId).catch(() => {});
   const facts = (state as FixState).fix;
-  if (facts) await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
+  if (facts) {
+    await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
+    await dropSiblingOverlayRefs(facts.fullName, fixId);
+  }
   return { status: 'discarded' };
 }
 
@@ -1258,8 +1505,50 @@ export async function closeFixAfterPush(ctx: AgentContext, accountId: number, fi
     const state = readSessionState(r.sessionJson);
     await dropAiFixBaseRefs(state.repos.map((x) => x.fullName), fixId).catch(() => {});
     const facts = (state as FixState).fix;
-    if (facts) await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
+    if (facts) {
+      await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
+      await dropSiblingOverlayRefs(facts.fullName, fixId);
+    }
   }
+}
+
+/** The overlay commits other fixes laid this (sibling) fix on: dropped when it is pushed or discarded. Never throws. */
+async function dropSiblingOverlayRefs(fullName: string, fixId: number): Promise<void> {
+  const [owner, ...rest] = fullName.split('/');
+  if (!owner || rest.length === 0) return;
+  const { dropLocalRefs } = await import('../../review/local-refs.js');
+  await dropLocalRefs(owner, rest.join('/'), SIBLING_OVERLAY_REF_KIND, fixId).catch(() => {});
+}
+
+/**
+ * THE OVERLAY REFS' KEEPER (review/local-refs.ts; registered at boot by the AI Fix manager): a sibling fix's overlay
+ * commits are kept while that fix is built and unpushed (another fix may lay it again). A fix that read one pins
+ * its own base under its `refs/pierre/ai-fix/<fixId>/…` ref, so its sandbox base outlives this ref.
+ */
+export function registerSiblingOverlayRefKeeper(ctx: AgentContext, register: (kind: string, keeper: (ids: readonly number[]) => Promise<ReadonlySet<number>>) => void): void {
+  register(SIBLING_OVERLAY_REF_KIND, async (ids) => {
+    if (ids.length === 0) return new Set();
+    const { and, inArray, isNull } = await import('drizzle-orm');
+    const t = ctx.schema.aiFixes;
+    const rows = (await ctx.db
+      .select({ id: t.id, sessionPhase: t.sessionPhase })
+      .from(t)
+      .where(and(inArray(t.id, [...ids]), isNull(t.pushedAt)))
+      .execute()) as Array<{ id: number; sessionPhase: string | null }>;
+    return new Set(rows.filter((r) => r.sessionPhase === 'built').map((r) => r.id));
+  });
+}
+
+/**
+ * What the per-ticket line needs of a LIVE fix session (Plan first's Start fix takes the line again): its PR, the
+ * repositories it loaded, and whether it is dependency automation's narrow fix. null when it is not live.
+ */
+export function fixLineFacts(fixId: number, accountId: number): { prId: number; prRepoId: number; number: number; workspaceId: number; loadedRepoIds: number[]; narrow: boolean } | null {
+  const l = liveSession(fixKey(fixId));
+  if (!l || l.accountId !== accountId || l.closing) return null;
+  const st = l.state as FixState;
+  if (!st.fix) return null;
+  return { prId: st.fix.prId, prRepoId: st.fix.prRepoId, number: st.fix.number, workspaceId: l.workspaceId, loadedRepoIds: st.repos.map((r) => r.repoId), narrow: st.fix.narrow === true };
 }
 
 /** A turn runs in the fix's live session now (push.ts refuses to push meanwhile). */

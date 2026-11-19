@@ -7,6 +7,9 @@
 //      a merge Limn checked as VALID: `fixRowHasWork`), never pushed;
 //   2. the workspace holding the PR's repo still has auto AI Fix ON and `autoPush` ON;
 //   3. the PR's author IS the account's own GitHub user (`prAuthorIsAccount`) — never anyone else's;
+//   3½. the fix is not STALE (sibling-stale.ts: another PR of its ticket changed after it was built), and it does
+//      not build on a sibling's AI Fix that is NOT PUSHED yet (the overlay) — such a fix waits for the reader's
+//      Push, and the AI Fix tab says why (`AiFix.pushHold`);
 //   4. then `pushFix` with target 'existing' — the Push button's own path: write access re-checked,
 //      the branch's head must still be the fix's base (HEAD_MOVED otherwise), NEVER forced, and the
 //      PR settled after the write.
@@ -19,11 +22,12 @@ import { readWorkspaceAutoFixSettingsForPr } from '../../review/claude-review/au
 import { getFixById, markFixPushFailed } from './persist.js';
 import { pushFix, type PushFixOutcome } from './push.js';
 import { fixRowHasWork } from '../../sandbox/session/fix-merge.js';
+import { fixSiblingFacts, overlayUnpushedHoldLine, siblingStaleHoldLine, type FixSiblingFacts } from './sibling-stale.js';
 
 export type AutoPushDecision =
   | { status: 'pushed'; branch: string }
   | { status: 'failed'; message: string }
-  | { status: 'skipped'; reason: 'not_auto' | 'not_pushable' | 'off' | 'not_own' };
+  | { status: 'skipped'; reason: 'not_auto' | 'not_pushable' | 'off' | 'not_own' | 'stale' | 'overlay_unpushed' };
 
 export interface AutoPushDeps {
   pushFix: (ctx: AgentContext, input: Parameters<typeof pushFix>[1]) => Promise<PushFixOutcome>;
@@ -71,7 +75,8 @@ export async function autoPushSkip(
   fixId: number,
   deps: Pick<AutoPushDeps, 'prAuthorIsAccount'> = defaultDeps,
   // `closing`: asked by the fix session as its build turn ends, BEFORE the close that makes the row succeeded.
-  o: { closing?: boolean } = {},
+  // `siblings`: the sibling facts the caller already read (the AI Fix tab's read), so they are read once.
+  o: { closing?: boolean; siblings?: FixSiblingFacts } = {},
 ): Promise<Extract<AutoPushDecision, { status: 'skipped' }>['reason'] | null> {
   const row = await getFixById(ctx, accountId, fixId);
   if (!row || row.trigger !== 'auto') return 'not_auto';
@@ -79,6 +84,10 @@ export async function autoPushSkip(
   const ws = await readWorkspaceAutoFixSettingsForPr(ctx, accountId, row.prId);
   if (!ws?.enabled || !ws.settings.autoPush) return 'off';
   if (!(await deps.prAuthorIsAccount(ctx, accountId, row.prId))) return 'not_own';
+  // At the close the row is not `succeeded` yet: read it as the finished fix it is about to be.
+  const sib = o.siblings ?? (await fixSiblingFacts(ctx, accountId, { ...row, status: 'succeeded' }));
+  if (sib.stale != null) return 'stale';
+  if (sib.overlayUnpushed != null) return 'overlay_unpushed';
   return null;
 }
 
@@ -109,7 +118,7 @@ function autoPushMessage(out: Extract<PushFixOutcome, { ok: false }>): string {
 // item is not fixed, or does not cover every item; and on a PR that is not the reader's own (a teammate's branch
 // is pushed only on a press). Nothing to push ⇒ nothing said.
 
-export type PushWhenDoneHold = 'off' | 'no_work' | 'pushed' | 'no_report' | 'unaddressed' | 'not_reported' | 'not_own';
+export type PushWhenDoneHold = 'off' | 'no_work' | 'pushed' | 'no_report' | 'unaddressed' | 'not_reported' | 'not_own' | 'stale' | 'overlay_unpushed';
 
 function parseChangeReport(raw: string | null): { unaddressed?: unknown[]; notReported?: unknown[] } | null {
   if (raw == null) return null;
@@ -124,7 +133,9 @@ function parseChangeReport(raw: string | null): { unaddressed?: unknown[]; notRe
 /** Why a finished manual fix is NOT pushed by itself; null = push it. Pure (auto-push.test.ts). */
 export function pushWhenDoneHold(
   row: { trigger: string | null; pushWhenDone?: boolean | null; pushedAt: unknown; changeReport: string | null },
-  o: { hasWork: boolean; own: boolean },
+  // `stale`: the PR number of the sibling that changed after the fix was built (sibling-stale.ts), or null.
+  // `overlayUnpushed`: the PR number of a sibling whose AI Fix this one builds on and that is not pushed yet.
+  o: { hasWork: boolean; own: boolean; stale?: number | null; overlayUnpushed?: number | null },
 ): { hold: PushWhenDoneHold; count?: number } | null {
   if ((row.trigger ?? 'manual') !== 'manual' || row.pushWhenDone !== true) return { hold: 'off' };
   if (row.pushedAt != null) return { hold: 'pushed' };
@@ -135,6 +146,8 @@ export function pushWhenDoneHold(
   if (unaddressed > 0) return { hold: 'unaddressed', count: unaddressed };
   if (Array.isArray(report.notReported) && report.notReported.length > 0) return { hold: 'not_reported', count: report.notReported.length };
   if (!o.own) return { hold: 'not_own' };
+  if (o.stale != null) return { hold: 'stale', count: o.stale };
+  if (o.overlayUnpushed != null) return { hold: 'overlay_unpushed', count: o.overlayUnpushed };
   return null;
 }
 
@@ -151,6 +164,10 @@ export function pushWhenDoneHoldLine(h: { hold: PushWhenDoneHold; count?: number
       return 'Not pushed: the agent did not hand in a valid report. Check the changes, then press Push.';
     case 'not_own':
       return 'Not pushed: this is not your pull request. Press Push to push to its branch.';
+    case 'stale':
+      return siblingStaleHoldLine(n);
+    case 'overlay_unpushed':
+      return overlayUnpushedHoldLine(n);
     default:
       return null;
   }
@@ -166,7 +183,9 @@ export async function pushWhenDoneReady(
   const row = await getFixById(ctx, accountId, fixId);
   if (!row || row.pushWhenDone !== true) return { push: false, line: null };
   const own = await deps.prAuthorIsAccount(ctx, accountId, row.prId).catch(() => false);
-  const hold = pushWhenDoneHold(row, { hasWork: fixRowHasWork(row), own });
+  // Asked as the build turn ends: the row reads as the finished fix it is about to be.
+  const sib = await fixSiblingFacts(ctx, accountId, { ...row, status: 'succeeded' });
+  const hold = pushWhenDoneHold(row, { hasWork: fixRowHasWork(row), own, stale: sib.stale?.prNumber ?? null, overlayUnpushed: sib.overlayUnpushed?.prNumber ?? null });
   return hold == null ? { push: true } : { push: false, line: pushWhenDoneHoldLine(hold) };
 }
 
@@ -185,8 +204,12 @@ export async function maybePushWhenDone(
     const row = await getFixById(ctx, accountId, fixId);
     if (!row || row.status !== 'succeeded') return { status: 'skipped', reason: 'not_pushable' };
     const own = await deps.prAuthorIsAccount(ctx, accountId, row.prId);
-    const hold = pushWhenDoneHold(row, { hasWork: fixRowHasWork(row), own });
-    if (hold != null) return { status: 'skipped', reason: hold.hold === 'not_own' ? 'not_own' : hold.hold === 'off' ? 'off' : 'not_pushable' };
+    const sib = await fixSiblingFacts(ctx, accountId, row);
+    const hold = pushWhenDoneHold(row, { hasWork: fixRowHasWork(row), own, stale: sib.stale?.prNumber ?? null, overlayUnpushed: sib.overlayUnpushed?.prNumber ?? null });
+    if (hold != null) {
+      const reason = hold.hold === 'not_own' || hold.hold === 'off' || hold.hold === 'stale' || hold.hold === 'overlay_unpushed' ? hold.hold : 'not_pushable';
+      return { status: 'skipped', reason };
+    }
     // The ledger's origin stays 'reader_pressed' (the reader's tick asked for it); the row says it was not a press.
     const out = await deps.pushFix(ctx, { accountId, fixId, target: 'existing', origin: 'reader_pressed', automatic: true });
     if (out.ok) {

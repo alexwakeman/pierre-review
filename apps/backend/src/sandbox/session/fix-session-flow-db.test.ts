@@ -1099,6 +1099,38 @@ describe('the repositories and documents of a fix (Settings → Sandbox → "AI 
     expect(F.siblingHeads({ prRepoId: 1, loadedRepoIds: [1, 2], prs: [], repoNames: names })).toEqual({ heads: new Map(), note: null });
   });
 
+  it('siblingStateToStore (pure, ④): this boot\'s reads; a sibling that failed to mirror keeps its earlier entry; nothing read ⇒ write nothing', () => {
+    const e = (prId: number, headSha: string) => ({ prId, number: prId, repoId: 2, headSha, overlayFixId: null, overlayPatchHash: null, at: 1 });
+    expect(F.siblingStateToStore(null, [e(1, 'a')])).toBeNull();
+    expect(F.siblingStateToStore({ read: [], failedPrIds: [] }, [e(1, 'a')])).toBeNull();
+    expect(F.siblingStateToStore({ read: [e(1, 'b')], failedPrIds: [] }, [e(1, 'a')])).toEqual([e(1, 'b')]);
+    expect(F.siblingStateToStore({ read: [], failedPrIds: [1] }, [e(1, 'a'), e(2, 'x')])).toEqual([e(1, 'a')]);
+  });
+
+  it('withTicketLineReleased (⑨): the loop\'s end releases the fix\'s hold even when it throws; another fix\'s hold stays', async () => {
+    const TL = await import('../../coding/ai-fix/ticket-line.js');
+    const h = TL.tryHoldTicketLine({ accountId: 1, prId: 777001, number: 1, reads: [] });
+    TL.bindTicketLineFix(777001, (h as { token: number }).token, 9001);
+    await expect(F.withTicketLineReleased(777001, 9002, async () => {})).resolves.toBeUndefined();
+    expect(TL.holdsTicketLine(777001)).toBe(true);
+    await expect(F.withTicketLineReleased(777001, 9001, async () => { throw new Error('read failed'); })).rejects.toThrow('read failed');
+    expect(TL.holdsTicketLine(777001)).toBe(false);
+  });
+
+  it('siblingOverlayPlan (pure): a built fix is laid on its head only when that head has not moved; a merge fix never', () => {
+    const fix = { fixId: 4, baseSha: HEAD, patch: PATCH, merge: false };
+    expect(F.siblingOverlayPlan({ number: 12, fix: null, liveHead: HEAD })).toEqual({ apply: false, note: null });
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: HEAD })).toEqual({ apply: true });
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: WEB })).toEqual({ apply: false, note: "#12's AI Fix is not applied: #12 changed after it was built." });
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: null })).toEqual({ apply: false, note: "#12's AI Fix is not applied: its head could not be read." });
+    expect(F.siblingOverlayPlan({ number: 12, fix: { ...fix, merge: true }, liveHead: HEAD })).toEqual({ apply: false, note: "#12's AI Fix is not applied: it resolves merge conflicts." });
+    // ⑫ pushed meanwhile: the head IS that fix.
+    expect(F.siblingOverlayPlan({ number: 12, fix, liveHead: WEB, pushedSha: WEB })).toEqual({ apply: false, note: "#12's AI Fix is pushed: its code is in #12's head." });
+    const note = F.siblingOverlayNote(["#12's AI Fix is not applied: #12 changed after it was built."])!;
+    expect(F.isSiblingNote(note)).toBe(true);
+    expect(F.siblingOverlayNote([])).toBeNull();
+  });
+
   it('a sibling PR\'s repository is read at THAT PR\'s head (read only, left out); the default branch otherwise; a dependency fix keeps default branches', async () => {
     const sibs = [
       { prId: 9001, repoId: web, number: 12, headRefName: 'feature/export-ui', updatedAtMs: 2 },
@@ -1132,6 +1164,199 @@ describe('the repositories and documents of a fix (Settings → Sandbox → "AI 
       await until(prC, (x) => x.id === depId && !AF.isFixRunning(prC), 'dependency fix closed (sibling)');
       expect(G.prepared.slice(before2).find((p) => p.name === 'web')).toMatchObject({ baseRef: 'HEAD', baseSha: null });
     } finally {
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
+  });
+
+  it('ONE TICKET AT A TIME: a fix of #50 waits while the fix of #12 (same ticket) runs, then boots with #12\'s built fix laid on its head (its BASE), labelled; staleness on read; Push when done holds a stale fix, a press pushes; a moved head ⇒ no overlay + a note', { timeout: 60_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    const OVERLAY = 'f'.repeat(40);
+    const H2 = '9'.repeat(40);
+    const mk = async (repoId: number, number: number, ref: string): Promise<number> =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({ accountId: 1, repoId, githubNodeId: `PR-T-${number}`, number, title: `Ticket PR ${number}`, body: null, state: 'open', headSha: HEAD, headRefName: ref, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+          .returning()
+          .execute()
+      )[0].id;
+    const prUi = await mk(web, 12, 'feature/ui');
+    const prApi = await mk(api, 50, 'feature/api');
+    // The fake mirror clones a head-less sibling at WEB: #50's synced head is that commit (what A reads of it).
+    await db.update(schema.pullRequests).set({ headSha: WEB }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prApi)).execute();
+    const overlays: any[] = [];
+    let liveHead: string | null = HEAD;
+    // Each fix changes its own PR's repository only (B's boot lays the overlay: from then on B extracts).
+    let prRepo = '/web';
+    const sibOf = (p: number) =>
+      p === prApi ? [{ prId: prUi, repoId: web, number: 12, headRefName: 'feature/ui', updatedAtMs: 2 }] : p === prUi ? [{ prId: prApi, repoId: api, number: 50, headRefName: 'feature/api', updatedAtMs: 1 }] : [];
+    F.setFixSessionDepsForTests({
+      relatedRepoIds: async () => relatedIds(),
+      contextTicket: async () => null,
+      siblingOpenPrs: async (_c, _a, p) => sibOf(p),
+      ticketSiblingPrIds: async (_c, _a, p) => sibOf(p).map((x) => x.prId),
+      siblingLiveHead: async () => liveHead,
+      overlayCommit: async (a) => {
+        overlays.push(a);
+        prRepo = '/api';
+        return { localRef: `refs/pierre/local/ai-fix-overlay/${a.siblingFixId}/for-${a.forFixId}`, sha: OVERLAY };
+      },
+    });
+    try {
+      extractAnswer = (path) => (path.endsWith(prRepo) ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: t', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      let release: () => void = () => {};
+      gate = new Promise<void>((r) => (release = r));
+      const a = await post(`/api/pro/prs/${prUi}/ai-fix`, { seed: 'plain', instruction: 'Fix the UI.' });
+      expect(a.statusCode).toBe(202);
+      const fixA = a.json().fixId as number;
+      // #12's fix runs: #50's press waits in line, says for whom, and holds no sandbox.
+      const b = await post(`/api/pro/prs/${prApi}/ai-fix`, { seed: 'plain', instruction: 'Fix the API.' });
+      expect(b.statusCode).toBe(202);
+      expect(b.json()).toEqual({ fixId: null, status: 'waiting', position: 1, blockedBy: { prNumber: 12 } });
+      expect(((await get(`/api/pro/prs/${prApi}/ai-fix`)).json() as AiFixResponse).waiting).toMatchObject({ position: 1, trigger: 'manual', blockedBy: { prNumber: 12 } });
+      expect(AF.isFixRunning(prApi)).toBe(false);
+      // #12's fix is built (its review loop ended: no reviewer here) ⇒ the line is released and #50's fix starts by itself.
+      release();
+      gate = null;
+      await until(prUi, (x) => x.id === fixA && x.session?.phase === 'built', 'A built');
+      const fb = await until(prApi, (x) => x.id != null && x.session?.phase === 'built', 'B built');
+      const fixB = fb.id;
+      // The sibling repository's BASE is the overlay: #12's head plus its unpushed fix, a LOCAL commit in Ensemble's clone cache.
+      expect(overlays).toEqual([expect.objectContaining({ owner: 'acme', name: 'web', number: 12, headSha: HEAD, patch: PATCH, siblingFixId: fixA, forFixId: fixB })]);
+      const webReq = G.prepared.filter((p) => p.name === 'web' && p.pinRef === `refs/pierre/ai-fix/${fixB}/${web}`).at(-1);
+      expect(webReq).toMatchObject({ baseSha: OVERLAY, localRef: `refs/pierre/local/ai-fix-overlay/${fixA}/for-${fixB}` });
+      expect(webReq.remoteRef).toBeUndefined();
+      const box = `limn-${(await rowOf(fixB)).sandboxRef}-sandbox`;
+      expect(fake.files(box).get('/workspace/CLAUDE.md')!.toString()).toMatch(/acme\/web: `[^`]+` \(from PR #12's head plus its AI Fix not pushed yet, at fffffff; branch `[^`]+`\)\. Read only: another pull request of the same ticket, not merged yet\. Edits here are left out\./);
+      // Only the agent's own edits are left out — never the overlay (it is the base).
+      expect(fb.leftOut ?? []).toEqual([]);
+      expect(fb.patch).toBe(PATCH);
+      // What B read is recorded; it is not stale.
+      expect((await rowOf(fixB)).siblingStateJson).toEqual([expect.objectContaining({ prId: prUi, number: 12, repoId: web, headSha: HEAD, overlayFixId: fixA })]);
+      expect(fb.stale ?? null).toBeNull();
+      // ① B was built ON TOP OF A's fix: B's newer fix does not make A stale.
+      expect((await readFix(prUi)).stale ?? null).toBeNull();
+      // ② B builds on A's fix, which is NOT PUSHED: Push when done (and Push automatically) hold B, and say why.
+      await db.update(schema.aiFixes).set({ pushWhenDone: true }).where((await import('drizzle-orm')).eq(schema.aiFixes.id, fixB)).execute();
+      const { maybePushWhenDone, pushWhenDoneReady } = await import('../../coding/ai-fix/auto-push.js');
+      const pushFix = vi.fn();
+      expect(await maybePushWhenDone(ctx, { accountId: 1, fixId: fixB }, { pushFix, prAuthorIsAccount: async () => true })).toEqual({ status: 'skipped', reason: 'overlay_unpushed' });
+      expect(await pushWhenDoneReady(ctx, 1, fixB, { prAuthorIsAccount: async () => true })).toEqual({ push: false, line: "Not pushed: it builds on #12's AI Fix, which is not pushed yet." });
+
+      // #12 gets a new head ⇒ B reads STALE; Push when done holds it with that reason; the reader's Push still pushes.
+      await db.update(schema.pullRequests).set({ headSha: H2 }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prUi)).execute();
+      expect((await readFix(prApi)).stale).toEqual({ line: '#12 changed after this fix was built.' });
+      expect(await maybePushWhenDone(ctx, { accountId: 1, fixId: fixB }, { pushFix, prAuthorIsAccount: async () => true })).toEqual({ status: 'skipped', reason: 'stale' });
+      expect(pushFix).not.toHaveBeenCalled();
+      expect(await pushWhenDoneReady(ctx, 1, fixB, { prAuthorIsAccount: async () => true })).toEqual({ push: false, line: 'Not pushed: #12 changed after this fix was built. Check it, then press Push.' });
+      const pressed = await post(`/api/pro/ai-fixes/${fixB}/push`, { target: 'existing' });
+      expect(pressed.statusCode).toBe(200);
+      expect(pushes.at(-1)).toMatchObject({ name: 'api', prNumber: 50 });
+
+      // #12 moved since its fix was built ⇒ a new fix of #50 reads #12's head WITHOUT the overlay, and says why.
+      liveHead = H2;
+      prRepo = '/api';
+      const c = await post(`/api/pro/prs/${prApi}/ai-fix`, { seed: 'plain', instruction: 'Again.' });
+      expect(c.statusCode).toBe(202);
+      const fixC = c.json().fixId as number;
+      const fc = await until(prApi, (x) => x.id === fixC && x.session?.phase === 'built', 'C built');
+      expect(overlays).toHaveLength(1);
+      expect(G.prepared.filter((p) => p.pinRef === `refs/pierre/ai-fix/${fixC}/${web}`).at(-1)).toMatchObject({ baseSha: H2, remoteRef: 'refs/pull/12/head' });
+      expect(fc.session!.notes).toContain("Pull requests of the same ticket: #12's AI Fix is not applied: #12 changed after it was built.");
+      expect((await rowOf(fixC)).siblingStateJson).toEqual([expect.objectContaining({ prId: prUi, headSha: H2, overlayFixId: null })]);
+
+      // ④ RESUME NEVER CLEARS STALENESS: #12 moves again ⇒ C is stale; a Resume boots with #12's new head but runs
+      // no turn, so the stored state (the head C's patch was built on) and the stale line stay.
+      await M._idleCloseForTest(fixC, 'fix');
+      await until(prApi, (x) => x.id === fixC && x.session?.phase === 'built' && M.liveSession(F.fixKey(fixC)) == null, 'C closed');
+      const H3 = '8'.repeat(40);
+      await db.update(schema.pullRequests).set({ headSha: H3 }).where((await import('drizzle-orm')).eq(schema.pullRequests.id, prUi)).execute();
+      liveHead = H3;
+      expect((await readFix(prApi)).stale).toEqual({ line: '#12 changed after this fix was built.' });
+      expect((await post(`/api/pro/ai-fixes/${fixC}/resume`)).statusCode).toBe(202);
+      await until(prApi, (x) => x.id === fixC && x.session?.phase === 'built' && M.liveSession(F.fixKey(fixC)) != null, 'C resumed');
+      expect(G.prepared.filter((p) => p.pinRef === `refs/pierre/ai-fix/${fixC}/${web}`).at(-1)).toMatchObject({ baseSha: H3 });
+      expect((await rowOf(fixC)).siblingStateJson).toEqual([expect.objectContaining({ prId: prUi, headSha: H2 })]);
+      expect((await readFix(prApi)).stale).toEqual({ line: '#12 changed after this fix was built.' });
+    } finally {
+      gate = null;
+      F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
+      await M._closeAllSessionsForTest();
+    }
+  });
+
+  it('START NOW, plan first and the repositories read: a press waiting behind the running fix of a PR it reads starts at once; an auto fix waits; a same-repository sibling never blocks; Plan first\'s Start fix takes the line', { timeout: 60_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    const mk = async (repoId: number, number: number): Promise<number> =>
+      (
+        await db
+          .insert(schema.pullRequests)
+          .values({ accountId: 1, repoId, githubNodeId: `PR-S-${number}`, number, title: `S ${number}`, body: null, state: 'open', headSha: HEAD, baseRefName: 'main', openedAt: new Date(), updatedAt: new Date() })
+          .returning()
+          .execute()
+      )[0].id;
+    const p1 = await mk(api, 61);
+    const p2 = await mk(web, 62);
+    const p3 = await mk(api, 63);
+    const repoOf = new Map([[p1, api], [p2, web], [p3, api]]);
+    const numOf = new Map([[p1, 61], [p2, 62], [p3, 63]]);
+    const all = [p1, p2, p3];
+    const sib = (p: number) => all.filter((x) => x !== p).map((x) => ({ prId: x, repoId: repoOf.get(x)!, number: numOf.get(x)!, headRefName: null, updatedAtMs: x }));
+    F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null, siblingOpenPrs: async (_c, _a, p) => sib(p), ticketSiblingPrIds: async (_c, _a, p) => all.filter((x) => x !== p) });
+    try {
+      extractAnswer = (path) => (path.endsWith('/api') || path.endsWith('/web') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+      reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: s', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+      let release: () => void = () => {};
+      gate = new Promise<void>((r) => (release = r));
+      expect((await post(`/api/pro/prs/${p1}/ai-fix`, { seed: 'plain', instruction: 'One.' })).statusCode).toBe(202);
+      // ⑤ #63 is in #61's OWN repository: the fix of #63 does not read #61 at its head, so it never waits for it.
+      const same = await post(`/api/pro/prs/${p3}/ai-fix`, { seed: 'plain', instruction: 'Same repo.' });
+      expect(same.json()).toMatchObject({ status: 'queued' });
+      // An AUTO fix of #62 (acme/web: it reads #61 in acme/api) always waits; Start now refuses it, clearly.
+      const auto = await AF.startFix(ctx, { accountId: 1, prId: p2, model: 'claude-sonnet-5', seed: 'plain', instruction: 'Auto.', trigger: 'auto' });
+      expect(auto).toMatchObject({ status: 'waiting' });
+      const refused = await post(`/api/pro/prs/${p2}/ai-fix/start-now`);
+      expect(refused.statusCode).toBe(409);
+      expect(refused.json().error).toBe('AutoFixWaits');
+      // The reader's press replaces the waiting auto fix (keeping its place) and waits; Start now runs it at once.
+      const w = await post(`/api/pro/prs/${p2}/ai-fix`, { seed: 'plain', instruction: 'Two.' });
+      expect(w.json()).toMatchObject({ status: 'waiting', blockedBy: { prNumber: 61 } });
+      const now = await post(`/api/pro/prs/${p2}/ai-fix/start-now`);
+      expect(now.statusCode).toBe(202);
+      expect(now.json()).toMatchObject({ status: 'queued' });
+      expect(AF.isFixRunning(p2)).toBe(true);
+      expect(((await get(`/api/pro/prs/${p2}/ai-fix`)).json() as AiFixResponse).waiting ?? null).toBeNull();
+      // Nothing waits any more: a second press of Start now is a 404; another account never reaches it.
+      expect((await post(`/api/pro/prs/${p2}/ai-fix/start-now`)).statusCode).toBe(404);
+      expect((await post(`/api/pro/prs/${p2}/ai-fix/start-now`, {}, 2)).statusCode).toBe(404);
+      release();
+      gate = null;
+      for (const p of [p1, p2, p3]) await until(p, (x) => x.session?.phase === 'built', `${p} built`);
+      await M._closeAllSessionsForTest();
+
+      // ③ PLAN FIRST: the plan turn releases the line; Start fix (the build) takes it again — and waits like a press.
+      const plan = await post(`/api/pro/prs/${p2}/ai-fix/plan`, { seed: 'plain', instruction: 'Plan it.' });
+      expect(plan.statusCode).toBe(202);
+      const planId = plan.json().fixId as number;
+      await until(p2, (x) => x.id === planId && x.status === 'planned' && x.session?.phase === 'ready', 'planned');
+      gate = new Promise<void>((r) => (release = r));
+      // #61's fix starts meanwhile (the plan does not hold the line) …
+      expect((await post(`/api/pro/prs/${p1}/ai-fix`, { seed: 'plain', instruction: 'One again.' })).json()).toMatchObject({ status: 'queued' });
+      // … so the plan's Start fix waits for it, says whom for, and offers Start now.
+      const appr = await post(`/api/pro/ai-fixes/${planId}/plan/approve`, {});
+      expect(appr.statusCode).toBe(202);
+      expect(appr.json()).toMatchObject({ fixId: planId, status: 'waiting', blockedBy: { prNumber: 61 } });
+      expect(((await get(`/api/pro/prs/${p2}/ai-fix`)).json() as AiFixResponse).waiting).toMatchObject({ trigger: 'manual', blockedBy: { prNumber: 61 } });
+      const go = await post(`/api/pro/prs/${p2}/ai-fix/start-now`);
+      expect(go.statusCode).toBe(202);
+      expect(go.json()).toMatchObject({ fixId: planId, status: 'queued' });
+      release();
+      gate = null;
+      await until(p2, (x) => x.id === planId && x.session?.phase === 'built', 'plan built');
+    } finally {
+      gate = null;
       F.setFixSessionDepsForTests({ relatedRepoIds: async () => relatedIds(), contextTicket: async () => null });
       await M._closeAllSessionsForTest();
     }

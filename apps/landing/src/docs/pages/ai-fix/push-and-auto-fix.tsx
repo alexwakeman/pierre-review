@@ -72,7 +72,9 @@ export default function Page(): JSX.Element {
       </p>
       <p>
         It waits for your press instead, and the session says why, when the agent says something is not fixed, its
-        report does not cover every item or is missing, or the pull request is someone else&rsquo;s. The same line
+        report does not cover every item or is missing, the pull request is someone else&rsquo;s, another pull
+        request of the same ticket changed after the fix was built, or the fix builds on a fix of that pull request
+        that is not pushed yet. The same line
         shows above <Ui>Push</Ui>. Untick it to keep talking to the agent before anything is pushed: a push ends the
         session.
       </p>
@@ -187,6 +189,11 @@ export default function Page(): JSX.Element {
           While a fix runs, the next one waits. When it starts, it works from what is still open on the latest commit, so
           nothing already fixed is done again. Each fix is its own commit, and its own push with <Ui>Push automatically</Ui>.
         </li>
+        <li>
+          While a fix of another pull request of the same ticket runs, an auto fix waits for it and says{' '}
+          <Ui>Waiting for the fix of #12 (same ticket).</Ui> Then it reads that pull request with its fix. See{' '}
+          <DocLink to="ai-fix/overview#one-ticket-at-a-time">Pull requests of the same ticket</DocLink>.
+        </li>
       </ul>
       <p>
         The <Ui>AI Review</Ui> tab shows what the next auto fix waits for, such as{' '}
@@ -231,6 +238,11 @@ export default function Page(): JSX.Element {
         the <Ui>AI Fix</Ui> tab says <Ui>Automatic push failed</Ui> and Ensemble does not try again; you can push by hand.
         A fix that was pushed shows <Ui>Pushed automatically</Ui> and has no Push button.
       </Warning>
+      <p>
+        A finished auto fix is not pushed when another pull request of the same ticket changed after it was built, or
+        when it builds on a fix of that pull request that is not pushed yet. The <Ui>AI Fix</Ui> tab says why, for example{' '}
+        <Ui>Not pushed: it builds on #12&rsquo;s AI Fix, which is not pushed yet.</Ui>
+      </p>
       <Note>
         Limits stop a loop of fix, review, fix: at most 3 automatic fixes per pull request a day, no new one while a fix
         runs or waits to be pushed, and none when the last one could not address the same items. Each one also asks your

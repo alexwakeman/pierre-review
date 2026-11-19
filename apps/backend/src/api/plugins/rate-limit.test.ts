@@ -19,6 +19,8 @@ describe('tierFor — AI generation', () => {
     // AI Fix's workspace session: a boot, a turn, Start fix and Resume spend an agent run; the
     // teardown, an Allow click and the stream are reads.
     expect(tiers('POST', '/api/pro/prs/12/ai-fix/plan')).toEqual(['ai', 'ai_hourly']);
+    // "Start now" (a press waiting behind the same ticket's fix) boots a sandbox and a build turn.
+    expect(tiers('POST', '/api/pro/prs/12/ai-fix/start-now')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/message')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/pro/ai-fixes/7/plan/approve')).toEqual(['ai', 'ai_hourly']);

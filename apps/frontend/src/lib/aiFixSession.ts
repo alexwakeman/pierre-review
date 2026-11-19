@@ -163,7 +163,7 @@ export type FixPushFooter =
   | { kind: 'plain' };
 
 export function fixPushFooter(
-  fix: Pick<AiFix, 'pushedAt' | 'pushedBranch' | 'pushedCommitSha' | 'pushedAutomatically' | 'pushing' | 'pushHold' | 'error' | 'loop'>,
+  fix: Pick<AiFix, 'pushedAt' | 'pushedBranch' | 'pushedCommitSha' | 'pushedAutomatically' | 'pushing' | 'pushHold' | 'error' | 'loop'> & Pick<Partial<AiFix>, 'stale'>,
   o: { headRef: string | null; repoFullName: string },
 ): FixPushFooter {
   if (fix.pushedAt != null) {
@@ -181,6 +181,9 @@ export function fixPushFooter(
   if (fix.pushing === true) return { kind: 'pushing', branch: o.headRef };
   if (fix.error != null && fix.error.startsWith('Automatic push failed')) return { kind: 'failed', line: fix.error };
   if (fix.pushHold != null && fix.pushHold.line !== '') return { kind: 'held', line: fix.pushHold.line };
+  // STALE (AiFix.stale): another PR of the ticket changed after the fix was built. ONE line above Push (a press
+  // still pushes); an automatic push held for it already said so through `pushHold` above.
+  if (fix.stale != null && fix.stale.line !== '') return { kind: 'held', line: fix.stale.line };
   return { kind: 'plain' };
 }
 

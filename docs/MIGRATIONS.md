@@ -1783,6 +1783,18 @@ cascade; unique `(id, account_id)`; index `(account_id, repo_id, branch, id)`; t
 `accountScopedTables()`, exported. No backfill. Additive; journal idx 209, `when` `1794816000000`.
 [DATA-MODEL.md](DATA-MODEL.md) § `local_reviews`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Reviewing a local branch.
 
+### `0210_ai_fix_sibling_state` — what an AI Fix read of its ticket's other PRs
+
+`ALTER TABLE ai_fixes ADD sibling_state_json` (text JSON, nullable, no default, no backfill): per open PR of the
+same ticket the fix read at its head: `{prId, number, repoId, headSha, overlayFixId, overlayPatchHash, builtFixIds,
+at}` — that head SHA, the sibling's built, unpushed AI Fix laid on it (or null) and its patch hash, and the sibling's
+built fix ids at that read. Written WITH EACH STORED PATCH (a build turn's), never by a boot or a Resume alone; a
+sibling whose repository failed to mirror keeps its earlier entry. NULL = none read (every older row reads "not stale").
+Staleness is computed on read, never stored. An existing account-scoped table: erasure already deletes it
+(`ai_fixes` is not in the data export). Additive; journal idx 210, `when` `1794902400000`.
+[DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The fix start queue;
+[SANDBOX.md](SANDBOX.md) § AI Fix sessions → Scope.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

@@ -1608,6 +1608,12 @@ export function aiFixBuilt(prId: number): AiFix {
   };
 }
 
+/** A finished, unpushed fix built while #12 (the same ticket's other PR) was at an older state (AiFix.stale). */
+export function aiFixStale(prId: number): AiFix {
+  const b = aiFixBuilt(prId);
+  return { ...b, session: { ...b.session!, live: false, resumable: true }, stale: { line: '#12 changed after this fix was built.' } };
+}
+
 /**
  * THE PUSH FOOTER's states of a finished fix ("Push when done" ticked): its automatic push on its way, landed,
  * or failed (Push stays).
@@ -2237,6 +2243,8 @@ export async function installMockApi(
     autoFixActive?: AutoFixActiveResponse;
     // THE FIX START QUEUE: the PR's fix waits for a free sandbox (cleared by Cancel).
     aiFixWaiting?: AiFixResponse['waiting'];
+    /** "Start now" refused (e.g. 429 from the rate limit): its status and body. */
+    aiFixStartNowRefusal?: { status: number; body: { error: string; message: string } };
   } = {},
 ): Promise<void> {
   // AI Fix on the workspace session: served only when a spec names it (`opts.aiFix`, null = no fix yet),
@@ -2952,7 +2960,7 @@ export async function installMockApi(
       if (path === '/api/pro/ai-fixes/auto-active') return json(route, opts.autoFixActive ?? ({ workspaceId: WORKSPACE.id, fixes: [] } satisfies AutoFixActiveResponse));
       // AI FIX (only when the spec asked for it): the tab's read, the CI-only picker, the session presses.
       if (aiFixOn) {
-        const prFix = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix(\/[a-z/]+)?$/);
+        const prFix = path.match(/^\/api\/pro\/prs\/(\d+)\/ai-fix(\/[a-z/-]+)?$/);
         if (prFix) {
           const prId = Number(prFix[1]);
           const rest = prFix[2] ?? '';
@@ -2990,6 +2998,14 @@ export async function installMockApi(
           if (rest === '/cancel') {
             aiFixWaiting = null;
             return json(route, { status: 'cancelled' });
+          }
+          // "Start now": a press waiting behind the same ticket's fix starts at once (the mock: it is built).
+          if (rest === '/start-now' && method === 'POST') {
+            if (opts.aiFixStartNowRefusal) return json(route, opts.aiFixStartNowRefusal.body, opts.aiFixStartNowRefusal.status);
+            if (aiFixWaiting?.blockedBy == null || aiFixWaiting.trigger !== 'manual') return json(route, { error: 'NotWaiting', message: 'This fix is not waiting any more.' }, 404);
+            aiFixWaiting = null;
+            aiFix = (opts.aiFixOnStart ?? aiFixBuilt)(prId);
+            return json(route, { fixId: aiFix.id, status: 'queued' }, 202);
           }
           if (rest === '/stream' || rest === '/status') return route.fulfill({ status: 200, contentType: 'text/event-stream', body: `data: ${JSON.stringify({ type: 'done', status: aiFix?.status ?? 'idle', fixId: aiFix?.id ?? null })}\n\n` });
         }

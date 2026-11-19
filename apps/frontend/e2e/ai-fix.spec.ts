@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { AiFix, AiFixPickerPreview, SandboxRuntimeStatus } from '@pierre-review/shared';
-import { AI_FIX_PREVIEW_MERGE, aiFixAutoPush, aiFixBuilt, aiFixLooping, aiFixMerged, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
+import { AI_FIX_PREVIEW_MERGE, aiFixAutoPush, aiFixBuilt, aiFixLooping, aiFixMerged, aiFixStale, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
 
 // AI FIX ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions; docs/FRONTEND.md § The AI Fix tab)
 // against the mocked API (mock-api.ts keeps the PR's fix per page). The picker stays; Start fix boots the
@@ -149,6 +149,12 @@ test.describe('AI Fix in the sandbox', () => {
     await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
   });
 
+  test('a fix built against an older state of the same ticket\'s other PR says so in one line and keeps Push', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixStale(PR_ID) });
+    await expect(page.getByTestId('ai-fix-push-line')).toHaveText('#12 changed after this fix was built.');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toBeVisible();
+  });
+
   test('a failed automatic push says why and keeps Push', async ({ page }) => {
     await openAiFix(page, { aiFix: aiFixAutoPush(PR_ID, 'failed') });
     await expect(page.getByTestId('ai-fix-push-line')).toHaveText('Automatic push failed: the branch moved since the fix was made.');
@@ -255,5 +261,51 @@ test.describe('The fix start queue', () => {
     await line.getByRole('button', { name: 'Cancel' }).click();
     await cancel;
     await expect(line).toHaveCount(0);
+  });
+
+  test('behind the fix of another PR of the same ticket: the tab says whose, and Start now starts it at once', async ({ page }) => {
+    await installMockApi(page, { aiFix: null, aiFixWaiting: { position: 1, queuedAt: new Date().toISOString(), trigger: 'manual', blockedBy: { prNumber: 12 } } });
+    const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
+    await page.route(
+      (u) => u.pathname.endsWith('/api/me'),
+      (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(me) }),
+    );
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=ai_fix`);
+    const line = page.getByTestId('ai-fix-waiting');
+    await expect(line).toContainText('Waiting for the fix of #12 (same ticket).');
+    const now = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith(`/api/pro/prs/${PR_ID}/ai-fix/start-now`));
+    await line.getByTestId('ai-fix-start-now').click();
+    await now;
+    await expect(line).toHaveCount(0);
+  });
+
+  test('a refused Start now says why and the fix keeps waiting', async ({ page }) => {
+    await installMockApi(page, {
+      aiFix: null,
+      aiFixWaiting: { position: 1, queuedAt: new Date().toISOString(), trigger: 'manual', blockedBy: { prNumber: 12 } },
+      aiFixStartNowRefusal: { status: 429, body: { error: 'RateLimited', message: 'Too many AI runs in a short time. Try again in a minute.' } },
+    });
+    const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
+    await page.route(
+      (u) => u.pathname.endsWith('/api/me'),
+      (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(me) }),
+    );
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=ai_fix`);
+    const line = page.getByTestId('ai-fix-waiting');
+    await line.getByTestId('ai-fix-start-now').click();
+    await expect(page.getByTestId('ai-fix-start-now-error')).toContainText('Too many AI runs');
+    await expect(line).toContainText('Waiting for the fix of #12 (same ticket).');
+  });
+
+  test('an auto fix waiting behind the same ticket gets no Start now', async ({ page }) => {
+    await installMockApi(page, { aiFix: null, aiFixWaiting: { position: 1, queuedAt: new Date().toISOString(), trigger: 'auto', blockedBy: { prNumber: 12 } } });
+    const me = { ...fixtures.ME_RESPONSE, ai: { ...fixtures.ME_RESPONSE.ai, enabled: true } };
+    await page.route(
+      (u) => u.pathname.endsWith('/api/me'),
+      (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(me) }),
+    );
+    await page.goto(`/app/?view=pr-detail:${PR_ID}&prTab=ai_fix`);
+    await expect(page.getByTestId('ai-fix-waiting')).toContainText('Waiting for the fix of #12 (same ticket).');
+    await expect(page.getByTestId('ai-fix-start-now')).toHaveCount(0);
   });
 });

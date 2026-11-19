@@ -2281,6 +2281,11 @@ export const aiFixes = sqliteTable(
     loopBaseSha: text('loop_base_sha'),
     loopReviewId: integer('loop_review_id'),
     loopFinishedAt: integer('loop_finished_at', { mode: 'timestamp' }),
+    // 0210 — THE SIBLING STATE the fix was built against (docs/SANDBOX.md § AI Fix sessions → Scope): JSON
+    // FixSiblingState[] (coding/ai-fix/sibling-stale.ts), one per open PR of the same ticket read at its head —
+    // its head SHA, the overlaid AI Fix (or null) and its patch hash, the sibling's built fix ids then. Written with
+    // each stored patch (never by a boot or Resume alone). Staleness is computed on read. NULL = no sibling was read.
+    siblingStateJson: text('sibling_state_json', { mode: 'json' }).$type<unknown[]>(),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),

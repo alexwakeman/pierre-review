@@ -183,6 +183,27 @@ export default function Page(): JSX.Element {
         on. See{' '}
         <DocLink to="security/ai-and-the-sandbox">AI and the sandbox</DocLink> for the full safety story.
       </p>
+      <H3 id="one-ticket-at-a-time">Pull requests of the same ticket</H3>
+      <p>
+        A fix reads the other open pull requests of its ticket that are in another repository. Fixes of those pull
+        requests take turns, so no fix works from another pull request&rsquo;s old code. While a fix of #12 runs, a fix
+        that reads #12 waits, and the tab says <Ui>Waiting for the fix of #12 (same ticket).</Ui> It starts by itself
+        when the fix of #12 is built, stopped or failed. <Ui>Start now</Ui> starts your fix at once, with #12 as it is
+        now. <Ui>Start fix</Ui> after <Ui>Plan first</Ui> waits the same way. Automatic fixes always wait.
+      </p>
+      <ul>
+        <li>
+          When the other pull request has a finished fix you have not pushed, the sandbox shows its repository with
+          that fix applied, read only. The session names it <Ui>PR #12&rsquo;s head plus its AI Fix not pushed yet</Ui>.
+          If that pull request changed since its fix was made, the fix is not applied, and the session says so.
+        </li>
+        <li>
+          When the other pull request changes after your fix is built, the tab says{' '}
+          <Ui>#12 changed after this fix was built.</Ui> A new fix of #12 built on top of yours does not count. The fix is
+          not pushed automatically then, and neither is a fix that builds on a fix of #12 that is not pushed yet.{' '}
+          <Ui>Push</Ui> still pushes it. Nothing runs again by itself.
+        </li>
+      </ul>
     </>
   );
 }

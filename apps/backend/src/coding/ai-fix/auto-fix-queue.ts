@@ -43,6 +43,7 @@ import {
   AUTO_FIX_QUEUE_REDECIDE,
   AUTO_FIX_REVIEW_WAIT_MS,
   autoReviewCappedLine,
+  ticketFixWaitLine,
   type AutoFixQueueReason,
   type AutoFixQueueState,
   type ClaudeAutoFixSkipReason,
@@ -172,7 +173,7 @@ export function _resetAutoFixQueueForTest(): void {
   inFlight.clear();
 }
 
-const TRANSIENT: ReadonlySet<AutoFixQueueReason> = new Set(['push_settling', 'sandbox_busy', 'over_budget', 'no_sandbox', 'fix_running', 'ci_running', 'ci_review', 'review_running', 'review_due']);
+const TRANSIENT: ReadonlySet<AutoFixQueueReason> = new Set(['push_settling', 'sandbox_busy', 'ticket_fix_running', 'over_budget', 'no_sandbox', 'fix_running', 'ci_running', 'ci_review', 'review_running', 'review_due']);
 const SKIP_REASON: Partial<Record<ClaudeAutoFixSkipReason, AutoFixQueueReason>> = {
   fix_in_progress: 'fix_running',
   fix_waiting: 'fix_waiting',
@@ -285,9 +286,20 @@ const ordinal = (n: number): string => `${n}${n % 100 >= 11 && n % 100 <= 13 ? '
 
 // THE FIX START QUEUE's place of a PR (registered by start-queue.ts's owner, the AI Fix manager, through the
 // same binding as the other facts; null when it is not waiting).
-let startPlace: (accountId: number, prId: number) => number | null = () => null;
-export function bindAutoFixStartPlace(fn: (accountId: number, prId: number) => number | null): void {
+let startPlace: (accountId: number, prId: number) => StartPlace | null = () => null;
+/** Where a PR's start waits: its place, and the PR number of the same ticket's running fix it waits for. */
+export interface StartPlace {
+  position: number;
+  blockedBy: number | null;
+}
+export function bindAutoFixStartPlace(fn: (accountId: number, prId: number) => StartPlace | null): void {
   startPlace = fn;
+}
+
+/** The queue state of a start waiting in THE FIX START QUEUE (a sandbox, or the same ticket's running fix). */
+function startPlaceWait(p: StartPlace): { reason: AutoFixQueueReason; line: string } {
+  if (p.blockedBy != null) return { reason: 'ticket_fix_running', line: ticketFixWaitLine(p.blockedBy) };
+  return { reason: 'sandbox_busy', line: `Waiting for a free sandbox (${ordinal(p.position)} in line).` };
 }
 
 /**
@@ -354,7 +366,10 @@ export async function evaluateAutoFix(
     if (running) return wait('fix_running', null);
     // 1¼. Its start already waits in THE FIX START QUEUE (start-queue.ts) for a free sandbox: say where.
     const inLine = startPlace(accountId, prId);
-    if (inLine != null) return put('waiting', 'sandbox_busy', { line: `Waiting for a free sandbox (${ordinal(inLine)} in line).` });
+    if (inLine != null) {
+      const w = startPlaceWait(inLine);
+      return put('waiting', w.reason, { line: w.line });
+    }
     // 1½. The last fix was PUSHED from this very head: the synced head has not caught up with the push yet.
     // Deciding now would read that head's review and CI causes again and fix them twice.
     if (last.pushedFrom === head) return wait('push_settling', null);
@@ -420,6 +435,12 @@ export async function evaluateAutoFix(
     const source = reviewId != null ? 'review' : 'ci';
     if (r.status === 'started') return put('started', null, { fixId: r.fixId ?? null, source });
     if (r.status === 'skipped' && r.reason != null) {
+      // The start went into THE FIX START QUEUE: say why it waits (a sandbox, or the same ticket's fix).
+      const placed = r.reason === 'sandbox_busy' ? startPlace(accountId, prId) : null;
+      if (placed != null) {
+        const w = startPlaceWait(placed);
+        return put('waiting', w.reason, { line: w.line });
+      }
       const reason = SKIP_REASON[r.reason] ?? 'error';
       return TRANSIENT.has(reason) ? wait(reason, null) : put('idle', reason, { source });
     }

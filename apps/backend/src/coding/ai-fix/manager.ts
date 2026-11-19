@@ -34,7 +34,8 @@ import { preflightFor } from '../../ai/run-choice.js';
 import { automaticRunAllowed } from '../../review/budget-gate.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
 import { liveSession, NO_RUNTIME_LINE, onSessionSlotFreed, reclaimIdleFixSession, sessionDeps, sessionSlotFree, type SessionActionResult } from '../../sandbox/session/manager.js';
-import { bindStartQueue, cancelQueuedStart, enqueueStart, pumpStartQueue, startWaitingFor } from './start-queue.js';
+import { bindStartQueue, cancelQueuedStart, enqueueStart, pumpStartQueue, queuedPlaceOf, sameTicketWaiting, startQueuedNow, startWaitingFor, type QueuedStart } from './start-queue.js';
+import { bindTicketLine, bindTicketLineFix, releaseTicketLine, tryHoldTicketLine } from './ticket-line.js';
 import {
   capFixDiff,
   claimFixPr,
@@ -52,6 +53,9 @@ import {
   startFixBuild,
   startFixSession,
   stopFixSession,
+  ticketSiblingPrIds,
+  lineReadsFor,
+  fixLineFacts,
   type FixDiscardResult,
 } from '../../sandbox/session/fix.js';
 import type { SessionKey } from '../../sandbox/session/subject.js';
@@ -327,8 +331,9 @@ export type StartFixResult =
   // An UNATTENDED start over the AI spend budget (`automaticRunAllowed`, asked once more here so no
   // automatic caller can skip it). A reader's click never gets it.
   | { status: 'over_budget' }
-  // THE FIX START QUEUE (start-queue.ts): every slot was taken and the start asked to wait in line.
-  | { status: 'waiting'; position: number };
+  // THE FIX START QUEUE (start-queue.ts): every slot was taken and the start asked to wait in line — or a fix
+  // of another PR of the same ticket runs (`blockedBy`: its PR number; ticket-line.ts), whatever was asked.
+  | { status: 'waiting'; position: number; blockedBy?: number | null };
 
 export interface StartFixInput {
   accountId: number;
@@ -369,6 +374,9 @@ export interface StartFixInput {
   // reference docs), whatever Settings → Sandbox → "AI Fix reads every repository" says (docs/SANDBOX.md § AI Fix
   // sessions → Scope).
   narrow?: boolean;
+  // "START NOW" (a reader's press that waits behind a fix of the same ticket): start past the per-ticket line,
+  // against what the siblings have now (ticket-line.ts). Never set by an automatic caller.
+  skipTicketLine?: boolean;
 }
 
 export function startFix(ctx: AgentContext, input: StartFixInput): Promise<StartFixResult> {
@@ -382,6 +390,18 @@ export function startFix(ctx: AgentContext, input: StartFixInput): Promise<Start
  */
 export function startPlan(ctx: AgentContext, input: StartFixInput): Promise<StartFixResult> {
   return startRun(ctx, { ...input, trigger: 'manual' }, 'plan');
+}
+
+/**
+ * THE PER-TICKET LINE's decision for one start (ticket-line.ts), SYNCHRONOUS (the caller looked `reads` and
+ * `sameTicket` up first): WAIT (in line behind a same-ticket entry already waiting — a direct start never jumps it —
+ * or behind the running fix of a PR it reads: `wait` = that PR's number, else null) or HOLD (the token). A start the
+ * queue itself runs (`queuedPlaceOf`) and a "Start now" skip the no-jumping rule; "Start now" skips the check too.
+ */
+function ticketLineGate(a: { accountId: number; prId: number; number: number; reads: readonly number[]; sameTicket: readonly number[]; skip: boolean }): { wait: number | null } | { token: number } {
+  if (!a.skip && queuedPlaceOf(a.accountId, a.prId) == null && sameTicketWaiting(a.accountId, a.prId, a.sameTicket)) return { wait: null };
+  const r = tryHoldTicketLine({ accountId: a.accountId, prId: a.prId, number: a.number, reads: a.reads }, { skip: a.skip });
+  return 'blocked' in r ? { wait: r.blocked.number } : { token: r.token };
 }
 
 async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | 'plan'): Promise<StartFixResult> {
@@ -414,11 +434,39 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
   let slot: SessionKey | null = null;
   // The row, once written: a throw before its session registers must not leave it `running` for ever.
   let insertedId: number | null = null;
+  // THE PER-TICKET LINE (ticket-line.ts): this start's hold, once it has one (a bail releases THIS token only).
+  let lineToken: number | null = null;
   const bail = <T extends StartFixResult>(r: T): T => {
     if (slot) releaseFixSlot(slot);
     releaseFixPr(prId);
+    if (lineToken != null) {
+      const token = lineToken;
+      lineToken = null;
+      releaseTicketLine(prId, { token });
+    }
     return r;
   };
+  // The start's entry in THE FIX START QUEUE: a reader's press runs this same start again at its turn (the seed
+  // rebuilt then) — or at once past the ticket line on "Start now"; an auto fix asks the auto fix queue again. A
+  // start the queue itself ran that has to wait again KEEPS ITS PLACE (`queuedPlaceOf`).
+  let reads: number[] = [];
+  let sameTicket: number[] = [];
+  const queueEntry = (): Omit<QueuedStart, 'queuedAt'> & { queuedAt: number | null } => ({
+    accountId,
+    prId,
+    trigger,
+    reads,
+    sameTicket,
+    queuedAt: queuedPlaceOf(accountId, prId),
+    ...(trigger === 'manual'
+      ? {
+          ...(input.skipTicketLine === true ? { skipLine: true } : {}),
+          meta: { include: input.selection?.kind === 'keys', ciOnly: input.seed === 'review' && input.sourceReviewId == null },
+          run: () => startRun(ctx, { ...input, queueIfBusy: false }, mode),
+          runNow: () => startRun(ctx, { ...input, queueIfBusy: true, skipTicketLine: true }, mode),
+        }
+      : {}),
+  });
   try {
     const pr = await getFixPrContext(ctx, accountId, prId);
     if (!pr) return bail({ status: 'not_found' });
@@ -461,6 +509,32 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     // THE MERGE goes into the session only when it was SHOWN to the agent (picked, or asked for).
     const wantsMerge = (reviewItems ?? []).some((i) => i.kind === 'merge_conflicts' && i.included);
 
+    // The whole workspace of the PR's repository (its Settings → Sandbox, its members). DB only.
+    const q = await import('../../db/queries.js');
+    const repoScope = await q.workspaceScopeForRepo(accountId, pr.repoId);
+    if (!repoScope) return bail({ status: 'not_found' });
+    // `members: 'all'`: EXTERNAL repos are cloned too (docs/DATA-MODEL.md § External repos).
+    const scope = await q.resolveWorkspaceScope(accountId, repoScope.workspaceId, null, { members: 'all' });
+
+    // ONE TICKET AT A TIME (ticket-line.ts): while a fix of a PR of this ticket that this fix would READ at its
+    // head runs, this one WAITS in the start queue (whatever `queueIfBusy` says) and starts when that fix stops
+    // running, reading its built work. A DIRECT start never jumps an entry of the same ticket already waiting.
+    // Checked and held in ONE tick after the lookups. Dependency automation's narrow fix is exempt.
+    if (input.narrow !== true) {
+      [sameTicket, reads] = await Promise.all([
+        ticketSiblingPrIds(ctx, accountId, prId),
+        lineReadsFor(ctx, accountId, { prId, prRepoId: pr.repoId, workspaceId: scope.workspaceId, memberRepoIds: scope.repoIds }),
+      ]);
+      const gate = ticketLineGate({ accountId, prId, number: pr.number, reads, sameTicket, skip: input.skipTicketLine === true });
+      if ('wait' in gate) {
+        bail({ status: 'build_busy' });
+        const place = enqueueStart(queueEntry());
+        if (place != null) return { status: 'waiting', position: place.position, blockedBy: place.blockedBy?.prNumber ?? gate.wait };
+        return { status: 'already_running' };
+      }
+      lineToken = gate.token;
+    }
+
     // THE SANDBOX: a runtime, a free session, and (a fix builds at once) the ONE build slot — reserved in
     // the tick of the check and held through the boot (its first turn starts the moment the agent is ready).
     const detected = await sessionDeps().runtime().detect();
@@ -472,12 +546,8 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
         bail({ status: 'build_busy' });
         // A reader's press re-runs this same start at its turn (the seed rebuilt then); an auto fix asks the
         // auto fix queue again (it re-reads the PR's work at its current head).
-        const place = enqueueStart(
-          trigger === 'manual'
-            ? { accountId, prId, trigger, run: () => startRun(ctx, { ...input, queueIfBusy: false }, mode) }
-            : { accountId, prId, trigger },
-        );
-        if (place != null) return { status: 'waiting', position: place.position };
+        const place = enqueueStart(queueEntry());
+        if (place != null) return { status: 'waiting', position: place.position, blockedBy: place.blockedBy?.prNumber ?? null };
         return reserved.reason === 'too_many' ? { status: 'too_many', message: reserved.message } : { status: 'build_busy' };
       }
       return bail(reserved.reason === 'too_many' ? { status: 'too_many', message: reserved.message } : { status: 'build_busy' });
@@ -488,13 +558,6 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     if (!head.headSha) return bail({ status: 'no_head' });
     const rawDiff = await ctx.github.fetchPrDiff(accountId, pr.owner, pr.name, pr.number).catch(() => '');
     const diff = capFixDiff(rawDiff);
-
-    // The whole workspace of the PR's repository (its Settings → Sandbox, its members).
-    const q = await import('../../db/queries.js');
-    const repoScope = await q.workspaceScopeForRepo(accountId, pr.repoId);
-    if (!repoScope) return bail({ status: 'not_found' });
-    // `members: 'all'`: EXTERNAL repos are cloned too (docs/DATA-MODEL.md § External repos).
-    const scope = await q.resolveWorkspaceScope(accountId, repoScope.workspaceId, null, { members: 'all' });
 
     const choice = resolveSandboxAgentChoice({ provider, model: input.model, surface: 'fix' });
     const nonce = pickReviewNonce([task.text, pr.title, pr.body ?? '', rawDiff]);
@@ -518,6 +581,8 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
     await markFixRanOn(ctx, fixId, { provider: choice.provider, model: choice.model, effort: choice.effort });
     rekeyFixSlot(placeholder, fixKey(fixId));
     slot = fixKey(fixId);
+    // From here the session owns the ticket line (fix.ts releases it when the fix stops running): the hold is bound
+    // to the fix id inside `startFixSession`, in this tick.
     startFixSession(ctx, {
       fixId,
       accountId,
@@ -537,6 +602,7 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
       },
       merge: wantsMerge ? { baseRef: head.baseRef || pr.baseRefName || pr.defaultBranch || 'main' } : null,
       ...(input.narrow === true ? { narrow: true } : {}),
+      ticketLineToken: lineToken,
       choice,
       planFirst: mode === 'plan',
       unattended,
@@ -546,11 +612,15 @@ async function startRun(ctx: AgentContext, input: StartFixInput, mode: 'fix' | '
       diff,
       nonce,
     });
+    lineToken = null;
     return { status: 'queued', fixId };
   } catch (err) {
     ctx.log.warn({ err }, 'ai-fix start failed');
     // A registered session owns its claim and slot from here (its close releases them).
     if (insertedId != null && liveSession(fixKey(insertedId)) != null) return { status: 'queued', fixId: insertedId };
+    // The session never registered: its hold of the ticket line goes with the start (`bail` below releases a
+    // start's token; a hold already handed to the session goes by the fix id).
+    if (insertedId != null) releaseTicketLine(prId, { fixId: insertedId });
     if (insertedId != null) {
       const failedId = insertedId;
       await updateFixSession(ctx, accountId, failedId, {
@@ -580,13 +650,54 @@ export const sendPlanMessage = sendFixSessionMessage;
  * "Start fix" (Plan first): the SAME session switches to build mode and fixes, following the plan it
  * agreed with the reader. A plan of the removed shell-less flow cannot be built any more.
  */
-export async function approvePlan(ctx: AgentContext, input: { accountId: number; fixId: number; text?: string | null }): Promise<FixActionResult> {
+export type ApprovePlanResult = FixActionResult | { status: 'waiting'; position: number; blockedBy: number | null };
+
+export async function approvePlan(ctx: AgentContext, input: { accountId: number; fixId: number; text?: string | null }): Promise<ApprovePlanResult> {
   const row = await getFixById(ctx, input.accountId, input.fixId);
   if (!row) return { status: 'not_found' };
   if (row.sessionPhase == null) {
     return { status: 'not_ready', message: 'This plan was made before AI Fix moved into the sandbox. Discard it and start a new fix.' };
   }
-  return startFixBuild(ctx, input.accountId, input.fixId, input.text ?? null);
+  return approveWithLine(ctx, { accountId: input.accountId, fixId: input.fixId, text: input.text ?? null }, false);
+}
+
+/**
+ * PLAN FIRST'S BUILD TAKES THE PER-TICKET LINE (ticket-line.ts): the plan turn released it; Start fix asks again,
+ * exactly like a press — a running fix of a PR it reads (or a same-ticket entry already waiting) ⇒ it WAITS in the
+ * start queue with "Waiting for the fix of #12 (same ticket)." and Start now. The hold is bound to the fix BEFORE
+ * the build starts, and released at once when the build does not start.
+ */
+async function approveWithLine(ctx: AgentContext, a: { accountId: number; fixId: number; text: string | null }, skip: boolean): Promise<ApprovePlanResult> {
+  const f = fixLineFacts(a.fixId, a.accountId);
+  if (f == null || f.narrow) return startFixBuild(ctx, a.accountId, a.fixId, a.text);
+  const [sameTicket, reads] = await Promise.all([
+    ticketSiblingPrIds(ctx, a.accountId, f.prId),
+    lineReadsFor(ctx, a.accountId, { prId: f.prId, prRepoId: f.prRepoId, workspaceId: f.workspaceId, loadedRepoIds: f.loadedRepoIds }),
+  ]);
+  const gate = ticketLineGate({ accountId: a.accountId, prId: f.prId, number: f.number, reads, sameTicket, skip });
+  if ('wait' in gate) {
+    const asStart = async (r: ApprovePlanResult): Promise<{ status: string; fixId?: number }> => (r.status === 'queued' ? { status: 'queued', fixId: r.id } : r);
+    const place = enqueueStart({
+      accountId: a.accountId,
+      prId: f.prId,
+      trigger: 'manual',
+      reads,
+      sameTicket,
+      queuedAt: queuedPlaceOf(a.accountId, f.prId),
+      ...(skip ? { skipLine: true } : {}),
+      run: async () => asStart(await approveWithLine(ctx, a, false)),
+      runNow: async () => asStart(await approveWithLine(ctx, a, true)),
+    });
+    if (place == null) return { status: 'build_busy' };
+    return { status: 'waiting', position: place.position, blockedBy: place.blockedBy?.prNumber ?? gate.wait };
+  }
+  bindTicketLineFix(f.prId, gate.token, a.fixId);
+  const res = await startFixBuild(ctx, a.accountId, a.fixId, a.text).catch((err: unknown) => {
+    releaseTicketLine(f.prId, { token: gate.token });
+    throw err;
+  });
+  if (res.status !== 'queued') releaseTicketLine(f.prId, { token: gate.token });
+  return res;
 }
 
 /** Discard (and the old "Discard plan"): the session closes; nothing is pushed. */
@@ -606,6 +717,20 @@ export async function requestFixCancel(ctx: AgentContext, accountId: number, prI
   return stopFixSession(ctx, accountId, prId);
 }
 
+/**
+ * "START NOW": a reader's press waiting behind the fix of another PR of the same ticket starts at once, against
+ * what the siblings have now (start-queue.ts `startQueuedNow`). null ⇒ nothing of that kind waits for this PR.
+ */
+export async function startFixNow(
+  accountId: number,
+  prId: number,
+): Promise<{ result: StartFixResult | FixActionResult; meta: { include: boolean; ciOnly: boolean } | null } | { refused: 'auto'; blockedBy: number | null } | null> {
+  const r = await startQueuedNow(accountId, prId);
+  if (r == null || 'refused' in r) return r;
+  const { meta, ...result } = r;
+  return { result: result as StartFixResult | FixActionResult, meta: meta ?? null };
+}
+
 /** A fix session holds the PR (starting, booting, or open — a Plan first waiting for Start fix too). */
 export function isFixRunning(prId: number): boolean {
   return fixHoldsPr(prId);
@@ -615,8 +740,13 @@ export function isFixRunning(prId: number): boolean {
 bindAutoFixQueueFacts({ fixRunning: isFixRunning });
 // THE FIX START QUEUE: is a build slot free now, and start what waits whenever one frees.
 bindStartQueue({ slotFree: () => sessionSlotFree({ build: true }).ok, reclaim: reclaimIdleFixSession });
-bindAutoFixStartPlace((a, p) => startWaitingFor(a, p)?.position ?? null);
+bindAutoFixStartPlace((a, p) => {
+  const w = startWaitingFor(a, p);
+  return w == null ? null : { position: w.position, blockedBy: w.blockedBy?.prNumber ?? null };
+});
 onSessionSlotFreed(pumpStartQueue);
+// THE PER-TICKET LINE: a fix of a ticket stopped running ⇒ the fixes waiting behind it may start.
+bindTicketLine({ onReleased: pumpStartQueue });
 
 export async function getFixStatus(ctx: AgentContext, accountId: number, prId: number): Promise<AiFixStatusResponse> {
   // The DB lookup goes FIRST, and it is what establishes ownership: the in-memory claims are keyed by
@@ -648,6 +778,8 @@ export async function reconcileFixesOnStartup(ctx: AgentContext): Promise<void> 
     const loop = await import('./loop.js');
     const { registerLocalRefKeeper } = await import('../../review/local-refs.js');
     loop.registerFixLoopRefKeeper(ctx, registerLocalRefKeeper);
+    // THE SIBLING OVERLAY's local commits (fix.ts `bases`): kept while the overlaid fix is built and unpushed.
+    (await import('../../sandbox/session/fix.js')).registerSiblingOverlayRefKeeper(ctx, registerLocalRefKeeper);
     await loop.reconcileFixLoopsOnStartup(ctx).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: review loop reconcile failed'));
     // ⚠ Sessions FIRST: the legacy reconcile below reads only `session_phase IS NULL` rows.
     const s = await reconcileFixSessionsOnStartup(ctx);

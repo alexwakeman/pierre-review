@@ -436,6 +436,29 @@ export async function prepHeadWorktree(
 }
 
 /**
+ * A LOCAL COMMIT (a ref under `refs/pierre/local/`, pointing at `sha`) as a sandbox base: checked under the repo
+ * lock, NEVER fetched, and `pinRef` (the session's own base ref) pointed at it so it outlives the local ref. No
+ * worktree. The AI Fix sibling overlay (sandbox/workspace/store.ts `resolveBase`).
+ */
+export async function resolveLocalCommit(owner: string, name: string, h: { localRef: string; sha: string; pinRef?: string }): Promise<{ repoCloneDir: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, h);
+    if (h.pinRef) await git(['-C', dir, 'update-ref', h.pinRef, h.sha]);
+    return { repoCloneDir: dir, sha: h.sha };
+  });
+}
+
+/** `resolveLocalCommit` with a detached worktree at the commit (its blobs hydrated); the caller removes it. */
+export async function prepLocalCommitWorktree(owner: string, name: string, h: { localRef: string; sha: string; pinRef?: string }): Promise<{ repoCloneDir: string; worktreePath: string; sha: string }> {
+  return withRepoLock(`${owner}/${name}`, async () => {
+    const dir = await localHeadLocked(owner, name, h);
+    if (h.pinRef) await git(['-C', dir, 'update-ref', h.pinRef, h.sha]);
+    const worktreePath = await addWorktree(dir, h.sha, { owner, name });
+    return { repoCloneDir: dir, worktreePath, sha: h.sha };
+  });
+}
+
+/**
  * `prepBranchWorktree` WITHOUT the worktree: the same clone, fetch and `pinRef` rules under the same
  * repo lock, so the commit is known (and pinned) before anything reads its files. The sandbox's repo
  * store uses it to learn the base commit, then copies the objects from the reader's own clone when that

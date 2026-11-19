@@ -15,12 +15,19 @@
 //     reader's fix session stays open for follow-ups. When every sandbox is open and a fix waits, the
 //     longest-idle FIX session (idle ≥ LIMN_SANDBOX_RECLAIM_IDLE_SECONDS, 60 s) is closed with its work kept
 //     (Resume goes on) — never a story session; nothing idle yet ⇒ look again every START_QUEUE_RETRY_MS.
+//   • ONE TICKET AT A TIME (ticket-line.ts). A fix whose ticket has a fix RUNNING of a PR it reads at its head
+//     waits here too, even with a slot free: the pump SKIPS it (those behind it may start) and tries it again when
+//     that fix leaves running (`releaseTicketLine` pumps). A DIRECT start of a PR whose ticket already has an entry
+//     waiting goes in line behind it (`sameTicketWaiting`); the queue's own starts (`queuedPlaceOf`) keep their
+//     place when they have to wait again. The order among waiting fixes is the same. A reader's "Start now"
+//     (`startQueuedNow`) starts a press at once against what the siblings have now; auto fixes always wait.
 //   • IN MEMORY. A restart drops the line: an auto fix is asked again by the auto fix queue's sweep within
 //     a minute; a reader presses Start again (the AI Fix tab no longer says it waits).
 // Positions are pushed to the PR's fix stream (`waiting`), so the AI Fix tab and the toast follow them.
 import type { AiFixTrigger, AiFixWaiting } from '@pierre-review/shared';
 import type { AgentContext } from '../../review/agent-context.js';
 import { emitFixStream } from './stream.js';
+import { ticketLineBlocker } from './ticket-line.js';
 
 export const FIX_START_QUEUE_MAX = 50;
 
@@ -31,6 +38,47 @@ export interface QueuedStart {
   queuedAt: number;
   /** A reader's press: the start to run again (the manager's own input). An auto entry has none. */
   run?: () => Promise<{ status: string }>;
+  /** A reader's press: the same start, past the per-ticket line ("Start now"). */
+  runNow?: () => Promise<{ status: string }>;
+  /** The PRs of its ticket this fix would READ at their head (ticket-line.ts). Absent ⇒ never ticket-blocked. */
+  reads?: readonly number[];
+  /** Every other PR of its ticket: a direct start of one of them goes in line behind this entry. */
+  sameTicket?: readonly number[];
+  /** A "Start now" start that lost the race for a slot: it waits for the slot only, never for the ticket. */
+  skipLine?: boolean;
+  /** The start route's words for its refusals (Start now answers with them). */
+  meta?: { include: boolean; ciOnly: boolean };
+}
+
+/** `${accountId}:${prId}` → the place (queuedAt) of an entry whose start the queue runs NOW (pump, Start now). */
+const runningFromQueue = new Map<string, number>();
+const keyOf = (accountId: number, prId: number): string => `${accountId}:${prId}`;
+
+/**
+ * Is this start run BY THE QUEUE (the pump or Start now)? Its place (queuedAt) then, so a start that has to wait
+ * again keeps it; null for a direct start (a press, the auto sweep).
+ */
+export function queuedPlaceOf(accountId: number, prId: number): number | null {
+  return runningFromQueue.get(keyOf(accountId, prId)) ?? null;
+}
+
+/**
+ * NO JUMPING THE LINE: does an entry of the same ticket already wait (either side's ticket list)? A DIRECT start then
+ * goes in line behind it (presses first, oldest first) instead of racing for the ticket line. Pure read.
+ */
+export function sameTicketWaiting(accountId: number, prId: number, sameTicket: readonly number[]): boolean {
+  const mine = new Set(sameTicket);
+  return queue.some((e) => e.accountId === accountId && e.prId !== prId && (mine.has(e.prId) || (e.sameTicket ?? []).includes(prId)));
+}
+
+async function runFromQueue<T>(e: QueuedStart, fn: () => Promise<T>): Promise<T> {
+  const k = keyOf(e.accountId, e.prId);
+  runningFromQueue.set(k, e.queuedAt);
+  try {
+    return await fn();
+  } finally {
+    if (runningFromQueue.get(k) === e.queuedAt) runningFromQueue.delete(k);
+  }
 }
 
 const queue: QueuedStart[] = [];
@@ -57,13 +105,23 @@ function sorted(): QueuedStart[] {
   return [...queue].sort((a, b) => rank(a) - rank(b) || a.queuedAt - b.queuedAt);
 }
 
+/** The running fix of the same ticket this entry waits for, or null (ticket-line.ts). */
+function blockerOf(e: QueuedStart): { prId: number; number: number } | null {
+  if (e.skipLine === true || e.reads == null || e.reads.length === 0) return null;
+  return ticketLineBlocker(e.accountId, e.prId, e.reads);
+}
+
+function waitingOf(e: QueuedStart, position: number): AiFixWaiting {
+  const b = blockerOf(e);
+  return { position, queuedAt: new Date(e.queuedAt).toISOString(), trigger: e.trigger, blockedBy: b != null ? { prNumber: b.number } : null };
+}
+
 /** The PR's place in line (1 = next), or null. Account-checked. */
 export function startWaitingFor(accountId: number, prId: number): AiFixWaiting | null {
   const list = sorted();
   const i = list.findIndex((e) => e.prId === prId && e.accountId === accountId);
   if (i < 0) return null;
-  const e = list[i]!;
-  return { position: i + 1, queuedAt: new Date(e.queuedAt).toISOString(), trigger: e.trigger };
+  return waitingOf(list[i]!, i + 1);
 }
 
 export function startQueueLength(): number {
@@ -78,31 +136,59 @@ function announce(): void {
       status: 'queued',
       fixId: null,
       progress: null,
-      waiting: { position: i + 1, queuedAt: new Date(e.queuedAt).toISOString(), trigger: e.trigger },
+      waiting: waitingOf(e, i + 1),
     });
   }
 }
 
 /**
  * Put a start in line. A reader's press replaces the PR's waiting auto entry (keeping its place); a
- * second entry of the same kind replaces the first's `run` (the newest press wins). Returns the place,
- * or null when the line is full.
+ * second entry of the same kind replaces the first's `run` (the newest press wins). An entry the queue itself
+ * ran that has to wait again passes its `queuedAt` and KEEPS ITS PLACE. Returns the place, or null when the
+ * line is full.
  */
-export function enqueueStart(e: Omit<QueuedStart, 'queuedAt'>, nowMs: number = Date.now()): AiFixWaiting | null {
+export function enqueueStart(e: Omit<QueuedStart, 'queuedAt'> & { queuedAt?: number | null }, nowMs: number = Date.now()): AiFixWaiting | null {
+  const placeAt = e.queuedAt ?? nowMs;
   const at = queue.findIndex((x) => x.prId === e.prId && x.accountId === e.accountId);
   if (at >= 0) {
     const prev = queue[at]!;
     // An auto entry never replaces a reader's.
     if (prev.trigger === 'manual' && e.trigger === 'auto') return startWaitingFor(e.accountId, e.prId);
-    queue[at] = { ...e, queuedAt: prev.queuedAt };
+    queue[at] = { ...e, queuedAt: Math.min(prev.queuedAt, placeAt) };
   } else {
     if (queue.length >= FIX_START_QUEUE_MAX) return null;
-    queue.push({ ...e, queuedAt: nowMs });
+    queue.push({ ...e, queuedAt: placeAt });
   }
   announce();
   // A slot may already be free (a race lost by a hair): try now.
   pumpStartQueue();
   return startWaitingFor(e.accountId, e.prId);
+}
+
+/**
+ * "START NOW" (a reader's press waiting behind a fix of the same ticket): run it at once against what the
+ * siblings have now. Only a press: an auto fix always waits (`{refused: 'auto'}`). null when nothing waits for
+ * this PR; otherwise the start's own answer (it may still wait for a free sandbox — then for the slot only, and
+ * in its old place) and the start route's words.
+ */
+export async function startQueuedNow(
+  accountId: number,
+  prId: number,
+): Promise<{ status: string; meta: QueuedStart['meta'] | null } | { refused: 'auto'; blockedBy: number | null } | null> {
+  const at = queue.findIndex((x) => x.prId === prId && x.accountId === accountId);
+  const e = at >= 0 ? queue[at]! : null;
+  if (e == null) return null;
+  if (e.trigger !== 'manual' || e.runNow == null) return { refused: 'auto', blockedBy: blockerOf(e)?.number ?? null };
+  queue.splice(at, 1);
+  announce();
+  let out: { status: string };
+  try {
+    out = await runFromQueue(e, e.runNow);
+  } catch {
+    out = { status: 'failed' };
+  }
+  if (out.status !== 'queued' && out.status !== 'waiting') emitFixStream(prId, { type: 'done', status: 'idle', fixId: null });
+  return { ...out, meta: e.meta ?? null };
 }
 
 /** Drop a PR's waiting start (the reader's Cancel). True when there was one. */
@@ -129,16 +215,23 @@ export function pumpStartQueue(): void {
   again = false;
   void (async () => {
     try {
-      while (queue.length > 0 && slotFree()) {
-        const next = sorted()[0]!;
+      // Each entry is tried at most once per pass: a start that finds itself ticket-blocked after all (its
+      // siblings changed meanwhile) goes back in line and must not be picked again in the same pass.
+      const tried = new Set<QueuedStart>();
+      const ready = (): QueuedStart | undefined => sorted().find((e) => !tried.has(e) && blockerOf(e) == null);
+      for (let next = ready(); next != null && slotFree(); next = ready()) {
+        tried.add(next);
         queue.splice(queue.indexOf(next), 1);
         let status = 'failed';
         try {
-          if (next.run) status = (await next.run()).status;
+          const cur = next;
+          if (cur.run) status = (await runFromQueue(cur, cur.run)).status;
           else if (pumpCtx) {
+            const ctx = pumpCtx;
             const { evaluateAutoFix } = await import('./auto-fix-queue.js');
-            const s = await evaluateAutoFix(pumpCtx, { accountId: next.accountId, prId: next.prId, cause: 'sweep' });
-            status = s?.status === 'started' ? 'queued' : s?.reason === 'sandbox_busy' ? 'waiting' : 'ended';
+            const s = await runFromQueue(cur, () => evaluateAutoFix(ctx, { accountId: cur.accountId, prId: cur.prId, cause: 'sweep' }));
+            // Back in line (a sandbox, or the same ticket's running fix): it waits — never "ended".
+            status = s?.status === 'started' ? 'queued' : s?.reason === 'sandbox_busy' || s?.reason === 'ticket_fix_running' ? 'waiting' : 'ended';
           }
         } catch {
           status = 'failed';
@@ -148,12 +241,15 @@ export function pumpStartQueue(): void {
           queue.unshift(next);
           break;
         }
+        // Re-queued by its own start (waiting again): the new entry is a new object; skip it this pass too.
+        for (const e of queue) if (e.prId === next.prId && e.accountId === next.accountId) tried.add(e);
         // Started (its own events follow), or it waits again (the start put it back), or nothing to do now.
         if (status !== 'queued' && status !== 'waiting') emitFixStream(next.prId, { type: 'done', status: 'idle', fixId: null });
       }
       // Still waiting and no slot: an idle fix session may make room (its close frees a slot and pumps
-      // again); otherwise look again shortly.
-      if (queue.length > 0 && !slotFree()) {
+      // again); otherwise look again shortly. A ticket-blocked entry waits for its sibling's fix instead (the
+      // release pumps), so only an entry that could start counts here.
+      if (queue.some((e) => blockerOf(e) == null) && !slotFree()) {
         const freed = await reclaim().catch(() => false);
         if (!freed && retry == null) {
           retry = setTimeout(() => {
@@ -182,4 +278,5 @@ export function _resetStartQueueForTest(): void {
   if (retry) clearTimeout(retry);
   retry = null;
   reclaim = async () => false;
+  runningFromQueue.clear();
 }

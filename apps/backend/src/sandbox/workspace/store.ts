@@ -240,14 +240,21 @@ const remoteRefOf = (req: RepoBaseRequest): string => req.remoteRef ?? (req.base
 
 export const defaultStoreSeams: StoreSeams = {
   async resolveBase(req) {
-    const { resolveBranchCommit } = await import('../../review/clone-manager.js');
+    const { resolveBranchCommit, resolveLocalCommit } = await import('../../review/clone-manager.js');
+    if (req.localRef != null) {
+      if (req.baseSha == null) throw new Error('A local commit needs its id.');
+      return { sha: (await resolveLocalCommit(req.owner, req.name, { localRef: req.localRef, sha: req.baseSha, pinRef: req.pinRef })).sha };
+    }
     const r = await resolveBranchCommit(req.owner, req.name, { remoteRef: remoteRefOf(req), destRef: 'refs/pierre/sandbox-base', sha: req.baseSha, pinRef: req.pinRef });
     return { sha: r.sha };
   },
   checkLocal: checkLocalSource,
   async hydrateCache(req, sha) {
-    const { prepBranchWorktree, removeWorktreeLocked } = await import('../../review/clone-manager.js');
-    const wt = await prepBranchWorktree(req.owner, req.name, { remoteRef: remoteRefOf(req), destRef: 'refs/pierre/sandbox-base', sha, pinRef: req.pinRef });
+    const { prepBranchWorktree, prepLocalCommitWorktree, removeWorktreeLocked } = await import('../../review/clone-manager.js');
+    const wt =
+      req.localRef != null
+        ? await prepLocalCommitWorktree(req.owner, req.name, { localRef: req.localRef, sha, pinRef: req.pinRef })
+        : await prepBranchWorktree(req.owner, req.name, { remoteRef: remoteRefOf(req), destRef: 'refs/pierre/sandbox-base', sha, pinRef: req.pinRef });
     const cleanup = (): Promise<void> => removeWorktreeLocked(req.owner, req.name, wt.repoCloneDir, wt.worktreePath).catch(() => {});
     try {
       return { gitDir: await gitDirOf(wt.repoCloneDir), cleanup };
@@ -311,7 +318,9 @@ export async function mirrorOneViaStore(a: {
       const again = await cloneFromStore(a.runtime, a.container, a.path, a.branch, sha, dir);
       if (again !== 'need') return { source: 'store', localSkipped: null };
       let localSkipped: string | null = null;
-      for (const p of a.localClones) {
+      // A LOCAL commit (an AI Fix's sibling overlay) is only in Ensemble's own clone cache: the reader's clone is
+      // never asked for it.
+      for (const p of a.req.localRef != null ? [] : a.localClones) {
         const c = await a.seams.checkLocal(p, sha);
         if (!c.ok) {
           localSkipped ??= c.reason;

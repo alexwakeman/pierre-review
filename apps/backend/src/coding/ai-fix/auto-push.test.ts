@@ -241,6 +241,14 @@ describe('push when done: the hold rule (pure)', () => {
     expect(mod.pushWhenDoneHold({ ...base, changeReport: null }, { hasWork: true, own: true })).toEqual({ hold: 'no_report' });
     expect(mod.pushWhenDoneHold({ ...base, changeReport: '{not json' }, { hasWork: true, own: true })).toEqual({ hold: 'no_report' });
     expect(mod.pushWhenDoneHold(base, { hasWork: true, own: false })).toEqual({ hold: 'not_own' });
+    // STALE (sibling-stale.ts): another PR of the ticket changed after the fix was built — it waits for Push.
+    const st = mod.pushWhenDoneHold(base, { hasWork: true, own: true, stale: 12 });
+    expect(st).toEqual({ hold: 'stale', count: 12 });
+    expect(mod.pushWhenDoneHoldLine(st)).toBe('Not pushed: #12 changed after this fix was built. Check it, then press Push.');
+    // BUILT ON A SIBLING'S UNPUSHED FIX: it waits for Push too (stale wins when both).
+    const ou = mod.pushWhenDoneHold(base, { hasWork: true, own: true, overlayUnpushed: 12 });
+    expect(mod.pushWhenDoneHoldLine(ou)).toBe("Not pushed: it builds on #12's AI Fix, which is not pushed yet.");
+    expect(mod.pushWhenDoneHold(base, { hasWork: true, own: true, stale: 13, overlayUnpushed: 12 })).toEqual({ hold: 'stale', count: 13 });
   });
   it('says nothing when it is off, already pushed, or has nothing to push', () => {
     for (const h of [

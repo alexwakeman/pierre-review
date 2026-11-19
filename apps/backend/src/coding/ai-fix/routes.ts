@@ -34,9 +34,11 @@ import {
   requestFixCancel,
   sendFixSessionMessage,
   startFix,
+  startFixNow,
   startPlan,
   subscribeFixStream,
   type FixActionResult,
+  type StartFixResult,
 } from './manager.js';
 import { planStateOf } from './plan.js';
 import { registerAutoFixRoutes } from './auto-fix-routes.js';
@@ -44,6 +46,7 @@ import { startWaitingFor } from './start-queue.js';
 import { pushFix } from './push.js';
 import { fixPushInFlight } from './push-guard.js';
 import { pushWhenDoneHold, pushWhenDoneHoldLine } from './auto-push.js';
+import { fixSiblingFacts, overlayUnpushedHoldLine, siblingStaleHoldLine, siblingStaleLine, type FixSiblingFacts } from './sibling-stale.js';
 import { requestModelOf } from '../../ai/provider.js';
 import { fixChoice } from '../../ai/run-profile.js';
 import { resolveSandboxAgentChoice } from '../../sandbox/drivers/index.js';
@@ -95,14 +98,32 @@ function tsToIso(v: Date | number | null | undefined): string | null {
  * the one line the AI Fix tab repeats above Push. null when the tick was off, the fix is pushed or has nothing
  * to push. `own` is read only when the rest can hold (a DB-only read).
  */
-async function pushHoldOf(ctx: AgentContext, accountId: number, row: AiFixRow): Promise<{ line: string } | null> {
-  if (row.pushWhenDone !== true || (row.trigger ?? 'manual') !== 'manual' || row.status !== 'succeeded' || row.pushedAt != null) return null;
+async function pushHoldOf(ctx: AgentContext, accountId: number, row: AiFixRow, sib: FixSiblingFacts): Promise<{ line: string } | null> {
+  if (row.status !== 'succeeded' || row.pushedAt != null) return null;
   const hasWork = fixRowHasWork(row);
   if (!hasWork) return null;
+  // PUSH AUTOMATICALLY held an auto fix only for its siblings (auto-push.ts gate part 3½): say so. The facts are
+  // the ones read once above.
+  if ((row.trigger ?? 'manual') === 'auto') {
+    if (sib.stale == null && sib.overlayUnpushed == null) return null;
+    const { autoPushSkip } = await import('./auto-push.js');
+    const skip = await autoPushSkip(ctx, accountId, row.id, undefined, { siblings: sib }).catch(() => null);
+    if (skip === 'stale' && sib.stale) return { line: siblingStaleHoldLine(sib.stale.prNumber) };
+    if (skip === 'overlay_unpushed' && sib.overlayUnpushed) return { line: overlayUnpushedHoldLine(sib.overlayUnpushed.prNumber) };
+    return null;
+  }
+  if (row.pushWhenDone !== true) return null;
   const { prAuthorIsAccount } = await import('./auto-fix.js');
   const own = await prAuthorIsAccount(ctx, accountId, row.prId).catch(() => false);
-  const line = pushWhenDoneHoldLine(pushWhenDoneHold(row, { hasWork, own }));
+  const line = pushWhenDoneHoldLine(pushWhenDoneHold(row, { hasWork, own, stale: sib.stale?.prNumber ?? null, overlayUnpushed: sib.overlayUnpushed?.prNumber ?? null }));
   return line != null ? { line } : null;
+}
+
+/** The finished fix's push-hold line and STALE line (sibling-stale.ts), DB only, the sibling facts read ONCE. */
+async function holdAndStaleOf(ctx: AgentContext, accountId: number, row: AiFixRow): Promise<{ pushHold: { line: string } | null; stale: { line: string } | null }> {
+  const sib = await fixSiblingFacts(ctx, accountId, row).catch((): FixSiblingFacts => ({ stale: null, overlayUnpushed: null }));
+  const pushHold = await pushHoldOf(ctx, accountId, row, sib);
+  return { pushHold, stale: sib.stale != null ? { line: siblingStaleLine(sib.stale.prNumber) } : null };
 }
 
 /** `AiFix.loop` (loop.ts `fixLoopWire`): DB only; a read that fails reads as no loop. */
@@ -111,7 +132,8 @@ async function loopOf(ctx: AgentContext, accountId: number, row: AiFixRow): Prom
   return fixLoopWire(ctx, accountId, row).catch(() => null);
 }
 
-function rowToAiFix(row: AiFixRow, pushHold: { line: string } | null = null, loop: AiFix['loop'] = null): AiFix {
+function rowToAiFix(row: AiFixRow, hs: { pushHold: { line: string } | null; stale: { line: string } | null } = { pushHold: null, stale: null }, loop: AiFix['loop'] = null): AiFix {
+  const { pushHold, stale } = hs;
   // THE WORKSPACE SESSION the fix ran in (null on a row of the removed shell-less fixer). Never throws.
   let wire: ReturnType<typeof fixSessionWire> = { session: null, leftOut: [] };
   try {
@@ -157,6 +179,7 @@ function rowToAiFix(row: AiFixRow, pushHold: { line: string } | null = null, loo
     pushWhenDone: row.pushWhenDone === true,
     pushing: row.pushedAt == null && fixPushInFlight(row.id),
     pushHold,
+    stale,
     // AI FIX'S OWN REVIEW LOOP (loop.ts): its rounds and why it stopped. null ⇒ it never ran.
     loop,
     createdAt: tsToIso(row.createdAt) ?? new Date(0).toISOString(),
@@ -365,7 +388,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         authMessage: auth.status === 'none' ? auth.message : undefined,
         viewerCanPush,
         headInfo,
-        fix: latest ? rowToAiFix(latest, await pushHoldOf(ctx, accountId, latest), await loopOf(ctx, accountId, latest)) : null,
+        fix: latest ? rowToAiFix(latest, await holdAndStaleOf(ctx, accountId, latest), await loopOf(ctx, accountId, latest)) : null,
         history: history.map(rowToSummary),
         // THE FIX START QUEUE: the PR's next fix waits for a free sandbox.
         waiting: startWaitingFor(accountId, prId),
@@ -407,12 +430,45 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           pushWhenDone: parsed.pushWhenDone,
         };
         const res = mode === 'fix' ? await startFix(ctx, input) : await startPlan(ctx, input);
+        return sendStartResult(reply, res, { include: parsed.include != null, ciOnly: parsed.sourceReviewId == null });
+      },
+    );
+  }
 
+  // "START NOW" (docs/API.md): a reader's press waiting behind the fix of another PR of the same ticket starts at
+  // once, against what the siblings have now (start-queue.ts `startQueuedNow`). Spends a sandbox boot and a
+  // build turn like the start itself: rate-limit tier ai + ai_hourly. 404 when no such press waits for this PR.
+  app.post<{ Params: { id: string } }>('/api/pro/prs/:id/ai-fix/start-now', async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const prId = parseId(req.params.id);
+    if (prId == null) return reply.code(404).send({ error: 'not found' });
+    if (!AIFIX_ENABLED) return reply.code(404).send({ error: 'AiFixDisabled' });
+    if (!(await getFixPrContext(ctx, accountId, prId))) return reply.code(404).send({ error: 'not found' });
+    const res = await startFixNow(accountId, prId);
+    if (res == null) return reply.code(404).send({ error: 'NotWaiting', message: 'This fix is not waiting any more.' });
+    if ('refused' in res) {
+      return reply.code(409).send({
+        error: 'AutoFixWaits',
+        message: res.blockedBy != null ? `This automatic fix starts by itself when the fix of #${res.blockedBy} ends.` : 'This automatic fix starts by itself.',
+      });
+    }
+    const r = res.result;
+    // A Plan first's Start fix (a session action) answers with the session's own words.
+    if ('id' in r && r.status === 'queued') return reply.code(202).send({ fixId: r.id, status: 'queued' });
+    if (r.status === 'not_ready' || r.status === 'not_live' || r.status === 'agent_busy' || r.status === 'rejected') return sendFixAction(reply, r);
+    return sendStartResult(reply, r as StartFixResult, res.meta ?? { include: false, ciOnly: false });
+  });
+
+  registerAiFixSessionRoutes(app, ctx, parseId);
+}
+
+/** A start's answer on the wire (the start route and Start now). */
+function sendStartResult(reply: FastifyReply, res: StartFixResult, o: { include: boolean; ciOnly: boolean }) {
         switch (res.status) {
           case 'queued':
             return reply.code(202).send({ fixId: res.fixId, status: 'queued' });
           case 'waiting':
-            return reply.code(202).send({ fixId: null, status: 'waiting', position: res.position });
+            return reply.code(202).send({ fixId: null, status: 'waiting', position: res.position, ...(res.blockedBy != null ? { blockedBy: { prNumber: res.blockedBy } } : {}) });
           case 'already_running':
             return reply.code(409).send({ error: 'AlreadyRunning' });
           case 'no_runtime':
@@ -438,18 +494,18 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
           case 'nothing_to_fix':
             return reply.code(409).send({
               error: 'NothingToFix',
-              message: parsed.include
+              message: o.include
                 ? 'Nothing is ticked.'
-                : parsed.sourceReviewId == null
+                : o.ciOnly
                   ? 'The CI check found nothing this PR can fix.'
                   : 'The review found nothing to fix.',
             });
           default:
             return reply.code(404).send({ error: 'not found' });
         }
-      },
-    );
-  }
+}
+
+function registerAiFixSessionRoutes(app: FastifyInstance, ctx: AgentContext, parseId: (raw: string) => number | null): void {
 
   // ---- The session: messages, Start fix, discard, resume, network, stream ----
   // Every id-route reads the row through the ACCOUNT-SCOPED getter (another account's ⇒ 404) and the PR
@@ -489,6 +545,8 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
     if (extra.length > SANDBOX_MESSAGE_MAX) return reply.code(400).send({ error: 'MessageTooLong', message: `Keep the message under ${SANDBOX_MESSAGE_MAX.toLocaleString('en-US')} characters.` });
     const res = await approvePlan(ctx, { accountId, fixId: row.id, text: extra === '' ? null : extra });
     if (res.status === 'not_ready') return reply.code(409).send({ error: 'PlanNotReady', message: res.message });
+    // ONE TICKET AT A TIME: the build waits behind the running fix of a PR it reads (it starts by itself).
+    if (res.status === 'waiting') return reply.code(202).send({ fixId: row.id, status: 'waiting', position: res.position, ...(res.blockedBy != null ? { blockedBy: { prNumber: res.blockedBy } } : {}) });
     return sendFixAction(reply, res);
   });
 
@@ -732,7 +790,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       if (!row) return reply.code(404).send({ error: 'not found' });
       const pr = await getFixPrContext(ctx, accountId, row.prId);
       if (!pr) return reply.code(404).send({ error: 'not found' });
-      return reply.send(rowToAiFix(row, await pushHoldOf(ctx, accountId, row), await loopOf(ctx, accountId, row)));
+      return reply.send(rowToAiFix(row, await holdAndStaleOf(ctx, accountId, row), await loopOf(ctx, accountId, row)));
     },
   );
 

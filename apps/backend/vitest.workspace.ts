@@ -87,6 +87,8 @@ export const SLOW_TESTS = [
   'src/sandbox/session/plan-session-flow-db.test.ts',
   // Moved 2026-11-09 by the time budget: real git, a scratch store and sandbox repositories per case
   'src/sandbox/session/fix-merge-store-real.test.ts',
+  // Real git: an AI Fix sibling overlay committed in a scratch clone cache, mirrored (per-session copy and a scratch store) and extracted with sh
+  'src/sandbox/session/fix-overlay-real.test.ts',
 ];
 
 // THE LIVE CODEX TESTS: a real `codex` binary and a real ChatGPT sign-in, spending real usage. Every

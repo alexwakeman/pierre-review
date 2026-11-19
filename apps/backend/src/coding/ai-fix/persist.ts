@@ -85,6 +85,8 @@ export interface AiFixRow {
   // 0178 — the merge (sandbox/session/fix-merge.ts `FixMergeState`) and the agent's commits (base64 bundle).
   mergeJson?: Record<string, unknown> | null;
   mergeBundle?: string | null;
+  // 0210 — the sibling state the fix was built against (sibling-stale.ts `FixSiblingState[]`). NULL = none read.
+  siblingStateJson?: unknown[] | null;
 }
 
 /** The session columns a fix session writes (fix.ts). Scoped by account. */
@@ -111,6 +113,7 @@ export interface FixSessionPatch {
   numTurns?: number | null;
   mergeJson?: Record<string, unknown> | null;
   mergeBundle?: string | null;
+  siblingStateJson?: unknown[] | null;
 }
 
 export async function updateFixSession(ctx: AgentContext, accountId: number, id: number, patch: FixSessionPatch): Promise<void> {
