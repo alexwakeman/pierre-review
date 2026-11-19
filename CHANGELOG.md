@@ -25,6 +25,12 @@ no internals.
   rounds of Implement story, AI Fix and a local branch review keep working on a criterion that only an unlinked
   pull request does.
 
+## [1.0.66] - 2026-11-19
+
+### Changed
+
+- Maintenance release: no changes you would notice.
+
 ## [1.0.65] - 2026-11-19
 
 ### Added
