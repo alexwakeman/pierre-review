@@ -5,7 +5,9 @@
 //     the CI review, the story check, Check threads, the replies pass, the Build loop's review rounds).
 //     Both vendors switched on and signed in = the Claude + Codex pair; each half runs at ITS model and
 //     effort. At least one vendor stays on.
-//   • FIX — ONE {provider, model, effort}: AI Fix and Plan first, manual and automatic.
+//   • FIX — ONE {provider, model, effort} + AI Fix's own review loop ROUNDS: AI Fix and Plan first, manual
+//     and automatic (dependency automation's fixes too). A block with ROUNDS ONLY is not a vendor choice:
+//     auto fix keeps inheriting its review's model.
 //   • BUILD — ONE {provider, model, effort} + the review loop's ROUNDS: Implement story's plan and build.
 //
 // EVERY FIELD IS OPTIONAL and a missing one means "as before": the effort falls back to the old single
@@ -17,6 +19,7 @@
 import { aiPickerModelFor, aiPickerModelProvider, type AiPickerModel } from './ai-run-label.js';
 import { isAiEffort, type AiEffort } from './ai-effort.js';
 import { STORY_BUILD_LOOP_ROUNDS_DEFAULT, STORY_BUILD_LOOP_ROUNDS_MAX, STORY_BUILD_LOOP_ROUNDS_MIN } from './story-build-loop.js';
+import { AI_FIX_LOOP_ROUNDS_DEFAULT, AI_FIX_LOOP_ROUNDS_MAX, AI_FIX_LOOP_ROUNDS_MIN } from './ai-fix-loop.js';
 import { DEFAULT_AI_FIX_MODEL, DEFAULT_CLAUDE_REVIEW_MODEL, type AiProviderId } from './types.js';
 
 /** The three surfaces a profile decides. */
@@ -44,10 +47,15 @@ export interface AiBuildProfile extends AiRunChoiceProfile {
   rounds?: number;
 }
 
+/** AI Fix's: the choice + its own review loop's rounds (AI_FIX_LOOP_ROUNDS_MIN..MAX; missing ⇒ the default). */
+export interface AiFixProfile extends AiRunChoiceProfile {
+  rounds?: number;
+}
+
 /** THE STORED OBJECT (`accounts.ai_run_profiles`, PUT /api/ai/run-profiles). */
 export interface AiRunProfiles {
   review?: { claude?: AiReviewVendorProfile; codex?: AiReviewVendorProfile };
-  fix?: AiRunChoiceProfile;
+  fix?: AiFixProfile;
   build?: AiBuildProfile;
 }
 
@@ -72,7 +80,7 @@ export interface AiRunChoiceResolved {
  */
 export interface AiRunProfilesStatus {
   review: { claude: AiReviewVendorResolved; codex: AiReviewVendorResolved };
-  fix: AiRunChoiceResolved;
+  fix: AiRunChoiceResolved & { rounds: number };
   build: AiRunChoiceResolved & { rounds: number };
   effortSource: 'env' | 'settings';
   /** What is stored (null = nothing): a Settings block writes back ITS surface only, so the others stay
@@ -106,6 +114,16 @@ export function profileLoopRounds(stored: AiRunProfiles | null | undefined): num
     : STORY_BUILD_LOOP_ROUNDS_DEFAULT;
 }
 
+/** AI Fix's stored rounds number, or its default (missing, or out of range). */
+export function profileFixLoopRounds(stored: AiRunProfiles | null | undefined): number {
+  const n = stored?.fix?.rounds;
+  return typeof n === 'number' && Number.isInteger(n) && n >= AI_FIX_LOOP_ROUNDS_MIN && n <= AI_FIX_LOOP_ROUNDS_MAX ? n : AI_FIX_LOOP_ROUNDS_DEFAULT;
+}
+
+/** A fix / build block that names a vendor choice (a rounds-only block does not). */
+const namesChoice = (block: { provider?: unknown; model?: unknown; effort?: unknown } | undefined): boolean =>
+  block != null && (block.provider != null || block.model != null || 'effort' in block);
+
 /** A stored effort field: `undefined` (missing ⇒ the old level), null (Default) or a level. */
 function effortField(block: { effort?: unknown } | undefined): AiEffort | null | undefined {
   if (block == null || !('effort' in block)) return undefined;
@@ -128,7 +146,7 @@ export function profileEffortFor(
 ): AiEffort | null | undefined {
   if (surface === 'review') return effortField(stored?.review?.[provider]);
   const block = stored?.[surface];
-  if (block == null) return undefined;
+  if (block == null || !namesChoice(block)) return undefined;
   if ((block.provider ?? defaultProvider) !== provider) return null;
   return effortField(block);
 }
@@ -167,7 +185,7 @@ export function resolveAiRunProfiles(
   };
   return {
     review: { claude: vendor('claude'), codex: vendor('codex') },
-    fix: choice('fix'),
+    fix: { ...choice('fix'), rounds: profileFixLoopRounds(stored) },
     build: { ...choice('build'), rounds: profileLoopRounds(stored) },
     effortSource: o.envEffort != null ? 'env' : 'settings',
     stored: stored ?? null,
@@ -226,7 +244,7 @@ export function parseAiRunProfiles(raw: unknown): ParsedAiRunProfiles {
     const b = r[surface];
     if (b === undefined) continue;
     if (!isObj(b)) return bad(`${surface} must be an object.`);
-    const allowed = surface === 'build' ? ['provider', 'model', 'effort', 'rounds'] : ['provider', 'model', 'effort'];
+    const allowed = ['provider', 'model', 'effort', 'rounds'];
     for (const k of Object.keys(b)) if (!allowed.includes(k)) return bad(`Unknown field: ${surface}.${k}.`);
     const v: AiBuildProfile = {};
     if ('provider' in b) {
@@ -242,10 +260,11 @@ export function parseAiRunProfiles(raw: unknown): ParsedAiRunProfiles {
     const e = effortOf(b, surface);
     if (!e.ok) return bad(e.message);
     if ('v' in e) v.effort = e.v ?? null;
-    if (surface === 'build' && 'rounds' in b) {
+    if ('rounds' in b) {
       const n = b.rounds;
-      if (typeof n !== 'number' || !Number.isInteger(n) || n < STORY_BUILD_LOOP_ROUNDS_MIN || n > STORY_BUILD_LOOP_ROUNDS_MAX) {
-        return bad(`build.rounds must be a whole number from ${STORY_BUILD_LOOP_ROUNDS_MIN} to ${STORY_BUILD_LOOP_ROUNDS_MAX}.`);
+      const [min, max] = surface === 'build' ? [STORY_BUILD_LOOP_ROUNDS_MIN, STORY_BUILD_LOOP_ROUNDS_MAX] : [AI_FIX_LOOP_ROUNDS_MIN, AI_FIX_LOOP_ROUNDS_MAX];
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < min || n > max) {
+        return bad(`${surface}.rounds must be a whole number from ${min} to ${max}.`);
       }
       v.rounds = n;
     }

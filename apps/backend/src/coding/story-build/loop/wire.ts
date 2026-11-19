@@ -279,6 +279,17 @@ export function toStoryBuildLoop(i: LoopWireInput): StoryBuildLoop {
 
 // ---- the PR body's summary ------------------------------------------------------------------------------
 
+/** Of these open criteria, those whose LATEST answer is "cannot meet" (a reason given), with that reason. */
+export function cannotMeetNow(open: ReadonlyArray<{ ref: string }>, answers: ReadonlyArray<{ round: number; ref: string; response: string; text: string | null }>): Array<{ ref: string; why: string }> {
+  const out: Array<{ ref: string; why: string }> = [];
+  for (const c of open) {
+    const latest = answers.filter((a) => a.ref.toUpperCase() === c.ref.toUpperCase() && a.response !== 'not_reported').sort((a, z) => z.round - a.round)[0];
+    const why = (latest?.text ?? '').trim();
+    if (latest?.response === 'cannot_meet' && why !== '') out.push({ ref: c.ref, why });
+  }
+  return out;
+}
+
 /** The `## Review in Limn` numbers for one target (or every target when `kind` is null). */
 export function loopBodySummaryOf(
   i: Pick<LoopWireInput, 'reviews' | 'findings' | 'checks' | 'acResponses'> & { finalRound: number; providers: AiProviderId[] },
@@ -301,6 +312,11 @@ export function loopBodySummaryOf(
         met: check.assessment.criteria.filter((c) => (c.status === 'met' || c.status === 'met_outside_code') && !na.has(c.ref.toUpperCase())).length,
         notApplicable: effectiveClaimVerdicts(check, i.checks).filter((v) => v.verdict === 'accepted').map((v) => ({ ref: v.ref, why: v.why })),
         notMet: openCriteriaOf(check, i.checks).length,
+        // Still NOT MET (counted above): the agent's latest answer on each says it cannot be done. Only when any.
+        ...(() => {
+          const cm = cannotMeetNow(openCriteriaOf(check, i.checks), i.acResponses);
+          return cm.length > 0 ? { cannotMeet: cm } : {};
+        })(),
       }
     : null;
   return {

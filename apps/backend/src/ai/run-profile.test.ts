@@ -13,6 +13,8 @@ import {
   buildChoice,
   buildLoopRounds,
   fixChoice,
+  fixLoopRounds,
+  profileEffortLevel,
   reviewDefaultProvider,
   reviewPairProviders,
   reviewProfileFor,
@@ -144,6 +146,17 @@ describe('AI Fix / Implement story', () => {
     setStoredAiRunProfiles({ build: { rounds: 2 } });
     expect(buildLoopRounds()).toBe(2);
   });
+
+  it('AI Fix’s own review rounds: the FIX profile’s, else 5; a rounds-only block is NOT a vendor choice', () => {
+    expect(fixLoopRounds()).toBe(5);
+    setStoredAiRunProfiles({ fix: { rounds: 2 } });
+    expect(fixLoopRounds()).toBe(2);
+    // Auto fix keeps inheriting its review's model; the effort stays the old single level (undefined).
+    expect(fixChoice(both, 'fix', free)).toMatchObject({ configured: false, model: null });
+    expect(profileEffortLevel('fix', 'claude', () => 'claude')).toBeUndefined();
+    expect(profileEffortLevel('fix', 'codex', () => 'claude')).toBeUndefined();
+    expect(resolveAiRunProfiles({ fix: { rounds: 4 } }, { legacyEffort: 'high', envEffort: null, defaultProvider: 'claude' }).fix).toMatchObject({ rounds: 4, effort: 'high' });
+  });
 });
 
 describe('the environment wins everywhere', () => {
@@ -160,6 +173,14 @@ describe('the validator', () => {
   it('keeps at least one review vendor on', () => {
     expect(parseAiRunProfiles({ review: { claude: { enabled: false }, codex: { enabled: false } } }).ok).toBe(false);
     expect(parseAiRunProfiles({ review: { claude: { enabled: false } } }).ok).toBe(true);
+  });
+
+  it('AI Fix rounds: 1 to 6, alone or with a vendor', () => {
+    expect(parseAiRunProfiles({ fix: { rounds: 3 } })).toEqual({ ok: true, value: { fix: { rounds: 3 } } });
+    expect(parseAiRunProfiles({ fix: { provider: 'codex', rounds: 6 } })).toEqual({ ok: true, value: { fix: { provider: 'codex', rounds: 6 } } });
+    expect(parseAiRunProfiles({ fix: { rounds: 0 } })).toEqual({ ok: false, message: 'fix.rounds must be a whole number from 1 to 6.' });
+    expect(parseAiRunProfiles({ fix: { rounds: 7 } }).ok).toBe(false);
+    expect(parseAiRunProfiles({ fix: { rounds: 2.5 } }).ok).toBe(false);
   });
 
   it('compacts empty blocks and keeps an explicit null effort', () => {

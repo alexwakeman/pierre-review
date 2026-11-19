@@ -40,6 +40,21 @@ describe('loopBodySection', () => {
     expect(s).not.toMatch(/(^|[^\w`])@[A-Za-z]/);
   });
 
+  it('a criterion the agent says it cannot meet is counted NOT MET and listed with its reason, defanged', () => {
+    const s = loopBodySection({
+      reviews: 2,
+      providers: ['claude'],
+      fixed: 1,
+      answered: 0,
+      pushedBackAccepted: 0,
+      stillOpen: [],
+      criteria: { met: 1, notApplicable: [], notMet: 1, cannotMeet: [{ ref: 'AC2', why: 'Billing sends it; ask @dana.' }] },
+    });
+    expect(s).toContain('Acceptance criteria: 1 met, 0 not applicable, 1 not met.');
+    expect(s).toContain('Not met, and the agent says these cannot be done:');
+    expect(s).toContain('- AC2: Billing sends it; ask @\u200bdana.');
+  });
+
   it('ends the PR body, with no "Built with Limn" footer', () => {
     const body = storyBuildPrBody({ summary: 's', ticketKey: 'PAY-1', ticketTitle: 't', ticketUrl: null, covers: [], siblings: [], stackedOnPrNumber: null, closes: null, review: '## Review in Ensemble\n\nReviewed once by Claude before this pull request opened.' });
     expect(body.indexOf('## Review in Ensemble')).toBeGreaterThan(0);

@@ -244,6 +244,10 @@ export const FIX = {
   // The commit the push left (the app links it to GitHub) and the line an automatic push adds.
   pushedSha: '4f2c9a1',
   pushedAuto: 'Pushed automatically',
+  // AI Fix's own review rounds (components/AiFix/FixLoopSection.tsx): Ensemble reviews the fix before the push.
+  roundsTitle: 'Review rounds',
+  rounds: ['Round 1 · Reviewed · 1 found · 1 fixed', 'Round 2 · Reviewed · 0 found'],
+  roundsLine: 'Reviewed: nothing is open.',
 };
 
 export const FIX_DIFF = {

@@ -1130,6 +1130,29 @@ the repository rows' `checks_*` and `worktree_path`) are DORMANT since the plan/
 (2026-11-07, [STORY-BUILD.md](STORY-BUILD.md) § Rows from the old flow): only its old rows carry them, and
 `coding/story-build/legacy.ts` settles and discards those rows.
 
+
+### `ai_fixes.loop_*` and `ai_fix_loop_*` — AI Fix's own review loop (migration `0207`)
+
+docs/CLAUDE-REVIEW.md § AI Fix → The review loop. On `ai_fixes`: `loop_state` (NULL never ran · `reviewing` ·
+`fixing` · `done` · `stopped`), `loop_round` (1-based for the whole fix; a reader's follow-up starts a new run and
+the numbers go on), `loop_first_round`, `loop_rounds` (N, read from Settings → AI → AI Fix when a run starts),
+`loop_stop` (shared `AiFixLoopStop`), `loop_base_sha` (the PR base commit the rounds review against),
+`loop_review_id` (the `claude_reviews` row the CLOSING review became at the PUSHED head; soft) and
+`loop_finished_at`. While the loop works the row's `status` reads `running` (the ONE exception to "derived from
+the phase", `fix.ts` `statusNow`).
+
+Four tables keyed `(account_id, fix_id, round)`, the Build loop's shape (`story_build_reviews` …) — Build's own
+tables are untouched: `ai_fix_loop_reviews` (one row per provider half: `head_sha` = the LOCAL commit reviewed,
+`local_ref` under `refs/pierre/local/ai-fix-loop/<fixId>/r<k>`, `work_key` = the work it reviewed — the patch's
+sha256 or `merge:<result sha>` — which the push compares before importing; `step` / `rounds` = the round's place in
+ITS loop run and that run's N, fixed at the run's start, since a reader's follow-up runs are contiguous; unique
+`(fix_id, round, provider)`),
+`ai_fix_loop_findings` (the findings + the agent's `response` / `response_text` / `response_round`; FK to its run
+`(review_id, account_id)` cascade), `ai_fix_loop_story_checks` (unique `(fix_id, round)`) and
+`ai_fix_loop_ac_responses` (`fixed` · `not_applicable` · `cannot_meet` · `answered` · `pushed_back` ·
+`not_reported`; unique `(fix_id, round, ref)`). ⚠ `fix_id` is SOFT (`ai_fixes` has no `(id, account_id)` unique):
+every query is account-scoped; both PR-keyed delete paths prune them with the fix (`db/ai-fix-loop-prune.ts`,
+BEFORE the `ai_fixes` delete); the erasure deletes them explicitly and `accountScopedTables()` lists them.
 ## `sandbox_allowed_hosts` — the sandbox's "Always allow" hosts (CORE; migration `0173`)
 
 ONE row per host rule a reader allowed for every sandbox session of ONE workspace — a denied host's

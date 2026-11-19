@@ -113,6 +113,14 @@ describe('a Settings block writes its own surface', () => {
     expect(next).toEqual({ fix: { provider: 'claude', model: 'claude-sonnet-5' } });
   });
 
+  it('AI Fix review rounds alone write ONLY the rounds (a missing vendor choice stays missing); a vendor change keeps them', () => {
+    expect(withSurfaceChoice(status(null), 'fix', { rounds: 3 })).toEqual({ fix: { rounds: 3 } });
+    expect(withSurfaceChoice(status({ fix: { provider: 'claude' } }), 'fix', { rounds: 2 })).toEqual({ fix: { provider: 'claude', rounds: 2 } });
+    expect(withSurfaceChoice(status({ fix: { rounds: 3 } }), 'fix', { provider: 'codex' })).toEqual({ fix: { provider: 'codex', model: 'gpt-6.1-sol', effort: null, rounds: 3 } });
+    expect(status({ fix: { rounds: 3 } }).fix.rounds).toBe(3);
+    expect(status(null).fix.rounds).toBe(5);
+  });
+
   it('the last vendor on is locked on', () => {
     const s = status({ review: { codex: { enabled: false } } });
     expect(isLastReviewVendorOn(s, 'claude')).toBe(true);

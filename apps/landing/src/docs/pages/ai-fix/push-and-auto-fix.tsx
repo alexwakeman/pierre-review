@@ -28,16 +28,46 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        A finished fix is pushed by itself when you left <Ui>Push when done</Ui> ticked (below); otherwise it waits in
-        the <Ui>AI Fix</Ui> tab until you decide. Push sends it to GitHub from your computer, with your own GitHub
+        A finished fix is reviewed by Ensemble first (see Review rounds), then pushed by itself when you left <Ui>Push when done</Ui>{' '}
+        ticked; otherwise it waits in the <Ui>AI Fix</Ui> tab until you decide. Push sends it to GitHub from your computer, with your own GitHub
         sign-in; the sandbox never holds your GitHub credentials. This page also covers auto fix, which prepares a fix
         by itself after an auto review of your own pull request.
       </p>
 
+      <H2 id="review-rounds">Review rounds before the push</H2>
+      <p>
+        After the agent fixes, Ensemble reviews the fix before anything is pushed. The review reads a copy of the fix on
+        your computer; nothing reaches GitHub. The agent then fixes, answers or pushes back on each point, and Ensemble
+        reviews again. This goes on until a review finds nothing, or for up to 5 rounds (
+        <DocLink to="settings/ai#ai-fix">Settings → AI → AI Fix → Review rounds</DocLink>), with one closing review after
+        the last round. Claude and Codex together count as one review.
+      </p>
+      <ul>
+        <li>
+          The <Ui>Review rounds</Ui> panel shows each round: what the review found, and what the agent fixed, answered or
+          pushed back on. While it works it says, for example, <Ui>Reviewing, round 2 of 5.</Ui>, and <Ui>Push</Ui> does
+          not show. <Ui>Stop</Ui> ends the rounds. A fix you started keeps its changes; an auto fix is discarded.
+        </li>
+        <li>
+          When the fix has the pull request&rsquo;s ticket criteria, each round also checks them. The agent can say a
+          criterion cannot be done, and why. It stays not met, with that reason, and the rounds stop when only such
+          criteria are left.
+        </li>
+        <li>
+          For an automatic fix, each round asks the{' '}
+          <DocLink to="settings/ai-usage-and-spend#spend-budget">spend limit</DocLink> first. Over the limit, the rounds
+          stop and the fix is kept as it is.
+        </li>
+        <li>
+          After the push, the last review shows in the <Ui>AI Review</Ui> tab as the review of the pushed commit. It is not
+          posted, auto review does not review that commit again, and no auto fix starts from it.
+        </li>
+      </ul>
+
       <H2 id="push-when-done">Push when done</H2>
       <p>
         <Ui>Push when done</Ui>, beside <Ui>Start fix</Ui>, is ticked by default, and Ensemble remembers your choice in this
-        browser. When the fix finishes on your own pull request, Ensemble pushes it to the pull request&rsquo;s branch the
+        browser. When the fix and its review rounds finish on your own pull request, Ensemble pushes it to the pull request&rsquo;s branch the
         same way as <Ui>Push</Ui>, and the session ends.
       </p>
       <p>
@@ -79,8 +109,8 @@ export default function Page(): JSX.Element {
         under <Ui>Left out</Ui> and dropped. Ensemble does not build or test the fix again before the push.
       </Warning>
       <p>
-        After the push, Ensemble syncs the pull request, so the new commit shows at once. If auto review is on, the new
-        commit is reviewed, which checks the fix. A fix that includes the merge item pushes only to the pull request's
+        After the push, Ensemble syncs the pull request, so the new commit shows at once. Its last review round becomes the
+        AI review of the new commit, so auto review does not review it again. A fix that includes the merge item pushes only to the pull request's
         own branch; see <DocLink to="ai-fix/resolve-merge-conflicts">Resolve merge conflicts with AI Fix</DocLink>.
       </p>
 
@@ -138,7 +168,10 @@ export default function Page(): JSX.Element {
           left. A merge that fails the check is never pushed. <Ui>Push automatically</Ui> still decides whether a good
           one is pushed or waits for you.
         </li>
-        <li>It runs one build turn, then the sandbox closes. The fix waits in the <Ui>AI Fix</Ui> tab, marked <Ui>Auto fix</Ui>.</li>
+        <li>
+          It runs one fix, then its <DocLink to="ai-fix/push-and-auto-fix#review-rounds">review rounds</DocLink>, then the
+          sandbox closes. The fix waits in the <Ui>AI Fix</Ui> tab, marked <Ui>Auto fix</Ui>.
+        </li>
         <li>
           Open pull requests shows <Ui>Fixing…</Ui> while it runs and <Ui>Fix ready</Ui> when it waits for you.
         </li>

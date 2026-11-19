@@ -1135,10 +1135,12 @@ land), then the merge sweep, then the watcher. ≤ 6 GitHub writes per tick acro
     instruction (`dependencyFixInstruction`) names the bot and the update, asks for the smallest
     change that makes CI pass without reverting the update (a companion/peer dependency, a lock file,
     a type break), and carries each failing check's log EXCERPT fenced as untrusted data. An
-    UNATTENDED session: the PR repo at its head in the workspace mirror, ONE build turn (the agent may
-    run the repo's tests; Claude capped by `--max-budget-usd` `AI_FIX_BUDGET_USD`), then the session
-    closes; one build per computer, shared with Implement. `auto-push.ts` never pushes it (not
-    the reader's own PR); this file waits for it (`watchFixAndPush`, ≤ 90 min) and pushes through
+    UNATTENDED session: the PR repo at its head in the workspace mirror, ONE FIX LOOP — a build turn, then
+    AI Fix's own review rounds and fix turns (docs/CLAUDE-REVIEW.md § AI Fix → The review loop; each
+    automatic step asks the spend gate) — (the agent may run the repo's tests; Claude capped by
+    `--max-budget-usd` `AI_FIX_BUDGET_USD`), then the session closes; one build per computer, shared with
+    Implement. `auto-push.ts` never pushes it (not the reader's own PR); this file waits for it while the row
+    reads `running` (`watchFixAndPush`, ≤ 4 h per step — the wait restarts at each loop round or fix turn) and pushes through
     AI Fix's own `pushFix(target 'existing')` — write access re-checked, the branch must still be the
     fix's base, NEVER forced. ⚠ Pushing to Dependabot's or Renovate's branch means the bot stops
     rebasing that PR by itself (both treat a foreign commit as "edited"); a new bump closes it.

@@ -5,7 +5,13 @@
 //   manual       booting ─► building ─► built ⇄ building      (Start runs the fix at once; follow-ups are
 //                                                               more build turns in the SAME session)
 //   Plan first   booting ─► chatting ─► ready ⇄ chatting ─(Start fix)─► building ─► built …
-//   unattended   booting ─► building ─► closed: built           (an auto fix, dependency automation's fix)
+//   unattended   booting ─► building ─► [review loop] ─► closed: built   (an auto fix, dependency automation's fix)
+//
+// THE REVIEW LOOP (coding/ai-fix/loop.ts; docs/CLAUDE-REVIEW.md § AI Fix → The review loop): every fix turn that
+// ends well with work to push — the first, Start fix's, a reader's follow-up — is followed by Ensemble's own
+// review of the fix (a LOCAL commit, never pushed) and, while anything is open and rounds are left, by host
+// fix turns seeded with REVIEW.md. The session is held meanwhile and the row reads 'running'. Only when the loop
+// ends does a fix close (unattended) or ask Push when done (manual): ONE FIX LOOP, then the push rules.
 //   Push (coding/ai-fix/push.ts) ends a live session as `pushed`; Discard as `discarded` (status cancelled).
 //
 // SCOPE (owner decision D3; narrowed 2026-11-10): the PR's repository, plus the workspace repositories of
@@ -48,6 +54,19 @@ import type { FixAgentReport } from '../../platform/contract.js';
 import type { SandboxAgentChoice } from '../drivers/index.js';
 import { fixSessionBranch, readSessionTicket, type FixSeedInput, type RepoBaseRequest, type SessionTicket } from '../workspace/index.js';
 import { readFixReport, removeFixReport } from '../workspace/fix-report.js';
+import {
+  afterFixLoopTurn,
+  clearFixLoopPending,
+  dropFixLoopRefs,
+  endFixLoopForClose,
+  fixLoopCanRun,
+  fixLoopActive,
+  fixLoopBusyReason,
+  markFixLoopPending,
+  startFixLoop,
+  stopFixLoop,
+} from '../../coding/ai-fix/loop.js';
+import type { AiFixLoopStop } from '@pierre-review/shared';
 import { defaultMirrorSeams } from '../workspace/mirror.js';
 import {
   extractMergeTurn,
@@ -252,6 +271,9 @@ export function fixIdHoldingPr(prId: number): number | null {
 
 export const fixKey = (fixId: number): SessionKey => `fix:${fixId}`;
 
+/** fixId → its live subject's "the review loop ended" step (coding/ai-fix/loop.ts calls `afterFixLoopEnded`). */
+const loopEnders = new Map<number, (stop: AiFixLoopStop | null) => Promise<void>>();
+
 export function reserveFixSlot(fixKeyId: SessionKey, build: boolean): ReserveResult {
   return reserveSessionSlot(fixKeyId, { build });
 }
@@ -397,6 +419,8 @@ function fixSubject(
   let prRepoPath: string | null = null;
   let contextTicket: SessionTicket | null = null;
   let pushedAt: Date | number | null = null;
+  // The turn that just ended will be followed by the review loop (`afterBuildTurn` → `afterBuildTurnEnded`).
+  let loopNext = false;
   // The merge (fix-merge.ts), once `bases` resolved it; written to `ai_fixes.merge_json` as it changes.
   let merge: FixMergeState | null = null;
   const saveMerge = (extra: { mergeBundle?: string | null } = {}): Promise<void> =>
@@ -418,7 +442,7 @@ function fixSubject(
     async save(l, p) {
       if (p.phase === 'discarded') pushedAt = (await row())?.pushedAt ?? pushedAt;
       await updateFixSession(ctx, accountId, fixId, {
-        ...(p.phase ? { sessionPhase: p.phase, status: aiFixStatusForPhase(p.phase, { pushed: pushedAt != null }) } : {}),
+        ...(p.phase ? { sessionPhase: p.phase, status: statusNow(p.phase) } : {}),
         ...(p.sessionJson ? { sessionJson: stateOf(l) as unknown as Record<string, unknown> } : {}),
         ...(p.error !== undefined ? { error: p.error } : {}),
         ...(p.sandboxRef !== undefined ? { sandboxRef: p.sandboxRef } : {}),
@@ -540,7 +564,8 @@ function fixSubject(
       return fixInstruction({ repoPath: prRepoPath ?? facts.fullName, afterPlan: true, extra });
     },
     followUpText: (_l, text) => fixInstruction({ repoPath: prRepoPath ?? facts.fullName, followUp: text }),
-    busyReason: () => (isFixPushing(fixId) ? 'Wait for the push to finish.' : null),
+    // A message would start a turn that rewrites the work while a push or the review loop reads it.
+    busyReason: () => (isFixPushing(fixId) ? 'Wait for the push to finish.' : fixLoopBusyReason(fixId)),
     async beforeBuildTurn(l) {
       if (l.container && l.layoutRoot) await removeFixReport((l as Live).runtime, l.container, l.layoutRoot);
     },
@@ -548,85 +573,158 @@ function fixSubject(
       const l = l0 as Live;
       if (merge) await storeMergeTurn(l);
       else await storeFixTurn(ctx, l, { fixId, accountId, facts, prRepoPath });
-      if (unattended) {
-        // PUSH AUTOMATICALLY: when the close will push, the AI Fix tab says "Pushing…" from now until the push
-        // settles (push-guard.ts `notePushPending`; `onClosed` clears it). Gate parts 1–3, read-only.
-        if (facts.trigger === 'auto') {
-          const { autoPushSkip } = await import('../../coding/ai-fix/auto-push.js');
-          const skip = await autoPushSkip(ctx, accountId, fixId, undefined, { closing: true }).catch(() => 'failed');
-          if (skip == null) notePushPending(fixId);
+      // A LOOP FIX TURN: the loop goes on in `afterBuildTurnEnded` (the answers, the next review).
+      if (l.loopTurn === true) return 'keep';
+      // THE REVIEW LOOP comes next when the turn ended well with work to push: the session stays, the row keeps
+      // reading 'running' (`statusNow`) from this tick, and the close / Push when done wait for the loop's end.
+      if (l.lastOutcome === 'completed' || l.lastOutcome === 'max_turns') {
+        const r = await row();
+        if (r != null && r.pushedAt == null && fixRowHasWork(r) && (await fixLoopCanRun(ctx, accountId, fixId, l.workspaceId))) {
+          markFixLoopPending(fixId);
+          loopNext = true;
+          return 'keep';
         }
-        return 'close';
       }
-      // PUSH WHEN DONE (coding/ai-fix/auto-push.ts): a clean manual fix on the reader's own PR closes, and its
-      // close pushes. Otherwise the session stays open and says, in one line, why it did not push.
-      const { pushWhenDoneReady } = await import('../../coding/ai-fix/auto-push.js');
-      const ready = await pushWhenDoneReady(ctx, accountId, fixId).catch(() => ({ push: false as const, line: null }));
-      if (ready.push) {
-        notePushPending(fixId);
-        return 'close';
+      return finishTurn(l, { closeBy: 'turn' });
+    },
+    afterBuildTurnEnded(l0, e) {
+      const l = l0 as Live;
+      if (l.loopTurn === true) {
+        l.loopTurn = false;
+        void afterFixLoopTurn(ctx, { accountId, fixId }, e).catch(() => {});
+        return;
       }
-      if (ready.line != null) notice(l, ready.line);
-      return 'keep';
+      if (!loopNext) return;
+      loopNext = false;
+      void (async () => {
+        const got = l.closing ? 'skipped' : await startFixLoop(ctx, { accountId, fixId, byReader: !unattended }).catch(() => 'skipped' as const);
+        if (got === 'started') return;
+        // No loop after all (nothing to review, the claim taken): the session goes on as before the loop.
+        clearFixLoopPending(fixId);
+        await afterLoop(null);
+      })();
     },
     onPhase(l, phase) {
-      const status = aiFixStatusForPhase(phase, { pushed: pushedAt != null });
+      const status = statusNow(phase);
       if (status === 'running') emitFixStream(facts.prId, { type: 'progress', status, fixId, progress: progressOf(l as Live, phase) });
       else emitFixStream(facts.prId, { type: 'done', status, fixId });
     },
     async onClosed(l, phase) {
-      releaseFixPr(facts.prId, fixId);
-      const state = stateOf(l);
-      if (phase === 'discarded' || phase === 'failed' || phase === 'pushed') {
-        await dropAiFixBaseRefs(state.repos.map((r) => r.fullName), fixId).catch(() => {});
-        // The merge's commits are kept only while the fix can still be pushed.
-        if (merge) await updateFixSession(ctx, accountId, fixId, { mergeBundle: null }).catch(() => {});
+      // A close while the review loop works (Stop all, a turn past its cap): the loop ends first, so the row's
+      // status is derived from the phase again before the push rules below read it.
+      if (fixLoopActive(fixId)) {
+        clearFixLoopPending(fixId);
+        await endFixLoopForClose(ctx, accountId, fixId).catch(() => {});
+        await updateFixSession(ctx, accountId, fixId, { status: aiFixStatusForPhase(phase, { pushed: pushedAt != null }) }).catch(() => {});
       }
-      // An AUTO fix that finished may be pushed automatically (auto-push.ts decides: the workspace's
-      // "Push automatically", own PR only, never forced). Off the session: a push is not a turn.
-      // ⚠ ONLY the unattended run's own close: a RESUMED auto fix is the reader's session (Resume sets
-      // `unattended: false`), so its close never pushes, and an automatic push that failed once is
-      // never retried by a later close.
-      // THE AUTO FIX QUEUE decides the PR's next fix once this one is done — after its automatic push,
-      // when there is one, so the next fix is read at the head that push leaves.
-      const queueNext = (): void => {
-        void import('../../coding/ai-fix/auto-fix-queue.js')
-          .then((m) => m.evaluateAutoFix(ctx, { accountId, prId: facts.prId, cause: 'fix_closed' }))
-          .catch(() => {});
-      };
-      // THE PUSH SETTLED (pushed, failed or skipped): the AI Fix tab stops saying "Pushing…". The SPA learns it
-      // from its poll while `AiFix.pushing` — never a second `done` on the fix stream: that stream closed on the
-      // close's own `done`, and a late `done` would end (and mark finished) the stream of a NEWER fix on this PR.
-      const settled = (): void => {
-        clearPushPending(fixId);
-        queueNext();
-      };
-      try {
-        // PUSH WHEN DONE: a MANUAL fix the reader asked to push once it is done (the close above was its own:
-        // `afterBuildTurn` closed a clean fix). Every rule is read again at push time.
-        if (phase === 'built' && !unattended && facts.trigger !== 'auto') {
-          const r = await row();
-          if (r?.pushWhenDone === true && r.status === 'succeeded' && fixRowHasWork(r)) {
-            const { maybePushWhenDone } = await import('../../coding/ai-fix/auto-push.js');
-            void maybePushWhenDone(ctx, { accountId, fixId }).catch(() => {}).finally(settled);
-            return;
-          }
-        }
-        if (phase === 'built' && unattended && facts.trigger === 'auto') {
-          const r = await row();
-          if (r?.status === 'succeeded' && fixRowHasWork(r)) {
-            const { maybeAutoPushFix } = await import('../../coding/ai-fix/auto-push.js');
-            void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {}).finally(settled);
-            return;
-          }
-        }
-      } catch {
-        /* a failed read pushes nothing; the pending mark is cleared below */
-      }
-      clearPushPending(fixId);
-      queueNext();
+      await onClosedInner(l, phase);
     },
   };
+
+  /** The row's status: DERIVED from the phase, except 'running' while the review loop works on a built session. */
+  function statusNow(phase: SandboxSessionPhase): ReturnType<typeof aiFixStatusForPhase> {
+    if (phase === 'built' && fixLoopActive(fixId)) return 'running';
+    return aiFixStatusForPhase(phase, { pushed: pushedAt != null });
+  }
+
+  /**
+   * AFTER A FIX TURN'S WORK (and its review loop, when one ran): an unattended fix closes (its close pushes by the
+   * existing rules); a manual one asks Push when done. 'turn': called from `afterBuildTurn` (the machine closes on
+   * 'close'); 'loop': the loop ended (this closes the live session itself).
+   */
+  async function finishTurn(l: Live, o: { closeBy: 'turn' | 'loop' }): Promise<'keep' | 'close'> {
+    if (unattended) {
+      // PUSH AUTOMATICALLY: when the close will push, the AI Fix tab says "Pushing…" from now until the push
+      // settles (push-guard.ts `notePushPending`; `onClosed` clears it). Gate parts 1–3, read-only.
+      if (facts.trigger === 'auto') {
+        const { autoPushSkip } = await import('../../coding/ai-fix/auto-push.js');
+        const skip = await autoPushSkip(ctx, accountId, fixId, undefined, { closing: true }).catch(() => 'failed');
+        if (skip == null) notePushPending(fixId);
+      }
+      if (o.closeBy === 'loop') await closeSession(l, { phase: 'built', error: null });
+      return 'close';
+    }
+    // PUSH WHEN DONE (coding/ai-fix/auto-push.ts): a clean manual fix on the reader's own PR closes, and its
+    // close pushes. Otherwise the session stays open and says, in one line, why it did not push.
+    const { pushWhenDoneReady } = await import('../../coding/ai-fix/auto-push.js');
+    const ready = await pushWhenDoneReady(ctx, accountId, fixId).catch(() => ({ push: false as const, line: null }));
+    if (ready.push) {
+      notePushPending(fixId);
+      if (o.closeBy === 'loop') await closeSession(l, { phase: 'built', error: null });
+      return 'close';
+    }
+    if (ready.line != null) notice(l, ready.line);
+    return 'keep';
+  }
+
+  /** THE LOOP ENDED (or never started): status from the phase again, the tab told, then `finishTurn`. */
+  async function afterLoop(stop: AiFixLoopStop | null): Promise<void> {
+    const l = liveSession(fixKey(fixId));
+    const r = await row();
+    if (r?.sessionPhase) await updateFixSession(ctx, accountId, fixId, { status: aiFixStatusForPhase(r.sessionPhase as SandboxSessionPhase, { pushed: r.pushedAt != null }) });
+    if (!l || l.closing) return;
+    subject.onPhase?.(l, l.phase);
+    // The reader pressed Stop: nothing is closed or pushed by itself (an unattended fix's Stop discards it).
+    if (stop === 'stopped') return;
+    await finishTurn(l, { closeBy: 'loop' });
+  }
+  loopEnders.set(fixId, afterLoop);
+
+  async function onClosedInner(l: SubjectLive, phase: SandboxSessionPhase): Promise<void> {
+    loopEnders.delete(fixId);
+    releaseFixPr(facts.prId, fixId);
+    const state = stateOf(l);
+    if (phase === 'discarded' || phase === 'failed' || phase === 'pushed') {
+      await dropAiFixBaseRefs(state.repos.map((r) => r.fullName), fixId).catch(() => {});
+      // The review loop's local commits (refs/pierre/local/ai-fix-loop/<fixId>/…) go with the fix.
+      await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
+      // The merge's commits are kept only while the fix can still be pushed.
+      if (merge) await updateFixSession(ctx, accountId, fixId, { mergeBundle: null }).catch(() => {});
+    }
+    // An AUTO fix that finished may be pushed automatically (auto-push.ts decides: the workspace's
+    // "Push automatically", own PR only, never forced). Off the session: a push is not a turn.
+    // ⚠ ONLY the unattended run's own close: a RESUMED auto fix is the reader's session (Resume sets
+    // `unattended: false`), so its close never pushes, and an automatic push that failed once is
+    // never retried by a later close.
+    // THE AUTO FIX QUEUE decides the PR's next fix once this one is done — after its automatic push,
+    // when there is one, so the next fix is read at the head that push leaves.
+    const queueNext = (): void => {
+      void import('../../coding/ai-fix/auto-fix-queue.js')
+        .then((m) => m.evaluateAutoFix(ctx, { accountId, prId: facts.prId, cause: 'fix_closed' }))
+        .catch(() => {});
+    };
+    // THE PUSH SETTLED (pushed, failed or skipped): the AI Fix tab stops saying "Pushing…". The SPA learns it
+    // from its poll while `AiFix.pushing` — never a second `done` on the fix stream: that stream closed on the
+    // close's own `done`, and a late `done` would end (and mark finished) the stream of a NEWER fix on this PR.
+    const settled = (): void => {
+      clearPushPending(fixId);
+      queueNext();
+    };
+    try {
+      // PUSH WHEN DONE: a MANUAL fix the reader asked to push once it is done (the close above was its own:
+      // `afterBuildTurn` closed a clean fix). Every rule is read again at push time.
+      if (phase === 'built' && !unattended && facts.trigger !== 'auto') {
+        const r = await row();
+        if (r?.pushWhenDone === true && r.status === 'succeeded' && fixRowHasWork(r)) {
+          const { maybePushWhenDone } = await import('../../coding/ai-fix/auto-push.js');
+          void maybePushWhenDone(ctx, { accountId, fixId }).catch(() => {}).finally(settled);
+          return;
+        }
+      }
+      if (phase === 'built' && unattended && facts.trigger === 'auto') {
+        const r = await row();
+        if (r?.status === 'succeeded' && fixRowHasWork(r)) {
+          const { maybeAutoPushFix } = await import('../../coding/ai-fix/auto-push.js');
+          void maybeAutoPushFix(ctx, { accountId, fixId }).catch(() => {}).finally(settled);
+          return;
+        }
+      }
+    } catch {
+      /* a failed read pushes nothing; the pending mark is cleared below */
+    }
+    clearPushPending(fixId);
+    queueNext();
+  }
 
   /** After the mirror: the base tip and the merge base into the PR repository, then Limn starts the merge. */
   async function prepareMerge(l: Live, repoPath: string, req: RepoBaseRequest | undefined): Promise<void> {
@@ -735,6 +833,8 @@ function fixSubject(
 /** The shown AiFix progress of a live session (the AiFixBanner's words). */
 function progressOf(l: Live, phase: SandboxSessionPhase): AiFixProgress {
   if (phase === 'booting') return { phase: 'cloning' };
+  // A built session whose review loop works (coding/ai-fix/loop.ts): the AiFix wire's `loop` says which round.
+  if (phase === 'built') return { phase: 'fixing', message: 'Ensemble is reviewing the fix.' };
   const recent = l.state.conversation
     .filter((c) => c.kind === 'tool')
     .slice(-PROGRESS_TOOLS)
@@ -859,11 +959,14 @@ export async function stopFixSession(ctx: AgentContext, accountId: number, prId:
   const l = liveSession(fixKey(fixId));
   if (!l || l.accountId !== accountId || l.closing) return false;
   const st = l.state as FixState;
+  // THE REVIEW LOOP stops first (its review aborted, its fix turn interrupted); the work so far is kept.
+  const loopStopped = fixLoopActive(fixId) ? await stopFixLoop(ctx, accountId, fixId).catch(() => false) : false;
   if (l.driver == null || st.unattended) {
     await l.driver?.interrupt().catch(() => {});
     void closeSession(l, { phase: 'discarded', error: null });
     return true;
   }
+  if (loopStopped) return true;
   const r = await interruptLive(fixKey(fixId), accountId, rowIsSession(ctx, accountId, fixId));
   return r.status === 'stopping';
 }
@@ -897,6 +1000,8 @@ export async function discardFixSession(ctx: AgentContext, accountId: number, fi
   }
   const state = readSessionState(r.sessionJson);
   await dropAiFixBaseRefs(state.repos.map((x) => x.fullName), fixId).catch(() => {});
+  const facts = (state as FixState).fix;
+  if (facts) await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
   return { status: 'discarded' };
 }
 
@@ -915,6 +1020,8 @@ export async function closeFixAfterPush(ctx: AgentContext, accountId: number, fi
     await updateFixSession(ctx, accountId, fixId, { sessionPhase: 'pushed', status: 'succeeded', sandboxRef: null });
     const state = readSessionState(r.sessionJson);
     await dropAiFixBaseRefs(state.repos.map((x) => x.fullName), fixId).catch(() => {});
+    const facts = (state as FixState).fix;
+    if (facts) await dropFixLoopRefs(facts.fullName, fixId).catch(() => {});
   }
 }
 
@@ -1006,8 +1113,55 @@ export function subscribeFixSession(fixId: number, accountId: number, fn: Listen
 export function fixLiveProgress(fixId: number): { status: ReturnType<typeof aiFixStatusForPhase>; progress: AiFixProgress | null } | null {
   const l = liveSession(fixKey(fixId));
   if (!l || l.closing) return null;
-  const status = aiFixStatusForPhase(l.phase, { pushed: false });
+  const status = l.phase === 'built' && fixLoopActive(fixId) ? 'running' : aiFixStatusForPhase(l.phase, { pushed: false });
   return { status, progress: status === 'running' ? progressOf(l, l.phase) : null };
+}
+
+// ---- the review loop's hooks into a live fix session (coding/ai-fix/loop.ts) --------------------------------
+
+/** The loop ended: the subject's own end (status from the phase, then close / Push when done). Never throws. */
+export async function afterFixLoopEnded(ctx: AgentContext, accountId: number, fixId: number, stop: AiFixLoopStop): Promise<void> {
+  const ender = loopEnders.get(fixId);
+  if (ender) return ender(stop).catch(() => {});
+  // No live subject: the row's status is derived from its phase again.
+  const r = await getFixById(ctx, accountId, fixId).catch(() => null);
+  if (r?.sessionPhase) await updateFixSession(ctx, accountId, fixId, { status: aiFixStatusForPhase(r.sessionPhase as SandboxSessionPhase, { pushed: r.pushedAt != null }) }).catch(() => {});
+}
+
+/** What the loop reads and writes in a live fix session (null when it is not live). */
+export function liveFixIo(fixId: number): {
+  root: string;
+  repoPath: string | null;
+  provider: import('@pierre-review/shared').AiProviderId;
+  copyIn(files: Array<{ path: string; content: string; mode?: number }>): Promise<void>;
+  runtime: Live['runtime'];
+  container: string;
+} | null {
+  const l = liveSession(fixKey(fixId));
+  if (!l || l.closing || !l.container || !l.layoutRoot) return null;
+  const container = l.container;
+  const st = l.state as FixState;
+  const repoPath = st.repos.find((r) => r.repoId === st.fix?.prRepoId)?.path ?? null;
+  return { root: l.layoutRoot, repoPath, provider: l.choice.provider, copyIn: (files) => l.runtime.copyIn(container, files), runtime: l.runtime, container };
+}
+
+/** One conversation line on a live fix session (a no-op when closed). */
+export function noticeFix(fixId: number, text: string): void {
+  const l = liveSession(fixKey(fixId));
+  if (l && !l.closing) notice(l, text);
+}
+
+/** Stop a running turn of the fix's session (the loop's Stop during its fix turn). */
+export async function interruptFixTurn(fixId: number): Promise<void> {
+  const l = liveSession(fixKey(fixId));
+  if (l && !l.closing) await l.driver?.interrupt().catch(() => {});
+}
+
+/** The loop moved: the AI Fix tab hears it (the fix stream's progress while it works, its `done` after). */
+export function fixLoopChanged(_ctx: AgentContext, _accountId: number, fixId: number): void {
+  const l = liveSession(fixKey(fixId));
+  if (!l || l.closing) return;
+  l.subject.onPhase?.(l, l.phase);
 }
 
 // ---- restart ------------------------------------------------------------------------------------------------

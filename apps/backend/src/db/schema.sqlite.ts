@@ -2266,11 +2266,174 @@ export const aiFixes = sqliteTable(
     // NULL = the run had no merge.
     mergeJson: text('merge_json', { mode: 'json' }).$type<Record<string, unknown>>(),
     mergeBundle: text('merge_bundle'),
+    // 0207 — AI FIX'S OWN REVIEW LOOP (docs/CLAUDE-REVIEW.md § AI Fix → The review loop; coding/ai-fix/loop.ts).
+    // loop_state NULL (never ran) | 'reviewing' | 'fixing' | 'done' | 'stopped'; loop_round the current round
+    // (1-based for the whole fix: a reader's follow-up runs the loop again and the numbers go on);
+    // loop_first_round the first round of the current run; loop_rounds N (Settings → AI → AI Fix, read at the
+    // run's start); loop_stop why it ended (shared `AiFixLoopStop`); loop_base_sha the PR base commit the
+    // rounds review against; loop_review_id the claude_reviews row the closing review became at the PUSHED
+    // head (markLoopReviewOnPr; soft, no FK).
+    loopState: text('loop_state'),
+    loopRound: integer('loop_round').notNull().default(0),
+    loopFirstRound: integer('loop_first_round').notNull().default(0),
+    loopRounds: integer('loop_rounds'),
+    loopStop: text('loop_stop'),
+    loopBaseSha: text('loop_base_sha'),
+    loopReviewId: integer('loop_review_id'),
+    loopFinishedAt: integer('loop_finished_at', { mode: 'timestamp' }),
   },
   (t) => ({
     prCreatedIdx: index('af_account_pr_created').on(t.accountId, t.prId, t.createdAt),
     statusIdx: index('af_account_status').on(t.accountId, t.status),
     sessionPhaseIdx: index('af_account_session_phase').on(t.accountId, t.sessionPhase),
+  }),
+);
+
+// ---- AI Fix's own review loop (migration 0207; docs/CLAUDE-REVIEW.md § AI Fix → The review loop) ----
+// The Build loop's shape (story_build_reviews …) keyed by the FIX: (account_id, fix_id, round). `ai_fixes` has
+// no `(id, account_id)` unique (an ADOPTED table, see above), so `fix_id` is SOFT (no FK): every read and
+// write is account-scoped, both delete paths prune these rows with the fix's (db/ai-fix-loop-prune.ts) and the
+// erasure deletes them explicitly. Build's tables are untouched.
+//
+// ai_fix_loop_reviews — ONE row per code-review RUN of a round (one provider half). `head_sha` is the LOCAL
+// commit reviewed (refs/pierre/local/ai-fix-loop/<fixId>/r<round>, never pushed); `work_key` names the work it
+// is (the patch's hash, or the checked merge result) so the push can tell whether the closing review covers
+// what it pushed. Status: 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled'.
+export const aiFixLoopReviews = sqliteTable(
+  'ai_fix_loop_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    repoId: integer('repo_id').notNull(),
+    baseSha: text('base_sha').notNull(),
+    headSha: text('head_sha').notNull(),
+    localRef: text('local_ref'),
+    workKey: text('work_key'),
+    provider: text('provider'),
+    model: text('model'),
+    effort: text('effort'),
+    pairRole: text('pair_role'),
+    // The round's place in ITS loop run (> rounds = the closing review) and that run's N, fixed at the run's start.
+    step: integer('step'),
+    rounds: integer('rounds'),
+    status: text('status').notNull(),
+    reviewMode: text('review_mode'),
+    summary: text('summary'),
+    verdict: text('verdict'),
+    followUp: text('follow_up', { mode: 'json' }).$type<Record<string, unknown>>(),
+    pairConsolidation: text('pair_consolidation', { mode: 'json' }).$type<Record<string, unknown>>(),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    runUx: uniqueIndex('ai_fix_loop_reviews_run').on(t.fixId, t.round, t.provider),
+    idAccountUx: uniqueIndex('ai_fix_loop_reviews_id_account').on(t.id, t.accountId),
+    accountIdx: index('ai_fix_loop_reviews_account_idx').on(t.accountId, t.fixId, t.round),
+  }),
+);
+
+// ai_fix_loop_findings — the findings of one loop review run, plus the fix agent's answer (`response` 'fixed' |
+// 'answered' | 'pushed_back' | 'not_reported', its text and the round it answered). `prior_finding_id` /
+// `merged_into` are SOFT.
+export const aiFixLoopFindings = sqliteTable(
+  'ai_fix_loop_findings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    reviewId: integer('review_id').notNull(),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    severity: text('severity').notNull(),
+    path: text('path').notNull(),
+    line: integer('line'),
+    side: text('side').notNull().default('RIGHT'),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    suggestion: text('suggestion'),
+    diffHunk: text('diff_hunk'),
+    anchored: integer('anchored', { mode: 'boolean' }).notNull().default(false),
+    fileInDiff: integer('file_in_diff', { mode: 'boolean' }).notNull().default(false),
+    priorFindingId: integer('prior_finding_id'),
+    lens: text('lens'),
+    mergedInto: integer('merged_into'),
+    ref: text('ref'),
+    response: text('response'),
+    responseText: text('response_text'),
+    responseRound: integer('response_round'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('ai_fix_loop_findings_review_idx').on(t.reviewId),
+    accountIdx: index('ai_fix_loop_findings_account_idx').on(t.accountId, t.fixId, t.round),
+    reviewAccountFk: foreignKey({
+      name: 'ai_fix_loop_findings_review_account_fk',
+      columns: [t.reviewId, t.accountId],
+      foreignColumns: [aiFixLoopReviews.id, aiFixLoopReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// ai_fix_loop_story_checks — the round's story check, only when the PR's ticket criteria are in the fix (the
+// ticket review's assessment; `claims` the agent's criterion notes shown, `claim_verdicts` the checker's word
+// on each "not applicable" note).
+export const aiFixLoopStoryChecks = sqliteTable(
+  'ai_fix_loop_story_checks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    status: text('status').notNull(),
+    provider: text('provider'),
+    model: text('model'),
+    assessment: text('assessment', { mode: 'json' }).$type<Record<string, unknown>>(),
+    claims: text('claims', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    claimVerdicts: text('claim_verdicts', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    numTurns: integer('num_turns'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    roundUx: uniqueIndex('ai_fix_loop_story_checks_round').on(t.fixId, t.round),
+    accountIdx: index('ai_fix_loop_story_checks_account_idx').on(t.accountId, t.fixId),
+  }),
+);
+
+// ai_fix_loop_ac_responses — the fix agent's answer per criterion ('AC3') or missing item ('M1') after a round's
+// review: 'fixed' | 'not_applicable' | 'cannot_meet' | 'answered' | 'pushed_back' | 'not_reported'.
+export const aiFixLoopAcResponses = sqliteTable(
+  'ai_fix_loop_ac_responses',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    fixId: integer('fix_id').notNull(),
+    round: integer('round').notNull(),
+    ref: text('ref').notNull(),
+    response: text('response').notNull(),
+    text: text('text'),
+  },
+  (t) => ({
+    refUx: uniqueIndex('ai_fix_loop_ac_responses_ref').on(t.fixId, t.round, t.ref),
+    accountIdx: index('ai_fix_loop_ac_responses_account_idx').on(t.accountId, t.fixId),
   }),
 );
 

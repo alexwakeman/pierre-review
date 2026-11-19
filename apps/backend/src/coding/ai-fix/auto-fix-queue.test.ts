@@ -222,6 +222,28 @@ describe('the auto fix queue', () => {
     expect(starts).toEqual([]);
   });
 
+  it('⚠ a head an AI fix pushed after its OWN review loop reviewed it is REVIEWED: idle "reviewed_by_fix", never a wait for an auto review; CI causes still start a CI fix', async () => {
+    const id = await pr({ ciStatus: 'success' });
+    // The fix's closing review, imported at the pushed head (markLoopReviewOnPr: trigger 'manual').
+    await aiReview(id, { trigger: 'manual' });
+    const reviewedByFix = async () => true;
+    const d2: AutoFixQueueDeps = { ...deps, reviewedByFix };
+    const decideFix = (prId: number) => Q.evaluateAutoFix(ctx, { accountId: 1, prId, cause: 'review' }, d2, NOW);
+    expect(await decideFix(id)).toMatchObject({ status: 'idle', reason: 'reviewed_by_fix', line: AUTO_FIX_QUEUE_LINE.reviewed_by_fix });
+    expect(starts).toEqual([]);
+    // With CI causes at that head, the CI-only fix still starts (CI is new work, not the review's).
+    ciItems = 2;
+    const other = await pr({ ciStatus: 'success' });
+    await aiReview(other, { trigger: 'manual' });
+    expect(await decideFix(other)).toMatchObject({ status: 'started' });
+    expect(starts).toEqual([{ reviewId: null }]);
+    // A manual review that is NOT a fix's import reads as before: nothing to fix.
+    ciItems = 0;
+    const plain = await pr({ ciStatus: 'success' });
+    await aiReview(plain, { trigger: 'manual' });
+    expect(await Q.evaluateAutoFix(ctx, { accountId: 1, prId: plain, cause: 'review' }, { ...deps, reviewedByFix: async () => false }, NOW)).toMatchObject({ status: 'idle', reason: 'nothing_to_fix' });
+  });
+
   it('a busy sandbox is a wait; the cap is final, and the sweep does not start again on unchanged facts', async () => {
     const id = await pr({ ciStatus: 'success' });
     await aiReview(id);

@@ -200,6 +200,25 @@ describe('the review loop helpers', () => {
     expect(loopCoverage({ history: [] })).toEqual([]);
   });
 
+  it('a criterion the agent last answered "cannot meet" stays open (not met), with its reason; never accepted', () => {
+    const notMet = LOOP.history.find((r) => r.storyCheck?.assessment?.criteria.some((c) => c.status === 'not_met'));
+    const check = notMet?.storyCheck ?? null;
+    expect(check).not.toBeNull();
+    if (check == null) return;
+    const l = {
+      history: [
+        { ...LOOP.history[0]!, acResponses: [{ ref: 'AC2', response: 'cannot_meet' as const, text: 'The cap lives in another service.' }] },
+        { ...LOOP.history[1]!, storyCheck: check, claimVerdicts: [], acResponses: [] },
+      ],
+    };
+    const ac2 = loopCoverage(l).find((c) => c.ref === 'AC2')!;
+    expect(ac2.state).toBe('open');
+    expect(ac2.cannotMeet).toBe('The cap lives in another service.');
+    // A later "fixed" answer replaces it.
+    const later = { history: [l.history[0]!, { ...l.history[1]!, acResponses: [{ ref: 'AC2', response: 'fixed' as const, text: 'Done.' }] }] };
+    expect(loopCoverage(later).find((c) => c.ref === 'AC2')!.cannotMeet).toBeNull();
+  });
+
   it('Review is a derived step between Build and Push', () => {
     const cur = (phase: Parameters<typeof sessionSteps>[0], loop: Parameters<typeof sessionSteps>[1]) =>
       sessionSteps(phase, loop).find((s) => s.state === 'current')?.word ?? null;

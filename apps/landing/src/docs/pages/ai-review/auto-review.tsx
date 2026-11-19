@@ -41,7 +41,8 @@ export default function Page(): JSX.Element {
     <>
       <p>
         With auto review on, Ensemble reviews each new pull request a person opens in the workspace, and reviews it again
-        when new commits arrive. You do not press anything. It uses the same models and the same rules as a review
+        when new commits arrive (except a commit an AI fix pushed, which Ensemble reviewed before the push). You do not
+        press anything. It uses the same models and the same rules as a review
         you start, and it runs on your own AI sign-in, so it is off until you switch it on.
       </p>
 

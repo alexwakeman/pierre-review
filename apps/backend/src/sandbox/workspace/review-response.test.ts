@@ -80,3 +80,22 @@ describe('the checker script', () => {
     expect(out).toContain('AC1 has no answer.');
   });
 });
+
+describe('cannot_meet (a criterion this work cannot meet)', () => {
+  it('only on AC / M refs, and it must say why', async () => {
+    const { validateReviewResponse } = await import('../../coding/review-loop/response.js');
+    const r = validateReviewResponse(
+      {
+        items: [
+          { ref: 'AC2', action: 'cannot_meet', reply: 'Another service sends the email.' },
+          { ref: 'F1', action: 'cannot_meet', reply: 'Too hard.' },
+          { ref: 'M1', action: 'cannot_meet', reply: '  ' },
+        ],
+      },
+      ['F1', 'AC2', 'M1'],
+    );
+    expect(r.payload!.items).toEqual([{ ref: 'AC2', action: 'cannot_meet', reply: 'Another service sends the email.' }]);
+    expect(r.problems).toContain('F1: "cannot_meet" is only for a criterion (AC) or a missing item (M).');
+    expect(r.problems).toContain('"items"[2].reply must say why it cannot be done.');
+  });
+});

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { AiFix, AiFixPickerPreview, SandboxRuntimeStatus } from '@pierre-review/shared';
-import { AI_FIX_PREVIEW_MERGE, aiFixAutoPush, aiFixBuilt, aiFixMerged, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
+import { AI_FIX_PREVIEW_MERGE, aiFixAutoPush, aiFixBuilt, aiFixLooping, aiFixMerged, fixtures, installMockApi, SANDBOX_RUNTIME_NONE } from './mock-api.js';
 
 // AI FIX ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions; docs/FRONTEND.md § The AI Fix tab)
 // against the mocked API (mock-api.ts keeps the PR's fix per page). The picker stays; Start fix boots the
@@ -152,6 +152,38 @@ test.describe('AI Fix in the sandbox', () => {
   test('a failed automatic push says why and keeps Push', async ({ page }) => {
     await openAiFix(page, { aiFix: aiFixAutoPush(PR_ID, 'failed') });
     await expect(page.getByTestId('ai-fix-push-line')).toHaveText('Automatic push failed: the branch moved since the fix was made.');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toBeVisible();
+  });
+
+  test('the review loop: while round 2 reviews there is no Push, and Stop is offered', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixLooping(PR_ID, 'reviewing') });
+    const loop = page.getByTestId('ai-fix-loop');
+    // The round is said ONCE: the session's status line (no second copy in the loop section or the footer).
+    await expect(page.getByTestId('ai-fix-session-status')).toContainText('Reviewing, round 2 of 5. Nothing is pushed until the review ends.');
+    await expect(loop.getByTestId('ai-fix-loop-progress')).toHaveCount(0);
+    await expect(page.getByText(/Reviewing, round 2 of 5/)).toHaveCount(1);
+    const rounds = loop.getByTestId('ai-fix-loop-round');
+    await expect(rounds).toHaveCount(2);
+    await expect(rounds.nth(0)).toContainText('Round 1');
+    await expect(rounds.nth(0)).toContainText('3 found · 1 fixed · 1 pushed back · 1 cannot meet');
+    await expect(rounds.nth(1)).toContainText('Reviewing');
+    // A review still running has no counts yet (unknown is never zero).
+    await expect(rounds.nth(1)).not.toContainText('found');
+    await expect(page.getByRole('button', { name: 'Push', exact: true })).toHaveCount(0);
+    const stop = page.waitForRequest((r) => r.url().endsWith('/ai-fix/cancel') && r.method() === 'POST');
+    await loop.getByTestId('ai-fix-loop-stop').click();
+    await stop;
+  });
+
+  test('the review loop stopped on a criterion the agent cannot meet: it stays not met, with the reason, and Push is back', async ({ page }) => {
+    await openAiFix(page, { aiFix: aiFixLooping(PR_ID, 'ended') });
+    const loop = page.getByTestId('ai-fix-loop');
+    await expect(loop.getByTestId('ai-fix-loop-stop-line')).toHaveText('Stopped: only criteria the agent says cannot be done are open.');
+    await expect(loop.getByTestId('ai-fix-loop-cannot-meet')).toContainText('Not met: the agent says this cannot be done: The PDF library is not in this repository.');
+    await expect(loop.getByTestId('ai-fix-loop-stop')).toHaveCount(0);
+    // Round 1's answers behind its toggle.
+    await loop.getByTestId('ai-fix-loop-round').nth(0).getByRole('button').click();
+    await expect(loop).toContainText('Pushed back: The name matches the module.');
     await expect(page.getByRole('button', { name: 'Push', exact: true })).toBeVisible();
   });
 

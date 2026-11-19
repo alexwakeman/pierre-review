@@ -384,7 +384,7 @@ one-shot completions, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md · docs
   The DEFAULT provider is `activeProviderId` (`ENSEMBLE_AI_PROVIDER` = `claude`|`codex`|`auto`, else
   Settings → AI; `auto` = Claude when both are signed in): it runs every surface without a RUN
   PROFILE (below). A MANUAL picker run (AI Review, AI Fix, Implement) names `{provider, model}`
-  (`ai/run-choice.ts`). A job resolves its provider ONCE; row label, follow-up chain, ledger and
+  (`ai/run-choice.ts`). Each sub-run resolves its provider ONCE; row label, follow-up chain, ledger and
   budget use the RUN's. Every run row stores the `provider` + `model` that RAN, shown ONLY via
   `aiRunLabel`; ⚠ a stored model fed to a new run goes through `requestModelOf`.
 - **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
@@ -461,9 +461,9 @@ one-shot completions, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md · docs
 
 ## Implement story and AI Fix — the workspace session
 
-docs/STORY-BUILD.md · docs/SANDBOX.md. A Claude Code / Codex agent WITH
-a shell, ONLY inside a sandbox `sandbox/runtime` started. The shell-less agents are REMOVED — never a
-fallback. AI Fix pushes ONLY the PR repository, to the PR's branch.
+docs/STORY-BUILD.md · docs/SANDBOX.md. A Claude Code / Codex agent WITH a shell, ONLY in a sandbox
+`sandbox/runtime` started; no shell-less fallback. AI Fix pushes ONLY the PR repo, to its branch,
+after ONE FIX LOOP (`ai-fix/loop.ts`).
 
 - ⚠ **The sandbox never holds GitHub credentials, the Docker socket or a writable host mount**; work
   leaves ONLY as a patch per repo; the HOST pushes on the reader's press — or by the opt-in REVIEW

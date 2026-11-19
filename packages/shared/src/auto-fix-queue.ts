@@ -32,6 +32,9 @@ export type AutoFixQueueReason =
   | 'cap'
   | 'already_tried'
   | 'nothing_to_fix'
+  // the head is the push of an AI fix whose OWN review loop reviewed it (its closing review is the PR's AI
+  // review at that head): no auto fix starts from that review
+  | 'reviewed_by_fix'
   // the auto review that would seed the fix will not run today (the workspace's daily cap)
   | 'review_capped'
   // faults: the fix did not start (the sweep decides again each minute, so a passing one clears)
@@ -73,6 +76,7 @@ export const AUTO_FIX_QUEUE_LINE: Record<AutoFixQueueReason, string> = {
   cap: `No auto fix: ${AUTO_FIX_DAILY_CAP} already ran on this pull request in the last 24 hours.`,
   already_tried: 'The last auto fix could not address these points. Nothing changed since.',
   nothing_to_fix: 'Nothing to fix.',
+  reviewed_by_fix: 'The AI fix reviewed this commit before it pushed it. No auto fix starts from that review.',
   review_capped: 'No auto review today: the daily limit is reached.',
   no_ai_login: 'No auto fix: AI is not signed in on this computer.',
   review_unavailable: 'No auto fix: the review could not be read.',
@@ -155,3 +159,36 @@ export function autoFixRowLine(r: Pick<AutoFixActiveRow, 'status' | 'failed' | '
   if (r.status === 'cancelled') return 'Stopped';
   return 'Ended';
 }
+
+// ── AI FIX'S OWN REVIEW LOOP: why it stopped (shared ai-fix-loop.ts; docs/CLAUDE-REVIEW.md § AI Fix → The
+// review loop). ONE line each, shown in the AI Fix tab and named in the docs. A loop that stopped for any
+// reason leaves the fix as built: the existing push rules still decide (it is never queued or retried) — except
+// Stop on an UNATTENDED fix, which discards it, so 'stopped' never claims the fix is kept.
+export type AiFixLoopStop =
+  // ended as planned
+  | 'clean'
+  | 'rounds'
+  | 'cannot_meet'
+  // stopped early
+  | 'budget'
+  | 'stopped'
+  | 'review_failed'
+  | 'fix_failed'
+  | 'no_reviewer'
+  | 'session_closed'
+  | 'interrupted'
+  | 'not_pushable';
+
+export const AI_FIX_LOOP_STOP_LINE: Record<AiFixLoopStop, string> = {
+  clean: 'Reviewed: nothing is open.',
+  rounds: 'Reviewed: the review rounds are used up. What is still open is listed below.',
+  cannot_meet: 'Stopped: only criteria the agent says cannot be done are open.',
+  budget: 'Stopped: the AI spend limit is reached. The fix so far is kept.',
+  stopped: 'You stopped the review.',
+  review_failed: 'Stopped: the review did not finish. The fix so far is kept.',
+  fix_failed: 'Stopped: the agent could not finish the fixes. The fix so far is kept.',
+  no_reviewer: 'Not reviewed: no AI review vendor is on and signed in.',
+  session_closed: 'Stopped: the session closed. The fix so far is kept.',
+  interrupted: 'Stopped: Ensemble restarted during the review. The fix so far is kept.',
+  not_pushable: 'Stopped: the latest changes cannot be pushed.',
+};

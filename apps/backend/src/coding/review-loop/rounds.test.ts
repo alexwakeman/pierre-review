@@ -2,10 +2,12 @@
 //   • the stop rule: nothing open ⇒ 'open'; open and k ≤ N ⇒ 'fix'; the closing review (k = N + 1) ⇒ 'open'
 //     whatever is open; follow-ups never add to the total (they are the findings they re-raise);
 //   • roundOpen counts the round's consolidated non-praise findings, the carried 'not_checked' ones, the
-//     open follow-ups of the lead run only, and the open criteria minus accepted "not applicable" notes.
+//     open follow-ups of the lead run only, and the open criteria minus accepted "not applicable" notes;
+//   • THE cannot_meet STOP: no open finding, and every open criterion one the agent said (last round, with a
+//     reason) it cannot meet ⇒ 'open' before N.
 import { describe, expect, it } from 'vitest';
 import type { ClaudeReviewFollowUpRecord, TicketAssessment } from '@pierre-review/shared';
-import { nextAfterReview, roundOpen, type LoopCheckLike, type LoopFindingLike, type LoopRunLike } from './rounds.js';
+import { cannotMeetOf, nextAfterReview, onlyCannotMeetLeft, roundOpen, type LoopCheckLike, type LoopFindingLike, type LoopRunLike } from './rounds.js';
 
 const followUp = (items: Array<{ priorFindingId: number; status: string }>): ClaudeReviewFollowUpRecord =>
   ({ priorReviewId: 1, priorHeadSha: 'a', headMoved: true, changesSinceShown: false, items }) as unknown as ClaudeReviewFollowUpRecord;
@@ -70,5 +72,29 @@ describe('roundOpen', () => {
   it('reads no criteria from a check that did not succeed', () => {
     const check: LoopCheckLike = { round: 1, status: 'failed', assessment: assessment([{ ref: 'AC1', status: 'not_met' }]), claimVerdicts: null };
     expect(roundOpen(1, [run(1, 1)], [], check).criteria).toBe(0);
+  });
+});
+
+describe('the cannot_meet stop', () => {
+  const answers = [
+    { round: 1, ref: 'AC2', response: 'cannot_meet', text: 'Another service sends it.' },
+    { round: 1, ref: 'ac3', response: 'cannot_meet', text: '  ' },
+    { round: 1, ref: 'M1', response: 'fixed', text: 'Done.' },
+    { round: 2, ref: 'AC4', response: 'cannot_meet', text: 'Later.' },
+  ];
+
+  it('reads the reasons of ONE round (a blank reason is no answer)', () => {
+    expect([...cannotMeetOf(answers, 1).entries()]).toEqual([['AC2', 'Another service sends it.']]);
+    expect([...cannotMeetOf(answers, 2).keys()]).toEqual(['AC4']);
+  });
+
+  it('stops only when every open item is such a criterion', () => {
+    const cm = cannotMeetOf(answers, 1);
+    expect(onlyCannotMeetLeft({ findings: 0 }, [{ ref: 'AC2' }], cm)).toBe(true);
+    expect(onlyCannotMeetLeft({ findings: 1 }, [{ ref: 'AC2' }], cm)).toBe(false);
+    expect(onlyCannotMeetLeft({ findings: 0 }, [{ ref: 'AC2' }, { ref: 'AC3' }], cm)).toBe(false);
+    expect(onlyCannotMeetLeft({ findings: 0 }, [], cm)).toBe(false);
+    expect(nextAfterReview({ findings: 0, criteria: 1 }, 2, 5)).toBe('fix');
+    expect(nextAfterReview({ findings: 0, criteria: 1 }, 2, 5, { onlyCannotMeet: true })).toBe('open');
   });
 });

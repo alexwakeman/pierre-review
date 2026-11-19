@@ -147,7 +147,10 @@ const {
 const ACTIONS_PER_TICK = 6;
 /** How long an AI fix — a CI fix or a conflict run — may take (the sandbox's boot — a first image pull is slow — then its one build turn)
  *  before it is given up on. */
-const AI_FIX_TIMEOUT_MS = 90 * 60_000;
+// An AI fix now runs its OWN review loop before it is pushable (coding/ai-fix/loop.ts: up to N fix turns and
+// N + 1 reviews, each turn up to SANDBOX_TURN_MAX_MINUTES): the deadline RESTARTS at every loop step (`loopStep`
+// changes), so it bounds one stuck step, never a loop that is making progress.
+const AI_FIX_TIMEOUT_MS = 4 * 60 * 60_000;
 /** The automation log's window and length. */
 const LOG_DAYS = 14;
 const LOG_MAX = 40;
@@ -1357,6 +1360,8 @@ export interface AiFixDeps {
     hasWork?: boolean;
     mergeReason?: string | null;
     ciItems?: number;
+    /** The review loop's position (`<round>:<state>`), null when it never ran: a change is progress. */
+    loopStep?: string | null;
   } | null>;
   push: (ctx: AgentContext, accountId: number, fixId: number) => Promise<{ ok: true; sha: string } | { ok: false; message: string }>;
   /** Does an AI Fix session (anyone's — a reader's click or an earlier automatic one) hold the PR? */
@@ -1438,7 +1443,7 @@ const defaultAiFixDeps: AiFixDeps = {
     const { getFixById } = await import('../coding/ai-fix/persist.js');
     const row = await getFixById(ctx, accountId, fixId);
     if (!row) return null;
-    const r = row as { status: string; patch?: string | null; error?: string | null; provider?: string | null; mergeJson?: unknown; mergeBundle?: string | null; reviewItems?: string | null };
+    const r = row as { status: string; patch?: string | null; error?: string | null; provider?: string | null; mergeJson?: unknown; mergeBundle?: string | null; reviewItems?: string | null; loopState?: string | null; loopRound?: number | null };
     const { fixRowHasWork, readMergeState } = await import('../sandbox/session/fix-merge.js');
     const merge = readMergeState(r.mergeJson ?? null);
     let ciItems = 0;
@@ -1456,6 +1461,7 @@ const defaultAiFixDeps: AiFixDeps = {
       provider: r.provider ?? null,
       hasWork: fixRowHasWork(r),
       mergeReason: merge && merge.status !== 'valid' ? (merge.reason ?? 'The merge is not ready.') : null,
+      loopStep: r.loopState ? `${r.loopRound ?? 0}:${r.loopState}` : null,
     };
   },
   async push(ctx, accountId, fixId) {
@@ -1548,9 +1554,15 @@ async function watchFixAndPush(
   what: 'ci' | 'conflicts' = 'ci',
 ): Promise<void> {
   try {
-    const deadline = Date.now() + AI_FIX_TIMEOUT_MS;
+    let deadline = Date.now() + AI_FIX_TIMEOUT_MS;
     let state = await deps.fixState(ctx, pr.accountId, fixId);
+    let step = state?.loopStep ?? null;
     while (state != null && (state.status === 'queued' || state.status === 'running')) {
+      // The review loop moved on (a new round, a fix turn): the wait restarts — it bounds ONE stuck step.
+      if ((state.loopStep ?? null) !== step) {
+        step = state.loopStep ?? null;
+        deadline = Date.now() + AI_FIX_TIMEOUT_MS;
+      }
       if (Date.now() > deadline) {
         // The session would run on (and spend) with nobody waiting for it: stop it first.
         await deps.stop(ctx, pr.accountId, pr.id, fixId).catch(() => {});

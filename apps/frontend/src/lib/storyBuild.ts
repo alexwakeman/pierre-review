@@ -320,6 +320,8 @@ export const LOOP_RESPONSE_WORDS: Record<StoryBuildLoopResponse | StoryBuildLoop
   answered: 'Answered',
   pushed_back: 'Pushed back',
   not_applicable: 'Not applicable',
+  // Still NOT MET: the agent says the work cannot meet it (with its reason, `cannotMeetLine`).
+  cannot_meet: 'Cannot meet',
   not_reported: 'Not answered',
 };
 
@@ -357,17 +359,26 @@ export function loopFindingsShown(findings: readonly StoryBuildLoopFinding[]): S
   return [...findings].sort((a, b) => Number(a.severity === 'praise') - Number(b.severity === 'praise'));
 }
 
-/** The coverage strip: the latest story check's criteria, each met / not applicable / open. */
-export function loopCoverage(loop: Pick<StoryBuildLoop, 'history'>): Array<{ ref: string; text: string; state: 'met' | 'not_applicable' | 'open' }> {
+/**
+ * The coverage strip: the latest story check's criteria, each met / not applicable / open. An open one the agent
+ * last answered "cannot meet" carries that reason (`cannotMeet`): it STAYS open (not met), never accepted.
+ */
+export function loopCoverage(
+  loop: Pick<StoryBuildLoop, 'history'>,
+): Array<{ ref: string; text: string; state: 'met' | 'not_applicable' | 'open'; cannotMeet: string | null }> {
   const check = [...loop.history].reverse().find((r) => r.storyCheck?.assessment != null) ?? null;
   const a = check?.storyCheck?.assessment;
   if (check == null || a == null) return [];
   const na = new Set(check.claimVerdicts.filter((v) => v.verdict === 'accepted').map((v) => v.ref.toUpperCase()));
-  return a.criteria.map((c) => ({
-    ref: c.ref,
-    text: c.text,
-    state: na.has(c.ref.toUpperCase()) ? 'not_applicable' : c.status === 'met' || c.status === 'met_outside_code' ? 'met' : 'open',
-  }));
+  // The agent's LATEST answer per criterion (any round), newest round last in the history.
+  const latest = new Map<string, { response: string; text: string | null }>();
+  for (const r of loop.history) for (const x of r.acResponses) if (x.response !== 'not_reported') latest.set(x.ref.toUpperCase(), x);
+  return a.criteria.map((c) => {
+    const state = na.has(c.ref.toUpperCase()) ? 'not_applicable' : c.status === 'met' || c.status === 'met_outside_code' ? 'met' : 'open';
+    const l = latest.get(c.ref.toUpperCase());
+    const why = (l?.text ?? '').trim();
+    return { ref: c.ref, text: c.text, state, cannotMeet: state === 'open' && l?.response === 'cannot_meet' && why !== '' ? why : null };
+  });
 }
 
 // ── errors ─────────────────────────────────────────────────────────────────────────────────────

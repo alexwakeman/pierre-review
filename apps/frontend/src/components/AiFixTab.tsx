@@ -52,11 +52,13 @@ import {
   fixRepoStatus,
   fixSessionHoldsPr,
   fixSessionShown,
+  fixLoopStatusLine,
   fixSessionStatusLine,
   leftOutLine,
   type FixPushFooter,
 } from '../lib/aiFixSession.js';
 import { ApprovedPlanNote, PlanHistory } from './AiFix/PlanPanel.js';
+import { FixLoopSection } from './AiFix/FixLoopSection.js';
 import { useClaudeReview, useClaudeReviewById } from '../hooks/useClaudeReview.js';
 import { fixSourceReviewId, olderSourceNote } from '../lib/aiFixSource.js';
 import { ApiError } from '../api/client.js';
@@ -450,6 +452,10 @@ function FixerSection({
               <FixSession pr={pr} fix={fix} session={session} partials={stream.partials} headRef={data?.headInfo?.headRef ?? pr.headRefName ?? null} />
             )}
 
+            {/* AI FIX'S OWN REVIEW LOOP: the rounds, what each found and what the agent did, why it stopped. */}
+            {/* The progress sentence is said ONCE: in the session's status line when that shows, else here. */}
+            {fix?.loop != null && <FixLoopSection prId={pr.id} loop={fix.loop} showProgress={!(sessionShown && session != null)} />}
+
             {fix && !turnRunning && session?.phase !== 'booting' && (
               <FixResult
                 pr={pr}
@@ -549,7 +555,7 @@ function FixSession({
     <div data-testid="ai-fix-session" className="mt-3">
       <p data-testid="ai-fix-session-status" className="flex flex-wrap items-center gap-2 text-meta text-ui-mute">
         {fix.trigger === 'auto' && <AutoFixChip />}
-        <span>{fixMergeBlockedLine(fix.merge, session) ?? fixSessionStatusLine(session, fix.unattended === true)}</span>
+        <span>{fixLoopStatusLine(fix.loop) ?? fixMergeBlockedLine(fix.merge, session) ?? fixSessionStatusLine(session, fix.unattended === true)}</span>
         {session.model != null && <span>· {aiRunLabel(session.provider, session.model, session.effort)}</span>}
       </p>
       <SharedSessionView
@@ -954,7 +960,7 @@ function PushControls({
   fix: AiFix;
   headInfo: PrHeadInfo | null;
   viewerCanPush: boolean;
-}): JSX.Element {
+}): JSX.Element | null {
   const push = usePushFix(pr.id);
 
   const canPushSameBranch = headInfo?.canPushSameBranch ?? false;
@@ -978,6 +984,9 @@ function PushControls({
   // one — is a record, nothing more; while an automatic push runs there is no button.
   const footer = fixPushFooter(fix, { headRef: headInfo?.headRef ?? pr.headRefName ?? null, repoFullName: pr.repoFullName });
   if (footer.kind === 'pushed') return <PushedCard fix={fix} footer={footer} />;
+  // THE REVIEW LOOP works: nothing is pushed until it ends, so no Push. The round is already said once (the
+  // session's status line, or the loop section), so the footer says nothing.
+  if (footer.kind === 'reviewing') return null;
   if (footer.kind === 'pushing') {
     return (
       <p data-testid="ai-fix-pushing" className="mt-3 text-meta text-ui-mute">

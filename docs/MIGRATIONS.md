@@ -1754,6 +1754,17 @@ falls back to `ai_effort`, the default provider and the usual models, so an exis
 backfill. An existing table, so erasure and export already cover it. Additive; journal idx 206, `when`
 `1794556800000`. [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § The run profiles.
 
+### `0207_ai_fix_review_loop` — AI Fix's own review loop
+
+`ALTER TABLE ai_fixes ADD loop_state, loop_round (NOT NULL DEFAULT 0), loop_first_round (NOT NULL DEFAULT 0),
+loop_rounds, loop_stop, loop_base_sha, loop_review_id, loop_finished_at`; `CREATE TABLE ai_fix_loop_reviews` (with `step` / `rounds`: the round's place in its run),
+`ai_fix_loop_findings` (FK `(review_id, account_id)` → the runs, cascade), `ai_fix_loop_story_checks`,
+`ai_fix_loop_ac_responses`, each with `account_id` → `accounts` cascade and `fix_id` SOFT (`ai_fixes` is an
+ADOPTED table with no `(id, account_id)` unique to point at). New account-bearing tables: erased explicitly and
+listed in `accountScopedTables()`; both PR-keyed delete paths prune them (`db/ai-fix-loop-prune.ts`). No backfill:
+an older fix reads `loop: null`. Additive; journal idx 207, `when` `1794643200000`.
+[DATA-MODEL.md](DATA-MODEL.md) § `ai_fixes.loop_*`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § AI Fix → The review loop.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

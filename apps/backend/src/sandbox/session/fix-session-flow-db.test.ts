@@ -228,6 +228,9 @@ beforeAll(async () => {
     credentialEnv: () => ({}),
     usageSink: { record: async (r) => void usage.push(r), noteClaudeRateLimit: () => {} },
   });
+  // AI FIX'S OWN REVIEW LOOP (coding/ai-fix/loop.ts) is pinned in coding/ai-fix/loop-db.test.ts: here no review
+  // vendor is signed in, so a fix goes on exactly as it did before the loop (the row records 'no_reviewer').
+  (await import('../../coding/ai-fix/loop.js')).setFixLoopSeamsForTests({ providers: async () => [] });
   F.setFixSessionDepsForTests({
     // The ticket's other PR is in acme/web: that repository comes too (read only).
     relatedRepoIds: async () => relatedIds(),
@@ -251,6 +254,8 @@ beforeAll(async () => {
   ctx = {
     db,
     schema,
+    // The review loop's imported review writes through a transaction (claude-review/persist.ts).
+    runTransaction: client.runTransaction,
     log: { info() {}, warn() {}, error() {} },
     accountIdOf: (req: any) => Number(req.headers['x-acct'] ?? 1),
     llm: { detectAuth: () => ({ status: 'ok' }), detectProviderAuth: () => ({ status: 'ok' }) },
@@ -282,6 +287,7 @@ afterEach(() => {
 afterAll(async () => {
   await M?._closeAllSessionsForTest();
   M?.setSessionDepsForTests(null);
+  (await import('../../coding/ai-fix/loop.js')).setFixLoopSeamsForTests(null);
   F?.setFixSessionDepsForTests(null);
   await app?.close();
   await closeDb?.();
@@ -876,5 +882,90 @@ describe('five PRs at once (the fix start queue, three build slots by default)',
     expect(all.every((f) => f.status === 'succeeded')).toBe(true);
     delete process.env.LIMN_SANDBOX_RECLAIM_IDLE_SECONDS;
     await M._closeAllSessionsForTest();
+  });
+});
+
+describe("AI Fix's own review loop, through the real session (coding/ai-fix/loop.ts)", () => {
+  it('reviews the fix before anything is pushed: round 1 finds a point, the agent answers in a host fix turn, round 2 is clean; then Push when done pushes and the closing review becomes the PR\'s AI review at the PUSHED head', async () => {
+    const L = await import('../../coding/ai-fix/loop.js');
+    const { and, eq } = await import('drizzle-orm');
+    // The reader's own PR (Push when done pushes only that).
+    await db.update(schema.accounts).set({ githubLogin: 'me-flow' }).where(eq(schema.accounts.id, 1)).execute();
+    const found = (await db.select().from(schema.users).where(eq(schema.users.githubLogin, 'Me-Flow')).execute())[0];
+    const meId = found?.id ?? (await db.insert(schema.users).values({ githubLogin: 'Me-Flow', githubNodeId: 'U_me_flow' }).returning().execute())[0].id;
+    const [pr] = await db
+      .insert(schema.pullRequests)
+      .values({ accountId: 1, repoId: api, githubNodeId: 'PR-60', number: 60, title: 'Own PR 60', body: null, state: 'open', headSha: HEAD, baseRefName: 'main', authorId: meId, openedAt: new Date(), updatedAt: new Date() })
+      .returning()
+      .execute();
+    extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH, ['src/a.ts'], '') : out('', [], ''));
+    reportAnswer = JSON.stringify({ summary: 'Done.', commitMessage: 'fix: own', changes: [{ path: 'src/a.ts', summary: 'C.', refs: [] }] });
+    const halves: any[] = [];
+    const committed: any[] = [];
+    L.setFixLoopSeamsForTests({
+      waitMs: 5_000,
+      pollMs: 10,
+      providers: async () => ['claude'],
+      storyProvider: async () => 'claude',
+      automaticAllowed: async () => true,
+      ticket: async () => null,
+      commitRound: async (a) => {
+        committed.push({ round: a.round, patch: a.patch });
+        return { head: { localRef: `refs/pierre/local/ai-fix-loop/${a.fixId}/r${a.round}`, sha: String(a.round).repeat(40) }, workKey: L.fixWorkKey({ patch: a.patch, merge: a.merge }) };
+      },
+      baseSha: async () => 'b'.repeat(40),
+      runHalf: async (_c, i) => {
+        halves.push(i);
+        const first = halves.length === 1;
+        // The agent's answer turn changes the code (a second file).
+        if (first) extractAnswer = (path) => (path.endsWith('/api') ? out(PATCH2, ['src/a.ts', 'src/b.ts'], '') : out('', [], ''));
+        return {
+          status: 'succeeded',
+          failureReason: null,
+          reviewMode: 'diff_only',
+          summary: first ? 'One point.' : 'Clean.',
+          verdict: first ? 'REQUEST_CHANGES' : 'APPROVE',
+          findings: first ? [{ path: 'src/a.ts', line: 1, side: 'RIGHT', severity: 'warning', title: 'Check the input', body: 'It may be empty.', suggestion: null, diffHunk: null, anchored: true, fileInDiff: true, priorFindingId: null, lens: null }] : [],
+          followUp: null,
+          ranOn: { provider: 'claude', model: 'claude-opus-5-5', effort: null },
+          costUsd: 0.1,
+          inputTokens: 1,
+          outputTokens: 1,
+          numTurns: 1,
+        } as any;
+      },
+      session: {
+        readResponse: async (_id: number, shown: readonly string[]) => ({ kind: 'ok' as const, check: { payload: { items: shown.map((ref) => ({ ref, action: 'fixed' as const, reply: 'Checked the input.' })) }, problems: [], notReported: [] } }),
+      } as any,
+    });
+    try {
+      const before = pushes.length;
+      const sentBefore = sentToClaude.length;
+      const r = await post(`/api/pro/prs/${pr.id}/ai-fix`, { seed: 'plain', instruction: 'Fix it.', pushWhenDone: true });
+      expect(r.statusCode).toBe(202);
+      const fixId = r.json().fixId as number;
+      const f = await until(pr.id, (x) => x.session?.phase === 'pushed' && x.pushing === false, 'pushed after the loop');
+      // ONE push, after the loop: two reviews of LOCAL commits (never pushed), one host fix turn between them.
+      expect(pushes.length).toBe(before + 1);
+      expect(halves.map((h) => h.head.sha)).toEqual(['1'.repeat(40), '2'.repeat(40)]);
+      expect(halves.every((h) => h.byReader === true && h.feature === 'ai_fix_loop_review')).toBe(true);
+      expect(committed.map((c) => c.patch)).toEqual([PATCH, PATCH2]);
+      expect(sentToClaude.slice(sentBefore).some((t) => t.startsWith('Ensemble reviewed your fix (round 1 of 5).'))).toBe(true);
+      expect(f.loop).toMatchObject({ state: 'done', stop: 'clean', rounds: 5, firstRound: 1, running: false });
+      expect(f.loop!.history.map((h) => [h.round, h.counts.found, h.counts.fixed])).toEqual([
+        [1, 1, 1],
+        [2, 0, 0],
+      ]);
+      // THE CLOSING REVIEW, at the PUSHED head ('c0ffee'), as the PR's AI review: manual trigger, not posted.
+      const cr = await db.select().from(schema.claudeReviews).where(and(eq(schema.claudeReviews.prId, pr.id), eq(schema.claudeReviews.headSha, 'c0ffee'))).execute();
+      expect(cr).toHaveLength(1);
+      expect(cr[0]).toMatchObject({ status: 'succeeded', trigger: 'manual', postedAt: null });
+      expect(f.loop!.importedReviewId ?? (await rowOf(fixId)).loopReviewId).toBe(cr[0].id);
+      // The auto fix queue reads that head as reviewed by the fix.
+      expect(await L.headReviewedByFixLoop(ctx, 1, pr.id, 'c0ffee')).toBe(true);
+    } finally {
+      L.setFixLoopSeamsForTests({ providers: async () => [] });
+      await M._closeAllSessionsForTest();
+    }
   });
 });

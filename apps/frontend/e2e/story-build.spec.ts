@@ -262,6 +262,32 @@ test.describe('Implement story', () => {
     await expect(line).toHaveAttribute('data-state', 'off');
   });
 
+  test('review loop: a criterion the agent says it cannot meet stays not met, with its reason', async ({ page }) => {
+    const base = STORY_SESSION_LOOP.loop!;
+    const [r1, r2] = base.history;
+    // Round 1: the agent says AC2 cannot be done; round 2's story check still finds it not met.
+    const loop = {
+      ...base,
+      state: 'done' as const,
+      pause: null,
+      pauseLine: null,
+      canContinue: false,
+      next: null,
+      history: [
+        { ...r1!, acResponses: [{ ref: 'AC2', response: 'cannot_meet' as const, text: 'The 500-row cap is set by the billing service, not this repository.' }] },
+        { ...r2!, storyCheck: r1!.storyCheck, claimVerdicts: [], open: { findings: 0, followUps: 0, criteria: 2 } },
+      ],
+    };
+    await withAi(page, { ...STORY_SESSION_LOOP, loop });
+    await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);
+    const coverage = page.getByTestId('story-build-overlay').getByTestId('story-build-loop-coverage');
+    await expect(coverage.locator('[data-ref="AC2"]')).toHaveAttribute('data-state', 'open');
+    await expect(coverage).toContainText('1 of 3 met');
+    await expect(coverage.getByTestId('story-build-loop-cannot-meet')).toContainText(
+      'AC2 Not met: the agent says this cannot be done: The 500-row cap is set by the billing service, not this repository.',
+    );
+  });
+
   test('review loop: rounds, the agent’s answers, Continue on a spend-limit pause', async ({ page }) => {
     await withAi(page, STORY_SESSION_LOOP);
     await page.goto(`/app/?view=${encodeURIComponent(`story-build:${ACME_1}`)}`);

@@ -9806,6 +9806,10 @@ export interface AiFix {
   pushWhenDone?: boolean;
   pushing?: boolean;
   pushHold?: { line: string } | null;
+  // AI FIX'S OWN REVIEW LOOP (shared ai-fix-loop.ts; docs/CLAUDE-REVIEW.md § AI Fix → The review loop): the
+  // rounds, what each found and what the fix turn did, why it stopped. null/absent ⇒ it never ran (an older
+  // row, a fix with nothing to push). While it runs, `status` reads 'running' and nothing is pushed.
+  loop?: import('./ai-fix-loop.js').AiFixLoop | null;
   createdAt: string;
   finishedAt: string | null;
 }

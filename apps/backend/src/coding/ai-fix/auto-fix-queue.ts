@@ -26,7 +26,8 @@
 //      `review_running` / `review_due`, at most AUTO_FIX_REVIEW_WAIT_MS after the CI was ready (one fix
 //      covers both); then a CI-ONLY fix. Neither ⇒ `nothing_to_fix`. `review_due` with the workspace's
 //      AUTO REVIEW daily cap reached (the sweeper's own count, `readAutoReviewUsage` — the same fold as
-//      the cap toast) ⇒ `review_capped`, never a wait that cannot end.
+//      the cap toast) ⇒ `review_capped`, never a wait that cannot end. A head an AI fix pushed after its OWN
+//      review loop reviewed it (the closing review imported there) ⇒ `reviewed_by_fix` with no CI causes.
 //   5. `maybeStartAutoFix` (auto-fix.ts) — every gate of the auto fix (budget, sandbox, a fix waiting
 //      for Push, the daily cap, already tried). A TRANSIENT refusal (sandbox busy, over budget, no
 //      sandbox, a fix still holding the PR) is a wait the sweep retries; the rest end until the PR changes,
@@ -67,6 +68,8 @@ export interface AutoFixQueueDeps {
   /** Today's auto reviews against the workspace's cap — the sweeper's own count; null when unknown / off. */
   autoReviewUsage(ctx: AgentContext, accountId: number, workspaceId: number): Promise<{ used: number; cap: number } | null>;
   start(ctx: AgentContext, input: { accountId: number; prId: number; reviewId: number | null }): Promise<{ status: string; fixId?: number; reason?: ClaudeAutoFixSkipReason }>;
+  /** This head is the push of an AI fix whose OWN review loop reviewed it (loop.ts `headReviewedByFixLoop`). */
+  reviewedByFix?(ctx: AgentContext, accountId: number, prId: number, head: string): Promise<boolean>;
 }
 
 const defaultDeps: AutoFixQueueDeps = {
@@ -107,6 +110,10 @@ const defaultDeps: AutoFixQueueDeps = {
     if (!settings) return null;
     const u = await readAutoReviewUsage(ctx, accountId, workspaceId, settings);
     return u ? { used: u.used, cap: u.cap } : null;
+  },
+  async reviewedByFix(ctx, accountId, prId, head) {
+    const { headReviewedByFixLoop } = await import('./loop.js');
+    return headReviewedByFixLoop(ctx, accountId, prId, head);
   },
   async start(ctx, input) {
     const { maybeStartAutoFix } = await import('./auto-fix.js');
@@ -380,6 +387,12 @@ export async function evaluateAutoFix(
     if (reviewId != null && input.cause !== 'review' && deps.reviewHeld(prId)) return wait('review_running', null);
     if (reviewId == null) {
       const ciItems = ws.ciFailures ? await deps.ciItemsAtHead(ctx, accountId, prId) : 0;
+      // THE FIX'S OWN REVIEW: this head is an AI fix's push, and its review loop's closing review is the PR's AI
+      // review here (imported, `trigger: 'manual'`). It is REVIEWED — never a wait for an auto review that will
+      // not come — and no auto fix starts from that review (CI causes still may).
+      if (ciItems === 0 && rev.anyId != null && !rev.reviewInFlight && (await deps.reviewedByFix?.(ctx, accountId, prId, head).catch(() => false))) {
+        return put('idle', 'reviewed_by_fix');
+      }
       // A Claude + Codex pair not ended, or a newer review of this head, is a review RUNNING.
       const reviewRunning = rev.reviewInFlight || deps.reviewHeld(prId);
       // An AI review of this head is coming: running, settling, or due (auto review on and none at this head).

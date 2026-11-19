@@ -9,6 +9,7 @@ import type {
   StoryBuildLoopTarget,
   StoryBuildLoopTargetReview,
 } from '@pierre-review/shared';
+import { cannotMeetLine } from '@pierre-review/shared';
 import { ApiError } from '../../api/client.js';
 import { storyBuildMutationKey, useContinueStoryBuildLoop, useStopStoryBuildLoop } from '../../hooks/useStoryBuild.js';
 import { REVIEW_CHIP, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
@@ -52,6 +53,7 @@ const RESPONSE_CLASS: Record<string, string> = {
   answered: 'bg-ui-raise text-ui-ink',
   pushed_back: 'bg-ui-raise text-ui-warn',
   not_applicable: 'bg-ui-raise text-ui-ink',
+  cannot_meet: 'bg-ui-raise text-ui-warn',
   not_reported: 'bg-ui-raise text-ui-mute',
 };
 
@@ -204,6 +206,18 @@ function Coverage({ loop }: { loop: StoryBuildLoop }): JSX.Element | null {
           </span>
         ))}
       </div>
+      {/* Still NOT MET: the agent says these cannot be done, and why (never counted as met or accepted). */}
+      {rows.some((r) => r.cannotMeet != null) && (
+        <ul data-testid="story-build-loop-cannot-meet" className="mt-1 space-y-0.5 text-body">
+          {rows
+            .filter((r) => r.cannotMeet != null)
+            .map((r) => (
+              <li key={r.ref} data-cannot-meet-ref={r.ref} className="text-ui-ink">
+                <span className="font-mono">{r.ref}</span> <span className="text-ui-warn">{cannotMeetLine(r.cannotMeet)}</span>
+              </li>
+            ))}
+        </ul>
+      )}
     </div>
   );
 }

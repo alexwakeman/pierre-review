@@ -535,12 +535,16 @@ criteria, prior findings and a provider list — never a `story_builds` row:
 
 | Module | What | Build calls it from |
 |---|---|---|
-| `rounds.ts` | THE STOP RULE `nextAfterReview(open, k, N)` (nothing open, or the closing review k = N + 1 ⇒ `open`; else `fix`), `roundOpen`, `openFindingsOf`, `openCriteriaOf`, `effectiveClaimVerdicts`/`acceptedNa`, the carried `notChecked*`, the next round's follow-up input `priorForTarget`. Pure, over STRUCTURAL rows. | `driver.ts`, `wire.ts` |
-| `seed.ts` | REVIEW.md (`buildLoopFixSeed`), the fix turn's message, `responseLine` | `driver.ts` |
-| `response.ts` | the answer vocabulary (`fixed`/`answered`/`pushed_back`/`not_applicable`), THE ONE validator text and the checker script | `driver.ts`, `sandbox/workspace/review-response.ts` |
+| `rounds.ts` | THE STOP RULE `nextAfterReview(open, k, N, {onlyCannotMeet})` (nothing open, the closing review k = N + 1, or only criteria the agent CANNOT MEET (`onlyCannotMeetLeft` over `cannotMeetOf`) ⇒ `open`; else `fix`), `roundOpen`, `openFindingsOf`, `openCriteriaOf`, `effectiveClaimVerdicts`/`acceptedNa`, the carried `notChecked*`, the next round's follow-up input `priorForTarget`. Pure, over STRUCTURAL rows. | `driver.ts`, `wire.ts` |
+| `seed.ts` | REVIEW.md (`buildLoopFixSeed`; `subject: 'fix'` for AI Fix's words), the fix turn's message (Build's `buildLoopFixInstruction`, byte-identical; AI Fix's `buildAiFixLoopFixInstruction`), `responseLine`; goldens `review-loop/__fixtures__/loop-seed-golden.json` | `driver.ts` |
+| `response.ts` | the answer vocabulary (`fixed`/`answered`/`pushed_back`/`not_applicable`/`cannot_meet`), THE ONE validator text and the checker script | `driver.ts`, `sandbox/workspace/review-response.ts` |
 | `branch-review.ts` | `runBranchReviewHalf` (one provider half: prepare, route, prompt, run, follow-up steps), the pair (`consolidateBranchPair`, `pairConsolidationRecord`, `pairRoleOf`), who reviews (`branchReviewProviders`, `storyCheckProvider`, through ai/run-profile.ts) | `loop/branch-review.ts` (the remote head of the pushed branch), `seams.ts` |
 | `story-check.ts` | `runBranchStoryCheck` (ticket-review pieces over branches; `claimVerdictsOf`) | `loop/story-check.ts` |
 | `review-on-pr.ts` | `markLoopReviewOnPr` (the closing review as ONE `claude_reviews` row at the PR head) | `driver.ts` |
+
+AI Fix's own review loop (`coding/ai-fix/loop.ts`; docs/CLAUDE-REVIEW.md § AI Fix → The review loop) is the
+second subject: ONE target (the PR's repository), a LOCAL pinned head per round (nothing pushed), its own
+`ai_fix_loop_*` tables, and the same stop rule, seed, checker, review half, story check and closing-review import.
 
 Build keeps its state machine, targets, pushes, claims, persistence and composite keys. Its `loop/branch-review.ts`
 and `loop/story-check.ts` are thin adapters: each target's head is its pushed loop branch
@@ -588,10 +592,17 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   re-raised as a finding of the round, with the agent's earlier answer), the refs file and the checker,
   then `startHostBuildTurn` (the build slot, claimed in one tick; refused ⇒ waits, then `build_busy`).
   `afterLoopFixTurn` reads `.limn/review-response.json`: `fixed` / `answered` / `pushed_back` per finding,
-  `not_applicable` too per criterion; a missing ref is `not_reported` (open again); `fixed` on a target whose
+  `not_applicable` and `cannot_meet` too per criterion; a missing ref is `not_reported` (open again); `fixed` on a target whose
   tree did not change is stored `answered`. The answers ARE the replies the next review judges. A turn
   that ended without its work STORED (the session closing, a failed store) pauses `fix_failed` /
   `session_closed` instead of pushing the old work.
+- **"Cannot meet"** (2026-11-18; both loops). The agent may answer a criterion or missing item `cannot_meet` with a
+  REQUIRED reason (the checker refuses it on a finding, and without a reason). It is NEVER turned into accepted:
+  the story check gets it as an answer (context), not a claim to judge, and the criterion stays NOT MET
+  everywhere — the coverage strip (`loopCoverage` carries the reason), the round's answers, the PR body ("Not
+  met, and the agent says these cannot be done: AC2: <reason>") and the story view. THE STOP: after a review, no
+  open finding and EVERY open criterion one the agent said it cannot meet in its answers to the round before ⇒
+  the loop ends (Build: the PRs open; AI Fix: `cannot_meet`) instead of spending the remaining rounds on it.
 - **What stays open across rounds** (`wire.ts`). An ACCEPTED "not applicable" stays settled on every later
   round (`effectiveClaimVerdicts`: the newest verdict per ref, an earlier `accepted` carried unless a later
   check rejects it) — the criterion leaves the seed, so no claim is sent for it again, and the next check's

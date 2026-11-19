@@ -230,6 +230,11 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
       .execute();
     // AI Fix runs (patches of the user's code + the prompts they were built from). Core since
     // migration 0074 / pg 0061 — the plugin's erasure hook used to own them.
+    // AI Fix's own review loop (migration 0207): findings first (they point at the runs), then the rest.
+    await tx.delete(schema.aiFixLoopFindings).where(eq(schema.aiFixLoopFindings.accountId, accountId)).execute();
+    await tx.delete(schema.aiFixLoopReviews).where(eq(schema.aiFixLoopReviews.accountId, accountId)).execute();
+    await tx.delete(schema.aiFixLoopStoryChecks).where(eq(schema.aiFixLoopStoryChecks.accountId, accountId)).execute();
+    await tx.delete(schema.aiFixLoopAcResponses).where(eq(schema.aiFixLoopAcResponses.accountId, accountId)).execute();
     await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
     // THE ISSUE TRACKER (core since migration 0088 / pg 0075 — the plugin's erasure hook used to own
     // these): the stored tickets (story text from the customer's tracker), the acceptance-criteria
@@ -461,6 +466,11 @@ export function accountScopedTables(): {
     // cascades: the explicit delete above is the whole guarantee. (`reviewLearnings`, review
     // memory's table, sat here until migration 0075 / pg 0062 DROPPED it.)
     { name: 'aiFixes', col: schema.aiFixes.accountId, table: schema.aiFixes },
+    // AI Fix's own review loop (migration 0207), erased explicitly above.
+    { name: 'aiFixLoopReviews', col: schema.aiFixLoopReviews.accountId, table: schema.aiFixLoopReviews },
+    { name: 'aiFixLoopFindings', col: schema.aiFixLoopFindings.accountId, table: schema.aiFixLoopFindings },
+    { name: 'aiFixLoopStoryChecks', col: schema.aiFixLoopStoryChecks.accountId, table: schema.aiFixLoopStoryChecks },
+    { name: 'aiFixLoopAcResponses', col: schema.aiFixLoopAcResponses.accountId, table: schema.aiFixLoopAcResponses },
     // The issue tracker (migration 0088 / pg 0075). All three carry their own accountId and are
     // erased explicitly above; `workspaceTrackers` holds a credential.
     { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },

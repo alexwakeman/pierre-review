@@ -105,7 +105,13 @@ async function pushHoldOf(ctx: AgentContext, accountId: number, row: AiFixRow): 
   return line != null ? { line } : null;
 }
 
-function rowToAiFix(row: AiFixRow, pushHold: { line: string } | null = null): AiFix {
+/** `AiFix.loop` (loop.ts `fixLoopWire`): DB only; a read that fails reads as no loop. */
+async function loopOf(ctx: AgentContext, accountId: number, row: AiFixRow): Promise<AiFix['loop']> {
+  const { fixLoopWire } = await import('./loop.js');
+  return fixLoopWire(ctx, accountId, row).catch(() => null);
+}
+
+function rowToAiFix(row: AiFixRow, pushHold: { line: string } | null = null, loop: AiFix['loop'] = null): AiFix {
   // THE WORKSPACE SESSION the fix ran in (null on a row of the removed shell-less fixer). Never throws.
   let wire: ReturnType<typeof fixSessionWire> = { session: null, leftOut: [] };
   try {
@@ -151,6 +157,8 @@ function rowToAiFix(row: AiFixRow, pushHold: { line: string } | null = null): Ai
     pushWhenDone: row.pushWhenDone === true,
     pushing: row.pushedAt == null && fixPushInFlight(row.id),
     pushHold,
+    // AI FIX'S OWN REVIEW LOOP (loop.ts): its rounds and why it stopped. null ⇒ it never ran.
+    loop,
     createdAt: tsToIso(row.createdAt) ?? new Date(0).toISOString(),
     finishedAt: tsToIso(row.finishedAt),
   };
@@ -357,7 +365,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
         authMessage: auth.status === 'none' ? auth.message : undefined,
         viewerCanPush,
         headInfo,
-        fix: latest ? rowToAiFix(latest, await pushHoldOf(ctx, accountId, latest)) : null,
+        fix: latest ? rowToAiFix(latest, await pushHoldOf(ctx, accountId, latest), await loopOf(ctx, accountId, latest)) : null,
         history: history.map(rowToSummary),
         // THE FIX START QUEUE: the PR's next fix waits for a free sandbox.
         waiting: startWaitingFor(accountId, prId),
@@ -724,7 +732,7 @@ export function registerAiFixRoutes(app: FastifyInstance, ctx: AgentContext): vo
       if (!row) return reply.code(404).send({ error: 'not found' });
       const pr = await getFixPrContext(ctx, accountId, row.prId);
       if (!pr) return reply.code(404).send({ error: 'not found' });
-      return reply.send(rowToAiFix(row, await pushHoldOf(ctx, accountId, row)));
+      return reply.send(rowToAiFix(row, await pushHoldOf(ctx, accountId, row), await loopOf(ctx, accountId, row)));
     },
   );
 

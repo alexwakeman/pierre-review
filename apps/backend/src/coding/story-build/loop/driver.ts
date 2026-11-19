@@ -70,7 +70,7 @@ import { LOOP_CHECK_FEATURE } from './story-check.js';
 import { isLive, loopTargets, reviewBaseOf, type LoopTarget } from './targets.js';
 import { loopBodySummaryOf, runWireOf, toStoryBuildLoop } from './wire.js';
 import { pairConsolidationRecord, pairRoleOf } from '../../review-loop/branch-review.js';
-import { nextAfterReview, notCheckedFindingsOf, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
+import { cannotMeetOf, nextAfterReview, notCheckedFindingsOf, onlyCannotMeetLeft, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
 import { markLoopReviewOnPr } from '../../review-loop/review-on-pr.js';
 import { loopBodySection } from './pr-body.js';
 
@@ -731,10 +731,21 @@ async function stepReview(
   if (!checkOk) return pause(ctx, accountId, b.id, 'review_failed', 'reviewing', null);
 
   const checksNow = await listLoopStoryChecks(ctx, accountId, b.id);
-  const open = roundOpen(k, await listLoopReviews(ctx, accountId, b.id), await listLoopFindings(ctx, accountId, b.id), checksNow.find((c) => c.round === k) ?? null, checksNow);
+  const checkNow = checksNow.find((c) => c.round === k) ?? null;
+  const open = roundOpen(k, await listLoopReviews(ctx, accountId, b.id), await listLoopFindings(ctx, accountId, b.id), checkNow, checksNow);
   const total = open.findings + open.criteria;
-  seams.session.notice(b.id, total === 0 ? `Review round ${k}: nothing is open.` : `Review round ${k}: ${open.findings} ${open.findings === 1 ? 'finding' : 'findings'} and ${open.criteria} ${open.criteria === 1 ? 'criterion' : 'criteria'} to answer.`);
-  return nextAfterReview(open, k, b.loopRounds);
+  // THE cannot_meet STOP: every open item is a criterion the agent said (last round, with a reason) it cannot
+  // meet. It stays NOT MET (the PR body says so); spending the remaining rounds on it changes nothing.
+  const onlyCannotMeet = k > 1 && onlyCannotMeetLeft(open, openCriteriaOf(checkNow, checksNow), cannotMeetOf(await listLoopAcResponses(ctx, accountId, b.id), k - 1));
+  seams.session.notice(
+    b.id,
+    total === 0
+      ? `Review round ${k}: nothing is open.`
+      : onlyCannotMeet
+        ? `Review round ${k}: only criteria the agent says cannot be done are open, so the review stops.`
+        : `Review round ${k}: ${open.findings} ${open.findings === 1 ? 'finding' : 'findings'} and ${open.criteria} ${open.criteria === 1 ? 'criterion' : 'criteria'} to answer.`,
+  );
+  return nextAfterReview(open, k, b.loopRounds, { onlyCannotMeet });
 }
 
 /** FIX k: write REVIEW.md, then start the host's build turn. The turn's end continues (`afterLoopFixTurn`). */
@@ -886,7 +897,8 @@ export async function afterLoopFixTurn(
     const byRef = new Map(items.map((it) => [it.ref, it]));
     for (const f of findings) {
       const it = byRef.get(f.ref!);
-      const action = it ? (it.action === 'not_applicable' ? 'answered' : it.action) : 'not_reported';
+      // A finding has no "not applicable" / "cannot meet" (the checker refuses them): read as an answer.
+      const action = it ? (it.action === 'not_applicable' || it.action === 'cannot_meet' ? 'answered' : it.action) : 'not_reported';
       await updateLoopFinding(ctx, accountId, f.id, { response: action, responseText: it?.reply ?? null, responseRound: k });
     }
     for (const r of acs) {

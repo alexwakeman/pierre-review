@@ -3,6 +3,8 @@ import {
   AI_EFFORTS,
   AI_PROVIDER_SETTINGS,
   STORY_BUILD_LOOP_ROUNDS_MAX,
+  AI_FIX_LOOP_ROUNDS_MAX,
+  AI_FIX_LOOP_ROUNDS_MIN,
   STORY_BUILD_LOOP_ROUNDS_MIN,
   aiModelChoiceLabel,
   aiPickerModelProvider,
@@ -216,6 +218,11 @@ const ROUND_OPTIONS: readonly SelectOption<string>[] = Array.from(
   (_, i) => ({ value: String(STORY_BUILD_LOOP_ROUNDS_MIN + i), label: String(STORY_BUILD_LOOP_ROUNDS_MIN + i) }),
 );
 
+const FIX_ROUND_OPTIONS: readonly SelectOption<string>[] = Array.from(
+  { length: AI_FIX_LOOP_ROUNDS_MAX - AI_FIX_LOOP_ROUNDS_MIN + 1 },
+  (_, i) => ({ value: String(AI_FIX_LOOP_ROUNDS_MIN + i), label: String(AI_FIX_LOOP_ROUNDS_MIN + i) }),
+);
+
 const ROW = 'flex flex-wrap items-center gap-2 text-body';
 const NAME = 'w-14 shrink-0 font-medium text-ui-ink';
 
@@ -292,6 +299,20 @@ function RunProfilesControl({ me, status }: { me: MeResponse | undefined; status
                   disabled={busy}
                   onChange={(v) => save(withSurfaceChoice(status, 'build', { rounds: Number(v) }))}
                   options={ROUND_OPTIONS}
+                />
+              </label>
+            )}
+            {surface === 'fix' && (
+              <label className="flex items-center gap-1.5 text-ui-ink">
+                Review rounds
+                <Select
+                  id="ai-fix-rounds"
+                  label="AI Fix review rounds"
+                  size="sm"
+                  value={String(status.fix.rounds)}
+                  disabled={busy}
+                  onChange={(v) => save(withSurfaceChoice(status, 'fix', { rounds: Number(v) }))}
+                  options={FIX_ROUND_OPTIONS}
                 />
               </label>
             )}
@@ -380,6 +401,10 @@ function RunProfilesControl({ me, status }: { me: MeResponse | undefined; status
         'fix',
         <InfoButton title="AI Fix">
           <p>AI Fix, Plan first and auto fix run on this vendor and model. The AI Fix menu can pick another model for one run.</p>
+          <p className="mt-2">
+            Review rounds: after each fix, Ensemble reviews the fix and the agent answers, up to this many times, before
+            anything is pushed. Every fix uses it, manual and automatic. The reviews use the Review settings above.
+          </p>
           <p className="mt-2">
             If this vendor is not signed in or is over its usage limit, the other signed-in vendor runs at its usual model
             and Default effort. The run shows what it used.

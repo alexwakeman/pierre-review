@@ -2448,9 +2448,20 @@ sessions.
   "Pushed automatically" when it was not a press; no Push) → **pushing** (`AiFix.pushing`: "Pushing to
   <branch>…", no button) → **failed** (an automatic push's `error`, "Automatic push failed: …", in an amber line
   above Push; Push still works and clears it) → **held** (`AiFix.pushHold.line`, "Push when done" waiting, above
-  Push) → plain Push. ⚠ `useAiFix` polls at `SESSION_POLL_MS` while `pushing` (the push runs after the session
-  closed, so no session stream reports it) and runs `invalidateAfterPrWrite` once when the fix turns pushed.
-  A new state (a review loop's round) is one more member of the fold.
+  Push) → plain Push. A fifth member, **reviewing** (AI Fix's own review loop works, `aiFixLoopRunning(fix.loop)`,
+  ranked after pushed), renders NOTHING: no Push while the loop runs, and the round is already said once. ⚠
+  `useAiFix` polls at `SESSION_POLL_MS` while `pushing` (the push runs after the session closed, so no session
+  stream reports it) AND while the loop runs (its rounds change the row, not the session stream), and runs
+  `invalidateAfterPrWrite` once when the fix turns pushed.
+- **THE REVIEW LOOP (2026-11-18; `components/AiFix/FixLoopSection.tsx`, folds in `lib/aiFixSession.ts`;
+  backend docs/CLAUDE-REVIEW.md § AI Fix → The review loop).** Under the session view: "Review rounds" (ⓘ), Stop
+  while it works (the ONE cancel route), the stop line (`AiFix.loop.stopLine`, shared `AI_FIX_LOOP_STOP_LINE`), the
+  cannot-meet lines (`fixLoopCannotMeetLines` → shared `cannotMeetLine`: the criterion stays NOT MET), and the
+  rounds strip (`fixLoopStrip`: "Round k" by the round's STEP in its own run, "Closing review" past that run's N;
+  found / fixed / answered / pushed back / cannot meet, zeros left out). ⚠ **Counts only for a SUCCEEDED review** — a
+  running, failed, skipped or stopped one shows none (unknown is never zero). ⚠ **The progress sentence
+  (`fixLoopStatusLine`) is said ONCE**: in the session's status line when the session view shows
+  (`showProgress={false}`), else in the section; never in the footer.
 - **`FixReport`** renders the validated `changeReport` under the summary and ABOVE the "no
   changes" branch (a run that judged every item wrong produces no diff, and that is the run whose
   "Not addressed" list matters most): per changed file the summary and ref chips labelled with the

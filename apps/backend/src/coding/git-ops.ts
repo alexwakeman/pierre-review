@@ -649,16 +649,23 @@ export async function commitPatchToLocalRef(a: {
   message: string;
   key: LocalRefKey;
 }): Promise<{ commitSha: string; treeSha: string; ref: string; changed: boolean }> {
-  const treeSha = await treeOfPatch(a.accountId, a.owner, a.name, a.baseRef, a.baseSha, a.patch);
-  const dir = repoCloneDir(a.owner, a.name);
-  return withRepoLock(`${a.owner}/${a.name}`, async () => {
-    const { stdout: baseTree } = await execGit(['-C', dir, 'rev-parse', `${a.baseSha}^{tree}`]);
-    const changed = baseTree.trim() !== treeSha;
-    const commitSha = changed ? await readerCommitTree(a.accountId, dir, treeSha, [a.baseSha], a.message) : a.baseSha;
-    const { pinLocalRefLocked } = await import('../review/local-refs.js');
-    const ref = await pinLocalRefLocked(dir, a.key, commitSha);
-    return { commitSha, treeSha, ref, changed };
-  });
+  // ⚠ THE OWNER IS HELD while the commit is made and pinned, so a boot sweep running meanwhile never drops
+  // the ref between the pin and the caller's own hold (the caller holds it for as long as it reads it).
+  const { holdLocalRefs, pinLocalRefLocked } = await import('../review/local-refs.js');
+  const release = holdLocalRefs(a.key.kind, a.key.id);
+  try {
+    const treeSha = await treeOfPatch(a.accountId, a.owner, a.name, a.baseRef, a.baseSha, a.patch);
+    const dir = repoCloneDir(a.owner, a.name);
+    return await withRepoLock(`${a.owner}/${a.name}`, async () => {
+      const { stdout: baseTree } = await execGit(['-C', dir, 'rev-parse', `${a.baseSha}^{tree}`]);
+      const changed = baseTree.trim() !== treeSha;
+      const commitSha = changed ? await readerCommitTree(a.accountId, dir, treeSha, [a.baseSha], a.message) : a.baseSha;
+      const ref = await pinLocalRefLocked(dir, a.key, commitSha);
+      return { commitSha, treeSha, ref, changed };
+    });
+  } finally {
+    release();
+  }
 }
 
 const execFileAsync = promisify(execFile);

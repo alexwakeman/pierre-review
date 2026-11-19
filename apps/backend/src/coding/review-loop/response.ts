@@ -22,7 +22,8 @@ export const REVIEW_RESPONSE_MAX_BYTES = 256 * 1024;
 /** The longest reply. */
 export const REVIEW_RESPONSE_REPLY_MAX = 600;
 
-export type ReviewResponseAction = 'fixed' | 'answered' | 'pushed_back' | 'not_applicable';
+/** `cannot_meet` (AC / M only, a reason required): the work cannot meet the criterion. It stays NOT MET. */
+export type ReviewResponseAction = 'fixed' | 'answered' | 'pushed_back' | 'not_applicable' | 'cannot_meet';
 
 export interface ReviewResponsePayload {
   items: Array<{ ref: string; action: ReviewResponseAction; reply: string }>;
@@ -40,7 +41,7 @@ export interface ReviewResponseCheck {
 /** THE validator, as text (see the header). `(raw, shown) → ReviewResponseCheck`. */
 export const REVIEW_RESPONSE_VALIDATOR_SOURCE = String.raw`function validateReviewResponse(raw, shown) {
   var MAX = 600;
-  var ACTIONS = { fixed: true, answered: true, pushed_back: true, not_applicable: true };
+  var ACTIONS = { fixed: true, answered: true, pushed_back: true, not_applicable: true, cannot_meet: true };
   var problems = [];
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     return { payload: null, problems: ['The report must be one JSON object: {"items": [...]}.'], notReported: shown.slice() };
@@ -61,9 +62,9 @@ export const REVIEW_RESPONSE_VALIDATOR_SOURCE = String.raw`function validateRevi
     if (ref === '') { problems.push(at + '.ref must be the ref of an item in REVIEW.md.'); continue; }
     if (!shownSet[ref]) { problems.push(at + '.ref "' + ref + '" is not an item in REVIEW.md.'); continue; }
     if (seen[ref]) { problems.push(ref + ' is answered more than once; keep one answer.'); continue; }
-    if (!ACTIONS[it.action]) { problems.push(at + '.action must be "fixed", "answered", "pushed_back" or "not_applicable".'); continue; }
-    if (it.action === 'not_applicable' && !/^(AC|M)\d+$/.test(ref)) { problems.push(ref + ': "not_applicable" is only for a criterion (AC) or a missing item (M).'); continue; }
-    if (typeof it.reply !== 'string' || it.reply.trim() === '') { problems.push(at + '.reply must say what you did, or why.'); continue; }
+    if (!ACTIONS[it.action]) { problems.push(at + '.action must be "fixed", "answered", "pushed_back", "not_applicable" or "cannot_meet".'); continue; }
+    if ((it.action === 'not_applicable' || it.action === 'cannot_meet') && !/^(AC|M)\d+$/.test(ref)) { problems.push(ref + ': "' + it.action + '" is only for a criterion (AC) or a missing item (M).'); continue; }
+    if (typeof it.reply !== 'string' || it.reply.trim() === '') { problems.push(at + '.reply must say ' + (it.action === 'cannot_meet' ? 'why it cannot be done.' : 'what you did, or why.')); continue; }
     if (it.reply.length > MAX) { problems.push(at + '.reply must be at most ' + MAX + ' characters.'); continue; }
     seen[ref] = true;
     out.push({ ref: ref, action: it.action, reply: it.reply.trim() });

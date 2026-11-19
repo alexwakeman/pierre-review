@@ -638,6 +638,12 @@ export async function getFixStatus(ctx: AgentContext, accountId: number, prId: n
 
 export async function reconcileFixesOnStartup(ctx: AgentContext): Promise<void> {
   try {
+    // THE REVIEW LOOP (loop.ts): its local refs' keeper BEFORE the boot sweep (index.ts, after listen) can
+    // drop a resumable fix's round commits; then every loop a restart cut off ends as 'interrupted'.
+    const loop = await import('./loop.js');
+    const { registerLocalRefKeeper } = await import('../../review/local-refs.js');
+    loop.registerFixLoopRefKeeper(ctx, registerLocalRefKeeper);
+    await loop.reconcileFixLoopsOnStartup(ctx).catch((err: unknown) => ctx.log.warn({ err }, 'ai-fix: review loop reconcile failed'));
     // ⚠ Sessions FIRST: the legacy reconcile below reads only `session_phase IS NULL` rows.
     const s = await reconcileFixSessionsOnStartup(ctx);
     const n = await reconcileOrphanedFixes(ctx);

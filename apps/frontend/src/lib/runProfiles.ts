@@ -44,6 +44,11 @@ export function withSurfaceChoice(
   patch: { provider?: AiProviderId; model?: AiPickerModel; effort?: Effort; rounds?: number },
 ): AiRunProfiles {
   const stored = status.stored ?? {};
+  // AI FIX'S ROUNDS ALONE: written on their own, so a missing vendor choice stays missing (auto fix then keeps
+  // inheriting its review's model).
+  if (surface === 'fix' && patch.rounds !== undefined && patch.provider === undefined && patch.model === undefined && patch.effort === undefined) {
+    return { ...stored, fix: { ...(stored.fix ?? {}), rounds: patch.rounds } };
+  }
   const r = status[surface];
   const provider = patch.provider ?? r.provider;
   const model = patch.model ?? (provider === r.provider ? r.model : usualRunProfileModel(surface, provider));
@@ -53,6 +58,8 @@ export function withSurfaceChoice(
     ...effortPart(status, r.effort, stored[surface]),
     ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
     ...(surface === 'build' ? { rounds: patch.rounds ?? status.build.rounds } : {}),
+    // AI Fix keeps its rounds as stored (a missing number stays the default).
+    ...(surface === 'fix' && (patch.rounds ?? stored.fix?.rounds) !== undefined ? { rounds: patch.rounds ?? stored.fix?.rounds } : {}),
   };
   return { ...stored, [surface]: block };
 }

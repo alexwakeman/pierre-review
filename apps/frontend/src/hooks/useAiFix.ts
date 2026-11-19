@@ -11,6 +11,7 @@ import type {
   GenerateFixBody,
   SandboxNetworkAllowBody,
 } from '@pierre-review/shared';
+import { aiFixLoopRunning } from '@pierre-review/shared';
 import { api, ApiError } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
 import { invalidateAfterPrWrite } from './prCacheSync.js';
@@ -36,6 +37,8 @@ export function useAiFix(prId: number | null, enabled: boolean) {
       // AN AUTOMATIC PUSH ON ITS WAY ("Push when done", "Push automatically"): it runs after the session closed,
       // so no session stream reports it. Follow it until it lands or fails.
       if (q.state.data?.fix?.pushing === true) return SESSION_POLL_MS;
+      // AI FIX'S OWN REVIEW LOOP: its reviews run with no turn in the session; follow the rounds until it ends.
+      if (aiFixLoopRunning(q.state.data?.fix?.loop)) return SESSION_POLL_MS;
       const s = q.state.data?.fix?.session;
       return s != null && s.live && s.phase !== 'ready' && s.phase !== 'built' ? SESSION_POLL_MS : false;
     },

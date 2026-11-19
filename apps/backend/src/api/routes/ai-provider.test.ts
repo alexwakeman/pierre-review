@@ -179,7 +179,8 @@ describe('the run profiles', () => {
     const p = (await me()).runProfiles;
     expect(p.review.claude).toEqual({ enabled: true, model: 'claude-opus-5-5', effort: null });
     expect(p.review.codex).toEqual({ enabled: true, model: 'gpt-6.1-sol', effort: null });
-    expect(p.fix).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null });
+    // AI Fix's own review rounds (its loop) default to 5 too.
+    expect(p.fix).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 });
     expect(p.build).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 });
     expect(p.effortSource).toBe('settings');
   });
@@ -194,6 +195,7 @@ describe('the run profiles', () => {
       { profiles: { build: { effort: 'ultra' } } },
       { profiles: { build: { rounds: 7 } } },
       { profiles: { build: { rounds: 0 } } },
+      { profiles: { fix: { rounds: 7 } } },
       { profiles: { review: { claude: { enabled: false }, codex: { enabled: false } } } },
     ]) {
       const res = await putProfiles(bad);
@@ -205,7 +207,7 @@ describe('the run profiles', () => {
   it('stores the whole object, holds it for the next run, reports it and reads it back at boot', async () => {
     const profiles = {
       review: { claude: { enabled: true, model: 'claude-sonnet-5', effort: 'high' }, codex: { enabled: false, effort: 'low' } },
-      fix: { provider: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' },
+      fix: { provider: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh', rounds: 2 },
       build: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 3 },
     };
     const res = await putProfiles({ profiles });
@@ -213,7 +215,7 @@ describe('the run profiles', () => {
     const p = res.json().runProfiles;
     expect(p.review.claude).toEqual({ enabled: true, model: 'claude-sonnet-5', effort: 'high' });
     expect(p.review.codex).toEqual({ enabled: false, model: 'gpt-6.1-sol', effort: 'low' });
-    expect(p.fix).toEqual({ provider: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' });
+    expect(p.fix).toEqual({ provider: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh', rounds: 2 });
     expect(p.build).toEqual({ provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 3 });
     expect((await me()).runProfiles).toEqual(p);
     expect(effort.agenticRunEffort('claude', { role: 'deep' }, 'worktree')).toBe('high');
@@ -222,6 +224,7 @@ describe('the run profiles', () => {
     rp.setStoredAiRunProfiles(null);
     expect(await store.loadStoredAiRunProfiles(1)).toEqual(profiles);
     expect(rp.buildLoopRounds()).toBe(3);
+    expect(rp.fixLoopRounds()).toBe(2);
   });
 
   it('the effort compat path sets every surface: the one level, every profile effort dropped', async () => {

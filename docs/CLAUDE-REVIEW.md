@@ -4800,10 +4800,12 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   write access re-checked, the PR settled). A failure is written to the succeeded row's `error`
   ("Automatic push failed: …", shown in the AI Fix tab) and NEVER retried; a later manual push
   clears it. Otherwise it waits for Push.
-  ⚠ **LOOP SAFETY.** A pushed fix makes a new head → an auto re-review (which verifies it) → maybe
-  another fix. Without Push automatically every turn needs a PERSON pressing Push (an unpushed fix
-  blocks the next one); with it the bound is the cap (3 per PR per 24h) plus the auto-review daily
-  cap. `already_tried` stops the push-free loop (a fix that
+  ⚠ **LOOP SAFETY.** Every fix now reviews ITS OWN work before it can be pushed (§ The review loop below), and
+  the closing review becomes the PR's AI review at the PUSHED head — so auto review skips that head and no auto
+  fix chains from it (the queue says `reviewed_by_fix`). The old push → auto re-review → fix chain survives only
+  through a head the loop did not review (a stopped loop, a later commit). Without Push automatically every turn
+  needs a PERSON pressing Push (an unpushed fix blocks the next one); with it the OUTER bound is the cap (3 per PR
+  per 24h, rarely reached now) plus the auto-review daily cap. `already_tried` stops the push-free loop (a fix that
   changed nothing, retried on every comment-triggered review). Items match across reviews by
   (kind, thread id, story index, path, title) — refs and finding ids are per review — so a finding
   a later review RE-WORDS counts as new and only the cap stops it. There is no "discard" for a fix,
@@ -4818,13 +4820,76 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   out but the allow-list proxy, no GitHub credential, host-side push — docs/SECURITY.md § Workspace
   sessions).
 - A finished fix PUSHES AS-IS (no trunk step) and only when the reader presses Push — or, for an
-  auto fix, under "Push automatically".
+  auto fix, under "Push automatically". Never while its review loop works (`409 NotPushable`, "Ensemble is still
+  reviewing the fix. Wait, or press Stop.").
+
+### The review loop (`coding/ai-fix/loop.ts`; migration 0207; 2026-11-18)
+
+AI Fix reviews its OWN work with a full review cycle after each fix turn, as Implement story's loop does
+(docs/STORY-BUILD.md § The review loop; the SHARED core is `coding/review-loop/`: the round and stop rule, the
+REVIEW.md seed, the answers file and its checker, the branch review half, the branch story check,
+`markLoopReviewOnPr`). Manual, auto and dependency automation's fixes alike; Plan first's chat turns never run it.
+
+- **When.** After every BUILD turn that ended well (`completed` / `max_turns`) with work to push
+  (`fixRowHasWork`) — the first turn, Start fix after a plan, every reader follow-up. The fix session decides it
+  in `afterBuildTurn` (`markFixLoopPending`, BEFORE the phase is saved, so the row never reads `succeeded` in
+  between) and starts it from `afterBuildTurnEnded` (`startFixLoop`, a compare-and-set claim on the row). No
+  review vendor on and signed in ⇒ no loop; the row records `no_reviewer` and the fix goes on as before.
+- **A round.** Round k reviews a LOCAL commit of the work in Ensemble's clone cache — `commitPatchToLocalRef`
+  (the patch on the PR head) under `refs/pierre/local/ai-fix-loop/<fixId>/r<k>`, or, with the MERGE item, the
+  CHECKED merge result pinned there — against the PR base branch's tip (pinned once per run; a merge's own base
+  commit). NOTHING is pushed and no claim line moves. The review providers are Settings → AI → Review's through
+  THE ONE PAIR RESOLVER (`branchReviewProviders`): a Claude + Codex pair is ONE pass, its halves AT ONCE and
+  blind, consolidated. A story check runs beside it ONLY when the fix carries the PR's ticket criteria (an
+  included S-item; `fixLoopTicket`). Prior rounds' findings and the agent's answers feed the follow-up.
+- **The stop rule** (shared `nextAfterReview`): nothing open ⇒ `clean`; the closing review (step N + 1) ⇒
+  `rounds`; every open item a criterion the agent said it CANNOT MEET last round, with a reason ⇒ `cannot_meet`
+  (`onlyCannotMeetLeft`; the criterion STAYS NOT MET everywhere). Otherwise a host-started fix turn
+  (`startHostBuildTurn`) seeded with REVIEW.md in AI Fix's words (`buildLoopFixSeed({subject: 'fix'})`,
+  `buildAiFixLoopFixInstruction`; goldens `review-loop/__fixtures__/loop-seed-golden.json`): every F / AC / M
+  item answered in `.limn/review-response.json`, and the fix report written again. A "fixed" whose work did not
+  change reads as an answer. N = Settings → AI → AI Fix → Review rounds (the FIX profile's `rounds`, default 5,
+  1–6, read when a run starts; `fixLoopRounds`).
+- **Spend.** Every automatic step of an UNATTENDED fix asks THE ONE gate first, under `ai_fix_loop_review`,
+  `ai_fix_loop_check` and `ai_fix_loop_fix`; a refusal STOPS the loop (`budget`), never queued or retried. A
+  manual fix's rounds are part of the reader's click (never asked). Each review half and each fix turn stores and
+  is ledgered under ITS OWN provider: the reviews run on the REVIEW profile, the fix turns on the FIX profile, so
+  one fix may run two providers. `AI_FIX_BUDGET_USD` stays Claude's per-process cap of an unattended session.
+- **The session** is HELD (no idle close) while the loop works; the row reads `running` (the fix stream sends
+  progress, dependency automation's poll keeps waiting); a reader's message is refused ("Wait for the review round
+  to finish, or press Stop."). Stop (`…/ai-fix/cancel`) ends the loop (`stopped`): a manual session stays open
+  with the fix kept, an unattended one is discarded. A restart ends a working loop as `interrupted`.
+- **The end.** The loop records why (shared `AI_FIX_LOOP_STOP_LINE`), then the session's own end
+  (`afterFixLoopEnded`): an unattended fix closes and the EXISTING push rules decide (Push automatically, the
+  Dependencies policy); a manual fix asks Push when done (unless the reader pressed Stop). Every rule is re-read at
+  push time, unchanged.
+- **After the push** (`importLoopReviewAfterPush`, from `pushFix`): the CLOSING review is written as the PR's
+  `claude_reviews` row at the PUSHED head (`markLoopReviewOnPr`: `trigger 'manual'`, NOT posted, the consolidated
+  findings; `ai_fixes.loop_review_id`) — only when it reviewed exactly what was pushed (the round's `work_key`:
+  the patch's hash, or `merge:<result sha>`). The pushed commit's sha differs from the local one; the tree is the
+  same, so the lines anchor. Auto review then skips that head (its first-review rule), and the auto fix queue
+  reads it as `reviewed_by_fix` (`headReviewedByFixLoop`), not as a review to wait for. A push to a NEW branch
+  imports nothing until its PR is synced (it never is: auto review reviews it).
+- **Storage** (migration 0207): `ai_fix_loop_reviews` / `_findings` / `_story_checks` / `_ac_responses` keyed
+  `(account_id, fix_id, round)`, plus `ai_fixes.loop_*`. The local refs are held while the loop reads them and
+  kept after a restart only for a resumable fix (the `ai-fix-loop` keeper, registered before the boot sweep);
+  discard and push drop them.
+- **Shown** (the AI Fix tab, `components/AiFix/FixLoopSection.tsx`): the rounds strip (round k: found / fixed /
+  answered / pushed back / cannot meet — counts only once that round's review SUCCEEDED; "Round k" / "Closing
+  review" from the review row's stored `step` / `rounds`; each round's points behind a toggle), the progress
+  ("Reviewing, round 2 of 5.", said ONCE — the session's status line) with Stop, the stop line, and the criteria
+  the agent says cannot be done ("Not met: the agent says this cannot be done: <reason>"). The push footer has a
+  `reviewing` state (no Push, no line). The AI Review tab shows only the imported closing review.
+- **A story check that did not finish** stops the loop (`review_failed`, as Build pauses): its criteria are
+  unknown, never "none open", so the loop never ends `clean` on a failed check.
+- **Dependency automation's wait** (`watchFixAndPush`, 4 h) restarts at every loop step (`loopStep`), so it bounds
+  one stuck step, never a loop making progress.
 
 ### Push when done (`coding/ai-fix/auto-push.ts` `pushWhenDoneHold`; migration 0190; 2026-11-12)
 
 A MANUAL fix (the picker's Start fix, or Plan first's build) carries the reader's "Push when done" tick (ON by
-default in the SPA, remembered per browser; `ai_fixes.push_when_done`). After every BUILD turn the session asks
-`pushWhenDoneReady`: PUSH when the turn left work (`fixRowHasWork`), the agent's report is valid with nothing
+default in the SPA, remembered per browser; `ai_fixes.push_when_done`). After every BUILD turn — and when the turn
+ran its review loop, after the LOOP ends (§ The review loop) — the session asks `pushWhenDoneReady`: PUSH when the turn left work (`fixRowHasWork`), the agent's report is valid with nothing
 `unaddressed` and nothing `notReported`, and the PR is the reader's OWN (`prAuthorIsAccount`) — then
 `afterBuildTurn` answers `'close'`, and the close (`onClosed`, phase `built`) pushes through `maybePushWhenDone`
 → `pushFix` 'existing' (the Push button's path: never forced, HEAD_MOVED refused, write access re-checked;
@@ -4850,7 +4915,8 @@ keep the AI Fix tab honest:
   was not a press; a fix pushed before migration 0205 shows the branch only) → pushing ("Pushing to
   `<branch>`…", no button) → failed ("Automatic push failed: `<reason>`" above Push) → held (Push when done's one
   line, `AiFix.pushHold`, computed on read) → plain Push. ⚠ The failed / held line is drawn by `FixResult`, not
-  `PushControls`, so the reason shows when Push is not offered (no write access, an invalid merge). A later "reviewing round k of N" is one more state.
+  `PushControls`, so the reason shows when Push is not offered (no write access, an invalid merge). While the
+  review loop works the footer is `reviewing` ("Reviewing, round 2 of 5.", no Push), ranked right after pushed.
   On the transition to pushed the SPA runs `invalidateAfterPrWrite` (the head, CI and mergeability moved).
 - **One push per fix**: `pushFixHeld` refuses a fix whose `pushedAt` is set (`409 NotPushable`, "This fix is
   already pushed."), so a stale tab's Push never opens a second branch and PR. `markFixPushed` stores
@@ -4920,6 +4986,11 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
    (`autoReviewWaiting`) or expected (auto review on, no full review row at the head) ⇒ `review_running` /
    `review_due`, at most `AUTO_FIX_REVIEW_WAIT_MS` (15 min) after CI was ready — one fix covers both; then a
    CI-ONLY fix. No CI causes and a review expected ⇒ wait for it, unbounded. Neither ⇒ `nothing_to_fix`.
+   ⚠ **`reviewed_by_fix`** (2026-11-18): the head is the PUSH of an AI fix whose OWN review loop reviewed it (its
+   closing review imported there, `trigger 'manual'`; `headReviewedByFixLoop`: an `ai_fixes` row with that
+   `pushed_commit_sha` and a `loop_review_id`). With no CI causes it is idle with that reason — REVIEWED, never a
+   wait for an auto review that will not come, and no auto fix starts from that review. CI causes at that head
+   still start a CI-only fix.
    ⚠ **`review_capped`** (2026-11-18): the review is due or settling (not running) but the workspace's AUTO
    REVIEW daily cap is reached — the sweeper's own count, `readAutoReviewUsage` (`getAutoReviewCandidates(…,
    {limit: 0}).autoToday` vs the cap in force), the fold `AutoReviewCapToast` reads, asked ONLY on this

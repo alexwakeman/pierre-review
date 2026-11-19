@@ -4,7 +4,7 @@
 //   • REVIEW — `reviewProfileFor(p)`, `reviewProvidersEnabled()`, `reviewPairProviders(detect)` (THE pair
 //     resolver: switched on AND signed in, used by the manual pair, auto review and the Build loop) and
 //     `reviewDefaultProvider(detect)` ("one vendor": the first switched-on, signed-in one with capacity).
-//   • FIX — `fixChoice(detect)` (AI Fix, Plan first, auto fix).
+//   • FIX — `fixChoice(detect)` (AI Fix, Plan first, auto fix) and `fixLoopRounds()` (its own review loop).
 //   • BUILD — `buildChoice(detect)` (story_plan, story_build) and `buildLoopRounds()`.
 //   • EFFORT — ai/effort.ts `agenticRunEffort(…, surface)` reads `profileEffortLevel` below.
 //
@@ -21,6 +21,7 @@ import {
   aiPickerModelProvider,
   aiPickerRequestModel,
   profileEffortFor,
+  profileFixLoopRounds,
   profileLoopRounds,
   reviewVendorEnabled,
   usualRunProfileModel,
@@ -172,6 +173,11 @@ export function fixChoice(detect: ProfilePreflight, kind: AiRunKind = 'fix', loc
 /** Implement story's vendor and model now (story_plan / story_build). */
 export function buildChoice(detect: ProfilePreflight, kind: AiRunKind = 'story_build', locked: (p: AiProviderId) => boolean = isLockedOut): SurfaceRunChoice {
   return surfaceChoice('build', kind, detect, locked);
+}
+
+/** AI Fix's own review loop's rounds (Settings → AI → AI Fix; default 5), read when a loop run starts. */
+export function fixLoopRounds(): number {
+  return profileFixLoopRounds(stored);
 }
 
 /** The Build review loop's rounds when a start names none (Settings → AI; default 5). */

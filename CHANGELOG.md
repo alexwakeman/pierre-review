@@ -25,6 +25,14 @@ no internals.
   is over its usage limit, the other vendor runs, and the run says so. Until you change a block, it runs as before.
 - Settings → AI → Implement story: "Review rounds" sets how many review rounds a build runs. The start panel opens
   on it and can still change it for one build.
+- AI Fix: every fix, manual or automatic, is reviewed by Ensemble before anything is pushed. The agent fixes,
+  answers or pushes back on each point, and Ensemble reviews again, up to 5 rounds. The AI Fix tab shows each round
+  ("Reviewing, round 2 of 5.") with Stop, and Push shows once the rounds end. After the push, the last review is
+  the pull request's AI review of the new commit, so auto review does not review it again. Settings → AI → AI Fix →
+  "Review rounds" sets the number (1 to 6).
+- AI Fix and Implement story: the agent can say a criterion cannot be done, and why. It stays not met, the reason
+  shows beside it (and in the pull request's description for Implement), and the review rounds stop when only such
+  criteria are left.
 
 ### Changed
 

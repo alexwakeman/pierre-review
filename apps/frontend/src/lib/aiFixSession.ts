@@ -1,7 +1,7 @@
 // THE AI FIX TAB ON THE WORKSPACE SESSION (docs/SANDBOX.md § AI Fix sessions; docs/FRONTEND.md § The AI
 // Fix tab), pure and React-free so test/aiFixSession.test.ts pins it: when the session view shows, what
 // the status line says, what each repository row says, and how a closed session's line reads.
-import type { AiFix, AiFixLeftOutRepo, AiFixMerge, SandboxSessionRepo, StoryBuildSession } from '@pierre-review/shared';
+import { aiFixLoopProgressLine, aiFixLoopRunning, cannotMeetLine, type AiFix, type AiFixLeftOutRepo, type AiFixLoop, type AiFixLoopRound, type AiFixMerge, type SandboxSessionRepo, type StoryBuildSession } from '@pierre-review/shared';
 
 /**
  * The session view shows while the sandbox runs, and for a closed session the reader can Resume (a
@@ -152,6 +152,8 @@ export function fixMergeBlockedLine(m: Pick<AiFixMerge, 'status'> | null | undef
 export type FixPushFooter =
   // A record, nothing more: no Push. `sha` null on a fix pushed before the commit was stored.
   | { kind: 'pushed'; branch: string | null; sha: string | null; shortSha: string | null; commitUrl: string | null; automatic: boolean }
+  // THE REVIEW LOOP works ("Reviewing, round 2 of 5."): nothing is pushed until it ends, so no Push.
+  | { kind: 'reviewing'; line: string }
   // An automatic push runs: no button.
   | { kind: 'pushing'; branch: string | null }
   // Push, with one line above it: the automatic push failed (never retried), or "Push when done" held.
@@ -161,7 +163,7 @@ export type FixPushFooter =
   | { kind: 'plain' };
 
 export function fixPushFooter(
-  fix: Pick<AiFix, 'pushedAt' | 'pushedBranch' | 'pushedCommitSha' | 'pushedAutomatically' | 'pushing' | 'pushHold' | 'error'>,
+  fix: Pick<AiFix, 'pushedAt' | 'pushedBranch' | 'pushedCommitSha' | 'pushedAutomatically' | 'pushing' | 'pushHold' | 'error' | 'loop'>,
   o: { headRef: string | null; repoFullName: string },
 ): FixPushFooter {
   if (fix.pushedAt != null) {
@@ -175,8 +177,68 @@ export function fixPushFooter(
       automatic: fix.pushedAutomatically === true,
     };
   }
+  if (aiFixLoopRunning(fix.loop)) return { kind: 'reviewing', line: aiFixLoopProgressLine(fix.loop!) ?? 'Reviewing the fix.' };
   if (fix.pushing === true) return { kind: 'pushing', branch: o.headRef };
   if (fix.error != null && fix.error.startsWith('Automatic push failed')) return { kind: 'failed', line: fix.error };
   if (fix.pushHold != null && fix.pushHold.line !== '') return { kind: 'held', line: fix.pushHold.line };
   return { kind: 'plain' };
+}
+
+// ── THE REVIEW LOOP (AiFix.loop; docs/CLAUDE-REVIEW.md § AI Fix → The review loop): the rounds strip and its lines ──
+
+/** The session's status line while the loop works (null when it does not: the usual line applies). */
+export function fixLoopStatusLine(loop: AiFixLoop | null | undefined): string | null {
+  if (!aiFixLoopRunning(loop)) return null;
+  const line = aiFixLoopProgressLine(loop!);
+  return line == null ? null : loop!.state === 'fixing' ? `${line} The agent is answering the review.` : `${line} Nothing is pushed until the review ends.`;
+}
+
+export interface FixLoopStripCell {
+  label: 'found' | 'fixed' | 'answered' | 'pushed back' | 'cannot meet';
+  n: number;
+}
+
+export interface FixLoopStripRow {
+  round: number;
+  /** "Round 2" or "Closing review". */
+  title: string;
+  /** One word for the round's review: what it is doing or how it ended. */
+  status: string;
+  tone: 'ok' | 'open' | 'running' | 'bad';
+  /** Only the non-zero counts (found always) — and none at all unless the review SUCCEEDED (unknown is never zero). */
+  cells: FixLoopStripCell[];
+}
+
+const REVIEW_WORD: Record<NonNullable<AiFixLoopRound['review']>, string> = {
+  running: 'Reviewing',
+  succeeded: 'Reviewed',
+  failed: 'Review failed',
+  skipped: 'Skipped',
+  cancelled: 'Stopped',
+};
+
+/** The rounds strip (newest last): per round, what the review found and what the fix turn after it did. Pure. */
+export function fixLoopStrip(loop: Pick<AiFixLoop, 'history'>): FixLoopStripRow[] {
+  return loop.history.map((r) => {
+    // A review still running, failed, skipped or stopped found nothing KNOWN: no counts, never "0 found".
+    const known = r.review === 'succeeded';
+    const cells: FixLoopStripCell[] = known ? [{ label: 'found', n: r.counts.found }] : [];
+    const more: Array<[FixLoopStripCell['label'], number]> = [
+      ['fixed', r.counts.fixed],
+      ['answered', r.counts.answered],
+      ['pushed back', r.counts.pushedBack],
+      ['cannot meet', r.counts.cannotMeet],
+    ];
+    if (known) for (const [label, n] of more) if (n > 0) cells.push({ label, n });
+    const review = r.review ?? 'running';
+    const status = r.fix === 'running' ? 'Fixing' : REVIEW_WORD[review];
+    const tone: FixLoopStripRow['tone'] =
+      review === 'running' || r.fix === 'running' ? 'running' : review === 'failed' || review === 'cancelled' || review === 'skipped' ? 'bad' : r.counts.found === 0 ? 'ok' : 'open';
+    return { round: r.round, title: r.closing ? 'Closing review' : `Round ${r.step}`, status, tone, cells };
+  });
+}
+
+/** The lines under the strip for criteria the agent says cannot be done (they stay NOT MET). */
+export function fixLoopCannotMeetLines(loop: Pick<AiFixLoop, 'cannotMeet'>): Array<{ ref: string; text: string; line: string }> {
+  return loop.cannotMeet.map((c) => ({ ref: c.ref, text: c.text, line: cannotMeetLine(c.reason) }));
 }

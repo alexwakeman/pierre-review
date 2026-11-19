@@ -118,7 +118,7 @@ export default function Page(): JSX.Element {
       <H3 id="review">Review</H3>
       <p>
         One row per vendor: <Ui>On</Ui>, a model and an effort. Every review uses them: AI Review, auto reviews, the CI
-        review, the story check, Check threads and the review rounds of Implement story.
+        review, the story check, Check threads and the review rounds of Implement story and AI Fix.
       </p>
       <ul>
         <li>
@@ -131,7 +131,12 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <H3 id="ai-fix">AI Fix</H3>
-      <p>A vendor, a model and an effort for AI Fix, Plan first and auto fix.</p>
+      <p>
+        A vendor, a model and an effort for AI Fix, Plan first and auto fix, and <Ui>Review rounds</Ui>: how many times
+        Ensemble reviews a fix and the agent answers, before anything is pushed. It is 5 by default, from 1 to 6, and
+        applies to every fix, manual and automatic. The reviews use the Review settings above. Changing only the rounds
+        leaves auto fix on its review&rsquo;s model. See <DocLink to="ai-fix/push-and-auto-fix#review-rounds">Review rounds</DocLink>.
+      </p>
       <H3 id="implement-story">Implement story</H3>
       <p>
         A vendor, a model and an effort for Implement story&rsquo;s plan and build, and <Ui>Review rounds</Ui>: how many

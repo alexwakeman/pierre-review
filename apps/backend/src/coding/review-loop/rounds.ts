@@ -169,11 +169,44 @@ export function roundOpen(
 /**
  * THE STOP RULE, after review round `round` of a loop with `rounds` fix passes: nothing open (findings +
  * criteria; follow-ups are already counted as the findings they re-raise), or this was the closing review
- * (round N + 1) ⇒ 'open' (the loop ends); otherwise ⇒ 'fix' (one more fix pass).
+ * (round N + 1), or `onlyCannotMeet` (every open item is a criterion the agent said it CANNOT MEET, with a
+ * reason — `onlyCannotMeetLeft`) ⇒ 'open' (the loop ends); otherwise ⇒ 'fix' (one more fix pass).
  */
-export function nextAfterReview(open: Pick<RoundOpen, 'findings' | 'criteria'>, round: number, rounds: number): 'open' | 'fix' {
+export function nextAfterReview(open: Pick<RoundOpen, 'findings' | 'criteria'>, round: number, rounds: number, o: { onlyCannotMeet?: boolean } = {}): 'open' | 'fix' {
   const total = open.findings + open.criteria;
-  return total === 0 || round >= rounds + 1 ? 'open' : 'fix';
+  return total === 0 || round >= rounds + 1 || o.onlyCannotMeet === true ? 'open' : 'fix';
+}
+
+/** One stored criterion answer (any loop's `*_ac_responses` row). */
+export interface LoopAcAnswerLike {
+  round: number;
+  ref: string;
+  response: string;
+  text: string | null;
+}
+
+/**
+ * The criteria the agent said it CANNOT MEET in its answers to round `round` (with a non-empty reason):
+ * ref (upper case) → the reason. The criterion stays NOT MET; this only feeds the stop rule and the words.
+ */
+export function cannotMeetOf(answers: readonly LoopAcAnswerLike[], round: number): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const a of answers) {
+    if (a.round !== round || a.response !== 'cannot_meet') continue;
+    const why = (a.text ?? '').trim();
+    if (why !== '') out.set(a.ref.toUpperCase(), why);
+  }
+  return out;
+}
+
+/**
+ * THE cannot_meet STOP, after a review: no open finding (carried ones included) and at least one open
+ * criterion, EVERY one of which the agent said it cannot meet in its answers to the round before (a reason
+ * given). The loop then ends ('open'): spending the remaining rounds on them changes nothing. Pure.
+ */
+export function onlyCannotMeetLeft(open: Pick<RoundOpen, 'findings'>, openCriteria: readonly Pick<OpenCriterion, 'ref'>[], cannotMeet: ReadonlyMap<string, string>): boolean {
+  if (open.findings > 0 || openCriteria.length === 0) return false;
+  return openCriteria.every((c) => cannotMeet.has(c.ref.toUpperCase()));
 }
 
 /**

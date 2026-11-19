@@ -17,7 +17,8 @@ export interface LoopBodySummary {
   answered: number;
   pushedBackAccepted: number;
   stillOpen: Array<{ severity: string; path: string; title: string }>;
-  criteria: { met: number; notApplicable: Array<{ ref: string; why: string }>; notMet: number } | null;
+  /** `cannotMeet`: the not-met criteria the agent says cannot be done (its reason). They are counted in `notMet`. */
+  criteria: { met: number; notApplicable: Array<{ ref: string; why: string }>; notMet: number; cannotMeet?: Array<{ ref: string; why: string }> } | null;
 }
 
 const oneLine = (s: string, n: number): string => {
@@ -39,6 +40,11 @@ export function loopBodySection(s: LoopBodySummary): string {
     const naText = na.length === 0 ? '0 not applicable' : `${na.length} not applicable (${na.map((x) => `${defangGithubText(oneLine(x.ref, 20))}: ${defangGithubText(oneLine(x.why, 160))}`).join('; ')})`;
     lines.push('');
     lines.push(`Acceptance criteria: ${s.criteria.met} met, ${naText}, ${s.criteria.notMet} not met.`);
+    const cm = s.criteria.cannotMeet ?? [];
+    if (cm.length > 0) {
+      lines.push('', 'Not met, and the agent says these cannot be done:');
+      for (const x of cm.slice(0, STILL_OPEN_MAX)) lines.push(`- ${defangGithubText(oneLine(x.ref, 20))}: ${defangGithubText(oneLine(x.why, 200))}`);
+    }
   }
   if (s.stillOpen.length > 0) {
     lines.push('', 'Still open:');

@@ -128,13 +128,17 @@ export default function Page(): JSX.Element {
 
       <H2 id="push-or-discard">Push or discard</H2>
       <p>
+        Before <Ui>Push</Ui> shows, Ensemble reviews the fix and the agent answers the review, for a few rounds. See{' '}
+        <DocLink to="ai-fix/push-and-auto-fix#review-rounds">Review rounds before the push</DocLink>.
+      </p>
+      <p>
         <Ui>Push</Ui> sends the change, as one commit with the agent's commit message, to the pull request's branch, or
         to a new branch with a new pull request. <Ui>Discard</Ui> removes the sandbox and pushes nothing. See{' '}
         <DocLink to="ai-fix/push-and-auto-fix">Push the fix, and auto fix</DocLink>.
       </p>
       <Warning>
-        The fix is pushed as it is. Ensemble does not build or test it again before the push; the agent's own test runs in
-        the sandbox are the only ones. Your CI runs on the pushed commit as usual.
+        The fix is pushed as it is. Ensemble reviews it but does not build or test it again before the push; the agent's
+        own test runs in the sandbox are the only ones. Your CI runs on the pushed commit as usual.
       </Warning>
 
       <H2 id="the-sandbox">The sandbox</H2>

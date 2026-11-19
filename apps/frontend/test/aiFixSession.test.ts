@@ -6,11 +6,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { SandboxSessionPhase } from '@pierre-review/shared';
+import type { AiFixLoop, AiFixLoopRound } from '@pierre-review/shared';
 import {
   fixErrorTone,
   fixMergeBlockedLine,
   fixMergeLine,
   fixPushable,
+  fixLoopCannotMeetLines,
+  fixLoopStatusLine,
+  fixLoopStrip,
   fixPushFooter,
   fixRepoStatus,
   fixSessionHoldsPr,
@@ -193,5 +197,81 @@ describe('fixPushFooter — THE PUSH FOOTER', () => {
 
   it('an older server (no push fields) reads as plain Push', () => {
     expect(fixPushFooter({ pushedAt: null, pushedBranch: null, error: null }, o)).toEqual({ kind: 'plain' });
+  });
+});
+
+describe('THE REVIEW LOOP — the footer, the status line, the rounds strip', () => {
+  const round = (n: number, over: Partial<AiFixLoopRound> = {}): AiFixLoopRound => ({
+    round: n,
+    step: n,
+    closing: false,
+    headSha: null,
+    review: 'succeeded',
+    providers: ['claude'],
+    verdict: 'COMMENT',
+    summary: null,
+    storyCheck: null,
+    open: { findings: 0, criteria: 0 },
+    counts: { found: 0, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 },
+    findings: [],
+    criteria: [],
+    fix: 'none',
+    ...over,
+  });
+  const loop = (over: Partial<AiFixLoop> = {}): AiFixLoop => ({
+    state: 'reviewing',
+    round: 2,
+    firstRound: 1,
+    rounds: 5,
+    stop: null,
+    stopLine: null,
+    running: true,
+    history: [],
+    cannotMeet: [],
+    importedReviewId: null,
+    ...over,
+  });
+  const o = { headRef: 'feature/x', repoFullName: 'acme/app' };
+  const base = { pushedAt: null, pushedBranch: null, pushedCommitSha: null, pushedAutomatically: false, pushing: false, pushHold: null, error: null };
+
+  it('⚠ while the loop works there is no Push: "Reviewing, round 2 of 5."; pushed still wins', () => {
+    expect(fixPushFooter({ ...base, loop: loop() }, o)).toEqual({ kind: 'reviewing', line: 'Reviewing, round 2 of 5.' });
+    expect(fixPushFooter({ ...base, loop: loop({ state: 'fixing' }) }, o)).toEqual({ kind: 'reviewing', line: 'Fixing, round 2 of 5.' });
+    expect(fixPushFooter({ ...base, loop: loop({ round: 6 }) }, o)).toEqual({ kind: 'reviewing', line: 'Reviewing, the closing round.' });
+    expect(fixPushFooter({ ...base, pushedAt: '2026-11-18T10:00:00Z', pushedBranch: 'b', loop: loop() }, o).kind).toBe('pushed');
+    // Ended: the usual footer.
+    expect(fixPushFooter({ ...base, loop: loop({ state: 'done', stop: 'clean' }) }, o)).toEqual({ kind: 'plain' });
+  });
+
+  it('the status line says the loop works and nothing is pushed; null once it ended', () => {
+    expect(fixLoopStatusLine(loop())).toBe('Reviewing, round 2 of 5. Nothing is pushed until the review ends.');
+    expect(fixLoopStatusLine(loop({ state: 'fixing' }))).toBe('Fixing, round 2 of 5. The agent is answering the review.');
+    expect(fixLoopStatusLine(loop({ state: 'stopped', stop: 'budget' }))).toBeNull();
+    expect(fixLoopStatusLine(null)).toBeNull();
+  });
+
+  it('the strip: round k found / fixed / answered / pushed back / cannot meet, zeros left out, no counts before a review succeeded; the closing review named', () => {
+    const rows = fixLoopStrip({
+      history: [
+        round(1, { fix: 'done', counts: { found: 4, fixed: 2, answered: 1, pushedBack: 0, cannotMeet: 1 } }),
+        round(2, { review: 'running' }),
+        round(6, { step: 6, closing: true, counts: { found: 0, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 } }),
+        round(7, { step: 1, review: 'failed' }),
+      ],
+    });
+    expect(rows.map((r) => `${r.title}|${r.status}|${r.tone}|${r.cells.map((c) => `${c.n} ${c.label}`).join(', ')}`)).toEqual([
+      'Round 1|Reviewed|open|4 found, 2 fixed, 1 answered, 1 cannot meet',
+      // ⚠ unknown is never zero: a review not succeeded shows no counts.
+      'Round 2|Reviewing|running|',
+      'Closing review|Reviewed|ok|0 found',
+      'Round 1|Review failed|bad|',
+    ]);
+    expect(fixLoopStrip({ history: [round(3, { fix: 'running', counts: { found: 2, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 } })] })[0]).toMatchObject({ status: 'Fixing', tone: 'running' });
+  });
+
+  it('a criterion the agent cannot meet stays NOT MET, with its reason', () => {
+    expect(fixLoopCannotMeetLines({ cannotMeet: [{ ref: 'AC2', text: 'Export to PDF', reason: 'No PDF library here.' }] })).toEqual([
+      { ref: 'AC2', text: 'Export to PDF', line: 'Not met: the agent says this cannot be done: No PDF library here.' },
+    ]);
   });
 });

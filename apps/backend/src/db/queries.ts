@@ -216,6 +216,7 @@ import { db, schema } from './client.js';
 import { dropRepoRelations } from './related-repos.js';
 import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
 import { runTransaction } from './client.js';
+import { pruneAiFixLoopForPrs } from './ai-fix-loop-prune.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
 import { getPushSummariesForPrs } from './push-summaries.js';
 import { pushSummariesForShas } from '@pierre-review/shared';
@@ -10147,6 +10148,8 @@ export async function deleteRepo(id: number, accountId: number): Promise<boolean
       // The agentic table core ADOPTED from the plugin (migration 0074 / pg 0061): AI Fix runs
       // (~MiB patches). No FKs, so nothing would cascade; before this the plugin had no deleteRepo
       // hook at all and they were orphaned on a repo removal.
+      // Their review loops' rows first (migration 0207; soft fix_id): db/ai-fix-loop-prune.ts.
+      await pruneAiFixLoopForPrs(tx, prIds);
       await tx.delete(schema.aiFixes).where(inArray(schema.aiFixes.prId, prIds)).execute();
       // Stored tracker tickets (core since migration 0088 / pg 0075; the plugin used to prune them
       // per PR). No FKs, so nothing would cascade.

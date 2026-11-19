@@ -6,6 +6,8 @@ import type {
   PrTabSummariesResponse,
   ActiveReviewsResponse,
   AiFix,
+  AiFixLoop,
+  AiFixLoopRound,
   AiFixPickerPreview,
   AiFixResponse,
   AiBudgetResponse,
@@ -137,6 +139,7 @@ import type {
 // build the Pending tabs from the shipped list rather than re-typing it.
 import {
   AI_BUDGET_DEFAULTS,
+  AI_FIX_LOOP_STOP_LINE,
   aiKindsAll,
   DO_NEXT_RULES,
   LARGE_PR_CODE_LOC_DEFAULT,
@@ -452,7 +455,7 @@ export const ME_RESPONSE: MeResponse = {
         claude: { enabled: true, model: 'claude-opus-5-5', effort: null },
         codex: { enabled: true, model: 'gpt-6.1-sol', effort: null },
       },
-      fix: { provider: 'claude', model: 'claude-opus-5-5', effort: null },
+      fix: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 },
       build: { provider: 'claude', model: 'claude-opus-5-5', effort: null, rounds: 5 },
       effortSource: 'settings',
       stored: null,
@@ -1622,6 +1625,61 @@ export function aiFixAutoPush(prId: number, state: 'pushing' | 'pushed' | 'faile
     pushedCommitSha: 'c0ffee'.padEnd(40, '0'),
     pushedAutomatically: true,
   };
+}
+
+/**
+ * AI FIX'S OWN REVIEW LOOP (AiFix.loop): round 1 found two findings, the agent fixed one and pushed back on the
+ * other, and said a criterion cannot be met; round 2 is reviewing now (no Push), or — `ended` — round 2 found
+ * only that criterion, so the loop stopped and the fix waits for Push.
+ */
+export function aiFixLooping(prId: number, state: 'reviewing' | 'ended'): AiFix {
+  const b = aiFixBuilt(prId);
+  const round1: AiFixLoopRound = {
+    round: 1,
+    step: 1,
+    closing: false,
+    headSha: 'a1'.padEnd(40, '0'),
+    review: 'succeeded',
+    providers: ['claude'],
+    verdict: 'REQUEST_CHANGES',
+    summary: 'Two things to fix.',
+    storyCheck: 'succeeded',
+    open: { findings: 2, criteria: 1 },
+    counts: { found: 3, fixed: 1, answered: 0, pushedBack: 1, cannotMeet: 1 },
+    findings: [
+      { id: 1, round: 1, severity: 'blocker', path: 'src/reports/route.ts', line: 12, title: 'The limit is not checked', body: 'Check it.', raisedBy: 'claude', response: { action: 'fixed', text: 'Added the check.', round: 1 } },
+      { id: 2, round: 1, severity: 'nit', path: 'src/reports/route.ts', line: 30, title: 'Rename the helper', body: 'Name it better.', raisedBy: 'claude', response: { action: 'pushed_back', text: 'The name matches the module.', round: 1 } },
+    ],
+    criteria: [{ ref: 'AC2', status: 'not_met', text: 'Export to PDF', explanation: 'No PDF export.', response: { action: 'cannot_meet', text: 'The PDF library is not in this repository.' } }],
+    fix: 'done',
+  };
+  const round2: AiFixLoopRound = {
+    ...round1,
+    round: 2,
+    step: 2,
+    headSha: 'b2'.padEnd(40, '0'),
+    review: state === 'reviewing' ? 'running' : 'succeeded',
+    summary: state === 'reviewing' ? null : 'Only the PDF criterion is open.',
+    open: state === 'reviewing' ? { findings: 0, criteria: 0 } : { findings: 0, criteria: 1 },
+    counts: state === 'reviewing' ? { found: 0, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 } : { found: 1, fixed: 0, answered: 0, pushedBack: 0, cannotMeet: 0 },
+    findings: [],
+    criteria: state === 'reviewing' ? [] : [{ ...round1.criteria[0]!, response: null }],
+    fix: 'none',
+  };
+  const loop: AiFixLoop = {
+    state: state === 'reviewing' ? 'reviewing' : 'stopped',
+    round: 2,
+    firstRound: 1,
+    rounds: 5,
+    stop: state === 'reviewing' ? null : 'cannot_meet',
+    stopLine: state === 'reviewing' ? null : AI_FIX_LOOP_STOP_LINE.cannot_meet,
+    running: state === 'reviewing',
+    history: [round1, round2],
+    cannotMeet: state === 'reviewing' ? [] : [{ ref: 'AC2', text: 'Export to PDF', reason: 'The PDF library is not in this repository.' }],
+    importedReviewId: null,
+  };
+  if (state === 'reviewing') return { ...b, status: 'running', loop };
+  return { ...b, loop };
 }
 
 /** The picker of a PR that conflicts with main: the merge item first (ticked), then the CI failures. */

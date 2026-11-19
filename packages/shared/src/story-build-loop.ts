@@ -35,8 +35,19 @@ export type StoryBuildLoopPause =
   | 'build_busy';
 /** What the build agent did with a finding. */
 export type StoryBuildLoopResponse = 'fixed' | 'answered' | 'pushed_back' | 'not_reported';
-/** What the build agent did with a criterion ('AC3') or a missing item ('M1'). */
-export type StoryBuildLoopAcResponse = 'fixed' | 'not_applicable' | 'answered' | 'pushed_back' | 'not_reported';
+/**
+ * What the build agent did with a criterion ('AC3') or a missing item ('M1'). `cannot_meet` (a reason is
+ * required): the agent says the work cannot meet it. The criterion STAYS NOT MET everywhere — it is never
+ * turned into accepted — and when such criteria are ALL that is open, the loop stops
+ * (`onlyCannotMeetLeft`). The words: `cannotMeetLine`.
+ */
+export type StoryBuildLoopAcResponse = 'fixed' | 'not_applicable' | 'cannot_meet' | 'answered' | 'pushed_back' | 'not_reported';
+
+/** How a criterion the agent says it cannot meet reads, everywhere it is shown (still NOT MET). */
+export function cannotMeetLine(reason: string | null | undefined): string {
+  const r = (reason ?? '').trim();
+  return r === '' ? 'Not met: the agent says this cannot be done.' : `Not met: the agent says this cannot be done: ${r}`;
+}
 export type StoryBuildLoopTargetKind = 'repo' | 'pr';
 
 /** The states in which the loop is working by itself (the tab polls; Push and messages wait). */

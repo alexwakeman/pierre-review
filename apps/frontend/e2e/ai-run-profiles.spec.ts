@@ -119,6 +119,22 @@ test('AI Fix and Implement story: vendor, model, effort and the review rounds', 
   });
 });
 
+test('AI Fix review rounds: written alone, so auto fix keeps its review\'s model', async ({ page }) => {
+  const seen = await setup(page, { codex: true });
+  const settings = await openAi(page);
+  const fix = settings.getByTestId('ai-profile-fix');
+  await expect(fix.getByRole('combobox', { name: 'AI Fix review rounds' })).toContainText('5');
+  await choose(page, fix, 'AI Fix review rounds', '3');
+  await expect.poll(() => seen.puts.length).toBe(1);
+  // Rounds only: no vendor choice is stored, so nothing about auto fix's model changes.
+  expect(seen.puts[0]).toEqual({ fix: { rounds: 3 } });
+  await expect(fix.getByRole('combobox', { name: 'AI Fix review rounds' })).toContainText('3');
+  // A later vendor change keeps the stored rounds.
+  await choose(page, fix, 'AI Fix vendor', 'Codex');
+  await expect.poll(() => seen.puts.length).toBe(2);
+  expect(seen.puts[1]).toEqual({ fix: { provider: 'codex', model: 'gpt-6.1-sol', effort: null, rounds: 3 } });
+});
+
 test('REVIEW_EFFORT locks every effort control and says so', async ({ page }) => {
   await setup(page, { codex: true, envEffort: true });
   const settings = await openAi(page);
