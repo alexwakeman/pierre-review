@@ -6,6 +6,7 @@ import {
   AUTO_POST_DEFAULT_APPROVE_LEFTOVERS,
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_SCOPE,
+  STORY_CHECK_OUTSIDE_REPOS_MAX,
   aiProviderName,
   type ApproveLeftovers,
   type AutoApproveImpact,
@@ -88,6 +89,10 @@ import { Select } from '../ui/index.js';
  * dimmed by auto review. Off stops only the automatic draw; the Draw button on the PR still works.
  * Same Save as the rest.
  *
+ * STORY CHECKS READ EVERY REPOSITORY (`storyCheckAllRepos`, `workspaces.story_check_all_repos`, migration
+ * 0211) — ON by default (only a stored false is off). Every story check, manual or automatic, so NOT
+ * dimmed by auto review. Explained behind its ⓘ. Same Save as the rest.
+ *
  * Under "Approve or request changes", three checkboxes — one per blast-radius level
  * (`autoPost.approveImpact`, overrides-only JSON, all on by default) — say which PRs may be
  * APPROVED automatically. A PR at an unticked level gets a comment-only review instead; requesting
@@ -166,6 +171,9 @@ export function AutoReviewSection(): JSX.Element {
   // ON unless a stored false says otherwise (an older server sends nothing).
   const storedDiagrams = stored?.autoDiagramsEnabled !== false;
   const [diagramsOn, setDiagramsOn] = useState(storedDiagrams);
+  // ON unless a stored false says otherwise (an older server sends nothing).
+  const storedAllRepos = stored?.storyCheckAllRepos !== false;
+  const [allRepos, setAllRepos] = useState(storedAllRepos);
   // Who runs auto reviews: the default provider, or Claude + Codex (a pair; migration 0135).
   const storedProviders: AutoReviewProviders = stored?.autoReviewProviders === 'default' ? 'default' : 'both';
   const [providers, setProviders] = useState<AutoReviewProviders>(storedProviders);
@@ -214,6 +222,9 @@ export function AutoReviewSection(): JSX.Element {
   useEffect(() => {
     setDiagramsOn(storedDiagrams);
   }, [workspaceId, storedDiagrams]);
+  useEffect(() => {
+    setAllRepos(storedAllRepos);
+  }, [workspaceId, storedAllRepos]);
   useEffect(() => {
     setCapText(String(storedCap));
   }, [workspaceId, storedCap]);
@@ -691,12 +702,40 @@ export function AutoReviewSection(): JSX.Element {
           </p>
         </InfoButton>
       </div>
+      <div className="flex items-start gap-1 text-body">
+        <label className="flex items-start gap-2">
+          <CheckInput
+            className="mt-0.5"
+            data-testid="story-check-all-repos"
+            checked={allRepos}
+            onChange={(e) => setAllRepos(e.target.checked)}
+          />
+          <span className="font-medium text-ui-ink">Story checks read every repository</span>
+        </label>
+        <InfoButton title="Story checks read every repository">
+          <p>
+            On: a story check also reads this workspace’s repositories that have no pull request on the ticket, read
+            only at their default branch. At most {STORY_CHECK_OUTSIDE_REPOS_MAX}: your related repositories first,
+            then the rest by name. The check names the ones it left out.
+          </p>
+          <p>
+            It also reads open pull requests in related repositories on the same branch as a pull request on the
+            ticket, when they are not linked to the ticket.
+          </p>
+          <p>
+            A criterion that only this code does is met, and says where. A change there does not start a new check,
+            so that line can be a little out of date.
+          </p>
+          <p>Off: only the ticket’s pull requests.</p>
+        </InfoButton>
+      </div>
       <SaveButton
         dirty={
           cap != null &&
           (on !== storedOn ||
             fixOn !== storedFix ||
             diagramsOn !== storedDiagrams ||
+            allRepos !== storedAllRepos ||
             providers !== storedProviders ||
             strictness !== storedStrictness ||
             capDirty ||
@@ -709,6 +748,7 @@ export function AutoReviewSection(): JSX.Element {
             enabled: on,
             autoFixEnabled: fixOn,
             ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
+            ...(allRepos !== storedAllRepos ? { storyCheckAllRepos: allRepos } : {}),
             ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
             ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
             ...(capDirty && cap != null ? { dailyCap: cap } : {}),

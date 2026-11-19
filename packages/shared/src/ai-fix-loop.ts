@@ -39,7 +39,9 @@ export interface AiFixLoopFinding {
 /** A criterion ('AC3') or missing item ('M1') the round's story check left open, with the answer. */
 export interface AiFixLoopCriterion {
   ref: string;
-  status: 'not_met' | 'partly_met' | 'unclear' | 'missing';
+  // 'met_unlinked': met ONLY by an open PR on the same branch that is not linked to the ticket — still open
+  // for the loop (shared `criterionDoneForBuild`).
+  status: 'not_met' | 'partly_met' | 'unclear' | 'missing' | 'met_unlinked';
   text: string;
   explanation: string | null;
   response: { action: StoryBuildLoopAcResponse; text: string | null } | null;

@@ -17,7 +17,7 @@
 // figure). Claude's own explanations are shown separately, as Claude's text — CLAUDE.md's rule
 // that a model-derived and a code-derived figure are labelled apart.
 import { NOTION_ROOT_RE } from './notion-tracker.js';
-import { criterionCounts } from './criterion-status.js';
+import { criterionCounts, outsideTicketWords } from './criterion-status.js';
 import type {
   ClaudeFindingSeverity,
   ClaudeFindingStory,
@@ -32,6 +32,7 @@ import type {
   ClaudeTicketAssessment,
   ClaudeTicketCriterionStatus,
   JiraAcCandidate,
+  TicketCriterionOutside,
 } from './types.js';
 
 // ---- caps ----
@@ -365,14 +366,16 @@ export function followUpLeftOutSentence(
 /** "4 of 6 criteria met." / "1 of 1 criterion met." / "4 met + 1 outside code of 6 criteria." — null
  *  when there are no criteria. Outside-code criteria are done but named apart (`criterionCounts`). */
 export function ticketCriteriaSentence(
-  a: { criteria: ReadonlyArray<{ status: ClaudeTicketCriterionStatus | string }> } | null | undefined,
+  a: { criteria: ReadonlyArray<{ status: ClaudeTicketCriterionStatus | string; outside?: TicketCriterionOutside | null }> } | null | undefined,
 ): string | null {
   if (!a || a.criteria.length === 0) return null;
   const c = criterionCounts(a.criteria);
   const noun = c.total === 1 ? 'criterion' : 'criteria';
+  // A criterion met only by code outside the ticket is met, and named apart.
+  const outside = outsideTicketWords(c);
   return c.metOutsideCode > 0
-    ? `${c.met} met + ${c.metOutsideCode} outside code of ${c.total} ${noun}.`
-    : `${c.met} of ${c.total} ${noun} met.`;
+    ? `${c.met} met + ${c.metOutsideCode} outside code of ${c.total} ${noun}${outside}.`
+    : `${c.met} of ${c.total} ${noun} met${outside}.`;
 }
 
 // ---- story findings ----

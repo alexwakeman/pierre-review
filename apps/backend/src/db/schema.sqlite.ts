@@ -2637,6 +2637,11 @@ export const workspaces = sqliteTable(
     // is off. Off stops only the automatic draw; Draw / Redraw still works. The ONE writer is
     // `setWorkspaceAutoReview` (review/claude-review/auto-settings.ts).
     autoDiagramsEnabled: integer('auto_diagrams_enabled', { mode: 'boolean' }).notNull().default(true),
+    // STORY CHECKS READ EVERY REPOSITORY (migration 0211; docs/CLAUDE-REVIEW.md § Ticket review → Outside
+    // the ticket): a story check also reads this workspace's other repositories at their default branch and
+    // open same-branch PRs not linked to the ticket. NULL = ON (only a stored false is off). The ONE
+    // writer is `setWorkspaceAutoReview`; the reader is review/ticket-review/outside.ts.
+    storyCheckAllRepos: integer('story_check_all_repos', { mode: 'boolean' }),
     // TEAM CLAIMS (migration 0134; docs/CLAUDE-REVIEW.md § Team claims): "Mark auto reviews on
     // GitHub". An auto review posts a commit status (limn/review-claude | limn/review-codex) on the
     // PR's head so teammates' Limn skips a commit someone is already reviewing with the same

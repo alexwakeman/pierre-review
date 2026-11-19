@@ -61,6 +61,8 @@ export interface PrCriteriaCheck {
   met: number;
   /** "Met outside code changes" — done, named apart. Absent from an older server (read as 0). */
   metOutsideCode?: number;
+  /** Of `met`: only code outside the ticket's PRs delivers it — met, named apart. Absent = 0. */
+  metOutsideTicket?: number;
   partlyMet: number;
   notMet: number;
   /** `unclear` + `not_checked`. */

@@ -92,7 +92,7 @@ function buildBaseTicketReviewShape(z: ZodNs) {
         .string()
         .nullable()
         .optional()
-        .describe("A repository from the 'Pull requests' section ('owner/name') when no PR there should carry it."),
+        .describe("A repository from the 'Pull requests' or 'Outside the ticket' section ('owner/name') when no PR there should carry it."),
     })
     .nullable()
     .optional()
@@ -116,6 +116,11 @@ function buildBaseTicketReviewShape(z: ZodNs) {
             .nullable()
             .optional()
             .describe("met_outside_code only: the ref of the ticket comment that says it was done, e.g. 'C3'."),
+          metOutsideTicket: z
+            .string()
+            .nullable()
+            .optional()
+            .describe("met only, when no pull request on the ticket delivers it: the ref of the code outside the ticket that does, e.g. 'X2'."),
           deliveredBy: z
             .array(memberRef)
             .optional()

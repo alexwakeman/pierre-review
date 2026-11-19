@@ -109,6 +109,11 @@ export function FixLoopSection({ prId, loop, showProgress = true }: { prId: numb
                     {round.criteria.map((c) => (
                       <li key={`c${c.ref}`}>
                         <span className="font-mono text-ui-mute">{c.ref}</span> <span className="text-ui-ink">{c.text}</span>
+                        {c.status === 'met_unlinked' && (
+                          <div className="text-ui-mute" data-testid="ai-fix-loop-met-unlinked">
+                            Only in a pull request on the same branch that is not linked to the ticket
+                          </div>
+                        )}
                         {c.response != null && (
                           <div className="text-ui-mute">
                             {c.response.action === 'cannot_meet'

@@ -390,11 +390,27 @@ const ACME_2_CHECK: TicketReview = {
     alignment: 'partly_aligned',
     summary: 'The link is sent, but it never expires.',
     criteria: [
-      { ref: 'AC1', index: 0, text: 'A sign-in link is emailed', status: 'met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null },
+      // Met by code OUTSIDE the ticket (docs/CLAUDE-REVIEW.md § Ticket review → Outside the ticket): the
+      // mailer already sends it, so it is met and labelled apart.
+      {
+        ref: 'AC1',
+        index: 0,
+        text: 'A sign-in link is emailed',
+        status: 'met',
+        explanation: null,
+        deliveredBy: [],
+        evidence: [],
+        expectedIn: null,
+        outside: { kind: 'repo', repoId: 11, repo: 'acme/api', prId: null, number: null },
+      },
       { ref: 'AC2', index: 1, text: 'The link expires after 15 minutes', status: 'not_met', explanation: null, deliveredBy: [], evidence: [], expectedIn: null },
     ],
     missing: [{ ref: 'M1', title: 'A rate limit on link requests', explanation: null, expectedIn: null }],
     notRequested: [],
+    outside: {
+      sources: [{ ref: 'X1', kind: 'repo', repoId: 11, repo: 'acme/api', prId: null, number: null, sha: 'f'.repeat(40), read: true }],
+      leftOut: [],
+    },
   },
   members: [],
   items: [],
@@ -2796,6 +2812,8 @@ export async function installMockApi(
             dailyCap: 20,
             autoFixEnabled: false,
             autoDiagramsEnabled: true,
+            // Story checks read every repository: ON by default (migration 0211).
+            storyCheckAllRepos: true,
             autoReviewProviders: 'default',
             pairStrictness: 'strict',
             autoFix: {

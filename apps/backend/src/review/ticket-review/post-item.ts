@@ -61,8 +61,13 @@ export async function postedInChain(ctx: AgentContext, accountId: number, priorI
   return false;
 }
 
-/** The target an item posts on: its owner PR, else the PR the reader is looking at. */
-export function storyGapTarget(item: Pick<TicketReviewItem, 'ownerPrId'>, viewedPrId: number | null): number | null {
+/**
+ * The target an item posts on: its owner PR, else the PR the reader is looking at. ⚠ An item whose work
+ * belongs in a repository with NO PR on the ticket (`noPrIn`, persist.ts) has NO target: there is no PR
+ * to post it on, and the viewed PR is another repository's.
+ */
+export function storyGapTarget(item: Pick<TicketReviewItem, 'ownerPrId' | 'noPrIn'>, viewedPrId: number | null): number | null {
+  if (item.ownerPrId == null && item.noPrIn != null) return null;
   return item.ownerPrId ?? viewedPrId;
 }
 

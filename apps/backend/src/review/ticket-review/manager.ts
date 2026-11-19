@@ -74,6 +74,7 @@ import {
   type PromptPrior,
 } from './prompts.js';
 import { reconcileTicketReview, type TicketReport } from './reconcile.js';
+import { noOutside, readOutsideForStoryCheck, storyCheckAllReposOn, type PreparedOutside } from './outside.js';
 import { reviewDefaultProvider, reviewKindModel } from '../../ai/run-profile.js';
 import { preflightFor } from '../../ai/run-choice.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
@@ -104,7 +105,10 @@ import { withWorktreeOwner } from '../worktree-owner.js';
 // PRE-PASS first (prepass.ts; its cost joins the run's) → in parallel: those diffs (+ the pre-pass),
 // a read-only worktree per OPEN member and ONE default-branch checkout per repo with a MERGED member
 // → the prompt (nonce-fenced) in a scratch working directory holding MEMBERS.md → the agent
-// (agent.ts: Read/Glob/Grep behind the path guard, every checkout a root) → the run's cards for its
+// (agent.ts: Read/Glob/Grep behind the path guard, every checkout a root) — plus, with the workspace's
+// "Story checks read every repository" on, CODE OUTSIDE THE TICKET (outside.ts: the workspace's other
+// repositories at their default branch, unlinked same-branch PRs; context, never in the fingerprint),
+// listed in MEMBERS.md and the prompt as X1… → the run's cards for its
 // diff members (validated, stored) → the server reconcile (reconcile.ts) → persist. The `finally`
 // removes every checkout and the scratch directory, then runs a deferred clone-cache eviction.
 //
@@ -376,7 +380,10 @@ async function runPipeline(
     return;
   }
   const { ticket, ticketHash: hash, members } = inputs;
-  const fp = fingerprint(hash, members);
+  // "Story checks read every repository", read ONCE: the fingerprint carries it (off only) and the outside
+  // read obeys the same answer.
+  const outsideOn = await storyCheckAllReposOn(ctx, accountId, job.workspaceId);
+  const fp = fingerprint(hash, members, { outsideOff: !outsideOn });
   // The people's comments on the ticket (docs/TRACKERS.md § Ticket comments) — a tracker ticket only,
   // READ AGAIN from the tracker first (comments only; the story text stays as stored). ⚠ NOT in the
   // hash or the fingerprint: the run stores what it saw (`commentsSeen`); a person's later comment
@@ -403,6 +410,7 @@ async function runPipeline(
   };
   let cleanupWorktrees: (() => Promise<void>) | null = null;
   let cleanupDefaults: (() => Promise<void>) | null = null;
+  let cleanupOutside: (() => Promise<void>) | null = null;
   let scratch: string | null = null;
   // Everything spent before the agent's own run (the card pre-pass) — added to the run's cost.
   const spent = (): number | null => (job.spentUsd > 0 ? job.spentUsd : null);
@@ -453,7 +461,7 @@ async function runPipeline(
     // ---- in parallel: diffs (+ pre-pass), checkouts, and the context ----
     // An OPEN member gets its own read-only worktree (whether shown as a card or a diff — the agent
     // may verify a card); a MERGED member is read through ONE default-branch checkout per repo.
-    const [{ diffs, results }, worktrees, defaults, legacy, prior] = await Promise.all([
+    const [{ diffs, results }, worktrees, defaults, legacy, prior, outside] = await Promise.all([
       // Caught like the reads below: a rejection would skip the cleanup assignments and leak.
       diffsThenCards.catch(() => ({ diffs: new Map<number, MemberDiff>(), results: [] as PrepassResult[] })),
       withWorktreeOwner({ kind: 'ticket_review', accountId, ticket: job.ident }, () => prepareMemberWorktrees(located.filter((m) => m.state === 'open'))),
@@ -468,9 +476,22 @@ async function runPipeline(
       getTicketStateInputs(ctx, accountId, [job.ident])
         .then((m) => m.get(job.ident)?.latest ?? null)
         .catch(() => null),
+      // CODE OUTSIDE THE TICKET, this run's workspace only (outside.ts). Never throws.
+      withWorktreeOwner({ kind: 'ticket_review', accountId, ticket: job.ident }, () =>
+        readOutsideForStoryCheck(
+          ctx,
+          accountId,
+          job.workspaceId,
+          members.map((m, i) => ({ prId: m.prId, repoId: m.repoId, open: m.state === 'open', ref: `PR${i + 1}` })),
+          // A Stop stops the waiting too (each source also has its own time limit).
+          controller.signal,
+          { switchOn: outsideOn },
+        ),
+      ).catch((): PreparedOutside => noOutside()),
     ]);
     cleanupWorktrees = worktrees.cleanup;
     cleanupDefaults = defaults.cleanup;
+    cleanupOutside = outside.cleanup;
     job.spentUsd += prepassCost(results);
 
     const headOf = new Map(members.map((m) => [m.prId, m.headSha]));
@@ -582,9 +603,10 @@ async function runPipeline(
       nonce,
       defaultBranches,
       comments,
+      outside: outside.block,
     }, words);
     scratch = mkdtempSync(join(tmpdir(), 'pierre-ticket-review-'));
-    writeFileSync(join(scratch, 'MEMBERS.md'), membersIndex(promptMembers), 'utf8');
+    writeFileSync(join(scratch, 'MEMBERS.md'), membersIndex(promptMembers, outside.block), 'utf8');
     // The workspace's reference library, read-only (docs/REFERENCE-DOCS.md § Use in reviews). null ⇒
     // prompt, tools and output exactly as before.
     const { reviewDocsFor } = await import('../../reference-docs/context.js');
@@ -596,10 +618,11 @@ async function runPipeline(
     const res = await runTicketReviewAgent({
       model: job.model,
       cwd: scratch,
-      // Every checkout is a root of the path guard; nothing else on disk can be read.
+      // Every checkout is a root of the path guard (the outside ones too); nothing else on disk can be read.
       worktrees: [
         ...promptMembers.map((m) => m.worktreePath).filter((p): p is string => p != null),
         ...defaultBranches.map((b) => b.path),
+        ...outside.roots,
       ],
       systemPrompt: ticketReviewSystemPrompt(docs?.dir ?? null, words),
       prompt,
@@ -664,6 +687,8 @@ async function runPipeline(
       res.payload as TicketReport | null,
       // The comments IN THE PROMPT, by ref: the only citations a "Met outside code changes" may make.
       ticketCommentsBlock(comments, TICKET_COMMENTS_PROMPT_CHARS, { refs: true }).shownRefs,
+      // What it read outside the ticket: the only X refs a criterion may lean on; stored on the run.
+      outside.context,
     );
     // The library passages, CHECKED (a bad link or a quote not in its section is dropped). Only a run
     // that read the library carries `references` at all.
@@ -680,6 +705,7 @@ async function runPipeline(
   } finally {
     await cleanupWorktrees?.().catch(() => {});
     await cleanupDefaults?.().catch(() => {});
+    await cleanupOutside?.().catch(() => {});
     if (scratch) {
       try {
         rmSync(scratch, { recursive: true, force: true });

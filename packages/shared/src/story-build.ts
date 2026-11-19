@@ -25,9 +25,10 @@ import type {
   ClaudeTicketCriterionStatus,
   TicketAssessment,
   TicketCriterionMetBy,
+  TicketCriterionOutside,
 } from './types.js';
 import { criterionTextOnly } from './prose.js';
-import { criterionIsGap } from './criterion-status.js';
+import { criterionDoneForBuild } from './criterion-status.js';
 
 // ---- caps (each spelled once) ---------------------------------------------------------------------
 
@@ -174,6 +175,8 @@ export interface StoryBuildCoverageCriterion {
   coveredByPrIds: number[];
   /** `met_outside_code` only: the person's ticket comment it rests on. */
   metBy?: TicketCriterionMetBy | null;
+  /** `met` only: delivered ONLY by code outside the ticket's PRs (`TicketCriterion.outside`). */
+  outside?: TicketCriterionOutside | null;
 }
 
 /** Something the ticket asks for outside its criteria (the ticket check's `missing` items). `ref` is `M1`…. */
@@ -202,8 +205,9 @@ export interface StoryBuildCoverage {
 }
 
 /** Is this criterion a gap the build should close? */
-export function storyBuildIsGap(c: Pick<StoryBuildCoverageCriterion, 'verdict'>): boolean {
-  return criterionIsGap(c.verdict);
+export function storyBuildIsGap(c: Pick<StoryBuildCoverageCriterion, 'verdict'> & { outside?: StoryBuildCoverageCriterion['outside'] }): boolean {
+  // A criterion met only by an UNLINKED same-branch PR is still a gap for a build (`criterionDoneForBuild`).
+  return !criterionDoneForBuild(c.verdict, c.outside);
 }
 
 /** Why a repository is a candidate. */

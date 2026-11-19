@@ -13,6 +13,18 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Story checks read code outside the ticket: the workspace's other repositories at their default branch (related
+  repositories first, at most 12; the check names the ones it left out) and open pull requests in related
+  repositories on the same branch but not linked to the ticket. A criterion only that code does is met and says
+  where, for example "Already in acme/api (no PR on this ticket)", and counts name it apart ("3 of 4 met,
+  1 already outside the ticket"). Work that belongs in a repository with no pull request reads "No PR yet in
+  acme/api" and is never posted. A change in that code does not start a new check; turning the switch on or off
+  does. Settings → AI review → "Story checks read every repository" (on by default) turns it off. The review
+  rounds of Implement story, AI Fix and a local branch review keep working on a criterion that only an unlinked
+  pull request does.
+
 ## [1.0.65] - 2026-11-19
 
 ### Added

@@ -31,7 +31,7 @@ export interface LoopSeedFinding {
 export interface LoopSeedCriterion {
   /** 'AC3' or 'M1'. */
   ref: string;
-  status: 'not_met' | 'partly_met' | 'unclear' | 'missing';
+  status: 'not_met' | 'partly_met' | 'unclear' | 'missing' | 'met_unlinked';
   text: string;
   explanation: string | null;
   /** The agent said "not applicable" last round and the story check did not accept it. */
@@ -71,6 +71,7 @@ const STATUS_WORDS: Record<LoopSeedCriterion['status'], string> = {
   partly_met: 'partly met',
   unclear: 'unclear',
   missing: 'not done anywhere',
+  met_unlinked: 'met only in a pull request on the same branch that is not linked to the ticket: deliver it in this work',
 };
 
 /** The fix pass's REVIEW.md (see the header). Pure. */

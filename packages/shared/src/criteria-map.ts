@@ -1,5 +1,5 @@
-import type { TicketPrCardCriterion } from './types.js';
-import { criterionDone } from './criterion-status.js';
+import type { TicketCriterionOutside, TicketPrCardCriterion } from './types.js';
+import { criterionDone, criterionOutsideWords } from './criterion-status.js';
 import { criterionTextForMatch } from './prose.js';
 
 // THE CRITERIA MAP — "how the code meets each criterion" (docs/CLAUDE-REVIEW.md § The criteria map,
@@ -26,6 +26,8 @@ export interface CriteriaMapCriterionIn {
   ref: string;
   text: string;
   status: string;
+  // A met only code OUTSIDE the ticket delivers (`TicketCriterion.outside`).
+  outside?: TicketCriterionOutside | null;
 }
 
 /** One member, as the fold reads it (a `TicketReviewMember`). */
@@ -55,6 +57,9 @@ export interface CriteriaMapRow {
   done: boolean;
   /** In member order. Empty = no current card claims it. */
   links: CriteriaMapLink[];
+  /** A met only code outside the ticket delivers, in words ("Already in acme/api (no PR on this ticket)");
+   *  null otherwise. */
+  outside: string | null;
 }
 
 export interface CriteriaMapPr {
@@ -158,7 +163,14 @@ export function matchCardCriterion(cardText: string, criteria: readonly Criteria
 
 /** Build the map. Pure; the inputs are never mutated. */
 export function criteriaMap(criteria: readonly CriteriaMapCriterionIn[], members: readonly CriteriaMapMemberIn[]): CriteriaMap {
-  const rows: CriteriaMapRow[] = criteria.map((c) => ({ ref: c.ref, text: c.text, status: c.status, done: criterionDone(c.status), links: [] }));
+  const rows: CriteriaMapRow[] = criteria.map((c) => ({
+    ref: c.ref,
+    text: c.text,
+    status: c.status,
+    done: criterionDone(c.status),
+    links: [],
+    outside: c.status === 'met' && c.outside != null ? criterionOutsideWords(c.outside) : null,
+  }));
   const prs: CriteriaMapPr[] = [];
   let links = 0;
   for (const m of members) {

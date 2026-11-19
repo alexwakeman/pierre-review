@@ -98,6 +98,7 @@ export function storyViewCheck(state: TicketReviewState | null | undefined, run:
   const n = criterionCounts(a.criteria);
   return {
     met: n.met,
+    ...(n.metOutsideTicket > 0 ? { metOutsideTicket: n.metOutsideTicket } : {}),
     metOutsideCode: n.metOutsideCode,
     partlyMet: n.partlyMet,
     notMet: n.notMet,

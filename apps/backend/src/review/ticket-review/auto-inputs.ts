@@ -4,6 +4,7 @@ import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
 import { utcDayStartMs } from '../claude-review/auto.js';
 import { fingerprint, readLiveMembers, staleReasons, ticketHash, type LiveMember } from './fingerprint.js';
+import { storyCheckAllReposOn } from './outside.js';
 import { countAutoTicketReviewsSince, getTicketStateInputs } from './persist.js';
 import { jiraStoryFor, ticketCommentsFor } from './prepare.js';
 import { newCommentsMakeStale } from '../../tracker/comments.js';
@@ -151,8 +152,13 @@ export async function loadTicketAutoState(
   const workspaceId = viaWs != null && a.enabled.has(viaWs) ? viaWs : (enabledWs[0] ?? null);
 
   const liveHash = ticketHash(ticket);
-  const fp = fingerprint(liveHash, live);
-  const st = (await getTicketStateInputs(ctx, accountId, [ident])).get(ident);
+  // The fingerprint a run would store: in the workspace it would run in (else the latest run's), with that
+  // workspace's "Story checks read every repository" switch (fingerprint.ts).
+  const st0 = (await getTicketStateInputs(ctx, accountId, [ident])).get(ident);
+  const fpWs = workspaceId ?? st0?.latest?.workspaceId ?? null;
+  const outsideOff = fpWs != null && !(await storyCheckAllReposOn(ctx, accountId, fpWs));
+  const fp = fingerprint(liveHash, live, { outsideOff });
+  const st = st0;
   const first = st?.latest == null;
   // A person's comment the latest check did not see re-checks it ONLY while it still has a criterion
   // not done (tracker/comments.ts `newCommentsMakeStale`; docs/TRACKERS.md § Ticket comments).

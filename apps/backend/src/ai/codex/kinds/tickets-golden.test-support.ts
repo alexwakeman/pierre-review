@@ -1,6 +1,8 @@
 // The prompts of Phase 3 stream (c), rendered from FIXED inputs. `tickets.test.ts` compares the
 // CLAUDE render against `__fixtures__/tickets-claude-prompts.json`, which was written from the code
-// BEFORE the Codex port — so the port provably moved no Claude byte.
+// BEFORE the Codex port — so the port provably moved no Claude byte. Deliberate changes since, each
+// regenerated on purpose: 2026-11-19 code outside the ticket (`ticketSystem`/`ticketSystemDocs` gained the
+// "met by code outside the ticket" rule; `ticketUserOutside` is new; every other user prompt unchanged).
 import { planCiReview, selectCiFailures, type CiPlan } from '../../../review/claude-review/ci-failures.js';
 import * as ci from '../../../review/ci-review/prompts.js';
 import * as sda from '../../../review/story-docs/agent.js';
@@ -32,6 +34,15 @@ function ciPlan(): CiPlan {
     { check: { checkName: c.name, jobId: 1, url: null }, step: 'Compile', log: { text: 'Error: x', windowTruncated: false } },
   ]);
 }
+
+const outsideBlock: tr.PromptOutsideBlock = {
+  sources: [
+    { ref: 'X1', kind: 'repo', repoId: 7, repo: 'acme/api', prId: null, number: null, branch: 'main', sha: 'b'.repeat(40), path: '/tmp/wt/x1', sameBranchAs: null },
+    { ref: 'X2', kind: 'unlinked_pr', repoId: 8, repo: 'acme/web', prId: 88, number: 88, branch: null, sha: 'c'.repeat(40), path: '/tmp/wt/x2', sameBranchAs: 'PR1' },
+    { ref: 'X3', kind: 'repo', repoId: 9, repo: 'acme/docs', prId: null, number: null, branch: null, sha: null, path: null, sameBranchAs: null },
+  ],
+  leftOut: ['acme/zeta', 'acme/zulu'],
+};
 
 /** Every prompt of the stream, by name, rendered for `t`'s provider. */
 export function ticketsPrompts(t: PromptTools): Record<string, string> {
@@ -78,6 +89,9 @@ export function ticketsPrompts(t: PromptTools): Record<string, string> {
     ticketSystemDocs: tr.ticketReviewSystemPrompt('/lib/ws', t),
     ticketUser: tr.buildTicketReviewPrompt(args, t),
     ticketUserComments: tr.buildTicketReviewPrompt({ ...args, comments }, t),
+    // Code outside the ticket (review/ticket-review/outside.ts): an outside repository, an unlinked
+    // same-branch PR, one that could not be read, and the named left-out repositories.
+    ticketUserOutside: tr.buildTicketReviewPrompt({ ...args, outside: outsideBlock }, t),
     cardSystem: pp.ticketCardSystemPrompt(t),
     cardUser: pp.buildPrepassPrompt(prep, ticket, 'zz', t),
     ciSystem: ci.ciReviewSystemPrompt(t),

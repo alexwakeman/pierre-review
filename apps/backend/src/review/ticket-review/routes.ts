@@ -22,6 +22,7 @@ import { getTicketSource } from '../../tracker/ticket-source.js';
 import { getReviewPrContext } from '../claude-review/persist.js';
 import { postStoryGapsComment } from './post-item.js';
 import { deriveTicketReviewState, readLiveMembers, ticketHash } from './fingerprint.js';
+import { storyCheckAllReposOn } from './outside.js';
 import { config } from '../../config.js';
 import { agenticRunReady, singleReviewProvider } from '../claude-review/ai-ready.js';
 import { preflightFor } from '../../ai/run-choice.js';
@@ -162,11 +163,18 @@ async function statesFor(
   for (const ident of idents) {
     const inp = inputs.get(ident);
     const parsed = parseTicketIdent(ident);
-    let live: { ticketHash: string; members: Awaited<ReturnType<typeof readLiveMembers>> } | null = null;
+    let live: { ticketHash: string; members: Awaited<ReturnType<typeof readLiveMembers>>; outsideOff?: boolean } | null = null;
     if (isTrackerIdent(parsed)) {
       const memberIds = await jiraMemberIds(accountId, ident);
       const story = await jiraStoryFor(accountId, ident, memberIds);
-      if (story) live = { ticketHash: ticketHash(story), members: await readLiveMembers(ctx, accountId, memberIds) };
+      if (story) {
+        live = {
+          ticketHash: ticketHash(story),
+          members: await readLiveMembers(ctx, accountId, memberIds),
+          // The latest run's workspace switch (fingerprint.ts): turning it on or off makes that run stale.
+          ...(inp?.latest != null ? { outsideOff: !(await storyCheckAllReposOn(ctx, accountId, inp.latest.workspaceId)) } : {}),
+        };
+      }
     }
     // People's comments the latest check did not see (docs/TRACKERS.md § Ticket comments). They make it
     // STALE only while it still has a criterion not done (`newCommentsMakeStale`); otherwise they are a

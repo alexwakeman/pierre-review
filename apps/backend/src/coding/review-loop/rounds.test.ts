@@ -98,3 +98,29 @@ describe('the cannot_meet stop', () => {
     expect(nextAfterReview({ findings: 0, criteria: 1 }, 2, 5, { onlyCannotMeet: true })).toBe('open');
   });
 });
+
+// 6. CODE OUTSIDE THE TICKET in the loop's stop rule (owner decision 2026-11-19): met ONLY by an UNLINKED
+//    same-branch PR stays OPEN ('met_unlinked'); met by another repository's DEFAULT BRANCH is done.
+describe('openCriteriaOf — code outside the ticket', () => {
+  it('keeps an unlinked-only met open and a default-branch met done', async () => {
+    const { openCriteriaOf } = await import('./rounds.js');
+    const crit = (ref: string, outside: 'repo' | 'unlinked_pr' | null) => ({
+      ref,
+      index: 0,
+      text: ref,
+      status: 'met' as const,
+      explanation: null,
+      deliveredBy: [],
+      evidence: [],
+      expectedIn: null,
+      ...(outside ? { outside: { kind: outside, repoId: 1, repo: 'acme/x', prId: outside === 'unlinked_pr' ? 8 : null, number: outside === 'unlinked_pr' ? 8 : null } } : {}),
+    });
+    const check: LoopCheckLike = {
+      round: 1,
+      status: 'succeeded',
+      claimVerdicts: null,
+      assessment: { alignment: 'partly_aligned', summary: null, criteria: [crit('AC1', 'repo'), crit('AC2', 'unlinked_pr'), crit('AC3', null)], missing: [], notRequested: [] },
+    };
+    expect(openCriteriaOf(check).map((c) => [c.ref, c.status])).toEqual([['AC2', 'met_unlinked']]);
+  });
+});

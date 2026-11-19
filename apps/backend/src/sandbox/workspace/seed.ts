@@ -16,7 +16,7 @@
 import { posix } from 'node:path';
 import {
   acSectionText,
-  criterionIsGap,
+  criterionDoneForBuild,
   describeTicketLayout,
   findAcSection,
   ticketLayoutOf,
@@ -469,11 +469,12 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
   );
   const verdict = new Map((t.gaps?.criteria ?? []).map((c) => [c.ref.toUpperCase(), c.verdict]));
   const metByOf = new Map((t.gaps?.criteria ?? []).map((c) => [c.ref.toUpperCase(), c.metBy ?? null]));
+  const outsideOf = new Map((t.gaps?.criteria ?? []).map((c) => [c.ref.toUpperCase(), c.outside ?? null]));
   if (t.criteria.length > 0) {
     out.push('Meet each one. Refer to them as AC1, AC2, … in this order.', '');
     for (const c of t.criteria) {
       const v = verdict.get(`AC${c.n}`);
-      const tag = mode === 'fill_gaps' && v != null ? gapTag(v, metByOf.get(`AC${c.n}`) ?? null) : '';
+      const tag = mode === 'fill_gaps' && v != null ? gapTag(v, metByOf.get(`AC${c.n}`) ?? null, outsideOf.get(`AC${c.n}`) ?? null) : '';
       out.push(`${c.n}. ${c.text}${tag}`);
     }
   } else if (t.acceptanceCriteriaText.trim() !== '') {
@@ -509,7 +510,7 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
   if (mode === 'fill_gaps' && t.gaps != null) {
     out.push('', '## What the existing pull requests do not deliver', '');
     if (t.gaps.note) out.push(t.gaps.note, '');
-    const gaps = t.gaps.criteria.filter((c) => criterionIsGap(c.verdict));
+    const gaps = t.gaps.criteria.filter((c) => !criterionDoneForBuild(c.verdict, c.outside ?? null));
     if (gaps.length === 0 && t.gaps.missing.length === 0) out.push('The ticket check found no gap.');
     for (const g of gaps) out.push(`- ${g.ref}: ${g.text}`);
     for (const m of t.gaps.missing) out.push(`- ${m.ref} (not in the criteria): ${m.text}`);
@@ -524,9 +525,22 @@ export function ticketMarkdown(t: SessionTicket, mode: SeedInput['mode'], docsDi
   return out.join('\n');
 }
 
-/** A Fill gaps criterion's tag in TICKET.md. Done (shared `criterionDone`) is never a gap: an
- *  outside-code criterion names the comment it rests on, so the agent does not build it. Pure. */
-export function gapTag(verdict: string, metBy: { author: string; createdAt: string } | null): string {
+/** A Fill gaps criterion's tag in TICKET.md. Done (shared `criterionDoneForBuild`) is never a gap: an
+ *  outside-code criterion names the comment it rests on, so the agent does not build it; one met ONLY by
+ *  code outside the ticket's pull requests says where — another repository's default branch is done, an
+ *  UNLINKED same-branch pull request is still a gap (nothing on the ticket delivers it). Pure. */
+export function gapTag(
+  verdict: string,
+  metBy: { author: string; createdAt: string } | null,
+  outside: { kind: 'repo' | 'unlinked_pr'; repo: string; number: number | null } | null = null,
+): string {
+  if (verdict === 'met' && outside != null) {
+    if (outside.kind === 'unlinked_pr') {
+      const pr = `${outside.repo}${outside.number != null ? `#${outside.number}` : ''}`;
+      return ` _(a gap: only ${pr} does it, on the same branch but not linked to the ticket: build this)_`;
+    }
+    return ` _(already in ${outside.repo}, outside this ticket's pull requests: do not build it)_`;
+  }
   if (verdict === 'met') return ' _(already met by the existing pull requests)_';
   if (verdict === 'met_outside_code') {
     const who = metBy != null ? ` (per ${metBy.author}'s comment of ${metBy.createdAt.slice(0, 10)})` : '';
@@ -550,7 +564,7 @@ export function planCriteriaRefs(t: SessionTicket, mode: SeedInput['mode']): { c
   const missing = mode === 'fill_gaps' ? (t.gaps?.missing ?? []).map((m) => m.ref.toUpperCase()) : [];
   const gaps =
     mode === 'fill_gaps' && t.gaps != null
-      ? [...t.gaps.criteria.filter((c) => criterionIsGap(c.verdict)).map((c) => c.ref.toUpperCase()), ...missing]
+      ? [...t.gaps.criteria.filter((c) => !criterionDoneForBuild(c.verdict, c.outside ?? null)).map((c) => c.ref.toUpperCase()), ...missing]
       : null;
   if (t.criteria.length > 0) return { criteria: [...t.criteria.map((c) => `AC${c.n}`), ...missing], gaps };
   return { criteria: t.acceptanceCriteriaText.trim() !== '' ? null : missing, gaps };

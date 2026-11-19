@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto';
 import {
   STORY_BUILD_LOOP_PAUSE_LINE,
+  criterionDoneForBuild,
   loopNextLine,
   type AiProviderId,
   type ClaudeFinding,
@@ -309,9 +310,20 @@ export function loopBodySummaryOf(
   const na = acceptedNa(check, i.checks);
   const criteria = check?.assessment
     ? {
-        met: check.assessment.criteria.filter((c) => (c.status === 'met' || c.status === 'met_outside_code') && !na.has(c.ref.toUpperCase())).length,
+        // DONE for the loop (`criterionDoneForBuild`): met by a PR, outside code changes, or another
+        // repository's default branch — the last named apart (`outsideTicket`); one met only by an UNLINKED
+        // same-branch PR is open (`unlinked`), never counted as met.
+        met: check.assessment.criteria.filter((c) => criterionDoneForBuild(c.status, c.outside) && !na.has(c.ref.toUpperCase())).length,
+        ...(() => {
+          const n = check.assessment.criteria.filter((c) => c.status === 'met' && c.outside?.kind === 'repo' && !na.has(c.ref.toUpperCase())).length;
+          return n > 0 ? { outsideTicket: n } : {};
+        })(),
         notApplicable: effectiveClaimVerdicts(check, i.checks).filter((v) => v.verdict === 'accepted').map((v) => ({ ref: v.ref, why: v.why })),
-        notMet: openCriteriaOf(check, i.checks).length,
+        notMet: openCriteriaOf(check, i.checks).filter((c) => c.status !== 'met_unlinked').length,
+        ...(() => {
+          const n = openCriteriaOf(check, i.checks).filter((c) => c.status === 'met_unlinked').length;
+          return n > 0 ? { unlinked: n } : {};
+        })(),
         // Still NOT MET (counted above): the agent's latest answer on each says it cannot be done. Only when any.
         ...(() => {
           const cm = cannotMeetNow(openCriteriaOf(check, i.checks), i.acResponses);

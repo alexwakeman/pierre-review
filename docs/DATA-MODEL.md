@@ -205,6 +205,13 @@ isolation as above (`accountId` denormalized onto the anchor tables;
   default**; only a stored false is off (`autoReviewOf`, `diagramsSwitchedOnForPr`). Off stops only
   the automatic draw (review/diagrams/trigger.ts); Draw / Redraw still works. The ONE writer is
   `setWorkspaceAutoReview`; docs/CLAUDE-REVIEW.md § Design diagrams.
+- **`workspaces.storyCheckAllRepos`** (`story_check_all_repos`, migration `0211`, nullable integer, no
+  default) — "Story checks read every repository" (Settings → AI review). **ON by default**: NULL reads on,
+  only a stored false is off (`autoReviewOf`, `review/ticket-review/outside.ts` `storyCheckAllReposOn`).
+  On, every story check also reads the workspace's other repositories at their default branch (≤ 12,
+  related first, the rest named) and open same-branch PRs not linked to the ticket; off = the ticket's PRs
+  only. The ONE writer is `setWorkspaceAutoReview`; docs/CLAUDE-REVIEW.md § Ticket review → OUTSIDE THE
+  TICKET.
 - **WITHDRAWING ENSEMBLE'S APPROVAL** (docs/CLAUDE-REVIEW.md § Auto-posting): the claim and outcome of
   each withdrawal ride the approving run's `claudeReviews.autoPost` JSON (`approvalWithdrawal`).
   ⚠ `workspaces.withdrawApprovalOnPush` (`withdraw_approval_on_push`, migration `0165`) is **DORMANT
@@ -821,6 +828,13 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
   No FKs: rows of a ticket no `tracker_tickets` row names are pruned by the worker's key prune and BOTH
   delete paths (`db/ticket-comments-prune.ts`); in `accountScopedTables()`. ⚠ NOT story text — never
   moves `changed_at` or any hash ([TRACKERS.md](TRACKERS.md) § Ticket comments).
+- **`ticket_reviews.assessment.outside`** (JSON inside the existing `assessment`, no column, 2026-11-19) —
+  `TicketOutsideContext {sources, leftOut}`: the code OUTSIDE the ticket's PRs a run read (refs `X1`…, each
+  `{kind, repoId, repo, prId, number, sha, read}`) and the workspace repositories it left out past the cap.
+  A criterion's `outside` and an `expectedIn.outsideRepo` are server-built from it. ⚠ CONTEXT, never in
+  `fingerprint`: a push to some default branch never makes a run stale. An item's `noPrIn` is computed on
+  read from its criterion's / missing item's `expectedIn.outsideRepo` (persist.ts `withNoPrIn`), never
+  stored.
 - **`ticket_reviews.comments_seen`** (migration `0142`) — `{ids, count, hash}` of the people comments a
   run was given. Outside the `fingerprint`; feeds `TicketReviewState.newComments`. NULL on older runs
   and on a dormant pasted-story run (a `manual:` ident, a feature removed 2026-11-10: its rows and

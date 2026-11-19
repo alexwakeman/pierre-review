@@ -1,5 +1,5 @@
 import type { PrBranchStack, PrCriteriaCheck, PrStackMember } from '@pierre-review/shared';
-import { criteriaCheckTone, criteriaDoneWords } from '@pierre-review/shared';
+import { criteriaCheckTone, criteriaDoneWords, outsideTicketWords } from '@pierre-review/shared';
 import { BranchIcon, CheckIcon, CloseIcon, WarningIcon } from '../Icons.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
 import { cx, FOCUS_RING } from '../ui/cx.js';
@@ -51,7 +51,7 @@ export function criteriaChipText(c: PrCriteriaCheck, several: boolean): { label:
   if (c.unsettled > 0) rest.push(`${c.unsettled} unclear`);
   const who = c.key != null ? `${c.key}: ` : '';
   const title =
-    `${who}${outside > 0 ? `${criteriaDoneWords(c)} acceptance criteria` : `${c.met} of ${c.total} acceptance criteria met`}${rest.length > 0 ? ` (${rest.join(', ')})` : ''}. ` +
+    `${who}${outside > 0 ? `${criteriaDoneWords(c)} acceptance criteria` : `${c.met} of ${c.total} acceptance criteria met`}${outsideTicketWords(c)}${rest.length > 0 ? ` (${rest.join(', ')})` : ''}. ` +
     `Checked ${relativeTime(c.checkedAt)}${c.olderHead ? ', on an older commit of this PR' : ''}.`;
   return { label, title };
 }

@@ -1,0 +1,12 @@
+-- STORY CHECKS READ EVERY REPOSITORY (2026-11-19; docs/CLAUDE-REVIEW.md § Ticket review → Outside the ticket).
+-- CORE, additive.
+--
+--   workspaces.story_check_all_repos   Settings → AI review → "Story checks read every repository". A story check
+--                                      (the ticket review, manual or auto, and the review loop's branch check) also
+--                                      reads the workspace's other repositories read-only at their default branch —
+--                                      related ones first, then by owner/name, at most STORY_CHECK_OUTSIDE_REPOS_MAX
+--                                      (12), the rest named — and open same-branch PRs in related repositories that are
+--                                      not linked to the ticket. NULL = ON (no backfill: every existing row reads on);
+--                                      0 = the ticket's PRs only.
+-- What a run read beyond its PRs is stored inside `ticket_reviews.assessment` (`outside`), never in the fingerprint.
+ALTER TABLE `workspaces` ADD COLUMN `story_check_all_repos` integer;

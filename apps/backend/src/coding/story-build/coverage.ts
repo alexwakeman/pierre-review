@@ -42,6 +42,9 @@ export function foldCoverage(a: {
         verdict: c.status,
         coveredByPrIds: c.status === 'met' ? [...new Set(c.deliveredBy)] : [],
         ...(c.status === 'met_outside_code' && c.metBy != null ? { metBy: c.metBy } : {}),
+        // Met ONLY by code outside the ticket's PRs (docs/CLAUDE-REVIEW.md § Ticket review → OUTSIDE THE
+        // TICKET): carried so TICKET.md says where, never "met by the existing pull requests".
+        ...(c.status === 'met' && c.outside != null ? { outside: c.outside } : {}),
       })),
       missing: assessment.missing.map((m) => ({ ref: m.ref, text: m.title })),
       existingPrs,

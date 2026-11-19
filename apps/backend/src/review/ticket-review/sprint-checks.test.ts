@@ -34,7 +34,7 @@ const live = (fp: string, members: LiveMember[]): SprintCheckLive => ({ fingerpr
 const state = (o: Partial<{ latestFp: string; latestId: number; running: number; attempt: { id: number; fp: string } }>): TicketStateInputs => ({
   latest:
     o.latestFp != null
-      ? { id: o.latestId ?? 1, fingerprint: o.latestFp, ticketHash: 'h', alignment: null, assessment: null, completedAt: null, members: [] }
+      ? { id: o.latestId ?? 1, workspaceId: 1, fingerprint: o.latestFp, ticketHash: 'h', alignment: null, assessment: null, completedAt: null, members: [] }
       : null,
   runningRunId: o.running ?? null,
   latestAttempt: o.attempt != null ? { id: o.attempt.id, status: 'failed', fingerprint: o.attempt.fp, refused: null } : null,
@@ -149,6 +149,7 @@ describe("a person's new comment", () => {
   const withRun = (statuses: string[]): TicketStateInputs => ({
     latest: {
       id: 1,
+      workspaceId: 1,
       fingerprint: 'fp',
       ticketHash: 'h',
       alignment: null,
@@ -174,6 +175,7 @@ describe('an all-met check', () => {
   const run = (statuses: string[]): TicketStateInputs => ({
     latest: {
       id: 1,
+      workspaceId: 1,
       fingerprint: 'fp-old',
       ticketHash: 'h',
       alignment: null,

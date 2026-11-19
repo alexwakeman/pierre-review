@@ -19,13 +19,14 @@ import { Chip, FindingRow, Group, MockFrame } from './kit';
 //    (Activity/CriteriaMap.tsx): ONE list, no lines. Each criterion with its story-check status, and
 //    under it each pull request marked Merged or Open with the description's "how" on one line
 //    (truncated at every width); a click opens the full "how" (the row drops its one-line copy) and the files. An unclaimed criterion
-//    says so. LIVE.
+//    says so; a criterion only code outside the ticket does says where ("Already in acme/statements (no PR
+//    on this ticket)"), as TicketCheckMock does. LIVE.
 //  - LoopBodyMock mirrors the section the review loop adds to the pull request's description
 //    (apps/backend/src/coding/story-build/loop/pr-body.ts loopBodySection).
 // Every word comes from src/mock/acme.ts BUILD.
 // ---------------------------------------------------------------------------
 
-const { flow, ticket, check, loopBody } = BUILD;
+const { flow, ticket, check, loopBody, outsideCriterion: OUT } = BUILD;
 const N = flow.lanes.length;
 const centre = (id: string): number => {
   const i = flow.lanes.findIndex((l) => l.id === id);
@@ -121,12 +122,12 @@ export function TicketDesignMock(): JSX.Element {
 const TONE = { Met: 'green', 'Partly met': 'amber', 'Not met': 'red' } as const;
 
 export function TicketCheckMock(): JSX.Element {
-  const met = ticket.criteria.filter((c) => c.status === 'Met').length;
+  const met = ticket.criteria.filter((c) => c.status === 'Met').length + 1;
   return (
     <MockFrame
       title={`Story check · ${ticket.key}`}
-      right={<Chip tone="amber">{`${met} of ${ticket.criteria.length} met`}</Chip>}
-      label={`The story check for ${ticket.key}: criteria 1 and 4 met in pull request 612, criterion 2 partly met because the retry path still sends two emails, criterion 3 not met and belongs in 612. One thing asked for outside the criteria: an audit log entry. One thing not asked for. The docs check finds criterion 3 matches the refund policy, and quotes it.`}
+      right={<Chip tone="amber">{`${met} of ${ticket.criteria.length + 1} met, 1 already outside the ticket`}</Chip>}
+      label={`The story check for ${ticket.key}: criteria 1 and 4 met in pull request 612, criterion 2 partly met because the retry path still sends two emails, criterion 3 not met and belongs in 612, criterion 5 met already in acme/statements, with no pull request on this ticket. One thing asked for outside the criteria: an audit log entry. One thing not asked for. The docs check finds criterion 3 matches the refund policy, and quotes it.`}
     >
       <Group first>Acceptance criteria</Group>
       {ticket.criteria.map((c, i) => (
@@ -134,6 +135,9 @@ export function TicketCheckMock(): JSX.Element {
           AC{c.n} {c.text} — {check.why[i]}
         </FindingRow>
       ))}
+      <FindingRow chip={OUT.status} tone="green">
+        AC{OUT.n} {OUT.text} — {OUT.words}
+      </FindingRow>
       <Group>Asked for outside the criteria (1)</Group>
       <FindingRow chip="Missing" tone="amber">
         {check.missing}
@@ -159,7 +163,7 @@ export function CriteriaMapMock(): JSX.Element {
       title="How the code meets each criterion"
       meta={`${ticket.key} ${ticket.title}`}
       onReset={open != null ? () => setOpen(null) : null}
-      label={`How the code in ${ticket.key} meets each criterion. Criterion 1, met: web 1196, open, the form asks for an amount below the order total; payments 612, merged, RefundPolicy leaves the order open. Criterion 2, partly met: payments 612 sends the refund email, and the retry path sends it again. Criterion 3, not met: no pull request claims it. Criterion 4, met: payments 612 emits a refund event for the daily ledger. Click a line to read it in full and see its files.`}
+      label={`How the code in ${ticket.key} meets each criterion. Criterion 1, met: web 1196, open, the form asks for an amount below the order total; payments 612, merged, RefundPolicy leaves the order open. Criterion 2, partly met: payments 612 sends the refund email, and the retry path sends it again. Criterion 3, not met: no pull request claims it. Criterion 4, met: payments 612 emits a refund event for the daily ledger. Criterion 5, met: already in acme/statements, with no pull request on this ticket. Click a line to read it in full and see its files.`}
     >
       <ol className="bd-cm-crit">
         {ticket.criteria.map((c) => {
@@ -202,6 +206,15 @@ export function CriteriaMapMock(): JSX.Element {
             </li>
           );
         })}
+        {/* Met by code outside the ticket: no pull request claims it, and the row says where it is. */}
+        <li className="bd-cm-none">
+          <span className="bd-cm-head">
+            <Chip tone="green">{OUT.status}</Chip>
+            <span className="bd-cm-ref">AC{OUT.n}</span>
+            <span>{OUT.text}</span>
+          </span>
+          <span className="bd-cm-empty">{OUT.words}</span>
+        </li>
       </ol>
     </MockFrame>
   );

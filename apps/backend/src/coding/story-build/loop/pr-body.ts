@@ -2,7 +2,7 @@
 // request). PURE. People who never saw Limn read it on GitHub: plain, short, every quoted text defanged
 // (mentions too: it is the PR BODY, where an `@name` notifies — `mentions: false` is for commit messages).
 import type { AiProviderId } from '@pierre-review/shared';
-import { aiProviderName } from '@pierre-review/shared';
+import { aiProviderName, outsideTicketWords } from '@pierre-review/shared';
 import { defangGithubText } from '../push.js';
 
 /** The section is clipped to this many characters (the whole body stays under GitHub's cap). */
@@ -18,7 +18,17 @@ export interface LoopBodySummary {
   pushedBackAccepted: number;
   stillOpen: Array<{ severity: string; path: string; title: string }>;
   /** `cannotMeet`: the not-met criteria the agent says cannot be done (its reason). They are counted in `notMet`. */
-  criteria: { met: number; notApplicable: Array<{ ref: string; why: string }>; notMet: number; cannotMeet?: Array<{ ref: string; why: string }> } | null;
+  // `outsideTicket`: of `met`, those only another repository's default branch delivers (no PR on the ticket),
+  // named apart with the story check's own words. `unlinked`: met only in an open PR on the same branch that
+  // is not linked to the ticket — NOT met for the loop, and not in `notMet` either. Both absent when 0.
+  criteria: {
+    met: number;
+    outsideTicket?: number;
+    notApplicable: Array<{ ref: string; why: string }>;
+    notMet: number;
+    unlinked?: number;
+    cannotMeet?: Array<{ ref: string; why: string }>;
+  } | null;
 }
 
 const oneLine = (s: string, n: number): string => {
@@ -39,7 +49,11 @@ export function loopBodySection(s: LoopBodySummary): string {
     const na = s.criteria.notApplicable;
     const naText = na.length === 0 ? '0 not applicable' : `${na.length} not applicable (${na.map((x) => `${defangGithubText(oneLine(x.ref, 20))}: ${defangGithubText(oneLine(x.why, 160))}`).join('; ')})`;
     lines.push('');
-    lines.push(`Acceptance criteria: ${s.criteria.met} met, ${naText}, ${s.criteria.notMet} not met.`);
+    const unlinked = s.criteria.unlinked ?? 0;
+    lines.push(
+      `Acceptance criteria: ${s.criteria.met} met${outsideTicketWords({ metOutsideTicket: s.criteria.outsideTicket })}, ${naText}, ${s.criteria.notMet} not met` +
+        `${unlinked > 0 ? `, ${unlinked} only in a pull request on the same branch that is not linked to the ticket` : ''}.`,
+    );
     const cm = s.criteria.cannotMeet ?? [];
     if (cm.length > 0) {
       lines.push('', 'Not met, and the agent says these cannot be done:');

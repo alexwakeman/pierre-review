@@ -51,10 +51,10 @@ export interface CheckMember {
 /** The verdict counts of one assessment (the shared rule: `unclear` and anything unknown are unsettled). */
 function countsOf(
   a: TicketAssessment,
-): Pick<SprintTicketCheck, 'met' | 'metOutsideCode' | 'partlyMet' | 'notMet' | 'unsettled' | 'total' | 'missing'> {
+): Pick<SprintTicketCheck, 'met' | 'metOutsideTicket' | 'metOutsideCode' | 'partlyMet' | 'notMet' | 'unsettled' | 'total' | 'missing'> {
   const missing = Array.isArray(a.missing) ? a.missing.length : 0;
   const c = criterionCounts(a.criteria);
-  return { met: c.met, metOutsideCode: c.metOutsideCode, partlyMet: c.partlyMet, notMet: c.notMet, unsettled: c.unsettled, total: c.total, missing };
+  return { met: c.met, ...(c.metOutsideTicket > 0 ? { metOutsideTicket: c.metOutsideTicket } : {}), metOutsideCode: c.metOutsideCode, partlyMet: c.partlyMet, notMet: c.notMet, unsettled: c.unsettled, total: c.total, missing };
 }
 
 /** One ticket's card check from its latest succeeded run. Pure. `live` = today's synced row of every

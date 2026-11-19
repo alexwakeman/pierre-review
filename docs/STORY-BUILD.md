@@ -592,7 +592,24 @@ built ─maybeStartLoop─► [CLAIM loop_claimed_at] ─► pushing (round 0: t
   target as a member labelled `branch <name>`, with the agent's not-applicable and answer notes as
   `claims`; the ticket is the build's frozen seed and Ensemble's stored comments (never a tracker read). It saves NO
   contribution card, so the story view's criteria map has nothing to draw for a build with no PR
-  ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket review → THE CRITERIA MAP).
+  ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket review → THE CRITERIA MAP). It ALSO reads the code outside
+  the ticket like every story check (2026-11-19; the build's workspace, its "Story checks read every
+  repository" switch, the same caps): the workspace's other repositories at their default branch and open
+  same-branch PRs not linked to the ticket — never a target's own branch. A criterion only that code
+  delivers is met and labelled apart; nothing outside is ever built, pushed or seeded as a gap's PR
+  ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Ticket review → OUTSIDE THE TICKET). The check also gets the
+  ticket's own PRs (never "outside" or "not linked").
+- **Code outside the ticket in the loop's stop rule (owner decision 2026-11-19).** A criterion met ONLY by an
+  UNLINKED same-branch PR is NOT done for the loop (`openCriteriaOf` → status `met_unlinked`, seeded to the fix
+  pass as "met only in a pull request on the same branch that is not linked to the ticket: deliver it in this
+  work"); one met by another repository's DEFAULT BRANCH is done (shared `criterionDoneForBuild`; the same rule
+  in AI Fix's loop and the local branch review). The PR body names them apart in the counts' own words
+  ("Acceptance criteria: 4 met, 1 already outside the ticket, 0 not applicable, 0 not met, 1 only in a pull
+  request on the same branch that is not linked to the ticket.").
+- **Fill gaps' TICKET.md** carries `outside` through `foldCoverage`: a default-branch one reads "_(already in
+  acme/api, outside this ticket's pull requests: do not build it)_" — never "already met by the existing pull
+  requests" — and an unlinked one is a GAP ("_(a gap: only acme/web#88 does it, on the same branch but not
+  linked to the ticket: build this)_").
 - **The fix pass**: the driver writes REVIEW.md (`seed.ts`: `F<n>` findings by severity, `AC<n>` / `M<n>`
   open criteria with the reviewer's words and a rejected claim's reason; an earlier finding still open is
   re-raised as a finding of the round, with the agent's earlier answer), the refs file and the checker,

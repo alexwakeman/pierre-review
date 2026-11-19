@@ -31,6 +31,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import {
   LOCAL_REVIEW_CHECK_FEATURE,
   LOCAL_REVIEW_FEATURE,
+  criterionOutsideWords,
   type AiEffort,
   type AiProviderId,
   type ClaudeReview,
@@ -821,7 +822,7 @@ export async function localReviewWire(ctx: AgentContext, accountId: number, row:
   const a = row.storyStatus === 'succeeded' ? row.assessment : null;
   const criteria: LocalReviewCriterion[] = a
     ? [
-        ...a.criteria.map((c) => ({ ref: c.ref, text: c.text, status: c.status, explanation: c.explanation, open: open.has(c.ref.toUpperCase()), cannotMeet: cannot.get(c.ref.toUpperCase()) ?? null, notApplicable: na.has(c.ref.toUpperCase()) })),
+        ...a.criteria.map((c) => ({ ref: c.ref, text: c.text, status: c.status, explanation: c.explanation, open: open.has(c.ref.toUpperCase()), cannotMeet: cannot.get(c.ref.toUpperCase()) ?? null, notApplicable: na.has(c.ref.toUpperCase()), ...(c.status === 'met' && c.outside != null ? { outside: criterionOutsideWords(c.outside) } : {}) })),
         ...a.missing.map((m) => ({ ref: m.ref, text: m.title, status: 'missing' as const, explanation: m.explanation, open: open.has(m.ref.toUpperCase()), cannotMeet: cannot.get(m.ref.toUpperCase()) ?? null, notApplicable: na.has(m.ref.toUpperCase()) })),
       ]
     : [];
