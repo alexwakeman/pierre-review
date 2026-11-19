@@ -347,6 +347,17 @@ it keeps: **a view still never calls a reader.** `GET /api/sprint-graph` only st
     sprint); one cut short keeps what it could not re-read; a failure never fails the read.
     `knownTicketsFor` reads them as its LAST source.
 
+## A local branch review's ticket — "the reader asked" (`local-review/run.ts`, 2026-11-19)
+
+⚠ **A second, LABELLED exception to "read when received".** `ensemble mcp` / `ensemble review`
+(docs/CLAUDE-REVIEW.md § Reviewing a local branch) check a branch nobody pushed yet against its ticket, so no
+PR can have triggered the read. The ticket is read ONLY on that reader's request — the `ticket` argument, else
+the workspace's own detection (`extractTicketKeys` with its `project_keys` on the branch name and the commit
+subjects; without project keys only upper-case keys in a subject, never the branch, and the run says "pass the
+ticket") — through `sandbox/workspace/ticket.ts readSessionTicket` (the session's FRESH read, then the story
+view's fold), on the workspace's site (`db/stories.ts workspaceSite` → `trackerTicketIdent`). It WRITES nothing
+to the tracker and nothing to `ticket_reviews`; a view still never calls a reader.
+
 ## GitHub Projects iterations — GitHub Issues' first sprint source (`tracker/sprint/github.ts`)
 
 A team that plans in GitHub Projects (v2) keeps its sprint in an ITERATION field, not a milestone. The

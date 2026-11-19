@@ -236,6 +236,9 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.aiFixLoopStoryChecks).where(eq(schema.aiFixLoopStoryChecks.accountId, accountId)).execute();
     await tx.delete(schema.aiFixLoopAcResponses).where(eq(schema.aiFixLoopAcResponses.accountId, accountId)).execute();
     await tx.delete(schema.aiFixes).where(eq(schema.aiFixes.accountId, accountId)).execute();
+    // Local branch reviews (migration 0209): findings first (they point at the runs).
+    await tx.delete(schema.localReviewFindings).where(eq(schema.localReviewFindings.accountId, accountId)).execute();
+    await tx.delete(schema.localReviews).where(eq(schema.localReviews.accountId, accountId)).execute();
     // THE ISSUE TRACKER (core since migration 0088 / pg 0075 — the plugin's erasure hook used to own
     // these): the stored tickets (story text from the customer's tracker), the acceptance-criteria
     // field choices, and the workspace tracker rows — which hold the customer's internal tracker
@@ -471,6 +474,9 @@ export function accountScopedTables(): {
     { name: 'aiFixLoopFindings', col: schema.aiFixLoopFindings.accountId, table: schema.aiFixLoopFindings },
     { name: 'aiFixLoopStoryChecks', col: schema.aiFixLoopStoryChecks.accountId, table: schema.aiFixLoopStoryChecks },
     { name: 'aiFixLoopAcResponses', col: schema.aiFixLoopAcResponses.accountId, table: schema.aiFixLoopAcResponses },
+    // Local branch reviews (migration 0209), erased explicitly above.
+    { name: 'localReviews', col: schema.localReviews.accountId, table: schema.localReviews },
+    { name: 'localReviewFindings', col: schema.localReviewFindings.accountId, table: schema.localReviewFindings },
     // The issue tracker (migration 0088 / pg 0075). All three carry their own accountId and are
     // erased explicitly above; `workspaceTrackers` holds a credential.
     { name: 'trackerTickets', col: schema.trackerTickets.accountId, table: schema.trackerTickets },

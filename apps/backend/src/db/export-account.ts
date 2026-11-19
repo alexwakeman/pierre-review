@@ -162,6 +162,9 @@ export interface AccountExport {
   /** Story chats (migration 0192): the reader's questions and the answers. */
   storyChats: Record<string, unknown>[];
   storyChatTurns: Record<string, unknown>[];
+  /** Local branch reviews (migration 0209): the runs `ensemble mcp` / `ensemble review` asked for, and their findings. */
+  localReviews: Record<string, unknown>[];
+  localReviewFindings: Record<string, unknown>[];
 }
 
 /** A stored story-build patch is exported up to this many characters. */
@@ -642,6 +645,13 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     .where(eq(schema.storyChatTurns.accountId, accountId))
     .limit(EXPORT_ROW_CAP + 1)
     .execute();
+  const localReviewRows = await db.select().from(schema.localReviews).where(eq(schema.localReviews.accountId, accountId)).limit(EXPORT_ROW_CAP + 1).execute();
+  const localReviewFindingRows = await db
+    .select()
+    .from(schema.localReviewFindings)
+    .where(eq(schema.localReviewFindings.accountId, accountId))
+    .limit(EXPORT_ROW_CAP + 1)
+    .execute();
   const extraExternalRows = await db
     .select({ workspaceId: workspaceExternalRepos.workspaceId, repoId: workspaceExternalRepos.repoId })
     .from(workspaceExternalRepos)
@@ -721,5 +731,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     storyBuildLoopPushes: capped('storyBuildLoopPushes', storyBuildLoopPushRows),
     storyChats: capped('storyChats', storyChatRows),
     storyChatTurns: capped('storyChatTurns', storyChatTurnRows),
+    localReviews: capped('localReviews', localReviewRows),
+    localReviewFindings: capped('localReviewFindings', localReviewFindingRows),
   };
 }

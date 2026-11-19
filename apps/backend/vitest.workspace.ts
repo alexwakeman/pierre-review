@@ -30,6 +30,8 @@ export const SLOW_TESTS = [
   'src/coding/git.test.ts',
   'src/coding/merge.test.ts',
   'src/review/worktree-gc.test.ts',
+  // A local branch review on real git: the client's snapshot in a scratch clone, the bundle intake (~1.6 s).
+  'src/local-review/*-real.test.ts',
   // A story build on a real scratch worktree per case (git init/add/commit/diff, ~1.5 s each).
   'src/coding/story-build/push-branch.test.ts',
   // The fake Codex CLI: one node process per run (two on a retry), many on real git worktrees.

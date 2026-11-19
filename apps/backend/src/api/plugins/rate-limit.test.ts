@@ -197,6 +197,20 @@ describe('tierFor — implement story', () => {
 
 // The CI review: only the start spends model money (and reads the head's checks and logs); the
 // batched states read is DB-only and a POST only because it carries a list.
+describe('tierFor — local branch review', () => {
+  it('bills the start as AI generation plus git work (the bundle intake and the base fetch from GitHub)', () => {
+    expect(tiers('POST', '/api/local-reviews')).toEqual(['ai', 'ai_hourly', 'sync']);
+  });
+  it('keeps the reads, the long-poll and cancel on read', () => {
+    expect(tiers('GET', '/api/local-reviews')).toEqual(['read']);
+    expect(tiers('GET', '/api/local-reviews/12')).toEqual(['read']);
+    expect(tiers('POST', '/api/local-reviews/12/cancel')).toEqual(['read']);
+  });
+  it('spells the path exactly: a look-alike gets nothing from it', () => {
+    expect(tiers('POST', '/api/local-reviewsx')).toEqual(['read']);
+  });
+});
+
 describe('tierFor — CI review', () => {
   it('bills only the start as AI generation', () => {
     expect(tiers('POST', '/api/ci-reviews')).toEqual(['ai', 'ai_hourly']);

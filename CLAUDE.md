@@ -55,10 +55,8 @@ or Settings → AI). The website is a separate service, `apps/site`.
                    idempotent)                  detail on demand) zustand, RQ)
 ```
 
-- **Sync** pulls PR activity into the DB.
-- **The API** is a thin read layer; the timeline endpoint is deliberately _lean_, heavy detail
-  fetched on demand.
-- **The frontend** is a timeline-first dashboard (state layers: § Frontend).
+- **Sync** pulls PR activity into the DB; **the API** is a thin read layer (a _lean_ timeline, detail on
+  demand); **the frontend** is a timeline-first dashboard (§ Frontend).
 
 The load-bearing concept is **derived thread state** (below).
 
@@ -111,7 +109,7 @@ pierre-review/
 ├─ apps/
 │  ├─ backend/   the Fastify server, sync and agents (src/)
 │  ├─ frontend/  the SPA (base `/app/`)
-│  ├─ landing/   the marketing site, PRERENDERED per route (served by apps/site, NOT the npm release)
+│  ├─ landing/   the marketing site, PRERENDERED per route
 │  └─ site/      the website service: landing + /api/contact (node:http, no runtime deps)
 └─ packages/
    ├─ shared/    the contract between the apps (types + shared folds)
@@ -136,6 +134,7 @@ All from the repo root unless noted.
 | `pnpm shots` | the README's screenshots (`apps/landing/public/shots/`) |
 | `pnpm test:e2e` · `pnpm verify:ui` | Playwright suite · UI smoke |
 | `pnpm package` | assemble `./release` for publishing |
+| `ensemble review` · `ensemble mcp` | review this branch via the RUNNING app · the same as an MCP server |
 
 **`PIERRE_ML_HTTP=1` runs the Python severity-api instead** (docs/ML-NODE-PORT.md;
 ⚠ it exports `SEVERITY_API_DEFAULT_URL`, never `SEVERITY_API_URL`).
@@ -453,6 +452,9 @@ one-shot completions, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md · docs
   ("Resolve merge conflicts", `sandbox/session/fix-merge.ts`): the agent merges first; out as REAL
   commits (a bundle); the host checks parents + markers; only a VALID merge pushes. Auto fix: only
   if `include.conflicts` (OFF).
+- **LOCAL BRANCH REVIEW** (`local-review/`): `ensemble mcp` / `review` are CLIENTS of the running backend
+  (server.lock; node-only, NO MCP SDK) sending a git BUNDLE, NEVER a path; ⚠ the reader's .git is never
+  written. A reader's click; one run per branch; no post, push, claim, My Turn or auto fix.
 - **Moved modules take ONE `AgentContext`** (`review/agent-context.ts`), never the platform's.
 - **SonarCloud** and **reference docs** (docs/SONARCLOUD.md,
   docs/REFERENCE-DOCS.md): sealed write-only tokens; a Sonar snapshot is
@@ -478,18 +480,14 @@ after ONE FIX LOOP (`ai-fix/loop.ts`).
 
 ## Platform features (formerly Pro)
 
-The old `@pierre/pro` plugin is core code at **`apps/backend/src/platform/`** — reporting, Bots
-Monitoring, Slack.
-docs/PLATFORM.md.
+The old Pro plugin, now core at **`apps/backend/src/platform/`** (reporting, Bots Monitoring, Slack); docs/PLATFORM.md.
 
 - **Bound statically at boot**: `platform/context.ts` `bindPlatform` builds ONE `ProContext`
-  (`platform/contract.ts`) and calls `registerPlatform`. Platform modules read the host ONLY
+  (`platform/contract.ts`) → `registerPlatform`. Platform modules read the host ONLY
   through that ctx — inject a new host dependency there, never import it. Tests pass a fake ctx.
-- **Its own migrations**: `platform/migrations/*.sql`, run after core's, filename-sorted, each once
-  by NAME in `pro_migrations`; NO journal. A failure FAILS THE BOOT. Tables keep their `pro_*` names
-  (`proSchemaFor()`).
-- `ctx.schema` is `Record<string, any>` — a stale table name type-checks and throws only at run
-  time. Grep, don't trust the compiler.
+- **Its own migrations**: `platform/migrations/*.sql`, after core's, filename-sorted, once by NAME
+  (`pro_migrations`); NO journal; a failure FAILS THE BOOT. Tables keep `pro_*` names.
+- `ctx.schema` is `Record<string, any>`: a stale table name throws only at run time — grep.
 - **Generation is cost-gated**: the payload-hash cache (⚠ **zero `Date.now()`-derived fields** and
   never hash a HYDRATED or derived value, or every judgement reads `stale` forever); a per-account
   in-flight slot claimed SYNCHRONOUSLY.
@@ -503,8 +501,8 @@ docs/PLATFORM.md.
 - **Slack** (`platform/slack/`): a TEAM digest — never a card about or naming the configuring
   account. Event signals (AUTO review ran — ⚠ never a manual run, PR merged) are OFF by default,
   CLAIMED before the post, never retried; a merge is announced only when SEEN LIVE (`sync/merge-notice.ts`).
-- **The severity INFLATION index** counts only BADGED findings; a bot that badges nothing is
-  OMITTED and NAMED, never a zero. Major+critical bucket as "high".
+- **The severity INFLATION index** counts only BADGED findings; a bot badging nothing is OMITTED
+  and NAMED, never a zero. Major+critical bucket as "high".
 
 ## Period reporting, Chronology, This Sprint
 
@@ -523,7 +521,7 @@ docs/PLATFORM.md.
   code" judgements and critical paths are made after a read, never on a view. ONE `LaneBoard`, rows by
   PR count; the story view opens only through `useOpenStory()`. Never bring the force-graph canvas back.
 - **Trackers** (docs/TRACKERS.md): ONE per workspace; read when a PR is
-  RECEIVED, never when VIEWED (exceptions: sprint list, release Confirm). ⚠ **The ONLY tracker
+  RECEIVED, never when VIEWED (exceptions: sprint list, release Confirm, a local review). ⚠ **The ONLY tracker
   writes are the reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion),
   "Build end to end"'s update + comment, the release comment. Customer hosts: `tracker/jira/fetch.ts`.
   Idents only via `trackerTicketIdent`/`trackerTicketRow`.
@@ -550,8 +548,7 @@ categories. docs/ML-SEVERITY.md · docs/ML-NODE-PORT.md.
 
 ## Security & privacy
 
-Read docs/SECURITY.md before touching `app.ts`, CORS/CSP, rate limiting or an
-AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard, the host guard —
+docs/SECURITY.md first. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard, the host guard —
 421 on a non-loopback `Host`, against DNS rebinding) and `api/plugins/rate-limit.ts`.
 
 - **CORS allows loopback origins only** — the server has no auth, so any wider origin lets any
@@ -595,22 +592,20 @@ AI route. `api/plugins/security.ts` (CSP, loopback-only CORS, cross-origin guard
 - **Idempotency is load-bearing** — upsert on GitHub node ids with composite conflict targets;
   new event types get a deterministic `dedupeKey`.
 - **`req.raw.on('close')` fires when a POST body is read** — watch `reply.raw` for a disconnect.
-  The GET `…/stream` endpoints are fine.
 - **A feature can be built and UNREACHABLE — grep for the mount.**
 - **TypeScript is strict** (`noUncheckedIndexedAccess`, `verbatimModuleSyntax`).
 
 ## Verifying changes
 
-`pnpm test:changed` (inner loop), `pnpm test` + `pnpm typecheck` for backend logic. For UI, run
-`pnpm dev:scratch`; deep-link with `?pr=<id>`, `?repos=<ids>` on `/app/`.
+`pnpm test:changed` (inner loop), `pnpm test` + `pnpm typecheck` for backend logic. UI: `pnpm dev:scratch`,
+`?pr=<id>` / `?repos=<ids>` on `/app/`.
 New id-routes: `verify:isolation`.
 
 ⚠ **The reader's Ensemble is `pnpm dev` in the MAIN checkout (tsx watch): agents edit in a git worktree
 and test on `pnpm dev:scratch`, never there.** One backend per data dir is enforced; a scratch backend
 blocks every write in code (docs/TESTING.md § Scratch stack).
 
-⚠ **`apps/frontend/test/` does not run in CI** (the frontend's `test` script is a no-op) and is
-not typechecked — run it by hand: `./apps/backend/node_modules/.bin/vitest run --root
+⚠ **`apps/frontend/test/` does not run in CI** and is not typechecked — run it by hand: `./apps/backend/node_modules/.bin/vitest run --root
 apps/frontend`. ⚠ **The E2E fixtures (`apps/frontend/e2e/mock-api.ts`) are a typechecked wire
 contract** (`tsconfig.e2e.json`), but an unhandled route falls through to an untyped `{}`, and a
 gap shows as a BLANK PAGE (no error boundary). Add a fixture with every boot-time route.
@@ -625,13 +620,12 @@ Internal identifiers (`pierre*`, `limn*`, the `limn:` prefix, the hidden marker,
 Publishing is CI-only — **never `npm publish`/`npm login` here**.
 docs/PACKAGING.md · docs/RELEASE.md.
 
-- **`@pierre-review/shared` is VENDORED** at `release/dist/shared` (it holds real code, e.g. the
-  conflict fold, that both sides must agree on to the byte); every emitted specifier is rewritten
-  and the build fails on one it missed. Never add it to the manifest; never fork a shared fold.
+- **`@pierre-review/shared` is VENDORED** at `release/dist/shared` (real code both sides must agree on
+  to the byte); every emitted specifier is rewritten, the build fails on one it missed. Never add it to the manifest; never fork a shared fold.
 - **AI runtimes install at boot, ML on first use** (pins: PACKAGING, ML-NODE-PORT); only `ai/runtime.ts` /
   `ml/runtime.ts` may value-import them (the build greps `release/dist`). ⚠ zod comes from the SAME
   install as the SDK. The sandbox image is pulled from GHCR or built locally, never packaged.
-- **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); bumping it means regenerating the lockfile.
+- **pnpm is PINNED** (`packageManager: pnpm@9.15.9`); a bump regenerates the lockfile.
 
 ## The website (`apps/site`) and the landing
 

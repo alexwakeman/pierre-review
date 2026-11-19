@@ -184,3 +184,15 @@ function releaseIfMine(path: string, pid: number): void {
     /* already gone */
   }
 }
+
+/**
+ * THE RUNNING BACKEND, for a CLIENT of it (`ensemble mcp`, `ensemble review`; local-review/client.ts): the lock's
+ * holder when it names a live process, else null (no lock, an unreadable one, or a stale one — a crash). Reads
+ * only; never takes, repairs or removes the lock.
+ */
+export function readInstanceLock(dataDir: string, isAlive: (pid: number) => boolean = pidExists): InstanceLockInfo | null {
+  const holder = readHolder(join(dataDir, INSTANCE_LOCK_FILE));
+  if (holder === 'missing' || holder === null) return null;
+  if (!Number.isInteger(holder.port) || holder.port <= 0 || holder.port > 65535) return null;
+  return isAlive(holder.pid) ? holder : null;
+}

@@ -1773,6 +1773,16 @@ the narrow set. Read and written only by `db/sandbox-settings.ts`. An existing t
 cover it (the export lists the column). Additive; journal idx 208, `when` `1794729600000`.
 [SANDBOX.md](SANDBOX.md) § AI Fix sessions → Scope; [DATA-MODEL.md](DATA-MODEL.md) § `sandbox_workspace_settings`.
 
+### `0209_local_reviews` — local branch reviews
+
+`CREATE TABLE local_reviews` (one row per `ensemble mcp` / `ensemble review` run; `account_id` → `accounts`
+cascade; unique `(id, account_id)`; index `(account_id, repo_id, branch, id)`; the PARTIAL unique index
+`local_reviews_one_running (account_id, repo_id, branch) WHERE status = 'running'` — the start's claim, kept out of
+`schema.sqlite.ts` like `workspaces_one_default`) and `local_review_findings` (FK `(local_review_id, account_id)` →
+`local_reviews (id, account_id)` cascade). New account-bearing tables: erased explicitly, listed in
+`accountScopedTables()`, exported. No backfill. Additive; journal idx 209, `when` `1794816000000`.
+[DATA-MODEL.md](DATA-MODEL.md) § `local_reviews`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Reviewing a local branch.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

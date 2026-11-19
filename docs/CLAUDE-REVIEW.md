@@ -2450,7 +2450,8 @@ and stores the result in its own `story_build_reviews` / `story_build_review_fin
   kind's registered keeper (`registerLocalRefKeeper`, for a resumable row) keeps the id; a keeper that
   throws keeps its whole kind; a malformed ref is kept. Everything else goes — on DISCARD
   (`dropLocalRefs(owner, name, kind, id)`) and at BOOT (`sweepLocalRefs`, after listen, never awaited,
-  bounded by a deadline and a delete cap). Nothing creates one yet outside tests.
+  bounded by a deadline and a delete cap). Owners: AI Fix's rounds (`ai-fix-loop`, a resumable fix keeps
+  them) and the local review (`local-review`, kept only while its run is `running`).
 - **The prompt**: `buildUserPrompt`'s optional `subject: {kind:'branch', branch}` changes the header
   ("branch X (no pull request yet)"), "What the branch is for", and the follow-up words: the replies are
   "The build agent's answers" (the agent's response to each finding, as a `FindingReply`), and prior
@@ -2478,6 +2479,124 @@ and stores the result in its own `story_build_reviews` / `story_build_review_fin
   `kind` NULL, the lead half's provider/model, the consolidated findings, NOT posted — so the first-review
   rule finds a row and auto review does not review that head again. A new head is reviewed as usual. A
   failed write is logged; auto review then reviews the PR.
+
+## Reviewing a local branch (`ensemble mcp` / `ensemble review`, 2026-11-19)
+
+The reader's coding agent — Claude Code, Codex — asks the RUNNING Ensemble to review the branch it is working
+on, BEFORE anything is pushed, with the SAME branch review the loops use (§ Reviewing a branch). Two clients:
+
+- **`ensemble mcp`** (`local-review/mcp-server.ts`): a stdio MCP server. Claude Code: `claude mcp add ensemble
+  -- npx ensemble-review mcp`; Codex: `[mcp_servers.ensemble] command = "npx", args = ["ensemble-review",
+  "mcp"]`, with `startup_timeout_sec = 60` (a first `npx` download outlasts the 10 s default) and
+  `tool_timeout_sec = 120`. Hand-rolled newline JSON-RPC (initialize, ping, tools/list, tools/call), node: built-ins only,
+  exactly as `ai/codex/workspace-mcp.ts` and for the same reasons: NO `@modelcontextprotocol/sdk` (only
+  `ai/runtime.ts` may load an AI package; `scripts/build-release.mjs` walks the entry's imports and runs it from
+  the release tree). ⚠ Stdout IS the protocol: nothing else prints there.
+- **`ensemble review [--json] [--no-uncommitted] [--ticket KEY] [--base REF] [--provider p] [--effort e]
+  [--story] [--list] [--id n]`** (`local-review/cli-review.ts`): the same, waiting in the terminal (Ctrl-C
+  cancels the run); `--json` prints the tools' projection. Exit 0 when the run succeeded.
+
+**Tools**: `review_local_branch` (start; `includeUncommitted`, `ticket`, `base`, `provider`, `effort`,
+`answers[]`, `path`), `get_local_review` (status + findings + criteria; waits ≤ 50 s while it runs — a review
+takes minutes and MCP clients time out tool calls), `list_local_reviews`, `cancel_local_review`, `check_story`
+(the story check alone). Results are PLAIN JSON (`local-review/view.ts`, one projection for both clients):
+file, line, severity, title, body, who raised it; the criteria with their status, `open`, `cannotMeet`; one
+`next` line telling the agent what to do.
+
+**The client** (`local-review/client.ts`, `snapshot.ts`) — the reader's own process, in the reader's repository:
+
+- **Finds the backend** through `<dataDir>/server.lock` (`instance-lock.ts readInstanceLock`: a live pid's
+  port) and calls `127.0.0.1:<port>` with a loopback Host and no Origin. No lock / a stale one / a refused
+  connection ⇒ ONE line, "Ensemble is not running. Start it with: npx ensemble-review" — it never starts one
+  (one backend per data dir; it owns the DB, the ledger and the clone cache). AI off ⇒ the routes are not
+  registered, and their 404 — the app's own not-found message (`Route POST /api/…`, a space; Fastify's
+  default has a colon: both are matched) — reads as ONE line naming `ENSEMBLE_AI_DISABLED` (the only way the
+  routes are missing; the Settings → Features switch leaves them registered, and the start then refuses with
+  the pre-flight's own sentence).
+- **The scope**: `merge-base(HEAD, base)..HEAD` PLUS the uncommitted TRACKED changes (`git diff HEAD`'s paths:
+  staged or not) unless opted out. UNTRACKED FILES ARE NEVER INCLUDED. The base: `--base`, else the upstream
+  when it is ANOTHER origin branch (a stacked branch), else `origin/HEAD` (or origin/main, origin/master). It
+  must be on a branch of origin (`for-each-ref --contains`), else a plain refusal; the server re-checks
+  (below). Nothing to send (no commits, no changes) is a refusal too.
+- **⚠ THE READER'S .git IS READ, NEVER WRITTEN.** Reads run with `store.ts`'s hardened env (`sourceGitEnv`: no
+  system/global config, no lazy fetch, NO OPTIONAL LOCKS — no index refresh) and `SOURCE_GIT_CONFIG` (hooks
+  off, no fsmonitor). The snapshot commit is built in a TEMP repository (`GIT_DIR`, `GIT_INDEX_FILE`,
+  `GIT_OBJECT_DIRECTORY` there): HEAD's tree read into a temp index, the changed paths hashed in. ⚠ git
+  FRESHENS (touches) an existing object it is asked to write — in an ALTERNATE too — so every blob and tree is
+  written with NO alternate; the reader's objects are borrowed (`GIT_ALTERNATE_OBJECT_DIRECTORIES`) only by
+  commands that read, and by the snapshot commit (new by its timestamp). `snapshot-real.test.ts` pins every
+  file under `.git` (path, mtime, size, bytes), the refs, `git status` and `count-objects`.
+- **Line endings and filters.** `core.autocrlf` / `core.eol` / `core.safecrlf` are read (`git config --get`,
+  read-only) from EVERY scope — Git for Windows sets autocrlf in the SYSTEM config, which the hardened env
+  hides — and passed as `-c` to the diff and the hashing, so the blobs are what the reader would commit. A
+  changed path with a `filter` attribute (Git LFS, git-crypt) is LEFT AT HEAD's version and named in the start
+  result (`leftOutFiltered`): the filter is the reader's program and LFS writes into `.git/lfs`, so it never
+  runs.
+- **Every spawned git** handles EPIPE on its stdin (a command that reads none may exit before the write is
+  flushed; an unhandled one would kill `ensemble mcp`).
+- **Sends** a git BUNDLE (base..head, one branch, ≤ 25 MB) with the branch name, the base ref, the commit
+  subjects, the optional ticket / provider / effort / answers. NEVER a filesystem path.
+
+**The server** (`local-review/run.ts`, routes in `local-review/routes.ts`, registered by
+`registerAgenticRoutes`):
+
+1. **The repository**: origin owner/name → this account's repo (any case), which must have a HOME workspace
+   and a finished first sync (`sync_state.last_full_sync_at`), else a plain refusal. That workspace gives the
+   review settings, the reference docs and the tracker.
+2. **Who reviews** (before the claim): the reader's `provider` for this run, else Settings → AI → Review
+   through THE ONE PAIR RESOLVER (`reviewPairProviders`: both on and signed in ⇒ the PAIR; else the review
+   vendor). Nobody able to run ⇒ a refusal with the pre-flight's OWN sentence (`whyNoProvider`: switched off,
+   not signed in, not installed, over its usage limit), never a fixed "not signed in". The story check: the review vendor (`storyCheckProvider`), never a
+   pair. `effort` (one run only) stands in for the setting's level (`ai/effort.ts runEffortFor`; diff-only one
+   step lower; REVIEW_EFFORT still wins); the story check keeps the setting's.
+3. **THE CLAIM**: ONE RUN IN FLIGHT per (account, repository, branch) — the insert of a `running` row is the
+   claim (partial unique index `local_reviews_one_running`); a second start returns the running id
+   (`alreadyRunning`).
+4. **THE INTAKE** (`clone-manager.ts fetchBundleIntoClone`, under the repo lock, OUTSIDE any transaction): the
+   base fetched from GitHub by its sha when the cache lacks it (a base GitHub lacks is refused); the bundle
+   must name ONE branch at `headSha`; its pack goes through `index-pack --fsck-objects --fix-thin` (not `git
+   fetch <bundle>`: before git 2.46 a bundle fetch ignores `fetch.fsckObjects`), then the head's objects must
+   connect (`rev-list --objects --missing=allow-promisor`, the clone being blobless) and it is pinned as
+   `refs/pierre/local/local-review/<id>/head`. A refusal fails the run with the plain line (422 `bad_bundle`).
+   ⚠ The start waits for the intake at most `intakeWaitMs` (20 s) — a first clone of the repository, or a
+   sync holding the repo lock, can take minutes, and Codex times an MCP tool call out at 60 s by default — then
+   answers with the id; the intake goes on behind it and a later refusal FAILS the run (read with get). ⚠
+   From the claim on, EVERY failure (the intake, the answers' writes, the background run) finishes the row and
+   releases the hold, the in-process entry and the ref (`giveUp`): a row left `running` would hold the branch
+   and make every read wait its full long-poll. A cancel during the intake is honoured right after it (no
+   answers written, no ticket read, no review) and at the top of the background run.
+   The ref is HELD while the run reads it, dropped at its end; the kind's keeper keeps only `running` rows (a
+   restart fails those first: `reconcileLocalReviewsOnStartup`).
+5. **The review** (background): `runBranchReviewHalf` per provider with head `{localRef, sha}`, `byReader: true`,
+   feature `local_review` (Codex's own ledger row too: `ledgerFeature`). A PAIR runs AT ONCE, blind, and is
+   consolidated (`consolidateBranchPair`) into ONE review — one summary, one verdict, duplicates
+   `merged_into`; a finding both raised reads `raisedBy: [claude, codex]`. One half failing never hides the
+   other's findings.
+6. **The story check** beside it, when a ticket resolves: the `ticket` argument, else `extractTicketKeys` —
+   WITH the workspace's project keys on the branch name and each commit subject; WITHOUT them only upper-case
+   keys in a subject (read as a PR title is), never the branch (the precision rule), and the note says "pass
+   the ticket". The ticket is read through `readSessionTicket` (the story view's fold; the tracker read FRESH
+   — the LABELLED "reader asked" exception, docs/TRACKERS.md). `runBranchStoryCheck` with feature
+   `local_review_check`. No ticket ⇒ a `ticketNote`, the code review still runs; a story-only run fails with it.
+
+**Follow-up**: a later start on the same branch may carry `answers[]` to the branch's latest succeeded run —
+`F<finding id>` (`fixed` / `answered` / `pushed_back`) and `AC<n>` / `M<n>` (`fixed` / `not_applicable` /
+`cannot_meet`, a reason required) — checked with THE review loop's validator (`validateReviewResponse`, the
+shown refs being that run's open findings and criteria); an unknown ref is dropped and listed in
+`ignoredAnswers`, reworded for THIS surface (`localAnswerProblems`: `answers[n]`, the open refs — never the
+loop's REVIEW.md / `items`). Answers sent to a branch whose run is still going are not used, and
+`ignoredAnswers` says so. `next` is for an AGENT (the tools, `--json`); the CLI's text ends with a line for a
+PERSON. A story check that did not finish is said in `next`, never "Nothing to fix". A finding's answer lands on it and the next review judges it through `priorForTarget` (the
+reply as `FindingReply`), exactly as the loops. A criterion's answer becomes a story-check claim
+(`not_applicable` judged, the rest context); **`cannot_meet` stays NOT MET** and the criterion carries its
+reason (`cannotMeet`), the review loop's vocabulary (`cannotMeetLine`).
+
+**A READER'S CLICK, AND NOTHING ELSE.** Never asked of the spend gate (the specialists' start included); spend
+recorded under `local_review` / `local_review_check` (Reports → AI usage: code review / story review). No
+claude_reviews row, no ticket_reviews row, no post, no push, no team claim, no My Turn card, no Slack, NO AUTO
+FIX — `run-db.test.ts` pins it (rows counted, the auto-fix and auto-post seams mocked and never reached).
+Storage: `local_reviews` + `local_review_findings` (docs/DATA-MODEL.md); routes: docs/API.md § Local reviews;
+the intake's security: docs/SECURITY.md § Local branch reviews.
 
 ## Ticket review (one review per ticket, across its PRs)
 

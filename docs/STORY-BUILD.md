@@ -545,6 +545,12 @@ criteria, prior findings and a provider list — never a `story_builds` row:
 AI Fix's own review loop (`coding/ai-fix/loop.ts`; docs/CLAUDE-REVIEW.md § AI Fix → The review loop) is the
 second subject: ONE target (the PR's repository), a LOCAL pinned head per round (nothing pushed), its own
 `ai_fix_loop_*` tables, and the same stop rule, seed, checker, review half, story check and closing-review import.
+The local branch review (`local-review/run.ts`; docs/CLAUDE-REVIEW.md § Reviewing a local branch) is the third:
+ONE review pass per reader request (no fix turns, no rounds), a LOCAL pinned head from an uploaded bundle, its own
+`local_reviews` tables (each provider half read as a structural run), and the same review half, pair consolidation,
+`priorForTarget` follow-up, response validator (for the reader agent's `answers[]`), story check and
+`openCriteriaOf` / `cannot_meet` vocabulary. `runBranchReviewHalf` gained two OPTIONAL inputs for it (`effort`:
+one run's level; `ledgerFeature`: Codex's ledger feature) — absent for Build and AI Fix, so their runs are unchanged.
 
 Build keeps its state machine, targets, pushes, claims, persistence and composite keys. Its `loop/branch-review.ts`
 and `loop/story-check.ts` are thin adapters: each target's head is its pushed loop branch

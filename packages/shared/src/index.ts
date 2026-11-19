@@ -71,3 +71,4 @@ export * from './release-check.js';
 export * from './release-write.js';
 export * from './hotfix.js';
 export * from './story-chat.js';
+export * from './local-review.js';

@@ -15,6 +15,12 @@ no internals.
 
 ### Added
 
+- Review a local branch from Claude Code or Codex: add Ensemble as an MCP server
+  (`claude mcp add ensemble -- npx ensemble-review mcp`) and your coding agent can ask the running Ensemble to review
+  the branch it is working on, uncommitted changes included, before anything is pushed. It gets the findings and,
+  when Ensemble finds the ticket, the acceptance criteria not yet met; it can answer them and review again.
+  `ensemble review` does the same in the terminal. Nothing is posted or pushed. Reports → AI usage counts these runs
+  as code review and story review.
 - Pull request Overview: "Someone else" asks anyone in the workspace for a review. Type a name, pick one or
   more people, and press "Request review". People who merged in the repository come first. If GitHub refuses
   someone (for example, they have no access to the repository), the reason shows on their name.

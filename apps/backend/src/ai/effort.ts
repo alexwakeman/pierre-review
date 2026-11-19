@@ -142,3 +142,21 @@ export function agenticRunEffort(
   return level == null ? atDefault : diffOnlyEffortAt(level, atDefault);
 }
 
+
+/**
+ * `agenticRunEffort` with ONE RUN'S LEVEL named by the reader for that run only (a local branch review's
+ * `effort` argument): it stands in for the surface's level — a diff-only run one step lower, as the
+ * setting. A set REVIEW_EFFORT still wins and locks it; REVIEW_DIFF_ONLY_EFFORT still decides diff-only.
+ * `oneRun` null ⇒ exactly `agenticRunEffort`.
+ */
+export function runEffortFor(
+  provider: AgentProviderId,
+  choice: Pick<ModelChoice, 'role'>,
+  mode: 'diff_only' | 'worktree',
+  oneRun: AiEffort | null,
+  env: NodeJS.ProcessEnv = process.env,
+): AiEffort {
+  if (oneRun == null || aiEffortEnvSetting(env) != null) return agenticRunEffort(provider, choice, mode, env);
+  if (mode === 'worktree') return oneRun;
+  return envEffort(env, REVIEW_DIFF_ONLY_EFFORT_ENV) ?? diffOnlyEffortAt(oneRun, defaultRunEffort(provider, choice.role, mode));
+}

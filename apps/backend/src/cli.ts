@@ -67,6 +67,8 @@ Usage:
   ensemble status [options]
   ensemble ai install
   ensemble ml install
+  ensemble review [options]
+  ensemble mcp
 
 Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
@@ -79,6 +81,10 @@ Commands:
   ml install       Download the model that scores bot review comments
                    (one time, about 240 MB). Settings → Features in the app does the same.
   ml status        Say whether bot comment scoring is set up
+  review           Ask the running Ensemble to review the branch you are on,
+                   before you push (see \`ensemble review --help\`)
+  mcp              Ensemble as an MCP server for Claude Code or Codex, with the
+                   same review (claude mcp add ensemble -- npx ensemble-review mcp)
   sandbox prune    Remove leftover Implement sandboxes (stop Ensemble first;
                    --dry-run lists them, --store also removes the repo store)
 
@@ -539,6 +545,23 @@ async function main(): Promise<void> {
   }
   if (argv[0] === 'sandbox') {
     await runSandboxCommand(argv.slice(1));
+    return;
+  }
+  // `ensemble review` / `ensemble mcp` — CLIENTS of the running Ensemble (local-review/): a review of the branch
+  // in the working folder before it is pushed. Neither starts a server. ⚠ `mcp` speaks JSON-RPC on stdout:
+  // nothing may print there (no banner, no data-dir move — the server owns that).
+  if (argv[0] === 'review') {
+    const { runReviewCli } = await import('./local-review/cli-review.js');
+    process.exitCode = await runReviewCli(argv.slice(1));
+    return;
+  }
+  if (argv[0] === 'mcp') {
+    if (argv.length > 1) {
+      console.error('ensemble mcp takes no arguments. Add it to Claude Code with: claude mcp add ensemble -- npx ensemble-review mcp');
+      process.exit(1);
+    }
+    const { serveLocalReviewMcp } = await import('./local-review/mcp-server.js');
+    await serveLocalReviewMcp({ input: process.stdin, output: process.stdout });
     return;
   }
 

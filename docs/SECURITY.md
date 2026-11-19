@@ -121,6 +121,34 @@ list — an `err` from a failed HTTP call carries the outgoing `Authorization: t
   "The host owns the commit and the push" is unchanged: the patch (or, for a merge, the bundle of the
   agent's commits) leaves the sandbox, and the host checks it, applies or rebuilds it, and pushes it.
 
+### Local branch reviews — the bundle intake (`local-review/`, 2026-11-19)
+
+`ensemble mcp` / `ensemble review` (docs/CLAUDE-REVIEW.md § Reviewing a local branch) make `POST
+/api/local-reviews` the one route that takes UPLOADED GIT DATA and spends model money on it. The server has no
+auth and the cross-origin guard lets a header-less client through by design (that is how the CLI reaches it), so:
+
+- **NO PATH IS EVER ACCEPTED.** The git work that reads the reader's repository runs in the CLIENT (the reader's
+  own process); the server takes only a bundle plus facts, so no "read any local folder" surface opens on an
+  unauthenticated API. An unknown body field (a `path`) is ignored, never read.
+- **The client runs none of the repository's programs**: hooks and fsmonitor off, no external diff, and a path
+  with a `filter` attribute (Git LFS, git-crypt) is left at HEAD's version — its clean filter is never run.
+  Only the line-ending settings are read from the reader's system/global config.
+- **The bundle is untrusted.** Capped at 25 MB (the route's own `bodyLimit` is its base64 plus 512 KB; the
+  global limit is unchanged); written to a fresh `mkdtemp` file the server names; it must carry ONE
+  `refs/heads/…` head equal to the `headSha` the body names; its pack is indexed with
+  `index-pack --fsck-objects` (every object checked; not `git fetch <bundle>`, which ignores
+  `fetch.fsckObjects` before git 2.46) with hooks off, and the head must connect to the base. It lands only
+  under the ONE local-ref namespace (`refs/pierre/local/local-review/<id>/head`), never a branch, never pushed;
+  all of it under the repo lock, outside any transaction. A refusal is a plain line with no git output beyond
+  one sanitized error (a tokenized URL is stripped).
+- **The repository is a SYNCED one of this account** (origin owner/name, home workspace, first sync finished);
+  anything else is refused before any git or model work.
+- **Rate tier** `ai` + `ai_hourly` + `sync` on the start (model runs, a ≤ 25 MB intake and a base fetch from
+  GitHub), spelled EXACTLY in `tierFor`; the GETs (including the ≤ 50 s long-poll) and cancel are `read`. ONE
+  run in flight per (repository, branch) bounds a client that loops on start.
+- **A reader's click**: never refused by the spend budget, recorded in the ledger. Nothing is posted, pushed or
+  claimed; no auto fix follows.
+
 ### Sandboxed checks — REMOVED 2026-11-07
 
 AI Fix's "Run tests" (2026-10-30, `coding/checks/`) ran a repository's DECLARED checks in an OS

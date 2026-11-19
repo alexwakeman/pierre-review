@@ -15,6 +15,7 @@
 // rounds run on (Settings → AI → Review through the ONE resolver, ai/run-profile.ts).
 import {
   DEFAULT_CLAUDE_REVIEW_MODEL,
+  type AiEffort,
   type AiProviderId,
   type ClaudeReview,
   type ClaudeReviewFollowUpRecord,
@@ -59,6 +60,10 @@ export interface BranchReviewHalfInput {
   byReader: boolean;
   /** The spend ledger's feature and the gate's question (e.g. 'story_loop_review'). */
   feature: string;
+  /** Codex writes its own ledger row under this feature too (absent ⇒ 'claude_review', as before). */
+  ledgerFeature?: string;
+  /** ONE RUN'S EFFORT named by the reader (a local branch review); absent ⇒ Settings → AI → Review's. */
+  effort?: AiEffort | null;
 }
 
 export type BranchReviewFinding = ReviewFinding & { priorFindingId: number | null };
@@ -143,7 +148,8 @@ export async function runBranchReviewHalf(ctx: AgentContext, i: BranchReviewHalf
       specialists,
       docsDir: docs?.dir ?? null,
       checkout: i.head,
-      usage: { accountId: i.accountId, prId: null, repoId },
+      usage: { accountId: i.accountId, prId: null, repoId, ...(i.ledgerFeature ? { feature: i.ledgerFeature } : {}) },
+      ...(i.effort ? { effort: i.effort } : {}),
       allowSpecialistStart: () => (i.byReader ? true : automaticRunAllowed(ctx, i.accountId, i.feature, i.provider)),
     });
     const ranOn = { provider: (res.ranOn?.provider ?? i.provider) as AiProviderId, model: res.ranOn?.model ?? null, effort: res.ranOn?.effort ?? null };

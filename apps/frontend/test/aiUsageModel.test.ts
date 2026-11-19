@@ -92,6 +92,9 @@ describe('aiUsageFeatureGroup', () => {
       thread_check: 'code',
       ticket_review: 'story',
       story_labels: 'story',
+      // A local branch review (`ensemble mcp` / `ensemble review`) and its story check.
+      local_review: 'code',
+      local_review_check: 'story',
       ci_review: 'ci',
       ai_fix: 'fix',
       ai_fix_plan: 'fix',

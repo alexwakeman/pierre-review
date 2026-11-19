@@ -1153,6 +1153,30 @@ ITS loop run and that run's N, fixed at the run's start, since a reader's follow
 `not_reported`; unique `(fix_id, round, ref)`). ⚠ `fix_id` is SOFT (`ai_fixes` has no `(id, account_id)` unique):
 every query is account-scoped; both PR-keyed delete paths prune them with the fix (`db/ai-fix-loop-prune.ts`,
 BEFORE the `ai_fixes` delete); the erasure deletes them explicitly and `accountScopedTables()` lists them.
+
+### `local_reviews` and `local_review_findings` — local branch reviews (migration `0209`)
+
+docs/CLAUDE-REVIEW.md § Reviewing a local branch (`ensemble mcp` / `ensemble review`). CORE.
+`local_reviews` is ONE ROW PER RUN: `repo_id`, `workspace_id` (the repository's HOME workspace when it ran),
+`kind` (`review` · `story`), `status` (`running` · `succeeded` · `failed` · `cancelled`), `branch`, `base_ref` /
+`base_sha` / `head_sha` (the reviewed commit — a snapshot of uncommitted changes when `uncommitted_changes`),
+`local_ref` (`refs/pierre/local/local-review/<id>/head`, dropped when the run ends), `subjects` (JSON),
+`provider_choice` / `effort_choice` (the reader's per-run choice, NULL = Settings), `reviewers` (JSON, one entry
+per provider half: provider, model, effort, status, failure, `pairRole`, its follow-up record), `summary` /
+`verdict` / `pair_consolidation` (the ONE consolidated review), the ticket (`ticket_key`, `ticket_ident`,
+`ticket_title`, `ticket_url`, or `ticket_note`: why there is none), the story check (`story_status`,
+`story_provider`, `story_model`, `story_failure`, `assessment`, `claims`, `claim_verdicts`), `answers` (JSON: the
+answers the start carried, as used), `prior_review_id` (soft), `failure_reason`, the summed `cost_usd` /
+`input_tokens` / `output_tokens`. Unique `(id, account_id)`; index `(account_id, repo_id, branch, id)`.
+⚠ **ONE RUN IN FLIGHT per (account, repo, branch)** is the PARTIAL unique index `local_reviews_one_running …
+WHERE status = 'running'`, in the `.sql` only (the start's insert IS the claim). A restart fails `running` rows.
+`local_review_findings`: one row per finding of a run, `half` (0/1: which provider half raised it — the shared
+loop core reads a half as run `id * 2 + half`, never stored), the finding columns of the loop tables,
+`merged_into` (the pair), and the agent's LATER answer (`response` `fixed` · `answered` · `pushed_back`,
+`response_text`, `response_review_id` = the run that carried it). FK `(local_review_id, account_id)` →
+`local_reviews (id, account_id)` cascade. Both carry `account_id` (cascade from `accounts`), are erased explicitly
+and listed in `accountScopedTables()`, and are in the account export (`localReviews`, `localReviewFindings`).
+No `claude_reviews` / `ticket_reviews` row is ever written for a local review.
 ## `sandbox_allowed_hosts` — the sandbox's "Always allow" hosts (CORE; migration `0173`)
 
 ONE row per host rule a reader allowed for every sandbox session of ONE workspace — a denied host's

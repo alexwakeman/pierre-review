@@ -717,3 +717,16 @@ story's agent (no model call). `POST /api/story-chats/ask {workspaceId, ident, c
 `{chatId, turnId}` (409 `busy` while one answers; 503 `no_credential`). `POST /api/story-chats/:id/stop`,
 `POST /api/story-chats/close {workspaceId, ident}`, `DELETE /api/story-chats/:id`. Agentic only; a chat
 id resolves within (account, workspace, ticket). Design: [STORY-CHAT.md](STORY-CHAT.md).
+
+## Local reviews
+
+Review a LOCAL branch before it is pushed (design: [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Reviewing a local
+branch). Their clients are `ensemble mcp` and `ensemble review`, over loopback. Agentic only: with AI off
+nothing answers (the clients read the 404 as "AI is off"). Wire types: shared `local-review.ts`.
+
+| Route | Contract |
+|---|---|
+| `POST /api/local-reviews` `LocalReviewStartRequest` | START a run: `{owner, name, branch, baseRef, baseSha, headSha, bundle (base64 git bundle, ≤ LOCAL_REVIEW_BUNDLE_MAX_BYTES = 25 MB), subjects[], includeUncommitted, uncommittedChanges, kind: 'review' \| 'story', ticket?, provider?, effort?, answers?[]}` → `200 LocalReviewStartResponse {id, status: 'running', alreadyRunning, ignoredAnswers[]}`. NEVER a filesystem path (an unknown field is ignored). A run of the same (repository, branch) already running ⇒ its id, `alreadyRunning: true`, nothing new. `400 bad_request` on a bad shape (one plain line); `422` refusals: `not_tracked` (no such repository, or in no workspace), `not_synced` (its first sync has not finished), `no_reviewer` (nobody signed in), `bad_bundle` (not a bundle, not one branch at `headSha`, fsck rejected an object, a base GitHub lacks — the run is stored `failed` with the line). ⚠ The start waits for the intake ≤ 20 s, then answers `200` with the id: a refusal after that is a `failed` run (read with GET), not a 422. A start that hits a running run returns its id and lists the sent answers in `ignoredAnswers` as not used. The body limit is the bundle's base64 plus 512 KB. Rate tiers `ai` + `ai_hourly` + `sync` |
+| `GET /api/local-reviews/:id?waitMs=` | one run → `LocalReview` (findings, follow-up on earlier findings, the ticket or why there is none, the story check's criteria with `open` / `cannotMeet` / `notApplicable`, the answers it was sent). While it runs, waits up to `waitMs` (≤ `LOCAL_REVIEW_WAIT_MAX_MS` = 50 000) for it to end. `404` for another account's id. Rate tier `read` |
+| `GET /api/local-reviews?owner=&name=&branch=` | the runs of a repository (and branch), newest first, ≤ 20 → `LocalReviewListResponse {repo, branch, reviews: LocalReviewListItem[]}`. Refusals as the start. Rate tier `read` |
+| `POST /api/local-reviews/:id/cancel` | stop a running run (its reviews abort at the next checkpoint) → `{cancelled, review}`; `cancelled: false` when it was not running. Rate tier `read` |

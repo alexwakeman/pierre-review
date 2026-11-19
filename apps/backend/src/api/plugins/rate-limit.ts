@@ -643,6 +643,18 @@ function tierFor(method: string, path: string): readonly Tier[] {
     if (mutating && path === '/api/story-chats/prepare') return [TIERS.sync];
     return [TIERS.read];
   }
+  // REVIEW A LOCAL BRANCH (local-review/routes.ts; docs/CLAUDE-REVIEW.md § Reviewing a local branch). FOLLOWING
+  // THE TOKEN:
+  //   POST /api/local-reviews            one review run (one or two model halves + the story check) AND git work:
+  //                                      a bundle of up to 25 MB fetched (fsck) into the clone cache, and the
+  //                                      base fetched FROM GITHUB by its sha when the cache lacks it   → ai + ai_hourly + sync
+  //   GET list / GET :id (a long-poll ≤ 50 s) / POST :id/cancel: DB and memory only                 → read
+  // ⚠ Spelled EXACTLY here (the GitHub-touching start included): the `hitsGithub` alternation further down is
+  // anchored to `/api/prs/\d+/` and never sees this family.
+  if (path === '/api/local-reviews' || path.startsWith('/api/local-reviews/')) {
+    if (mutating && path === '/api/local-reviews') return [TIERS.ai, TIERS.aiHourly, TIERS.sync];
+    return [TIERS.read];
+  }
   if (path === '/api/story-builds' || path.startsWith('/api/story-builds/')) {
     // The start also writes the TEAM CLAIM on GitHub (a placeholder branch + one status).
     if (mutating && path === '/api/story-builds') return [TIERS.ai, TIERS.aiHourly, TIERS.githubWrite];

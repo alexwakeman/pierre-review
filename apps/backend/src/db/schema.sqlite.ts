@@ -2437,6 +2437,105 @@ export const aiFixLoopAcResponses = sqliteTable(
   }),
 );
 
+// ---- Local branch reviews (CORE, migration 0209; docs/CLAUDE-REVIEW.md § Reviewing a local branch) ----
+// local_reviews — ONE row per run of `ensemble mcp` / `ensemble review` (a code review of a branch nobody pushed
+// yet, + its story check; or the story check alone). `local_ref` is the pinned bundle head
+// (refs/pierre/local/local-review/<id>/head, dropped when the run ends). ⚠ ONE RUN IN FLIGHT per (account,
+// repo, branch): the partial unique index `local_reviews_one_running` (… WHERE status = 'running') lives in the
+// .sql only. `reviewers` / `assessment` / `answers` are JSON (shapes: local-review/persist.ts).
+export const localReviews = sqliteTable(
+  'local_reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    workspaceId: integer('workspace_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status').notNull(),
+    branch: text('branch').notNull(),
+    baseRef: text('base_ref'),
+    baseSha: text('base_sha').notNull(),
+    headSha: text('head_sha').notNull(),
+    localRef: text('local_ref'),
+    includeUncommitted: integer('include_uncommitted', { mode: 'boolean' }).notNull().default(false),
+    uncommittedChanges: integer('uncommitted_changes', { mode: 'boolean' }).notNull().default(false),
+    subjects: text('subjects', { mode: 'json' }).$type<string[]>(),
+    providerChoice: text('provider_choice'),
+    effortChoice: text('effort_choice'),
+    reviewers: text('reviewers', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    summary: text('summary'),
+    verdict: text('verdict'),
+    pairConsolidation: text('pair_consolidation', { mode: 'json' }).$type<Record<string, unknown>>(),
+    ticketKey: text('ticket_key'),
+    ticketIdent: text('ticket_ident'),
+    ticketTitle: text('ticket_title'),
+    ticketUrl: text('ticket_url'),
+    ticketNote: text('ticket_note'),
+    storyStatus: text('story_status'),
+    storyProvider: text('story_provider'),
+    storyModel: text('story_model'),
+    storyFailure: text('story_failure'),
+    assessment: text('assessment', { mode: 'json' }).$type<Record<string, unknown>>(),
+    claims: text('claims', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    claimVerdicts: text('claim_verdicts', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    answers: text('answers', { mode: 'json' }).$type<Array<Record<string, unknown>>>(),
+    priorReviewId: integer('prior_review_id'),
+    failureReason: text('failure_reason'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+    completedAt: integer('completed_at', { mode: 'timestamp' }),
+  },
+  (t) => ({
+    idAccountUx: uniqueIndex('local_reviews_id_account').on(t.id, t.accountId),
+    branchIdx: index('local_reviews_branch_idx').on(t.accountId, t.repoId, t.branch, t.id),
+  }),
+);
+
+// local_review_findings — the findings of one local review run (`half` 0/1: which provider half raised it), plus
+// the agent's answer from a LATER run of the same branch (`response` 'fixed' | 'answered' | 'pushed_back',
+// `response_review_id` the run that carried it). `prior_finding_id` / `merged_into` are SOFT.
+export const localReviewFindings = sqliteTable(
+  'local_review_findings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    localReviewId: integer('local_review_id').notNull(),
+    half: integer('half').notNull().default(0),
+    provider: text('provider'),
+    severity: text('severity').notNull(),
+    path: text('path').notNull(),
+    line: integer('line'),
+    side: text('side').notNull().default('RIGHT'),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    suggestion: text('suggestion'),
+    diffHunk: text('diff_hunk'),
+    anchored: integer('anchored', { mode: 'boolean' }).notNull().default(false),
+    fileInDiff: integer('file_in_diff', { mode: 'boolean' }).notNull().default(false),
+    priorFindingId: integer('prior_finding_id'),
+    lens: text('lens'),
+    mergedInto: integer('merged_into'),
+    response: text('response'),
+    responseText: text('response_text'),
+    responseReviewId: integer('response_review_id'),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    reviewIdx: index('local_review_findings_review_idx').on(t.accountId, t.localReviewId),
+    reviewAccountFk: foreignKey({
+      name: 'local_review_findings_review_account_fk',
+      columns: [t.localReviewId, t.accountId],
+      foreignColumns: [localReviews.id, localReviews.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 // ---- Workspaces (CORE) ----
 // A named grouping of an account's repos, and the ONE scope this app has. Exactly one row per
 // account carries is_default: it is auto-created, RENAMEABLE, NOT deletable, and new repos land

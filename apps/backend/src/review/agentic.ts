@@ -32,6 +32,8 @@ import { registerStoryDocsRoutes } from './story-docs/routes.js';
 import { reconcileStoryDocsOnStartup } from './story-docs/manager.js';
 import { registerSandboxSessionRoutes } from '../sandbox/session/routes.js';
 import { registerStoryChatRoutes } from '../story-chat/routes.js';
+import { registerLocalReviewRoutes } from '../local-review/routes.js';
+import { bindLocalReviews, reconcileLocalReviewsOnStartup } from '../local-review/run.js';
 
 // THE AGENTIC FEATURES' ONE REGISTRATION POINT — Claude Review (run, follow-up, the chat, auto
 // review), the ticket review (one run per ticket across its PRs, + its cascade sweeper), the CI
@@ -88,6 +90,11 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   registerSandboxSessionRoutes(app, ctx);
   // Story chat (docs/STORY-CHAT.md): quick questions about one story, its commands in a process sandbox.
   registerStoryChatRoutes(app, ctx);
+  // REVIEW A LOCAL BRANCH (docs/CLAUDE-REVIEW.md § Reviewing a local branch): `ensemble mcp` / `ensemble review`
+  // send a git bundle of the branch the reader works on; the branch review halves (+ the story check) run on it.
+  // A reader's click: nothing posted, pushed, claimed or fixed. The keeper keeps a running review's pinned head.
+  registerLocalReviewRoutes(app, ctx);
+  bindLocalReviews(ctx);
   return ctx;
 }
 
@@ -157,6 +164,8 @@ export async function startAgenticBackground(app: FastifyInstance): Promise<void
     app.log.warn({ err }, 'sequence diagrams: startup reconcile failed');
   }
   await reconcileFixesOnStartup(ctx);
+  // A local branch review a restart cut off is failed (its pinned head is then swept).
+  await reconcileLocalReviewsOnStartup(ctx);
   try {
     await reconcileReferenceDocsOnStartup(ctx);
     // Wiki documents (Confluence): the hourly cheap check + the pre-review kick's context.

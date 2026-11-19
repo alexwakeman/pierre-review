@@ -22,6 +22,7 @@ import {
   chosenAiEffort,
   defaultRunEffort,
   diffOnlyEffortAt,
+  runEffortFor,
   setStoredAiEffort,
 } from './effort.js';
 
@@ -170,5 +171,17 @@ describe('the run label', () => {
     expect(aiRunLabel('claude', 'claude-opus-5-5')).toBe('Claude Opus 5.5');
     expect(aiRunLabel('claude', 'claude-opus-5-5', null)).toBe('Claude Opus 5.5');
     expect(aiRunLabel('codex', 'gpt-6-astra', 'ultra')).toBe('Codex · GPT-6 Astra');
+  });
+});
+
+describe('runEffortFor — one run’s level (a local branch review)', () => {
+  const opus = { role: 'deep' as const };
+  it('stands in for the setting: as chosen on a worktree run, one step lower diff-only', () => {
+    expect(runEffortFor('claude', opus, 'worktree', 'max', {})).toBe('max');
+    expect(runEffortFor('claude', opus, 'diff_only', 'max', {})).toBe('xhigh');
+  });
+  it('none ⇒ exactly agenticRunEffort; REVIEW_EFFORT still wins', () => {
+    expect(runEffortFor('claude', opus, 'worktree', null, {})).toBe(agenticRunEffort('claude', opus, 'worktree', {}));
+    expect(runEffortFor('claude', opus, 'worktree', 'max', { REVIEW_EFFORT: 'low' })).toBe('low');
   });
 });

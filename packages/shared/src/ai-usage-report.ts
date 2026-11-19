@@ -63,7 +63,9 @@ export function aiUsageFeatureGroup(feature: string): AiUsageFeatureGroup {
   // Check threads are code review too.
   if (f === 'claude_review' || f.startsWith('claude_review:') || f === 'claude_review_merge') return 'code';
   if (f === 'replies_check' || f === 'thread_check') return 'code';
-  if (f === 'ticket_review' || f === 'story_labels') return 'story';
+  // A local branch review (`ensemble mcp` / `ensemble review`) is a code review; its story check a story review.
+  if (f === 'local_review') return 'code';
+  if (f === 'ticket_review' || f === 'story_labels' || f === 'local_review_check') return 'story';
   if (f === 'ci_review' || f === 'ci_analysis') return 'ci';
   if (f === 'ai_fix' || f === 'ai_fix_plan') return 'fix';
   // "Implement story" (story-build.ts STORY_BUILD_LEDGER_FEATURES) writes code like AI Fix does.

@@ -4,6 +4,7 @@ import type {
   FastifyBaseLogger,
 } from 'fastify';
 import type {
+  AiEffort,
   BotWindowKind,
   CheckLogsResponse,
   ClaudeFindingSeverity,
@@ -384,7 +385,12 @@ export interface RunReviewArgs {
   // WHO TO BILL, for a provider that writes its own ledger row (Codex: a ChatGPT run is US$ 0, so the
   // manager's cost-gated row would never be written; ai/provider.ts `usageRecord`). Claude ignores it
   // and the manager records Claude's run exactly as before. Core-only.
-  usage?: { accountId: number; prId: number | null; repoId?: number | null };
+  // `feature` names the ledger row Codex writes (absent ⇒ 'claude_review'; a local branch review passes its own).
+  usage?: { accountId: number; prId: number | null; repoId?: number | null; feature?: string };
+  // ONE RUN'S EFFORT, named by the reader for this run only (a local branch review's `effort` argument):
+  // used in place of Settings → AI → Review's level (a diff-only run one step lower, as the setting). A set
+  // REVIEW_EFFORT still wins. Absent ⇒ exactly as before. Core-only.
+  effort?: AiEffort;
   // Asked before EACH specialist starts on a CODEX deep review, where Limn runs them as separate runs
   // (ai/codex/specialists.ts `allowStart`; the manager passes the spend-budget gate for an automatic
   // review). Claude's specialists are sub-agents of the one run and never ask it. Core-only.

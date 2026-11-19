@@ -133,6 +133,21 @@ specifier, **any AI SDK in `dependencies` / `optionalDependencies` / `peerDepend
 missing or inexact AI-runtime pin, or **an AI SDK specifier in any emitted JS file other than
 `dist/ai/runtime.js`**. `better-sqlite3` is a native runtime dep: ⚠ keep it ≥ 13 (N-API, binaries INSIDE the package, no install script). 11.x had no Node 24 prebuild and relied on an install script; under npx that left no binary ("Could not locate the bindings file").
 
+### The client subcommands: `ensemble review` and `ensemble mcp` (2026-11-19)
+
+`dist/cli.js` also answers `ensemble review [options]` and `ensemble mcp` (docs/CLAUDE-REVIEW.md § Reviewing a
+local branch). Both are CLIENTS of the running Ensemble: they never boot a server, never move the data
+directory and print no banner (⚠ `mcp`'s stdout IS the JSON-RPC stream). They are peeled off in `main()` before
+the server's own argument parser, like `status` / `ai` / `ml` / `sandbox`. Users add the MCP server with
+`claude mcp add ensemble -- npx ensemble-review mcp` (Codex: an `[mcp_servers.ensemble]` entry running
+`npx ensemble-review mcp`).
+
+⚠ **`build-release.mjs` asserts the client loads NO AI package**: it walks every import of
+`dist/local-review/mcp-server.js` and `dist/local-review/cli-review.js` (after the shared rewrite) and fails on
+anything but a `node:` built-in or a relative file — the MCP server is hand-rolled, never
+`@modelcontextprotocol/sdk` — then RUNS `node dist/cli.js mcp` from the release tree against an empty data
+directory: initialize, tools/list (the five tools) and a tool call that must answer "Ensemble is not running."
+
 ### No AI SDK in the manifest; downloaded on the first boot
 
 Every model-backed feature (Claude Review, AI Fix, the reports and narration, …) ships in

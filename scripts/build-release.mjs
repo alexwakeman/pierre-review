@@ -15,6 +15,7 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -22,6 +23,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -610,6 +612,55 @@ if (sharedHits.length > 0) {
   console.error('Unrewritten @pierre-review/shared import left in the release:');
   for (const h of sharedHits) console.error(`  ${h}`);
   fail('shared is vendored at dist/shared and resolved relatively — these would resolve by name');
+}
+
+// ---- `ensemble mcp` / `ensemble review`: clients of the running Ensemble (local-review/) ----
+// They load NO AI package (the MCP server is hand-rolled newline JSON-RPC, not @modelcontextprotocol/sdk) and
+// start fast: everything they import, transitively, is a `node:` built-in or a relative file (the vendored shared
+// included, after the rewrite above). Then `ensemble mcp` RUNS from the release tree: it answers initialize and
+// tools/list with its five tools, and with no Ensemble running a tool call is the one plain line.
+const LOCAL_REVIEW_CLIENT_ENTRIES = ['dist/local-review/mcp-server.js', 'dist/local-review/cli-review.js'];
+for (const rel of LOCAL_REVIEW_CLIENT_ENTRIES) if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
+{
+  // A static `import … from` / `export … from` (no quote before `from`, so a word "from" inside a string never
+  // matches), a dynamic `import('…')`, or a bare `import '…'`.
+  const SPEC = /(?:^\s*(?:import|export)\b[^;'"]*?\bfrom\s*|\bimport\s*\(\s*|^\s*import\s*)(['"])([^'"]+)\1/gm;
+  for (const entry of LOCAL_REVIEW_CLIENT_ENTRIES) {
+    const seen = new Set();
+    const queue = [join(releaseDir, entry)];
+    while (queue.length > 0) {
+      const file = queue.pop();
+      if (seen.has(file)) continue;
+      seen.add(file);
+      if (!existsSync(file)) fail(`${entry} imports a missing file: ${relative(releaseDir, file)}`);
+      for (const m of readFileSync(file, 'utf8').matchAll(SPEC)) {
+        const spec = m[2];
+        if (spec.startsWith('node:')) continue;
+        if (spec.startsWith('./') || spec.startsWith('../')) queue.push(resolve(dirname(file), spec));
+        else fail(`${entry} must import only node: built-ins and relative files (no AI package), but ${relative(releaseDir, file)} imports '${spec}'`);
+      }
+    }
+  }
+  const empty = mkdtempSync(join(tmpdir(), 'ensemble-mcp-check-'));
+  try {
+    const mcp = spawnSync(process.execPath, [join(releaseDir, 'dist/cli.js'), 'mcp'], {
+      input: [
+        { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} },
+        { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'get_local_review', arguments: { id: 1 } } },
+      ].map((m) => `${JSON.stringify(m)}\n`).join(''),
+      env: { ...process.env, ENSEMBLE_DATA_DIR: empty },
+      encoding: 'utf8',
+      timeout: 20_000,
+    });
+    const replies = (mcp.stdout ?? '').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const names = replies.find((m) => m.id === 2)?.result?.tools?.map((t) => t.name).join(',');
+    if (names !== 'review_local_branch,get_local_review,list_local_reviews,cancel_local_review,check_story') fail(`release \`ensemble mcp\` did not list its tools: ${mcp.stderr || names}`);
+    const line = replies.find((m) => m.id === 3)?.result?.content?.[0]?.text;
+    if (line !== 'Ensemble is not running. Start it with: npx ensemble-review') fail(`release \`ensemble mcp\` did not say Ensemble is not running: ${line ?? mcp.stderr}`);
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+  }
 }
 
 // ---- No AI SDK in the manifest; installed on first use ----

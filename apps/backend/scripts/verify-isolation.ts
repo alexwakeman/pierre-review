@@ -5095,6 +5095,52 @@ check(
   await rs.setReleaseSettings(2, homeB, { releaseSuffix: null, hotfixSuffix: null });
 }
 
+// LOCAL BRANCH REVIEWS (local-review/; migration 0209). GET /api/local-reviews/:id is id-addressed and the
+// start maps owner/name to a repo: A reads none of B's runs or findings, and B's repository name is not A's.
+{
+  console.log('\nlocal_reviews + local_review_findings (review a local branch)');
+  const lp = await import('../src/local-review/persist.js');
+  const { resolveLocalRepo, LocalReviewRefusal } = await import('../src/local-review/run.js');
+  const dc = { db, schema: schema as unknown as Record<string, any> };
+  const row = (repoId: number, workspaceId: number) => ({
+    repoId,
+    workspaceId,
+    kind: 'review' as const,
+    branch: 'feat/iso',
+    baseRef: 'main',
+    baseSha: 'a'.repeat(40),
+    headSha: 'b'.repeat(40),
+    includeUncommitted: false,
+    uncommittedChanges: false,
+    subjects: ['iso'],
+    providerChoice: null,
+    effortChoice: null,
+  });
+  const a = await lp.claimLocalReview(dc, 1, row(A.repoId, defaultA));
+  const b = await lp.claimLocalReview(dc, 2, row(B.repoId, defaultB));
+  await lp.insertLocalFindings(dc, 2, [
+    { localReviewId: b.id, half: 0, provider: 'claude', severity: 'warning', path: 'x.ts', line: 1, side: 'RIGHT', title: 't', body: 'b', suggestion: null, diffHunk: null, anchored: false, fileInDiff: true, priorFindingId: null, lens: null },
+  ]);
+  check("getLocalReview(A, B's id) is null", (await lp.getLocalReview(dc, 1, b.id)) === null);
+  check("getLocalReview(B, B's id) is B's (mutation check)", (await lp.getLocalReview(dc, 2, b.id))?.id === b.id);
+  check("listLocalReviews(A, B's repo, branch) is empty", (await lp.listLocalReviews(dc, 1, B.repoId, 'feat/iso')).length === 0);
+  check("listLocalReviews(A, A's repo) is A's only", (await lp.listLocalReviews(dc, 1, A.repoId, null)).map((r) => r.id).join() === String(a.id));
+  check("listLocalFindings(A, [B's run]) is empty", (await lp.listLocalFindings(dc, 1, [b.id])).length === 0);
+  check("listLocalFindings(B, [B's run]) is B's (mutation check)", (await lp.listLocalFindings(dc, 2, [b.id])).length === 1);
+  await lp.updateLocalReview(dc, 1, b.id, { summary: 'pwned' });
+  check("updateLocalReview(A, B's id) changes nothing", (await lp.getLocalReview(dc, 2, b.id))?.summary == null);
+  check("finishLocalReview(A, B's id) moves nothing", (await lp.finishLocalReview(dc, 1, b.id, 'cancelled')) === false);
+  let refused = false;
+  try {
+    await resolveLocalRepo(dc, 1, 'orgB', 'repoB');
+  } catch (err) {
+    refused = err instanceof LocalReviewRefusal;
+  }
+  check("resolveLocalRepo(A, B's owner/name) is refused (not A's repository)", refused);
+  await db.delete(schema.localReviewFindings).execute();
+  await db.delete(schema.localReviews).execute();
+}
+
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);
 await closeDb();
 process.exit(fail === 0 ? 0 : 1);
