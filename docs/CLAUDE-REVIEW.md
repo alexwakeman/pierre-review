@@ -1049,8 +1049,8 @@ pushed").
   probe at most every 5 minutes. Both counts cover the SAME span. Unknown account tokens leave
   Ensemble's share unknown, which never blocks. The share is coarse (whole percent); the copy says so
   behind the ⓘ.
-- **Install.** The Codex CLI is downloaded on the first boot with Claude's packages into
-  `~/.ensemble/ai-runtime` (`ai/auto-install.ts`; by hand, `ensemble ai install codex`); `ENSEMBLE_CODEX_PATH` points at a codex program of your own.
+- **Install.** The Codex CLI is downloaded when the reader picks it (Settings → AI's Download, or
+  `ensemble ai install codex`), into `~/.ensemble/ai-runtime`; a Codex not picked reads not installed everywhere; `ENSEMBLE_CODEX_PATH` points at a codex program of your own.
   See [PACKAGING.md](PACKAGING.md).
 
 ## Related repos (2026-10-26)

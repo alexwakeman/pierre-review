@@ -19,6 +19,7 @@ function deps(
     enabled: true,
     claude: () => st(claude),
     codex: () => st(codex),
+    choice: () => ({ claude: true, codex: true }),
     install,
     schedule: (fn, ms) => scheduled.push({ fn, ms }),
     log: { info: () => {}, warn: () => {} },
@@ -39,6 +40,14 @@ describe('autoInstallProviders', () => {
     expect(autoInstallProviders(st('ready'), st('absent'))).toEqual(['codex']);
     expect(autoInstallProviders(st('absent'), st('ready'))).toEqual(['claude']);
   });
+  it('only what the reader picked is downloaded', () => {
+    // A new install: Claude alone.
+    expect(autoInstallProviders(st('absent'), st('absent'), { claude: true, codex: false })).toEqual(['claude']);
+    // Codex alone.
+    expect(autoInstallProviders(st('absent'), st('absent'), { claude: false, codex: true })).toEqual(['codex']);
+    expect(autoInstallProviders(st('absent'), st('absent'), { claude: false, codex: false })).toBeNull();
+    expect(autoInstallProviders(st('ready'), st('absent'), { claude: true, codex: false })).toBeNull();
+  });
 });
 
 describe('runAutoInstall', () => {
@@ -49,7 +58,14 @@ describe('runAutoInstall', () => {
     expect(install).not.toHaveBeenCalled();
   });
 
-  it('downloads both on a first boot, without waiting on the caller', async () => {
+  it('downloads only the picked agent', async () => {
+    const { d, install } = deps('absent', 'absent', [{ ok: true }], { choice: () => ({ claude: true, codex: false }) });
+    runAutoInstall(d);
+    await flush();
+    expect(install).toHaveBeenCalledWith(['claude']);
+  });
+
+  it('downloads both when both are picked, without waiting on the caller', async () => {
     const { d, install, scheduled } = deps('absent', 'absent');
     expect(runAutoInstall(d)).toBeUndefined();
     await flush();

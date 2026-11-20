@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   AI_EFFORT_LABELS,
   AI_EFFORTS,
@@ -25,17 +26,16 @@ import {
   type MeResponse,
 } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
-import { useAiRuntimeInstall, useAiRuntimePoll } from '../../hooks/useAiCapabilities.js';
+import { useAiRuntimeInstall, useAiRuntimePoll, useRemoveAiRuntime } from '../../hooks/useAiCapabilities.js';
 import { useCodexLogin, useCodexLoginActions, useSetAiApiKey, useSetAiProvider, useSetAiRunProfiles } from '../../hooks/useAiProvider.js';
 import { aiProviderReadyFor } from '../../lib/aiCapabilities.js';
 import { isLastReviewVendorOn, withReviewVendor, withSurfaceChoice } from '../../lib/runProfiles.js';
 import { CheckboxBox } from '../ui/FormControls.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { chatGptPlanLabel } from '../../lib/aiBudget.js';
-import { InfoButton } from '../InfoModal.js';
-import { SetUpInFeatures } from '../AiSetup.js';
+import { InfoButton, InfoModal } from '../InfoModal.js';
 import { SectionShell, RadioInput } from './ui.js';
-import { Select, type SelectOption } from '../ui/index.js';
+import { Button, Select, type SelectOption } from '../ui/index.js';
 
 const EFFORT_OPTIONS: readonly SelectOption<string>[] = [
   { value: 'default', label: 'Default' },
@@ -74,11 +74,15 @@ const CHOICE_LABEL: Record<AiProviderSetting, string> = {
 
 /** The download's own line while it is not ready; null once it is (then the sign-in line). */
 function downloadLine(name: string, runtime: string | undefined, message: string | null | undefined): string | null {
-  if (runtime === 'installing') return `Setting up ${name}…${message ? ` ${message}` : ''}`;
+  if (runtime === 'installing') return `Downloading ${name}…${message ? ` ${message}` : ''}`;
   if (runtime === 'failed') return message ?? 'The download failed.';
-  if (runtime === 'absent') return message ?? 'Not set up.';
+  // The server's "not downloaded" line points HERE; this row has the button, so it just says so.
+  if (runtime === 'absent') return message == null || message.startsWith(`${name} is not downloaded`) ? 'Not downloaded.' : message;
   return null;
 }
+
+/** Each agent's download size, for its Download button and the Remove question. */
+const AGENT_SIZE: Record<AiProviderId, string> = { claude: 'about 110 MB', codex: 'about 360 MB' };
 
 function claudeLine(c: AiClaudeProviderStatus): string {
   const dl = downloadLine('Claude', c.runtime, c.runtimeMessage);
@@ -104,13 +108,31 @@ export function AiProviderSection(): JSX.Element | null {
   const ai = me?.ai;
   const set = useSetAiProvider();
   const install = useAiRuntimeInstall();
+  const remove = useRemoveAiRuntime();
+  const [removing, setRemoving] = useState<AiProviderId | null>(null);
   const codexReady = ai?.providers.codex.runtime === 'ready';
   const claudeRuntime = ai?.providers.claude.runtime;
   const codexRuntime = ai?.providers.codex.runtime;
-  // Limn downloads both by itself on the first boot: poll while it runs so each line moves on its own.
+  // Limn downloads the picked agents by itself: poll while one runs so each line moves on its own.
+  const downloading = install.state.phase === 'running' || claudeRuntime === 'installing' || codexRuntime === 'installing';
   useAiRuntimePoll(ai?.enabled === true && (claudeRuntime === 'installing' || codexRuntime === 'installing'));
-  // Retry a failed download (both providers, one download), or Set up where the automatic one is off.
-  const retryable = (r: string | undefined): boolean => r === 'failed' || (r === 'absent' && ai?.autoInstall !== true);
+  // Download / Retry / Remove beside each agent's line (ONE download at a time on the server).
+  const agentButton = (p: AiProviderId, runtime: string | undefined): JSX.Element | null => {
+    if (runtime === 'installing') return null;
+    const busy = downloading || remove.isPending;
+    if (runtime === 'ready') {
+      return (
+        <Button size="sm" disabled={busy} data-testid={`ai-agent-remove-${p}`} onClick={() => setRemoving(p)}>
+          Remove
+        </Button>
+      );
+    }
+    return (
+      <Button size="sm" disabled={busy} data-testid={`ai-agent-download-${p}`} onClick={() => install.start(p)}>
+        {runtime === 'failed' ? 'Retry' : `Download (${AGENT_SIZE[p]})`}
+      </Button>
+    );
+  };
   const login = useCodexLogin(ai?.enabled === true && codexReady);
   const actions = useCodexLoginActions();
 
@@ -126,7 +148,9 @@ export function AiProviderSection(): JSX.Element | null {
       </p>
       <p className="mt-2">Auto uses Claude when Claude is signed in, and Codex when only Codex is.</p>
       <p className="mt-2">
-        Ensemble downloads Claude and Codex by itself the first time it starts. Signing in is the only step.
+        Download only the agents you use. A new install gets Claude; Codex downloads when you press its Download.
+        Ensemble keeps each one you picked up to date by itself. Remove deletes it from this machine and stops every
+        AI feature from using it.
       </p>
       <p className="mt-2">
         A change applies to the next run. A run already going finishes on the provider it started on, and every run
@@ -176,15 +200,14 @@ export function AiProviderSection(): JSX.Element | null {
             <span className={ai.providers.claude.runtime === 'failed' ? 'text-ui-danger' : MUTED}>
               {claudeLine(ai.providers.claude)}
             </span>
-            {/* Downloads happen in ONE place, Settings → Features (components/settings/ToolsSection.tsx). */}
-            {retryable(claudeRuntime) && <SetUpInFeatures />}
+            {agentButton('claude', claudeRuntime)}
           </dd>
         </div>
         <div className="flex flex-wrap items-baseline gap-x-2">
           <dt className="w-14 shrink-0 font-medium text-ui-ink">Codex</dt>
           <dd className="flex flex-wrap items-center gap-2">
             <span className={codexRuntime === 'failed' ? 'text-ui-danger' : MUTED}>{codexLine(ai.providers.codex)}</span>
-            {retryable(codexRuntime) && !retryable(claudeRuntime) && <SetUpInFeatures />}
+            {agentButton('codex', codexRuntime)}
             {codexReady && (
               <CodexSignIn
                 signedIn={ai.providers.codex.signedIn}
@@ -201,6 +224,28 @@ export function AiProviderSection(): JSX.Element | null {
       {/* The lines above carry a download failure the server recorded; this is one it never saw. */}
       {install.state.phase === 'failed' && install.state.message && claudeRuntime !== 'failed' && codexRuntime !== 'failed' && (
         <p className="text-body text-ui-danger">{install.state.message}</p>
+      )}
+      {remove.isError && <p className="text-body text-ui-danger">{remove.error.message}</p>}
+      {removing != null && (
+        <InfoModal title={`Remove ${aiProviderName(removing)}?`} onClose={() => setRemoving(null)} overModal>
+          <p>
+            Ensemble deletes its {aiProviderName(removing)} download ({AGENT_SIZE[removing]}) from this machine. AI
+            features stop using {aiProviderName(removing)} until you download it again here.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button onClick={() => setRemoving(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              data-testid="ai-agent-remove-confirm"
+              onClick={() => {
+                remove.mutate(removing);
+                setRemoving(null);
+              }}
+            >
+              Remove
+            </Button>
+          </div>
+        </InfoModal>
       )}
       <p className={`text-body ${MUTED}`}>Codex signs in with ChatGPT only. An OPENAI_API_KEY is not used.</p>
     </SectionShell>

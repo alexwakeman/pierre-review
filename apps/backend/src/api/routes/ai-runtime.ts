@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
-import type { AiRuntimeInstallBody, AiRuntimeInstallEvent } from '@pierre-review/shared';
+import type { AiRuntimeInstallBody, AiRuntimeInstallEvent, AiRuntimeRemoveBody, AiRuntimeRemoveResponse } from '@pierre-review/shared';
 import { config } from '../../config.js';
-import { getAiRuntimeStatus, getCodexRuntimeStatus, installAiRuntime } from '../../ai/runtime.js';
+import { getAiRuntimeStatus, getCodexRuntimeStatus, installAiRuntime, removeAiRuntime } from '../../ai/runtime.js';
 
 // POST /api/ai/runtime/install — "Set up AI": download the pinned AI runtime (the Agent SDK and its
 // three peers, ~110 MB) into `<dataDir>/ai-runtime`, streaming npm's progress as SSE.
@@ -19,16 +19,16 @@ export async function aiRuntimeRoutes(app: FastifyInstance): Promise<void> {
     if (!config.aiEnabled) {
       return reply.code(404).send({ error: 'NotFound', message: 'Not available here.' });
     }
-    // Optional body `{ provider: 'codex' }` adds the Codex CLI (docs/CODEX-PLAN.md § 3.7). Anything
-    // else in it is ignored; an unknown provider is refused before a byte is downloaded.
+    // Optional body `{ provider }` names the ONE agent to download and records it as picked (Settings →
+    // AI); absent ⇒ Claude. The shared packages come with either. Anything else in the body is ignored;
+    // an unknown provider is refused before a byte is downloaded.
     const body = (req.body ?? {}) as AiRuntimeInstallBody;
     const provider = body.provider ?? 'claude';
     if (provider !== 'claude' && provider !== 'codex') {
       return reply.code(400).send({ error: 'BadRequest', message: 'provider must be claude or codex.' });
     }
-    const before = getAiRuntimeStatus();
-    const codexBefore = getCodexRuntimeStatus();
-    const alreadyReady = before.runtime === 'ready' && (provider !== 'codex' || codexBefore.runtime === 'ready');
+    // Ready AND picked (a provider the reader did not pick reads 'absent', so a press picks it).
+    const alreadyReady = (provider === 'codex' ? getCodexRuntimeStatus() : getAiRuntimeStatus()).runtime === 'ready';
 
     reply.hijack();
     const raw = reply.raw;
@@ -68,10 +68,28 @@ export async function aiRuntimeRoutes(app: FastifyInstance): Promise<void> {
         if (p.phase === 'done' || p.phase === 'failed') return; // the terminal event is sent below
         send({ type: 'progress', phase: p.phase, message: p.message });
       },
-      { providers: [provider] },
+      { providers: [provider], skipIfReady: true },
     );
     if (result.ok) send({ type: 'done', runtime: 'ready' });
     else send({ type: 'error', message: result.message });
     finish();
+  });
+
+  // POST /api/ai/runtime/remove {provider} — Settings → AI's Remove: the agent is no longer picked (every
+  // gate then reads it as not downloaded) and its own files are deleted (ai/runtime.ts `remove`). Local
+  // disk only: no model, no GitHub. Refused (409) while a download runs.
+  app.post('/api/ai/runtime/remove', async (req, reply) => {
+    if (!config.aiEnabled) {
+      return reply.code(404).send({ error: 'NotFound', message: 'Not available here.' });
+    }
+    const provider = ((req.body ?? {}) as Partial<AiRuntimeRemoveBody>).provider;
+    if (provider !== 'claude' && provider !== 'codex') {
+      return reply.code(400).send({ error: 'BadRequest', message: 'provider must be claude or codex.' });
+    }
+    const result = removeAiRuntime(provider);
+    if (!result.ok) return reply.code(409).send({ error: 'Conflict', message: result.message });
+    const status = provider === 'codex' ? getCodexRuntimeStatus() : getAiRuntimeStatus();
+    const body: AiRuntimeRemoveResponse = { provider, runtime: status.runtime };
+    return body;
   });
 }

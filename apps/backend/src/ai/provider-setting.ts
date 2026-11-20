@@ -6,6 +6,7 @@
 
 import { isAiProviderSetting, type AiProviderSetting, type AiRunKind } from '@pierre-review/shared';
 import { codexCredentialRunnable, resolveAiCredential, resolveCodexCredential } from './credentials.js';
+import { getAiRuntimeStatus, getCodexRuntimeStatus } from './runtime.js';
 import { CODEX_DOCS_KINDS } from './codex/kinds/docs.js';
 import { CODEX_FIX_KINDS } from './codex/kinds/fix.js';
 import { CODEX_REVIEW_KINDS } from './codex/kinds/review.js';
@@ -163,8 +164,9 @@ export function pickAutoProvider(s: { claudeReady: boolean; codexReady: boolean;
  */
 export function autoReadiness(env: NodeJS.ProcessEnv = process.env): { claudeReady: boolean; codexReady: boolean; codexRunnable: boolean } {
   return {
-    claudeReady: resolveAiCredential(env).route !== 'none',
-    codexReady: codexCredentialRunnable(resolveCodexCredential(env)),
+    // A provider not downloaded (Settings → AI) is never ready, whatever its sign-in.
+    claudeReady: resolveAiCredential(env).route !== 'none' && getAiRuntimeStatus().runtime === 'ready',
+    codexReady: codexCredentialRunnable(resolveCodexCredential(env)) && getCodexRuntimeStatus().runtime === 'ready',
     codexRunnable: codexRunnable(),
   };
 }

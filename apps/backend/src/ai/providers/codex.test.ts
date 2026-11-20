@@ -407,7 +407,13 @@ describe('complete()', () => {
     process.env.LIMN_AI_USE_API_KEY = 'true';
     process.env.OPENAI_API_KEY = 'sk-test';
     expect(C.codexProvider.credentialRoute()).toBe('login');
-    expect(P.autoReadiness().codexReady).toBe(true);
+    // `auto` also needs Codex DOWNLOADED: a program of the reader's own counts.
+    process.env.LIMN_CODEX_PATH = '/usr/local/bin/codex';
+    try {
+      expect(P.autoReadiness().codexReady).toBe(true);
+    } finally {
+      delete process.env.LIMN_CODEX_PATH;
+    }
     const out = await C.codexProvider.complete({ prompt: 'COMPLETE' });
     expect(out.costUsd).toBe(0);
     const [call] = calls();
@@ -421,7 +427,7 @@ describe('complete()', () => {
     const err = await C.codexProvider.complete({ prompt: 'COMPLETE' }).catch((e: unknown) => e);
     const { AiRuntimeMissingError } = await import('../runtime.js');
     expect(err).toBeInstanceOf(AiRuntimeMissingError);
-    expect((err as Error).message).toBe('Codex is not set up yet. Run: ensemble ai install codex');
+    expect((err as Error).message).toBe('Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex');
     expect(await C.runAgentUnchecked(spec('GOOD')).catch((e: unknown) => e)).toBeInstanceOf(AiRuntimeMissingError);
     expect(calls()).toEqual([]);
   });

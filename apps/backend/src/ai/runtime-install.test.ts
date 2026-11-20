@@ -1,13 +1,15 @@
 // The AI runtime INSTALLER (ai/runtime.ts `install`), over temp directories only: each case runs a
 // stand-in npm as a real child process, which is why this file is in the slow project
 // (vitest.workspace.ts, docs/TESTING.md). The loader's tests are in runtime.test.ts.
-import { mkdirSync, readFileSync, realpathSync, existsSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, existsSync, writeFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   AI_RUNTIME_MANIFEST_FIELD,
   AI_RUNTIME_PACKAGES,
   AiRuntimeMissingError,
+  CLAUDE_NOT_DOWNLOADED_MESSAGE,
+  CODEX_NOT_DOWNLOADED_MESSAGE,
   CODEX_PACKAGE,
   createAiRuntime,
 } from './runtime.js';
@@ -81,6 +83,8 @@ await new Promise((r) => setTimeout(r, 50));
     );
     return { command: process.execPath, args: [script] };
   }
+  /** The data directory's entries, without the reader's pick (`ai-runtimes.json`, written by every install). */
+  const dataDirEntries = (): string[] => readdirSync(dataDir).filter((n) => n !== 'ai-runtimes.json');
   const npmCalls = (): number =>
     existsSync(join(root, 'npm-calls')) ? readFileSync(join(root, 'npm-calls'), 'utf8').length : 0;
 
@@ -96,7 +100,7 @@ await new Promise((r) => setTimeout(r, 50));
     expect(phases).toContain('downloading');
     expect(phases.at(-1)).toBe('done');
     // No staging or old directory is left behind.
-    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    expect(dataDirEntries()).toEqual(['ai-runtime']);
   });
 
   it('is single-flight: a second press joins the running download', async () => {
@@ -120,7 +124,7 @@ await new Promise((r) => setTimeout(r, 50));
     expect(result.message).toMatch(/ensemble ai install/);
     expect(result.message).toMatch(/npm ERR!/);
     expect(rt.status()).toEqual({ runtime: 'failed', runtimeMessage: result.message });
-    expect(readdirSync(dataDir)).toEqual([]);
+    expect(dataDirEntries()).toEqual([]);
   });
 
   it('refuses a download that did not deliver the pinned versions', async () => {
@@ -153,7 +157,8 @@ await new Promise((r) => setTimeout(r, 50));
       runtime: 'absent',
       runtimeMessage: expect.stringMatching(/Claude Code program is missing/),
     });
-    await expect(without.load('zod')).rejects.toBeInstanceOf(AiRuntimeMissingError);
+    // The shared packages still load (Codex's schemas need zod); only Claude's runs are gated.
+    expect(await without.load('zod')).toBeTruthy();
   });
 
   it('says so when npm cannot be found', async () => {
@@ -179,7 +184,7 @@ await new Promise((r) => setTimeout(r, 50));
     seedPackages(join(dataDir, 'ai-runtime'), PINS, { later: false });
     const rt = runtime();
     expect(rt.status().runtime).toBe('absent');
-    expect(rt.status().runtimeMessage).toMatch(/Download AI again from Settings → Features/);
+    expect(rt.status().runtimeMessage).toMatch(/Download Claude again in Settings → AI/);
     const sdk = (await rt.load('@anthropic-ai/claude-agent-sdk')) as { query(): string };
     expect(sdk.query()).toBe('fake');
     await expect(rt.load('mammoth')).rejects.toBeInstanceOf(AiRuntimeMissingError);
@@ -205,8 +210,74 @@ await new Promise((r) => setTimeout(r, 50));
     expect(await rt.install(undefined, { npm: fakeNpm('ok') })).toEqual({ ok: true });
     const manifest = JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8'));
     expect(manifest.dependencies).toEqual(PINS);
-    expect(rt.codexStatus()).toEqual({ runtime: 'absent', runtimeMessage: null });
+    expect(rt.codexStatus()).toEqual({ runtime: 'absent', runtimeMessage: CODEX_NOT_DOWNLOADED_MESSAGE });
     expect(rt.codexBinary()).toBeNull();
+  });
+
+  // ---- each agent is the reader's pick (Settings → AI, `ensemble ai install|remove <agent>`) ----
+
+  it('a new install picks Claude alone; an install from before the pick keeps the Codex it has', async () => {
+    withCodexPin();
+    expect(runtime().choice()).toEqual({ claude: true, codex: false });
+    // Codex already on disk (an older install that downloaded both): it stays picked.
+    expect(await runtime().install(undefined, { npm: fakeNpm('ok'), providers: ['claude', 'codex'] })).toEqual({ ok: true });
+    rmSync(join(dataDir, 'ai-runtimes.json'));
+    expect(runtime().choice()).toEqual({ claude: true, codex: true });
+  });
+
+  it('Codex alone: the shared packages without Claude’s program, Claude reads not downloaded, zod still loads', async () => {
+    withCodexPin();
+    writeFileSync(join(dataDir, 'ai-runtimes.json'), JSON.stringify({ claude: false }));
+    const rt = runtime();
+    const phases: string[] = [];
+    expect(await rt.install((p) => phases.push(p.message), { npm: fakeNpm('ok'), providers: ['codex'] })).toEqual({ ok: true });
+    expect(phases[0]).toBe('Downloading the shared AI packages, then Codex.');
+    expect(existsSync(join(dataDir, 'ai-runtime', 'node_modules', PLATFORM_PKG))).toBe(false);
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.status()).toEqual({ runtime: 'absent', runtimeMessage: CLAUDE_NOT_DOWNLOADED_MESSAGE });
+    expect(await rt.load('zod')).toBeTruthy();
+    expect(rt.choice()).toEqual({ claude: false, codex: true });
+    // Picking Claude later downloads it and keeps Codex where it is.
+    expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['claude'] })).toEqual({ ok: true });
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+  });
+
+  it('remove: Codex’s packages go, Claude stays; the last agent takes the whole directory', async () => {
+    withCodexPin();
+    const rt = runtime();
+    expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['claude', 'codex'] })).toEqual({ ok: true });
+    expect(rt.remove('codex')).toEqual({ ok: true });
+    expect(existsSync(join(dataDir, 'ai-runtime', 'node_modules', '@openai', 'codex'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8')).dependencies).toEqual(PINS);
+    expect(rt.codexStatus()).toEqual({ runtime: 'absent', runtimeMessage: CODEX_NOT_DOWNLOADED_MESSAGE });
+    expect(rt.codexBinary()).toBeNull();
+    expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    expect(rt.remove('claude')).toEqual({ ok: true });
+    expect(existsSync(join(dataDir, 'ai-runtime'))).toBe(false);
+    expect(rt.status()).toEqual({ runtime: 'absent', runtimeMessage: CLAUDE_NOT_DOWNLOADED_MESSAGE });
+    expect(rt.choice()).toEqual({ claude: false, codex: false });
+  });
+
+  it('remove Claude keeps Codex and the shared packages; only Claude’s program is deleted', async () => {
+    withCodexPin();
+    const rt = runtime();
+    expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['claude', 'codex'] })).toEqual({ ok: true });
+    expect(rt.remove('claude')).toEqual({ ok: true });
+    expect(existsSync(join(dataDir, 'ai-runtime', 'node_modules', PLATFORM_PKG))).toBe(false);
+    expect(existsSync(join(dataDir, 'ai-runtime', 'node_modules', 'zod'))).toBe(true);
+    expect(rt.status().runtime).toBe('absent');
+    expect(rt.codexStatus()).toEqual({ runtime: 'ready', runtimeMessage: null });
+    // A later Codex download does not bring Claude back.
+    expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] })).toEqual({ ok: true });
+    expect(rt.status().runtime).toBe('absent');
+  });
+
+  it('remove is refused while a download runs', async () => {
+    const rt = runtime();
+    const running = rt.install(undefined, { npm: fakeNpm('ok') });
+    expect(rt.remove('claude')).toEqual({ ok: false, message: expect.stringMatching(/download is running/) });
+    await running;
   });
 
   it('install with codex: the exact pin, verified, and its native program located', async () => {
@@ -234,7 +305,7 @@ await new Promise((r) => setTimeout(r, 50));
     expect(JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8')).dependencies[CODEX_PACKAGE]).toBe(CODEX_PIN);
     expect(rt.codexStatus().runtime).toBe('ready');
     expect(rt.codexBinary()).toBe(bin);
-    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    expect(dataDirEntries()).toEqual(['ai-runtime']);
   });
 
   it('⚠ a Claude that is already ready stays ready while a download runs (the first boot adding Codex)', async () => {
@@ -267,13 +338,13 @@ await new Promise((r) => setTimeout(r, 50));
     expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
     const manifest = JSON.parse(readFileSync(join(dataDir, 'ai-runtime', 'package.json'), 'utf8'));
     expect(manifest.dependencies).toEqual({ ...PINS, [CODEX_PACKAGE]: CODEX_PIN });
-    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    expect(dataDirEntries()).toEqual(['ai-runtime']);
     // A failed Codex-only download is Codex's alone and keeps the Codex already there.
     const again = await rt.install(undefined, { npm: fakeNpm('codex-fail'), providers: ['codex'] });
     expect(again.ok).toBe(false);
     expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
     expect(rt.codexStatus().runtime).toBe('ready');
-    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    expect(dataDirEntries()).toEqual(['ai-runtime']);
   });
 
   it('⚠ a Claude-only "Set up AI" never fails for Codex: a broken Codex download is not even attempted', async () => {
@@ -294,7 +365,7 @@ await new Promise((r) => setTimeout(r, 50));
     expect(first).toEqual({ ok: false, message: expect.stringMatching(/ensemble ai install codex/) });
     expect(rt.status()).toEqual({ runtime: 'ready', runtimeMessage: null });
     expect(rt.codexStatus()).toEqual({ runtime: 'failed', runtimeMessage: (first as { message: string }).message });
-    expect(readdirSync(dataDir)).toEqual(['ai-runtime']);
+    expect(dataDirEntries()).toEqual(['ai-runtime']);
     // With a working Codex in place, a failed re-download KEEPS it.
     expect(await rt.install(undefined, { npm: fakeNpm('ok'), providers: ['codex'] })).toEqual({ ok: true });
     const bin = rt.codexBinary();

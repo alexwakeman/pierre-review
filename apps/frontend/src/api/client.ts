@@ -197,6 +197,7 @@ import type {
   CodexLoginMethod,
   CodexLoginResponse,
   CodexLogoutResponse,
+  AiRuntimeRemoveResponse,
   RepoAnalytics,
   RepoClaudeReviewsResponse,
   OpenPrsResponse,
@@ -1143,6 +1144,9 @@ export const api = {
     fetch('/api/ai/codex/login/cancel', jsonBody('POST')).then((r) => handle<CodexLoginResponse>(r)),
   codexLogout: () =>
     fetch('/api/ai/codex/logout', jsonBody('POST')).then((r) => handle<CodexLogoutResponse>(r)),
+  // Settings → AI's Remove: the agent is no longer picked and its download is deleted.
+  removeAiRuntime: (provider: AiProviderId) =>
+    fetch('/api/ai/runtime/remove', jsonBody('POST', { provider })).then((r) => handle<AiRuntimeRemoveResponse>(r)),
   // Workspace review-intelligence "Insights" — the attention CARDS (+ the sprint report). The
   // flow-metric HEADER moved OUT to
   // /api/workspace-metrics, the Retro panel was deleted, and there is no cross-workspace comparison.

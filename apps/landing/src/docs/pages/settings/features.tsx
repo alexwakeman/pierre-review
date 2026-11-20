@@ -71,10 +71,10 @@ export default function Page(): JSX.Element {
         downloads them.
       </p>
       <Illustration
-        label="Two switches: AI (Claude and Codex) on and downloaded, Bot comment analysis off and not downloaded."
+        label="Two switches: AI on and downloaded, Bot comment analysis off and not downloaded."
         caption="Each switch says what is installed."
       >
-        <SettingsRow label="AI (Claude and Codex)" hint="Downloaded." control={<Toggle on />} />
+        <SettingsRow label="AI" hint="Downloaded." control={<Toggle on />} />
         <SettingsRow
           label="Bot comment analysis"
           hint="Not downloaded yet. Switching it on asks before downloading."
@@ -83,9 +83,10 @@ export default function Page(): JSX.Element {
       </Illustration>
       <ul>
         <li>
-          <Ui>AI (Claude and Codex)</Ui>: on when it is downloaded. Ensemble downloads it by itself the first time it
+          <Ui>AI</Ui>: on when your default agent is downloaded. Ensemble downloads Claude by itself the first time it
           starts. Switched off, every AI feature shows how to set it up again and nothing runs automatically. The
-          download stays on your computer. See <DocLink to="settings/ai">AI</DocLink>.
+          download stays on your computer. Each agent (Claude, Codex) is downloaded or removed in{' '}
+          <DocLink to="settings/ai">AI</DocLink>.
         </li>
         <li>
           <Ui>Bot comment analysis</Ui>: labels how serious each bot review comment is. Switched off, no new comments are
@@ -96,7 +97,7 @@ export default function Page(): JSX.Element {
       <p>
         Switching on a tool that is not downloaded asks first, and says how big the download is. Select{' '}
         <Ui>Download</Ui> to start it. When a tool is installed, the switch lists what was found: versions, the models
-        and where they are. From a terminal, <code>npx ensemble-review ai install</code> and{' '}
+        and where they are. From a terminal, <code>npx ensemble-review ai install claude</code> (or <code>codex</code>) and{' '}
         <code>npx ensemble-review ml install</code> do the same downloads.
       </p>
     </>

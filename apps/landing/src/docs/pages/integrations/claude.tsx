@@ -31,7 +31,7 @@ export default function Page(): JSX.Element {
       </ul>
       <p>
         You do not need to install anything for Ensemble itself: Ensemble downloads the Claude programs it needs (about 110 MB)
-        the first time it starts.
+        the first time it starts. <Ui>Remove</Ui> in Settings → AI deletes them if you use only Codex.
       </p>
 
       <H2 id="set-it-up">Set it up</H2>
@@ -135,7 +135,7 @@ export default function Page(): JSX.Element {
       </ul>
       <Note>
         If a download fails, the AI tab shows the reason and <Ui>Retry</Ui>. You can also run{' '}
-        <code>ensemble ai install</code>, and <code>ensemble ai status</code> to check.
+        <code>ensemble ai install claude</code>, and <code>ensemble ai status</code> to check.
       </Note>
     </>
   );
