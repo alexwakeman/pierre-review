@@ -99,7 +99,6 @@ export const INSIGHT_KINDS: readonly InsightKind[] = [
   'dependency_bump',
   'waiting_on_others',
   'bot_signal',
-  'bot_only_review',
   'ai_review',
 ];
 

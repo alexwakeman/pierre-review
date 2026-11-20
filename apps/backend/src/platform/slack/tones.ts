@@ -92,7 +92,6 @@ export function pendingCardEmoji(card: InsightCard): string {
       return ':package:';
     case 'reviewer_load':
     case 'bot_signal':
-    case 'bot_only_review':
     case 'waiting_on_others':
     case 'ai_review':
       return '•';

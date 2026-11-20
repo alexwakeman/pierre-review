@@ -220,8 +220,8 @@ export function myTurnGroupOf(
 /**
  * THE "EVERYTHING ELSE" ORDER WITHIN ONE COLOUR. The board sorts by severity first (red, amber,
  * blue) and by this rank second; within one kind, each builder's own order stands (the sort is
- * stable). The two bot kinds keep their slots because the fold still emits them — the Pending
- * route filters them out, the Pro Insights pane does not.
+ * stable). The bot kind keeps its slot because the fold still emits it — the Pending route
+ * filters it out.
  *
  * ⚠ The two FORWARD kinds (`merge`, `update_branch`) rank after the problems on purpose: they are
  * opportunities, and every kind above them is a problem. The "Do next" head is where they get to
@@ -234,16 +234,15 @@ export const PENDING_KIND_RANK: Record<InsightKind, number> = {
   conflicts: 2,
   security: 3,
   bot_signal: 4,
-  bot_only_review: 5,
-  stalled_review: 6,
-  untouched_thread: 7,
-  reviewer_load: 8,
-  reviewer_routing: 9,
-  merge: 10,
-  update_branch: 11,
-  dependency_bump: 12,
-  waiting_on_others: 13,
-  ai_review: 14,
+  stalled_review: 5,
+  untouched_thread: 6,
+  reviewer_load: 7,
+  reviewer_routing: 8,
+  merge: 9,
+  update_branch: 10,
+  dependency_bump: 11,
+  waiting_on_others: 12,
+  ai_review: 13,
 };
 
 /**
@@ -339,11 +338,10 @@ export const DEPENDENCY_STATE_BASE: Record<
 };
 
 /** The card kinds that get no score. Review load is about PEOPLE, not pull requests, so it is
- *  listed beside the ranking rather than in it; the two bot cards never reach the Pending board. */
+ *  listed beside the ranking rather than in it; the bot card never reaches the Pending board. */
 export const DO_NEXT_UNSCORED_KINDS: ReadonlySet<InsightKind> = new Set<InsightKind>([
   'reviewer_load',
   'bot_signal',
-  'bot_only_review',
   // Read-only: the ball is with someone else, so there is no next step of the reader's to rank.
   'waiting_on_others',
   // Read-only reference: the newest AI review per PR. Listed newest first.

@@ -248,11 +248,11 @@ describe('getBotAnalytics same-line overlap (advisory ROI signal)', () => {
     expect(cr.topOverlapPartner).toBeNull();
   });
 
-  it('quality checks are excluded from the pass (0 overlap despite a same-line thread)', async () => {
+  it('quality checks are excluded from the pass (no row at all, despite a same-line thread)', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
-    const qc = resp.qualityChecks.find((v: any) => v.key === `u${qcId}`)!;
-    expect(qc.overlapThreads).toBe(0);
-    expect(qc.topOverlapPartner).toBeNull();
+    // A quality check is not measured on Bots Monitoring: no row, never anyone's partner.
+    expect(resp.vendors.some((v: any) => v.key === `u${qcId}`)).toBe(false);
+    for (const v of resp.vendors) expect(v.topOverlapPartner?.key).not.toBe(`u${qcId}`);
     // …and its same-line thread bought inhouseA no overlap either (see the 5 above, not 6).
   });
 

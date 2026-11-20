@@ -44,7 +44,7 @@ describe('brand ink', () => {
   });
 
   it('leaves a colour that already passes exactly alone', () => {
-    // CodeRabbit's orange clears both grounds unaided — the adjustment must be a no-op, or every
+    // An orange (CodeRabbit's old brand colour) clears both grounds unaided — the adjustment must be a no-op, or every
     // brand that was fine gets quietly shifted.
     expect(readableInk('#ff7a45', DARK_BG)).toBe('#ff7a45');
     expect(contrastRatio('#ff7a45', DARK_BG)).toBeGreaterThanOrEqual(AA);

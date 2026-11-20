@@ -722,8 +722,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // JSON column that no portable SQL predicate can express, so there is no cheaper page to fetch)
   // or the window's whole thread scan plus the ±3-line clustering, and then hydrates a page of
   // comment BODIES on top. An IntersectionObserver fires it repeatedly as the user scrolls — so
-  // `search`, never the 600/min blanket. Anchored at both ends: `/api/bot-analytics` itself and
-  // `/api/bot-analytics/bot-only-prs` are ordinary reads and must keep falling through.
+  // `search`, never the 600/min blanket. Anchored at both ends: `/api/bot-analytics` itself is an
+  // ordinary read and must keep falling through. (`/api/bot-analytics/bot-only-prs` was REMOVED
+  // 2026-11-20.)
   if (!mutating && /^\/api\/bot-analytics\/flagging$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
@@ -732,8 +733,7 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // population, then folds the whole thing in JS. Same shape of cost as its neighbour above —
   // this process's event loop, not GitHub quota and not Anthropic — so the same 60/min bucket
   // rather than the 600/min blanket one. Anchored at BOTH ends with the sub-path spelled out, so
-  // `/api/bot-analytics` itself and `/api/bot-analytics/bot-only-prs` keep falling through to
-  // `read`. (The `/prs` drill-down was removed 2026-11-20.)
+  // `/api/bot-analytics` itself keeps falling through to `read`. (The `/prs` drill-down was removed 2026-11-20.)
   if (!mutating && /^\/api\/bot-analytics\/volume(\/scatter)?$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }

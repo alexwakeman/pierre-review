@@ -924,25 +924,6 @@ check(
   anCross.vendors.length === 0,
 );
 
-// getBotOnlyPrs (the caption's expandable list) is account-scoped: the owner call resolves its own
-// repos and never contains another account's PR; a cross-account call passing the OTHER account's
-// repo ids returns nothing (getBotOnlyReviewPrs binds pullRequests.accountId).
-const boA = await q.getBotOnlyPrs(1, 'rolling_30', scopeANow);
-check(
-  "getBotOnlyPrs(A) returns a list, never B's PR",
-  Array.isArray(boA.prs) && !boA.prs.some((p) => p.prId === B.prId),
-);
-const boCrossA = await q.getBotOnlyPrs(2, 'rolling_30', {
-  workspaceId: defaultB,
-  repoIds: [A.repoId],
-});
-check('getBotOnlyPrs(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)', boCrossA.prs.length === 0);
-const boCrossB = await q.getBotOnlyPrs(1, 'rolling_30', {
-  workspaceId: defaultA,
-  repoIds: [B.repoId],
-});
-check('getBotOnlyPrs(A, repoIds=[B.repo]) leaks nothing (IDOR blocked)', boCrossB.prs.length === 0);
-
 // getBotDedupClusters: A resolves its PR; B gets null (ownership → 404).
 check(
   'getBotDedupClusters(A.pr, A) returns a response',
@@ -1330,6 +1311,12 @@ await upsertMlLabels([
     targetCreatedAt: now,
   },
 ]);
+// The badge index returns REVIEW bots' labels only (judged by the PR's home workspace), so the
+// label's author must be a review bot there, or the "own" check fails for the wrong reason.
+await q.setWorkspaceReviewer(1, contributor!.id, {
+  workspaceId: (await q.workspaceScopeForRepo(1, A.repoId))!.workspaceId,
+  automated: true,
+});
 const mlOwn = await getPrMlLabels(A.prId, 1);
 check(
   'getPrMlLabels(A.pr, A) returns the stored label',

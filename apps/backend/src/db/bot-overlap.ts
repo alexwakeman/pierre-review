@@ -251,10 +251,9 @@ export async function getBotOverlapClusters(
 
   // An empty workspace → nothing to analyze (mirrors getBotAnalytics' two early exits).
   if (scope.repoIds.length === 0) return empty();
-  // `role: 'all'` — the same set the tile counted from. The quality-check EXCLUSION happens
-  // below, at the same point in the pipeline it happens in getBotAnalytics; narrowing here
-  // instead would also change `classificationKindForUser`'s reach and is not the same filter.
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  // `role: 'review'` — the same set the tile (getBotAnalytics' `overlapClusters`) counted from.
+  // The per-thread role test below is now a belt-and-braces repeat of the same rule.
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) return empty();
   const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
   const roleMap = await reviewerRoleForUser(accountId, scope.workspaceId);

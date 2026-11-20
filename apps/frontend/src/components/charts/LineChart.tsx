@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import {
   useChartWidth,
   fmtDate,
@@ -12,6 +12,7 @@ import {
   type Series,
 } from './common.js';
 import { RingIcon } from '../Icons.js';
+import { logAxis, type LogTick } from '../../lib/logAxis.js';
 
 // Multi-series line chart over a weekly x-axis (labels are ISO bucket-starts). The
 // first series may render a soft area fill (area). Null values break that series'
@@ -24,6 +25,7 @@ export function LineChart({
   formatY = fmtNum,
   height = 132,
   logY = false,
+  logScale,
   yDomain,
   centerTip = false,
   tipBelow = false,
@@ -40,6 +42,11 @@ export function LineChart({
   // when the series also has large spikes. Zeros/negatives floor to the bottom decade (log has no
   // 0). Falls back to linear when there's no positive value to scale. Opt-in; default linear.
   logY?: boolean;
+  // A log y-axis with NAMED ticks (e.g. 1m · 10m · 1h · 6h · 1d for a duration in hours): only the
+  // ticks that bracket the data are drawn (`lib/logAxis.ts`). A value under `floor` — a zero
+  // included — is DRAWN on the floor; the hover still shows the real value. Null stays a gap.
+  // Wins over `logY` and `yDomain`.
+  logScale?: { ticks: readonly LogTick[]; floor: number };
   // An EXPLICIT linear y-scale with its own gridlines, for a series whose axis is a fixed
   // ordinal scale rather than a magnitude — e.g. severity nit(1)…critical(4), where the default
   // 0→niceMax(4)=5 would put the ticks at 0 and 5, i.e. on two values the metric cannot take and
@@ -62,9 +69,16 @@ export function LineChart({
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
+  // The widest y tick label as the browser actually drew it (0 until measured). The character
+  // estimate below is only the first guess: font metrics differ by machine (a CI runner without
+  // Archivo draws "100%" ~40px wide), so the pad follows the measured width once it is known.
+  const yLabelsRef = useRef<SVGGElement>(null);
+  const [measuredLabelW, setMeasuredLabelW] = useState(0);
 
   const PAD_R = 8;
-  const PAD_T = 8;
+  // The top tick's label is centred on its gridline (see the <text> below), so half a line of
+  // type has to fit above the plot or the top label ("100%") is cut by the SVG's edge.
+  const PAD_T = 10;
   const PAD_B = 18;
   const n = labels.length;
   const innerH = height - PAD_T - PAD_B;
@@ -77,9 +91,30 @@ export function LineChart({
     .flatMap((s) => s.values)
     .filter((v): v is number => v != null && v > 0);
   const useLog = logY && positives.length > 0;
+  const named = logScale ? logAxis(series.flatMap((s) => s.values), logScale.ticks, logScale.floor) : null;
   let y: (v: number) => number;
   let yTicks: number[];
-  if (!useLog && yDomain) {
+  let tickLabel: (v: number) => string = formatY;
+  if (named && logScale) {
+    const loL = Math.log10(named.lo);
+    const span = Math.max(Math.log10(named.hi) - loL, 1e-9);
+    y = (v: number): number => {
+      const cl = Math.min(named.hi, Math.max(logScale.floor, v));
+      return PAD_T + innerH * (1 - (Math.log10(cl) - loL) / span);
+    };
+    // Thin the ticks so no two labels touch (14px type): keep the top one, walk down, and drop a
+    // tick closer than MIN_GAP to the last one kept — the bottom tick wins over its upper neighbour.
+    const MIN_GAP = 17;
+    const kept: number[] = [];
+    for (const t of [...named.ticks].reverse()) {
+      const last = kept[kept.length - 1];
+      if (last == null || y(t.value) - y(last) >= MIN_GAP) kept.push(t.value);
+      else if (t === named.ticks[0] && kept.length > 1) kept[kept.length - 1] = t.value;
+    }
+    yTicks = kept.reverse();
+    const byValue = new Map(named.ticks.map((t) => [t.value, t.label]));
+    tickLabel = (v: number): string => byValue.get(v) ?? formatY(v);
+  } else if (!useLog && yDomain) {
     const span = Math.max(yDomain.max - yDomain.min, 1e-9);
     y = (v: number): number => {
       const cl = Math.min(yDomain.max, Math.max(yDomain.min, v));
@@ -104,9 +139,23 @@ export function LineChart({
     yTicks = [0, maxV];
   }
 
-  // The left pad fits the WIDEST y tick (12px type ≈ 6.6px a character): a word axis
-  // ("Critical") was clipped to "ritical" by a fixed 36px.
-  const PAD_L = Math.max(36, Math.ceil(Math.max(0, ...yTicks.map((v) => formatY(v).length)) * 6.6) + 8);
+  // The left pad fits the WIDEST y tick. The labels are `text-meta`, 14px in page content (12px
+  // only in the compact sidebar), ≈ 8.4px a character in Archivo: at the old 6.6px estimate a
+  // word axis ("Critical") lost its first letter and "100%" lost its "1".
+  const estimatedLabelW = Math.max(0, ...yTicks.map((v) => tickLabel(v).length)) * 8.4;
+  const PAD_L = Math.max(36, Math.ceil(Math.max(estimatedLabelW, measuredLabelW)) + 8);
+  const tickKey = yTicks.map((v) => tickLabel(v)).join('|');
+  useLayoutEffect(() => {
+    const g = yLabelsRef.current;
+    if (g == null) return;
+    let widest = 0;
+    for (const t of Array.from(g.querySelectorAll('text'))) {
+      // getBBox is the drawn box; jsdom has none, so a test environment keeps the estimate.
+      const bw = typeof t.getBBox === 'function' ? t.getBBox().width : 0;
+      if (bw > widest) widest = bw;
+    }
+    if (Math.abs(widest - measuredLabelW) > 0.5) setMeasuredLabelW(widest);
+  }, [tickKey, w, measuredLabelW]);
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const x = (i: number): number => PAD_L + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
 
@@ -199,6 +248,7 @@ export function LineChart({
         {w > 0 && (
           <svg width={w} height={height} className="block">
             {/* y gridlines + labels (0/max for linear; each decade for log) */}
+            <g ref={yLabelsRef}>
             {yTicks.map((v) => (
               <g key={v}>
                 <line
@@ -212,14 +262,16 @@ export function LineChart({
                 />
                 <text
                   x={PAD_L - 4}
-                  y={y(v) + 3}
+                  y={y(v)}
+                  dominantBaseline="middle"
                   textAnchor="end"
                   className="fill-ui-faint text-meta"
                 >
-                  {formatY(v)}
+                  {tickLabel(v)}
                 </text>
               </g>
             ))}
+            </g>
             {area && series[0] && areaPathFor(series[0]) && (
               <path d={areaPathFor(series[0])} fill={series[0].color} opacity={0.12} />
             )}

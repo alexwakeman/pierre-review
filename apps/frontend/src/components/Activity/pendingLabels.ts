@@ -37,7 +37,6 @@ export const KIND_LABEL: Record<InsightCard['kind'], string> = {
   // you maintain") is made per card by `cardKindLabel`, off the card's own `arm`.
   ci_failing: 'CI failing',
   bot_signal: 'Review-bot signal',
-  bot_only_review: 'Only a bot reviewed',
   stalled_review: 'Stalled review',
   untouched_thread: 'Untouched thread',
   reviewer_load: 'Review load',

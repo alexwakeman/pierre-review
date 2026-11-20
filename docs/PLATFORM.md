@@ -141,7 +141,7 @@ pagination for a "Show all N" footer opening the sortable `open-prs` drill-down 
 isolates the feed on click. The **"Showing only #N" feed-isolation banner** (`FeedIsolationBanner`,
 set from PrDetail's "Show in Activity feed" button or a drill-down, dismissible with Clear) renders
 **directly under the panel's summary header** — under `RepoFeedHeader` in the per-repo Activity
-console, under the "Review bots" header in `BotsView` (bot-only "Show in feed" lands there), and in
+console, under the "Review bots" header in `BotsView`, and in
 the empty-workspace fallback branch — so it's present in every context isolation can reach (never
 sticky; scrolls with content). When isolated, that view also **hides the repo-wide charts +
 open-PR list**: RepoConsole drops `RepoInsightsPanel`/`RepoOpenPrList`. `FeedView` still reads `feedIsolatedPrId` only to scope its query.
@@ -239,8 +239,7 @@ is stamped **UNCONDITIONALLY** in `review/post-seam.ts` and dogfooded through th
 detector. ⚠ **It used to be a setting (`pro_settings bots.tagPierreReviews`) and must never be one
 again**: the marker is how Ensemble's own posts are recognised (`isLimnPostedComment`) and, with a severity
 lead, what makes a finding a per-poster "Ensemble · <login>" bot (docs/CLAUDE-REVIEW.md § Ensemble findings
-are bots) — switching it off would turn those bots, the verbatim-vs-curated provenance and the
-`bot_only_review` risk flag dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Ensemble +
+are bots) — switching it off would turn those bots and the verbatim-vs-curated provenance dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Ensemble +
 Claude") appeared in NO detector and is DELETED. `PostReviewArgs.pierreMarker?`/`pierreFooter?` stay
 DECLARED on the contract but nothing passes them. **Bot-ROI** (`getBotAnalytics(accountId,
 window, scope)`, a core fold) → per-kind volume/actedOn%/untouched/`medianAddressedMs`/humanFollowThrough/noiseRatio/`verdict`
@@ -295,8 +294,10 @@ the old `bot_mute_rules` "hide" mute (Pierre-only cosmetic filter) + the standin
 changed no behaviour, and the unattended cron was replaced by the confirm-gated manual resolve. The
 `bot_mute_rules` table / `/api/bot-mute-rules` routes / `BotMuteRulesEditor` are gone; migration `0029`
 still creates an orphan table; `pro_settings.bot_auto_resolve*` columns are now vestigial.)_
-**"Only a bot reviewed this" risk flag:** a `bot_only_review` Insights card (`getBotOnlyReviewPrs`;
-Pierre-verbatim counts as bot-derived) + a `ChecksTab` caution. **Settings:** the account-wide
+**"Only a bot reviewed this" is NOT a warning (REMOVED 2026-11-20):** the `bot_only_review` Insights
+card, `getBotOnlyReviewPrs`, `getBotOnlyPrs`, `GET /api/bot-analytics/bot-only-prs` and
+`totals.botOnlyPrs` are gone — a PR only a bot reviewed is normal practice. It never reaches the
+Pending board, the Slack digest, the sprint report or ⌘K; do not bring it back as a card. **Settings:** the account-wide
 "Review bots" section (`BotSection`) is **DELETED**. Its last knob, the "Slack bot digest" toggle, moved to the per-workspace Slack section with the
 flag itself in platform 0033 (`WorkspaceSlackTargetUpdate.botDigest`), which left the section holding only an explainer
 pointing at the Bots rail — a signpost, not a setting. Its "Detection" and "Ensemble attribution"
@@ -511,27 +512,20 @@ broken by lowest `workspaceId`). The two role filters:
 
 | `role: 'review'` — SCORING | `role: 'all'` — EXCLUSION / visibility |
 |---|---|
-| behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, `getActivity`'s acted-on stat, `getWorkspaceInsights`' `bot_signal` | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), **bot-only PRs** (`getBotOnlyReviewPrs`), **and `getBotAnalytics`** |
+| **every Bots Monitoring read**: ROI (`getBotAnalytics` — rows, totals, suggestions, overlap, its `ml` block), behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`, incl. the workspace responsiveness fold), volume + scatter (`db/bot-volume.ts`), the flagging drill-downs (`foldBotFlaggingPopulation`, `getBotOverlapClusters`), the ML scoring worker + pending counts + per-PR badges (`db/ml-labels.ts`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, the benchmark lineup; plus `getActivity`'s acted-on stat, `getWorkspaceInsights`' `bot_signal` | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), and `getBotAnalytics`'s "was that reply a PERSON's?" test (human follow-through, time-to-addressed — a linter's reply is not a human acting) |
 
-**`getBotAnalytics` is the exception that reads like a bug and isn't** — it is the ROI getter, yet
-it passes `'all'`. It narrows by SPLITTING, not by filtering: it computes a row for EVERY automated
-reviewer and then routes `role:'quality_check'` ones into `qualityChecks[]` (via `reviewerRoleForUser`)
-so they are excluded from `vendors`/`totals`/`suggestions` but still RENDERED, in a collapsed
-"excluded from ROI" section. Filtering them out of the id set instead would have made a mis-roled bot
-silently vanish from the one screen where you'd fix the role. So "ROI scores only review bots" is true
-of the OUTPUT and false of the argument — don't grep for `'review'` expecting to find it here.
+**BOTS MONITORING MEASURES AND SHOWS REVIEW BOTS ONLY (2026-11-20).** `getBotAnalytics` used to pass
+`'all'` and SPLIT non-reviewers into a `qualityChecks[]` section ("excluded from ROI"); that section,
+the wire field and its computation are GONE. A quality check, dependency bot, code agent, release or
+housekeeping automation has no row, total, suggestion, overlap, ML label, category or severity anywhere
+on Bots Monitoring — even a label stored for it before the rule is ignored on read. A mis-roled bot is
+found and fixed in **Settings → Bots**, which lists every role.
 _(The two in-code comments that used to contradict this — `schema.sqlite.ts`'s `role` comment and
 `queries.ts`' `ReviewerRoleFilter` comment, both listing "bot-only PRs" among the sets that narrow —
-were corrected during the workspace rename. They now agree with the code and with the paragraph
-below.)_
+were corrected during the workspace rename. They now agree with the code.)_
 
-**Bot-only PRs DELIBERATELY DO NOT NARROW**, and the symmetry is tempting enough that it is worth
-stating: that list answers "did a human look at this before it merged". A PR reviewed only by
-SonarQube has no human reviewer — exactly what the banner exists to surface. Narrowing it to
-role `'review'` leaves that PR with zero qualifying bot reviews, fails the "at least one automated
-review" leg, and DROPS it from the list, hiding the risk instead of flagging it. The scoring sets
-narrow because a linter's volume makes a reviewer's numbers lie; the risk set does not, because a
-linter's approval is not a human's.
+(The bot-only PRs list, the one RISK reader of the `'all'` set, was REMOVED 2026-11-20 with the
+`bot_only_review` card.)
 
 **Consolidated Feed — CORE, the Activity "Feed" entry (`getConsolidatedFeed` → `FeedView`).** ONE
 flat, purely-**chronological** (newest-first) stream of **real activity events** (opens / merges /
@@ -918,6 +912,8 @@ the two cannot list different cards). The seam runs WITHOUT the route's two live
 - Card wording is a small server-side map (`pendingCardText`, `MY_TURN_REASON_TEXT`) — a SECOND
   copy of the SPA's `pendingLabels.ts`, which the backend cannot import. It reads only fields the
   card carries; `test/slack-pending-blocks.test.ts` fails on a kind or reason with no wording.
+- There is no "only a bot reviewed this" line: that card kind was REMOVED 2026-11-20 (normal
+  practice, not a warning). `bot_signal` and `reviewer_load` map to no wording, as before.
 - ⚠ **LIVE STATE**: nothing from the board enters any payload hash (the sprint report's included).
 - Block budget, counted across the top level and every attachment: header 1 + 5 team tabs × ≤ 2
   sections + sprint 1 + bot 1 + footer 1 = 14, well under Slack's 50; the `SLACK_MAX_BLOCKS` (48)
@@ -1190,15 +1186,14 @@ Four surfaces live in `BotsView`, BESIDE the panel rather than inside it:
 
 | Surface | Where it lives |
 |---|---|
-| "Only a bot reviewed N open PRs" governance caution + its list | `BotsView`, reads `totals.botOnlyPrs` |
 | `ResolveBacklogBanner` → review-and-resolve | exported FROM `BotRoiPanel.tsx`, mounted in `BotsView` |
 | `TuningSuggestions` (the amber advisory box) | **hoisted OUT of the panel** into `BotsView` |
 | the bot-only `FeedView` | `BotsView` |
 
 `TuningSuggestions` reads as a heading over the table rather than a footnote under it.
-`QualityCheckSection` stays in the panel; its mis-role safeguard survives because the
-classification screen (Bots Monitoring → Classification) lists "Other automation" with each row's role
-picker, which is where the re-role happens anyway.
+(The "Only a bot reviewed N open PRs" caution, its list and `QualityCheckSection` were REMOVED
+2026-11-20: Bots Monitoring shows review bots only. The mis-role safeguard lives in Settings → Bots,
+which lists "Other automation" with each row's role picker, where the re-role happens anyway.)
 
 **"Turning it off would save …" (`lib/botSavings.ts` `stopPayingLine`).** Under the table, ONE
 templated sentence per review bot (`vendors` is the `=== 'review'` cohort already) with a positive

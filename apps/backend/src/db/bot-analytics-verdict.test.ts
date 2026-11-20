@@ -205,19 +205,15 @@ describe('getBotAnalytics response-time-gated verdict', () => {
   });
 });
 
-// The ROLE SPLIT, asserted on the very fixture that motivates it: greptile's 10 aged untouched
+// The ROLE RULE, asserted on the very fixture that motivates it: greptile's 10 aged untouched
 // threads earn it 'noisy' as a REVIEW bot (above). A quality check doing exactly its job produces
-// the same shape — a linter's findings sit unanswered — so the role must keep it out of the metric
-// surface WITHOUT hiding it.
+// the same shape — a linter's findings sit unanswered — so Bots Monitoring must not measure it.
 //
-// ⚠ THE POINT IS THAT `getBotAnalytics` SPLITS, IT DOES NOT FILTER. It asks
-// `automatedReviewerUserIds(..., 'all')` and routes `role:'quality_check'` rows into
-// `qualityChecks[]` at the bottom, so the row is still COMPUTED — same counts, same trend — just
-// kept out of `vendors`/`totals`/`suggestions`. Narrowing the id set to `'review'` instead would
-// make a mis-roled bot vanish from the one screen where you'd fix the role, and that failure is
-// invisible to any assertion that only checks `vendors`. Hence the three-way check: gone from
-// `vendors`, PRESENT in `qualityChecks`, and carrying its real numbers.
-describe('getBotAnalytics role split (quality_check is SPLIT OUT, not filtered away)', () => {
+// ⚠ `getBotAnalytics` FILTERS to the reviewer cohort (`automatedReviewerUserIds(..., 'review')`):
+// a non-review bot has no row, no totals share, no suggestion, and there is no `qualityChecks`
+// section any more (removed 2026-11-20 — the user's rule: Bots Monitoring shows review bots only;
+// a mis-roled bot is fixed in Settings → Bots, which lists every role).
+describe('getBotAnalytics role rule (a quality_check bot is not measured)', () => {
   const wsRow = (workspaceId: number, role: string) => ({
     accountId: 1,
     workspaceId,
@@ -228,20 +224,18 @@ describe('getBotAnalytics role split (quality_check is SPLIT OUT, not filtered a
     source: 'manual',
   });
 
-  it('a quality_check row moves the bot to qualityChecks[] with its counts intact', async () => {
+  it('a quality_check row removes the bot from every number on the response', async () => {
     const { workspaceReviewers } = schema;
     // The judgement is a WORKSPACE fact now: one row per (account, workspace, actor).
     await db.insert(workspaceReviewers).values(wsRow(scope.workspaceId, 'quality_check')).execute();
     try {
       const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
       expect(resp.vendors.some((v: { kind: string }) => v.kind === 'greptile')).toBe(false);
-      const qc = resp.qualityChecks.find((v: { kind: string }) => v.kind === 'greptile');
-      expect(qc).toBeDefined();
-      // Computed identically to a vendor row — this is what "split, not filtered" means.
-      expect(qc.untouched).toBe(10);
+      expect('qualityChecks' in resp).toBe(false);
       // …and excluded from the headline numbers: only coderabbit's 12 threads remain.
       expect(resp.totals.threads).toBe(12);
       expect(resp.vendors).toHaveLength(1);
+      expect(resp.suggestions.some((s: { vendorKind: string }) => s.vendorKind === 'greptile')).toBe(false);
     } finally {
       await db.delete(workspaceReviewers).execute();
     }
@@ -255,7 +249,6 @@ describe('getBotAnalytics role split (quality_check is SPLIT OUT, not filtered a
       const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
       // Read at the DEFAULT workspace, so the row keyed to `other` is invisible: greptile is a
       // review bot here and keeps its 'noisy' verdict.
-      expect(resp.qualityChecks).toHaveLength(0);
       const gr = resp.vendors.find((v: { kind: string }) => v.kind === 'greptile')!;
       expect(gr.verdict).toBe('noisy');
     } finally {

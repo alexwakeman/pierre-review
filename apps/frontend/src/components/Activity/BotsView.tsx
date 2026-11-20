@@ -10,7 +10,7 @@ import { effectiveBotsTab } from './benchmarkModel.js';
 import { BotIcon } from '../Icons.js';
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { Tabs, useRegisterCommands, type Command, type TabItem } from '../ui/index.js';
-import { Callout, PageHeader } from './reportChrome.js';
+import { PageHeader } from './reportChrome.js';
 import type { BotsInnerTab } from '../../store/filters.js';
 import type { BotWindowKind } from '@pierre-review/shared';
 
@@ -28,21 +28,17 @@ import type { BotWindowKind } from '@pierre-review/shared';
 // repos is ONE row here, merged by GitHub handle — not six.
 //
 // `repoId` narrows the DATA to one repo (the per-repo Bots tab in the repo console): the
-// analytics, the bot-only-review caution and the vendor drill-down all measure
+// analytics and the vendor drill-down all measure
 // that repo alone. It does NOT narrow the judgement — there is nothing per-repo left to narrow.
 export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
-  // The same analytics query BotRoiPanel drives (same key → deduped), read here for the
-  // governance caution and the tuning suggestions. Same workspace + repo narrowing as the panel, so
-  // both hit the same cache entry.
+  // The same analytics query BotRoiPanel drives (same key → deduped), read here for the tuning
+  // suggestions. Same workspace + repo narrowing as the panel, so both hit the same cache entry.
   const workspaceId = useFilters((s) => s.workspaceId);
   const window = useFilters((s) => s.botAnalyticsWindow);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const { data } = useBotAnalytics(workspaceId, window, true, repoScope);
-  const botOnly = data?.totals.botOnlyPrs ?? 0;
-
-  // The EXACT PR list behind the count lives in the bot-only-PRs drill-down TAB (same
-  // window/workspace/repoIds route → caption ≡ list); the caption just opens it.
-  const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
+  // (The amber "Only a bot reviewed N open PRs" caution and its drill-down tab are REMOVED: Bots
+  // Monitoring measures the review bots, it does not police PRs.)
 
   // Inner sub-tab. A single shared store field (both the cross-repo rail Bots view and the
   // per-repo console Bots tab funnel through this one BotsView), so switching sticks across
@@ -58,7 +54,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   const showThemes = useAiCapabilities().enabled;
   const effectiveTab = effectiveBotsTab(innerTab, { showThemes });
 
-  // ⌘K while Bots Monitoring is showing: the window, and the two lists behind the callouts.
+  // ⌘K while Bots Monitoring is showing: the window, and the list behind the resolve callout.
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
   const openBotThreadsDetail = useFilters((s) => s.openBotThreadsDetail);
   const commands = useMemo<Command[]>(() => {
@@ -79,10 +75,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       win('rolling_14', 'the last 14 days'),
       win('rolling_30', 'the last 30 days'),
       win('sprint', 'this sprint'),
-      { id: 'bots:bot-only', group: 'Actions', title: 'Bots: open PRs only a bot reviewed', icon, run: () => openBotOnlyDetail(repoId ?? null) },
       { id: 'bots:resolve', group: 'Actions', title: 'Bots: review & resolve likely-addressed threads', icon, run: () => openBotThreadsDetail(repoId ?? null) },
     ];
-  }, [setInnerTab, setWindow, openBotOnlyDetail, openBotThreadsDetail, repoId]);
+  }, [setInnerTab, setWindow, openBotThreadsDetail, repoId]);
   useRegisterCommands(repoId != null ? `bots:repo:${repoId}` : 'bots', commands);
 
   const tabs: readonly TabItem<BotsInnerTab>[] = [
@@ -132,37 +127,13 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
         // ONE isolated bot for every per-bot chart below (ROI row + Workspace charts): a legend
         // click in any of them dims the other bots in all of them.
         <BotIsolateProvider>
-          {/* Governance caution: PRs whose only review came from an automated reviewer — no human
-              ever looked. Sourced from the CORE analytics totals; "Show list" opens the
-              bot-only-PRs drill-down tab (same route/scope → count ≡ list). */}
-          {botOnly > 0 && (
-            // The WHOLE caution is clickable — it opens the bot-only-PRs drill-down tab (the exact
-            // PR list behind the count; same route/scope → count ≡ list).
-            <Callout
-              tone="warn"
-              icon={<BotIcon />}
-              onClick={() => openBotOnlyDetail(repoId ?? null)}
-              testId="bot-only-caption"
-              title="Show the open PRs only a bot reviewed"
-              action="Show list →"
-            >
-              Only a bot reviewed{' '}
-              <span className="font-semibold tabular-nums">{botOnly}</span>{' '}
-              open PR{botOnly === 1 ? '' : 's'} — no human review yet. Consider a human pass before
-              they merge.{' '}
-              {/* The count is a live review-state snapshot of currently-OPEN PRs (any age); merged
-                  PRs are excluded here (they're in the list behind "Show merged"). */}
-              <span className="text-ui-mute">Open PRs only, any age.</span>
-            </Callout>
-          )}
-
-          {/* Directly beneath the "only a bot reviewed" caution: the likely-addressed backlog, in
-              the SAME full-width-clickable + "Show list" layout (sky, its own colour). Self-hides
-              when the backlog is empty; opens the resolvable-bot-threads review-and-resolve tab. */}
+          {/* The likely-addressed backlog: a full-width clickable callout with "Show list" (sky).
+              Self-hides when the backlog is empty; opens the resolvable-bot-threads
+              review-and-resolve tab. */}
           <ResolveBacklogBanner workspaceId={workspaceId} repoIds={repoScope} />
 
           {/* Deterministic, ADVISORY tuning hints (which bot × path is mostly noise), read off the
-              SAME analytics response the caution above does. Self-hides when there is nothing to
+              SAME analytics response the ROI panel below does. Self-hides when there is nothing to
               suggest. */}
           <TuningSuggestions suggestions={data?.suggestions ?? []} />
 

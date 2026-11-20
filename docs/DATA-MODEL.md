@@ -1556,10 +1556,11 @@ The column is NOT NULL, default `'review'`.
 the same answer while there were exactly two roles, and became **silently wrong** at six: the
 old spelling re-admits `dependency` / `code_agent` / `release` / `housekeeping` into the ROI,
 behaviour, dedup and benchmark sets. Fixed at four sites — `narrowAutomatedIds`,
-`getBotAnalytics`'s `isQualityCheck`, `getBotOverlap`, `bucketReviewers`. **`grep -n
-"quality_check'"` before adding a fifth.** The wire field
-`BotAnalyticsResponse.qualityChecks` and the frontend bucket of the same name now hold EVERY
-non-reviewer role — the names are historical.
+`getBotAnalytics`'s `isQualityCheck` (since removed with the section), `getBotOverlap`,
+`bucketReviewers`. **`grep -n "quality_check'"` before adding a fifth.** The frontend bucket
+`qualityChecks` (Settings → Bots) holds EVERY non-reviewer role — the name is historical. (The wire
+field `BotAnalyticsResponse.qualityChecks` was REMOVED 2026-11-20: every Bots Monitoring read,
+and the ML scoring worker, now takes the `'review'` set and measures nothing else.)
 
 ⚠ **The STORED role beats the login seed on read.** Widening a vocabulary in code therefore
 does NOTHING for an actor already classified. Migration **`0053`** re-derives `role` for every

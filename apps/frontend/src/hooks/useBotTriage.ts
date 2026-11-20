@@ -3,7 +3,6 @@ import type {
   BotAnalyticsResponse,
   BotBehaviourResponse,
   BotDedupResponse,
-  BotOnlyPrsResponse,
   PrBotBehaviourResponse,
   ResolvableThreadPrsResponse,
   BotWindowKind,
@@ -115,29 +114,6 @@ export function useBotBehaviour(
   });
 }
 
-// The exact PR list behind the analytics `totals.botOnlyPrs` count ("only a bot reviewed
-// these"), served by a dedicated route so the count and its expandable list can't disagree.
-// SAME window/workspace/repoIds as useBotAnalytics → the same server-side resolution, and the same
-// key shape so the two cannot be scoped differently. `enabled` gates the fetch so the caller only
-// hits the route when the panel is expanded.
-export function useBotOnlyPrs(
-  workspaceId: number | null,
-  window: BotWindowKind,
-  enabled = true,
-  repoIds?: number[] | null,
-) {
-  return useQuery<BotOnlyPrsResponse>({
-    queryKey: ['bot-only-prs', window, workspaceKey(workspaceId), repoKeySlot(repoIds)],
-    queryFn:
-      workspaceId == null ? skipToken : () => api.botOnlyPrs(window, workspaceId, repoIds),
-    enabled,
-    refetchInterval: 5 * 60_000, // main sync cadence
-    refetchIntervalInBackground: false,
-    staleTime: 60_000,
-    gcTime: ACTIVITY_GC_TIME,
-  });
-}
-
 // The bot-reviewer listing: ONE `WorkspaceReviewer` row per actor in the workspace, each carrying
 // its judgement (automated / role), its identity (kind / label), its price, and the evidence
 // behind them (`footprint` + `repoFootprints`). Feeds the Settings → Bots list, the feed's vendor
@@ -182,7 +158,7 @@ export function useDetectedReviewers(
 
 // Every query key a reclassification shifts. A reviewer moving in or out of the automated set (or
 // between the review / quality_check roles) changes the ROI table, the behaviour analytics, the
-// bot-only-PR list, the resolvable backlog, the Activity console's acted-on stats, the bot feed
+// resolvable backlog, the Activity console's acted-on stats, the bot feed
 // and each PR's cached detail (its Bots chip + Bot-activity tab).
 // The old hook invalidated only two of these, which read as "the setting didn't take".
 const RECLASSIFY_INVALIDATE_KEYS = [
@@ -193,7 +169,6 @@ const RECLASSIFY_INVALIDATE_KEYS = [
   'bot-reviewers',
   'bot-analytics',
   'bot-behaviour',
-  'bot-only-prs',
   'bot-resolvable',
   // The "what the bots are flagging" drill-down. Its population IS the automated set — the
   // server's label scan filters on `automatedReviewerUserIds`, so marking a login human (or a
@@ -409,7 +384,6 @@ export function useScopeResolveBotThreads() {
     onSettled: (_data, _err, vars) => {
       void qc.invalidateQueries({ queryKey: ['bot-resolvable'] });
       void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
-      void qc.invalidateQueries({ queryKey: ['bot-only-prs'] });
       // The flagging drill-down's comment cards and cluster members both render `derivedState`,
       // which a resolve just changed.
       void qc.invalidateQueries({ queryKey: ['bot-flagging'] });

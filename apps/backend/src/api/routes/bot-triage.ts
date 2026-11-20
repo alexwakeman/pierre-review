@@ -4,7 +4,6 @@ import type {
   BotFlaggingRefine,
   BotFlaggingResponse,
   BotFlaggingSelector,
-  BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotVolumeResponse,
   BotVolumeScatterResponse,
@@ -26,7 +25,6 @@ import { getBotOverlapClusters } from '../../db/bot-overlap.js';
 import { getBotVolume, getBotVolumeScatter } from '../../db/bot-volume.js';
 import {
   getBotAnalytics,
-  getBotOnlyPrs,
   getBotDedupClusters,
   getResolvableBotThreadPrs,
   getResolvableBotThreadsForScope,
@@ -478,7 +476,7 @@ const scopeResolveSchema = {
 
 // Bot-triage platform routes: detection/override + the reviewer listing (bot hiding on
 // Feed/Timeline reads it), per-PR cross-bot dedup, and everything the Bots Monitoring screen reads
-// (ROI analytics, the ML flagging strip, the volume family, the bot-only list, the resolvable-thread
+// (ROI analytics, the ML flagging strip, the volume family, the resolvable-thread
 // backlog + resolve, every drill-down, the seat prices).
 //
 // Every handler is account-scoped via accountIdOf(req); id-addressed reads/writes verify ownership
@@ -688,23 +686,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
 
   // The bot BEHAVIOUR analytics route is `GET /api/pro/bot-behaviour` (platform/bots/
   // behaviour-routes.ts); the compute is core (db/queries.ts getBotBehaviourAnalytics).
-
-  // The exact PR list behind the analytics totals.botOnlyPrs count — "only a bot reviewed these".
-  // Same window/scope resolution as /api/bot-analytics so the amber caption's number and this
-  // expandable list are computed identically and can't drift. Unbounded but small (real bot-only
-  // PRs); no pagination.
-  app.get('/api/bot-analytics/bot-only-prs', { schema: analyticsSchema }, async (req, reply) => {
-    const { window, workspace, repoIds } = req.query as {
-      window: BotWindowKind;
-      workspace?: string;
-      repoIds?: string;
-    };
-    const accountId = accountIdOf(req);
-    const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const { window: win, prs } = await getBotOnlyPrs(accountId, window, scope);
-    const resp: BotOnlyPrsResponse = { window: win, prs, generatedAt: new Date().toISOString() };
-    return resp;
-  });
 
   // ── "WHAT THE BOTS ARE FLAGGING" ──────────────────────────────────────────────────────────
   // The drill-down behind every tile and chip on the Bots rail's ML strip. `select` picks the

@@ -124,7 +124,6 @@ export function pendingCardText(card: InsightCard): string {
       return withDetail('Dependency bump', card.detail);
     case 'reviewer_load':
     case 'bot_signal':
-    case 'bot_only_review':
     // The reader's own PRs — a personal tab, never in a team digest.
     case 'waiting_on_others':
     // The AI reviews reference list — personal and the live board's alone.

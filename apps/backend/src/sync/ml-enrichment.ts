@@ -18,6 +18,14 @@
 //   • a bot classified LATER (workspace_reviewers rows are written lazily, on a read of the
 //     Bots tab — never by sync) brings its whole backlog with it on the next tick,
 //   • a restart loses nothing: there is no in-memory queue to drop.
+//
+// ONLY REVIEW BOTS ARE SCORED. `listMlCandidates` selects text by the workspace's REVIEWER
+// COHORT (`automatedReviewerUserIds(…, 'review')` — the stored role beating the login seed), so
+// a quality check (SonarCloud's "Quality Gate passed" summary, Codecov), a dependency bot, a code
+// agent, release or housekeeping automation is never categorised or given a severity. The verdict
+// is the repo's HOME workspace's (External repos are never scored, below). Re-roling a bot to
+// 'review' there makes its unlabelled text candidates on the next tick; re-roling it away stops
+// scoring and every read ignores its stored labels (docs/ML-SEVERITY.md § Who is scored).
 /** The subset of a logger this worker uses — pino (app.log) and sync-repo's minimal
  * Logger both satisfy it structurally, so any sync path can kick a tick. */
 export interface MlLog {
@@ -430,8 +438,8 @@ export async function runMlEnrichmentTick(log: MlLog): Promise<TickStats> {
       // Bot scoring is OPT-IN per repo (Repos & workspaces; db/repo-bot-scoring.ts).
       const enabled = await botScoringEnabledRepoIds(accountId);
       if (enabled.size === 0) continue;
-      // Every workspace, because a repo lives in exactly one and the bot verdict is per
-      // workspace: the same login can be a bot in one and a person in another.
+      // Every workspace, because a repo lives in exactly one and the bot verdict (and ROLE) is
+      // per workspace: the same login can be a review bot in one and a person in another.
       for (const workspace of await listWorkspaces(accountId)) {
         if (Date.now() >= deadline) break;
         // EXTERNAL REPOS (db/external-repos.ts) are left out: their bot comments are not watched,

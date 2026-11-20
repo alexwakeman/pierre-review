@@ -52,15 +52,9 @@ export default function Page(): JSX.Element {
         <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>.
       </p>
 
-      <H2 id="callouts">The two callouts</H2>
-      <H3>Only a bot reviewed</H3>
+      <H2 id="callouts">Likely-addressed bot threads</H2>
       <p>
-        When open pull requests have had a review from a bot and none from a person, a callout says how many. Select{' '}
-        <Ui>Show list →</Ui> to see them. Consider a human pass before they merge.
-      </p>
-      <H3>Likely-addressed bot threads</H3>
-      <p>
-        When later commits look as if they dealt with bot threads that are still open, a second callout counts them.
+        When later commits look as if they dealt with bot threads that are still open, a callout counts them.
         Select <Ui>Show list →</Ui> to review them and resolve them on GitHub in one go. “Looks addressed” is a guess
         (a commit touched the file after the comment), so check each one before you resolve it.
       </p>
@@ -69,8 +63,8 @@ export default function Page(): JSX.Element {
       <p>
         Ensemble recognises most bots by their GitHub account and how they behave, and gives each one a category:{' '}
         <Ui>Review bot</Ui>, <Ui>Quality check</Ui>, <Ui>Dependency updates</Ui>, <Ui>Code agent</Ui>,{' '}
-        <Ui>Release automation</Ui> or <Ui>Housekeeping</Ui>. Only review bots are measured on the ROI table; quality
-        checks are listed apart, because nobody is meant to reply to them. To change a bot’s category, mark an
+        <Ui>Release automation</Ui> or <Ui>Housekeeping</Ui>. Bots Monitoring shows review bots only. Quality checks
+        and the other categories are listed in Settings → Bots. To change a bot’s category, mark an
         account as a bot or a person, or set its price, open{' '}
         <DocLink to="settings/bots">Settings → Bots</DocLink>.
       </p>

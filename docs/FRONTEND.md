@@ -287,7 +287,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
     screen to explain it. **The Workspace is the scope; the rail is how you narrow it.** Clicking a
     repo row in the Activity rail is the per-repo view, and that is a DIFFERENT mechanism
     (`filters.activityRepoId`, a single repo id) which is unchanged — as are the drill-down tables'
-    own repo-column filter dropdowns (`BotThreadsDetail`, `BotOnlyPrsDetail`, `MetricRepoFilter`),
+    own repo-column filter dropdowns (`BotThreadsDetail`, `MetricRepoFilter`),
     which filter rows already on screen rather than scoping a fetch.
   - Timeline-only, i.e. rendered **only when the Timeline board is the active tab**
     (`isTimeline = activeTab === 'timeline'`): Members (auto-scoped, exclude-bots toggle), range
@@ -627,10 +627,17 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   the never-mounted `FeedOpenPrsPanel` are DELETED; the old `MetricsDetail` `open_prs` sub-tab is
   GONE too. Pinned in `test/openPrsTab.test.ts` + `landingTab.test.ts`.
   Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
-  URL/localStorage-persisted, never pinnable; a reload drops them): `metrics-detail`, `bot-only-prs`
-  (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
+  URL/localStorage-persisted, never pinnable; a reload drops them): `metrics-detail` and
+  `bot-threads` (sortable +
   DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
-  scope-wide review & resolve). **`user-activity` is the one drill-down keyed PER USER**, not a
+  scope-wide review & resolve). (`bot-only-prs` — the "Only a bot reviewed N open PRs" list — was
+  REMOVED 2026-11-20 with its callout, its ROI summary link and its ⌘K command: `BotOnlyPrsDetail`,
+  the TabKind, `openBotOnlyDetail` + `botOnlyFocusRepoId`, `useBotOnlyPrs` and `client.botOnlyPrs`
+  are deleted; a saved `bot-only-prs` tab is dropped on load. The server route and
+  `totals.botOnlyPrs` went too, with the `bot_only_review` card: `KIND_LABEL`, `KIND_ICON`,
+  `INSIGHT_KINDS` and `BOT_CARD_KINDS` no longer name it, and an old `?attn=bot_only_review` link
+  falls through to no isolation.)
+  **`user-activity` is the one drill-down keyed PER USER**, not a
   singleton (`userActivityKey(userId)` / `parseUserActivityKey`): two people's feeds can sit side
   by side and re-clicking a handle re-focuses their tab. It needs no filters-store seed — the tab
   KEY carries the userId, so a stale key can never show the wrong person; `Tab.userMeta` carries
@@ -652,7 +659,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   `store/filters.ts` (`{fromActivity:true}` stamps the feed card to flash on a Back — the entry
   itself is the URL's, see the Back-button note below), a full-`<main>` overlay
   branch in `App.tsx` (MUST join `overlayActive`), and a compact chip in `PinnedTabsBar`. The
-  drill-down TABLES (bot-only-prs / bot-threads, **plus `MetricsDetail`** — now
+  drill-down TABLES (bot-threads, **plus `MetricsDetail`** — now
   retrofitted, per-tab `sortByTab` state; its four DURATION tabs add a "Longest first" / "Fastest
   first" toggle that only re-seeds the value-column sort — remembered per viewer in localStorage
   `pierre:metricsFastestFirst`, try/catch-wrapped — and a duration with no figure sorts LAST either
@@ -2535,13 +2542,16 @@ but broken deep links).
   the vendor table, its keep / tune / rarely used verdicts (the label for the `noisy` verdict id),
   the **Inflation column** (the weekly sparkline stays separately conditional on
   `mlInflation.weekly`, an extra scan width — as does `InflationHistoryChart`, the enlarged twin of
-  that sparkline in this panel's chart row, on the same field and the same `showMlColumns` gate;
+  that sparkline in this panel's chart row, on the same field and the same `showInflation` gate —
+  `lib/botRoiColumns.ts` `inflationShown(showMlColumns, vendors)`: the ML columns are on AND not
+  every row is Ensemble's own bot (kind `'pierre'` or a `limn:` login; Ensemble's findings carry the
+  review's own severity, so there is no badge to compare). ONE flag for the `<th>`, the `<td>` and
+  the chart; `test/botRoiColumns.test.ts`;
   contract in docs/ML-SEVERITY.md § The enlarged inflation chart), the deterministic **"What the
   bots are flagging"** ML totals strip (`MlTotalsStrip` — no AI), the volume column and every
   drill-down. ⚠ The AI report titled **"What they're flagging"** LEFT this panel and is the
   `Bots → Themes` sub-tab — which is also what pulled the two near-identical headings apart: they
-  used to sit on one screen, and now cannot. Around it, in `BotsView`: the amber bot-only
-  governance caution, the resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of
+  used to sit on one screen, and now cannot. Around it, in `BotsView`: the resolve backlog, the **hoisted `TuningSuggestions` box** (moved OUT of
   the panel — do not move it back; it sits ABOVE the table) and the bot feed. (Until 2026-10-22 the
   whole Bots Monitoring pane was Pro, visible-but-locked; the locks, badges and gated hooks are
   gone.)
@@ -2555,8 +2565,8 @@ but broken deep links).
   and invites the next reader to "restore" the column. ⚠ **Do NOT simplify `showCost` to `true`.**
 - **THE ROI TABLE, 2026-11-20.** Columns: Bot · Threads · Comments · Comments/PR · Used · Not
   addressed · Merged anyway · Time to address · **First review** · **Follow-ups** · % not addressed ·
-  Overlap · [Severity mix · Inflation, `showMl`] · [$ per used thread, `showCost`] · Verdict — ONE
-  header row (no `rowSpan`). REMOVED: "Unanswered after Nh", "Oldest not addressed", High, Nits, the
+  Overlap · [Severity mix, `showMl` · Inflation, `showInflation`] · [$ per used thread, `showCost`] ·
+  Verdict — ONE header row (no `rowSpan`). REMOVED: "Unanswered after Nh", "Oldest not addressed", High, Nits, the
   "Not addressed by severity" group, the Depth column. The bot NAME opens the depth tab; Comments/PR
   is plain text (`BotVolumeDetail`, the `'bot-volume'` TabKind, `botVolumeSeed` and
   `client.botVolumePrs` are deleted, and so is the route `GET /api/bot-analytics/volume/prs`).
@@ -2577,6 +2587,18 @@ but broken deep links).
     (`u<id>`); loading is a pulse, a null "—"; ⚠ NOT dashed for a dormant bot (their population is
     PRs first reviewed in the window, not threads). Two TREND CARDS beside Thread volume ("Time to
     first review", "Follow-up rate"), one line per review bot from `BotBehaviourBotStat.trend`.
+    ⚠ "Time to first review" is a LOG axis of hours with NAMED ticks (`LineChart` `logScale`,
+    `lib/logAxis.ts` `HOUR_TICKS`: 1m · 10m · 1h · 6h · 1d · 3d · 1w · 4w — only those bracketing the
+    data, thinned so no two labels touch); a median under 1 minute (a 0 too) is DRAWN on the 1-minute
+    floor (its ⓘ says so), the hover shows the real value, a null week stays a gap. Every
+    `LineChart` centres its y labels on their gridline (`dominantBaseline="middle"`, `PAD_T` 10) and
+    sizes the left pad at ≈ 8.4px a character (`text-meta` is 14px in page content), so the top
+    "100%" is drawn whole; `e2e/bots-monitoring.spec.ts` checks every label sits inside its SVG.
+    (`BarChart` / `StackedAreaChart` / `ScatterChart` still use the old 36px pad + baseline offset.)
+  - **REVIEW BOTS ONLY** (2026-11-20). The collapsed "Quality checks — excluded from ROI" section
+    (`QualityCheckSection`, both mounts) is DELETED and the panel never reads
+    `BotAnalyticsResponse.qualityChecks`; a quality check is listed in Settings → Bots ("Other
+    automation"). The summary line under the tiles lost its "N bot-only open PRs" link.
   - **The chart row** holds Thread volume + the two trend cards (+ the conditional
     `InflationHistoryChart`). "Bot effectiveness" and "Used vs not addressed" MOVED into
     `WorkspaceBotCharts` (rendered first in the opened section, read from `useBotAnalytics` — the ROI
@@ -5442,8 +5464,7 @@ target with no label renders nothing. Gated on `MeResponse.mlSeverity` (a TOP-LE
   Timeline's default bot hiding reads the same union) — before the page
   cap — so a thread a person and a bot both replied on shows on BOTH sides, and an actor-less row
   is a person's. The old Bots-rail bot feed (`botsMode`, `botsOnly`, `botWindowDays`, vendor
-  pills) is DELETED; Bot-only-PRs "Show in feed" now opens the Feed's Bots side with the PR
-  isolated.
+  pills) is DELETED.
 - **A person's activity tab hides the toggle** and picks the side from the subject (all viewed
   actors bots → `'bots'`, else `'humans'`), derived for the render, never written back.
 - **No My Turn, Needs review, Claude Reviews or CI-failure pills, and no such items** — Pending
@@ -6142,7 +6163,7 @@ already padded by `PAGE_GUTTER` passes `inset={false}`.
   name, the Activity | Bots tabs under it), the story tab, Implement (StoryBuildHeader — the ticket
   title FIRST; "Implement · ACME-1 · Open ticket", the steps and the status line moved under it),
   a person's activity, a bot's depth tab, Flow metrics, the bot drill-downs (Bot Drill-Down,
-  Bot-only PRs, Resolve bot threads, What the bots are flagging, Bot comments per merged PR), a
+  Resolve bot threads, What the bots are flagging, Bot comments per merged PR), a
   theme's threads and Search. These overlays used to pad `p-4` with a `text-title` heading.
 - **The full-screen PR detail is the one view that is not a `PageHeader`** (its title truncates,
   its meta line and tabs are its own); it uses the SAME two tokens and marks its `h2`

@@ -86,7 +86,8 @@ export default function Page(): JSX.Element {
         <li>
           <Ui>Severity mix</Ui> and <Ui>Inflation</Ui>: from Ensemble’s own severity model (see{' '}
           <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>). These columns appear once comments
-          have been scored.
+          have been scored. <Ui>Inflation</Ui> and its chart are hidden when Ensemble is the only review bot, because
+          Ensemble’s findings keep the severity its review gave them.
         </li>
         <li>
           <Ui>$ per used thread</Ui>: the bot’s monthly price divided by the used threads it produces in a month, at
@@ -132,7 +133,8 @@ export default function Page(): JSX.Element {
       <H2 id="bot-charts">Charts</H2>
       <p>
         Above the table: <Ui>Thread volume</Ui>, <Ui>Time to first review</Ui> and <Ui>Follow-up rate</Ui>, each
-        weekly for the last 12 weeks, one line per review bot.
+        weekly for the last 12 weeks, one line per review bot. <Ui>Time to first review</Ui> uses a log scale, so a
+        bot that answers in minutes and one that answers in days fit on one chart.
       </p>
       <p>
         Click a bot’s name for its own charts: response times, coverage, consistency and severity over time.
@@ -151,8 +153,7 @@ export default function Page(): JSX.Element {
         <Ui>Where bots work</Ui>, <Ui>PR size vs bot comment volume</Ui> and the overlap between bots.
       </p>
       <Tip>
-        Press <Kbd>⌘K</Kbd> and type “Bots: measure” to change the window, or “Bots: open PRs only a bot reviewed” to
-        see the pull requests no person has looked at.
+        Press <Kbd>⌘K</Kbd> and type “Bots: measure” to change the window.
       </Tip>
 
       <H2 id="why-it-helps">Why it helps</H2>

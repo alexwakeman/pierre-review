@@ -14,7 +14,7 @@ export default function Page(): JSX.Element {
         <Ui>Pending</Ui> is everything waiting on you or your workspace, across every repository, in eight
         tabs. Each item is one line; select it to see the whole card in a side panel, with the buttons to act
         on it. Pending is worked out again every time it loads, from what GitHub says now. An item leaves when
-        the work it describes is done.
+        the work it describes is done. A pull request that only a bot reviewed is not an item.
       </p>
 
 

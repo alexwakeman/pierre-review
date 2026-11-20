@@ -45,7 +45,7 @@ beforeEach(() => {
 describe('pinning', () => {
   it('only PR, story and build tabs can be pinned', () => {
     for (const kind of ['pr-detail', 'pr-focus', 'ticket', 'story-build'] as const) expect(canPinTab({ kind })).toBe(true);
-    for (const kind of ['bot-only-prs', 'metrics-detail', 'search', 'bot-flagging', 'user-activity'] as const)
+    for (const kind of ['bot-threads', 'metrics-detail', 'search', 'bot-flagging', 'user-activity'] as const)
       expect(canPinTab({ kind })).toBe(false);
     s().openMetricsTab();
     s().togglePinTab(METRICS_TAB_KEY);
@@ -183,14 +183,17 @@ describe('a reload', () => {
     expect(fresh.tabs[2]?.ticketMeta?.buildOffer).toEqual({ action: 'fill_gaps', reviewId: 7, endToEnd: true });
   });
 
-  // 'bot-prs' (the per-bot comments drill-down) was REMOVED 2026-11-20: an old saved state that
-  // still names it — even marked pinned — must load without it, never crash or resurrect it.
+  // 'bot-prs' (the per-bot comments drill-down) and 'bot-only-prs' (the bot-only-PRs drill-down)
+  // were REMOVED 2026-11-20: an old saved state that still names one — even marked pinned — must
+  // load without it, never crash or resurrect it.
   it('a stored pinned key of an unknown or removed kind is dropped, and a bad label falls back to the key', async () => {
     mem.set(
       'pierre:tabs',
       JSON.stringify([
         { key: 'bot-prs', kind: 'bot-prs', prId: 0, meta: null, pinned: true },
         { key: 'bot-prs', kind: 'bot-prs', prId: 0, meta: null },
+        { key: 'bot-only-prs', kind: 'bot-only-prs', prId: 0, meta: null, pinned: true },
+        { key: 'bot-only-prs', kind: 'bot-only-prs', prId: 0, meta: null },
         { key: 'mystery:7', kind: 'mystery', pinned: true },
         { key: storyBuildTabKey(IDENT), pinned: true, ticketMeta: { key: 42, title: ['x'] } },
       ]),
@@ -198,6 +201,7 @@ describe('a reload', () => {
     const fresh = (await reload()).usePinnedTabs.getState();
     expect(fresh.tabs).toHaveLength(1);
     expect(fresh.tabs.some((t) => (t.kind as string) === 'bot-prs')).toBe(false);
+    expect(fresh.tabs.some((t) => (t.kind as string) === 'bot-only-prs')).toBe(false);
     expect(fresh.tabs[0]?.ticketMeta).toEqual({ ident: IDENT, key: 'PLAT-310', title: null });
   });
 });

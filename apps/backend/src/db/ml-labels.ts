@@ -7,11 +7,21 @@
 //   3. READS       — the per-PR badge index, and the Bots severity rollup
 //
 // WHO COUNTS AS A BOT is not decided here: it is `automatedReviewerUserIds(accountId,
-// workspaceId, 'all')` from queries.ts, the one workspace-grain answer. `'all'` rather than
-// `'review'` on purpose — a quality check (SonarQube, Codecov, Hound) posts exactly the kind
-// of finding a severity label is FOR, and the role split exists to stop a linter's volume
-// distorting a REVIEWER's ROI numbers, which is a different question from "how bad is this
-// comment". The role is still reported per row, so a consumer can narrow.
+// workspaceId, 'review')` from queries.ts, the one workspace-grain answer, and EVERY function in
+// this file asks for the REVIEWER COHORT (`=== 'review'`, the STORED role beating the login seed)
+// — never `'all'`. A quality check (SonarCloud's "Quality Gate passed" summary, Codecov), a
+// dependency bot, a code agent, release or housekeeping automation is NOT scored, NOT counted as
+// pending, and NOT read by any rollup, drill-down or badge (docs/ML-SEVERITY.md § Who is scored).
+// Severity and category describe a REVIEW FINDING; a linter's verdict post has neither.
+//
+// THE GRAIN IS THE REPO'S HOME WORKSPACE. The worker scores a repo only under its home workspace
+// (`scoreableRepoIds` skips External), so a bot is a candidate on a repo iff it is a review bot
+// THERE — the same grain the "is it a bot at all" verdict already used. Every READ filters by the
+// READER's workspace review set, so a label written while a bot was a reviewer and kept after it
+// was re-roled is IGNORED, never deleted (re-roling it back to 'review' shows it again, and makes
+// its unlabelled text candidates again on the next tick — the worker re-derives the set per tick).
+// Limn's own bots (`limn:<login>`) carry a stored `role: 'review'` row (db/limn-bots.ts), so
+// their finding labels keep reading as before.
 //
 // TIMING: `workspace_reviewers` rows are written LAZILY (listDetectedReviewers, on a read of
 // the Bots tab), never by sync. Known vendor logins are automated with zero stored rows, so
@@ -48,6 +58,7 @@ import { botWindowMs } from './bot-window.js';
 import { labelFor as labelForKind } from '../sync/reviewer-classify.js';
 import {
   automatedReviewerUserIds,
+  botScopeForPr,
   classificationKindForUser,
   classificationLabelMap,
   listWorkspaces,
@@ -172,7 +183,9 @@ export async function listMlCandidates(
   limit: number,
 ): Promise<MlCandidate[]> {
   if (scope.repoIds.length === 0) return [];
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  // ⚠ `'review'` — ONLY a review bot's text is ever scored (see the header). A quality check's
+  // summary comment is never a candidate, so it is never labelled and never pending.
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) return [];
 
   // The join predicate is identical for all three kinds bar the discriminator and which id
@@ -466,10 +479,24 @@ export async function getPrMlLabels(
     .execute();
   if (owned.length === 0) return null;
 
+  // Only REVIEW bots' labels, judged by the PR's own (home) workspace — the grain the worker
+  // scored it at. A label stored for a bot that is not (or no longer) a reviewer there — a quality
+  // check's summary comment scored before the review-only rule — is never shown (see the header).
+  const scope = await botScopeForPr(accountId, prId);
+  if (scope == null) return [];
+  const reviewIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
+  if (reviewIds.length === 0) return [];
+
   const rows = await db
     .select()
     .from(mlCommentLabels)
-    .where(and(eq(mlCommentLabels.accountId, accountId), eq(mlCommentLabels.prId, prId)))
+    .where(
+      and(
+        eq(mlCommentLabels.accountId, accountId),
+        eq(mlCommentLabels.prId, prId),
+        inArray(mlCommentLabels.authorUserId, reviewIds),
+      ),
+    )
     .execute();
   return rows.map(toWireLabel).filter((l): l is MlLabel => l !== null);
 }
@@ -520,7 +547,8 @@ export async function getBotSeverityRollup(
   };
   if (scope.repoIds.length === 0) return empty;
 
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  // `'review'` — the reviewer cohort only (see the header).
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) return empty;
 
   const [labelRows, kindMap, labelMap, userRows, pending, unscorable] = await Promise.all([
@@ -1281,7 +1309,8 @@ export async function getMlBacklogForAccount(accountId: number): Promise<MlBackl
     const repoIds = scoreableRepoIds(ws, enabled);
     if (repoIds.length === 0) continue;
     const scope: BotScope = { workspaceId: ws.id, repoIds };
-    const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'all');
+    // ⚠ LOCKSTEP with `listMlCandidates`: the review set, or "pending" counts text nobody scores.
+    const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'review');
     if (automatedIds.length === 0) continue;
     pending += await countUnlabelledBotText(accountId, scope, automatedIds);
     unscorable += await countUnscorableBotText(accountId, scope, automatedIds);
@@ -1316,7 +1345,8 @@ export async function getMlBacklogForRepo(
   // The HOME workspace: the one where it is a member and not External (a repo has exactly one).
   const home = (await listWorkspaces(accountId)).find((w) => scoreableRepoIds(w, new Set([repoId])).length > 0);
   if (home == null) return { pending: 0, labelled };
-  const automatedIds = await automatedReviewerUserIds(accountId, home.id, 'all');
+  // ⚠ LOCKSTEP with `listMlCandidates` (the review set).
+  const automatedIds = await automatedReviewerUserIds(accountId, home.id, 'review');
   if (automatedIds.length === 0) return { pending: 0, labelled };
   const pending = await countUnlabelledBotText(accountId, { workspaceId: home.id, repoIds: [repoId] }, automatedIds);
   return { pending, labelled };
@@ -1876,9 +1906,10 @@ export async function foldBotFlaggingPopulation(
     truncated: false,
   };
   if (scope.repoIds.length === 0) return empty;
-  // `'all'`, not `'review'` — the strip counts quality checks too, and a drill-down that narrowed
-  // the bot set would list fewer rows than the tile it opened from.
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  // `'review'` — the SAME set getBotAnalytics hands getMlWindowAggregates for the strip, so the
+  // drill-down lists exactly the tile's rows. A quality check (SonarCloud's summary comment) is
+  // never in it, even when an older label for it is still stored.
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) return empty;
 
   // ── Phase 1: the population scan ─────────────────────────────────────────────────────────

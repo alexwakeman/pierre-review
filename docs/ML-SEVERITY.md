@@ -175,19 +175,33 @@ state of a dev machine without the sibling repo running) must not disturb anythi
 
 ---
 
-## Who counts as a bot
+## Who counts as a bot — who is scored
 
-`automatedReviewerUserIds(accountId, workspaceId, 'all')` — the one workspace-grain answer,
+`automatedReviewerUserIds(accountId, workspaceId, 'review')` — the one workspace-grain answer,
 which already honours known vendor logins, auto-classification and **manual user-defined bots**
-(and a manual "this is actually a human", which removes even a known vendor login).
+(and a manual "this is actually a human", which removes even a known vendor login), narrowed to
+the **reviewer cohort** (`=== 'review'`; the STORED role beats the login seed).
 
-- **Role `'all'`, not `'review'`**, on purpose. A quality check (SonarQube, Codecov, Hound)
-  posts exactly the kind of finding a severity label is *for*. The role split exists to stop a
-  linter's volume distorting a *reviewer's* ROI numbers, which is a different question from
-  "how bad is this comment".
-- **Per workspace.** A repo lives in exactly one workspace, so the comment's bot-ness is
-  determined by the workspace that owns its repo. The same login can be a bot in one workspace
-  and a person in another; nothing reconciles them.
+- **Review bots ONLY (2026-11-20).** A quality check (SonarCloud's "Quality Gate passed" summary,
+  Codecov), a dependency bot, a code agent, release or housekeeping automation is **never
+  categorised or given a severity**: it is not a candidate (`listMlCandidates`), not pending
+  (`countBotText`, `getMlBacklogFor*` — in lockstep), and **every read ignores a label already
+  stored for it** — the ROI `ml` block and per-vendor `ml*` fields, the flagging drill-downs
+  (`foldBotFlaggingPopulation`: findings / summaries / severity / category, the matrix and the
+  Inflation cells), the Behaviour ML fold, the standalone rollup and the per-PR badges
+  (`getPrMlLabels`, judged by the PR's home workspace). Old labels are **not deleted**: re-roling
+  the bot to `review` shows them again and makes its unlabelled text candidates on the next tick
+  (the worker re-derives the set every tick). A deep re-sync's `deleteMlLabelsForRepo` is the
+  purge path, if one is wanted. (It used to be `'all'`, on the theory that a linter posts
+  findings; in practice it posts verdicts, and the category/severity drill-downs filled with
+  SonarCloud summaries.)
+- **Per workspace — the repo's HOME workspace.** A repo lives in exactly one workspace and the
+  worker never scores External repos, so a comment's bot-ness AND role are those of the workspace
+  that owns its repo. The same login can be a review bot in one workspace and a quality check
+  (or a person) in another; nothing reconciles them. Consequence, deliberate: a bot that is a
+  review bot ONLY in a workspace where the repo is External gets no labels there — scoring by
+  "review in ANY workspace" would re-admit a SonarCloud account-wide the moment one workspace
+  flipped it, and the reader's workspace filters every read anyway.
 - The `kind` (vendor identity) is passed to the service as its optional `vendor` hint, but only
   for the 16 real vendor names — `in_house` / `pierre` / `vendor` are not vendor names and are
   filtered out (the `vendorKindOf` predicate's shape).
@@ -376,7 +390,7 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     scored (84%)"), announces a truncated scan, and calls out a marker-fallback deployment.
     Its fifth tile, **"Same-line overlap"**, is the one number on this strip that is NOT model
     output: `totals.overlapClusters` counts the window's ±3-line clusters that more than one
-    review bot flagged (`db/line-overlap.ts`; quality checks and null-line threads excluded).
+    review bot flagged (`db/line-overlap.ts`; review bots only, null-line threads excluded).
     It rides `totals`, not the `ml` block, for exactly that reason — and it is **not** the sum
     of the rows' `overlapThreads`, since a cluster credits every bot in it.
   - the per-vendor `ml*` fields (`mlFindings`, `mlBySeverity`). ⚠ A bot with no in-window
@@ -386,8 +400,8 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     2026-11-20, and with them the `mlHighPct` / `mlNitPct` / `notAddressedBySeverity` wire
     fields and their computation.)
   - the **nit-ratio tuning suggestion**: findings ≥ 20 AND nit share ≥ 0.7 → a
-    `BotTuningSuggestion` filling its (previously always-null) `severity` slot; skipped for
-    quality checks.
+    `BotTuningSuggestion` filling its (previously always-null) `severity` slot (review bots
+    only, like every number here).
   - ⚠ **THE VERDICT IS NO LONGER ML-FREE**, and this is the one place a label changes a
     judgement. A bot past those SAME two gates (`ML_NIT_MIN_FINDINGS` / `ML_NIT_MIN_SHARE` —
     ONE pair of constants shared by the suggestion and `botVerdict`, so the chip and the
@@ -426,8 +440,9 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     Accuracy).
   - **§ The enlarged inflation chart** — `InflationHistoryChart`
     (`components/Activity/InflationHistoryChart.tsx`), a fourth full-width `ChartCard` in
-    `BotRoiPanel`'s existing chart row, gated on the SAME `showMlColumns` flag as the column it
-    enlarges. The 52×14px cell sparkline is `aria-hidden` and stays that way; this card is the same
+    `BotRoiPanel`'s existing chart row, gated on the SAME `showInflation` flag as the column it
+    enlarges (`lib/botRoiColumns.ts` `inflationShown`: the ML columns are on and not every row is
+    Ensemble's own bot — Ensemble's findings carry their review's severity, so nothing to compare). The 52×14px cell sparkline is `aria-hidden` and stays that way; this card is the same
     `mlInflation.weekly`, same two direction hues, at a size that can carry a **key**, an **axis**
     and a **hover**. It costs no request — the panel already holds the rows. What it must keep:
     ⚠ **it plots COUNTS, never a rate** (there is no weekly `badged`/`agree` on the wire — the

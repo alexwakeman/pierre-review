@@ -802,7 +802,7 @@ export async function scoreCards(
       });
       continue;
     }
-    // reviewer_load / bot_signal / bot_only_review are SURVEYS of the workspace, not things one
+    // reviewer_load / bot_signal are SURVEYS of the workspace, not things one
     // person does today. They are deliberately not worklist rows.
     //
     // ⚠ AND NEITHER ARE `conflicts`, `security` OR `dependency_bump`, WHICH ARE NOT SURVEYS — so
