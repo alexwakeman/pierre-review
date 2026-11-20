@@ -77,8 +77,9 @@ export function releaseSnapshotChanges(
     const now = repoById.get(b.repoId);
     const name = repoName(b.repoId);
     if (now == null) out.push(`${name} is no longer in this workspace.`);
-    else if (now.candidate == null) out.push(`${name} has no tag that can be released now.`);
-    else if (now.candidate.name !== b.tagName) out.push(`${name}: the tag to release is now ${now.candidate.name}, not ${b.tagName}.`);
+    else if (now.candidate == null) out.push(`${name} has ${now.basis === 'prs' ? 'nothing' : 'no tag'} that can be released now.`);
+    else if (now.candidate.name !== b.tagName)
+      out.push(`${name}: ${now.basis === 'prs' ? 'the release now goes up to' : 'the tag to release is now'} ${now.candidate.name}, not ${b.tagName}.`);
     else if (now.candidate.sha !== b.sha) out.push(`${b.tagName} in ${name} now points at another commit.`);
   }
   for (const c of extra.liveShaChanged ?? []) {
@@ -132,6 +133,10 @@ export interface ReleaseNotesRepo {
   scope: 'since_release' | 'since_start';
   untracked: ReleaseNotesPr[];
   bot: ReleaseNotesPr[];
+  /** What it was cut from (absent = version tags). 'prs': `versionTag` is the release point (`#539`). */
+  basis?: 'tags' | 'prs';
+  /** The released commit (absent in older callers). */
+  sha?: string;
 }
 
 /** The PR ids in a repo's candidate scope. Pure. */
@@ -182,6 +187,8 @@ export function releaseNotesInputOf(
     scope: r.scope,
     untracked: r.untrackedPrIds.map(prRef).filter((p): p is ReleaseNotesPr => p != null),
     bot: r.botPrIds.map(prRef).filter((p): p is ReleaseNotesPr => p != null),
+    basis: r.basis ?? 'tags',
+    sha: r.candidate!.sha,
   }));
 }
 
@@ -205,9 +212,11 @@ function prLine(p: ReleaseNotesPr): string {
 
 /** ONE repo's section — also its GitHub pre-release body. Pure. */
 export function releaseNotesSection(repo: ReleaseNotesRepo): string {
-  const lines: string[] = [`## ${notesText(repo.repoName)} ${notesText(repo.releaseTagName)}`, '', `Built from ${notesText(repo.versionTag)}.`];
+  const byPoints = repo.basis === 'prs';
+  const built = byPoints && repo.sha != null ? `${notesText(repo.versionTag)} (${repo.sha.slice(0, 7)})` : notesText(repo.versionTag);
+  const lines: string[] = [`## ${notesText(repo.repoName)} ${notesText(repo.releaseTagName)}`, '', `Built from ${built}.`];
   // No release yet: everything up to the candidate tag ships, so everything is listed.
-  if (repo.scope === 'since_start') lines.push('', 'First release: everything up to this tag.');
+  if (repo.scope === 'since_start') lines.push('', `First release: everything up to this ${byPoints ? 'pull request' : 'tag'}.`);
   if (repo.stories.length > 0) {
     lines.push('', '### Stories');
     for (const s of repo.stories) {

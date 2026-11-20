@@ -1331,3 +1331,128 @@ describe('ticketKeysOwed / bestTicketRead', () => {
     expect(m.bestTicketRead([], 3)).toEqual({ read: null, readState: 'not_read' });
   });
 });
+
+describe('getReleases — a repository released from MERGED PULL REQUESTS (no version tags, 2026-11-19)', () => {
+  it('each merged PR is a release point; the candidate stops below a ticket not Complete; a release tag is the baseline', async () => {
+    const { db, schema } = client;
+    const { repos, pullRequests, repoTags, trackerTickets } = schema;
+    const { eq } = await import('drizzle-orm');
+    const { setReleaseSettings, getReleaseSettingsResponse } = await import('./release-settings.js');
+    const { setReleaseRepos } = await import('./release-repos.js');
+    const { resolveWorkspaceScope } = await import('./queries.js');
+    const { releaseDateTagName } = await import('@pierre-review/shared');
+
+    const [svc] = await db
+      .insert(repos)
+      .values({ accountId: 1, owner: 'acme', name: 'svc', githubNodeId: 'R_rc_svc', defaultBranch: 'main', viewerPermission: 'WRITE' })
+      .returning()
+      .execute();
+    const scope = await resolveWorkspaceScope(1, undefined);
+    await setReleaseSettings(1, scope.workspaceId, SETTINGS);
+    await setReleaseRepos(1, scope.workspaceId, [svc.id]);
+    // Auto: no version tag → merged pull requests.
+    const settingsRes = await getReleaseSettingsResponse(1, scope.workspaceId);
+    expect(settingsRes!.repos.find((r) => r.repoId === svc.id)).toMatchObject({ releasable: true, basis: 'auto', effectiveBasis: 'prs' });
+
+    const now = day(10);
+    const prRow = async (number: number, d: number) =>
+      (
+        await db
+          .insert(pullRequests)
+          .values({
+            githubNodeId: `PR_svc_${number}`,
+            accountId: 1,
+            repoId: svc.id,
+            number,
+            title: `change ${number}`,
+            state: 'merged',
+            isDraft: false,
+            openedAt: day(d, 0),
+            updatedAt: day(d),
+            mergedAt: day(d),
+            baseRefName: 'main',
+          })
+          .returning()
+          .execute()
+      )[0].id as number;
+    const ticketRow = (prId: number, key: string, statusName: string, statusCategory: string) => ({
+      accountId: 1,
+      workspaceId: scope.workspaceId,
+      prId,
+      provider: 'jira',
+      issueKey: key,
+      detectedFrom: 'title',
+      detectOrder: 0,
+      apiRoot: SITE.apiRoot,
+      url: `${SITE.apiRoot}/browse/${key}`,
+      state: 'ok',
+      statusName,
+      statusCategory,
+      fetchedAt: now,
+      checkedAt: now,
+      nextCheckAt: now,
+    });
+    const p11 = await prRow(11, 2);
+    const p12 = await prRow(12, 5);
+    const p13 = await prRow(13, 6);
+    await light(svc.id, 11, 'change 11');
+    await light(svc.id, 12, 'change 12');
+    await light(svc.id, 13, 'change 13');
+    await db
+      .insert(trackerTickets)
+      .values([
+        ticketRow(p11, 'SVC-1', 'Done', 'done'),
+        ticketRow(p12, 'SVC-2', 'Done', 'done'),
+        ticketRow(p13, 'SVC-3', 'In review', 'indeterminate'),
+      ])
+      .execute();
+    // main, newest first: PR 13 (squash), PR 12 rebase-merged as two commits, a direct push, PR 11.
+    await walked(svc.id, [
+      { c: 's5', prs: [13], d: 6 },
+      { c: 's4', prs: [12], d: 5 },
+      { c: 's3', prs: [12], d: 5 },
+      { c: 's2', prs: [], d: 3 },
+      { c: 's1', prs: [11], d: 2 },
+    ]);
+
+    const res = await m.getReleases(1, scope.workspaceId);
+    const repo = res.check!.repos.find((r) => r.repoId === svc.id)!;
+    expect(repo).toMatchObject({ basis: 'prs', status: 'candidate', checking: false });
+    expect(repo.candidate).toMatchObject({ name: '#12', sha: sha('s4'), releaseTagName: releaseDateTagName(new Date(), '-rc', []) });
+    expect(repo.candidate!.point).toMatchObject({ number: 12, title: 'change 12', prId: p12 });
+    expect(repo.tags.map((t) => [t.name, t.state])).toEqual([
+      ['#13', 'does_not_qualify'],
+      ['#12', 'qualifies'],
+    ]);
+    expect(repo.newestReason?.tagName).toBe('#13');
+    expect(repo.olderTags.map((t) => t.name)).toEqual(['#11']);
+    // The rebase merge's older commit and the direct push fall to the point above them.
+    expect(repo.tags[1]!.unmatchedCommits).toBe(1);
+    expect(res.check!.prs.find((p) => p.number === 12)?.tagName).toBe('#12');
+
+    // A release tag on #12's commit is the baseline: only #13 is new; Ensemble's next tag name skips it.
+    const today = releaseDateTagName(new Date(), '-rc', []);
+    await db
+      .insert(repoTags)
+      .values({ accountId: 1, repoId: svc.id, name: today, sha: sha('s4'), committedAt: day(5), taggedAt: day(9), firstSeenAt: day(9), lastSeenAt: day(9) })
+      .execute();
+    const afterRelease = await m.getReleases(1, scope.workspaceId);
+    const repo2 = afterRelease.check!.repos.find((r) => r.repoId === svc.id)!;
+    expect(repo2).toMatchObject({ status: 'none', baseline: { name: today } });
+    expect(repo2.tags.map((t) => t.name)).toEqual(['#13']);
+    // Still released from merged pull requests: a release tag is never a version tag.
+    expect((await getReleaseSettingsResponse(1, scope.workspaceId))!.repos.find((r) => r.repoId === svc.id)!.effectiveBasis).toBe('prs');
+
+    await db.update(trackerTickets).set({ statusName: 'Done', statusCategory: 'done' }).where(eq(trackerTickets.issueKey, 'SVC-3')).execute();
+    const done = await m.getReleases(1, scope.workspaceId);
+    const repo3 = done.check!.repos.find((r) => r.repoId === svc.id)!;
+    expect(repo3.candidate).toMatchObject({ name: '#13', releaseTagName: today.replace(/-rc$/, '.2-rc') });
+    expect(repo3.ticketIdents).toEqual([`jira:${SITE.apiRoot}#SVC-3`]);
+
+    // "Version tags" by choice: with none there is nothing to release.
+    await setReleaseRepos(1, scope.workspaceId, [svc.id], new Date(), [{ repoId: svc.id, basis: 'tags' }]);
+    const byTags = await m.getReleases(1, scope.workspaceId);
+    expect(byTags.check!.repos.find((r) => r.repoId === svc.id)).toMatchObject({ basis: 'tags', status: 'nothing_new', nothingNewReason: 'no_tags' });
+    expect((await getReleaseSettingsResponse(1, scope.workspaceId))!.repos.find((r) => r.repoId === svc.id)).toMatchObject({ basis: 'tags', effectiveBasis: 'tags' });
+  });
+});

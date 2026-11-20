@@ -37,10 +37,13 @@ import {
   TRACKER_PROVIDER_LABEL,
   clampOlderTagsWanted,
   foldReleaseCheck,
+  releaseBasisOf,
+  releaseDateTagName,
   releaseScanLine,
   releaseSettingsConfigured,
   tagKind,
   trackerTicketIdent,
+  type ReleaseBasis,
   type ReleaseCheckInput,
   type ReleaseCheckMergedPrInput,
   type ReleaseCheckResult,
@@ -58,14 +61,14 @@ import { db, schema } from './client.js';
 import { WRITE_PERMISSIONS, resolveWorkspaceScope } from './queries.js';
 import { getReleaseRepos } from './release-repos.js';
 import { getReleaseSettings } from './release-settings.js';
-import { getRepoTags } from './repo-tags.js';
+import { getRepoTags, type StoredRepoTag } from './repo-tags.js';
 import { liveScanStep } from '../releases/scan-state.js';
 import { olderTagsWanted } from '../releases/older-tags.js';
-import { historyView, type HistoryIncrement } from '../releases/history-fold.js';
+import { historyView, releasePointsOf, type HistoryIncrement } from '../releases/history-fold.js';
 import { RELEASE_TICKET_FAILS_MAX } from '../tracker/ticket-status.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
 
-const { repos, pullRequests, trackerTickets, sprintTickets, releases, releaseHistoryCommits, releaseRangePrs, trackerTicketStatus, users } = schema;
+const { repos, pullRequests, trackerTickets, sprintTickets, releases, releaseItems, releaseHistoryCommits, releaseRangePrs, trackerTicketStatus, users } = schema;
 
 const CHUNK = 400;
 
@@ -217,6 +220,9 @@ export async function loadReleaseCheckInput(
   return (await loadReleaseCheck(accountId, workspaceId, requestedRepoIds, settings, opts)).input;
 }
 
+/** A tag as the fold reads it: a stored tag, or (basis 'prs') a release point. */
+type StoredTag = Pick<StoredRepoTag, 'repoId' | 'name' | 'sha' | 'committedAt' | 'taggedAt' | 'movedAt'>;
+
 type StoredPr = {
   id: number;
   repoId: number;
@@ -255,7 +261,18 @@ export async function loadReleaseCheck(
           .where(and(eq(repos.accountId, accountId), inArray(repos.id, [...repoIds])))
           .execute();
   const ids = repoRows.map((r) => r.id);
-  const tags = await getRepoTags(accountId, ids);
+  const storedTags = await getRepoTags(accountId, ids);
+  // The release tag names Ensemble holds for these repos (a press's tag may not be synced back yet): a
+  // date-named release tag never reuses one.
+  const itemNames =
+    ids.length === 0
+      ? []
+      : await db
+          .select({ repoId: releaseItems.repoId, name: releaseItems.releaseTagName })
+          .from(releaseItems)
+          .where(and(eq(releaseItems.accountId, accountId), inArray(releaseItems.repoId, ids)))
+          .execute();
+  const now = new Date();
   const { readHistoryScan, historyProgress } = await import('../sync/release-history.js');
 
   // ── Per repo: the walked history → each tag's place on the default branch and its increment ──
@@ -263,11 +280,19 @@ export async function loadReleaseCheck(
     onDefault: Map<string, boolean | null>;
     increments: HistoryIncrement[];
     history: { done: number; total: number; complete: boolean };
+    basis: ReleaseBasis;
+    /** The tags the fold reads: the stored ones, or (basis 'prs') the release points + the stored release
+     *  and hotfix tags (a version tag is not one here). */
+    tags: StoredTag[];
+    /** Basis 'prs': the release tag a release here would create (`2026.11.19-rc`). */
+    pointReleaseTagName: string | null;
   }
   const historyByRepo = new Map<number, RepoHistory>();
   const hc = releaseHistoryCommits;
   for (const r of repoRows) {
-    const repoTagsOf = tags.filter((t) => t.repoId === r.id);
+    const storedOf = storedTags.filter((t) => t.repoId === r.id);
+    const basis = releaseBasisOf(ticked.get(r.id)?.basis, storedOf.map((t) => t.name), settings);
+    let repoTagsOf: StoredTag[] = storedOf;
     const scan = await readHistoryScan(accountId, r.id);
     // The floor: the newest WALKED release tag of this workspace (its baseline). Older commits are not
     // needed, and not loaded.
@@ -296,6 +321,22 @@ export async function loadReleaseCheck(
         ? 0
         : Number((await db.select({ n: count() }).from(hc).where(and(eq(hc.accountId, accountId), eq(hc.repoId, r.id))).execute())[0]?.n ?? 0);
     const topAt = scan == null ? null : (commitRows.find((c) => c.sha === scan.topSha)?.committedAt ?? null);
+    let pointReleaseTagName: string | null = null;
+    if (basis === 'prs') {
+      // RELEASE POINTS (docs/RELEASES.md § Releasing without version tags): each merged PR's commit on the
+      // default branch stands in for a version tag. A stored release / hotfix tag on a point's commit takes
+      // the point's (nudged) date, so it still sorts AFTER the point — the point is released.
+      const points = releasePointsOf(commitRows.map((c) => ({ ...c, prNumbers: c.prNumbers ?? [] })));
+      const pointAt = new Map(points.map((p) => [p.sha, p.committedAt]));
+      repoTagsOf = [
+        ...points.map((p) => ({ repoId: r.id, name: p.name, sha: p.sha, committedAt: p.committedAt, taggedAt: null, movedAt: null })),
+        ...storedOf
+          .filter((t) => tagKind(t.name, settings) !== 'version')
+          .map((t) => (pointAt.has(t.sha) ? { ...t, committedAt: pointAt.get(t.sha) ?? t.committedAt } : t)),
+      ];
+      const taken = new Set([...storedOf.map((t) => t.name), ...itemNames.filter((x) => x.repoId === r.id).map((x) => x.name)]);
+      pointReleaseTagName = releaseDateTagName(now, settings.releaseSuffix ?? '', taken);
+    }
     const view = historyView(
       commitRows.map((c) => ({ ...c, prNumbers: c.prNumbers ?? [] })),
       repoTagsOf,
@@ -308,7 +349,14 @@ export async function loadReleaseCheck(
     // Complete for THIS workspace: no newer head left, and the deep walk met its baseline or the root.
     const complete = scan != null && scan.tipStartSha == null && (scan.deepExpectedSha == null || floorSeq != null);
     const progress = scan == null ? { done: 0, total: 0 } : historyProgress(scan, walked, floorSeq != null);
-    historyByRepo.set(r.id, { onDefault: view.onDefaultBranch, increments: view.increments, history: { ...progress, complete } });
+    historyByRepo.set(r.id, {
+      onDefault: view.onDefaultBranch,
+      increments: view.increments,
+      history: { ...progress, complete },
+      basis,
+      tags: repoTagsOf,
+      pointReleaseTagName,
+    });
   }
 
   // ── The range PRs: their light records, and the full row when one is stored ──
@@ -700,9 +748,9 @@ export async function loadReleaseCheck(
             defaultBranch: r.defaultBranch ?? r.defaultBranchName ?? null,
             history: h.history,
             olderWanted: clampOlderTagsWanted(olderTagsWanted(accountId, workspaceId, r.id)),
-            tags: tags
-              .filter((t) => t.repoId === r.id)
-              .map((t) => ({
+            basis: h.basis,
+            pointReleaseTagName: h.pointReleaseTagName,
+            tags: h.tags.map((t) => ({
                 name: t.name,
                 sha: t.sha,
                 committedAt: t.committedAt,

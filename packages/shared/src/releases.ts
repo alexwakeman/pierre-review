@@ -25,6 +25,10 @@ export interface ReleaseSettingsRepo {
   external: boolean;
   /** "Released from this workspace" is ticked: only these are checked, tagged and offered as hotfix bases. */
   releasable: boolean;
+  /** "Release from": the stored choice (`auto` until the reader picks). */
+  basis: ReleaseBasisSetting;
+  /** What `auto` means for it now (`releaseBasisOf` over its stored tags). */
+  effectiveBasis: ReleaseBasis;
 }
 
 /** GET / PUT /api/workspaces/:id/release-settings (and PUT …/release-repos). */
@@ -52,6 +56,9 @@ export interface SetReleaseSettingsBody {
  *  unticks every one). Ids outside the workspace are refused. */
 export interface SetReleaseReposBody {
   repoIds: number[];
+  /** "Release from" per ticked repository; a repository left out keeps its stored choice (a newly
+   *  ticked one starts at `auto`). */
+  bases?: Array<{ repoId: number; basis: ReleaseBasisSetting }>;
 }
 
 // Characters git refuses anywhere in a ref name, plus space.
@@ -151,4 +158,56 @@ export function tagKind(name: string, settings: ReleaseSettings): TagKind | null
 /** The release tag name for a version tag. */
 export function releaseTagName(versionTag: string, releaseSuffix: string): string {
   return `${versionTag}${releaseSuffix}`;
+}
+
+// ── What a release is cut from: version tags, or merged pull requests (2026-11-19) ──────────────
+
+/** How a releasable repository finds what can be released (docs/RELEASES.md § Releasing without version
+ *  tags): its VERSION TAGS on the default branch, or each MERGED PULL REQUEST's commit on it. */
+export type ReleaseBasis = 'tags' | 'prs';
+
+/** The stored choice per (workspace, repository): `auto` = merged pull requests when the repository has
+ *  no version tag, else version tags. */
+export type ReleaseBasisSetting = 'auto' | ReleaseBasis;
+
+export const RELEASE_BASIS_SETTINGS: readonly ReleaseBasisSetting[] = ['auto', 'tags', 'prs'];
+
+/** THE ONE basis rule. `auto` reads the tag NAMES only (any branch): one tag that is neither a release nor
+ *  a hotfix tag ⇒ version tags. The release tags Ensemble creates end in the release suffix, so they never
+ *  turn a repository back to version tags. Pure. */
+export function releaseBasisOf(
+  setting: ReleaseBasisSetting | null | undefined,
+  tagNames: readonly string[],
+  settings: ReleaseSettings,
+): ReleaseBasis {
+  if (setting === 'tags' || setting === 'prs') return setting;
+  return tagNames.some((n) => tagKind(n, settings) === 'version') ? 'tags' : 'prs';
+}
+
+/** A release point's name in a repository released from merged pull requests: the PR number. */
+export function releasePointName(prNumber: number): string {
+  return `#${prNumber}`;
+}
+
+/** The PR number a release point's name carries; null = not a release point name. Pure. */
+export function releasePointNumber(name: string): number | null {
+  const m = /^#(\d+)$/.exec(name);
+  return m == null ? null : Number(m[1]);
+}
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/**
+ * The release tag Ensemble creates in a repository released from merged pull requests (there is no
+ * version to name it after): the day, `2026.11.19-rc`, then `2026.11.19.2-rc`, `.3`… when the name is
+ * taken (`taken` = the repository's tag names). Local date. Pure.
+ */
+export function releaseDateTagName(at: Date, releaseSuffix: string, taken: ReadonlySet<string> | readonly string[]): string {
+  const has = Array.isArray(taken) ? new Set(taken) : (taken as ReadonlySet<string>);
+  const day = `${at.getFullYear()}.${pad2(at.getMonth() + 1)}.${pad2(at.getDate())}`;
+  for (let n = 1; n < 10_000; n += 1) {
+    const name = `${n === 1 ? day : `${day}.${n}`}${releaseSuffix}`;
+    if (!has.has(name)) return name;
+  }
+  return `${day}.${at.getTime()}${releaseSuffix}`;
 }

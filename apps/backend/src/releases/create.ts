@@ -79,8 +79,8 @@ export class ReleaseRequestError extends Error {
 
 export interface ReleaseCheckLoad {
   result: ReleaseCheckResult;
-  /** repoId → owner / name. */
-  repoNames: Map<number, { owner: string; name: string }>;
+  /** repoId → owner / name (and the default branch: a release point is checked against it). */
+  repoNames: Map<number, { owner: string; name: string; defaultBranch?: string | null }>;
 }
 
 /** Everything outside this module (tests replace them). */
@@ -114,7 +114,7 @@ export async function defaultCheck(
   const input = await loadReleaseCheckInput(accountId, workspaceId, repoIds, settings);
   return {
     result: foldReleaseCheck(input),
-    repoNames: new Map(input.repos.map((r) => [r.repoId, splitFullName(r.fullName)])),
+    repoNames: new Map(input.repos.map((r) => [r.repoId, { ...splitFullName(r.fullName), defaultBranch: r.defaultBranch ?? null }])),
   };
 }
 
@@ -301,15 +301,27 @@ export async function createRelease(
   for (const r of snapshot.repos) {
     const names = after.repoNames.get(r.repoId);
     if (names == null) continue;
+    const byPoints = after.result.repos.find((x) => x.repoId === r.repoId)?.basis === 'prs';
     try {
-      const live = await gh.readTagSha(names.owner, names.name, r.tagName);
-      if (live !== r.sha) liveShaChanged.push({ repoId: r.repoId, tagName: r.tagName });
+      if (byPoints) {
+        // A RELEASE POINT (a merged PR's commit) has no tag to read again: it must still be on the
+        // default branch (a force-push could have dropped it).
+        const onBranch = names.defaultBranch != null && (await gh.commitOnBranch(names.owner, names.name, r.sha, names.defaultBranch));
+        if (!onBranch) extraChanges.push(`${r.tagName} in ${nameOf(r.repoId)} is no longer on ${names.defaultBranch ?? 'the default branch'}.`);
+      } else {
+        const live = await gh.readTagSha(names.owner, names.name, r.tagName);
+        if (live !== r.sha) liveShaChanged.push({ repoId: r.repoId, tagName: r.tagName });
+      }
     } catch {
       extraChanges.push(`${r.tagName} in ${nameOf(r.repoId)} could not be checked on GitHub.`);
     }
   }
   const snapRepoIds = new Set(snapshot.repos.map((r) => r.repoId));
-  for (const id of included) if (!snapRepoIds.has(id)) extraChanges.push(`${nameOf(id)} now has a version tag to release.`);
+  for (const id of included) {
+    if (snapRepoIds.has(id)) continue;
+    const byPoints = after.result.repos.find((x) => x.repoId === id)?.basis === 'prs';
+    extraChanges.push(`${nameOf(id)} now has ${byPoints ? 'merged pull requests' : 'a version tag'} to release.`);
+  }
   const changes = [
     ...releaseSnapshotChanges(
       { repos: snapshot.repos.filter((r) => s.included.includes(r.repoId)), tickets: snapshot.tickets },
@@ -396,6 +408,7 @@ export async function createRelease(
           repoId: r.repoId,
           versionTag: r.candidate!.name,
           sha: r.candidate!.sha,
+          basis: r.basis ?? 'tags',
           releaseTagName: r.candidate!.releaseTagName,
           notesMarkdown: sectionOf.get(r.repoId) ?? '',
           tagState: existsLive.has(r.repoId) ? 'refused' : 'pending',

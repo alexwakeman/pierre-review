@@ -8,6 +8,9 @@
 //                     (`refs/tags/<name>`). A 422 on the ref = the name already exists → `exists`:
 //                     REFUSED, never moved (there is no PATCH anywhere here).
 //   createPrerelease  POST releases `{tag_name, name, body, prerelease: true}`.
+//   commitOnBranch    GET compare/<sha>...<branch> (`per_page=1`): the commit is on the branch when the
+//                     branch is `ahead` of it or `identical` — Confirm's check of a RELEASE POINT (a repo
+//                     released from merged pull requests has no version tag to read again).
 // The two writes live in github/mutations.ts (`createAnnotatedReleaseTag`, `createGithubPrerelease`),
 // through `limnWrite` with the 'reader' origin: the reader's press, under the reader's account.
 import { ghRestGetFor } from '../github/client.js';
@@ -15,6 +18,8 @@ import { createAnnotatedReleaseTag, createGithubPrerelease } from '../github/mut
 
 export interface ReleaseGithub {
   readTagSha(owner: string, name: string, tag: string): Promise<string | null>;
+  /** The commit is on the branch (reachable from its head). A 404 (unknown commit or branch) = false. */
+  commitOnBranch(owner: string, name: string, sha: string, branch: string): Promise<boolean>;
   createReleaseTag(
     owner: string,
     name: string,
@@ -65,6 +70,17 @@ export function releaseGithubFor(token: string): ReleaseGithub {
         obj = t.object;
       }
       return obj?.type === 'commit' && typeof obj.sha === 'string' ? obj.sha : null;
+    },
+
+    async commitOnBranch(owner, name, sha, branch) {
+      let out: { status?: string };
+      try {
+        out = await ghRestGetFor(token, `/repos/${seg(owner)}/${seg(name)}/compare/${seg(sha)}...${refPath(branch)}?per_page=1`);
+      } catch (err) {
+        if (statusOf(err) === 404) return false;
+        throw err;
+      }
+      return out.status === 'ahead' || out.status === 'identical';
     },
 
     async createReleaseTag(owner, name, a) {

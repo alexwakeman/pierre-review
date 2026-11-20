@@ -1,4 +1,4 @@
-import type { ReleaseSettings, ReleaseSettingsResponse } from '@pierre-review/shared';
+import type { ReleaseBasis, ReleaseBasisSetting, ReleaseSettings, ReleaseSettingsResponse } from '@pierre-review/shared';
 
 /**
  * The disclosure before saving a suffix change (docs/RELEASES.md § Terms and settings, acceptance
@@ -27,4 +27,24 @@ export function releaseReposDirty(stored: readonly number[], ticked: readonly nu
   if (a.size !== b.size) return true;
   for (const id of a) if (!b.has(id)) return true;
   return false;
+}
+
+/** "Release from" changed for a ticked repository (a missing entry reads as `auto`). Pure. */
+export function releaseBasesDirty(
+  stored: Readonly<Record<number, ReleaseBasisSetting>>,
+  next: Readonly<Record<number, ReleaseBasisSetting>>,
+  ticked: readonly number[],
+): boolean {
+  return ticked.some((id) => (stored[id] ?? 'auto') !== (next[id] ?? 'auto'));
+}
+
+const BASIS_WORDS: Record<ReleaseBasis, string> = { tags: 'Version tags', prs: 'Merged pull requests' };
+
+/** The "Release from" choices; Auto names what it means for the repository now. Pure. */
+export function releaseBasisOptions(effective: ReleaseBasis): Array<{ value: ReleaseBasisSetting; label: string }> {
+  return [
+    { value: 'auto', label: `Auto (${BASIS_WORDS[effective].toLowerCase()})` },
+    { value: 'tags', label: BASIS_WORDS.tags },
+    { value: 'prs', label: BASIS_WORDS.prs },
+  ];
 }

@@ -37,6 +37,23 @@ export default function Page(): JSX.Element {
         used as hotfix bases. Nothing is ticked at first. Releases ignores the others completely: no rows, no warnings,
         nothing held back. In a hotfix build an unticked repository is read only.
       </p>
+      <p>
+        Each ticked repository has <Ui>Release from</Ui>:
+      </p>
+      <ul>
+        <li>
+          <Ui>Version tags</Ui>: releases are picked from the version tags on the default branch.
+        </li>
+        <li>
+          <Ui>Merged pull requests</Ui>: for a repository with no version tags. Each pull request merged into the
+          default branch counts as a release point, and a release tags its commit with the date and your release suffix,
+          such as 2026.11.19-rc.
+        </li>
+        <li>
+          <Ui>Auto</Ui> (the default): merged pull requests while the repository has no version tags, version tags once
+          it has one. The release tags Ensemble creates never count as version tags.
+        </li>
+      </ul>
 
       <H2 id="changing-a-suffix">Changing a suffix</H2>
       <Warning>

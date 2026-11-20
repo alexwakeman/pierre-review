@@ -26,6 +26,20 @@ export default function Page(): JSX.Element {
         tag is what starts your team&rsquo;s own build.
       </p>
 
+      <H2 id="without-version-tags">Repositories with no version tags</H2>
+      <p>
+        A repository with no version tags is released from its merged pull requests instead. Each pull request merged
+        into the default branch stands in for a tag, and the same rules pick the newest one that can be released: every
+        pull request merged since the last release, up to it, has its tickets Complete with no pull request still open.
+        The strip reads &ldquo;Up to #539 &ldquo;Edit an area&rdquo; → 2026.11.19-rc&rdquo;.
+      </p>
+      <p>
+        Release… tags that pull request&rsquo;s commit with the day&rsquo;s date and your release suffix
+        (2026.11.19-rc, then 2026.11.19.2-rc for a second release that day). That tag is where the next release starts.
+        Choose how each repository is released in{' '}
+        <DocLink to="settings/releases#released-from-this-workspace">Release settings</DocLink>.
+      </p>
+
       <H2 id="what-you-need">What you need</H2>
       <ul>
         <li>
@@ -162,8 +176,8 @@ export default function Page(): JSX.Element {
         <li>Read the comment each ticket will get.</li>
         <li>
           Press <Ui>Confirm</Ui>. Ensemble first checks each candidate again: it reads its tickets again, looks for pull
-          requests opened since, and checks each version tag. If anything changed, it stops, lists what changed and
-          writes nothing.
+          requests opened since, and checks each version tag (or, with no version tags, that the commit is still on the
+          default branch). If anything changed, it stops, lists what changed and writes nothing.
         </li>
       </Steps>
       <p>Then, in order: the release tags, a GitHub pre-release on each with that repository&rsquo;s notes, and a comment on each ticket whose repositories all tagged. The dialog lists each step and whether it worked.</p>
