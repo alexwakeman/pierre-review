@@ -70,12 +70,20 @@ export default function Page(): JSX.Element {
           The risk as a word: <Ui>High risk</Ui>, <Ui>Medium risk</Ui> or <Ui>Low risk</Ui>.
         </li>
         <li>A short title and one sentence of advice.</li>
-        <li>The path&rsquo;s tickets in their status columns, with the arrows between them drawn as critical.</li>
+        <li>
+          The path&rsquo;s tickets in their status columns, with an arrow from each ticket to the one that waits on it.
+          Each arrow&rsquo;s reason is written beside it. A reason too long for the space ends in &ldquo;…&rdquo;; hover
+          over it to read all of it.
+        </li>
       </ul>
       <p>
         A ticket on a path that is not in the sprint sits in an extra column on the left, <Ui>Outside the sprint</Ui>
         . That is often the most important card on the page: work your sprint waits on that nobody planned for this
         sprint.
+      </p>
+      <p>
+        Only this view draws arrows. The <DocLink to="this-sprint/theme">Theme</DocLink> and{' '}
+        <DocLink to="this-sprint/people">People</DocLink> views draw none.
       </p>
       <Note>
         AI chooses the paths, their order, the titles and the advice from what Ensemble found: the tickets, their
@@ -107,7 +115,6 @@ export default function Page(): JSX.Element {
       <H2 id="what-you-can-do">What you can do</H2>
       <Steps>
         <li>Select a ticket on a path, or a key in a call-out, to read its story in the panel on the right.</li>
-        <li>Hover over an arrow, or its number, to read why one ticket waits on the other.</li>
         <li>
           Press <Ui>Refresh</Ui> after a big change in the tracker. The paths are worked out again after the next
           sprint read, and the line under the heading says &ldquo;Working out the critical paths…&rdquo; while that

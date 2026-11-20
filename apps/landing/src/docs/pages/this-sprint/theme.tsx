@@ -59,8 +59,8 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        An arrow between two tickets is drawn as critical when the two sit next to each other on a{' '}
-        <DocLink to="this-sprint/critical-path">critical path</DocLink>.
+        This view draws no arrows. A ticket that waits on another unfinished ticket wears the waiting mark; to see
+        the chains, open the <DocLink to="this-sprint/critical-path">Critical path view</DocLink>.
       </p>
 
       <H2 id="what-you-can-do">What you can do</H2>
