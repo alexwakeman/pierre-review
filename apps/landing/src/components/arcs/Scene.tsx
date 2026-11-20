@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 
 // ---------------------------------------------------------------------------
 // A SCENE: one big arc picture PINNED to the screen while the page scrolls over it
-// (the home page's figure of 8 under the hero, and the same 8 in reverse after "Dependency
+// (the home page's ring under the hero, and the same ring in reverse after "Dependency
 // updates": it arrives assembled and comes apart).
 //
 //   section.scene                       its own scroll timeline (--scene, a view timeline)
@@ -57,7 +57,7 @@ export function Scene({
   after: ReactNode;
   className?: string;
   /** Play the gather backwards: the picture arrives assembled and comes APART as the page
-   *  scrolls (the home page's closing 8, the hero's in reverse). */
+   *  scrolls (the home page's closing ring, the hero's in reverse). */
   reverse?: boolean;
 }): JSX.Element {
   const t = timing;

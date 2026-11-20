@@ -5,7 +5,7 @@
 
    CLASSES
      shared     .k (small label) · .cmd (copy button + code) · .section.chapter
-     scenes     .scene.scene-chain (Hero, then ensemble) · .scene.scene-eight-out.scene-reverse (then close): Scene.tsx
+     scenes     .scene.scene-ring (Hero, then ensemble) · .scene.scene-ring-out.scene-reverse (then close): Scene.tsx
      hero       .hero > .hero-card > .say (.kick, h1, .lead, .cmd) · figure.motto, over the pinned Chain
      flow       .board.flow > .tile.flow-stage (BuildStory: svg.bstory-svg + .story-cap) · p.flow-note · p.flow-more
      ensemble   .board.ensemble > .tile.circle (EnsembleStory: svg.story-svg + .story-cap) · .ens-points > .tile (h3, p) · p.ens-more

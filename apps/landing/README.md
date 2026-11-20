@@ -18,7 +18,7 @@ plus the three legal ones and the docs. (2026-11 restructure: `/teams` 301s to `
 
 | Route | Page | Focus |
 |---|---|---|
-| `/` | `pages/Home.tsx` | "Refine, build and review as an ensemble": the hero (the claim, Poincaré's line) and then review as an ensemble (`EnsembleStory`: the team circle tells one pull request’s life in five steps, played once in view, Replay; finished picture under reduced motion) scrolling over the pinned Chain, the build flow (`BuildStory`: Build end to end in nine steps, from the press to the updated ticket and How to test; same engine and caption card as `EnsembleStory`, `components/board/story/`), dependency updates, then the close scrolling over the same 8 pinned again, coming apart (Scene `reverse`) |
+| `/` | `pages/Home.tsx` | "Refine, build and review as an ensemble": the hero (the claim, Poincaré's line) and then review as an ensemble (`EnsembleStory`: the team circle tells one pull request’s life in five steps, played once in view, Replay; finished picture under reduced motion) scrolling over the pinned Ring, the build flow (`BuildStory`: Build end to end in nine steps, from the press to the updated ticket and How to test; same engine and caption card as `EnsembleStory`, `components/board/story/`), dependency updates, then the close scrolling over the same ring pinned again, coming apart (Scene `reverse`) |
 | `/build` | `pages/Build.tsx` | How a ticket becomes a pull request, by hand and automatically; the story check; the Ticket design example; verifying the results |
 | `/ensemble-review` | `pages/EnsembleReview.tsx` | How each teammate's local agent joins one review with no server between them — GitHub's status lines, Claude + Codex, thread judgements, the licence above the free size |
 | `/automation` | `pages/Automation.tsx` | Everything the dependency automation does, and how it claims each pull request once per team |
@@ -41,10 +41,10 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 
 **EVERY OTHER PICTURE IS DRAWN IN CODE** from one motif, the banded quarter-circle
 (`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
-`Arcs.tsx` draws a composition; `pieces.tsx` holds the Chain (the figure of 8), Orchestra and Combo;
+`Arcs.tsx` draws a composition; `Ring.tsx` draws the home page's ring (one disc broken into its 64 band lines, each travelling through 3D space into place); `pieces.tsx` holds Orchestra and Combo;
 each quarter a layer moved on the compositor by CSS scroll-driven animations as the reader scrolls down,
 `arcMotion.ts` the fallback where those are unsupported, off under reduced motion). On the home page the
-8 is two SCENES (`Scene.tsx`): pinned full width for one screen while the page scrolls over it, coming
+ring is two SCENES (`Scene.tsx`): pinned full width for one screen while the page scrolls over it, coming
 together and fading up under the hero, and after "Dependency updates" coming apart (`reverse`), each dimming
 as the next section covers it. No photographs. The header's mark (`public/mark.svg`), every favicon and app icon and
 `public/og-image.png` are generated (`node scripts/make-favicons.mjs`, `node scripts/make-og-image.mjs`):

@@ -380,46 +380,98 @@ export function chainQuarters(
   return assemble(raw, R, margin, cross, reach, scatter);
 }
 
-/**
- * A FIGURE OF 8: two whole discs of radius `R` (four quarters each round one centre),
- * one on the other, touching at the waist. Its links are in the order a pen draws the
- * 8 (round the top loop, through the waist, round the bottom), so the colours alternate
- * warm and cool along it, and they are mirrored left to right like the chain's.
- * The rest (margin, crossing starts, reach, scatter) is the chain's: see chainQuarters.
- */
-export function eightQuarters(
-  R: number,
-  margin = 0,
-  reach = 1,
-  scatter = 0,
-  spreadX = 1,
-): { quarters: Quarter[]; width: number; height: number } {
-  const top = 0;
-  const bottom = 2 * R;
-  const raw: RawLink[] = [
-    // the top loop, from the waist on the right, over the top, back down to the waist
-    { cx: 0, cy: top, sx: 1, sy: 1 },
-    { cx: 0, cy: top, sx: 1, sy: -1 },
-    { cx: 0, cy: top, sx: -1, sy: -1 },
-    { cx: 0, cy: top, sx: -1, sy: 1 },
-    // through the waist into the bottom loop, round it and back up
-    { cx: 0, cy: bottom, sx: 1, sy: -1 },
-    { cx: 0, cy: bottom, sx: 1, sy: 1 },
-    { cx: 0, cy: bottom, sx: -1, sy: 1 },
-    { cx: 0, cy: bottom, sx: -1, sy: -1 },
-  ];
-  return assemble(raw, R, margin, true, reach, scatter, spreadX);
+/** One band of the RING, cut loose: its own little picture and its own place in 3D space
+ *  before the ring assembles. All lengths are in the ring's user units except the start,
+ *  which is in BOX WIDTHS (the CSS multiplies by --bw), so it scales with the stage. */
+export interface RingLine {
+  /** The band's box in user units: x, y, width, height (stroke included). */
+  box: [number, number, number, number];
+  d: string;
+  /** Stroke width. */
+  w: number;
+  /** Its quarter's gradient line (x1 y1 x2 y2) and colour run. */
+  line: [number, number, number, number];
+  stops: readonly string[];
+  /** The start: a translation in box widths (z toward the reader), and turns in degrees. */
+  tx: number;
+  ty: number;
+  tz: number;
+  rx: number;
+  ry: number;
+  rz: number;
+  /** Opacity at the start: a line far back is dimmer. */
+  o0: number;
+  /** When it lands, as a share of the gather (0.6 to 1): the lines settle one by one. */
+  e: number;
 }
 
-/** The site's hero picture: it LANDS AS A TALL FIGURE OF 8,
- *  two whole discs one on the other (1 : 2), mirrored left to right in shape and colour,
- *  so the scroll resolves into one calm, ordered figure. Its links start scattered across
- *  the whole width of the screen (`reach` 1.35 × the mirror distance, `spreadX` 2.4
- *  sideways, since the 8 is narrow on a wide screen; each turned and stretched by its own
- *  `scatter`, some off screen), cross through each other, and fall into place. The margin
- *  (0.04 of a quarter's radius) keeps it just off the screen's top and bottom. */
-export const SITE_EIGHT = { margin: 0.04, reach: 1.35, scatter: 0.8, spreadX: 2.4 } as const;
+/**
+ * THE RING: one whole disc of radius `R` (four quarters round one centre, mirrored left to
+ * right in colour like the chain), broken into its single BANDS, 4 × BANDS lines. Each line
+ * starts somewhere of its own in 3D space (the same on every load, and in the prerendered
+ * page): pushed outward from the ring's centre and turned off its course, nearer or further
+ * from the reader, tilted on all three axes. The scroll brings every line home.
+ * `spreadX` stretches the starts sideways, since the ring is narrow on a wide screen.
+ */
+export function ringLines(
+  R: number,
+  margin = 0,
+  scatter = 1,
+  spreadX = 1,
+): { lines: RingLine[]; width: number; height: number } {
+  // the four quarters in pen order (round from the right), coloured as a mirrored chain
+  const raw: RawLink[] = [
+    { cx: 0, cy: 0, sx: 1, sy: -1 },
+    { cx: 0, cy: 0, sx: -1, sy: -1 },
+    { cx: 0, cy: 0, sx: -1, sy: 1 },
+    { cx: 0, cy: 0, sx: 1, sy: 1 },
+  ];
+  const { quarters, width, height } = assemble(raw, R, margin, false, 1, 0);
+  const lines: RingLine[] = [];
+  quarters.forEach((q) => {
+    const [bx, by] = BULGE[q.corner];
+    const c = (CUT * q.R) / 2;
+    const ox = q.cx + bx * c;
+    const oy = q.cy + by * c;
+    const line = gradientLine(q.cx, q.cy, q.R, q.corner);
+    for (const b of bands(q.R - c, q.n, q.inner)) {
+      const i = lines.length;
+      const h = b.t / 2;
+      const x0 = Math.min(ox, ox + bx * b.r) - h;
+      const y0 = Math.min(oy, oy + by * b.r) - h;
+      // outward from the centre, through the band's middle, then turned off that line
+      const ang = Math.atan2(by, bx) + (unit(i, 1) - 0.5) * 2.2 * scatter;
+      const dist = (0.22 + 0.7 * unit(i, 2)) * scatter;
+      const tz = (unit(i, 3) - 0.62) * 2.2 * scatter; // −1.36 … +0.84 box widths
+      const deg = (k: number, max: number): number => round((unit(i, k) - 0.5) * 2 * max * scatter, 10);
+      lines.push({
+        box: [round(x0), round(y0), round(Math.abs(bx * b.r) + b.t), round(Math.abs(by * b.r) + b.t)],
+        d: arcPath(ox, oy, b.r, q.corner),
+        w: round(b.t),
+        line,
+        stops: RUNS[q.run],
+        tx: round(Math.cos(ang) * dist * spreadX, 1000),
+        ty: round(Math.sin(ang) * dist, 1000),
+        tz: round(Math.min(tz, 0.7), 1000),
+        rx: deg(4, 80),
+        ry: deg(5, 80),
+        rz: deg(6, 150),
+        // depth cue: far back is dim, at the reader full
+        o0: round(Math.min(1, Math.max(0.45, 0.85 + tz * 0.4)), 100),
+        // the inner bands land first, the rim last, each a little off the rhythm
+        e: round(0.6 + 0.28 * b.k + 0.12 * unit(i, 7), 1000),
+      });
+    }
+  });
+  return { lines, width, height };
+}
 
-/** The wide symmetric arch: the hero's shape before the figure of 8, and still the share
+/** The site's big picture: it LANDS AS ONE RING, its 64 band lines scattered through 3D
+ *  space when the page opens and travelling home as the reader scrolls. The margin (0.12 of
+ *  the radius) keeps the ring off the screen's top and bottom; `spreadX` 1.7 spreads the
+ *  starts across a wide screen. */
+export const SITE_RING = { margin: 0.12, scatter: 1, spreadX: 1.7 } as const;
+
+/** The wide symmetric arch: the hero's shape before the ring, and still the share
  *  image's (scripts/make-og-image.mjs), whose wide card it fills. */
 export const SITE_CHAIN = { steps: 'ABBBABBBA', first: 'v', margin: 0.04, cross: true, reach: 1.35, scatter: 0.8 } as const;

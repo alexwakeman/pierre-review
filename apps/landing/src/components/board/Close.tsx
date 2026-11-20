@@ -2,7 +2,7 @@ import { Link } from '../../router';
 import { INSTALL_COMMAND } from '../../lib/site';
 import { CopyCommand } from './CopyCommand';
 
-/** The close (#run, where the header's "Run it now" lands). It scrolls over the figure of 8
+/** The close (#run, where the header's "Run it now" lands). It scrolls over the ring
  *  coming apart, pinned behind it after "Dependency updates, handled" (pages/Home.tsx). */
 export function Close(): JSX.Element {
   return (
