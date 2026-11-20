@@ -12,7 +12,7 @@ export default function Page(): JSX.Element {
       <p>
         The <Ui>Pull requests</Ui> tab sets two judgements Ensemble makes about every pull request: whether it is large,
         and how far its change can reach (its blast radius). Both settings apply to every workspace and take effect
-        everywhere as soon as you save.
+        everywhere as soon as you change them. There is no Save button.
       </p>
 
       <H2 id="large-pull-requests">Large pull requests</H2>
@@ -29,8 +29,8 @@ export default function Page(): JSX.Element {
         />
       </Illustration>
       <ul>
-        <li>Type a whole number greater than zero, then select <Ui>Save</Ui>.</li>
-        <li>Clear the box and save to go back to the default of 1,500 lines.</li>
+        <li>Type a whole number greater than zero. It saves when you stop typing or leave the box.</li>
+        <li>Clear the box to go back to the default of 1,500 lines.</li>
       </ul>
 
       <H2 id="blast-radius">Blast radius</H2>

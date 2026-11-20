@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useReferenceDocsSettings, useSetReferenceDocsSettings } from '../../hooks/useReferenceDocs.js';
 import { InfoButton } from '../InfoModal.js';
-import { SaveButton, SectionShell, CheckInput } from './ui.js';
+import { SectionShell, CheckInput } from './ui.js';
+import { SaveState } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { aiCredentialWords } from '@pierre-review/shared';
 import { useAiProvider } from '../../hooks/useAiCapabilities.js';
@@ -10,7 +11,7 @@ import { useAiProvider } from '../../hooks/useAiCapabilities.js';
 // `me.ai.enabled`, beside Auto review; `GET`/`PUT /api/workspaces/:id/docs-settings`,
 // `workspaces.docs_in_review`, migration 0116 / pg 0103). OFF by default.
 //
-// ⚠ DRAFT + SAVE, like every other section in this modal — ticking the box writes nothing.
+// Saves as you go (./autosave.tsx): ticking the box writes at once.
 export function ReferenceDocsSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
   const setting = useReferenceDocsSettings(workspaceId);
@@ -49,16 +50,15 @@ export function ReferenceDocsSection(): JSX.Element {
       }
     >
       <label className="flex items-start gap-2 text-body">
-        <CheckInput className="mt-0.5" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
+        <CheckInput className="mt-0.5" checked={draft} onChange={(e) => {
+            setDraft(e.target.checked);
+            save.mutate(e.target.checked);
+          }} />
         <span className="font-medium text-ui-ink">Use reference docs in AI Review</span>
       </label>
 
-      <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate(draft)} />
       <p className="text-meta text-ui-mute">Applies to this workspace only.</p>
-
-      {save.isError && (
-        <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
-      )}
+      <SaveState section="Reference docs" mutation={save} dirty={dirty} />
     </SectionShell>
   );
 }

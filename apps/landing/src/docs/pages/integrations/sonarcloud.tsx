@@ -56,13 +56,13 @@ export default function Page(): JSX.Element {
           a key only if yours is different.
         </li>
         <li>
-          Press <Ui>Save</Ui>, then <Ui>Test connection</Ui>. Each repository is marked <Ui>Found</Ui> or{' '}
+          Press <Ui>Test connection</Ui>. Every field saves as you go; the token saves when you press Enter or leave the box. Each repository is marked <Ui>Found</Ui> or{' '}
           <Ui>Not found</Ui>.
         </li>
       </Steps>
       <Note title="The token is write-only">
         The token is stored sealed on your computer and is never shown again, or included in an export. To change it,
-        type a new one and save. It is sent only to sonarcloud.io.
+        press <Ui>Replace</Ui> and type a new one. It is sent only to sonarcloud.io.
       </Note>
 
       <H2 id="what-ensemble-reads">What Ensemble reads</H2>
@@ -128,7 +128,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="turn-it-off">Turn it off</H2>
       <p>
-        In <Ui>Settings → Integrations → SonarCloud</Ui>, remove the token and press <Ui>Save</Ui>. Ensemble stops reading
+        In <Ui>Settings → Integrations → SonarCloud</Ui>, press <Ui>Remove</Ui> beside the token. Ensemble stops reading
         SonarCloud for that workspace. Each workspace has its own setting.
       </p>
     </>

@@ -14,7 +14,7 @@ import {
 // ⚠ THE SERVER STORES OVERRIDES ONLY, AND THIS IS WHERE "ONLY" IS DECIDED. A field that equals the
 // product default is not sent, and a blank budget (a slider resting on its default mark) means
 // "the default" — so a workspace that never changed a budget keeps following the product's, even
-// after someone opened this form and pressed Save. The time zone is the exception: its default is
+// after someone opened this form and changed something else. The time zone is the exception: its default is
 // the DEPLOYMENT's (the machine's zone locally, UTC in the cloud), which a reader may choose on
 // purpose, so a picked zone is always kept.
 
@@ -26,7 +26,7 @@ export interface FlowForm {
   start: string;
   end: string;
   /** '' = the product default. Strings, so a stored value is carried exactly as stored until a
-   *  slider moves it (Save cannot rewrite what nobody touched). */
+   *  slider moves it (a write cannot rewrite what nobody touched). */
   budgets: Record<FlowBudgetMeasure, { good: string; ok: string }>;
 }
 
@@ -77,7 +77,7 @@ function num(s: string): number | undefined {
   return Number.isFinite(n) ? n : Number.NaN;
 }
 
-/** What one Save sends: the whole override set, defaults left out. */
+/** What one write sends: the whole override set, defaults left out. */
 export function buildFlowSettingsBody(form: FlowForm): FlowSettings {
   const body: FlowSettings = {};
   const tz = form.timeZone.trim();
@@ -127,7 +127,7 @@ export function flowFormProblem(form: FlowForm): string | null {
   return null;
 }
 
-/** Order-independent equality of two bodies — what "dirty" means for the Save button. */
+/** Order-independent equality of two bodies — what "dirty" means for the autosave. */
 export function sameFlowBody(a: FlowSettings, b: FlowSettings): boolean {
   const canon = (s: FlowSettings): string =>
     JSON.stringify({
@@ -151,7 +151,7 @@ export function sameFlowBody(a: FlowSettings, b: FlowSettings): boolean {
 // that calendar, so "1 working day" on the scale must mean its day, not a fixed 8 or 9 hours.
 //
 // ⚠ THE SCALE BENDS TO WHAT IS STORED, NEVER THE OTHER WAY. Every default is a step (so a slider
-// can rest on it and send nothing), and every stored value inside the range is a step (so Save
+// can rest on it and send nothing), and every stored value inside the range is a step (so a write
 // cannot move it). A stored value outside the range — the API allows up to 1,000 hours — is
 // pinned at that end, shown with its TRUE value, and left untouched until someone moves it.
 
@@ -185,7 +185,7 @@ function scaleTop(dayHours: number): number {
  *   · BUDGET_SUB_DAY_STEPS below one working day;
  *   · roundHalf(k × dayHours) for k in BUDGET_DAY_MULTIPLES;
  *   · every FLOW_BUDGET_DEFAULTS value (so every slider can REST on its default);
- *   · every stored budget inside [0.5, top] (so a stored off-grid value is exact and Save cannot move it),
+ *   · every stored budget inside [0.5, top] (so a stored off-grid value is exact and a write cannot move it),
  * where top = max(roundHalf(5 × dayHours), 16). A stored value outside [0.5, top] is NOT added — it is pinned.
  */
 export function budgetScaleSteps(dayHours: number, stored: FlowSettings | null | undefined): number[] {

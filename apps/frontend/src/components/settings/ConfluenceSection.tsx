@@ -3,7 +3,8 @@ import type { WikiCredentialsSettings, WikiCredentialsUpdate } from '@pierre-rev
 import { useCheckWikiCredentials, useSetWikiCredentials, useWikiCredentials } from '../../hooks/useReferenceDocs.js';
 import { InfoButton } from '../InfoModal.js';
 import { CheckCircleIcon } from '../Icons.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SectionShell, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 const SECONDARY_BTN =
@@ -19,8 +20,10 @@ const SECONDARY_BTN =
  * (Atlassian Cloud shares one site and one API token). "Use a different token" opens the fields to
  * override it; the server's ladder prefers the workspace's own token on the same host.
  *
- * ⚠ DRAFT + SAVE like every section here. ⚠ THE TOKEN IS NEVER SHOWN (`hasToken` only). ⚠ "Test
- * connection" is CLICK-GATED (one Confluence read with the SAVED credential).
+ * No Save button (./autosave.tsx): site and email save as you type (debounced, at once on blur /
+ * Enter); the token is written ONLY on blur or Enter of a non-empty value; Remove writes at once.
+ * ⚠ THE TOKEN IS NEVER SHOWN (`hasToken` only). ⚠ "Test connection" is CLICK-GATED (one Confluence
+ * read with the SAVED credential).
  */
 export function ConfluenceSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
@@ -33,6 +36,8 @@ export function ConfluenceSection(): JSX.Element {
 
 export function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; saved: WikiCredentialsSettings }): JSX.Element {
   const save = useSetWikiCredentials(workspaceId);
+  // The token's own write (commit on blur / Enter, Remove), apart from the fields' autosave.
+  const tokenSave = useSetWikiCredentials(workspaceId);
   const check = useCheckWikiCredentials(workspaceId);
   const ids = { site: useId(), email: useId(), token: useId() };
   const c = saved.confluence;
@@ -41,35 +46,47 @@ export function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; sa
   const [email, setEmail] = useState(c.email ?? '');
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
-  const [removing, setRemoving] = useState(false);
   // Jira's connection covers Confluence until the reader chooses to override it.
   const viaJira = c.jiraSite != null && !c.hasToken && c.siteUrl == null;
   const [overriding, setOverriding] = useState(false);
 
-  const signature = `${c.siteUrl ?? ''}|${c.email ?? ''}|${c.hasToken}`;
+  // Each field re-seeds on its OWN stored value, so a write of one never wipes a half-typed other.
+  useEffect(() => setSite(c.siteUrl ?? ''), [c.siteUrl]);
+  useEffect(() => setEmail(c.email ?? ''), [c.email]);
   useEffect(() => {
-    setSite(c.siteUrl ?? '');
-    setEmail(c.email ?? '');
     setToken('');
     setReplacing(false);
-    setRemoving(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [c.hasToken]);
 
   const siteChanged = site.trim() !== (c.siteUrl ?? '');
   const emailChanged = email.trim() !== (c.email ?? '');
   const typedToken = token.trim();
-  const dirty = siteChanged || emailChanged || typedToken !== '' || removing;
-  const showTokenInput = (!c.hasToken || replacing) && !removing;
+  const dirty = siteChanged || emailChanged;
+  const showTokenInput = !c.hasToken || replacing;
   const canTest = !dirty && ((c.hasToken && c.siteUrl != null) || c.jiraSite != null);
 
-  const onSave = (): void => {
-    const patch: WikiCredentialsUpdate['confluence'] = {};
-    if (siteChanged) patch.siteUrl = site.trim() === '' ? null : site.trim();
-    if (emailChanged) patch.email = email.trim() === '' ? null : email.trim();
-    if (removing) patch.token = null;
-    else if (typedToken !== '') patch.token = typedToken;
-    save.mutate({ confluence: patch });
+  const autosave = useAutoSave({
+    key: `${site.trim()}|${email.trim()}`,
+    ready: dirty,
+    busy: save.isPending,
+    run: () => {
+      const patch: WikiCredentialsUpdate['confluence'] = {};
+      if (siteChanged) patch.siteUrl = site.trim() === '' ? null : site.trim();
+      if (emailChanged) patch.email = email.trim() === '' ? null : email.trim();
+      save.mutate({ confluence: patch });
+    },
+  });
+  const flushOnEnter = (e: { key: string }): void => {
+    if (e.key === 'Enter') autosave.flush();
+  };
+  // A committed secret leaves the field at once and is never echoed (Replace closes too).
+  const clearToken = (): void => {
+    setToken('');
+    setReplacing(false);
+  };
+  const commitToken = (): void => {
+    if (typedToken === '' || tokenSave.isPending) return;
+    tokenSave.mutate({ confluence: { token: typedToken } }, { onSuccess: clearToken });
   };
 
   const info = (
@@ -122,13 +139,28 @@ export function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; sa
           placeholder="https://acme.atlassian.net"
           value={site}
           onChange={(e) => setSite(e.target.value)}
+          onBlur={autosave.flush}
+          onKeyDown={flushOnEnter}
         />
       </Field>
       <Field label="Email" htmlFor={ids.email}>
-        <input id={ids.email} className={inputCls} autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input
+          id={ids.email}
+          className={inputCls}
+          autoComplete="off"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onBlur={autosave.flush}
+          onKeyDown={flushOnEnter}
+        />
       </Field>
+      <SaveState section="Confluence" mutation={save} dirty={dirty} />
       {showTokenInput ? (
-        <Field label="API token" htmlFor={ids.token} hint={c.hasToken ? 'Replaces the saved token when you save.' : undefined}>
+        <Field
+          label="API token"
+          htmlFor={ids.token}
+          hint={c.hasToken ? 'Saved when you press Enter or leave the field. It replaces the saved one.' : 'Saved when you press Enter or leave the field.'}
+        >
           <input
             id={ids.token}
             type="password"
@@ -136,36 +168,40 @@ export function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; sa
             className={inputCls}
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            onBlur={commitToken}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitToken();
+              }
+            }}
           />
         </Field>
       ) : (
         <div className="flex flex-col gap-1 text-body">
           <span className="font-medium text-ui-mute">API token</span>
           <div className="flex items-center gap-2">
-            <span className="text-ui-ink">{removing ? 'Removed when you save' : 'Saved'}</span>
-            {removing ? (
-              <button type="button" className={SECONDARY_BTN} onClick={() => setRemoving(false)}>
-                Keep it
-              </button>
-            ) : (
-              <>
-                <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
-                  Replace
-                </button>
-                <button type="button" className={SECONDARY_BTN} onClick={() => setRemoving(true)}>
-                  Remove
-                </button>
-              </>
-            )}
+            <span className="text-ui-ink">Saved</span>
+            <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
+              Replace
+            </button>
+            <button
+              type="button"
+              className={SECONDARY_BTN}
+              disabled={tokenSave.isPending}
+              onClick={() => tokenSave.mutate({ confluence: { token: null } })}
+            >
+              Remove
+            </button>
           </div>
         </div>
       )}
+      <SaveState section="Confluence API token" mutation={tokenSave} dirty={false} />
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={SECONDARY_BTN} disabled={!canTest || check.isPending} onClick={() => check.mutate()}>
           {check.isPending ? 'Testing…' : 'Test connection'}
         </button>
-        {dirty && <span className="text-meta text-ui-mute">Save first.</span>}
         {check.data != null && (
           <span className={`text-meta ${check.data.ok ? 'text-ui-success' : 'text-ui-danger'}`}>
             {check.data.message}
@@ -174,15 +210,11 @@ export function ConfluenceForm({ workspaceId, saved }: { workspaceId: number; sa
       </div>
       {check.isError && <p className="text-body text-ui-danger">{check.error.message}</p>}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <SaveButton dirty={dirty} saving={save.isPending} onClick={onSave} />
-        {overriding && !dirty && (
-          <button type="button" className={SECONDARY_BTN} onClick={() => setOverriding(false)}>
-            Use Jira&rsquo;s connection
-          </button>
-        )}
-      </div>
-      {save.isError && <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>}
+      {overriding && !dirty && (
+        <button type="button" className={`${SECONDARY_BTN} self-start`} onClick={() => setOverriding(false)}>
+          Use Jira&rsquo;s connection
+        </button>
+      )}
     </SectionShell>
   );
 }

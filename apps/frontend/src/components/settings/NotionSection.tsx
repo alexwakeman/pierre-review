@@ -2,7 +2,8 @@ import { useEffect, useId, useState } from 'react';
 import { NOTION_TOKEN_RE, type WikiCredentialsSettings } from '@pierre-review/shared';
 import { useCheckWikiCredentials, useSetWikiCredentials, useWikiCredentials } from '../../hooks/useReferenceDocs.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SectionShell, inputCls } from './ui.js';
+import { SaveState } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 const SECONDARY_BTN =
@@ -13,8 +14,9 @@ const SECONDARY_BTN =
  * and inside the add-documents wizard; docs/REFERENCE-DOCS.md § Wiki sources → Notion). ONE write-only
  * internal-integration token; the integration must be shared with the pages in Notion (said behind the ⓘ).
  *
- * ⚠ DRAFT + SAVE like every section here. ⚠ THE TOKEN IS NEVER SHOWN (`hasToken` only). ⚠ "Test
- * connection" is CLICK-GATED (one Notion read with the SAVED token).
+ * No Save button (./autosave.tsx): the token is written on blur or Enter of a non-empty, well-formed
+ * value, never per keystroke; Remove writes at once. ⚠ THE TOKEN IS NEVER SHOWN (`hasToken` only).
+ * ⚠ "Test connection" is CLICK-GATED (one Notion read with the SAVED token).
  */
 export function NotionSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
@@ -33,21 +35,31 @@ export function NotionForm({ workspaceId, saved }: { workspaceId: number; saved:
 
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
-  const [removing, setRemoving] = useState(false);
+  // Shown only after a commit of a malformed value — never while the reader is still typing.
+  const [badShape, setBadShape] = useState(false);
 
   useEffect(() => {
     setToken('');
     setReplacing(false);
-    setRemoving(false);
+    setBadShape(false);
   }, [hasToken]);
 
   const typed = token.trim();
-  const shapeOk = typed === '' || NOTION_TOKEN_RE.test(typed);
-  const dirty = typed !== '' || removing;
-  const showInput = (!hasToken || replacing) && !removing;
+  const showInput = !hasToken || replacing;
 
-  const onSave = (): void => {
-    save.mutate({ notion: { token: removing ? null : typed } });
+  // A committed secret leaves the field at once and is never echoed (Replace closes too).
+  const clearToken = (): void => {
+    setToken('');
+    setReplacing(false);
+  };
+  const commit = (): void => {
+    if (typed === '' || save.isPending) return;
+    if (!NOTION_TOKEN_RE.test(typed)) {
+      setBadShape(true);
+      return;
+    }
+    setBadShape(false);
+    save.mutate({ notion: { token: typed } }, { onSuccess: clearToken });
   };
 
   return (
@@ -68,7 +80,11 @@ export function NotionForm({ workspaceId, saved }: { workspaceId: number; saved:
       }
     >
       {showInput ? (
-        <Field label="Integration token" htmlFor={tokenId} hint={hasToken ? 'Replaces the saved token when you save.' : undefined}>
+        <Field
+          label="Integration token"
+          htmlFor={tokenId}
+          hint={hasToken ? 'Saved when you press Enter or leave the field. It replaces the saved one.' : 'Saved when you press Enter or leave the field.'}
+        >
           <input
             id={tokenId}
             type="password"
@@ -76,38 +92,50 @@ export function NotionForm({ workspaceId, saved }: { workspaceId: number; saved:
             className={inputCls}
             placeholder="ntn_…"
             value={token}
-            onChange={(e) => setToken(e.target.value)}
+            onChange={(e) => {
+              setToken(e.target.value);
+              setBadShape(false);
+            }}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              }
+            }}
           />
         </Field>
       ) : (
         <div className="flex flex-col gap-1 text-body">
           <span className="font-medium text-ui-mute">Integration token</span>
           <div className="flex items-center gap-2">
-            <span className="text-ui-ink">{removing ? 'Removed when you save' : 'Saved'}</span>
-            {removing ? (
-              <button type="button" className={SECONDARY_BTN} onClick={() => setRemoving(false)}>
-                Keep it
-              </button>
-            ) : (
-              <>
-                <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
-                  Replace
-                </button>
-                <button type="button" className={SECONDARY_BTN} onClick={() => setRemoving(true)}>
-                  Remove
-                </button>
-              </>
-            )}
+            <span className="text-ui-ink">Saved</span>
+            <button type="button" className={SECONDARY_BTN} onClick={() => setReplacing(true)}>
+              Replace
+            </button>
+            <button
+              type="button"
+              className={SECONDARY_BTN}
+              disabled={save.isPending}
+              onClick={() => save.mutate({ notion: { token: null } })}
+            >
+              Remove
+            </button>
           </div>
         </div>
       )}
-      {!shapeOk && <p className="text-meta text-ui-danger">A Notion token starts with ntn_ (or secret_ for an older one).</p>}
+      <SaveState
+        section="Notion"
+        mutation={save}
+        dirty={false}
+        invalid={badShape ? 'a Notion token starts with ntn_ (or secret_ for an older one).' : null}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={SECONDARY_BTN} disabled={!hasToken || dirty || check.isPending} onClick={() => check.mutate('notion')}>
+        <button type="button" className={SECONDARY_BTN} disabled={!hasToken || check.isPending} onClick={() => check.mutate('notion')}>
           {check.isPending ? 'Testing…' : 'Test connection'}
         </button>
-        {dirty && <span className="text-meta text-ui-mute">Save first.</span>}
+        {!hasToken && <span className="text-meta text-ui-mute">Add a token first.</span>}
         {check.data != null && (
           <span className={`text-meta ${check.data.ok ? 'text-ui-success' : 'text-ui-danger'}`}>
             {check.data.message}
@@ -115,9 +143,6 @@ export function NotionForm({ workspaceId, saved }: { workspaceId: number; saved:
         )}
       </div>
       {check.isError && <p className="text-body text-ui-danger">{check.error.message}</p>}
-
-      <SaveButton dirty={dirty && shapeOk} saving={save.isPending} onClick={onSave} />
-      {save.isError && <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>}
     </SectionShell>
   );
 }

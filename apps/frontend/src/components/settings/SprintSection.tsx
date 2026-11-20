@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SprintComparisonMode, WorkspaceProSettingsUpdate } from '@pierre-review/shared';
 import {
   useUpdateWorkspaceProSettings,
   useWorkspaceProSettings,
 } from '../../hooks/useWorkspaceProSettings.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SectionShell, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { Select } from '../ui/index.js';
 
@@ -39,10 +40,10 @@ const MODE_OPTIONS: { value: SprintComparisonMode; label: string; hint: string }
 ];
 
 /**
- * What ONE Save on this section writes. Extracted from the component so the rule can be pinned
+ * What ONE write of this section sends. Extracted from the component so the rule can be pinned
  * without a renderer (`apps/frontend/test/sprintSectionPatch.test.ts`).
  *
- * ⚠ EACH HALF IS SENT ONLY WHEN IT CHANGED, even though one button submits both. The patch is
+ * ⚠ EACH HALF IS SENT ONLY WHEN IT CHANGED, even though one write may carry both. The patch is
  * sectioned and `useUpdateWorkspaceProSettings` keys its invalidation sweeps off which sections
  * are PRESENT, not on whether their values differ from the stored ones. An unchanged `sprint`
  * riding along on a mode-only edit would regrid nothing, yet would still push every stored period
@@ -53,9 +54,9 @@ const MODE_OPTIONS: { value: SprintComparisonMode; label: string; hint: string }
  * and the issue tracker. `startDate: null` goes with it so a later re-enable does not silently
  * inherit a phase anchor the user cleared months ago.
  *
- * ⚠ AN EMPTY PATCH IS REACHABLE AND MUST STAY LEGAL. The Save button is disabled when neither
- * half is dirty, but "disabled" is a UI state, not a guarantee; `{}` is a well-formed no-op patch
- * rather than something that throws or writes a default.
+ * ⚠ AN EMPTY PATCH IS REACHABLE AND MUST STAY LEGAL. Nothing is written when neither half is
+ * dirty, but that is a UI rule, not a guarantee; `{}` is a well-formed no-op patch rather than
+ * something that throws or writes a default.
  */
 export function buildSprintPatch(edit: {
   cadenceDirty: boolean;
@@ -86,7 +87,7 @@ export function buildSprintPatch(edit: {
  * "inherit", it is NO SPRINT GRID: the comparison window degrades to rolling-14 and the Reports
  * sprint grain refuses, which is exactly what an unconfigured account already did.
  *
- * ⚠ EVERY CONTROL HERE IS AT ONE GRAIN — THE WORKSPACE'S — AND THAT IS WHY THERE IS ONE SAVE.
+ * ⚠ EVERY CONTROL HERE IS AT ONE GRAIN — THE WORKSPACE'S — AND THAT IS WHY THERE IS ONE WRITE.
  * The comparison MODE was the last account-wide knob in this modal, fenced off in its own box
  * under a "Applies to every workspace" caption and its own Save button, justified by a comment
  * reading "a reading preference with no per-team meaning". THAT CLAIM WAS FALSE, and it was the
@@ -94,20 +95,23 @@ export function buildSprintPatch(edit: {
  * cadence got a sprint-position window while one WITHOUT silently got rolling-14, so a single
  * account setting produced two different window SHAPES across one reader's workspaces with
  * nothing on screen saying so. The mode moved onto the same row as the cadence it composes with
- * in plugin migration 0032, the fence came down, and the two Saves became one.
+ * in plugin migration 0032, the fence came down, and the two Saves became one (and, since Settings
+ * saves as you go, one write).
  *
- * ⚠ THE RULE THAT KEPT THEM APART IS SPENT HERE, NOT REPEALED. One Save spanning TWO GRAINS is
+ * ⚠ THE RULE THAT KEPT THEM APART IS SPENT HERE, NOT REPEALED. One write spanning TWO GRAINS is
  * still how an edit meant for one team travels silently to every team — so a control added to
  * this modal at the ACCOUNT grain still belongs above the "Workspace" heading, in its own section
- * with its own Save, never inside a workspace-scoped one. What changed is that this section no
+ * with its own write, never inside a workspace-scoped one. What changed is that this section no
  * longer has such a control, not that mixing them became safe.
  *
  * ⚠ THE WORKSPACE IS NAMED ONCE, IN THE MODAL'S "Workspace" HEADING, NOT IN THIS TITLE. Three
  * sections each appending "— acme-web" to their heading was the same fact three times; the group
  * heading above them owns it now. What stays in this copy is the BLAST RADIUS ("only this
- * workspace"), which is a different claim and still has to be made where the Save button is.
+ * workspace"), which is a different claim and still has to be made beside the controls.
  *
- * ⚠ IT DISCLOSES WHAT A CADENCE CHANGE DOES TO EXISTING REPORTS, before the Save. Stored reports
+ * ⚠ IT DISCLOSES WHAT A CADENCE CHANGE DOES TO EXISTING REPORTS, before the change: the line
+ * shows whenever a cadence is set, so it is read before the length or start date is touched
+ * (Settings saves as you go — ./autosave.tsx — so there is no later moment to say it). Stored reports
  * are artifacts people forward: changing the cadence regrids the period boundaries, so reports
  * measured under the old one stop being LISTED as periods. They are not destroyed and not
  * rewritten — they move to the Reports pane's archive and stay readable. Saying so is the
@@ -122,7 +126,7 @@ export function SprintSection(): JSX.Element {
 
   // Local edit state, re-seeded whenever the resolved workspace or the STORED VALUES change. An
   // uncontrolled seed would keep the previous workspace's numbers in the inputs after a switch —
-  // and Save would then write them onto the new one.
+  // and the autosave would then write them onto the new one (`seededFor` holds it back).
   //
   // ⚠ KEYED ON THE VALUES, NOT ON THE RESPONSE OBJECT. React Query hands back a new object
   // identity on every background refetch (a window focus past the 60s staleTime is enough), so a
@@ -132,11 +136,19 @@ export function SprintSection(): JSX.Element {
   const [start, setStart] = useState('');
   // ⚠ THE MODE IS IN THE SIGNATURE TOO, now that it is stored on this row. Leaving it out would
   // strand the select on the previous workspace's mode after a scope switch — and this section's
-  // one Save would write it there.
+  // autosave would write it there.
   const [mode, setMode] = useState<SprintComparisonMode>('rolling_14');
-  const signature = `${workspaceId ?? 'none'}:${data?.cadenceDays ?? 'none'}:${data?.startDate ?? 'none'}:${data?.comparisonMode ?? 'none'}`;
+  const signature = `${workspaceId ?? 'none'}:${data?.cadenceDays ?? 'none'}:${data?.startDate?.slice(0, 10) || 'none'}:${data?.comparisonMode ?? 'none'}`;
+  const [seededFor, setSeededFor] = useState<number | null>(null);
+  // What this section last wrote: its echo must not re-seed over an edit made since.
+  const sent = useRef<string | null>(null);
   useEffect(() => {
     if (data == null) return;
+    setSeededFor(workspaceId);
+    if (sent.current === signature) {
+      sent.current = null;
+      return;
+    }
     setDays(data.cadenceDays);
     setCustom(data.cadenceDays != null && !PRESETS.includes(data.cadenceDays));
     setStart(data.startDate?.slice(0, 10) ?? '');
@@ -146,6 +158,27 @@ export function SprintSection(): JSX.Element {
 
   const activeHint = MODE_OPTIONS.find((o) => o.value === mode)?.hint;
 
+  const savedDays = data?.cadenceDays ?? null;
+  const savedStart = data?.startDate?.slice(0, 10) ?? '';
+  const savedMode = data?.comparisonMode;
+  const enabled = days != null;
+  const cadenceDirty = data != null && (days !== savedDays || (enabled && start !== savedStart));
+  const modeDirty = data != null && mode !== savedMode;
+  const dirty = cadenceDirty || modeDirty;
+  const draftSignature = `${workspaceId ?? 'none'}:${days ?? 'none'}:${(enabled && start) || 'none'}:${mode}`;
+  // Saves as you go (./autosave.tsx): a select writes at once, a typed length or a date after a
+  // short pause and on blur.
+  const autosave = useAutoSave({
+    key: draftSignature,
+    ready: dirty && workspaceId != null && seededFor === workspaceId,
+    busy: mutation.isPending,
+    run: () => {
+      // Matches `signature` once the server echoes it (a cleared cadence clears the date too).
+      sent.current = draftSignature;
+      mutation.mutate(buildSprintPatch({ cadenceDirty, modeDirty, days, start, mode }));
+    },
+  });
+
   // ⚠ NOTHING RENDERS AGAINST AN UNRESOLVED SCOPE. `workspaceId === null` means "not resolved
   // yet", and an editor seeded from whatever the server picked as Default would save one team's
   // cadence onto another. (SettingsModal holds the whole Workspace half back for the same reason;
@@ -154,16 +187,6 @@ export function SprintSection(): JSX.Element {
     return <ScopePendingSection title="Sprint cadence" failed={query.isError} />;
   }
 
-  const savedDays = data.cadenceDays;
-  const savedStart = data.startDate?.slice(0, 10) ?? '';
-  const savedMode = data.comparisonMode;
-  const enabled = days != null;
-  const cadenceDirty = days !== savedDays || (enabled && start !== savedStart);
-  const modeDirty = mode !== savedMode;
-
-  const onSave = (): void => {
-    mutation.mutate(buildSprintPatch({ cadenceDirty, modeDirty, days, start, mode }));
-  };
 
   return (
     <SectionShell
@@ -203,6 +226,7 @@ export function SprintSection(): JSX.Element {
           value={days == null ? NONE : custom ? 'custom' : String(days)}
           options={LENGTH_OPTIONS}
           onChange={(v) => {
+            autosave.now();
             if (v === NONE) {
               setCustom(false);
               setDays(null);
@@ -228,6 +252,7 @@ export function SprintSection(): JSX.Element {
                 className={inputCls}
                 value={days}
                 onChange={(e) => setDays(Math.max(1, Math.min(90, Number(e.target.value) || 1)))}
+                onBlur={autosave.flush}
               />
             </Field>
           )}
@@ -245,6 +270,7 @@ export function SprintSection(): JSX.Element {
               className={`${inputCls} cursor-pointer [color-scheme:light] dark:[color-scheme:dark]`}
               value={start}
               onChange={(e) => setStart(e.target.value)}
+              onBlur={autosave.flush}
               onClick={(e) => {
                 try {
                   e.currentTarget.showPicker?.();
@@ -265,36 +291,33 @@ export function SprintSection(): JSX.Element {
       )}
 
       {/* The comparison window — the SAME grain as the cadence above it since plugin migration
-          0032, so no fence, no second caption and no second Save. */}
+          0032, so no fence, no second caption and no second write. */}
       <Field group label="Comparison window" hint={activeHint}>
         <Select
           label="Comparison window"
           className="w-full sm:w-auto"
           value={mode}
           options={MODE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-          onChange={(v) => setMode(v)}
+          onChange={(v) => {
+            autosave.now();
+            setMode(v);
+          }}
         />
       </Field>
 
-      {/* ⚠ THE DISCLOSURE. Stated BEFORE the Save, and only when the edit would actually regrid —
-          so a mode-only change never raises it. */}
-      {cadenceDirty && (
+      {/* ⚠ THE DISCLOSURE. Stated BEFORE the change (whenever a cadence is set, or a new one is being
+          made), because a change is written as it is made. The mode never regrids, so it is not
+          part of it. */}
+      {(savedDays != null || cadenceDirty) && (
         <p className="rounded-ui bg-ui-raise px-2 py-1.5 text-meta text-ui-warn">
-          Saving moves this workspace’s period boundaries. Reports already generated are{' '}
+          Changing the sprint length or start date moves this workspace’s period boundaries. Reports already generated are{' '}
           <span className="font-medium">kept unchanged</span> but leave the period picker; they
           stay readable under <span className="font-medium">Earlier cadences</span> at the bottom
           of the Reports pane.
         </p>
       )}
 
-      <SaveButton
-        dirty={cadenceDirty || modeDirty}
-        saving={mutation.isPending}
-        onClick={onSave}
-      />
-      {mutation.isError && (
-        <p className="text-meta text-ui-danger">{(mutation.error as Error).message}</p>
-      )}
+      <SaveState section="Sprint cadence" mutation={mutation} dirty={dirty} />
     </SectionShell>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   RELEASE_SUFFIX_MAX,
   RELEASE_SUFFIX_PREFIX,
@@ -9,7 +9,8 @@ import {
 } from '@pierre-review/shared';
 import { useReleaseSettings, useSetReleaseRepos, useSetReleaseSettings } from '../../hooks/useReleases.js';
 import { InfoButton } from '../InfoModal.js';
-import { CheckInput, Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { CheckInput, Field, SectionShell, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { releaseReposDirty, releaseSuffixChangeWarning } from './releasesSectionModel.js';
 
@@ -22,8 +23,11 @@ import { releaseReposDirty, releaseSuffixChangeWarning } from './releasesSection
 // (an adornment), never in it; `suffixTypedPart` / `suffixFromTyped` convert.
 // ⚠ ONE VALIDATOR: the shared `validateReleaseSettings`, the same function the PUT route runs, so
 // the sentence under the fields is the sentence a 400 would carry.
-// ⚠ A SUFFIX CHANGE AFTER RELEASES EXIST IS DISCLOSED BEFORE THE SAVE: older tags stop counting as
-// releases (the next check reads them as version tags or nothing).
+// ⚠ A SUFFIX CHANGE AFTER RELEASES EXIST IS DISCLOSED BEFORE IT IS WRITTEN: older tags stop counting
+// as releases (the next check reads them as version tags or nothing). Saves as you go
+// (./autosave.tsx), except that while the warning shows, a suffix is written only when the reader
+// leaves the field or presses Enter — never mid-word, so the warning is read first.
+// The repository boxes write at once.
 // ⚠ Nothing renders, and nothing is written, against an unresolved workspace.
 export function ReleasesSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
@@ -40,7 +44,17 @@ export function ReleasesSection(): JSX.Element {
   );
 }
 
-function SuffixInput({ id, value, onChange }: { id: string; value: string; onChange: (v: string) => void }): JSX.Element {
+function SuffixInput({
+  id,
+  value,
+  onChange,
+  onCommit,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  onCommit: () => void;
+}): JSX.Element {
   return (
     <div className="flex items-stretch sm:w-60">
       <span
@@ -57,6 +71,10 @@ function SuffixInput({ id, value, onChange }: { id: string; value: string; onCha
         spellCheck={false}
         autoComplete="off"
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onCommit();
+        }}
       />
     </div>
   );
@@ -72,7 +90,13 @@ function SuffixSection({ workspaceId, data }: { workspaceId: number; data: Relea
   // Re-seeded on the STORED values (and the workspace), never on the response object: a background
   // refetch must not throw away a half-typed suffix.
   const signature = `${workspaceId}:${data.releaseSuffix ?? ''}:${data.hotfixSuffix ?? ''}`;
+  // What this section last wrote: its echo must not re-seed over typing done since.
+  const sent = useRef<string | null>(null);
   useEffect(() => {
+    if (sent.current === signature) {
+      sent.current = null;
+      return;
+    }
     setRelease(suffixTypedPart(data.releaseSuffix));
     setHotfix(suffixTypedPart(data.hotfixSuffix));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -82,6 +106,18 @@ function SuffixSection({ workspaceId, data }: { workspaceId: number; data: Relea
   const dirty = next.releaseSuffix !== data.releaseSuffix || next.hotfixSuffix !== data.hotfixSuffix;
   const problem = dirty ? validateReleaseSettings(next) : null;
   const warning = dirty && problem == null ? releaseSuffixChangeWarning(data, next) : null;
+  const draftSignature = `${workspaceId}:${next.releaseSuffix ?? ''}:${next.hotfixSuffix ?? ''}`;
+  const autosave = useAutoSave({
+    key: draftSignature,
+    ready: dirty && problem == null,
+    busy: save.isPending,
+    run: () => {
+      sent.current = draftSignature;
+      save.mutate(next);
+    },
+    // While the warning shows, only blur / Enter commits (the timer never comes due in practice).
+    delayMs: warning != null ? 2_000_000_000 : 700,
+  });
   const example = (typed: string, fallback: string): string => `v2.4.0${RELEASE_SUFFIX_PREFIX}${typed.trim() === '' ? fallback : typed}`;
 
   return (
@@ -103,15 +139,17 @@ function SuffixSection({ workspaceId, data }: { workspaceId: number; data: Relea
       }
     >
       <Field label="Release suffix" htmlFor={releaseId} hint={example(release, 'rc')}>
-        <SuffixInput id={releaseId} value={release} onChange={setRelease} />
+        <SuffixInput id={releaseId} value={release} onChange={setRelease} onCommit={autosave.flush} />
       </Field>
       <Field label="Hotfix suffix" htmlFor={hotfixId} hint={example(hotfix, 'hotfix')}>
-        <SuffixInput id={hotfixId} value={hotfix} onChange={setHotfix} />
+        <SuffixInput id={hotfixId} value={hotfix} onChange={setHotfix} onCommit={autosave.flush} />
       </Field>
-      {problem != null && <p className="text-meta text-ui-danger">{problem}</p>}
-      {warning != null && <p className="rounded-ui bg-ui-raise px-2 py-1.5 text-meta text-ui-warn">{warning}</p>}
-      <SaveButton dirty={dirty && problem == null} saving={save.isPending} onClick={() => save.mutate(next)} />
-      {save.isError && <p className="text-meta text-ui-danger">{save.error.message}</p>}
+      {warning != null && (
+        <p className="rounded-ui bg-ui-raise px-2 py-1.5 text-meta text-ui-warn">
+          {warning} Saved when you leave the field.
+        </p>
+      )}
+      <SaveState section="Release tags" mutation={save} dirty={dirty} invalid={problem} />
     </SectionShell>
   );
 }
@@ -120,13 +158,32 @@ function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; da
   const save = useSetReleaseRepos(workspaceId);
   const stored = data.repos.filter((r) => r.releasable).map((r) => r.repoId);
   const [ticked, setTicked] = useState<number[]>(stored);
-  const signature = `${workspaceId}:${stored.join(',')}`;
+  const signature = `${workspaceId}:${[...stored].sort((a, b) => a - b).join(',')}`;
+  // What this section last wrote: its echo must not re-seed over a click made since.
+  const sent = useRef<string | null>(null);
   useEffect(() => {
+    if (sent.current === signature) {
+      sent.current = null;
+      return;
+    }
     setTicked(stored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
   const dirty = releaseReposDirty(stored, ticked);
-  const toggle = (id: number): void => setTicked((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+  const draftSignature = `${workspaceId}:${[...ticked].sort((a, b) => a - b).join(',')}`;
+  const autosave = useAutoSave({
+    key: draftSignature,
+    ready: dirty,
+    busy: save.isPending,
+    run: () => {
+      sent.current = draftSignature;
+      save.mutate({ repoIds: ticked });
+    },
+  });
+  const toggle = (id: number): void => {
+    autosave.now();
+    setTicked((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+  };
 
   return (
     <SectionShell
@@ -146,7 +203,7 @@ function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; da
           {data.repos.map((r) => (
             <li key={r.repoId}>
               <label className="flex items-center gap-2 text-body">
-                <CheckInput checked={ticked.includes(r.repoId)} onChange={() => toggle(r.repoId)} disabled={save.isPending} />
+                <CheckInput checked={ticked.includes(r.repoId)} onChange={() => toggle(r.repoId)} />
                 <span className="min-w-0 truncate">{r.fullName}</span>
                 {r.external && <span className="text-meta text-ui-mute">External</span>}
               </label>
@@ -154,8 +211,7 @@ function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; da
           ))}
         </ul>
       )}
-      <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate({ repoIds: ticked })} />
-      {save.isError && <p className="text-meta text-ui-danger">{save.error.message}</p>}
+      <SaveState section="Released from this workspace" mutation={save} dirty={dirty} />
     </SectionShell>
   );
 }

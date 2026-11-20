@@ -20,6 +20,11 @@ no internals.
   alone; an install that already had Codex keeps it. An agent that is not downloaded is not used: AI features, Auto
   and Claude + Codex reviews use the other one, and a feature with neither says how to download one. From a terminal,
   `ensemble ai install claude|codex` and the new `ensemble ai remove claude|codex` do the same.
+- Settings save as you go: there is no Save button on any Settings tab. A switch, choice or tick saves at once;
+  a typed value saves when you stop typing or leave the box, and a value that is not allowed is not saved and
+  says why beside the box. A token, API key or Slack webhook saves when you press Enter or leave the box, and is
+  never shown again. Each section says "Saved" when its change is stored; a change that could not be saved says
+  so beside it and in the corner of the window.
 - This Sprint: only the Critical path view draws arrows, and each arrow's reason is now written beside it, in the
   space between the tickets, instead of behind a number you had to hover. The Theme and People views draw no
   arrows; a ticket that waits on another still wears the hourglass mark.

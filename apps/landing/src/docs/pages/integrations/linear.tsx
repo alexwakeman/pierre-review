@@ -44,9 +44,9 @@ export default function Page(): JSX.Element {
           Optional: type your <Ui>Team keys</Ui>, comma-separated, for example <code>ENG, OPS</code>, and choose{' '}
           <Ui>Where to look</Ui>. Without team keys only the pull request title is searched for keys.
         </li>
-        <li>Save. The <Ui>Linear API key</Ui> block appears.</li>
+        <li>Each field saves as you go. The <Ui>Linear API key</Ui> block appears.</li>
         <li>
-          Paste your <Ui>Personal API key</Ui>, save, and press <Ui>Check connection</Ui>. The check names the Linear
+          Paste your <Ui>Personal API key</Ui>, press Enter to save it, and press <Ui>Check connection</Ui>. The check names the Linear
           workspace the key belongs to.
         </li>
       </Steps>

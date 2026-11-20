@@ -43,13 +43,13 @@ export default function Page(): JSX.Element {
           <Ui>API token</Ui> (or press <Ui>Use a different token</Ui> when the Jira connection is in use).
         </li>
         <li>
-          Save, and press <Ui>Test connection</Ui>.
+          Press Enter or leave the token box to save it, then press <Ui>Test connection</Ui>.
         </li>
       </Steps>
       <Illustration label="Settings → Docs → Confluence using the Jira connection" caption="Confluence in Settings → Docs.">
         <SettingsRow label="Confluence" hint="Pages on acme.atlassian.net use your Jira token." control={<TextBox value="Using your Jira connection" />} />
       </Illustration>
-      <Note>The token is stored sealed and is never shown again. A new token replaces the saved one when you save.</Note>
+      <Note>The token is stored sealed and is never shown again. A new token replaces the saved one when you press Enter or leave the box.</Note>
 
       <H2 id="add-pages">Add pages</H2>
       <Steps>
@@ -104,7 +104,7 @@ export default function Page(): JSX.Element {
           { key: 'f', label: 'What to do' },
         ]}
         rows={[
-          { _key: '1', m: 'Add a Confluence API token in Settings', f: 'Save a token in Settings → Docs, or save Jira’s email and token if Jira is on the same site.' },
+          { _key: '1', m: 'Add a Confluence API token in Settings', f: 'Add a token in Settings → Docs, or add Jira’s email and token if Jira is on the same site.' },
           {
             _key: '2',
             m: "Can't reach this page in Confluence since …",
