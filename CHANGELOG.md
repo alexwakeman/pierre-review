@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.70] - 2026-11-20
+
 ### Added
 
 - Feed → Bots has two new chip rows: **Severity** (Critical, Major, Minor, Nit, Unscored) and **Bot type** (Review
