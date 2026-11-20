@@ -200,7 +200,7 @@ function PopulationPicker({
 
   if (family === null) return null;
 
-  // Same chrome as the other Activity drill-downs' selects (BotThreadsDetail / BotOnlyPrsDetail),
+  // Same chrome as the other Activity drill-downs' selects (BotThreadsDetail),
   // sized to sit level with the window picker beside it.
 
   if (family === 'severity') {

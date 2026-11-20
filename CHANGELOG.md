@@ -13,6 +13,26 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Bots Monitoring and the severity model cover review bots only. SonarCloud summaries, dependency bots and other
+  automation get no severity or category, and no longer appear in any Bots Monitoring figure or list.
+- Bots Monitoring → ROI: the **Time to first review** chart uses a log scale (1m, 10m, 1h, 6h, 1d, 3d), so a bot
+  that answers in minutes and one that answers in days fit on one chart.
+- Bots Monitoring → ROI: the **Inflation** column and the **Severity inflation** chart are hidden when Ensemble is
+  the only review bot.
+
+### Fixed
+
+- Bots Monitoring → ROI: the top label of the **Follow-up rate** chart ("100%") is no longer cut off.
+
+### Removed
+
+- Bots Monitoring: the "Only a bot reviewed N open PRs" callout, the "bot-only open PRs" link under the tiles, the
+  list they opened and the ⌘K command "Bots: open PRs only a bot reviewed".
+- Bots Monitoring → ROI: the **Quality checks** section. Bots Monitoring shows review bots only; quality checks are
+  in Settings → Bots.
+
 ## [1.0.70] - 2026-11-20
 
 ### Added

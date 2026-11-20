@@ -120,7 +120,6 @@ import type {
   BotBehaviourResponse,
   BotBenchmarkPlacementResponse,
   BotBenchmarkResponse,
-  BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
   BotFlaggingSelector,
   BotFlaggingRefine,
@@ -2342,18 +2341,6 @@ export const api = {
       withQuery('/api/pro/flow-pointers', workspaceParam(workspaceId), flowWindowParam(window)),
       jsonBody('POST'),
     ).then((r) => handle<FlowPointersResponse>(r)),
-  // The exact PR list behind the analytics `totals.botOnlyPrs` count — "only a bot reviewed these".
-  // Same window/workspace/repoIds wiring as botAnalytics, so the caption's number and this list are
-  // computed identically server-side.
-  botOnlyPrs: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
-    get<BotOnlyPrsResponse>(
-      withQuery(
-        '/api/bot-analytics/bot-only-prs',
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-        repoIdsParam(repoIds),
-      ),
-    ),
   // "What the bots are flagging" — the drill-down behind every tile and chip of the Bots rail's
   // ML totals strip. ONE route, one `select=` discriminator, paginated by an OPAQUE cursor.
   //

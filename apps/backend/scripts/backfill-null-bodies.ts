@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     for (const ws of await listWorkspaces(accountId)) {
       if (ws.repoIds.length === 0) continue;
       const scope: BotScope = { workspaceId: ws.id, repoIds: ws.repoIds };
-      const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'all');
+      const automatedIds = await automatedReviewerUserIds(accountId, ws.id, 'review'); // lockstep with countUnscorableBotText (review bots only)
       if (automatedIds.length === 0) continue;
       for (const prId of await listNullBodyBotPrIds(accountId, scope, automatedIds)) {
         prIds.add(prId);

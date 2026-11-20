@@ -106,13 +106,7 @@ describe('no user-visible "Pierre" in the sources that render one', () => {
     expect(src).not.toMatch(/^\s*pierre:\s*\{\s*label:\s*['"`]/m);
   });
 
-  // Whole-file scans, for files that should now contain the old brand NOWHERE — not even in a
-  // comment. Strictest form of the guard, and only usable where no historical note is needed.
-  it.each([
-    'apps/frontend/src/components/Activity/BotOnlyPrsDetail.tsx',
-  ])('%s carries no "Pierre" at all', (rel) => {
-    expect(read(rel)).not.toMatch(OLD_BRAND);
-  });
+  // (The whole-file scan of `BotOnlyPrsDetail.tsx` went with that file, 2026-11-20.)
 
   // This sentence is rendered in the SPA (ClaudeReviewTab / AiFixTab) via `authMessage` on the
   // wire, unbackticked and mid-paragraph, where "restart pierre-review" reads as a name.

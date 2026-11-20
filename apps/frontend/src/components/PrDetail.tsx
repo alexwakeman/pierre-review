@@ -454,7 +454,7 @@ export function PrDetail({
   // "Show in Activity feed" — jump to this PR's repo console (activity sub-tab) with the PR
   // isolated as the feed filter. ORDER IS LOAD-BEARING, and there are now THREE steps that clear
   // `feedIsolatedPrId`: `setWorkspace` and `setActivityRepo` both do, so the isolation is set
-  // LAST (mirrors OpenPrsDetail.showInFeed / BotOnlyPrsDetail).
+  // LAST (mirrors OpenPrsDetail.showInFeed).
   //
   // ⚠ THE WORKSPACE MOVES FIRST WHEN THE PR LIVES ELSEWHERE. A PR tab can hold a PR from any
   // workspace (a `?pr=<id>` deep link, a restored `pierre:tabs` entry, a search hit), and the

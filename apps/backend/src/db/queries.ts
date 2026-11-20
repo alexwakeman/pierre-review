@@ -11797,16 +11797,15 @@ export async function clearOwnReviewRequest(
 // (a narrowed `set:` object) rather than a table boundary, and it is what stops "not a bot here"
 // from also un-naming the vendor. `monthly_cents` is owned by neither and has exactly one writer.
 
-// Which automated reviewers a metric counts. `'review'` = real AI code reviewers only (behaviour,
-// dedup, the cross-org benchmark); `'all'` = every automated reviewer including quality checks
-// (EXCLUSION sets + the feed, where a linter's threads must stay visible).
+// Which automated reviewers a metric counts. `'review'` = real AI code reviewers only — EVERY
+// Bots Monitoring read (ROI, behaviour, overlap, volume, the ML strip + its drill-downs, the ML
+// scoring worker itself, dedup, the benchmark); `'all'` = every automated reviewer including
+// quality checks (EXCLUSION sets — "is this author a person?" — and the feed, where a linter's
+// threads must stay visible). Bots Monitoring measures and shows NOTHING but review bots; a
+// mis-roled bot is fixed in Settings → Bots, which lists every role.
 //
-// Two entries in the `'all'` column are there for reasons worth stating, because both look like
-// oversights:
-//   • getBotAnalytics (ROI) asks for 'all' and then SPLITS the result by role into `vendors` vs
-//     `qualityChecks`, rather than filtering. A mis-roled bot therefore stays VISIBLE in its own
-//     section where the user can fix it, instead of vanishing from a panel that is the only place
-//     to reclassify it.
+// One entry in the `'all'` column is there for a reason worth stating, because it looks like an
+// oversight:
 //   • getBotOnlyReviewPrs asks for 'all' because it answers "did a human look at this before it
 //     merged". A PR reviewed only by SonarQube is precisely what it exists to flag; narrowing to
 //     'review' would leave it with no qualifying bot review and drop it from the list entirely.
@@ -14290,21 +14289,26 @@ export async function getBotAnalytics(
   const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS, overlapClusters: 0 };
   // An empty workspace → nothing to analyze.
   if (scope.repoIds.length === 0) {
-    return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
+    return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
   }
   // Spread into each PR-joined WHERE to narrow to the workspace's repos.
   const repoScopeFilter = [inArray(pullRequests.repoId, scope.repoIds)];
-  // `role: 'all'` here is NOT a leak of quality checks into the metrics: this getter computes a
-  // row for EVERY automated reviewer and then SPLITS them by role at the bottom — `vendors` (the
-  // metric surface: totals, verdicts, suggestions) vs `qualityChecks` (a collapsed
-  // "excluded from ROI" section, volume only). Computing both in one pass is why a mis-roled bot
-  // is discoverable in the UI instead of just vanishing.
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  // ⚠ TWO SETS, NEVER CONFUSED. `automatedIds` is the REVIEWER COHORT (`'review'`, the stored
+  // role beating the login seed): EVERY measured row, total, verdict, suggestion, overlap count and
+  // ML aggregate below is built from it ALONE — a quality check (SonarCloud's summary comment), a
+  // dependency bot or a code agent is not measured or shown on Bots Monitoring at all
+  // (docs/PLATFORM.md). `machineIds` (`'all'`) is used for ONE question only: "was the reply after
+  // the bot's comment a PERSON's?" — a linter's follow-up comment is not a human acting on a
+  // finding, so the human-follow-through and time-to-addressed folds must still recognise it.
+  const [automatedIds, machineIdList] = await Promise.all([
+    automatedReviewerUserIds(accountId, scope.workspaceId, 'review'),
+    automatedReviewerUserIds(accountId, scope.workspaceId, 'all'),
+  ]);
   if (automatedIds.length === 0) {
-    return { enabled: true, generatedAt, window: win, vendors: [], qualityChecks: [], totals: emptyTotals, suggestions: [] };
+    return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
   }
+  const machineIds = new Set<number>(machineIdList);
   const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
-  const roleMap = await reviewerRoleForUser(accountId, scope.workspaceId);
   // SERVER-resolved cost, read from `workspace_reviewers.monthly_cents` for THIS workspace. There
   // is exactly one row per actor here, so this array may be totalled — but the figure is a
   // WORKSPACE total and must never be added to another workspace's: six workspaces each listing a
@@ -14320,10 +14324,10 @@ export async function getBotAnalytics(
 
   // The windowed ML label fold (docs/ML-SEVERITY.md): the merged Bots table shows severity
   // columns beside the ROI columns over the SAME window, so the per-bot aggregates ride this
-  // response instead of a second, unwindowed one. Computed for the whole automated set (both
-  // roles, like the rollup) and ALWAYS — the SPA's render gate is MeResponse.mlSeverity, and on
+  // response instead of a second, unwindowed one. Computed for the review set and ALWAYS — the SPA's render gate is MeResponse.mlSeverity, and on
   // a deployment with no scoring service this is a cheap scan of an empty table plus three
-  // indexed zero counts. The vendor's own declared severity is never read here.
+  // indexed zero counts. The vendor's own declared severity is never read here. Review bots
+  // only (`automatedIds`), like every other number on this response.
   // Under `inflationHistory` the scan widens to `trendFrom` for the weekly series; the window
   // counts are unchanged (in-window rows are a newest-first PREFIX of the widened scan — see the
   // note on `getMlWindowAggregates`' `history` parameter).
@@ -14532,10 +14536,10 @@ export async function getBotAnalytics(
       if (!rv) continue;
       let botLastAt = -Infinity;
       for (const c of comments) {
-        if (c.authorId != null && automatedIds.includes(c.authorId) && c.at > botLastAt) botLastAt = c.at;
+        if (c.authorId != null && machineIds.has(c.authorId) && c.at > botLastAt) botLastAt = c.at;
       }
       const humanAfter = comments.some(
-        (c) => c.authorId != null && !automatedIds.includes(c.authorId) && c.at > botLastAt,
+        (c) => c.authorId != null && !machineIds.has(c.authorId) && c.at > botLastAt,
       );
       if (humanAfter) {
         humanFollowSet.add(threadId);
@@ -14597,7 +14601,7 @@ export async function getBotAnalytics(
       };
       // A human reply on the thread, or the thread being resolved (any resolver — it was addressed).
       for (const c of comments) {
-        if (c.authorId != null && !automatedIds.includes(c.authorId)) consider(c.at);
+        if (c.authorId != null && !machineIds.has(c.authorId)) consider(c.at);
       }
       consider(t.resolvedAt != null ? t.resolvedAt.getTime() : null);
       // A commit that addressed it — timed by the first file-touching commit after the last comment.
@@ -14633,8 +14637,8 @@ export async function getBotAnalytics(
 
   // ── Same-line overlap (ADVISORY — the redundancy signal) ──────────────────────────────────
   // THE shared ±3-line clustering (db/line-overlap.ts — the same definition the per-PR dedup
-  // rollup renders), over the window's REVIEW-role threads. Quality checks are excluded on both
-  // sides (the dedup stance, kept: a rule firing is not review consensus); null-line threads
+  // rollup renders), over the window's threads — review bots only, by construction of
+  // `automatedIds` (the dedup stance: a rule firing is not review consensus); null-line threads
   // (outdated / file-level) are excluded too — a thread LOSES its line when it outdates, and a
   // per-file null lump manufactures overlap out of any two chatty bots. A cluster with ≥2
   // DISTINCT bots credits EACH bot's threads in it (→ overlapPct = the share of a bot's output
@@ -14647,8 +14651,7 @@ export async function getBotAnalytics(
   // credit EACH member of a cluster, so summing them double-counts by construction.
   let overlapClusters = 0;
   {
-    const reviewRoleThreads = windowThreads.filter((t) => roleMap.get(t.userId) !== 'quality_check');
-    for (const c of clusterThreadsByLine(reviewRoleThreads, { nullLineGroup: false })) {
+    for (const c of clusterThreadsByLine(windowThreads, { nullLineGroup: false })) {
       if (c.userIds.size < 2) continue;
       overlapClusters += 1;
       for (const t of c.items)
@@ -14742,13 +14745,10 @@ export async function getBotAnalytics(
   }
 
   const suggestions: BotTuningSuggestion[] = [];
+  // Review bots only — `byUser` is keyed off `automatedIds`, the reviewer cohort. (The old
+  // `qualityChecks` section — every non-reviewer role, volume only — was REMOVED 2026-11-20:
+  // Bots Monitoring measures and shows nothing but review bots. Settings → Bots still lists them.)
   const vendors: BotVendorAnalytics[] = [];
-  // Automated reviewers whose resolved ReviewerRole is 'quality_check' (SonarQube, Codecov, …).
-  // Same row shape, computed the same way, but kept OUT of `vendors`/`totals`/`suggestions`:
-  // their volume inflates thread counts and their untouched threads would earn them a `noisy`
-  // verdict for doing exactly their job. Surfaced as their own collapsed section so a user can
-  // still see the bot is running and can spot a mis-role.
-  const qualityChecks: BotVendorAnalytics[] = [];
   for (const [userId, acc] of byUser) {
     const comments = commentsByUser.get(userId) ?? 0;
     // This bot's windowed ML label aggregate — undefined when it has no labels in the window,
@@ -14775,7 +14775,7 @@ export async function getBotAnalytics(
     const humanFollowThroughPct = acc.threads > 0 ? Math.round((acc.humanFollow / acc.threads) * 100) : null;
     // Noise ratio: untouched-share proxy (see the header — true severity is often unknowable).
     const noiseRatioPct = acc.threads > 0 ? Math.round((acc.untouched / acc.threads) * 100) : null;
-    // Same-line overlap for this bot (always 0 / null for quality checks — excluded from the pass).
+    // Same-line overlap for this bot.
     const overlapThreads = overlapThreadsByUser.get(userId) ?? 0;
     const overlapPct = acc.threads > 0 ? Math.round((overlapThreads / acc.threads) * 100) : null;
     const topPartner = topPartnerByUser.get(userId);
@@ -14786,16 +14786,6 @@ export async function getBotAnalytics(
     // Not-addressed (untouched) threads that have aged past the account-wide normal response
     // window — the ones that are genuinely being ignored. This gates the noisy verdict.
     const overdueUntouched = overdueByUser.get(userId) ?? 0;
-    // The ROLE decides which array this row lands in. Everything above is computed identically
-    // for both — a quality check's numbers are real, they are just not REVIEW numbers.
-    //
-    // ⚠ `!== 'review'`, NEVER `=== 'quality_check'`. The wire field is still called
-    // `qualityChecks` for compatibility, but it now holds EVERY non-reviewer role — dependency,
-    // code_agent, release and housekeeping as well. Testing for the one old role would send all
-    // four newer ones into `vendors`, i.e. straight back into the AI-reviewer ROI table this
-    // split exists to keep clean. An absent entry means no stored row and no seeded login, which
-    // is the historical default 'review'.
-    const isQualityCheck = (roleMap.get(userId) ?? 'review') !== 'review';
     // `?? null` (never `||`): a stored 0 is a REAL price ("we pay nothing for this bot") and must
     // survive as 0, not collapse to "unknown". Nothing inherits, so there is no chain to walk.
     const storedCost = costMap.get(userId);
@@ -14817,7 +14807,7 @@ export async function getBotAnalytics(
       actedOnPct: w.threads > 0 ? Math.round((w.actedOn / w.threads) * 100) : null,
       untouched: w.untouched,
     }));
-    (isQualityCheck ? qualityChecks : vendors).push({
+    vendors.push({
       // A stable per-reviewer row key (kind repeats across in-house bots, so the table can't key
       // on kind). `kind` still drives colour / cost / verdict; `label` is the per-bot name.
       key: `u${userId}`,
@@ -14904,9 +14894,8 @@ export async function getBotAnalytics(
     // Deterministic, ADVISORY tuning suggestions (§3h): a (reviewer, path-bucket) with volume
     // ≥ 5 and untouchedPct ≥ 70 → a "mostly noise" hint. No action attached — the reader tunes
     // the bot on its own platform (or resolves addressed threads via the confirm-gated flow).
-    // Quality checks are skipped: "most of SonarQube's findings in src/** went untouched" is the
-    // normal, expected state of a linter, so a suggestion there is pure noise about noise.
-    if (isQualityCheck) continue;
+    // Review bots only (a linter's untouched findings are its normal state, never a tuning hint) —
+    // guaranteed by `automatedIds`, so there is no per-row role test left here.
     for (const [pb, b] of acc.buckets) {
       if (b.volume < 5) continue;
       const untouchedPct = Math.round((b.untouched / b.volume) * 100);
@@ -14923,8 +14912,7 @@ export async function getBotAnalytics(
     }
     // ML nit-ratio advisory — the severity-slot suggestion: a bot whose scored findings are
     // overwhelmingly nits probably has its severity floor set too low. Gated on a real sample so
-    // a bot is never judged on a handful of labels. Quality checks are skipped by the `continue`
-    // above — a linter's findings being nits is its job, not a tuning signal.
+    // a bot is never judged on a handful of labels. Review bots only (`automatedIds`).
     //
     // It shares its gates with the verdict's escalation (ML_NIT_MIN_*), so whenever this
     // sentence appears the chip above it reads at least 'tune'. That is the point of one pair of
@@ -14976,7 +14964,6 @@ export async function getBotAnalytics(
     }
   }
   vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
-  qualityChecks.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   suggestions.sort((a, b) => b.volume - a.volume);
 
   // Item 4b — bot-only OPEN PR count over THIS WORKSPACE's repos, using the same broadened rule
@@ -14989,9 +14976,8 @@ export async function getBotAnalytics(
     await getBotOnlyReviewPrs(accountId, scope, { from, to }, { openOnly: true })
   ).length;
 
-  // Totals sum `vendors` ONLY — quality checks are excluded by construction (they're in their own
-  // array). That is the point of the role: a linter's thread volume must not move the headline
-  // acted-on %, which is a claim about REVIEW throughput.
+  // Totals sum `vendors` — review bots only, by construction of `automatedIds`: a linter's thread
+  // volume must not move the headline acted-on %, which is a claim about REVIEW throughput.
   const totalThreads = vendors.reduce((s, v) => s + v.threads, 0);
   const totalActedOn = vendors.reduce((s, v) => s + v.actedOn, 0);
   const totals = {
@@ -15011,8 +14997,8 @@ export async function getBotAnalytics(
     overlapClusters,
   };
   // `ml` rides every non-empty response (the two empty-scope early returns omit it — treat
-  // absent as "nothing labelled"). The totals cover the WHOLE automated set, both roles.
-  return { enabled: true, generatedAt, window: win, vendors, qualityChecks, totals, ml: mlAgg.totals, suggestions };
+  // absent as "nothing labelled"). The totals cover the review bots only.
+  return { enabled: true, generatedAt, window: win, vendors, totals, ml: mlAgg.totals, suggestions };
 }
 
 // ── Bot BEHAVIOUR analytics (EXPERIMENTAL, CORE, deterministic) ────────────────────────────

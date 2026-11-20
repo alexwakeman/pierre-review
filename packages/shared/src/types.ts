@@ -1278,7 +1278,7 @@ export interface BotVendorAnalytics {
   // a core table and computed with no model — "core" describes where the code lives, never the
   // tier. The whole ROI table this row draws went behind `botDepth`, so an unentitled account
   // never receives a populated `vendors[]` at all (`GET /api/bot-analytics` narrows: `vendors`
-  // empty, `ml`/`qualityChecks` absent, the ROI half of `totals` zeroed). An OSS/npx install can
+  // empty, `ml` absent, the ROI half of `totals` zeroed). An OSS/npx install can
   // neither set nor see a price unless the plugin is bound and advertising `botDepth`.
   costMonthlyUsd: number | null;
   costPerActedOnUsd: number | null;
@@ -1304,14 +1304,10 @@ export interface BotAnalyticsResponse {
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   vendors: BotVendorAnalytics[];  // most-threads-first
-  // Automated reviewers classified `quality_check` (SonarQube, Codecov, …) — the SAME row shape,
-  // computed the same way, but kept OUT of `vendors`, `totals` and `suggestions` because they are
-  // not reviewers: their volume inflates thread counts and their untouched threads would earn a
-  // `noisy` verdict for doing exactly their job. Rendered as a collapsed "excluded from ROI"
-  // section so a user can still see they are running, and so a mis-role is discoverable rather
-  // than looking like the bot vanished. Optional purely for wire back-compat with an older
-  // plugin/response; treat absent as [].
-  qualityChecks?: BotVendorAnalytics[];
+  // REVIEW BOTS ONLY (role `=== 'review'`, the stored role beating the login seed). Every field on
+  // this response — rows, totals, `ml`, `suggestions` — measures the reviewer cohort alone; a
+  // quality check (SonarCloud), dependency bot or code agent is not measured or shown on Bots
+  // Monitoring. (The `qualityChecks` section was REMOVED 2026-11-20; Settings → Bots lists roles.)
   // `botOnlyPrs` = currently-OPEN (mergeable) PRs in the account's repos whose only review/comment
   // touch was automated (incl. Pierre-verbatim) — no human review AND no human comment. Merged PRs
   // are excluded (the banner is a "needs a human before it merges" signal); the drill-down list
@@ -1321,15 +1317,15 @@ export interface BotAnalyticsResponse {
   // reply time — that's intrinsically fast (sample bias), so a flat cutoff is the fair gate. Each
   // row's own `medianResponseMs` is display-only.
   // `overlapClusters` = distinct line areas (the shared ±3-line clustering, db/line-overlap.ts)
-  // that MORE THAN ONE review bot flagged in this window — quality checks and null-line
+  // that MORE THAN ONE review bot flagged in this window — null-line
   // (outdated / file-level) threads excluded, i.e. exactly the population the per-vendor overlap
   // columns are credited from. DETERMINISTIC (thread line data, no model), which is why it sits
   // here rather than on the `ml` block, even though the UI renders it on the flagging strip.
   // ⚠ It is NOT the sum of the rows' `overlapThreads`: a cluster credits EVERY bot in it, so
   // that sum counts each shared area at least twice.
   totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number; overdueGraceMs: number; overlapClusters: number };
-  // The windowed ML label rollup for the WHOLE scope (every automated reviewer, BOTH roles —
-  // quality checks post exactly the kind of finding a severity label is for). Feeds the severity
+  // The windowed ML label rollup for the scope's REVIEW bots (only a review bot's text is ever
+  // scored; a stored label for any other role is ignored). Feeds the severity
   // totals strip that used to be the standalone /api/bot-severity panel, computed over the SAME
   // window as everything else in this response so one screen carries one time grain. Optional
   // purely for wire back-compat (and omitted on the empty-scope early returns); treat absent as
@@ -13016,9 +13012,8 @@ export interface BotVolumeBot {
   label: string;
   login: string | null;
   kind: AutomatedReviewerKind;
-  /** `'quality_check'` bots are INCLUDED here (the bot set is role `'all'`). Split them out the
-   *  way `BotAnalyticsResponse` splits `vendors` from `qualityChecks` — this response does not
-   *  pre-split, because the chart wants both. */
+  /** Always `'review'` now: the volume bot set is the reviewer cohort only (Bots Monitoring
+   *  measures nothing else). Kept on the wire for back-compat. */
   role: ReviewerRole;
   /** Every counted bot comment by this bot, over the window's merged PRs in scope. */
   comments: number;

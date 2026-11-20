@@ -1,4 +1,4 @@
-// Shared bits for the Activity drill-down TABLES (bot-only-PRs, resolvable bot
+// Shared bits for the Activity drill-down TABLES (resolvable bot
 // threads): a clickable column header, the sort-state shape, a compare fn, and the
 // header-click reducer. Each table keeps its OWN column enum + per-column sort values +
 // natural directions — only the generic mechanics live here so they read identically.

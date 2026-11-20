@@ -274,8 +274,6 @@ export function tabWords(tab: Tab): string {
       return 'Search results';
     case 'metrics-detail':
       return 'Flow metrics';
-    case 'bot-only-prs':
-      return 'Bot-only PRs';
     case 'bot-threads':
       return 'Bot threads';
     case 'theme-threads':

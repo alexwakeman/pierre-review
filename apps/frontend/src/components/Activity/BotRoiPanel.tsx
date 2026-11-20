@@ -46,11 +46,13 @@ import { Callout, Segmented, STICKY_COL, TABLE, TABLE_SCROLL, TR_HOVER } from '.
 import { InfoButton } from '../InfoModal.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
-import { ChartCard, ChartEmpty, PALETTE, fmtDuration, type Series } from '../charts/common.js';
+import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
 import { InflationHistoryChart } from './InflationHistoryChart.js';
 import { BotIsolateLegend, useBotIsolate } from './BotIsolate.js';
 import { applyIsolation } from '../../lib/botIsolate.js';
 import { formatHours, formatResponsivenessTiles } from '../../lib/botResponsiveness.js';
+import { inflationShown } from '../../lib/botRoiColumns.js';
+import { HOUR_FLOOR, HOUR_TICKS, type LogTick } from '../../lib/logAxis.js';
 
 // Bot ROI / utilisation panel, rendered in the Bots rail console. Deterministic and model-free: a
 // per-bot signal-to-noise table + a 12-week thread-volume trend + keep/tune/noisy verdicts + the ML
@@ -210,12 +212,15 @@ function BehaviourTrendChart({
   value,
   botColor,
   formatY,
+  logScale,
   height = 140,
 }: {
   bots: BotBehaviourBotStat[];
   value: (p: BotBehaviourTrendPoint) => number | null;
   botColor: BotColor;
   formatY?: (n: number) => string;
+  // Passed straight to LineChart (the TTFR card's named log axis of hours).
+  logScale?: { ticks: readonly LogTick[]; floor: number };
   height?: number;
 }): JSX.Element {
   const { isolated } = useBotIsolate();
@@ -242,7 +247,15 @@ function BehaviourTrendChart({
   }
   return (
     <>
-      <LineChart labels={labels} series={shown} height={height} curved formatY={formatY} hideLegend />
+      <LineChart
+        labels={labels}
+        series={shown}
+        height={height}
+        curved
+        formatY={formatY}
+        logScale={logScale}
+        hideLegend
+      />
       <BotIsolateLegend bots={legendBots} botColor={botColor} />
     </>
   );
@@ -251,7 +264,11 @@ function BehaviourTrendChart({
 // Module-level extractors / axis formatters, so the charts' useMemo keys stay stable.
 const ttfrVal = (p: BotBehaviourTrendPoint): number | null => p.medianTtfrHours;
 const followupVal = (p: BotBehaviourTrendPoint): number | null => p.followupRatePct;
-const hoursAxis = (n: number): string => fmtDuration(n);
+// TTFR: a LOG axis of hours with named ticks (1m · 10m · 1h · 6h · 1d · 3d …), because one bot
+// answering in minutes and another in days share the card and a linear axis flattens the first into
+// the floor. The hover reads the real median through `formatHours` ("<1m" under a minute).
+const TTFR_LOG_SCALE = { ticks: HOUR_TICKS, floor: HOUR_FLOOR };
+const hoursValue = (n: number): string => formatHours(n);
 const pctAxis = (n: number): string => `${Math.round(n)}%`;
 
 // The two headline tiles above the table: how fast the workspace's review bots first review a PR,
@@ -711,109 +728,9 @@ function MlTotalsStrip({
   );
 }
 
-/*
- * (There is no "mixed role" chip any more, and there is nothing left for one to say. `role` used
- * to be a `repo_reviewers` column, so one login could be a review bot in `api` and a quality gate
- * in `infra`; a multi-repo scope then had to put that reviewer's aggregate in ONE of the two
- * lists while it half-belonged in the other, and the chip existed to admit it. `role` is now a
- * column on the single `workspace_reviewers` row, so within a workspace a bot has exactly one
- * role and appears in exactly one of the two tables below. `mixedRoleRowKeys` is deleted with it.)
- */
-
-/**
- * Automated reviewers roled `quality_check` — coverage/quality gates (SonarQube, Codecov,
- * CodeClimate, …) rather than code reviewers.
- *
- * COLLAPSED and VOLUME-ONLY by design. These rows exist so the user can (a) confirm the gate is
- * still running and (b) spot a MIS-role, and for nothing else. Deliberately absent: verdict, noise
- * ratio, $/acted-on and the charts — the whole point of the role is that ROI judgements do not
- * apply, and showing a greyed-out verdict column would invite reading one anyway. The counts are
- * NOT in `totals` either, so the summary line above stays a review-bot number.
- *
- * A bot re-roled to `quality_check` drops out of `vendors`; Settings → Bots also lists
- * it under "Other automation", so the re-role stays visible from where it was made.
- *
- * `<details>` rather than React state: it is a disclosure with no other behaviour, and the browser
- * already gets keyboard + a11y right for free.
- */
-function QualityCheckSection({
-  rows,
-  botColor,
-}: {
-  rows: BotVendorAnalytics[];
-  botColor: (bot: { login?: string | null; kind: AutomatedReviewerKind }) => string;
-}): JSX.Element | null {
-  if (rows.length === 0) return null;
-  return (
-    <details className="rounded-ui bg-ui-surface">
-      <summary className="cursor-pointer select-none rounded-ui px-3 py-2 text-body text-ui-mute hover:text-ui-ink touch:py-3">
-        Quality checks ({rows.length}){' '}
-        <span className="font-normal normal-case tracking-normal text-ui-faint">
-          — excluded from ROI
-        </span>
-      </summary>
-      <div className="px-3 py-2">
-        {/* The InfoButton sits in the BODY, not the <summary>: a button inside a summary toggles
-            the disclosure in some browsers as well as opening the modal. */}
-        <div className="mb-2 flex items-center gap-1.5 text-meta text-ui-mute">
-          <span>
-            Belongs in the ROI table? Change its role in{' '}
-            <span className="font-medium">Settings</span>.
-          </span>
-          <InfoButton title="Why quality checks are left out">
-            <p>
-              Coverage and quality gates (SonarQube, Codecov and similar) post reports, not code
-              review. Nobody is expected to answer a coverage report, so an unanswered one is normal.
-            </p>
-            <p>
-              Their threads and comments are left out of the totals, verdicts and charts above. They
-              are listed here so you can see they are still running and spot one with the wrong role.
-            </p>
-          </InfoButton>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[380px] border-collapse text-meta">
-            <thead>
-              <tr className="text-left text-ui-mute">
-                <th className="py-1 pr-3 font-medium">Check</th>
-                <th className="py-1 pr-3 text-right font-medium">Threads</th>
-                <th className="py-1 pr-3 text-right font-medium">Comments</th>
-                <th className="py-1 text-right font-medium">Last active</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((v) => (
-                <tr key={v.key} className="">
-                  <td className="py-1 pr-3">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span
-                        className="inline-block h-2 w-2 shrink-0 rounded-full"
-                        style={{ background: botColor({ login: v.login, kind: v.kind }) }}
-                      />
-                      <span className="text-ui-ink">{v.label}</span>
-                      {/* A dormant gate is the interesting case here: it usually means the
-                          integration broke, not that the bot got quieter. */}
-                      {v.dormant && (
-                        <span className="rounded-ui bg-ui-raise px-1 py-px text-meta text-ui-mute">
-                          dormant
-                        </span>
-                      )}
-                    </span>
-                  </td>
-                  <td className="py-1 pr-3 text-right tabular-nums">{v.threads}</td>
-                  <td className="py-1 pr-3 text-right tabular-nums">{v.comments}</td>
-                  <td className="py-1 text-right text-ui-mute">
-                    {v.lastActiveAt != null ? relativeTime(v.lastActiveAt) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </details>
-  );
-}
+// (The collapsed "Quality checks — excluded from ROI" section is REMOVED: Bots Monitoring shows
+// review bots only. A quality check stays visible in Settings → Bots, under "Other automation",
+// which is also where a mis-role is fixed.)
 
 // One "Comments/PR" cell — the ROI table's bot-comment VOLUME column.
 //
@@ -1114,6 +1031,7 @@ function VendorTable({
   vendors,
   botColor,
   showMl,
+  showInflation,
   showCost,
   volume,
   volumeLoading,
@@ -1145,6 +1063,9 @@ function VendorTable({
   // The ML columns (the severity mix bar, plus Inflation) — rendered ONLY when the deployment
   // scores (MeResponse.mlSeverity) AND the window has labels. False must render NO ml chrome at all.
   showMl: boolean;
+  // The Inflation column alone — `inflationShown()` (lib/botRoiColumns.ts): implies `showMl`, and is
+  // false when every row is Ensemble's own bot. Header and cell read this ONE flag.
+  showInflation: boolean;
   // The Inflation column's click-through: opens the flagging drill-down seeded with the clicked
   // bot + direction (the exact opener the removed workspace inflation charts used). null ⇒ the
   // counts render as plain text.
@@ -1183,7 +1104,7 @@ function VendorTable({
     // Its own scroll box with the Bot column sticky, so the wide table never widens the page.
     <div ref={scrollRef} style={fade} className={TABLE_SCROLL} data-testid="bot-roi-table">
       <table
-        className={`${TABLE} text-meta ${showMl ? 'min-w-[1400px]' : 'min-w-[1160px]'}`}
+        className={`${TABLE} text-meta ${showInflation ? 'min-w-[1400px]' : showMl ? 'min-w-[1280px]' : 'min-w-[1160px]'}`}
       >
         <thead>
           <tr className="text-left text-ui-mute">
@@ -1263,13 +1184,15 @@ function VendorTable({
                   Severity mix
                 </th>
                 {/* The Inflation column (plan P1.2/C2) — the workspace inflation charts' verdict,
-                    folded into the row. */}
+                    folded into the row. Same `showInflation` gate as its cell below. */}
+                {showInflation && (
                 <th
                   className="px-2 py-1.5 text-right font-medium"
                   title="How often this bot's OWN severity badge contradicted our label, over its badged findings in the window: the up-arrow count = the bot graded a finding worse than we did (inflation), the down-arrow count = we graded it worse than the bot (what a nit-filter on its own grades would drop). Counts, never shares. A bot that badges nothing shows a dash — no badge is silence, not agreement. Click a count for the comments behind it."
                 >
                   Inflation
                 </th>
+                )}
               </>
             )}
             {showCost && (
@@ -1440,9 +1363,11 @@ function VendorTable({
                     {/* Inflation — counts + sparkline. NOT dashed on dormant: like the ML
                         cells above, its window population is labels, not threads, and the cell
                         carries its own dash rule (badges nothing ⇒ dash, never zero). */}
-                    <td className="px-2 py-1.5 text-right">
-                      <InflationCell vendor={v} onOpen={onOpenInflation} />
-                    </td>
+                    {showInflation && (
+                      <td className="px-2 py-1.5 text-right">
+                        <InflationCell vendor={v} onOpen={onOpenInflation} />
+                      </td>
+                    )}
                   </>
                 )}
                 {/* The $/acted-on figure. The price is a plain column on this bot's WORKSPACE row
@@ -1557,9 +1482,8 @@ function VendorTable({
   return fullTable;
 }
 
-// The workspace-wide "clear the stale-bot backlog" caution — rendered in BotsView directly beneath
-// the "only a bot reviewed" caution and styled to MATCH it (full-width clickable + a "Show list"
-// pill), in sky (its own colour). The whole banner opens the resolvable-bot-threads review-and-
+// The workspace-wide "clear the stale-bot backlog" caution — rendered in BotsView above the ROI
+// panel (full-width clickable + a "Show list" pill), in sky. The whole banner opens the resolvable-bot-threads review-and-
 // resolve drill-down TAB (BotThreadsDetail). Renders NOTHING until the eager resolvable query (a
 // lean per-PR id-list) shows ≥1 likely-addressed automated-reviewer thread.
 //
@@ -1603,7 +1527,6 @@ export function ResolveBacklogBanner({
 export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element | null {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
-  const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
   // The "what the bots are flagging" tiles/chips → the flagging drill-down tab.
   const openBotFlaggingDetail = useFilters((s) => s.openBotFlaggingDetail);
   // ⚠ MONEY IS WORKSPACE-GRAINED, SO IT RENDERS ONLY ON THE WORKSPACE-GRAINED MOUNT.
@@ -1685,17 +1608,13 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     () => (data ? withResolvedCost(data.vendors, legacyCostByLogin) : []),
     [data, legacyCostByLogin],
   );
-  // Automated reviewers the user (or the migration's login seed) marked `role: 'quality_check'`.
-  // The server computes their numbers identically but keeps them OUT of `vendors`/`totals`/
-  // `suggestions`, because a coverage gate's untouched threads would earn it a `noisy` verdict
-  // for doing exactly its job.
+  // ⚠ REVIEW BOTS ONLY. The response's quality checks (when a server still sends them) are never
+  // read: a quality check is listed in Settings → Bots, "Other automation", not here.
   //
-  // ⚠ THEY MUST STILL BE SHOWN SOMEWHERE. Without this section, marking a bot as a quality check
-  // in Settings → Bots makes it silently VANISH from the only screen that lists review bots —
-  // indistinguishable from "we stopped detecting it", and there is no way to notice a MIS-role.
-  // Volume only: no verdict, no noise ratio, no $/acted-on, because those are the ROI judgements
-  // that were deliberately withheld.
-  const qualityChecks = data?.qualityChecks ?? [];
+  // The Inflation column and its weekly chart say how often a bot's OWN severity badge disagreed
+  // with our model. Ensemble's own findings carry the review's own severity, so with only
+  // Ensemble's bot in the table there is nothing to compare: both are hidden (`inflationShown`).
+  const showInflation = inflationShown(showMlColumns, vendors);
 
   // The panel's one explanation. The grace figure is the server's constant (`overdueGraceMs`), read
   // off the response rather than retyped; it is absent only before the first response lands.
@@ -1750,8 +1669,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     // The "Review-bot ROI" heading was dropped (the rail line already has a header); just the
     // window/date-range picker remains, right-aligned.
     //
-    // The window picker writes the SHARED `botAnalyticsWindow` field that BotsView's caution and
-    // the hoisted tuning suggestions also read; neither makes a window CLAIM in its copy.
+    // The window picker writes the SHARED `botAnalyticsWindow` field that BotsView's hoisted tuning
+    // suggestions also read; they make no window CLAIM in their copy.
     <div className="flex flex-wrap items-center gap-2">
       <span className="inline-flex items-center gap-1 text-meta text-ui-mute">
         How this is measured
@@ -1776,20 +1695,12 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
   } else if (isError) {
     body = <div className="text-body text-ui-danger">Couldn’t load bot analytics.</div>;
   } else if (!data || vendors.length === 0) {
-    // LANDMINE: "no vendors" is NOT the same as "no bots". If every automated reviewer in scope
-    // is roled `quality_check`, `vendors` is empty while `qualityChecks` is not — claiming "no
-    // activity" there would be a lie, and would hide the only rows that exist. So the
-    // quality-check section renders in the empty branch too, and the wording softens to name it.
+    // "No review-bot activity" is exactly true: this screen lists review bots only, and the
+    // sentence names that population.
     body = (
-      <div className="space-y-3">
-        <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
-          No review-bot activity in this window.
-          <div className="mt-1 text-meta">
-            Try a wider window above.
-            {qualityChecks.length > 0 && ' Quality checks are listed below.'}
-          </div>
-        </div>
-        <QualityCheckSection rows={qualityChecks} botColor={botColor} />
+      <div className="rounded-ui p-6 text-center text-body text-ui-faint bg-ui-surface">
+        No review-bot activity in this window.
+        <div className="mt-1 text-meta">Try a wider window above.</div>
       </div>
     );
   } else {
@@ -1837,21 +1748,12 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           <span className="tabular-nums">
             counted unanswered after {Math.round(t.overdueGraceMs / 3_600_000)}h
           </span>
-          {' · '}
-          <button
-            type="button"
-            onClick={() => openBotOnlyDetail(repoId ?? null)}
-            title="Show the OPEN PRs only a bot reviewed — no human review or comment since they opened"
-            className="hit rounded-ui underline decoration-dotted underline-offset-2 hover:text-ui-ink"
-          >
-            <b className="tabular-nums text-ui-ink">{t.botOnlyPrs}</b>{' '}
-            bot-only open PR{t.botOnlyPrs === 1 ? '' : 's'}
-          </button>
         </div>
         <VendorTable
           vendors={vendors}
           botColor={botColor}
           showMl={showMlColumns}
+          showInflation={showInflation}
           showCost={showCost}
           volume={volume}
           volumeLoading={volumeLoading}
@@ -1910,7 +1812,22 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
           </ChartCard>
           {/* Per-bot weekly TTFR and follow-up rate, off the behaviour response the tiles read. A
               bot's week is its PRs FIRST reviewed that week. */}
-          <ChartCard title="Time to first review" note="weekly median · last 12">
+          <ChartCard
+            title="Time to first review"
+            note="weekly median · last 12"
+            info={
+              <InfoButton title="Time to first review">
+                <p>
+                  One line per review bot: the median time from ready for review to the bot’s first
+                  review or comment, for the PRs it first reviewed that week.
+                </p>
+                <p>
+                  The scale is logarithmic, so minutes and days fit on one chart. A median under a
+                  minute is drawn at 1 minute.
+                </p>
+              </InfoButton>
+            }
+          >
             {behaviourLoading ? (
               <div className="h-[140px] animate-pulse rounded-ui bg-ui-raise" />
             ) : (
@@ -1918,7 +1835,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
                 bots={behaviourBots}
                 value={ttfrVal}
                 botColor={botColor}
-                formatY={hoursAxis}
+                formatY={hoursValue}
+                logScale={TTFR_LOG_SCALE}
               />
             )}
           </ChartCard>
@@ -1940,13 +1858,14 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
               charts" section because that section is fed by `/api/pro/bot-behaviour`, which
               carries no weekly inflation at all; here it costs no request.
 
-              ⚠ GATED ON `showMlColumns`, THE SAME FLAG AS THE COLUMN IT ENLARGES — a deployment
-              with no scoring service, or a window with nothing scored, must show neither. It also
+              ⚠ GATED ON `showInflation`, THE SAME FLAG AS THE COLUMN IT ENLARGES — a deployment
+              with no scoring service, a window with nothing scored, or a table holding only
+              Ensemble's own bot must show neither. It also
               spans the full row (`lg:col-span-3` on the card itself): the cards above it
               are one-metric-per-bot, this one is one PANEL per bot and would be unreadable in a
               third of the width. It returns null when there is no badged bot to chart and none to
               name, so no empty cell appears in the grid. */}
-          {showMlColumns && (
+          {showInflation && (
             <InflationHistoryChart
               vendors={vendors}
               botColor={botColor}
@@ -1956,7 +1875,6 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         </div>
         {/* `TuningSuggestions` USED TO SIT HERE and now renders in BotsView, above this panel.
             Do not re-add it — two mounts would draw it twice. */}
-        <QualityCheckSection rows={qualityChecks} botColor={botColor} />
         {/* ⚠ THE PRICING INSTRUCTION IS GATED ON THE SAME PREDICATE AS THE COLUMN IT DESCRIBES.
             "Set a price to see $/acted-on" is a promise about THIS table, and on the per-repo
             mount there is no $/acted-on column for a price to fill — a reader who followed it

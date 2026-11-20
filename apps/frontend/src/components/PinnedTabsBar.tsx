@@ -162,10 +162,9 @@ export interface TabChipCfg {
 }
 
 export function useTabChip(tab: Tab): TabChipCfg {
-  // Repo-scoped drill-down chips (bot-only-prs / bot-threads) show the repo name so a
+  // Repo-scoped drill-down chips (bot-threads) show the repo name so a
   // per-repo tab is easy to track. These hooks run UNCONDITIONALLY (before the kind branches) to
   // satisfy the Rules of Hooks — TabChip renders for every tab; only the branches below use them.
-  const botOnlyRepoId = useFilters((s) => s.botOnlyFocusRepoId);
   const botThreadsRepoId = useFilters((s) => s.botThreadsFocusRepoId);
   const themeThreadsSeed = useFilters((s) => s.themeThreadsSeed);
   const searchSeed = useFilters((s) => s.searchSeed);
@@ -189,24 +188,6 @@ export function useTabChip(tab: Tab): TabChipCfg {
       ),
       label: (
         <>Flow metrics</>
-      ),
-    };
-  } else if (tab.kind === 'bot-only-prs') {
-    const scopeName = repoName(botOnlyRepoId);
-    cfg = {
-      title: `Bot-only PRs — only a bot reviewed these${scopeName ? ` · ${scopeName}` : ''}`,
-      closeAria: 'Close bot-only-PRs tab',
-      icon: (
-        <>
-          <span aria-hidden="true" className="shrink-0">
-            <BotIcon />
-          </span>
-        </>
-      ),
-      label: (
-        <>
-            Bot-only PRs{scopeName ? ` · ${scopeName}` : ''}
-          </>
       ),
     };
   } else if (tab.kind === 'user-activity') {

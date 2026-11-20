@@ -356,7 +356,7 @@ describe('the cluster list IS the Same-line overlap tile', () => {
     // ⚠ THE POINT OF THE SEPARATE COUNT: the per-bot `overlapThreads` column credits EVERY member
     // of a cluster, so summing it counts the 4 areas as 31. The tile — and this drill-down's
     // `total` — must not be derivable that way.
-    const summed = [...resp.vendors, ...resp.qualityChecks].reduce(
+    const summed = [...resp.vendors].reduce(
       (s: number, v: any) => s + v.overlapThreads,
       0,
     );
@@ -379,11 +379,9 @@ describe('the cluster list IS the Same-line overlap tile', () => {
     // automated (so it survives the kind gate) and is excluded purely on its ROLE — which is what
     // makes this fail rather than pass vacuously if the role filter is dropped.
     expect(pathsOf(list)).not.toContain('src/q.ts');
-    const qb = (await q.getBotAnalytics(1, 'rolling_14', scope)).qualityChecks.find(
-      (v: any) => v.login === 'quality-bot',
-    );
-    expect(qb).toBeDefined(); // it IS a classified automated reviewer …
-    expect(qb.overlapThreads).toBe(0); // … it just never enters the overlap pass
+    // … and it is not measured on the ROI table at all (Bots Monitoring is review bots only).
+    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
+    expect(resp.vendors.some((v: any) => v.login === 'quality-bot')).toBe(false);
   });
 
   it('null-line (outdated / file-level) threads are excluded', async () => {

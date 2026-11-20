@@ -1330,6 +1330,12 @@ await upsertMlLabels([
     targetCreatedAt: now,
   },
 ]);
+// The badge index returns REVIEW bots' labels only (judged by the PR's home workspace), so the
+// label's author must be a review bot there, or the "own" check fails for the wrong reason.
+await q.setWorkspaceReviewer(1, contributor!.id, {
+  workspaceId: (await q.workspaceScopeForRepo(1, A.repoId))!.workspaceId,
+  automated: true,
+});
 const mlOwn = await getPrMlLabels(A.prId, 1);
 check(
   'getPrMlLabels(A.pr, A) returns the stored label',

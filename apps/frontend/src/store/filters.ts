@@ -446,8 +446,7 @@ export interface FilterState {
   // so it's threaded into the feed query key. Transient, URL-silent (like the other feed toggles).
   feedShowCommits: boolean;
   // Activity "Feed" single-PR isolation: null (default) → every PR in scope; a pr id →
-  // the consolidated Feed shows ONLY that PR's items. Set from PrDetail's "Show in Activity feed"
-  // and the bot-only PR drill-down.
+  // the consolidated Feed shows ONLY that PR's items. Set from PrDetail's "Show in Activity feed".
   // Transient (never persisted); cleared on rail / scope changes.
   //
   // ⚠ URL-SERIALIZED (`?feedPr=<id>`) and a NAVIGATION key, for the same reason as
@@ -690,11 +689,8 @@ export interface FilterState {
   // row expanded and scrolled to, then consumes it — so the next arrival is collapsed again.
   trunkFocusRepoId: number | null;
 
-  // transient: the repo the bot-only-PRs drill-down was opened FROM (the per-repo Bots tab).
+  // transient: the repo the resolvable-bot-threads tab was opened FROM (the per-repo Bots tab).
   // null = the whole active workspace (the cross-repo Bots rail). Read-not-consumed, like above.
-  botOnlyFocusRepoId: number | null;
-  // transient: the repo the resolvable-bot-threads tab was opened FROM. null = the whole active
-  // workspace. Read-not-consumed, like the above.
   botThreadsFocusRepoId: number | null;
   // transient: the theme whose review threads / PR comments the theme-threads drill-down renders
   // (carries the theme's resolved `threads` + `prs`) + which summary it came from (for labels).
@@ -869,15 +865,15 @@ export interface FilterState {
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
   // Isolate the Feed to a single PR (or clear with null) — set from PrDetail's "Show in Activity
-  // feed" and the bot-only PR drill-down.
+  // feed".
   setFeedIsolatedPrId: (id: number | null) => void;
   // Isolate the **Pending** board to one card kind (or clear with null) — a kind chip or
   // `openMyTurnInWorkspace`.
   //
   // ⚠ ORDERING: `setActivityRepo` CLEARS this (and early-returns `{}` when the rail id is
   // unchanged), so a caller that wants to both switch to the board AND isolate it must call
-  // `setActivityRepo('attention')` FIRST and this SECOND. The same rule the PR-detail /
-  // bot-only-PRs "Show in Activity feed" buttons follow for `setFeedIsolatedPrId`.
+  // `setActivityRepo('attention')` FIRST and this SECOND. The same rule the PR-detail
+  // "Show in Activity feed" button follows for `setFeedIsolatedPrId`.
   setAttentionIsolation: (kind: InsightKind | null) => void;
   /**
    * Narrow the **Pending** board to one half of the `my_turn` population — 'mine' (work
@@ -1096,9 +1092,6 @@ export interface FilterState {
   consumeTrunkFocus: () => void;
   // The tab's dropdown writes here (null = every repo).
   setOpenPrsRepoFilter: (repoIds: number[] | null) => void;
-  // Open (or re-focus) the bot-only-PRs drill-down tab (the amber "only a bot reviewed
-  // these" caption). repoId scopes it to one repo; null = the whole active workspace.
-  openBotOnlyDetail: (repoId: number | null) => void;
   // Open (or re-focus) the resolvable-bot-threads review & resolve tab (the Bot-ROI
   // backlog banner). repoId scopes it to one repo; null = the whole active workspace.
   openBotThreadsDetail: (repoId: number | null) => void;
@@ -1409,7 +1402,6 @@ function freshDefaults(): FilterData {
     metricsFocus: null,
     openPrsRepoFilter: null,
     trunkFocusRepoId: null,
-    botOnlyFocusRepoId: null,
     botThreadsFocusRepoId: null,
     themeThreadsSeed: null,
     searchSeed: null,
@@ -1888,10 +1880,6 @@ export const useFilters = create<FilterState>((set, get) => ({
   consumeTrunkFocus: () => set({ trunkFocusRepoId: null }),
   setOpenPrsRepoFilter: (repoIds) =>
     set({ openPrsRepoFilter: repoIds != null ? { workspaceId: get().workspaceId, repoIds } : null }),
-  openBotOnlyDetail: (repoId) => {
-    set({ botOnlyFocusRepoId: repoId });
-    usePinnedTabs.getState().openBotOnlyPrsTab({ fromActivity: true });
-  },
   openBotThreadsDetail: (repoId) => {
     set({ botThreadsFocusRepoId: repoId });
     usePinnedTabs.getState().openBotThreadsTab({ fromActivity: true });

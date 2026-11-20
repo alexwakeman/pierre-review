@@ -235,12 +235,9 @@ function emptyBase(
 /**
  * The merged-PR population plus its per-(PR, bot) comment counts.
  *
- * ⚠ THE BOT SET IS ROLE `'all'`, NOT `'review'` — the ROI / flagging convention. Quality checks
- * (SonarQube, Codecov …) post exactly the kind of text this counts, and a drill-down that
- * narrowed the bot set would list fewer comments than the column it was opened from. The response
- * carries each bot's `role` so the UI can split them the way `BotAnalyticsResponse` splits
- * `vendors` from `qualityChecks`; it does NOT pre-split, because the chart wants the whole cloud.
- * (The Behaviour tab's own panels use `'review'` — this file deliberately does not follow them.)
+ * ⚠ THE BOT SET IS ROLE `'review'` — the ROI / flagging / Behaviour convention: Bots Monitoring
+ * measures and shows review bots only. A quality check's comments (SonarCloud's summary post,
+ * Codecov) are not counted in any column, chart or drill-down this base feeds.
  */
 async function loadVolumeBase(
   accountId: number,
@@ -265,7 +262,7 @@ async function loadVolumeBase(
 
   // `repoIds: []` is a real empty workspace, never "widen to the account".
   if (scope.repoIds.length === 0) return emptyBase(windowKind, from, to, generatedAt);
-  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'all');
+  const automatedIds = await automatedReviewerUserIds(accountId, scope.workspaceId, 'review');
   if (automatedIds.length === 0) {
     // No bots ⇒ no comments, but the PR population is still real and `totals.prs` must report it
     // (a workspace with 800 merged PRs and no bots reads "0 of 800", not "no data").

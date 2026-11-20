@@ -9,10 +9,12 @@
 //  • a bot with NO in-window labels ships the fields ABSENT (blanks, never zeros);
 //  • the nit suggestion fires only past BOTH gates (findings ≥ 20 AND nit share ≥ 0.7), fills
 //    the severity slot, and NEVER fires for a quality_check-roled bot;
+//  • a quality_check-roled bot is NOT MEASURED AT ALL — no row, no ML totals, even when labels
+//    for it are still stored (Bots Monitoring shows review bots only);
 //  • those SAME gates escalate the verdict 'keep' → 'tune', so the chip and the advisory under
 //    the table always agree (the escalation's own matrix — boundaries, no-downgrade — lives in
 //    bot-analytics-verdict.test.ts);
-//  • response-level `ml` totals cover the whole automated set (both roles), `pending` counts
+//  • response-level `ml` totals cover the REVIEW bots only, `pending` counts
 //    only unlabelled bot text INSIDE the window, and `totals.overlapClusters` counts the
 //    shared line areas ONCE (it is not the sum of the per-vendor overlap columns).
 //
@@ -227,16 +229,17 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     expect(ob.mlBySeverity).toBeUndefined();
   });
 
-  it('response-level ml totals cover BOTH roles, and pending counts only in-window text', async () => {
+  it('response-level ml totals cover REVIEW bots only, and pending counts only in-window text', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
-    // labelled = coderabbit 26 (24+summary+praise) + greptile 5 + qbot 25. oldbot's 3 are old.
-    expect(resp.ml.labelled).toBe(56);
-    expect(resp.ml.findings).toBe(54);
+    // labelled = coderabbit 26 (24+summary+praise) + greptile 5. oldbot's 3 are old. The quality
+    // check's 25 STORED labels are ignored — a quality check is never measured.
+    expect(resp.ml.labelled).toBe(31);
+    expect(resp.ml.findings).toBe(29);
     expect(resp.ml.summaries).toBe(1);
     expect(resp.ml.praise).toBe(1);
-    expect(resp.ml.bySeverity).toEqual({ nit: 51, minor: 2, major: 1, critical: 0 });
+    expect(resp.ml.bySeverity).toEqual({ nit: 26, minor: 2, major: 1, critical: 0 });
     // The praise row's category is NOT a finding category; nitpick leads.
-    expect(resp.ml.byCategory[0]).toEqual({ category: 'nitpick', count: 51 });
+    expect(resp.ml.byCategory[0]).toEqual({ category: 'nitpick', count: 26 });
     expect(resp.ml.backends).toEqual(['modernbert-onnx']);
     expect(resp.ml.truncated).toBe(false);
     // One unlabelled bot comment inside the window; the out-of-window one is invisible.
@@ -272,13 +275,11 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     ).toBe(false);
   });
 
-  it('does NOT suggest for a quality check, though its row still carries the mix', async () => {
+  it('a quality check is NOT MEASURED: no row, no suggestion, no wire section', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
-    const qb = resp.qualityChecks.find((v: { login: string | null }) => v.login === 'quality-bot')!;
-    // The fold reaches quality checks (labels ARE computed for them — role 'all')…
-    expect(qb.mlFindings).toBe(25);
-    expect(qb.mlBySeverity.nit).toBe(25);
-    // …but a linter's findings being nits is its job, not a tuning signal.
+    // Its 25 stored nit labels clear both nit gates — and still nothing about it ships.
+    expect(resp.vendors.some((v: { login: string | null }) => v.login === 'quality-bot')).toBe(false);
+    expect('qualityChecks' in resp).toBe(false);
     expect(
       resp.suggestions.some((s: { label: string }) => s.label.includes('quality-bot')),
     ).toBe(false);
@@ -307,7 +308,7 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     expect(resp.totals.overlapClusters).toBe(1);
     // ⚠ THE POINT OF THE SEPARATE COUNT: a cluster credits EVERY member, so summing the rows'
     // overlapThreads gives 4 for the one area. The strip's tile must not be derivable that way.
-    const summed = [...resp.vendors, ...resp.qualityChecks].reduce(
+    const summed = [...resp.vendors].reduce(
       (s: number, v: { overlapThreads: number }) => s + v.overlapThreads,
       0,
     );

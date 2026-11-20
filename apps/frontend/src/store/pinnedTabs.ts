@@ -21,7 +21,6 @@ export type PinnedPr = TabMeta;
 //  - pr-detail: a PR rendered full-screen (PrDetail) over the warm board (today's "pinned PR")
 //  - pr-focus:  a PR's OWN isolated Timeline instance (replaces the old overlay focus mode)
 //  - metrics-detail: the flow-metric drill-down (a singleton, non-PR, EPHEMERAL tab)
-//  - bot-only-prs: the bot-only-reviewed PR drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-threads: the resolvable-bot-threads review & resolve (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-flagging: the ML-strip drill-down ("what the bots are flagging" — a singleton, non-PR,
 //    EPHEMERAL tab; which tile/chip it shows is the transient seed, not the key)
@@ -38,7 +37,6 @@ export type TabKind =
   | 'pr-detail'
   | 'pr-focus'
   | 'metrics-detail'
-  | 'bot-only-prs'
   | 'bot-threads'
   | 'bot-flagging'
   | 'theme-threads'
@@ -138,9 +136,9 @@ export const prFocusKey = (id: number): string => `pr-focus:${id}`;
 // transient `metricsFocus` signal (store/filters.ts), not the key. EPHEMERAL: excluded from
 // persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
 export const METRICS_TAB_KEY = 'metrics-detail';
-// Two SINGLETON, non-PR bot drill-downs, seeded by transient repo-scope signals
-// (store/filters.ts botOnlyFocusRepoId / botThreadsFocusRepoId). EPHEMERAL like the above.
-export const BOT_ONLY_PRS_TAB_KEY = 'bot-only-prs';
+// A SINGLETON, non-PR bot drill-down, seeded by a transient repo-scope signal
+// (store/filters.ts botThreadsFocusRepoId). EPHEMERAL like the above. (The bot-only-PRs drill-down
+// is REMOVED; a stored 'bot-only-prs' key is dropped on load like any other unknown kind.)
 export const BOT_THREADS_TAB_KEY = 'bot-threads';
 // The ML-strip drill-down is likewise a SINGLETON, non-PR tab. WHICH tile or chip it renders (and
 // the repo it was opened FROM) is the transient `botFlaggingSeed` signal (store/filters.ts), not
@@ -296,7 +294,6 @@ interface TabsState {
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
   openPrFocusTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-focus + activate
   openMetricsTab: (opts?: OpenOpts) => void; // ensure the singleton metrics drill-down + activate
-  openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
   openBotFlaggingTab: (opts?: OpenOpts) => void; // ensure the singleton ML-strip drill-down + activate
   openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
@@ -457,7 +454,7 @@ function loadTabs(): Tab[] {
 function persist(tabs: Tab[]): void {
   try {
     // PR-backed tabs persist, and any PINNED tab (a story or build tab, `canPinTab`); the singleton
-    // drill-downs (metrics / bot-only PRs / …) are ephemeral.
+    // drill-downs (metrics / bot threads / …) are ephemeral.
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify(tabs.filter((t) => t.kind === 'pr-detail' || t.kind === 'pr-focus' || t.pinned === true)),
@@ -544,8 +541,6 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         : openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
     openMetricsTab: (opts) =>
       openTab({ key: METRICS_TAB_KEY, kind: 'metrics-detail', prId: 0, meta: null }, opts),
-    openBotOnlyPrsTab: (opts) =>
-      openTab({ key: BOT_ONLY_PRS_TAB_KEY, kind: 'bot-only-prs', prId: 0, meta: null }, opts),
     openBotThreadsTab: (opts) =>
       openTab({ key: BOT_THREADS_TAB_KEY, kind: 'bot-threads', prId: 0, meta: null }, opts),
     openBotFlaggingTab: (opts) =>

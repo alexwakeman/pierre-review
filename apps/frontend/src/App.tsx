@@ -8,7 +8,6 @@ import { useTimelineLayout } from './store/timelineLayout.js';
 import { ActivityView } from './components/Activity/index.js';
 import { SprintTabView } from './components/Sprint/SprintTabView.js';
 import { MetricsDetail } from './components/Activity/MetricsDetail.js';
-import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
 import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { BotFlaggingDetail } from './components/Activity/BotFlaggingDetail.js';
 import { UserActivityDetail } from './components/Activity/UserActivityDetail.js';
@@ -141,7 +140,6 @@ export default function App(): JSX.Element {
   const sprintActive = activeTab === 'sprint';
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
   const metricsActive = activeTabObj?.kind === 'metrics-detail';
-  const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const botFlaggingActive = activeTabObj?.kind === 'bot-flagging';
   const themeThreadsActive = activeTabObj?.kind === 'theme-threads';
@@ -154,7 +152,7 @@ export default function App(): JSX.Element {
   // bar's Focus controls and this slot can never disagree about a stale key.
   const boardMode: TimelineMode | null = boardSlotMode(activeTab, tabs);
   // A full-main overlay (a pr-detail PR, the Activity console, or a drill-down: metrics /
-  // bot-only PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
+  // bot threads / …) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
   //
   // Note the axis: these are TABS. The Activity console's own RAIL entries — Open PRs, Pending, Feed,
@@ -167,7 +165,6 @@ export default function App(): JSX.Element {
     inboxActive ||
     sprintActive ||
     metricsActive ||
-    botOnlyActive ||
     botThreadsActive ||
     botFlaggingActive ||
     themeThreadsActive ||
@@ -418,16 +415,6 @@ export default function App(): JSX.Element {
                 className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
               >
                 <MetricsDetail />
-              </div>
-            )}
-
-            {/* The bot-only-PRs drill-down — a sibling full-main overlay over the board. */}
-            {botOnlyActive && (
-              <div
-                data-testid="bot-only-prs-overlay"
-                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
-              >
-                <BotOnlyPrsDetail />
               </div>
             )}
 

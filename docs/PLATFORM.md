@@ -141,7 +141,7 @@ pagination for a "Show all N" footer opening the sortable `open-prs` drill-down 
 isolates the feed on click. The **"Showing only #N" feed-isolation banner** (`FeedIsolationBanner`,
 set from PrDetail's "Show in Activity feed" button or a drill-down, dismissible with Clear) renders
 **directly under the panel's summary header** — under `RepoFeedHeader` in the per-repo Activity
-console, under the "Review bots" header in `BotsView` (bot-only "Show in feed" lands there), and in
+console, under the "Review bots" header in `BotsView`, and in
 the empty-workspace fallback branch — so it's present in every context isolation can reach (never
 sticky; scrolls with content). When isolated, that view also **hides the repo-wide charts +
 open-PR list**: RepoConsole drops `RepoInsightsPanel`/`RepoOpenPrList`. `FeedView` still reads `feedIsolatedPrId` only to scope its query.
@@ -511,15 +511,14 @@ broken by lowest `workspaceId`). The two role filters:
 
 | `role: 'review'` — SCORING | `role: 'all'` — EXCLUSION / visibility |
 |---|---|
-| behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, `getActivity`'s acted-on stat, `getWorkspaceInsights`' `bot_signal` | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), **bot-only PRs** (`getBotOnlyReviewPrs`), **and `getBotAnalytics`** |
+| **every Bots Monitoring read**: ROI (`getBotAnalytics` — rows, totals, suggestions, overlap, its `ml` block), behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`, incl. the workspace responsiveness fold), volume + scatter (`db/bot-volume.ts`), the flagging drill-downs (`foldBotFlaggingPopulation`, `getBotOverlapClusters`), the ML scoring worker + pending counts + per-PR badges (`db/ml-labels.ts`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, the benchmark lineup; plus `getActivity`'s acted-on stat, `getWorkspaceInsights`' `bot_signal` | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), **bot-only PRs** (`getBotOnlyReviewPrs`), and `getBotAnalytics`'s "was that reply a PERSON's?" test (human follow-through, time-to-addressed — a linter's reply is not a human acting) |
 
-**`getBotAnalytics` is the exception that reads like a bug and isn't** — it is the ROI getter, yet
-it passes `'all'`. It narrows by SPLITTING, not by filtering: it computes a row for EVERY automated
-reviewer and then routes `role:'quality_check'` ones into `qualityChecks[]` (via `reviewerRoleForUser`)
-so they are excluded from `vendors`/`totals`/`suggestions` but still RENDERED, in a collapsed
-"excluded from ROI" section. Filtering them out of the id set instead would have made a mis-roled bot
-silently vanish from the one screen where you'd fix the role. So "ROI scores only review bots" is true
-of the OUTPUT and false of the argument — don't grep for `'review'` expecting to find it here.
+**BOTS MONITORING MEASURES AND SHOWS REVIEW BOTS ONLY (2026-11-20).** `getBotAnalytics` used to pass
+`'all'` and SPLIT non-reviewers into a `qualityChecks[]` section ("excluded from ROI"); that section,
+the wire field and its computation are GONE. A quality check, dependency bot, code agent, release or
+housekeeping automation has no row, total, suggestion, overlap, ML label, category or severity anywhere
+on Bots Monitoring — even a label stored for it before the rule is ignored on read. A mis-roled bot is
+found and fixed in **Settings → Bots**, which lists every role.
 _(The two in-code comments that used to contradict this — `schema.sqlite.ts`'s `role` comment and
 `queries.ts`' `ReviewerRoleFilter` comment, both listing "bot-only PRs" among the sets that narrow —
 were corrected during the workspace rename. They now agree with the code and with the paragraph
@@ -1190,15 +1189,14 @@ Four surfaces live in `BotsView`, BESIDE the panel rather than inside it:
 
 | Surface | Where it lives |
 |---|---|
-| "Only a bot reviewed N open PRs" governance caution + its list | `BotsView`, reads `totals.botOnlyPrs` |
 | `ResolveBacklogBanner` → review-and-resolve | exported FROM `BotRoiPanel.tsx`, mounted in `BotsView` |
 | `TuningSuggestions` (the amber advisory box) | **hoisted OUT of the panel** into `BotsView` |
 | the bot-only `FeedView` | `BotsView` |
 
 `TuningSuggestions` reads as a heading over the table rather than a footnote under it.
-`QualityCheckSection` stays in the panel; its mis-role safeguard survives because the
-classification screen (Bots Monitoring → Classification) lists "Other automation" with each row's role
-picker, which is where the re-role happens anyway.
+(The "Only a bot reviewed N open PRs" caution, its list and `QualityCheckSection` were REMOVED
+2026-11-20: Bots Monitoring shows review bots only. The mis-role safeguard lives in Settings → Bots,
+which lists "Other automation" with each row's role picker, where the re-role happens anyway.)
 
 **"Turning it off would save …" (`lib/botSavings.ts` `stopPayingLine`).** Under the table, ONE
 templated sentence per review bot (`vendors` is the `=== 'review'` cohort already) with a positive
