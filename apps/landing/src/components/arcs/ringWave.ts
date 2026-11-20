@@ -8,9 +8,11 @@ import { BAND_LAG_S, swellTimeline } from './cornerWave';
 //
 // WHEN. A scene's ring is closed when every line has landed: in a forward scene once
 // S ≥ gather × (the latest line's share), in a reverse scene while S ≤ 0 (S, Scene.tsx:
-// vh scrolled since the scene's top reached the screen's top). The ripple plays on the
-// change from apart to closed, never on the state the page opens in, and again on the
-// next close. A ring that comes apart mid-ripple stops it at once.
+// vh scrolled since the scene's top reached the screen's top). It ripples when it starts
+// to SHOW WHOLE: closed, and its scene at least ARRIVE_VH onto the screen. So the forward
+// ring ripples as its lines close, and the reverse ring ripples as it arrives whole and
+// again whenever it is scrolled back together. Never on the state the page opens in. A
+// ring that comes apart (or leaves) mid-ripple stops it at once.
 //
 // HOW, CHEAPLY. The lines are 64 composited layers; swelling their strokes would repaint
 // all 64 every frame. Instead the ripple draws ONE overlay <svg> of the whole ring (the
@@ -23,9 +25,18 @@ import { BAND_LAG_S, swellTimeline } from './cornerWave';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+/** How far into view (vh) a scene must be for its whole ring to count as arrived: most of the
+ *  pinned picture on screen, so the ripple is seen rather than played below the fold. */
+export const ARRIVE_VH = 75;
+
 /** Is a scene's ring closed (every line home) at S vh, for a gather of `gather` vh? */
 export function ringClosed(S: number, gather: number, lastShare: number, reverse: boolean): boolean {
   return reverse ? S <= 0 : S >= gather * lastShare;
+}
+
+/** Is the ring showing whole: closed and its scene ARRIVE_VH onto the screen (S ≥ ARRIVE_VH − 100)? */
+export function ringWhole(S: number, gather: number, lastShare: number, reverse: boolean): boolean {
+  return S >= ARRIVE_VH - 100 && ringClosed(S, gather, lastShare, reverse);
 }
 
 /** A band's swell as Web Animations keyframes (stroke widths in user units). */
@@ -121,7 +132,7 @@ export function startRingWaves(root: HTMLElement): () => void {
     const vh = window.innerHeight;
     for (const t of tracks) {
       const S = (-t.scene.getBoundingClientRect().top / vh) * 100;
-      const closed = ringClosed(S, t.gather, t.lastShare, t.reverse);
+      const closed = ringWhole(S, t.gather, t.lastShare, t.reverse);
       if (closed && !t.closed && !first) {
         t.stop?.();
         t.stop = ripple(t.ring, () => {

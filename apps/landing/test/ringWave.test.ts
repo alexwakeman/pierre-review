@@ -2,8 +2,8 @@
 // and the tiles' swell carried over as Web Animations keyframes.
 import { describe, expect, it } from 'vitest';
 import { RIPPLE_PEAKS } from '../src/components/arcs/cornerWave';
-import { ringClosed, swellKeyframes } from '../src/components/arcs/ringWave';
-import { ringLines, SITE_RING } from '../src/components/arcs/geometry';
+import { ARRIVE_VH, ringClosed, ringWhole, swellKeyframes } from '../src/components/arcs/ringWave';
+import { ringLines, SITE_RING, SPECTRUM } from '../src/components/arcs/geometry';
 
 describe('the ring ripple', () => {
   it('a forward ring closes once its last line has landed', () => {
@@ -16,6 +16,23 @@ describe('the ring ripple', () => {
     expect(ringClosed(-20, 120, 1, true)).toBe(true);
     expect(ringClosed(0, 120, 1, true)).toBe(true);
     expect(ringClosed(1, 120, 1, true)).toBe(false);
+  });
+
+  it('a whole ring counts as arrived only once its scene is well onto the screen', () => {
+    // the reverse ring scrolling in, whole: not yet, then arrived
+    expect(ringWhole(ARRIVE_VH - 100 - 1, 120, 1, true)).toBe(false);
+    expect(ringWhole(ARRIVE_VH - 100, 120, 1, true)).toBe(true);
+    // coming apart: no longer whole
+    expect(ringWhole(5, 120, 1, true)).toBe(false);
+    // the forward ring: whole once closed
+    expect(ringWhole(130, 130, 1, false)).toBe(true);
+  });
+
+  it('the ring has no blue, indigo or violet in it', () => {
+    const { lines } = ringLines(100, SITE_RING.margin, SITE_RING.scatter, SITE_RING.spreadX);
+    const used = new Set(lines.flatMap((l) => l.stops));
+    for (const c of [SPECTRUM.azure, SPECTRUM.indigo, SPECTRUM.violet, SPECTRUM.plum, SPECTRUM.teal]) expect(used.has(c)).toBe(false);
+    for (const c of [SPECTRUM.red, SPECTRUM.orange, SPECTRUM.green]) expect(used.has(c)).toBe(true);
   });
 
   it('swells like the tiles and settles back to the band width', () => {

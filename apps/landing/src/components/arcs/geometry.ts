@@ -180,7 +180,7 @@ export const SPECTRUM = {
   pink: '#f70e6a',
 } as const;
 
-export type RunName = 'ember' | 'dawn' | 'meadow' | 'dusk' | 'bloom';
+export type RunName = 'ember' | 'dawn' | 'meadow' | 'dusk' | 'bloom' | 'harvest';
 
 const S = SPECTRUM;
 export const RUNS: Record<RunName, readonly string[]> = {
@@ -189,7 +189,13 @@ export const RUNS: Record<RunName, readonly string[]> = {
   meadow: [S.teal, S.mint, S.green, S.lime],
   dusk: [S.plum, S.violet, S.azure, S.mint, S.lime],
   bloom: [S.magenta, S.pink, S.plum, S.azure, S.mint],
+  // the ring's lower half: green at the pole into the site's orange, no blue
+  harvest: [S.green, S.lime, S.amber, S.orange],
 };
+
+/** The ring's colours by half: warm red-to-yellow on top, green-to-orange below. Only
+ *  the site's orange family with red and green, never blue, indigo or violet. */
+export const RING_RUNS = { top: 'ember', bottom: 'harvest' } as const satisfies Record<string, RunName>;
 
 /** The order compositions cycle through. */
 export const RUN_ORDER: readonly RunName[] = ['ember', 'dawn', 'meadow', 'dusk', 'bloom'];
@@ -409,7 +415,7 @@ export interface RingLine {
 
 /**
  * THE RING: one whole disc of radius `R` (four quarters round one centre, mirrored left to
- * right in colour like the chain), broken into its single BANDS, 4 × BANDS lines. Each line
+ * right in colour: RING_RUNS, warm on top and green-to-orange below), broken into its single BANDS, 4 × BANDS lines. Each line
  * starts somewhere of its own in 3D space (the same on every load, and in the prerendered
  * page): pushed outward from the ring's centre and turned off its course, nearer or further
  * from the reader, tilted on all three axes. The scroll brings every line home.
@@ -421,7 +427,7 @@ export function ringLines(
   scatter = 1,
   spreadX = 1,
 ): { lines: RingLine[]; width: number; height: number } {
-  // the four quarters in pen order (round from the right), coloured as a mirrored chain
+  // the four quarters in pen order (round from the right); colours from RING_RUNS by half
   const raw: RawLink[] = [
     { cx: 0, cy: 0, sx: 1, sy: -1 },
     { cx: 0, cy: 0, sx: -1, sy: -1 },
@@ -451,7 +457,8 @@ export function ringLines(
         d: arcPath(ox, oy, b.r, q.corner),
         w: round(b.t),
         line,
-        stops: RUNS[q.run],
+        // the corner the centre sits in: 'b…' means the quarter reaches up (the top half)
+        stops: RUNS[q.corner[0] === 'b' ? RING_RUNS.top : RING_RUNS.bottom],
         tx: round(Math.cos(ang) * dist * spreadX, 1000),
         ty: round(Math.sin(ang) * dist, 1000),
         tz: round(Math.min(tz, 0.7), 1000),
