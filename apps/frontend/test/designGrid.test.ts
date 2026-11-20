@@ -4,7 +4,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/designGrid.test.ts
 import { describe, expect, it } from 'vitest';
 import type { DesignDiagram, SequenceDiagramMember } from '@pierre-review/shared';
-import { ARROW_TRACK_PX, CHANGE_KEY_LABEL, CHANGE_WORD, changesPresent, crossings, layoutDesign, memberForRef, placeArrowLabels, prBadgeTexts, routeArrow, separateArrowRuns } from '../src/lib/designGrid.js';
+import { ARROW_TRACK_PX, CHANGE_KEY_LABEL, CHANGE_WORD, changesPresent, crossings, fitArrowLabels, layoutDesign, memberForRef, placeArrowLabels, wrapLines, prBadgeTexts, routeArrow, separateArrowRuns } from '../src/lib/designGrid.js';
 
 const design = (over: Partial<DesignDiagram> = {}): DesignDiagram => ({
   acts: [
@@ -204,5 +204,92 @@ describe('placeArrowLabels', () => {
     const [lv, lh] = placeArrowLabels([v, h]);
     expect(Math.abs(lv![1] - 100)).toBeGreaterThanOrEqual(13); // not on the crossing
     expect(Math.hypot(lv![0] - lh![0], lv![1] - lh![1])).toBeGreaterThanOrEqual(26);
+  });
+});
+
+describe('fitArrowLabels — always-on labels never cover a card', () => {
+  // 7px a character, 16px a line: a label box is (chars × 7 + 8) wide when it fits on one line.
+  const o = { measure: (s: string) => s.length * 7, lineH: 16, padX: 4, padY: 2, margin: 4, maxW: 176, minW: 40 };
+  type B = { x: number; y: number; w: number; h: number };
+  const boxOf = (l: { x: number; y: number; w: number; lines: number }): B => ({ x: l.x - l.w / 2, y: l.y - (l.lines * 16 + 4) / 2, w: l.w, h: l.lines * 16 + 4 });
+  const overlap = (a: B, b: B): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+  it('wraps by words', () => {
+    expect(wrapLines('one two three', 1000, o.measure)).toBe(1);
+    expect(wrapLines('one two three', 7 * 7, o.measure)).toBe(2);
+    expect(wrapLines('', 100, o.measure)).toBe(0);
+  });
+
+  it('a label sits in the gap between two cards, above its line, wrapped to the gap', () => {
+    const cards = [{ x: 0, y: 0, w: 120, h: 240 }, { x: 220, y: 0, w: 120, h: 240 }];
+    const [l] = fitArrowLabels([{ at: [170, 120], text: 'The cron loop can only go once the queue does its job.' }], cards, { x: 0, y: 0, w: 340, h: 240 }, o);
+    expect(l).not.toBeNull();
+    expect(l!.w).toBeLessThanOrEqual(100 - 8);
+    expect(l!.lines).toBeGreaterThan(1);
+    for (const c of cards) expect(overlap(boxOf(l!), c)).toBe(false);
+    expect(boxOf(l!).y + boxOf(l!).h).toBeLessThanOrEqual(120); // above the line: the arrow stays in view
+  });
+
+  it('words that do not fit the height are cut, never spilled', () => {
+    const cards = [{ x: 0, y: 0, w: 120, h: 40 }, { x: 180, y: 0, w: 120, h: 40 }];
+    const long = 'word '.repeat(40).trim();
+    const [l] = fitArrowLabels([{ at: [150, 20], text: long }], cards, { x: 0, y: 0, w: 300, h: 40 }, o);
+    expect(l).not.toBeNull();
+    expect(l!.cut).toBe(true);
+    expect(boxOf(l!).y).toBeGreaterThanOrEqual(0);
+    expect(boxOf(l!).y + boxOf(l!).h).toBeLessThanOrEqual(40);
+  });
+
+  it('no room (a gap narrower than minW) → not drawn', () => {
+    const cards = [{ x: 0, y: 0, w: 100, h: 100 }, { x: 120, y: 0, w: 100, h: 100 }];
+    expect(fitArrowLabels([{ at: [110, 50], text: 'Needs the writer.' }], cards, { x: 0, y: 0, w: 220, h: 100 }, o)).toEqual([null]);
+  });
+
+  it('a label that must sit ON its line keeps clear of both cards, so the arrowheads show', () => {
+    // One line of room only: above and below do not fit.
+    const cards = [{ x: 0, y: 0, w: 120, h: 28 }, { x: 240, y: 0, w: 120, h: 28 }];
+    const [l] = fitArrowLabels([{ at: [180, 14], text: 'Short why' }], cards, { x: 0, y: 0, w: 360, h: 28 }, o);
+    expect(l).not.toBeNull();
+    const b = boxOf(l!);
+    expect(b.x).toBeGreaterThanOrEqual(120 + 15);
+    expect(b.x + b.w).toBeLessThanOrEqual(240 - 15);
+  });
+
+  it('a DENSE board: many cards and labels, no label over a card or another label, all inside the bounds', () => {
+    // 6 columns × 8 rows of 120×90 cards, 96px column gaps, 8px row gaps; a label in every column gap of every row.
+    const cards: B[] = [];
+    const items: Array<{ at: [number, number]; text: string }> = [];
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 6; c++) cards.push({ x: c * 216, y: r * 98, w: 120, h: 90 });
+      for (let c = 0; c < 5; c++) items.push({ at: [c * 216 + 168, r * 98 + 45], text: `Ticket ${r}-${c} waits on the queue and the dead-letter queue that the infra ticket creates.` });
+    }
+    const bounds = { x: 0, y: 0, w: 6 * 216, h: 8 * 98 };
+    const fitted = fitArrowLabels(items, cards, bounds, o);
+    const drawn = fitted.filter((l): l is NonNullable<typeof l> => l != null).map(boxOf);
+    expect(drawn.length).toBe(items.length);
+    for (const [i, a] of drawn.entries()) {
+      for (const c of cards) expect(overlap(a, c)).toBe(false);
+      for (const b of drawn.slice(i + 1)) expect(overlap(a, b)).toBe(false);
+      expect(a.x).toBeGreaterThanOrEqual(0);
+      expect(a.y).toBeGreaterThanOrEqual(0);
+      expect(a.x + a.w).toBeLessThanOrEqual(bounds.w);
+      expect(a.y + a.h).toBeLessThanOrEqual(bounds.h);
+    }
+  });
+
+  it('two labels in one gap share it: the second fits round the first or is not drawn', () => {
+    const cards = [{ x: 0, y: 0, w: 120, h: 200 }, { x: 220, y: 0, w: 120, h: 200 }];
+    const fitted = fitArrowLabels(
+      [
+        { at: [170, 80], text: 'The handler writes through the upsert.' },
+        { at: [170, 110], text: 'Only the progress events say which syncs run.' },
+      ],
+      cards,
+      { x: 0, y: 0, w: 340, h: 200 },
+      o,
+    );
+    const [a, b] = fitted.map((l) => (l == null ? null : boxOf(l)));
+    expect(a).not.toBeNull();
+    if (b != null) expect(overlap(a!, b)).toBe(false);
   });
 });

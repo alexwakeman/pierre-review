@@ -531,8 +531,7 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
         </li>
         <li>
           <strong>People</strong>: one row per person the tickets are assigned to, Unassigned last. Reviews
-          waiting counts open pull requests in this workspace waiting on their review, where Ensemble knows their GitHub account. An
-          arrow between two rows is a hand-off.
+          waiting counts open pull requests in this workspace waiting on their review, where Ensemble knows their GitHub account.
         </li>
         <li>
           <strong>Row order</strong>: on every view, the rows with the most pull requests (open, merged or closed) come first; each
@@ -579,8 +578,8 @@ function BoardInfo({ name }: { name: string }): JSX.Element {
           changes, while it is open.
         </li>
         <li>
-          <strong>Arrows</strong> run from the ticket waited on to the one that waits. Hover an arrow or its number to see why. A
-          number on an arrow is explained under the board.
+          <strong>Arrows</strong> are on the Critical path view only. Each runs from the ticket waited on to the one that waits,
+          with the reason beside it.
         </li>
       </ul>
     </>

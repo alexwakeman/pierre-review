@@ -28,7 +28,7 @@ import {
 
 
 // The lane board's pure folds (lib/laneBoard.ts): the columns, each view's lanes, the ghost column, the
-// collapsed Complete columns, the arrows and their key, and a card's tag words.
+// collapsed Complete columns, the arrows (Critical path only), and a card's tag words.
 
 // Two review buckets and a done bucket that also holds "Won't do" — the user's own setup, in the
 // columns the server resolved (`statusLayout.columns`), with a Product review bucket after review.
@@ -331,7 +331,7 @@ describe("a card's person pill spells the person as the People lane does", () =>
   });
 });
 
-describe('arrows and their key', () => {
+describe('arrows: the Critical path view only', () => {
   const nodes = [
     node('A-1', { assignee: { name: 'Colin', avatarUrl: null } }),
     node('A-2'),
@@ -339,71 +339,62 @@ describe('arrows and their key', () => {
     node('A-4', { column: 'done', stage: 'done' }),
   ];
   const edges = [dep('A-2', 'A-1', 'Needs the writer.'), dep('A-3', 'A-2', null), dep('A-3', 'A-4', 'Uses the schema.')];
-  it('an arrow runs FROM the ticket waited on TO the one that waits; its words read that way', () => {
-    const b = themesBoard({ nodes, edges, paths: null, columns: COLUMNS, themes: null });
+  const paths: SprintPaths = {
+    paths: [{ title: 'Chain', tickets: ['A-1', 'A-2', 'A-3', 'A-4'], idents: [id('A-1'), id('A-2'), id('A-3'), id('A-4')], advice: 'Go.', risk: 'medium' }],
+    callouts: [],
+    createdAt: '2026-10-18T00:00:00.000Z',
+  };
+  const lane = 'path:0';
+  it('an arrow runs FROM the ticket waited on TO the one that waits; its words are the why', () => {
+    const b = pathsBoard({ nodes, edges, paths, columns: COLUMNS });
     const a = b.arrows.find((x) => x.text.startsWith('A-2'))!;
-    expect(a).toMatchObject({ from: cardIdOf('all', id('A-1')), to: cardIdOf('all', id('A-2')), label: 'Needs the writer.', critical: false });
+    expect(a).toMatchObject({ from: cardIdOf(lane, id('A-1')), to: cardIdOf(lane, id('A-2')), label: 'Needs the writer.' });
     expect(a.text).toBe('A-2 waits on A-1: Needs the writer.');
+    expect(b.arrows.find((x) => x.text === 'A-3 waits on A-2')!.label).toBeNull();
   });
-  it('People: an arrow between two people is a hand-off, keyed "<person> waits on <person>"', () => {
-    const b = peopleBoard({ nodes, edges, paths: null, columns: COLUMNS, people: [] });
-    expect(b.arrows.find((x) => x.text.startsWith('A-2'))!.label).toBe('Sinan Goktas waits on Colin');
-    // Inside one person's lane: the brief's why (none here).
-    expect(b.arrows.find((x) => x.text.startsWith('A-3 waits on A-2'))!.label).toBeNull();
+  it('Theme and People draw NO lines, even with dependencies and a stored path (the cards keep their marks)', () => {
+    const t = themesBoard({ nodes, edges, paths, columns: COLUMNS, themes: null });
+    const p = peopleBoard({ nodes, edges, paths, columns: COLUMNS, people: [] });
+    expect(t.arrows).toEqual([]);
+    expect(p.arrows).toEqual([]);
+    expect(t.cards.find((c) => c.data.node.key === 'A-3')!.data.waiting).toBe(true);
+    expect(t.cards.filter((c) => c.data.critical).map((c) => c.data.node.key)).toEqual(['A-1', 'A-2', 'A-3', 'A-4']);
   });
-  it('layout: only arrows between drawn cards; a collapsed column draws none; numbers shared by equal words', () => {
-    const b = themesBoard({ nodes, edges, paths: null, columns: COLUMNS, themes: null });
+  it('a dependency between two tickets NOT on one path draws nothing', () => {
+    const short: SprintPaths = { ...paths, paths: [{ ...paths.paths[0]!, tickets: ['A-1', 'A-2'], idents: [id('A-1'), id('A-2')] }] };
+    expect(pathsBoard({ nodes, edges, paths: short, columns: COLUMNS }).arrows.map((a) => a.text)).toEqual(['A-2 waits on A-1: Needs the writer.']);
+  });
+  it('layout: only arrows between drawn cards; a collapsed column draws none; no numbers', () => {
+    const b = pathsBoard({ nodes, edges, paths, columns: COLUMNS });
     const collapsed = layoutBoard({ ...b, collapsed: collapsedColumns(b.columns, new Set()) });
     expect(collapsed.arrows.map((a) => a.text)).toEqual(['A-2 waits on A-1: Needs the writer.', 'A-3 waits on A-2']);
-    expect(collapsed.key).toEqual([{ n: 1, label: 'Needs the writer.' }]);
-    expect(collapsed.arrows.map((a) => a.n)).toEqual([1, null]);
+    expect(collapsed.arrows[0]).not.toHaveProperty('n');
+    expect(collapsed).not.toHaveProperty('key');
     expect(collapsed.lanes[0]!.hidden.get('done')).toBe(1);
     const open = layoutBoard({ ...b, collapsed: collapsedColumns(b.columns, new Set(['done'])) });
     expect(open.arrows).toHaveLength(3);
-    expect(open.key.map((k) => k.n)).toEqual([1, 2]);
-    const twice = layoutBoard({
-      ...b,
-      arrows: [...b.arrows, { from: b.cards[2]!.id, to: b.cards[0]!.id, label: 'Needs the writer.', critical: false, text: 'x' }],
-      collapsed: new Set(),
-    });
-    expect(twice.key).toHaveLength(2);
-    expect(twice.arrows[twice.arrows.length - 1]!.n).toBe(1);
+    const twice = layoutBoard({ ...b, arrows: [...b.arrows, b.arrows[0]!], collapsed: new Set() });
+    expect(twice.arrows).toHaveLength(3);
   });
   it("a lane's \"n tickets\" opens THAT lane's cell only: its cards drawn below a toggle row, arrows to them, the column widened", () => {
-    const b = peopleBoard({ nodes, edges, paths: null, columns: COLUMNS, people: [] });
+    const b = pathsBoard({ nodes, edges, paths, columns: COLUMNS });
     const collapsed = collapsedColumns(b.columns, new Set());
     const shut = layoutBoard({ ...b, collapsed });
-    const laneOfA4 = b.cards.find((c) => c.data.node.key === 'A-4')!.lane;
-    const open = layoutBoard({ ...b, collapsed, expanded: new Set([cellKey(laneOfA4, 'done')]) });
-    const lane = open.lanes.find((l) => l.id === laneOfA4)!;
-    expect(lane.hidden.has('done')).toBe(false);
-    expect(lane.opened.get('done')).toBe(1);
+    const open = layoutBoard({ ...b, collapsed, expanded: new Set([cellKey(lane, 'done')]) });
+    const l = open.lanes.find((x) => x.id === lane)!;
+    expect(l.hidden.has('done')).toBe(false);
+    expect(l.opened.get('done')).toBe(1);
     const a4 = open.cards.find((c) => c.data.node.key === 'A-4')!;
     // Row 0 of the cell holds the "Hide" toggle; the card sits under it.
-    expect(a4.row).toBe(lane.row + 1);
-    expect(lane.span).toBeGreaterThanOrEqual(2);
+    expect(a4.row).toBe(l.row + 1);
+    expect(l.span).toBeGreaterThanOrEqual(2);
     expect(open.columns.find((c) => c.id === 'done')).toMatchObject({ collapsed: true, widened: true });
     expect(shut.columns.find((c) => c.id === 'done')).toMatchObject({ collapsed: true, widened: false });
     expect(open.arrows.some((a) => a.text.startsWith('A-3 waits on A-4'))).toBe(true);
     expect(shut.arrows.some((a) => a.text.startsWith('A-3 waits on A-4'))).toBe(false);
     // Another lane's cell in the same column stays a count.
     const other = layoutBoard({ ...b, collapsed, expanded: new Set([cellKey('nobody', 'done')]) });
-    expect(other.lanes.find((l) => l.id === laneOfA4)!.hidden.get('done')).toBe(1);
-  });
-  it('critical: on a path, every arrow; elsewhere, two tickets next to each other on a stored path', () => {
-    const paths: SprintPaths = {
-      paths: [{ title: 'Chain', tickets: ['A-1', 'A-2'], idents: [id('A-1'), id('A-2')], advice: 'Go.', risk: 'medium' }],
-      callouts: [],
-      createdAt: '2026-10-18T00:00:00.000Z',
-    };
-    expect(pathsBoard({ nodes, edges, paths, columns: COLUMNS }).arrows.map((a) => a.critical)).toEqual([true]);
-    const t = themesBoard({ nodes, edges, paths, columns: COLUMNS, themes: null });
-    expect(t.arrows.map((a) => [a.text.slice(0, 13), a.critical])).toEqual([
-      ['A-2 waits on ', true],
-      ['A-3 waits on ', false],
-      ['A-3 waits on ', false],
-    ]);
-    expect(t.cards.filter((c) => c.data.critical).map((c) => c.data.node.key)).toEqual(['A-1', 'A-2']);
+    expect(other.lanes.find((x) => x.id === lane)!.hidden.get('done')).toBe(1);
   });
 });
 
@@ -498,7 +489,13 @@ describe('cards with a pull request', () => {
       node('A-3'),
       node('B-1', { column: 'cr', stage: 'in_review' }),
     ];
-    const b = themesBoard({ nodes, edges: [dep('A-3', 'B-1')], paths: null, columns: COLUMNS, themes: [] });
+    const chain: SprintPaths = {
+      paths: [{ title: 'P', tickets: ['A-1', 'A-2', 'A-3', 'B-1'], idents: [id('A-1'), id('A-2'), id('A-3'), id('B-1')], advice: '', risk: 'low' }],
+      callouts: [],
+      createdAt: '2026-10-18T00:00:00.000Z',
+    };
+    const b = pathsBoard({ nodes, edges: [dep('A-3', 'B-1')], paths: chain, columns: COLUMNS });
+    expect(b.arrows).toHaveLength(1);
     const l = layoutBoard({ ...b, collapsed: new Set() });
     const doing = l.cards.filter((c) => c.column === 'doing').sort((x, y) => x.row - y.row).map((c) => c.data.node.key);
     expect(doing).toEqual(['A-1', 'A-2', 'A-3']);

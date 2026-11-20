@@ -119,9 +119,10 @@ export default function Page(): JSX.Element {
         request come first. The key under the board names every mark the board uses.
       </p>
       <p>
-        Arrows go from a ticket to the ticket that waits on it. They come from the tracker&rsquo;s own
-        &ldquo;blocked by&rdquo; links and from what the ticket text says. A number on an arrow points to the reason
-        in the line under the board. Hover over an arrow or its number to read it.
+        Only the <DocLink to="this-sprint/critical-path">Critical path view</DocLink> draws arrows: from a ticket on
+        a path to the ticket on that path that waits on it, with the reason written beside the arrow. They come from
+        the tracker&rsquo;s own &ldquo;blocked by&rdquo; links and from what the ticket text says. The Theme and
+        People views draw no arrows.
       </p>
 
       <H2 id="filters">Filters</H2>
