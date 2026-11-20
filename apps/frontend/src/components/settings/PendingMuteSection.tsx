@@ -1,25 +1,26 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspacePendingMuteUpdate } from '@pierre-review/shared';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { useRepos } from '../../hooks/useTimeline.js';
 import { InfoButton } from '../InfoModal.js';
-import { SaveButton, SectionShell, CheckInput } from './ui.js';
+import { SectionShell, CheckInput } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 /**
- * What ONE Save on this section writes. Extracted from the component so the rule can be pinned
+ * What ONE write of this section sends. Extracted from the component so the rule can be pinned
  * without a renderer (`apps/frontend/test/pendingMutePatch.test.ts`), exactly as
  * `buildSprintPatch` is.
  *
- * ⚠ EACH HALF IS SENT ONLY WHEN IT CHANGED, even though one button submits both. The two are
+ * ⚠ EACH HALF IS SENT ONLY WHEN IT CHANGED, even though one write may carry both. The two are
  * INDEPENDENTLY OWNED FACTS, OR-ed — not a chain — so a key that rides along unchanged is an
  * assertion the user never made: it would re-write the other grain's stored value with whatever
  * this screen last read, and on a stale tab that is a silent revert of an edit made elsewhere.
  * `undefined` means "leave this fact alone", which is the whole difference between a union and
  * an inheritance chain.
  *
- * ⚠ AN EMPTY PATCH IS REACHABLE AND MUST STAY LEGAL. Save is disabled when neither half is
- * dirty, but "disabled" is a UI state, not a guarantee; `{}` is a well-formed no-op.
+ * ⚠ AN EMPTY PATCH IS REACHABLE AND MUST STAY LEGAL. Nothing is written when neither half is
+ * dirty, but that is a UI rule, not a guarantee; `{}` is a well-formed no-op.
  *
  * ⚠ `mutedRepoIds` IS THE WHOLE SET FOR THIS WORKSPACE, never a delta. The server replaces the
  * muted set inside the named workspace's membership and leaves every other workspace's rows
@@ -64,11 +65,13 @@ function sameSet(a: readonly number[], b: ReadonlySet<number>): boolean {
  * target, the sprint cadence all had it). Turning the workspace switch back off must reveal the
  * per-repo choices unchanged, which it does because nothing merged them.
  *
- * ⚠ THE LIST IS THIS WORKSPACE'S MEMBERSHIP, and the Save is scoped to it server-side. The stored
+ * ⚠ THE LIST IS THIS WORKSPACE'S MEMBERSHIP, and the write is scoped to it server-side. The stored
  * row is repo-grained and carries no workspace id (a repo belongs to exactly one workspace
- * already), so without that scoping a Save here would clear every mute set in every other
+ * already), so without that scoping a write here would clear every mute set in every other
  * workspace. Naming the workspace is the modal heading's job; naming the BLAST RADIUS is this
- * section's, and it is stated where the button is.
+ * section's, and it is stated under the controls.
+ *
+ * Saves as you go (./autosave.tsx): every box writes at once.
  */
 export function PendingMuteSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
@@ -100,29 +103,53 @@ export function PendingMuteSection(): JSX.Element {
   const [repoIds, setRepoIds] = useState<number[]>([...storedRepoIds]);
 
   // Re-seed whenever the resolved workspace or the STORED values change — an uncontrolled seed
-  // would keep the previous workspace's choices in the boxes after a switch, and Save would then
-  // write them onto the new one.
+  // would keep the previous workspace's choices in the boxes after a switch, and the autosave would
+  // then write them onto the new one (`seededFor` holds it back until the re-seed lands).
   //
   // ⚠ KEYED ON THE VALUES, NOT ON THE RESPONSE OBJECT. React Query hands back a new object
   // identity on every background refetch, so a `[workspace]` dependency would revert a half-made
   // edit while the user was still in it. `storedKey` is the values, flattened.
   const storedKey = `${workspaceId}|${storedMuted}|${[...storedRepoIds].sort((a, b) => a - b).join(',')}`;
+  const [seededFor, setSeededFor] = useState(workspaceId);
+  // What this section last wrote: its echo must not re-seed over a click made since.
+  const sent = useRef<string | null>(null);
   useEffect(() => {
+    setSeededFor(workspaceId);
+    if (sent.current === storedKey) {
+      sent.current = null;
+      return;
+    }
     setMuted(storedMuted);
     setRepoIds([...storedRepoIds]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
 
+  const workspaceDirty = muted !== storedMuted;
+  const reposDirty = !sameSet(repoIds, storedRepoIds);
+  const dirty = workspace != null && (workspaceDirty || reposDirty);
+  const draftKey = `${workspaceId}|${muted}|${[...repoIds].sort((a, b) => a - b).join(',')}`;
+  const autosave = useAutoSave({
+    key: draftKey,
+    ready: dirty && workspaceId != null && seededFor === workspaceId,
+    busy: setWorkspacePendingMute.isPending,
+    run: () => {
+      if (workspaceId == null) return;
+      sent.current = draftKey;
+      setWorkspacePendingMute.mutate({
+        id: workspaceId,
+        patch: buildPendingMutePatch({ workspaceDirty, reposDirty, muted, repoIds }),
+      });
+    },
+  });
+
   if (workspaceId == null || workspace == null) {
     return <ScopePendingSection title="Pending mute" failed={workspaces.isError} />;
   }
 
-  const workspaceDirty = muted !== storedMuted;
-  const reposDirty = !sameSet(repoIds, storedRepoIds);
-  const dirty = workspaceDirty || reposDirty;
-
-  const toggleRepo = (id: number): void =>
+  const toggleRepo = (id: number): void => {
+    autosave.now();
     setRepoIds((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
+  };
 
   return (
     <SectionShell
@@ -146,7 +173,10 @@ export function PendingMuteSection(): JSX.Element {
         <CheckInput
           className="mt-0.5"
           checked={muted}
-          onChange={(e) => setMuted(e.target.checked)}
+          onChange={(e) => {
+            autosave.now();
+            setMuted(e.target.checked);
+          }}
         />
         <span>
           <span className="font-medium text-ui-ink">
@@ -192,25 +222,11 @@ export function PendingMuteSection(): JSX.Element {
         )}
       </div>
 
-      <SaveButton
-        dirty={dirty}
-        saving={setWorkspacePendingMute.isPending}
-        onClick={() =>
-          setWorkspacePendingMute.mutate({
-            id: workspaceId,
-            patch: buildPendingMutePatch({ workspaceDirty, reposDirty, muted, repoIds }),
-          })
-        }
-      />
       <p className="text-meta text-ui-faint">
         Applies to this workspace only.
       </p>
 
-      {setWorkspacePendingMute.isError && (
-        <div className="text-meta text-ui-danger">
-          {(setWorkspacePendingMute.error as Error)?.message ?? 'Couldn’t save the mute.'}
-        </div>
-      )}
+      <SaveState section="Pending mute" mutation={setWorkspacePendingMute} dirty={dirty} />
     </SectionShell>
   );
 }

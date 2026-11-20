@@ -1,3 +1,4 @@
+import { SANDBOX_RESOURCE_LIMITS } from '@pierre-review/shared';
 import type { SandboxMemoryProject, SandboxServiceStackChoice, SandboxWorkspaceSettings, SandboxWorkspaceSettingsBody } from '@pierre-review/shared';
 
 // SETTINGS → SANDBOX'S PURE HALF (SandboxSection.tsx): the draft from the stored setting, the whole-setting
@@ -53,6 +54,25 @@ export function sandboxBodyOf(d: SandboxDraft): SandboxWorkspaceSettingsBody {
     services: d.services,
     fixAllRepos: d.fixAllRepos,
   };
+}
+
+/** Why the draft must not be written (a resource that is not a whole number within its limits), or
+ *  null. Settings save as you go, so an invalid figure is held back and the reason shown, never
+ *  quietly sent as "the default". */
+export function sandboxDraftProblem(d: SandboxDraft): string | null {
+  const rows: Array<[string, string, { min: number; max: number }]> = [
+    ['CPUs', d.cpus, SANDBOX_RESOURCE_LIMITS.cpus],
+    ['Memory', d.memoryGb, SANDBOX_RESOURCE_LIMITS.memoryGb],
+    ['Disk', d.diskGb, SANDBOX_RESOURCE_LIMITS.diskGb],
+  ];
+  for (const [label, v, lim] of rows) {
+    if (v.trim() === '') continue;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < lim.min || n > lim.max) {
+      return `${label} must be a whole number from ${lim.min} to ${lim.max}.`;
+    }
+  }
+  return null;
 }
 
 export function sandboxDraftDirty(d: SandboxDraft, saved: SandboxWorkspaceSettings): boolean {

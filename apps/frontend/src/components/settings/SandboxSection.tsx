@@ -22,9 +22,10 @@ import {
 } from '../../hooks/useStoryBuild.js';
 import { InfoButton } from '../InfoModal.js';
 import { CloseIcon, PlusIcon } from '../Icons.js';
-import { CheckInput, Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { CheckInput, Field, SectionShell, inputCls } from './ui.js';
+import { SaveState, useAutoSave, useEchoGuard } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
-import { addComposePicks, sandboxBodyOf, sandboxDraftOf, sandboxDraftDirty, sandboxMemoryTicks, type SandboxDraft } from './sandboxSettingsForm.js';
+import { addComposePicks, sandboxBodyOf, sandboxDraftOf, sandboxDraftDirty, sandboxDraftProblem, sandboxMemoryTicks, type SandboxDraft } from './sandboxSettingsForm.js';
 
 // SETTINGS → SANDBOX (docs/SANDBOX.md § The workspace mirror, § Services; plan WP4/WP8), the workspace
 // part (the computer's container runtime is SandboxRuntimeSection.tsx, above it in the same tab).
@@ -35,7 +36,8 @@ import { addComposePicks, sandboxBodyOf, sandboxDraftOf, sandboxDraftDirty, sand
 //     the services (compose files Limn may run, picked from the ones found in Limn's own copies), the
 //     "Always allow" hosts, the proxy variables and the resources.
 //
-// ⚠ DRAFT + SAVE like every section here. ⚠ The PUT REPLACES the whole setting, so the body is built
+// SAVES AS YOU GO (./autosave.tsx): a tick writes at once, a typed figure or host list after a pause
+// or on blur; an invalid resource is held back with the reason shown. ⚠ The PUT REPLACES the whole setting, so the body is built
 // from the WHOLE draft (`sandboxBodyOf`), never a patch of the changed fields.
 
 const SECONDARY_BTN =
@@ -59,10 +61,14 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
   const [draft, setDraft] = useState<SandboxDraft>(() => sandboxDraftOf(saved));
   // Re-seed on the STORED values (first load, after a save), never the response object.
   const signature = JSON.stringify(sandboxDraftOf(saved));
+  // Keyed per workspace (the `key` above), so the scope never changes here.
+  const echo = useEchoGuard(JSON.stringify(draft), null);
   useEffect(() => {
+    if (echo.keepDraft()) return;
     setDraft(sandboxDraftOf(saved));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
+  /** A typed value: written after a pause, or on blur (`autosave.flush`). */
   const set = (patch: Partial<SandboxDraft>): void => setDraft((d) => ({ ...d, ...patch }));
 
   // THE CHECK is CLICK-GATED: it walks the reader's Claude projects and clones when they press Find.
@@ -76,8 +82,22 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
   };
 
   const dirty = sandboxDraftDirty(draft, saved);
+  const problem = sandboxDraftProblem(draft);
   const body: SandboxWorkspaceSettingsBody = sandboxBodyOf(draft);
-  const err = save.error instanceof ApiError ? save.error.message : save.error != null ? (save.error as Error).message : null;
+  const autosave = useAutoSave({
+    key: JSON.stringify(body),
+    ready: dirty && problem == null,
+    busy: save.isPending,
+    run: () => {
+      echo.markSent();
+      save.mutate(body);
+    },
+  });
+  /** A tick, an add or a remove: written at once. */
+  const setNow = (patch: Partial<SandboxDraft>): void => {
+    autosave.now();
+    set(patch);
+  };
   const ticks = useMemo(() => sandboxMemoryTicks(result?.memories ?? [], draft.memoryProjects), [result?.memories, draft.memoryProjects]);
 
   return (
@@ -118,7 +138,7 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
               <label key={m.dir} className="flex cursor-pointer items-center gap-2 text-body text-ui-ink">
                 <CheckInput
                   checked={m.ticked}
-                  onChange={(e) => set({ memoryProjects: m.toggle(e.target.checked) })}
+                  onChange={(e) => setNow({ memoryProjects: m.toggle(e.target.checked) })}
                 />
                 <span className="min-w-0 break-all font-mono text-meta">{m.dir}</span>
                 <span className="text-meta text-ui-mute">
@@ -130,12 +150,12 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
         )}
 
         <label className="flex cursor-pointer items-center gap-2 text-body text-ui-ink">
-          <CheckInput checked={draft.userClaudeMd} onChange={(e) => set({ userClaudeMd: e.target.checked })} />
+          <CheckInput checked={draft.userClaudeMd} onChange={(e) => setNow({ userClaudeMd: e.target.checked })} />
           Bring your ~/.claude/CLAUDE.md
           {result != null && !result.userClaudeMd && <span className="text-meta text-ui-mute">(none found)</span>}
         </label>
         <label className="flex cursor-pointer items-center gap-2 text-body text-ui-ink">
-          <CheckInput checked={draft.userSkills} onChange={(e) => set({ userSkills: e.target.checked })} />
+          <CheckInput checked={draft.userSkills} onChange={(e) => setNow({ userSkills: e.target.checked })} />
           Bring your Claude skills
           {result != null && (
             <span className="text-meta text-ui-mute">
@@ -146,7 +166,7 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
 
         <div className="flex items-center gap-2">
           <label className="flex cursor-pointer items-center gap-2 text-body text-ui-ink">
-            <CheckInput data-testid="sandbox-fix-all-repos" checked={draft.fixAllRepos} onChange={(e) => set({ fixAllRepos: e.target.checked })} />
+            <CheckInput data-testid="sandbox-fix-all-repos" checked={draft.fixAllRepos} onChange={(e) => setNow({ fixAllRepos: e.target.checked })} />
             AI Fix reads every repository
           </label>
           <InfoButton title="AI Fix reads every repository">
@@ -162,12 +182,18 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
           </InfoButton>
         </div>
 
-        <ServicesEditor workspaceId={workspaceId} services={draft.services} onChange={(services) => set({ services })} />
+        <ServicesEditor
+          workspaceId={workspaceId}
+          services={draft.services}
+          onChange={(services) => setNow({ services })}
+          onType={(services) => set({ services })}
+          onCommit={autosave.flush}
+        />
 
         <AllowedHosts workspaceId={workspaceId} hosts={saved.alwaysAllowedHosts} inputId={ids.host} />
 
         <label className="flex cursor-pointer items-start gap-2 text-body text-ui-ink">
-          <CheckInput className="mt-0.5" checked={draft.globalProxyEnv} onChange={(e) => set({ globalProxyEnv: e.target.checked })} />
+          <CheckInput className="mt-0.5" checked={draft.globalProxyEnv} onChange={(e) => setNow({ globalProxyEnv: e.target.checked })} />
           <span>
             Set HTTP_PROXY for every program
             <span className="block text-meta text-ui-mute">
@@ -179,17 +205,13 @@ function SandboxForm({ workspaceId, saved }: { workspaceId: number; saved: Sandb
         <fieldset>
           <legend className={SUBHEAD}>Resources</legend>
           <div className="mt-1 grid grid-cols-3 gap-2">
-            <ResourceInput id={ids.cpus} label="CPUs" value={draft.cpus} fallback={SANDBOX_RESOURCE_DEFAULTS.cpus} limits={SANDBOX_RESOURCE_LIMITS.cpus} onChange={(cpus) => set({ cpus })} />
-            <ResourceInput id={ids.mem} label="Memory (GB)" value={draft.memoryGb} fallback={SANDBOX_RESOURCE_DEFAULTS.memoryGb} limits={SANDBOX_RESOURCE_LIMITS.memoryGb} onChange={(memoryGb) => set({ memoryGb })} />
-            <ResourceInput id={ids.disk} label="Disk (GB)" value={draft.diskGb} fallback={SANDBOX_RESOURCE_DEFAULTS.diskGb} limits={SANDBOX_RESOURCE_LIMITS.diskGb} onChange={(diskGb) => set({ diskGb })} />
+            <ResourceInput id={ids.cpus} label="CPUs" value={draft.cpus} fallback={SANDBOX_RESOURCE_DEFAULTS.cpus} limits={SANDBOX_RESOURCE_LIMITS.cpus} onChange={(cpus) => set({ cpus })} onCommit={autosave.flush} />
+            <ResourceInput id={ids.mem} label="Memory (GB)" value={draft.memoryGb} fallback={SANDBOX_RESOURCE_DEFAULTS.memoryGb} limits={SANDBOX_RESOURCE_LIMITS.memoryGb} onChange={(memoryGb) => set({ memoryGb })} onCommit={autosave.flush} />
+            <ResourceInput id={ids.disk} label="Disk (GB)" value={draft.diskGb} fallback={SANDBOX_RESOURCE_DEFAULTS.diskGb} limits={SANDBOX_RESOURCE_LIMITS.diskGb} onChange={(diskGb) => set({ diskGb })} onCommit={autosave.flush} />
           </div>
         </fieldset>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <SaveButton dirty={dirty} saving={save.isPending} onClick={() => save.mutate(body)} />
-          {err != null && <span className="text-meta text-ui-danger">{err}</span>}
-          {save.isSuccess && !dirty && <span className="text-meta text-ui-mute">Saved.</span>}
-        </div>
+        <SaveState section="Sandbox" mutation={save} dirty={dirty} invalid={problem} />
       </div>
     </SectionShell>
   );
@@ -248,6 +270,7 @@ function ResourceInput({
   fallback,
   limits,
   onChange,
+  onCommit,
 }: {
   id: string;
   label: string;
@@ -255,6 +278,8 @@ function ResourceInput({
   fallback: number;
   limits: { min: number; max: number };
   onChange: (v: string) => void;
+  /** Blur / Enter: write now. */
+  onCommit: () => void;
 }): JSX.Element {
   return (
     <Field label={label} htmlFor={id}>
@@ -268,6 +293,10 @@ function ResourceInput({
         placeholder={String(fallback)}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onCommit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onCommit();
+        }}
       />
     </Field>
   );
@@ -277,10 +306,16 @@ function ServicesEditor({
   workspaceId,
   services,
   onChange,
+  onType,
+  onCommit,
 }: {
   workspaceId: number;
   services: SandboxServiceStackChoice[];
+  /** An add or a remove: written at once. */
   onChange: (s: SandboxServiceStackChoice[]) => void;
+  /** Typing in an "Online" box: written after a pause, or on blur (`onCommit`). */
+  onType: (s: SandboxServiceStackChoice[]) => void;
+  onCommit: () => void;
 }): JSX.Element {
   const listId = useId();
   // The candidates: CLICK-GATED (one `git ls-tree` per repository, in Limn's own copies).
@@ -330,7 +365,11 @@ function ServicesEditor({
                     .split(',')
                     .map((x) => x.trim())
                     .filter((x) => x !== '');
-                  onChange(services.map((x, j) => (j === i ? { ...x, egress } : x)));
+                  onType(services.map((x, j) => (j === i ? { ...x, egress } : x)));
+                }}
+                onBlur={onCommit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onCommit();
                 }}
               />
             </label>

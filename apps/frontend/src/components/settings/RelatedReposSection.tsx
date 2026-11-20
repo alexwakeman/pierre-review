@@ -3,9 +3,10 @@ import { RELATED_REPOS_MAX_PER_REPO, TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW } from
 import { useRepos } from '../../hooks/useTimeline.js';
 import { partnerIsFull, relatedTo, useRelatedRepos, useSetRelatedRepos } from '../../hooks/useRelatedRepos.js';
 import { InfoButton } from '../InfoModal.js';
-import { SaveButton, SectionShell, CheckInput } from './ui.js';
+import { SectionShell, CheckInput } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
-import { Button, Select, cx, FOCUS_RING, nextIndex } from '../ui/index.js';
+import { Select, cx, FOCUS_RING, nextIndex } from '../ui/index.js';
 import { PHONE_QUERY, useMediaQuery } from '../ui/media.js';
 import {
   sharesOneOwner,
@@ -15,7 +16,6 @@ import {
   curvePath,
   defaultSelectedRepo,
   draftChanges,
-  pendingLine,
   type BlockReason,
   type Pt,
 } from './relatedReposGeometry.js';
@@ -30,9 +30,10 @@ import {
 // SYMMETRIC (the server stores it both ways), so each left row's count includes links made from the
 // other side.
 //
-// ⚠ DRAFT + SAVE, like every other section in this modal: one repo's draft at a time, and Save sends
-// that repo's whole list (`PUT …/related-repos/:repoId {relatedRepoIds}` REPLACES it). Selecting
-// another repo drops an unsaved draft, as the old picker did.
+// SAVES AS YOU GO (./autosave.tsx): each click writes the selected repo's whole list at once
+// (`PUT …/related-repos/:repoId {relatedRepoIds}` REPLACES it). ⚠ The draft is tagged with the repo
+// it belongs to (`draftFor`), so a click made just before another repo is selected can never be
+// written onto the newly selected one.
 
 interface Member {
   id: number;
@@ -69,14 +70,38 @@ export function RelatedReposSection(): JSX.Element {
   );
   const current = repoId != null && nameOf.has(repoId) ? repoId : fallback;
   const stored = useMemo(() => (current != null && pairs ? relatedTo(pairs, current) : []), [pairs, current]);
-  const storedKey = `${workspaceId}|${current}|${stored.join(',')}`;
+  const keyOf = (repo: number | null, ids: readonly number[]): string =>
+    `${workspaceId}|${repo}|${[...ids].sort((a, b) => a - b).join(',')}`;
+  const storedKey = keyOf(current, stored);
   const [draft, setDraft] = useState<number[]>(stored);
-  // Re-seed on the values (a workspace switch, another repo picked, after a save) — never the
-  // response object, whose identity changes on every refetch.
+  const [draftFor, setDraftFor] = useState<number | null>(current);
+  // What this section last wrote: its echo must not re-seed over a click made since.
+  const sent = useRef<string | null>(null);
+  // Re-seed on the values (a workspace switch, another repo picked, a change made elsewhere) — never
+  // the response object, whose identity changes on every refetch.
   useEffect(() => {
+    if (sent.current === storedKey && draftFor === current) {
+      sent.current = null;
+      return;
+    }
     setDraft(stored);
+    setDraftFor(current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
+
+  const { added, removed } = draftChanges(stored, draft);
+  const dirty = pairs != null && (added.length > 0 || removed.length > 0);
+  const draftKey = keyOf(draftFor, draft);
+  const autosave = useAutoSave({
+    key: draftKey,
+    ready: dirty && draftFor != null && draftFor === current,
+    busy: save.isPending,
+    run: () => {
+      if (draftFor == null) return;
+      sent.current = draftKey;
+      save.mutate({ repoId: draftFor, relatedRepoIds: draft });
+    },
+  });
 
   const counts = useMemo(() => {
     const m = new Map<number, number>();
@@ -91,8 +116,6 @@ export function RelatedReposSection(): JSX.Element {
     return <ScopePendingSection title="Related repos" failed={related.isError} />;
   }
 
-  const { added, removed } = draftChanges(stored, draft);
-  const dirty = added.length > 0 || removed.length > 0;
   const full = draft.length >= RELATED_REPOS_MAX_PER_REPO;
   // The cap holds on both sides: 'cap' = the selected repo's draft is at the most it can take;
   // 'full' = the PARTNER already has the most (only that one is labelled "already has 8").
@@ -108,9 +131,9 @@ export function RelatedReposSection(): JSX.Element {
     if (blocked(id) != null) return;
     // Pin the selection, so a save that empties the default repo does not jump to another one.
     if (repoId !== current) setRepoId(current);
+    autosave.now();
     setDraft((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
-  const line = pendingLine(added.length, removed.length);
 
   return (
     <SectionShell
@@ -163,23 +186,7 @@ export function RelatedReposSection(): JSX.Element {
               onToggle={toggle}
             />
           )}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <SaveButton
-              dirty={dirty}
-              saving={save.isPending}
-              onClick={() => current != null && save.mutate({ repoId: current, relatedRepoIds: draft })}
-            />
-            {line != null && !save.isPending && (
-              <>
-                <span className="text-meta text-ui-mute" role="status">
-                  {line}
-                </span>
-                <Button variant="ghost" size="sm" onClick={() => setDraft(stored)}>
-                  Discard
-                </Button>
-              </>
-            )}
-          </div>
+          <SaveState section="Related repos" mutation={save} dirty={dirty} />
           {full && (
             <p className="text-meta text-ui-mute">{RELATED_REPOS_MAX_PER_REPO} links is the most a repo can have.</p>
           )}
@@ -197,9 +204,6 @@ export function RelatedReposSection(): JSX.Element {
       )}
       <p className="text-meta text-ui-mute">Applies to this workspace only.</p>
 
-      {save.isError && (
-        <div className="text-meta text-ui-danger">{save.error?.message ?? 'Couldn’t save this setting.'}</div>
-      )}
     </SectionShell>
   );
 }

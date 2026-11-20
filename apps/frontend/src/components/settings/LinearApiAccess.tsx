@@ -3,7 +3,8 @@ import { useMutation } from '@tanstack/react-query';
 import type { LinearConnectionCheck, WorkspaceJiraApiSettings } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
-import { Field, SaveButton, inputCls } from './ui.js';
+import { Field, inputCls } from './ui.js';
+import { SaveState } from './autosave.js';
 
 const SECONDARY_BTN =
   'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
@@ -16,7 +17,8 @@ const SECONDARY_BTN =
  *
  * ⚠ THE KEY IS WRITE-ONLY. The server never returns it (`jira.hasToken` — the block is the
  * workspace's one tracker credential, named for its first provider), so the input starts empty
- * every time; a saved key shows "Saved" with Replace / Remove.
+ * every time; a saved key shows "Saved" with Replace / Remove. No Save button (./autosave.tsx): the
+ * key is written on blur or Enter of a non-empty value, never per keystroke, and the field clears.
  *
  * ⚠ THE CONNECTION CHECK IS CLICK-GATED (one Linear call with the SAVED key) and says which Linear
  * workspace the key belongs to — a key for another workspace than the URL above is refused on every
@@ -50,6 +52,15 @@ export function LinearApiAccess({
 
   const typed = token.trim();
   const showInput = !jira.hasToken || replacing;
+  // A committed secret leaves the field at once and is never echoed (Replace closes too).
+  const clearToken = (): void => {
+    setToken('');
+    setReplacing(false);
+  };
+  const commit = (): void => {
+    if (typed === '' || mutation.isPending) return;
+    mutation.mutate({ jira: { token: typed } }, { onSuccess: clearToken });
+  };
 
   return (
     <div className="space-y-2.5 rounded-ui bg-ui-surface p-3.5">
@@ -66,8 +77,8 @@ export function LinearApiAccess({
           htmlFor={keyId}
           hint={
             jira.hasToken
-              ? 'The new key replaces the saved one when you save.'
-              : 'Create one in Linear under Settings → Security & access. It starts with lin_api_. Read access is enough.'
+              ? 'Saved when you press Enter or leave the field. It replaces the saved one.'
+              : 'Create one in Linear under Settings → Security & access. It starts with lin_api_. Read access is enough. Saved when you press Enter or leave the field.'
           }
         >
           <input
@@ -78,6 +89,13 @@ export function LinearApiAccess({
             placeholder="lin_api_…"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+              }
+            }}
           />
         </Field>
       ) : (
@@ -108,7 +126,7 @@ export function LinearApiAccess({
         >
           {check.isPending ? 'Checking…' : 'Check connection'}
         </button>
-        {!jira.hasToken && <span className="text-meta text-ui-mute">Save a key first.</span>}
+        {!jira.hasToken && <span className="text-meta text-ui-mute">Add a key first.</span>}
         {checked != null && checked.matchesBaseUrl && (
           <span className="text-meta text-ui-success">
             Connected as {checked.viewerName} to {checked.organizationName}.
@@ -118,16 +136,11 @@ export function LinearApiAccess({
       {checked != null && !checked.matchesBaseUrl && (
         <p className="text-body text-ui-danger">
           This key belongs to {checked.organizationName} ({checked.organizationUrl}), not {baseUrl}. Change the
-          workspace URL above, or save a key from that workspace.
+          workspace URL above, or add a key from that workspace.
         </p>
       )}
       {check.isError && <p className="text-body text-ui-danger">{check.error.message}</p>}
-      <SaveButton
-        dirty={typed !== ''}
-        saving={mutation.isPending}
-        onClick={() => mutation.mutate({ jira: { token: typed } })}
-      />
-      {mutation.isError && <p className="text-body text-ui-danger">{mutation.error.message}</p>}
+      <SaveState section="Linear API key" mutation={mutation} dirty={false} />
     </div>
   );
 }

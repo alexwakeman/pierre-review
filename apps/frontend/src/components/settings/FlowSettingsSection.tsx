@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWorkspaces, useWorkspaceMutations } from '../../hooks/useWorkspaces.js';
 import { useMe } from '../../hooks/useTriage.js';
-import { inputCls, SaveButton, SectionShell } from './ui.js';
+import { inputCls, SectionShell } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { BudgetSliders } from './BudgetSliders.js';
 import { TimeZoneCombobox } from './TimeZoneCombobox.js';
@@ -31,6 +32,9 @@ const DAYS: { iso: number; short: string }[] = [
  * and the form sends only what differs from it (`buildFlowSettingsBody`), so a later change to a
  * default still reaches this workspace. The time zone's "Default (<zone>)" entry is the blank one.
  * "Reset to defaults" sends `{}`.
+ *
+ * Saves as you go (./autosave.tsx): a day or a time zone writes at once; a time or a slider after
+ * a short pause. A form with a problem (an end before its start, no days) is never written.
  */
 export function FlowSettingsSection(): JSX.Element {
   const { workspaceId } = useSettingsWorkspace();
@@ -47,25 +51,46 @@ export function FlowSettingsSection(): JSX.Element {
   // Re-seed when the workspace or the STORED value changes — keyed on the values, not the object
   // identity React Query hands back on every refetch (the PendingMuteSection rule).
   const storedKey = `${workspaceId}|${JSON.stringify(stored)}`;
+  const storedBody = buildFlowSettingsBody(seedFlowForm(stored));
+  const [seededFor, setSeededFor] = useState(workspaceId);
+  // What this section last wrote: its echo must not re-seed over an edit made since.
+  const sent = useRef<{ workspaceId: number; body: ReturnType<typeof buildFlowSettingsBody> } | null>(null);
   useEffect(() => {
+    setSeededFor(workspaceId);
+    const last = sent.current;
+    if (last != null && last.workspaceId === workspaceId && sameFlowBody(last.body, storedBody)) {
+      sent.current = null;
+      return;
+    }
     setForm(seedFlowForm(stored));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
+
+  const problem = flowFormProblem(form);
+  const body = buildFlowSettingsBody(form);
+  const dirty = workspace != null && !sameFlowBody(body, storedBody);
+  const autosave = useAutoSave({
+    key: `${workspaceId}|${JSON.stringify(body)}`,
+    ready: dirty && problem == null && workspaceId != null && seededFor === workspaceId,
+    busy: setWorkspaceFlowSettings.isPending,
+    run: () => {
+      if (workspaceId == null) return;
+      sent.current = { workspaceId, body };
+      setWorkspaceFlowSettings.mutate({ id: workspaceId, settings: body });
+    },
+  });
 
   if (workspaceId == null || workspace == null) {
     return <ScopePendingSection title="Working hours and budgets" failed={workspaces.isError} />;
   }
 
-  const problem = flowFormProblem(form);
-  const body = buildFlowSettingsBody(form);
-  const storedBody = buildFlowSettingsBody(seedFlowForm(stored));
-  const dirty = !sameFlowBody(body, storedBody);
-
-  const toggleDay = (iso: number): void =>
+  const toggleDay = (iso: number): void => {
+    autosave.now();
     setForm((f) => ({
       ...f,
       days: f.days.includes(iso) ? f.days.filter((d) => d !== iso) : [...f.days, iso].sort((a, b) => a - b),
     }));
+  };
 
   return (
     <SectionShell
@@ -80,7 +105,10 @@ export function FlowSettingsSection(): JSX.Element {
           <TimeZoneCombobox
             id="flow-tz"
             value={form.timeZone}
-            onChange={(tz) => setForm((f) => ({ ...f, timeZone: tz }))}
+            onChange={(tz) => {
+              autosave.now();
+              setForm((f) => ({ ...f, timeZone: tz }));
+            }}
             defaultZone={defaultZone}
           />
         </div>
@@ -93,6 +121,7 @@ export function FlowSettingsSection(): JSX.Element {
               className={inputCls}
               value={form.start}
               onChange={(e) => setForm((f) => ({ ...f, start: e.target.value }))}
+              onBlur={autosave.flush}
             />
             <span className="text-ui-mute">to</span>
             <input
@@ -101,6 +130,7 @@ export function FlowSettingsSection(): JSX.Element {
               className={inputCls}
               value={form.end}
               onChange={(e) => setForm((f) => ({ ...f, end: e.target.value }))}
+              onBlur={autosave.flush}
             />
           </div>
         </div>
@@ -132,18 +162,8 @@ export function FlowSettingsSection(): JSX.Element {
 
       <BudgetSliders form={form} setForm={setForm} stored={stored} />
 
-      {problem != null && (
-        <p className="text-body text-ui-danger" role="alert">
-          {problem}
-        </p>
-      )}
-
       <div className="flex items-center gap-3">
-        <SaveButton
-          dirty={dirty && problem == null}
-          saving={setWorkspaceFlowSettings.isPending}
-          onClick={() => setWorkspaceFlowSettings.mutate({ id: workspaceId, settings: body })}
-        />
+        <SaveState section="Working hours and budgets" mutation={setWorkspaceFlowSettings} dirty={dirty} invalid={problem} />
         {stored != null && (
           <button
             type="button"
@@ -155,11 +175,6 @@ export function FlowSettingsSection(): JSX.Element {
           </button>
         )}
       </div>
-      {setWorkspaceFlowSettings.isError && (
-        <div className="text-body text-ui-danger">
-          {(setWorkspaceFlowSettings.error as Error)?.message ?? 'Couldn’t save the working hours.'}
-        </div>
-      )}
     </SectionShell>
   );
 }

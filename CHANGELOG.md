@@ -19,6 +19,11 @@ no internals.
   even while you are signed in to Claude Code. "Use my API keys first" in Settings → AI is now ticked unless you
   untick it. Without a key, Ensemble still falls back to a Claude Code login; the docs and Settings link to
   Anthropic's terms on that use.
+- Settings save as you go: there is no Save button on any Settings tab. A switch, choice or tick saves at once;
+  a typed value saves when you stop typing or leave the box, and a value that is not allowed is not saved and
+  says why beside the box. A token, API key or Slack webhook saves when you press Enter or leave the box, and is
+  never shown again. Each section says "Saved" when its change is stored; a change that could not be saved says
+  so beside it and in the corner of the window.
 - This Sprint: only the Critical path view draws arrows, and each arrow's reason is now written beside it, in the
   space between the tickets, instead of behind a number you had to hover. The Theme and People views draw no
   arrows; a ticket that waits on another still wears the hourglass mark.

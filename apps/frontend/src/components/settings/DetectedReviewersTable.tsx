@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Select } from '../ui/index.js';
 import type {
   AutomatedReviewerKind,
@@ -17,6 +17,7 @@ import {
 import { automatedReviewerMeta, safeExternalUrl, vendorInk } from '../../lib/ui.js';
 import { monogramFor } from '../../lib/botAvatar.js';
 import { InfoButton } from '../InfoModal.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import {
   costEditOutcome,
   costStateOf,
@@ -396,7 +397,18 @@ export function DetectedReviewersTable({
           </div>
         </>
       )}
-      {anyError != null && <p className="text-meta text-ui-danger">{anyError.message}</p>}
+      {/* Saves as you go (./autosave.tsx): one quiet state for the whole list, and a failure also
+          reaches the toast cluster. A price that does not parse says why beside its own field. */}
+      <SaveState
+        section="Bot classification"
+        mutation={{
+          isPending: busy,
+          isSuccess: patch.isSuccess || cost.isSuccess || resetJudgement.isSuccess || resetIdentity.isSuccess,
+          isError: anyError != null,
+          error: anyError,
+        }}
+        dirty={false}
+      />
     </SectionShell>
   );
 }
@@ -496,7 +508,7 @@ function ReviewerCard({
   const r = reviewer;
   // A newly-promoted bot has no vendor named yet (`kind: null`). Default the picker to In-house AI
   // rather than leaving it blank — the honest guess for an unrecognised automation — and nothing is
-  // written until Save.
+  // written until the reader picks or types something.
   const serverKind: AutomatedReviewerKind = r.kind ?? 'in_house';
   const [kind, setKind] = useState<AutomatedReviewerKind>(serverKind);
   const [label, setLabel] = useState(r.label);
@@ -512,19 +524,42 @@ function ReviewerCard({
   const [role, setRole] = useState<ReviewerRole>(r.role);
   // The render-phase re-seed, extended to the role. Same rule as the vendor and label above: when
   // the SERVER's value changes under us (a save landing, a refetch, another tab) the local draft
-  // is replaced — otherwise an applied role would keep showing the old draft and the "Apply role"
-  // button would stay lit forever.
+  // is replaced — otherwise an applied role would keep showing the old draft.
+  // ⚠ EXCEPT THE ECHO OF THIS CARD'S OWN NAME WRITE: the reader may have typed on while it was in
+  // flight, and re-seeding would eat those keystrokes (`sentIdentity`).
+  const sentIdentity = useRef<string | null>(null);
   const [seed, setSeed] = useState(`${serverKind}${SEP}${r.label}${SEP}${r.role}`);
   const nextSeed = `${serverKind}${SEP}${r.label}${SEP}${r.role}`;
   if (seed !== nextSeed) {
     setSeed(nextSeed);
-    setKind(serverKind);
-    setLabel(r.label);
     setRole(r.role);
+    if (sentIdentity.current === `${serverKind}${SEP}${r.label}`) {
+      sentIdentity.current = null;
+    } else {
+      setKind(serverKind);
+      setLabel(r.label);
+    }
   }
 
   const color = botColor({ login: r.login, kind: serverKind });
   const identityDirty = kind !== serverKind || label !== r.label;
+  // THE NAME SAVES AS YOU GO (./autosave.tsx): a vendor pick at once, the label after a pause in
+  // typing and on blur / Enter. Identity ONLY: sending `automated`/`role` here would stamp
+  // `source: 'manual'` and freeze the classification because someone corrected a vendor name — the
+  // exact coupling the two provenance flags exist to prevent.
+  const identityKey = `${kind}${SEP}${label}`;
+  const identity = useAutoSave({
+    key: identityKey,
+    ready: identityDirty,
+    busy,
+    run: () => {
+      // An UNEDITED detected label is sent as null, so a vendor pick alone does not pin the old
+      // vendor's brand name as a hand-typed label; detection names it afresh.
+      const unedited = r.identitySource !== 'manual' && label === r.label;
+      sentIdentity.current = identityKey;
+      onPatch(r.userId, { kind, label: label.trim() === '' || unedited ? null : label });
+    },
+  });
   const f = r.footprint;
   const footprints = r.repoFootprints;
   const shownRepos = footprints.slice(0, MAX_REPO_CHIPS);
@@ -696,40 +731,29 @@ function ReviewerCard({
         {r.automated && (
           <div className="flex flex-wrap items-center gap-2">
             {/* ⚠ A SELECT OVER ALL SIX ROLES, never a two-way toggle (a toggle silently re-roled the
-                four newer roles to `quality_check`). Its `title` names the consequence. */}
+                four newer roles to `quality_check`). Its `title` names the consequence.
+                It WRITES ON CHOOSE (Settings saves as you go). An earlier version kept the role
+                write behind an "Apply role" button because a NATIVE <select> wrote on its `change`
+                event, which a scroll wheel or a browser form restore can fire — a live row once
+                went `review` → `housekeeping` with nobody choosing it. This is the ui/ `Select`, a
+                listbox button: it changes only on a click or a key press on an option, and a form
+                restore never touches it. ⚠ Do not swap it for a native <select>. */}
             <div className="flex items-center gap-2" title={ROLE_HELP[role]}>
               <span className={CONTROL_LABEL_CLS} id={`role-label-${r.userId}`}>Role</span>
               <Select
                 size="sm"
                 disabled={busy}
                 value={role}
-                onChange={(v) => setRole(v)}
+                onChange={(v) => {
+                  setRole(v);
+                  // `automated: true` rides along so the row is stamped a human judgement in one
+                  // write; it is already true here, so only the provenance changes.
+                  if (v !== r.role) onPatch(r.userId, { automated: true, role: v });
+                }}
                 labelledBy={`role-label-${r.userId}`}
                 options={REVIEWER_ROLES.map((k) => ({ value: k, label: REVIEWER_ROLE_LABEL[k] }))}
               />
             </div>
-            {/* ⚠ THE ROLE WRITE IS BEHIND AN EXPLICIT BUTTON. Writing on the select's `change`
-                event made a persistent, provenance-stamping write out of a scroll wheel or a
-                browser form restore — a live row once went `review` → `housekeeping` with nobody
-                choosing it. The identity half works the same way ("Save name"). */}
-            {role !== r.role && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() =>
-                  onPatch(r.userId, {
-                    // `automated: true` rides along so the row is stamped a human judgement in
-                    // one write; it is already true here, so only the provenance changes.
-                    automated: true,
-                    role,
-                  })
-                }
-                title={ROLE_HELP[role]}
-                className="rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center touch:h-10 touch:px-3"
-              >
-                Apply role
-              </button>
-            )}
           </div>
         )}
         {/* On screen rather than only on hover: the reset is the half of the model that is not
@@ -755,14 +779,17 @@ function ReviewerCard({
 
               ⚠ `kind` IS PASSED AS `current` FOR A CORRECTNESS REASON, not a cosmetic one. A
               `<select>` whose `value` is absent from its options renders the FIRST option instead,
-              so the card would display a vendor the row does not hold — and "Save name" would then
-              write that wrong vendor. Role and identity are independently owned halves, so a row
+              so the card would display a vendor the row does not hold — and the next name write
+              would then send that wrong vendor. Role and identity are independently owned halves, so a row
               legitimately carries a vendor from another family (someone marks CodeRabbit a quality
               check without renaming it), and the stored value has to stay selectable. */}
           <Select
             size="sm"
             value={kind}
-            onChange={(v) => setKind(v)}
+            onChange={(v) => {
+              identity.now();
+              setKind(v);
+            }}
             label={`Vendor for ${r.login} in this Workspace`}
             options={vendorKindsForRole(role, kind).map((k) => ({
               value: k,
@@ -779,22 +806,13 @@ function ReviewerCard({
             value={label}
             placeholder="Label"
             onChange={(e) => setLabel(e.target.value)}
+            onBlur={identity.flush}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') identity.flush();
+            }}
+            title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
             aria-label={`Display label for ${r.login} in this Workspace`}
           />
-          <button
-            type="button"
-            disabled={busy || !identityDirty}
-            onClick={() =>
-              // Identity ONLY. Sending `automated`/`role` here would stamp `source: 'manual'` and
-              // freeze the classification because someone corrected a vendor name — the exact
-              // coupling the two provenance flags exist to prevent.
-              onPatch(r.userId, { kind, label: label.trim() === '' ? null : label })
-            }
-            title="Name this bot for this Workspace. It does not change whether it counts as a bot, and it does not reach your other Workspaces."
-            className="rounded-ui bg-ui-accent-fill disabled:bg-ui-raise disabled:text-ui-ink px-2 py-0.5 text-meta font-medium text-ui-on-accent hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center touch:h-10 touch:px-3"
-          >
-            Save name
-          </button>
           {/* THE WAY BACK for the identity half, shown ONLY on a manually-named bot. On an auto
               identity there is nothing to reset, and a control that does nothing reads as a broken
               one. It is the only way back: re-typing the auto name by hand just re-stamps
@@ -890,8 +908,8 @@ function BotAvatar({
 
 // Per-state input chrome. ONE neutral look for both: a coloured outline on a set price read as a
 // validation error on every priced card. The two states stay apart by their CONTENT (a number vs
-// the "—" placeholder) and by the grey hint line under the box, which names what Save would do —
-// emptying a priced box CLEARS it, emptying an unpriced one does nothing.
+// the "—" placeholder) and by the field's title and hint, which say what an edit does — emptying
+// a priced box CLEARS it, emptying an unpriced one does nothing.
 const COST_INPUT_CLS: Record<CostState, string> = {
   set: 'text-ui-ink',
   none: 'text-ui-ink',
@@ -909,10 +927,14 @@ const COST_INPUT_CLS: Record<CostState, string> = {
  * ⚠ 0 IS A PRICE ("we pay nothing"), EMPTY IS NO PRICE. `parseCostInput` keeps them apart —
  * `Number('')` is 0, which is exactly the trap.
  *
- * ⚠ THE MODE IS PART OF WHAT SAVE SAVES. Under "per seat" the typed number is a per-seat unit and
+ * SAVES AS YOU GO (./autosave.tsx): the number after a pause in typing and on blur / Enter, a
+ * flat / per-seat switch at once. A number that does not parse is never sent; the reason shows
+ * beside the field.
+ *
+ * ⚠ THE MODE IS PART OF WHAT IS SAVED. Under "per seat" the typed number is a per-seat unit and
  * the displayed monthly is unit × the Workspace's derived seat count — SERVER-computed on read;
  * the "× N seats ≈ $X/mo" line below is a preview of the same arithmetic, never a second source
- * of truth. A mode flip with an unchanged number is a REAL save (`costEditOutcome` compares
+ * of truth. A mode flip with an unchanged number is a REAL write (`costEditOutcome` compares
  * both), and the mode state lives inside this component so the remount key on `userId` keeps a
  * flipped toggle from ever leaking onto another bot's card.
  */
@@ -941,38 +963,38 @@ function CostEditor({
   const SEP = '\u001f';
   const serverSeed = `${serverText}${SEP}${costModel}`;
   const [seededFrom, setSeededFrom] = useState(serverSeed);
+  // ⚠ The echo of this field's own write is not a re-seed: the reader may have typed on while it
+  // was in flight.
+  const sent = useRef<string | null>(null);
   if (seededFrom !== serverSeed) {
     setSeededFrom(serverSeed);
-    setText(serverText);
-    setMode(costModel);
+    if (sent.current === serverSeed) {
+      sent.current = null;
+    } else {
+      setText(serverText);
+      setMode(costModel);
+    }
   }
 
   const parsed = parseCostInput(text);
   const outcome = parsed.ok ? costEditOutcome(costMonthlyUsd, parsed.value, costModel, mode) : null;
+  const autosave = useAutoSave({
+    key: `${text.trim()}${SEP}${mode}`,
+    ready: parsed.ok && outcome?.dirty === true,
+    busy,
+    run: () => {
+      if (!parsed.ok) return;
+      sent.current = `${formatCostInput(parsed.value)}${SEP}${mode}`;
+      onApply(parsed.value, mode);
+    },
+  });
 
-  // What the button would do / why it can't. The one no-op outcome is exactly the case where a
-  // user who clicked and saw nothing needs the explanation on screen, not on hover.
+  // Why a typed number is not saved, or what an empty field means. Saving / Saved is the section's
+  // one line below the list.
   let hint: string;
-  if (!parsed.ok) hint = parsed.error;
-  else if (outcome == null) hint = '';
-  else
-    switch (outcome.kind) {
-      case 'set':
-        hint =
-          mode === 'per_seat'
-            ? 'Sets a per-seat price for this Workspace — the monthly figure is the price × this Workspace’s seats. Other Workspaces are unaffected.'
-            : 'Sets this bot’s price for this Workspace. Other Workspaces are unaffected.';
-        break;
-      case 'clear':
-        hint = 'Clears the price for this Workspace. $/acted-on stops showing for this bot.';
-        break;
-      case 'unchanged':
-        hint = 'Unchanged.';
-        break;
-      case 'no-cost':
-        hint = 'No price set. Type a number to add one (0 means “free”).';
-        break;
-    }
+  if (!parsed.ok) hint = `Not saved: ${parsed.error}`;
+  else if (outcome?.kind === 'no-cost') hint = 'No price set. Type a number to add one (0 means “free”).';
+  else hint = '';
 
   const modeBtnCls = (active: boolean): string =>
     `inline-flex h-7 items-center rounded-ui px-2 text-meta font-medium touch:h-10 touch:px-3 ${
@@ -995,11 +1017,16 @@ function CostEditor({
         value={text}
         placeholder="—"
         onChange={(e) => setText(e.target.value)}
+        onBlur={autosave.flush}
         onKeyDown={(e) => {
-          if (e.key === 'Enter' && parsed.ok && outcome?.dirty === true && !busy) {
-            onApply(parsed.value, mode);
-          }
+          if (e.key === 'Enter') autosave.flush();
         }}
+        aria-invalid={!parsed.ok}
+        title={
+          mode === 'per_seat'
+            ? 'A per-seat price for this Workspace — the monthly figure is the price × this Workspace’s seats. Empty clears it. Other Workspaces are unaffected.'
+            : 'This bot’s price for this Workspace. Empty clears it. Other Workspaces are unaffected.'
+        }
         aria-label={`Monthly cost in US dollars for ${login} in this Workspace`}
       />
       <span className="text-meta text-ui-faint">{mode === 'per_seat' ? '/seat/mo' : '/mo'}</span>
@@ -1011,13 +1038,24 @@ function CostEditor({
         aria-label={`Pricing model for ${login} in this Workspace`}
         className="inline-flex rounded-ui bg-ui-raise p-0.5"
       >
-        <button type="button" disabled={busy} onClick={() => setMode('flat')} className={modeBtnCls(mode === 'flat')}>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            autosave.now();
+            setMode('flat');
+          }}
+          className={modeBtnCls(mode === 'flat')}
+        >
           flat
         </button>
         <button
           type="button"
           disabled={busy}
-          onClick={() => setMode('per_seat')}
+          onClick={() => {
+            autosave.now();
+            setMode('per_seat');
+          }}
           className={modeBtnCls(mode === 'per_seat')}
           title="Meter this bot per seat — a seat is a distinct human who opened a PR in this Workspace’s repos over the last 30 days."
         >
@@ -1037,19 +1075,11 @@ function CostEditor({
         </span>
       )}
 
-      <button
-        type="button"
-        disabled={busy || !parsed.ok || outcome?.dirty !== true}
-        onClick={() => {
-          if (parsed.ok && outcome?.dirty === true) onApply(parsed.value, mode);
-        }}
-        title={hint}
-        className="inline-flex items-center rounded-ui px-2 py-0.5 touch:h-10 touch:px-3 text-meta font-medium text-ui-mute hover:bg-ui-hover disabled:opacity-40 bg-ui-surface"
-      >
-        {outcome?.kind === 'clear' ? 'Clear' : 'Save price'}
-      </button>
-
-      <span className={`text-meta ${parsed.ok ? 'text-ui-faint' : 'text-ui-danger'}`}>{hint}</span>
+      {hint !== '' && (
+        <span role="status" className={`text-meta ${parsed.ok ? 'text-ui-faint' : 'text-ui-danger'}`}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }

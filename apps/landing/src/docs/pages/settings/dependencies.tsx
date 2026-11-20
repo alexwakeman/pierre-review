@@ -11,8 +11,8 @@ export default function Page(): JSX.Element {
     <>
       <p>
         The <Ui>Dependencies</Ui> tab decides what Ensemble does with the pull requests that Dependabot, Renovate and other
-        dependency bots open in the current workspace. Every switch is on until you turn it off, and nothing changes
-        until you select <Ui>Save</Ui>. This page lists the settings; how the automation behaves day to day is in{' '}
+        dependency bots open in the current workspace. Every switch is on until you turn it off, and each change saves
+        at once. This page lists the settings; how the automation behaves day to day is in{' '}
         <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
       </p>
 
@@ -85,9 +85,6 @@ export default function Page(): JSX.Element {
         <li>Choose the update sizes and ecosystems.</li>
         <li>
           Under <Ui>Trusted bots</Ui>, tick each bot you trust and untick any you don&rsquo;t.
-        </li>
-        <li>
-          Select <Ui>Save</Ui>.
         </li>
       </Steps>
 

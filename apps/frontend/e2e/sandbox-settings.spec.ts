@@ -3,8 +3,8 @@ import type { SandboxWorkspaceSettingsBody } from '@pierre-review/shared';
 import { installMockApi, ME_RESPONSE } from './mock-api.js';
 
 // SETTINGS → SANDBOX → "AI Fix reads every repository" (components/settings/SandboxSection.tsx; docs/SANDBOX.md
-// § AI Fix sessions → Scope): one per-workspace switch, ON by default, its explanation behind the ⓘ; Save sends
-// the WHOLE setting with the switch's value.
+// § AI Fix sessions → Scope): one per-workspace switch, ON by default, its explanation behind the ⓘ; a tick
+// writes at once (no Save button), sending the WHOLE setting with the switch's value.
 
 test('the AI Fix repositories switch: on by default, explained behind ⓘ, saved with the whole setting', async ({ page }) => {
   await installMockApi(page);
@@ -33,7 +33,7 @@ test('the AI Fix repositories switch: on by default, explained behind ⓘ, saved
   await page.keyboard.press('Escape');
 
   await box.uncheck();
-  await section.getByRole('button', { name: 'Save' }).click();
+  await expect(section.getByRole('button', { name: 'Save' })).toHaveCount(0);
   await expect.poll(() => puts.length).toBe(1);
   expect(puts[0]).toMatchObject({ fixAllRepos: false, userClaudeMd: true, services: [] });
 });

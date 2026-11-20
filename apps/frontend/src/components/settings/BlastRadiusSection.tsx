@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BLAST_HIGH_SURFACES, type BlastSensitivity, type BlastSurface } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useBlastConfig, useSetBlastConfig } from '../../hooks/useBlastRadius.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, RadioInput, CheckInput } from './ui.js';
+import { Field, SectionShell, RadioInput, CheckInput } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 
 // BLAST RADIUS — CORE / free, both deployment modes, every tier. The sibling of
 // LargePrThresholdSection above it, and deliberately shaped the same way: one account-grained
@@ -62,9 +63,15 @@ export function BlastRadiusSection(): JSX.Element {
   const [sensitivity, setSensitivity] = useState<BlastSensitivity>(resolved.sensitivity);
   const [off, setOff] = useState<BlastSurface[]>(resolved.surfacesOff);
 
-  // Re-seed when the server value changes (first load, and after a successful save).
+  // What this section last wrote: its echo must not re-seed over a click made since.
+  const sent = useRef<string | null>(null);
+  // Re-seed when the server value changes (first load, or a change made elsewhere).
   const storedKey = `${resolved.sensitivity}|${[...resolved.surfacesOff].sort().join(',')}`;
   useEffect(() => {
+    if (sent.current === storedKey) {
+      sent.current = null;
+      return;
+    }
     setSensitivity(resolved.sensitivity);
     setOff(resolved.surfacesOff);
     // Keyed on the resolved values rather than the object, which is rebuilt on every render.
@@ -74,8 +81,25 @@ export function BlastRadiusSection(): JSX.Element {
   const draftKey = `${sensitivity}|${[...off].sort().join(',')}`;
   const dirty = draftKey !== storedKey;
 
-  const toggle = (s: BlastSurface): void =>
+  // Saves as you go (./autosave.tsx): every radio and box writes at once.
+  const autosave = useAutoSave({
+    key: draftKey,
+    ready: dirty,
+    busy: save.isPending,
+    run: () => {
+      // ⚠ Save the DEFAULTS as null, not as a stored blob. A blob saying "balanced, nothing
+      // off" would freeze this account against any future change to the product
+      // defaults — the same two-state rule the large-PR threshold follows.
+      const isDefaults = sensitivity === 'balanced' && off.length === 0;
+      sent.current = draftKey;
+      save.mutate(isDefaults ? null : { sensitivity, surfacesOff: off });
+    },
+  });
+
+  const toggle = (s: BlastSurface): void => {
+    autosave.now();
     setOff((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
+  };
 
   return (
     <SectionShell
@@ -104,7 +128,7 @@ export function BlastRadiusSection(): JSX.Element {
         hint={
           <>
             {stored == null ? 'Currently the product default. ' : ''}
-            Applies to every workspace, and takes effect everywhere the moment you save.
+            Applies to every workspace, and takes effect everywhere as soon as it saves.
           </>
         }
       >
@@ -115,7 +139,10 @@ export function BlastRadiusSection(): JSX.Element {
                 name="blast-sensitivity"
                 className="mt-0.5"
                 checked={sensitivity === s.value}
-                onChange={() => setSensitivity(s.value)}
+                onChange={() => {
+                  autosave.now();
+                  setSensitivity(s.value);
+                }}
               />
               <span>
                 <span className="font-medium text-ui-ink">{s.label}</span>
@@ -141,25 +168,7 @@ export function BlastRadiusSection(): JSX.Element {
         </div>
       </Field>
 
-      <SaveButton
-        dirty={dirty}
-        saving={save.isPending}
-        onClick={() => {
-          // ⚠ Save the DEFAULTS as null, not as a stored blob. A blob saying "balanced, nothing
-          // off" would freeze this account against any future change to the product
-          // defaults — the same two-state rule the large-PR threshold follows.
-          const isDefaults = sensitivity === 'balanced' && off.length === 0;
-          save.mutate(
-            isDefaults ? null : { sensitivity, surfacesOff: off },
-          );
-        }}
-      />
-
-      {save.isError && (
-        <div className="text-meta text-ui-danger">
-          {(save.error as Error)?.message ?? 'Couldn’t save your blast-radius settings.'}
-        </div>
-      )}
+      <SaveState section="Blast radius" mutation={save} dirty={dirty} />
     </SectionShell>
   );
 }
