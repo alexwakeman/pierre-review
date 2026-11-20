@@ -1,16 +1,12 @@
 import { Arcs } from './Arcs';
-import { eightQuarters, SITE_EIGHT } from './geometry';
 import type { Corner, Quarter, RunName } from './geometry';
 
 // ---------------------------------------------------------------------------
 // The compositions. Every picture on the site is one of these, drawn from the same
 // banded quarter (geometry.ts): no photographs, no product screenshots.
 //
-//   Chain      the home page's big picture, twice: quarters, each a different voice,
-//              whose links start scattered across the screen and cross through each
-//              other into place as the reader scrolls down, landing as a tall figure
-//              of 8 (SITE_EIGHT); and after "Dependency updates" the same 8 in reverse,
-//              arriving whole and coming apart (Scene `reverse`).
+//   (Ring      the home page's big picture lives in Ring.tsx: one disc whose band
+//              lines travel through 3D space into place.)
 //   Orchestra  the seating plan from above: rows of chairs in sections around
 //              the conductor
 //   Combo      a jazz band: four players of different weight, facing in, their
@@ -23,24 +19,6 @@ interface PieceProps {
   lead?: boolean;
   /** 'slice' fills the box and crops; default 'meet'. */
   fit?: 'meet' | 'slice';
-}
-
-const CHAIN = eightQuarters(100, SITE_EIGHT.margin, SITE_EIGHT.reach, SITE_EIGHT.scatter, SITE_EIGHT.spreadX);
-
-export function Chain({ className, label, lead }: PieceProps): JSX.Element {
-  return (
-    <Arcs
-      lead={lead}
-      align="end"
-      viewBox={`0 0 ${CHAIN.width} ${CHAIN.height}`}
-      quarters={CHAIN.quarters}
-      // the links cross through each other on the way in: overlaps mix like light
-      blend
-      className={['eight', className].filter(Boolean).join(' ')}
-      label={label}
-      fit="meet"
-    />
-  );
 }
 
 /** Rows of chairs around the conductor, in four sections, front to back. */

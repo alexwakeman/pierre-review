@@ -45,6 +45,12 @@ no internals.
 - Bots Monitoring: the per-bot list of comments and pull requests is gone, and the **Comments/PR** figures no
   longer open a list of merged pull requests.
 
+## [1.0.69] - 2026-11-20
+
+### Changed
+
+- Maintenance release: no changes you would notice.
+
 ## [1.0.68] - 2026-11-20
 
 ### Added

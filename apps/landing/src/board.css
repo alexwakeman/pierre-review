@@ -356,6 +356,51 @@ body:has(.lb) {
   }
 }
 
+/* ---- the ring (components/arcs/Ring.tsx) -------------------------------- */
+/* One disc, broken into its band LINES: each a small <svg> on its own band's box, placed
+   by arithmetic like the box itself. The box has perspective, so a line's z (in box
+   widths, --tz) reads as size. --t0 is a line's START; the scene's timeline takes it to
+   transform: none. Played only inside a scene (below); reduced motion: home, still. */
+.lb .ring3d .arcs-box {
+  perspective: calc(var(--bw) * 1.8);
+}
+.lb .ring3d .line {
+  position: absolute;
+  overflow: visible;
+  --t0: translate3d(calc(var(--bw) * var(--tx)), calc(var(--bw) * var(--ty)), calc(var(--bw) * var(--tz)))
+    rotateX(calc(var(--rx) * 1deg)) rotateY(calc(var(--ry) * 1deg)) rotateZ(calc(var(--rz) * 1deg));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lb .ring3d .line {
+    transform: var(--t0);
+    opacity: var(--o0);
+  }
+}
+/* THE RING'S RIPPLE (ringWave.ts): while it plays, one overlay of the whole ring
+   swells its bands and the lines underneath are hidden (visibility, never the animated
+   opacity, so their scroll animations carry on untouched). */
+.lb .ring3d .ring-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.lb .ring3d.waving .line {
+  visibility: hidden;
+}
+@keyframes ring-gather {
+  from {
+    transform: var(--t0);
+    opacity: var(--o0);
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
 /* ---- scenes (components/arcs/Scene.tsx) ---------------------------------- */
 /* A picture PINNED full width for one screen while the page scrolls over it. The
    scene is its own view timeline; S (Scene.tsx) is the scroll after its top reaches
@@ -392,9 +437,9 @@ body:has(.lb) {
 .lb .scene .arcs.end .arcs-box {
   left: calc((100cqw - var(--bw)) / 2); /* centred behind the page, not anchored right */
 }
-/* The figure of 8 (the hero's, and the closing one), a little less bright at every stage of its fade: one still
+/* The ring (the hero's, and the closing one), a little less bright at every stage of its fade: one still
    opacity under the scene's own (they multiply), so nothing new moves on a scroll. */
-.lb .scene-out > .arcs.eight {
+.lb .scene-out > .arcs.ring3d {
   opacity: 0.82;
 }
 .lb .scene-over {
@@ -415,6 +460,15 @@ body:has(.lb) {
     }
     /* a reverse scene: the same span, played backwards (together → apart) */
     .lb .scene.scene-reverse .arcs .layer {
+      animation-direction: reverse;
+    }
+    /* the ring's lines: each lands at its own share (--e) of the gather, easing in */
+    .lb .scene .ring3d .line {
+      animation: ring-gather cubic-bezier(0.22, 0.6, 0.3, 1) both;
+      animation-timeline: --scene;
+      animation-range: contain 0px contain calc(var(--sc-gather) * var(--e));
+    }
+    .lb .scene.scene-reverse .ring3d .line {
       animation-direction: reverse;
     }
     .lb .scene-in {

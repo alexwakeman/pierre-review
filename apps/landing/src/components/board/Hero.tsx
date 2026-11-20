@@ -4,8 +4,8 @@ import { CopyCommand } from './CopyCommand';
 // ---------------------------------------------------------------------------
 // The hero: the claim, the command, and Poincaré's line on the ensemble and the
 // details. It is the first thing that scrolls over the site's big picture, the
-// CHAIN, pinned full width behind it (pages/Home.tsx, components/arcs/Scene.tsx):
-// faded under the text, it comes together and brightens as the text scrolls away,
+// RING, pinned full width behind it (pages/Home.tsx, components/arcs/Scene.tsx):
+// faded under the text, its lines come together and it brightens as the text scrolls away,
 // then dims again behind "Review as an ensemble".
 //
 // ⚠ "On your machine" is the claim, and it is exact: the app runs on each person's
