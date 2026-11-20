@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.68] - 2026-11-20
+
 ### Added
 
 - Releases work without version tags. A repository with no version tags is released from its merged pull requests:
