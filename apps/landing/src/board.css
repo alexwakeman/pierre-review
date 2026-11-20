@@ -376,6 +376,20 @@ body:has(.lb) {
     opacity: var(--o0);
   }
 }
+/* THE RING'S RIPPLE (ringWave.ts): while it plays, one overlay of the whole ring
+   swells its bands and the lines underneath are hidden (visibility, never the animated
+   opacity, so their scroll animations carry on untouched). */
+.lb .ring3d .ring-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.lb .ring3d.waving .line {
+  visibility: hidden;
+}
 @keyframes ring-gather {
   from {
     transform: var(--t0);

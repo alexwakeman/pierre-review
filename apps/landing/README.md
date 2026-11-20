@@ -41,7 +41,7 @@ cookie banner and the lightbox. The home page's sections are `components/board/*
 
 **EVERY OTHER PICTURE IS DRAWN IN CODE** from one motif, the banded quarter-circle
 (`components/arcs/`: `geometry.ts` holds the measured band geometry, the spectrum and the runs;
-`Arcs.tsx` draws a composition; `Ring.tsx` draws the home page's ring (one disc broken into its 64 band lines, each travelling through 3D space into place); `pieces.tsx` holds Orchestra and Combo;
+`Arcs.tsx` draws a composition; `Ring.tsx` draws the home page's ring (one disc broken into its 64 band lines, each travelling through 3D space into place), and each time the lines close its bands ripple like the voice tiles' corners, `ringWave.ts`); `pieces.tsx` holds Orchestra and Combo;
 each quarter a layer moved on the compositor by CSS scroll-driven animations as the reader scrolls down,
 `arcMotion.ts` the fallback where those are unsupported, off under reduced motion). On the home page the
 ring is two SCENES (`Scene.tsx`): pinned full width for one screen while the page scrolls over it, coming

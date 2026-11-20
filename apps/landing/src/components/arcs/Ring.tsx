@@ -14,6 +14,8 @@ import { ringLines, SITE_RING } from './geometry';
 // Only transforms and opacity move, on the compositor; the bands are painted once.
 // Each line's box is its own band's box, never the whole stage, so 64 layers stay cheap.
 // No JS without scroll-driven animations (a <noscript> style) and reduced motion: home.
+// THE RIPPLE (ringWave.ts): each time the lines close into the ring, its bands swell and
+// settle like the voice tiles' corners, inner band first.
 // ---------------------------------------------------------------------------
 
 const RING = ringLines(100, SITE_RING.margin, SITE_RING.scatter, SITE_RING.spreadX);
@@ -30,6 +32,8 @@ export function Ring({ className, label }: { className?: string; label?: string 
       aria-label={label}
       aria-hidden={label ? undefined : true}
       style={{ '--ar': W / H } as React.CSSProperties}
+      data-w={W}
+      data-h={H}
     >
       <div className="arcs-box">
         {lines.map((l, i) => {
@@ -58,6 +62,7 @@ export function Ring({ className, label }: { className?: string; label?: string 
               focusable="false"
               style={style}
               data-o0={l.o0}
+              data-b={l.b}
             >
               <defs>
                 <linearGradient id={id} gradientUnits="userSpaceOnUse" x1={l.line[0]} y1={l.line[1]} x2={l.line[2]} y2={l.line[3]}>

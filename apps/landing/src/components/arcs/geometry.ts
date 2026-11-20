@@ -403,6 +403,8 @@ export interface RingLine {
   o0: number;
   /** When it lands, as a share of the gather (0.6 to 1): the lines settle one by one. */
   e: number;
+  /** Its band's place in its quarter, 0 for the innermost: the ripple's order (ringWave.ts). */
+  b: number;
 }
 
 /**
@@ -434,7 +436,7 @@ export function ringLines(
     const ox = q.cx + bx * c;
     const oy = q.cy + by * c;
     const line = gradientLine(q.cx, q.cy, q.R, q.corner);
-    for (const b of bands(q.R - c, q.n, q.inner)) {
+    bands(q.R - c, q.n, q.inner).forEach((b, bi) => {
       const i = lines.length;
       const h = b.t / 2;
       const x0 = Math.min(ox, ox + bx * b.r) - h;
@@ -460,8 +462,9 @@ export function ringLines(
         o0: round(Math.min(1, Math.max(0.45, 0.85 + tz * 0.4)), 100),
         // the inner bands land first, the rim last, each a little off the rhythm
         e: round(0.6 + 0.28 * b.k + 0.12 * unit(i, 7), 1000),
+        b: bi,
       });
-    }
+    });
   });
   return { lines, width, height };
 }
