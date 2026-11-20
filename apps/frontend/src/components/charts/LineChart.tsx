@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import {
   useChartWidth,
   fmtDate,
@@ -69,6 +69,11 @@ export function LineChart({
 }): JSX.Element {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
+  // The widest y tick label as the browser actually drew it (0 until measured). The character
+  // estimate below is only the first guess: font metrics differ by machine (a CI runner without
+  // Archivo draws "100%" ~40px wide), so the pad follows the measured width once it is known.
+  const yLabelsRef = useRef<SVGGElement>(null);
+  const [measuredLabelW, setMeasuredLabelW] = useState(0);
 
   const PAD_R = 8;
   // The top tick's label is centred on its gridline (see the <text> below), so half a line of
@@ -137,7 +142,20 @@ export function LineChart({
   // The left pad fits the WIDEST y tick. The labels are `text-meta`, 14px in page content (12px
   // only in the compact sidebar), ≈ 8.4px a character in Archivo: at the old 6.6px estimate a
   // word axis ("Critical") lost its first letter and "100%" lost its "1".
-  const PAD_L = Math.max(36, Math.ceil(Math.max(0, ...yTicks.map((v) => tickLabel(v).length)) * 8.4) + 8);
+  const estimatedLabelW = Math.max(0, ...yTicks.map((v) => tickLabel(v).length)) * 8.4;
+  const PAD_L = Math.max(36, Math.ceil(Math.max(estimatedLabelW, measuredLabelW)) + 8);
+  const tickKey = yTicks.map((v) => tickLabel(v)).join('|');
+  useLayoutEffect(() => {
+    const g = yLabelsRef.current;
+    if (g == null) return;
+    let widest = 0;
+    for (const t of Array.from(g.querySelectorAll('text'))) {
+      // getBBox is the drawn box; jsdom has none, so a test environment keeps the estimate.
+      const bw = typeof t.getBBox === 'function' ? t.getBBox().width : 0;
+      if (bw > widest) widest = bw;
+    }
+    if (Math.abs(widest - measuredLabelW) > 0.5) setMeasuredLabelW(widest);
+  }, [tickKey, w, measuredLabelW]);
   const innerW = Math.max(w - PAD_L - PAD_R, 1);
   const x = (i: number): number => PAD_L + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
 
@@ -230,6 +248,7 @@ export function LineChart({
         {w > 0 && (
           <svg width={w} height={height} className="block">
             {/* y gridlines + labels (0/max for linear; each decade for log) */}
+            <g ref={yLabelsRef}>
             {yTicks.map((v) => (
               <g key={v}>
                 <line
@@ -252,6 +271,7 @@ export function LineChart({
                 </text>
               </g>
             ))}
+            </g>
             {area && series[0] && areaPathFor(series[0]) && (
               <path d={areaPathFor(series[0])} fill={series[0].color} opacity={0.12} />
             )}
