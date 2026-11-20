@@ -46,7 +46,7 @@ function insightKinds(): string[] {
   // ⚠ STRIP THE PROSE BEFORE LOOKING FOR THE TERMINATOR. The union is heavily commented, and one
   // of those comments contains a semicolon ("Every kind above is something that is WRONG; these
   // two are…"). Slicing at the first raw `;` stopped the scan mid-union at SEVEN of eleven
-  // members — `merge`, `update_branch`, `bot_signal` and `bot_only_review` were never seen, and
+  // members — `merge`, `update_branch`, `bot_signal` and a since-removed bot kind were never seen, and
   // neither would a NEW member appended to the end, which is the only case this test exists for.
   // The `> 5` floor below passed at 7, so the blindness was invisible. It was caught by appending
   // a fake kind and watching this file stay green.

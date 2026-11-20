@@ -666,16 +666,8 @@ export type ClassificationSource =
 // Any automated role stays `automated: true` — `excludeBots`, the Feed people/bots toggle and the
 // per-row vendor tag all keep working unchanged. The role only splits the two DERIVED SETS:
 //   role 'review'                    → SCORING (ROI, behaviour, dedup, benchmark)
-//   all automated (every role)       → EXCLUSION, the feed, AND bot-only PRs
+//   all automated (every role)       → EXCLUSION and the feed
 // Confusing those two is the defect this feature is most likely to ship; see the CLAUDE.md note.
-//
-// BOT-ONLY PRs DELIBERATELY DO NOT NARROW, and the reason is worth stating because the symmetry
-// is tempting: that list answers "did a human look at this before it merged". A PR reviewed only
-// by SonarQube has no human reviewer, so it is exactly what the banner exists to surface. Narrowing
-// it to role 'review' would leave such a PR with zero qualifying bot reviews, fail the "at least
-// one automated review" leg, and drop it from the list — hiding the risk instead of flagging it.
-// The scoring sets narrow because a linter's volume makes a REVIEWER's numbers lie; the risk set
-// does not, because a linter's approval is not a human's.
 export type ReviewerRole =
   | 'review'
   | 'quality_check'
@@ -1308,10 +1300,6 @@ export interface BotAnalyticsResponse {
   // this response — rows, totals, `ml`, `suggestions` — measures the reviewer cohort alone; a
   // quality check (SonarCloud), dependency bot or code agent is not measured or shown on Bots
   // Monitoring. (The `qualityChecks` section was REMOVED 2026-11-20; Settings → Bots lists roles.)
-  // `botOnlyPrs` = currently-OPEN (mergeable) PRs in the account's repos whose only review/comment
-  // touch was automated (incl. Pierre-verbatim) — no human review AND no human comment. Merged PRs
-  // are excluded (the banner is a "needs a human before it merges" signal); the drill-down list
-  // adds merged behind a toggle. See getBotOnlyReviewPrs.
   // `overdueGraceMs` = the fixed grace window (currently 36h): a not-addressed thread counts as
   // overdue (feeding the `noisy` verdict) once it's older than this. NOT the measured
   // reply time — that's intrinsically fast (sample bias), so a flat cutoff is the fair gate. Each
@@ -1323,7 +1311,7 @@ export interface BotAnalyticsResponse {
   // here rather than on the `ml` block, even though the UI renders it on the flagging strip.
   // ⚠ It is NOT the sum of the rows' `overlapThreads`: a cluster credits EVERY bot in it, so
   // that sum counts each shared area at least twice.
-  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; botOnlyPrs: number; overdueGraceMs: number; overlapClusters: number };
+  totals: { threads: number; comments: number; actedOn: number; actedOnPct: number | null; untouched: number; overdueGraceMs: number; overlapClusters: number };
   // The windowed ML label rollup for the scope's REVIEW bots (only a review bot's text is ever
   // scored; a stored label for any other role is ignored). Feeds the severity
   // totals strip that used to be the standalone /api/bot-severity panel, computed over the SAME
@@ -1772,36 +1760,6 @@ export interface BotVendorComment {
   // The stored ML label for this target, or null when it has not been scored (or the deployment
   // has no scoring service) — the row still renders, just unbadged.
   mlLabel: MlLabel | null;
-}
-
-// The exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count — "only a bot reviewed
-// these" (GET /api/bot-analytics/bot-only-prs). Served by a DEDICATED route so the amber caption
-// and its expandable list are computed from the SAME query and can never disagree: the count is a
-// PR-STATE snapshot (merged-in-window OR open-and-mergeable at any age, bot-touch judged over the
-// PR's ENTIRE history), NOT the 14-day feed event stream. Deterministic, no AI, account-scoped;
-// the bot-only rule is getBotOnlyReviewPrs's — automated review/comment touch (incl. Pierre-
-// verbatim) with NO human review AND NO human comment.
-export interface BotOnlyPrItem {
-  prId: number;
-  number: number;
-  title: string;
-  repoId: number;      // for the cross-repo drill-down's repo filter
-  repoFullName: string;
-  botLabel: string;    // the first automated reviewer's label ("CodeRabbit" | "Ensemble · alice" | …)
-  state: PrState;      // 'open' (mergeable) | 'merged' (in window)
-  githubUrl: string;
-  openedAt: string;    // ISO-8601 — the PR age (sortable)
-  updatedAt: string;   // ISO-8601 — last activity (sortable)
-  authorId: number | null;
-  // The PR's only automated touch is a Pierre-verbatim review — posted with the human's
-  // token, so it has NO bot-actor events and the bot-only feed isolation can't surface it
-  // (the UI hides "Show in feed" for these rows).
-  viaPierreOnly: boolean;
-}
-export interface BotOnlyPrsResponse {
-  window: { kind: BotWindowKind; from: string; to: string };
-  prs: BotOnlyPrItem[]; // no inherent order — a small, bounded list
-  generatedAt: string;
 }
 
 // ── WS4 cross-bot dedup + consensus ─────────────────────────────────
@@ -10646,8 +10604,7 @@ export type InsightKind =
   // the workspace. Read-only, unscored, listed newest first, counted ONLY in "AI reviews". See
   // `AiReviewCard`.
   | 'ai_review'
-  | 'bot_signal' // AI-review-bot signal-to-noise across the sprint (deterministic)
-  | 'bot_only_review'; // PRs whose only review(s) came from an automated reviewer (WS7)
+  | 'bot_signal'; // AI-review-bot signal-to-noise across the sprint (deterministic)
 
 export type InsightSeverity = 'info' | 'warn' | 'high';
 
@@ -11239,16 +11196,6 @@ export interface BotSignalCard extends InsightCardBase {
   vendors: BotSignalVendorStat[]; // most-threads-first
 }
 
-// "Only a bot reviewed this" governance risk (WS7): PRs merged (or open-and-mergeable)
-// whose ONLY reviews come from automated reviewers (incl. Pierre-verbatim) — no human
-// review. Deterministic; a rubber-stamping-fatigue trust/safety hook. Aggregate (a PR
-// list, no single ref).
-export interface BotOnlyReviewCard extends InsightCardBase {
-  kind: 'bot_only_review';
-  prs: { prId: number; number: number; title: string; repoFullName: string;
-         botLabel: string; state: string; githubUrl: string }[];
-}
-
 // ---- the two "forward" cards (see InsightKind) ----------------------------------------------
 //
 // DELIBERATELY TWO INTERFACES, NOT ONE WITH A UNION `kind`. `Record<InsightCard['kind'], …>`
@@ -11477,7 +11424,6 @@ export type InsightCard =
   | SecurityCard
   | DependencyBumpCard
   | BotSignalCard
-  | BotOnlyReviewCard
   | WaitingOnOthersCard
   | AiReviewCard;
 

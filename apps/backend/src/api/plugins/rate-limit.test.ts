@@ -773,9 +773,8 @@ describe('tierFor — GitHub quota spenders', () => {
   // file's documented failure mode, now three times over.
   it('puts the flagging drill-down on the expensive bucket, not the blanket read one', () => {
     expect(tiers('GET', '/api/bot-analytics/flagging')).toEqual(['search', 'read']);
-    // ...and it must not sweep in the always-loaded panel it drills into, nor its other sibling.
+    // ...and it must not sweep in the always-loaded panel it drills into.
     expect(tiers('GET', '/api/bot-analytics')).toEqual(['read']);
-    expect(tiers('GET', '/api/bot-analytics/bot-only-prs')).toEqual(['read']);
   });
 
   // The volume family walks every merged PR in the window (up to 5000) plus three grouped comment

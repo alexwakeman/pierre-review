@@ -169,7 +169,6 @@ import type {
   BotTuningSuggestion,
   MlSeverityCounts,
   MlCategory,
-  BotOnlyReviewCard,
   UserContributionStats,
   ArmedMergeRequest,
   ArmedMergePhase,
@@ -4645,9 +4644,8 @@ export async function getWorkspaceMetricsDetail(
 // refetches on the sync cadence); every query is account-scoped + bounded (the workspace's repos,
 // open PRs, the sprint window, per-kind caps).
 //
-// It takes a full `BotScope` rather than a repo list because its `bot_signal` and
-// `bot_only_review` cards need the WORKSPACE to know who counts as an automated reviewer;
-// `scope.repoIds` only narrows the data.
+// It takes a full `BotScope` rather than a repo list because its `bot_signal` card needs the
+// WORKSPACE to know who counts as an automated reviewer; `scope.repoIds` only narrows the data.
 /** The deferred HEADING FACTS of one board fold (`getWorkspaceInsights`' `boardFacts` option).
  *  `run(listed)` reads the facts for the cards whose ids are in `listed`, writes them onto those
  *  card objects, and returns the user ids they name (to resolve for the client). Set by the fold;
@@ -4863,7 +4861,7 @@ export async function getWorkspaceInsights(
     //     nearer the two viewer-scoped kinds than the workspace surveys. ⚠ The sort is severity
     //     FIRST and kind second, so a `high` conflicts card sits with my_turn/ci_failing and a
     //     `warn` one with the stalled reviews.
-    //   • bot_signal, then bot_only_review — the flagship bot summary and the governance risk.
+    //   • bot_signal — the flagship bot summary.
     //   • ⚠ THE TWO "FORWARD" KINDS (merge, update_branch) RANK LAST WITHIN THEIR TIER, and that is
     //     not a demotion — it is the severity sort staying honest. "You could merge this" is an
     //     opportunity, and every kind above it is a problem; the RANKED HEAD is where these rows
@@ -5874,37 +5872,6 @@ export async function getWorkspaceInsights(
         };
         cards.push(card);
       }
-    }
-  }
-
-  // ── bot_only_review card (WS7, deterministic, no AI) ────────────────────────
-  // "Only a bot reviewed this" — PRs (merged, or open-and-mergeable) in the workspace's repos
-  // whose ONLY reviews came from automated reviewers (incl. Pierre-verbatim) with no human
-  // review. Computed here (BEFORE the open-PR guard) like bot_signal so merged PRs count. It
-  // takes the same `scope` as the bot_signal card, so both cards judge by the same workspace.
-  {
-    const botOnly = await getBotOnlyReviewPrs(accountId, scope, {
-      from: sprintFrom,
-      to: sprintTo,
-    });
-    if (botOnly.length > 0) {
-      for (const p of botOnly) addUser(p.authorId);
-      const card: BotOnlyReviewCard = {
-        id: 'bot_only_review',
-        kind: 'bot_only_review',
-        // Governance/trust hook — a rubber-stamping-fatigue caution, never "high".
-        severity: 'warn',
-        prs: botOnly.map((p) => ({
-          prId: p.prId,
-          number: p.number,
-          title: p.title,
-          repoFullName: p.repoFullName,
-          botLabel: p.botLabel,
-          state: p.state,
-          githubUrl: p.githubUrl,
-        })),
-      };
-      cards.push(card);
     }
   }
 
@@ -11804,15 +11771,6 @@ export async function clearOwnReviewRequest(
 // threads must stay visible). Bots Monitoring measures and shows NOTHING but review bots; a
 // mis-roled bot is fixed in Settings → Bots, which lists every role.
 //
-// One entry in the `'all'` column is there for a reason worth stating, because it looks like an
-// oversight:
-//   • getBotOnlyReviewPrs asks for 'all' because it answers "did a human look at this before it
-//     merged". A PR reviewed only by SonarQube is precisely what it exists to flag; narrowing to
-//     'review' would leave it with no qualifying bot review and drop it from the list entirely.
-//     ⚠ BOT-ONLY PRs ARE IN THE `'all'` COLUMN, NOT THE `'review'` ONE. The scoring sets narrow
-//     because a linter's volume makes a reviewer's numbers lie; this RISK set does not, because a
-//     linter's approval is not a human's.
-//
 // This parameter is REQUIRED and POSITIONAL on automatedReviewerUserIds precisely so every call
 // site had to be reviewed individually — confusing the two sets is the defect this feature is most
 // likely to ship. See the ReviewerRole comment in shared.
@@ -13669,205 +13627,6 @@ export async function setReviewerCost(
   return readWorkspaceReviewer(accountId, workspaceId, userId);
 }
 
-// WS7 — "only a bot reviewed this": PRs (merged in-window, or open-and-mergeable) in the
-// given repos whose ONLY counting reviews (approved/changes_requested/commented) are from
-// automated reviewers (incl. Pierre-verbatim via the claudeReviews join) with NO human
-// review. Account-scoped. Feeds the bot_only_review card in getWorkspaceInsights.
-export interface BotOnlyReviewPr {
-  prId: number;
-  number: number;
-  title: string;
-  repoId: number;
-  repoFullName: string;
-  botLabel: string;
-  state: PrState;
-  githubUrl: string;
-  openedAt: string;
-  updatedAt: string;
-  authorId: number | null;
-  // The PR's ONLY automated touch is a Pierre-verbatim review (posted with the human's token,
-  // so no bot-ACTOR events exist) — the Feed's bots side can't surface it.
-  viaPierreOnly: boolean;
-}
-export async function getBotOnlyReviewPrs(
-  accountId: number,
-  scope: BotScope,
-  window: { from: Date; to: Date },
-  // openOnly: restrict to currently-OPEN (mergeable) PRs, dropping merged-in-window. The
-  // analytics COUNT (the "only a bot reviewed…" banner) uses this — it's a live "needs a human
-  // before it merges" signal, and merged PRs have already shipped. The drill-down LIST omits
-  // this so the tab can offer merged behind a "Show merged" toggle.
-  opts?: { openOnly?: boolean },
-): Promise<BotOnlyReviewPr[]> {
-  const repoIds = scope.repoIds;
-  if (repoIds.length === 0) return [];
-  // `role: 'all'` — DELIBERATELY NOT narrowed to 'review', and this is the one metric where the
-  // obvious edit is wrong. This getter flags PRs NO HUMAN reviewed. Narrowing to review-role bots
-  // means a PR reviewed only by SonarQube has zero review-role bot reviews, fails the "at least
-  // one automated review" leg, and VANISHES from the list — hiding the risk instead of flagging
-  // it, the exact opposite of the banner's purpose ("needs a human before it merges"). The role
-  // narrowing belongs on ROI / behaviour / dedup / benchmark, not here.
-  //
-  // The judgement comes from `scope.workspaceId` — the workspace the scanned repos belong to, so
-  // the drill-down list and the count above it evaluate the identical rule by construction.
-  const automatedIds = new Set(
-    await automatedReviewerUserIds(accountId, scope.workspaceId, 'all'),
-  );
-  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
-
-  // Pierre-verbatim posted review ids (these count as automated reviews; a human-curated
-  // Pierre review counts as a human review). Keyed by reviews.databaseId == postedReviewId.
-  const crRows = await db
-    .select({
-      postedReviewId: claudeReviews.postedReviewId,
-      userBody: claudeReviews.userBody,
-      summary: claudeReviews.summary,
-    })
-    .from(claudeReviews)
-    .where(
-      and(eq(claudeReviews.accountId, accountId), isNotNull(claudeReviews.postedReviewId)),
-    )
-    .execute();
-  const pierreVerbatim = new Set<string>();
-  for (const r of crRows) {
-    if (!r.postedReviewId) continue;
-    const ub = normalizeBody(r.userBody);
-    if (ub.length > 0 && ub === normalizeBody(r.summary)) pierreVerbatim.add(r.postedReviewId);
-  }
-
-  const prRows = await db
-    .select({
-      id: pullRequests.id,
-      repoId: pullRequests.repoId,
-      number: pullRequests.number,
-      title: pullRequests.title,
-      authorId: pullRequests.authorId,
-      state: pullRequests.state,
-      openedAt: pullRequests.openedAt,
-      updatedAt: pullRequests.updatedAt,
-    })
-    .from(pullRequests)
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, repoIds),
-        opts?.openOnly
-          ? and(eq(pullRequests.state, 'open'), eq(pullRequests.mergeable, 'mergeable'))
-          : or(
-              and(
-                eq(pullRequests.state, 'merged'),
-                gte(pullRequests.mergedAt, window.from),
-                lte(pullRequests.mergedAt, window.to),
-              ),
-              and(eq(pullRequests.state, 'open'), eq(pullRequests.mergeable, 'mergeable')),
-            ),
-      ),
-    )
-    .execute();
-  if (prRows.length === 0) return [];
-  const prIds = prRows.map((p) => p.id);
-
-  const revRows = await db
-    .select({
-      prId: reviews.prId,
-      authorId: reviews.authorId,
-      databaseId: reviews.databaseId,
-      state: reviews.state,
-    })
-    .from(reviews)
-    .where(inArray(reviews.prId, prIds))
-    .execute();
-  const revsByPr = new Map<number, typeof revRows>();
-  for (const r of revRows) {
-    const arr = revsByPr.get(r.prId) ?? [];
-    arr.push(r);
-    revsByPr.set(r.prId, arr);
-  }
-
-  // Item 4a — a PR's comments count as touch too: a bot review-thread/issue comment is automated
-  // touch, and a NON-AUTHOR human comment disqualifies "bot-only" (the author's own comments never
-  // count as human input). Gather review-thread + issue-comment authors for the candidate PRs.
-  const rcAuthorRows = await db
-    .select({ prId: reviewComments.prId, authorId: reviewComments.authorId })
-    .from(reviewComments)
-    .where(inArray(reviewComments.prId, prIds))
-    .execute();
-  const pcAuthorRows = await db
-    .select({ prId: prComments.prId, authorId: prComments.authorId })
-    .from(prComments)
-    .where(inArray(prComments.prId, prIds))
-    .execute();
-  const commentAuthorsByPr = new Map<number, (number | null)[]>();
-  for (const r of [...rcAuthorRows, ...pcAuthorRows]) {
-    const arr = commentAuthorsByPr.get(r.prId) ?? [];
-    arr.push(r.authorId);
-    commentAuthorsByPr.set(r.prId, arr);
-  }
-
-  const repoRows = await db
-    .select({ id: repos.id, owner: repos.owner, name: repos.name })
-    .from(repos)
-    .where(inArray(repos.id, repoIds))
-    .execute();
-  const repoFullName = new Map(repoRows.map((r) => [r.id, `${r.owner}/${r.name}`]));
-
-  const out: BotOnlyReviewPr[] = [];
-  for (const pr of prRows) {
-    const revs = (revsByPr.get(pr.id) ?? []).filter(
-      (rv) =>
-        rv.state === 'approved' || rv.state === 'changes_requested' || rv.state === 'commented',
-    );
-    let anyAutomated = false;
-    let anyHuman = false;
-    // True when a CLASSIFIED bot actor touched the PR. A PR whose only automated touch is a
-    // Pierre-VERBATIM review has NO bot-actor events (the human's token posted it), so the
-    // Feed's bots side can't surface it — the UI needs to know (viaPierreOnly).
-    let anyRealBot = false;
-    let botLabel: string | null = null;
-    const noteAuto = (authorId: number | null, isPierre: boolean): void => {
-      anyAutomated = true;
-      if (authorId != null && automatedIds.has(authorId)) anyRealBot = true;
-      if (botLabel == null) {
-        const kind = authorId != null ? kindMap.get(authorId) : undefined;
-        botLabel = kind ? labelForKind(kind) : isPierre ? labelForKind('pierre') : 'Automated';
-      }
-    };
-    // Reviews: automated (incl. Pierre-verbatim) → automated touch; a NON-AUTHOR human review
-    // disqualifies (a review by the PR author — rare — never counts as human input).
-    for (const rv of revs) {
-      const isPierre = rv.databaseId != null && pierreVerbatim.has(rv.databaseId);
-      const isAuto = (rv.authorId != null && automatedIds.has(rv.authorId)) || isPierre;
-      if (isAuto) noteAuto(rv.authorId, isPierre);
-      else if (rv.authorId != null && rv.authorId !== pr.authorId) anyHuman = true;
-    }
-    // Comments (review-thread + issue): a bot comment is automated touch; a non-author human
-    // comment disqualifies. Null-author (unknown/deleted) comments count as neither.
-    for (const cid of commentAuthorsByPr.get(pr.id) ?? []) {
-      if (cid == null) continue;
-      if (automatedIds.has(cid)) noteAuto(cid, false);
-      else if (cid !== pr.authorId) anyHuman = true;
-    }
-    if (anyAutomated && !anyHuman) {
-      const full = repoFullName.get(pr.repoId) ?? '';
-      out.push({
-        prId: pr.id,
-        number: pr.number,
-        title: pr.title,
-        repoId: pr.repoId,
-        repoFullName: full,
-        botLabel: botLabel ?? 'Automated',
-        state: pr.state,
-        githubUrl: `https://github.com/${full}/pull/${pr.number}`,
-        openedAt: pr.openedAt.toISOString(),
-        updatedAt: pr.updatedAt.toISOString(),
-        authorId: pr.authorId,
-        viaPierreOnly: !anyRealBot,
-      });
-    }
-  }
-  return out;
-}
-
 // WS3 — the Bot-ROI analytics. Per AutomatedReviewerKind over the requested window:
 // volume (threads + comments), acted-on %, untouched backlog + oldest age, human
 // follow-through %, noise ratio (untouched-share proxy — severity is often unknowable),
@@ -14286,7 +14045,7 @@ export async function getBotAnalytics(
   const generatedAt = new Date(nowMs).toISOString();
   const win = { kind: windowKind, from: from.toISOString(), to: to.toISOString() };
 
-  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, botOnlyPrs: 0, overdueGraceMs: OVERDUE_GRACE_MS, overlapClusters: 0 };
+  const emptyTotals = { threads: 0, comments: 0, actedOn: 0, actedOnPct: null, untouched: 0, overdueGraceMs: OVERDUE_GRACE_MS, overlapClusters: 0 };
   // An empty workspace → nothing to analyze.
   if (scope.repoIds.length === 0) {
     return { enabled: true, generatedAt, window: win, vendors: [], totals: emptyTotals, suggestions: [] };
@@ -14966,16 +14725,6 @@ export async function getBotAnalytics(
   vendors.sort((a, b) => b.threads - a.threads || b.comments - a.comments);
   suggestions.sort((a, b) => b.volume - a.volume);
 
-  // Item 4b — bot-only OPEN PR count over THIS WORKSPACE's repos, using the same broadened rule
-  // as getBotOnlyReviewPrs (item 4a): automated touch (review OR comment, incl. Pierre-verbatim)
-  // with no human review AND no human comment. OPEN-only (`openOnly`) — the banner is a live
-  // "needs a human before it merges" signal, so merged PRs (already shipped) are excluded; the
-  // drill-down list still offers them behind a toggle. It takes the SAME `scope`, so the count and
-  // the list it opens cannot disagree about either the repos or the verdict.
-  const botOnlyPrs = (
-    await getBotOnlyReviewPrs(accountId, scope, { from, to }, { openOnly: true })
-  ).length;
-
   // Totals sum `vendors` — review bots only, by construction of `automatedIds`: a linter's thread
   // volume must not move the headline acted-on %, which is a claim about REVIEW throughput.
   const totalThreads = vendors.reduce((s, v) => s + v.threads, 0);
@@ -14986,7 +14735,6 @@ export async function getBotAnalytics(
     actedOn: totalActedOn,
     actedOnPct: totalThreads > 0 ? Math.round((totalActedOn / totalThreads) * 100) : null,
     untouched: vendors.reduce((s, v) => s + v.untouched, 0),
-    botOnlyPrs,
     // The fixed overdue grace window (ms): a not-addressed thread is "overdue" (feeding the noisy
     // verdict) once it's older than this. Exposed so the UI can state the rule ("overdue after 36h").
     overdueGraceMs: OVERDUE_GRACE_MS,
@@ -16071,34 +15819,6 @@ export async function getPrBotBehaviour(
   }
   out.sort((a, b) => (a.firstTouchAt ?? '').localeCompare(b.firstTouchAt ?? ''));
   return { enabled: true, prId, bots: out };
-}
-
-// Item 4 — the exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count. A THIN wrapper:
-// it resolves the window date range + the default repo scope IDENTICALLY to the analytics
-// count path (§7078: window days from the kind; null scope → every account repo; [] short-
-// circuits to empty) then defers to getBotOnlyReviewPrs for the shared bot-only rule, so the
-// caption and its expandable list are computed from the same source and can NEVER disagree. The
-// return shape (BotOnlyPrItem[]) is structurally the local BotOnlyReviewPr. Deterministic, no AI,
-// account-scoped (getBotOnlyReviewPrs binds pullRequests.accountId, so a foreign repo id → []).
-export async function getBotOnlyPrs(
-  accountId: number,
-  window: BotWindowKind,
-  // The SAME `BotScope` object getBotAnalytics computed its count from — which is what makes the
-  // COUNT and this LIST agree by construction. The old second `teamKey` argument was a thing a
-  // caller could forget, and one drill-down did. `repoIds: []` = an empty workspace → empty.
-  scope: BotScope,
-): Promise<{ window: { kind: BotWindowKind; from: string; to: string }; prs: BotOnlyReviewPr[] }> {
-  const nowMs = Date.now();
-  const to = new Date(nowMs);
-  // rolling_14 and 'sprint' both use the 14-day trailing window (matches getBotAnalytics).
-  const from = new Date(nowMs - botWindowMs(window));
-  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
-
-  // An empty workspace means "no repos" → no PRs.
-  if (scope.repoIds.length === 0) return { window: win, prs: [] };
-  // No `openOnly` here: the LIST offers merged PRs behind a client-side "Show merged" toggle.
-  const prs = await getBotOnlyReviewPrs(accountId, scope, { from, to });
-  return { window: win, prs };
 }
 
 // WS4 — cross-bot dedup + consensus for one PR. Groups the PR's automated-reviewer

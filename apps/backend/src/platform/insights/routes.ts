@@ -23,7 +23,7 @@ export function registerInsightsRoutes(app: FastifyInstance, ctx: ProContext): v
   app.get<{ Querystring: { workspace?: string } }>('/api/pro/insights', async (req) => {
     const accountId = ctx.accountIdOf(req);
     // `?workspace=<id>` → the ONE scope: the workspace decides who counts as a bot (the
-    // `bot_signal` / `bot_only_review` cards need that), `repoIds` narrows the data.
+    // `bot_signal` card needs that), `repoIds` narrows the data.
     //
     // ⚠ RESOLVED FIRST, because the comparison window now depends on it: the sprint CADENCE is a
     // per-workspace fact (`resolveSprintCadence`), so a window taken before the scope would be

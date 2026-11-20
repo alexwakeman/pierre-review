@@ -680,8 +680,8 @@ export interface ProHostQueries {
   // routing). Returns WorkspaceInsightsResponse. `window` (epoch-millis) overrides the default
   // metrics window with the account's configured SPRINT (see the Pro sprint config); open PRs
   // always count regardless of age. `undefined` → the built-in default window.
-  // `scope` is a full BotScopeWire because the `bot_signal` and `bot_only_review` cards need the
-  // WORKSPACE to know who counts as an automated reviewer; `scope.repoIds` only narrows the data.
+  // `scope` is a full BotScopeWire because the `bot_signal` card needs the WORKSPACE to know who
+  // counts as an automated reviewer; `scope.repoIds` only narrows the data.
   // (`window` is a REQUIRED-but-undefined-able parameter, not optional: it precedes a required
   // one, so `window?` would not compile.)
   getWorkspaceInsights(

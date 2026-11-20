@@ -59,9 +59,9 @@ import { pendingBoardEmpty } from '../../lib/pendingFirstLanding.js';
 // The **Pending** rail entry — the attention cards (your turn / stalled reviews / untouched
 // threads / reviewer load / needs-a-reviewer) that used to sit under the Insights AI panels, now a
 // first-class rail entry. Scoped to the ACTIVE WORKSPACE
-// (a plain id, the only scope this app has); the bot cards live in the free Bots console, so
-// they're excluded here.
-const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
+// (a plain id, the only scope this app has); the bot card lives in the free Bots console, so
+// it's excluded here.
+const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal']);
 
 /** What a surface renders when the `my_turn` cards are capped: the pair, plus the sentence that
  *  explains it. `shown` is always the figure to DISPLAY; `total` only ever qualifies it. */

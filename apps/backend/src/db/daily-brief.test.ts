@@ -52,7 +52,7 @@ const prIdByKey = new Map<string, number>();
 /** The two bot kinds GET /api/attention drops (they live in the free Bots console) — mirrored
  *  here on purpose: if that filter and the brief's count loop ever disagree, this copy is what
  *  makes the disagreement fail rather than ship. */
-const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal', 'bot_only_review']);
+const BOT_CARD_KINDS = new Set<InsightCard['kind']>(['bot_signal']);
 
 /** What GET /api/attention would return right now, counted by kind — the LIST side of the pair. */
 async function liveCardCounts(): Promise<Record<string, number>> {

@@ -98,7 +98,8 @@ export default function Page(): JSX.Element {
         <li>
           <strong>The team’s Pending tabs:</strong> <Ui>Needs fixing</Ui>, <Ui>Waiting on review</Ui>,{' '}
           <Ui>Unanswered threads</Ui>, <Ui>Ready to land</Ui> and <Ui>Dependencies</Ui>, the top 5 of each, every pull
-          request once. My turn and other personal lists are left out, and nothing in the digest names you.
+          request once. My turn and other personal lists are left out, and nothing in the digest names you. A pull
+          request that only a bot reviewed is not flagged.
         </li>
         <li>
           <strong>A short sprint summary,</strong> written by AI. It is not rewritten when the workspace’s activity has

@@ -633,7 +633,10 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   scope-wide review & resolve). (`bot-only-prs` — the "Only a bot reviewed N open PRs" list — was
   REMOVED 2026-11-20 with its callout, its ROI summary link and its ⌘K command: `BotOnlyPrsDetail`,
   the TabKind, `openBotOnlyDetail` + `botOnlyFocusRepoId`, `useBotOnlyPrs` and `client.botOnlyPrs`
-  are deleted; a saved `bot-only-prs` tab is dropped on load. The server route is not the SPA's.)
+  are deleted; a saved `bot-only-prs` tab is dropped on load. The server route and
+  `totals.botOnlyPrs` went too, with the `bot_only_review` card: `KIND_LABEL`, `KIND_ICON`,
+  `INSIGHT_KINDS` and `BOT_CARD_KINDS` no longer name it, and an old `?attn=bot_only_review` link
+  falls through to no isolation.)
   **`user-activity` is the one drill-down keyed PER USER**, not a
   singleton (`userActivityKey(userId)` / `parseUserActivityKey`): two people's feeds can sit side
   by side and re-clicking a handle re-focuses their tab. It needs no filters-store seed — the tab

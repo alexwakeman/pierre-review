@@ -21,6 +21,7 @@ no internals.
   that answers in minutes and one that answers in days fit on one chart.
 - Bots Monitoring → ROI: the **Inflation** column and the **Severity inflation** chart are hidden when Ensemble is
   the only review bot.
+- Charts draw CodeRabbit in magenta instead of orange, so its line no longer looks like Ensemble's.
 
 ### Fixed
 
@@ -28,6 +29,7 @@ no internals.
 
 ### Removed
 
+- Pending and the Slack digest no longer flag a pull request that only a bot reviewed.
 - Bots Monitoring: the "Only a bot reviewed N open PRs" callout, the "bot-only open PRs" link under the tiles, the
   list they opened and the ⌘K command "Bots: open PRs only a bot reviewed".
 - Bots Monitoring → ROI: the **Quality checks** section. Bots Monitoring shows review bots only; quality checks are

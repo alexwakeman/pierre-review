@@ -47,9 +47,8 @@ const KIND_ICON: Record<InsightKind, IconComponent> = {
   dependency_bump: PendingDependencyIcon,
   waiting_on_others: PendingWaitingOnOthersIcon,
   ai_review: PendingClaudeReviewIcon,
-  // Never on the board (the route filters them out); a mark so the Record is total.
+  // Never on the board (the route filters it out); a mark so the Record is total.
   bot_signal: BotIcon,
-  bot_only_review: BotIcon,
 };
 
 const REASON_ICON: Record<MyTurnCardReason, IconComponent> = {

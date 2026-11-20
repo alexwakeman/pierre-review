@@ -75,7 +75,7 @@ function analytics(vendors: BotVendorAnalytics[]): BotAnalyticsResponse {
     generatedAt: iso(0),
     window: { kind: 'rolling_14', from: iso(14), to: iso(0) },
     vendors,
-    totals: { threads: 80, comments: 120, actedOn: 48, actedOnPct: 60, untouched: 20, botOnlyPrs: 3, overdueGraceMs: 36 * 3_600_000, overlapClusters: 0 },
+    totals: { threads: 80, comments: 120, actedOn: 48, actedOnPct: 60, untouched: 20, overdueGraceMs: 36 * 3_600_000, overlapClusters: 0 },
     ml: {
       labelled: 60,
       findings: 60,

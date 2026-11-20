@@ -299,7 +299,11 @@ export const BOT_VENDOR_META: Record<
   AutomatedReviewerKind,
   { label: string; color: string }
 > = {
-  coderabbit: { label: 'CodeRabbit', color: '#ff7a45' },
+  // NOT CodeRabbit's orange brand. It sat 15° from Ensemble's own `pierre` orange (#d97757), so the
+  // two chart lines could not be told apart. Magenta (hue ~305°) is the widest gap on the wheel: at
+  // least ΔE 37 (CIELAB) from every other colour in this map and in BOT_PALETTE, and neither red
+  // nor green, so it never reads as a CI status.
+  coderabbit: { label: 'CodeRabbit', color: '#d411c4' },
   greptile: { label: 'Greptile', color: '#16a34a' },
   copilot: { label: 'Copilot', color: '#8957e5' },
   qodo: { label: 'Qodo', color: '#7c3aed' },
@@ -538,7 +542,7 @@ export function botVendorMeta(
 // spread across the wheel, each legible on both light and dark surfaces (used as chart strokes,
 // small swatches, and text-on-10%-tint pills). ORDER MATTERS: buildBotColorMap assigns greedily
 // from the front, so we lead with hues furthest from the most COMMON review-bot brand colours
-// (CodeRabbit orange, Copilot/Qodo purple, Sourcery teal, Korbit blue, Greptile green) — this
+// (CodeRabbit magenta, Copilot/Qodo purple, Sourcery teal, Korbit blue, Greptile green) — this
 // way the usual 1–3 in-house bots land on pink/lime/cyan, clearly distinct from the brands they
 // sit beside, before we reach the brand-adjacent hues at the tail.
 export const BOT_PALETTE: readonly string[] = [

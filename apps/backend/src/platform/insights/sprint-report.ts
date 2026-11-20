@@ -220,10 +220,9 @@ async function buildSprintPayload(
 
   let reviewersOverloaded = 0;
   for (const c of cards) {
-    // bot_signal + bot_only_review are cross-repo AGGREGATE cards (no PR ref, no
-    // repoFullName/additions/deletions) — not part of the per-PR digest the sprint report
-    // compacts. Skip both here; they surface in the Insights UI directly.
-    if (c.kind === 'bot_signal' || c.kind === 'bot_only_review') continue;
+    // bot_signal is a cross-repo AGGREGATE card (no PR ref, no repoFullName/additions/
+    // deletions) — not part of the per-PR digest the sprint report compacts. Skip it here.
+    if (c.kind === 'bot_signal') continue;
     // ⚠ AN EXPLICIT BRANCH, AND IT HAS TO BE. Falling through is WORSE than a silent drop here:
     // everything below `bump(c.repoFullName)` counts the card into that repo's importance ranking
     // (cards × 3) and adds a PR ref, so an unhandled kind quietly re-orders the report around

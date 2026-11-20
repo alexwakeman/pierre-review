@@ -3216,9 +3216,7 @@ export const workspaceReviewers = sqliteTable(
     // keeps its brand while being marked a linter. `automated` stays TRUE for every automation
     // role, so exclusion + the feed are unaffected; only the SCORING sets (behaviour, dedup,
     // benchmark, ROI) narrow, and they narrow to EXACTLY 'review' — never "not quality_check",
-    // which would re-admit all four newer roles. BOT-ONLY PRs DELIBERATELY DO NOT NARROW: that
-    // list answers "did a human look at this", and a PR reviewed only by SonarQube is exactly
-    // what it exists to surface. NOT NULL DEFAULT 'review' so a row written by an older code path
+    // which would re-admit all four newer roles. NOT NULL DEFAULT 'review' so a row written by an older code path
     // still means something. Migration 0053 re-derives it for every row whose `source` is not
     // 'manual' — the stored value beats the login seed on read, so a widened vocabulary in code
     // does nothing for an actor that has already been classified.

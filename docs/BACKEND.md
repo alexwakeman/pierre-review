@@ -729,6 +729,11 @@ about"** (the survey, S2). PER ACCOUNT: one account is one reader, in every work
 - **The Pending mute removes a repository from My Turn** (db/pending-mute.ts): `getMutedPendingRepoIds`
   is read once and its repos are dropped from the open-PR list and the thread query. Other tabs are
   unaffected — your own red build in a muted repo goes back to Needs fixing.
+- **"Only a bot reviewed this" is not a Pending item.** The `bot_only_review` kind is REMOVED
+  (2026-11-20) from `InsightKind`, `PENDING_KIND_RANK` (the later kinds moved up one) and
+  `DO_NEXT_UNSCORED_KINDS`; a PR only a bot reviewed is normal practice. No card, count, Slack line
+  or ⌘K entry names it. `bot_signal` is the one bot kind the fold still emits, and the attention
+  route still filters it out.
 - **The ranking is fixed.** Every scored Pending tab uses `DO_NEXT_RULES.weights` (proximity 50,
   stall 30, relevance 20); `rankPendingTabs` still returns them as `rules` with the fixed type order
   and `myTurnOff`. My turn itself is NOT ordered by score: `listTab` sorts it by group
