@@ -1,11 +1,13 @@
-// THE FIRST-BOOT AI DOWNLOAD — Claude and Codex come with Limn, without a click.
+// THE FIRST-BOOT AI DOWNLOAD — the agents the reader PICKED (Settings → AI) come without a click.
 //
 // The SDKs and the Codex CLI stay OUT of the npm manifest (a fast `npx limn-review`; the guardrails in
-// scripts/build-release.mjs are unchanged), so on a boot that finds either runtime missing, stale or
-// without its native program, Limn downloads what is missing in the background — the same
-// single-flight `installAiRuntime` that `limn ai install codex` and the SPA's Retry run. ⚠ A Claude
-// that is already ready is never fetched again or swapped (`['codex']` alone: the existing install
-// adding Codex). After it, signing in to each provider is the only step.
+// scripts/build-release.mjs are unchanged), so on a boot that finds a PICKED runtime missing, stale or
+// without its native program, Limn downloads it in the background — the same single-flight
+// `installAiRuntime` that `limn ai install <agent>` and Settings → AI run. Never-picked defaults
+// (ai/runtime.ts `chosen`): Claude yes; Codex only when it is already on disk. So a new install
+// downloads Claude alone, and an existing one keeps (and repairs) what it has. ⚠ A Claude that is
+// already ready is never fetched again or swapped (`['codex']` alone). After it, signing in to each
+// provider is the only step.
 //
 // ⚠ IT NEVER DELAYS THE SERVER. `index.ts` calls `startAiAutoInstall` AFTER `listen`, with `void`;
 // nothing awaits it. `/api/me` reads `runtime: 'installing'` (and the current step in
@@ -19,6 +21,7 @@
 import { aiSwitchedOff } from './tool-switches.js';
 import { config } from '../config.js';
 import {
+  aiRuntimeChoice,
   getAiRuntimeStatus,
   getCodexRuntimeStatus,
   installAiRuntime,
@@ -39,20 +42,27 @@ export interface AutoInstallDeps {
   enabled: boolean;
   claude: () => AiRuntimeStatus;
   codex: () => AiRuntimeStatus;
+  /** Which agents the reader picked (ai/runtime.ts `aiRuntimeChoice`). */
+  choice: () => Record<AiRuntimeProvider, boolean>;
   install: (providers: AiRuntimeProvider[]) => Promise<AiRuntimeInstallResult>;
   schedule: (fn: () => void, ms: number) => void;
   log: Log;
 }
 
 /**
- * The providers a download must bring, or null when nothing is missing. ['codex'] alone over a ready
- * Claude downloads Codex only (ai/runtime.ts): an existing install neither fetches nor swaps Claude.
+ * The providers a download must bring, or null when nothing PICKED is missing. ['codex'] alone over a
+ * ready Claude downloads Codex only (ai/runtime.ts): an existing install neither fetches nor swaps
+ * Claude. A provider the reader did not pick is never downloaded.
  */
-export function autoInstallProviders(claude: AiRuntimeStatus, codex: AiRuntimeStatus): AiRuntimeProvider[] | null {
+export function autoInstallProviders(
+  claude: AiRuntimeStatus,
+  codex: AiRuntimeStatus,
+  choice: Record<AiRuntimeProvider, boolean> = { claude: true, codex: true },
+): AiRuntimeProvider[] | null {
   // Already running (a `limn ai install` started by the same process cannot be, but a Retry can).
   if (claude.runtime === 'installing' || codex.runtime === 'installing') return null;
-  const needClaude = claude.runtime !== 'ready';
-  const needCodex = codex.runtime !== 'ready';
+  const needClaude = choice.claude && claude.runtime !== 'ready';
+  const needCodex = choice.codex && codex.runtime !== 'ready';
   if (!needClaude && !needCodex) return null;
   if (!needCodex) return ['claude'];
   return needClaude ? ['claude', 'codex'] : ['codex'];
@@ -61,7 +71,7 @@ export function autoInstallProviders(claude: AiRuntimeStatus, codex: AiRuntimeSt
 /** The testable body: one attempt, and on failure ONE scheduled retry. */
 export function runAutoInstall(deps: AutoInstallDeps, attempt = 1): void {
   if (!deps.enabled) return;
-  const providers = autoInstallProviders(deps.claude(), deps.codex());
+  const providers = autoInstallProviders(deps.claude(), deps.codex(), deps.choice());
   if (!providers) return;
   const names = providers.map((p) => (p === 'codex' ? 'Codex' : 'Claude')).join(' and ');
   deps.log.info(`ai: downloading ${names} in the background`);
@@ -88,6 +98,7 @@ export function startAiAutoInstall(log: Log): void {
       enabled: config.aiEnabled && config.aiAutoInstall && !aiSwitchedOff(),
       claude: getAiRuntimeStatus,
       codex: getCodexRuntimeStatus,
+      choice: aiRuntimeChoice,
       install: (providers) => installAiRuntime(undefined, { providers }),
       schedule: (fn, ms) => {
         setTimeout(fn, ms).unref?.();

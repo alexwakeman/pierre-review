@@ -101,9 +101,12 @@ export function AiAuthLine({ kind, provider }: { kind?: AiRunKind; provider?: Ai
 /** "Set up in Settings → Features": the ONE place in the app that downloads AI (or bot comment analysis). */
 export function SetUpInFeatures({
   label = 'Set up in Settings → Features',
+  focus = 'tools',
   beforeOpen,
 }: {
   label?: string;
+  /** Where Settings lands: Features (default) or the AI section ('ai-effort'), where agents download. */
+  focus?: 'tools' | 'ai-effort';
   /** Runs first: a surface inside another modal closes it, or Settings would open behind it. */
   beforeOpen?: () => void;
 }): JSX.Element {
@@ -112,7 +115,7 @@ export function SetUpInFeatures({
       type="button"
       onClick={() => {
         beforeOpen?.();
-        useSettingsModal.getState().openSettings('tools');
+        useSettingsModal.getState().openSettings(focus);
       }}
       className="hit bg-ui-raise rounded-ui px-2 py-1 text-meta hover:bg-ui-hover"
     >
@@ -122,13 +125,15 @@ export function SetUpInFeatures({
 }
 
 /**
- * What stands where "Set up AI" used to: Limn downloads Claude and Codex by itself on the first boot
- * (`ai.autoInstall`), so this is the download's progress line; otherwise the reason AI is not ready (not
- * downloaded, failed, or switched off) and a link to Settings → Features, the one place that downloads it
- * (components/settings/ToolsSection.tsx).
+ * What stands where "Set up AI" used to: Limn downloads the agents picked in Settings → AI by itself
+ * (`ai.autoInstall`), so this is the download's progress line; otherwise the reason AI is not ready and
+ * where to fix it — Settings → AI, where each agent is downloaded or removed, or Settings → Features
+ * while AI is switched off there.
  */
 export function AiRuntimeSetup(): JSX.Element | null {
   const ai = useAiCapabilities();
+  // Switched off BY THE READER (a stored false), not merely off by default because nothing is downloaded.
+  const switchedOff = useMe().data?.tools?.ai.setting === false;
   const { state } = useAiRuntimeInstall();
   // Poll while the SERVER is downloading (the automatic one, another tab's, `limn ai install`): its
   // step shows, and the line turns into Run on its own.
@@ -151,7 +156,11 @@ export function AiRuntimeSetup(): JSX.Element | null {
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <span className={`text-meta ${ai.runtime === 'failed' || state.phase === 'failed' ? 'text-ui-danger' : 'text-ui-mute'}`}>{reason}</span>
-      <SetUpInFeatures />
+      {switchedOff ? (
+        <SetUpInFeatures />
+      ) : (
+        <SetUpInFeatures label="Download in Settings → AI" focus="ai-effort" />
+      )}
     </span>
   );
 }

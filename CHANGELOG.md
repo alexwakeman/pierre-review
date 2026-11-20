@@ -13,12 +13,26 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Releases work without version tags. A repository with no version tags is released from its merged pull requests:
+  each one merged into the default branch counts as a release point, and the same rules pick the newest one whose
+  tickets, and every earlier one's since the last release, are Complete with no pull request still open. Release…
+  tags that commit with the date and your release suffix (2026.11.19-rc), and that tag is where the next release
+  starts. Settings → Releases → "Release from" (Auto, Version tags, Merged pull requests) picks it per repository;
+  Auto uses merged pull requests until the repository has a version tag.
+
 ### Changed
 
 - Claude now runs on your Anthropic API key by default. When `ANTHROPIC_API_KEY` is set, every Claude run uses it,
   even while you are signed in to Claude Code. "Use my API keys first" in Settings → AI is now ticked unless you
   untick it. Without a key, Ensemble still falls back to a Claude Code login; the docs and Settings link to
   Anthropic's terms on that use.
+- Settings → AI downloads each agent on its own. Claude and Codex each have a line with **Download** (Claude about
+  110 MB, Codex about 360 MB) or **Remove**, and only the ones you pick are downloaded. A new install downloads Claude
+  alone; an install that already had Codex keeps it. An agent that is not downloaded is not used: AI features, Auto
+  and Claude + Codex reviews use the other one, and a feature with neither says how to download one. From a terminal,
+  `ensemble ai install claude|codex` and the new `ensemble ai remove claude|codex` do the same.
 - Settings save as you go: there is no Save button on any Settings tab. A switch, choice or tick saves at once;
   a typed value saves when you stop typing or leave the box, and a value that is not allowed is not saved and
   says why beside the box. A token, API key or Slack webhook saves when you press Enter or leave the box, and is

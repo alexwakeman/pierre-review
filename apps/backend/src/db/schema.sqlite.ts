@@ -6008,8 +6008,11 @@ export const releaseItems = sqliteTable(
       .references(() => accounts.id, { onDelete: 'cascade' }),
     releaseId: integer('release_id').notNull(),
     repoId: integer('repo_id').notNull(),
+    /** The version tag released, or (basis 'prs') the release point's name, `#539`. */
     versionTag: text('version_tag').notNull(),
     sha: text('sha').notNull(),
+    /** What it was cut on (migration 0212): 'tags' / 'prs'; NULL = before 0212 (tags). */
+    basis: text('basis', { enum: ['tags', 'prs'] }),
     releaseTagName: text('release_tag_name').notNull(),
     notesMarkdown: text('notes_markdown').notNull().default(''),
     tagState: text('tag_state', { enum: ['pending', 'claimed', 'done', 'failed', 'refused'] })
@@ -6249,6 +6252,8 @@ export const workspaceReleaseRepos = sqliteTable(
     startTagSha: text('start_tag_sha'),
     startSetByLogin: text('start_set_by_login'),
     startSetAt: integer('start_set_at', { mode: 'timestamp' }),
+    /** "Release from" (migration 0212): NULL = auto, 'tags', 'prs' (shared `releaseBasisOf`). */
+    releaseBasis: text('release_basis', { enum: ['tags', 'prs'] }),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
   },
   (t) => ({

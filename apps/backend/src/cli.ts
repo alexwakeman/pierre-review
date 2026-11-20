@@ -73,11 +73,11 @@ Usage:
 Commands:
   status           Your cross-repo "my turn" queue in the terminal, with
                    clickable links (see \`ensemble status --help\`)
-  ai install       Download the AI runtime AI Review and AI Fix run on
-                   (one time, about 110 MB). Ensemble does this by itself the
-                   first time it starts, with Codex; Settings → Features does
-                   the same.
-  ai status        Say whether the AI runtime is set up
+  ai install       Download an agent AI Review and AI Fix run on: Claude
+                   (about 110 MB) or \`ai install codex\` (about 360 MB).
+                   Ensemble downloads the ones picked in Settings → AI by
+                   itself; \`ai remove claude|codex\` deletes one.
+  ai status        Say which agents are set up
   ml install       Download the model that scores bot review comments
                    (one time, about 240 MB). Settings → Features in the app does the same.
   ml status        Say whether bot comment scoring is set up
@@ -306,25 +306,28 @@ async function runAiCommand(argv: string[]): Promise<void> {
   const sub = argv[0];
   const target = argv[1];
   const known =
-    sub === 'install' || sub === 'status' || sub === 'login' || sub === 'logout' || sub === 'clean-sessions';
+    sub === 'install' || sub === 'remove' || sub === 'status' || sub === 'login' || sub === 'logout' || sub === 'clean-sessions';
   const targetOk =
     sub === 'install' ? target === undefined || target === 'claude' || target === 'codex'
+    : sub === 'remove' ? target === 'claude' || target === 'codex'
     : sub === 'login' || sub === 'logout' ? target === 'codex'
     : true;
   if (!known || !targetOk) {
     console.log(`ensemble ai — the AI runtime AI Review and AI Fix run on (Claude or Codex)
 
 Usage:
-  ensemble ai install          Download it (one time, about 110 MB) into ~/.ensemble/ai-runtime
-  ensemble ai install codex    The same, plus the Codex CLI (about 360 MB unpacked)
-  ensemble ai status           Say whether it is set up
+  ensemble ai install [claude]  Download Claude (one time, about 110 MB) into ~/.ensemble/ai-runtime
+  ensemble ai install codex    Download Codex (about 360 MB unpacked)
+  ensemble ai remove claude    Stop using Claude and delete its download (codex likewise)
+  ensemble ai status           Say which are set up
   ensemble ai login codex      Sign Ensemble's own Codex in (add --device-auth on a headless machine)
   ensemble ai logout codex     Sign it out
   ensemble ai clean-sessions   Delete the session folders older runs left in
                                ~/.claude/projects (add --dry-run to list them first)
 
-Ensemble downloads Claude and Codex by itself the first time it starts
-(ENSEMBLE_AI_AUTO_INSTALL=false turns that off). Signing in is the only step.
+Ensemble downloads the agents you picked (Settings → AI; Claude unless you
+choose) by itself when it starts (ENSEMBLE_AI_AUTO_INSTALL=false turns that
+off). Installing or removing one here changes the pick too.
 
 AI Review and AI Fix are free. One AI runs every feature: Claude, unless only
 Codex is signed in. Set ENSEMBLE_AI_PROVIDER=claude or codex to choose.
@@ -357,9 +360,11 @@ The older LIMN_ names of these settings still work.
 
   if (sub === 'status') {
     const s = getAiRuntimeStatus();
-    const words =
-      s.runtime === 'ready' ? 'AI is set up.' : 'AI is not set up. Run: ensemble ai install';
-    console.log(s.runtimeMessage ? `${words} ${s.runtimeMessage}` : words);
+    console.log(
+      s.runtime === 'ready'
+        ? 'Claude is set up.'
+        : `Claude: ${s.runtimeMessage ?? 'not set up. Run: ensemble ai install claude'}`,
+    );
     const c = getCodexRuntimeStatus();
     if (c.runtime === 'ready') {
       const { detectCodex, CODEX_API_KEY_NOT_AVAILABLE_MESSAGE } = await import('./ai/codex/detect.js');
@@ -376,10 +381,10 @@ The older LIMN_ names of these settings still work.
                 `Codex is set up. ${d.message ?? 'The Codex sign-in could not be checked.'}`
               : 'Codex is set up but not signed in. Run: ensemble ai login codex',
       );
-    } else if (c.runtimeMessage) {
-      console.log(`Codex: ${c.runtimeMessage}`);
+    } else {
+      console.log(`Codex: ${c.runtimeMessage ?? 'not set up. Run: ensemble ai install codex'}`);
     }
-    process.exit(s.runtime === 'ready' ? 0 : 1);
+    process.exit(s.runtime === 'ready' || c.runtime === 'ready' ? 0 : 1);
   }
 
   if (sub === 'login' || sub === 'logout') {
@@ -402,11 +407,23 @@ The older LIMN_ names of these settings still work.
     process.exit(r.status ?? 1);
   }
 
+  if (sub === 'remove') {
+    const { removeAiRuntime } = await import('./ai/runtime.js');
+    const agent = target === 'codex' ? 'codex' : 'claude';
+    const r = removeAiRuntime(agent);
+    if (!r.ok) {
+      console.error(bold(r.message));
+      process.exit(1);
+    }
+    console.log(`${agent === 'codex' ? 'Codex' : 'Claude'} is removed. Download it again with: ensemble ai install ${agent}`);
+    return;
+  }
+
   const withCodex = target === 'codex';
   const pins = aiRuntimePins();
   if (pins) {
-    console.log(bold(`Setting up AI (one-time download, about 110 MB${withCodex ? ', plus Codex' : ''}):`));
-    for (const [name, version] of Object.entries(pins)) console.log(`  ${dim(`${name}@${version}`)}`);
+    console.log(bold(withCodex ? 'Setting up Codex (one-time download, about 360 MB unpacked):' : 'Setting up Claude (one-time download, about 110 MB):'));
+    if (!withCodex) for (const [name, version] of Object.entries(pins)) console.log(`  ${dim(`${name}@${version}`)}`);
     const codexPin = withCodex ? codexRuntimePin() : null;
     if (codexPin) console.log(`  ${dim(`@openai/codex@${codexPin}`)}`);
   }
@@ -415,7 +432,7 @@ The older LIMN_ names of these settings still work.
       if (p.phase === 'downloading') console.log(`  ${dim(p.message)}`);
       else if (p.phase !== 'failed') console.log(`${cyan('▸')} ${p.message}`);
     },
-    { providers: withCodex ? ['claude', 'codex'] : ['claude'] },
+    { providers: withCodex ? ['codex'] : ['claude'] },
   );
   if (result.ok && withCodex) console.log(dim('Next: ensemble ai login codex'));
   if (!result.ok) {

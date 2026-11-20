@@ -216,7 +216,23 @@ describe('GET / PUT /api/workspaces/:id/release-settings', () => {
     expect((await call('GET', ownWs)).body.hasReleases).toBe(false);
     const tick = await app.inject({ method: 'PUT', url: `/api/workspaces/${ownWs}/release-repos`, payload: { repoIds: [repo.id] } });
     expect(tick.statusCode).toBe(200);
-    expect(tick.json().repos).toEqual([{ repoId: repo.id, fullName: 'acme/api', external: false, releasable: true }]);
+    // Its one tag is a release tag, so Auto releases it from merged pull requests.
+    expect(tick.json().repos).toEqual([
+      { repoId: repo.id, fullName: 'acme/api', external: false, releasable: true, basis: 'auto', effectiveBasis: 'prs' },
+    ]);
+    // "Release from" is stored per ticked repo; a bad value is refused by the schema.
+    const pick = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${ownWs}/release-repos`,
+      payload: { repoIds: [repo.id], bases: [{ repoId: repo.id, basis: 'tags' }] },
+    });
+    expect(pick.json().repos[0]).toMatchObject({ basis: 'tags', effectiveBasis: 'tags' });
+    const bad = await app.inject({
+      method: 'PUT',
+      url: `/api/workspaces/${ownWs}/release-repos`,
+      payload: { repoIds: [repo.id], bases: [{ repoId: repo.id, basis: 'commits' }] },
+    });
+    expect(bad.statusCode).toBe(400);
     expect((await call('GET', ownWs)).body.hasReleases).toBe(true);
     // After the suffix changes, the old tag no longer counts.
     const res = await call('PUT', ownWs, { releaseSuffix: '-release', hotfixSuffix: '-hotfix' });

@@ -298,6 +298,41 @@ worker  no release yet — read only
   when adapted). A repo with a contradiction flag can still be pushed; the reader decides.
 - After the PRs open, Ensemble writes NOTHING more for that build.
 
+## Releasing without version tags (owner, 2026-11-19)
+
+A repository with NO version tags is released from its MERGED PULL REQUESTS. It works the same way from the
+reader's side; only what a "tag" is changes.
+
+- **"Release from"** (Settings → Releases, per ticked repository; `workspace_release_repos.release_basis`):
+  **Auto** (NULL, the default) · **Version tags** · **Merged pull requests**. Auto = merged pull requests while
+  the repository has no VERSION tag by name (any branch; shared `releaseBasisOf`), else version tags. The release
+  tags Ensemble creates end in the release suffix, so they never turn Auto back to tags.
+- **Release points.** Each merged PR's NEWEST first-parent commit on the default branch stands in for a version
+  tag, named `#<number>` (squash or merge commit: the PR's one commit; a rebase merge's earlier commits fall to
+  the point above them; a commit that brings two PRs is one point named by the first; direct pushes belong to the
+  point above them). They come from the history pass already stored (`release_history_commits.pr_numbers` from
+  `associatedPullRequests`) — no new GitHub read. Real version tags are ignored in this mode; release and hotfix
+  tags still count.
+- **THE CUMULATIVE RULE is unchanged**, over points: the candidate is the newest merged PR such that every PR
+  merged since the last release (or since the start), up to it, has its tickets Complete (or Cancelled) with no
+  open PR. Picked together, not-found tickets, PRs with no ticket, the older band — all as for tags.
+- **The baseline** is the newest RELEASE tag on the default branch, as before: the tag a release here creates.
+- **The release tag**: there is no version to name it after, so it is the local DATE + the release suffix,
+  `2026.11.19-rc`, then `2026.11.19.2-rc`, `.3`… when the name is taken (a stored tag, or a release item's name
+  not synced back yet; shared `releaseDateTagName`). Annotated, on the point's commit; the pre-release and the
+  tracker comment as before. Ensemble still never cuts a VERSION tag.
+- **Confirm** checks a point's commit is still ON THE DEFAULT BRANCH (REST compare `sha...branch`: `ahead` or
+  `identical`) instead of reading a version tag again; "#539 in api is no longer on main." stops it.
+- **Words**: the strip reads "Up to #539 “Edit an AREA” → 2026.11.19-rc", "Nothing merged since 2026.11.10-rc",
+  "Nothing merged since … can be released", "Nothing merged yet"; reasons say "(from #531)"; a split names the PR
+  alone when it is its own point ("web #21"); the notes say "Built from #539 (e18c3b2)." and "First release:
+  everything up to this pull request."
+- **Hotfix**: unchanged — the base is the latest release tag, which a release here creates.
+
+**Risks, as decided.** A REVERTED PR stays in the scope and still holds its tag if its ticket is not Complete
+(as with tags). A ticket spread over several PRs is released whole or not at all (picked together, inside one
+repository too). A PR with no ticket never blocks.
+
 ## Invariants this feature adds
 
 - Tag sync is part of the default-branch snapshot step: STRICTLY NON-FATAL, found by the settle sweep
@@ -459,6 +494,18 @@ The ticket list (owner, 2026-11-16)
 61. NO-TICKET ROWS OFF BY DEFAULT: until "Show PRs with no ticket" is ticked the list holds only ticket cards (missing
     tickets included).
 62. THE RAIL: every row of the list has its mark in a disc on one vertical line; a no-ticket group has a merge mark.
+
+Releasing without version tags (owner, 2026-11-19)
+63. AUTO: a ticked repository with no version tag (release / hotfix tags do not count) is released from merged
+    pull requests; one version tag ⇒ version tags; "Release from" overrides either way.
+64. POINTS: each merged PR's newest first-parent commit is a point `#n`; a rebase merge is one point at its top
+    commit; a direct push belongs to the point above it.
+65. THE RULE OVER POINTS: PR #2's ticket not Complete ⇒ the candidate is #1 and #4, #3, #2 say why.
+66. THE RELEASE TAG is `<YYYY.MM.DD><suffix>`, `.2` when taken; it lands on the point's commit and is the next
+    baseline (only later PRs are new; nothing merged since ⇒ "Nothing merged since …").
+67. CONFIRM: the point's commit no longer on the default branch ⇒ stopped, nothing written.
+68. SPEED: 1,500 merged PRs with the oldest held fold in well under a second (each point's reasons are whole;
+    only the candidate, the tag the walk stopped at and the oldest read list their whole scope).
 
 ## Implementation
 
@@ -1184,3 +1231,33 @@ in a tag yet" and "Holding the release" moved to a second bordered box below it.
 no-ticket row's list (`noTicketShownPrs`).
 Then: "Show PRs with no ticket" (off by default; `listedItems`) and the rail — `RailMarker` copies `PrActivityTab`'s disc
 and line; `TicketCard railed` moves the mark onto it.
+
+### Releasing without version tags (2026-11-19)
+
+The spec: § Releasing without version tags. THE FOLD'S RULES are unchanged; points are fed in as tags.
+
+- **Shared** `releases.ts`: `ReleaseBasis`, `ReleaseBasisSetting`, `RELEASE_BASIS_SETTINGS`, `releaseBasisOf`
+  (THE basis rule), `releasePointName` / `releasePointNumber`, `releaseDateTagName`; `ReleaseSettingsRepo.basis` /
+  `effectiveBasis`, `SetReleaseReposBody.bases`. `release-check.ts`: `ReleaseCheckRepoInput.basis` /
+  `pointReleaseTagName`; `ReleaseRepoCheck.basis`, `candidate.point`; `releaseSplitWhere` drops "(in #n)" for a
+  PR that is its own point. `release-write.ts`: `ReleaseNotesRepo.basis` / `sha` ("Built from #539 (e18c3b2).").
+- **Speed** (`foldRepo`): a ticket's verdict is the same in every span, so each span caches its NOTABLE tickets
+  (not clear, not Cancelled) and a tag's reasons walk only those; `incompleteUpTo` replaces the per-tag scan for
+  unread history. `TagEval.full`: only the candidate, the tag the walk stopped at and the oldest read build the
+  whole `scopeIdents` / `scopePrIds`; a newer tag carries its own (the wire's `scopePrIds` says so). 1,500 points
+  went from ~1 s to ~0.1 s.
+- **Migration `0212_release_basis`** (registered): `workspace_release_repos.release_basis`, `release_items.basis`.
+- **Backend**: `releases/history-fold.ts` `releasePointsOf` (pure; dates nudged by 1 ms so points sort in walk
+  order); `db/release-check.ts` per repo: the basis, then (prs) the points + the stored release / hotfix tags
+  (a release tag on a point's commit takes the point's nudged date, so it sorts after it) through the same
+  `historyView`, and the date-named release tag (taken = stored tags ∪ `release_items` names);
+  `db/release-repos.ts` reads / writes `basis`; `db/release-settings.ts` adds `basis` / `effectiveBasis`;
+  `PUT …/release-repos` takes `bases` (a changed one ⇒ catch-up); `releases/github.ts` `commitOnBranch`;
+  `releases/create.ts` checks it for a point, stores `release_items.basis`.
+- **Frontend**: Settings → Releases "Release from" (`Select`, `releaseBasisOptions`, `releaseBasesDirty`);
+  `releaseTicketsModel.ts` `repoStripText` (points), a PR line drops "in #n" for its own point; the ⓘ.
+- **Tests**: `releases/tagless.test.ts` (63–66, 68 on the pure parts), `db/release-check.test.ts` (63–66 on the
+  DB half), `releases/create.test.ts` (66, 67), `api/routes/release-settings.test.ts` (the route's `bases`),
+  `apps/frontend/test/releasesModel.test.ts` (the strip, the picker).
+- **Landing mock** (`SPRINT_RELEASES`): acme/docs-site is released from merged pull requests ("Nothing merged
+  since 2026.10.02-rc").

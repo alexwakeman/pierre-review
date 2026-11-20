@@ -411,8 +411,8 @@ one-shot completions, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md · docs
   proves the PreToolUse ALLOW-list hook runs. Results are strict JSON Schemas fed to the SAME handlers
   (docs/CLAUDE-REVIEW.md § The Codex runner). ⚠ A Codex change leaves Claude's
   prompts byte-identical (`prompt-golden.json`); Codex wording goes through `ai/prompt-tools.ts`.
-- **No AI SDK in the npm manifest** (`build-release.mjs` asserts it), yet the first boot downloads
-  Claude AND Codex (`ai/auto-install.ts`, after listen, never awaited); signing in is the only step.
+- **No AI SDK in the npm manifest** (`build-release.mjs` asserts it); the boot downloads the PICKED
+  agents (Settings → AI; docs/PACKAGING.md). ⚠ One not picked reads `absent` whatever is on disk.
 - **THE SPEND BUDGET** (ON by default at 50% of the week on a subscription, changeable; never-set on an API key = no cap; per machine, `ai/budget.ts`; read per provider): ⚠
   **every AUTOMATIC model run asks the ONE gate first** (`review/budget-gate.ts`
   `automaticRunAllowed` / `ctx.aiBudget`) and is SKIPPED, never queued, when over; a reader's click

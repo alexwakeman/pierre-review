@@ -8,6 +8,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import {
   normaliseReleaseSuffix,
+  releaseBasisOf,
   releaseSettingsConfigured,
   type ReleaseSettings,
   type ReleaseSettingsRepo,
@@ -115,5 +116,25 @@ export async function releaseSettingsRepos(accountId: number, workspaceId: numbe
     getReleaseRepos(accountId, workspaceId),
     externalRepoIds(accountId, workspaceId),
   ]);
-  return rows.map((r) => ({ repoId: r.id, fullName: `${r.owner}/${r.name}`, external: external.has(r.id), releasable: ticked.has(r.id) }));
+  const settings = await getReleaseSettings(accountId, workspaceId);
+  const tagRows =
+    settings == null
+      ? []
+      : await db
+          .select({ repoId: repoTags.repoId, name: repoTags.name })
+          .from(repoTags)
+          .where(and(eq(repoTags.accountId, accountId), inArray(repoTags.repoId, ids)))
+          .execute();
+  return rows.map((r) => {
+    const basis = ticked.get(r.id)?.basis ?? 'auto';
+    const names = tagRows.filter((t) => t.repoId === r.id).map((t) => t.name);
+    return {
+      repoId: r.id,
+      fullName: `${r.owner}/${r.name}`,
+      external: external.has(r.id),
+      releasable: ticked.has(r.id),
+      basis,
+      effectiveBasis: releaseBasisOf(basis, names, settings ?? { releaseSuffix: null, hotfixSuffix: null }),
+    };
+  });
 }

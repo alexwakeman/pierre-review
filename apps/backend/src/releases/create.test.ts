@@ -67,6 +67,8 @@ interface World {
   /** GitHub's tags: name → commit, per repo name. */
   tags: Record<string, Record<string, string>>;
   failTag: Set<string>;
+  /** `repo@sha` no longer on the default branch (a release point). */
+  offMain?: Set<string>;
   unreadable: Set<string>;
   calls: { tag: string[]; prerelease: Array<{ repo: string; tag: string; body: string }>; comment: Array<{ ident: string; wiki: string }>; reread: string[] };
   /** Linear ticket idents (another tracker). */
@@ -171,6 +173,9 @@ const github: ReleaseGithub = {
   async readTagSha(_owner, name, tag) {
     return w.tags[name]?.[tag] ?? null;
   },
+  async commitOnBranch(_owner, name, sha) {
+    return !(w.offMain?.has(`${name}@${sha}`) ?? false);
+  },
   async createReleaseTag(_owner, name, a) {
     w.calls.tag.push(`${name} ${a.tag} ${a.sha} ${a.message}`);
     if (w.failTag.has(name)) return { ok: false, exists: false, message: 'GitHub did not answer' };
@@ -269,6 +274,50 @@ describe('createRelease — the writes, in order, each claimed', () => {
     ]);
     // Settled: the release tag is stored at its commit (it is the baseline from now on).
     expect(await m.releaseTagStored(1, API, 'v1.0.0-rc', sha('api1'))).toBe(true);
+  });
+
+  it('a repository released from MERGED PULL REQUESTS: the date-named tag on the release point, and Confirm checks the commit is still on main', async () => {
+    // api has no version tags: its v1.0.0 commit stands as release point #10 (the DB half's job).
+    const byPoints = (inp: ReleaseCheckInput): ReleaseCheckInput => ({
+      ...inp,
+      repos: inp.repos.map((r) =>
+        r.repoId !== API
+          ? r
+          : {
+              ...r,
+              basis: 'prs' as const,
+              pointReleaseTagName: '2026.11.14-rc',
+              tags: r.tags.map((t) => (t.name === 'v1.0.0' ? { ...t, name: '#10' } : t)),
+              ranges: r.ranges.map((x) => (x.tagName === 'v1.0.0' ? { ...x, tagName: '#10' } : x)),
+            },
+      ),
+    });
+    const d = deps({
+      async check(_a, _w, repoIds) {
+        const inp = byPoints(only(input(), repoIds));
+        return {
+          result: foldReleaseCheck(inp),
+          repoNames: new Map(inp.repos.map((r) => [r.repoId, { owner: 'acme', name: r.name, defaultBranch: 'main' }])),
+        };
+      },
+    });
+    const preview = await m.previewRelease(1, workspaceId, { repoIds: [API] }, d);
+    expect(preview.snapshot.repos).toEqual([{ repoId: API, tagName: '#10', sha: sha('api1') }]);
+    expect(preview.sections[0]!.markdown).toContain(`Built from \\#10 (${sha('api1').slice(0, 7)}).`);
+
+    // The commit left main (a force-push): Confirm stops and writes nothing.
+    w.offMain = new Set([`api@${sha('api1')}`]);
+    const stopped = await create([API], preview.snapshot, d);
+    expect(stopped).toMatchObject({ outcome: 'stopped', changes: ['#10 in api is no longer on main.'] });
+    expect(w.calls.tag).toEqual([]);
+
+    w.offMain = new Set();
+    const res = await create([API], preview.snapshot, d);
+    expect(res.outcome).toBe('written');
+    expect(w.calls.tag).toEqual([`api 2026.11.14-rc ${sha('api1')} api 2026.11.14-rc\n\nRelease of #10.`]);
+    expect(w.calls.prerelease.map((p) => p.tag)).toEqual(['2026.11.14-rc']);
+    const detail = await m.getReleaseDetail(1, res.release!.id);
+    expect(detail?.items.map((i) => [i.repoName, i.tagState])).toEqual([['api', 'done']]);
   });
 
   it('acceptance 20: an existing release tag name is refused for that repo (never moved); the others go ahead', async () => {

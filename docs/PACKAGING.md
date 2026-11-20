@@ -74,9 +74,9 @@ maps them to env **before** importing config, sets `NODE_ENV=production`. It fir
 pre-rename `~/.limn` (or `~/.pierre-review`) to `~/.ensemble` (below), then defaults the DB to
 `~/.ensemble/pierre-review.sqlite` (never the read-only install dir; the FILE keeps its old name so the
 move carries it and its WAL files untouched) + pre-checks `gh auth token`. Prints the banner + URL, boots via `start()` (guarded run-as-main), opens the
-browser (built-in, no dep) unless `--no-open`. **`ensemble ai install` / `ensemble ai status`** run the
-same AI-runtime download the app starts by itself on the first boot (below); refused under
-`ENSEMBLE_AI_DISABLED=true`. `ensemble ai install codex` adds the Codex CLI; **`ensemble ai login codex`**
+browser (built-in, no dep) unless `--no-open`. **`ensemble ai install [claude|codex]` / `ensemble ai
+remove <claude|codex>` / `ensemble ai status`** run the same per-agent download (and pick) as Settings → AI
+(below); refused under `ENSEMBLE_AI_DISABLED=true`. A bare `install` is Claude; **`ensemble ai login codex`**
 (`--device-auth` on a headless machine) / **`ensemble ai logout codex`** sign the app's own Codex home in
 and out (§ The Codex CLI). **`ensemble ai clean-sessions`** (`--dry-run` lists first) deletes the
 `~/.claude/projects` folders older runs left (the same one-off cleanup the boot runs once;
@@ -165,21 +165,39 @@ them by default, and a dependent package cannot switch off its dependency's plat
   against), each asserted EXACT and asserted to satisfy the range `apps/backend/package.json`
   declares. ⚠ The field name is spelled twice — the script and `AI_RUNTIME_MANIFEST_FIELD` in
   `ai/runtime.ts` — and the script fails if they diverge.
-- **Claude and Codex are INCLUDED BY DEFAULT — no click** (`ai/auto-install.ts`). After `listen`
-  (never before, never awaited — it cannot slow the boot), a boot that finds either runtime not
+- **EACH AGENT IS THE READER'S PICK** (Settings → AI rows' Download / Remove; `ensemble ai install|remove
+  <agent>`), stored per machine in `<dataDir>/ai-runtimes.json` (`{claude?, codex?}` — a FILE, not the
+  database: the CLI writes it without opening the DB). `ai/runtime.ts` `chosen()` is the one reader; a
+  download records its agents as picked BEFORE it starts, Remove records `false`. **Unset defaults**: Claude
+  picked (the default provider); Codex picked only when it is already on disk (or `ENSEMBLE_CODEX_PATH` is
+  set). Why: a new install gets the default provider without Codex's ~360 MB its reader may never use, and an
+  install from before the pick keeps exactly what it had — nothing is deleted without the reader asking.
+  ⚠ **A provider not picked reads `absent` WHATEVER IS ON DISK** (the workspace SDK in dev, a
+  `*_CLAUDE_PATH` / `*_CODEX_PATH` program too), with `CLAUDE_NOT_DOWNLOADED_MESSAGE` /
+  `CODEX_NOT_DOWNLOADED_MESSAGE` (`ai/runtime-errors.ts`) as its one line — so every gate (the pre-flight
+  `review/auth.ts`, `auto`'s `autoReadiness`, `reviewPairProviders`, the picker) passes it over. The SHARED
+  packages (zod, the MCP SDK, the Anthropic SDK, the docs converters) come with either pick; Claude's own part
+  is the Agent SDK's native program (an optional dependency), so a Codex-only download runs npm with
+  `--omit=optional` and the loader serves the shared packages from a `no_binary` runtime. **Remove**
+  (`POST /api/ai/runtime/remove`, refused while a download runs) deletes Claude's native program folders or
+  Codex's `@openai/codex*` folders (+ its manifest entry); removing the LAST picked agent deletes the whole
+  runtime directory. Nothing outside it is ever deleted.
+- **The picked agents download BY THEMSELVES — no click** (`ai/auto-install.ts`). After `listen`
+  (never before, never awaited — it cannot slow the boot), a boot that finds a PICKED runtime not
   `ready` (absent, stale, no native program) downloads what is missing (`['claude', 'codex']`;
   `['claude']` when only Claude is; ⚠ `['codex']` ALONE over a ready Claude, which `runCodexOnly`
   stages apart and moves in WITHOUT re-downloading or swapping Claude's packages under a live run). `MeResponse.ai.autoInstall` says it is on; while it runs,
   `runtime: 'installing'` with the current STEP in `runtimeMessage` (the app's own words, never npm's
   lines — `currentStep` in `ai/runtime.ts`), polled by the SPA where "Set up AI" used to be. A failure
-  is retried ONCE automatically (3 min later), then left to the SPA's Retry (which re-POSTs with
-  `provider: 'codex'`, i.e. both), `ensemble ai install codex` or the next boot — never a loop. Skipped
+  is retried ONCE automatically (3 min later), then left to Settings → AI's Retry (which re-POSTs for that
+  ONE agent), `ensemble ai install <agent>` or the next boot — never a loop. Skipped
   under `ENSEMBLE_AI_DISABLED=true` and `ENSEMBLE_AI_AUTO_INSTALL=false` (the demo and recording stacks set
   the latter: a download would turn `/api/me` into 'installing' mid-shot). Signing in to each
   provider is then the only step.
-- **The download** (`installAiRuntime`): the automatic one above, the SPA's Retry / Set up (where
-  the automatic one is off) → `POST /api/ai/runtime/install` (SSE progress; registered only when
-  `config.aiEnabled`; `sync` rate-limit tier), or `ensemble ai install [codex]`. It writes a `package.json`
+- **The download** (`installAiRuntime`): the automatic one above, Settings → AI's Download / Retry
+  → `POST /api/ai/runtime/install {provider}` (SSE progress; `skipIfReady`, so picking an agent whose files
+  are already there downloads nothing; registered only when `config.aiEnabled`; `sync` rate-limit tier), or
+  `ensemble ai install [claude|codex]`. It writes a `package.json`
   carrying the pins into a STAGING dir and runs `npm install --prefix <staging> --ignore-scripts
   --no-package-lock` — npm's own `npm-cli.js` under `process.execPath`, `shell: false`, no string
   interpolation (pins are regex-checked exact versions) — verifies every package landed at its pin,
@@ -235,7 +253,7 @@ package carries only what that needs:
   microsandbox (docs/SANDBOX.md § Setting up a runtime); the app drives their CLI and adds no npm
   dependency for it. `ensemble sandbox prune [--dry-run] [--store]` (`src/cli.ts`) removes leftovers (`--store`: also the kept repo store).
 
-### The Codex CLI (downloaded with Claude's packages)
+### The Codex CLI (downloaded when picked)
 
 Codex is the second AI provider ([CLAUDE-REVIEW.md](CLAUDE-REVIEW.md) § Codex, the second
 provider). The app runs the Codex CLI's native program; it never imports a Codex package.
@@ -246,10 +264,11 @@ provider). The app runs the Codex CLI's native program; it never imports a Codex
   rather than reading `node_modules`, and `ai/runtime.ts` reads the same field in dev. The models
   (`CODEX_MODEL_FOR_ROLE`) are pinned for this version: re-check them, and the spike's checks, on
   every bump.
-- **Downloaded on the first boot with Claude's packages** (the automatic download above), into the
-  same `~/.ensemble/ai-runtime`; by hand, `ensemble ai install codex` or the SPA's Retry
-  (`POST /api/ai/runtime/install {provider: 'codex'}`: Codex only when Claude is ready, else both). A
-  plain `ensemble ai install` stays Claude-only. npm brings the
+- **Downloaded when picked** (Settings → AI's Download, `ensemble ai install codex`, then by the
+  automatic download above to repair or upgrade it), into the same `~/.ensemble/ai-runtime`
+  (`POST /api/ai/runtime/install {provider: 'codex'}`: Codex alone over shared packages already in place,
+  else the shared packages too — with Claude's program only when Claude is picked). A plain
+  `ensemble ai install` stays Claude-only. npm brings the
   platform package (`@openai/codex-<platform>`); `codexBinaryIn` finds the native program the way
   the package's own `bin/codex.js` does. ⚠ Codex is STAGED APART from Claude's packages: a Codex
   failure is recorded as Codex's alone and never fails Claude's install, and a Claude-only "Set up

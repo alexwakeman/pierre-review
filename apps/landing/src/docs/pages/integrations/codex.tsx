@@ -18,7 +18,10 @@ export default function Page(): JSX.Element {
       <H2 id="what-you-need">What you need</H2>
       <ul>
         <li>A ChatGPT account whose plan includes Codex.</li>
-        <li>Nothing else to install: Ensemble downloads the Codex program (about 360 MB) the first time it starts.</li>
+        <li>
+          The Codex program (about 360 MB): select <Ui>Download</Ui> beside Codex in Settings → AI, or run{' '}
+          <code>ensemble ai install codex</code>. Ensemble keeps it up to date after that.
+        </li>
       </ul>
       <Note title="No API keys yet">
         Ensemble runs Codex only on a ChatGPT sign-in. An OpenAI API key is refused for now, because Ensemble cannot yet show

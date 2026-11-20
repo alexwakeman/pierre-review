@@ -13,7 +13,7 @@ const FOLDER_COLS = [
 const FOLDER_ROWS = [
   { _key: 'db', what: 'The database', why: 'Synced pull request activity, your settings, AI results' },
   { _key: 'clones', what: 'Repository copies', why: 'The code AI runs and the conflict resolver read' },
-  { _key: 'ai', what: 'The AI programs', why: 'Claude and Codex, downloaded on first start' },
+  { _key: 'ai', what: 'The AI programs', why: 'The agents you picked in Settings → AI (Claude by default)' },
   { _key: 'codex', what: 'Ensemble’s Codex sign-in', why: 'Kept apart from your own Codex setup' },
   { _key: 'ml', what: 'The scoring model', why: 'Bot comment scoring, if you set it up' },
 ];

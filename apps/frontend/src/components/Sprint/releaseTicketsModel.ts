@@ -1,4 +1,5 @@
 import {
+  releaseTitleShort,
   type ReleaseBlocker,
   type ReleaseCheckPr,
   type ReleaseCheckResult,
@@ -322,8 +323,9 @@ function prLineOf(p: ReleaseTicketPr): ReleasePrLine {
     const day = releaseDayWords(p.mergedAt);
     parts.push(day != null ? `merged ${day}` : 'merged');
     if (p.authorLogin != null) parts.push(p.authorLogin);
-    if (p.tagName != null) parts.push(`in ${p.tagName}`);
-    else if (p.untagged) parts.push('not in a tag yet');
+    // A release point named by this PR (a repository released from merged pull requests) adds nothing.
+    if (p.tagName != null && p.tagName !== `#${p.number}`) parts.push(`in ${p.tagName}`);
+    else if (p.tagName == null && p.untagged) parts.push('not in a tag yet');
   }
   return {
     key: `${p.repoId}#${p.number}`,
@@ -345,8 +347,10 @@ export function noTicketPrLineOf(check: Pick<ReleaseCheckResult, 'repos'>, p: Re
   return prLineOf({ id: p.id, prId: p.prId, repoId: p.repoId, repoName, number: p.number, title: p.title, url: p.url, authorLogin: p.authorLogin, mergedAt: p.mergedAt, open: false, tagName: p.tagName, tagAt: p.tagAt, untagged: false });
 }
 
-/** The repository strip's line: "0.316.0 → 0.316.0-rc", or why there is none. Pure. */
+/** The repository strip's line: "0.316.0 → 0.316.0-rc", or why there is none. A repository released from
+ *  merged pull requests: "Up to #539 “Edit an AREA” → 2026.11.19-rc", "Nothing merged since …". Pure. */
 export function repoStripText(repo: ReleaseRepoCheck): string {
+  if (repo.basis === 'prs') return pointStripText(repo);
   if (repo.status === 'candidate' && repo.candidate != null) return `${repo.candidate.name} → ${repo.candidate.releaseTagName}`;
   if (repo.status === 'nothing_new') {
     if (repo.nothingNewReason === 'no_tags') return 'No version tags on main yet';
@@ -354,6 +358,20 @@ export function repoStripText(repo: ReleaseRepoCheck): string {
   }
   if (repo.status === 'checking') return 'Checking…';
   return repo.baseline != null ? `No tag since ${repo.baseline.name} can be released` : 'No tag can be released';
+}
+
+function pointStripText(repo: ReleaseRepoCheck): string {
+  const c = repo.candidate;
+  if (repo.status === 'candidate' && c != null) {
+    const title = releaseTitleShort(c.point?.title ?? null);
+    return `Up to ${c.name}${title != null ? ` “${title}”` : ''} → ${c.releaseTagName}`;
+  }
+  if (repo.status === 'nothing_new') {
+    if (repo.nothingNewReason === 'no_tags') return 'Nothing merged yet';
+    return repo.baseline != null ? `Nothing merged since ${repo.baseline.name}` : 'Nothing new';
+  }
+  if (repo.status === 'checking') return 'Checking…';
+  return repo.baseline != null ? `Nothing merged since ${repo.baseline.name} can be released` : 'Nothing merged can be released';
 }
 
 /** The repositories shown above the list: those with NO candidate (no version tags, nothing new, none can be

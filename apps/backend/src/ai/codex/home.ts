@@ -21,7 +21,7 @@ import type { CodexHookConfig } from './types.js';
 export const CODEX_HOME_DIR_NAME = 'codex';
 
 /** Shown wherever Codex is not set up. One sentence, the command to run. */
-export const CODEX_NOT_INSTALLED_MESSAGE = 'Codex is not set up yet. Run: ensemble ai install codex';
+export const CODEX_NOT_INSTALLED_MESSAGE = 'Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex';
 
 /**
  * Thrown by `codexBinary` (and the provider) when the Codex program is not installed. Its message is

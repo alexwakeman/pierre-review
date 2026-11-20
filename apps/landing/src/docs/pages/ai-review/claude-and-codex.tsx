@@ -31,7 +31,8 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Two different models miss different things. When you are signed in to both Claude and Codex, Ensemble can run
+        Two different models miss different things. When both Claude and Codex are downloaded and signed in (Settings →
+        AI), Ensemble can run
         both on the same commit and give you one review. In Ensemble's own tests, one Claude review and one Codex review,
         merged, found about four in five known issues; either one alone found about half.
       </p>

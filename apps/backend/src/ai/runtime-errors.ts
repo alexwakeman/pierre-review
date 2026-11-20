@@ -14,3 +14,11 @@ export class AiRuntimeMissingError extends Error {
     this.name = 'AiRuntimeMissingError';
   }
 }
+
+/** Claude's line while the reader has not picked it (or removed it) in Settings → AI. */
+export const CLAUDE_NOT_DOWNLOADED_MESSAGE =
+  'Claude is not downloaded. Download it in Settings → AI, or run: ensemble ai install claude';
+
+/** Codex's line while the reader has not picked it (or removed it) in Settings → AI. */
+export const CODEX_NOT_DOWNLOADED_MESSAGE =
+  'Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex';
