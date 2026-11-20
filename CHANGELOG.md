@@ -19,6 +19,9 @@ no internals.
   even while you are signed in to Claude Code. "Use my API keys first" in Settings → AI is now ticked unless you
   untick it. Without a key, Ensemble still falls back to a Claude Code login; the docs and Settings link to
   Anthropic's terms on that use.
+- This Sprint: only the Critical path view draws arrows, and each arrow's reason is now written beside it, in the
+  space between the tickets, instead of behind a number you had to hover. The Theme and People views draw no
+  arrows; a ticket that waits on another still wears the hourglass mark.
 
 ## [1.0.67] - 2026-11-19
 

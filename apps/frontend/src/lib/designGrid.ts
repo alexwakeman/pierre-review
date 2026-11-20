@@ -100,7 +100,7 @@ export interface ArrowGeometry {
   ly: number;
 }
 
-interface Box {
+export interface Box {
   x: number;
   y: number;
   w: number;
@@ -279,6 +279,124 @@ export function placeArrowLabels(routes: ReadonlyArray<ReadonlyArray<readonly [n
     placed.push([r1(at[0]), r1(at[1])]);
   });
   return placed;
+}
+
+/** A label drawn beside its arrow, in the space between cards: its CENTRE, its width, and how many lines
+ *  of words it may show (the rest is cut with an ellipsis). */
+export interface FittedLabel {
+  x: number;
+  y: number;
+  w: number;
+  lines: number;
+  /** Some words did not fit and are cut. */
+  cut: boolean;
+}
+
+export interface LabelFitOptions {
+  /** The words' width in px, as drawn (the DOM side measures with the board's own font). */
+  measure: (text: string) => number;
+  lineH: number;
+  /** Inner padding of the label box, px. */
+  padX: number;
+  padY: number;
+  /** Space kept between a label and any card or other label, px. */
+  margin: number;
+  maxW: number;
+  /** Below this width a label is not drawn (it would be a column of single letters). */
+  minW: number;
+}
+
+/** How far a label's edge sits from its line, px (the line and its arrowhead stay in view). */
+const LABEL_LIFT_PX = 3;
+/** How far a label that sits ON its line keeps from the cards at either end, px (an arrowhead is 9). */
+const LABEL_ARROW_CLEAR_PX = 15;
+
+/** How many lines `text` takes when wrapped at `width` px (greedy, by words; a word wider than the
+ *  line takes a line of its own). */
+export function wrapLines(text: string, width: number, measure: (s: string) => number): number {
+  const words = text.split(/\s+/).filter((w) => w !== '');
+  if (words.length === 0) return 0;
+  let lines = 1;
+  let line = '';
+  for (const w of words) {
+    const next = line === '' ? w : `${line} ${w}`;
+    if (line !== '' && measure(next) > width) {
+      lines += 1;
+      line = w;
+    } else line = next;
+  }
+  return lines;
+}
+
+/**
+ * ALWAYS-ON ARROW LABELS THAT NEVER COVER A CARD (This Sprint's Critical path board). Each label starts
+ * at its arrow's label point (`placeArrowLabels`) and takes the FREE box round it: sideways to the
+ * nearest card (or label already placed) on each side, then up and down within that width. The words
+ * wrap to fit the width; the lines that do not fit the height are cut. It sits just above its line,
+ * else just below; only when neither fits does it sit on the line, kept clear of both ends so the
+ * arrowhead still shows. A label with no room
+ * (narrower than `minW`, or not one line high) is null — not drawn; the arrow still reads in the
+ * board's sr-only list. `obstacles` are the cards' boxes; `bounds` the area labels may use. Pure.
+ */
+export function fitArrowLabels(
+  items: ReadonlyArray<{ at: readonly [number, number]; text: string }>,
+  obstacles: ReadonlyArray<Box>,
+  bounds: Box,
+  o: LabelFitOptions,
+): Array<FittedLabel | null> {
+  const taken: Box[] = [...obstacles];
+  const r1 = (n: number): number => Math.round(n * 10) / 10;
+  const band = o.lineH / 2 + o.padY;
+  // Every label still to come keeps one line's band at its own point, so an earlier label that grows
+  // up or down never swallows it.
+  const pending = items.map(({ at: [x, y] }): Box => ({ x: x - 1, y: y - band - o.margin, w: 2, h: 2 * (band + o.margin) }));
+  return items.map(({ at: [lx, ly], text }, i) => {
+    const fit = (mx: number): { box: Box; label: FittedLabel; onLine: boolean } | null => {
+      const others = [...taken, ...pending.slice(i + 1)];
+      let L = bounds.x;
+      let R = right(bounds);
+      for (const b of others) {
+        if (b.y >= ly + band || bottom(b) <= ly - band) continue;
+        if (right(b) <= lx) L = Math.max(L, right(b));
+        else if (b.x >= lx) R = Math.min(R, b.x);
+        else return null; // the label point is inside another box
+      }
+      const w = Math.min(o.maxW, R - L - 2 * mx, Math.ceil(o.measure(text)) + 2 * o.padX + 1);
+      if (w < o.minW) return null;
+      const x = Math.min(Math.max(lx, L + mx + w / 2), R - mx - w / 2);
+      let T = bounds.y;
+      let B = bottom(bounds);
+      for (const b of others) {
+        if (b.x >= x + w / 2 || right(b) <= x - w / 2) continue;
+        if (bottom(b) <= ly) T = Math.max(T, bottom(b));
+        else if (b.y >= ly) B = Math.min(B, b.y);
+        else return null;
+      }
+      const room = Math.floor((B - T - 2 * o.margin - 2 * o.padY) / o.lineH);
+      if (room < 1) return null;
+      const need = wrapLines(text, w - 2 * o.padX, o.measure);
+      const lines = Math.min(room, need);
+      const h = lines * o.lineH + 2 * o.padY;
+      // Just ABOVE the line, so the arrow stays in view; else just below; else as near the line as fits.
+      const lo = T + o.margin + h / 2;
+      const hi = B - o.margin - h / 2;
+      const above = ly - LABEL_LIFT_PX - h / 2;
+      const below = ly + LABEL_LIFT_PX + h / 2;
+      const y = above >= lo ? above : below <= hi ? below : Math.min(Math.max(ly, lo), hi);
+      return {
+        box: { x: x - w / 2, y: y - h / 2, w, h },
+        label: { x: r1(x), y: r1(y), w: Math.floor(w), lines, cut: need > lines },
+        onLine: y - h / 2 < ly && ly < y + h / 2,
+      };
+    };
+    // A label that has to sit ON its line keeps clear of the arrowhead and the line's start, so the
+    // arrow still reads (a line in, the words, a line out to the head).
+    let got = fit(o.margin);
+    if (got?.onLine === true) got = fit(Math.max(o.margin, LABEL_ARROW_CLEAR_PX)) ?? got;
+    if (got == null) return null;
+    taken.push(got.box);
+    return got.label;
+  });
 }
 
 function permutations<T>(xs: readonly T[]): T[][] {

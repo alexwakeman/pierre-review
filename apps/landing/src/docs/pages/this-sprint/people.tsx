@@ -3,7 +3,7 @@ import { Card, DocLink, FindingRow, H2, Illustration, Note, Pill, Steps, Ui } fr
 
 export const meta: DocMeta = {
   title: 'The People view',
-  summary: 'Tickets by assignee, so you can see who has what, whose reviews are waiting, and who waits on whom.',
+  summary: 'Tickets by assignee, so you can see who has what and whose reviews are waiting.',
 };
 
 export default function Page(): JSX.Element {
@@ -11,8 +11,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         The <Ui>People</Ui> view puts the sprint&rsquo;s tickets in one row per assignee. It is for planning and
-        stand-ups: who has which tickets, how far each person&rsquo;s tickets have got, and where one person&rsquo;s
-        work waits on another&rsquo;s.
+        stand-ups: who has which tickets and how far each person&rsquo;s tickets have got.
       </p>
       <p>
         To give a ticket to someone else, open it and pick them from the assignee menu (Jira, GitHub Issues and
@@ -21,7 +20,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="what-you-see">What you see</H2>
       <Illustration
-        label="Two people rows: Priya Nair with two tickets and one review waiting, Tom Becker with one ticket that waits on Priya"
+        label="Two people rows: Priya Nair with two tickets and one review waiting, Tom Becker with one ticket"
         caption="People rows: the person's ticket count and waiting reviews, then their tickets. Each card shows the ticket's theme."
       >
         <Card title="Priya Nair" chip={<Pill>2 tickets · 1 review waiting</Pill>}>
@@ -32,7 +31,7 @@ export default function Page(): JSX.Element {
         </Card>
         <Card title="Tom Becker" chip={<Pill>1 ticket</Pill>}>
           <FindingRow chip="Not started" tone="grey">
-            PAY-158 Retire the nightly ledger job · Ledger — Tom Becker waits on Priya Nair
+            PAY-158 Retire the nightly ledger job · Ledger
           </FindingRow>
         </Card>
       </Illustration>
@@ -54,7 +53,8 @@ export default function Page(): JSX.Element {
           <strong>Each card shows the ticket&rsquo;s theme</strong> where the other views show the assignee.
         </li>
         <li>
-          <strong>Arrows between rows</strong> are hand-offs, read as &ldquo;Tom Becker waits on Priya Nair&rdquo;.
+          <strong>No arrows.</strong> A ticket that waits on another unfinished ticket wears the waiting mark. The
+          chains between tickets are on the <DocLink to="this-sprint/critical-path">Critical path view</DocLink>.
         </li>
       </ul>
       <Note>
@@ -65,7 +65,6 @@ export default function Page(): JSX.Element {
       <H2 id="what-you-can-do">What you can do</H2>
       <Steps>
         <li>Select a card to read its story in the panel on the right.</li>
-        <li>Follow an arrow between two rows to see which ticket holds up the other person.</li>
         <li>
           Turn on <Ui>Has PRs</Ui> to see only the tickets with code in flight.
         </li>
@@ -73,9 +72,9 @@ export default function Page(): JSX.Element {
 
       <H2 id="why-it-helps">Why it helps</H2>
       <p>
-        A hand-off between two people is where work most often stalls: one person finishes, the other does not
-        know. The People view draws those hand-offs, so they come up in the stand-up rather than at the sprint
-        review. For the chains that put the sprint at risk, see{' '}
+        A stand-up goes person by person. The People view puts each person&rsquo;s tickets and waiting reviews in one
+        row, so nobody has to read the whole board to find their own work. For the chains that put the sprint at
+        risk, see{' '}
         <DocLink to="this-sprint/critical-path">The Critical path view</DocLink>.
       </p>
     </>

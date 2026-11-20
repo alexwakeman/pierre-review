@@ -845,7 +845,7 @@ export function SprintLanesMock({ initialView = 'themes' }: { initialView?: Spri
       title={SPRINT.name}
       meta={SPRINT.meta}
       onReset={view !== initialView ? () => setView(initialView) : null}
-      label="This Sprint: one lane board by theme, critical path or person, with status columns from not started to product review, ticket cards with criteria and assignee, and numbered critical-path links; and a Releases tab naming each repository's release candidate and the tickets behind it"
+      label="This Sprint: one lane board by theme, critical path or person, with status columns from not started to product review, ticket cards with criteria and assignee, and critical paths marked on the cards; and a Releases tab naming each repository's release candidate and the tickets behind it"
     >
       <MockTabs label="This Sprint views" tabs={SPRINT.views} value={view} onChange={setView}>
         {view === 'releases' ? (
