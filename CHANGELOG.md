@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.71] - 2026-11-20
+
 ### Changed
 
 - Bots Monitoring and the severity model cover review bots only. SonarCloud summaries, dependency bots and other
