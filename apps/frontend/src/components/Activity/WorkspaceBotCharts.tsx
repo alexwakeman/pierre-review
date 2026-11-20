@@ -794,10 +794,9 @@ function BotRepoWorkChart({
 // exactly what the server already folded. Bars over the existing `BarChart` also keep the per-bucket
 // PR counts sayable, which a scatter has nowhere to put.
 //
-// ⚠ READ-ONLY ON PURPOSE. A bucket does NOT open the volume drill-down: `BotVolumeRefine` narrows
-// by `authorUserIds` and by nothing else, so there is no size-bucket refinement for the server to
-// honour. A client-side "PRs in this bucket" filter would be a list the server's own `total` and
-// `filteredTotal` then contradict — the exact failure the volume surfaces were specced against. So
+// ⚠ READ-ONLY ON PURPOSE. There is no per-PR volume drill-down to open (removed 2026-11-20), and
+// a client-side "PRs in this bucket" filter would be a list the server's own counts then
+// contradict — the exact failure the volume surfaces were specced against. So
 // `BarChart` is given NO `onSelectBar`, which leaves it byte-identical to every other consumer:
 // no pointer cursor, no hit targets, nothing added to the tab order.
 function BotVolumeSizeChart({

@@ -301,7 +301,7 @@ enforces FKs.
 |---|---|
 | `GET /api/prs/:id/ml-labels` | **THE per-PR index** → `PrMlLabelsResponse`. Every badge on the page reads this one query (React Query dedupes; `staleTime: Infinity`), so a 60-thread PR costs one request, not 60. A target with no label is simply absent. Ownership 404 via the getter. Carries the vendor's own badge (`vendorSeverity` / `vendorSeverityConfidence`, both nullable) alongside ours, purely so the client can render the disagreement. Rate tier `read` — recorded explicitly, not inherited, because it sits inside the `/api/prs/<id>/` family whose other members hydrate from GitHub |
 | ~~`GET /api/bot-severity`~~ | **DELETED** (the consolidation cut list). The Bots rail's severity surface lives entirely on `/api/bot-analytics` (the WINDOWED `ml` block + per-vendor `ml*` fields, computed by `getMlWindowAggregates`); a corpus-wide, unwindowed twin with no SPA consumer was one more predicate to hold in parity for zero renderers. `getBotSeverityRollup` STAYS in `db/ml-labels.ts` as the documented reference for the findings-only exclusion semantics the merged fold mirrors; `useBotSeverity`/`botSeverityKey` and the client method are gone with the route |
-| `GET /api/bot-analytics/vendor/:key/comments?window&workspace&repoIds[&fromMs&toMs]` | **No SPA caller since 2026-11-20** (the drill-down was removed; the route stays). The per-bot COMMENTS drill-down → `BotVendorCommentsResponse`: everything one automated reviewer said in the ROI window (inline review comments with path + thread state, PR comments, non-empty review bodies), each row's `MlLabel` shipped **INLINE** via a LEFT JOIN on `(account_id, target_kind, target_id)` — one request, never the per-PR index per row. Capped 3 000/source, newest-first, `truncated` flag. `key` = `u<userId>` \| `'pierre'` (the sentinel answers empty — verbatim reviews are human-posted); anything else 400s. Lives in `db/ml-labels.ts` (`getBotVendorComments`) — deliberately NOT a re-export of `getBotReviewComments`, whose row shape is hand-mirrored in `platform/bot-themes/build.ts` and which is role-`'review'` while this also serves quality-check rows. Its `window` parameter was widened to the `getBotAnalytics` form (`BotWindowKind | {kind, fromMs, toMs}`) so the People report's per-bot evidence cards can cover a COMPLETED period; the optional `fromMs`/`toMs` query pair is route-validated (only-together, ordered, span ≤ 200d, else **400**) and applied under the `toBound` rule below. ⚠ **Rate tier `search`** (bodies + a three-way label join); its `/prs` sibling stays `read` (metadata only). Pinned in `rate-limit.test.ts` |
+| ~~`GET /api/bot-analytics/vendor/:key/comments`~~ | **REMOVED 2026-11-20** with the per-bot Comments drill-down, its only reader (`getBotVendorComments`, `BotVendorCommentsResponse` and its `search` rate-tier entry gone too). `BotVendorComment` (a comment row with its `MlLabel` INLINE) STAYS — `BotFlaggingComment` extends it and the person-period evidence rows use it |
 | `GET /api/ml-status` | The worker's live state → `MlEnrichmentStatus` (incl. `unscorable`, the NULL-body legacy population — never part of `pending`), so the sync UI can show the scoring pass (above). **NO scope parameter** — the worker walks every workspace, so a workspace-scoped backlog would under-report the work actually running. Same `search` tier as the rollup, for the same reason (its backlog half is those unlabelled-count joins, once per workspace) — plus a ~3 s per-account cache on the scan, because this one is POLLED and a tier bounds request count, not per-request work |
 
 Both are **pure reads**. There is no generate endpoint and no mutating verb: the model is only
@@ -379,19 +379,12 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     review bot flagged (`db/line-overlap.ts`; quality checks and null-line threads excluded).
     It rides `totals`, not the `ml` block, for exactly that reason — and it is **not** the sum
     of the rows' `overlapThreads`, since a cluster credits every bot in it.
-  - **three ML columns on the VendorTable** (severity-mix `SeverityBar` — now exported from
-    `MlSeverityBadge.tsx` — plus High % and Nit %), hidden entirely when `mlSeverity` is false
-    or nothing in the window is labelled. ⚠ A bot with no in-window labels ships the `ml*`
-    fields **ABSENT** and renders **blanks, never zeros** — "not scored" and "zero findings"
-    are different claims. Every rate divides by FINDINGS (the phantom-gap rule).
-  - **four more columns under a grouped "Not addressed by severity" header**
-    (`notAddressedBySeverity`, same `showMl` gate, zeros blanked): the untouched threads split
-    by the severity of the finding that OPENED each one — the label on the thread's FIRST
-    comment by its own bot (`review_comment` targets; addressed threads, praise and summaries
-    excluded). ⚠ **They need not sum to the "Not addressed" column** and must never be
-    presented as if they did: a thread whose opening comment was never scored counts in that
-    total and in none of these four. One query over the whole scope (the ids are collected
-    during the human-follow pass), never a per-vendor fan-out.
+  - the per-vendor `ml*` fields (`mlFindings`, `mlBySeverity`). ⚠ A bot with no in-window
+    labels ships them **ABSENT** and renders **blanks, never zeros** — "not scored" and "zero
+    findings" are different claims. Severity counts are FINDINGS only (the phantom-gap rule).
+    (The High % / Nit % columns and the four "Not addressed by severity" columns were REMOVED
+    2026-11-20, and with them the `mlHighPct` / `mlNitPct` / `notAddressedBySeverity` wire
+    fields and their computation.)
   - the **nit-ratio tuning suggestion**: findings ≥ 20 AND nit share ≥ 0.7 → a
     `BotTuningSuggestion` filling its (previously always-null) `severity` slot; skipped for
     quality checks.
@@ -401,9 +394,9 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     advisory under the table cannot contradict each other) is **escalated `keep` → `tune`**.
     Escalation ONLY: `tune` and `noisy` are never softened, and nothing about a label can
     produce `noisy` — "mostly nits" is a tuning fact, not evidence the bot is being ignored.
-    The gate reads the RAW share, not the rounded `mlNitPct` the column shows, and never
-    `vendorSeverity`. Matrix pinned by `bot-analytics-verdict.test.ts`; the fold, the split and
-    the overlap count by `bot-analytics-ml.test.ts`.
+    The gate reads the RAW share, never a rounded percentage, and never `vendorSeverity`.
+    Matrix pinned by `bot-analytics-verdict.test.ts`; the fold and the overlap count by
+    `bot-analytics-ml.test.ts`.
 - **The workspace ML charts moved to the depth surfaces and the ROI table** (the
   consolidation's C2/P1.2). `BotBehaviourPanel` and the Bots "Behaviour" tab are DELETED;
   `/api/bot-behaviour` moved to `GET /api/pro/bot-behaviour`, still
@@ -475,9 +468,9 @@ attaches stored labels to a handful of capped comment rows — same coercions, o
     `db/bot-behaviour-ml.test.ts`; the pure series maths is `lib/botMlSeries.ts` +
     `apps/frontend/test/botMlSeries.test.ts`.
 - **The per-bot Comments drill-down (`BotPrsDetail`) was REMOVED 2026-11-20** — the SPA list,
-  its tab and its client filter/sort (`lib/botComments.ts`) are deleted. The route
-  `GET /api/bot-analytics/vendor/:key/comments` (labels shipped inline per row) stays with no SPA
-  caller; `BotFlaggingComment` still extends its `BotVendorComment` row.
+  its tab and its client filter/sort (`lib/botComments.ts`), and then its route
+  `GET /api/bot-analytics/vendor/:key/comments` (`getBotVendorComments`). `BotFlaggingComment`
+  still extends its `BotVendorComment` row.
 - **The Feed's Bots-side Severity chips** (2026-11-20; docs/FRONTEND.md § The Feed's Bots side) read
   `ml_comment_labels` in the backend (`db/feed-bot-filters.ts`, account-scoped, chunks of 500, by
   review_comment / pr_comment / review id) to filter `GET /api/activity/feed?severities=`. ⚠ **ONE
@@ -972,13 +965,12 @@ breaks a tie, never becomes a low-confidence fallback, and never reaches the mod
 ## Tests
 
 - `rate-limit.test.ts` pins both tiers, including that the label index is **not** swept into the
-  GitHub-hydrating `pr_detail` bucket — and that the comments drill-down sits on `search` while
-  its `/prs` sibling stays on `read`.
+  GitHub-hydrating `pr_detail` bucket. (The per-bot comments drill-down's `search` entry was
+  removed with its route, 2026-11-20.)
 - `db/bot-analytics-ml.test.ts` pins the windowed fold on a throwaway SQLite DB: same-window
   aggregation (out-of-window labels invisible), findings-only rates, absent-not-zero fields for
   a bot with no in-window labels, both nit-suggestion gates plus the quality-check skip, a
-  verdict untouched by an 88%-nits mix, windowed `pending`, and `getBotVendorComments`
-  (inline labels, unbadged unscored rows, the empty pierre/unclassified answers).
+  verdict escalated by an 88%-nits mix, and windowed `pending`.
 - `verify:isolation` covers `getPrMlLabels` (both directions) and `getBotSeverityRollup`. Note
   the "B asks for A's repo" rollup check is **vacuous on its own** — `resolveWorkspaceScope`
   intersects with B's membership, the scope comes back empty and the rollup short-circuits. The

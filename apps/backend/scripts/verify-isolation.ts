@@ -924,17 +924,6 @@ check(
   anCross.vendors.length === 0,
 );
 
-// getBotVendorPrs (the per-REVIEWER drill-down) is account-scoped by the PR join: A's owner call
-// surfaces its own bot's PR; the SAME userId under account B leaks nothing.
-const vpA = await q.getBotVendorPrs(1, { userId: botUser!.id }, 'rolling_30', scopeANow);
-check('getBotVendorPrs(A, botUser) surfaces A’s PR', vpA.prs.some((p) => p.prId === A.prId));
-check('getBotVendorPrs(A, botUser) echoes the per-reviewer key', vpA.key === `u${botUser!.id}`);
-const vpCross = await q.getBotVendorPrs(2, { userId: botUser!.id }, 'rolling_30', {
-  workspaceId: defaultB,
-  repoIds: [A.repoId],
-});
-check('getBotVendorPrs(B, A’s botUser) leaks nothing (IDOR blocked)', vpCross.prs.length === 0);
-
 // getBotOnlyPrs (the caption's expandable list) is account-scoped: the owner call resolves its own
 // repos and never contains another account's PR; a cross-account call passing the OTHER account's
 // repo ids returns nothing (getBotOnlyReviewPrs binds pullRequests.accountId).
@@ -1459,43 +1448,6 @@ check(
   rollupB.labelled === 1 && rollupB.totals.bySeverity.nit === 1 && rollupB.totals.bySeverity.major === 0,
 );
 
-// getBotVendorComments (the Comments drill-down) has the rollup's exact shape of exposure —
-// outer rows off the caller's PR join, labels off the (accountId, kind, targetId) LEFT JOIN —
-// and the same vacuity trap (a transposed scope short-circuits empty before querying). The
-// binding pair is therefore the SAME global author labelled in BOTH tenants just above: each
-// side must list exactly its own comment, carrying its own label inline, never the other's.
-const { getBotVendorComments } = await import('../src/db/ml-labels.js');
-const vcOwnA = await getBotVendorComments(1, { userId: contributor!.id }, 'rolling_30', mlScopeA);
-check(
-  "getBotVendorComments(A) lists A's comment with A's label inline, never B's row",
-  vcOwnA.comments.some(
-    (c) =>
-      c.targetKind === 'review_comment' &&
-      c.targetId === isoRc[0]!.id &&
-      c.mlLabel?.severity === 'major',
-  ) && !vcOwnA.comments.some((c) => c.targetKind === 'review_comment' && c.targetId === isoRcB[0]!.id),
-);
-const vcOwnB = await getBotVendorComments(2, { userId: contributor!.id }, 'rolling_30', mlScopeB);
-check(
-  "getBotVendorComments(B) lists ONLY B's comment and label, not A's (IDOR blocked)",
-  vcOwnB.comments.some(
-    (c) =>
-      c.targetKind === 'review_comment' &&
-      c.targetId === isoRcB[0]!.id &&
-      c.mlLabel?.severity === 'nit',
-  ) && !vcOwnB.comments.some((c) => c.mlLabel?.severity === 'major'),
-);
-const vcCross = await getBotVendorComments(
-  2,
-  { userId: contributor!.id },
-  'rolling_30',
-  await q.resolveWorkspaceScope(2, undefined, [A.repoId]),
-);
-check(
-  'getBotVendorComments(B, repoIds=[A.repo]) leaks nothing (IDOR blocked)',
-  vcCross.comments.length === 0,
-);
-
 // ── "What the bots are flagging" (getBotFlaggingComments / getBotOverlapClusters) ───────────
 // The ML strip's drill-down. Two more readers OUTSIDE db/queries.ts — the second one in its own
 // file (db/bot-overlap.ts) — so, like findPostedReviewComment above, this script cannot see them
@@ -1790,9 +1742,10 @@ check(
   backlogB.labelled === 1,
 );
 
-// ── getBotVolume / getPrBotVolume / getBotVolumeScatter (db/bot-volume.ts) ──────────────────
+// ── getBotVolume / foldPrBotVolumePopulation / getBotVolumeScatter (db/bot-volume.ts) ────────
 // The bot-comment-volume family: one merged-PR scan plus three grouped comment counts, all
-// account-scoped through `pullRequests.accountId`. Three getters, one base loader, so the check
+// account-scoped through `pullRequests.accountId`. Three folds (the per-PR one feeds the
+// 'bot-volume' synthesis input; its drill-down route was removed 2026-11-20), one base loader, so the check
 // is per getter — a predicate dropped from the shared loader would fail all three at once, but a
 // predicate dropped from one of the three grouped counts would only show up in a comment total.
 //
@@ -1802,7 +1755,7 @@ check(
 // accountId predicate deleted. Each merged PR therefore carries ONE OF EACH of the three counted
 // text kinds (review comment, PR comment, review body), so a leak reads as 3 rather than as a
 // difference between two empty lists.
-const { getBotVolume, getBotVolumeScatter, getPrBotVolume } = await import(
+const { getBotVolume, getBotVolumeScatter, foldPrBotVolumePopulation } = await import(
   '../src/db/bot-volume.js'
 );
 const volMerged = new Date(now.getTime() - 2 * 86_400_000);
@@ -1931,36 +1884,42 @@ check(
   volCrossResolved.totals.prs === 0,
 );
 
-const volPrsA = await getPrBotVolume(1, 'rolling_30', volScopeA, { authorUserIds: null }, {
-  offset: 0,
-  limit: 10,
-  sort: 'comments',
-});
-check(
-  'getPrBotVolume(A) returns A’s merged PR and never B’s',
-  volPrsA.filteredTotal === 1 &&
-    volPrsA.items.length === 1 &&
-    volPrsA.items[0]!.prId === volPrA &&
-    !volPrsA.items.some((i) => i.prId === volPrB || i.repoId === B.repoId),
+const volPrsA = await foldPrBotVolumePopulation(
+  1,
+  'rolling_30',
+  volScopeA,
+  { authorUserIds: null },
+  'comments',
 );
-const volPrsCross = await getPrBotVolume(1, 'rolling_30', {
-  workspaceId: volScopeA.workspaceId,
-  repoIds: [B.repoId],
-}, { authorUserIds: null }, { offset: 0, limit: 10, sort: 'ratio' });
 check(
-  'getPrBotVolume(A, repoIds=[B.repo]) leaks nothing under EITHER sort (IDOR blocked)',
-  volPrsCross.total === 0 && volPrsCross.filteredTotal === 0 && volPrsCross.items.length === 0,
+  'foldPrBotVolumePopulation(A) scores A’s merged PR and never B’s',
+  volPrsA.scored.length === 1 &&
+    volPrsA.scored[0]!.pr.id === volPrA &&
+    !volPrsA.scored.some((s) => s.pr.id === volPrB || s.pr.repoId === B.repoId),
+);
+const volPrsCross = await foldPrBotVolumePopulation(
+  1,
+  'rolling_30',
+  { workspaceId: volScopeA.workspaceId, repoIds: [B.repoId] },
+  { authorUserIds: null },
+  'ratio',
+);
+check(
+  'foldPrBotVolumePopulation(A, repoIds=[B.repo]) leaks nothing (IDOR blocked)',
+  volPrsCross.windowPrCount === 0 && volPrsCross.scored.length === 0,
 );
 // A refinement naming a bot that only exists through the OTHER tenant's data still cannot widen
 // tenancy, and an EMPTY list means NO bots rather than all of them.
-const volPrsNoBot = await getPrBotVolume(1, 'rolling_30', volScopeA, { authorUserIds: [] }, {
-  offset: 0,
-  limit: 10,
-  sort: 'comments',
-});
+const volPrsNoBot = await foldPrBotVolumePopulation(
+  1,
+  'rolling_30',
+  volScopeA,
+  { authorUserIds: [] },
+  'comments',
+);
 check(
-  'getPrBotVolume(A, refine.authorUserIds=[]) narrows to nothing, never to everything',
-  volPrsNoBot.total === 1 && volPrsNoBot.filteredTotal === 0 && volPrsNoBot.items.length === 0,
+  'foldPrBotVolumePopulation(A, refine.authorUserIds=[]) narrows to nothing, never to everything',
+  volPrsNoBot.windowPrCount === 1 && volPrsNoBot.scored.length === 0,
 );
 
 const volScA = await getBotVolumeScatter(1, 'rolling_30', volScopeA);

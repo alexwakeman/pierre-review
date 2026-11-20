@@ -1,6 +1,5 @@
-// The optional `?fromMs=&toMs=` bounds pair on GET /api/bot-analytics and
-// GET /api/bot-analytics/vendor/:key/comments (the People report's real-period refinement), on
-// a THROWAWAY sqlite DB with a real Fastify instance .
+// The optional `?fromMs=&toMs=` bounds pair on GET /api/bot-analytics (the People report's
+// real-period refinement), on a THROWAWAY sqlite DB with a real Fastify instance.
 //
 // THE CONTRACT: the pair names a POPULATION, so — unlike `?workspace=`, which degrades — garbage
 // 400s: only-together, `fromMs < toMs`, span ≤ 200 days, digits only (ajv). A valid pair is
@@ -88,30 +87,5 @@ describe('GET /api/bot-analytics bounds validation', () => {
     expect(plain.body.window.kind).toBe('rolling_14');
     // Enum-resolved bounds end at "now", not at the fixture's 2026 period.
     expect(plain.body.window.to).not.toBe(new Date(TO).toISOString());
-  });
-});
-
-describe('GET /api/bot-analytics/vendor/:key/comments bounds validation', () => {
-  it('validates the pair exactly like the analytics route', async () => {
-    expect(
-      (await getJson(`/api/bot-analytics/vendor/u999/comments?fromMs=${FROM}`)).status,
-    ).toBe(400);
-    expect(
-      (await getJson(`/api/bot-analytics/vendor/u999/comments?fromMs=${TO}&toMs=${FROM}`)).status,
-    ).toBe(400);
-  });
-
-  it('echoes a valid pair on the comments window', async () => {
-    const res = await getJson(
-      `/api/bot-analytics/vendor/u999/comments?fromMs=${FROM}&toMs=${TO}`,
-    );
-    expect(res.status).toBe(200);
-    expect(res.body.window).toMatchObject({
-      kind: 'rolling_14',
-      from: new Date(FROM).toISOString(),
-      to: new Date(TO).toISOString(),
-    });
-    // An unclassified key still answers the empty shape (no oracle), bounds or not.
-    expect(res.body.comments).toEqual([]);
   });
 });

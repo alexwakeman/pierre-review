@@ -2559,11 +2559,14 @@ but broken deep links).
   header row (no `rowSpan`). REMOVED: "Unanswered after Nh", "Oldest not addressed", High, Nits, the
   "Not addressed by severity" group, the Depth column. The bot NAME opens the depth tab; Comments/PR
   is plain text (`BotVolumeDetail`, the `'bot-volume'` TabKind, `botVolumeSeed` and
-  `client.botVolumePrs` are deleted; `GET /api/bot-analytics/volume/prs` is kept with no SPA caller).
+  `client.botVolumePrs` are deleted, and so is the route `GET /api/bot-analytics/volume/prs`).
   The per-bot comments + PRs drill-down was REMOVED 2026-11-20 (`BotPrsDetail`, the `'bot-prs'`
   TabKind, `openBotPrsDetail` + its `botPrsFocus*` seeds, `useBotVendorPrs`, `lib/botComments.ts`
   and `client.botVendorPrs`/`botVendorComments` are deleted; a saved `'bot-prs'` tab is dropped on
-  load). `GET /api/bot-analytics/vendor/:key/prs` and `…/comments` are kept with no SPA caller.
+  load), and so are the routes `GET /api/bot-analytics/vendor/:key/prs` and `…/comments`. The
+  removed columns' wire fields (`oldestUntouchedDays`, `overdueUntouched`, `mlHighPct`, `mlNitPct`,
+  `notAddressedBySeverity`) are gone from `BotVendorAnalytics`; the overdue count is still computed
+  server-side for the verdict, and `totals.overdueGraceMs` still rides the wire (the panel's ⓘ).
   ⚠ Do not re-add an entry point (the depth tab has none).
   - **Responsiveness.** `BotRoiPanel` calls `useBotBehaviour(workspaceId, window, true, repoScope)`
     ON MOUNT — the SAME key as `WorkspaceBotCharts` (no `botUserId`), so they dedupe; the collapsed

@@ -765,15 +765,6 @@ describe('tierFor — GitHub quota spenders', () => {
     expect(tiers('PUT', '/api/workspaces/3/flow-view')).toEqual(['read']);
   });
 
-  // The comments drill-down ships comment BODIES (up to 3000/source) plus a three-way label
-  // join per request — the same shape of cost as the rollup — while its /prs sibling is PR
-  // metadata only and stays on the blanket bucket. Both pinned so neither drifts into the other.
-  it('puts the bot-comments drill-down on the expensive bucket, its /prs sibling on read', () => {
-    expect(tiers('GET', '/api/bot-analytics/vendor/u12/comments')).toEqual(['search', 'read']);
-    expect(tiers('GET', '/api/bot-analytics/vendor/pierre/comments')).toEqual(['search', 'read']);
-    expect(tiers('GET', '/api/bot-analytics/vendor/u12/prs')).toEqual(['read']);
-  });
-
   // The flagging drill-down re-runs the strip's whole 50k-row label scan (or the whole windowed
   // thread scan + clustering) on EVERY page, because the population is a JS fold over a JSON
   // column and the offset is a slice over it — and an IntersectionObserver fires it repeatedly
@@ -788,18 +779,18 @@ describe('tierFor — GitHub quota spenders', () => {
   });
 
   // The volume family walks every merged PR in the window (up to 5000) plus three grouped comment
-  // counts over that population on EVERY request — the `/prs` offset is a slice over the fold, so
-  // paging re-runs the scan. All three sub-paths are spelled into one both-ends-anchored regex;
-  // without it they would land on the 600/min blanket bucket with no error anywhere, this file's
+  // counts over that population on EVERY request. Both paths are spelled into one
+  // both-ends-anchored regex; without it they would land on the 600/min blanket bucket with no error anywhere, this file's
   // documented failure mode.
   it('puts the bot-comment-volume family on the expensive bucket', () => {
     expect(tiers('GET', '/api/bot-analytics/volume')).toEqual(['search', 'read']);
-    expect(tiers('GET', '/api/bot-analytics/volume/prs')).toEqual(['search', 'read']);
     expect(tiers('GET', '/api/bot-analytics/volume/scatter')).toEqual(['search', 'read']);
     // ...and the anchoring must not sweep in a neighbour or a path that merely starts the same.
     expect(tiers('GET', '/api/bot-analytics')).toEqual(['read']);
     expect(tiers('GET', '/api/bot-analytics/volumes')).toEqual(['read']);
-    expect(tiers('GET', '/api/bot-analytics/volume/prs/extra')).toEqual(['read']);
+    expect(tiers('GET', '/api/bot-analytics/volume/scatter/extra')).toEqual(['read']);
+    // The removed `/prs` drill-down (2026-11-20) no longer matches the family.
+    expect(tiers('GET', '/api/bot-analytics/volume/prs')).toEqual(['read']);
   });
 
   it('throttles sync triggers and repo-add (each starts a backfill)', () => {

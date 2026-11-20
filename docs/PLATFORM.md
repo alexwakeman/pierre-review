@@ -243,20 +243,20 @@ are bots) — switching it off would turn those bots, the verbatim-vs-curated pr
 `bot_only_review` risk flag dark. The paired **visible footer** (`bots.pierreFooter`, "🤖 Reviewed with Ensemble +
 Claude") appeared in NO detector and is DELETED. `PostReviewArgs.pierreMarker?`/`pierreFooter?` stay
 DECLARED on the contract but nothing passes them. **Bot-ROI** (`getBotAnalytics(accountId,
-window, scope)`, a core fold) → per-kind volume/actedOn%/untouched/`overdueUntouched`/`medianAddressedMs`/oldest/humanFollowThrough/noiseRatio/`verdict`
+window, scope)`, a core fold) → per-kind volume/actedOn%/untouched/`medianAddressedMs`/humanFollowThrough/noiseRatio/`verdict`
 (keep|tune|**noisy**) + ≤12wk trend → `BotRoiPanel`, and deterministic tuning suggestions →
 `BotsView` (hoisted out of the panel, § The Bots ROI panel); **cost is SERVER-resolved from the
 workspace row**, with the `pro_settings` `bots.cost` blob surviving only as a null-only client
 fallback. The `noisy` (ex-`kill`)
-verdict is **response-time-gated**: it keys on `overdueUntouched` (untouched threads older than a
-FIXED 36h grace window, `totals.overdueGraceMs`; `medianAddressedMs` per bot = time-to-addressed, display-only), never raw `untouched`, so a bot
+verdict is **response-time-gated**: it keys on the overdue untouched count (untouched threads older than a
+FIXED 36h grace window, `totals.overdueGraceMs`; computed for the verdict only — off the wire since 2026-11-20; `medianAddressedMs` per bot = time-to-addressed, display-only), never raw `untouched`, so a bot
 isn't flagged noisy for threads still inside the normal response window (tested in
 `bot-analytics-verdict.test.ts`). ⚠ **The verdict also takes ONE ML input** (it is no longer
 ML-free): a bot past the nit gates — findings ≥ 20 AND nit share ≥ 0.7, the SAME
 `ML_NIT_MIN_FINDINGS`/`ML_NIT_MIN_SHARE` pair the nit tuning suggestion uses, so chip and
 advisory always agree — is **escalated `keep` → `tune`**. Escalation only: `tune`/`noisy` are
-never softened, a label can never produce `noisy`, the gate reads the RAW share (not the rounded
-`mlNitPct`), and `vendorSeverity` is never read. See docs/ML-SEVERITY.md. **Same-line overlap** (ADVISORY): every "same line" claim now
+never softened, a label can never produce `noisy`, the gate reads the RAW share (never a rounded
+percentage), and `vendorSeverity` is never read. See docs/ML-SEVERITY.md. **Same-line overlap** (ADVISORY): every "same line" claim now
 goes through the ONE shared ±3-line clustering helper (`db/line-overlap.ts` — user-distinct, so two
 distinct in-house bots CAN overlap; quality checks excluded). `getBotAnalytics` runs it over the
 window's review-role threads with **null-line (outdated/file-level) threads EXCLUDED** (they
@@ -511,7 +511,7 @@ broken by lowest `workspaceId`). The two role filters:
 
 | `role: 'review'` — SCORING | `role: 'all'` — EXCLUSION / visibility |
 |---|---|
-| behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, `getActivity`'s acted-on stat, `getWorkspaceInsights`' `bot_signal` | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), human-follow-through detection (inside `getBotVendorPrs` — "was the replier a HUMAN"), **bot-only PRs** (`getBotOnlyReviewPrs`), **and `getBotAnalytics`** |
+| behaviour + per-PR behaviour (`getBotBehaviourAnalytics`/`getPrBotBehaviour`), dedup, bot themes (`getBotReviewComments`), all three resolvable-thread-backlog getters, `getActivity`'s acted-on stat, `getWorkspaceInsights`' `bot_signal` | the bots-only feed (`getConsolidatedFeed`), the human-themes exclusion set (`getHumanReviewComments`), **bot-only PRs** (`getBotOnlyReviewPrs`), **and `getBotAnalytics`** |
 
 **`getBotAnalytics` is the exception that reads like a bug and isn't** — it is the ROI getter, yet
 it passes `'all'`. It narrows by SPLITTING, not by filtering: it computes a row for EVERY automated
@@ -1231,8 +1231,9 @@ fetch, no new route), folded by core `db/bot-responsiveness.ts` `foldBotResponsi
 
 The ROI table also LOST columns ("Unanswered after Nh", "Oldest not addressed", High, Nits, "Not
 addressed by severity", Depth): the bot NAME opens the `bot-detail` tab, Comments/PR is plain text
-(the merged-PR drill-down `BotVolumeDetail` is deleted; `/api/bot-analytics/volume/prs` is kept with
-no SPA caller), and "Bot effectiveness" / "Used vs not addressed" moved into the collapsed
+(the merged-PR drill-down `BotVolumeDetail` is deleted, then its route `/api/bot-analytics/volume/prs`
+and the per-bot `/vendor/:key/prs` + `…/comments` routes; the columns' wire fields left
+`BotVendorAnalytics` too), and "Bot effectiveness" / "Used vs not addressed" moved into the collapsed
 `WorkspaceBotCharts` section. One click-to-isolate bot per `BotsView` mount dims the other bots in
 every per-bot chart. SPA detail: docs/FRONTEND.md § Bots view (THE ROI TABLE, 2026-11-20).
 

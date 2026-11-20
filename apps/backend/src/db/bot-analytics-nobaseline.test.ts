@@ -103,7 +103,10 @@ describe('getBotAnalytics fixed 36h overdue gate boundary', () => {
     expect(resp.totals.overdueGraceMs).toBe(36 * HOUR); // the fixed gate
     const v = resp.vendors.find((x: { kind: string }) => x.kind === 'coderabbit')!;
     expect(v.untouched).toBe(3); // all three not addressed
-    expect(v.overdueUntouched).toBe(2); // the 40h + 50h ones; the 10h one is inside the 36h grace
+    // (Of these, the 40h + 50h ones are overdue; the 10h one is inside the 36h grace. That count
+    // is verdict-internal — it left the wire with its ROI column on 2026-11-20 — and too small
+    // here to move the verdict, so the gate's verdict effect is pinned in
+    // bot-analytics-verdict.test.ts.)
     expect(v.medianAddressedMs).toBeNull(); // never addressed — doesn't affect the gate
   });
 });

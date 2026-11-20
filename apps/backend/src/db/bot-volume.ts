@@ -1,13 +1,14 @@
 // ── Bot comment VOLUME per PR (CORE, free, deterministic — no model, no new table) ──────────
 //
 // Answers two questions the ROI tab could not: "how much does this bot say on a PR" and "does it
-// scale with the diff". Three getters over ONE shared base scan:
-//   getBotVolume        → the per-bot column + workspace totals (Bots ROI tab)
-//   getPrBotVolume      → the paginated PR drill-down behind that column
-//   getBotVolumeScatter → the LOC-vs-volume chart series (Bots BEHAVIOUR tab)
+// scale with the diff". Three folds over ONE shared base scan:
+//   getBotVolume              → the per-bot column + workspace totals (Bots ROI tab)
+//   foldPrBotVolumePopulation → the scored per-PR fold behind the 'bot-volume' synthesis input
+//                               (its paginated drill-down route was removed 2026-11-20)
+//   getBotVolumeScatter       → the LOC-vs-volume chart series (Bots BEHAVIOUR tab)
 //
-// ⚠ ALL THREE FOLD THE SAME `loadVolumeBase` RESULT. That is the point: a column, the list behind
-// it and the chart beside it are three renderings of one count, so they cannot drift the way a
+// ⚠ ALL THREE FOLD THE SAME `loadVolumeBase` RESULT. That is the point: a column, the PR set
+// behind it and the chart beside it are three renderings of one count, so they cannot drift the way a
 // tile and its drill-down drift when each runs its own scan (the failure db/bot-flagging.test.ts
 // exists to prevent). Nothing client-side re-derives a count from items — the server's number is
 // the number.
@@ -59,10 +60,7 @@ import type {
   AutomatedReviewerKind,
   BotVolumeBaselineKind,
   BotVolumeBot,
-  BotVolumePrBotShare,
-  BotVolumePrRow,
   BotVolumePrSort,
-  BotVolumePrsResponse,
   BotVolumeRefine,
   BotVolumeResponse,
   BotVolumeScatterPoint,
@@ -96,9 +94,6 @@ const VOLUME_PR_SCAN_CAP = 5000;
 // solid cloud, and each one is ~60 bytes of JSON. Set independently of the scan cap so the UI can
 // say "the most recent 2000" without implying the aggregates were sampled too.
 const SCATTER_POINT_CAP = 2000;
-
-// Drill-down page bound (the flagging route's FLAGGING_PAGE_MAX precedent).
-const VOLUME_PAGE_MAX = 50;
 
 // ── THE SMALL-SAMPLE FLOOR ──────────────────────────────────────────────────────────────────
 // A (repo × bucket) cell needs at least this many SIZED PRs before its mean may be called an
@@ -185,9 +180,10 @@ export interface VolumePr {
   additions: number;
   deletions: number;
   changedFiles: number;
-  /** null = size NEVER OBSERVED. See the `loc` contract on BotVolumePrRow: under lean storage the
-   *  three size columns default to 0, so an unhydrated PR is indistinguishable from an empty one
-   *  and must be read as unknown rather than fabricated into the `xs` bucket. */
+  /** null = size NEVER OBSERVED (`additions + deletions` otherwise). Under lean storage the
+   *  three size columns default to 0, so an unhydrated PR (all three 0) is indistinguishable from
+   *  an empty one and must be read as unknown rather than fabricated into the `xs` bucket —
+   *  never 0, which would manufacture a spectacular ratio. */
   loc: number | null;
   bucket: BotVolumeSizeBucket | null;
   /**
@@ -645,9 +641,9 @@ function ratioFor(
   return round2(botComments / expected);
 }
 
-// ── (2) The paginated PR drill-down ─────────────────────────────────────────────────────────
+// ── (2) The scored per-PR fold (synthesis input) ────────────────────────────────────────────
 
-/** One scored drill-down row, pre-hydration. Exported for the synthesis input (§8.3). */
+/** One scored PR row, pre-hydration. Exported for the synthesis input (§8.3). */
 export interface VolumeScoredPr {
   pr: VolumePr;
   botComments: number;
@@ -657,13 +653,13 @@ export interface VolumeScoredPr {
   baselinePrs: number;
 }
 
-// The shared drill-down POPULATION fold (§8.3: one predicate, three consumers). The route's LIST
-// (`getPrBotVolume` below), its COUNTS (`total`/`filteredTotal`) and the SYNTHESIS INPUT
-// (`db/synthesis-input.ts`) all read THIS function — never a second predicate.
+// The shared per-PR POPULATION fold (§8.3: one predicate). The SYNTHESIS INPUT
+// (`db/synthesis-input.ts`) reads THIS function — never a second predicate. (Its paginated
+// drill-down route, GET /api/bot-analytics/volume/prs, was removed 2026-11-20.)
 export interface PrBotVolumePopulation {
   win: { kind: BotWindowKind; from: string; to: string };
   generatedAt: string;
-  /** Scored + SORTED — `filteredTotal` is its length; the page/cap is a slice over it. */
+  /** Scored + SORTED — the synthesis input caps a slice over it. */
   scored: VolumeScoredPr[];
   /** The whole merged in-window population (`total`) — the caption's denominator. */
   windowPrCount: number;
@@ -755,88 +751,6 @@ export async function foldPrBotVolumePopulation(
   };
 }
 
-export async function getPrBotVolume(
-  accountId: number,
-  window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
-  scope: BotScope,
-  refine: BotVolumeRefine,
-  page: { offset: number; limit: number; sort: BotVolumePrSort },
-): Promise<BotVolumePrsResponse> {
-  const offset = Math.max(0, Math.trunc(page.offset));
-  const limit = Math.max(1, Math.min(Math.trunc(page.limit), VOLUME_PAGE_MAX));
-
-  // The ONE population fold (shared with the synthesis input — §8.3).
-  const pop = await foldPrBotVolumePopulation(accountId, window, scope, refine, page.sort);
-  const { scored, only } = pop;
-
-  const pageRows = scored.slice(offset, offset + limit);
-  const consumed = offset + pageRows.length;
-
-  // Identities only for the bots that actually appear on THIS page — the drill-down spans many
-  // PRs, so a per-row lookup is out, but so is resolving every bot in the workspace.
-  const pageBotIds = new Set<number>();
-  for (const s of pageRows) {
-    for (const [userId] of s.pr.byBot) {
-      if (!only || only.has(userId)) pageBotIds.add(userId);
-    }
-  }
-  const identities = await loadBotIdentities(accountId, scope, [...pageBotIds]);
-
-  const items: BotVolumePrRow[] = pageRows.map((s) => {
-    const byBot: BotVolumePrBotShare[] = [...s.pr.byBot.entries()]
-      .filter(([userId]) => !only || only.has(userId))
-      .map(([userId, comments]) => ({
-        key: `u${userId}`,
-        authorUserId: userId,
-        label: identities.get(userId)?.label ?? `#${userId}`,
-        comments,
-      }))
-      .sort((x, y) => y.comments - x.comments || x.label.localeCompare(y.label));
-    const repoFullName = pop.repoFullName.get(s.pr.repoId) ?? `#${s.pr.repoId}`;
-    return {
-      prId: s.pr.id,
-      prNumber: s.pr.number,
-      prTitle: s.pr.title,
-      prUrl: `https://github.com/${repoFullName}/pull/${s.pr.number}`,
-      repoId: s.pr.repoId,
-      repoFullName,
-      createdAt: s.pr.openedAt.toISOString(),
-      mergedAt: s.pr.mergedAt.toISOString(),
-      additions: s.pr.additions,
-      deletions: s.pr.deletions,
-      loc: s.pr.loc,
-      // Null in lockstep with `loc`: the two are unknown together (they come from the same
-      // unhydrated row), and a lone `changedFiles: 0` beside a null LOC reads as a real zero.
-      changedFiles: s.pr.loc == null ? null : s.pr.changedFiles,
-      botComments: s.botComments,
-      byBot,
-      sizeBucket: s.pr.bucket,
-      expected: s.expected,
-      ratio: s.ratio,
-      baseline: s.baseline,
-      baselinePrs: s.baselinePrs,
-      // The raw density, shipped but never ranked on — it explodes on small PRs by construction
-      // (see the file header). `max(loc, 1)` keeps a rename-only PR finite.
-      commentsPer100Loc:
-        s.pr.loc == null ? null : round2((s.botComments / Math.max(s.pr.loc, 1)) * 100),
-    } satisfies BotVolumePrRow;
-  });
-
-  return {
-    workspaceId: scope.workspaceId,
-    window: pop.win,
-    refine,
-    sort: page.sort,
-    total: pop.windowPrCount,
-    filteredTotal: scored.length,
-    items,
-    // Opaque on the wire; `o:<n>` is today's encoding of "offset into the sorted fold".
-    nextCursor: consumed < scored.length ? `o:${consumed}` : null,
-    truncated: pop.truncated,
-    generatedAt: pop.generatedAt,
-  };
-}
-
 // ── (3) The LOC-vs-volume chart series ──────────────────────────────────────────────────────
 
 export async function getBotVolumeScatter(
@@ -866,7 +780,7 @@ export async function getBotVolumeScatter(
   let sizedPrs = 0;
   let unsizedPrs = 0;
   // ⚠ WINDOW ONLY — this card is captioned with the selected window, so its bars must describe
-  // that window. The wider scan exists for the drill-down's expectation, not for this chart.
+  // that window. The wider scan exists for the per-PR expectation, not for this chart.
   const windowPrs = base.prs.filter((p) => p.inWindow);
   for (const pr of windowPrs) {
     if (pr.loc == null || pr.bucket == null) {
@@ -919,8 +833,8 @@ export async function getBotVolumeScatter(
     // The POINT cap, not the scan cap — reported separately so "showing the most recent 2000"
     // does not imply the aggregates beside it were sampled too.
     truncated: sizedPrs > points.length,
-    // The SCAN cap, straight off the shared loader — the same bit `/volume` and `/volume/prs`
-    // surface, so all three routes agree about whether the window was fully walked.
+    // The SCAN cap, straight off the shared loader — the same bit `/volume` surfaces,
+    // so both routes agree about whether the window was fully walked.
     scanTruncated: base.truncated,
     generatedAt: base.generatedAt,
   };

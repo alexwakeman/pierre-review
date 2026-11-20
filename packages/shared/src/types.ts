@@ -1179,15 +1179,14 @@ export interface BotVendorAnalytics {
   comments: number;
   actedOn: number;
   actedOnPct: number | null;
-  // Not-addressed (untouched) threads: `untouched` = the total; `overdueUntouched` = the subset
-  // older than the fixed overdue grace window (totals.overdueGraceMs) — i.e. the ones genuinely
-  // being ignored, which is what the `noisy` verdict keys on. `medianAddressedMs` is THIS bot's
-  // own MEDIAN time-to-ADDRESSED (ms) — reply | resolve | addressing commit; null when no thread
-  // of its was ever addressed. Display-only.
+  // Not-addressed (untouched) threads: `untouched` = the total. The subset older than the fixed
+  // overdue grace window (totals.overdueGraceMs) — the ones genuinely being ignored — is what the
+  // `noisy` verdict keys on; it is computed server-side for the verdict only and no longer rides
+  // the wire (its "Unanswered after 36h" column, and "Oldest not addressed", were removed
+  // 2026-11-20). `medianAddressedMs` is THIS bot's own MEDIAN time-to-ADDRESSED (ms) — reply |
+  // resolve | addressing commit; null when no thread of its was ever addressed. Display-only.
   untouched: number;
-  overdueUntouched: number;
   medianAddressedMs: number | null;
-  oldestUntouchedDays: number | null;
   humanFollowThroughPct: number | null;
   noiseRatioPct: number | null;
   // "Merged past": PRs MERGED inside the window still carrying ≥1 untouched thread by this
@@ -1215,25 +1214,15 @@ export interface BotVendorAnalytics {
   // account without `botDepth`. The per-COMMENT severity badge (`GET /api/prs/:id/ml-labels`) is a
   // DIFFERENT route and stays free on every tier — that is the line the tier draws.
   // Aggregated from `ml_comment_labels` over the SAME window as the ROI numbers, for THIS bot.
-  // ALL FOUR ARE ABSENT (undefined) when the bot has no labels in the window — the UI renders
+  // BOTH ARE ABSENT (undefined) when the bot has no labels in the window — the UI renders
   // blanks, never zeros ("no data yet" and "zero findings" are different claims). A present
-  // `mlFindings: 0` means labels exist and every one is a summary/praise. The two rates divide
-  // by FINDINGS (summaries + praise excluded — the phantom-gap rule) and are rounded 0..100
-  // like their `…Pct` siblings; null when findings is 0. The vendor's OWN declared severity is
-  // NEVER an input to any of these (measured anti-metric — see docs/ML-SEVERITY.md § Accuracy).
+  // `mlFindings: 0` means labels exist and every one is a summary/praise. `mlBySeverity` counts
+  // FINDINGS only (summaries + praise excluded — the phantom-gap rule). The vendor's OWN declared
+  // severity is NEVER an input (measured anti-metric — see docs/ML-SEVERITY.md § Accuracy).
+  // (The `mlNitPct` / `mlHighPct` rates and the `notAddressedBySeverity` split left the wire
+  // with their ROI columns, 2026-11-20.)
   mlFindings?: number;
   mlBySeverity?: MlSeverityCounts;
-  mlNitPct?: number | null;
-  mlHighPct?: number | null;
-  // The NOT-ADDRESSED (untouched) window threads split by the predicted severity of the finding
-  // that OPENED each one — "17 not addressed" is a volume complaint; "3 of them major" is a
-  // decision. Same population as `untouched`, but it is a split of the LABELLED subset only:
-  // a thread whose origin comment carries no label (or a summary/praise one — never findings)
-  // contributes to `untouched` and to nothing here, so THESE FOUR NEED NOT SUM TO `untouched`
-  // and must never be presented as if they did. Absent under the same rule as its ml* siblings
-  // (no in-window labels for this bot ⇒ no ML claim at all); present-and-zero means labels
-  // exist and none of the ignored threads scored that way.
-  notAddressedBySeverity?: MlSeverityCounts;
   // ── The severity INFLATION column (plan P1.2/C2) ────────────────────────────────────────
   // How often this bot's OWN badge contradicted our label, over the SAME window as every other
   // column here. Counts, never shares — and they partition `badged` (the findings carrying a
@@ -1326,9 +1315,9 @@ export interface BotAnalyticsResponse {
   // `botOnlyPrs` = currently-OPEN (mergeable) PRs in the account's repos whose only review/comment
   // touch was automated (incl. Pierre-verbatim) — no human review AND no human comment. Merged PRs
   // are excluded (the banner is a "needs a human before it merges" signal); the drill-down list
-  // adds merged behind a toggle. See getBotOnlyReviewPrs / getBotVendorPrs.
+  // adds merged behind a toggle. See getBotOnlyReviewPrs.
   // `overdueGraceMs` = the fixed grace window (currently 36h): a not-addressed thread counts as
-  // `overdueUntouched` (feeding the `noisy` verdict) once it's older than this. NOT the measured
+  // overdue (feeding the `noisy` verdict) once it's older than this. NOT the measured
   // reply time — that's intrinsically fast (sample bias), so a flat cutoff is the fair gate. Each
   // row's own `medianResponseMs` is display-only.
   // `overlapClusters` = distinct line areas (the shared ±3-line clustering, db/line-overlap.ts)
@@ -1763,51 +1752,10 @@ export interface PrBotBehaviourResponse {
   bots: PrBotBehaviour[]; // reviewers that touched this PR, first-touch order
 }
 
-// One PR row behind a vendor's Bot-ROI panel — the drill-down list of PRs one automated REVIEWER
-// touched in the window (GET /api/bot-analytics/vendor/:key/prs). Deterministic, no AI, account-
-// scoped; ordered most-recent-bot-activity first.
-export interface BotVendorPr {
-  prId: number;
-  repoId: number;
-  repoFullName: string;
-  prNumber: number;
-  prTitle: string;
-  authorId: number | null;
-  state: PrState;
-  githubUrl: string;
-  ciStatus: CiStatus | null;
-  additions: number;
-  deletions: number;
-  changedFiles: number;
-  openedAt: string; // ISO-8601
-  botThreads: number;   // review threads this vendor opened on the PR (in window)
-  botComments: number;  // review comments this vendor authored on the PR (in window)
-  botActedOn: number;   // of botThreads, acted-on (resolved | likely_addressed | human follow-up)
-  botUntouched: number; // of botThreads, still `untouched`
-  lastBotActivityAt: string | null; // ISO-8601 — max createdAt across this vendor's threads+comments
-  // This PR has automated touch and NO human review AND NO human comment since it opened.
-  botOnly: boolean;
-}
-
-export interface BotVendorPrsResponse {
-  enabled: boolean;
-  // The analytics-row identity this list belongs to: `u<userId>`, one reviewer (each Limn poster's
-  // bot included). Mirrors BotVendorAnalytics.key.
-  key: string;
-  kind: AutomatedReviewerKind;
-  label: string;
-  // The reviewer's github login; null when unresolved. A Limn bot's is internal (`limn:alice`)
-  // and never a GitHub profile.
-  login: string | null;
-  window: { kind: BotWindowKind; from: string; to: string };
-  prs: BotVendorPr[]; // most-recent-bot-activity first
-  generatedAt: string;
-}
-
-// One comment row behind a vendor's COMMENTS drill-down — the individual things one automated
-// reviewer said in the window (GET /api/bot-analytics/vendor/:key/comments): inline review
-// comments (with path + thread state), issue-level PR comments, and review BODIES, each with its
-// stored ML label shipped INLINE. One request carries everything — a cross-PR list must never
+// One comment row with its stored ML label INLINE — the base of `BotFlaggingComment` and the
+// person-period evidence rows (its per-bot route, GET /api/bot-analytics/vendor/:key/comments,
+// was removed 2026-11-20): inline review comments (with path + thread state), issue-level PR
+// comments, and review BODIES. One request carries everything — a cross-PR list must never
 // mount the per-PR label index per row (the ThreadAssessment 60-requests-for-60-empty-boxes
 // failure; docs/ML-SEVERITY.md § UI).
 export interface BotVendorComment {
@@ -1828,19 +1776,6 @@ export interface BotVendorComment {
   // The stored ML label for this target, or null when it has not been scored (or the deployment
   // has no scoring service) — the row still renders, just unbadged.
   mlLabel: MlLabel | null;
-}
-
-export interface BotVendorCommentsResponse {
-  enabled: boolean;
-  // `u<userId>` — mirrors BotVendorAnalytics.key.
-  key: string;
-  kind: AutomatedReviewerKind;
-  label: string;
-  login: string | null;
-  window: { kind: BotWindowKind; from: string; to: string };
-  comments: BotVendorComment[]; // newest-first, capped per source
-  truncated: boolean;           // a source (or the combined stream) hit the cap
-  generatedAt: string;
 }
 
 // The exact PR LIST behind getBotAnalytics's totals.botOnlyPrs count — "only a bot reviewed
@@ -12876,8 +12811,8 @@ export interface SeverityAgreementMatrix {
 }
 
 // ── The card item ────────────────────────────────────────────────────────────────────────
-// EXTENDS BotVendorComment (the per-bot comments route's row; its SPA list was removed
-// 2026-11-20, the route stays). The four added fields are exactly what a CROSS-BOT list needs and the single-bot list does
+// EXTENDS BotVendorComment (the old per-bot comments route's row; the route was removed
+// 2026-11-20). The four added fields are exactly what a CROSS-BOT list needs and the single-bot list does
 // not: who said it, and where on the file.
 export interface BotFlaggingComment extends BotVendorComment {
   authorUserId: number;
@@ -12972,14 +12907,14 @@ export type BotFlaggingResponse = BotFlaggingCommentsResponse | BotFlaggingClust
 // Bot comment VOLUME per PR (PAID `botDepth` — deterministic, no model, no new table)
 // ---------------------------------------------------------------------------------------
 //
-// ⚠ ALL THREE VOLUME ROUTES 402 WITHOUT `botDepth` (`/api/bot-analytics/volume`, `…/volume/prs`,
-// `…/volume/scatter`). Both surfaces below live inside the paid ROI panel, so there is no free
-// half to narrow for — unlike `/api/bot-analytics`, which serves a free caution and therefore
-// narrows instead of refusing. Deterministic and core-computed; "core" is where the code lives.
+// Two routes (`/api/bot-analytics/volume`, `…/volume/scatter`; the `…/volume/prs` drill-down was
+// removed 2026-11-20). Deterministic and core-computed.
 //
 // Two surfaces, one getter family (backend db/bot-volume.ts):
-//   • the Bots ROI tab's "avg bot comments per PR" column + the PR drill-down behind it, and
+//   • the Bots ROI tab's "avg bot comments per PR" column, and
 //   • the Behaviour tab's LOC-vs-bot-comment-volume chart.
+// The scored per-PR fold (`foldPrBotVolumePopulation`) still feeds the 'bot-volume' synthesis
+// input; `BotVolumeRefine` / `BotVolumePrSort` / `BotVolumeBaselineKind` are its vocabulary.
 //
 // ⚠ THE POPULATION IS **MERGED** PRs, AND THE WINDOW APPLIES TO `mergedAt`. Not opened-in-window,
 // not updated-in-window. Two reasons, and both are load-bearing for how the numbers read:
@@ -13004,7 +12939,7 @@ export type BotFlaggingResponse = BotFlaggingCommentsResponse | BotFlaggingClust
 //   the other — do not caption one with the other's total.
 //
 // ⚠ NOBODY RE-DERIVES A COUNT CLIENT-SIDE. The server's number is the number; the column, the
-// drill-down and the chart all fold the SAME per-(PR, bot) counts, which is why they cannot
+// synthesis input and the chart all fold the SAME per-(PR, bot) counts, which is why they cannot
 // disagree.
 //
 // Nothing here feeds `botVerdict` — it is display-only (bot-analytics-verdict.test.ts pins that
@@ -13016,7 +12951,7 @@ export type BotFlaggingResponse = BotFlaggingCommentsResponse | BotFlaggingClust
  *  ride the wire as `BotVolumeSizeBucketStat.minLoc/maxLoc`, so no client re-spells them. */
 export type BotVolumeSizeBucket = 'xs' | 's' | 'm' | 'l' | 'xl';
 
-/** Which population `BotVolumePrRow.expected` was averaged over — an EXPLICIT discriminator, not
+/** Which population a scored PR's `expected` was averaged over — an EXPLICIT discriminator, not
  *  something to infer from nulls, because "we have no baseline" and "this PR is exactly average"
  *  are different claims that must read differently on screen.
  *   • `'bucket'` — the mean of this PR's own repo × size bucket (the honest comparison).
@@ -13112,7 +13047,8 @@ export interface BotVolumeTotals {
   /** Merged-in-window PRs in scope — the denominator of `avgCommentsPerScopePr`, and the honest
    *  denominator for any "N of M PRs" caption. */
   prs: number;
-  /** The subset with an OBSERVED size (see `BotVolumePrRow.loc`) — the denominator every LOC
+  /** The subset with an OBSERVED size (lean storage leaves unhydrated PRs' size UNKNOWN, never
+   *  0 — backend db/bot-volume.ts `VolumePr.loc`) — the denominator every LOC
    *  chart and every bucket baseline actually uses. `prs - sizedPrs` is a real population on a
    *  lean-storage install (135 of three.js's 796 here), never zero-LOC PRs. */
   sizedPrs: number;
@@ -13137,92 +13073,6 @@ export interface BotVolumeResponse {
   totals: BotVolumeTotals;
   /** The merged-PR scan cap was hit: every number is a most-recent sample, not a total. Same
    *  honesty rule as `BotFlaggingBase.truncated`. */
-  truncated: boolean;
-  generatedAt: string;
-}
-
-export interface BotVolumePrBotShare {
-  key: string; // `u<userId>`
-  authorUserId: number;
-  label: string;
-  comments: number;
-}
-
-export interface BotVolumePrRow {
-  prId: number;
-  prNumber: number;
-  prTitle: string;
-  /** `https://github.com/<owner>/<name>/pull/<n>`. */
-  prUrl: string;
-  repoId: number;
-  repoFullName: string;
-  /** The PR's `openedAt`, ISO. */
-  createdAt: string;
-  /** ISO. Never null in this population (merged-only) — typed non-null on purpose. */
-  mergedAt: string;
-  additions: number;
-  deletions: number;
-  /**
-   * `additions + deletions`, or **null when the PR's size was never observed**. Under lean
-   * storage the three size columns default to 0 and a PR whose detail never hydrated is
-   * indistinguishable from a genuinely empty one, so `changedFiles === 0 && additions === 0 &&
-   * deletions === 0` is read as UNKNOWN: `loc`/`changedFiles` null, `sizeBucket` null,
-   * `baseline: 'none'`, `expected`/`ratio`/`commentsPer100Loc` all null. **Never 0** — a
-   * fabricated zero would put the PR in the `xs` bucket and manufacture a spectacular ratio.
-   */
-  loc: number | null;
-  changedFiles: number | null;
-  /** Bot comments on this PR from the refined bot set (every bot when `refine` is empty). */
-  botComments: number;
-  /** Who said what, most comments first. Sums to `botComments` by construction. */
-  byBot: BotVolumePrBotShare[];
-  sizeBucket: BotVolumeSizeBucket | null;
-  /**
-   * The mean bot-comment count of the baseline population (see `baseline`), 2dp. null ⇔
-   * `baseline === 'none'`.
-   *
-   * `ratio` = botComments / expected, 2dp — "3.7×" is `ratio: 3.7`. null when there is no
-   * baseline AND when `expected` is 0. An `expected` of 0 cannot hide a finding: this PR is
-   * itself a member of its own baseline population, so a mean of 0 forces `botComments` to 0 too.
-   *
-   * ⚠ RENDER `expected` AND `baselinePrs` BESIDE THE MULTIPLIER, never behind a tooltip. A
-   * near-zero expectation inflates the ratio without inflating the finding: measured on this
-   * corpus, bevyengine/bevy #24971 reads **42.86×** off 3 bot comments against an expectation of
-   * 0.07 (over 61 PRs), while erxes #7802's 3.68× is 25 comments against 6.80. Both numbers are
-   * correct; only one is a PR someone should look at, and only the surrounding numbers say which.
-   * The small-sample floor fixes thin SAMPLES — nothing fixes a small MEAN except showing it.
-   */
-  expected: number | null;
-  ratio: number | null;
-  baseline: BotVolumeBaselineKind;
-  /** How many PRs the baseline was averaged over — the small-sample disclosure. 0 when
-   *  `baseline === 'none'`. A ratio computed off 2 PRs is noise dressed as a finding, which is
-   *  why a bucket under the floor degrades to `'repo'` rather than answering. */
-  baselinePrs: number;
-  /**
-   * ⚠ RAW DENSITY, DELIBERATELY NOT THE SORT AND NOT A HEADLINE. It EXPLODES on small PRs —
-   * measured across erxes's buckets it runs 57.65 → 8.99 → 4.46 → 2.23 → 0.83 per 100 LOC, so
-   * ranking on it returns a list of one-line PRs every time. The bucket-relative `ratio` is the
-   * honest form. null when `loc` is null; `loc` of 0 divides by 1 (a rename-only PR).
-   */
-  commentsPer100Loc: number | null;
-}
-
-export interface BotVolumePrsResponse {
-  workspaceId: number;
-  window: { kind: BotWindowKind; from: string; to: string };
-  refine: BotVolumeRefine;
-  sort: BotVolumePrSort;
-  /** Merged-in-window PRs in scope — the population, including the ones no bot touched. */
-  total: number;
-  /** PRs carrying ≥1 comment from the refined bot set — what the list actually enumerates, and
-   *  what its caption must report ("140 of 796 merged PRs drew bot comments"). */
-  filteredTotal: number;
-  items: BotVolumePrRow[];
-  /** OPAQUE. Feed back verbatim as `?cursor=`. null = no further page. Today it encodes an offset
-   *  into the sorted fold (`o:<n>`), because the population is a JS fold over three grouped
-   *  counts and the sort keys are derived — opaque so a later keyset switch is not a wire break. */
-  nextCursor: string | null;
   truncated: boolean;
   generatedAt: string;
 }

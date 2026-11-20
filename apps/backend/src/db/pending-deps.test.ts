@@ -633,8 +633,6 @@ describe('the vendor kind seed', () => {
     const kinds = await q.classificationKindForUser(1, scope.workspaceId);
     expect(kinds.get(ids.renovate)).toBe('renovate');
     expect(kinds.has(ids.foreignSemgrep)).toBe(false);
-    const drill = await q.getBotVendorPrs(1, { userId: ids.foreignSemgrep }, 'rolling_30', scope);
-    expect([drill.login, drill.label]).toEqual([null, `u${ids.foreignSemgrep}`]);
     // …while the prefix still makes it AUTOMATION — by id, which names nobody.
     const inputs = await q.resolveAuthorAutomationInputs(1, scope.workspaceId);
     expect(inputs.automatedIds.has(ids.foreignSemgrep)).toBe(true);

@@ -2422,8 +2422,7 @@ export const api = {
   // ── Bot comment VOLUME (CORE, free, deterministic) ────────────────────────────────────────
   // "How much does each bot say on a PR" — the ROI table's per-bot average, and the PR-size chart.
   // Both fold the SAME server-side scan, so the column and the chart cannot disagree about a number.
-  // (The paginated `/api/bot-analytics/volume/prs` list has no SPA caller since its drill-down was
-  // removed.)
+  // (The paginated `/api/bot-analytics/volume/prs` list was removed 2026-11-20.)
   //
   // ⚠ THE POPULATION IS PRs **MERGED** IN THE WINDOW, open ones excluded (measured: 686 merged vs
   // 997 opened over 180d on one repo here — a ~45% difference). Any caption written against these

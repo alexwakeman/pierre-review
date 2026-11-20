@@ -1,4 +1,5 @@
-// db/bot-volume.ts — the bot-comment-volume column, its PR drill-down and the LOC chart, on a
+// db/bot-volume.ts — the bot-comment-volume column, the scored per-PR fold (the 'bot-volume'
+// synthesis input; its drill-down route was removed 2026-11-20) and the LOC chart, on a
 // THROWAWAY sqlite DB.
 //
 // THE CONTRACTS THIS FILE EXISTS FOR, each of which shipped as a real bug somewhere on this
@@ -16,8 +17,8 @@
 //    degrades to the repo mean, and a repo under the floor answers `baseline: 'none'` with BOTH
 //    `expected` and `ratio` null — so the wire can always tell "no baseline" from "ratio 1.0".
 //  • THE EMPTY SCOPE. `repoIds: []` is a real empty workspace and must early-return, never widen.
-//  • BOTH SORTS, INCLUDING THE TIEBREAK. The page offset is a slice over a JS fold, so a
-//    comparator that is not TOTAL makes a cursor walk duplicate and drop rows.
+//  • BOTH SORTS. The synthesis input caps a slice of the sorted fold, so the order decides
+//    which PRs the model sees.
 //
 // ⚠ Its OWN database file. The bot fixtures in this directory are order-dependent with exact
 // expected counts, so a row added to one of them for this feature would move assertions elsewhere.
@@ -276,14 +277,36 @@ afterAll(() => {
 const volume = (opts: { window?: string; sc?: any } = {}) =>
   vol.getBotVolume(1, opts.window ?? 'rolling_30', opts.sc ?? scope);
 
-const prPage = (
-  opts: { window?: string; sc?: any; refine?: any; offset?: number; limit?: number; sort?: string } = {},
-) =>
-  vol.getPrBotVolume(1, opts.window ?? 'rolling_30', opts.sc ?? scope, opts.refine ?? NO_REFINE, {
-    offset: opts.offset ?? 0,
-    limit: opts.limit ?? 50,
-    sort: opts.sort ?? 'comments',
-  });
+// The scored per-PR fold, flattened into the row shape these assertions read.
+const prPage = async (opts: { window?: string; sc?: any; refine?: any; sort?: string } = {}) => {
+  const sort = opts.sort ?? 'comments';
+  const pop = await vol.foldPrBotVolumePopulation(
+    1,
+    opts.window ?? 'rolling_30',
+    opts.sc ?? scope,
+    opts.refine ?? NO_REFINE,
+    sort,
+  );
+  return {
+    sort,
+    total: pop.windowPrCount,
+    filteredTotal: pop.scored.length,
+    items: pop.scored.map((x: any) => ({
+      prId: x.pr.id,
+      botComments: x.botComments,
+      expected: x.expected,
+      ratio: x.ratio,
+      baseline: x.baseline,
+      baselinePrs: x.baselinePrs,
+      sizeBucket: x.pr.bucket,
+      loc: x.pr.loc,
+      changedFiles: x.pr.loc == null ? null : x.pr.changedFiles,
+      byBot: [...x.pr.byBot.entries()]
+        .filter(([id]: [number, number]) => !pop.only || pop.only.has(id))
+        .map(([authorUserId, comments]: [number, number]) => ({ authorUserId, comments })),
+    })),
+  };
+};
 
 const scatter = (opts: { window?: string; sc?: any } = {}) =>
   vol.getBotVolumeScatter(1, opts.window ?? 'rolling_30', opts.sc ?? scope);
@@ -305,7 +328,7 @@ describe('getBotVolume — the per-bot column', () => {
     // 3 inline + 2 PR-level + 1 review body from CodeRabbit, + 9 inline from Greptile, on the one
     // PR. The 4 human inline comments and the pending draft review are both invisible.
     const loudId = prIdOf.get('xs_loud');
-    const page = await prPage({ limit: 50 });
+    const page = await prPage();
     const loud = page.items.find((i: any) => i.prId === loudId);
     expect(loud.botComments).toBe(15);
     expect(loud.byBot.find((b: any) => b.authorUserId === botCr).comments).toBe(6);
@@ -375,7 +398,7 @@ describe('getBotVolume — the per-bot column', () => {
   });
 });
 
-describe('getPrBotVolume — the drill-down, its baseline and its sorts', () => {
+describe('foldPrBotVolumePopulation — the scored per-PR fold, its baseline and its sorts', () => {
   it('lists only PRs the bot set touched, but reports the whole population as `total`', async () => {
     const r = await prPage();
     expect(r.total).toBe(10); // every merged PR in the window
@@ -397,7 +420,6 @@ describe('getPrBotVolume — the drill-down, its baseline and its sorts', () => 
     expect(loud.ratio).toBe(1.52); // 15 / 9.86
     expect(loud.loc).toBe(20);
     expect(loud.changedFiles).toBe(1);
-    expect(loud.commentsPer100Loc).toBe(75); // 15 / 20 × 100 — shipped, never the sort
   });
 
   it('THE SMALL-SAMPLE GUARD: a bucket under the floor falls back to the repo mean, and says so', async () => {
@@ -440,7 +462,6 @@ describe('getPrBotVolume — the drill-down, its baseline and its sorts', () => 
     expect(u.baseline).toBe('none');
     expect(u.expected).toBeNull();
     expect(u.ratio).toBeNull();
-    expect(u.commentsPer100Loc).toBeNull();
     // Its comments still count towards the totals — it is unmeasurable, not absent.
     expect(u.botComments).toBe(7);
   });
@@ -465,27 +486,6 @@ describe('getPrBotVolume — the drill-down, its baseline and its sorts', () => 
         (a: number, b: number) => b - a,
       ),
     );
-  });
-
-  it('pages with a TOTAL comparator: a cursor walk is exhaustive and duplicate-free', async () => {
-    // Four of the fixture rows tie at 1 comment, so an unstable comparator shows up here.
-    for (const sort of ['comments', 'ratio']) {
-      const seen: number[] = [];
-      let offset = 0;
-      for (;;) {
-        const p = await prPage({ sort, offset, limit: 2 });
-        seen.push(...p.items.map((i: any) => i.prId));
-        if (!p.nextCursor) break;
-        const m = /^o:(\d+)$/.exec(p.nextCursor);
-        expect(m).not.toBeNull();
-        const next = Number(m![1]);
-        // A cursor that does not advance is what a `while (nextCursor)` loop turns into a hang.
-        expect(next).toBeGreaterThan(offset);
-        offset = next;
-      }
-      expect(seen).toHaveLength(9);
-      expect(new Set(seen).size).toBe(9);
-    }
   });
 
   it('refine.authorUserIds narrows the count AND moves the baseline with it', async () => {
