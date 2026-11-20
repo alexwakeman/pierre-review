@@ -53,10 +53,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           Under <Ui>Pending mute</Ui>, tick <Ui>Mute this whole workspace</Ui> to mute every repository in it,
-          including ones added later. Or tick single repositories under <Ui>Mute individual repositories</Ui>.
-        </li>
-        <li>
-          Select <Ui>Save</Ui>.
+          including ones added later. Or tick single repositories under <Ui>Mute individual repositories</Ui>. Each
+          tick saves at once.
         </li>
       </Steps>
       <Note>

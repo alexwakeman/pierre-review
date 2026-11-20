@@ -27,7 +27,8 @@ import {
   useWorkspaceAutoReview,
 } from '../../hooks/useWorkspaceAutoReview.js';
 import { dateTime } from '../../lib/ui.js';
-import { SaveButton, SectionShell, CheckInput, RadioInput } from './ui.js';
+import { SectionShell, CheckInput, RadioInput } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 
 const CAP_MIN = 1;
 const CAP_MAX = 500;
@@ -58,18 +59,18 @@ import { Select } from '../ui/index.js';
  * AUTO AI FIX is the second switch (`autoFixEnabled`, `workspaces.auto_fix_enabled`, migration
  * 0083 / pg 0070) — OFF by default since 0084 / pg 0071. It only runs after an auto review of the reader's own PR, so
  * it is DIMMED and inert while auto review is off; its value is kept, never cleared, so turning
- * auto review back on restores it. One Save writes both.
+ * auto review back on restores it.
  *
  * THE DAILY CAP (`dailyCap`, `workspaces.auto_review_daily_cap`, migration 0085 / pg 0072) is an
  * integer 1..500 typed beside the switch; the server stores it as an override (20 = the default).
  * A text box with a numeric keypad, not `type="number"`, so a half-typed value is visible and an
- * invalid one shuts Save with a reason instead of being clamped silently. Same Save as the rest.
+ * invalid one is not saved and says why instead of being clamped silently.
  *
  * AUTO-POSTING (`autoPost`, `workspaces.auto_post_enabled` + `auto_post_settings`, migration 0087 /
  * pg 0074) — ON by default (only a stored false is off; it acts on AUTO runs only). A master switch, the WHICH-PRs choice and one checkbox per kind.
  * Every control under the master switch is DIMMED, never disabled, while it is off (the reader can
  * set it up first), and the whole block is dimmed while auto review is off (it acts on auto runs
- * only). Same Save as the rest; only what changed is sent.
+ * only). Only what changed is sent.
  *
  * Under it, `autoVerdict` rides the same `autoPost` object (migration 0091 / pg 0078; ON by default
  * since 2026-11-04; the review's event becomes the stricter verdict — only when the reader's own last
@@ -87,11 +88,11 @@ import { Select } from '../ui/index.js';
  * DESIGN DIAGRAMS (`autoDiagramsEnabled`, `workspaces.auto_diagrams_enabled`, migration 0126) — ON
  * by default. A diagram is drawn after EVERY review, yours or automatic, so this switch is NOT
  * dimmed by auto review. Off stops only the automatic draw; the Draw button on the PR still works.
- * Same Save as the rest.
+ *
  *
  * STORY CHECKS READ EVERY REPOSITORY (`storyCheckAllRepos`, `workspaces.story_check_all_repos`, migration
  * 0211) — ON by default (only a stored false is off). Every story check, manual or automatic, so NOT
- * dimmed by auto review. Explained behind its ⓘ. Same Save as the rest.
+ * dimmed by auto review. Explained behind its ⓘ.
  *
  * Under "Approve or request changes", three checkboxes — one per blast-radius level
  * (`autoPost.approveImpact`, overrides-only JSON, all on by default) — say which PRs may be
@@ -105,6 +106,9 @@ import { Select } from '../ui/index.js';
  * default); and — ONLY while both Claude and Codex are signed in — "When Claude and Codex disagree"
  * (`pairStrictness`: strict, the default, or relaxed), explained behind its ⓘ. It governs every pair
  * verdict (yours too), so it is not dimmed by the verdict switch.
+ *
+ * SAVES AS YOU GO (./autosave.tsx): every tick, radio and select writes at once; the daily cap after
+ * a pause in typing or on blur, and never while it is not a whole number in range.
  */
 
 const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
@@ -266,9 +270,6 @@ export function AutoReviewSection(): JSX.Element {
     setAutoPush(storedPush);
   }, [workspaceId, storedPush]);
 
-  if (workspaceId == null || settings.data == null) {
-    return <ScopePendingSection title="Auto review" failed={settings.isError} />;
-  }
   const cap = parseCap(capText);
   const capDirty = cap != null && cap !== storedCap;
   const postDirty =
@@ -280,6 +281,58 @@ export function AutoReviewSection(): JSX.Element {
     !sameImpact(impact, storedImpact) ||
     leftovers !== storedLeftovers;
   const fixSettingsDirty = autoPush !== storedPush || !sameInclude(include, storedInclude);
+  const dirty =
+    stored != null &&
+    (on !== storedOn ||
+      fixOn !== storedFix ||
+      diagramsOn !== storedDiagrams ||
+      allRepos !== storedAllRepos ||
+      providers !== storedProviders ||
+      strictness !== storedStrictness ||
+      capDirty ||
+      postDirty ||
+      fixSettingsDirty);
+  // Only what changed, plus the two switches the route always takes.
+  const body = {
+    enabled: on,
+    autoFixEnabled: fixOn,
+    ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
+    ...(allRepos !== storedAllRepos ? { storyCheckAllRepos: allRepos } : {}),
+    ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
+    ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
+    ...(capDirty && cap != null ? { dailyCap: cap } : {}),
+    ...(postDirty
+      ? {
+          autoPost: {
+            enabled: postOn,
+            scope,
+            kinds,
+            autoVerdict: verdict,
+            resolveOwnPrs: resolveOwn,
+            approveImpact: impact,
+            approveLeftovers: leftovers,
+          },
+        }
+      : {}),
+    ...(fixSettingsDirty ? { autoFix: { include, autoPush } } : {}),
+  };
+  const autosave = useAutoSave({
+    key: JSON.stringify(body),
+    ready: workspaceId != null && dirty && cap != null,
+    busy: update.isPending,
+    run: () => update.mutate(body),
+  });
+  /** A tick, radio or select: written at once. */
+  const n =
+    <A extends unknown[]>(f: (...a: A) => void) =>
+    (...a: A): void => {
+      autosave.now();
+      f(...a);
+    };
+
+  if (workspaceId == null || settings.data == null) {
+    return <ScopePendingSection title="Auto review" failed={settings.isError} />;
+  }
 
   return (
     <SectionShell
@@ -317,7 +370,7 @@ export function AutoReviewSection(): JSX.Element {
         <CheckInput
           className="mt-0.5"
           checked={on}
-          onChange={(e) => setOn(e.target.checked)}
+          onChange={(e) => n(setOn)(e.target.checked)}
         />
         <span>
           <span className="font-medium text-ui-ink">
@@ -336,7 +389,7 @@ export function AutoReviewSection(): JSX.Element {
               label="Auto reviews use"
               size="sm"
               value={providers}
-              onChange={(v) => setProviders(v === 'both' ? 'both' : 'default')}
+              onChange={(v) => n(setProviders)(v === 'both' ? 'both' : 'default')}
               options={[
                 { value: 'both' as const, label: `${PAIR_PICK_LABEL} (the default)` },
                 { value: 'default' as const, label: `${oneVendor} only` },
@@ -372,7 +425,7 @@ export function AutoReviewSection(): JSX.Element {
                     name="pair-strictness"
                     className="mt-0.5"
                     checked={strictness === value}
-                    onChange={() => setStrictness(value)}
+                    onChange={() => n(setStrictness)(value)}
                   />
                   <span>{label}</span>
                 </label>
@@ -404,7 +457,7 @@ export function AutoReviewSection(): JSX.Element {
                 name="auto-review-outcome"
                 className="mt-0.5"
                 checked={!postOn}
-                onChange={() => setPostOn(false)}
+                onChange={() => n(setPostOn)(false)}
               />
               <span>
                 Keep it in Ensemble
@@ -418,7 +471,7 @@ export function AutoReviewSection(): JSX.Element {
                 name="auto-review-outcome"
                 className="mt-0.5"
                 checked={postOn}
-                onChange={() => setPostOn(true)}
+                onChange={() => n(setPostOn)(true)}
               />
               <span>
                 Post to GitHub
@@ -472,7 +525,7 @@ export function AutoReviewSection(): JSX.Element {
                 name="auto-post-scope"
                 className="mt-0.5"
                 checked={scope === 'mine'}
-                onChange={() => setScope('mine')}
+                onChange={() => n(setScope)('mine')}
               />
               <span>Your own PRs, and PRs you are asked to review or have reviewed or commented on</span>
             </label>
@@ -481,7 +534,7 @@ export function AutoReviewSection(): JSX.Element {
                 name="auto-post-scope"
                 className="mt-0.5"
                 checked={scope === 'all'}
-                onChange={() => setScope('all')}
+                onChange={() => n(setScope)('all')}
               />
               <span>Every PR auto review covers</span>
             </label>
@@ -493,7 +546,7 @@ export function AutoReviewSection(): JSX.Element {
                 <CheckInput
                   className="mt-0.5"
                   checked={kinds[key]}
-                  onChange={(e) => setKinds((k) => ({ ...k, [key]: e.target.checked }))}
+                  onChange={(e) => n(setKinds)((k) => ({ ...k, [key]: e.target.checked }))}
                 />
                 <span>{label}</span>
               </label>
@@ -503,7 +556,7 @@ export function AutoReviewSection(): JSX.Element {
             <CheckInput
               className="mt-0.5"
               checked={verdict}
-              onChange={(e) => setVerdict(e.target.checked)}
+              onChange={(e) => n(setVerdict)(e.target.checked)}
             />
             <span>
               <span className="font-medium text-ui-ink">
@@ -535,7 +588,7 @@ export function AutoReviewSection(): JSX.Element {
                 <CheckInput
                   className="mt-0.5"
                   checked={impact[key]}
-                  onChange={(e) => setImpact((v) => ({ ...v, [key]: e.target.checked }))}
+                  onChange={(e) => n(setImpact)((v) => ({ ...v, [key]: e.target.checked }))}
                 />
                 <span>{label}</span>
               </label>
@@ -558,7 +611,7 @@ export function AutoReviewSection(): JSX.Element {
                   name="approve-leftovers"
                   className="mt-0.5"
                   checked={leftovers === value}
-                  onChange={() => setLeftovers(value)}
+                  onChange={() => n(setLeftovers)(value)}
                 />
                 <span>{label}</span>
               </label>
@@ -569,7 +622,7 @@ export function AutoReviewSection(): JSX.Element {
       </div>
       <div className="flex items-start gap-1 pl-5 text-body" data-resolve-own>
         <label className="flex items-start gap-2 text-ui-ink">
-          <CheckInput className="mt-0.5" checked={resolveOwn} onChange={(e) => setResolveOwn(e.target.checked)} />
+          <CheckInput className="mt-0.5" checked={resolveOwn} onChange={(e) => n(setResolveOwn)(e.target.checked)} />
           <span className="font-medium">Resolve my Ensemble threads when addressed</span>
         </label>
         <InfoButton title="Resolve my Ensemble threads when addressed">
@@ -595,6 +648,10 @@ export function AutoReviewSection(): JSX.Element {
             className="w-16 rounded-ui bg-ui-raise px-2 py-1 text-body ring-1 ring-inset ring-ui-line outline-none focus:ring-2 focus:ring-ui-accent"
             value={capText}
             onChange={(e) => setCapText(e.target.value)}
+            onBlur={autosave.flush}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') autosave.flush();
+            }}
           />
           <span>auto reviews a day (UTC). The rest wait for the next day.</span>
         </label>
@@ -610,7 +667,7 @@ export function AutoReviewSection(): JSX.Element {
             className="mt-0.5"
             checked={fixOn}
             disabled={!on}
-            onChange={(e) => setFixOn(e.target.checked)}
+            onChange={(e) => n(setFixOn)(e.target.checked)}
           />
           <span>
             <span className="font-medium text-ui-ink">
@@ -653,7 +710,7 @@ export function AutoReviewSection(): JSX.Element {
               <CheckInput
                 className="mt-0.5"
                 checked={include[key]}
-                onChange={(e) => setInclude((v) => ({ ...v, [key]: e.target.checked }))}
+                onChange={(e) => n(setInclude)((v) => ({ ...v, [key]: e.target.checked }))}
               />
               <span>{label}</span>
             </label>
@@ -663,7 +720,7 @@ export function AutoReviewSection(): JSX.Element {
           <CheckInput
             className="mt-0.5"
             checked={autoPush}
-            onChange={(e) => setAutoPush(e.target.checked)}
+            onChange={(e) => n(setAutoPush)(e.target.checked)}
           />
           <span>
             <span className="font-medium text-ui-ink">Push automatically</span>
@@ -689,7 +746,7 @@ export function AutoReviewSection(): JSX.Element {
           <CheckInput
             className="mt-0.5"
             checked={diagramsOn}
-            onChange={(e) => setDiagramsOn(e.target.checked)}
+            onChange={(e) => n(setDiagramsOn)(e.target.checked)}
           />
           <span className="font-medium text-ui-ink">
             Draw a design diagram after each review
@@ -708,7 +765,7 @@ export function AutoReviewSection(): JSX.Element {
             className="mt-0.5"
             data-testid="story-check-all-repos"
             checked={allRepos}
-            onChange={(e) => setAllRepos(e.target.checked)}
+            onChange={(e) => n(setAllRepos)(e.target.checked)}
           />
           <span className="font-medium text-ui-ink">Story checks read every repository</span>
         </label>
@@ -729,51 +786,7 @@ export function AutoReviewSection(): JSX.Element {
           <p>Off: only the ticket’s pull requests.</p>
         </InfoButton>
       </div>
-      <SaveButton
-        dirty={
-          cap != null &&
-          (on !== storedOn ||
-            fixOn !== storedFix ||
-            diagramsOn !== storedDiagrams ||
-            allRepos !== storedAllRepos ||
-            providers !== storedProviders ||
-            strictness !== storedStrictness ||
-            capDirty ||
-            postDirty ||
-            fixSettingsDirty)
-        }
-        saving={update.isPending}
-        onClick={() =>
-          update.mutate({
-            enabled: on,
-            autoFixEnabled: fixOn,
-            ...(diagramsOn !== storedDiagrams ? { autoDiagramsEnabled: diagramsOn } : {}),
-            ...(allRepos !== storedAllRepos ? { storyCheckAllRepos: allRepos } : {}),
-            ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
-            ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
-            ...(capDirty && cap != null ? { dailyCap: cap } : {}),
-            ...(postDirty
-              ? {
-                  autoPost: {
-                    enabled: postOn,
-                    scope,
-                    kinds,
-                    autoVerdict: verdict,
-                    resolveOwnPrs: resolveOwn,
-                    approveImpact: impact,
-                    approveLeftovers: leftovers,
-                  },
-                }
-              : {}),
-            ...(fixSettingsDirty ? { autoFix: { include, autoPush } } : {}),
-          })
-        }
-      />
-      {update.isError && (
-        <div className="text-body text-ui-danger">
-          {(update.error as Error)?.message ?? 'Couldn’t save.'}
-        </div>
-      )}
+      <SaveState section="Auto review" mutation={update} dirty={dirty} />
     </SectionShell>
   );
 }

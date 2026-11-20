@@ -18,7 +18,8 @@ import {
 } from '../../lib/aiBudget.js';
 import { claudeSpendBodyOf, claudeSpendDraftOf, type ClaudeSpendDraft } from './claudeSpendForm.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls, CheckInput } from './ui.js';
+import { Field, SectionShell, inputCls, CheckInput } from './ui.js';
+import { SaveState, useAutoSave, useEchoGuard } from './autosave.js';
 import { Select } from '../ui/index.js';
 
 // "AI spend" — the ONE budget that pauses Limn's AUTOMATIC AI runs before they eat
@@ -64,7 +65,9 @@ export function ClaudeSpendSection(): JSX.Element | null {
   const data = q.data;
   const [draft, setDraft] = useState<Draft | null>(null);
   const storedKey = data == null ? '' : JSON.stringify(data.settings) + String(data.isDefault);
+  const echo = useEchoGuard(JSON.stringify(draft), null);
   useEffect(() => {
+    if (echo.keepDraft()) return;
     if (data != null) setDraft(draftOf(data));
     // Re-seed on first load and after a save (the stored settings changed).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,6 +78,24 @@ export function ClaudeSpendSection(): JSX.Element | null {
   // Unknown (still loading, an older server) ⇒ no 5-hour parts.
   const fiveHourLimit = data?.usage.fiveHourLimit === true;
   const info = <SpendInfo provider={provider} fiveHourLimit={fiveHourLimit} />;
+
+  // SAVES AS YOU GO (./autosave.tsx): the tick and the subscription pick write at once, a typed
+  // figure after a pause or on blur. An invalid figure is never written; the reason shows inline.
+  const route = data?.status.route ?? 'none';
+  const parsed = draft != null ? bodyOf(draft, route) : null;
+  const error = parsed != null && 'error' in parsed ? parsed.error : null;
+  const dirty = data != null && draft != null && JSON.stringify(draft) !== JSON.stringify(draftOf(data));
+  const autosave = useAutoSave({
+    key: JSON.stringify(draft),
+    ready: route !== 'none' && dirty && parsed != null && 'body' in parsed,
+    busy: save.isPending,
+    run: () => {
+      if (parsed != null && 'body' in parsed) {
+        echo.markSent();
+        save.mutate(parsed.body);
+      }
+    },
+  });
 
   if (q.isError) {
     return (
@@ -92,7 +113,6 @@ export function ClaudeSpendSection(): JSX.Element | null {
   }
 
   const { status, settings } = data;
-  const route = status.route;
 
   if (route === 'none') {
     return (
@@ -111,13 +131,15 @@ export function ClaudeSpendSection(): JSX.Element | null {
     );
   }
 
+  /** A typed figure: written after a pause (or on blur, `autosave.flush`). */
   const set = (patch: Partial<Draft>): void => setDraft({ ...draft, ...patch });
-  const parsed = bodyOf(draft, route);
-  const error = 'error' in parsed ? parsed.error : null;
-  const stored = draftOf(data);
-  const dirty = JSON.stringify(draft) !== JSON.stringify(stored);
-  const submit = (): void => {
-    if ('body' in parsed) save.mutate(parsed.body);
+  /** A tick, a pick or a button: written at once. */
+  const setNow = (patch: Partial<Draft>): void => {
+    autosave.now();
+    set(patch);
+  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') autosave.flush();
   };
 
   // OFF and not being set up: one line and the button that fills in the suggested values.
@@ -137,7 +159,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
           type="button"
           className={BTN}
           onClick={() =>
-            set({ enabled: true, weekSharePct: String(AI_BUDGET_DEFAULTS.weekSharePct) })
+            setNow({ enabled: true, weekSharePct: String(AI_BUDGET_DEFAULTS.weekSharePct) })
           }
         >
           Set a budget
@@ -167,7 +189,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
       }
     >
       <label className="flex items-center gap-2 text-body">
-        <CheckInput checked={draft.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
+        <CheckInput checked={draft.enabled} onChange={(e) => setNow({ enabled: e.target.checked })} />
         <span className="font-medium text-ui-ink">Pause automatic runs over budget</span>
       </label>
 
@@ -182,6 +204,8 @@ export function ClaudeSpendSection(): JSX.Element | null {
               placeholder={String(AI_BUDGET_DEFAULTS.weeklyUsd)}
               value={draft.weeklyUsd}
               onChange={(e) => set({ weeklyUsd: e.target.value })}
+              onBlur={autosave.flush}
+              onKeyDown={onKeyDown}
             />
           </Field>
         ) : (
@@ -198,6 +222,8 @@ export function ClaudeSpendSection(): JSX.Element | null {
                 className={NUM}
                 value={draft.weekSharePct}
                 onChange={(e) => set({ weekSharePct: e.target.value })}
+              onBlur={autosave.flush}
+              onKeyDown={onKeyDown}
               />
             </Field>
             {/* THE 5-HOUR SHARE: follows the weekly one unless the reader sets their own. Collapsed
@@ -226,10 +252,12 @@ export function ClaudeSpendSection(): JSX.Element | null {
                       placeholder={draft.weekSharePct}
                       value={draft.fiveHourSharePct}
                       onChange={(e) => set({ fiveHourSharePct: e.target.value })}
+              onBlur={autosave.flush}
+              onKeyDown={onKeyDown}
                     />
                   </Field>
                   {draft.fiveHourSharePct.trim() !== '' && (
-                    <button type="button" className={BTN} onClick={() => set({ fiveHourSharePct: '' })}>
+                    <button type="button" className={BTN} onClick={() => setNow({ fiveHourSharePct: '' })}>
                       Use the weekly share
                     </button>
                   )}
@@ -254,7 +282,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
                   id="ai-budget-subscription"
                   label="Your subscription"
                   value={draft.subscription != null && (pickFrom ?? []).includes(draft.subscription) ? draft.subscription : null}
-                  onChange={(v) => set({ subscription: v })}
+                  onChange={(v) => setNow({ subscription: v })}
                   options={(pickFrom ?? []).map((k) => ({ value: k, label: AI_SUBSCRIPTION_LABELS[k] }))}
                 />
               </Field>
@@ -269,13 +297,7 @@ export function ClaudeSpendSection(): JSX.Element | null {
         )}
       </div>
 
-      {error != null && draft.enabled && <p className="text-body text-ui-danger">{error}</p>}
-      {save.isError && (
-        <p className="text-body text-ui-danger">
-          {(save.error as Error)?.message || 'Couldn’t save the budget.'}
-        </p>
-      )}
-      <SaveButton dirty={dirty && error == null} saving={save.isPending} onClick={submit} />
+      <SaveState section="AI spend" mutation={save} dirty={dirty} invalid={dirty && draft.enabled ? error : null} />
 
       {status.enabled && (
         <div className="space-y-0.5 text-meta text-ui-mute" data-testid="ai-budget-status">

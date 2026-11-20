@@ -40,7 +40,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="changing-a-suffix">Changing a suffix</H2>
       <Warning>
-        Once a release exists, changing a suffix warns you before you save. Tags ending in the old suffix stop counting
+        Once a release exists, changing a suffix shows a warning, and the new suffix is saved only when you leave the box or press Enter. Tags ending in the old suffix stop counting
         as releases, so the next check starts again from the newest tag with the new one.
       </Warning>
     </>

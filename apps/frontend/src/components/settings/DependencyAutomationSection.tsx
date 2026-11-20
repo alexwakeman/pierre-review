@@ -13,7 +13,8 @@ import { useDependencyAutomation, useSetDependencyAutomation } from '../../hooks
 import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { automatedReviewerMeta } from '../../lib/ui.js';
 import { InfoButton } from '../InfoModal.js';
-import { CheckInput, RadioInput, SaveButton, SectionShell } from './ui.js';
+import { CheckInput, RadioInput, SectionShell } from './ui.js';
+import { SaveState, useAutoSave, useEchoGuard } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 // SETTINGS → DEPENDENCIES (CORE, free). Everything the server does to dependency updates in THIS
@@ -29,9 +30,8 @@ import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 //   • which of the workspace's dependency bots the reader TRUSTS (a mark on the bot's row; untouched,
 //     dependabot[bot] and renovate[bot] are trusted and no other bot — the server resolves it).
 //
-// ⚠ DRAFT + SAVE, like every other section in this modal — toggling a box writes NOTHING. A switch
-// that approves or merges on the reader's behalf is the last one that should fire on a stray click.
-// One Save sends only what changed.
+// Saves as you go (./autosave.tsx): each tick or radio writes at once, and each write sends only
+// what changed. "Only these" with no ecosystem ticked is never written (it would admit nothing).
 
 interface Draft {
   autoMerge: boolean;
@@ -62,7 +62,7 @@ function draftOf(r: WorkspaceDependencyAutomationResponse): Draft {
 const sameList = <T,>(a: readonly T[] | null, b: readonly T[] | null): boolean =>
   a === b || (a != null && b != null && a.length === b.length && a.every((x, i) => x === b[i]));
 
-/** Only what changed — the patch a Save sends. */
+/** Only what changed — the patch a write sends. */
 function patchOf(stored: Draft, d: Draft): DependencyAutomationPatch {
   const p: DependencyAutomationPatch = {};
   if (d.autoMerge !== stored.autoMerge) p.autoMerge = d.autoMerge;
@@ -126,17 +126,34 @@ export function DependencyAutomationSection(): JSX.Element {
   // half-made edit.
   const storedKey = stored ? JSON.stringify(stored) : null;
   const [draft, setDraft] = useState<Draft | null>(stored);
+  const echo = useEchoGuard(JSON.stringify(draft), workspaceId);
   useEffect(() => {
+    if (echo.keepDraft()) return;
     setDraft(stored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, storedKey]);
 
+  const patch = stored != null && draft != null ? patchOf(stored, draft) : {};
+  const dirty = Object.keys(patch).length > 0;
+  // "Only these" with nothing ticked would admit nothing at all — never saved that way.
+  const noEcosystem = draft?.ecosystems != null && draft.ecosystems.length === 0;
+  const autosave = useAutoSave({
+    key: JSON.stringify(draft),
+    ready: dirty && !noEcosystem,
+    busy: save.isPending,
+    run: () => {
+      echo.markSent();
+      save.mutate(patch);
+    },
+  });
+
   if (workspaceId == null || stored == null || draft == null || data == null) {
     return <ScopePendingSection title="Dependency updates" failed={query.isError} />;
   }
-  const patch = patchOf(stored, draft);
-  const dirty = Object.keys(patch).length > 0;
-  const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p });
+  const set = (p: Partial<Draft>) => {
+    autosave.now();
+    setDraft({ ...draft, ...p });
+  };
   const toggleEco = (e: DependencyEcosystem, on: boolean) => {
     const cur = new Set(draft.ecosystems ?? []);
     if (on) cur.add(e);
@@ -150,8 +167,6 @@ export function DependencyAutomationSection(): JSX.Element {
     set({ trusted: [...cur].sort((a, b) => a - b) });
   };
   const trustedNeeded = draft.autoApprove || draft.autoResolveConflicts || draft.autoFix;
-  // "Only these" with nothing ticked would admit nothing at all — never saved that way.
-  const noEcosystem = draft.ecosystems != null && draft.ecosystems.length === 0;
 
   return (
     <SectionShell
@@ -307,15 +322,13 @@ export function DependencyAutomationSection(): JSX.Element {
         )}
       </fieldset>
 
-      {noEcosystem && <p className="text-meta text-ui-mute">Tick at least one ecosystem, or pick All ecosystems.</p>}
-      <SaveButton dirty={dirty && !noEcosystem} saving={save.isPending} onClick={() => save.mutate(patch)} />
       <p className="text-meta text-ui-faint">Applies to this workspace only.</p>
-
-      {save.isError && (
-        <div className="text-meta text-ui-danger">
-          {(save.error as Error)?.message ?? 'Couldn’t save these settings.'}
-        </div>
-      )}
+      <SaveState
+        section="Dependency updates"
+        mutation={save}
+        dirty={dirty}
+        invalid={noEcosystem ? 'tick at least one ecosystem, or pick All ecosystems.' : null}
+      />
     </SectionShell>
   );
 }

@@ -5,7 +5,7 @@
 //      reason; nothing on an approval; "Posted on GitHub." when it went out alone. The Post-to-GitHub
 //      section does not repeat it (`autoVerdictLine`), and a replies pass says it too.
 //   2. Settings: "When Claude and Codex disagree" shows ONLY while both are signed in
-//      (`pairReviewReady`), with an ⓘ; "Approve with open findings" sits under Approve; both ride Save.
+//      (`pairReviewReady`), with an ⓘ; "Approve with open findings" sits under Approve; both are written as soon as they change.
 //
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend verdictStrictness
 import { readFileSync } from 'node:fs';
@@ -121,7 +121,7 @@ describe('Settings → Auto review', () => {
     expect(s).toMatch(/binary file/);
   });
 
-  it('"Approve with open findings" sits under Approve, with three choices, and both rules ride Save', () => {
+  it('"Approve with open findings" sits under Approve, with three choices, and both rules are written with the rest', () => {
     const s = src('components/settings/AutoReviewSection.tsx');
     expect(s.indexOf('Approve with open findings')).toBeGreaterThan(s.indexOf('IMPACT_ROWS.map'));
     for (const label of ['Only when nothing is left open', 'When only nits are left', 'When only nits and questions are left']) {

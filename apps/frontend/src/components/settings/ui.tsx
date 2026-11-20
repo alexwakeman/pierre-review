@@ -1,5 +1,5 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Button, cx, FOCUS_RING } from '../ui/index.js';
+import { cx, FOCUS_RING } from '../ui/index.js';
 import { CheckIcon } from '../Icons.js';
 
 // Shared, READ-ONLY presentational helpers for the config-modal sections. Kept in one small
@@ -8,8 +8,8 @@ import { CheckIcon } from '../Icons.js';
 //
 // THE REDESIGN (docs/redesign/DESIGN.md): sections are separated by SPACE, never a rule; a
 // section's heading is the one `text-title`, its consequence line `text-meta`, its controls
-// `text-body`; fields are a raised tone with a hairline ring; the Save is the section's ONE primary
-// button; checkboxes and radios are real <input>s, restyled (`CheckInput` / `RadioInput` below for
+// `text-body`; fields are a raised tone with a hairline ring; there is NO Save button — every section
+// saves as you go (./autosave.tsx); checkboxes and radios are real <input>s, restyled (`CheckInput` / `RadioInput` below for
 // rows that lay out their own label; the `Checkbox` / `Radio` primitives in ui/ otherwise).
 //
 // ⚠ THERE IS NO `SectionProps` ANY MORE, AND THAT IS A GRAIN FACT, NOT A TIDY-UP. It was
@@ -17,7 +17,7 @@ import { CheckIcon } from '../Icons.js';
 // mutation, threaded down into whichever sections wrote at that grain. No section does: the last
 // account-grained control in this modal, the comparison-window mode, moved onto the workspace row
 // in plugin migration 0032, and the bot Slack-digest toggle onto the delivery row in 0033. Every
-// remaining section owns its OWN scoped query and mutation, which is what makes a Save's blast
+// remaining section owns its OWN scoped query and mutation, which is what makes a write's blast
 // radius a property of the section rather than of a prop somebody passed it.
 
 export function SectionShell({
@@ -93,24 +93,6 @@ export function Field({
  *  ring, the accent ring on focus, 40px tall on touch. */
 export const inputCls =
   'w-full rounded-ui bg-ui-raise px-2.5 py-1.5 text-body text-ui-ink ring-1 ring-inset ring-ui-line placeholder:text-ui-faint outline-none focus:ring-2 focus:ring-ui-accent disabled:opacity-50 touch:py-2.5 [color-scheme:light] dark:[color-scheme:dark]';
-
-export function SaveButton({
-  dirty,
-  saving,
-  onClick,
-}: {
-  dirty: boolean;
-  saving: boolean;
-  onClick: () => void;
-}): JSX.Element {
-  // The section's ONE primary action, disabled until something changed — so a glance says which
-  // section holds an unsaved draft.
-  return (
-    <Button variant="primary" size="sm" onClick={onClick} disabled={!dirty || saving} className="self-start">
-      {saving ? 'Saving…' : 'Save'}
-    </Button>
-  );
-}
 
 type BareInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
 

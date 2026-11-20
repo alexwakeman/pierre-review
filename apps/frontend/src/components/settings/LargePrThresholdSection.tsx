@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LARGE_PR_CODE_LOC_DEFAULT } from '@pierre-review/shared';
 import { useMe } from '../../hooks/useTriage.js';
 import { useSetLargePrThreshold } from '../../hooks/useLargePr.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SectionShell, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 
 // The large-PR threshold — CORE / free, both deployment modes, every tier. A pull request whose
 // CODE churn (documentation, config, lockfiles, generated and vendored output all excluded by the
@@ -43,14 +44,33 @@ export function LargePrThresholdSection(): JSX.Element {
   const storedText = stored == null ? '' : String(stored);
 
   const [draft, setDraft] = useState(storedText);
-  // Re-seed when the server value changes (first load, and after a successful save).
+  // What this field last wrote. When the server echoes it back the reader may already have typed
+  // on, so the echo must not re-seed (it would eat the newer keystrokes).
+  const sent = useRef<string | null>(null);
+  // Re-seed when the server value changes (first load, or a change made elsewhere).
   useEffect(() => {
+    if (sent.current === storedText) {
+      sent.current = null;
+      return;
+    }
     setDraft(storedText);
   }, [storedText]);
 
   const parsed = parseDraft(draft);
   const error = 'error' in parsed ? parsed.error : null;
   const dirty = draft.trim() !== storedText;
+  // Saves as you go (./autosave.tsx): after a pause in typing, and at once on blur / Enter. An
+  // invalid number is never sent.
+  const autosave = useAutoSave({
+    key: draft.trim(),
+    ready: dirty && error == null,
+    busy: save.isPending,
+    run: () => {
+      if (!('value' in parsed)) return;
+      sent.current = draft.trim();
+      save.mutate(parsed.value);
+    },
+  });
 
   return (
     <SectionShell
@@ -72,7 +92,7 @@ export function LargePrThresholdSection(): JSX.Element {
           <>
             Leave empty to use the default of{' '}
             {LARGE_PR_CODE_LOC_DEFAULT.toLocaleString()} lines. Applies to every workspace, and
-            takes effect everywhere the moment you save.
+            takes effect everywhere as soon as it saves.
           </>
         }
       >
@@ -84,31 +104,18 @@ export function LargePrThresholdSection(): JSX.Element {
           value={draft}
           placeholder={`Default (${LARGE_PR_CODE_LOC_DEFAULT.toLocaleString()})`}
           onChange={(e) => setDraft(e.target.value)}
+          onBlur={autosave.flush}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') autosave.flush();
+          }}
           aria-invalid={error != null}
           aria-describedby={error != null ? 'large-pr-threshold-error' : undefined}
         />
       </Field>
 
-      {error != null && (
-        <div id="large-pr-threshold-error" className="text-meta text-ui-danger">
-          {error}
-        </div>
-      )}
-
-      <SaveButton
-        dirty={dirty && error == null}
-        saving={save.isPending}
-        onClick={() => {
-          if (error != null || !('value' in parsed)) return;
-          save.mutate(parsed.value);
-        }}
-      />
-
-      {save.isError && (
-        <div className="text-meta text-ui-danger">
-          {(save.error as Error)?.message ?? 'Couldn’t save your threshold.'}
-        </div>
-      )}
+      <div id="large-pr-threshold-error">
+        <SaveState section="Large pull requests" mutation={save} dirty={dirty} invalid={error} />
+      </div>
     </SectionShell>
   );
 }

@@ -14,7 +14,8 @@ import { api } from '../../api/client.js';
 import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
 import { NotionIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, inputCls } from './ui.js';
+import { Field, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { Select } from '../ui/index.js';
 
 const SECONDARY_BTN =
@@ -26,7 +27,10 @@ const CATEGORY_LABEL: Record<JiraStatusCategory, string> = { new: 'To do', indet
  * NOTION — the token and the PROPERTY MAPPING for ONE workspace (docs/TRACKERS.md § Notion). Mounted by
  * IssueLinksSection only when the SAVED tracker is Notion with a database URL.
  *
- * ⚠ THE TOKEN IS WRITE-ONLY (`jira.hasToken`, the workspace's one tracker credential).
+ * ⚠ THE TOKEN IS WRITE-ONLY (`jira.hasToken`, the workspace's one tracker credential). No Save button
+ * (./autosave.tsx): the token is written on blur or Enter of a non-empty value; the mapping saves as it
+ * is picked. A freshly read FIRST mapping (nothing saved yet) saves as soon as it is valid; on "Change
+ * mapping" only the reader's own picks write.
  * ⚠ THE SCHEMA READ IS CLICK-GATED ("Read database": one Notion call with the SAVED token). A database
  * with no prefixed Unique ID is refused with the server's sentence — nothing can be mapped.
  */
@@ -40,17 +44,21 @@ export function NotionTrackerSetup({
   saved: NotionTrackerMapping | null;
 }): JSX.Element {
   const mutation = useUpdateWorkspaceTracker(workspaceId);
+  const mappingSave = useUpdateWorkspaceTracker(workspaceId);
   const schema = useMutation<NotionSchemaResponse, Error, void>({ mutationFn: () => api.notionSchema(workspaceId) });
   const read = schema.data?.workspaceId === workspaceId ? schema.data : null;
   const tokenId = useId();
   const [token, setToken] = useState('');
   const [replacing, setReplacing] = useState(false);
   const [draft, setDraft] = useState<NotionTrackerMapping | null>(null);
+  // The reader changed the mapping form (not just the read's suggestion).
+  const [touched, setTouched] = useState(false);
 
   useEffect(() => {
     setToken('');
     setReplacing(false);
     setDraft(null);
+    setTouched(false);
     schema.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspaceId, jira.hasToken]);
@@ -62,6 +70,27 @@ export function NotionTrackerSetup({
   const showInput = !jira.hasToken || replacing;
   const problem = draft != null ? notionMappingProblem(draft) : null;
   const dirty = draft != null && JSON.stringify(draft) !== JSON.stringify(saved);
+
+  const autosave = useAutoSave({
+    key: JSON.stringify(draft),
+    ready: draft != null && dirty && problem == null && (touched || saved == null),
+    busy: mappingSave.isPending,
+    run: () => draft != null && mappingSave.mutate({ notion: draft }),
+  });
+  const pick = (m: NotionTrackerMapping): void => {
+    setTouched(true);
+    autosave.now();
+    setDraft(m);
+  };
+  // A committed secret leaves the field at once and is never echoed (Replace closes too).
+  const clearToken = (): void => {
+    setToken('');
+    setReplacing(false);
+  };
+  const commitToken = (): void => {
+    if (typed === '' || mutation.isPending) return;
+    mutation.mutate({ jira: { token: typed } }, { onSuccess: clearToken });
+  };
 
   return (
     <div className="space-y-2.5 rounded-ui bg-ui-surface p-3.5">
@@ -85,7 +114,11 @@ export function NotionTrackerSetup({
         <Field
           label="Integration token"
           htmlFor={tokenId}
-          hint={jira.hasToken ? 'The new token replaces the saved one when you save.' : 'It starts with ntn_ or secret_. A saved token is never shown again.'}
+          hint={
+            jira.hasToken
+              ? 'Saved when you press Enter or leave the field. It replaces the saved one.'
+              : 'It starts with ntn_ or secret_. Saved when you press Enter or leave the field, and never shown again.'
+          }
         >
           <input
             id={tokenId}
@@ -95,6 +128,13 @@ export function NotionTrackerSetup({
             placeholder="ntn_…"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            onBlur={commitToken}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitToken();
+              }
+            }}
           />
         </Field>
       ) : (
@@ -114,9 +154,7 @@ export function NotionTrackerSetup({
           </button>
         </div>
       )}
-      {typed !== '' && (
-        <SaveButton dirty saving={mutation.isPending} onClick={() => mutation.mutate({ jira: { token: typed } })} />
-      )}
+      <SaveState section="Notion token" mutation={mutation} dirty={false} />
 
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -128,7 +166,7 @@ export function NotionTrackerSetup({
         >
           {schema.isPending ? 'Reading…' : saved != null ? 'Change mapping' : 'Read database'}
         </button>
-        {!jira.hasToken && <span className="text-meta text-ui-mute">Save a token first.</span>}
+        {!jira.hasToken && <span className="text-meta text-ui-mute">Add a token first.</span>}
         {read == null && saved != null && (
           <span className="text-meta text-ui-mute">{mappingSummary(saved)}</span>
         )}
@@ -140,19 +178,16 @@ export function NotionTrackerSetup({
       {read?.refusal != null && <p className="text-body text-ui-danger">{read.refusal}</p>}
 
       {read != null && read.refusal == null && draft != null && (
-        <MappingForm schema={read} draft={draft} onChange={setDraft} />
+        <MappingForm schema={read} draft={draft} onChange={pick} />
       )}
       {read != null && draft != null && (
-        <>
-          {problem != null && <p className="text-body text-ui-danger">{problem}</p>}
-          <SaveButton
-            dirty={dirty && problem == null}
-            saving={mutation.isPending}
-            onClick={() => mutation.mutate({ notion: draft })}
-          />
-        </>
+        <SaveState
+          section="Notion mapping"
+          mutation={mappingSave}
+          dirty={dirty && (touched || saved == null)}
+          invalid={problem}
+        />
       )}
-      {mutation.isError && <p className="text-body text-ui-danger">{mutation.error.message}</p>}
     </div>
   );
 }

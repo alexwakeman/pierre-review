@@ -13,7 +13,8 @@ import { LinearApiAccess } from './LinearApiAccess.js';
 import { NotionTrackerSetup } from './NotionTrackerSetup.js';
 import { TrackerCopyFrom } from './TrackerCopyFrom.js';
 import { InfoButton } from '../InfoModal.js';
-import { Field, SaveButton, SectionShell, inputCls } from './ui.js';
+import { Field, SectionShell, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { Select, type SelectOption } from '../ui/index.js';
 
@@ -54,8 +55,13 @@ const LABEL: Record<TrackerProvider, string> = { jira: 'Jira', linear: 'Linear',
  * ⚠ THE WORKSPACE IS NAMED ONCE, IN THE MODAL'S "Workspace" HEADING, NOT IN THIS TITLE. The name
  * is still load-bearing (there is no picker in Settings), but three sections each appending
  * "— acme-web" to their heading was one fact three times. The BLAST RADIUS claim — this tracker
- * governs this workspace's repos and nobody else's — is a different claim and stays here, where
- * the Save button is.
+ * governs this workspace's repos and nobody else's — is a different claim and stays here, beside
+ * the fields that write.
+ *
+ * NO SAVE BUTTON (./autosave.tsx). The provider and "Where to look" save when picked; project keys
+ * save as you type (debounced, at once on blur / Enter). Only what changed is sent — a provider
+ * change sends the provider alone. ⚠ THE BASE URL SAVES ONLY ON BLUR / ENTER, never per keystroke:
+ * moving it to another site removes the saved token, so a half-typed address must never be written.
  */
 /** The heading the modal lands on for `openSettings('issue-tracker')` (This Sprint's setup button). */
 export const ISSUE_TRACKER_SECTION_HEADING_ID = 'settings-issue-tracker-heading';
@@ -67,7 +73,7 @@ export function IssueLinksSection(): JSX.Element {
   const data = query.data;
 
   // Re-seeded on the resolved workspace / STORED VALUE: an uncontrolled seed would leave the
-  // previous workspace's tracker in the inputs after a switch, and Save would write it here.
+  // previous workspace's tracker in the inputs after a switch, and an autosave would write it here.
   //
   // ⚠ KEYED ON THE VALUES, NOT ON THE RESPONSE OBJECT — a `[data]` dependency re-seeds on every
   // background refetch (a window focus past the 60s staleTime), reverting a half-typed base URL.
@@ -75,17 +81,63 @@ export function IssueLinksSection(): JSX.Element {
   const [baseUrl, setBaseUrl] = useState('');
   const [projectKeys, setProjectKeys] = useState('');
   const [matchScope, setMatchScope] = useState<IssueMatchScope>('title_branch');
-  const signature = data
-    ? `${workspaceId ?? 'none'}:${data.issue.provider ?? 'none'}:${data.issue.baseUrl ?? 'none'}:${data.issue.projectKeys.join(',')}:${data.issue.matchScope}`
-    : `${workspaceId ?? 'none'}:pending`;
+  // The base URL as typed has been committed (blur / Enter) — only then may it be written.
+  const [urlCommitted, setUrlCommitted] = useState(false);
+  // Each field re-seeds on its OWN stored value, so one write landing never wipes a half-typed other.
+  const ws = workspaceId ?? 'none';
+  const storedProvider = data?.issue.provider;
+  const storedBaseUrl = data?.issue.baseUrl;
+  const storedKeys = data?.issue.projectKeys.join(',');
+  const storedScope = data?.issue.matchScope;
   useEffect(() => {
-    if (data == null) return;
-    setProvider(data.issue.provider ?? '');
-    setBaseUrl(data.issue.baseUrl ?? '');
-    setProjectKeys(data.issue.projectKeys.join(', '));
-    setMatchScope(data.issue.matchScope);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+    if (storedProvider !== undefined) setProvider(storedProvider ?? '');
+  }, [ws, storedProvider]);
+  useEffect(() => {
+    if (storedBaseUrl === undefined) return;
+    setBaseUrl(storedBaseUrl ?? '');
+    setUrlCommitted(false);
+  }, [ws, storedBaseUrl]);
+  useEffect(() => {
+    if (storedKeys !== undefined) setProjectKeys(storedKeys.split(',').filter((k) => k !== '').join(', '));
+  }, [ws, storedKeys]);
+  useEffect(() => {
+    if (storedScope !== undefined) setMatchScope(storedScope);
+  }, [ws, storedScope]);
+
+  // Project keys as a comma-separated string in the input; parsed to a list on save. The saved
+  // list is normalized (uppercase), so compare against its comma-joined form.
+  const parsedKeys = projectKeys
+    .split(/[\s,]+/)
+    .map((k) => k.trim().toUpperCase())
+    .filter((k) => k !== '');
+
+  // ONLY WHAT CHANGED is sent. GitHub Issues asks for nothing: a provider change sends ONLY the
+  // provider — the stored Jira URL and token are kept for a switch back (a token is dropped only
+  // when the URL itself moves).
+  const saved = data?.issue;
+  const fields = provider === '' ? null : TRACKER_PROVIDER_FIELDS[provider];
+  const providerChanged = saved != null && (provider || null) !== saved.provider;
+  const urlChanged = saved != null && fields?.baseUrl === true && baseUrl.trim() !== (saved.baseUrl ?? '');
+  const keysChanged = saved != null && fields?.projectKeys === true && parsedKeys.join(',') !== saved.projectKeys.join(',');
+  const scopeChanged = saved != null && fields?.matchScope === true && matchScope !== saved.matchScope;
+  const urlInvalid = urlChanged && baseUrl.trim() !== '' && !/^https?:\/\/[^\s/]+/i.test(baseUrl.trim());
+  const patch: NonNullable<WorkspaceTrackerUpdate['issue']> = {
+    ...(providerChanged ? { provider: provider === '' ? null : provider } : {}),
+    ...(urlChanged && urlCommitted && !urlInvalid ? { baseUrl: baseUrl.trim() === '' ? null : baseUrl.trim() } : {}),
+    ...(keysChanged ? { projectKeys: parsedKeys } : {}),
+    ...(scopeChanged ? { matchScope } : {}),
+  };
+  const dirty = providerChanged || urlChanged || keysChanged || scopeChanged;
+  const autosave = useAutoSave({
+    key: `${ws}:${JSON.stringify(patch)}`,
+    ready: workspaceId != null && Object.keys(patch).length > 0,
+    busy: mutation.isPending,
+    run: () => mutation.mutate({ issue: patch }),
+  });
+  const commitUrl = (): void => {
+    autosave.now();
+    setUrlCommitted(true);
+  };
 
   // ⚠ NOTHING RENDERS — AND NOTHING SAVES — AGAINST AN UNRESOLVED SCOPE. A PUT with no
   // `?workspace=` is answered by the account's DEFAULT workspace.
@@ -93,40 +145,15 @@ export function IssueLinksSection(): JSX.Element {
     return <ScopePendingSection title="Issue tracker" failed={query.isError} />;
   }
 
-  const saved = data.issue;
+  const issue = data.issue;
   // The workspace's repos that use GitHub Issues, and whether the provider was picked for it.
   const detected = data.githubIssuesRepos;
-  const autoPicked = !data.providerChosen && saved.provider === 'github';
+  const autoPicked = !data.providerChosen && issue.provider === 'github';
   const autoReason =
     detected.length === 1
       ? `Picked automatically: ${detected[0]} uses GitHub Issues.`
       : `Picked automatically: ${detected[0]} and ${detected.length - 1} more ${detected.length === 2 ? 'repo use' : 'repos use'} GitHub Issues.`;
-  // Project keys as a comma-separated string in the input; parsed to a list on save. The saved
-  // list is normalized (uppercase), so compare against its comma-joined form.
-  const parsedKeys = projectKeys
-    .split(/[\s,]+/)
-    .map((k) => k.trim().toUpperCase())
-    .filter((k) => k !== '');
   const hasKeys = parsedKeys.length > 0;
-
-  // What this provider asks for. GitHub Issues asks for nothing: only a change of provider is a
-  // change, and its Save sends ONLY the provider — the stored Jira URL and token are kept for a
-  // switch back (a token is dropped only when the URL itself moves).
-  const fields = provider === '' ? null : TRACKER_PROVIDER_FIELDS[provider];
-  const dirty =
-    (provider || null) !== saved.provider ||
-    (fields?.baseUrl === true && baseUrl.trim() !== (saved.baseUrl ?? '')) ||
-    (fields?.projectKeys === true && parsedKeys.join(',') !== saved.projectKeys.join(',')) ||
-    (fields?.matchScope === true && matchScope !== saved.matchScope);
-  const patch: WorkspaceTrackerUpdate['issue'] =
-    provider === ''
-      ? { provider: null }
-      : {
-          provider,
-          ...(fields?.baseUrl ? { baseUrl: baseUrl.trim() === '' ? null : baseUrl.trim() } : {}),
-          ...(fields?.projectKeys ? { projectKeys: parsedKeys } : {}),
-          ...(fields?.matchScope ? { matchScope } : {}),
-        };
 
   return (
     <SectionShell
@@ -162,14 +189,17 @@ export function IssueLinksSection(): JSX.Element {
       {/* Offered only when another workspace has a tracker set up (renders nothing otherwise). */}
       <TrackerCopyFrom
         workspaceId={workspaceId}
-        hasTracker={saved.provider != null && (!TRACKER_PROVIDER_FIELDS[saved.provider].baseUrl || (saved.baseUrl ?? '') !== '')}
+        hasTracker={issue.provider != null && (!TRACKER_PROVIDER_FIELDS[issue.provider].baseUrl || (issue.baseUrl ?? '') !== '')}
       />
       <Field group label="Provider">
         <Select
           label="Provider"
           className="w-full sm:w-auto"
           value={provider}
-          onChange={(v) => setProvider(v)}
+          onChange={(v) => {
+            autosave.now();
+            setProvider(v);
+          }}
           options={[
             { value: '' as TrackerProvider | '', label: 'None' },
             ...TRACKER_PROVIDERS_AVAILABLE.map((p) => ({
@@ -186,7 +216,7 @@ export function IssueLinksSection(): JSX.Element {
       )}
       {/* ⚠ THE AUTOMATIC DEFAULT NAMES ITS REASON. With no choice saved the server picks GitHub
           Issues when a repo here uses it (docs/TRACKERS.md § Automatic default); choosing None and
-          saving stores None, which then wins. */}
+          stores None, which then wins. */}
       {autoPicked && provider === 'github' && (
         <p className="text-meta text-ui-mute">{autoReason}</p>
       )}
@@ -196,10 +226,10 @@ export function IssueLinksSection(): JSX.Element {
             label={provider === 'linear' ? 'Workspace URL' : provider === 'notion' ? 'Database URL' : 'Base URL'}
             hint={
               provider === 'jira'
-                ? `Tickets link to {base}/browse/KEY-123.${data.jira.hasToken ? ' Moving to a different Jira site removes the saved API token.' : ''}`
+                ? `Tickets link to {base}/browse/KEY-123. Saved when you press Enter or leave the field.${data.jira.hasToken ? ' Moving to a different Jira site removes the saved API token.' : ''}`
                 : provider === 'notion'
-                  ? 'Copy the link of the database that holds your tickets. Moving to another database clears its mapping.'
-                  : `Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123.${data.jira.hasToken ? ' Moving to a different Linear workspace removes the saved API key.' : ''}`
+                  ? 'Copy the link of the database that holds your tickets. Saved when you press Enter or leave the field. Moving to another database clears its mapping.'
+                  : `Your Linear workspace’s address. Tickets link to {base}/issue/KEY-123. Saved when you press Enter or leave the field.${data.jira.hasToken ? ' Moving to a different Linear workspace removes the saved API key.' : ''}`
             }
           >
             <input
@@ -207,7 +237,14 @@ export function IssueLinksSection(): JSX.Element {
               className={inputCls}
               placeholder={PLACEHOLDER[provider as TrackerProvider]}
               value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
+              onChange={(e) => {
+                setBaseUrl(e.target.value);
+                setUrlCommitted(false);
+              }}
+              onBlur={commitUrl}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') commitUrl();
+              }}
             />
           </Field>
           {fields.projectKeys && (
@@ -225,6 +262,10 @@ export function IssueLinksSection(): JSX.Element {
               placeholder="ENG, PROJ"
               value={projectKeys}
               onChange={(e) => setProjectKeys(e.target.value)}
+              onBlur={autosave.flush}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') autosave.flush();
+              }}
             />
           </Field>
           )}
@@ -246,38 +287,39 @@ export function IssueLinksSection(): JSX.Element {
               className="w-full sm:w-auto"
               value={matchScope}
               disabled={!hasKeys && provider !== 'notion'}
-              onChange={(v) => setMatchScope(v)}
+              onChange={(v) => {
+                autosave.now();
+                setMatchScope(v);
+              }}
               options={MATCH_SCOPE_OPTIONS}
             />
           </Field>
         </>
       )}
-      <SaveButton
+      <SaveState
+        section="Issue tracker"
+        mutation={mutation}
         dirty={dirty}
-        saving={mutation.isPending}
-        onClick={() => mutation.mutate({ issue: patch })}
+        invalid={urlInvalid && urlCommitted ? 'enter the full address, starting with https://' : null}
       />
-      {mutation.isError && (
-        <p className="text-meta text-ui-danger">{(mutation.error as Error).message}</p>
-      )}
       {/* Offered once Jira is the SAVED tracker with a base URL — the field list and the ticket
           reads call the saved site, so an unsaved URL in the box above would be the wrong one.
           ⚠ NO LONGER BEHIND `me.ai.enabled`: the token feeds the stored tickets every free surface
           reads (the Open PRs ticket row and stacks, the ticket modal), in both modes, not only
           Claude Review. */}
-      {saved.provider === 'jira' &&
+      {issue.provider === 'jira' &&
         provider === 'jira' &&
-        (saved.baseUrl ?? '') !== '' && <JiraApiAccess workspaceId={workspaceId} jira={data.jira} />}
+        (issue.baseUrl ?? '') !== '' && <JiraApiAccess workspaceId={workspaceId} jira={data.jira} />}
       {/* The criteria field per issue type, once a token lets Limn read tickets. */}
-      {saved.provider === 'jira' && provider === 'jira' && data.jira.hasToken && (
+      {issue.provider === 'jira' && provider === 'jira' && data.jira.hasToken && (
         <JiraAcFieldSettings workspaceId={workspaceId} />
       )}
       {/* The same rule for Linear: the key belongs to the SAVED workspace URL. */}
-      {saved.provider === 'linear' && provider === 'linear' && (saved.baseUrl ?? '') !== '' && (
-        <LinearApiAccess workspaceId={workspaceId} jira={data.jira} baseUrl={saved.baseUrl ?? ''} />
+      {issue.provider === 'linear' && provider === 'linear' && (issue.baseUrl ?? '') !== '' && (
+        <LinearApiAccess workspaceId={workspaceId} jira={data.jira} baseUrl={issue.baseUrl ?? ''} />
       )}
       {/* Notion: the token and the property mapping belong to the SAVED database URL. */}
-      {saved.provider === 'notion' && provider === 'notion' && (saved.baseUrl ?? '') !== '' && (
+      {issue.provider === 'notion' && provider === 'notion' && (issue.baseUrl ?? '') !== '' && (
         <NotionTrackerSetup workspaceId={workspaceId} jira={data.jira} saved={data.notion ?? null} />
       )}
     </SectionShell>

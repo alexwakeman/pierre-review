@@ -3,7 +3,8 @@ import { useMutation } from '@tanstack/react-query';
 import type { JiraFieldListResponse, WorkspaceJiraApiSettings } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useUpdateWorkspaceTracker } from '../../hooks/useWorkspaceTracker.js';
-import { Field, SaveButton, inputCls } from './ui.js';
+import { Field, inputCls } from './ui.js';
+import { SaveState, useAutoSave } from './autosave.js';
 
 const SECONDARY_BTN =
   'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent disabled:cursor-not-allowed disabled:opacity-40';
@@ -19,8 +20,9 @@ const SECONDARY_BTN =
  * in use varies by issue type.
  *
  * ⚠ THE TOKEN IS WRITE-ONLY. The server never returns it (`hasToken` only), so the input starts
- * empty every time; a saved token shows "Saved" with Replace / Remove. Saving without typing a
- * token keeps the saved one.
+ * empty every time; a saved token shows "Saved" with Replace / Remove. There is no Save button
+ * (./autosave.tsx): the email saves as you type (debounced, at once on blur / Enter); the token is
+ * written ONLY on blur or Enter of a non-empty value, never per keystroke, and the field clears.
  *
  * ⚠ THE CONNECTION CHECK IS CLICK-GATED. It calls the customer's Jira with the SAVED token (the
  * field-list route) and never fires just because Settings opened.
@@ -32,6 +34,8 @@ export function JiraApiAccess({
   workspaceId: number;
   jira: WorkspaceJiraApiSettings;
 }): JSX.Element {
+  // Two writes, two states: the email autosaves; the token is committed on blur / Enter.
+  const emailSave = useUpdateWorkspaceTracker(workspaceId);
   const mutation = useUpdateWorkspaceTracker(workspaceId);
   const fields = useMutation<JiraFieldListResponse, Error, void>({
     mutationFn: () => api.jiraFields(workspaceId),
@@ -44,26 +48,35 @@ export function JiraApiAccess({
   const [replacing, setReplacing] = useState(false);
 
   // Re-seeded on the STORED values (not the response object — a background refetch must not
-  // revert a half-typed email). The token input is cleared after every save.
-  const signature = `${workspaceId}:${jira.email ?? ''}:${jira.hasToken}`;
+  // revert a half-typed email). The token input is cleared after every token write.
+  // The email and the token re-seed apart, so a token commit never wipes a half-typed email.
+  useEffect(() => setEmail(jira.email ?? ''), [workspaceId, jira.email]);
   useEffect(() => {
-    setEmail(jira.email ?? '');
     setToken('');
     setReplacing(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature]);
+  }, [workspaceId, jira.hasToken]);
 
   const typedToken = token.trim();
-  const dirty = email.trim() !== (jira.email ?? '') || typedToken !== '';
+  const emailDirty = email.trim() !== (jira.email ?? '');
   const showTokenInput = !jira.hasToken || replacing;
 
-  const save = (): void =>
-    mutation.mutate({
-      jira: {
-        email: email.trim() === '' ? null : email.trim(),
-        ...(typedToken !== '' ? { token: typedToken } : {}),
-      },
-    });
+  const autosave = useAutoSave({
+    key: `${workspaceId}:${email.trim()}`,
+    ready: emailDirty,
+    busy: emailSave.isPending,
+    run: () => emailSave.mutate({ jira: { email: email.trim() === '' ? null : email.trim() } }),
+  });
+
+  // The token: an explicit commit of a NON-EMPTY value only. The re-seed above clears the field.
+  // A committed secret leaves the field at once and is never echoed (Replace closes too).
+  const clearToken = (): void => {
+    setToken('');
+    setReplacing(false);
+  };
+  const commitToken = (): void => {
+    if (typedToken === '' || mutation.isPending) return;
+    mutation.mutate({ jira: { token: typedToken } }, { onSuccess: clearToken });
+  };
 
   return (
     <div className="space-y-2.5 rounded-ui bg-ui-surface p-3.5">
@@ -89,16 +102,21 @@ export function JiraApiAccess({
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          onBlur={autosave.flush}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') autosave.flush();
+          }}
         />
       </Field>
+      <SaveState section="Jira email" mutation={emailSave} dirty={emailDirty} />
       {showTokenInput ? (
         <Field
           label="API token"
           htmlFor={ids.token}
           hint={
             jira.hasToken
-              ? 'The new token replaces the saved one when you save.'
-              : 'A Jira Cloud API token, or a Data Center personal access token.'
+              ? 'Saved when you press Enter or leave the field. It replaces the saved one.'
+              : 'A Jira Cloud API token, or a Data Center personal access token. Saved when you press Enter or leave the field.'
           }
         >
           <input
@@ -108,6 +126,13 @@ export function JiraApiAccess({
             className={inputCls}
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            onBlur={commitToken}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                commitToken();
+              }
+            }}
           />
         </Field>
       ) : (
@@ -140,7 +165,7 @@ export function JiraApiAccess({
         </button>
         {!jira.hasToken && (
           <span className="text-meta text-ui-mute">
-            Save a token first.
+            Add a token first.
           </span>
         )}
         {loaded != null && (
@@ -152,10 +177,7 @@ export function JiraApiAccess({
       {fields.isError && (
         <p className="text-body text-ui-danger">{fields.error.message}</p>
       )}
-      <SaveButton dirty={dirty} saving={mutation.isPending} onClick={save} />
-      {mutation.isError && (
-        <p className="text-body text-ui-danger">{mutation.error.message}</p>
-      )}
+      <SaveState section="Jira API token" mutation={mutation} dirty={false} />
     </div>
   );
 }

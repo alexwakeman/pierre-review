@@ -57,14 +57,6 @@ export function draftChanges(stored: readonly number[], draft: readonly number[]
   };
 }
 
-/** The one short line beside Save; null when nothing is pending. */
-export function pendingLine(added: number, removed: number): string | null {
-  const parts: string[] = [];
-  if (added > 0) parts.push(`${added} to add`);
-  if (removed > 0) parts.push(`${removed} to remove`);
-  return parts.length > 0 ? `Not saved: ${parts.join(', ')}.` : null;
-}
-
 /** The repo selected on first view: the first (in list order) that has a relation, else the first. */
 export function defaultSelectedRepo(
   orderedIds: readonly number[],

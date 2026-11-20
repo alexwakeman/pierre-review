@@ -7,7 +7,6 @@ import {
   curvePath,
   defaultSelectedRepo,
   draftChanges,
-  pendingLine,
   sharesOneOwner,
 } from '../src/components/settings/relatedReposGeometry.js';
 
@@ -47,16 +46,10 @@ describe('clampToBand', () => {
   });
 });
 
-describe('draftChanges and pendingLine', () => {
+describe('draftChanges', () => {
   it('splits the draft into additions and removals', () => {
     expect(draftChanges([1, 2, 3], [3, 4, 1])).toEqual({ added: [4], removed: [2] });
     expect(draftChanges([1], [1])).toEqual({ added: [], removed: [] });
-  });
-  it('says what is unsaved in one line', () => {
-    expect(pendingLine(0, 0)).toBeNull();
-    expect(pendingLine(1, 0)).toBe('Not saved: 1 to add.');
-    expect(pendingLine(2, 1)).toBe('Not saved: 2 to add, 1 to remove.');
-    expect(pendingLine(0, 3)).toBe('Not saved: 3 to remove.');
   });
 });
 
