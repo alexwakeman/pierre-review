@@ -30,6 +30,10 @@ let branchCleanups = 0;
 let failPeer: string | null = null;
 
 vi.mock('../ai/runtime.js', () => ({
+  // The pre-flight and `auto` read each agent's download (review/auth.ts, ai/provider-setting.ts).
+  getAiRuntimeStatus: () => ({ runtime: 'ready', runtimeMessage: null }),
+  getCodexRuntimeStatus: () => ({ runtime: 'absent', runtimeMessage: null }),
+  CLAUDE_NOT_DOWNLOADED_MESSAGE: 'Claude is not downloaded.',
   claudeExecutableOptions: () => ({}),
   loadAgentSdk: async () => ({
     tool: (name: string, _d: string, _s: unknown, handler: (a: unknown) => Promise<unknown>) => ({ name, handler }),

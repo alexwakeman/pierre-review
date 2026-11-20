@@ -73,8 +73,9 @@ export default function Page(): JSX.Element {
           recently. See <DocLink to="getting-started/add-repositories">Add your repositories</DocLink>.
         </li>
         <li>
-          In the background, it downloads the runtimes the AI features use (about 110 MB, one time). It does
-          this after the app is open, so you do not wait for it. Signing in is the only step you do.
+          In the background, it downloads Claude, the agent the AI features use (about 110 MB, one time). It does
+          this after the app is open, so you do not wait for it. Signing in is the only step you do. To use Codex
+          too, or instead, select its <Ui>Download</Ui> in Settings → AI.
         </li>
         <li>
           The model that scores review bot comments is a separate download (about 240 MB). It is downloaded
@@ -130,8 +131,9 @@ export default function Page(): JSX.Element {
           <code>--device-auth</code> on a machine with no browser.
         </li>
         <li>
-          <code>npx ensemble-review ai install</code> and <code>npx ensemble-review ml install</code> download the AI
-          runtimes or the comment-scoring model now, instead of when Ensemble first needs them.
+          <code>npx ensemble-review ai install claude</code> (or <code>codex</code>) and{' '}
+          <code>npx ensemble-review ml install</code> download an AI agent or the comment-scoring model now.{' '}
+          <code>npx ensemble-review ai remove claude</code> (or <code>codex</code>) deletes an agent.
         </li>
         <li>
           <code>npx ensemble-review review</code> asks the running Ensemble to review the branch you are on, before you

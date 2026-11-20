@@ -126,14 +126,14 @@ describe('the registry (LIMN_AI_PROVIDER)', () => {
       available: false,
       route: 'none',
       // The install sentence first (as /api/me), else CODEX_NOT_AVAILABLE_MESSAGE.
-      message: 'Codex is not set up yet. Run: ensemble ai install codex',
+      message: 'Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex',
       installed: false,
       signedIn: false,
       plan: null,
     });
     expect(codex.credentialRoute()).toBe('none');
     expect(codex.usage.probeReady()).toBe(false);
-    await expect(codex.usage.probe()).rejects.toThrow(/Codex is not set up yet/);
+    await expect(codex.usage.probe()).rejects.toThrow(/Codex is not downloaded/);
   });
 
   it('with OPENAI_API_KEY set, Codex reports the API-key rung — and still runs no agent', async () => {

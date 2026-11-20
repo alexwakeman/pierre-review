@@ -61,8 +61,9 @@ export default function Page(): JSX.Element {
       <H2 id="ai-not-ready">The AI features are not ready</H2>
       <H3>&ldquo;Setting up AI…&rdquo; or &ldquo;The download failed.&rdquo;</H3>
       <p>
-        Ensemble downloads Claude and Codex the first time it starts. Wait for it to finish. If it failed, select{' '}
-        <Ui>Retry</Ui> on the <DocLink to="settings/ai">AI</DocLink> tab, or run <code>ensemble ai install</code> in a
+        Ensemble downloads the agents you picked (Claude, unless you changed it) when it starts. Wait for it to finish.
+        If it failed, select <Ui>Retry</Ui> on the <DocLink to="settings/ai">AI</DocLink> tab, or run{' '}
+        <code>ensemble ai install claude</code> (or <code>codex</code>) in a
         terminal and read its message. <code>ensemble ai status</code> says whether it is set up. A firewall that blocks
         the npm registry stops the download.
       </p>

@@ -46,6 +46,16 @@
 // staged APART from Claude's packages, so a Codex failure is recorded as Codex's alone and never
 // blocks Claude's install or repair.
 //
+// ⚠ EACH AGENT IS THE READER'S PICK (Settings → AI, `limn ai install|remove <claude|codex>`). The
+// choice lives in `<dataDir>/ai-runtimes.json` (`{claude?, codex?}`, per machine; the CLI has no
+// database), and a provider the reader did not pick reads 'absent' with one line saying how to get it,
+// WHATEVER is on disk — so every gate (the pre-flight, `auto`, the review pair) sees it unavailable.
+// Unset: Claude is picked (the default provider), Codex only when it is already on disk (an install from
+// before the choice keeps what it has; a new one gets Claude alone, not Codex's ~360 MB). The shared
+// packages (zod, the MCP SDK, the docs converters) come with EITHER pick; Claude's part is the Agent
+// SDK's native program, so a Codex-only install runs npm with `--omit=optional` and Remove for Claude
+// deletes just that program. Removing the last picked agent deletes the whole runtime directory.
+//
 // ⚠ NOTHING ELSE MAY IMPORT THESE PACKAGES. Type-only imports are fine (erased at emit); a value
 // import anywhere else fails with ERR_MODULE_NOT_FOUND on an npm install — and only when someone
 // clicks the feature. scripts/build-release.mjs greps the emitted JS and fails the build on one.
@@ -63,7 +73,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveDataDir } from '../data-dir.js';
-import { AiRuntimeMissingError } from './runtime-errors.js';
+import { AiRuntimeMissingError, CLAUDE_NOT_DOWNLOADED_MESSAGE, CODEX_NOT_DOWNLOADED_MESSAGE } from './runtime-errors.js';
 import { readEnv } from '../env-name.js';
 
 export const AI_RUNTIME_PACKAGES = [
@@ -82,7 +92,7 @@ export type AiRuntimePackage = (typeof AI_RUNTIME_PACKAGES)[number];
 
 /** The Codex CLI package: installed only on request, never imported (its native program is run). */
 export const CODEX_PACKAGE = '@openai/codex';
-/** Which providers' packages an install brings. Claude's set is always installed. */
+/** Which agent an install brings (the shared packages come with either). */
 export type AiRuntimeProvider = 'claude' | 'codex';
 
 /**
@@ -133,7 +143,12 @@ export interface AiRuntimeInstallProgress {
 export type AiRuntimeInstallResult = { ok: true } | { ok: false; message: string };
 
 // The error (and its sentence) live in ./runtime-errors.ts so a subclass can load without this module.
-export { AI_RUNTIME_MISSING_MESSAGE, AiRuntimeMissingError } from './runtime-errors.js';
+export {
+  AI_RUNTIME_MISSING_MESSAGE,
+  AiRuntimeMissingError,
+  CLAUDE_NOT_DOWNLOADED_MESSAGE,
+  CODEX_NOT_DOWNLOADED_MESSAGE,
+} from './runtime-errors.js';
 
 // ---- package location (no exports-map surprises) ----------------------------------------------
 
@@ -415,10 +430,14 @@ export interface AiRuntimeOptions {
 
 export interface InstallOptions {
   timeoutMs?: number;
-  /** Which providers' packages to install. Claude's set comes too, except that ['codex'] alone over
-   *  a Claude that is already ready downloads Codex only. An already-installed Codex is kept
+  /** Which agents to install; each is recorded as PICKED before the download starts. The shared
+   *  packages come with either, and Claude's program also when Claude is picked. ['codex'] alone
+   *  over shared packages already in place downloads Codex only. An already-installed Codex is kept
    *  whatever this says. Default: ['claude']. */
   providers?: AiRuntimeProvider[];
+  /** Return at once when every requested agent is already ready (after recording the pick): the
+   *  SPA's Download. Without it a ready agent is downloaded again (`ensemble ai install`, a repair). */
+  skipIfReady?: boolean;
   /** Test seam: the program and leading args that stand in for npm. */
   npm?: { command: string; args: string[] };
 }
@@ -542,6 +561,8 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
   let currentStep: string | null = null;
 
   function status(): AiRuntimeStatus {
+    // Not picked: unavailable whatever is on disk (the workspace's SDK in dev, LIMN_CLAUDE_PATH too).
+    if (!chosen('claude')) return { runtime: 'absent', runtimeMessage: CLAUDE_NOT_DOWNLOADED_MESSAGE };
     // ⚠ A Claude that is ALREADY ready stays 'ready' while a download runs (the first-boot one that
     // adds Codex, say): reading 'installing' would gate every Claude Run button for minutes for nothing.
     if (workspaceReady()) return { runtime: 'ready', runtimeMessage: null };
@@ -553,13 +574,13 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       return {
         runtime: 'absent',
         runtimeMessage:
-          'The Claude Code program is missing from the AI download. Download AI again from Settings → Features, or set ENSEMBLE_CLAUDE_PATH to your own claude.',
+          'The Claude Code program is missing from the AI download. Download Claude again in Settings → AI, or set ENSEMBLE_CLAUDE_PATH to your own claude.',
       };
     }
     if (state === 'stale') {
       return {
         runtime: 'absent',
-        runtimeMessage: 'Ensemble was updated. Download AI again from Settings → Features to get the matching version.',
+        runtimeMessage: 'Ensemble was updated. Download Claude again in Settings → AI to get the matching version.',
       };
     }
     return { runtime: 'absent', runtimeMessage: null };
@@ -577,6 +598,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
    */
   function codexStatus(): AiRuntimeStatus {
     if (inFlight && inFlightCodex) return { runtime: 'installing', runtimeMessage: currentStep };
+    if (!chosen('codex')) return { runtime: 'absent', runtimeMessage: CODEX_NOT_DOWNLOADED_MESSAGE };
     if (codexOverride()) return { runtime: 'ready', runtimeMessage: null };
     const state = existsSync(join(runtimeDir, 'package.json')) ? codexDirState(runtimeDir) : 'absent';
     if (state === 'ready') return { runtime: 'ready', runtimeMessage: null };
@@ -595,12 +617,100 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
 
   /** The Codex program to run, or null when Codex is not set up. */
   function codexBinary(): string | null {
+    if (!chosen('codex')) return null;
     const override = codexOverride();
     if (override) return override;
     if (!existsSync(join(runtimeDir, 'package.json'))) return null;
     // 'stale' still runs (an older pin is a working CLI); "set up again" is the status's job.
     const state = codexDirState(runtimeDir);
     return state === 'ready' || state === 'stale' ? codexBinaryIn(runtimeDir) : null;
+  }
+
+  // ---- the reader's pick ----
+  const choiceFile = join(dataDir, 'ai-runtimes.json');
+
+  function storedChoice(): Partial<Record<AiRuntimeProvider, boolean>> {
+    const raw = readJson(choiceFile);
+    const out: Partial<Record<AiRuntimeProvider, boolean>> = {};
+    for (const p of ['claude', 'codex'] as const) if (typeof raw?.[p] === 'boolean') out[p] = raw[p] as boolean;
+    return out;
+  }
+
+  /** Codex is on disk (any version) or LIMN_CODEX_PATH names one: an install from before the pick. */
+  function codexOnDisk(): boolean {
+    if (codexOverride()) return true;
+    return existsSync(join(runtimeDir, 'package.json')) && findPackageDirIn(CODEX_PACKAGE, runtimeDir) !== null;
+  }
+
+  /** Did the reader pick this agent? Unset: Claude yes; Codex only when it is already there. */
+  function chosen(p: AiRuntimeProvider): boolean {
+    const v = storedChoice()[p];
+    if (v !== undefined) return v;
+    return p === 'claude' ? true : codexOnDisk();
+  }
+
+  function setChosen(p: AiRuntimeProvider, on: boolean): void {
+    const next = { ...storedChoice(), [p]: on };
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(choiceFile, JSON.stringify(next, null, 2) + '\n');
+    } catch {
+      /* the pick is remembered for this process only; the download still runs */
+    }
+  }
+
+  function choice(): Record<AiRuntimeProvider, boolean> {
+    return { claude: chosen('claude'), codex: chosen('codex') };
+  }
+
+  /** The Agent SDK's native program folders under a prefix (glibc and musl on linux). */
+  function claudeBinaryDirs(fromDir: string): string[] {
+    // ⚠ Only INSIDE the prefix: never a folder above it.
+    const sdkDir = findPackageDirIn(AGENT_SDK, fromDir);
+    if (!sdkDir) return [];
+    const base = `${AGENT_SDK}-${process.platform}-${process.arch}`;
+    const names = process.platform === 'linux' ? [base, `${base}-musl`] : [base];
+    const out: string[] = [];
+    for (const name of names) {
+      const dir = findPackageDirWithin(name, sdkDir, fromDir);
+      if (dir) out.push(dir);
+    }
+    return out;
+  }
+
+  /**
+   * REMOVE ONE AGENT: record it as not picked and delete what it alone needs — Claude's native program,
+   * or Codex's packages. The last picked agent takes the whole runtime directory with it. Refused while
+   * a download runs. Nothing is deleted outside the runtime directory (the workspace's SDK in dev and a
+   * LIMN_CLAUDE_PATH / LIMN_CODEX_PATH program stay; not picking them is enough to stop using them).
+   */
+  function remove(p: AiRuntimeProvider): AiRuntimeInstallResult {
+    if (inFlight) return { ok: false, message: 'A download is running. Try again when it has finished.' };
+    setChosen(p, false);
+    if (p === 'claude') lastFailure = null;
+    else lastCodexFailure = null;
+    try {
+      if (!chosen('claude') && !chosen('codex')) {
+        rmSync(runtimeDir, { recursive: true, force: true });
+      } else if (existsSync(join(runtimeDir, 'package.json'))) {
+        if (p === 'claude') {
+          for (const dir of claudeBinaryDirs(runtimeDir)) rmSync(dir, { recursive: true, force: true });
+        } else {
+          for (const n of codexPackageNames(runtimeDir)) {
+            rmSync(join(runtimeDir, 'node_modules', '@openai', n), { recursive: true, force: true });
+          }
+          const prior = readJson(join(runtimeDir, 'package.json'))?.dependencies;
+          if (prior && typeof prior === 'object') {
+            const deps = { ...(prior as Record<string, string>) };
+            delete deps[CODEX_PACKAGE];
+            writeStagingManifest(runtimeDir, deps);
+          }
+        }
+      }
+    } catch (err) {
+      return { ok: false, message: `Could not delete every file in ${runtimeDir}: ${(err as Error).message}` };
+    }
+    return { ok: true };
   }
 
   // ---- loading ----
@@ -620,7 +730,9 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
           if (dir && workspaceFrom === HERE) return (await import(specifierFor(spec))) as T;
           const entry = dir ? esmEntryOf(dir, ENTRY_SUBPATH[spec]) : null;
           if (entry) return (await import(pathToFileURL(entry).href)) as T;
-        } else if (['ready', 'stale'].includes(runtimeDirState())) {
+        } else if (['ready', 'stale', 'no_binary'].includes(runtimeDirState())) {
+          // 'no_binary' too: a Codex-only install has every shared package (zod for Codex's schemas,
+          // the docs converters) and no Claude program. Claude's runs are gated on `status()` instead.
           const dir = findPackageDir(spec, runtimeDir);
           const entry = dir ? esmEntryOf(dir, ENTRY_SUBPATH[spec]) : null;
           if (entry) return (await import(pathToFileURL(entry).href)) as T;
@@ -658,6 +770,17 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     // Codex while a Claude-only download runs joins it too; Codex then still reads 'absent' and the
     // next press downloads it.
     if (inFlight) return inFlight.finally(detach);
+    // A download is the reader picking each agent it names (kept even if the download fails, so the
+    // next boot tries again).
+    const requested = installOpts.providers ?? ['claude'];
+    for (const p of requested) setChosen(p, true);
+    // Picking an agent whose files are already here (the workspace's SDK in dev, a Claude program
+    // kept beside a removed pick, LIMN_CODEX_PATH) needs no download.
+    if (installOpts.skipIfReady && requested.every((p) => (p === 'codex' ? codexStatus() : status()).runtime === 'ready')) {
+      detach();
+      emit({ phase: 'done', message: 'Already downloaded.' });
+      return Promise.resolve({ ok: true });
+    }
     const codexRequested = (installOpts.providers ?? ['claude']).includes('codex');
     inFlightCodex = codexRequested;
     inFlight = runInstall(installOpts, codexRequested).finally(() => {
@@ -762,12 +885,15 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     return moved;
   }
 
-  /** Codex was asked for WITHOUT Claude, and Claude needs nothing (the workspace's SDK in dev, or a
-   *  runtime directory at its pins): only Codex is downloaded. */
+  /** Codex was asked for WITHOUT Claude, and the shared packages need nothing (the workspace's SDK in
+   *  dev, a runtime directory at its pins, or one without Claude's program while Claude is not
+   *  picked): only Codex is downloaded. */
   function codexOnly(installOpts: InstallOptions): boolean {
     const providers = installOpts.providers ?? ['claude'];
     if (providers.includes('claude') || !providers.includes('codex')) return false;
-    return workspaceReady() || runtimeDirState() === 'ready';
+    if (workspaceReady()) return true;
+    const state = runtimeDirState();
+    return state === 'ready' || (state === 'no_binary' && !chosen('claude'));
   }
 
   /** Download Codex into its own staging prefix, then move it into the runtime directory as it is. */
@@ -859,13 +985,17 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
       return runCodexOnly(codexWant, npm, installOpts.timeoutMs ?? 10 * 60_000, codexOnlyFailure);
     }
 
+    // Claude's program only when Claude is picked; a Codex-only pick takes the shared packages alone.
+    const withClaude = chosen('claude');
     lastFailure = null;
     if (codexRequested) lastCodexFailure = null;
     emit({
       phase: 'starting',
-      message: codexRequested
-        ? 'Downloading Claude (about 110 MB), then Codex.'
-        : 'Downloading Claude (about 110 MB).',
+      message: !withClaude
+        ? 'Downloading the shared AI packages, then Codex.'
+        : codexRequested
+          ? 'Downloading Claude (about 110 MB), then Codex.'
+          : 'Downloading Claude (about 110 MB).',
     });
 
     const stamp = `${process.pid}-${Date.now()}`;
@@ -881,7 +1011,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     // Using your own `claude`: skip the SDK's bundled ~110 MB binary (its optional dependencies). Codex
     // is staged apart, so this no longer depends on whether Codex comes too.
     const claudeError = await npmInto(staging, npm, {
-      omitOptional: !!readEnv(env, 'CLAUDE_PATH')?.trim(),
+      omitOptional: !withClaude || !!readEnv(env, 'CLAUDE_PATH')?.trim(),
       timeoutMs,
       retry: 'ensemble ai install',
     });
@@ -901,7 +1031,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
         );
       }
     }
-    if (!binaryOk(staging)) {
+    if (withClaude && !binaryOk(staging)) {
       rmSync(staging, { recursive: true, force: true });
       return failWith(
         `The download finished but the Claude Code program for ${process.platform}-${process.arch} is missing from it. Try again: ensemble ai install. Or set ENSEMBLE_CLAUDE_PATH to your own claude.`,
@@ -981,7 +1111,7 @@ export function createAiRuntime(opts: AiRuntimeOptions = {}) {
     return { ok: true };
   }
 
-  return { runtimeDir, pins, codexPin, status, codexStatus, codexBinary, load, install };
+  return { runtimeDir, pins, codexPin, status, codexStatus, codexBinary, load, install, remove, choice };
 }
 
 // ---- the app's runtime ----------------------------------------------------------------------
@@ -999,6 +1129,16 @@ export function installAiRuntime(
   opts?: InstallOptions,
 ): Promise<AiRuntimeInstallResult> {
   return runtime.install(onProgress, opts);
+}
+
+/** Remove one agent's download and record it as not picked (Settings → AI, `limn ai remove`). */
+export function removeAiRuntime(provider: AiRuntimeProvider): AiRuntimeInstallResult {
+  return runtime.remove(provider);
+}
+
+/** Which agents the reader picked (Settings → AI): what the first-boot download fetches. */
+export function aiRuntimeChoice(): Record<AiRuntimeProvider, boolean> {
+  return runtime.choice();
 }
 
 /** The exact versions this copy of Limn downloads, or null when it cannot tell. */

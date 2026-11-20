@@ -150,7 +150,7 @@ describe("Limn's Codex home", () => {
 
   it('codexBinary() refuses with the setup sentence when Codex is not installed — as an AiRuntimeMissingError', async () => {
     delete process.env.LIMN_CODEX_PATH;
-    await expect(H.codexBinary()).rejects.toThrow('Codex is not set up yet. Run: ensemble ai install codex');
+    await expect(H.codexBinary()).rejects.toThrow('Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex');
     const { AiRuntimeMissingError } = await import('../runtime.js');
     const err = await H.codexBinary().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AiRuntimeMissingError);

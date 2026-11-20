@@ -38,15 +38,22 @@ export default function Page(): JSX.Element {
         with that setting. Start Ensemble without it to choose here.
       </Note>
 
-      <H2 id="sign-in">Set up and sign in</H2>
+      <H2 id="sign-in">Download and sign in</H2>
       <p>
-        Ensemble downloads Claude and Codex by itself the first time it starts. Signing in is the only step. The tab shows
-        one line for each provider:
+        Download only the agents you use. A new install downloads Claude by itself; Codex downloads when you select its{' '}
+        <Ui>Download</Ui>. An install that already had both keeps both. Ensemble keeps each downloaded agent up to date by
+        itself. The tab shows one line for each provider:
       </p>
-      <Illustration label="The provider lines: Claude signed in, Codex not signed in." caption="Each provider's status line.">
-        <SettingsRow label="Claude" hint="Signed in to Claude Code." control={<Pill tone="green">Ready</Pill>} />
-        <SettingsRow label="Codex" hint="Not signed in." control={<Pill tone="grey">Sign in with ChatGPT</Pill>} />
+      <Illustration label="The provider lines: Claude downloaded and signed in, Codex not downloaded." caption="Each provider's status line.">
+        <SettingsRow label="Claude" hint="Signed in to Claude Code." control={<Pill tone="grey">Remove</Pill>} />
+        <SettingsRow label="Codex" hint="Not downloaded." control={<Pill tone="grey">Download (about 360 MB)</Pill>} />
       </Illustration>
+      <p>
+        <Ui>Remove</Ui> deletes that agent&rsquo;s download from your computer. Until you download it again, every AI
+        feature reads it as not downloaded and uses the other agent, if it is signed in. From a terminal,{' '}
+        <code>ensemble ai install claude</code> (or <code>codex</code>) and <code>ensemble ai remove claude</code> (or{' '}
+        <code>codex</code>) do the same.
+      </p>
       <H3>Claude</H3>
       <p>
         Ensemble uses your Claude Code login on this computer. Run <code>claude</code> in a terminal and sign in there.
@@ -77,9 +84,9 @@ export default function Page(): JSX.Element {
         <DocLink to="integrations/codex">Codex (OpenAI)</DocLink>.
       </p>
       <Tip>
-        If the download failed, or AI is switched off, the line says why and links to{' '}
-        <DocLink to="settings/features">Settings → Features</DocLink>, where the AI switch downloads it again. The
-        terminal command <code>ensemble ai install</code> does the same.
+        If a download failed, the line says why and shows <Ui>Retry</Ui>. An AI feature whose agent is not downloaded
+        says so and links here. If AI is switched off, it links to{' '}
+        <DocLink to="settings/features">Settings → Features</DocLink> instead.
       </Tip>
 
       <H2 id="api-keys">Use my API keys first</H2>

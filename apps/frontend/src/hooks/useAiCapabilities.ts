@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AiProviderId, AiProviderName, AiRuntimeInstallBody, AiRuntimeInstallEvent, MeResponse } from '@pierre-review/shared';
 import { api } from '../api/client.js';
 import { sseStream } from '../api/sse.js';
@@ -11,7 +11,6 @@ import { aiCapabilitiesOf, type AiCapabilities } from '../lib/aiCapabilities.js'
 export {
   AI_AUTH_LINE,
   AI_SETUP_LABEL,
-  AI_SETUP_LABEL_BOTH,
   aiSetupLabel,
   aiAuthFor,
   aiCapabilitiesOf,
@@ -38,8 +37,9 @@ export function useAiProvider(): AiProviderId {
 
 // ---- The one-time runtime install (POST /api/ai/runtime/install, SSE) ----------------------------
 //
-// The SERVER starts the download by itself on the first boot (ai/auto-install.ts, `ai.autoInstall`);
-// this is the Retry after a failure (and the Set up button where the automatic download is off).
+// The SERVER downloads the agents picked in Settings → AI by itself (ai/auto-install.ts,
+// `ai.autoInstall`); this is Settings → AI's Download for ONE agent (which also picks it), and the Retry
+// after a failure.
 // ONE install per page, shared by every mount: two "Set up AI" buttons (the Claude Review tab and
 // the AI Fix tab, say) must show the same progress and must not start two downloads. A tiny
 // module-level store rather than per-mount state, so a tab switch mid-download keeps the line.
@@ -68,15 +68,14 @@ export function useAiRuntimeInstall(): { state: AiInstallState; start: (forProvi
     if (installState.phase === 'running') return;
     setInstallState({ phase: 'running', message: null });
     let failed: string | null = null;
-    // Where Limn sets up both providers by itself (`ai.autoInstall`), a Retry fetches both too: body
-    // `codex` (Claude's SDKs always come with it). Otherwise the ACTIVE provider's download (or the one
-    // Settings → AI names): with Codex, `me.ai.runtime` is the Codex program's. Absent body ⇒ Claude only.
+    // The ONE agent named (Settings → AI's rows), else the ACTIVE provider's: with Codex, `me.ai.runtime`
+    // is the Codex program's. The server records it as picked.
     const meAi = qc.getQueryData<MeResponse>(['me'])?.ai;
-    const provider = forProvider ?? (meAi?.autoInstall ? 'codex' : meAi?.provider);
-    const body: AiRuntimeInstallBody | undefined = provider === 'codex' ? { provider: 'codex' } : undefined;
+    const provider = forProvider ?? meAi?.provider ?? 'claude';
+    const body: AiRuntimeInstallBody = { provider };
     void sseStream<AiRuntimeInstallEvent>('/api/ai/runtime/install', {
       method: 'POST',
-      ...(body ? { body } : {}),
+      body,
       onEvent: (e) => {
         if (e.type === 'error') {
           failed = e.message || 'The download failed.';
@@ -104,6 +103,17 @@ export function useAiRuntimeInstall(): { state: AiInstallState; start: (forProvi
       });
   };
   return { state, start };
+}
+
+/** Settings → AI's Remove: the agent is no longer picked and its download is deleted. */
+export function useRemoveAiRuntime() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: AiProviderId) => api.removeAiRuntime(provider),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['me'] });
+    },
+  });
 }
 
 /**

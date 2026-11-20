@@ -1,5 +1,6 @@
 import type { AiRunKind } from '@pierre-review/shared';
 import { hasClaudeLogin, resolveAiCredential } from '../ai/credentials.js';
+import { getAiRuntimeStatus, CLAUDE_NOT_DOWNLOADED_MESSAGE } from '../ai/runtime.js';
 import { codexDetailCached, NO_CODEX_AUTH_MESSAGE } from '../ai/codex/detect.js';
 import {
   activeProviderId,
@@ -53,6 +54,10 @@ export function detectClaudeAuth(kind?: AiRunKind): ClaudeAuthResult {
  */
 export function detectProviderAuth(provider: 'claude' | 'codex', kind?: AiRunKind): ClaudeAuthResult {
   if (provider === 'codex') return detectCodexAuth(kind);
+  // Claude not downloaded (not picked in Settings → AI, removed, or still downloading): unavailable,
+  // with the line saying how to get it — so a picker, the review pair and `auto` all pass it over.
+  const rt = getAiRuntimeStatus();
+  if (rt.runtime !== 'ready') return { status: 'none', message: rt.runtimeMessage ?? CLAUDE_NOT_DOWNLOADED_MESSAGE };
   const c = resolveAiCredential();
   if (c.route !== 'none') return { status: 'ok', method: c.method };
   // ⚠ THIS SENTENCE IS RENDERED IN THE SPA, NOT JUST LOGGED — it is the ONE line that replaces

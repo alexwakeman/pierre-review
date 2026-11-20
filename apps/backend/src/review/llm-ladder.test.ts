@@ -30,6 +30,10 @@ const query = vi.fn((_args: { options: { env?: Record<string, string | undefined
 const loadAgentSdk = vi.fn(async () => ({ query }));
 
 vi.mock('../ai/runtime.js', () => ({
+  // The pre-flight and `auto` read each agent's download (review/auth.ts, ai/provider-setting.ts).
+  getAiRuntimeStatus: () => ({ runtime: 'ready', runtimeMessage: null }),
+  getCodexRuntimeStatus: () => ({ runtime: 'absent', runtimeMessage: null }),
+  CLAUDE_NOT_DOWNLOADED_MESSAGE: 'Claude is not downloaded.',
   loadAnthropicSdk,
   loadAgentSdk,
   claudeExecutableOptions: () => ({}),

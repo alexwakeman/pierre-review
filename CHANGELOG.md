@@ -24,6 +24,11 @@ no internals.
 
 ### Changed
 
+- Settings → AI downloads each agent on its own. Claude and Codex each have a line with **Download** (Claude about
+  110 MB, Codex about 360 MB) or **Remove**, and only the ones you pick are downloaded. A new install downloads Claude
+  alone; an install that already had Codex keeps it. An agent that is not downloaded is not used: AI features, Auto
+  and Claude + Codex reviews use the other one, and a feature with neither says how to download one. From a terminal,
+  `ensemble ai install claude|codex` and the new `ensemble ai remove claude|codex` do the same.
 - Settings save as you go: there is no Save button on any Settings tab. A switch, choice or tick saves at once;
   a typed value saves when you stop typing or leave the box, and a value that is not allowed is not saved and
   says why beside the box. A token, API key or Slack webhook saves when you press Enter or leave the box, and is

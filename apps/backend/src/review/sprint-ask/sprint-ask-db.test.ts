@@ -149,7 +149,7 @@ describe('a missing provider runtime', () => {
   it('a missing CODEX install says how to install CODEX (503), never the Claude remedy', async () => {
     const res = await ask({ workspaceId: ws, question: 'no codex here' });
     expect(res.statusCode).toBe(503);
-    expect(res.json()).toEqual({ error: 'runtime', message: 'Codex is not set up yet. Run: ensemble ai install codex' });
+    expect(res.json()).toEqual({ error: 'runtime', message: 'Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex' });
   });
 });
 

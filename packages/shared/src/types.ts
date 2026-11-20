@@ -3783,7 +3783,19 @@ export type AiRuntimeInstallEvent =
 /** POST /api/ai/runtime/install body (optional). `codex` adds the Codex CLI to the download (Claude's
  *  SDKs always come). Absent ⇒ Claude only. */
 export interface AiRuntimeInstallBody {
+  /** The ONE agent to download (and record as picked in Settings → AI). Absent ⇒ Claude. */
   provider?: AiProviderId;
+}
+
+/** Body of POST /api/ai/runtime/remove: the agent to remove (no longer picked; its files deleted). */
+export interface AiRuntimeRemoveBody {
+  provider: AiProviderId;
+}
+
+/** Response of POST /api/ai/runtime/remove: the agent's download state afterwards ('absent'). */
+export interface AiRuntimeRemoveResponse {
+  provider: AiProviderId;
+  runtime: 'ready' | 'absent' | 'installing' | 'failed';
 }
 
 /** The AI providers Limn knows (docs/CODEX-PLAN.md). ONE is active for every AI feature. */
@@ -3878,7 +3890,8 @@ export interface AiClaudeProviderStatus {
 
 /** `MeResponse.ai.providers.codex` — the Codex install and Limn's own Codex sign-in. */
 export interface AiCodexProviderStatus {
-  /** The Codex program (downloaded with Claude's SDKs on the first boot, or `limn ai install codex`). */
+  /** The Codex program (downloaded when picked in Settings → AI, or `limn ai install codex`). 'absent'
+   *  while not picked, with `runtimeMessage` saying how to get it. */
   runtime: 'ready' | 'absent' | 'installing' | 'failed';
   runtimeMessage: string | null;
   /**
@@ -4011,7 +4024,8 @@ export interface MeResponse {
   //    Optional: an older server omits it and every gate falls back to `auth`.
   ai: {
     enabled: boolean;
-    /** Limn downloads both runtimes by itself on boot. Optional: an older server omits it (false). */
+    /** Limn downloads the agents picked in Settings → AI by itself on boot. Optional: an older server
+     *  omits it (false). */
     autoInstall?: boolean;
     runtime: 'ready' | 'absent' | 'installing' | 'failed';
     runtimeMessage: string | null;

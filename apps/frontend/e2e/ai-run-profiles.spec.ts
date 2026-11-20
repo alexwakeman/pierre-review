@@ -73,7 +73,7 @@ test('Codex not signed in: its sign-in line, no controls; Claude stays on (the o
   await setup(page, { codex: false });
   const settings = await openAi(page);
   const codex = settings.getByTestId('ai-profile-review-codex');
-  await expect(codex).toContainText('Not set up.');
+  await expect(codex).toContainText('Not downloaded.');
   await expect(codex.getByRole('combobox')).toHaveCount(0);
   const claude = settings.getByTestId('ai-profile-review-claude');
   await expect(claude.getByRole('checkbox', { name: 'Claude reviews' })).toBeDisabled();

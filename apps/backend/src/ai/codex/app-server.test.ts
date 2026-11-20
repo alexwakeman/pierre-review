@@ -420,7 +420,7 @@ describe('the sign-in', () => {
     try {
       expect(await L.startCodexLogin('browser')).toEqual({
         state: 'failed',
-        message: 'Codex is not set up yet. Run: ensemble ai install codex',
+        message: 'Codex is not downloaded. Download it in Settings → AI, or run: ensemble ai install codex',
       });
       expect(AS.kickCodexProbe({ force: true })).toBeNull();
     } finally {

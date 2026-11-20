@@ -26,8 +26,8 @@ const DOWNLOAD: Record<ToolId, { title: string; body: string; size: string }> = 
   ai: {
     title: 'Download AI?',
     body:
-      'Ensemble downloads the Claude Agent SDK and Codex into its own folder on this machine. AI Review, AI Fix and the other AI features run on them, with your own Claude or ChatGPT sign-in.',
-    size: 'About 110 MB, plus about 360 MB for Codex.',
+      'Ensemble downloads your default agent (Claude, unless you chose Codex) into its own folder on this machine. AI Review, AI Fix and the other AI features run on it, with your own sign-in. Settings → AI downloads or removes each agent.',
+    size: 'Claude is about 110 MB; Codex about 360 MB.',
   },
   botAnalysis: {
     title: 'Download the bot comment model?',
@@ -108,7 +108,8 @@ export function ToolsSection(): JSX.Element | null {
             scored; the labels already shown stay, and so does the model.
           </p>
           <p>
-            From a terminal: <code>npx ensemble-review ai install</code> or <code>npx ensemble-review ml install</code>.
+            Settings → AI downloads or removes each agent (Claude, Codex). From a terminal:{' '}
+            <code>npx ensemble-review ai install claude|codex</code> or <code>npx ensemble-review ml install</code>.
           </p>
         </InfoButton>
       }
@@ -117,7 +118,7 @@ export function ToolsSection(): JSX.Element | null {
         <div>
           <Switch
             data-testid="tool-switch-ai"
-            label="AI (Claude and Codex)"
+            label="AI"
             hint={tools.ai.installed ? 'Downloaded.' : 'Not downloaded yet. Switching it on asks before downloading.'}
             checked={tools.ai.on}
             disabled={save.isPending || aiRunning}
