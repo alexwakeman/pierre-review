@@ -11,12 +11,11 @@ import {
 import { canPinTab, usePinnedTabs, type Tab } from '../store/pinnedTabs.js';
 import { useFilters } from '../store/filters.js';
 import { useRepos } from '../hooks/useTimeline.js';
-import { botNarrowLabel, selectorLabel } from '../lib/severityAgreement.js';
+import { selectorLabel } from '../lib/severityAgreement.js';
 import {
   BarsIcon,
   BotIcon,
   CloseIcon,
-  CommentIcon,
   MagnifierIcon,
   PersonIcon,
   PinIcon,
@@ -171,7 +170,6 @@ export function useTabChip(tab: Tab): TabChipCfg {
   const themeThreadsSeed = useFilters((s) => s.themeThreadsSeed);
   const searchSeed = useFilters((s) => s.searchSeed);
   const botFlaggingSeed = useFilters((s) => s.botFlaggingSeed);
-  const botVolumeSeed = useFilters((s) => s.botVolumeSeed);
   const { data: repos } = useRepos();
   const repoName = (id: number | null): string | null =>
     id != null ? ((repos ?? []).find((r) => r.id === id)?.fullName ?? `repo ${id}`) : null;
@@ -191,23 +189,6 @@ export function useTabChip(tab: Tab): TabChipCfg {
       ),
       label: (
         <>Flow metrics</>
-      ),
-    };
-  } else if (tab.kind === 'bot-prs') {
-    // The `bot-prs` kind is the wire/state identifier and keeps its name; the label the
-    // user reads does not, because the tab opens on the COMMENTS view.
-    cfg = {
-      title: 'Bot Drill-Down — what a review bot said, and the PRs it touched',
-      closeAria: 'Close bot drill-down tab',
-      icon: (
-        <>
-          <span aria-hidden="true" className="shrink-0">
-            <BotIcon />
-          </span>
-        </>
-      ),
-      label: (
-        <>Bot Drill-Down</>
       ),
     };
   } else if (tab.kind === 'bot-only-prs') {
@@ -384,33 +365,6 @@ export function useTabChip(tab: Tab): TabChipCfg {
       label: (
         <>
             Flagged{seedTitle ? ` · ${seedTitle}` : ''}
-          </>
-      ),
-    };
-  } else if (tab.kind === 'bot-volume') {
-    // The "bot comments per PR" drill-down — labelled with the bot whose cell was clicked (the
-    // transient seed), or nothing when it was opened on the workspace-wide total.
-    // ⚠ Not cosmetic: without this branch the tab falls through to the PR ladder below and renders
-    // as a two-line `#undefined` chip with no title and no author.
-    // `botNarrowLabel` is the SAME function the drill-down's own pill uses, so the chip and the
-    // page can never name one narrowing two ways.
-    const botLabel = botVolumeSeed?.bots ? botNarrowLabel(botVolumeSeed.bots) : null;
-    const scopeName = repoName(botVolumeSeed?.repoId ?? null);
-    cfg = {
-      title: `Bot comments per merged PR${botLabel ? ` — ${botLabel}` : ''}${
-        scopeName ? ` · ${scopeName}` : ''
-      }`,
-      closeAria: 'Close bot-volume tab',
-      icon: (
-        <>
-          <span aria-hidden="true" className="shrink-0">
-            <CommentIcon />
-          </span>
-        </>
-      ),
-      label: (
-        <>
-            Comments/PR{botLabel ? ` · ${botLabel}` : ''}
           </>
       ),
     };

@@ -13,6 +13,38 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Feed → Bots has two new chip rows: **Severity** (Critical, Major, Minor, Nit, Unscored) and **Bot type** (Review
+  bot, Quality check, Dependency updates, Code agent, Release automation, Housekeeping). The Bots side opens on
+  Review bot, or on every type when the feed shows one pull request. Turn every chip in a row off to see all. ⌘K toggles each chip.
+- Bots Monitoring → ROI has two tiles across the workspace's review bots: **Time to first review** (median, with
+  p90 and the number of pull requests) and **Follow-ups after first review** (the share of pull requests a review
+  bot posted on again, with the average number of extra posts).
+- Bots Monitoring → ROI: new weekly charts **Time to first review** and **Follow-up rate** beside Thread volume,
+  and new table columns **First review** and **Follow-ups**.
+- Bots Monitoring: click a bot in a chart legend to show only that bot. The other bots fade in every chart on the
+  page. Click it again to show all.
+
+### Changed
+
+- A rendered Markdown file in Changes now looks like the diff: a bordered panel with a "README.md · rendered"
+  header, a `+` beside each block with added lines, hidden-line rows like the diff's, and code blocks in the diff's
+  font and colours.
+- Bots Monitoring → ROI: click a bot's name to open its own charts. The **Depth** column is gone.
+- Bots Monitoring → ROI: **Bot effectiveness** and **Used vs not addressed** moved into **Workspace charts**.
+- Each Ensemble poster ("Ensemble · alice") and each account of a bot with several accounts gets its own shade of
+  that bot's colour.
+- Bots Monitoring → Findings density: the bot picker under the chart is replaced by the same click-to-isolate
+  legend as the other charts.
+
+### Removed
+
+- Bots Monitoring → ROI: the columns **Unanswered after Nh**, **Oldest not addressed**, **High**, **Nits** and
+  **Not addressed by severity**.
+- Bots Monitoring: the per-bot list of comments and pull requests is gone, and the **Comments/PR** figures no
+  longer open a list of merged pull requests.
+
 ## [1.0.68] - 2026-11-20
 
 ### Added

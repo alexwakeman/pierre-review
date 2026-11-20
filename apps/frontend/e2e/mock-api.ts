@@ -134,6 +134,7 @@ import type {
   SandboxSessionStartBody,
   RepoOverviewResponse,
   SyncStatus,
+  BotBehaviourResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
@@ -3080,6 +3081,29 @@ export async function installMockApi(
         if (/^\/api\/prs\/\d+\/claude-review$/.test(path)) return json(route, { enabled: true, auth: 'ok', review: null, history: [] });
       }
 
+      // Bots Monitoring's behaviour read (the ROI tiles, trend cards and table columns fetch it on
+      // mount): a typed empty window — no review bot, every figure null, never the untyped stub.
+      if (path.endsWith('/api/pro/bot-behaviour')) {
+        return json(route, {
+          enabled: true,
+          generatedAt: iso(0),
+          window: { kind: 'rolling_14', from: iso(14), to: iso(0) },
+          bots: [],
+          workspace: {
+            prs: 0,
+            ttfrMedianHours: null,
+            ttfrP90Hours: null,
+            ttfrBaseline: null,
+            followupRatePct: null,
+            avgFollowups: null,
+            trend: [],
+          },
+          overlap: { reviewedPrs: 0, multiReviewedPrs: 0, distribution: [], pairs: [], lineOverlapClusters: 0, lineOverlapPrs: 0 },
+          repoBotDirs: [],
+          prsOpenedPerDay: [],
+          daySpanStart: iso(84),
+        } satisfies BotBehaviourResponse);
+      }
       // Every other `/api/pro/*` read: a harmless "switched off" stub.
       if (path.includes('/api/pro/')) {
         return json(route, { enabled: false, model: 'claude-haiku-5-5', generatedAt: iso(0) });

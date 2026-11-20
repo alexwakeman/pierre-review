@@ -627,7 +627,7 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   the never-mounted `FeedOpenPrsPanel` are DELETED; the old `MetricsDetail` `open_prs` sub-tab is
   GONE too. Pinned in `test/openPrsTab.test.ts` + `landingTab.test.ts`.
   Besides the PR tabs there's a family of **singleton, EPHEMERAL drill-down tabs** (never
-  URL/localStorage-persisted, never pinnable; a reload drops them): `metrics-detail`, `bot-prs`, `bot-only-prs`
+  URL/localStorage-persisted, never pinnable; a reload drops them): `metrics-detail`, `bot-only-prs`
   (sortable + Age/Updated + cross-repo repo-filter dropdown), and `bot-threads` (sortable +
   DESELECT-by-default + Select-all/Clear across pages + Stop + repo-filter + client pagination;
   scope-wide review & resolve). **`user-activity` is the one drill-down keyed PER USER**, not a
@@ -1391,6 +1391,20 @@ late arrival never shifts the 1–9 keys of the tabs before it):
       absolute http(s) URL — a repository-relative link prints as its text, it would resolve against
       Ensemble's own server) and `rehypeDropRelativeImages` (a relative `<img>` becomes its alt text).
       Pinned in `test/markdownFile.test.ts` + `e2e/changes-markdown.spec.ts`.
+    - **IT LOOKS LIKE THE DIFF (2026-11-20).** The content sits in a bordered panel (`md-file code-hl
+      … rounded-ui border border-ui-line`, no fill) under a mono header bar like the hunk row
+      (`<basename> · rendered`); "N unchanged lines" rows are drawn like the diff's gap rows; each
+      stretch sits beside a gutter (`MarkdownFileSegment`, plugin list memoised per segment so
+      `Markdown`'s memo holds). A **`+`** in the gutter marks each block with an added line:
+      `rehypeMarkAddedBlocks(added)` (`lib/markdownFile.ts`) runs AFTER the sanitizer and reads hast
+      SOURCE POSITIONS — origin from the patch (`MarkdownSegment.added` before the file loads,
+      `addedNewLines(rows)` once it has). ⚠ A block with NO position gets no mark (origin unknown).
+      Lists are marked ITEM BY ITEM on each item's own lines, so a nested list never marks its parent.
+      A block mixing added and unchanged lines gets the `+`; removed-only changes show none; no tint.
+      All styling lives under `.md-file` in `index.css` (`content: '+' / 'added'` for screen readers);
+      other Markdown surfaces keep `.md-body` and github-dark's #0d1117 code ground. Fenced code here
+      takes the diff's mono font and the `.code-hl` palette on the diff's own ground; its language
+      still comes from the fence tag (untagged = auto-detect), never `languageForPath`.
 - **Bot activity** (`PrBotBehaviourTab.tsx`, EXPERIMENTAL, CORE) — shown only when a bot touched
   the PR (`hasBots`: `reviews.automatedKind` or a bot thread-opener/commenter). Per bot: its on-PR
   touch timeline + TTFR/follow-ups vs the bot's OWN typical (`/api/prs/:id/bot-behaviour`). A ⚠
@@ -2539,6 +2553,46 @@ but broken deep links).
   `<th>`, the `<td>` and the "set a monthly price" clause, and gets a REPLACEMENT sentence naming
   the reason and pointing at the rail — an elision alone reads as a bug or a permissions glitch,
   and invites the next reader to "restore" the column. ⚠ **Do NOT simplify `showCost` to `true`.**
+- **THE ROI TABLE, 2026-11-20.** Columns: Bot · Threads · Comments · Comments/PR · Used · Not
+  addressed · Merged anyway · Time to address · **First review** · **Follow-ups** · % not addressed ·
+  Overlap · [Severity mix · Inflation, `showMl`] · [$ per used thread, `showCost`] · Verdict — ONE
+  header row (no `rowSpan`). REMOVED: "Unanswered after Nh", "Oldest not addressed", High, Nits, the
+  "Not addressed by severity" group, the Depth column. The bot NAME opens the depth tab; Comments/PR
+  is plain text (`BotVolumeDetail`, the `'bot-volume'` TabKind, `botVolumeSeed` and
+  `client.botVolumePrs` are deleted; `GET /api/bot-analytics/volume/prs` is kept with no SPA caller).
+  The per-bot comments + PRs drill-down was REMOVED 2026-11-20 (`BotPrsDetail`, the `'bot-prs'`
+  TabKind, `openBotPrsDetail` + its `botPrsFocus*` seeds, `useBotVendorPrs`, `lib/botComments.ts`
+  and `client.botVendorPrs`/`botVendorComments` are deleted; a saved `'bot-prs'` tab is dropped on
+  load). `GET /api/bot-analytics/vendor/:key/prs` and `…/comments` are kept with no SPA caller.
+  ⚠ Do not re-add an entry point (the depth tab has none).
+  - **Responsiveness.** `BotRoiPanel` calls `useBotBehaviour(workspaceId, window, true, repoScope)`
+    ON MOUNT — the SAME key as `WorkspaceBotCharts` (no `botUserId`), so they dedupe; the collapsed
+    section therefore no longer means "no behaviour request" on the ROI tab. The two TILES ("Time to
+    first review", "Follow-ups after first review", each with an ⓘ) read `data.workspace`
+    (`lib/botResponsiveness.ts` `formatResponsivenessTiles`; ⚠ a null figure or `prs === 0` is "—",
+    never 0; `formatHours` prints "<1m", never "0h"). The two COLUMNS join behaviour rows on `key`
+    (`u<id>`); loading is a pulse, a null "—"; ⚠ NOT dashed for a dormant bot (their population is
+    PRs first reviewed in the window, not threads). Two TREND CARDS beside Thread volume ("Time to
+    first review", "Follow-up rate"), one line per review bot from `BotBehaviourBotStat.trend`.
+  - **The chart row** holds Thread volume + the two trend cards (+ the conditional
+    `InflationHistoryChart`). "Bot effectiveness" and "Used vs not addressed" MOVED into
+    `WorkspaceBotCharts` (rendered first in the opened section, read from `useBotAnalytics` — the ROI
+    table's key, `enabled = open`, so a cache hit; the collapsed section still subscribes to nothing).
+  - **ONE ISOLATED BOT PER `BotsView` MOUNT** (`components/Activity/BotIsolate.tsx`
+    `BotIsolateProvider`, React state, never persisted; `useBotIsolate()` falls back to local state
+    without a provider). `BotIsolateLegend` (keyboard buttons, `aria-pressed`, nothing for < 2 bots)
+    sits under Thread volume, the trend cards, Findings density and Where bots work. Pure half:
+    `lib/botIsolate.ts` — ⚠ `effectiveIsolated`: a bot NOT DRAWN in a chart dims nothing there;
+    `applyIsolation` dims the rest (`Series.dimmed`: `LineChart` draws it at 0.2 opacity, no dots, no
+    hover value) and draws the isolated one last; dashed overlays never dim. Density's trend line is
+    fitted on the isolated bot alone. `useBotSubset` / `BotSubsetLegend` survive ONLY for the depth
+    tab's `MlSeverityTrendChart`. Not followed (one series, bars per bot, or panels per bot): Bot
+    effectiveness, Used vs not addressed, `InflationHistoryChart`, the overlap cards.
+  - **BRAND SHADES** (`lib/ui.ts` `brandShade(color, i)`): in `buildBotColorMap`, the FIRST login of a
+    branded kind (by login sort) keeps the exact brand hex; each later login takes the next shade
+    (±11% lightness per step, alternating, inside 20–85%, then an 8° hue shift), skipping used ones —
+    so every `limn:<login>` poster is its own orange. Order-independent. Strokes/swatches use the raw
+    shade; TEXT still goes through `vendorInk` (`test/botColorShades.test.ts` checks AA on every scheme).
 - **Bot classification is SETTINGS → BOTS** (2026-11-03; a WORKSPACE section,
   `settings/BotClassificationSection.tsx`, under the tab's global "Bot comment scoring";
   `openSettings('bots')` opens it — the ROI panel's "Set a bot's monthly price in Settings → Bots" is
@@ -2831,8 +2885,8 @@ in a per-vendor activity band and ranked against the fitted cell. Tests:
   id and the fetch's `botUserId` narrowing can never name different bots), `TabBotMeta` chip
   metadata captured at open time from the ROI row (label, kind, and the `repoId` the row was
   measured at, inherited so depth describes the scope the user clicked), EPHEMERAL (not
-  persisted, not URL-parsed). Opened by the ROI table's "Depth →" pill
-  (`openBotDetailTab`); `BotDetailPanel` is a sibling full-`<main>` overlay in App.tsx (joins
+  persisted, not URL-parsed). Opened by the BOT'S NAME in the ROI table (`BotNameButton`, row and
+  phone list; the "Depth" column and its "Depth →" pill are GONE since 2026-11-20) (`openBotDetailTab`); `BotDetailPanel` is a sibling full-`<main>` overlay in App.tsx (joins
   `overlayActive`), keyed on the tab so switching bots remounts. It re-slices the SAME per-bot
   data shapes the workspace charts read — nothing recomputes client-side.
 - **`SynthesisCard`** (+ `hooks/useSynthesis.ts`) — the verdict card the drill-down surfaces and
@@ -2882,8 +2936,9 @@ was first restored as a card at the top of the ROI view and then moved onto its 
 ### The Bots Themes panel — `Bots → Themes`
 
 `BotThemesPanel` is the whole body of the `'themes'` sub-tab, mirroring the Feed rail's
-`Feed | Themes` strip. The three drill-down `SynthesisCard` mounts (`BotVolumeDetail`,
-`BotFlaggingDetail`, `BotThreadsDetail`) are untouched and still serve slice-scoped Summarise, and
+`Feed | Themes` strip. The drill-down `SynthesisCard` mounts (`BotFlaggingDetail`,
+`BotThreadsDetail`; `BotVolumeDetail` was DELETED 2026-11-20 with the Comments/PR drill-down, so the
+`'bot-volume'` synthesis kind has no SPA caller) still serve slice-scoped Summarise, and
 `MlTotalsStrip` — the deterministic "What the bots are flagging" severity totals, a different
 surface with a confusingly similar heading — stays INSIDE `BotRoiPanel`, on the same
 windowed `/api/bot-analytics` response as the columns beside it.
@@ -5419,7 +5474,7 @@ rendered. (`FeedView.tsx`, `FEED_PR_EVENT_CHIPS` + `feedPrEventChip` in `lib/ui.
 - ⚠ **THE SELECTION IS REMEMBERED WHEN THE PARENT GOES OFF, never cleared.** The row stops
   rendering and `catMatch` reads a hoisted empty array instead of the field. A corrective `set()`
   here is the derived-sub-tab defect one surface over — it permanently forgets a choice the
-  reader made (`BotPrsDetail`'s `activePills` is the same shape).
+  reader made.
 - **CLIENT-SIDE, like its parent, and that is a constraint rather than an accident.** It narrows
   through `catMatch` inside `applyFeedPills` — no `types` query param, no re-keyed request.
   A server-side narrowing would break three things at once: `computeFeedCounts` runs over the
@@ -5441,6 +5496,30 @@ rendered. (`FeedView.tsx`, `FEED_PR_EVENT_CHIPS` + `feedPrEventChip` in `lib/ui.
 - The group labels in this block (`State`, `Kind`) were 10px uppercase-with-tracking
   and are now **11px, muted pairing** (`text-gray-500 dark:text-gray-400`), matching the new
   `Kind` label rather than leaving one row correct and its neighbours not.
+
+## The Feed's Bots side: Severity and Bot type rows (2026-11-20)
+
+Two chip rows under the first filter row, rendered ONLY while `authors === 'bots'` and NOT on a
+person's activity tab (`botFiltersOn`; a Review-only default would empty a Dependabot tab).
+**Severity** (Critical / Major / Minor / Nit / Unscored, with an ⓘ) and **Bot type** (one chip per
+`REVIEWER_ROLES`, `REVIEWER_ROLE_LABEL`). Store: `feedBotSeverities` (default `[]`) and
+`feedBotRoles` (default `['review']`), toggled by `toggleFeedBotSeverity` / `toggleFeedBotRole`.
+
+- **SERVER-SIDE, unlike the PR-event chips** — `?severities=` / `?botRoles=` on
+  `GET /api/activity/feed` (docs/API.md). The feed is offset-paginated over a CAPPED stream
+  (`FEED_EVENT_CAP`), so a client filter would leave whole pages empty and the counts line wrong. Each
+  click RE-KEYS the infinite query, like the People/Bots switch and Commits.
+- ⚠ **`useFeedAutoInsert` must get the SAME `severities` / `botRoles` as `useConsolidatedFeed`**, or
+  the two keys diverge. `feedSearch` (exported) sends them on the Bots side only and omits an empty list.
+- **Transient**, like every feed toggle: not persisted, not in the URL — so no
+  `FILTER_STORAGE_VERSION` bump (still v5). Every session opens the Bots side on Review only. Off
+  screen the rows send nothing, but the choice is REMEMBERED (never cleared by a corrective `set`).
+- **Empty means all**; turning the last chip off lands back on empty. Badges are the server's
+  `counts.bySeverity` / `counts.byBotRole` (each row counted with the OTHER row applied, not its own).
+  Empty state: "No bot activity of the selected types or severities." ⌘K has one command per chip.
+- An isolated PR (`feedIsolatedPrId`) opens the bot-type row with EVERY type (none pressed). That
+  choice is FeedView-local state keyed by the PR id — it resets when the PR changes and never writes
+  `feedBotRoles`, so the workspace feed keeps its own Review-only default.
 
 ## The Activity Feed auto-inserts, and marks what's new (`feedNewCohorts`)
 
@@ -6500,7 +6579,8 @@ shorter form of each rule; this is the full wording.
 - **The Feed is a STREAM (`FeedView`) and nothing else** — no survey panels. It has no My Turn /
   Needs review / Claude / CI-failure items (Pending owns them). It has no sub-tabs: bot CLASSIFICATION is
   Settings → Bots (since 2026-11-03). The "PR events" pill's `Kind` chip row is a PARTITION (empty =
-  all four), client-side, NOT cleared when the parent goes off. A default flip on a persisted key
+  all four), client-side, NOT cleared when the parent goes off. The Bots side's Severity / Bot type
+  rows are SERVER-side (they re-key the query; transient, default Review only). A default flip on a persisted key
   needs a `FILTER_STORAGE_VERSION` bump (now v5; `migratePersistedFilters` steps CHAIN).
 - **ENSEMBLE'S OWN WORK is labelled "Ensemble" and is never My Turn** (2026-11-08): the backend marks an item
   `limn` (`feed/my-turn.ts markLimnItems`: a `limn:` bot actor, or a body with an Ensemble hidden marker — a

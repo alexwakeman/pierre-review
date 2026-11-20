@@ -81,8 +81,7 @@ export function flaggedCommentKey(c: BotFlaggingComment): string {
   return `${c.targetKind}:${c.targetId}`;
 }
 
-// Copied from BotPrsDetail's Comments view so the two bot-comment lists name the same three
-// things the same way.
+// How a bot comment's three sources are named in the bot-comment lists.
 const TARGET_KIND_LABEL: Record<MlLabelTargetKind, string> = {
   review_comment: 'inline comment',
   pr_comment: 'PR comment',

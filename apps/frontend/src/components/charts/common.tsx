@@ -86,6 +86,9 @@ export interface Series {
   // Render this series as a dashed line with NO point dots (LineChart) — for a fitted/derived
   // overlay like a line-of-best-fit trend, visually distinct from the real data series.
   dashed?: boolean;
+  // Draw this series faint, under the others (LineChart) — another series is isolated by the
+  // chart's legend (`lib/botIsolate.ts`). Its dots and hover value are left out.
+  dimmed?: boolean;
 }
 
 // Hours → compact human duration (m / h / d), precision shrinking with magnitude.

@@ -182,8 +182,8 @@ export function useDetectedReviewers(
 
 // Every query key a reclassification shifts. A reviewer moving in or out of the automated set (or
 // between the review / quality_check roles) changes the ROI table, the behaviour analytics, the
-// bot-only-PR list, the resolvable backlog, the per-vendor drill-down, the Activity console's
-// acted-on stats, the bot feed and each PR's cached detail (its Bots chip + Bot-activity tab).
+// bot-only-PR list, the resolvable backlog, the Activity console's acted-on stats, the bot feed
+// and each PR's cached detail (its Bots chip + Bot-activity tab).
 // The old hook invalidated only two of these, which read as "the setting didn't take".
 const RECLASSIFY_INVALIDATE_KEYS = [
   // PREFIXES, deliberately — and that is exactly what keeps them correct now that every entry is
@@ -195,8 +195,6 @@ const RECLASSIFY_INVALIDATE_KEYS = [
   'bot-behaviour',
   'bot-only-prs',
   'bot-resolvable',
-  'bot-vendor-prs',
-  'bot-vendor-comments',
   // The "what the bots are flagging" drill-down. Its population IS the automated set — the
   // server's label scan filters on `automatedReviewerUserIds`, so marking a login human (or a
   // new one automated) changes every tile's number and every row of every selector's list.
@@ -412,11 +410,8 @@ export function useScopeResolveBotThreads() {
       void qc.invalidateQueries({ queryKey: ['bot-resolvable'] });
       void qc.invalidateQueries({ queryKey: ['bot-analytics'] });
       void qc.invalidateQueries({ queryKey: ['bot-only-prs'] });
-      void qc.invalidateQueries({ queryKey: ['bot-vendor-prs'] });
-      // The comments drill-down shows each thread's derivedState, which a resolve just changed.
-      void qc.invalidateQueries({ queryKey: ['bot-vendor-comments'] });
-      // Same reason for the flagging drill-down: its comment cards and its cluster members both
-      // render `derivedState`.
+      // The flagging drill-down's comment cards and cluster members both render `derivedState`,
+      // which a resolve just changed.
       void qc.invalidateQueries({ queryKey: ['bot-flagging'] });
       // Then THE ONE WRITE SET (prCacheSync.ts), the same as the per-PR resolve hook: every
       // affected PR's own keys, the threads that were ticked (named, because their PRs' details

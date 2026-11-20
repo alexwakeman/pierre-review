@@ -119,6 +119,7 @@ import type {
   ConsolidatedFeedCounts,
   FeedPrEventChip,
   FeedAuthors,
+  FeedSeverity,
   FeedAffectedThread,
   MyTurnPr,
   MyTurnDismissedItem,
@@ -218,6 +219,13 @@ import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
 import { runTransaction } from './client.js';
 import { pruneAiFixLoopForPrs } from './ai-fix-loop-prune.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
+import {
+  countBy,
+  feedBotFacts,
+  passesBotRole,
+  passesSeverity,
+  type FeedMlTarget,
+} from './feed-bot-filters.js';
 import { getPushSummariesForPrs } from './push-summaries.js';
 import { pushSummariesForShas } from '@pierre-review/shared';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
@@ -323,6 +331,7 @@ import {
   type PrFailingChecks,
 } from './failing-checks.js';
 import { prFlakyChecks, type FlakyVerdict } from './flaky-checks.js';
+import { emptyBotResponsiveness, foldBotResponsiveness } from './bot-responsiveness.js';
 import {
   addressedCommitAuthors,
   mentionFacts as mentionCommentFacts,
@@ -2234,11 +2243,12 @@ export async function getFeed(
         .map((r) => r.refId as number),
     ),
   ];
-  type CommentRow = { createdAt: Date; authorId: number | null; excerpt: string | null; body: string | null };
+  type CommentRow = { id: number; createdAt: Date; authorId: number | null; excerpt: string | null; body: string | null };
   const commentsByThread = new Map<number, CommentRow[]>();
   if (threadIds.length > 0) {
     const cs = await db
       .select({
+        id: reviewComments.id,
         threadId: reviewComments.threadId,
         createdAt: reviewComments.createdAt,
         authorId: reviewComments.authorId,
@@ -2277,6 +2287,7 @@ export async function getFeed(
     // The full markdown body for text events (fallback to `excerpt` when a row was
     // synced lean before full-body persistence).
     let content: string | null = null;
+    let reviewCommentId: number | null = null;
     if (r.type === 'review_comment' && r.refId != null) {
       const arr = commentsByThread.get(r.refId) ?? [];
       const match =
@@ -2285,6 +2296,7 @@ export async function getFeed(
         ) ?? arr.find((c) => c.createdAt.getTime() === r.occurredAt.getTime());
       excerpt = match?.excerpt ?? (match?.body ? truncate(match.body, 160) : null);
       content = match?.body ?? null;
+      reviewCommentId = match?.id ?? null;
     } else if (r.type === 'pr_comment' && r.refId != null) {
       const body = prCommentBodyById.get(r.refId) ?? null;
       excerpt = body ? truncate(body, 160) : null;
@@ -2313,6 +2325,7 @@ export async function getFeed(
           : null,
       excerpt,
       content,
+      reviewCommentId,
     };
   });
 
@@ -3340,6 +3353,11 @@ export interface ConsolidatedFeedFilters {
   // opt-in "Commits" feed toggle (off by default). Plain pushes stay hidden unless this is
   // set. The addressed-thread runs still ride along inline either way.
   includeAllCommits?: boolean;
+  // THE BOTS SIDE'S TWO CHIP ROWS (ignored on the people side; db/feed-bot-filters.ts). null /
+  // omitted = no narrowing. Applied BEFORE the plain-activity cap and the page slice, like
+  // `authors`, so a narrowed page is never an empty slice of a wider stream.
+  severities?: readonly FeedSeverity[] | null;
+  botRoles?: readonly ReviewerRole[] | null;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -7192,6 +7210,8 @@ export async function getConsolidatedFeed(
     offset = 0,
     authors = 'humans',
     includeAllCommits = false,
+    severities = null,
+    botRoles = null,
   } = opts;
 
   // Restrict to the repos this account owns; a passed repoIds narrows within them. The
@@ -7282,10 +7302,23 @@ export async function getConsolidatedFeed(
     items.push(it);
   };
 
+  // The ML label target behind each comment / review row (Bots side only; feed-bot-filters.ts).
+  const mlTargetOf = new Map<string, FeedMlTarget>();
   // Activity events → one row each, as PLAIN rows (isMyTurn:false). The Pro enricher flags
   // participation below; without it every row stays plain. Exactly one row per underlying
   // event (no synthesized "My Turn" layer / dedup).
   for (const f of feed.events) {
+    if (authors === 'bots') {
+      const target: FeedMlTarget | null =
+        f.type === 'review_comment' && f.reviewCommentId != null
+          ? { kind: 'review_comment', id: f.reviewCommentId }
+          : f.type === 'pr_comment' && f.refId != null
+            ? { kind: 'pr_comment', id: f.refId }
+            : f.type === 'review_submitted' && f.refId != null
+              ? { kind: 'review', id: f.refId }
+              : null;
+      if (target) mlTargetOf.set(`feed:${f.id}`, target);
+    }
     push({
       id: `feed:${f.id}`,
       isMyTurn: false,
@@ -7363,21 +7396,44 @@ export async function getConsolidatedFeed(
 
   // Pure chronological — newest first. Keep every My Turn item (always relevant); cap the plain
   // activity rows so a busy multi-repo account doesn't render thousands of them.
-  const alwaysRows = scoped.filter((i) => i.isMyTurn);
-  const feedRows = scoped
-    .filter((i) => !i.isMyTurn)
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
-    .slice(0, FEED_EVENT_CAP);
-  const ordered = [...alwaysRows, ...feedRows].sort((a, b) =>
-    b.occurredAt.localeCompare(a.occurredAt),
-  );
+  const capStream = (list: ConsolidatedFeedItem[]): ConsolidatedFeedItem[] => {
+    const alwaysRows = list.filter((i) => i.isMyTurn);
+    const feedRows = list
+      .filter((i) => !i.isMyTurn)
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+      .slice(0, FEED_EVENT_CAP);
+    return [...alwaysRows, ...feedRows].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  };
+
+  // THE BOTS SIDE'S severity + bot-type rows (db/feed-bot-filters.ts), BEFORE the cap. Each chip
+  // row's badges are counted over the stream narrowed by the OTHER row only, after the same cap.
+  let narrowed = scoped;
+  let botFacets: { bySeverity: Record<string, number>; byBotRole: Record<string, number> } | null = null;
+  if (authors === 'bots') {
+    const facts = await feedBotFacts(
+      accountId,
+      scoped,
+      mlTargetOf,
+      await reviewerRoleForUser(accountId, workspaceId),
+    );
+    const bySev = scoped.filter((i) => passesSeverity(facts.get(i.id), severities));
+    const byRole = scoped.filter((i) => passesBotRole(facts.get(i.id), botRoles));
+    narrowed = bySev.filter((i) => passesBotRole(facts.get(i.id), botRoles));
+    botFacets = {
+      bySeverity: countBy(capStream(byRole), facts, (f) => f?.severity ?? 'unscored'),
+      byBotRole: countBy(capStream(bySev), facts, (f) => f?.role ?? null),
+    };
+  }
+  const ordered = capStream(narrowed);
 
   // Paginate: `total` is the full stream length; `page` is the requested window. Only
   // the page is enriched + has its users backfilled, so hidden items cost nothing.
   const total = ordered.length;
   // Facet counts over the WHOLE post-cap stream (not just the page) so the SPA's pill badges
   // reflect every matching item.
-  const counts = computeFeedCounts(ordered);
+  const counts: ConsolidatedFeedCounts = botFacets
+    ? { ...computeFeedCounts(ordered), ...botFacets }
+    : computeFeedCounts(ordered);
   const start = Math.max(0, offset ?? 0);
   const page =
     limit != null ? ordered.slice(start, start + Math.max(0, limit)) : ordered.slice(start);
@@ -7522,7 +7578,7 @@ export async function getConsolidatedFeed(
     total,
     // Pre-cap stream length — lets the client disclose "total most recent of N" honestly
     // when the plain-activity cap dropped older rows (uncappedTotal > total).
-    uncappedTotal: scoped.length,
+    uncappedTotal: narrowed.length,
     counts,
     generatedAt: new Date().toISOString(),
   };
@@ -15184,6 +15240,19 @@ export async function getBotBehaviourAnalytics(
   // 84-day coverage span + scope. A SHARED response field (PR inflow is an account/repo fact, not
   // per-bot) so every bot's coverage strip can be read against real PR inflow — the days a bot went
   // silent while PRs kept coming are exactly the coverage gaps the user wants to spot.
+  const HOUR = 3_600_000;
+  const SPAN_WEEKS = 12;
+  // THE week boundaries, computed once. The per-bot `trend`, the pooled `workspace` trend and the
+  // ML fold at the end
+  // read this array rather than re-deriving `trendFromMs + i·7·DAY` — the two series are drawn on
+  // the same x-axis, and a second copy of that arithmetic is exactly how they would come to
+  // disagree by a week without anything failing.
+  const weekStarts = Array.from({ length: SPAN_WEEKS }, (_, i) =>
+    new Date(trendFromMs + i * 7 * DAY).toISOString(),
+  );
+  const weekIndexOf = (ms: number): number =>
+    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - trendFromMs) / (7 * DAY))));
+
   const EMPTY_OVERLAP: BotOverlapStats = {
     reviewedPrs: 0,
     multiReviewedPrs: 0,
@@ -15201,6 +15270,7 @@ export async function getBotBehaviourAnalytics(
     generatedAt,
     window: win,
     bots: [],
+    workspace: emptyBotResponsiveness(weekStarts),
     prsOpenedPerDay,
     daySpanStart,
     overlap: EMPTY_OVERLAP,
@@ -15387,18 +15457,6 @@ export async function getBotBehaviourAnalytics(
     byPr.set(t.prId, (byPr.get(t.prId) ?? 0) + 1);
   }
 
-  const HOUR = 3_600_000;
-  const SPAN_WEEKS = 12;
-  // DAY / SPAN_DAYS / trendFromMs are hoisted above (they also gate the prsOpenedPerDay series).
-  // THE week boundaries, computed once. Both the per-bot `trend` below and the ML fold at the end
-  // read this array rather than re-deriving `trendFromMs + i·7·DAY` — the two series are drawn on
-  // the same x-axis, and a second copy of that arithmetic is exactly how they would come to
-  // disagree by a week without anything failing.
-  const weekStarts = Array.from({ length: SPAN_WEEKS }, (_, i) =>
-    new Date(trendFromMs + i * 7 * DAY).toISOString(),
-  );
-  const weekIndexOf = (ms: number): number =>
-    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - trendFromMs) / (7 * DAY))));
   const bots: BotBehaviourBotStat[] = [];
   for (const [userId, byPr] of touchesByUserPr) {
     const kind = kindMap.get(userId);
@@ -15606,6 +15664,17 @@ export async function getBotBehaviourAnalytics(
     });
   }
   bots.sort((a, b) => b.totalActivity - a.totalActivity || b.prsReviewed - a.prsReviewed);
+
+  // Workspace headline tiles: every review bot pooled per PR, over the SAME touches, PR clock
+  // starts and week boundaries as the per-bot rows (db/bot-responsiveness.ts).
+  const workspace = foldBotResponsiveness({
+    touchesByUserPr,
+    openedMsByPr: new Map([...prMeta].map(([id, m]) => [id, m.openedMs])),
+    readyMsByPr: readyByPr,
+    fromMs,
+    weekStarts,
+    weekIndexOf,
+  });
 
   // ── Cross-bot overlap + coverage (EXPERIMENTAL) ─────────────────────────────────────────────
   // All over the SELECTED window [from, to] + scope. Bot identity mirrors the per-bot rows
@@ -15903,6 +15972,7 @@ export async function getBotBehaviourAnalytics(
     generatedAt,
     window: win,
     bots,
+    workspace,
     prsOpenedPerDay,
     daySpanStart,
     overlap,

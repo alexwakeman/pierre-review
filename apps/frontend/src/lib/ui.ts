@@ -565,8 +565,34 @@ function isBrandedKind(kind: AutomatedReviewerKind): boolean {
   return kind !== 'in_house' && kind !== 'vendor';
 }
 
+// The `index`-th shade of a brand colour: 0 is the brand colour itself; later indexes step the
+// LIGHTNESS out from it, alternating lighter / darker (±11% per step), reflecting to the other
+// side (and nudging the hue a few degrees) when a step leaves the 20–85% band. Hue family and saturation stay the brand's, so every shade still reads as that
+// brand. Deterministic: the same (colour, index) is always the same hex. Strokes and swatches use
+// it raw; TEXT goes through `vendorInk` like any brand colour.
+export function brandShade(color: string, index: number): string {
+  if (index <= 0) return color;
+  const [h, s, l0] = rgbToHsl(hexToRgb(color));
+  const step = Math.ceil(index / 2);
+  const sign = index % 2 === 1 ? 1 : -1;
+  const MIN_L = 0.2;
+  const MAX_L = 0.85;
+  const delta = step * 0.11;
+  let l = l0 + sign * delta;
+  let hueShift = 0;
+  if (l < MIN_L || l > MAX_L) {
+    // Reflected: the other side may already hold the opposite-sign shade at this step, so the
+    // hue moves too, keeping the two apart.
+    l = l0 - sign * delta;
+    hueShift = (sign * step * 8) / 360;
+  }
+  if (l < MIN_L || l > MAX_L) l = Math.min(MAX_L, Math.max(MIN_L, l));
+  return hslToHex((((h + hueShift) % 1) + 1) % 1, s, l);
+}
+
 // Build a stable login → colour map for a roster of automated reviewers (brand-aware hybrid):
-//   1. branded kinds (known vendors + Pierre) keep their BOT_VENDOR_META brand colour, and
+//   1. branded kinds (known vendors + Ensemble) keep their BOT_VENDOR_META brand colour — a
+//      second, third… login of the SAME branded kind takes a shade of it (`brandShade`), and
 //   2. in-house / unknown bots each get a DISTINCT palette colour (greedy, skipping any hue a
 //      brand already claimed), so no two bots share a colour until the palette is exhausted.
 // Keyed by login (unique per user) and seeded by a stable login sort, so a given bot resolves
@@ -577,10 +603,22 @@ export function buildBotColorMap(
   const map = new Map<string, string>();
   const used = new Set<string>();
   const sorted = [...roster].sort((a, b) => a.login.localeCompare(b.login));
-  // Pass 1: branded vendors + Pierre claim their brand colour.
+  // Pass 1: branded vendors + Ensemble claim their brand colour. When ONE branded kind has more
+  // than one login (every Ensemble poster is kind `pierre`, one `limn:<login>` per reader), the
+  // first login by sort order keeps the brand colour and each later one takes the next SHADE of
+  // it (`brandShade`): still recognisably that brand, but one line per poster on a chart.
+  const nthOfKind = new Map<AutomatedReviewerKind, number>();
   for (const r of sorted) {
     if (map.has(r.login) || !isBrandedKind(r.kind)) continue;
-    const c = BOT_VENDOR_META[r.kind].color;
+    const base = BOT_VENDOR_META[r.kind].color;
+    let i = nthOfKind.get(r.kind) ?? 0;
+    let c = brandShade(base, i);
+    // Skip a shade that is already taken (two brands can sit close); bounded, so it terminates.
+    for (let guard = 0; i > 0 && guard < 24 && used.has(c.toLowerCase()); guard++) {
+      i += 1;
+      c = brandShade(base, i);
+    }
+    nthOfKind.set(r.kind, i + 1);
     map.set(r.login, c);
     used.add(c.toLowerCase());
   }

@@ -6,11 +6,17 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { parsePatch } from '../src/lib/diff.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { Markdown } from '../src/components/Markdown.js';
 import {
+  ADDED_BLOCK_CLASS,
+  addedNewLines,
   isMarkdownPath,
   markdownFileLinkHref,
   markdownFromPatch,
   rehypeDropRelativeImages,
+  rehypeMarkAddedBlocks,
 } from '../src/lib/markdownFile.js';
 
 describe('isMarkdownPath', () => {
@@ -32,7 +38,7 @@ describe('markdownFromPatch', () => {
   it('an added file is the whole file: every line, not partial', () => {
     const rows = parsePatch(['@@ -0,0 +1,3 @@', '+# Title', '+', '+Some text.'].join('\n'));
     expect(markdownFromPatch(rows)).toEqual({
-      segments: [{ text: '# Title\n\nSome text.', hiddenBefore: 0 }],
+      segments: [{ text: '# Title\n\nSome text.', hiddenBefore: 0, added: [1, 2, 3] }],
       partial: false,
     });
   });
@@ -44,7 +50,7 @@ describe('markdownFromPatch', () => {
       ),
     );
     const out = markdownFromPatch(rows);
-    expect(out.segments).toEqual([{ text: '# Title\nNew line.\n\nEnd.', hiddenBefore: 0 }]);
+    expect(out.segments).toEqual([{ text: '# Title\nNew line.\n\nEnd.', hiddenBefore: 0, added: [2] }]);
     // Starts at line 1 and the no-newline marker proves it reaches the end.
     expect(out.partial).toBe(false);
   });
@@ -67,8 +73,8 @@ describe('markdownFromPatch', () => {
     );
     const out = markdownFromPatch(rows);
     expect(out.segments).toEqual([
-      { text: 'a\nb\nC\nd', hiddenBefore: 9 },
-      { text: 'x\ny\nz\nw', hiddenBefore: 16 },
+      { text: 'a\nb\nC\nd', hiddenBefore: 9, added: [3] },
+      { text: 'x\ny\nz\nw', hiddenBefore: 16, added: [2] },
     ]);
     expect(out.partial).toBe(true);
   });
@@ -142,5 +148,50 @@ describe('rehypeDropRelativeImages', () => {
       img('https://example.com/a.png', 'A'),
       { type: 'text', value: 'Diagram' },
     ]);
+  });
+});
+
+describe('addedNewLines', () => {
+  it('lists the new-side line numbers of the added rows only', () => {
+    const rows = parsePatch(['@@ -10,3 +10,4 @@', ' a', '-b', '+B', '+B2', ' c'].join('\n'));
+    expect(addedNewLines(rows)).toEqual([11, 12]);
+  });
+});
+
+describe('rehypeMarkAddedBlocks', () => {
+  // Through the real pipeline (raw → sanitize → highlight → the plugin), so the source positions
+  // the plugin reads are the ones the sanitizer actually keeps.
+  const render = (text: string, added: number[]): string =>
+    renderToStaticMarkup(
+      createElement(Markdown, { rehypeExtra: [rehypeMarkAddedBlocks(added)], children: text }),
+    );
+  const marked = (html: string): number => html.split(ADDED_BLOCK_CLASS).length - 1;
+
+  it('wraps a top-level block that holds an added line; leaves unchanged blocks alone', () => {
+    const html = render(['# Title', '', 'Old text.', '', 'New text.'].join('\n'), [5]);
+    expect(marked(html)).toBe(1);
+    expect(html).toContain(`<div class="${ADDED_BLOCK_CLASS}"><p>New text.</p></div>`);
+    expect(html).toContain('<h1>Title</h1>');
+  });
+
+  it('marks a block in which only one line is added (a paragraph, a fenced code block)', () => {
+    const html = render(['Line one', 'line two', '', '```ts', 'const a = 1;', '```'].join('\n'), [2, 5]);
+    expect(marked(html)).toBe(2);
+  });
+
+  it('marks list ITEMS, not the whole list, and a parent item only for its own lines', () => {
+    const html = render(['- one', '- two', '  - nested', '- three'].join('\n'), [3]);
+    expect(marked(html)).toBe(1);
+    expect(html).toMatch(new RegExp(`<li class="${ADDED_BLOCK_CLASS}">nested</li>`));
+    expect(html).toContain('<ul>');
+  });
+
+  it('marks nothing when no line is added', () => {
+    expect(marked(render('# Title\n\nText.', []))).toBe(0);
+  });
+
+  it('a raw HTML block that survives the sanitizer keeps its provenance', () => {
+    const html = render(['Intro.', '', '<details><summary>More</summary>Body</details>'].join('\n'), [3]);
+    expect(marked(html)).toBe(1);
   });
 });

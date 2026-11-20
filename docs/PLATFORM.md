@@ -1212,6 +1212,30 @@ mount shows none. No model, no total across bots or Workspaces.
 ⚠ **`vendors`, `suggestions` and `totals` are REQUIRED on `BotAnalyticsResponse`.** The SPA decides
 what to draw from the payload's own content, never by inferring a state from zeros.
 
+**Review-bot responsiveness (2026-11-20).** The ROI tab now leads with two tiles, "Time to first
+review" and "Follow-ups after first review", across the workspace's review bots, plus per-bot
+"First review" / "Follow-ups" columns and two weekly trend cards beside Thread volume. The data is
+the REQUIRED `workspace: BotResponsiveness` block on the existing `GET /api/pro/bot-behaviour` (ONE
+fetch, no new route), folded by core `db/bot-responsiveness.ts` `foldBotResponsiveness` from the SAME
+`touchesByUserPr`, open times, `readyByPr`, `fromMs` and week boundaries as the per-bot rows inside
+`getBotBehaviourAnalytics`:
+
+- **Which bots**: the workspace's role-`'review'` set (`automatedReviewerUserIds(…, 'review')`, stored
+  roles), never `hiddenBotUserIds`. Ensemble's own posts count only if their stored role is `'review'`.
+- **TTFR**: per PR to the first touch by ANY review bot; the clock starts at ready-for-review when
+  seen at or before that touch, else at open. **Follow-ups**: every review-bot touch after that one,
+  including another bot's first pass; each review / comment row is one touch (no time-gap rule).
+- **Window**: headline over PRs whose pooled first touch is in `[window.from, now]`; `trend` is 12
+  weeks by first-touch week. `prs === 0` ⇒ every figure null, never 0. With `?botUserId=` the block
+  equals that bot's own figures. Same known limit as per-bot: touches before the 84-day span are unseen.
+
+The ROI table also LOST columns ("Unanswered after Nh", "Oldest not addressed", High, Nits, "Not
+addressed by severity", Depth): the bot NAME opens the `bot-detail` tab, Comments/PR is plain text
+(the merged-PR drill-down `BotVolumeDetail` is deleted; `/api/bot-analytics/volume/prs` is kept with
+no SPA caller), and "Bot effectiveness" / "Used vs not addressed" moved into the collapsed
+`WorkspaceBotCharts` section. One click-to-isolate bot per `BotsView` mount dims the other bots in
+every per-bot chart. SPA detail: docs/FRONTEND.md § Bots view (THE ROI TABLE, 2026-11-20).
+
 ### The peer benchmark — serving the cohort (`GET /api/pro/bot-benchmark`)
 
 The COHORT half of "how does our bot compare": per-(vendor × activity band) distributions fitted in
@@ -1799,9 +1823,10 @@ The People report (Reports → People), the contributor tab's 1:1 prep and "Ask 
 are back after the P2.3/C6 retirement, over the never-dropped `bot_theme_reports` table — **no
 migration**. `BotThemesPanel` first replaced the `SynthesisCard` mount at the top of the Bots
 Measure surface and now owns the **`Bots → Themes` sub-tab** outright (listed only while
-`me.ai.enabled`; details in docs/FRONTEND.md § The Bots Themes panel). The three drill-down SynthesisCards (`BotVolumeDetail`,
-`BotFlaggingDetail`, `BotThreadsDetail`) and the seam's `'workspace-bots'` kind are untouched and
-still serve slice-scoped Summarise. ⚠ The move is SPA-only: same routes, same `scope_key`.
+`me.ai.enabled`; details in docs/FRONTEND.md § The Bots Themes panel). The drill-down SynthesisCards
+(`BotFlaggingDetail`, `BotThreadsDetail`) and the seam's `'workspace-bots'` kind are untouched and
+still serve slice-scoped Summarise (`BotVolumeDetail` was deleted 2026-11-20; the `'bot-volume'` kind
+has no SPA caller now). ⚠ The move is SPA-only: same routes, same `scope_key`.
 
 **⚠ The panel renders TWO CLASSES OF FIGURE and the caption must say which is which.** An early
 draft claimed the whole panel was exact.

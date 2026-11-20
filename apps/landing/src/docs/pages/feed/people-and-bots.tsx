@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Illustration, Note, Pill, Steps, Toolbar, Ui, Warning } from '../../kit';
+import { DocLink, H2, Illustration, Kbd, Note, Pill, Steps, Toolbar, Ui, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'People or bots',
@@ -26,6 +26,34 @@ export default function Page(): JSX.Element {
           <Pill tone="blue">Bots</Pill>
         </Toolbar>
       </Illustration>
+
+      <H2 id="bot-filters">Filter the Bots side</H2>
+      <p>The Bots side has two more rows of chips. Choose any number in each row.</p>
+      <ul>
+        <li>
+          <b>
+            <Ui>Severity</Ui>
+          </b>
+          : <Ui>Critical</Ui>, <Ui>Major</Ui>, <Ui>Minor</Ui>, <Ui>Nit</Ui> or <Ui>Unscored</Ui>. Ensemble’s own
+          findings keep the severity they were posted with: Blocker is Critical, Warning is Major, Question is Minor,
+          Nit is Nit. Other bot comments use the score from{' '}
+          <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>. Unscored means no score yet, or
+          nothing to score.
+        </li>
+        <li>
+          <b>
+            <Ui>Bot type</Ui>
+          </b>
+          : <Ui>Review bot</Ui>, <Ui>Quality check</Ui>, <Ui>Dependency updates</Ui>, <Ui>Code agent</Ui>,{' '}
+          <Ui>Release automation</Ui> or <Ui>Housekeeping</Ui>, as set in{' '}
+          <DocLink to="settings/bots">Settings → Bots</DocLink>.
+        </li>
+      </ul>
+      <p>
+        The Bots side opens on <Ui>Review bot</Ui> only, except when the feed shows one pull request: then every type shows. Turn every chip in a row off to see all. Each chip shows how
+        many items it holds. Press <Kbd>⌘K</Kbd> and type “Feed: show only” and a chip’s name to turn it on. A person’s own activity
+        tab does not show these rows.
+      </p>
 
       <H2 id="who-is-a-bot">How Ensemble decides who is a bot</H2>
       <p>An account counts as a bot when any of these is true:</p>

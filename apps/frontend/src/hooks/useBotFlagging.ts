@@ -21,10 +21,8 @@ import { repoKeySlot } from './useBotTriage.js';
 // pages).
 //
 // ⚠ EVERY NUMBER HERE IS THE SERVER'S. `total` is the tile's count by construction (the server
-// re-runs the strip's own scan and the same JS fold), and nothing on the client may re-derive it —
-// notably `lib/botComments.ts`'s `pillOf`, which buckets praise BEFORE isSummary and would
-// therefore disagree with the backend about a praise-flavoured walkthrough. `pillOf` is for
-// display pills only.
+// re-runs the strip's own scan and the same JS fold), and nothing on the client may re-derive it:
+// a client-side tally would disagree with the backend about a praise-flavoured walkthrough.
 
 // A cluster card is several comments tall, so the overlap selector pages in smaller batches; the
 // comment selectors page at the feed's usual grain.

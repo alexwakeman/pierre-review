@@ -534,7 +534,7 @@ export function BotsSeverityMock(): JSX.Element {
       title="What the bots are flagging"
       meta="graded by Ensemble's model"
       onReset={sel ? () => setSel(null) : null}
-      label="Bots Monitoring: 502 findings, 49% high severity, 30% nits, mostly about correctness; a row per bot with threads, share used, not addressed and severity mix. Each bot's row opens its breakdown."
+      label="Bots Monitoring: 502 findings, 49% high severity, 30% nits, mostly about correctness; a row per bot with threads, share used, not addressed, severity mix and time to first review. Each bot's row opens its breakdown."
     >
       <div className="mk-stats">
         {BOT_SUMMARY.map((s) => (
@@ -552,7 +552,7 @@ export function BotsSeverityMock(): JSX.Element {
           { key: 'used', label: 'Used', num: true },
           { key: 'open', label: 'Not addressed', num: true },
           { key: 'mix', label: 'Severity mix' },
-          { key: 'high', label: 'High', num: true },
+          { key: 'first', label: 'First review', num: true },
         ]}
         rows={BOTS.map((x) => ({
           _key: x.bot,
@@ -561,13 +561,13 @@ export function BotsSeverityMock(): JSX.Element {
           used: x.used,
           open: x.open,
           mix: <HBar parts={x.mix} colors={SEVERITY} />,
-          high: x.high,
+          first: x.firstReview,
         }))}
       />
       {b ? (
         <div className="mk-detail" role="status">
-          <b>{b.bot}</b>: {b.threads} threads. Your team used {b.used}; {b.open} were not addressed. Top topic:{' '}
-          {b.topic}.
+          <b>{b.bot}</b>: {b.threads} threads. Your team used {b.used}; {b.open} were not addressed. First review
+          after {b.firstReview} (median). Top topic: {b.topic}.
           <div className="mk-chips" style={{ marginTop: 6 }}>
             {SEVERITY_NAMES.map((name, i) => (
               <Chip key={name} tone={i === 0 ? 'red' : i === 1 ? 'amber' : i === 2 ? 'blue' : 'grey'}>

@@ -144,6 +144,21 @@ describe('getBotBehaviourAnalytics — findings density trend', () => {
     expect(w7.findingsPerKloc).toBe(0);
   });
 
+  it('carries the pooled workspace responsiveness block over the same touches', async () => {
+    const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
+    // Two PRs first touched in the 14-day window, each opened exactly one day before its touch.
+    expect(resp.workspace.prs).toBe(2);
+    expect(resp.workspace.ttfrMedianHours).toBe(24);
+    expect(resp.workspace.ttfrBaseline).toBe('opened');
+    expect(resp.workspace.followupRatePct).toBe(0);
+    expect(resp.workspace.trend).toHaveLength(12);
+    expect(resp.workspace.trend.map((w: { weekStart: string }) => w.weekStart)).toEqual(
+      resp.bots[0].trend.map((w: { weekStart: string }) => w.weekStart),
+    );
+    expect(resp.workspace.trend[11].prs).toBe(2);
+    expect(resp.workspace.trend[7].prs).toBe(1);
+  });
+
   it('reports null density (not 0) for a week with no reviewed PRs', async () => {
     const resp = await q.getBotBehaviourAnalytics(1, 'rolling_14', scope);
     const bot = resp.bots.find((b: { login: string | null }) => b.login === 'coderabbitai');

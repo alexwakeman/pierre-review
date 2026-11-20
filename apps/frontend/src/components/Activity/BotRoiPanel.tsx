@@ -3,6 +3,9 @@ import { useEdgeFade, useIsPhone } from '../ui/index.js';
 import type {
   AutomatedReviewerKind,
   BotAnalyticsMlTotals,
+  BotBehaviourBotStat,
+  BotBehaviourResponse,
+  BotBehaviourTrendPoint,
   BotFlaggingSelector,
   BotInflationWeekPoint,
   BotTuningSuggestion,
@@ -12,17 +15,12 @@ import type {
   BotVolumeBot,
   BotVolumeResponse,
   BotWindowKind,
-  MlSeverity,
 } from '@pierre-review/shared';
 import type { BotFlaggingBotNarrowing } from '../../lib/severityAgreement.js';
 import { ML_SEVERITIES } from '@pierre-review/shared';
-
-// ASCENDING (nit → critical), deliberately NOT the shared `ML_SEVERITIES` (worst-first, which is
-// the right order for a badge legend): the four "not addressed by severity" columns read
-// left-to-right as a scale, and flipping them would silently transpose every cell's meaning.
-const SEVERITY_COLUMNS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
 import {
   useBotAnalytics,
+  useBotBehaviour,
   useResolvableBotThreads,
 } from '../../hooks/useBotTriage.js';
 import { useMlSeverityEnabled } from '../../hooks/useMlLabels.js';
@@ -48,9 +46,11 @@ import { Callout, Segmented, STICKY_COL, TABLE, TABLE_SCROLL, TR_HOVER } from '.
 import { InfoButton } from '../InfoModal.js';
 import { SeverityBar } from '../MlSeverityBadge.js';
 import { LineChart } from '../charts/LineChart.js';
-import { BarChart } from '../charts/BarChart.js';
-import { ChartCard, ChartEmpty, PALETTE, type Series } from '../charts/common.js';
+import { ChartCard, ChartEmpty, PALETTE, fmtDuration, type Series } from '../charts/common.js';
 import { InflationHistoryChart } from './InflationHistoryChart.js';
+import { BotIsolateLegend, useBotIsolate } from './BotIsolate.js';
+import { applyIsolation } from '../../lib/botIsolate.js';
+import { formatHours, formatResponsivenessTiles } from '../../lib/botResponsiveness.js';
 
 // Bot ROI / utilisation panel, rendered in the Bots rail console. Deterministic and model-free: a
 // per-bot signal-to-noise table + a 12-week thread-volume trend + keep/tune/noisy verdicts + the ML
@@ -116,19 +116,9 @@ function pct(v: number | null): string {
   return v == null ? '—' : `${Math.round(v)}%`;
 }
 
-// Chart y-axis / value formatter (BarChart never passes null).
-const pctAxis = (n: number): string => `${Math.round(n)}%`;
-
 // Per-week metric extractor for the thread-volume trend. Module-level so its identity is
 // stable (keeps VendorTrendChart's useMemo from recomputing every render).
 const threadsVal = (p: BotVendorTrendPoint): number | null => p.threads;
-
-// Keep/tune/noisy → the traffic-light hue that tints each effectiveness bar.
-const VERDICT_COLOR: Record<BotVerdict, string> = {
-  keep: PALETTE.green,
-  tune: PALETTE.amber,
-  noisy: PALETTE.red,
-};
 
 function usd(v: number | null): string {
   if (v == null) return '—';
@@ -182,85 +172,174 @@ function VendorTrendChart({
   formatY?: (n: number) => string;
   height?: number;
 }): JSX.Element {
-  const { labels, series } = useMemo(() => {
+  const { isolated } = useBotIsolate();
+  const { labels, series, legendBots } = useMemo(() => {
     const weekSet = new Set<string>();
     for (const v of vendors) for (const p of v.trend) weekSet.add(p.weekStart);
     const labels = Array.from(weekSet).sort().slice(-12);
-    const series: Series[] = vendors
-      .filter((v) => v.trend.length > 0)
-      .map((v) => {
-        const byWeek = new Map(v.trend.map((p) => [p.weekStart, value(p)]));
-        return {
-          key: v.key,
-          label: v.label,
-          color: botColor({ login: v.login, kind: v.kind }),
-          values: labels.map((w) => byWeek.get(w) ?? null),
-        };
-      });
-    return { labels, series };
+    const drawn = vendors.filter((v) => v.trend.length > 0);
+    const series: Series[] = drawn.map((v) => {
+      const byWeek = new Map(v.trend.map((p) => [p.weekStart, value(p)]));
+      return {
+        key: v.key,
+        label: v.label,
+        color: botColor({ login: v.login, kind: v.kind }),
+        values: labels.map((w) => byWeek.get(w) ?? null),
+      };
+    });
+    return { labels, series, legendBots: drawn };
   }, [vendors, value, botColor]);
+  const shown = useMemo(() => applyIsolation(series, isolated), [series, isolated]);
 
   if (labels.length < 2 || series.length === 0) {
     return <ChartEmpty label="Not enough weekly history yet" />;
   }
-  return <LineChart labels={labels} series={series} height={height} curved formatY={formatY} />;
-}
-
-// A per-bot acted-on-vs-untouched snapshot over the selected window (stacked bar per bot):
-// the deterministic effectiveness split — how much of each bot's volume drove action vs sat
-// untouched. Labels rotate so bot names don't collide.
-function ActedVsUntouchedChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
-  const labels = vendors.map((v) => v.label);
-  const series: Series[] = [
-    { key: 'acted', label: 'Used', color: PALETTE.green, values: vendors.map((v) => v.actedOn) },
-    { key: 'untouched', label: 'Not addressed', color: PALETTE.amber, values: vendors.map((v) => v.untouched) },
-  ];
-  if (labels.length === 0 || vendors.every((v) => v.actedOn + v.untouched === 0)) {
-    return <ChartEmpty />;
-  }
-  return <BarChart labels={labels} series={series} mode="stacked" rotateLabels height={160} />;
-}
-
-// Volume-INDEPENDENT effectiveness: each bot's acted-on % over the window, the bar tinted by
-// its keep/tune/noisy verdict. Surfaces low-volume-but-ineffective bots the count charts bury
-// (a 24-thread bot at 25% acted-on reads as clearly "noisy" here, where its stacked bar is a
-// sliver). A small verdict legend sits under it so the traffic-light colours are legible.
-function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
-  const rated = vendors.filter((v) => v.actedOnPct != null);
-  if (rated.length === 0) return <ChartEmpty label="No acted-on data yet" />;
-  const series: Series[] = [
-    {
-      key: 'acted',
-      label: 'Used %',
-      color: PALETTE.slate,
-      values: rated.map((v) => v.actedOnPct ?? 0),
-      colors: rated.map((v) => VERDICT_COLOR[v.verdict]),
-    },
-  ];
   return (
-    <div>
-      <BarChart
-        labels={rated.map((v) => v.label)}
-        series={series}
-        formatY={pctAxis}
-        formatValue={pctAxis}
-        rotateLabels
-        height={160}
-      />
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-        {(['keep', 'tune', 'noisy'] as BotVerdict[]).map((v) => (
-          <span
-            key={v}
-            className="flex items-center gap-1 text-meta capitalize text-ui-mute"
-          >
-            <span
-              className="inline-block h-2 w-2 rounded-[2px]"
-              style={{ background: VERDICT_COLOR[v] }}
-            />
-            {v}
-          </span>
-        ))}
+    <>
+      <LineChart labels={labels} series={shown} height={height} curved formatY={formatY} hideLegend />
+      <BotIsolateLegend bots={legendBots} botColor={botColor} />
+    </>
+  );
+}
+
+// One weekly line per REVIEW bot off `/api/pro/bot-behaviour` (`BotBehaviourBotStat.trend`) — the
+// "Time to first review" and "Follow-up rate" cards beside Thread volume. Same union-of-weeks axis
+// and isolation as VendorTrendChart. A week with no PR first reviewed by that bot is a gap, never 0.
+function BehaviourTrendChart({
+  bots,
+  value,
+  botColor,
+  formatY,
+  height = 140,
+}: {
+  bots: BotBehaviourBotStat[];
+  value: (p: BotBehaviourTrendPoint) => number | null;
+  botColor: BotColor;
+  formatY?: (n: number) => string;
+  height?: number;
+}): JSX.Element {
+  const { isolated } = useBotIsolate();
+  const { labels, series, legendBots } = useMemo(() => {
+    const weekSet = new Set<string>();
+    for (const b of bots) for (const p of b.trend) weekSet.add(p.weekStart);
+    const labels = Array.from(weekSet).sort().slice(-12);
+    const drawn = bots.filter((b) => b.trend.some((p) => value(p) != null));
+    const series: Series[] = drawn.map((b) => {
+      const byWeek = new Map(b.trend.map((p) => [p.weekStart, value(p)]));
+      return {
+        key: b.key,
+        label: b.label,
+        color: botColor({ login: b.login, kind: b.kind }),
+        values: labels.map((w) => byWeek.get(w) ?? null),
+      };
+    });
+    return { labels, series, legendBots: drawn };
+  }, [bots, value, botColor]);
+  const shown = useMemo(() => applyIsolation(series, isolated), [series, isolated]);
+
+  if (labels.length < 2 || series.length === 0) {
+    return <ChartEmpty label="Not enough weekly history yet" />;
+  }
+  return (
+    <>
+      <LineChart labels={labels} series={shown} height={height} curved formatY={formatY} hideLegend />
+      <BotIsolateLegend bots={legendBots} botColor={botColor} />
+    </>
+  );
+}
+
+// Module-level extractors / axis formatters, so the charts' useMemo keys stay stable.
+const ttfrVal = (p: BotBehaviourTrendPoint): number | null => p.medianTtfrHours;
+const followupVal = (p: BotBehaviourTrendPoint): number | null => p.followupRatePct;
+const hoursAxis = (n: number): string => fmtDuration(n);
+const pctAxis = (n: number): string => `${Math.round(n)}%`;
+
+// The two headline tiles above the table: how fast the workspace's review bots first review a PR,
+// and how often they come back. One fold on the server (`BotBehaviourResponse.workspace`); the
+// figures are formatted by `formatResponsivenessTiles` (unknown is a dash, never 0).
+function ResponsivenessTiles({
+  behaviour,
+  loading,
+  error,
+}: {
+  behaviour: BotBehaviourResponse | undefined;
+  loading: boolean;
+  // A failed read with nothing cached: "no PR reviewed" would be a false statement, so say it failed.
+  error: boolean;
+}): JSX.Element {
+  if (loading) {
+    return (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="h-[4.5rem] animate-pulse rounded-ui bg-ui-surface" />
+        <div className="h-[4.5rem] animate-pulse rounded-ui bg-ui-surface" />
       </div>
+    );
+  }
+  const failed = error && behaviour == null;
+  const t = failed
+    ? {
+        ttfr: { value: '—', sub: 'Couldn’t load' },
+        followups: { value: '—', sub: 'Couldn’t load' },
+      }
+    : formatResponsivenessTiles(behaviour?.workspace ?? null);
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="bot-responsiveness-tiles">
+      <HeadlineTile
+        label="Time to first review"
+        value={t.ttfr.value}
+        sub={t.ttfr.sub}
+        info={
+          <InfoButton title="Time to first review">
+            <p>
+              For each pull request a review bot looked at in this window: the time from ready for
+              review to the first review or comment by any review bot. When the ready-for-review
+              moment was not seen, the clock starts when the PR was opened.
+            </p>
+            <p>The big figure is the median; p90 is the time nine in ten PRs beat.</p>
+            <p>Only bots with the Review role in Settings → Bots count.</p>
+          </InfoButton>
+        }
+      />
+      <HeadlineTile
+        label="Follow-ups after first review"
+        value={t.followups.value}
+        sub={t.followups.sub}
+        info={
+          <InfoButton title="Follow-ups after first review">
+            <p>
+              The share of those pull requests where a review bot posted again after the first
+              review or comment. Any review bot counts, so a second bot’s first pass is a follow-up.
+            </p>
+            <p>
+              Each review and each comment counts once, so inline comments posted with a review
+              count as follow-ups too.
+            </p>
+          </InfoButton>
+        }
+      />
+    </div>
+  );
+}
+
+function HeadlineTile({
+  label,
+  value,
+  sub,
+  info,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  info: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="rounded-ui bg-ui-surface p-2">
+      <div className="flex items-center gap-1 text-meta font-semibold text-ui-mute">
+        {label}
+        {info}
+      </div>
+      <div className="text-title font-semibold tabular-nums text-ui-ink">{value}</div>
+      <div className="text-meta text-ui-mute">{sub}</div>
     </div>
   );
 }
@@ -761,7 +840,6 @@ function VolumeCell({
   bot,
   loading,
   mergedPrs,
-  onOpen,
 }: {
   bot: BotVolumeBot | undefined;
   /** True while the figure on hand does not describe the CURRENT (workspace, window, repo)
@@ -769,7 +847,6 @@ function VolumeCell({
   loading: boolean;
   /** Merged-in-window PRs in scope — the OTHER denominator, quoted in the tooltip. */
   mergedPrs: number;
-  onOpen: ((b: { userId: number; label: string }) => void) | null;
 }): JSX.Element {
   if (loading) {
     return (
@@ -796,28 +873,70 @@ function VolumeCell({
     `(most on one PR: ${bot.maxCommentsOnOnePr.toLocaleString()}). ` +
     `Averaged over EVERY merged PR in scope instead — counting the ones it ignored — it is ` +
     `${formatAvg(bot.avgCommentsPerScopePr)}.`;
-  if (!onOpen) return <span title={detail}>{label}</span>;
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen({ userId: bot.authorUserId, label: bot.label })}
-      // No aria-label — it would displace the number as the accessible name (the `Tile` rule).
-      title={`${detail} Click for the PRs behind it.`}
-      className="hit rounded-ui px-1 underline decoration-dotted underline-offset-2 hover:bg-ui-hover hover:text-ui-ink"
-    >
-      {label}
-    </button>
-  );
+  return <span title={detail}>{label}</span>;
 }
 
-// The ONE place a vendor row's `u<userId>` key is parsed back to its users.id (the "Depth →"
-// pill's target). `BotVendorAnalytics` carries no userId field; its `key` is `u<id>` for every
+// The ONE place a vendor row's `u<userId>` key is parsed back to its users.id (the bot name's
+// depth-tab target). `BotVendorAnalytics` carries no userId field; its `key` is `u<id>` for every
 // reviewer row, a per-poster Limn bot ("Limn · alice") included. A key of any other shape yields
-// null and the pill doesn't render. Kept as a single exported-nowhere helper so a second
+// null and the name renders as plain text. Kept as a single exported-nowhere helper so a second
 // spelling of the format cannot creep in.
 function vendorKeyUserId(key: string): number | null {
   const m = /^u(\d+)$/.exec(key);
   return m ? Number(m[1]) : null;
+}
+
+type OpenDepth = (bot: {
+  userId: number;
+  label: string;
+  login: string | null;
+  kind: AutomatedReviewerKind;
+}) => void;
+
+// The bot's name, as the button that opens its depth tab. The table row and the phone list both
+// use it, so the two can never open different things. `className` carries each layout's own chrome.
+function BotNameButton({
+  vendor,
+  color,
+  onOpenDepth,
+  className,
+  children,
+}: {
+  vendor: BotVendorAnalytics;
+  color: string;
+  onOpenDepth: OpenDepth;
+  className: string;
+  children?: ReactNode;
+}): JSX.Element {
+  const userId = vendorKeyUserId(vendor.key);
+  const mark = (
+    // The vendor colour is the MARK only; the name is ink.
+    <span aria-hidden className="flex shrink-0" style={vendorInk(color)}>
+      <BotIcon size={11} />
+    </span>
+  );
+  const name = children ?? vendor.label;
+  if (userId == null) {
+    return (
+      <span className={className}>
+        {mark}
+        {name}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        onOpenDepth({ userId, label: vendor.label, login: vendor.login, kind: vendor.kind })
+      }
+      title="Open this bot's charts"
+      className={className}
+    >
+      {mark}
+      {name}
+    </button>
+  );
 }
 
 // ── The Inflation column (plan P1.2/C2) ───────────────────────────────────────────────────────
@@ -944,23 +1063,67 @@ function InflationCell({
   );
 }
 
+// The table's "First review" and "Follow-ups" cells for one bot. NOT dashed on `dormant`: the
+// behaviour figures have their own window (PRs first reviewed in it). No behaviour row ⇒ blank; a
+// row with no PR first reviewed in the window ⇒ a dash (unknown, never 0).
+function BehaviourCells({
+  bot,
+  loading,
+}: {
+  bot: BotBehaviourBotStat | undefined;
+  loading: boolean;
+}): JSX.Element {
+  if (loading) {
+    const pulse = (
+      <td className="px-2 py-1.5 text-right">
+        <span className="inline-block h-3 w-8 animate-pulse rounded-ui bg-ui-raise align-middle" />
+      </td>
+    );
+    return (
+      <>
+        {pulse}
+        {pulse}
+      </>
+    );
+  }
+  return (
+    <>
+      <td
+        className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
+        title={
+          bot?.ttfrP90Hours != null ? `p90 ${formatHours(bot.ttfrP90Hours)}` : undefined
+        }
+      >
+        {bot == null ? '' : bot.ttfrMedianHours != null ? formatHours(bot.ttfrMedianHours) : '—'}
+      </td>
+      <td
+        className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
+        title={
+          bot?.avgFollowups != null
+            ? `avg ${Math.round(bot.avgFollowups * 10) / 10} more per PR`
+            : undefined
+        }
+      >
+        {bot == null ? '' : bot.followupRatePct != null ? `${Math.round(bot.followupRatePct)}%` : '—'}
+      </td>
+    </>
+  );
+}
+
 function VendorTable({
   vendors,
   botColor,
-  onOpenVendor,
-  overdueGraceMs,
   showMl,
   showCost,
   volume,
   volumeLoading,
-  onOpenVolume,
+  behaviourBots,
+  behaviourLoading,
   onOpenInflation,
   onOpenDepth,
 }: {
   vendors: CostedVendor[];
   botColor: BotColor;
-  onOpenVendor: (key: string) => void;
-  overdueGraceMs: number;
   // The bot-comment VOLUME response backing the "Comments/PR" column — a SEPARATE query from the
   // analytics one, measured at the same (workspace, window, repoIds) triple.
   //
@@ -971,18 +1134,16 @@ function VendorTable({
   // True while the volume query has nothing to show yet. The cell renders a placeholder, NEVER a
   // zero — a "0" that becomes "12" a moment later is a worse answer than an obvious pending state.
   volumeLoading: boolean;
-  // Opens the merged-PR drill-down narrowed to this bot. null ⇒ the cell stays plain text (the
-  // `TileShell` rule: a cell becomes clickable only when someone is there to route the click).
-  onOpenVolume: ((bot: { userId: number; label: string }) => void) | null;
-  // Opens the per-bot DEPTH drill-down tab (plan P1.1/C1) — its own small cell/pill, because the
-  // row's existing click targets keep their jobs (the vendor chip opens the comments/PRs
-  // drill-down; the Comments/PR cell opens the volume list). null renders NO depth chrome at all.
-  onOpenDepth:
-    | ((bot: { userId: number; label: string; login: string | null; kind: AutomatedReviewerKind }) => void)
-    | null;
-  // The ML severity columns (mix bar / High / Nits / the four "not addressed by severity"
-  // columns, plus Inflation) — rendered ONLY when the deployment scores (MeResponse.mlSeverity)
-  // AND the window has labels. False must render NO ml chrome at all.
+  // The behaviour rows behind the "First review" and "Follow-ups" columns, joined on `key`
+  // (`u<userId>` on both responses). A bot with no behaviour row renders blank — no review-bot
+  // touch in the 12-week span — and a pending query renders a pulse, never a 0.
+  behaviourBots: BotBehaviourBotStat[];
+  behaviourLoading: boolean;
+  // Opens the per-bot DEPTH drill-down tab (plan P1.1/C1) — the bot NAME is its button. A row
+  // whose key is not `u<id>` has no users.id to key the tab on, so its name stays plain text.
+  onOpenDepth: OpenDepth;
+  // The ML columns (the severity mix bar, plus Inflation) — rendered ONLY when the deployment
+  // scores (MeResponse.mlSeverity) AND the window has labels. False must render NO ml chrome at all.
   showMl: boolean;
   // The Inflation column's click-through: opens the flagging drill-down seeded with the clicked
   // bot + direction (the exact opener the removed workspace inflation charts used). null ⇒ the
@@ -999,12 +1160,6 @@ function VendorTable({
   // grain moved instead.
   showCost: boolean;
 }): JSX.Element {
-  // ⚠ THE HEADER IS TWO ROWS WHEN `showMl`, ONE WHEN NOT — because the four "not addressed by
-  // severity" columns sit under a shared group cell, and a group cell only makes sense with a
-  // second row beneath it. Every OTHER header cell therefore has to span both rows, or the four
-  // sub-headers shove the ordinary columns out of alignment with their own data. Add a column
-  // here and it needs `rowSpan={headSpan}` too.
-  const headSpan = showMl ? 2 : 1;
   // The table scrolls inside its own box; the hidden side fades so the cut-off column reads as
   // "more this way", not as the edge of the data.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1013,10 +1168,14 @@ function VendorTable({
   // keep such a row meaningful, unlike this table's dormant rows) — so a miss means "said nothing
   // on anything merged here" and renders a DASH, never a 0.
   const volumeByBot = useMemo(() => volumeByKey(volume?.bots), [volume?.bots]);
+  const behaviourByKey = useMemo(
+    () => new Map(behaviourBots.map((b) => [b.key, b])),
+    [behaviourBots],
+  );
   const mergedPrs = volume?.totals.prs ?? 0;
-  // ⚠ ON A PHONE THE JUDGEMENT LEADS. The full table is 1,000–1,560px wide, which put the Verdict,
+  // ⚠ ON A PHONE THE JUDGEMENT LEADS. The full table is 1,000–1,240px wide, which put the Verdict,
   // "$ per used thread" and "% not addressed" four or five screen-widths to the right. Below md a
-  // one-line-per-bot list carries those first (the name still opens the bot's drill-down), and the
+  // one-line-per-bot list carries those first (the name still opens the bot's depth tab), and the
   // full table — every column, unchanged — sits behind "All figures" underneath.
   const phone = useIsPhone();
   const [allFigures, setAllFigures] = useState(false);
@@ -1024,12 +1183,12 @@ function VendorTable({
     // Its own scroll box with the Bot column sticky, so the wide table never widens the page.
     <div ref={scrollRef} style={fade} className={TABLE_SCROLL} data-testid="bot-roi-table">
       <table
-        className={`${TABLE} text-meta ${showMl ? 'min-w-[1560px]' : 'min-w-[1080px]'}`}
+        className={`${TABLE} text-meta ${showMl ? 'min-w-[1400px]' : 'min-w-[1160px]'}`}
       >
         <thead>
-          <tr className={`text-left text-ui-mute${showMl ? '' : ' '}`}>
-            <th rowSpan={headSpan} className={`${STICKY_COL} px-2 py-1.5 font-medium`}>Bot</th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium">Threads</th>
+          <tr className="text-left text-ui-mute">
+            <th className={`${STICKY_COL} px-2 py-1.5 font-medium`}>Bot</th>
+            <th className="px-2 py-1.5 text-right font-medium">Threads</th>
             {/* ⚠ THIS COLUMN AND THE ONE BESIDE IT ARE NOT A NUMERATOR AND A RATIO, and their
                 adjacency invites exactly that reading. They disagree on BOTH axes:
                   • KIND — this counts `review_comments` ONLY; "Comments/PR" also counts PR
@@ -1040,65 +1199,56 @@ function VendorTable({
                 anything` does not reconstruct this number. Both tooltips say which basis they
                 use, because the figures alone cannot. */}
             <th
-              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="Inline review comments this bot left in the window, counted by the comment's own date, across PRs in any state (open, merged or closed). Deliberately NOT the numerator of Comments/PR — that column also counts PR comments and review bodies, and only over PRs merged inside the window."
             >
               Comments
             </th>
-            {/* ⚠ `rowSpan={headSpan}` LIKE EVERY OTHER NON-ML HEADER CELL. When `showMl` the header
-                is TWO rows (the four "not addressed by severity" columns sit under a group cell),
-                and a new column without the span shoves every ordinary column out of alignment
-                with its own data.
-                ⚠ THE TOOLTIP STATES THE DENOMINATOR IN WORDS, and that is not padding: the same
+            {/* ⚠ THE TOOLTIP STATES THE DENOMINATOR IN WORDS, and that is not padding: the same
                 bot's "per PR it commented on" and "per merged PR in scope" differ by ~6× on a
                 quiet repo (measured: 656 of mrdoob/three.js's 796 merged PRs drew NO bot comment
                 at all), and the number alone cannot tell a reader which one it is. The cell's own
                 tooltip carries the other figure so the gap is visible rather than implied. */}
             <th
-              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
-              title="How much this bot says when it shows up: its comments averaged over the PRs IT COMMENTED ON — not over every PR. Counts inline review comments, PR comments and review bodies, on PRs MERGED inside the window (open PRs are excluded, unlike the thread columns to the left). Click a figure for the PRs behind it."
+              title="How much this bot says when it shows up: its comments averaged over the PRs IT COMMENTED ON — not over every PR. Counts inline review comments, PR comments and review bodies, on PRs MERGED inside the window (open PRs are excluded, unlike the thread columns to the left)."
             >
               Comments/PR
             </th>
             <th
-              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="Threads the team used: a later commit likely addressed the thread, it was resolved, or a person replied after the bot"
             >
               Used
             </th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit — the total not-addressed">
+            <th className="px-2 py-1.5 text-right font-medium" title="Threads with no reply and no follow-up commit — the total not-addressed">
               Not addressed
             </th>
             <th
-              rowSpan={headSpan}
-              className="px-2 py-1.5 text-right font-medium"
-              title={`Not-addressed threads older than the ${Math.round(
-                overdueGraceMs / 3_600_000,
-              )}h grace window — the genuinely-ignored ones that drive 'Rarely used' verdict`}
-            >
-              Unanswered after {Math.round(overdueGraceMs / 3_600_000)}h
-            </th>
-            <th
-              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="PRs merged inside the window that still carried at least one not-addressed thread by this bot at merge — the team's final answer was to ship anyway. The threads themselves may be older than the window."
             >
               Merged anyway
             </th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
+            <th className="px-2 py-1.5 text-right font-medium" title="This bot's median time from opening a thread to it being addressed — a human reply, a resolve, or an addressing commit">
               Time to address
             </th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="How long the oldest not-addressed thread has been waiting">
-              Oldest not addressed
+            <th
+              className="px-2 py-1.5 text-right font-medium"
+              title="Median time from a PR being ready for review (or opened) to this bot's first review or comment on it. Hover a cell for the p90."
+            >
+              First review
             </th>
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads as a share of all this bot's threads">
+            <th
+              className="px-2 py-1.5 text-right font-medium"
+              title="Share of the PRs this bot reviewed where it posted again after its first review or comment."
+            >
+              Follow-ups
+            </th>
+            <th className="px-2 py-1.5 text-right font-medium" title="Not-addressed threads as a share of all this bot's threads">
               % not addressed
             </th>
             <th
-              rowSpan={headSpan}
               className="px-2 py-1.5 text-right font-medium"
               title="Share of this bot's threads landing within ±3 lines of another bot's thread in the same file — redundant coverage. Advisory only; hover a cell for the top partner. Outdated/file-level threads (no line) never count."
             >
@@ -1107,41 +1257,14 @@ function VendorTable({
             {showMl && (
               <>
                 <th
-                  rowSpan={headSpan}
                   className="w-28 px-2 py-1.5 font-medium"
                   title="This bot's scored findings by predicted severity, over the selected window — model-scored, advisory. Summaries and praise are excluded."
                 >
                   Severity mix
                 </th>
-                <th
-                  rowSpan={headSpan}
-                  className="px-2 py-1.5 text-right font-medium"
-                  title="Major + critical as a share of this bot's scored findings in the window."
-                >
-                  High
-                </th>
-                <th
-                  rowSpan={headSpan}
-                  className="px-2 py-1.5 text-right font-medium"
-                  title="Nits as a share of this bot's scored findings in the window — a persistently high share suggests raising the bot's severity floor."
-                >
-                  Nits
-                </th>
-                {/* The group cell for the four columns below it. Its own count is deliberately
-                    NOT shown: these are a split of the LABELLED not-addressed threads, so they
-                    need not add up to the "Not addressed" column, and a total here would invite
-                    exactly that subtraction. */}
-                <th
-                  colSpan={4}
-                  className="px-2 pb-0 pt-1.5 text-center font-medium"
-                  title="This bot's not-addressed threads, split by the predicted severity of the finding that opened each one. Model-scored and advisory: threads whose opening comment was never scored aren't counted, so these need not add up to the Not addressed column."
-                >
-                  Not addressed by severity
-                </th>
                 {/* The Inflation column (plan P1.2/C2) — the workspace inflation charts' verdict,
-                    folded into the row. `rowSpan={headSpan}` like every other non-group ML cell. */}
+                    folded into the row. */}
                 <th
-                  rowSpan={headSpan}
                   className="px-2 py-1.5 text-right font-medium"
                   title="How often this bot's OWN severity badge contradicted our label, over its badged findings in the window: the up-arrow count = the bot graded a finding worse than we did (inflation), the down-arrow count = we graded it worse than the bot (what a nit-filter on its own grades would drop). Counts, never shares. A bot that badges nothing shows a dash — no badge is silence, not agreement. Click a count for the comments behind it."
                 >
@@ -1151,7 +1274,6 @@ function VendorTable({
             )}
             {showCost && (
               <th
-                rowSpan={headSpan}
                 className="px-2 py-1.5 text-right font-medium"
                 // ⚠ THE OLD "narrowed to a single repo…" CAVEAT IS GONE BECAUSE THE STATE IS.
                 // This column no longer renders on the per-repo mount at all (`showCost` is
@@ -1171,30 +1293,8 @@ function VendorTable({
                 $ per used thread
               </th>
             )}
-            <th rowSpan={headSpan} className="px-2 py-1.5 text-center font-medium">Verdict</th>
-            {onOpenDepth != null && (
-              <th
-                rowSpan={headSpan}
-                className="px-2 py-1.5 text-center font-medium"
-                title="Open this bot's depth tab — its latency, cadence, coverage and consistency charts, plus its severity-over-time and category mix"
-              >
-                Depth
-              </th>
-            )}
+            <th className="px-2 py-1.5 text-center font-medium">Verdict</th>
           </tr>
-          {showMl && (
-            <tr className="text-left text-ui-mute">
-              {SEVERITY_COLUMNS.map((s, i) => (
-                <th
-                  key={s}
-                  className={`px-1.5 pb-1.5 text-right text-meta font-medium${i === 0 ? ' ' : ''}`}
-                  title={`Not-addressed threads whose opening finding scored ${ML_SEVERITY_META[s].label.toLowerCase()}`}
-                >
-                  {s === 'critical' ? 'Crit' : ML_SEVERITY_META[s].label}
-                </th>
-              ))}
-            </tr>
-          )}
         </thead>
         <tbody>
           {vendors.map((v) => {
@@ -1210,18 +1310,12 @@ function VendorTable({
                 className={`group ${TR_HOVER}`}
               >
                 <td className={`${STICKY_COL} whitespace-nowrap px-2 py-1.5 group-hover:bg-ui-hover`}>
-                  <button
-                    type="button"
-                    onClick={() => onOpenVendor(v.key)}
-                    title="Open the bot drill-down — its comments (default) and the PRs it touched"
-                    className="hit inline-flex cursor-pointer items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium text-ui-ink hover:underline"
-                  >
-                    {/* The vendor colour is the MARK only; the name is ink. */}
-                    <span aria-hidden className="flex" style={vendorInk(color)}>
-                      <BotIcon size={11} />
-                    </span>
-                    {v.label}
-                  </button>
+                  <BotNameButton
+                    vendor={v}
+                    color={color}
+                    onOpenDepth={onOpenDepth}
+                    className="hit inline-flex items-center gap-1 rounded-ui px-1.5 py-0.5 font-medium text-ui-ink hover:underline"
+                  />
                   {v.reviewers > 1 && (
                     <span className="ml-1 text-ui-faint">×{v.reviewers}</span>
                   )}
@@ -1247,13 +1341,12 @@ function VendorTable({
                     Three states, deliberately distinguishable:
                       • loading  → a pulse, never a 0 that turns into 12 a moment later;
                       • no row   → a dash ("said nothing on anything merged here");
-                      • a figure → a button into the PRs it was folded from. */}
+                      • a figure → the average, with the other denominator in its tooltip. */}
                 <td className="px-2 py-1.5 text-right tabular-nums">
                   <VolumeCell
                     bot={volumeByBot.get(v.key)}
                     loading={volumeLoading}
                     mergedPrs={mergedPrs}
-                    onOpen={onOpenVolume}
                   />
                 </td>
                 <td className="px-2 py-1.5 text-right tabular-nums">
@@ -1276,24 +1369,6 @@ function VendorTable({
                       }
                     >
                       {v.untouched}
-                    </span>
-                  )}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {v.dormant ? (
-                    dash
-                  ) : (
-                    <span
-                      className={
-                        v.overdueUntouched > 0 ? 'text-ui-ink' : 'text-ui-faint'
-                      }
-                      title={
-                        v.untouched > 0
-                          ? `${v.overdueUntouched} of ${v.untouched} not-addressed threads are past the normal response window`
-                          : undefined
-                      }
-                    >
-                      {v.overdueUntouched}
                     </span>
                   )}
                 </td>
@@ -1324,9 +1399,10 @@ function VendorTable({
                 <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
                   {v.dormant ? dash : dur(v.medianAddressedMs)}
                 </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
-                  {v.oldestUntouchedDays != null ? `${v.oldestUntouchedDays}d` : '—'}
-                </td>
+                <BehaviourCells
+                  bot={behaviourByKey.get(v.key)}
+                  loading={behaviourLoading}
+                />
                 <td className="px-2 py-1.5 text-right tabular-nums text-ui-mute">
                   {v.dormant ? dash : pct(v.noiseRatioPct)}
                 </td>
@@ -1361,40 +1437,6 @@ function VendorTable({
                         dash
                       )}
                     </td>
-                    <td
-                      className="px-2 py-1.5 text-right font-medium tabular-nums text-ui-ink"
-                    >
-                      {v.mlHighPct != null ? `${v.mlHighPct}%` : dash}
-                    </td>
-                    <td
-                      className="px-2 py-1.5 text-right tabular-nums text-ui-mute"
-                    >
-                      {v.mlNitPct != null ? `${v.mlNitPct}%` : dash}
-                    </td>
-                    {/* Not-addressed threads by the severity of the finding that opened them. A
-                        ZERO renders as a blank, like every other ML cell: the four are a split of
-                        the LABELLED not-addressed threads, so a 0 says "none scored that way",
-                        which is not a number worth drawing attention to — and printing zeros
-                        would invite reading the row as a decomposition of "Not addressed". */}
-                    {SEVERITY_COLUMNS.map((s, i) => {
-                      const n = v.notAddressedBySeverity?.[s] ?? 0;
-                      return (
-                        <td
-                          key={s}
-                          // Ink, not the severity hue (a raw hex is never text colour); critical
-                          // findings still waiting are the one cell in danger ink.
-                          className={`px-1.5 py-1.5 text-right tabular-nums${n > 0 && s === 'critical' ? ' text-ui-danger' : ''}`}
-                          data-severity={s}
-                          title={
-                            n > 0
-                              ? `${n} not-addressed thread${n === 1 ? '' : 's'} opened by a ${ML_SEVERITY_META[s].label.toLowerCase()} finding`
-                              : undefined
-                          }
-                        >
-                          {n > 0 ? n : dash}
-                        </td>
-                      );
-                    })}
                     {/* Inflation — counts + sparkline. NOT dashed on dormant: like the ML
                         cells above, its window population is labels, not threads, and the cell
                         carries its own dash rule (badges nothing ⇒ dash, never zero). */}
@@ -1455,34 +1497,6 @@ function VendorTable({
                     </span>
                   )}
                 </td>
-                {onOpenDepth != null && (
-                  <td className="px-2 py-1.5 text-center">
-                    {(() => {
-                      // A key that is not `u<id>` has no users.id to key a depth tab on — a
-                      // dash, never a dead pill.
-                      const depthUserId = vendorKeyUserId(v.key);
-                      return depthUserId == null ? (
-                        dash
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onOpenDepth({
-                              userId: depthUserId,
-                              label: v.label,
-                              login: v.login,
-                              kind: v.kind,
-                            })
-                          }
-                          title="Open this bot's depth tab — latency, cadence, coverage and consistency, plus its severity-over-time and category mix"
-                          className="whitespace-nowrap rounded-ui px-1.5 py-0.5 text-meta font-medium text-ui-ink hover:bg-ui-hover touch:py-2"
-                        >
-                          Depth →
-                        </button>
-                      );
-                    })()}
-                  </td>
-                )}
               </tr>
             );
           })}
@@ -1499,17 +1513,14 @@ function VendorTable({
             const verdict = VERDICT_META[v.verdict];
             return (
               <li key={v.key} className="flex min-h-11 items-center gap-2 px-2 py-1 text-meta">
-                <button
-                  type="button"
-                  onClick={() => onOpenVendor(v.key)}
-                  title="Open the bot drill-down — its comments (default) and the PRs it touched"
+                <BotNameButton
+                  vendor={v}
+                  color={color}
+                  onOpenDepth={onOpenDepth}
                   className="flex min-h-10 min-w-0 flex-1 items-center gap-1.5 rounded-ui text-left font-medium text-ui-ink"
                 >
-                  <span aria-hidden className="flex shrink-0" style={vendorInk(color)}>
-                    <BotIcon size={11} />
-                  </span>
                   <span className="truncate">{v.label}</span>
-                </button>
+                </BotNameButton>
                 {v.dormant ? (
                   <span className="shrink-0 text-ui-mute">dormant</span>
                 ) : (
@@ -1592,7 +1603,6 @@ export function ResolveBacklogBanner({
 export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element | null {
   const window = useFilters((s) => s.botAnalyticsWindow);
   const setWindow = useFilters((s) => s.setBotAnalyticsWindow);
-  const openBotPrsDetail = useFilters((s) => s.openBotPrsDetail);
   const openBotOnlyDetail = useFilters((s) => s.openBotOnlyDetail);
   // The "what the bots are flagging" tiles/chips → the flagging drill-down tab.
   const openBotFlaggingDetail = useFilters((s) => s.openBotFlaggingDetail);
@@ -1636,7 +1646,20 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
     isPlaceholderData: volumeStale,
   } = useBotVolume(workspaceId, window, true, repoScope);
   const volumeLoading = volumeFetching || volumeStale;
-  const openBotVolumeDetail = useFilters((s) => s.openBotVolumeDetail);
+  // The behaviour response: the headline tiles (`workspace`), the TTFR / follow-up trend cards and
+  // the table's two columns (`bots`, joined on `key`). Fetched on mount here; the "Workspace charts"
+  // section below asks for the SAME key, so opening it is a cache hit. No `?botUserId=`.
+  const {
+    data: behaviour,
+    isLoading: behaviourLoading,
+    isError: behaviourError,
+  } = useBotBehaviour(
+    workspaceId,
+    window,
+    true,
+    repoScope,
+  );
+  const behaviourBots = useMemo(() => behaviour?.bots ?? [], [behaviour?.bots]);
   // The per-bot DEPTH drill-down tab (plan P1.1/C1) — keyed on the bot's users.id, with the
   // label metadata (and this table's repo narrowing) captured at open time.
   const openBotDetailTab = usePinnedTabs((s) => s.openBotDetailTab);
@@ -1782,6 +1805,11 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         {/* The severity totals strip (the old BotSeverityPanel's survivor) — same response,
             same window as the table below it. Self-hides when the window has nothing scored
             and nothing pending. */}
+        <ResponsivenessTiles
+          behaviour={behaviour}
+          loading={behaviourLoading}
+          error={behaviourError}
+        />
         {showMlStrip && ml && (
           <MlTotalsStrip
             ml={ml}
@@ -1823,19 +1851,12 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
         <VendorTable
           vendors={vendors}
           botColor={botColor}
-          onOpenVendor={(key) => openBotPrsDetail(key, repoId ?? null)}
-          overdueGraceMs={t.overdueGraceMs}
           showMl={showMlColumns}
           showCost={showCost}
           volume={volume}
           volumeLoading={volumeLoading}
-          // ⚠ THE SAME `repoId ?? null` THIRD LEG the flagging drill-down gets: on the per-repo
-          // Bots tab the cell counts ONE repo, so the list must too. The bot narrowing is the
-          // one-element SET shape shared with the flagging drill-down (`users.id`s, never vendor
-          // key strings) — one narrowing convention on this surface, not two.
-          onOpenVolume={(b) =>
-            openBotVolumeDetail(repoId ?? null, { userIds: [b.userId], label: b.label })
-          }
+          behaviourBots={behaviourBots}
+          behaviourLoading={behaviourLoading}
           // The Inflation column's click-through — the EXACT opener the removed workspace
           // inflation charts used: the flagging drill-down over `findings`, seeded with the
           // clicked bot's id + direction (the `|bot:<id>|` refineQueryKey slot), plus the same
@@ -1848,8 +1869,8 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
               disagree: direction,
             })
           }
-          // "Depth →". The meta is the chip/header label + the repo narrowing THIS table was measured at,
-          // so the tab describes the same scope as the row that was clicked.
+          // The bot name. The meta is the chip/header label + the repo narrowing THIS table was
+          // measured at, so the tab describes the same scope as the row that was clicked.
           onOpenDepth={(b) => {
             const meta: TabBotMeta = {
               id: b.userId,
@@ -1879,19 +1900,39 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
             </div>
           );
         })()}
-        {/* Bot-effectiveness charts (per vendor): raw weekly volume, the volume-independent
-            effectiveness + verdict, and the acted-on vs untouched split — those three always
-            visible. The fourth, severity inflation over time, is the only conditional one: it
-            enlarges the table's Inflation sparkline and rides the same ML gate that column does. */}
+        {/* The always-visible chart row: weekly thread volume per bot. Severity inflation over time
+            is the one conditional card: it enlarges the table's Inflation sparkline and rides the
+            same ML gate that column does. "Bot effectiveness" and "Used vs not addressed" moved to
+            the collapsed Workspace charts section (WorkspaceBotCharts), off this same query. */}
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <ChartCard title="Thread volume" note="weekly · last 12">
             <VendorTrendChart vendors={vendors} value={threadsVal} botColor={botColor} />
           </ChartCard>
-          <ChartCard title="Bot effectiveness" note="% of threads used · keep / tune / rarely used">
-            <EffectivenessChart vendors={vendors} />
+          {/* Per-bot weekly TTFR and follow-up rate, off the behaviour response the tiles read. A
+              bot's week is its PRs FIRST reviewed that week. */}
+          <ChartCard title="Time to first review" note="weekly median · last 12">
+            {behaviourLoading ? (
+              <div className="h-[140px] animate-pulse rounded-ui bg-ui-raise" />
+            ) : (
+              <BehaviourTrendChart
+                bots={behaviourBots}
+                value={ttfrVal}
+                botColor={botColor}
+                formatY={hoursAxis}
+              />
+            )}
           </ChartCard>
-          <ChartCard title="Used vs not addressed" note="threads, by bot · this window">
-            <ActedVsUntouchedChart vendors={vendors} />
+          <ChartCard title="Follow-up rate" note="weekly · last 12">
+            {behaviourLoading ? (
+              <div className="h-[140px] animate-pulse rounded-ui bg-ui-raise" />
+            ) : (
+              <BehaviourTrendChart
+                bots={behaviourBots}
+                value={followupVal}
+                botColor={botColor}
+                formatY={pctAxis}
+              />
+            )}
           </ChartCard>
           {/* The Inflation column's sparkline, enlarged — same response, same field
               (`mlInflation.weekly`), same two direction hues, plus the key/axis/hover a 52×14px
@@ -1901,7 +1942,7 @@ export function BotRoiPanel({ repoId }: { repoId?: number } = {}): JSX.Element |
 
               ⚠ GATED ON `showMlColumns`, THE SAME FLAG AS THE COLUMN IT ENLARGES — a deployment
               with no scoring service, or a window with nothing scored, must show neither. It also
-              spans the full row (`lg:col-span-3` on the card itself): the three cards beside it
+              spans the full row (`lg:col-span-3` on the card itself): the cards above it
               are one-metric-per-bot, this one is one PANEL per bot and would be unreadable in a
               third of the width. It returns null when there is no badged bot to chart and none to
               name, so no empty cell appears in the grid. */}

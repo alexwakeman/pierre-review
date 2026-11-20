@@ -1679,11 +1679,35 @@ export interface BotBehaviourMl {
   truncated: boolean;
 }
 
+// Workspace-level REVIEW-bot responsiveness — the Bots Monitoring headline tiles. All the
+// workspace's role-'review' bots pooled per PR (backend db/bot-responsiveness.ts): time to first
+// review = the FIRST touch by ANY review bot since ready-for-review (fallback opened, the per-bot
+// ttfr rule); a follow-up = any review-bot touch after that first one (a second bot counts).
+// Headline figures cover PRs whose pooled first touch is in the window; null (never 0) when
+// `prs === 0`. With `botUserId` narrowing, the pool is that one bot.
+export interface BotResponsivenessWeekPoint {
+  weekStart: string; // ISO — IDENTICAL to BotBehaviourTrendPoint.weekStart
+  prs: number; // PRs first touched by a review bot that week
+  ttfrMedianHours: number | null;
+  followupRatePct: number | null; // 0–100, rounded
+  avgFollowups: number | null; // mean extra touches, 1 decimal
+}
+export interface BotResponsiveness {
+  prs: number; // PRs first touched by a review bot in the window (every figure's denominator)
+  ttfrMedianHours: number | null;
+  ttfrP90Hours: number | null;
+  ttfrBaseline: 'ready' | 'opened' | 'mixed' | null;
+  followupRatePct: number | null; // share of `prs` review bots came back to, 0–100 rounded
+  avgFollowups: number | null; // mean extra review-bot touches per PR, 1 decimal
+  trend: BotResponsivenessWeekPoint[]; // 12 weeks, oldest → newest (the per-bot trend's weeks)
+}
+
 export interface BotBehaviourResponse {
   enabled: boolean; // always true (CORE / deterministic) — parallels BotAnalyticsResponse.enabled
   generatedAt: string;
   window: { kind: BotWindowKind; from: string; to: string };
   bots: BotBehaviourBotStat[]; // most-active-first
+  workspace: BotResponsiveness; // pooled review-bot responsiveness (the headline tiles)
   // ML severity/category fold. ABSENT (not an empty block) when no bot in scope has a single
   // non-summary label — which is also what an install with no severity-api configured looks
   // like, since nothing ever writes a label there. The client renders no ML cards at all in
@@ -6628,6 +6652,10 @@ export interface FeedEvent {
   // review_submitted); null for non-text events. Null on rows synced lean before
   // full-body persistence — the consumer falls back to `excerpt`.
   content: string | null;
+  // review_comment → the matched review_comments row id (the event itself points at the THREAD),
+  // so the Feed's Bots side can read that comment's ML severity label. Null when no row matched;
+  // absent on other kinds.
+  reviewCommentId?: number | null;
 }
 
 export interface FeedResponse {
@@ -10621,6 +10649,12 @@ export interface ConsolidatedFeedCounts {
   // the same rule `uncappedTotal` and `counts` follow above; the server ALWAYS sends it, and
   // FeedView's per-chip badge memo has the loaded-page fallback that absence needs.
   byEventType?: Record<string, number>;
+  // THE BOTS SIDE ONLY (`authors=bots`; absent on the people side): the badges on the two bot
+  // chip rows. `bySeverity` is FeedSeverity → count, `byBotRole` is ReviewerRole → count. Each is
+  // counted over the stream narrowed by the OTHER row but not its own (so pressing a severity chip
+  // never zeroes its siblings), after the same plain-activity cap the page is cut from.
+  bySeverity?: Record<string, number>;
+  byBotRole?: Record<string, number>;
 }
 
 export interface ConsolidatedFeedResponse {
@@ -12842,9 +12876,8 @@ export interface SeverityAgreementMatrix {
 }
 
 // ── The card item ────────────────────────────────────────────────────────────────────────
-// EXTENDS BotVendorComment so `lib/botComments.ts` (pillOf / vendorDisagrees /
-// commentFacetCounts / selectComments, all typed on BotVendorComment) works on it unchanged.
-// The four added fields are exactly what a CROSS-BOT list needs and the single-bot list does
+// EXTENDS BotVendorComment (the per-bot comments route's row; its SPA list was removed
+// 2026-11-20, the route stays). The four added fields are exactly what a CROSS-BOT list needs and the single-bot list does
 // not: who said it, and where on the file.
 export interface BotFlaggingComment extends BotVendorComment {
   authorUserId: number;

@@ -15,7 +15,7 @@ const mem = new Map<string, string>();
 
 type Store = typeof import('../src/store/pinnedTabs.js');
 const mod: Store = await import('../src/store/pinnedTabs.js');
-const { BOT_PRS_TAB_KEY, canPinTab, prDetailKey, prFocusKey, storyBuildTabKey, ticketTabKey, usePinnedTabs } = mod;
+const { METRICS_TAB_KEY, canPinTab, prDetailKey, prFocusKey, storyBuildTabKey, ticketTabKey, usePinnedTabs } = mod;
 
 /** A fresh module instance — what a reload does: `loadTabs()` runs again over localStorage. */
 async function reload(): Promise<Store> {
@@ -45,10 +45,10 @@ beforeEach(() => {
 describe('pinning', () => {
   it('only PR, story and build tabs can be pinned', () => {
     for (const kind of ['pr-detail', 'pr-focus', 'ticket', 'story-build'] as const) expect(canPinTab({ kind })).toBe(true);
-    for (const kind of ['bot-prs', 'metrics-detail', 'search', 'bot-flagging', 'user-activity'] as const)
+    for (const kind of ['bot-only-prs', 'metrics-detail', 'search', 'bot-flagging', 'user-activity'] as const)
       expect(canPinTab({ kind })).toBe(false);
-    s().openBotPrsTab();
-    s().togglePinTab(BOT_PRS_TAB_KEY);
+    s().openMetricsTab();
+    s().togglePinTab(METRICS_TAB_KEY);
     expect(s().tabs[0]?.pinned).toBeUndefined();
   });
 
@@ -168,7 +168,7 @@ describe('a reload', () => {
     s().togglePinTab(ticketTabKey(IDENT));
     s().openTicketTab({ ident: 'jira:https://acme.atlassian.net#PLAT-9', key: 'PLAT-9', title: null });
     s().openStoryBuildTab({ ident: IDENT, key: 'PLAT-310', title: 'Export', buildOffer: { action: 'fill_gaps', reviewId: 7, endToEnd: true } });
-    s().openBotPrsTab();
+    s().openMetricsTab();
 
     const fresh = (await reload()).usePinnedTabs.getState();
     expect(fresh.tabs.map((t) => [t.key, t.pinned === true])).toEqual([
@@ -183,16 +183,21 @@ describe('a reload', () => {
     expect(fresh.tabs[2]?.ticketMeta?.buildOffer).toEqual({ action: 'fill_gaps', reviewId: 7, endToEnd: true });
   });
 
-  it('a stored pinned key of an unknown kind is dropped, and a bad label falls back to the key', async () => {
+  // 'bot-prs' (the per-bot comments drill-down) was REMOVED 2026-11-20: an old saved state that
+  // still names it — even marked pinned — must load without it, never crash or resurrect it.
+  it('a stored pinned key of an unknown or removed kind is dropped, and a bad label falls back to the key', async () => {
     mem.set(
       'pierre:tabs',
       JSON.stringify([
         { key: 'bot-prs', kind: 'bot-prs', prId: 0, meta: null, pinned: true },
+        { key: 'bot-prs', kind: 'bot-prs', prId: 0, meta: null },
+        { key: 'mystery:7', kind: 'mystery', pinned: true },
         { key: storyBuildTabKey(IDENT), pinned: true, ticketMeta: { key: 42, title: ['x'] } },
       ]),
     );
     const fresh = (await reload()).usePinnedTabs.getState();
     expect(fresh.tabs).toHaveLength(1);
+    expect(fresh.tabs.some((t) => (t.kind as string) === 'bot-prs')).toBe(false);
     expect(fresh.tabs[0]?.ticketMeta).toEqual({ ident: IDENT, key: 'PLAT-310', title: null });
   });
 });

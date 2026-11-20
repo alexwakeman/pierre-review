@@ -5,6 +5,7 @@ import type {
   RepoClaudeReviewsResponse,
   ConsolidatedFeedResponse,
 } from '@pierre-review/shared';
+import { parseFeedBotRoles, parseFeedSeverities } from '@pierre-review/shared';
 import {
   getActivity,
   getConsolidatedFeed,
@@ -91,6 +92,8 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       offset?: string;
       authors?: string;
       includeAllCommits?: string;
+      severities?: string;
+      botRoles?: string;
     };
     const accountId = accountIdOf(req);
     // A NARROWED read is one repo's console, which an EXTERNAL member has too (to explore it); the
@@ -110,6 +113,10 @@ export async function activityRoutes(app: FastifyInstance): Promise<void> {
       // People or bots, never both. Anything but an explicit 'bots' is people — the default.
       authors: q.authors === 'bots' ? 'bots' : 'humans',
       includeAllCommits: q.includeAllCommits === 'true',
+      // The Bots side's two chip rows (ignored on the people side). Absent / empty / nothing
+      // recognised = no narrowing.
+      severities: parseFeedSeverities(q.severities),
+      botRoles: parseFeedBotRoles(q.botRoles),
     });
   });
 

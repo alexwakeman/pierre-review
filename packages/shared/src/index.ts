@@ -41,6 +41,7 @@ export * from './ai-api-key.js';
 export * from './ai-provider-words.js';
 export * from './limn-status.js';
 export * from './limn-severity.js';
+export * from './feed-severity.js';
 export * from './limn-review-meta.js';
 export * from './limn-actions.js';
 export * from './prose.js';

@@ -412,7 +412,7 @@ export function BotDetailPanel(): JSX.Element {
         </InfoButton>
         }
         sub={
-          botMeta?.repoId != null ? 'Measured on the repo the pill was opened from.' : undefined
+          botMeta?.repoId != null ? 'Measured on the repo this tab was opened from.' : undefined
         }
         actions={
         <div className="inline-flex overflow-hidden rounded-ui">

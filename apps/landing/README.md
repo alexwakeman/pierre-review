@@ -88,7 +88,7 @@ are the app's own; never invent a feature for a mock.
 | `reports.tsx` PeriodReportMock | `/reporting` | `Activity/PeriodReportsPanel.tsx` + `PeriodSeriesChart.tsx` (Grain, Show as) |
 | `reports.tsx` ChronologyMock, OverTimeMock | `/reporting` | `Activity/BottlenecksPanel.tsx` (the People + bots / People view in the meta line), `ChronologyTrend.tsx` (Show markers) |
 | `reports.tsx` WhereWorkMock | `/reporting` | `charts/RepoRows` in `WorkspaceFlowMetrics` |
-| `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure` | Bots Monitoring (platform), the peer benchmark |
+| `reports.tsx` BotsSeverityMock, BenchmarkMock | `/reporting`, `/how-we-measure`, the Bots Monitoring docs | Bots Monitoring: `Activity/BotRoiPanel.tsx` (the ROI table columns, incl. "First review"), the peer benchmark |
 | `build.tsx` CriteriaMapMock | `/build` | `Activity/CriteriaMap.tsx` ("How the code meets each criterion", the story view) |
 | `build.tsx` TicketDesignMock, TicketCheckMock, LoopBodyMock | `/build` | `components/FlowDiagram.tsx` + `StoryDesignSection.tsx` ("Ticket design"), the story check in `ClaudeReviewTab.tsx` / `StoryLayout.tsx`, the loop's PR body (`coding/story-build/loop/pr-body.ts`) |
 | `openPrs.tsx` OpenPrsMock | `/everything-else#open-prs` | `components/Activity/OpenPrsRows.tsx` (the ticket groups, the Review / CI / Threads / AI review columns, the drawer: Can it land, Checks, Reviews, Threads, AI review, Tickets, Pull request), `lib/ui.ts` `mergeVerdict` (the "Can it land" words) |

@@ -6,8 +6,9 @@ import { installMockApi, prDetailFor } from './mock-api.js';
 // A `.md` / `.mdx` / `.markdown` file shows its NEW side as Markdown by default, with a header
 // toggle to the diff ("Plain text") and back; the choice is remembered. Before the whole file is
 // read (click-gated, never on mount) the rendered view is the patch's new side and says so when
-// that is not the whole file. A deleted Markdown file and a non-Markdown file get no toggle. The
-// PR's Markdown is untrusted: no script, relative links print as text.
+// that is not the whole file. It is drawn like the diff: a header bar, a gutter `+` beside each
+// block built from an added line. A deleted Markdown file and a non-Markdown file get no toggle.
+// The PR's Markdown is untrusted: no script, relative links print as text.
 
 const PR_ID = 101;
 
@@ -136,6 +137,11 @@ test.describe('Changes tab: Markdown files', () => {
     await expect(rendered.locator('code', { hasText: /^pnpm install$/ })).toBeVisible();
     await expect(rendered.getByText('Only the changed parts are shown.')).toBeVisible();
     await expect(rendered.getByText('9 unchanged lines')).toBeVisible();
+    // Drawn like the diff: a mono header bar, and a gutter `+` beside the one block built from
+    // added lines (the paragraph) — none beside the unchanged heading.
+    await expect(rendered.getByText('README.md · rendered')).toBeVisible();
+    await expect(rendered.locator('.md-file-added')).toHaveCount(1);
+    await expect(rendered.locator('.md-file-added')).toContainText('pnpm install');
     // Untrusted: the relative link is text, the script never ran and is not in the DOM.
     await expect(rendered.getByText('setup', { exact: true })).toBeVisible();
     await expect(rendered.getByRole('link', { name: 'setup' })).toHaveCount(0);
@@ -181,6 +187,9 @@ test.describe('Changes tab: Markdown files', () => {
     await expect(rendered.getByRole('heading', { name: 'Old section' })).toBeVisible();
     await expect(rendered.getByText('Only the changed parts are shown.')).toHaveCount(0);
     await expect(rendered.locator('script')).toHaveCount(0);
+    // The whole file still marks only the added block, by the patch's new-side line numbers.
+    await expect(rendered.locator('.md-file-added')).toHaveCount(1);
+    await expect(rendered.locator('.md-file-added')).toContainText('pnpm install');
     expect(contentReads).toEqual(['README.md']);
   });
 

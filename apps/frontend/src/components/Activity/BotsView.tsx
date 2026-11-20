@@ -3,6 +3,7 @@ import { useBotAnalytics } from '../../hooks/useBotTriage.js';
 import { useFilters } from '../../store/filters.js';
 import { BotRoiPanel, ResolveBacklogBanner, TuningSuggestions } from './BotRoiPanel.js';
 import { WorkspaceBotCharts } from './WorkspaceBotCharts.js';
+import { BotIsolateProvider } from './BotIsolate.js';
 import { BotThemesPanel } from './BotThemesPanel.js';
 import { BenchmarkPanel } from './BenchmarkPanel.js';
 import { effectiveBotsTab } from './benchmarkModel.js';
@@ -46,7 +47,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
   // Inner sub-tab. A single shared store field (both the cross-repo rail Bots view and the
   // per-repo console Bots tab funnel through this one BotsView), so switching sticks across
   // rail/tab round-trips. The old 'behaviour' tab is GONE (plan P1.1/C1): per-bot depth is the
-  // "Depth →" drill-down tab off the ROI table, and the surviving workspace-grain charts are the
+  // depth tab opened from a bot's name in the ROI table, and the surviving workspace-grain charts are the
   // collapsed "Workspace charts" section at the bottom of the ROI branch.
   const innerTab = useFilters((s) => s.botsInnerTab);
   const setInnerTab = useFilters((s) => s.setBotsInnerTab);
@@ -128,7 +129,9 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
       ) : effectiveTab === 'benchmark' ? (
         <BenchmarkPanel repoId={repoId} />
       ) : (
-        <>
+        // ONE isolated bot for every per-bot chart below (ROI row + Workspace charts): a legend
+        // click in any of them dims the other bots in all of them.
+        <BotIsolateProvider>
           {/* Governance caution: PRs whose only review came from an automated reviewer — no human
               ever looked. Sourced from the CORE analytics totals; "Show list" opens the
               bot-only-PRs drill-down tab (same route/scope → count ≡ list). */}
@@ -175,7 +178,7 @@ export function BotsView({ repoId }: { repoId?: number } = {}): JSX.Element {
               that fetches nothing until opened. The bottom of the Measure surface. */}
           <WorkspaceBotCharts repoId={repoId} />
           {/* No bot feed here: bot activity is the Feed's "Bots" side (one Feed, two sides). */}
-        </>
+        </BotIsolateProvider>
       )}
     </div>
   );
