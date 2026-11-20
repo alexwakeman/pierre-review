@@ -56,6 +56,9 @@ const LABEL_PAD_Y = 2;
 const LABEL_MARGIN = 4;
 const LABEL_MAX_W = 176;
 const LABEL_MIN_W = 40;
+/** The labels' type: the compact meta size (12px — the floor for a sentence), kept small so the words
+ *  sit quietly between the cards. */
+const LABEL_TYPE_CLASS = 'type-compact text-meta font-medium';
 
 /** Width of a text in the board's meta font, measured on a canvas (one per font). */
 function textMeasurer(font: string): (s: string) => number {
@@ -75,10 +78,16 @@ function fitLabels(
   cardEls: Iterable<HTMLElement>,
   slotEls: Iterable<HTMLElement>,
 ): void {
-  const css = getComputedStyle(grid);
+  // The labels use the COMPACT meta size (12px, the sidebar's scale): read it off a probe with the same
+  // class, so the fit measures exactly what is drawn.
+  const probe = document.createElement('span');
+  probe.className = LABEL_TYPE_CLASS;
+  grid.appendChild(probe);
+  const css = getComputedStyle(probe);
   const fs = css.getPropertyValue('--fs-meta').trim() || '12px';
   const lineH = parseFloat(css.getPropertyValue('--lh-meta')) || 16;
   const measureText = textMeasurer(`500 ${fs} ${css.fontFamily}`);
+  probe.remove();
   const boxOf = (el: HTMLElement): Box => {
     const r = el.getBoundingClientRect();
     return { x: r.left - g.left, y: r.top - g.top, w: r.width, h: r.height };
@@ -724,7 +733,7 @@ function InlineArrowLabels({ paths, texts }: { paths: readonly RoutedPath[]; tex
             aria-hidden
             data-testid="arrow-label"
             title={box.cut ? text : undefined}
-            className="absolute z-20 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-ui bg-ui-bg px-1 py-0.5 text-center text-meta font-medium text-ui-mute"
+            className={`absolute z-20 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-ui bg-ui-bg px-1 py-0.5 text-center text-ui-mute ${LABEL_TYPE_CLASS}`}
             style={{ left: box.x, top: box.y, width: 'max-content', maxWidth: box.w, display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: box.lines }}
           >
             {text}

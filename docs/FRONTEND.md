@@ -3060,7 +3060,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     drawn beside it ALWAYS** — no number, no key, no hover: `fitArrowLabels` (lib/designGrid.ts) gives
     each label the FREE box round its arrow's label point (sideways to the nearest card / heading /
     "n tickets" / placed label, then up and down within that width — the board's words are marked
-    `data-label-obstacle`), wraps the words to it (measured on a canvas in the board's meta font) and
+    `data-label-obstacle`), wraps the words to it (12px, the compact meta size — `LABEL_TYPE_CLASS` — measured on a canvas in that font) and
     cuts the lines that do not fit (ellipsis; the full sentence is the label's `title`). It sits just
     above its line, else just below; only when neither fits does it sit ON the line, kept 15px clear of
     both cards so the arrowhead shows. Every label still to come keeps a one-line band at its point, so
