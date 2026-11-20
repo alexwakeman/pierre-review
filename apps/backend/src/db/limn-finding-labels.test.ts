@@ -349,14 +349,6 @@ describe('Limn bots in the Bots folds', () => {
     expect(agg.totals.limnLabelled).toBeGreaterThan(0);
   });
 
-  it('the per-reviewer drill-down lists a Limn bot\'s PRs by its u<id> key', async () => {
-    const aliceBot = await userId('limn:alice-dev');
-    const resp = await q.getBotVendorPrs(1, { userId: aliceBot }, 'rolling_14', scope);
-    expect(resp.key).toBe(`u${aliceBot}`);
-    expect(resp.label).toBe('Ensemble · alice-dev');
-    expect(resp.prs.map((p) => p.prNumber).sort()).toEqual([1, 2]);
-  });
-
   it('the flagging drill-down lists Limn findings but keeps them out of the agreement matrix', async () => {
     const resp = await ml.getBotFlaggingComments(
       1,

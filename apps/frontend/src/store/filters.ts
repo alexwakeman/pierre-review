@@ -18,6 +18,7 @@ import {
   type EventCategory,
   type EventType,
   type FeedPrEventChip,
+  type FeedSeverity,
   type InsightKind,
   type PendingAuthorLens,
   type PendingTabKey,
@@ -25,6 +26,7 @@ import {
   type PeriodGrain,
   type PrStatus,
   type ReviewBotKind,
+  type ReviewerRole,
   type ReviewState,
   type VendorDisagreeDirection,
   type WorkspaceMetricKey,
@@ -416,13 +418,28 @@ export interface FilterState {
   //
   // ⚠ NOT CLEARED WHEN THE PARENT PILL GOES OFF. The row stops rendering and the filter stops
   // consulting it; the selection is REMEMBERED. A corrective set() here is the derived-sub-tab
-  // defect — it permanently forgets a choice the reader made (see BotPrsDetail's `activePills`,
-  // the same shape one surface over).
+  // defect — it permanently forgets a choice the reader made.
   //
   // Transient and URL-silent like feedCatPrEvents itself: NOT in FilterDefaults, NOT in
   // pickFilterBarState, NOT in sanitizePersistedFilters, so no FILTER_STORAGE_VERSION bump and
   // no useUrlState serializer entry is owed.
   feedPrEventKinds: FeedPrEventChip[];
+  // THE BOTS SIDE'S TWO CHIP ROWS (rendered only while feedAuthors === 'bots'). SERVER-side, unlike
+  // the pills above: useConsolidatedFeed sends them as `severities` / `botRoles`, filtered before
+  // the cap and the page, because the feed is offset-paginated over a capped stream and a
+  // client-side narrowing would turn a page of other bots' rows into an empty page.
+  //
+  // EMPTY MEANS EVERY ONE (as feedPrEventKinds): turning the last pressed chip off lands back on
+  // empty, so an all-off selection is unreachable. `feedBotRoles` DEFAULTS to ['review'] — the
+  // Bots side opens on review bots (the cohort test is `=== 'review'`); `feedBotSeverities`
+  // defaults to empty. Not cleared when the reader flips back to People: the rows stop rendering
+  // and the request stops sending them, and the choice is remembered.
+  //
+  // Transient and URL-silent like every feed toggle: NOT in FilterDefaults, NOT in
+  // pickFilterBarState, NOT in sanitizePersistedFilters, so no FILTER_STORAGE_VERSION bump is
+  // owed. Every session opens the Bots side on Review only.
+  feedBotSeverities: FeedSeverity[];
+  feedBotRoles: ReviewerRole[];
   // Activity "Feed" opt-in "show individual commits" toggle. false (default) → only commit
   // pushes that ADDRESSED a review thread surface (the existing behaviour); true → the server
   // also emits plain commit-push runs. Server-side (the client can't synthesize plain commits),
@@ -662,15 +679,6 @@ export interface FilterState {
   // Seeds/re-jumps the MetricsDetail sub-tab (the tab itself is a singleton). null = none.
   metricsFocus: WorkspaceMetricKey | null;
 
-  // transient: a clicked Bot-ROI vendor row → which analytics-row KEY (`u<userId>`)
-  // the bot-PR drill-down tab should show. Seeds/re-jumps the BotPrsDetail sub-tab (the tab
-  // itself is a singleton). null = none.
-  botPrsFocusKey: string | null;
-  // transient: the repo the bot-PR drill-down was opened FROM (the per-repo Bots tab), so the
-  // drill-down stays scoped to that repo. null = the whole active workspace (the cross-repo
-  // Bots rail).
-  botPrsFocusRepoId: number | null;
-
   // transient: Activity → Open PRs' own repo dropdown (null = every repo). The tab always
   // fetches the WHOLE workspace; this narrows the loaded rows client-side. Seeded by the per-repo
   // "Show all N open PRs" footer (that repo), cleared by the tab chip and the Flow metrics tile.
@@ -717,22 +725,6 @@ export interface FilterState {
     repoId: number | null;
     bots: BotFlaggingBotNarrowing | null;
     disagree: VendorDisagreeDirection | null;
-  } | null;
-  // transient: which bot's "bot comments per PR" cell the volume drill-down was opened on, plus
-  // the repo the COLUMN was measured at (null = the whole active workspace, i.e. the cross-repo
-  // Bots rail). Read-not-consumed for the tab's lifetime and overwritten by the next open — the
-  // botFlaggingSeed discipline, because this tab is a singleton RE-SEEDED IN PLACE too.
-  // ⚠ NOT in FilterDefaults, NOT URL-serialized, NOT persisted: a stale narrowing restored from
-  // storage would name a bot the current workspace may not even have.
-  //
-  // `bots` reuses `BotFlaggingBotNarrowing` deliberately — ONE bot-narrowing shape on this
-  // surface, not two, so the chip label (`botNarrowLabel`) and the wire spelling (`users.id`s,
-  // never vendor key strings) are shared with the flagging drill-down. It rides the SEED rather
-  // than the tab's local state because the CHIP names it: two opens for two different bots would
-  // otherwise render identical chips. null = every bot in scope (the column's totals reading).
-  botVolumeSeed: {
-    repoId: number | null;
-    bots: BotFlaggingBotNarrowing | null;
   } | null;
   // Activity tab (the master-detail triage console). Which detail is shown:
   // 'open-prs' = the workspace's Open PRs cards (the FIRST rail line and the default landing
@@ -870,6 +862,10 @@ export interface FilterState {
   // pressed chip lands back on the empty array, i.e. all four, so clicking can never reach an
   // all-off selection whose only honest rendering is an empty feed.
   toggleFeedPrEventKind: (k: FeedPrEventChip) => void;
+  // The Bots side's chip rows (see feedBotSeverities / feedBotRoles) — add/remove one chip; the
+  // last one off lands on empty (every one).
+  toggleFeedBotSeverity: (v: FeedSeverity) => void;
+  toggleFeedBotRole: (v: ReviewerRole) => void;
   // Feed "show individual commits" toggle (see feedShowCommits).
   toggleFeedShowCommits: () => void;
   // Isolate the Feed to a single PR (or clear with null) — set from PrDetail's "Show in Activity
@@ -1092,11 +1088,6 @@ export interface FilterState {
   // metricsFocus signal + opens the singleton metrics tab; MetricsDetail consumes it.
   openMetricsDetail: (metric: WorkspaceMetricKey) => void;
   consumeMetricsFocus: () => void;
-  // Open (or re-focus) the bot-vendor PR drill-down tab on a specific analytics-row key
-  // (`u<userId>`). Sets the botPrsFocusKey signal + opens the singleton bot-PRs tab;
-  // BotPrsDetail consumes it.
-  openBotPrsDetail: (key: string, repoId?: number | null) => void;
-  consumeBotPrsFocus: () => void;
   // Reveal Activity → Open PRs. A repoId pre-selects that repo in the pane's dropdown (the
   // per-repo footer, which promised that repo's count); no argument clears the dropdown.
   openOpenPrsDetail: (repoId?: number | null) => void;
@@ -1146,19 +1137,6 @@ export interface FilterState {
   // A local override would leave the chip advertising the tile the user has since navigated away
   // from — the tab would read "Nits" while the page showed Security, which is worse than no label.
   setBotFlaggingSelector: (selector: BotFlaggingSelector) => void;
-  // Open (or re-seed) the bot-comment-VOLUME drill-down — the merged PRs behind the ROI table's
-  // "bot comments per PR" cell. `repoId` is the scope the COLUMN was measured at (the per-repo
-  // Bots tab); null = the whole active workspace. `bots` is the cell's own bot, or null for the
-  // whole-workspace reading.
-  //
-  // ⚠ The tab MUST inherit the same (workspace, window, repoIds) triple the cell was computed at —
-  // workspace and window come from the store (`workspaceId` / `botAnalyticsWindow`, which is why
-  // the tab keeps no local window), and this `repoId` is the third leg. A list measured at a
-  // different scope would silently contradict the number that was clicked.
-  openBotVolumeDetail: (repoId: number | null, bots?: BotFlaggingBotNarrowing | null) => void;
-  // The bot pill's ✕ on the open volume drill-down: widen to EVERY bot while keeping the scope.
-  // `null`, never an empty set — `[]` reads as "no bots" on the wire, the opposite of "clear".
-  setBotVolumeBots: (bots: BotFlaggingBotNarrowing | null) => void;
   // Ask SyncStatus to pop the sync-progress modal (used right after adding a repo
   // so the initial backfill's load time is visible). Bumps syncModalSignal and
   // dedup-appends the added repo id to syncModalRepoIds so the modal can scope to
@@ -1389,6 +1367,9 @@ function freshDefaults(): FilterData {
     feedCatPrEvents: false,
     // Empty = all four PR-event chips (see feedPrEventKinds) — the pill's whole bucket.
     feedPrEventKinds: [],
+    // The Bots side opens on review bots, every severity (see feedBotRoles).
+    feedBotSeverities: [],
+    feedBotRoles: ['review'],
     feedShowCommits: false,
     feedIsolatedPrId: null,
     attentionIsolation: null,
@@ -1426,8 +1407,6 @@ function freshDefaults(): FilterData {
     prChangesFocus: null,
     aiFixTabFocus: null,
     metricsFocus: null,
-    botPrsFocusKey: null,
-    botPrsFocusRepoId: null,
     openPrsRepoFilter: null,
     trunkFocusRepoId: null,
     botOnlyFocusRepoId: null,
@@ -1435,7 +1414,6 @@ function freshDefaults(): FilterData {
     themeThreadsSeed: null,
     searchSeed: null,
     botFlaggingSeed: null,
-    botVolumeSeed: null,
     // Activity detail state — transient (like myTurnOnly / insightsOpen). A fresh open lands
     // on Open PRs — one card per open PR — for every tier, with no thread-state filter. Pending
     // is one rail click below it.
@@ -1592,6 +1570,18 @@ export const useFilters = create<FilterState>((set, get) => ({
       feedPrEventKinds: s.feedPrEventKinds.includes(k)
         ? s.feedPrEventKinds.filter((x) => x !== k)
         : [...s.feedPrEventKinds, k],
+    })),
+  toggleFeedBotSeverity: (v) =>
+    set((s) => ({
+      feedBotSeverities: s.feedBotSeverities.includes(v)
+        ? s.feedBotSeverities.filter((x) => x !== v)
+        : [...s.feedBotSeverities, v],
+    })),
+  toggleFeedBotRole: (v) =>
+    set((s) => ({
+      feedBotRoles: s.feedBotRoles.includes(v)
+        ? s.feedBotRoles.filter((x) => x !== v)
+        : [...s.feedBotRoles, v],
     })),
   toggleFeedShowCommits: () => set((s) => ({ feedShowCommits: !s.feedShowCommits })),
   setFeedIsolatedPrId: (id) => set({ feedIsolatedPrId: id }),
@@ -1882,11 +1872,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     usePinnedTabs.getState().openMetricsTab({ fromActivity: true });
   },
   consumeMetricsFocus: () => set({ metricsFocus: null }),
-  openBotPrsDetail: (key, repoId) => {
-    set({ botPrsFocusKey: key, botPrsFocusRepoId: repoId ?? null });
-    usePinnedTabs.getState().openBotPrsTab({ fromActivity: true });
-  },
-  consumeBotPrsFocus: () => set({ botPrsFocusKey: null }),
   openOpenPrsDetail: (repoId) => {
     set({ openPrsRepoFilter: repoId != null ? { workspaceId: get().workspaceId, repoIds: [repoId] } : null });
     usePinnedTabs.getState().showActivity();
@@ -1955,18 +1940,6 @@ export const useFilters = create<FilterState>((set, get) => ({
     // and the opening direction ride through for the same reason — "CodeRabbit's over-calls,
     // now among the nits" is a population the reader asked for one half of at a time.
     set({ botFlaggingSeed: { ...seed, selector } });
-  },
-  // Open (or re-seed) the bot-comment-VOLUME drill-down on one bot's cell (or on the whole
-  // workspace, from the totals line). The repo scope is carried through verbatim so the list's
-  // population is the one the clicked number was folded from.
-  openBotVolumeDetail: (repoId, bots) => {
-    set({ botVolumeSeed: { repoId, bots: bots ?? null } });
-    usePinnedTabs.getState().openBotVolumeTab({ fromActivity: true });
-  },
-  setBotVolumeBots: (bots) => {
-    const seed = get().botVolumeSeed;
-    if (!seed) return; // never opened — nothing to narrow (the setBotFlaggingBots rule)
-    set({ botVolumeSeed: { ...seed, bots } });
   },
   // Open (or re-seed) the cross-team search-results tab for `query`. No forced fromActivity — the
   // search box is global (openable from any view), so openTab infers the Back-to-Activity arming

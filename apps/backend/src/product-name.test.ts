@@ -109,7 +109,6 @@ describe('no user-visible "Pierre" in the sources that render one', () => {
   // Whole-file scans, for files that should now contain the old brand NOWHERE — not even in a
   // comment. Strictest form of the guard, and only usable where no historical note is needed.
   it.each([
-    'apps/frontend/src/components/Activity/BotPrsDetail.tsx',
     'apps/frontend/src/components/Activity/BotOnlyPrsDetail.tsx',
   ])('%s carries no "Pierre" at all', (rel) => {
     expect(read(rel)).not.toMatch(OLD_BRAND);

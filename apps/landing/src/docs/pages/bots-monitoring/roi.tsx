@@ -20,7 +20,7 @@ export default function Page(): JSX.Element {
       <H2 id="what-you-see">What you see</H2>
       <Illustration
         label="The ROI table: CodeRabbit with 132 threads, 58% used, verdict Keep; Greptile with 125 threads, 39% used, verdict Tune"
-        caption="Part of the ROI table. Each figure opens the threads or pull requests behind it."
+        caption="Part of the ROI table. Click a bot's name for its own charts."
       >
         <MiniTable
           cols={[
@@ -38,6 +38,21 @@ export default function Page(): JSX.Element {
           ]}
         />
       </Illustration>
+      <H3>The two tiles</H3>
+      <p>Above the table, two tiles cover every review bot in the workspace together, over the window you picked.</p>
+      <ul>
+        <li>
+          <Ui>Time to first review</Ui>: the median time from a pull request being ready for review (or opened, when
+          that was not seen) to the first review or comment by any review bot. Below it: the p90 and the number of
+          pull requests.
+        </li>
+        <li>
+          <Ui>Follow-ups after first review</Ui>: the share of those pull requests where a review bot posted again,
+          and the average number of extra posts. A second bot’s first pass counts as a follow-up, and so does each
+          inline comment posted with a review.
+        </li>
+      </ul>
+      <p>A tile shows “—” when no pull request was reviewed by a bot in the window.</p>
       <H3>The columns</H3>
       <ul>
         <li>
@@ -51,22 +66,25 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <Ui>Not addressed</Ui>: still unresolved, nobody replied and no later commit touched the file. A thread
-          counts as <Ui>Unanswered</Ui> only once it is older than 36 hours, so a bot is not marked down for threads
-          nobody has reached yet.
+          counts as unanswered only once it is older than 36 hours, so a bot is not marked down for threads nobody
+          has reached yet.
         </li>
         <li>
           <Ui>Merged anyway</Ui>: pull requests that merged with at least one of the bot’s threads not addressed.
         </li>
         <li>
-          <Ui>Time to address</Ui>, <Ui>Oldest not addressed</Ui> and <Ui>% not addressed</Ui>.
+          <Ui>Time to address</Ui> and <Ui>% not addressed</Ui>.
+        </li>
+        <li>
+          <Ui>First review</Ui> and <Ui>Follow-ups</Ui>: the two tiles’ figures for this bot alone. Hover a cell for
+          the p90 or the average.
         </li>
         <li>
           <Ui>Overlap</Ui>: the share of the bot’s threads within three lines of another bot’s thread in the same file.
           A high figure means two bots say the same thing.
         </li>
         <li>
-          <Ui>Severity mix</Ui>, <Ui>High</Ui>, <Ui>Nits</Ui>, <Ui>Not addressed by severity</Ui> and{' '}
-          <Ui>Inflation</Ui>: from Ensemble’s own severity model (see{' '}
+          <Ui>Severity mix</Ui> and <Ui>Inflation</Ui>: from Ensemble’s own severity model (see{' '}
           <DocLink to="bots-monitoring/severity-scoring">Severity scoring</DocLink>). These columns appear once comments
           have been scored.
         </li>
@@ -111,11 +129,26 @@ export default function Page(): JSX.Element {
         Bots tab, because one repository’s share of a workspace price is not a real cost.
       </p>
 
+      <H2 id="bot-charts">Charts</H2>
+      <p>
+        Above the table: <Ui>Thread volume</Ui>, <Ui>Time to first review</Ui> and <Ui>Follow-up rate</Ui>, each
+        weekly for the last 12 weeks, one line per review bot.
+      </p>
+      <p>
+        Click a bot’s name for its own charts: response times, coverage, consistency and severity over time.
+      </p>
+      <H3>Show one bot</H3>
+      <p>
+        Click a bot in a chart’s legend to show only that bot. The other bots fade in every chart on the page. Click
+        it again to show all. Each Ensemble account (“Ensemble · alice”) has its own shade of orange, and each account
+        of a bot with several accounts has its own shade of that bot’s colour.
+      </p>
+
       <H2 id="workspace-charts">Workspace charts</H2>
       <p>
-        At the bottom of the tab, open the charts for <Ui>Thread volume</Ui> (weekly, for the last 12 weeks),{' '}
-        <Ui>Bot effectiveness</Ui> (the share of threads used, by verdict) and <Ui>Used vs not addressed</Ui> (by bot,
-        for this window).
+        At the bottom of the tab, open <Ui>Workspace charts</Ui> for <Ui>Bot effectiveness</Ui> (the share of threads
+        used, by verdict), <Ui>Used vs not addressed</Ui> (by bot, for this window), <Ui>Findings density</Ui>,{' '}
+        <Ui>Where bots work</Ui>, <Ui>PR size vs bot comment volume</Ui> and the overlap between bots.
       </p>
       <Tip>
         Press <Kbd>⌘K</Kbd> and type “Bots: measure” to change the window, or “Bots: open PRs only a bot reviewed” to

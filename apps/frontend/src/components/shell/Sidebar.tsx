@@ -274,8 +274,6 @@ export function tabWords(tab: Tab): string {
       return 'Search results';
     case 'metrics-detail':
       return 'Flow metrics';
-    case 'bot-prs':
-      return 'Bot Drill-Down';
     case 'bot-only-prs':
       return 'Bot-only PRs';
     case 'bot-threads':
@@ -284,8 +282,6 @@ export function tabWords(tab: Tab): string {
       return 'Theme threads';
     case 'bot-flagging':
       return 'Flagged';
-    case 'bot-volume':
-      return 'Comments/PR';
     default:
       return 'Tab';
   }

@@ -180,6 +180,7 @@ export function LineChart({
       fill="none"
       stroke={s.color}
       strokeWidth={s.dashed ? 2.75 : 1.5}
+      strokeOpacity={s.dimmed ? 0.2 : undefined}
       strokeDasharray={s.dashed ? '6 4' : undefined}
       strokeLinejoin="round"
       strokeLinecap="round"
@@ -236,8 +237,8 @@ export function LineChart({
             {/* data lines first, then dots, then any dashed trend line ON TOP (below) */}
             {series.filter((s) => !s.dashed).map(renderPath)}
             {series.map((s) =>
-              s.dashed
-                ? null // a fitted overlay (trend line) carries no data dots
+              s.dashed || s.dimmed
+                ? null // a fitted overlay (trend line) and a dimmed line carry no data dots
                 : s.values.map((v, i) => {
                 if (v == null) return null;
                 const flagged = s.pointFlags?.[i] === true;
@@ -292,7 +293,7 @@ export function LineChart({
         {!tipBelow && hover != null && w > 0 && (
           <FloatingTip x={x(hover)} y={PAD_T} width={w} centered={centerTip}>
             <div className="font-medium">{labels[hover] ? fmtDate(labels[hover]!) : ''}</div>
-            {series.filter((s) => !s.dashed).map((s) => {
+            {series.filter((s) => !s.dashed && !s.dimmed).map((s) => {
               const note = s.pointNotes?.[hover] ?? null;
               return (
                 <div key={s.key}>
@@ -336,7 +337,7 @@ export function LineChart({
                 {labels[hover] ? fmtDate(labels[hover]!) : ''}
               </span>
               {series
-                .filter((s) => !s.dashed)
+                .filter((s) => !s.dashed && !s.dimmed)
                 .map((s) => {
                   const v = s.values[hover!];
                   const note = s.pointNotes?.[hover!] ?? null;

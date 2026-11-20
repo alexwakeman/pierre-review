@@ -22,7 +22,7 @@ export default function Page(): JSX.Element {
       <ul>
         <li>
           <DocLink to="bots-monitoring/roi">ROI</DocLink>: one row per bot, with its threads, how many were used, how
-          many were left, the severity mix, the cost per used thread and a verdict: <Ui>Keep</Ui>, <Ui>Tune</Ui> or{' '}
+          many were left, how fast it first reviews, the severity mix, the cost per used thread and a verdict: <Ui>Keep</Ui>, <Ui>Tune</Ui> or{' '}
           <Ui>Rarely used</Ui>.
         </li>
         <li>
@@ -43,8 +43,8 @@ export default function Page(): JSX.Element {
       <H2 id="what-the-bots-are-flagging">What the bots are flagging</H2>
       <p>
         On the <Ui>ROI</Ui> tab, a summary strip counts the bots’ findings in the window: how many there were, the
-        share that is high severity (major plus critical), the share of nits and the top topic. Each bot’s row opens
-        its breakdown. The picture below is a working model with made-up data.
+        share that is high severity (major plus critical), the share of nits and the top topic. The picture below is a
+        working model with made-up data.
       </p>
       <BotsSeverityMock />
       <p>
@@ -88,11 +88,11 @@ export default function Page(): JSX.Element {
           Pick a window on the ROI tab: <Ui>7d</Ui>, <Ui>14d</Ui>, <Ui>30d</Ui> or <Ui>Sprint</Ui>. The other tabs use
           the same window.
         </li>
-        <li>Select a bot’s name to open its comments and the pull requests it touched.</li>
         <li>
-          Select <Ui>Depth →</Ui> on a bot’s row for its response times, coverage, consistency and severity over
-          time.
+          Select a bot’s name in the ROI table for its own charts: response times, coverage, consistency and severity
+          over time.
         </li>
+        <li>Click a bot in a chart’s legend to show only that bot in every chart. Click it again to show all.</li>
       </Steps>
       <p>
         A bot’s activity, comment by comment, is on the <DocLink to="feed/people-and-bots">Feed</DocLink>’s Bots side.

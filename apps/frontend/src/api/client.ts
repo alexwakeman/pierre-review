@@ -122,15 +122,11 @@ import type {
   BotBenchmarkResponse,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
-  BotVendorCommentsResponse,
-  BotVendorPrsResponse,
   BotFlaggingSelector,
   BotFlaggingRefine,
   BotFlaggingResponse,
   BotVolumeResponse,
-  BotVolumePrsResponse,
   BotVolumeScatterResponse,
-  BotVolumePrSort,
   BotDedupResponse,
   PrBotBehaviourResponse,
   DetectedReviewersResponse,
@@ -2358,49 +2354,6 @@ export const api = {
         repoIdsParam(repoIds),
       ),
     ),
-  // The per-PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer touched in
-  // the window (threads/comments/acted-on/untouched/bot-only), most-recent-activity first. `key` is
-  // the analytics row identity — `u<userId>` (one reviewer; a Limn bot is one per poster).
-  //
-  // ⚠ It is opened FROM a scoped ROI row, so it MUST be given the SAME workspace and repo set that
-  // row was computed at: the header label and the per-PR `botOnly` badge both key on them, and one
-  // screen cannot show two contradictory bot-only answers.
-  botVendorPrs: (
-    key: string,
-    window: BotWindowKind,
-    workspaceId: number,
-    repoIds?: number[] | null,
-  ) =>
-    get<BotVendorPrsResponse>(
-      withQuery(
-        `/api/bot-analytics/vendor/${encodeURIComponent(key)}/prs`,
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-        repoIdsParam(repoIds),
-      ),
-    ),
-  // The per-bot COMMENTS drill-down behind the same Bot-ROI row: everything the reviewer said
-  // in the window (inline review comments, PR comments, review bodies), each row's ML label
-  // shipped INLINE — one request, never the per-PR label index per row. Same scope wiring as
-  // botVendorPrs, for the same one-screen-one-answer reason. `bounds` mirrors botAnalytics's
-  // (the People report's bot sections cover the real period; server-validated, 400 on garbage).
-  botVendorComments: (
-    key: string,
-    window: BotWindowKind,
-    workspaceId: number,
-    repoIds?: number[] | null,
-    bounds?: { fromMs: number; toMs: number },
-  ) =>
-    get<BotVendorCommentsResponse>(
-      withQuery(
-        `/api/bot-analytics/vendor/${encodeURIComponent(key)}/comments`,
-        `window=${encodeURIComponent(window)}`,
-        workspaceParam(workspaceId),
-        repoIdsParam(repoIds),
-        bounds ? `fromMs=${bounds.fromMs}` : undefined,
-        bounds ? `toMs=${bounds.toMs}` : undefined,
-      ),
-    ),
   // "What the bots are flagging" — the drill-down behind every tile and chip of the Bots rail's
   // ML totals strip. ONE route, one `select=` discriminator, paginated by an OPAQUE cursor.
   //
@@ -2467,17 +2420,16 @@ export const api = {
     );
   },
   // ── Bot comment VOLUME (CORE, free, deterministic) ────────────────────────────────────────
-  // "How much does each bot say on a PR" — the ROI table's per-bot average, and the paginated
-  // PR list behind it. Both fold the SAME server-side scan, so the column and the list cannot
-  // disagree about a number.
+  // "How much does each bot say on a PR" — the ROI table's per-bot average, and the PR-size chart.
+  // Both fold the SAME server-side scan, so the column and the chart cannot disagree about a number.
+  // (The paginated `/api/bot-analytics/volume/prs` list was removed 2026-11-20.)
   //
   // ⚠ THE POPULATION IS PRs **MERGED** IN THE WINDOW, open ones excluded (measured: 686 merged vs
   // 997 opened over 180d on one repo here — a ~45% difference). Any caption written against these
   // numbers has to say "merged".
   //
-  // ⚠ CALL BOTH WITH THE SAME (window, workspaceId, repoIds) TRIPLE. The drill-down reproduces the
-  // column's own number; measured at a different scope it would silently contradict the cell the
-  // user just clicked, with nothing on screen saying why.
+  // ⚠ CALL BOTH WITH THE SAME (window, workspaceId, repoIds) TRIPLE. The size chart explains the
+  // column's own number; measured at a different scope it would silently contradict it.
   botVolume: (window: BotWindowKind, workspaceId: number, repoIds?: number[] | null) =>
     get<BotVolumeResponse>(
       withQuery(
@@ -2487,40 +2439,8 @@ export const api = {
         repoIdsParam(repoIds),
       ),
     ),
-  // The PR drill-down. `sort` is an ajv ENUM server-side, so an unknown value 400s rather than
-  // quietly serving the default order under the other one's caption.
-  //
-  // ⚠ `authorUserIds` follows the flagging route's rule EXACTLY: `!= null`, NEVER `.length > 0`.
-  // An empty set means "no bots" and must reach the server as a PRESENT-but-empty parameter;
-  // dropping the key widens it to every bot, which is the "the cell promised 25, the list showed
-  // 612" failure. It is declared on the route schema too — Fastify's `removeAdditional` strips an
-  // undeclared key silently and answers 200 with the narrowing not applied.
-  //
-  // The cursor is OPAQUE: feed `nextCursor` back verbatim and never parse it (today an offset into
-  // a JS fold; a later keyset switch must not be a wire break).
-  botVolumePrs: (p: {
-    window: BotWindowKind;
-    workspaceId: number;
-    repoIds?: number[] | null;
-    authorUserIds: number[] | null;
-    sort: BotVolumePrSort;
-    limit: number;
-    cursor?: string | null;
-  }) =>
-    get<BotVolumePrsResponse>(
-      withQuery(
-        '/api/bot-analytics/volume/prs',
-        `window=${encodeURIComponent(p.window)}`,
-        workspaceParam(p.workspaceId),
-        repoIdsParam(p.repoIds),
-        p.authorUserIds != null ? `authorUserIds=${p.authorUserIds.join(',')}` : '',
-        `sort=${encodeURIComponent(p.sort)}`,
-        `limit=${p.limit}`,
-        p.cursor ? `cursor=${encodeURIComponent(p.cursor)}` : '',
-      ),
-    ),
   // The Behaviour tab's PR-size-vs-volume chart: the five LOC-bucket means over the WHOLE scope
-  // plus one point per SIZED merged PR. Same (window, workspaceId, repoIds) triple as the two
+  // plus one point per SIZED merged PR. Same (window, workspaceId, repoIds) triple as the one
   // above — a third scope would put a differently-measured chart beside the column it explains.
   //
   // ⚠ The response's `buckets` are DENSE (all five present, `prs: 0` and `avgComments: null` on an

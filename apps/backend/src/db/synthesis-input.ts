@@ -15,8 +15,9 @@
 //                      hydration then goes through `getResolvableBotThreadsForScope(threadIds)`,
 //                      the SAME re-derive the confirm-gated resolve route runs (those two are
 //                      contractually one predicate — the resolve flow already depends on it).
-//   'bot-volume'     → bot-volume.ts `foldPrBotVolumePopulation` — the exact scored fold behind
-//                      GET /api/bot-analytics/volume/prs (`filteredTotal` is its length).
+//   'bot-volume'     → bot-volume.ts `foldPrBotVolumePopulation` — the scored per-PR fold (its
+//                      drill-down route, GET /api/bot-analytics/volume/prs, was removed
+//                      2026-11-20; `totalCount` is the fold's length).
 //   'workspace-bots' → queries.ts `getBotReviewComments` — the deterministic collection query the
 //                      Pro Themes fold has always read (the C6 union of the workspace's bot
 //                      comments). It is ALREADY core, so the "smaller honest change" of the two

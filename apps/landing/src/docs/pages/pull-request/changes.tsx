@@ -30,8 +30,11 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>Markdown files rendered.</b> A changed Markdown file (<code>.md</code>, <code>.mdx</code>,{' '}
-          <code>.markdown</code>) shows as formatted text. Until you choose <Ui>Show whole file</Ui>, only the changed
-          parts are shown. Review threads on a Markdown file are in its plain-text view.
+          <code>.markdown</code>) shows as formatted text, in a panel headed with its name and “rendered”. A{' '}
+          <b>+</b> in the left margin marks each block that has added lines. Until you choose{' '}
+          <Ui>Show whole file</Ui>, only the changed parts are shown, and a row such as “12 unchanged lines” stands for
+          each gap. Code blocks use the diff’s font and colours. Review threads on a Markdown file are in its
+          plain-text view.
         </li>
         <li>
           <b>Threads on their lines.</b> A thread whose code has moved since it was written is placed on the code

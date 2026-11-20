@@ -715,34 +715,26 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // ordinary single-window reads on the `read` fall-through — they do not multiply by anything.)
   // (GET /api/bot-severity — the standalone ML-severity rollup — was REMOVED on the C7 cut list;
   // its `search` tier entry left with it.)
-  // GET /api/bot-analytics/vendor/<key>/comments — the per-bot comments drill-down: up to 3000
-  // comment BODIES per source plus a three-way ml_comment_labels join, per request. Same shape
-  // of cost as the rollup above (this process, not GitHub and not Anthropic), so the same
-  // 60/min bucket. Its `/prs` sibling stays on `read` DELIBERATELY — that list is PR metadata
-  // only, no bodies. Anchored at both ends so the sibling cannot be swept in.
-  if (!mutating && /^\/api\/bot-analytics\/vendor\/[^/]+\/comments$/.test(path)) {
-    return [TIERS.search, TIERS.read];
-  }
+  // (GET /api/bot-analytics/vendor/<key>/comments and …/prs — the per-bot drill-downs — were
+  // REMOVED 2026-11-20; the comments route's `search` entry left with them.)
   // GET /api/bot-analytics/flagging — the "what the bots are flagging" drill-down. Per request it
   // re-runs the strip's WHOLE 50k-row label scan (the page offset is a JS slice over a fold of a
   // JSON column that no portable SQL predicate can express, so there is no cheaper page to fetch)
   // or the window's whole thread scan plus the ±3-line clustering, and then hydrates a page of
-  // comment BODIES on top. Strictly more work than the vendor-comments route beside it, and an
-  // IntersectionObserver fires it repeatedly as the user scrolls — so `search`, never the 600/min
-  // blanket. Anchored at both ends like its neighbour: `/api/bot-analytics` itself and
+  // comment BODIES on top. An IntersectionObserver fires it repeatedly as the user scrolls — so
+  // `search`, never the 600/min blanket. Anchored at both ends: `/api/bot-analytics` itself and
   // `/api/bot-analytics/bot-only-prs` are ordinary reads and must keep falling through.
   if (!mutating && /^\/api\/bot-analytics\/flagging$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
-  // GET /api/bot-analytics/volume[/prs|/scatter] — the bot-comment-volume family. Per request each
+  // GET /api/bot-analytics/volume[/scatter] — the bot-comment-volume family. Per request each
   // walks EVERY merged PR in the window (up to 5000) plus three grouped comment counts over that
-  // population, then folds the whole thing in JS; the `/prs` page offset is a slice over that
-  // fold, so a cursor walk re-runs the scan per page and an IntersectionObserver fires it again
-  // on every scroll. Same shape of cost as its two neighbours above — this process's event loop,
-  // not GitHub quota and not Anthropic — so the same 60/min bucket rather than the 600/min
-  // blanket one. Anchored at BOTH ends with the sub-paths spelled out, so `/api/bot-analytics`
-  // itself and `/api/bot-analytics/bot-only-prs` keep falling through to `read`.
-  if (!mutating && /^\/api\/bot-analytics\/volume(\/(prs|scatter))?$/.test(path)) {
+  // population, then folds the whole thing in JS. Same shape of cost as its neighbour above —
+  // this process's event loop, not GitHub quota and not Anthropic — so the same 60/min bucket
+  // rather than the 600/min blanket one. Anchored at BOTH ends with the sub-path spelled out, so
+  // `/api/bot-analytics` itself and `/api/bot-analytics/bot-only-prs` keep falling through to
+  // `read`. (The `/prs` drill-down was removed 2026-11-20.)
+  if (!mutating && /^\/api\/bot-analytics\/volume(\/scatter)?$/.test(path)) {
     return [TIERS.search, TIERS.read];
   }
   // GET /api/prs/<id>/ml-labels — the per-PR badge index. Two indexed reads over

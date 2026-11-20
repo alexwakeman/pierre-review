@@ -119,6 +119,7 @@ import type {
   ConsolidatedFeedCounts,
   FeedPrEventChip,
   FeedAuthors,
+  FeedSeverity,
   FeedAffectedThread,
   MyTurnPr,
   MyTurnDismissedItem,
@@ -161,14 +162,11 @@ import type {
   BotRepoDirBreakdown,
   PrBotBehaviourResponse,
   PrBotBehaviour,
-  BotVendorPr,
-  BotVendorPrsResponse,
   BotDedupMember,
   BotDedupCluster,
   BotDedupResponse,
   AddressedConfidence,
   BotTuningSuggestion,
-  MlSeverity,
   MlSeverityCounts,
   MlCategory,
   BotOnlyReviewCard,
@@ -218,6 +216,13 @@ import { deleteSettledClaimLinesForPrs } from './team-claim-lines-delete.js';
 import { runTransaction } from './client.js';
 import { pruneAiFixLoopForPrs } from './ai-fix-loop-prune.js';
 import { enrichMyTurn } from '../feed/my-turn.js';
+import {
+  countBy,
+  feedBotFacts,
+  passesBotRole,
+  passesSeverity,
+  type FeedMlTarget,
+} from './feed-bot-filters.js';
 import { getPushSummariesForPrs } from './push-summaries.js';
 import { pushSummariesForShas } from '@pierre-review/shared';
 import { resolvePrTickets } from '../pr/detail-enricher.js';
@@ -323,6 +328,7 @@ import {
   type PrFailingChecks,
 } from './failing-checks.js';
 import { prFlakyChecks, type FlakyVerdict } from './flaky-checks.js';
+import { emptyBotResponsiveness, foldBotResponsiveness } from './bot-responsiveness.js';
 import {
   addressedCommitAuthors,
   mentionFacts as mentionCommentFacts,
@@ -2234,11 +2240,12 @@ export async function getFeed(
         .map((r) => r.refId as number),
     ),
   ];
-  type CommentRow = { createdAt: Date; authorId: number | null; excerpt: string | null; body: string | null };
+  type CommentRow = { id: number; createdAt: Date; authorId: number | null; excerpt: string | null; body: string | null };
   const commentsByThread = new Map<number, CommentRow[]>();
   if (threadIds.length > 0) {
     const cs = await db
       .select({
+        id: reviewComments.id,
         threadId: reviewComments.threadId,
         createdAt: reviewComments.createdAt,
         authorId: reviewComments.authorId,
@@ -2277,6 +2284,7 @@ export async function getFeed(
     // The full markdown body for text events (fallback to `excerpt` when a row was
     // synced lean before full-body persistence).
     let content: string | null = null;
+    let reviewCommentId: number | null = null;
     if (r.type === 'review_comment' && r.refId != null) {
       const arr = commentsByThread.get(r.refId) ?? [];
       const match =
@@ -2285,6 +2293,7 @@ export async function getFeed(
         ) ?? arr.find((c) => c.createdAt.getTime() === r.occurredAt.getTime());
       excerpt = match?.excerpt ?? (match?.body ? truncate(match.body, 160) : null);
       content = match?.body ?? null;
+      reviewCommentId = match?.id ?? null;
     } else if (r.type === 'pr_comment' && r.refId != null) {
       const body = prCommentBodyById.get(r.refId) ?? null;
       excerpt = body ? truncate(body, 160) : null;
@@ -2313,6 +2322,7 @@ export async function getFeed(
           : null,
       excerpt,
       content,
+      reviewCommentId,
     };
   });
 
@@ -3340,6 +3350,11 @@ export interface ConsolidatedFeedFilters {
   // opt-in "Commits" feed toggle (off by default). Plain pushes stay hidden unless this is
   // set. The addressed-thread runs still ride along inline either way.
   includeAllCommits?: boolean;
+  // THE BOTS SIDE'S TWO CHIP ROWS (ignored on the people side; db/feed-bot-filters.ts). null /
+  // omitted = no narrowing. Applied BEFORE the plain-activity cap and the page slice, like
+  // `authors`, so a narrowed page is never an empty slice of a wider stream.
+  severities?: readonly FeedSeverity[] | null;
+  botRoles?: readonly ReviewerRole[] | null;
   // Pagination over the merged, chronologically-sorted stream. `limit` omitted → the
   // whole stream (legacy). The response `total` is the full count so the client knows
   // when to stop "Load more". Only the returned page is enriched (merge/review credit)
@@ -7192,6 +7207,8 @@ export async function getConsolidatedFeed(
     offset = 0,
     authors = 'humans',
     includeAllCommits = false,
+    severities = null,
+    botRoles = null,
   } = opts;
 
   // Restrict to the repos this account owns; a passed repoIds narrows within them. The
@@ -7282,10 +7299,23 @@ export async function getConsolidatedFeed(
     items.push(it);
   };
 
+  // The ML label target behind each comment / review row (Bots side only; feed-bot-filters.ts).
+  const mlTargetOf = new Map<string, FeedMlTarget>();
   // Activity events → one row each, as PLAIN rows (isMyTurn:false). The Pro enricher flags
   // participation below; without it every row stays plain. Exactly one row per underlying
   // event (no synthesized "My Turn" layer / dedup).
   for (const f of feed.events) {
+    if (authors === 'bots') {
+      const target: FeedMlTarget | null =
+        f.type === 'review_comment' && f.reviewCommentId != null
+          ? { kind: 'review_comment', id: f.reviewCommentId }
+          : f.type === 'pr_comment' && f.refId != null
+            ? { kind: 'pr_comment', id: f.refId }
+            : f.type === 'review_submitted' && f.refId != null
+              ? { kind: 'review', id: f.refId }
+              : null;
+      if (target) mlTargetOf.set(`feed:${f.id}`, target);
+    }
     push({
       id: `feed:${f.id}`,
       isMyTurn: false,
@@ -7363,21 +7393,44 @@ export async function getConsolidatedFeed(
 
   // Pure chronological — newest first. Keep every My Turn item (always relevant); cap the plain
   // activity rows so a busy multi-repo account doesn't render thousands of them.
-  const alwaysRows = scoped.filter((i) => i.isMyTurn);
-  const feedRows = scoped
-    .filter((i) => !i.isMyTurn)
-    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
-    .slice(0, FEED_EVENT_CAP);
-  const ordered = [...alwaysRows, ...feedRows].sort((a, b) =>
-    b.occurredAt.localeCompare(a.occurredAt),
-  );
+  const capStream = (list: ConsolidatedFeedItem[]): ConsolidatedFeedItem[] => {
+    const alwaysRows = list.filter((i) => i.isMyTurn);
+    const feedRows = list
+      .filter((i) => !i.isMyTurn)
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+      .slice(0, FEED_EVENT_CAP);
+    return [...alwaysRows, ...feedRows].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  };
+
+  // THE BOTS SIDE'S severity + bot-type rows (db/feed-bot-filters.ts), BEFORE the cap. Each chip
+  // row's badges are counted over the stream narrowed by the OTHER row only, after the same cap.
+  let narrowed = scoped;
+  let botFacets: { bySeverity: Record<string, number>; byBotRole: Record<string, number> } | null = null;
+  if (authors === 'bots') {
+    const facts = await feedBotFacts(
+      accountId,
+      scoped,
+      mlTargetOf,
+      await reviewerRoleForUser(accountId, workspaceId),
+    );
+    const bySev = scoped.filter((i) => passesSeverity(facts.get(i.id), severities));
+    const byRole = scoped.filter((i) => passesBotRole(facts.get(i.id), botRoles));
+    narrowed = bySev.filter((i) => passesBotRole(facts.get(i.id), botRoles));
+    botFacets = {
+      bySeverity: countBy(capStream(byRole), facts, (f) => f?.severity ?? 'unscored'),
+      byBotRole: countBy(capStream(bySev), facts, (f) => f?.role ?? null),
+    };
+  }
+  const ordered = capStream(narrowed);
 
   // Paginate: `total` is the full stream length; `page` is the requested window. Only
   // the page is enriched + has its users backfilled, so hidden items cost nothing.
   const total = ordered.length;
   // Facet counts over the WHOLE post-cap stream (not just the page) so the SPA's pill badges
   // reflect every matching item.
-  const counts = computeFeedCounts(ordered);
+  const counts: ConsolidatedFeedCounts = botFacets
+    ? { ...computeFeedCounts(ordered), ...botFacets }
+    : computeFeedCounts(ordered);
   const start = Math.max(0, offset ?? 0);
   const page =
     limit != null ? ordered.slice(start, start + Math.max(0, limit)) : ordered.slice(start);
@@ -7522,7 +7575,7 @@ export async function getConsolidatedFeed(
     total,
     // Pre-cap stream length — lets the client disclose "total most recent of N" honestly
     // when the plain-activity cap dropped older rows (uncappedTotal > total).
-    uncappedTotal: scoped.length,
+    uncappedTotal: narrowed.length,
     counts,
     generatedAt: new Date().toISOString(),
   };
@@ -12209,7 +12262,7 @@ export async function classificationKindForUserForAccount(
 //
 // ⚠ EXACT LOGINS ONLY (`exactAutomationVendorUsers` matches no prefix) — never the per-org PREFIX
 // half (`semgrep-code-<org>`). This map is also
-// the bot drill-downs' "is this id classified here" gate (`getBotVendorPrs`, the ML comment list),
+// the bot drill-downs' "is this id classified here" gate (the ML flagging list),
 // which then resolves the login: a global row seeded by prefix would hand any tenant ANOTHER org's
 // name for the asking. An exact vendor login is a public identity, like the REVIEW_BOTS seed. A
 // prefixed login still counts as automation (`hiddenBotUserIds`, ids only) and still gets its
@@ -12395,11 +12448,6 @@ const OVERDUE_GRACE_MS = 36 * 60 * 60 * 1000;
 // is never judged on a handful of scored comments.
 const ML_NIT_MIN_FINDINGS = 20;
 const ML_NIT_MIN_SHARE = 0.7;
-
-const ML_SEVERITY_KEYS: MlSeverity[] = ['nit', 'minor', 'major', 'critical'];
-function emptyMlSeverityCounts(): MlSeverityCounts {
-  return { nit: 0, minor: 0, major: 0, critical: 0 };
-}
 
 // Gates on the same-line-overlap tuning suggestion (ADVISORY — pair-level redundancy hint;
 // botVerdict never reads overlap). The share is of the bot's window threads landing in ≥2-bot
@@ -14384,7 +14432,6 @@ export async function getBotAnalytics(
     threads: number;
     actedOn: number;
     untouched: number;
-    oldestUntouchedMs: number | null;
     humanFollow: number;
     // Time-to-ADDRESSED samples (ms) for THIS bot's window threads that were addressed by ANY
     // means — a human reply, a resolve, or an addressing commit (firstAddressed − createdAt). The
@@ -14408,7 +14455,6 @@ export async function getBotAnalytics(
         threads: 0,
         actedOn: 0,
         untouched: 0,
-        oldestUntouchedMs: null,
         humanFollow: 0,
         addressedSamples: [],
         weekly: Array.from({ length: 12 }, () => ({ threads: 0, actedOn: 0, untouched: 0 })),
@@ -14448,11 +14494,7 @@ export async function getBotAnalytics(
     if (t.createdAt >= from) {
       acc.reviewers.add(t.userId);
       acc.threads += 1;
-      if (t.state === 'untouched') {
-        acc.untouched += 1;
-        const ms = t.createdAt.getTime();
-        if (acc.oldestUntouchedMs == null || ms < acc.oldestUntouchedMs) acc.oldestUntouchedMs = ms;
-      }
+      if (t.state === 'untouched') acc.untouched += 1;
       const pb = pathBucket(t.path);
       const b = acc.buckets.get(pb) ?? { volume: 0, untouched: 0 };
       b.volume += 1;
@@ -14466,13 +14508,6 @@ export async function getBotAnalytics(
   // the bot's last comment on that thread. Feeds BOTH the human-only humanFollowThroughPct
   // sub-figure (acc.humanFollow) AND the merged acted-on definition (humanFollowSet, item 6).
   const humanFollowSet = new Set<number>();
-  // Each NOT-ADDRESSED window thread → the id of the bot comment that OPENED it. The ML severity
-  // pass below joins `ml_comment_labels` on these ids; it is filled here because this is the one
-  // place the threads' comments are already in memory (a second read of the same rows for the
-  // severity split would be pure waste). Untouched-only on purpose: that is exactly the
-  // population the "Not addressed" column counts, so the per-severity split cannot describe a
-  // different set of threads than the total it sits beside.
-  const originCommentIdByThread = new Map<number, number>();
   const wtIds = windowThreads.map((t) => t.id);
   if (wtIds.length > 0) {
     const ftRows = await db
@@ -14490,19 +14525,6 @@ export async function getBotAnalytics(
       const arr = byThread.get(r.threadId) ?? [];
       arr.push({ id: r.id, authorId: r.authorId, at: r.createdAt.getTime() });
       byThread.set(r.threadId, arr);
-    }
-    for (const t of windowThreads) {
-      if (t.state !== 'untouched') continue;
-      // The thread's OWN bot (`originalCommenterId`), earliest comment first; ties break on the
-      // lower id so the same thread resolves to the same comment on every run and in both
-      // dialects (row order out of the join is not a promise).
-      let origin: { id: number; at: number } | null = null;
-      for (const c of byThread.get(t.id) ?? []) {
-        if (c.authorId !== t.userId) continue;
-        if (origin == null || c.at < origin.at || (c.at === origin.at && c.id < origin.id))
-          origin = { id: c.id, at: c.at };
-      }
-      if (origin) originCommentIdByThread.set(t.id, origin.id);
     }
     const reviewerByThread = new Map(windowThreads.map((t) => [t.id, { userId: t.userId, kind: t.kind }]));
     for (const [threadId, comments] of byThread) {
@@ -14598,57 +14620,6 @@ export async function getBotAnalytics(
     if (t.state !== 'untouched') continue;
     if (nowMs - t.createdAt.getTime() > overdueGateMs) {
       overdueByUser.set(t.userId, (overdueByUser.get(t.userId) ?? 0) + 1);
-    }
-  }
-
-  // ── "Not addressed" BY ML SEVERITY (CORE, free — docs/ML-SEVERITY.md) ─────────────────────
-  // The `untouched` column split by how bad the model thinks each ignored finding was: "17 not
-  // addressed" is a volume complaint, "3 of them major" is a decision. Same population as that
-  // column by construction (`originCommentIdByThread` is untouched-only), bucketed by the label
-  // on the comment that OPENED the thread — the finding itself, not a later reply.
-  //
-  // ONE query over the whole scope, never a per-vendor fan-out: the ids are already collected and
-  // the read is the label table's own (account, kind, target) unique. A thread whose origin
-  // comment carries NO label simply does not count — the four numbers are a split of the LABELLED
-  // untouched threads and must not be read as summing to `untouched` (the UI blanks a zero for
-  // exactly this reason). Summaries and praise are excluded, the same exclusion the fold applies:
-  // a walkthrough nobody replied to is not an ignored finding.
-  const notAddressedBySeverityByUser = new Map<number, MlSeverityCounts>();
-  if (originCommentIdByThread.size > 0) {
-    const labelByCommentId = new Map<number, { severity: MlSeverity; skip: boolean }>();
-    for (const r of await db
-      .select({
-        targetId: mlCommentLabels.targetId,
-        severity: mlCommentLabels.severity,
-        categories: mlCommentLabels.categories,
-        isSummary: mlCommentLabels.isSummary,
-      })
-      .from(mlCommentLabels)
-      .where(
-        and(
-          eq(mlCommentLabels.accountId, accountId),
-          eq(mlCommentLabels.targetKind, 'review_comment'),
-          inArray(mlCommentLabels.targetId, [...originCommentIdByThread.values()]),
-        ),
-      )
-      .execute()) {
-      const severity = ML_SEVERITY_KEYS.find((s) => s === r.severity);
-      if (!severity) continue; // the column is plain text in both dialects — an unreadable value is no claim
-      const categories = Array.isArray(r.categories) ? r.categories : [];
-      labelByCommentId.set(r.targetId, {
-        severity,
-        skip: r.isSummary === true || categories.includes('praise'),
-      });
-    }
-    for (const t of windowThreads) {
-      if (t.state !== 'untouched') continue;
-      const commentId = originCommentIdByThread.get(t.id);
-      if (commentId == null) continue;
-      const label = labelByCommentId.get(commentId);
-      if (!label || label.skip) continue;
-      const counts = notAddressedBySeverityByUser.get(t.userId) ?? emptyMlSeverityCounts();
-      counts[label.severity] += 1;
-      notAddressedBySeverityByUser.set(t.userId, counts);
     }
   }
 
@@ -14801,8 +14772,6 @@ export async function getBotAnalytics(
     const kind = acc.kind;
     const label = reviewerLabel(userId, kind);
     const actedOnPct = acc.threads > 0 ? Math.round((acc.actedOn / acc.threads) * 100) : null;
-    const oldestUntouchedDays =
-      acc.oldestUntouchedMs == null ? null : Math.floor((nowMs - acc.oldestUntouchedMs) / 86_400_000);
     const humanFollowThroughPct = acc.threads > 0 ? Math.round((acc.humanFollow / acc.threads) * 100) : null;
     // Noise ratio: untouched-share proxy (see the header — true severity is often unknowable).
     const noiseRatioPct = acc.threads > 0 ? Math.round((acc.untouched / acc.threads) * 100) : null;
@@ -14861,9 +14830,7 @@ export async function getBotAnalytics(
       actedOn: acc.actedOn,
       actedOnPct,
       untouched: acc.untouched,
-      overdueUntouched,
       medianAddressedMs,
-      oldestUntouchedDays,
       humanFollowThroughPct,
       noiseRatioPct,
       mergedPastPrs: mergedPastByUser.get(userId)?.prs.size ?? 0,
@@ -14878,24 +14845,11 @@ export async function getBotAnalytics(
           }
         : null,
       // ML severity mix over the SAME window (fields absent when the bot has no in-window
-      // labels). Rates divide by FINDINGS — the phantom-gap rule — and round like their `…Pct`
-      // siblings; the suggestion gate below uses the raw share, not these rounded figures.
+      // labels). The suggestion gate below uses the raw nit share off `mlRow`.
       ...(mlRow
         ? {
             mlFindings: mlRow.findings,
             mlBySeverity: mlRow.bySeverity,
-            mlNitPct:
-              mlRow.findings > 0
-                ? Math.round((mlRow.bySeverity.nit / mlRow.findings) * 100)
-                : null,
-            mlHighPct:
-              mlRow.findings > 0 ? Math.round((mlRow.high / mlRow.findings) * 100) : null,
-            // The not-addressed threads split by the severity of the finding that opened them.
-            // Rides the same `mlRow` gate as its siblings — a bot with no in-window labels has no
-            // ML claim to make about its backlog either. Zeros here mean "labels exist, none of
-            // the ignored threads are scored that way"; the UI blanks them like the other ML cells.
-            notAddressedBySeverity:
-              notAddressedBySeverityByUser.get(userId) ?? emptyMlSeverityCounts(),
             // The Inflation column (plan P1.2/C2): counts partition `badged` (never `findings`),
             // direction via the ONE shared `vendorAgreementOf` rule — so each count equals the
             // flagging drill-down's `filteredTotal` for the same bot + direction. `weekly` ships
@@ -15184,6 +15138,19 @@ export async function getBotBehaviourAnalytics(
   // 84-day coverage span + scope. A SHARED response field (PR inflow is an account/repo fact, not
   // per-bot) so every bot's coverage strip can be read against real PR inflow — the days a bot went
   // silent while PRs kept coming are exactly the coverage gaps the user wants to spot.
+  const HOUR = 3_600_000;
+  const SPAN_WEEKS = 12;
+  // THE week boundaries, computed once. The per-bot `trend`, the pooled `workspace` trend and the
+  // ML fold at the end
+  // read this array rather than re-deriving `trendFromMs + i·7·DAY` — the two series are drawn on
+  // the same x-axis, and a second copy of that arithmetic is exactly how they would come to
+  // disagree by a week without anything failing.
+  const weekStarts = Array.from({ length: SPAN_WEEKS }, (_, i) =>
+    new Date(trendFromMs + i * 7 * DAY).toISOString(),
+  );
+  const weekIndexOf = (ms: number): number =>
+    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - trendFromMs) / (7 * DAY))));
+
   const EMPTY_OVERLAP: BotOverlapStats = {
     reviewedPrs: 0,
     multiReviewedPrs: 0,
@@ -15201,6 +15168,7 @@ export async function getBotBehaviourAnalytics(
     generatedAt,
     window: win,
     bots: [],
+    workspace: emptyBotResponsiveness(weekStarts),
     prsOpenedPerDay,
     daySpanStart,
     overlap: EMPTY_OVERLAP,
@@ -15387,18 +15355,6 @@ export async function getBotBehaviourAnalytics(
     byPr.set(t.prId, (byPr.get(t.prId) ?? 0) + 1);
   }
 
-  const HOUR = 3_600_000;
-  const SPAN_WEEKS = 12;
-  // DAY / SPAN_DAYS / trendFromMs are hoisted above (they also gate the prsOpenedPerDay series).
-  // THE week boundaries, computed once. Both the per-bot `trend` below and the ML fold at the end
-  // read this array rather than re-deriving `trendFromMs + i·7·DAY` — the two series are drawn on
-  // the same x-axis, and a second copy of that arithmetic is exactly how they would come to
-  // disagree by a week without anything failing.
-  const weekStarts = Array.from({ length: SPAN_WEEKS }, (_, i) =>
-    new Date(trendFromMs + i * 7 * DAY).toISOString(),
-  );
-  const weekIndexOf = (ms: number): number =>
-    Math.min(SPAN_WEEKS - 1, Math.max(0, Math.floor((ms - trendFromMs) / (7 * DAY))));
   const bots: BotBehaviourBotStat[] = [];
   for (const [userId, byPr] of touchesByUserPr) {
     const kind = kindMap.get(userId);
@@ -15606,6 +15562,17 @@ export async function getBotBehaviourAnalytics(
     });
   }
   bots.sort((a, b) => b.totalActivity - a.totalActivity || b.prsReviewed - a.prsReviewed);
+
+  // Workspace headline tiles: every review bot pooled per PR, over the SAME touches, PR clock
+  // starts and week boundaries as the per-bot rows (db/bot-responsiveness.ts).
+  const workspace = foldBotResponsiveness({
+    touchesByUserPr,
+    openedMsByPr: new Map([...prMeta].map(([id, m]) => [id, m.openedMs])),
+    readyMsByPr: readyByPr,
+    fromMs,
+    weekStarts,
+    weekIndexOf,
+  });
 
   // ── Cross-bot overlap + coverage (EXPERIMENTAL) ─────────────────────────────────────────────
   // All over the SELECTED window [from, to] + scope. Bot identity mirrors the per-bot rows
@@ -15903,6 +15870,7 @@ export async function getBotBehaviourAnalytics(
     generatedAt,
     window: win,
     bots,
+    workspace,
     prsOpenedPerDay,
     daySpanStart,
     overlap,
@@ -16145,282 +16113,6 @@ export async function getBotOnlyPrs(
   // No `openOnly` here: the LIST offers merged PRs behind a client-side "Show merged" toggle.
   const prs = await getBotOnlyReviewPrs(accountId, scope, { from, to });
   return { window: win, prs };
-}
-
-// Item 6 — the per-PR drill-down behind a vendor's Bot-ROI row (GET /api/bot-analytics/vendor/:key/prs).
-// Keyed by the analytics ROW (per-REVIEWER, not per-kind), so two in-house bots don't collapse into
-// one merged list. `target` is `{ userId }`, a single reviewer (the old `{ kind: 'pierre' }`
-// sentinel is gone: Limn's findings are per-poster bot users now, db/limn-bots.ts). Lists the PRs that reviewer touched in the window (its review threads + comments), with
-// per-PR volume, the merged "acted-on" count (resolved | likely_addressed | a human followed up
-// after the bot), the untouched backlog, last-activity, and the broadened bot-only flag. Ordered
-// most-recent-bot-activity first (nulls last). Deterministic, NO AI, account-scoped (the vendor's
-// threads/comments bind pullRequests.accountId via the PR join — a foreign/unknown userId surfaces
-// nothing).
-export async function getBotVendorPrs(
-  accountId: number,
-  target: { userId: number },
-  window: BotWindowKind,
-  // The SAME `BotScope` the ROI row was computed at — this list must reproduce ONE of that
-  // panel's rows, so the header label and the per-PR `botOnly` badge both take the identical
-  // workspace and repo set. `repoIds` is applied at the final PR-metadata load (the single
-  // narrowing point), so the whole result stays scoped; `repoIds: []` = an empty workspace.
-  scope: BotScope,
-): Promise<BotVendorPrsResponse> {
-  const nowMs = Date.now();
-  const to = new Date(nowMs);
-  // The one shared window→duration mapping (db/bot-window.ts).
-  const from = new Date(nowMs - botWindowMs(window));
-  const win = { kind: window, from: from.toISOString(), to: to.toISOString() };
-  const generatedAt = new Date(nowMs).toISOString();
-
-  // Resolve the drill-down's identity — the analytics ROW this list belongs to.
-  let key: string;
-  let kindTyped: AutomatedReviewerKind;
-  let label: string;
-  let login: string | null;
-  let vendorIds: number[];
-  {
-    const userId = target.userId;
-    key = `u${userId}`;
-    // NOT role-filtered: the quality-check SECTION of the ROI panel offers the same drill-down,
-    // so narrowing here would make its rows un-openable.
-    const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
-    // Only a reviewer this account has CLASSIFIED as automated is a valid drill-down target.
-    // An arbitrary (human / foreign / unknown) userId lists nothing AND identifies nothing:
-    // the users table is GLOBAL, and resolving login/displayName for an unclassified numeric
-    // id would hand any tenant a cross-account login-enumeration oracle — the exact thing the
-    // /api/users/:id/stats precedent (counts only, no profile fields) exists to prevent. The
-    // key is the caller's own input; the label degrades to it; login stays null.
-    if (!kindMap.has(userId)) {
-      return {
-        enabled: true, key, kind: 'in_house', label: key, login: null, window: win,
-        prs: [], generatedAt,
-      };
-    }
-    kindTyped = kindMap.get(userId) ?? 'in_house';
-    vendorIds = [userId];
-    // Per-reviewer identity — mirrors getBotAnalytics's reviewerLabel resolution: the workspace's
-    // custom label → the vendor's pretty name (known vendors) → login/display name. ONE row per
-    // (workspace, actor), so this drill-down and the ROI row it was opened from cannot show
-    // different labels — which they could when the label was replicated per repo/team row and an
-    // unordered `limit(1)` picked whichever the storage engine handed back first. Safe to read
-    // the global row HERE: the classification row above proves the account association.
-    const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
-    const [userRow] = await db
-      .select({ login: users.githubLogin, name: users.displayName })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1)
-      .execute();
-    login = userRow?.login ?? null;
-    const custom = classLabel.get(userId);
-    if (custom) label = custom;
-    else if (kindTyped !== 'in_house' && kindTyped !== 'pierre' && kindTyped !== 'vendor')
-      label = labelForKind(kindTyped);
-    else label = userRow?.name?.trim() || login || `u${userId}`;
-  }
-
-  const empty: BotVendorPrsResponse = {
-    enabled: true, key, kind: kindTyped, label, login, window: win, prs: [], generatedAt,
-  };
-  if (scope.repoIds.length === 0) return empty;
-
-  // Per-PR vendor-activity accumulator.
-  type PrAcc = {
-    threadIds: number[];
-    threadStates: DerivedState[];
-    botThreads: number;
-    botComments: number;
-    lastAtMs: number | null;
-  };
-  const perPr = new Map<number, PrAcc>();
-  const accForPr = (prId: number): PrAcc => {
-    let a = perPr.get(prId);
-    if (!a) {
-      a = { threadIds: [], threadStates: [], botThreads: 0, botComments: 0, lastAtMs: null };
-      perPr.set(prId, a);
-    }
-    return a;
-  };
-  const bump = (a: PrAcc, atMs: number): void => {
-    if (a.lastAtMs == null || atMs > a.lastAtMs) a.lastAtMs = atMs;
-  };
-
-  {
-    if (vendorIds.length === 0) return empty;
-    // Vendor review threads in-window (account-scoped via the PR join).
-    const threadRows = await db
-      .select({
-        id: reviewThreads.id,
-        prId: reviewThreads.prId,
-        state: reviewThreads.derivedState,
-        createdAt: reviewThreads.createdAt,
-      })
-      .from(reviewThreads)
-      .innerJoin(pullRequests, eq(pullRequests.id, reviewThreads.prId))
-      .where(
-        and(
-          eq(pullRequests.accountId, accountId),
-          inArray(reviewThreads.originalCommenterId, vendorIds),
-          gte(reviewThreads.createdAt, from),
-          lte(reviewThreads.createdAt, to),
-        ),
-      )
-      .execute();
-    for (const t of threadRows) {
-      const a = accForPr(t.prId);
-      a.threadIds.push(t.id);
-      a.threadStates.push(t.state);
-      a.botThreads += 1;
-      bump(a, t.createdAt.getTime());
-    }
-    // Vendor review comments in-window.
-    const commentRows = await db
-      .select({ prId: reviewComments.prId, createdAt: reviewComments.createdAt })
-      .from(reviewComments)
-      .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
-      .where(
-        and(
-          eq(pullRequests.accountId, accountId),
-          inArray(reviewComments.authorId, vendorIds),
-          gte(reviewComments.createdAt, from),
-          lte(reviewComments.createdAt, to),
-        ),
-      )
-      .execute();
-    for (const c of commentRows) {
-      const a = accForPr(c.prId);
-      a.botComments += 1;
-      bump(a, c.createdAt.getTime());
-    }
-  }
-
-  const prIds = [...perPr.keys()];
-  if (prIds.length === 0) return empty;
-
-  // Human follow-up per vendor thread → the merged acted-on rule (item 6). Fetch ALL comments on
-  // the vendor threads (not just in-window) to detect a human reply after the bot's last comment.
-  const allThreadIds = [...perPr.values()].flatMap((a) => a.threadIds);
-  const humanFollowSet = new Set<number>();
-  if (allThreadIds.length > 0) {
-    // `role: 'all'` — this set answers "was the replier a HUMAN". A quality-check bot's reply is
-    // not human follow-through, so narrowing to review-role bots would count it as one.
-    const autoSet = new Set(
-      await automatedReviewerUserIds(accountId, scope.workspaceId, 'all'),
-    );
-    const fcRows = await db
-      .select({
-        threadId: reviewComments.threadId,
-        authorId: reviewComments.authorId,
-        createdAt: reviewComments.createdAt,
-      })
-      .from(reviewComments)
-      .where(inArray(reviewComments.threadId, allThreadIds))
-      .execute();
-    const byThread = new Map<number, { authorId: number | null; at: number }[]>();
-    for (const r of fcRows) {
-      const arr = byThread.get(r.threadId) ?? [];
-      arr.push({ authorId: r.authorId, at: r.createdAt.getTime() });
-      byThread.set(r.threadId, arr);
-    }
-    for (const [threadId, comments] of byThread) {
-      let botLastAt = -Infinity;
-      for (const c of comments) {
-        if (c.authorId != null && autoSet.has(c.authorId) && c.at > botLastAt) botLastAt = c.at;
-      }
-      const humanAfter = comments.some(
-        (c) => c.authorId != null && !autoSet.has(c.authorId) && c.at > botLastAt,
-      );
-      if (humanAfter) humanFollowSet.add(threadId);
-    }
-  }
-
-  // PR metadata (account-scoped) + repo name.
-  const metaRows = await db
-    .select({
-      id: pullRequests.id,
-      repoId: pullRequests.repoId,
-      number: pullRequests.number,
-      title: pullRequests.title,
-      authorId: pullRequests.authorId,
-      state: pullRequests.state,
-      ciStatus: pullRequests.ciStatus,
-      additions: pullRequests.additions,
-      deletions: pullRequests.deletions,
-      changedFiles: pullRequests.changedFiles,
-      openedAt: pullRequests.openedAt,
-      owner: repos.owner,
-      name: repos.name,
-    })
-    .from(pullRequests)
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.id, prIds),
-        inArray(pullRequests.repoId, scope.repoIds),
-      ),
-    )
-    .execute();
-
-  // Bot-only flag: reuse the broadened rule (item 4a) over the candidate PRs' OWN repos, at THIS
-  // scope's workspace — so this drill-down and the `totals.botOnlyPrs` header above it cannot
-  // evaluate different rules. Under the old two-parameter shape, forgetting to thread the
-  // classification key gave one screen two contradictory bot-only answers.
-  const repoIdSet = [...new Set(metaRows.map((m) => m.repoId))];
-  const botOnlyIds = new Set(
-    (
-      await getBotOnlyReviewPrs(
-        accountId,
-        { workspaceId: scope.workspaceId, repoIds: repoIdSet },
-        { from, to },
-      )
-    ).map((p) => p.prId),
-  );
-
-  const prs: BotVendorPr[] = [];
-  for (const m of metaRows) {
-    const a = perPr.get(m.id)!;
-    let botActedOn = 0;
-    let botUntouched = 0;
-    for (let i = 0; i < a.threadIds.length; i++) {
-      const st = a.threadStates[i]!;
-      if (st === 'resolved' || st === 'likely_addressed' || humanFollowSet.has(a.threadIds[i]!)) {
-        botActedOn += 1;
-      }
-      if (st === 'untouched') botUntouched += 1;
-    }
-    const full = `${m.owner}/${m.name}`;
-    prs.push({
-      prId: m.id,
-      repoId: m.repoId,
-      repoFullName: full,
-      prNumber: m.number,
-      prTitle: m.title,
-      authorId: m.authorId,
-      state: m.state,
-      githubUrl: `https://github.com/${full}/pull/${m.number}`,
-      ciStatus: m.ciStatus,
-      additions: m.additions,
-      deletions: m.deletions,
-      changedFiles: m.changedFiles,
-      openedAt: m.openedAt.toISOString(),
-      botThreads: a.botThreads,
-      botComments: a.botComments,
-      botActedOn,
-      botUntouched,
-      lastBotActivityAt: a.lastAtMs == null ? null : new Date(a.lastAtMs).toISOString(),
-      botOnly: botOnlyIds.has(m.id),
-    });
-  }
-  // Most-recent-bot-activity first (nulls last).
-  prs.sort((x, y) => {
-    const xa = x.lastBotActivityAt == null ? -Infinity : Date.parse(x.lastBotActivityAt);
-    const ya = y.lastBotActivityAt == null ? -Infinity : Date.parse(y.lastBotActivityAt);
-    return ya - xa;
-  });
-
-  return { enabled: true, key, kind: kindTyped, label, login, window: win, prs, generatedAt };
 }
 
 // WS4 — cross-bot dedup + consensus for one PR. Groups the PR's automated-reviewer

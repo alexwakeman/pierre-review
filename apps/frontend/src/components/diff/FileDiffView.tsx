@@ -64,10 +64,13 @@ import {
 import { Markdown, type RehypePlugins } from '../Markdown.js';
 import { FOCUS_RING, cx } from '../ui/cx.js';
 import {
+  addedNewLines,
   isMarkdownPath,
   markdownFileLinkHref,
   markdownFromPatch,
   rehypeDropRelativeImages,
+  rehypeMarkAddedBlocks,
+  type MarkdownSegment,
 } from '../../lib/markdownFile.js';
 import { useClaudeThreadJudgements } from '../../hooks/useClaudeThreadJudgements.js';
 import { threadPillFor } from '../../lib/claudeThreadMarker.js';
@@ -957,8 +960,15 @@ function MarkdownViewToggle({
  * segment per hunk — and when that is not the whole file, one line says so and offers the read.
  * The PR's Markdown is untrusted: `Markdown` sanitizes raw HTML, links go through
  * `markdownFileLinkHref`, relative images are dropped.
+ *
+ * It is drawn like the diff it replaces: a bordered panel, a mono header bar in the hunk row's
+ * colours, a left gutter whose `+` marks each block built from an ADDED line
+ * (`rehypeMarkAddedBlocks`; a block of unchanged lines, or one with no source position, gets no
+ * mark), the hidden-line separators as the diff's gap rows, and fenced code in the diff's mono
+ * type and syntax colours (`.md-file` in index.css — this view only).
  */
 function MarkdownFileView({
+  path,
   rows,
   wholeLines,
   status,
@@ -966,6 +976,7 @@ function MarkdownFileView({
   onLoad,
   threadCount,
 }: {
+  path: string;
   rows: readonly DiffRow[];
   wholeLines: readonly string[] | null;
   status: GapLoadStatus;
@@ -974,12 +985,18 @@ function MarkdownFileView({
   threadCount: number;
 }): JSX.Element {
   const fromPatch = useMemo(() => markdownFromPatch(rows), [rows]);
-  const whole = useMemo(() => (wholeLines != null ? wholeLines.join('\n') : null), [wholeLines]);
+  const whole = useMemo(
+    (): MarkdownSegment | null =>
+      wholeLines != null ? { text: wholeLines.join('\n'), hiddenBefore: 0, added: addedNewLines(rows) } : null,
+    [wholeLines, rows],
+  );
   const showNote = whole == null && fromPatch.partial;
+  const segments = whole != null ? [whole] : fromPatch.segments;
+  const name = path.slice(path.lastIndexOf('/') + 1);
   return (
-    <div data-testid="markdown-rendered" className="px-4 py-3">
+    <div data-testid="markdown-rendered" className="px-3 py-3">
       {(showNote || threadCount > 0) && (
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
+        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-ui-mute">
           {showNote && <span>Only the changed parts are shown.</span>}
           {showNote && canLoad && (status === 'idle' || status === 'loading') && (
             <button
@@ -1000,24 +1017,49 @@ function MarkdownFileView({
           )}
         </div>
       )}
-      {whole != null ? (
-        <Markdown rehypeExtra={MARKDOWN_FILE_REHYPE} renderLink={renderMarkdownFileLink} wideTables>
-          {whole}
-        </Markdown>
-      ) : (
-        fromPatch.segments.map((seg, i) => (
+      <div className="md-file code-hl overflow-hidden rounded-ui border border-ui-line">
+        <div className="select-none truncate border-b border-ui-line bg-ui-sel px-2 py-0.5 font-mono text-meta text-ui-mute">
+          {name} · rendered
+        </div>
+        {segments.map((seg, i) => (
           <Fragment key={i}>
             {seg.hiddenBefore > 0 && (
-              <div className="my-3 border-y border-dashed border-ui-line py-1 text-center text-meta text-ui-mute">
-                {seg.hiddenBefore === 1 ? '1 unchanged line' : `${seg.hiddenBefore} unchanged lines`}
+              <div
+                data-md-gap=""
+                className={cx(
+                  'flex border-b border-ui-line bg-ui-sel font-mono text-meta text-ui-mute',
+                  i > 0 && 'border-t',
+                )}
+              >
+                <div aria-hidden="true" className="md-file-gutter shrink-0 border-r border-ui-line" />
+                <div className="min-w-0 flex-1 px-2 py-0.5">
+                  {seg.hiddenBefore === 1 ? '1 unchanged line' : `${seg.hiddenBefore} unchanged lines`}
+                </div>
               </div>
             )}
-            <Markdown rehypeExtra={MARKDOWN_FILE_REHYPE} renderLink={renderMarkdownFileLink} wideTables>
-              {seg.text}
-            </Markdown>
+            <MarkdownFileSegment segment={seg} />
           </Fragment>
-        ))
-      )}
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One rendered stretch of the file beside its gutter. The plugin list is memoised per segment, so
+ *  `Markdown`'s memo holds across re-renders. */
+function MarkdownFileSegment({ segment }: { segment: MarkdownSegment }): JSX.Element {
+  const rehype = useMemo(
+    (): RehypePlugins => [...MARKDOWN_FILE_REHYPE, rehypeMarkAddedBlocks(segment.added)],
+    [segment.added],
+  );
+  return (
+    <div className="md-file-row relative flex">
+      <div aria-hidden="true" className="md-file-gutter shrink-0 border-r border-ui-line" />
+      <div className="min-w-0 flex-1 px-4 py-3">
+        <Markdown rehypeExtra={rehype} renderLink={renderMarkdownFileLink} wideTables>
+          {segment.text}
+        </Markdown>
+      </div>
     </div>
   );
 }
@@ -1788,6 +1830,7 @@ function FileDiffBlock({
             </div>
           ) : showRendered ? (
             <MarkdownFileView
+              path={file.path}
               rows={rows}
               wholeLines={usableLines}
               status={wantContent ? gapStatus : 'idle'}

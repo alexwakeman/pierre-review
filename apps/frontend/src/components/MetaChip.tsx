@@ -7,8 +7,8 @@ import { vendorInk } from '../lib/ui.js';
  * inline in a dense list row or table cell.
  *
  * Promoted here from `Activity/BotCommentCard.tsx`, which is where the form was designed; other
- * survey surfaces had grown byte-equivalent copies of it (`BotPrsDetail`'s inline `<span>`,
- * `ThemeThreadsDetail`'s matched-state chips), so a padding or opacity tweak had to be made in
+ * survey surfaces had grown byte-equivalent copies of it (`ThemeThreadsDetail`'s matched-state
+ * chips), so a padding or opacity tweak had to be made in
  * several places to hold.
  *
  * ⚠ THIS IS NOT A REPLACEMENT FOR `StateBadge`, AND THE TWO MUST NOT BE COLLAPSED INTO ONE

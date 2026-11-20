@@ -80,6 +80,13 @@ export default function Page(): JSX.Element {
           : show only threads in the states you choose. See{' '}
           <DocLink to="timeline/thread-states">What the thread states mean</DocLink>.
         </li>
+        <li>
+          <b>
+            <Ui>Severity</Ui> and <Ui>Bot type</Ui>
+          </b>
+          : on the Bots side only. See{' '}
+          <DocLink to="feed/people-and-bots#bot-filters">People or bots</DocLink>.
+        </li>
       </ul>
       <p>
         With <Ui>Comments</Ui> and <Ui>PR events</Ui> both off, the feed shows everything. Each pill shows how

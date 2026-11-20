@@ -2096,6 +2096,53 @@ body {
   padding: 0;
 }
 
+/* ── THE CHANGES TAB'S RENDERED MARKDOWN FILE (`FileDiffView`'s `MarkdownFileView`) ──────────────
+   Drawn like the diff it replaces, and ONLY here (`.md-file`; every other Markdown keeps `.md-body`
+   as above). The gutter is one column wide; `rehypeMarkAddedBlocks` (lib/markdownFile.ts) puts
+   `.md-file-added` on each block built from an ADDED line and this draws its `+` in the gutter —
+   absolutely placed against the segment row (`.md-file-row`, the one positioned ancestor), at the
+   block's first line, so a nested list item marks the same column. Fenced code takes the diff's
+   mono type and size, sits on the diff's own ground (no fill — github-dark's #0d1117 is for the
+   other Markdown surfaces) and takes the `.code-hl` palette the panel carries, the one the diff's
+   rows use. */
+.md-file {
+  --md-file-gutter: 2rem;
+}
+.md-file-gutter {
+  width: var(--md-file-gutter);
+}
+.md-file .md-file-added::before {
+  content: '+';
+  content: '+' / 'added';
+  position: absolute;
+  left: 0;
+  width: var(--md-file-gutter);
+  text-align: center;
+  font-weight: 700;
+  color: rgb(var(--ui-mute));
+  @apply font-mono;
+}
+.md-file .md-body > .md-file-added:first-child > :first-child {
+  margin-top: 0;
+}
+.md-file .md-body > .md-file-added:last-child > :last-child {
+  margin-bottom: 0;
+}
+.md-file .md-body pre {
+  @apply font-mono text-meta;
+  line-height: 1.45;
+  background: transparent;
+  border: 1px solid rgb(var(--ui-line));
+}
+.md-file .md-body pre code,
+.md-file .md-body pre code.hljs {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: transparent;
+  padding: 0;
+}
+
 /* Settings → Working hours and budgets. The thumb has a FIXED 14px width: the default tick under the
    track is positioned from it (BudgetSliders.tsx). Track is gray-500 for 3:1 non-text contrast in
    both themes.

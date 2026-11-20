@@ -50,17 +50,16 @@ import { SynthesisCard } from './SynthesisCard.js';
 // ⚠ EVERY NUMBER ON THIS SCREEN IS THE SERVER'S, and `total` is the tile's own count BY
 // CONSTRUCTION: the route re-runs the strip's identical windowed label scan and the identical JS
 // fold (`foldMlLabelRow`) before it slices a page. Nothing here may re-derive a count from the
-// loaded rows — `lib/botComments.ts`'s `pillOf` in particular buckets a praise-flavoured
-// walkthrough the OPPOSITE way from the backend, deliberately, so a client-side tally would
-// disagree with the tile the user just clicked. `items.length` is only ever reported as "showing N
+// loaded rows — a client-side tally would disagree with the tile the user just clicked (the
+// backend's fold buckets a praise-flavoured walkthrough by its own rules). `items.length` is only ever reported as "showing N
 // of M", never as the population.
 //
 // THE TAB IS A SINGLETON THAT IS RE-SEEDED IN PLACE, NEVER REMOUNTED (`BOT_FLAGGING_TAB_KEY`) —
 // clicking a second tile while this tab is open swaps the seed under a live component. That is why
 // the local refinements below carry an explicit reset effect rather than relying on a remount.
 
-// The window picker options — kept in lockstep with BotRoiPanel's and BotPrsDetail's WINDOWS, since
-// all three write the SAME store field. The drill-down reproduces one number off the panel behind
+// The window picker options — kept in lockstep with BotRoiPanel's WINDOWS, since both write the
+// SAME store field. The drill-down reproduces one number off the panel behind
 // it, so the two must not be able to be measuring different windows.
 const WINDOWS: { key: BotWindowKind; label: string }[] = [
   { key: 'rolling_7', label: '7d' },

@@ -188,8 +188,9 @@ describe('getBotAnalytics response-time-gated verdict', () => {
   it('young untouched backlog is NOT overdue → the bot escapes "noisy" (verdict tune)', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     const cr = resp.vendors.find((v: { kind: string }) => v.kind === 'coderabbit')!;
-    expect(cr.untouched).toBe(10); // 10 not-addressed threads…
-    expect(cr.overdueUntouched).toBe(0); // …but all 2h old, inside the 36h grace → none overdue
+    // 10 not-addressed threads, but all 2h old, inside the 36h grace → none overdue. (The overdue
+    // count is verdict-internal; it left the wire with its ROI column on 2026-11-20.)
+    expect(cr.untouched).toBe(10);
     expect(cr.medianAddressedMs).toBe(DAY); // its own two replies → median time-to-addressed ~1 day (info-only)
     expect(cr.verdict).toBe('tune'); // low acted-on, but NOT noisy — the grace spared it
   });
@@ -197,8 +198,8 @@ describe('getBotAnalytics response-time-gated verdict', () => {
   it('aged untouched backlog IS overdue → same untouched count, verdict "noisy"', async () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     const gr = resp.vendors.find((v: { kind: string }) => v.kind === 'greptile')!;
-    expect(gr.untouched).toBe(10); // identical not-addressed count to coderabbit…
-    expect(gr.overdueUntouched).toBe(10); // …but all 5d old, past the 36h grace → all overdue
+    // Identical not-addressed count to coderabbit, but all 5d old, past the 36h grace → all overdue.
+    expect(gr.untouched).toBe(10);
     expect(gr.medianAddressedMs).toBeNull(); // no thread of its was ever addressed (no reply/resolve/commit)
     expect(gr.verdict).toBe('noisy'); // high volume, zero acted-on, all overdue
   });
@@ -238,7 +239,6 @@ describe('getBotAnalytics role split (quality_check is SPLIT OUT, not filtered a
       expect(qc).toBeDefined();
       // Computed identically to a vendor row — this is what "split, not filtered" means.
       expect(qc.untouched).toBe(10);
-      expect(qc.overdueUntouched).toBe(10);
       // …and excluded from the headline numbers: only coderabbit's 12 threads remain.
       expect(resp.totals.threads).toBe(12);
       expect(resp.vendors).toHaveLength(1);
@@ -359,9 +359,9 @@ describe('getBotAnalytics ML nit-ratio escalation', () => {
     const v = await rowFor('nit-bot');
     expect(v.threads).toBe(6);
     expect(v.actedOnPct).toBe(100); // the thread math has no complaint at all…
-    expect(v.overdueUntouched).toBe(0);
+    expect(v.untouched).toBe(0);
     expect(v.mlFindings).toBe(20);
-    expect(v.mlNitPct).toBe(70);
+    expect(v.mlBySeverity.nit).toBe(14); // 70%
     expect(v.verdict).toBe('tune'); // …so this is the label, and only the label
   });
 
@@ -385,26 +385,25 @@ describe('getBotAnalytics ML nit-ratio escalation', () => {
   it('19 findings is under the volume gate — 100% nits still reads keep', async () => {
     const v = await rowFor('few-bot');
     expect(v.mlFindings).toBe(19);
-    expect(v.mlNitPct).toBe(100);
+    expect(v.mlBySeverity.nit).toBe(19); // 100%
     expect(v.verdict).toBe('keep');
   });
 
   it('gates on the RAW share, not the rounded percentage the column shows', async () => {
     const v = await rowFor('share-bot');
     expect(v.mlFindings).toBe(23);
-    // 16/23 = 0.6956… — the COLUMN rounds it to 70%, the gate does not. Reading the rounded
-    // twin here would flip this row and make the boundary depend on a display decision.
-    expect(v.mlNitPct).toBe(70);
+    // 16/23 = 0.6956… — it ROUNDS to 70%, the gate does not. Reading a rounded figure here
+    // would flip this row and make the boundary depend on a display decision.
+    expect(v.mlBySeverity.nit).toBe(16);
     expect(v.verdict).toBe('keep');
   });
 
   it('never downgrades: a nit-heavy noisy bot stays noisy, a tune bot stays tune', async () => {
     const gr = await rowFor('greptile-apps');
-    expect(gr.mlNitPct).toBe(100);
-    expect(gr.overdueUntouched).toBe(10);
+    expect(gr.mlBySeverity.nit).toBe(gr.mlFindings); // 100% nits
     expect(gr.verdict).toBe('noisy'); // the ML branch is never reached — thread math already spoke
     const cr = await rowFor('coderabbitai');
-    expect(cr.mlNitPct).toBe(100);
+    expect(cr.mlBySeverity.nit).toBe(cr.mlFindings); // 100% nits
     expect(cr.verdict).toBe('tune'); // and nothing about a label can push a row TO 'noisy'
   });
 
@@ -436,7 +435,7 @@ describe('getBotAnalytics ML nit-ratio escalation', () => {
     await q.setWorkspaceReviewer(1, u.id, { workspaceId: scope.workspaceId, automated: true });
     const v = await rowFor('bare-bot');
     expect(v.mlFindings).toBeUndefined();
-    expect(v.notAddressedBySeverity).toBeUndefined();
+    expect(v.mlBySeverity).toBeUndefined();
     expect(v.verdict).toBe('keep');
   });
 });

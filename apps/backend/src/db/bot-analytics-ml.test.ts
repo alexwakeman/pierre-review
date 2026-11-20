@@ -1,5 +1,5 @@
 // getBotAnalytics — the WINDOWED ML label fold + the nit-ratio suggestion, on a THROWAWAY
-// sqlite DB. Plus getBotVendorComments (the comments drill-down) against the same fixture.
+// sqlite DB.
 //
 // What this file pins:
 //  • the per-vendor ml* fields aggregate `ml_comment_labels` over the SAME window as the ROI
@@ -12,8 +12,6 @@
 //  • those SAME gates escalate the verdict 'keep' → 'tune', so the chip and the advisory under
 //    the table always agree (the escalation's own matrix — boundaries, no-downgrade — lives in
 //    bot-analytics-verdict.test.ts);
-//  • `notAddressedBySeverity` splits the untouched threads by the severity of the finding that
-//    OPENED each one — addressed threads, praise and summaries never count;
 //  • response-level `ml` totals cover the whole automated set (both roles), `pending` counts
 //    only unlabelled bot text INSIDE the window, and `totals.overlapClusters` counts the
 //    shared line areas ONCE (it is not the sum of the per-vendor overlap columns).
@@ -31,7 +29,6 @@ let db: any;
 let schema: any;
 let closeDb: (() => void) | undefined;
 let q: any;
-let ml: any;
 let scope: any;
 let repoId = 0;
 let prId = 0;
@@ -85,7 +82,6 @@ beforeAll(async () => {
   schema = client.schema;
   closeDb = client.closeDb;
   q = await import('./queries.js');
-  ml = await import('./ml-labels.js');
   await runMigrations();
 
   const { repos, pullRequests, users, reviewThreads, prComments } = schema;
@@ -221,8 +217,6 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     // 24 findings — the summary, the praise and the 2 out-of-window nits are all excluded.
     expect(cr.mlFindings).toBe(24);
     expect(cr.mlBySeverity).toEqual({ nit: 21, minor: 2, major: 1, critical: 0 });
-    expect(cr.mlNitPct).toBe(88); // round(21/24 · 100)
-    expect(cr.mlHighPct).toBe(4); // round(1/24 · 100)
   });
 
   it('a bot with labels only OUTSIDE the window ships the fields ABSENT — blanks, not zeros', async () => {
@@ -231,8 +225,6 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     expect(ob).toBeDefined(); // the row survives on its thread activity…
     expect(ob.mlFindings).toBeUndefined(); // …but carries no ML claim at all
     expect(ob.mlBySeverity).toBeUndefined();
-    expect(ob.mlNitPct).toBeUndefined();
-    expect(ob.mlHighPct).toBeUndefined();
   });
 
   it('response-level ml totals cover BOTH roles, and pending counts only in-window text', async () => {
@@ -271,7 +263,7 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
     const gr = resp.vendors.find((v: { kind: string }) => v.kind === 'greptile')!;
     expect(gr.mlFindings).toBe(5);
-    expect(gr.mlNitPct).toBe(100);
+    expect(gr.mlBySeverity.nit).toBe(5);
     expect(
       resp.suggestions.some(
         (s: { severity: string | null; vendorKind: string }) =>
@@ -285,7 +277,7 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     const qb = resp.qualityChecks.find((v: { login: string | null }) => v.login === 'quality-bot')!;
     // The fold reaches quality checks (labels ARE computed for them — role 'all')…
     expect(qb.mlFindings).toBe(25);
-    expect(qb.mlNitPct).toBe(100);
+    expect(qb.mlBySeverity.nit).toBe(25);
     // …but a linter's findings being nits is its job, not a tuning signal.
     expect(
       resp.suggestions.some((s: { label: string }) => s.label.includes('quality-bot')),
@@ -299,12 +291,11 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
     // botVerdict(2, 0, 0) = 'keep'. The 88% nit share over 24 findings clears both gates, so the
     // chip agrees with the suggestion this same response emits rather than contradicting it.
     expect(cr.threads).toBe(2);
-    expect(cr.overdueUntouched).toBe(0);
     expect(cr.verdict).toBe('tune');
     // greptile is the control: 100% nits, but only 5 findings — under the volume gate, so its
     // thread math (1 young untouched thread) still decides.
     const gr = resp.vendors.find((v: { kind: string }) => v.kind === 'greptile')!;
-    expect(gr.mlNitPct).toBe(100);
+    expect(gr.mlBySeverity.nit).toBe(gr.mlFindings);
     expect(gr.verdict).toBe('keep');
   });
 
@@ -324,102 +315,10 @@ describe('getBotAnalytics ML fold (windowed, findings-only)', () => {
   });
 });
 
-// The comments drill-down, on the same fixture — a REAL review comment is inserted here (after
-// the fold assertions above have run) with its label keyed to the real row id.
-describe('getBotVendorComments (the Comments drill-down)', () => {
-  let rcId = 0;
-
-  beforeAll(async () => {
-    const [thread] = await db
-      .insert(schema.reviewThreads)
-      .values({
-        githubNodeId: 'T_cr_dd',
-        prId,
-        path: 'src/dd.ts',
-        line: 3,
-        isResolved: false,
-        isOutdated: false,
-        derivedState: 'untouched',
-        originalCommenterId: coderabbitId,
-        createdAt: inWindow,
-      })
-      .returning()
-      .execute();
-    const [rc] = await db
-      .insert(schema.reviewComments)
-      .values({
-        githubNodeId: 'RC_cr_dd',
-        threadId: thread.id,
-        prId,
-        authorId: coderabbitId,
-        body: 'A real inline finding body.',
-        createdAt: inWindow,
-      })
-      .returning()
-      .execute();
-    rcId = rc.id;
-    await db
-      .insert(schema.mlCommentLabels)
-      .values({
-        accountId: 1,
-        repoId,
-        prId,
-        targetKind: 'review_comment',
-        targetId: rcId,
-        authorUserId: coderabbitId,
-        severity: 'major',
-        severityOrd: 2,
-        severityProb: 0.9,
-        categories: ['security'],
-        categoryProbs: {},
-        isSummary: false,
-        backend: 'modernbert-onnx',
-        modelVersion: 'test',
-        bodyHash: 'h_dd',
-        targetCreatedAt: inWindow,
-      })
-      .execute();
-  });
-
-  it('ships the vendor rows with the ML label INLINE (and unscored rows unbadged)', async () => {
-    const resp = await ml.getBotVendorComments(1, { userId: coderabbitId }, 'rolling_14', scope);
-    expect(resp.key).toBe(`u${coderabbitId}`);
-    expect(resp.kind).toBe('coderabbit');
-    // The real inline comment, its thread context, and its label — one response.
-    const rc = resp.comments.find(
-      (c: { targetKind: string; targetId: number }) =>
-        c.targetKind === 'review_comment' && c.targetId === rcId,
-    );
-    expect(rc).toBeDefined();
-    expect(rc.path).toBe('src/dd.ts');
-    expect(rc.derivedState).toBe('untouched');
-    expect(rc.repoFullName).toBe('acme/api');
-    expect(rc.prNumber).toBe(1);
-    expect(rc.mlLabel?.severity).toBe('major');
-    expect(rc.mlLabel?.categories).toEqual(['security']);
-    // The unlabelled in-window PR comment appears too — unbadged, never dropped…
-    const pc = resp.comments.find((c: { targetKind: string }) => c.targetKind === 'pr_comment');
-    expect(pc).toBeDefined();
-    expect(pc.mlLabel).toBeNull();
-    // …while the out-of-window PR comment is invisible.
-    expect(resp.comments).toHaveLength(2);
-    expect(resp.truncated).toBe(false);
-  });
-
-  it('answers EMPTY for an unclassified user id', async () => {
-    const unknown = await ml.getBotVendorComments(1, { userId: 999_999 }, 'rolling_14', scope);
-    expect(unknown.comments).toEqual([]);
-  });
-});
-
-// ── "Not addressed" split by the severity of the finding that OPENED the thread ──────────────
-// Seeded AFTER the assertions above (its rows would move the fold's counts). Every case here is
-// a way the split must DIFFER from a naive "label the untouched threads" pass:
-//   • an ADDRESSED thread with a major finding must not appear anywhere;
-//   • a praise-categorised or summary label is not a finding, so it is not an ignored one either;
-//   • an untouched thread whose opening comment was never scored counts toward `untouched` and
-//     toward NOTHING here — which is why the four numbers need not sum to that column.
-describe('notAddressedBySeverity (the untouched column, split by severity)', () => {
+// ── Six more single-bot threads ─────────────────────────────────────────────────────────────
+// Seeded AFTER the assertions above (its rows would move the fold's counts). (They also seeded
+// the `notAddressedBySeverity` split, which left the wire with its ROI column on 2026-11-20.)
+describe('single-bot threads (overlap)', () => {
   beforeAll(async () => {
     // (thread node id, derivedState, path, the origin comment's label — null = unscored)
     const cases: Array<[string, string, string, null | { severity: string; ord: number; isSummary?: boolean; categories?: string[] }]> = [
@@ -499,28 +398,6 @@ describe('notAddressedBySeverity (the untouched column, split by severity)', () 
       if (label) rows.push(mk(origin.id, label.severity, label.ord, label));
       await db.insert(schema.mlCommentLabels).values(rows).execute();
     }
-  });
-
-  it('buckets ONLY the untouched threads whose opening finding was scored', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
-    const cr = resp.vendors.find((v: { kind: string }) => v.kind === 'coderabbit')!;
-    // nit: T_na_nit. major: T_na_major PLUS the drill-down suite's own untouched thread, whose
-    // real inline comment carries a major label — a second scored thread reaching this split
-    // through the ordinary path. The resolved critical, the praise, the summary and the unscored
-    // thread all contribute nothing, and NO cell picks up the follow-up comments' critical
-    // labels, which is what proves the join keys on the OPENING comment.
-    expect(cr.notAddressedBySeverity).toEqual({ nit: 1, minor: 0, major: 2, critical: 0 });
-    // …while the total it splits counts every untouched thread, scored or not: 3 from the suites
-    // above (2 fixture + 1 drill-down) + the 5 untouched ones seeded here. 8 ≠ 1 + 2, and that
-    // gap is the contract — the four numbers split the LABELLED subset, nothing more.
-    expect(cr.untouched).toBe(8);
-  });
-
-  it('a bot with no in-window labels ships the split ABSENT, like its ml* siblings', async () => {
-    const resp = await q.getBotAnalytics(1, 'rolling_14', scope);
-    const ob = resp.vendors.find((v: { login: string | null }) => v.login === 'old-bot')!;
-    expect(ob.mlFindings).toBeUndefined();
-    expect(ob.notAddressedBySeverity).toBeUndefined();
   });
 
   it('single-bot line areas never become overlap clusters', async () => {

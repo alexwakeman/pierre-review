@@ -15,6 +15,8 @@ import type {
   EventType,
   FeedAffectedThread,
   FeedPrEventChip,
+  FeedSeverity,
+  ReviewerRole,
   ReviewState,
   User,
   WorkspaceReviewer,
@@ -25,7 +27,15 @@ import {
   useFeedAutoInsert,
   useMarkFeedSeen,
 } from '../../hooks/useConsolidatedFeed.js';
-import { FEED_WINDOW_DAYS } from '@pierre-review/shared';
+import {
+  FEED_SEVERITIES,
+  FEED_SEVERITY_LABEL,
+  FEED_WINDOW_DAYS,
+  PRODUCT_NAME,
+  REVIEWER_ROLE_LABEL,
+  REVIEWER_ROLES,
+} from '@pierre-review/shared';
+import { InfoButton } from '../InfoModal.js';
 import { useDetectedReviewers, useSetWorkspaceReviewer } from '../../hooks/useBotTriage.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
 import { useThread, usePr } from '../../hooks/usePr.js';
@@ -105,6 +115,10 @@ const FEED_CHIP_OFF = 'text-ui-mute hover:bg-ui-hover hover:text-ui-ink';
 // STABLE: `activePrEventKinds` feeds catMatch's dep array, and a fresh `[]` per render would
 // rebuild the matcher — and with it `applyFeedPills` and the whole windowed list — every time.
 const NO_PR_EVENT_KINDS: FeedPrEventChip[] = [];
+// The Bots side's chip rows off (the People side, a person's tab): nothing is sent. Hoisted for
+// the same referential stability.
+const NO_FEED_SEVERITIES: FeedSeverity[] = [];
+const NO_BOT_ROLES: ReviewerRole[] = [];
 
 // A coloured chip + label describing WHAT an item is (the event kind). The My-Turn reason is
 // a separate pill (see MY_TURN_REASON_META).
@@ -284,6 +298,10 @@ export function FeedView({
   const fade1 = useEdgeFade(fadeRow1, 'x');
   const fade2 = useEdgeFade(fadeRow2, 'x');
   const fade3 = useEdgeFade(fadeRow3, 'x');
+  const fadeRowSev = useRef<HTMLDivElement>(null);
+  const fadeRowRole = useRef<HTMLDivElement>(null);
+  const fadeSev = useEdgeFade(fadeRowSev, 'x');
+  const fadeRole = useEdgeFade(fadeRowRole, 'x');
   const feedAuthors = useFilters((s) => s.feedAuthors);
   const setFeedAuthors = useFilters((s) => s.setFeedAuthors);
   const feedCatComments = useFilters((s) => s.feedCatComments);
@@ -292,6 +310,10 @@ export function FeedView({
   const toggleFeedCatPrEvents = useFilters((s) => s.toggleFeedCatPrEvents);
   const feedPrEventKinds = useFilters((s) => s.feedPrEventKinds);
   const toggleFeedPrEventKind = useFilters((s) => s.toggleFeedPrEventKind);
+  const feedBotSeverities = useFilters((s) => s.feedBotSeverities);
+  const feedBotRoles = useFilters((s) => s.feedBotRoles);
+  const toggleFeedBotSeverity = useFilters((s) => s.toggleFeedBotSeverity);
+  const toggleFeedBotRole = useFilters((s) => s.toggleFeedBotRole);
   const feedShowCommits = useFilters((s) => s.feedShowCommits);
   const toggleFeedShowCommits = useFilters((s) => s.toggleFeedShowCommits);
   const feedIsolatedPrId = useFilters((s) => s.feedIsolatedPrId);
@@ -496,6 +518,40 @@ export function FeedView({
         : feedAuthors,
     [personScoped, userIds, isUnionBot, rosterById, feedAuthors],
   );
+  // THE BOTS SIDE'S TWO CHIP ROWS (severity, bot type) — on the Feed's Bots side only, never on a
+  // person's tab (a bot's own tab shows all of that bot's activity; a Review-only default there
+  // would empty a Dependabot tab). SERVER-side: sent as `severities` / `botRoles` and filtered
+  // before the cap and the page. The store keeps the choice while the rows are off.
+  const botFiltersOn = authors === 'bots' && !personScoped;
+  // ON ONE PR the bot-type row starts with EVERY type (none pressed): a single PR's bot activity is
+  // small, and the Review-only default would hide its Dependabot or quality-check rows. The choice
+  // is LOCAL to that PR — it resets when the isolated PR changes and never writes the store, so the
+  // workspace feed keeps its own (Review-only by default) selection.
+  const [prBotRoles, setPrBotRoles] = useState<{ prId: number | null; roles: ReviewerRole[] }>({
+    prId: null,
+    roles: [],
+  });
+  const onePrRoles = prBotRoles.prId === isolatedPrId ? prBotRoles.roles : NO_BOT_ROLES;
+  const botRoleSel = isolatedPrId != null ? onePrRoles : feedBotRoles;
+  const toggleBotRole = useCallback(
+    (role: ReviewerRole): void => {
+      if (isolatedPrId == null) {
+        toggleFeedBotRole(role);
+        return;
+      }
+      setPrBotRoles((cur) => {
+        const roles = cur.prId === isolatedPrId ? cur.roles : [];
+        return {
+          prId: isolatedPrId,
+          roles: roles.includes(role) ? roles.filter((r) => r !== role) : [...roles, role],
+        };
+      });
+    },
+    [isolatedPrId, toggleFeedBotRole],
+  );
+  const activeBotSeverities = botFiltersOn ? feedBotSeverities : NO_FEED_SEVERITIES;
+  const activeBotRoles = botFiltersOn ? botRoleSel : NO_BOT_ROLES;
+  const botNarrowing = activeBotSeverities.length > 0 || activeBotRoles.length > 0;
 
   // Members + the header exclude-bots toggle/allow-list are TIMELINE-only filters — the feed
   // never sends them. The people/bots split here is Activity-native and SERVER-side (`authors`,
@@ -525,6 +581,8 @@ export function FeedView({
       // Opt-in "show individual commits" — surfaces plain commit-push runs (not just the ones
       // that addressed a thread).
       includeAllCommits: feedShowCommits,
+      severities: activeBotSeverities,
+      botRoles: activeBotRoles,
     });
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -532,7 +590,7 @@ export function FeedView({
   const usersById = useMemo(() => indexUsers(users), [users]);
   // The sub-selection the render and the filter actually use. The store field is REMEMBERED
   // across the parent pill going off (see feedPrEventKinds) — the row just stops rendering and
-  // this reads empty, exactly like BotPrsDetail's `activePills`. A corrective set() here would
+  // this reads empty. A corrective set() here would
   // permanently forget the reader's choice. Empty = all four chips.
   const activePrEventKinds = feedCatPrEvents ? feedPrEventKinds : NO_PR_EVENT_KINDS;
   // Event-category matcher for the Comments / PR-events pills. Both off = no category filter.
@@ -948,6 +1006,8 @@ export function FeedView({
     prId: isolatedPrId,
     authors,
     includeAllCommits: feedShowCommits,
+    severities: activeBotSeverities,
+    botRoles: activeBotRoles,
     enabled: isCrossRepoFeed,
     onBeforeInsert,
   });
@@ -1281,8 +1341,29 @@ export function FeedView({
       { id: 'comments', group: 'Actions', title: `Feed: ${feedCatComments ? 'stop narrowing to' : 'show only'} comments`, icon: <CommentIcon size={14} />, run: toggleFeedCatComments },
       { id: 'pr-events', group: 'Actions', title: `Feed: ${feedCatPrEvents ? 'stop narrowing to' : 'show only'} PR events`, icon: <PullRequestIcon size={14} />, run: toggleFeedCatPrEvents },
       { id: 'commits', group: 'Actions', title: `Feed: ${feedShowCommits ? 'hide plain' : 'show every'} commit push`, icon: <CommitIcon size={14} />, run: toggleFeedShowCommits },
+      // The Bots side's chip rows, while they are on screen.
+      ...(botFiltersOn
+        ? [
+            ...FEED_SEVERITIES.map((sev) => ({
+              id: `bot-severity-${sev}`,
+              group: 'Actions' as const,
+              title: `Feed: ${feedBotSeverities.includes(sev) ? 'stop narrowing to' : 'show only'} ${FEED_SEVERITY_LABEL[sev]} bot comments`,
+              keywords: ['severity'],
+              icon: <BotIcon size={14} />,
+              run: () => toggleFeedBotSeverity(sev),
+            })),
+            ...REVIEWER_ROLES.map((role) => ({
+              id: `bot-role-${role}`,
+              group: 'Actions' as const,
+              title: `Feed: ${botRoleSel.includes(role) ? 'stop narrowing to' : 'show only'} ${REVIEWER_ROLE_LABEL[role]}`,
+              keywords: ['bot type'],
+              icon: <BotIcon size={14} />,
+              run: () => toggleBotRole(role),
+            })),
+          ]
+        : []),
     ],
-    [personScoped, feedCatComments, feedCatPrEvents, feedShowCommits, setFeedAuthors, toggleFeedCatComments, toggleFeedCatPrEvents, toggleFeedShowCommits],
+    [personScoped, feedCatComments, feedCatPrEvents, feedShowCommits, setFeedAuthors, toggleFeedCatComments, toggleFeedCatPrEvents, toggleFeedShowCommits, botFiltersOn, feedBotSeverities, botRoleSel, toggleFeedBotSeverity, toggleBotRole],
   );
   useRegisterCommands('feed', feedCommands);
 
@@ -1385,6 +1466,62 @@ export function FeedView({
           {commitsCount > 0 && <span className="tabular-nums text-ui-faint">{commitsCount}</span>}
         </button>
       </div>
+      {/* THE BOTS SIDE'S TWO CHIP ROWS — severity, then bot type. SERVER-side (`severities` /
+          `botRoles`, filtered before the cap and the page). None pressed = every one; the Bots
+          side opens on Review bots, except on one PR, where every type shows. Badges are the server's facets: each row is counted with the
+          other row applied, not its own. */}
+      {botFiltersOn && (
+        <div ref={fadeRowSev} style={fadeSev} className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+          <span className="mr-1 flex shrink-0 items-center gap-0.5 text-meta text-ui-faint">
+            Severity
+            <InfoButton title="Severity">
+              <p>
+                {PRODUCT_NAME}'s own findings keep the severity they were posted with: Blocker is
+                Critical, Warning is Major, Question is Minor, Nit is Nit. Other bot comments use the
+                severity model's score.
+              </p>
+              <p className="mt-2">Unscored: no severity yet, or nothing to score.</p>
+            </InfoButton>
+          </span>
+          {FEED_SEVERITIES.map((sev) => {
+            const on = feedBotSeverities.includes(sev);
+            const count = counts?.bySeverity?.[sev] ?? 0;
+            return (
+              <button
+                key={sev}
+                type="button"
+                onClick={() => toggleFeedBotSeverity(sev)}
+                aria-pressed={on}
+                className={`${FEED_CHIP} ${on ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
+              >
+                {FEED_SEVERITY_LABEL[sev]}
+                {count > 0 && <span className="tabular-nums text-ui-faint">{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {botFiltersOn && (
+        <div ref={fadeRowRole} style={fadeRole} className="flex flex-wrap items-center gap-1.5 max-sm:-mx-3 max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:px-3 max-sm:[scrollbar-width:none]">
+          <span className="mr-1 shrink-0 text-meta text-ui-faint">Bot type</span>
+          {REVIEWER_ROLES.map((role) => {
+            const on = botRoleSel.includes(role);
+            const count = counts?.byBotRole?.[role] ?? 0;
+            return (
+              <button
+                key={role}
+                type="button"
+                onClick={() => toggleBotRole(role)}
+                aria-pressed={on}
+                className={`${FEED_CHIP} ${on ? FEED_CHIP_ON : FEED_CHIP_OFF}`}
+              >
+                {REVIEWER_ROLE_LABEL[role]}
+                {count > 0 && <span className="tabular-nums text-ui-faint">{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {/* The "PR events" pill's dependent chip row — rendered ONLY while that pill is pressed.
           Client-side like its parent: it narrows the loaded pages, it does not re-key the feed
           request.
@@ -1466,9 +1603,11 @@ export function FeedView({
           <div className="flex h-32 items-center justify-center px-4 text-center text-body text-ui-mute">
             {staleNotice ??
               (authors === 'bots'
-                ? isolatedPrId != null
-                  ? 'No bot activity on this pull request.'
-                  : `No bot activity in the last ${feedWindowDays} days.`
+                ? botNarrowing
+                  ? 'No bot activity of the selected types or severities.'
+                  : isolatedPrId != null
+                    ? 'No bot activity on this pull request.'
+                    : `No bot activity in the last ${feedWindowDays} days.`
                 : 'Nothing to show yet — activity across your repos will appear here.')}
           </div>
         )

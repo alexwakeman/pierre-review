@@ -21,13 +21,10 @@ export type PinnedPr = TabMeta;
 //  - pr-detail: a PR rendered full-screen (PrDetail) over the warm board (today's "pinned PR")
 //  - pr-focus:  a PR's OWN isolated Timeline instance (replaces the old overlay focus mode)
 //  - metrics-detail: the flow-metric drill-down (a singleton, non-PR, EPHEMERAL tab)
-//  - bot-prs: the bot-vendor PR drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-only-prs: the bot-only-reviewed PR drill-down (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-threads: the resolvable-bot-threads review & resolve (a singleton, non-PR, EPHEMERAL tab)
 //  - bot-flagging: the ML-strip drill-down ("what the bots are flagging" — a singleton, non-PR,
 //    EPHEMERAL tab; which tile/chip it shows is the transient seed, not the key)
-//  - bot-volume: the merged-PR list behind the ROI table's "bot comments per PR" column (a
-//    singleton, non-PR, EPHEMERAL tab; which bot it is narrowed to is the transient seed)
 //  - user-activity: one contributor's activity feed (keyed PER USER, non-PR, EPHEMERAL)
 //  - bot-detail: one review bot's depth analytics (keyed PER BOT user id, non-PR, EPHEMERAL —
 //    the per-bot drill-down that replaced the Bots "Behaviour" inner tab, plan P1.1/C1)
@@ -41,11 +38,9 @@ export type TabKind =
   | 'pr-detail'
   | 'pr-focus'
   | 'metrics-detail'
-  | 'bot-prs'
   | 'bot-only-prs'
   | 'bot-threads'
   | 'bot-flagging'
-  | 'bot-volume'
   | 'theme-threads'
   | 'search'
   | 'user-activity'
@@ -143,11 +138,7 @@ export const prFocusKey = (id: number): string => `pr-focus:${id}`;
 // transient `metricsFocus` signal (store/filters.ts), not the key. EPHEMERAL: excluded from
 // persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
 export const METRICS_TAB_KEY = 'metrics-detail';
-// The bot-vendor PR drill-down is likewise a SINGLETON, non-PR tab. Which reviewer it shows is
-// driven by the transient `botPrsFocusKey` signal (store/filters.ts), not the key. EPHEMERAL:
-// excluded from persistence (see `persist`) + not matched by parseTabKey, so a reload drops it.
-export const BOT_PRS_TAB_KEY = 'bot-prs';
-// Two more SINGLETON, non-PR bot drill-downs, seeded by transient repo-scope signals
+// Two SINGLETON, non-PR bot drill-downs, seeded by transient repo-scope signals
 // (store/filters.ts botOnlyFocusRepoId / botThreadsFocusRepoId). EPHEMERAL like the above.
 export const BOT_ONLY_PRS_TAB_KEY = 'bot-only-prs';
 export const BOT_THREADS_TAB_KEY = 'bot-threads';
@@ -157,13 +148,6 @@ export const BOT_THREADS_TAB_KEY = 'bot-threads';
 // EPHEMERAL: excluded from persistence (see `persist`) + not matched by parseTabKey, so a reload
 // drops it — which it must, since the seed it renders from lives only in memory.
 export const BOT_FLAGGING_TAB_KEY = 'bot-flagging';
-// The bot-comment-VOLUME drill-down — the merged PRs behind the ROI table's "bot comments per PR"
-// column. A SINGLETON, non-PR tab like the ones above: WHICH bot it is narrowed to (and the repo
-// the column was measured at) is the transient `botVolumeSeed` signal (store/filters.ts), not the
-// key, so clicking a second bot's cell RE-SEEDS this one tab in place. EPHEMERAL: excluded from
-// persistence (see `persist`) + not matched by parseTabKey, so a reload drops it — which it must,
-// since the seed it renders from lives only in memory.
-export const BOT_VOLUME_TAB_KEY = 'bot-volume';
 // The theme-threads drill-down is a SINGLETON, non-PR tab: it lists all the review threads / PR
 // comments a Bot/Human theme groups. The theme itself is the transient seed (store/filters.ts
 // `themeThreadsSeed`), not the key. EPHEMERAL like the others (dropped on reload).
@@ -182,7 +166,7 @@ export function parseUserActivityKey(key: string): number | null {
   return m ? Number(m[1]) : null;
 }
 // One review bot's depth analytics, keyed PER BOT (the user-activity pattern): two bots' depth
-// tabs can sit side by side, and re-clicking the same bot's "Depth →" pill re-focuses its
+// tabs can sit side by side, and re-clicking the same bot's name in the ROI table re-focuses its
 // existing tab. The NUMERIC slot is the bot's `users.id` — the same id the behaviour route's
 // `botUserId` narrowing takes, so the key and the fetch can never name different bots. Still
 // EPHEMERAL: `persist` whitelists only the two PR kinds and parseTabKey doesn't match this
@@ -312,11 +296,9 @@ interface TabsState {
   openPrDetailTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-detail + activate
   openPrFocusTab: (meta: TabMeta, opts?: OpenOpts) => void; // ensure pr-focus + activate
   openMetricsTab: (opts?: OpenOpts) => void; // ensure the singleton metrics drill-down + activate
-  openBotPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-vendor PR drill-down + activate
   openBotOnlyPrsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-only-PRs drill-down + activate
   openBotThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton bot-threads resolve tab + activate
   openBotFlaggingTab: (opts?: OpenOpts) => void; // ensure the singleton ML-strip drill-down + activate
-  openBotVolumeTab: (opts?: OpenOpts) => void; // ensure the singleton bot-volume PR drill-down + activate
   openThemeThreadsTab: (opts?: OpenOpts) => void; // ensure the singleton theme-threads drill-down + activate
   openSearchTab: (opts?: OpenOpts) => void; // ensure the singleton search-results drill-down + activate
   // Ensure (and activate) one contributor's activity-feed tab. Keyed per user; `user` is the
@@ -431,7 +413,8 @@ function loadTabs(): Tab[] {
             }
             // A PINNED story or build tab is kept too, rebuilt from its self-describing key (a
             // separate branch: `parseTabKey` stays PR-only, `boardSlotMode` and others rely on it).
-            // Drop anything else unrecognised (e.g. a legacy transient 'my-turn' key).
+            // Drop anything else unrecognised (e.g. a legacy transient 'my-turn' key, or the removed
+            // 'bot-prs' drill-down): the kind is rebuilt from the key, never read from storage.
             if (t.pinned !== true) return null;
             const ticketIdent = parseTicketTabKey(key);
             const buildIdent = ticketIdent == null ? parseStoryBuildTabKey(key) : null;
@@ -474,7 +457,7 @@ function loadTabs(): Tab[] {
 function persist(tabs: Tab[]): void {
   try {
     // PR-backed tabs persist, and any PINNED tab (a story or build tab, `canPinTab`); the singleton
-    // drill-downs (metrics / bot-PRs / …) are ephemeral.
+    // drill-downs (metrics / bot-only PRs / …) are ephemeral.
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify(tabs.filter((t) => t.kind === 'pr-detail' || t.kind === 'pr-focus' || t.pinned === true)),
@@ -561,16 +544,12 @@ export const usePinnedTabs = create<TabsState>((set, get) => {
         : openTab({ key: prFocusKey(meta.id), kind: 'pr-focus', prId: meta.id, meta }, opts),
     openMetricsTab: (opts) =>
       openTab({ key: METRICS_TAB_KEY, kind: 'metrics-detail', prId: 0, meta: null }, opts),
-    openBotPrsTab: (opts) =>
-      openTab({ key: BOT_PRS_TAB_KEY, kind: 'bot-prs', prId: 0, meta: null }, opts),
     openBotOnlyPrsTab: (opts) =>
       openTab({ key: BOT_ONLY_PRS_TAB_KEY, kind: 'bot-only-prs', prId: 0, meta: null }, opts),
     openBotThreadsTab: (opts) =>
       openTab({ key: BOT_THREADS_TAB_KEY, kind: 'bot-threads', prId: 0, meta: null }, opts),
     openBotFlaggingTab: (opts) =>
       openTab({ key: BOT_FLAGGING_TAB_KEY, kind: 'bot-flagging', prId: 0, meta: null }, opts),
-    openBotVolumeTab: (opts) =>
-      openTab({ key: BOT_VOLUME_TAB_KEY, kind: 'bot-volume', prId: 0, meta: null }, opts),
     openThemeThreadsTab: (opts) =>
       openTab({ key: THEME_THREADS_TAB_KEY, kind: 'theme-threads', prId: 0, meta: null }, opts),
     openSearchTab: (opts) =>

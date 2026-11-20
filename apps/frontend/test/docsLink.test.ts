@@ -38,7 +38,7 @@ describe('docs links', () => {
     expect(docsUrlFor(42, null)).toBe(`${DOCS_SITE}/getting-started/repository-pages`);
     expect(docsUrlFor(null, 'pr-detail')).toBe(`${DOCS_SITE}/pull-request/overview`);
     // A tab with no page of its own opens the docs home.
-    expect(docsUrlFor(null, 'bot-volume')).toBe(DOCS_SITE);
+    expect(docsUrlFor(null, 'bot-flagging')).toBe(DOCS_SITE);
     expect(docsUrlFor(null, null)).toBe(DOCS_SITE);
   });
 

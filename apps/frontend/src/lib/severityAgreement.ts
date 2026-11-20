@@ -15,8 +15,7 @@ import { ML_CATEGORY_LABEL, ML_SEVERITY_META } from './ui.js';
 // confusion matrix, naming the tile a selector came from, and turning a selector/refine pair into
 // a cache key.
 //
-// It lives here rather than inline in BotFlaggingDetail.tsx for the same reason `botComments.ts`
-// does: every rule below has a wrong version that compiles and renders a plausible screen —
+// It lives here rather than inline in BotFlaggingDetail.tsx because every rule below has a wrong version that compiles and renders a plausible screen —
 //   • "the bot disagrees" evaluated against a null vendor claim, which is most rows
 //   • a direction read off `severityProb` or the vendor's confidence rather than the two ordinals
 //   • an absent dense cell rendering `undefined` instead of the zero it means
@@ -32,8 +31,7 @@ import { ML_CATEGORY_LABEL, ML_SEVERITY_META } from './ui.js';
 //
 // ⚠ AND NOTHING HERE COUNTS. The drill-down's `total`/`filteredTotal`/`matrix` are the SERVER's,
 // folded from the same scan the tiles are (see docs/ML-SEVERITY.md); a client-side re-derivation
-// would disagree with the tile it was opened from — `pillOf` in botComments.ts already buckets a
-// praise-flavoured walkthrough the opposite way from the backend, deliberately.
+// would disagree with the tile it was opened from.
 
 /**
  * Which column of the confusion matrix a row sits in. `'none'` is a real axis value, not a
@@ -281,10 +279,9 @@ export function refineQueryKey(r: BotFlaggingRefine): string {
  * looking at the pair still needs to be able to ask for one half of it.
  *
  * `'praise'` is not a severity either — it is the v2 non-finding CATEGORY (the bot acknowledging
- * a fix, withdrawing a concern, saying thanks). It sits in the SEVERITY picker on the precedent
- * `botComments.ts`'s `SEVERITY_PILLS` already set for the comments list: from the reader's side
- * "show me only the praise" is the same kind of question as "show me only the criticals" — one
- * row of mutually-exclusive answers to "what KIND of thing was this bot saying". Splitting it out
+ * a fix, withdrawing a concern, saying thanks). It sits in the SEVERITY picker because from the
+ * reader's side "show me only the praise" is the same kind of question as "show me only the
+ * criticals" — one row of mutually-exclusive answers to "what KIND of thing was this bot saying". Splitting it out
  * into the topic dropdown would put it next to eight questions of a different shape ("what was
  * this finding ABOUT"), where it is the only option that is not a finding at all.
  */

@@ -8,11 +8,9 @@ import { useTimelineLayout } from './store/timelineLayout.js';
 import { ActivityView } from './components/Activity/index.js';
 import { SprintTabView } from './components/Sprint/SprintTabView.js';
 import { MetricsDetail } from './components/Activity/MetricsDetail.js';
-import { BotPrsDetail } from './components/Activity/BotPrsDetail.js';
 import { BotOnlyPrsDetail } from './components/Activity/BotOnlyPrsDetail.js';
 import { BotThreadsDetail } from './components/Activity/BotThreadsDetail.js';
 import { BotFlaggingDetail } from './components/Activity/BotFlaggingDetail.js';
-import { BotVolumeDetail } from './components/Activity/BotVolumeDetail.js';
 import { UserActivityDetail } from './components/Activity/UserActivityDetail.js';
 import { TicketTabView } from './components/Ticket/TicketTabView.js';
 import { StoryBuildTabView } from './components/StoryBuild/StoryBuildTabView.js';
@@ -143,11 +141,9 @@ export default function App(): JSX.Element {
   const sprintActive = activeTab === 'sprint';
   const prDetailId = activeTabObj?.kind === 'pr-detail' ? activeTabObj.prId : null;
   const metricsActive = activeTabObj?.kind === 'metrics-detail';
-  const botPrsActive = activeTabObj?.kind === 'bot-prs';
   const botOnlyActive = activeTabObj?.kind === 'bot-only-prs';
   const botThreadsActive = activeTabObj?.kind === 'bot-threads';
   const botFlaggingActive = activeTabObj?.kind === 'bot-flagging';
-  const botVolumeActive = activeTabObj?.kind === 'bot-volume';
   const themeThreadsActive = activeTabObj?.kind === 'theme-threads';
   const searchActive = activeTabObj?.kind === 'search';
   const userActivityActive = activeTabObj?.kind === 'user-activity';
@@ -158,7 +154,7 @@ export default function App(): JSX.Element {
   // bar's Focus controls and this slot can never disagree about a stale key.
   const boardMode: TimelineMode | null = boardSlotMode(activeTab, tabs);
   // A full-main overlay (a pr-detail PR, the Activity console, or a drill-down: metrics /
-  // bot-PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
+  // bot-only PRs) covers the warm full board. Drives the `inert` a11y treatment. pr-focus is NOT
   // an overlay — it replaces the board slot, so it doesn't set this.
   //
   // Note the axis: these are TABS. The Activity console's own RAIL entries — Open PRs, Pending, Feed,
@@ -171,11 +167,9 @@ export default function App(): JSX.Element {
     inboxActive ||
     sprintActive ||
     metricsActive ||
-    botPrsActive ||
     botOnlyActive ||
     botThreadsActive ||
     botFlaggingActive ||
-    botVolumeActive ||
     themeThreadsActive ||
     searchActive ||
     userActivityActive ||
@@ -427,16 +421,6 @@ export default function App(): JSX.Element {
               </div>
             )}
 
-            {/* The bot-vendor PR drill-down — a sibling full-main overlay over the board. */}
-            {botPrsActive && (
-              <div
-                data-testid="bot-prs-overlay"
-                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
-              >
-                <BotPrsDetail />
-              </div>
-            )}
-
             {/* The bot-only-PRs drill-down — a sibling full-main overlay over the board. */}
             {botOnlyActive && (
               <div
@@ -465,17 +449,6 @@ export default function App(): JSX.Element {
                 className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
               >
                 <BotFlaggingDetail />
-              </div>
-            )}
-            {/* The merged PRs behind the ROI table's "bot comments per PR" column — a sibling
-                full-main overlay. `overflow-auto` is load-bearing here too: it is the scroll pane the
-                list's auto-load sentinel roots its IntersectionObserver on (lib/scrollParent.ts). */}
-            {botVolumeActive && (
-              <div
-                data-testid="bot-volume-overlay"
-                className="absolute inset-0 z-20 overflow-auto bg-ui-bg"
-              >
-                <BotVolumeDetail />
               </div>
             )}
             {themeThreadsActive && (

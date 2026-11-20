@@ -10,6 +10,8 @@ import type {
   ConsolidatedFeedItem,
   ConsolidatedFeedResponse,
   FeedAuthors,
+  FeedSeverity,
+  ReviewerRole,
   User,
 } from '@pierre-review/shared';
 import { api } from '../api/client.js';
@@ -49,13 +51,15 @@ export const FEED_PAGE_SIZE = 50;
  * picker is not mounted while Activity is the active tab — routing it here would leave the feed
  * silently scoped with no visible control to widen it again.
  */
-function feedSearch(
+export function feedSearch(
   workspaceId: number | null,
   repoIds: number[] | null,
   userIds: number[] | null,
   authors: FeedAuthors,
   prId: number | null,
   includeAllCommits: boolean,
+  severities: readonly FeedSeverity[] | undefined,
+  botRoles: readonly ReviewerRole[] | undefined,
 ): string {
   const p = new URLSearchParams();
   if (workspaceId != null) p.set('workspace', String(workspaceId));
@@ -71,6 +75,13 @@ function feedSearch(
   // Opt-in "show individual commits" — surface plain commit-push runs too. Only emitted when
   // on (default off keeps the key clean).
   if (includeAllCommits) p.set('includeAllCommits', 'true');
+  // The Bots side's two chip rows — SERVER-side (filtered before the cap and the page, so a
+  // narrowed page is never an empty slice), so they ride the key. Bots side only; an empty list
+  // means "every one" and is omitted.
+  if (authors === 'bots') {
+    if (severities && severities.length > 0) p.set('severities', severities.join(','));
+    if (botRoles && botRoles.length > 0) p.set('botRoles', botRoles.join(','));
+  }
   return p.toString();
 }
 
@@ -93,6 +104,9 @@ export function useConsolidatedFeed(opts: {
   authors?: FeedAuthors;
   prId?: number | null;
   includeAllCommits?: boolean;
+  // The Bots side's chip rows (see feedSearch). Empty / omitted = every one.
+  severities?: readonly FeedSeverity[];
+  botRoles?: readonly ReviewerRole[];
   enabled?: boolean;
 }) {
   const search = feedSearch(
@@ -102,6 +116,8 @@ export function useConsolidatedFeed(opts: {
     opts.authors ?? 'humans',
     opts.prId ?? null,
     opts.includeAllCommits ?? false,
+    opts.severities,
+    opts.botRoles,
   );
   const query = useInfiniteQuery<ConsolidatedFeedResponse>({
     queryKey: ['consolidated-feed', workspaceKey(opts.workspaceId), search],
@@ -239,7 +255,7 @@ export function countHeadArrivals<T extends { id: string }>(
 // Deliberately reuses the real feed builder so the head's inclusion logic (coalescing, caps,
 // thread-addressing commits) matches the loaded feed EXACTLY — with real items now being spliced
 // in rather than a single id compared, that parity is STRICTER than it was: a divergent
-// `authors` / `includeAllCommits` would inject rows the loaded feed's own request would never have
+// `authors` / `includeAllCommits` / `severities` / `botRoles` would inject rows the loaded feed's own request would never have
 // returned.
 //
 // ⚠ THE LIMIT IS FEED_PAGE_SIZE, NOT 1, AND THAT IS THE CONTIGUITY GUARANTEE, not a bigger
@@ -263,6 +279,9 @@ export function useFeedAutoInsert(opts: {
   authors?: FeedAuthors;
   prId?: number | null;
   includeAllCommits?: boolean;
+  // The Bots side's chip rows (see feedSearch). Empty / omitted = every one.
+  severities?: readonly FeedSeverity[];
+  botRoles?: readonly ReviewerRole[];
   // Off for every non-cross-repo mount (per-repo console, a person's activity tab). Those surfaces are narrowed views someone opened on purpose, not
   // "the feed" being kept current, and they carry no "new" marker to go with an insert.
   enabled?: boolean;
@@ -287,6 +306,8 @@ export function useFeedAutoInsert(opts: {
     opts.authors ?? 'humans',
     opts.prId ?? null,
     opts.includeAllCommits ?? false,
+    opts.severities,
+    opts.botRoles,
   );
   const wsKey = workspaceKey(opts.workspaceId);
   const enabled = (opts.enabled ?? true) && opts.workspaceId != null;

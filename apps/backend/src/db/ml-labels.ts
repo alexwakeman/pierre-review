@@ -30,8 +30,6 @@ import type {
   BotFlaggingRefine,
   BotFlaggingSelector,
   BotSeverityResponse,
-  BotVendorComment,
-  BotVendorCommentsResponse,
   BotWindowKind,
   DerivedState,
   MlBotSeverityRow,
@@ -744,7 +742,6 @@ export interface MlVendorWindowAgg {
   findings: number;
   summaries: number;
   praise: number;
-  high: number; // major + critical findings
   bySeverity: MlSeverityCounts; // findings-only
   // ── The Inflation column's counts (plan P1.2/C2) — in-window, findings-only ─────────────
   // `vendorBadged` = findings carrying a vendor badge at all; the two disagreement counters
@@ -907,7 +904,6 @@ export async function getMlWindowAggregates(
         findings: 0,
         summaries: 0,
         praise: 0,
-        high: 0,
         bySeverity: emptySeverityCounts(),
         vendorBadged: 0,
         vendorOverCall: 0,
@@ -935,7 +931,6 @@ export async function getMlWindowAggregates(
         findings += 1;
         acc.bySeverity[folded.severity] += 1;
         totalsBySeverity[folded.severity] += 1;
-        if (folded.severity === 'major' || folded.severity === 'critical') acc.high += 1;
         for (const c of folded.categories) {
           totalsByCategory.set(c, (totalsByCategory.get(c) ?? 0) + 1);
         }
@@ -1055,347 +1050,6 @@ export async function listMlLabelsForBehaviour(
     });
   }
   return { rows, truncated: raw.length >= ROLLUP_SCAN_CAP };
-}
-
-// ── The per-REVIEWER comments drill-down (GET /api/bot-analytics/vendor/:key/comments) ──────
-// Everything one automated reviewer SAID in the window — inline review comments (path + thread
-// state), issue-level PR comments, and non-empty review bodies — each row carrying its stored
-// ML label INLINE via a LEFT JOIN on (account_id, target_kind, target_id). One response serves
-// the whole list: a cross-PR list must never mount the per-PR label index per row.
-//
-// Deliberately a NEW query rather than a re-export of getBotReviewComments: that query is
-// role:'review' by design (it feeds the synthesis seam's 'workspace-bots' fold), while this
-// drill-down must also serve quality_check-roled rows —
-// mirroring getBotVendorPrs, whose quality-check section offers the same drill-down.
-//
-// Limn's findings are listed like any bot's: each poster's findings belong to their own
-// `limn:<login>` bot user (db/limn-bots.ts). The old 'pierre' sentinel key is gone.
-const BOT_VENDOR_COMMENT_CAP = 3000; // most-recent rows per source (the themes-funnel precedent)
-
-interface JoinedLabelCols {
-  mlSeverity: string | null;
-  mlSeverityOrd: number | null;
-  mlSeverityProb: number | null;
-  mlVendorSeverity: string | null;
-  mlVendorSeverityConfidence: string | null;
-  mlCategories: string[] | null;
-  mlIsSummary: boolean | null;
-  mlBackend: string | null;
-  mlModelVersion: string | null;
-  mlCreatedAt: Date | null;
-}
-
-// The left-joined label columns → a wire MlLabel, or null when the target has no label row.
-// Coercions mirror toWireLabel: an unreadable severity drops the LABEL (not the comment row),
-// an unreadable vendor claim degrades to "no vendor claim".
-function inlineLabel(
-  targetKind: MlLabelTargetKind,
-  targetId: number,
-  r: JoinedLabelCols,
-): MlLabel | null {
-  const severity = coerceSeverity(r.mlSeverity);
-  if (!severity || r.mlSeverityOrd == null || r.mlSeverityProb == null) return null;
-  return {
-    targetKind,
-    targetId,
-    severity,
-    severityOrd: r.mlSeverityOrd,
-    severityProb: r.mlSeverityProb,
-    vendorSeverity: coerceSeverity(r.mlVendorSeverity),
-    vendorSeverityConfidence: coerceVendorConfidence(r.mlVendorSeverityConfidence),
-    categories: coerceCategories(r.mlCategories),
-    isSummary: r.mlIsSummary ?? false,
-    backend: r.mlBackend ?? '',
-    modelVersion: r.mlModelVersion ?? '',
-    createdAt: (r.mlCreatedAt ?? new Date(0)).toISOString(),
-  };
-}
-
-export async function getBotVendorComments(
-  accountId: number,
-  target: { userId: number },
-  // Either a KIND (resolved here against the one shared duration mapping) or a kind carried
-  // ALONGSIDE explicit bounds — the getBotAnalytics window form, widened here for the same
-  // reason: the People report's bot sections must list a completed period's comments, and an
-  // arbitrary-bounds period has no enum spelling. Bounds only narrow WHAT IS MEASURED inside
-  // the caller's resolved scope (route-validated where they arrive over the wire).
-  window: BotWindowKind | { kind: BotWindowKind; fromMs: number; toMs: number },
-  // The SAME BotScope the ROI row was computed at — this list reproduces one of that panel's
-  // rows, so it takes the identical workspace + repo narrowing.
-  scope: BotScope,
-): Promise<BotVendorCommentsResponse> {
-  const nowMs = Date.now();
-  const windowKind = typeof window === 'string' ? window : window.kind;
-  const to = new Date(typeof window === 'string' ? nowMs : window.toMs);
-  // The one shared window→duration mapping (db/bot-window.ts) — same window as the ROI row —
-  // unless the caller supplied real bounds.
-  const from = new Date(
-    typeof window === 'string' ? nowMs - botWindowMs(window) : window.fromMs,
-  );
-  const win = { kind: windowKind, from: from.toISOString(), to: to.toISOString() };
-  // The upper predicate, applied ONLY under EXPLICIT bounds — `getMlWindowAggregates`' `to`
-  // rule, and the ROI row this list reproduces uses the same `toBound`. Under the enum form the
-  // window ends at NOW, where an upper bound can only exclude rows written in the CURRENT SECOND
-  // (second-granular timestamps on sqlite) and would break byte-identity with the other
-  // enum-form scans over the same rows.
-  const toBound = typeof window === 'string' ? null : to;
-  const generatedAt = new Date(nowMs).toISOString();
-
-  const userId = target.userId;
-  const key = `u${userId}`;
-  // NOT role-filtered — mirrors getBotVendorPrs: the quality-check section of the ROI panel
-  // offers the same drill-down.
-  const kindMap = await classificationKindForUser(accountId, scope.workspaceId);
-  if (!kindMap.has(userId)) {
-    // An id this workspace has NOT classified as automated identifies NOTHING. The users
-    // table is GLOBAL — resolving login/displayName for an arbitrary numeric id here
-    // would hand any tenant a cross-account login-enumeration oracle, exactly what the
-    // /api/users/:id/stats precedent exists to prevent (counts only, no profile fields).
-    // The key is the caller's own input; the label degrades to it; login stays null.
-    return {
-      enabled: true, key, kind: 'in_house', label: key, login: null, window: win,
-      comments: [], truncated: false, generatedAt,
-    };
-  }
-  const kindTyped: AutomatedReviewerKind = kindMap.get(userId) ?? 'in_house';
-  // Identity mirrors getBotVendorPrs / getBotAnalytics.reviewerLabel exactly: the workspace's
-  // custom label → the vendor's pretty name (known vendors) → login/display name. Safe to
-  // read the global row HERE: the classification row above proves the account association.
-  const classLabel = await classificationLabelMap(accountId, scope.workspaceId);
-  const [userRow] = await db
-    .select({ login: users.githubLogin, name: users.displayName })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1)
-    .execute();
-  const login = userRow?.login ?? null;
-  const custom = classLabel.get(userId);
-  let label: string;
-  if (custom) label = custom;
-  else if (kindTyped !== 'in_house' && kindTyped !== 'pierre' && kindTyped !== 'vendor')
-    label = labelForKind(kindTyped);
-  else label = userRow?.name?.trim() || login || key;
-
-  const empty: BotVendorCommentsResponse = {
-    enabled: true, key, kind: kindTyped, label, login, window: win,
-    comments: [], truncated: false, generatedAt,
-  };
-  if (scope.repoIds.length === 0) return empty;
-
-  const mlCols = {
-    mlSeverity: mlCommentLabels.severity,
-    mlSeverityOrd: mlCommentLabels.severityOrd,
-    mlSeverityProb: mlCommentLabels.severityProb,
-    mlVendorSeverity: mlCommentLabels.vendorSeverity,
-    mlVendorSeverityConfidence: mlCommentLabels.vendorSeverityConfidence,
-    mlCategories: mlCommentLabels.categories,
-    mlIsSummary: mlCommentLabels.isSummary,
-    mlBackend: mlCommentLabels.backend,
-    mlModelVersion: mlCommentLabels.modelVersion,
-    mlCreatedAt: mlCommentLabels.createdAt,
-  };
-
-  // Inline review-thread comments (carry the thread's path + derivedState).
-  const rcRows = await db
-    .select({
-      targetId: reviewComments.id,
-      prId: reviewComments.prId,
-      prNumber: pullRequests.number,
-      prTitle: pullRequests.title,
-      prAuthorId: pullRequests.authorId,
-      repoId: pullRequests.repoId,
-      owner: repos.owner,
-      name: repos.name,
-      body: reviewComments.body,
-      createdAt: reviewComments.createdAt,
-      path: reviewThreads.path,
-      derivedState: reviewThreads.derivedState,
-      threadId: reviewComments.threadId,
-      ...mlCols,
-    })
-    .from(reviewComments)
-    .innerJoin(pullRequests, eq(pullRequests.id, reviewComments.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .leftJoin(reviewThreads, eq(reviewThreads.id, reviewComments.threadId))
-    .leftJoin(
-      mlCommentLabels,
-      and(
-        eq(mlCommentLabels.accountId, accountId),
-        eq(mlCommentLabels.targetKind, 'review_comment'),
-        eq(mlCommentLabels.targetId, reviewComments.id),
-      ),
-    )
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, scope.repoIds),
-        eq(reviewComments.authorId, userId),
-        gte(reviewComments.createdAt, from),
-        // Half-open [from, to) — the route's stated bounds contract, and the person-period
-        // evidence fold's spelling, so a boundary-ms comment lands in exactly one period.
-        ...(toBound != null ? [lt(reviewComments.createdAt, toBound)] : []),
-      ),
-    )
-    .orderBy(desc(reviewComments.createdAt))
-    .limit(BOT_VENDOR_COMMENT_CAP)
-    .execute();
-
-  // Issue-level PR comments (no path / thread state).
-  const pcRows = await db
-    .select({
-      targetId: prComments.id,
-      prId: prComments.prId,
-      prNumber: pullRequests.number,
-      prTitle: pullRequests.title,
-      prAuthorId: pullRequests.authorId,
-      repoId: pullRequests.repoId,
-      owner: repos.owner,
-      name: repos.name,
-      body: prComments.body,
-      createdAt: prComments.createdAt,
-      ...mlCols,
-    })
-    .from(prComments)
-    .innerJoin(pullRequests, eq(pullRequests.id, prComments.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .leftJoin(
-      mlCommentLabels,
-      and(
-        eq(mlCommentLabels.accountId, accountId),
-        eq(mlCommentLabels.targetKind, 'pr_comment'),
-        eq(mlCommentLabels.targetId, prComments.id),
-      ),
-    )
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, scope.repoIds),
-        eq(prComments.authorId, userId),
-        gte(prComments.createdAt, from),
-        ...(toBound != null ? [lt(prComments.createdAt, toBound)] : []),
-      ),
-    )
-    .orderBy(desc(prComments.createdAt))
-    .limit(BOT_VENDOR_COMMENT_CAP)
-    .execute();
-
-  // Review BODIES with real text only (`hasText` — an approval with no comment is an
-  // empty-string body, and 5.4k empty rows are not things the bot "said"). Matches the label
-  // corpus: the candidate query applies the same predicate, so every row here is labellable.
-  const rvRows = await db
-    .select({
-      targetId: reviews.id,
-      prId: reviews.prId,
-      prNumber: pullRequests.number,
-      prTitle: pullRequests.title,
-      prAuthorId: pullRequests.authorId,
-      repoId: pullRequests.repoId,
-      owner: repos.owner,
-      name: repos.name,
-      body: reviews.body,
-      createdAt: reviews.submittedAt,
-      ...mlCols,
-    })
-    .from(reviews)
-    .innerJoin(pullRequests, eq(pullRequests.id, reviews.prId))
-    .innerJoin(repos, eq(repos.id, pullRequests.repoId))
-    .leftJoin(
-      mlCommentLabels,
-      and(
-        eq(mlCommentLabels.accountId, accountId),
-        eq(mlCommentLabels.targetKind, 'review'),
-        eq(mlCommentLabels.targetId, reviews.id),
-      ),
-    )
-    .where(
-      and(
-        eq(pullRequests.accountId, accountId),
-        inArray(pullRequests.repoId, scope.repoIds),
-        eq(reviews.authorId, userId),
-        isNotNull(reviews.body),
-        hasText(reviews.body),
-        gte(reviews.submittedAt, from),
-        ...(toBound != null ? [lt(reviews.submittedAt, toBound)] : []),
-      ),
-    )
-    .orderBy(desc(reviews.submittedAt))
-    .limit(BOT_VENDOR_COMMENT_CAP)
-    .execute();
-
-  const toIso = (d: Date | number | null): string => {
-    if (d == null) return new Date(0).toISOString();
-    if (d instanceof Date) return d.toISOString();
-    const ms = Number(d) > 1e12 ? Number(d) : Number(d) * 1000;
-    return new Date(ms).toISOString();
-  };
-
-  const out: BotVendorComment[] = [];
-  for (const r of rcRows) {
-    out.push({
-      targetKind: 'review_comment',
-      targetId: r.targetId,
-      prId: r.prId,
-      prNumber: r.prNumber,
-      prTitle: r.prTitle,
-      prAuthorId: r.prAuthorId ?? null,
-      repoId: r.repoId,
-      repoFullName: `${r.owner}/${r.name}`,
-      path: r.path ?? null,
-      threadId: r.threadId ?? null,
-      derivedState: r.derivedState ?? null,
-      body: r.body,
-      createdAt: toIso(r.createdAt),
-      mlLabel: inlineLabel('review_comment', r.targetId, r),
-    });
-  }
-  for (const r of pcRows) {
-    out.push({
-      targetKind: 'pr_comment',
-      targetId: r.targetId,
-      prId: r.prId,
-      prNumber: r.prNumber,
-      prTitle: r.prTitle,
-      prAuthorId: r.prAuthorId ?? null,
-      repoId: r.repoId,
-      repoFullName: `${r.owner}/${r.name}`,
-      path: null,
-      threadId: null,
-      derivedState: null,
-      body: r.body,
-      createdAt: toIso(r.createdAt),
-      mlLabel: inlineLabel('pr_comment', r.targetId, r),
-    });
-  }
-  for (const r of rvRows) {
-    out.push({
-      targetKind: 'review',
-      targetId: r.targetId,
-      prId: r.prId,
-      prNumber: r.prNumber,
-      prTitle: r.prTitle,
-      prAuthorId: r.prAuthorId ?? null,
-      repoId: r.repoId,
-      repoFullName: `${r.owner}/${r.name}`,
-      path: null,
-      threadId: null,
-      derivedState: null,
-      body: r.body,
-      createdAt: toIso(r.createdAt),
-      mlLabel: inlineLabel('review', r.targetId, r),
-    });
-  }
-  // Newest-first, capped combined — `truncated` when either a source hit its own cap or the
-  // combined stream overflowed (the getBotReviewComments rule).
-  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
-  const truncated =
-    rcRows.length >= BOT_VENDOR_COMMENT_CAP ||
-    pcRows.length >= BOT_VENDOR_COMMENT_CAP ||
-    rvRows.length >= BOT_VENDOR_COMMENT_CAP ||
-    out.length > BOT_VENDOR_COMMENT_CAP;
-  return {
-    enabled: true, key, kind: kindTyped, label, login, window: win,
-    comments: out.slice(0, BOT_VENDOR_COMMENT_CAP), truncated, generatedAt,
-  };
 }
 
 /**
@@ -2126,7 +1780,7 @@ export async function hydrateFlaggingPage(
   for (const { row, fold } of pageRows) {
     const parent = parents.get(`${row.targetKind}:${row.targetId}`);
     // A label whose parent row is gone is DROPPED from the page but stays counted in
-    // `total`/`filteredTotal` — the same tolerance getBotVendorComments has, and the honest one:
+    // `total`/`filteredTotal` — the honest tolerance:
     // re-deriving the count from what hydrated would put the list back out of step with the tile
     // it was opened from, which is the whole thing this getter exists to prevent.
     if (!parent) continue;

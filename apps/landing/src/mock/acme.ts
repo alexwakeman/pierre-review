@@ -413,12 +413,13 @@ export const WHERE = [
   { repo: REPOS.ledger, people: 3, bots: 2, lines: null, linesPct: 0, low: 0, med: 1, high: 0 },
 ];
 
-/** Bots Monitoring: one row per review bot. Severity mix is critical/major/minor/nit, in %. */
+/** Bots Monitoring: one row per review bot. Severity mix is critical/major/minor/nit, in %;
+ * firstReview is the median time to the bot's first review (BotRoiPanel's "First review" column). */
 export const BOTS = [
-  { bot: 'CodeRabbit', threads: 132, used: '58%', open: 55, mix: [8, 36, 26, 30], high: '44%', topic: 'Correctness' },
-  { bot: 'Greptile', threads: 125, used: '61%', open: 49, mix: [10, 44, 16, 30], high: '54%', topic: 'Correctness' },
-  { bot: 'Copilot', threads: 41, used: '80%', open: 8, mix: [9, 42, 17, 32], high: '51%', topic: 'Error handling' },
-  { bot: 'Cursor Bugbot', threads: 41, used: '59%', open: 17, mix: [7, 37, 19, 37], high: '44%', topic: 'Tests' },
+  { bot: 'CodeRabbit', threads: 132, used: '58%', open: 55, mix: [8, 36, 26, 30], firstReview: '6m', topic: 'Correctness' },
+  { bot: 'Greptile', threads: 125, used: '61%', open: 49, mix: [10, 44, 16, 30], firstReview: '9m', topic: 'Correctness' },
+  { bot: 'Copilot', threads: 41, used: '80%', open: 8, mix: [9, 42, 17, 32], firstReview: '3m', topic: 'Error handling' },
+  { bot: 'Cursor Bugbot', threads: 41, used: '59%', open: 17, mix: [7, 37, 19, 37], firstReview: '14m', topic: 'Tests' },
 ];
 
 export const BOT_SUMMARY = [

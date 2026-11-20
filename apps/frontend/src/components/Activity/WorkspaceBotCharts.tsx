@@ -2,12 +2,14 @@ import { useMemo, useState } from 'react';
 import type {
   AnalyticsBin,
   BotBehaviourBotStat,
+  BotVendorAnalytics,
+  BotVerdict,
   BotBehaviourMlBot,
   BotOverlapStats,
   BotRepoDirBreakdown,
   BotWindowKind,
 } from '@pierre-review/shared';
-import { useBotBehaviour } from '../../hooks/useBotTriage.js';
+import { useBotAnalytics, useBotBehaviour } from '../../hooks/useBotTriage.js';
 import { useBotVolumeScatter } from '../../hooks/useBotVolume.js';
 import { useFilters } from '../../store/filters.js';
 import { useBotColors } from '../../hooks/useBotColors.js';
@@ -24,6 +26,8 @@ import {
   unsizedNote,
 } from '../../lib/botVolumeSize.js';
 import { ChevronIcon, WarningIcon } from '../Icons.js';
+import { BotIsolateLegend, useBotIsolate } from './BotIsolate.js';
+import { applyIsolation, effectiveIsolated, isDimmed } from '../../lib/botIsolate.js';
 import { InfoButton } from '../InfoModal.js';
 import { LineChart } from '../charts/LineChart.js';
 import { BarChart } from '../charts/BarChart.js';
@@ -41,17 +45,22 @@ import {
 
 // The WORKSPACE-grain bot charts — the surviving cross-bot charts of the retired Bots
 // "Behaviour" inner tab (plan P1.1/C1, trimmed again by P1.2/C2): findings density,
-// PR-size-vs-volume, cross-bot overlap and "where bots work" — and NOTHING ELSE at workspace
-// grain. Rendered as a COLLAPSED-BY-DEFAULT "Workspace charts" section at the bottom of the ROI
+// PR-size-vs-volume, cross-bot overlap and "where bots work" — plus the two ROI charts ("Bot
+// effectiveness", "Used vs not addressed") moved down from the ROI panel's top row. Rendered as a COLLAPSED-BY-DEFAULT "Workspace charts" section at the bottom of the ROI
 // (Measure) branch of BotsView. Per-BOT depth (the old BotCard stack + that bot's severity/category slices) lives
-// in the per-bot drill-down tab instead (BotDetailPanel, opened from the ROI table's "Depth →"
-// pill); the old workspace ML block's inflation charts became the ROI table's Inflation column —
+// in the per-bot drill-down tab instead (BotDetailPanel, opened from the bot's name in the ROI
+// table); the old workspace ML block's inflation charts became the ROI table's Inflation column —
 // where the HISTORY has since regrown a readable card of its own (`InflationHistoryChart`, in
 // BotRoiPanel's chart row, off `/api/bot-analytics`). It is NOT here, and cannot be: this
 // section's `/api/pro/bot-behaviour` wire carries no weekly inflation at all.
 //
-// FETCH DISCIPLINE: nothing here fetches while the section is collapsed — `useBotBehaviour`
-// rides the section's open state, so the default Bots view issues no behaviour request at all.
+// FETCH DISCIPLINE: nothing here fetches while the section is collapsed — `useBotBehaviour` and
+// `useBotAnalytics` ride the section's open state. Both keys are the ROI panel's own (the panel
+// fetches the behaviour response on mount for its tiles, trend cards and table columns), so
+// opening the section is a cache hit, not a new request.
+//
+// Every per-bot chart here follows the page's ONE isolated bot (BotIsolate.tsx, provided by
+// BotsView) and carries the same click-to-isolate legend.
 // Scope + window come from the store exactly as the old panel's did: the ACTIVE WORKSPACE
 // decides which logins count as automated reviewers, the optional `repoId` narrows the measured
 // data to one repo, and the window is the same one the ROI panel's picker sets.
@@ -220,8 +229,10 @@ function DensityTrendChart({
     [bots],
   );
   const allKeys = useMemo(() => botsWithData.map((b) => b.key), [botsWithData]);
-  const subset = useBotSubset(allKeys);
-  const { selected, isOn } = subset;
+  // The Bots page's ONE isolated bot (BotIsolate.tsx): the other lines dim, and the trend line is
+  // fitted over the isolated bot alone.
+  const { isolated } = useBotIsolate();
+  const selected = effectiveIsolated(isolated, allKeys);
 
   const { labels, series, trendPct } = useMemo(() => {
     const val = (p: BotBehaviourBotStat['trend'][number]): number | null =>
@@ -229,10 +240,10 @@ function DensityTrendChart({
     const weekSet = new Set<string>();
     for (const b of botsWithData) for (const p of b.trend) weekSet.add(p.weekStart);
     const labels = Array.from(weekSet).sort().slice(-12);
-    const chosen = botsWithData.filter((b) => selected == null || selected.has(b.key));
+    const chosen = botsWithData.filter((b) => selected == null || selected === b.key);
 
     const valByBotWeek = new Map<string, Map<string, number | null>>();
-    const series: Series[] = chosen
+    const botSeries: Series[] = botsWithData
       .filter((b) => b.trend.some((p) => val(p) != null))
       .map((b) => {
         const byWeek = new Map(b.trend.map((p) => [p.weekStart, val(p)]));
@@ -262,6 +273,7 @@ function DensityTrendChart({
           pointNotes: labels.map((w) => noteByWeek.get(w) ?? null),
         };
       });
+    const series = applyIsolation(botSeries, selected);
 
     // Overall trend: a log-space line of best fit over the selected bots' COMBINED weekly density
     // (mean across bots present that week). Log-space so it renders straight on the log axis and
@@ -310,8 +322,6 @@ function DensityTrendChart({
     return { text: `${arrow} ${trendPct > 0 ? '+' : ''}${trendPct}% over 12 wks`, cls };
   })();
 
-  const noneSelected = allKeys.length > 0 && allKeys.every((k) => !isOn(k));
-
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -352,12 +362,7 @@ function DensityTrendChart({
         </div>
       </div>
 
-      {/* Interactive legend / bot selector — click a bot to focus just it; click others to add. */}
-      <BotSubsetLegend bots={botsWithData} subset={subset} botColor={botColor} />
-
-      {noneSelected ? (
-        <ChartEmpty label="Select at least one bot" />
-      ) : labels.length < 2 || series.length === 0 ? (
+      {labels.length < 2 || series.length === 0 ? (
         <ChartEmpty label="Not enough weekly history yet" />
       ) : (
         <LineChart
@@ -371,6 +376,8 @@ function DensityTrendChart({
           formatY={densAxis}
         />
       )}
+      {/* The shared click-to-isolate legend: one bot on every chart on the page. */}
+      <BotIsolateLegend bots={botsWithData} botColor={botColor} />
     </div>
   );
 }
@@ -539,6 +546,7 @@ function BotRepoWorkChart({
 }): JSX.Element | null {
   const [ref, w] = useChartWidth();
   const [hover, setHover] = useState<number | null>(null);
+  const { isolated } = useBotIsolate();
 
   const model = useMemo(() => {
     const bots = data.filter((b) => b.repos.some((r) => r.totalThreads > 0)).slice(0, 6);
@@ -562,7 +570,7 @@ function BotRepoWorkChart({
       dir === 'other' ? PALETTE.gray : SERIES_COLORS[(topIdx.get(dir) ?? 0) % SERIES_COLORS.length]!;
 
     type Seg = { dir: string; count: number; color: string };
-    type Col = { botLabel: string; botColor: string; repoName: string; repoFull: string; segments: Seg[]; total: number };
+    type Col = { botKey: string; botLabel: string; botColor: string; repoName: string; repoFull: string; segments: Seg[]; total: number };
     const columns: Col[] = [];
     const groups: { label: string; color: string; start: number; count: number }[] = [];
     let usesOther = false;
@@ -584,6 +592,7 @@ function BotRepoWorkChart({
           usesOther = true;
         }
         columns.push({
+          botKey: b.key,
           botLabel: b.label,
           botColor: bc,
           repoName: r.repoName.split('/').pop() ?? r.repoName,
@@ -601,11 +610,16 @@ function BotRepoWorkChart({
       ...topDirs.map((d) => ({ dir: d, color: colorOf(d) })),
       ...(usesOther ? [{ dir: 'other', color: PALETTE.gray }] : []),
     ];
-    return { columns, groups, singleRepo, legend };
+    return { columns, groups, singleRepo, legend, bots };
   }, [data, botColor]);
 
   if (!model) return null;
-  const { columns, groups, singleRepo, legend } = model;
+  const { columns, groups, singleRepo, legend, bots } = model;
+  // The page's isolated bot: the other bots' columns draw faint (the shared legend is under the chart).
+  const isoKey = effectiveIsolated(
+    isolated,
+    bots.map((b) => b.key),
+  );
 
   const height = 210;
   // A rotated label runs up-LEFT from its column, so the first one can pass the SVG's left edge
@@ -684,7 +698,17 @@ function BotRepoWorkChart({
                 const yTop = y(acc + s.count);
                 const h = y(acc) - yTop;
                 acc += s.count;
-                return <rect key={`${i}-${s.dir}`} x={barX(i)} y={yTop} width={barW} height={Math.max(h, 0)} fill={s.color} />;
+                return (
+                  <rect
+                    key={`${i}-${s.dir}`}
+                    x={barX(i)}
+                    y={yTop}
+                    width={barW}
+                    height={Math.max(h, 0)}
+                    fill={s.color}
+                    fillOpacity={isDimmed(isoKey, c.botKey) ? 0.2 : undefined}
+                  />
+                );
               });
             })}
             {columns.map((c, i) => {
@@ -743,6 +767,7 @@ function BotRepoWorkChart({
           </span>
         ))}
       </div>
+      <BotIsolateLegend bots={bots} botColor={botColor} />
     </ChartCard>
   );
 }
@@ -769,10 +794,9 @@ function BotRepoWorkChart({
 // exactly what the server already folded. Bars over the existing `BarChart` also keep the per-bucket
 // PR counts sayable, which a scatter has nowhere to put.
 //
-// ⚠ READ-ONLY ON PURPOSE. A bucket does NOT open the volume drill-down: `BotVolumeRefine` narrows
-// by `authorUserIds` and by nothing else, so there is no size-bucket refinement for the server to
-// honour. A client-side "PRs in this bucket" filter would be a list the server's own `total` and
-// `filteredTotal` then contradict — the exact failure the volume surfaces were specced against. So
+// ⚠ READ-ONLY ON PURPOSE. There is no per-PR volume drill-down to open (removed 2026-11-20), and
+// a client-side "PRs in this bucket" filter would be a list the server's own counts then
+// contradict — the exact failure the volume surfaces were specced against. So
 // `BarChart` is given NO `onSelectBar`, which leaves it byte-identical to every other consumer:
 // no pointer cursor, no hit targets, nothing added to the tab order.
 function BotVolumeSizeChart({
@@ -936,6 +960,79 @@ function BotVolumeSizeChart({
   );
 }
 
+// ── The two ROI charts (moved here from BotRoiPanel's always-visible row) ─────────────────────
+// Both read `/api/bot-analytics` — the SAME query (same key, so deduped and already cached) the ROI
+// table above draws from, gated on this section being open. They need no behaviour data.
+
+// Keep/tune/noisy → the traffic-light hue that tints each effectiveness bar.
+const VERDICT_COLOR: Record<BotVerdict, string> = {
+  keep: PALETTE.green,
+  tune: PALETTE.amber,
+  noisy: PALETTE.red,
+};
+
+// Chart y-axis / value formatter (BarChart never passes null).
+const roiPctAxis = (n: number): string => `${Math.round(n)}%`;
+
+// A per-bot acted-on-vs-untouched snapshot over the selected window (stacked bar per bot):
+// the deterministic effectiveness split — how much of each bot's volume drove action vs sat
+// untouched. Labels rotate so bot names don't collide.
+function ActedVsUntouchedChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
+  const labels = vendors.map((v) => v.label);
+  const series: Series[] = [
+    { key: 'acted', label: 'Used', color: PALETTE.green, values: vendors.map((v) => v.actedOn) },
+    { key: 'untouched', label: 'Not addressed', color: PALETTE.amber, values: vendors.map((v) => v.untouched) },
+  ];
+  if (labels.length === 0 || vendors.every((v) => v.actedOn + v.untouched === 0)) {
+    return <ChartEmpty />;
+  }
+  return <BarChart labels={labels} series={series} mode="stacked" rotateLabels height={160} />;
+}
+
+// Volume-INDEPENDENT effectiveness: each bot's acted-on % over the window, the bar tinted by
+// its keep/tune/noisy verdict. Surfaces low-volume-but-ineffective bots the count charts bury
+// (a 24-thread bot at 25% acted-on reads as clearly "noisy" here, where its stacked bar is a
+// sliver). A small verdict legend sits under it so the traffic-light colours are legible.
+function EffectivenessChart({ vendors }: { vendors: BotVendorAnalytics[] }): JSX.Element {
+  const rated = vendors.filter((v) => v.actedOnPct != null);
+  if (rated.length === 0) return <ChartEmpty label="No acted-on data yet" />;
+  const series: Series[] = [
+    {
+      key: 'acted',
+      label: 'Used %',
+      color: PALETTE.slate,
+      values: rated.map((v) => v.actedOnPct ?? 0),
+      colors: rated.map((v) => VERDICT_COLOR[v.verdict]),
+    },
+  ];
+  return (
+    <div>
+      <BarChart
+        labels={rated.map((v) => v.label)}
+        series={series}
+        formatY={roiPctAxis}
+        formatValue={roiPctAxis}
+        rotateLabels
+        height={160}
+      />
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+        {(['keep', 'tune', 'noisy'] as BotVerdict[]).map((v) => (
+          <span
+            key={v}
+            className="flex items-center gap-1 text-meta capitalize text-ui-mute"
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-[2px]"
+              style={{ background: VERDICT_COLOR[v] }}
+            />
+            {v}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // The collapsed-by-default "Workspace charts" section — the bottom of the ROI (Measure) branch
 // of BotsView. Nothing is fetched until the section is opened.
 export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.Element {
@@ -944,10 +1041,14 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
   const workspaceId = useFilters((s) => s.workspaceId);
   const repoScope = useMemo(() => (repoId != null ? [repoId] : null), [repoId]);
   const botColor = useBotColors(workspaceId);
-  // Fetch ONLY while the section is open — the default (collapsed) Bots view must not issue the
-  // whole-workspace behaviour request.
+  // Subscribe ONLY while the section is open. The ROI panel above already holds this key (its
+  // tiles and trend cards), so opening is a cache hit.
   const { data, isLoading, isError } = useBotBehaviour(workspaceId, window, open, repoScope);
   const bots = data?.bots ?? [];
+  // The ROI response the table above already fetched (same key → a cache hit, never a second
+  // request). Gated on `open` too, so a collapsed section subscribes to nothing.
+  const { data: roi } = useBotAnalytics(workspaceId, window, open, repoScope);
+  const vendors = roi?.vendors ?? [];
   const windowLabel = WINDOWS.find((w) => w.key === window)?.label ?? '';
 
   return (
@@ -970,13 +1071,23 @@ export function WorkspaceBotCharts({ repoId }: { repoId?: number } = {}): JSX.El
           </li>
           <li>Times are UTC. Gaps in activity are inferred, not a direct rate-limit signal.</li>
           <li>The window is the one picked above the ROI table.</li>
-          <li>Each bot’s own charts open from “Depth →” on its ROI table row.</li>
+          <li>Click a bot’s name in the ROI table for its own charts.</li>
         </ul>
       </InfoButton>
       {open && <span className="text-meta text-ui-faint">· {windowLabel}</span>}
       </div>
       {open && (
         <>
+          {vendors.length > 0 && (
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <ChartCard title="Bot effectiveness" note="% of threads used · keep / tune / rarely used">
+                <EffectivenessChart vendors={vendors} />
+              </ChartCard>
+              <ChartCard title="Used vs not addressed" note="threads, by bot · this window">
+                <ActedVsUntouchedChart vendors={vendors} />
+              </ChartCard>
+            </div>
+          )}
           {isLoading ? (
             <div className="h-40 animate-pulse rounded-ui bg-ui-surface" />
           ) : isError ? (

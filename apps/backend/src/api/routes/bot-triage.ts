@@ -6,11 +6,6 @@ import type {
   BotFlaggingSelector,
   BotOnlyPrsResponse,
   ResolvableThreadPrsResponse,
-  BotVendorCommentsResponse,
-  BotVendorPrsResponse,
-  BotVolumePrSort,
-  BotVolumePrsResponse,
-  BotVolumeRefine,
   BotVolumeResponse,
   BotVolumeScatterResponse,
   BotWindowKind,
@@ -26,13 +21,12 @@ import type {
   WorkspaceReviewer,
   WorkspaceReviewerPatchBody,
 } from '@pierre-review/shared';
-import { getBotFlaggingComments, getBotVendorComments } from '../../db/ml-labels.js';
+import { getBotFlaggingComments } from '../../db/ml-labels.js';
 import { getBotOverlapClusters } from '../../db/bot-overlap.js';
-import { getBotVolume, getBotVolumeScatter, getPrBotVolume } from '../../db/bot-volume.js';
+import { getBotVolume, getBotVolumeScatter } from '../../db/bot-volume.js';
 import {
   getBotAnalytics,
   getBotOnlyPrs,
-  getBotVendorPrs,
   getBotDedupClusters,
   getResolvableBotThreadPrs,
   getResolvableBotThreadsForScope,
@@ -320,59 +314,6 @@ const analyticsSchema = {
   },
 };
 
-// GET /api/bot-analytics/vendor/:key/prs?window= — per-REVIEWER PR drill-down. `key` is the
-// analytics-row identity: `u<userId>`, a single reviewer; the handler parses it (anything else →
-// 400). The window/workspace/repoIds resolution is identical to
-// /api/bot-analytics, because this list must reproduce ONE of that panel's rows.
-const vendorPrsSchema = {
-  params: {
-    type: 'object',
-    required: ['key'],
-    properties: { key: { type: 'string' } },
-  },
-  querystring: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      window: {
-        type: 'string',
-        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
-        default: 'rolling_14',
-      },
-      workspace: { type: 'string' },
-      repoIds: { type: 'string' },
-    },
-  },
-};
-
-// GET /api/bot-analytics/vendor/:key/comments?window=[&fromMs=&toMs=] — the per-REVIEWER
-// COMMENTS drill-down. Same shape as vendorPrsSchema, spelled out rather than aliased so the two
-// can diverge without a shared-object surprise (the reset-schema precedent above) — and it HAS
-// diverged: this one also takes the optional explicit-bounds pair (the People report's per-bot
-// evidence cards cover the real period), validated exactly like /api/bot-analytics's.
-const vendorCommentsSchema = {
-  params: {
-    type: 'object',
-    required: ['key'],
-    properties: { key: { type: 'string' } },
-  },
-  querystring: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      window: {
-        type: 'string',
-        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'sprint'],
-        default: 'rolling_14',
-      },
-      workspace: { type: 'string' },
-      repoIds: { type: 'string' },
-      fromMs: { type: 'string', pattern: '^[0-9]+$' },
-      toMs: { type: 'string', pattern: '^[0-9]+$' },
-    },
-  },
-};
-
 // The two ML enums, spelled out LOCALLY rather than imported from the shared package.
 //
 // ⚠ `@pierre-review/shared` is TYPES-ONLY and is not a published runtime dependency — the
@@ -462,7 +403,7 @@ const flaggingSchema = {
 };
 
 // ── Bot comment VOLUME (deterministic — db/bot-volume.ts) ─────────────────────────────────
-// Three routes over ONE base scan: the per-bot column, its PR drill-down, and the LOC chart.
+// Two routes over ONE base scan: the per-bot column and the LOC chart.
 //
 // ⚠ `workspace`/`repoIds` are STRING here for the same reason they are everywhere else on this
 // surface — an ajv `integer` would 400 on a stale bookmark, and a stale bookmark must degrade to
@@ -484,34 +425,6 @@ const volumeScopeSchema = {
       },
       workspace: { type: 'string' },
       repoIds: { type: 'string' },
-    },
-  },
-};
-
-const volumePrsSchema = {
-  querystring: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      window: {
-        type: 'string',
-        enum: ['rolling_7', 'rolling_14', 'rolling_30', 'rolling_90', 'sprint'],
-        default: 'rolling_30',
-      },
-      workspace: { type: 'string' },
-      repoIds: { type: 'string' },
-      // The per-bot narrowing. A CSV of `users.id`s, the `BotFlaggingRefine.authorUserIds`
-      // spelling verbatim — ONE convention on this surface, not two. Present-but-empty means NO
-      // bots (see the handler); only absence widens.
-      authorUserIds: { type: 'string' },
-      // ⚠ AN ENUM, so an unknown sort 400s rather than silently falling back to the default and
-      // presenting a comments-ranked list as a ratio-ranked one. The default is `'comments'` by
-      // product decision even though raw count mostly ranks by SIZE — see BotVolumePrSort.
-      sort: { type: 'string', enum: ['comments', 'ratio'], default: 'comments' },
-      limit: { type: 'integer', default: 20, minimum: 1, maximum: 50 },
-      // OPAQUE server-minted state, bounded so a hostile client cannot make the handler parse an
-      // arbitrarily long string. A malformed cursor degrades to the first page rather than 400ing.
-      cursor: { type: 'string', minLength: 1, maxLength: 64 },
     },
   },
 };
@@ -793,75 +706,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     return resp;
   });
 
-  // The per-REVIEWER PR drill-down behind one Bot-ROI row: the PRs that one automated reviewer
-  // touched in the window (threads/comments/acted-on/untouched/bot-only), newest-activity first.
-  // `key` is the analytics row identity — `u<userId>`, one reviewer (a Limn bot included); anything
-  // else, the retired 'pierre' sentinel among them, is a client bug → 400.
-  app.get('/api/bot-analytics/vendor/:key/prs', { schema: vendorPrsSchema }, async (req, reply) => {
-    const { key } = req.params as { key: string };
-    const { window, workspace, repoIds } = req.query as {
-      window: BotWindowKind;
-      workspace?: string;
-      repoIds?: string;
-    };
-    const m = /^u(\d+)$/.exec(key);
-    const target = m ? { userId: Number(m[1]) } : null;
-    if (!target) {
-      reply.status(400);
-      return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };
-    }
-    const accountId = accountIdOf(req);
-    // The SAME scope the ROI row was computed at — this list reproduces one of that panel's rows,
-    // so the header label and the per-PR `botOnly` badge must take the identical workspace and
-    // repo set. One screen cannot show two contradictory bot-only answers.
-    const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-    const resp: BotVendorPrsResponse = await getBotVendorPrs(accountId, target, window, scope);
-    return resp;
-  });
-
-  // The per-REVIEWER COMMENTS drill-down behind the same Bot-ROI row: everything the reviewer
-  // said in the window (inline review comments, PR comments, review bodies), each row with its
-  // stored ML label INLINE — one response, never the per-PR label index per row. Same key parse
-  // and the same scope resolution as the /prs sibling, so the list reproduces the same ROI row.
-  // ⚠ Rate tier `search`, pinned in rate-limit.test.ts — this ships up to
-  // 3000 comment BODIES per source plus a three-way label join per request.
-  app.get(
-    '/api/bot-analytics/vendor/:key/comments',
-    { schema: vendorCommentsSchema },
-    async (req, reply) => {
-      const { key } = req.params as { key: string };
-      const { window, workspace, repoIds, fromMs, toMs } = req.query as {
-        window: BotWindowKind;
-        workspace?: string;
-        repoIds?: string;
-        fromMs?: string;
-        toMs?: string;
-      };
-      const m = /^u(\d+)$/.exec(key);
-      const target = m ? { userId: Number(m[1]) } : null;
-      if (!target) {
-        reply.status(400);
-        return { error: 'BadRequest', message: `Invalid vendor key: ${key}` };
-      }
-      // Same optional real-bounds refinement as /api/bot-analytics (the People report's per-bot
-      // evidence cards) — a malformed pair 400s.
-      const bounds = parseWindowBounds(window, fromMs, toMs);
-      if ('error' in bounds) {
-        reply.status(400);
-        return { error: 'BadRequest', message: bounds.error };
-      }
-      const accountId = accountIdOf(req);
-      const scope = await resolveWorkspaceScope(accountId, workspace, parseIntList(repoIds));
-      const resp: BotVendorCommentsResponse = await getBotVendorComments(
-        accountId,
-        target,
-        bounds.window,
-        scope,
-      );
-      return resp;
-    },
-  );
-
   // ── "WHAT THE BOTS ARE FLAGGING" ──────────────────────────────────────────────────────────
   // The drill-down behind every tile and chip on the Bots rail's ML strip. `select` picks the
   // population; the response is discriminated on `kind` — 'comments' for the four label
@@ -995,7 +839,7 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     return resp;
   });
 
-  // ── Bot comment VOLUME — the three routes over db/bot-volume.ts's one base scan ───────────
+  // ── Bot comment VOLUME — the two routes over db/bot-volume.ts's one base scan ───────────
   //
   // GET /api/bot-analytics/volume — the ROI tab's "avg bot comments per PR" column + workspace
   // totals. The two averages differ ONLY by denominator (`avgCommentsPerCommentedPr` divides by
@@ -1011,48 +855,6 @@ export async function botTriageRoutes(app: FastifyInstance): Promise<void> {
     const accountId = accountIdOf(req);
     const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
     const resp: BotVolumeResponse = await getBotVolume(accountId, q.window, scope);
-    return resp;
-  });
-
-  // GET /api/bot-analytics/volume/prs — the paginated drill-down behind that column. Default sort
-  // is raw `botComments` DESC; `sort=ratio` ranks by the bucket-relative expectation, which is
-  // the only ordering that surfaces a small PR a bot tore apart (raw count mostly ranks by size).
-  app.get('/api/bot-analytics/volume/prs', { schema: volumePrsSchema }, async (req, reply) => {
-    const q = req.query as {
-      window: BotWindowKind;
-      workspace?: string;
-      repoIds?: string;
-      authorUserIds?: string;
-      sort: BotVolumePrSort;
-      limit: number;
-      cursor?: string;
-    };
-    const accountId = accountIdOf(req);
-    // ⚠ PRESENT-BUT-EMPTY IS "NO BOTS", NEVER "EVERY BOT" — the `repoIds` rule (`if (ids)`, never
-    // `ids.length > 0`), identical to the flagging route above. `parseIntList` collapses absence
-    // AND an unusable list to null, which is right for a repo NARROW and wrong here: a caller
-    // that computed an empty bot set and sent it would get the whole workspace back under a
-    // caption promising a subset. So the KEY's presence decides whether there is a narrowing at
-    // all, and `parseIntList` only parses its members.
-    //
-    // ⚠ NO OWNERSHIP CHECK, and that is not an oversight: `users` is a GLOBAL table, so "does this
-    // account own that user row" is not a question it can answer. The narrowing is applied over an
-    // already accountId- and scope-filtered fold, so a foreign or nonexistent id matches nothing —
-    // an empty list, identical in both cases, which is what stops it being an existence oracle.
-    const authorUserIds = q.authorUserIds == null ? null : (parseIntList(q.authorUserIds) ?? []);
-    const refine: BotVolumeRefine = { authorUserIds };
-    // ⚠ THE CURSOR DEGRADES, IT NEVER 400s — server-minted state a client only ever echoes back,
-    // opaque precisely so its encoding can change without breaking in-flight clients. Anything
-    // that is not exactly `o:<n>` starts again at the first page, which is always renderable.
-    const m = /^o:(\d+)$/.exec(q.cursor ?? '');
-    const parsedOffset = m ? Number(m[1]) : 0;
-    const offset = Number.isSafeInteger(parsedOffset) ? parsedOffset : 0;
-    const scope = await resolveWorkspaceScope(accountId, q.workspace, parseIntList(q.repoIds));
-    const resp: BotVolumePrsResponse = await getPrBotVolume(accountId, q.window, scope, refine, {
-      offset,
-      limit: q.limit,
-      sort: q.sort,
-    });
     return resp;
   });
 
