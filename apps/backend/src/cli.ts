@@ -332,9 +332,9 @@ off). Installing or removing one here changes the pick too.
 AI Review and AI Fix are free. One AI runs every feature: Claude, unless only
 Codex is signed in. Set ENSEMBLE_AI_PROVIDER=claude or codex to choose.
 
-Claude runs on your own Claude Code login or Anthropic API key: sign in to
-Claude Code, or set ANTHROPIC_API_KEY. Set ENSEMBLE_AI_USE_API_KEY=true to use the
-key even when you are signed in. Set ENSEMBLE_CLAUDE_PATH to use your installed
+Claude runs on your own Anthropic API key: set ANTHROPIC_API_KEY. With no key,
+it falls back to a Claude Code login; Anthropic's terms limit that use, so read
+them first. Set ENSEMBLE_AI_USE_API_KEY=false to put the login first. Set ENSEMBLE_CLAUDE_PATH to use your installed
 \`claude\` and skip its bundled copy.
 
 Codex runs on your ChatGPT sign-in, kept in ~/.ensemble/codex (your ~/.codex is not

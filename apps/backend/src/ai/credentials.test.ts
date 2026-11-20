@@ -1,6 +1,6 @@
-// THE ONE CREDENTIAL LADDER: the Claude Code login first, else ANTHROPIC_API_KEY; the opt-in
-// LIMN_AI_USE_API_KEY=true puts the key first. Every input is passed explicitly (an env object and
-// a login probe), so nothing here reads the real home directory.
+// THE ONE CREDENTIAL LADDER: ANTHROPIC_API_KEY first BY DEFAULT, else the Claude Code login; unticking
+// the box (or LIMN_AI_USE_API_KEY=false) puts the login first. Every input is passed explicitly (an env
+// object and a login probe), so nothing here reads the real home directory.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +18,16 @@ const loggedIn = () => true;
 const loggedOut = () => false;
 
 describe('resolveAiCredential', () => {
-  it('login present → the login, even with a key set', () => {
+  afterEach(() => setStoredPrefersApiKey(true));
+
+  it('THE DEFAULT: a key set → the key, over a login and an OAuth token', () => {
+    const env = { ANTHROPIC_API_KEY: 'sk-ant', CLAUDE_CODE_OAUTH_TOKEN: 'tok' };
+    expect(prefersApiKey({})).toBe(true);
+    expect(resolveAiCredential(env, loggedIn)).toEqual({ route: 'api_key', method: 'api_key', apiKey: 'sk-ant' });
+  });
+
+  it('box unticked: login present → the login, even with a key set', () => {
+    setStoredPrefersApiKey(false);
     expect(resolveAiCredential({ ANTHROPIC_API_KEY: 'sk-ant' }, loggedIn)).toEqual({
       route: 'login',
       method: 'ambient',
@@ -53,7 +62,7 @@ describe('resolveAiCredential', () => {
 });
 
 describe('"Use my API keys first" (the Settings box)', () => {
-  afterEach(() => setStoredPrefersApiKey(false));
+  afterEach(() => setStoredPrefersApiKey(true));
 
   it('ticked → the key first, over a login and an OAuth token', () => {
     setStoredPrefersApiKey(true);
@@ -79,7 +88,7 @@ describe('"Use my API keys first" (the Settings box)', () => {
 
   it('says whether each key is set, never its value', () => {
     const s = apiKeySettingStatus({ ANTHROPIC_API_KEY: ' ', OPENAI_API_KEY: 'sk-openai' });
-    expect(s).toEqual({ value: false, source: 'settings', anthropicKeySet: false, openaiKeySet: true });
+    expect(s).toEqual({ value: true, source: 'settings', anthropicKeySet: false, openaiKeySet: true });
     expect(JSON.stringify(s)).not.toContain('sk-openai');
   });
 });
@@ -144,7 +153,7 @@ describe('hasClaudeLogin', () => {
   it('~/.claude.json recording a signed-in oauthAccount IS a login (the macOS Keychain case)', () => {
     writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'u' } }));
     expect(probe({})).toBe(true);
-    expect(resolveAiCredential({ ANTHROPIC_API_KEY: 'sk-ant' }, probe)).toEqual({
+    expect(resolveAiCredential({}, probe)).toEqual({
       route: 'login',
       method: 'ambient',
     });

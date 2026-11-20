@@ -52,6 +52,7 @@ export default function Footer(): JSX.Element {
           <Link to="/everything-else">Everything else</Link>
         </div>
         <div>
+          <Link to="/about">About</Link>
           <Link to="/contact">Contact</Link>
           <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
             GitHub

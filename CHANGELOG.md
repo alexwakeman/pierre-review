@@ -24,6 +24,10 @@ no internals.
 
 ### Changed
 
+- Claude now runs on your Anthropic API key by default. When `ANTHROPIC_API_KEY` is set, every Claude run uses it,
+  even while you are signed in to Claude Code. "Use my API keys first" in Settings → AI is now ticked unless you
+  untick it. Without a key, Ensemble still falls back to a Claude Code login; the docs and Settings link to
+  Anthropic's terms on that use.
 - Settings → AI downloads each agent on its own. Claude and Codex each have a line with **Download** (Claude about
   110 MB, Codex about 360 MB) or **Remove**, and only the ones you pick are downloaded. A new install downloads Claude
   alone; an install that already had Codex keeps it. An agent that is not downloaded is not used: AI features, Auto

@@ -78,8 +78,7 @@ export default function Page(): JSX.Element {
           <DocLink to="security/runs-on-your-machine">Ensemble runs on your machine</DocLink>.
         </li>
         <li>
-          <b>AI on your terms.</b> The AI features use your own Claude or ChatGPT subscription, or your own
-          Anthropic API key. You choose the provider, the effort and a spend budget.
+          <b>AI on your terms.</b> The AI features use your own Anthropic API key or ChatGPT plan. You choose the provider, the effort and a spend budget.
         </li>
         <li>
           <b>It works with the bots you already have.</b> Ensemble complements your existing review bots, like

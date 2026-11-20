@@ -44,8 +44,8 @@ export default function Page(): JSX.Element {
         <Ui>Download</Ui>. An install that already had both keeps both. Ensemble keeps each downloaded agent up to date by
         itself. The tab shows one line for each provider:
       </p>
-      <Illustration label="The provider lines: Claude downloaded and signed in, Codex not downloaded." caption="Each provider's status line.">
-        <SettingsRow label="Claude" hint="Signed in to Claude Code." control={<Pill tone="grey">Remove</Pill>} />
+      <Illustration label="The provider lines: Claude downloaded and on an API key, Codex not downloaded." caption="Each provider's status line.">
+        <SettingsRow label="Claude" hint="Using ANTHROPIC_API_KEY." control={<Pill tone="grey">Remove</Pill>} />
         <SettingsRow label="Codex" hint="Not downloaded." control={<Pill tone="grey">Download (about 360 MB)</Pill>} />
       </Illustration>
       <p>
@@ -56,10 +56,9 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Claude</H3>
       <p>
-        Ensemble uses your Claude Code login on this computer. Run <code>claude</code> in a terminal and sign in there.
-        When there is no login, Ensemble uses an Anthropic API key set as <code>ANTHROPIC_API_KEY</code> when Ensemble starts.
-        The line then reads <Ui>Signed in to Claude Code.</Ui> or <Ui>Using ANTHROPIC_API_KEY.</Ui>, or asks you to
-        sign in. Full details:{' '}
+        Ensemble uses the Anthropic API key set as <code>ANTHROPIC_API_KEY</code> when Ensemble starts. With no key, it
+        falls back to a Claude Code login on this computer. The line then reads <Ui>Using ANTHROPIC_API_KEY.</Ui> or{' '}
+        <Ui>Signed in to Claude Code.</Ui>, or asks you to set a key. Full details:{' '}
         <DocLink to="integrations/claude">Claude (Anthropic)</DocLink>.
       </p>
       <H3>Codex</H3>
@@ -91,7 +90,7 @@ export default function Page(): JSX.Element {
 
       <H2 id="api-keys">Use my API keys first</H2>
       <p>
-        Tick <Ui>Use my API keys first</Ui> to pay for AI runs with an API key instead of your subscription. Ensemble reads
+        <Ui>Use my API keys first</Ui> is ticked by default: AI runs use an API key, not a subscription. Ensemble reads
         the keys from the environment it started in (your shell, or the <code>.env</code> file), and never stores one.
         The line under the box says which keys are set.
       </p>
@@ -99,8 +98,9 @@ export default function Page(): JSX.Element {
         <li>
           <b>Claude</b> reads <code>ANTHROPIC_API_KEY</code>. With the box ticked and the key set, every Claude run uses
           the key, even while you are signed in to Claude Code. Anthropic bills it per token, and Ensemble shows its spend
-          in US$. With the box not ticked, Ensemble uses your Claude Code sign-in, and the key only when you are not signed
-          in.
+          in US$. Untick the box to use your Claude Code sign-in first. Anthropic&rsquo;s terms limit how tools like
+          Ensemble may use a plan sign-in; see{' '}
+          <DocLink to="settings/how-providers-treat-your-work#your-claude-login">Using a Claude login</DocLink>.
         </li>
         <li>
           <b>Codex</b> reads <code>OPENAI_API_KEY</code>. Codex runs on an API key are not available yet, so Codex keeps

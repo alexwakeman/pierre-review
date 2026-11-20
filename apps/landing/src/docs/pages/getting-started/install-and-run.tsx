@@ -27,8 +27,7 @@ export default function Page(): JSX.Element {
           <DocLink to="integrations/github">GitHub</DocLink>.
         </li>
         <li>
-          <b>Optional, for the AI features:</b> a Claude Code sign-in, an Anthropic API key, or a ChatGPT
-          sign-in for Codex. You can add these later. See <DocLink to="integrations/claude">Claude</DocLink>{' '}
+          <b>Optional, for the AI features:</b> an Anthropic API key, or a ChatGPT sign-in for Codex. You can add these later. See <DocLink to="integrations/claude">Claude</DocLink>{' '}
           and <DocLink to="integrations/codex">Codex</DocLink>.
         </li>
       </ul>
@@ -157,13 +156,13 @@ export default function Page(): JSX.Element {
           <DocLink to="getting-started/add-repositories">Add your repositories</DocLink>.
         </li>
         <li>
-          <b>Connect your AI agent</b> for AI Review, AI Fix and the chats. Sign in to Claude Code with{' '}
-          <code>claude</code>, or sign in to Codex with your ChatGPT account in <Ui>Settings → AI</Ui>. See{' '}
+          <b>Connect your AI agent</b> for AI Review, AI Fix and the chats. Start Ensemble with{' '}
+          <code>ANTHROPIC_API_KEY</code> set, or sign in to Codex with your ChatGPT account in <Ui>Settings → AI</Ui>. See{' '}
           <DocLink to="integrations/claude">Claude</DocLink> and <DocLink to="integrations/codex">Codex</DocLink>.
         </li>
         <li>
-          <b>Check the AI budget.</b> On a subscription, Ensemble may use 50% of your week for its automatic runs until
-          you change it. On an API key, there is no limit until you set a weekly budget in US dollars. See{' '}
+          <b>Check the AI budget.</b> On an API key, there is no limit until you set a weekly budget in US dollars. On a
+          ChatGPT plan, Ensemble may use 50% of your week for its automatic runs until you change it. See{' '}
           <DocLink to="settings/ai-usage-and-spend#spend-budget">The spend budget</DocLink>.
         </li>
         <li>

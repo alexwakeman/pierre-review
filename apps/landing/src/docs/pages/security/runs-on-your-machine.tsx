@@ -43,7 +43,7 @@ export default function Page(): JSX.Element {
           credentials. See <DocLink to="security/github-access">GitHub access</DocLink>.
         </li>
         <li>
-          The AI runs on your own Claude Code login, Anthropic API key or ChatGPT sign-in. See{' '}
+          The AI runs on your own Anthropic API key or ChatGPT sign-in. See{' '}
           <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
         </li>
         <li>

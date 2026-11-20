@@ -103,16 +103,18 @@ paste the story in.
 
 ### Your Claude, not ours
 
-It runs on your own Claude Code login or Anthropic API key. Ensemble stores no key and
-charges nothing for it. Every AI feature (reviews, fixes, chats, report write-ups)
-uses the same two sources, first one wins:
+It runs on your own Anthropic API key. Ensemble stores no key and charges nothing
+for it. Every AI feature (reviews, fixes, chats, report write-ups) uses the same two
+sources, first one wins:
 
-1. **Your Claude Code login** — run `claude` once to sign in (or set
-   `CLAUDE_CODE_OAUTH_TOKEN`). A run on the login never sees `ANTHROPIC_API_KEY`.
-2. **`ANTHROPIC_API_KEY`** in the environment.
+1. **`ANTHROPIC_API_KEY`** in the environment (the default, and the route Anthropic's
+   [terms](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+   ask for in tools built on the Agent SDK).
+2. **A Claude Code login**, only when no key is set. A run on the login never sees
+   `ANTHROPIC_API_KEY`. Read Anthropic's terms before you rely on it.
 
-Tick **Use my API keys first** in Settings → AI (or set `ENSEMBLE_AI_USE_API_KEY=true`) to use the
-key even when you are signed in. Codex reads `OPENAI_API_KEY`, but Codex runs on an API key are not
+Untick **Use my API keys first** in Settings → AI (or set `ENSEMBLE_AI_USE_API_KEY=false`) to put
+the login first. Codex reads `OPENAI_API_KEY`, but Codex runs on an API key are not
 available yet. With
 neither, the Run button is replaced by one line: *Sign in to Claude Code or set
 ANTHROPIC_API_KEY*. The ladder lives in `apps/backend/src/ai/credentials.ts`.

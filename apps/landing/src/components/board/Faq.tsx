@@ -15,7 +15,7 @@ const QUESTIONS: ReadonlyArray<{ q: string; a: string }> = [
   },
   {
     q: 'What does it cost?',
-    a: 'Nothing from us. Reviews run on your own Claude Code or Codex, and Ensemble shows what each run used.',
+    a: 'Nothing from us. Reviews run on your own Anthropic API key or ChatGPT plan, and Ensemble shows what each run used.',
   },
   {
     q: 'Will it post to GitHub for me?',

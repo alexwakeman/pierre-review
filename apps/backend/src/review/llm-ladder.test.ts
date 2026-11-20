@@ -1,8 +1,8 @@
 // THE ONE LADDER, end to end through `cheapComplete` and the platform's client (makeHaikuClient —
 // every synthesis, pointer, bot-theme, refine and Slack call goes through it):
-//   • login present → the Agent SDK, with ANTHROPIC_API_KEY hidden from the run;
-//   • no login + key → the Anthropic API with that key;
-//   • LIMN_AI_USE_API_KEY=true → the key first, even with a login;
+//   • a key set → the Anthropic API with that key, even with a login (THE DEFAULT);
+//   • LIMN_AI_USE_API_KEY=false + login → the Agent SDK, with ANTHROPIC_API_KEY hidden from the run;
+//   • no key + login → the Agent SDK;
 //   • LIMN_AI_DISABLED (config.aiEnabled false) → refused, nothing loaded.
 // HOME points at an empty temp dir so the real machine's Claude login never leaks in; the login is
 // simulated with CLAUDE_CODE_OAUTH_TOKEN.
@@ -75,7 +75,16 @@ afterEach(() => {
 });
 
 describe('cheapComplete — the ladder', () => {
-  it('login present → the Agent SDK, and the run never sees the API key', async () => {
+  it('BY DEFAULT a key wins over a login → the Anthropic API', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
+    const res = await cheapComplete({ prompt: 'hi' });
+    expect(res.text).toBe('from the api');
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('LIMN_AI_USE_API_KEY=false + login → the Agent SDK, and the run never sees the API key', async () => {
+    process.env.LIMN_AI_USE_API_KEY = 'false';
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
     const res = await cheapComplete({ prompt: 'hi' });
@@ -130,7 +139,8 @@ describe('cheapComplete — the ladder', () => {
 });
 
 describe('the platform clients take the same ladder', () => {
-  it('makeHaikuClient: login → the Agent SDK, even with a key set (no per-feature key)', async () => {
+  it('makeHaikuClient: login first when unticked → the Agent SDK, even with a key set (no per-feature key)', async () => {
+    process.env.LIMN_AI_USE_API_KEY = 'false';
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'tok';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-env';
     const out = await makeHaikuClient(ctx).complete({ system: 's', user: 'u', maxTokens: 100 });

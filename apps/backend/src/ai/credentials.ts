@@ -5,17 +5,23 @@
 // reports, synthesis, pointers, bot themes, the Slack
 // report — all go through).
 //
-//   1. THE LOCAL CLAUDE CODE LOGIN (default) — a `claude` session on disk or
-//      CLAUDE_CODE_OAUTH_TOKEN, used through the Agent SDK. Any ANTHROPIC_API_KEY in the
-//      environment is HIDDEN from that run, or the SDK would prefer it and silently meter it.
-//   2. ANTHROPIC_API_KEY from the environment — the alternative when there is no login. Agent runs
-//      hand it to the Agent SDK; one-shot completions call the Anthropic API directly with it
-//      (the SDK loaded through ai/runtime.ts `loadAnthropicSdk`, never imported here).
+//   1. ANTHROPIC_API_KEY from the environment (THE DEFAULT) — billed to the key's owner under
+//      Anthropic's Commercial Terms. Agent runs hand it to the Agent SDK; one-shot completions call
+//      the Anthropic API directly with it (the SDK loaded through ai/runtime.ts `loadAnthropicSdk`,
+//      never imported here). A CLAUDE_CODE_OAUTH_TOKEN is hidden from the run.
+//   2. THE LOCAL CLAUDE CODE LOGIN — a `claude` session on disk or CLAUDE_CODE_OAUTH_TOKEN, used
+//      through the Agent SDK, only when there is no key or the reader unticked the box. Any
+//      ANTHROPIC_API_KEY is HIDDEN from that run, or the SDK would prefer it and silently meter it.
 //
-// "USE MY API KEYS FIRST" flips the order when a key is set: the key first, the login ignored. It is the
-// Settings → AI box (`accounts.ai_use_api_key`, held HERE in memory — loaded at boot by
-// ai/provider-store.ts, updated by PUT /api/ai/api-key — so the next call reads it with no restart), and
-// an explicitly set LIMN_AI_USE_API_KEY (`true` / `false`) wins over the box.
+// ⚠ WHY THE KEY IS THE DEFAULT: Anthropic's "Authentication and credential use" terms
+// (code.claude.com/docs/en/legal-and-compliance) ask products built on the Agent SDK to use API keys
+// and not to route requests through Free/Pro/Max/Ultra plan credentials. Never flip this back to
+// login-first, and never word the login route as approved by Anthropic.
+//
+// "USE MY API KEY" is the Settings → AI box (`accounts.ai_use_api_key`, held HERE in memory — loaded at
+// boot by ai/provider-store.ts, updated by PUT /api/ai/api-key — so the next call reads it with no
+// restart). NULL (never chosen) = TICKED; only an explicit false puts the login first. An explicitly
+// set ENSEMBLE_AI_USE_API_KEY / LIMN_AI_USE_API_KEY (`true` / `false`) wins over the box.
 // LIMN_AI_DISABLED=true (config.aiEnabled) turns every model call off; that switch is checked by
 // the callers, not here, because this module answers only "which credential", never "may we".
 //
@@ -35,8 +41,8 @@ export type AiCredential =
   | { route: 'api_key'; method: 'api_key'; apiKey: string }
   | { route: 'none' };
 
-/** The opt-in that makes ANTHROPIC_API_KEY win over a Claude Code login: ENSEMBLE_AI_USE_API_KEY,
- *  else the older LIMN_AI_USE_API_KEY (env-name.ts). */
+/** The switch that decides whether ANTHROPIC_API_KEY wins over a Claude Code login (default: it does):
+ *  ENSEMBLE_AI_USE_API_KEY, else the older LIMN_AI_USE_API_KEY (env-name.ts). */
 export const USE_API_KEY_ENV = 'ENSEMBLE_AI_USE_API_KEY';
 
 function envApiKey(env: NodeJS.ProcessEnv): string | undefined {
@@ -44,9 +50,9 @@ function envApiKey(env: NodeJS.ProcessEnv): string | undefined {
   return k ? k : undefined;
 }
 
-let storedUseApiKey = false;
+let storedUseApiKey = true;
 
-/** The stored box (Settings → AI → "Use my API keys first"). Memory only; see the header. */
+/** The stored box (Settings → AI → "Use my API key"; default ticked). Memory only; see the header. */
 export function storedPrefersApiKey(): boolean {
   return storedUseApiKey;
 }

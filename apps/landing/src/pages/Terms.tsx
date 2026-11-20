@@ -124,8 +124,9 @@ export default function Terms(): JSX.Element {
           may be copied and whether it may be sent to an AI model.
         </P>
         <P>
-          The AI features run on your own AI agent: a Claude Code login or Anthropic API key, or
-          Codex on a ChatGPT plan. Content they send goes from your machine to Anthropic or
+          The AI features run on your own AI agent: an Anthropic API key (or, if you choose, a
+          Claude Code login), or Codex on a ChatGPT plan. You are responsible for using that
+          account within the provider&rsquo;s terms. Content they send goes from your machine to Anthropic or
           OpenAI under your own agreement with that provider. We are not in that path.
         </P>
         <P>On this website, you agree not to:</P>

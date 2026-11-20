@@ -386,9 +386,10 @@ one-shot completions, on Claude or Codex. Details: docs/CLAUDE-REVIEW.md · docs
   (`ai/run-choice.ts`). Each sub-run resolves its provider ONCE; row label, follow-up chain, ledger and
   budget use the RUN's. Every run row stores the `provider` + `model` that RAN, shown ONLY via
   `aiRunLabel`; ⚠ a stored model fed to a new run goes through `requestModelOf`.
-- **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the reader's
-  Claude Code login first (a `claude` session or `CLAUDE_CODE_OAUTH_TOKEN`), else the
-  environment's `ANTHROPIC_API_KEY`; a Settings tick (`ENSEMBLE_AI_USE_API_KEY` wins) puts it first. Agent runs pass
+- **CLAUDE: ONE CREDENTIAL LADDER** (`ai/credentials.ts` `resolveAiCredential`): the
+  environment's `ANTHROPIC_API_KEY` FIRST BY DEFAULT (Anthropic's terms ask Agent SDK tools for API
+  keys — ⚠ never flip back, never word the login route as approved), else the reader's Claude Code
+  login; unticking the Settings box (`ENSEMBLE_AI_USE_API_KEY` wins) puts the login first. Agent runs pass
   the ladder's environment as the query `env` (`agentAuthOptions()`, so a login run never sees the
   key); `cheapComplete` takes the Agent SDK on the login and the Anthropic API on the key. **No
   caller picks its own credential; no key stored.** Copy never promises subscription
