@@ -135,6 +135,11 @@ export function ReleasesView(): JSX.Element | null {
             it. The repositories are picked together: no Complete ticket is released with only part of its work.
           </p>
           <p>
+            A repository with no version tags is released from its merged pull requests instead: each pull request
+            merged into main stands in for a tag, and the release goes up to the newest one that passes the same test.
+            Release… tags that commit with the day’s date and your release suffix.
+          </p>
+          <p>
             The list shows tickets, newest tag first. A ticket sits where its latest tag sits, in any repository. ★ is the
             newest ticket in the release candidates: it names each repository’s candidate and its commit, and Release…
             releases them together. ✓ is in the candidates; ✗ is not Complete or has a pull request still open; the amber

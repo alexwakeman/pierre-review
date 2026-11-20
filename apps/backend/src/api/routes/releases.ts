@@ -223,7 +223,19 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
           type: 'object',
           required: ['repoIds'],
           additionalProperties: false,
-          properties: { repoIds: { type: 'array', maxItems: 500, items: { type: 'integer' } } },
+          properties: {
+            repoIds: { type: 'array', maxItems: 500, items: { type: 'integer' } },
+            bases: {
+              type: 'array',
+              maxItems: 500,
+              items: {
+                type: 'object',
+                required: ['repoId', 'basis'],
+                additionalProperties: false,
+                properties: { repoId: { type: 'integer' }, basis: { type: 'string', enum: ['auto', 'tags', 'prs'] } },
+              },
+            },
+          },
         },
       },
     },
@@ -231,8 +243,8 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
       const accountId = accountIdOf(req);
       const { id } = req.params as { id: number };
       const body = req.body as SetReleaseReposBody;
-      const before = new Set((await getReleaseRepos(accountId, id)).keys());
-      const out = await setReleaseRepos(accountId, id, body.repoIds);
+      const before = await getReleaseRepos(accountId, id);
+      const out = await setReleaseRepos(accountId, id, body.repoIds, new Date(), body.bases ?? []);
       if (out == null) {
         reply.status(404);
         return { error: 'NotFound', message: `Workspace ${id} not found` };
@@ -242,6 +254,8 @@ export async function releaseRoutes(app: FastifyInstance): Promise<void> {
         return { error: 'NotAMember', message: 'Only repositories of this workspace can be released from it.' };
       }
       for (const repoId of body.repoIds) if (!before.has(repoId)) markTagCatchUp(repoId);
+      // A changed "Release from" reads the history again for that repo (DB only until the scan runs).
+      for (const b of body.bases ?? []) if (before.has(b.repoId) && before.get(b.repoId)!.basis !== b.basis) markTagCatchUp(b.repoId);
       const res = await getReleaseSettingsResponse(accountId, id);
       if (!res) {
         reply.status(404);

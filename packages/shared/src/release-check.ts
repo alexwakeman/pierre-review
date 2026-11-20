@@ -55,7 +55,7 @@
 // increment (its own tickets); after a release the band STOPS at the baseline (older tags were released). Tags beyond the wanted number are not in the result (it stays bounded).
 //
 // The fold never reads the clock and never fetches. Timestamps come in as Date and go out as ISO-8601.
-import { tagKind, releaseTagName, type ReleaseSettings, type TagKind } from './releases.js';
+import { tagKind, releasePointNumber, releaseTagName, type ReleaseBasis, type ReleaseSettings, type TagKind } from './releases.js';
 import type { SprintStage } from './sprint-stories.js';
 
 /** A ticket's read state: `ok`, or why the tracker gave nothing; `not_read` = no answer yet. */
@@ -215,6 +215,11 @@ export interface ReleaseCheckRepoInput {
   history?: { done: number; total: number; complete: boolean } | null;
   /** How many tags the OLDER band lists (default RELEASE_OLDER_TAGS_DEFAULT; "Show 50 more" raises it). */
   olderWanted?: number;
+  /** What a release is cut from (shared `releaseBasisOf`; absent = 'tags'). With 'prs' every `tags`
+   *  entry that is not a release or hotfix tag is a RELEASE POINT — a merged PR's commit, named `#539`. */
+  basis?: ReleaseBasis;
+  /** Basis 'prs': the release tag a release would create (`2026.11.19-rc`); there is no version to name it. */
+  pointReleaseTagName?: string | null;
 }
 
 /** A PR merged into the default branch, from the history pass (its LIGHT record). */
@@ -381,7 +386,8 @@ export interface ReleaseTagCheck extends ReleaseTagRef {
   prIds: number[];
   /** Ticket idents on those PRs. */
   ticketIdents: string[];
-  /** Every PR in its scope (with a baseline: since the release; with none: = `prIds`). */
+  /** Every PR in its scope — on the candidate, the tag the walk stopped at and the oldest tag read; on
+   *  any other newer tag its own PRs only (= `prIds`), so a long history never sends n² ids. */
   scopePrIds: number[];
   /** Its own increment has been read. */
   historyRead: boolean;
@@ -418,6 +424,10 @@ export interface ReleaseRepoCheck {
   fullName: string;
   name: string;
   writable: boolean;
+  /** What a release is cut from here: version tags, or each merged pull request (absent = 'tags'). With
+   *  'prs' a "tag" of this result (`tags`, `candidate`, `latestVersion`, a reason's `fromTag`) is a release
+   *  point named `#539`. */
+  basis?: ReleaseBasis;
   status: ReleaseRepoStatus;
   /** `nothing_new` only: no version tag on the default branch at all, or none after the baseline. */
   nothingNewReason: 'no_tags' | 'no_new_tags' | null;
@@ -429,7 +439,14 @@ export interface ReleaseRepoCheck {
   scope: 'since_release' | 'since_start';
   /** The newest release OR hotfix tag (any branch) — the hotfix base. */
   latestRelease: (ReleaseTagRef & { kind: 'release' | 'hotfix' }) | null;
-  candidate: (ReleaseTagRef & { releaseTagName: string; releaseTagExists: boolean }) | null;
+  candidate:
+    | (ReleaseTagRef & {
+        releaseTagName: string;
+        releaseTagExists: boolean;
+        /** Basis 'prs': the merged pull request the candidate point is (null otherwise, or not read). */
+        point?: { number: number; title: string; url: string; prId: number | null } | null;
+      })
+    | null;
   /** The newest version tag's first reason when it is not the candidate (the `none` row's words). */
   newestReason: { tagName: string; blocker: ReleaseBlocker } | null;
   /** Not decided yet: the tab polls while any repo is checking. */
@@ -576,9 +593,13 @@ interface TagEval {
   state: ReleaseTagState;
   blockers: ReleaseBlocker[];
   unverified: ReleaseUnverified[];
-  /** Ticket idents in its scope, with the PRs naming each. */
+  /** Ticket idents in its scope, with the PRs naming each. Its OWN increment's only, unless `full`. */
   scopeIdents: string[];
   scopePrIds: number[];
+  /** `scopeIdents` / `scopePrIds` hold the whole scope (the candidate, the tag the walk stopped at, the
+   *  oldest tag read). A newer tag's reasons are always whole; only these two lists are cut, so a long
+   *  history (a repository released from merged PRs: one point per PR) never builds n² lists. */
+  full: boolean;
 }
 
 /** Fold ONE releasable repository. Pure. */
@@ -655,33 +676,57 @@ function foldRepo(
     from = i + 1;
   }
 
+  const identsCache = new Map<Span, string[]>();
   const identsOf = (span: Span): string[] => {
+    const hit = identsCache.get(span);
+    if (hit != null) return hit;
     const out: string[] = [];
-    for (const id of span.prIds) for (const ident of prById.get(id)?.ticketIdents ?? []) if (!out.includes(ident)) out.push(ident);
+    const seen = new Set<string>();
+    for (const id of span.prIds) {
+      for (const ident of prById.get(id)?.ticketIdents ?? []) {
+        if (seen.has(ident)) continue;
+        seen.add(ident);
+        out.push(ident);
+      }
+    }
+    identsCache.set(span, out);
     return out;
   };
+  /** A span's tickets that say something (not Complete-and-clear, not Cancelled), in order — a ticket's
+   *  verdict is the same in every span, so a scope's reasons need only these. Cached per span. */
+  const notableCache = new Map<number, Array<{ ident: string; v: TicketVerdict }>>();
+  const notableOf = (s: number): Array<{ ident: string; v: TicketVerdict }> => {
+    const hit = notableCache.get(s);
+    if (hit != null) return hit;
+    const out: Array<{ ident: string; v: TicketVerdict }> = [];
+    for (const ident of identsOf(spans[s]!)) {
+      const v = verdictOf(ident, repo.repoId);
+      if (v.kind !== 'ok' && v.kind !== 'cancelled') out.push({ ident, v });
+    }
+    notableCache.set(s, out);
+    return out;
+  };
+  /** incompleteUpTo[s]: some span at or below s is not read whole yet. */
+  const incompleteUpTo: boolean[] = [];
+  spans.forEach((sp, i) => incompleteUpTo.push(!sp.complete || (i > 0 && incompleteUpTo[i - 1]!)));
 
   /** THE RULE for one tag: its scope, then each ticket's verdict. `ownOnly` = the older band's view (a
-   *  tag below the candidate lists only what it added). */
-  const evaluate = (s: number, ownOnly = false): TagEval => {
+   *  tag below the candidate lists only what it added). `full` = also list the whole scope's tickets and
+   *  PRs (`TagEval.full`); the reasons are whole either way. */
+  const evaluate = (s: number, ownOnly = false, full = false): TagEval => {
     const own = spans[s]!;
     // The tag's own increment first, then every earlier tag after the baseline, newest first. While a
     // newer baseline may still turn up the earlier tags are not known to be in the scope: own only.
-    const scope = ownOnly || baselinePending ? [own] : [own, ...spans.slice(0, s).reverse()];
+    const single = ownOnly || baselinePending;
     const blockers: ReleaseBlocker[] = [];
     const checking: ReleaseBlocker[] = [];
     const unverified: ReleaseUnverified[] = [];
-    const scopeIdents: string[] = [];
     const seen = new Set<string>();
-    const scopePrIds: number[] = [];
-    for (const sp of scope) {
-      const fromTag = sp === own ? null : ordered[sp.tagIdx]!.name;
-      for (const id of sp.prIds) scopePrIds.push(id);
-      for (const ident of identsOf(sp)) {
+    for (let idx = s; idx >= (single ? s : 0); idx -= 1) {
+      const fromTag = idx === s ? null : ordered[spans[idx]!.tagIdx]!.name;
+      for (const { ident, v } of notableOf(idx)) {
         if (seen.has(ident)) continue;
         seen.add(ident);
-        scopeIdents.push(ident);
-        const v = verdictOf(ident, repo.repoId);
         const key = keyOf(ident);
         const title = titleOf(ident);
         if (v.kind === 'split') {
@@ -694,13 +739,32 @@ function foldRepo(
         else if (v.kind === 'unverified') unverified.push({ ident, key, ...named(title), reason: v.reason, fromTag });
       }
     }
+    // The scope's tickets and PRs, newest span first (only when asked: see `TagEval.full`).
+    const whole = full || single || s === 0;
+    const scopeIdents: string[] = [];
+    const scopePrIds: number[] = [];
+    if (whole) {
+      const all = new Set<string>();
+      for (let idx = s; idx >= (single ? s : 0); idx -= 1) {
+        const sp = spans[idx]!;
+        for (const id of sp.prIds) scopePrIds.push(id);
+        for (const ident of identsOf(sp)) {
+          if (all.has(ident)) continue;
+          all.add(ident);
+          scopeIdents.push(ident);
+        }
+      }
+    } else {
+      scopeIdents.push(...identsOf(own));
+      scopePrIds.push(...own.prIds);
+    }
     // Not decided by its history yet: a scope not read, a baseline not known yet, or a version tag
     // whose place is unknown (newer, or inside the scope). The older band's own view waits only for its
     // own increment.
-    const historyWait = ownOnly ? !own.complete : scope.some((sp) => !sp.complete) || baselinePending || unknownVersions.length > 0;
+    const historyWait = ownOnly ? !own.complete : (single ? !own.complete : incompleteUpTo[s]!) || baselinePending || unknownVersions.length > 0;
     if (historyWait) checking.unshift({ kind: 'checking', ident: null, key: null, fromTag: null });
     const state: ReleaseTagState = blockers.length > 0 ? 'does_not_qualify' : checking.length > 0 ? 'checking' : 'qualifies';
-    return { span: s, state, blockers: [...blockers, ...(state === 'checking' ? checking : [])], unverified, scopeIdents, scopePrIds };
+    return { span: s, state, blockers: [...blockers, ...(state === 'checking' ? checking : [])], unverified, scopeIdents, scopePrIds, full: whole };
   };
 
   // THE WALK, newest first: the first tag that qualifies is the candidate; a tag not decided yet stops
@@ -719,6 +783,15 @@ function foldRepo(
       stopped = ev;
       break;
     }
+  }
+  // The tag the walk ended on (the candidate, the one it stopped at, or the oldest read) lists its WHOLE
+  // scope: with the newer tags' own lists that is every ticket and PR the walk read.
+  const lastAt = evals.length - 1;
+  if (lastAt >= 0 && !evals[lastAt]!.full) {
+    const whole = evaluate(evals[lastAt]!.span, false, true);
+    if (candidate === evals[lastAt]) candidate = whole;
+    if (stopped === evals[lastAt]) stopped = whole;
+    evals[lastAt] = whole;
   }
   // Every tag read is ruled out: an older tag (or a newer baseline) may still turn up while the
   // history is read — a tag whose place on the default branch is not known yet.
@@ -751,13 +824,22 @@ function foldRepo(
     candidate != null && ((olderEvals.length < wanted && knownLeft === 0 && unknownOlder > 0) || olderEvals.some((ev) => !spans[ev.span]!.complete));
   const olderLoading = olderHistoryNeeded || olderEvals.some((ev) => ev.state === 'checking');
   const suffix = settings.releaseSuffix ?? '';
+  const byPoints = repo.basis === 'prs';
+  const candidateTagName = (name: string): string =>
+    byPoints ? (repo.pointReleaseTagName ?? releaseTagName(name, suffix)) : releaseTagName(name, suffix);
+  const pointOf = (name: string): NonNullable<ReleaseRepoCheck['candidate']>['point'] => {
+    const n = releasePointNumber(name);
+    const p = n == null ? undefined : [...prById.values()].find((x) => x.repoId === repo.repoId && x.number === n);
+    return p == null ? null : { number: p.number, title: p.title, url: p.url, prId: p.prId ?? null };
+  };
   const candidateOut =
     candTag == null
       ? null
       : {
           ...ref(candTag),
-          releaseTagName: releaseTagName(candTag.name, suffix),
-          releaseTagExists: repo.tags.some((t) => t.name === releaseTagName(candTag.name, suffix)),
+          releaseTagName: candidateTagName(candTag.name),
+          releaseTagExists: repo.tags.some((t) => t.name === candidateTagName(candTag.name)),
+          ...(byPoints ? { point: pointOf(candTag.name) } : {}),
         };
 
   const untrackedPrIds: number[] = [];
@@ -859,6 +941,7 @@ function foldRepo(
     fullName: repo.fullName,
     name: repo.name,
     writable: repo.writable,
+    basis: repo.basis ?? 'tags',
     status,
     nothingNewReason: status !== 'nothing_new' ? null : latestVersion == null ? 'no_tags' : 'no_new_tags',
     latestVersion,
@@ -1246,6 +1329,8 @@ function openPrWhere(prs: readonly ReleaseOpenPr[]): string {
 
 /** The PR a split ticket would ship without: "bng-metric-backend #539 (in 0.326.0)", "… (not in a tag yet)". Pure. */
 export function releaseSplitWhere(b: { repoName: string; number: number; tagName: string | null }): string {
+  // A release point named by this very PR (a repository released from merged pull requests) says nothing more.
+  if (b.tagName != null && releasePointNumber(b.tagName) === b.number) return `${b.repoName} #${b.number}`;
   return `${b.repoName} #${b.number} (${b.tagName != null ? `in ${b.tagName}` : 'not in a tag yet'})`;
 }
 

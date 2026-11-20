@@ -47,7 +47,7 @@ import {
   ticketList,
   ticketWindow,
 } from '../src/components/Sprint/releaseTicketsModel.js';
-import { releaseReposDirty, releaseSuffixChangeWarning } from '../src/components/settings/releasesSectionModel.js';
+import { releaseBasesDirty, releaseBasisOptions, releaseReposDirty, releaseSuffixChangeWarning } from '../src/components/settings/releasesSectionModel.js';
 
 const SETTINGS = { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' };
 const day = (d: number, h = 12) => new Date(Date.UTC(2026, 10, d, h));
@@ -417,6 +417,38 @@ describe('Settings → Releases: the ticked repositories', () => {
     expect(releaseReposDirty([1], [1, 2])).toBe(true);
     expect(releaseReposDirty([1, 2], [1])).toBe(true);
     expect(releaseReposDirty([], [])).toBe(false);
+  });
+  it('"Release from": dirty only for a ticked repository whose choice changed; Auto names what it means now', () => {
+    expect(releaseBasesDirty({ 1: 'auto' }, { 1: 'auto' }, [1])).toBe(false);
+    expect(releaseBasesDirty({ 1: 'auto' }, { 1: 'prs' }, [1])).toBe(true);
+    expect(releaseBasesDirty({ 1: 'auto' }, { 1: 'prs' }, [])).toBe(false);
+    expect(releaseBasesDirty({}, { 2: 'auto' }, [2])).toBe(false);
+    expect(releaseBasisOptions('prs').map((o) => o.label)).toEqual(['Auto (merged pull requests)', 'Version tags', 'Merged pull requests']);
+    expect(releaseBasisOptions('tags')[0]!.label).toBe('Auto (version tags)');
+  });
+});
+
+describe('the repository strip — released from merged pull requests', () => {
+  // threeTags() with each tag standing for the merged PR on its commit: #1, #2, #3.
+  const NAMES: Record<string, string> = { 'v1.0.0': '#1', 'v1.1.0': '#2', 'v1.2.0': '#3', 'v1.0.0-rc': '2026.11.10-rc' };
+  const points = (base = threeTags()) => ({
+    ...base,
+    basis: 'prs' as const,
+    pointReleaseTagName: '2026.11.19-rc',
+    tags: base.tags.map((t) => ({ ...t, name: NAMES[t.name] ?? t.name })),
+    ranges: base.ranges.map((x) => ({ ...x, tagName: NAMES[x.tagName] ?? x.tagName, baseTagName: x.baseTagName == null ? null : (NAMES[x.baseTagName] ?? x.baseTagName) })),
+  });
+  const prs = () => [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T3'])];
+
+  it('candidate: "Up to #3 “title” → 2026.11.19-rc"; held: the PR below; none and nothing new in plain words', () => {
+    const ok = run({ repos: [points()], prs: prs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3')] });
+    expect(repoStripText(ok.repos[0]!)).toBe(`Up to #3 “${prs()[2]!.title}” → 2026.11.19-rc`);
+    const held = run({ repos: [points()], prs: prs(), tickets: [ticket('T1'), ticket('T2'), ticket('T3', { done: false })] });
+    expect(repoStripText(held.repos[0]!)).toBe(`Up to #2 “${prs()[1]!.title}” → 2026.11.19-rc`);
+    const none = run({ repos: [points()], prs: prs(), tickets: [ticket('T1', { done: false }), ticket('T2'), ticket('T3')] });
+    expect(repoStripText(none.repos[0]!)).toBe('Nothing merged can be released');
+    const empty = run({ repos: [{ ...points(), tags: [], ranges: [] }] });
+    expect(repoStripText(empty.repos[0]!)).toBe('Nothing merged yet');
   });
 });
 

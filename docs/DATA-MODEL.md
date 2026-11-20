@@ -973,7 +973,8 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
   re-homes rows to Default first), `created_by_user_id` / `created_by_login`, `created_at`,
   `release_suffix` (in force then), `notes_markdown`, `state` (`writing`·`done`·`partial`·`failed`·
   `stopped`), `finished_at`. Unique `(id, account_id)` is the children's FK parent.
-- **`release_items`** — one row per `(release, repo)`: `version_tag`, `sha`, `release_tag_name`,
+- **`release_items`** — one row per `(release, repo)`: `version_tag` (with `basis` `'prs'`: the release
+  point's name, `#539`), `sha`, `release_tag_name`, `basis` (migration 0212: `'tags'` / `'prs'`; NULL = before it, tags),
   `notes_markdown` (the pre-release body), `tag_state` (`pending`→`claimed`→`done`|`failed`|`refused`),
   `tag_object_oid`, `prerelease_state` (…|`skipped`), `github_release_id` / `_url`, `error`. ⚠ PARTIAL
   UNIQUE `(account_id, repo_id, release_tag_name) WHERE tag_state IN ('pending','claimed','done')` across
@@ -984,7 +985,8 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
 - **`workspace_release_repos`** (migration `0199`) — one row per `(account_id, workspace_id, repo_id)`
   the reader ticked "Released from this workspace" (Settings → Releases; default: none). ONLY these are
   folded by the release check, tagged, ranged by the tag sync and offered as hotfix bases; no row = ignored
-  entirely. `created_at`. ⚠ `start_tag_name` / `start_tag_sha` / `start_set_by_login` / `start_set_at` are
+  entirely. `created_at`. `release_basis` (migration 0212, "Release from"): NULL = auto, `'tags'`, `'prs'` —
+  read ONLY through shared `releaseBasisOf` (auto = merged pull requests while the repo has no version tag). ⚠ `start_tag_name` / `start_tag_sha` / `start_set_by_login` / `start_set_at` are
   DORMANT since 2026-11-15 (the reader's "Start from this tag" was removed: the check finds its own starting
   point) — never read or written, kept, never dropped. Composite FKs to `workspaces` and `repos`, both
   cascading; `deleteWorkspace` deletes the workspace's rows (a tick is that workspace's choice, never

@@ -5,6 +5,7 @@ import {
   suffixFromTyped,
   suffixTypedPart,
   validateReleaseSettings,
+  type ReleaseBasisSetting,
   type ReleaseSettingsResponse,
 } from '@pierre-review/shared';
 import { useReleaseSettings, useSetReleaseRepos, useSetReleaseSettings } from '../../hooks/useReleases.js';
@@ -12,7 +13,8 @@ import { InfoButton } from '../InfoModal.js';
 import { CheckInput, Field, SectionShell, inputCls } from './ui.js';
 import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
-import { releaseReposDirty, releaseSuffixChangeWarning } from './releasesSectionModel.js';
+import { Select } from '../ui/Select.js';
+import { releaseBasisOptions, releaseBasesDirty, releaseReposDirty, releaseSuffixChangeWarning } from './releasesSectionModel.js';
 
 // SETTINGS → RELEASES (docs/RELEASES.md § Terms and settings): the workspace's release suffix and
 // hotfix suffix, and which repositories are RELEASED FROM THIS WORKSPACE. BOTH suffixes and at least one
@@ -169,20 +171,40 @@ function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; da
     setTicked(stored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
-  const dirty = releaseReposDirty(stored, ticked);
+  const storedBases = Object.fromEntries(data.repos.map((r) => [r.repoId, r.basis] as const)) as Record<number, ReleaseBasisSetting>;
+  const [bases, setBases] = useState<Record<number, ReleaseBasisSetting>>(storedBases);
+  const basesSignature = `${workspaceId}:${data.repos.map((r) => `${r.repoId}=${r.basis}`).join(',')}`;
+  // Likewise for "Release from": its echo must not re-seed over a pick made since.
+  const basesSent = useRef<string | null>(null);
+  useEffect(() => {
+    if (basesSent.current === basesSignature) {
+      basesSent.current = null;
+      return;
+    }
+    setBases(storedBases);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basesSignature]);
+  const dirty = releaseReposDirty(stored, ticked) || releaseBasesDirty(storedBases, bases, ticked);
   const draftSignature = `${workspaceId}:${[...ticked].sort((a, b) => a - b).join(',')}`;
+  const nextBases = ticked.map((repoId) => ({ repoId, basis: bases[repoId] ?? ('auto' as const) }));
+  const draftBases = `${workspaceId}:${data.repos.map((r) => `${r.repoId}=${ticked.includes(r.repoId) ? (bases[r.repoId] ?? 'auto') : r.basis}`).join(',')}`;
   const autosave = useAutoSave({
-    key: draftSignature,
+    key: `${draftSignature}|${draftBases}`,
     ready: dirty,
     busy: save.isPending,
     run: () => {
       sent.current = draftSignature;
-      save.mutate({ repoIds: ticked });
+      basesSent.current = draftBases;
+      save.mutate({ repoIds: ticked, bases: nextBases });
     },
   });
   const toggle = (id: number): void => {
     autosave.now();
     setTicked((t) => (t.includes(id) ? t.filter((x) => x !== id) : [...t, id]));
+  };
+  const pickBasis = (id: number, v: ReleaseBasisSetting): void => {
+    autosave.now();
+    setBases((b) => ({ ...b, [id]: v }));
   };
 
   return (
@@ -193,6 +215,12 @@ function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; da
         <InfoButton title="Released from this workspace">
           <p>Tick the repositories your team releases. Releases ignores the others: no rows, no blocks, no warnings.</p>
           <p>In a hotfix build, a repository that is not ticked is read only.</p>
+          <p>
+            Release from: a repository with version tags is released tag by tag. One with no version tags is released
+            from its merged pull requests: each one merged into the default branch counts as a release point, and
+            Release… tags the chosen commit with the date and the release suffix. Auto picks by whether the repository
+            has version tags.
+          </p>
         </InfoButton>
       }
     >
@@ -207,6 +235,19 @@ function ReleasableReposSection({ workspaceId, data }: { workspaceId: number; da
                 <span className="min-w-0 truncate">{r.fullName}</span>
                 {r.external && <span className="text-meta text-ui-mute">External</span>}
               </label>
+              {ticked.includes(r.repoId) && (
+                <div className="mt-1 flex items-center gap-2 pl-6 text-meta text-ui-mute">
+                  <span>Release from</span>
+                  <Select<ReleaseBasisSetting>
+                    size="sm"
+                    label={`Release ${r.fullName} from`}
+                    value={bases[r.repoId] ?? 'auto'}
+                    onChange={(v) => pickBasis(r.repoId, v)}
+                    options={releaseBasisOptions(r.effectiveBasis)}
+                    disabled={save.isPending}
+                  />
+                </div>
+              )}
             </li>
           ))}
         </ul>

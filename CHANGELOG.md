@@ -13,6 +13,15 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Releases work without version tags. A repository with no version tags is released from its merged pull requests:
+  each one merged into the default branch counts as a release point, and the same rules pick the newest one whose
+  tickets, and every earlier one's since the last release, are Complete with no pull request still open. Release…
+  tags that commit with the date and your release suffix (2026.11.19-rc), and that tag is where the next release
+  starts. Settings → Releases → "Release from" (Auto, Version tags, Merged pull requests) picks it per repository;
+  Auto uses merged pull requests until the repository has a version tag.
+
 ### Changed
 
 - Settings save as you go: there is no Save button on any Settings tab. A switch, choice or tick saves at once;

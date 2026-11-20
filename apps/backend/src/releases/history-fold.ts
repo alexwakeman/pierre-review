@@ -231,3 +231,45 @@ export function historyView(
   }
   return { onDefaultBranch, increments };
 }
+
+// ── Release points (a repository released from merged pull requests) ─────────────────────────────
+
+export interface ReleasePoint {
+  /** `#539` (shared `releasePointName`). */
+  name: string;
+  sha: string;
+  prNumber: number;
+  /** The commit's date, nudged so the points sort in WALK order (each 1 ms after the one below it when
+   *  the dates tie or run backwards: a rebase merge, a clock skew). */
+  committedAt: Date | null;
+}
+
+/**
+ * docs/RELEASES.md § Releasing without version tags: in a repository released from MERGED PULL REQUESTS,
+ * every pull request's NEWEST first-parent commit is a release point — a squash or merge commit is the
+ * PR's one commit; a rebase merge's earlier commits fall to the point above them. A commit that brings
+ * more than one new PR is one point, named by the first. Commits with no PR (direct pushes) belong to the
+ * point above them. Newest first. Pure.
+ */
+export function releasePointsOf(commits: readonly StoredHistoryCommit[]): ReleasePoint[] {
+  const ordered = [...commits].sort((x, y) => y.seq - x.seq);
+  const seen = new Set<number>();
+  const points: ReleasePoint[] = [];
+  for (const c of ordered) {
+    const fresh = c.prNumbers.filter((n) => !seen.has(n));
+    for (const n of c.prNumbers) seen.add(n);
+    if (fresh.length === 0) continue;
+    points.push({ name: `#${fresh[0]!}`, sha: c.sha, prNumber: fresh[0]!, committedAt: c.committedAt });
+  }
+  // Oldest first: a date never earlier than (and never equal to) the point below it.
+  let prev: number | null = null;
+  for (let i = points.length - 1; i >= 0; i -= 1) {
+    const p = points[i]!;
+    const at = p.committedAt?.getTime() ?? null;
+    if (at == null) continue;
+    const next: number = prev != null && at <= prev ? prev + 1 : at;
+    if (next !== at) p.committedAt = new Date(next);
+    prev = next;
+  }
+  return points;
+}

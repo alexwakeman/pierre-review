@@ -529,7 +529,8 @@ export const SPRINT_RELEASES = {
   repos: [
     { name: REPOS.ledger, candidate: false, text: 'No tag since v0.8.0-rc can be released' },
     { name: REPOS.api, candidate: false, text: 'Checking…', progress: { share: 0.44, line: "Reading main's history: 2,380 of 5,400 commits" } },
-    { name: 'acme/docs-site', candidate: false, text: 'Nothing new since v4.1.0-rc' },
+    // Released from merged pull requests (no version tags): its release tags carry the date.
+    { name: 'acme/docs-site', candidate: false, text: 'Nothing merged since 2026.10.02-rc' },
   ] as Array<{
     name: string;
     candidate: boolean;

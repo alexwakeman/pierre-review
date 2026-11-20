@@ -10,7 +10,12 @@
 //   • The `start_tag_*` columns are DORMANT (the start tag was removed 2026-11-15: the check finds its
 //     starting point itself). Never read, never written, never dropped.
 import { and, eq, inArray } from 'drizzle-orm';
-import { normaliseReleaseSuffix, releaseSettingsConfigured, type ReleaseRangeView } from '@pierre-review/shared';
+import {
+  normaliseReleaseSuffix,
+  releaseSettingsConfigured,
+  type ReleaseBasisSetting,
+  type ReleaseRangeView,
+} from '@pierre-review/shared';
 import { db, runTransaction, schema } from './client.js';
 import { getWorkspaceRepoIds } from './queries.js';
 
@@ -18,6 +23,8 @@ const { workspaceReleaseRepos, workspaces } = schema;
 
 export interface ReleaseRepoRow {
   repoId: number;
+  /** "Release from" (migration 0212): `auto` when not set. */
+  basis: ReleaseBasisSetting;
 }
 
 /** The workspace's member repos (home + External). */
@@ -29,21 +36,22 @@ export async function workspaceMemberRepoIds(accountId: number, workspaceId: num
 export async function getReleaseRepos(accountId: number, workspaceId: number): Promise<Map<number, ReleaseRepoRow>> {
   const members = new Set(await workspaceMemberRepoIds(accountId, workspaceId));
   const rows = await db
-    .select({ repoId: workspaceReleaseRepos.repoId })
+    .select({ repoId: workspaceReleaseRepos.repoId, basis: workspaceReleaseRepos.releaseBasis })
     .from(workspaceReleaseRepos)
     .where(and(eq(workspaceReleaseRepos.accountId, accountId), eq(workspaceReleaseRepos.workspaceId, workspaceId)))
     .execute();
   const out = new Map<number, ReleaseRepoRow>();
   for (const r of rows) {
     if (!members.has(r.repoId)) continue;
-    out.set(r.repoId, { repoId: r.repoId });
+    out.set(r.repoId, { repoId: r.repoId, basis: r.basis ?? 'auto' });
   }
   return out;
 }
 
 /**
  * Replace the ticked set. `repoIds` must all be workspace members (else `{refused}` names them and
- * nothing changes). An unticked repo loses its row.
+ * nothing changes). An unticked repo loses its row. `bases` sets "Release from" for ticked repos
+ * (`auto` stores NULL); a ticked repo not named keeps its choice.
  * Returns null when the workspace is not this account's.
  */
 export async function setReleaseRepos(
@@ -51,6 +59,7 @@ export async function setReleaseRepos(
   workspaceId: number,
   repoIds: readonly number[],
   now: Date = new Date(),
+  bases: ReadonlyArray<{ repoId: number; basis: ReleaseBasisSetting }> = [],
 ): Promise<{ ok: true } | { ok: false; refused: number[] } | null> {
   const owned = (
     await db
@@ -89,6 +98,20 @@ export async function setReleaseRepos(
         .insert(workspaceReleaseRepos)
         .values({ accountId, workspaceId, repoId, createdAt: now })
         .onConflictDoNothing({ target: [workspaceReleaseRepos.accountId, workspaceReleaseRepos.workspaceId, workspaceReleaseRepos.repoId] })
+        .execute();
+    }
+    for (const b of bases) {
+      if (!want.includes(b.repoId)) continue;
+      await tx
+        .update(workspaceReleaseRepos)
+        .set({ releaseBasis: b.basis === 'auto' ? null : b.basis })
+        .where(
+          and(
+            eq(workspaceReleaseRepos.accountId, accountId),
+            eq(workspaceReleaseRepos.workspaceId, workspaceId),
+            eq(workspaceReleaseRepos.repoId, b.repoId),
+          ),
+        )
         .execute();
     }
   });
