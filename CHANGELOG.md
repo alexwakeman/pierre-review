@@ -20,6 +20,9 @@ no internals.
   says why beside the box. A token, API key or Slack webhook saves when you press Enter or leave the box, and is
   never shown again. Each section says "Saved" when its change is stored; a change that could not be saved says
   so beside it and in the corner of the window.
+- This Sprint: only the Critical path view draws arrows, and each arrow's reason is now written beside it, in the
+  space between the tickets, instead of behind a number you had to hover. The Theme and People views draw no
+  arrows; a ticket that waits on another still wears the hourglass mark.
 
 ## [1.0.67] - 2026-11-19
 

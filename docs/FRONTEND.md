@@ -2935,8 +2935,8 @@ ghost buttons, Refresh secondary); quiet cards (surface tone, no border; MARKS n
 hairline lane rules, no zebra. ⌘K while the board is up (`SprintCommands` in SprintView): Refresh,
 Ask, Statuses, both filters, and every ticket ("PLAT-292 · title" shows its story in the tray). ⚠ A
 PHONE (`useIsPhone`) gets `StackedLaneBoard` (LaneBoard.tsx): lanes down, each lane's columns down,
-cards two to a row, the Complete toggle as a line above, and the ARROWS as a VISIBLE numbered
-"Dependencies" list (every sentence) — a routed arrow cannot cross a stack. 768–1023: the grid in
+cards two to a row, the Complete toggle as a line above, and (Critical path only) the ARROWS as a
+VISIBLE "Critical path links" list (every sentence) — a routed arrow cannot cross a stack. 768–1023: the grid in
 narrow mode, columns ≥ 9rem, scrolling sideways in its own box with snap. The story tray is a
 FULL-SCREEN sheet on a phone (Back, top left), a right sheet md–lg, the sticky column at lg+.
 
@@ -3049,17 +3049,28 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
     An empty lane is not drawn. Lanes alternate a faint ground under a rule. The lane label is a side
     column; below 760px it moves to a band heading above the lane's cards, as the design grid's layer
     names do. Below the columns' minimum widths the board scrolls INSIDE its own box, never the page.
-  - **ARROWS** are `depends_on` edges between two DRAWN cards, FROM the ticket waited on TO the one that
-    waits, routed by `routeArrow` (lib/designGrid.ts) through the padded slots and grid gaps and
-    re-measured by a ResizeObserver (`useRoutedArrows`; it re-renders only when the drawing changes, so a
-    caller's un-memoised arrays cannot loop). A critical arrow is the accent (`--ai-signal-fill`). A
-    labelled arrow carries a number keyed in ONE line under the board (`ArrowKey`); arrows with the SAME
-    words share a number. An sr-only list ("Dependencies") reads every arrow as "B waits on A: why".
-    Hovering a line or its number shows the popover — HOVER / FOCUS ONLY, no pin (§ Design diagrams →
-    Arrow popovers). Above the arrow key, `BorderKey` (`components/LaneBoard.tsx`, the SAME component the
+  - **ARROWS — CRITICAL PATH VIEW ONLY** (owner, 2026-11-19: "just critical path is fine for those
+    lines"; Theme and People hand the board NO arrows — `themesBoard` / `peopleBoard` return `[]`, the
+    cards keep their waiting / critical MARKS). They are the `depends_on` edges between two tickets of
+    one path, between two DRAWN cards, FROM the ticket waited on TO the one that waits, routed by
+    `routeArrow` (lib/designGrid.ts) through the padded slots and grid gaps and re-measured by a
+    ResizeObserver (`useRoutedArrows`; it re-renders only when the drawing changes, so a caller's
+    un-memoised arrays cannot loop; it re-measures on the narrow flip too, which MOVES cards without
+    resizing them). Every arrow is drawn as the heavier ink line. **Its words (the edge's `why`) are
+    drawn beside it ALWAYS** — no number, no key, no hover: `fitArrowLabels` (lib/designGrid.ts) gives
+    each label the FREE box round its arrow's label point (sideways to the nearest card / heading /
+    "n tickets" / placed label, then up and down within that width — the board's words are marked
+    `data-label-obstacle`), wraps the words to it (12px, the compact meta size — `LABEL_TYPE_CLASS` — measured on a canvas in that font) and
+    cuts the lines that do not fit (ellipsis; the full sentence is the label's `title`). It sits just
+    above its line, else just below; only when neither fits does it sit ON the line, kept 15px clear of
+    both cards so the arrowhead shows. Every label still to come keeps a one-line band at its point, so
+    an earlier label never swallows it. A label with no room is not drawn. A board with labels gets
+    `gap-x-24` column gaps to hold them. An sr-only list ("Critical path links") reads every arrow as "B
+    waits on A: why". Above the arrow list, `BorderKey` (`components/LaneBoard.tsx`, the SAME component the
     design grid's key uses) names each card MARK the board draws ("Card marks"), each with the card's own icon or ground
     (`ticketCardMarks` / `ticketCardSurface`, `sprintBorderKeyItems`). ⚠ `useRoutedArrows`, `ArrowLayer`, `ArrowKey`,
-    `BorderKey` and `ArrowList` are SHARED with `DesignGrid`, which kept its look; change them for both or
+    `BorderKey` and `ArrowList` are SHARED with `DesignGrid`, which kept its look (numbered markers, the
+    key, hover popovers — the lane board no longer uses the numbers or popovers); change them for both or
     neither. ⚠ The SAME border means different things on the two surfaces (dashed accent = waiting here,
     "Changed" on the design grid) — which is why each surface draws its own visible key.
   - **ONE CARD, `TicketCard`** (`components/TicketCard.tsx`), for every view, ⚠ **ONE HEIGHT whatever
@@ -3147,8 +3158,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   progress, 3 Product review, 8 Complete" / "4 with a pull request, 9 without") are NOT printed under
   the name — ⚠ they live ONLY in the colour bar's popover (below), so the model's sentence is the one
   line of prose on the row and the code's counts sit apart from it. Sprint tickets only.
-  An arrow is critical when its two tickets sit next to each other on a stored path; its key is the
-  brief's `why`.
+  No arrows (Critical path only).
 - **PEOPLE** (`SprintPeopleView`, `peopleBoard`) — one lane per assignee, ALPHABETICAL,
   Unassigned last. ⚠ Never by PR count or load ("prep, not scoring"): on 2026-10-26 the owner moved the
   Theme and Critical path lanes to PR order and kept People alphabetical. A person is
@@ -3179,8 +3189,7 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   mouse, `pointer-events-none`, closes when the pointer leaves) with CODE's two row lines (tickets by
   column; with / without a pull request — `data-testid` `lane-progress` / `lane-code`), then each
   part's swatch, column and count. The bar's accessible name carries the same two lines.
-  Placed by `lib/avoidRects.ts` clear of the board's cards (`useBoardObstacles`). An arrow BETWEEN two lanes is a hand-off keyed "<person> waits on
-  <person>"; one inside a lane keys the brief's `why`.
+  Placed by `lib/avoidRects.ts` clear of the board's cards (`useBoardObstacles`). No arrows (Critical path only).
 
 - **The toolbar**: the sprint's title + ⓘ ("Reading this sprint": the views, columns, the card's one-liner and criteria line, borders, Refresh, arrows),
   its dates (`sprintDatesLine`: "14 Oct – 27 Oct · day 1 of 14" from `sprintDates`, the day count from
