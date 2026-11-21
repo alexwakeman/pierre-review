@@ -1,6 +1,7 @@
 # Plan: Implement story builds front ends — the ticket relay, Figma, and an on-demand browser
 
-Status: **DESIGN NOTE, NOT BUILT** (2026-11-21). Nothing here exists in code yet. When a part is built, move
+Status: **BEING BUILT** (2026-11-21). § 2 (the ticket relay) is BUILT for Jira attachments and every provider's links:
+[SANDBOX.md](SANDBOX.md) § The ticket relay is now its contract. The rest is not built yet. When a part is built, move
 its detail into [STORY-BUILD.md](STORY-BUILD.md) / [SANDBOX.md](SANDBOX.md) / [TRACKERS.md](TRACKERS.md) and
 mark it built here, as [CODEX-PLAN.md](CODEX-PLAN.md) does.
 
@@ -69,6 +70,10 @@ part of this plan.
 ---
 
 ## 2. The ticket relay — `ensemble-ticket`
+
+> **Built 2026-11-21** (Jira attachments; links from every provider). Differences from the design below: there is
+> no `figma` verb yet (§ 3); a link is never fetched by the host — `get` answers how to open it through the proxy, so
+> the reader's allow-list still decides; the manifest scans the session's own TICKET text, so it adds no tracker read.
 
 The agent asks for ticket material; the HOST reads it with the workspace's tracker credential and writes the
 result into the sandbox. **No tracker credential ever enters the sandbox.** This keeps the threat model's

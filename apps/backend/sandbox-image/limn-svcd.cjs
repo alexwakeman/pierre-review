@@ -1,4 +1,5 @@
-// limn-svcd — the services RELAY inside the sandbox (docs/SANDBOX.md § Services). Limn starts it with
+// limn-svcd — a RELAY inside the sandbox (docs/SANDBOX.md § Services; the same program serves
+// `ensemble-ticket`, § The ticket relay — LIMN_RELAY_NAME names the command, LIMN_SVC_SOCKET its socket). Limn starts it with
 // `docker exec -i` and talks to it over its STDIN/STDOUT, one JSON object per line. Nothing listens on
 // the network for Limn: the host never accepts a connection from a sandbox.
 //
@@ -17,6 +18,8 @@ const fs = require('node:fs');
 const net = require('node:net');
 
 const SOCKET = process.env.LIMN_SVC_SOCKET || '/tmp/limn-svc.sock';
+// The command this relay serves, in its own messages (`limn-svc`, or `ensemble-ticket`: the same relay).
+const NAME = /^[a-z][a-z0-9-]{0,40}$/.test(process.env.LIMN_RELAY_NAME || '') ? process.env.LIMN_RELAY_NAME : 'limn-svc';
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_CLIENTS = 8;
 const MAX_FORWARDS = 256;
@@ -34,7 +37,7 @@ try {
 
 const server = net.createServer((sock) => {
   if (clients.size >= MAX_CLIENTS) {
-    sock.end(JSON.stringify({ e: 'limn-svc: too many requests at once. Try again.\n' }) + '\n' + JSON.stringify({ x: 3 }) + '\n');
+    sock.end(JSON.stringify({ e: `${NAME}: too many requests at once. Try again.\n` }) + '\n' + JSON.stringify({ x: 3 }) + '\n');
     return;
   }
   let buf = '';
@@ -44,7 +47,7 @@ const server = net.createServer((sock) => {
     if (id !== null) return;
     buf += chunk;
     if (buf.length > MAX_REQUEST_BYTES) {
-      sock.end(JSON.stringify({ e: 'limn-svc: the request is too long.\n' }) + '\n' + JSON.stringify({ x: 2 }) + '\n');
+      sock.end(JSON.stringify({ e: `${NAME}: the request is too long.\n` }) + '\n' + JSON.stringify({ x: 2 }) + '\n');
       return;
     }
     const nl = buf.indexOf('\n');
@@ -53,7 +56,7 @@ const server = net.createServer((sock) => {
     try {
       req = JSON.parse(buf.slice(0, nl));
     } catch {
-      sock.end(JSON.stringify({ e: 'limn-svc: unreadable request.\n' }) + '\n' + JSON.stringify({ x: 2 }) + '\n');
+      sock.end(JSON.stringify({ e: `${NAME}: unreadable request.\n` }) + '\n' + JSON.stringify({ x: 2 }) + '\n');
       return;
     }
     const argv = Array.isArray(req.argv) ? req.argv.filter((a) => typeof a === 'string') : [];
@@ -68,7 +71,7 @@ const server = net.createServer((sock) => {
   sock.on('error', gone);
 });
 server.on('error', (e) => {
-  process.stderr.write(`limn-svcd: ${e.message}\n`);
+  process.stderr.write(`${NAME} relay: ${e.message}\n`);
   process.exit(1);
 });
 server.listen(SOCKET, () => {
@@ -171,7 +174,7 @@ process.stdin.on('data', (chunk) => {
 });
 // Limn went away: nothing can answer any more.
 process.stdin.on('end', () => {
-  for (const sock of clients.values()) sock.end(JSON.stringify({ e: 'limn-svc: Limn stopped answering.\n' }) + '\n' + JSON.stringify({ x: 3 }) + '\n');
+  for (const sock of clients.values()) sock.end(JSON.stringify({ e: `${NAME}: Ensemble stopped answering.\n` }) + '\n' + JSON.stringify({ x: 3 }) + '\n');
   server.close();
   try {
     fs.unlinkSync(SOCKET);

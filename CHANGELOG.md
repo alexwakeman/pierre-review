@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Implement story: the agent can read what the ticket attaches or links (designs, screenshots, sketches, JSON). It
+  asks for the files it needs, and Ensemble reads them from your tracker. Jira attachments for now; links from any
+  tracker. Your tracker token stays on your computer, and each read shows in the session's **Network** panel.
+
 ## [1.0.71] - 2026-11-20
 
 ### Changed

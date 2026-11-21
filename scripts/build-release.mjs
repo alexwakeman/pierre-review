@@ -468,7 +468,7 @@ const CODEX_HELPER_ENTRIES = ['dist/ai/codex/workspace-mcp-main.js', 'dist/ai/co
 mustExist.push(...CODEX_HELPER_ENTRIES);
 // The sandbox: the Dockerfile the local-build fallback reads, and the egress proxy's program, which runs
 // ALONE in the proxy container (node: built-ins only — asserted below by the app's own check).
-mustExist.push('dist/sandbox-image/Dockerfile', 'dist/sandbox-image/limn-svc', 'dist/sandbox-image/limn-svcd.cjs', 'dist/sandbox/proxy/server.js', 'dist/sandbox/runtime/image.js');
+mustExist.push('dist/sandbox-image/Dockerfile', 'dist/sandbox-image/limn-svc', 'dist/sandbox-image/ensemble-ticket', 'dist/sandbox-image/limn-svcd.cjs', 'dist/sandbox/proxy/server.js', 'dist/sandbox/runtime/image.js');
 for (const rel of mustExist) {
   if (!existsSync(join(releaseDir, rel))) fail(`missing required file: ${rel}`);
 }

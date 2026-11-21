@@ -1,4 +1,4 @@
-// THE HOST SIDE OF THE SERVICES RELAY (docs/SANDBOX.md § Services). Limn starts `limn-svcd`
+// THE HOST SIDE OF A SANDBOX RELAY (docs/SANDBOX.md § Services; also `ensemble-ticket`, § The ticket relay). Limn starts `limn-svcd`
 // (apps/backend/sandbox-image/limn-svcd.cjs) INSIDE the sandbox with `runtime.exec` and talks to it over
 // that process's stdin/stdout, one JSON object per line. So:
 //
@@ -11,13 +11,19 @@
 // If the relay exits while the session is open (the agent can kill its own processes), it is started
 // again, a few times, and the forwards are given to it again.
 import type { SandboxRuntime } from '../runtime/types.js';
-import type { ServicesController } from './controller.js';
 import type { Forward } from './policy.js';
 
 export const RELAY_PROGRAM = '/usr/local/lib/limn/limn-svcd.cjs';
 export const SVC_SOCKET = '/tmp/limn-svc.sock';
 const MAX_RESTARTS = 5;
 const MAX_CHUNK = 32 * 1024;
+
+/** What a relay hands each request to: the services controller, or another host-side command
+ *  (`ensemble-ticket`, sandbox/ticket/). `setForwarder` is the services' localhost forwards only. */
+export interface RelayHandler {
+  handle(argv: readonly string[], cwd: string, out: (stream: 'o' | 'e', text: string) => void): Promise<number>;
+  setForwarder?(f: ((forwards: Forward[]) => Promise<{ listening: number[]; failed: { port: number; reason: string }[] }>) | null): void;
+}
 
 export interface ServicesRelay {
   /** Resolves when the relay listens (rejects when it never does). */
@@ -34,13 +40,17 @@ type FromRelay =
 export function startServicesRelay(o: {
   runtime: SandboxRuntime;
   sandbox: string;
-  controller: ServicesController;
+  controller: RelayHandler;
+  /** The command's name in the relay's own messages (default `limn-svc`). */
+  name?: string;
   onProblem?: (line: string) => void;
   readyTimeoutMs?: number;
   /** Test seams: the relay program and its socket. */
   program?: string;
   socket?: string;
 }): ServicesRelay {
+  const name = o.name ?? 'limn-svc';
+  const what = name === 'limn-svc' ? 'services' : name;
   let closed = false;
   let restarts = 0;
   let current: ReturnType<SandboxRuntime['exec']> | null = null;
@@ -57,7 +67,7 @@ export function startServicesRelay(o: {
 
   const send = (m: unknown): void => current?.write(`${JSON.stringify(m)}\n`);
 
-  o.controller.setForwarder(
+  o.controller.setForwarder?.(
     (forwards) =>
       new Promise((resolve) => {
         lastForwards = forwards;
@@ -96,7 +106,7 @@ export function startServicesRelay(o: {
       void o.controller
         .handle(argv, cwd, out)
         .catch((e: unknown) => {
-          out('e', `limn-svc: ${e instanceof Error ? e.message : String(e)}\n`);
+          out('e', `${name}: ${e instanceof Error ? e.message : String(e)}\n`);
           return 1;
         })
         .then((code) => send({ t: 'exit', id, code }));
@@ -105,7 +115,7 @@ export function startServicesRelay(o: {
   };
 
   const start = (): void => {
-    const h = o.runtime.exec(o.sandbox, ['node', o.program ?? RELAY_PROGRAM], { interactive: true, env: { LIMN_SVC_SOCKET: o.socket ?? SVC_SOCKET } });
+    const h = o.runtime.exec(o.sandbox, ['node', o.program ?? RELAY_PROGRAM], { interactive: true, env: { LIMN_SVC_SOCKET: o.socket ?? SVC_SOCKET, LIMN_RELAY_NAME: name } });
     current = h;
     void (async () => {
       let buf = '';
@@ -131,20 +141,20 @@ export function startServicesRelay(o: {
       for (const w of pendingForwards.splice(0)) w({ listening: [], failed: lastForwards.map((f) => ({ port: f.port, reason: 'the relay stopped' })) });
       if (closed) return;
       if (restarts++ < MAX_RESTARTS) {
-        o.onProblem?.(`The services relay stopped${err.trim() ? ` (${err.trim().split('\n').pop()})` : ''}. Starting it again.`);
+        o.onProblem?.(`The ${what} relay stopped${err.trim() ? ` (${err.trim().split('\n').pop()})` : ''}. Starting it again.`);
         setTimeout(() => {
           if (!closed) start();
         }, 1_000).unref();
       } else {
-        o.onProblem?.('The services relay keeps stopping. `limn-svc` will not answer in this session.');
-        if (!isReady) readyReject(new Error('The services relay did not start.'));
+        o.onProblem?.(`The ${what} relay keeps stopping. \`${name}\` will not answer in this session.`);
+        if (!isReady) readyReject(new Error(`The ${what} relay did not start.`));
       }
     })();
   };
   start();
 
   const timer = setTimeout(() => {
-    if (!isReady) readyReject(new Error('The services relay did not start.'));
+    if (!isReady) readyReject(new Error(`The ${what} relay did not start.`));
   }, o.readyTimeoutMs ?? 20_000);
   timer.unref();
 
@@ -153,7 +163,7 @@ export function startServicesRelay(o: {
     close() {
       closed = true;
       clearTimeout(timer);
-      o.controller.setForwarder(null);
+      o.controller.setForwarder?.(null);
       current?.end();
       current?.kill();
       current = null;

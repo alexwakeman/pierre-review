@@ -190,6 +190,7 @@ export default function Page(): JSX.Element {
         rows={[
           { _key: 'r', w: 'Every repository in the workspace', d: 'At the same paths as your own clones, which Ensemble finds through the folders where you use Claude Code, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
           { _key: 't', w: 'The ticket in full', d: 'Description, numbered acceptance criteria and open points.' },
+          { _key: 'f', w: 'The ticket’s files', d: 'What the ticket attaches or links: designs, screenshots, sketches, JSON. The agent asks Ensemble for the ones it needs, and Ensemble reads them from your tracker. Your tracker token stays on your computer. Jira attachments for now; links from any tracker.' },
           { _key: 'n', w: 'Your Claude notes', d: 'The notes of each repository’s clone (untick one in Settings → Sandbox), your CLAUDE.md and, if you allow, skills. Copied in; the originals are never changed. Each repository’s own CLAUDE.md and AGENTS.md are in its code. Past sessions are never brought in.' },
           { _key: 'k', w: 'Skills', d: 'Skills your repositories keep in .claude/skills come with the code, and the agent is told where each one is. Your own ~/.claude/skills come only if you allow it in Settings → Sandbox.' },
           { _key: 'd', w: 'Reference documents', d: 'When the workspace has them: the parts of the library that match the story, read only. The agent reads their index first and uses only what helps; the plan says which it used.' },

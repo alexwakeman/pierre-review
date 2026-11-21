@@ -64,6 +64,8 @@ export const SLOW_TESTS = [
   // forwards); and services on a real daemon (compose, builds, the real BNG backend file when cloned).
   'src/sandbox/services/relay.test.ts',
   'src/sandbox/services/services-real.test.ts',
+  // `ensemble-ticket` on a real daemon: the shipped client and relay in a plain Node container, over `docker exec`.
+  'src/sandbox/ticket/ticket-real.test.ts',
   // Real git (a blobless cache, worktrees, shallow fetches) and a real daemon: the workspace mirror end to
   // end; its Docker part is skipped with its reason when no daemon answers.
   'src/sandbox/workspace/mirror-real.test.ts',

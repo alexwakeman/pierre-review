@@ -99,6 +99,7 @@ import { startEgress, type EgressSession } from '../proxy/egress.js';
 import { bootSweepSettled, sandboxRuntime } from '../runtime/index.js';
 import { DEFAULT_RESOURCES, type SandboxResources, type SandboxRuntime, type SessionOwner } from '../runtime/types.js';
 import { serviceStacksFor, startSessionServices, type SessionServices } from '../services/index.js';
+import { startTicketRelay, trackerTicketRelaySource, type TicketRelay } from '../ticket/index.js';
 import {
   defaultLayoutPlaces,
   prepareSessionWorkspace,
@@ -189,6 +190,8 @@ export interface SessionDeps {
   startEgress: typeof startEgress;
   startAgent: typeof startSandboxAgent;
   startServices: typeof startSessionServices;
+  /** `ensemble-ticket` (docs/SANDBOX.md § The ticket relay). */
+  startTicketRelay: typeof startTicketRelay;
   readTicket(ctx: AgentContext, accountId: number, workspaceId: number, ident: string, coverage: StoryBuildCoverage | null): Promise<SessionTicket | null>;
   /** Fill gaps: the latest story check's verdicts (no new check is started). */
   coverage(ctx: AgentContext, accountId: number, ident: string): Promise<StoryBuildCoverage | null>;
@@ -224,6 +227,7 @@ const defaultDeps: SessionDeps = {
   startEgress,
   startAgent: startSandboxAgent,
   startServices: startSessionServices,
+  startTicketRelay,
   readTicket: (ctx, accountId, workspaceId, ident, coverage) => readSessionTicket(ctx, accountId, workspaceId, ident, { coverage }),
   async coverage(ctx, accountId, ident) {
     const { latestTicketCheck, foldCoverage } = await import('../../coding/story-build/coverage.js');
@@ -304,6 +308,8 @@ export interface Live extends SubjectLive {
   resume: boolean;
   egress: EgressSession | null;
   services: SessionServices | null;
+  /** `ensemble-ticket` (a story session; null when it did not start). */
+  ticketRelay: TicketRelay | null;
   driver: SandboxAgentDriver | null;
   container: string | null;
   layoutRoot: string | null;
@@ -637,6 +643,7 @@ export function newLive(
     resume: o.resume,
     egress: null,
     services: null,
+    ticketRelay: null,
     driver: null,
     container: null,
     layoutRoot: null,
@@ -928,6 +935,30 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       begin('patches');
       const n = await sub.restore(l, prepared.mirror);
       step(l, 'patches', 'done', `${n} repositories`);
+    }
+
+    // THE TICKET RELAY (`ensemble-ticket`, docs/SANDBOX.md § The ticket relay): a story session only.
+    // Never fatal — without it the agent has TICKET.md, and the client says the ticket is not available.
+    const ticketSource = sub.ticketRelaySource?.(l) ?? null;
+    if (ticketSource != null) {
+      try {
+        l.ticketRelay = await deps.startTicketRelay({
+          runtime: rt,
+          sandbox: box.name,
+          root: layout.root,
+          source: ticketSource,
+          onNetwork: (entry) => {
+            putNetworkEntry(l.state, entry);
+            emit(l, { type: 'network', entry });
+            scheduleSave(l);
+          },
+          onProblem: (line) => notice(l, line),
+        });
+      } catch (err) {
+        l.ctx.log.warn({ err }, `sandbox session ${l.key}: the ticket relay did not start`);
+        notice(l, '`ensemble-ticket` did not start, so the agent has TICKET.md only.');
+      }
+      stopIfClosing(l);
     }
 
     begin('agent');
@@ -1475,6 +1506,8 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
     l.idleTimer = null;
     l.idleAt = null;
     await l.driver?.close().catch(() => {});
+    l.ticketRelay?.close();
+    l.ticketRelay = null;
     await l.services?.close().catch(() => {});
     if (l.egress) {
       for (const e of l.egress.log.snapshot()) putNetworkEntry(l.state, e);
@@ -1508,6 +1541,8 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
 async function reapAfterClose(l: Live): Promise<void> {
   await l.closed?.catch(() => {});
   await l.driver?.close().catch(() => {});
+  l.ticketRelay?.close();
+  l.ticketRelay = null;
   await l.services?.close().catch(() => {});
   l.egress?.close();
   await destroyNow(l);
@@ -1840,7 +1875,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
   const machine = (l: Live): PlanMachine => ({ notice: (t) => notice(l, t), emitPlan: (v) => emit(l, { type: 'plan', plan: v }), scheduleSave: () => scheduleSave(l) });
 
   /** THE TICKET AGAIN (open points and criteria change while a ticket is in flight), into TICKET.md. */
-  async function rereadTicket(l: Live): Promise<boolean> {
+  async function rereadTicket(l: Live, o: { onRead?: (path: string | null) => void } = {}): Promise<boolean> {
     let ticketChanged = false;
     const before = l.state.criteria;
     const fresh = await deps.readTicket(ctx, accountId, l.workspaceId, row.ident, null).catch(() => null);
@@ -1848,6 +1883,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
       const ticketFile = `${l.layoutRoot.replace(/\/$/, '')}/TICKET.md`;
       const docsDir = l.state.withDocs && l.state.docs ? SANDBOX_DOCS_DIR : null;
       await l.runtime.copyIn(l.container, [{ path: ticketFile, content: ticketMarkdown(fresh, l.state.action === 'fill_gaps' ? 'fill_gaps' : 'implement', docsDir) }]);
+      o.onRead?.(ticketFile);
       const after = criteriaLines(fresh);
       ticketChanged = JSON.stringify(after) !== JSON.stringify(before);
       if (ticketChanged) {
@@ -1862,6 +1898,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     } else if (fresh == null) {
       notice(l, 'The ticket could not be read again, so the build uses the copy from the start of the session.');
     }
+    if (!fresh || !l.container || !l.layoutRoot) o.onRead?.(null);
     return ticketChanged;
   }
 
@@ -1995,6 +2032,22 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     branch: () => sessionBranch(row.ticketKey),
     seed() {
       return { ticket: ticket!, mode: action, planFirst: planFirstFlag && !plan.isApproved() };
+    },
+    ticketRelaySource(sl) {
+      if (ticket == null) return null;
+      const l = sl as Live;
+      return trackerTicketRelaySource({
+        accountId,
+        workspaceId: l.workspaceId,
+        ticket: () => ({ ident: row.ident, description: ticket?.description ?? '', comments: ticket?.comments ?? null }),
+        refreshTicket: () =>
+          new Promise<string | null>((resolve) => {
+            let path: string | null = null;
+            void rereadTicket(l, { onRead: (p) => (path = p) })
+              .catch(() => false)
+              .then(() => resolve(path));
+          }),
+      });
     },
     async afterMirror(_l, mirror, bases, mainMirror) {
       // One row per mirrored repository: the patch Push applies lands here.

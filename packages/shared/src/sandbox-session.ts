@@ -147,7 +147,8 @@ export interface SandboxNetworkEntry {
   port: number;
   allowed: boolean;
   reason: string | null;
-  via: 'forward' | 'anthropic' | 'chatgpt';
+  /** 'ticket': a read Ensemble made on the HOST for `ensemble-ticket` (docs/SANDBOX.md § The ticket relay). */
+  via: 'forward' | 'anthropic' | 'chatgpt' | 'ticket';
   count: number;
   up: number;
   down: number;

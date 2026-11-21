@@ -1064,6 +1064,14 @@ is a different feature). ⚠ **READ-ONLY**: no Notion write exists; the status p
   and blockers are read (comments are left to the per-ticket reader and the story check's re-read). Ghost
   lookups: none (Jira only).
 
+## Attachments for a workspace session — `ensemble-ticket` (`tracker/artifacts.ts`, `tracker/ticket-artifacts.ts`)
+
+The ONE tracker read made for a running Implement session's AGENT, never for a view: the ticket's attachments
+(Jira: `issue/<KEY>?fields=attachment`, then each file), on the host, with the workspace's credential, when the
+session starts and when the agent asks for a file. READ ONLY. Nothing is stored in `tracker_tickets`: the manifest
+lives in the session only. The rules (site check before the credential, the credential-free media hop, caps) are in
+[SANDBOX.md](SANDBOX.md) § The ticket relay. Other providers: links only, for now.
+
 ## Credential — the sealed per-workspace token
 
 `workspace_trackers.auth_token` (with `auth_email`). Jira: email set → HTTP Basic
