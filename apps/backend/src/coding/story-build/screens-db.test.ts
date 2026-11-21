@@ -161,6 +161,38 @@ describe('storeBuildScreens', () => {
     expect(seen[0]).toContain('|thumbnail!');
   });
 
+  it('Linear: the markdown comment — the agent’s words cannot link, embed or mention; the pictures by asset address', () => {
+    const screens = [
+      { name: 'Refunds [x](https://evil.example) @admin', url: null, comparedWith: 'the **mock-up**', verdict: 'differs' as const, note: '![p](https://evil.example/p.png) wraps.', shots: [{ sha: 'a'.repeat(64), name: 'x.png', bytes: 1 }] },
+    ];
+    const picked = S.ticketShotsOf(7, screens, 10);
+    const md = S.screensTicketMarkdown({ ticketKey: 'ENG-7', screens, shots: picked, urls: ['https://uploads.linear.app/a/1.png'] });
+    expect(md).toContain("### Screenshots from Ensemble's build of ENG-7");
+    expect(md).toContain('**Refunds x https://evil.example admin**: the agent says it differs, compared with the mock-up.');
+    expect(md).toContain('![Refunds x https://evil.example admin](https://uploads.linear.app/a/1.png)');
+    expect(md).not.toMatch(/\]\(https:\/\/evil|@admin|!\[p\]/);
+    // An asset address that could break out of the image is left out.
+    expect(S.screensTicketMarkdown({ ticketKey: 'ENG-7', screens, shots: picked, urls: ['https://x.example/a) [y](z'] })).not.toContain('![');
+    expect(S.screensPostable('linear:https://linear.app/acme#ENG-7')).toBe(true);
+    expect(S.screensPostable('github:https://github.com/acme/api#7')).toBe(false);
+  });
+
+  it('Linear: offered on the wire, and the press asks for the markdown comment', async () => {
+    await db.update(schema.storyBuilds).set({ ident: 'linear:https://linear.app/acme#ENG-7', screensTicketJson: null }).execute();
+    const P = await import('./persist.js');
+    const row = await P.getStoryBuildRow(ctx, 1, buildId);
+    expect(P.screensTicketOf(row!)).toMatchObject({ offered: true });
+    let text = '';
+    const r = await S.postBuildScreensToTicket(ctx, 1, buildId, {
+      post: async (a: any) => ((text = a.comment(a.shots.map(() => 'https://uploads.linear.app/a/1.png'), 'linear')), { ok: true as const, attachments: a.shots.length }),
+      now: () => 0,
+    });
+    expect(r).toMatchObject({ status: 200 });
+    expect(text).toContain('### Screenshots');
+    expect(text).toContain('](https://uploads.linear.app/a/1.png)');
+    await db.update(schema.storyBuilds).set({ ident: 'jira:https://acme.atlassian.net#ACME-1' }).execute();
+  });
+
   it('the account erasure takes the screenshots', async () => {
     const { eraseAccountData } = await import('../../db/erase-account.js');
     await eraseAccountData(1);
