@@ -316,6 +316,7 @@ function ticketFilesSection(i: SeedInput): string {
     '',
     `- \`ensemble-ticket list\` shows what the ticket attaches or links. The same list is in \`${dir}/manifest.json\`.`,
     `- \`ensemble-ticket get <id>\` copies an attachment into \`${dir}/files/\`. Open an image to look at it.`,
+    `- \`ensemble-ticket figma <id>\` reads a Figma link when the workspace has a Figma token: an outline of the frame's layers (sizes, spacing, colours, text styles, components) and a picture of it, into \`${dir}/figma/\`. Without a token it says so: work from the ticket's other files, and say so in the plan.`,
     '- A link is not copied. Open it through the proxy (`curl -x "$LIMN_PROXY" <url>`). A host that is not allowed fails: say which host you needed.',
     '- `ensemble-ticket show` reads the ticket again and writes TICKET.md again.',
     '- Read what the work needs. You do not have to read every file.',

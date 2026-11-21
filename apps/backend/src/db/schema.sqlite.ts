@@ -4534,6 +4534,31 @@ export const sprintAssessments = sqliteTable(
 // (tracker/secret.ts's `sealed:v1:` / `plain:` forms) and per-repo project-key OVERRIDES
 // (`{ "<repoId>": "<key>" }`; a repo absent from the map uses `<owner>_<repo>`). `workspace_id`
 // arrives in a request PATH, so its FK is the named COMPOSITE one onto `workspaces (id, account_id)`.
+// FIGMA (migration 0213; docs/IMPLEMENT-UI-PLAN.md § 3): ONE row per workspace, the SEALED write-only Figma
+// personal access token (tracker/secret.ts forms). Read only on the host, by `ensemble-ticket figma`.
+export const workspaceFigma = sqliteTable(
+  'workspace_figma',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    authToken: text('auth_token'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('workspace_figma_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_figma_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 export const workspaceSonar = sqliteTable(
   'workspace_sonar',
   {

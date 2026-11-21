@@ -272,6 +272,16 @@ describe('tierFor — SonarCloud', () => {
   });
 });
 
+// Figma (figma/routes.ts): only "Test token" calls Figma; the setting itself is DB-only.
+describe('tierFor — Figma', () => {
+  it('Test token is search + read; the setting is read', () => {
+    expect(tiers('POST', '/api/workspaces/3/figma/check')).toEqual(['search', 'read']);
+    expect(tiers('GET', '/api/workspaces/3/figma')).toEqual(['read']);
+    expect(tiers('PUT', '/api/workspaces/3/figma')).toEqual(['read']);
+    expect(tiers('GET', '/api/workspaces/3/figma/check')).toEqual(['read']);
+  });
+});
+
 // Sequence diagrams (review/diagrams/routes.ts). Only the two Redraw POSTs start a model run.
 describe('tierFor — sequence diagrams', () => {
   it('bills only the redraws as AI generation', () => {

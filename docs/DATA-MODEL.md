@@ -856,6 +856,14 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
 - ⚠ The plugin-era copies (`pro_workspace_settings.issue_*`/`jira_*`, `pro_pr_jira_tickets`) are
   MOVED and cleared at boot, never read again; the columns are dormant.
 
+## `workspace_figma` — the workspace's Figma token (CORE; migration `0213`)
+
+ONE row per workspace (unique `(account_id, workspace_id)`, the named COMPOSITE FK onto `workspaces (id,
+account_id)`): `auth_token`, the SEALED write-only Figma personal access token (tracker/secret.ts forms, as
+`workspace_sonar`). No row = no token. Read only on the host by `ensemble-ticket figma` (docs/SANDBOX.md § The
+ticket relay) and the Settings "Test token". Erased with the account (`accountScopedTables()`); exported as
+`hasToken` only.
+
 ## `repo_relations` — related repos (CORE; migration `0131`)
 
 Repos of ONE workspace the reader reviews together; a deep review of a PR in one reads the matching

@@ -102,5 +102,25 @@ export function trackerTicketRelaySource(o: {
       }
     },
     refreshTicket: o.refreshTicket,
+    // A Figma link, with the WORKSPACE's Figma token (Settings → Integrations → Figma), on the host.
+    async figma(entry: ManifestEntry) {
+      const f = entry.artifact.figma;
+      if (f == null) throw new Error('That is not a Figma link Ensemble can read.');
+      const [{ db, schema }, { readWorkspaceFigmaToken }, { readFigmaFrames }, { figmaErrorMessage }] = await Promise.all([
+        import('../../db/client.js'),
+        import('../../figma/settings.js'),
+        import('../../figma/read.js'),
+        import('../../figma/client.js'),
+      ]);
+      const token = await readWorkspaceFigmaToken({ db, schema: schema as unknown as Record<string, never> }, o.accountId, o.workspaceId);
+      if (token.state === 'none') throw new Error('No Figma token is saved for this workspace, so Ensemble cannot read Figma. Work from the ticket\'s other files, and say so in the plan.');
+      if (token.state === 'unreadable') throw new Error('The workspace\'s Figma token cannot be read on this computer. Work from the ticket\'s other files.');
+      try {
+        const r = await readFigmaFrames({ accountId: o.accountId, token: token.token, fileKey: f.fileKey, nodeId: f.nodeId });
+        return { outline: r.outline, pngs: r.pngs, calls: r.calls };
+      } catch (e) {
+        throw new Error(figmaErrorMessage(e));
+      }
+    },
   };
 }

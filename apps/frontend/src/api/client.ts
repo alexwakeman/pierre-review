@@ -45,6 +45,9 @@ import type {
   SonarPrResponse,
   WorkspaceSonarSettings,
   WorkspaceSonarUpdate,
+  WorkspaceFigmaSettings,
+  WorkspaceFigmaUpdate,
+  FigmaConnectionCheck,
   ActiveReviewsResponse,
   DependencyMergeAllBody,
   DependencyMergeAllResponse,
@@ -1418,6 +1421,14 @@ export const api = {
     fetch(`/api/workspaces/${workspaceId}/sonar/check`, { method: 'POST' }).then((r) =>
       handle<SonarConnectionCheck>(r),
     ),
+  // ---- FIGMA (docs/IMPLEMENT-UI-PLAN.md § 3) ----
+  // The workspace's Figma token: `hasToken` only (WRITE-ONLY, never comes back). PATH id ⇒ another tenant's is a 404.
+  workspaceFigma: (workspaceId: number) => get<WorkspaceFigmaSettings>(`/api/workspaces/${workspaceId}/figma`),
+  updateWorkspaceFigma: (workspaceId: number, patch: WorkspaceFigmaUpdate) =>
+    fetch(`/api/workspaces/${workspaceId}/figma`, jsonBody('PUT', patch)).then((r) => handle<WorkspaceFigmaSettings>(r)),
+  // "Test token" with the SAVED token. Click-gated (calls Figma).
+  checkWorkspaceFigma: (workspaceId: number) =>
+    fetch(`/api/workspaces/${workspaceId}/figma/check`, { method: 'POST' }).then((r) => handle<FigmaConnectionCheck>(r)),
   // A PR's STORED snapshot at `head` (or its synced head) — never calls SonarCloud.
   prSonar: (prId: number, head: string | null) =>
     get<SonarPrResponse>(`/api/prs/${prId}/sonar${head ? `?head=${encodeURIComponent(head)}` : ''}`),

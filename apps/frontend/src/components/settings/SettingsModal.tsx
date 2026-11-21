@@ -17,6 +17,7 @@ import { DiskSpaceSection } from './DiskSpaceSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutomationSection } from './DependencyAutomationSection.js';
 import { SonarSection } from './SonarSection.js';
+import { FigmaSection } from './FigmaSection.js';
 import { SandboxSection } from './SandboxSection.js';
 import { SandboxRuntimeSection } from './SandboxRuntimeSection.js';
 import { ReferenceDocsSection } from './ReferenceDocsSection.js';
@@ -104,6 +105,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   ReleasesSection,
   IssueLinksSection,
   SonarSection,
+  FigmaSection,
   SandboxRuntimeSection,
   SandboxSection,
   SlackSection,

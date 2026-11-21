@@ -24,6 +24,8 @@ no internals.
 - Implement story: **Give the build a browser** at Approve, when the plan changes a screen. The agent looks at the
   screens it builds in a headless Chromium on your computer, which reaches only what the sandbox reaches. The agent
   can also ask for one during the build. Docker only.
+- **Settings → Integrations → Figma**: an optional Figma token. With it, Implement story reads the Figma frames a
+  ticket links (an outline of the layers and a picture). Without it, the agent works from the ticket's other files.
 
 ## [1.0.71] - 2026-11-20
 

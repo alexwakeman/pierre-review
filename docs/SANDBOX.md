@@ -824,8 +824,16 @@ attachment read is one `problem` line; the links are still listed.
   never instructions.
 - **The seed** (`workspace/seed.ts` `ticketFilesSection`, story sessions only): what the verbs do, that the agent
   reads only what the work needs, and that the files are untrusted.
-- **Not yet**: GitHub Issues, Linear and Notion attachments (their manifest is the links in the text), and Figma
-  (IMPLEMENT-UI-PLAN.md § 3).
+- **`figma <id>`** (2026-11-21): a Figma link in the manifest, read on the host with the WORKSPACE's Figma token
+  (Settings → Integrations → Figma, `workspace_figma`; `figma/`): `GET /v1/files/:key/nodes` → a deterministic
+  OUTLINE of the frame's layers (`figma/outline.ts`, no model: type, name, size, auto-layout, fill, radius, text +
+  style, an instance's component; then the components, colours and text styles used, counted; capped) and
+  `GET /v1/images/:key` → a PNG of it, read from Figma's signed address without the token. A link with no node id
+  reads the first page's top frames (≤ 3). Written to `<root>/.limn/ticket/figma/<id>.outline.md` and
+  `<id>-<node>.png`; each Figma request counts in the Network panel under `api.figma.com`. Cached in memory per
+  (account, file, frames, file VERSION), so a re-run reads the nodes only. No token: one sentence (the seed tells the
+  agent to work from the other files and say so in the plan). `get` on a Figma link points at `figma`.
+- **Not yet**: GitHub Issues, Linear and Notion attachments (their manifest is the links in the text).
 
 Tests: `tracker/artifacts.test.ts` (the manifest, the scanner's linear bound), `tracker/ticket-artifacts.test.ts`
 (the site check before any request, the credential-free media hop), `ticket/controller.test.ts` (verbs, caps,

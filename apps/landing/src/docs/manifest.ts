@@ -295,6 +295,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
       { slug: 'notion', writer: 'W3' },
       { slug: 'confluence', writer: 'W3' },
       { slug: 'sonarcloud', writer: 'W4' },
+      { slug: 'figma', writer: 'W4' },
       { slug: 'slack', writer: 'W4' },
       { slug: 'sandbox-runtimes', writer: 'W2' },
     ],

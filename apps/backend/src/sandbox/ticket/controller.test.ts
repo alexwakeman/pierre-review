@@ -136,4 +136,44 @@ describe('ensemble-ticket on the host', () => {
     expect(r.code).toBe(2);
     expect(r.err).toContain('unknown command `rm`');
   });
+
+  it('figma: the outline and pictures under figma/, one Network row for api.figma.com; a link to it from get is redirected', async () => {
+    const entries = buildManifest({ provider: 'jira', attachments: [], description: 'https://www.figma.com/design/AbCdEfGhIj1234/X?node-id=1-2', comments: null });
+    const id = entries[0]!.artifact.id;
+    const written: Array<{ path: string; content: string | Buffer }> = [];
+    const network: SandboxNetworkEntry[] = [];
+    const ctl = new TicketRelayController('/workspace', {
+      manifest: async () => ({ entries, problem: null }),
+      download: async () => Buffer.alloc(0),
+      refreshTicket: async () => null,
+      host: () => 'acme.atlassian.net',
+      figma: async () => ({ outline: '# Figma outline', pngs: [{ nodeId: '1:2', bytes: Buffer.from([0x89, 0x50]) }], calls: 2 }),
+    }, { write: async (f) => void written.push(...f), onNetwork: (e) => void network.push(e) });
+    let out = '';
+    let err = '';
+    const code = await ctl.handle(['figma', id], '/', (s2, t) => (s2 === 'o' ? (out += t) : (err += t)));
+    expect(code).toBe(0);
+    expect(out.trim().split('\n')).toEqual([`/workspace/.limn/ticket/figma/${id}.outline.md`, `/workspace/.limn/ticket/figma/${id}-1-2.png`]);
+    expect(network.at(-1)).toMatchObject({ host: 'api.figma.com', count: 2, via: 'ticket' });
+    await ctl.handle(['get', id], '/', (s2, t) => (s2 === 'o' ? (out += t) : (err += t)));
+    expect(err).toContain(`Read it with \`ensemble-ticket figma ${id}\``);
+  });
+
+  it("figma with no token: the source's sentence, and nothing is written", async () => {
+    const entries = buildManifest({ provider: 'jira', attachments: [], description: 'https://www.figma.com/file/AbCdEfGhIj1234', comments: null });
+    const written: Array<{ path: string }> = [];
+    const ctl = new TicketRelayController('/workspace', {
+      manifest: async () => ({ entries, problem: null }),
+      download: async () => Buffer.alloc(0),
+      refreshTicket: async () => null,
+      host: () => 'h',
+      figma: async () => {
+        throw new Error('No Figma token is saved for this workspace.');
+      },
+    }, { write: async (f) => void written.push(...f) });
+    let err = '';
+    expect(await ctl.handle(['figma', entries[0]!.artifact.id], '/', (s2, t) => (s2 === 'e' ? (err += t) : undefined))).toBe(1);
+    expect(err).toContain('No Figma token is saved');
+    expect(written.filter((f) => f.path.includes('/figma/'))).toEqual([]);
+  });
 });

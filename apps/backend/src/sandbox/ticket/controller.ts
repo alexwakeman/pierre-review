@@ -28,6 +28,7 @@ export const TICKET_USAGE = `ensemble-ticket — read this session's ticket. Ens
 
   ensemble-ticket list            what the ticket attaches or links (also ${TICKET_DIR}/manifest.json)
   ensemble-ticket get <id> [id…]  copy attachments into ${TICKET_DIR}/files/ (up to ${TICKET_GET_MAX_IDS} at once)
+  ensemble-ticket figma <id>      read a Figma link: an outline of its layers and a picture, into ${TICKET_DIR}/figma/
   ensemble-ticket show            read the ticket again and rewrite TICKET.md
   ensemble-ticket help            this text
 
@@ -44,6 +45,9 @@ export interface TicketRelaySource {
   refreshTicket(): Promise<string | null>;
   /** The tracker's host, for the Network panel. */
   host(): string;
+  /** A Figma link, read with the workspace's Figma token (docs/IMPLEMENT-UI-PLAN.md § 3). Throws with a plain
+   *  sentence (no token: says so). Absent ⇒ Figma is not read in this session. */
+  figma?(entry: ManifestEntry): Promise<{ outline: string; pngs: Array<{ nodeId: string; bytes: Buffer }>; calls: number }>;
 }
 
 export interface TicketRelayIo {
@@ -61,7 +65,7 @@ export class TicketRelayController implements RelayHandler {
   private reads = 0;
   private lastShowAt = 0;
   private busy: Promise<unknown> = Promise.resolve();
-  private net: SandboxNetworkEntry | null = null;
+  private readonly nets = new Map<string, SandboxNetworkEntry>();
 
   constructor(
     private readonly root: string,
@@ -98,11 +102,11 @@ export class TicketRelayController implements RelayHandler {
     return this.loaded;
   }
 
-  private noteRead(bytes: number, ok: boolean): void {
+  private noteRead(bytes: number, ok: boolean, o: { host?: string; count?: number } = {}): void {
     const at = new Date(this.now()).toISOString();
-    const host = this.source.host();
-    const prev = this.net;
-    this.net = {
+    const host = o.host ?? this.source.host();
+    const prev = this.nets.get(host) ?? null;
+    const next: SandboxNetworkEntry = {
       key: `ticket:${host}`,
       source: 'Ensemble, for ensemble-ticket',
       host,
@@ -110,14 +114,15 @@ export class TicketRelayController implements RelayHandler {
       allowed: true,
       reason: null,
       via: 'ticket',
-      count: (prev?.count ?? 0) + 1,
+      count: (prev?.count ?? 0) + (o.count ?? 1),
       up: 0,
       down: (prev?.down ?? 0) + bytes,
       lastStatus: ok ? 200 : null,
       firstAt: prev?.firstAt ?? at,
       lastAt: at,
     };
-    this.io.onNetwork?.(this.net);
+    this.nets.set(host, next);
+    this.io.onNetwork?.(next);
   }
 
   async handle(argv: readonly string[], _cwd: string, out: Out): Promise<number> {
@@ -140,6 +145,8 @@ export class TicketRelayController implements RelayHandler {
         return this.serial(() => this.get(argv.slice(1), say, fail));
       case 'show':
         return this.serial(() => this.show(say, fail));
+      case 'figma':
+        return this.serial(() => this.figma(argv.slice(1), say, fail));
       default:
         return fail(`ensemble-ticket: unknown command \`${verb.slice(0, 40)}\`.\n\n${TICKET_USAGE}`, 2);
     }
@@ -164,6 +171,10 @@ export class TicketRelayController implements RelayHandler {
         continue;
       }
       const a = entry.artifact;
+      if (a.kind === 'figma') {
+        code = fail(`ensemble-ticket: ${id} is a Figma link. Read it with \`ensemble-ticket figma ${id}\`.`);
+        continue;
+      }
       if (!a.fetchable) {
         code = fail(a.url != null ? `ensemble-ticket: ${id} is a link. Open it through the proxy: curl -x "$LIMN_PROXY" ${a.url}` : `ensemble-ticket: Ensemble cannot read ${id}.`);
         continue;
@@ -200,6 +211,40 @@ export class TicketRelayController implements RelayHandler {
       say(`${path}\n`);
     }
     return code;
+  }
+
+  private async figma(ids: readonly string[], say: (t: string) => void, fail: (t: string, code?: number) => number): Promise<number> {
+    if (ids.length !== 1) return fail('ensemble-ticket: name one Figma id from `ensemble-ticket list`.', 2);
+    const m = await this.manifest();
+    const entry = m.entries.find((e) => e.artifact.id === ids[0]);
+    if (entry == null) return fail(`ensemble-ticket: \`${ids[0]!.slice(0, 40)}\` is not in the ticket's list.`);
+    if (entry.artifact.kind !== 'figma') return fail(`ensemble-ticket: ${entry.artifact.id} is not a Figma link.`);
+    if (this.source.figma == null) return fail('ensemble-ticket: Figma is not read in this session. Work from the ticket\'s other files.');
+    if (this.reads >= TICKET_SESSION_MAX_READS) return fail(`ensemble-ticket: this session has used its ${TICKET_SESSION_MAX_READS} tracker reads.`);
+    this.reads++;
+    let r: Awaited<ReturnType<NonNullable<TicketRelaySource['figma']>>>;
+    try {
+      r = await this.source.figma(entry);
+    } catch (e) {
+      return fail(`ensemble-ticket: ${e instanceof Error ? e.message : 'Figma could not be read.'}`);
+    }
+    const bytes = r.pngs.reduce((n, p) => n + p.bytes.length, 0) + Buffer.byteLength(r.outline);
+    if (r.calls > 0) this.noteRead(bytes, true, { host: 'api.figma.com', count: r.calls });
+    if (bytes > TICKET_SESSION_MAX_BYTES - this.bytes) return fail(`ensemble-ticket: ${entry.artifact.id} would pass this session's ticket file budget.`);
+    this.bytes += bytes;
+    const id = entry.artifact.id;
+    const files = [
+      { path: this.dir('figma', `${id}.outline.md`), content: r.outline },
+      ...r.pngs.map((p) => ({ path: this.dir('figma', `${id}-${p.nodeId.replace(/[^0-9A-Za-z]+/g, '-')}.png`), content: p.bytes })),
+    ];
+    try {
+      await this.io.write(files);
+    } catch {
+      return fail(`ensemble-ticket: ${id} was read but could not be written into the sandbox.`);
+    }
+    say(`${files.map((f) => f.path).join('\n')}\n`);
+    if (r.pngs.length === 0) say('Figma sent no picture of it: the outline is all there is.\n');
+    return 0;
   }
 
   private async show(say: (t: string) => void, fail: (t: string, code?: number) => number): Promise<number> {

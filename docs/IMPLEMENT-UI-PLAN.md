@@ -3,7 +3,7 @@
 Status: **BEING BUILT** (2026-11-21). BUILT: § 2 (the ticket relay: Jira attachments and every provider's links;
 [SANDBOX.md](SANDBOX.md) § The ticket relay), § 4 (the plan's UI section) and §§ 6–7 (the design-system and
 no-design rules, in the seed's plan section; SANDBOX.md § The plan and its checks) and § 5 (the browser; SANDBOX.md
-§ The browser). The rest is not built yet. When a part is built, move
+§ The browser) and § 3 (Figma; SANDBOX.md § The ticket relay → `figma <id>`). The rest is not built yet. When a part is built, move
 its detail into [STORY-BUILD.md](STORY-BUILD.md) / [SANDBOX.md](SANDBOX.md) / [TRACKERS.md](TRACKERS.md) and
 mark it built here, as [CODEX-PLAN.md](CODEX-PLAN.md) does.
 
@@ -158,6 +158,10 @@ requirement.
 ---
 
 ## 3. Figma — an optional integration
+
+> **Built 2026-11-21**, as designed below. The cache is in memory (per process), not stored. Figma's endpoint
+> shapes are parsed defensively and were NOT checked against a live Figma account while building (only against
+> fakes): confirm `/v1/files/:key/nodes`, `/v1/images/:key` and `/v1/me` with a real token before relying on it.
 
 ### Setting
 

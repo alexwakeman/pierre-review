@@ -105,6 +105,8 @@ export interface AccountExport {
    * analysis, regenerable from it.
    */
   workspaceSonar: Record<string, unknown>[];
+  /** Each workspace's Figma setting (core `workspace_figma`, migration 0213). ⚠ THE TOKEN IS WITHHELD (`hasToken` only). */
+  workspaceFigma: Record<string, unknown>[];
   /**
    * The reference library (core `reference_docs`, migration 0116 / pg 0103): each document's
    * metadata, summary, topics and section list. The text itself lives as markdown files under the
@@ -261,6 +263,13 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     })
     .from(schema.workspaceSonar)
     .where(eq(schema.workspaceSonar.accountId, accountId))
+    .execute();
+
+  // The Figma rows — the token reduced to its presence below.
+  const figmaRows = await db
+    .select({ workspaceId: schema.workspaceFigma.workspaceId, hasToken: schema.workspaceFigma.authToken, updatedAt: schema.workspaceFigma.updatedAt })
+    .from(schema.workspaceFigma)
+    .where(eq(schema.workspaceFigma.accountId, accountId))
     .execute();
 
   // The reference library's metadata and the docs chat.
@@ -697,6 +706,7 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
     // ⚠ PRESENCE ONLY — never the stored token, in any form.
     workspaceTrackers: trackerRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     workspaceSonar: sonarRows.map((t) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
+    workspaceFigma: figmaRows.map((t: { workspaceId: number; hasToken: string | null; updatedAt: Date }) => ({ ...t, hasToken: t.hasToken != null && t.hasToken !== '' })),
     referenceDocs: referenceDocRows,
     referenceDocWikiPages: wikiPageRows,
     // ⚠ PRESENCE ONLY — never the stored token, in any form.

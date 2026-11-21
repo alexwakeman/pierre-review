@@ -72,6 +72,7 @@ import type {
   WorkspaceTrackerSettings,
   TrackerCopySourcesResponse,
   WorkspaceSonarSettings,
+  WorkspaceFigmaSettings,
   WikiCredentialsSettings,
   SonarPrResponse,
   PrSequenceDiagramsResponse,
@@ -2698,6 +2699,10 @@ export async function installMockApi(
           tokenUnreadable: false,
           repos: [],
         } satisfies WorkspaceSonarSettings);
+      }
+      // FIGMA (docs/IMPLEMENT-UI-PLAN.md § 3): no token in e2e.
+      if (/\/api\/workspaces\/\d+\/figma$/.test(path)) {
+        return json(route, { workspaceId: WORKSPACE.id, hasToken: false, tokenUnreadable: false } satisfies WorkspaceFigmaSettings);
       }
       const sonarMatch = path.match(/\/api\/prs\/(\d+)\/sonar$/);
       if (sonarMatch) {

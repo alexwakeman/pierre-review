@@ -257,7 +257,7 @@ function sizeText(n: number | undefined): string {
 export function manifestText(entries: readonly ManifestEntry[]): string {
   if (entries.length === 0) return 'The ticket has no attachments or links.\n';
   const lines = entries.map(({ artifact: a }) => {
-    const how = a.fetchable ? `ensemble-ticket get ${a.id}` : a.url != null ? a.url : 'not readable here';
+    const how = a.kind === 'figma' ? `ensemble-ticket figma ${a.id}  (${a.url ?? ''})` : a.fetchable ? `ensemble-ticket get ${a.id}` : a.url != null ? a.url : 'not readable here';
     return `${a.id}  ${KIND_WORD[a.kind]} · ${a.source}${sizeText(a.size)} · ${a.name}\n      ${how}`;
   });
   return `${lines.join('\n')}\n`;

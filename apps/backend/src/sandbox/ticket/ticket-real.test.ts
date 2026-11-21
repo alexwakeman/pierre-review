@@ -80,6 +80,6 @@ describe.skipIf(!haveDaemon)('ensemble-ticket in a real container', () => {
     expect((await sh(`od -An -tx1 /home/agent/ws/.limn/ticket/files/${id}-mock_up.png`)).out.trim()).toBe('89 50 4e 47');
     const link = await sh(`ensemble-ticket get ${entries[1]!.artifact.id}`);
     expect(link.code).toBe(1);
-    expect(link.out).toContain('is a link');
+    expect(link.out).toContain('is a Figma link');
   }, 120_000);
 });
