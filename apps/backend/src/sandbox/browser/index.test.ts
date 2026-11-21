@@ -6,6 +6,7 @@ import { SessionBrowser } from './index.js';
 
 function setup(o: { startFails?: boolean; readyAfter?: number; noBrowser?: boolean } = {}) {
   const calls: string[] = [];
+  const noted: string[][] = [];
   const notices: string[] = [];
   let probes = 0;
   const runtime = {
@@ -25,14 +26,14 @@ function setup(o: { startFails?: boolean; readyAfter?: number; noBrowser?: boole
       return { code: probes > (o.readyAfter ?? 0) ? 0 : 1, stdout: Buffer.alloc(0), stderr: '', timedOut: false };
     },
   } as unknown as SandboxRuntime;
-  const b = new SessionBrowser({ runtime, owner: { sessionId: 's1', accountId: 1 }, sandbox: 'limn-s1-sandbox', proxyUrl: 'http://limn-proxy:3128', notice: (t) => void notices.push(t), probeEveryMs: 1 });
+  const b = new SessionBrowser({ runtime, owner: { sessionId: 's1', accountId: 1 }, sandbox: 'limn-s1-sandbox', proxyUrl: 'http://limn-proxy:3128', notice: (t) => void notices.push(t), onShots: async (p) => void noted.push([...p]), probeEveryMs: 1 });
   const run = async (...argv: string[]) => {
     let out = '';
     let err = '';
     const code = await b.handle(argv, '/', (s, t) => (s === 'o' ? (out += t) : (err += t)));
     return { code, out, err };
   };
-  return { b, calls, notices, run, probes: () => probes };
+  return { b, calls, notices, noted, run, probes: () => probes };
 }
 
 describe('the session browser', () => {
@@ -81,5 +82,13 @@ describe('the session browser', () => {
     t.b.close();
     expect(await t.b.start('reader')).toBe(false);
     expect(t.calls).toEqual([]);
+  });
+
+  it('noted: the CLI\'s own call after a shot hands the paths on (at most six), quietly', async () => {
+    const t = setup();
+    const paths = Array.from({ length: 8 }, (_, i) => `/home/agent/.limn/browser/s${i}.png`);
+    const r = await t.run('noted', ...paths);
+    expect(r).toEqual({ code: 0, out: '', err: '' });
+    expect(t.noted).toEqual([paths.slice(0, 6)]);
   });
 });

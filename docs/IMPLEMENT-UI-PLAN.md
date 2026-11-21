@@ -4,7 +4,10 @@ Status: **BEING BUILT** (2026-11-21). BUILT: § 2 (the ticket relay: Jira attach
 [SANDBOX.md](SANDBOX.md) § The ticket relay), § 4 (the plan's UI section) and §§ 6–7 (the design-system and
 no-design rules, in the seed's plan section; SANDBOX.md § The plan and its checks) and § 5 (the browser; SANDBOX.md
 § The browser) and § 3 (Figma; SANDBOX.md § The ticket relay → `figma <id>`), and § 8 (screens in the build report; SANDBOX.md § The
-browser). The model-run visual round in the review loop (§ 12, step 5) is NOT built: see § 8's note. When a part is built, move
+browser). The model-run visual round in the review loop (§ 12, step 5) is NOT built: see § 8's note.
+Also BUILT after the plan: live screenshots in the build tab, and "Post screenshots to the ticket" (Jira, one press;
+TRACKERS.md § The build's screenshots). Screenshots in the PR description are NOT built: GitHub has no supported
+image upload, and the owner chose to skip it for now. When a part is built, move
 its detail into [STORY-BUILD.md](STORY-BUILD.md) / [SANDBOX.md](SANDBOX.md) / [TRACKERS.md](TRACKERS.md) and
 mark it built here, as [CODEX-PLAN.md](CODEX-PLAN.md) does.
 

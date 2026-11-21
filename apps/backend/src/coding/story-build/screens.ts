@@ -44,7 +44,7 @@ export interface StoreScreensResult {
  */
 export async function storeBuildScreens(
   ctx: Ctx,
-  o: { accountId: number; buildId: number; screens: readonly BuildReportScreen[]; read: (path: string) => Promise<Buffer | null> },
+  o: { accountId: number; buildId: number; screens: readonly BuildReportScreen[]; read: (path: string) => Promise<Buffer | null>; keep?: readonly string[] },
 ): Promise<StoreScreensResult> {
   const bytesByPath = new Map<string, { sha: string; bytes: Buffer } | null>();
   let total = 0;
@@ -87,7 +87,8 @@ export async function storeBuildScreens(
   const { shots: t, builds: b } = T(ctx);
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   const write = async (dbx: any): Promise<void> => {
-    const shas = [...keep.keys()];
+    // The live screenshots the build tab still shows (`keep`) stay too.
+    const shas = [...new Set([...keep.keys(), ...(o.keep ?? [])])];
     await dbx
       .delete(t)
       .where(and(eq(t.accountId, o.accountId), eq(t.buildId, o.buildId), ...(shas.length > 0 ? [notInArray(t.sha256, shas)] : [])))
@@ -232,4 +233,26 @@ export async function postBuildScreensToTicket(ctx: Ctx, accountId: number, buil
   if (!r.ok) return { status: r.status, error: r.error, message: r.wrote ? `${r.message} Some screenshots may be on the ticket already, so Ensemble will not try again.` : r.message };
   const { screensTicketOf } = await import('./persist.js');
   return { status: 200, screensTicket: screensTicketOf({ ident: row.ident, screensJson: screens, screensTicketJson: state }) };
+}
+
+// ── LIVE SCREENSHOTS (docs/SANDBOX.md § The browser → Live screenshots) ─────────────────────────────────────────
+
+/** Live screenshots one session may copy out in all; past it they stay in the sandbox. */
+export const LIVE_SHOTS_MAX = 40;
+
+/**
+ * ONE screenshot the agent just took (`ensemble-browser shot` tells Ensemble its path): the same checks as a
+ * report's (the browser folder, the PNG signature, the size cap), stored in `story_build_shots`. null = left out.
+ */
+export async function storeLiveShot(
+  ctx: Ctx,
+  o: { accountId: number; buildId: number; path: string; read: (path: string) => Promise<Buffer | null> },
+): Promise<{ sha: string; name: string } | null> {
+  if (!shotPathAllowed(o.path)) return null;
+  const b = await o.read(o.path).catch(() => null);
+  if (b == null || !isPng(b) || b.length > SHOT_MAX_BYTES) return null;
+  const sha = createHash('sha256').update(b).digest('hex');
+  const { shots: t } = T(ctx);
+  await ctx.db.insert(t).values({ accountId: o.accountId, buildId: o.buildId, sha256: sha, png: b, bytes: b.length }).onConflictDoNothing().execute();
+  return { sha, name: o.path.slice(o.path.lastIndexOf('/') + 1) };
 }

@@ -87,6 +87,9 @@ export function applySessionEvent(s: SessionStreamState, e: SandboxSessionStream
       return { ...s, session: { ...cur, network: upsertBy<SandboxNetworkEntry>(cur.network, e.entry, (n) => n.key === e.entry.key) } };
     case 'services':
       return { ...s, session: { ...cur, services: e.status } };
+    // Live screenshots: the newest list, as the server keeps it.
+    case 'shots':
+      return { ...s, session: { ...cur, liveShots: e.shots } };
     case 'plan':
       return { ...s, session: { ...cur, plan: e.plan } };
     // Plan first: the planned PRs live on the build, not the session — the query's read brings them.
@@ -122,6 +125,8 @@ export function mergeSessionViews(read: StoryBuildSession | null | undefined, st
     network: stream.network,
     services: stream.services ?? read.services,
     plan: stream.plan ?? read.plan,
+    // Live screenshots stream in as the agent takes them.
+    ...(stream.liveShots != null || read.liveShots != null ? { liveShots: stream.liveShots ?? read.liveShots } : {}),
     agentState: stream.agentState,
     mode: stream.mode,
     live: stream.live,

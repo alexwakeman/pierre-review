@@ -27,6 +27,8 @@ const rt: SandboxRuntime = createDockerRuntime({ instance: 'browser-test', extra
 const sandbox = resourceName(owner.sessionId, 'sandbox');
 const network = `limn-${owner.sessionId}-net`;
 const notices: string[] = [];
+// The paths `ensemble-browser shot` handed to Ensemble (live screenshots).
+const noted: string[] = [];
 let browser: SessionBrowser | null = null;
 
 const PAGE = `require('http').createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end('<html><body style="background:#eef"><h1>Refunds</h1><p>' + q.headers.host + '</p><script>console.error("missing amount")</script></body></html>'); }).listen(5173, '127.0.0.1')`;
@@ -46,7 +48,7 @@ describe.skipIf(!haveDaemon)('the browser in a real sandbox', () => {
     );
     // The agent's dev server, on the SANDBOX's loopback only.
     spawnSync(docker, ['exec', '-d', '-u', 'agent', sandbox, 'node', '-e', PAGE], { timeout: 30_000 });
-    browser = new SessionBrowser({ runtime: rt, owner, sandbox, proxyUrl: null, notice: (t) => void notices.push(t) });
+    browser = new SessionBrowser({ runtime: rt, owner, sandbox, proxyUrl: null, notice: (t) => void notices.push(t), onShots: async (p) => void noted.push(...p) });
     await browser.startRelay();
   }, 600_000);
 
@@ -84,6 +86,8 @@ describe.skipIf(!haveDaemon)('the browser in a real sandbox', () => {
     expect(files[0]).toMatch(/^\/home\/agent\/\.limn\/browser\/\d{8}-\d{6}-localhost-5173-refunds-1280\.png$/);
     const png = await rt.readFile(sandbox, files[0]!);
     expect([...png!.subarray(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    // The shot told Ensemble its files, over the relay (live screenshots).
+    expect(noted).toEqual(files);
     const con = await sh('ensemble-browser console http://localhost:5173/ --wait 300');
     expect(con.out).toContain('console.error: missing amount');
   }, 120_000);

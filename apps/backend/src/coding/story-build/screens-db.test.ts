@@ -95,6 +95,19 @@ describe('storeBuildScreens', () => {
     expect(rows.map((x: { sha: string }) => x.sha)).toEqual([r.screens[0]!.shots[0]!.sha]);
   });
 
+  it('a live shot: the same checks; a later report keeps the live shots it is told to keep', async () => {
+    files[`${DIR}live.png`] = png(77);
+    expect(await S.storeLiveShot(ctx, { accountId: 1, buildId, path: '/etc/passwd.png', read })).toBeNull();
+    expect(await S.storeLiveShot(ctx, { accountId: 1, buildId, path: `${DIR}not-a-png.png`, read })).toBeNull();
+    const live = await S.storeLiveShot(ctx, { accountId: 1, buildId, path: `${DIR}live.png`, read });
+    expect(live).toMatchObject({ name: 'live.png' });
+    await S.storeBuildScreens(ctx, { accountId: 1, buildId, read, keep: [live!.sha], screens: [{ name: 'Refunds panel', shots: [`${DIR}a-375.png`], verdict: 'differs', note: 'Still wraps.' }] });
+    expect(await S.readBuildShot(ctx, 1, buildId, live!.sha)).toEqual(png(77));
+    // Without `keep`, a report drops it.
+    await S.storeBuildScreens(ctx, { accountId: 1, buildId, read, screens: [{ name: 'Refunds panel', shots: [`${DIR}a-375.png`], verdict: 'differs', note: 'Still wraps.' }] });
+    expect(await S.readBuildShot(ctx, 1, buildId, live!.sha)).toBeNull();
+  });
+
   it('caps the number of screenshots', async () => {
     const many = Array.from({ length: S.SHOTS_MAX + 5 }, (_, i) => `${DIR}m${i}.png`);
     for (const [i, p] of many.entries()) files[p] = png(10 + i);

@@ -878,6 +878,13 @@ A story session's agent looks at the screens it builds in a headless Chromium. P
   `story_build_shots` (never a path); the build tab's **Screens** block lists the verdicts and loads the pictures only
   on "Show screenshots", from `GET /api/story-builds/:id/shots/:sha` (the account's own build; `image/png`,
   `nosniff`, `default-src 'none'; sandbox`).
+- **Live screenshots** (2026-11-21): after `shot` writes its files, the CLI tells Ensemble their paths over the relay
+  (`ensemble-browser noted <path>…`, quiet, ≤ 6 per call; never a failure of the command). The story subject
+  (`onLiveShots` → `coding/story-build/screens.ts` `storeLiveShot`) applies the SAME checks as a report's shots (the
+  browser folder, the PNG signature, 5 MB) and stores the bytes in `story_build_shots`; ≤ 40 per session. The newest
+  12 are `session.liveShots`, streamed as a `shots` frame (the stream owns them while open) and shown in the build
+  tab's **Screenshots** section as they land (lazy-loaded, from the same shot route). A later build report keeps
+  them (`storeBuildScreens` `keep`).
 - The seed (`workspace/seed.ts` `BROWSER`, story sessions): how to start it and take shots, `localhost` is the
   sandbox, never sign in to a real account (Storybook, mock data or a test page).
 

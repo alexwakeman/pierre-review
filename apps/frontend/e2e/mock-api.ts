@@ -1547,7 +1547,15 @@ export function stackBuiltFrom(b: StoryBuild): StoryBuild {
       storyBuildPr(502, 'P2', 1, { stackIndex: 2, branch: 'ACME-1-2', title: 'Stream reports as CSV', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], summary: 'Adds GET /reports/:id.csv, streamed.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
       storyBuildPr(503, 'P3', 2, { repoId: 10, fullName: 'acme/web', title: 'Add the Download CSV button', criteria: ['AC1'], dependsOn: ['P2'], filesChanged: ['src/reports/ReportHeader.tsx'], reported: 'partly', checks: [{ command: 'pnpm lint', result: 'not_run', note: 'No lint config.' }] }),
     ],
-    session: { ...builtFrom(b).session!, plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) } },
+    session: {
+      ...builtFrom(b).session!,
+      plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) },
+      // Live screenshots the agent took during the build (newest first).
+      liveShots: [
+        { sha: STORY_SHOT_SHA_2, name: '20261121-101012-localhost-6006-375.png', at: iso(0.001) },
+        { sha: STORY_SHOT_SHA, name: '20261121-101010-localhost-6006-1280.png', at: iso(0.001) },
+      ],
+    },
     // The build report's screens (docs/SANDBOX.md § The browser): the agent's verdict and the copied screenshots.
     screens: [
       {

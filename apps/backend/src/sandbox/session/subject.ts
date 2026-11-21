@@ -132,6 +132,9 @@ export interface SessionSubject {
   onServiceRun?(l: SubjectLive): void;
   /** `ensemble-ticket`'s source (a story session; docs/SANDBOX.md § The ticket relay). null / absent ⇒ none. */
   ticketRelaySource?(l: SubjectLive): import('../ticket/index.js').TicketRelaySource | null;
+  /** Screenshots the agent just took (docs/SANDBOX.md § The browser → Live screenshots): copy them out, checked.
+   *  Answers the ones kept, newest first. */
+  onLiveShots?(l: SubjectLive, paths: readonly string[]): Promise<import('@pierre-review/shared').SandboxLiveShot[]>;
   /** The ticket relay read its manifest (plan first: the checker's context names the files now). */
   onTicketFiles?(l: SubjectLive): Promise<void>;
   /** Start build (the button): switch the driver first (the machine does), then this is the instruction. */

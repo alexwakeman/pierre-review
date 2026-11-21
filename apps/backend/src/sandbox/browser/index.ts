@@ -23,6 +23,8 @@ export interface BrowserHost {
   proxyUrl: string | null;
   /** One line for the session's conversation. */
   notice(text: string): void;
+  /** Screenshots the agent just took (`ensemble-browser shot` names their paths): copy them out, checked. */
+  onShots?(paths: readonly string[]): Promise<void>;
   /** Test seam: the wait between readiness probes. */
   probeEveryMs?: number;
 }
@@ -90,6 +92,11 @@ export class SessionBrowser implements RelayHandler {
   /** `ensemble-browser start | stop | status` (argv is DATA from the sandbox). */
   async handle(argv: readonly string[], _cwd: string, out: Out): Promise<number> {
     const verb = argv[0] ?? 'status';
+    // `noted <path>…`: the CLI's own call after a shot (paths are DATA; the subject checks each one). Quiet.
+    if (verb === 'noted') {
+      await this.host.onShots?.(argv.slice(1, 7)).catch(() => {});
+      return 0;
+    }
     if (!this.available) {
       out('e', 'ensemble-browser: a browser runs only on Docker. Look at the code instead, and say so in your report.\n');
       return 1;

@@ -184,6 +184,14 @@ export interface SandboxSessionSpend {
 }
 
 /** `StoryBuild.session` — set on every session row; null on a row of the old plan/build flow. */
+/** One screenshot the agent took, as the build tab shows it live. */
+export interface SandboxLiveShot {
+  sha: string;
+  /** The file's name (`<time>-<page>-<width>.png`). */
+  name: string;
+  at: string;
+}
+
 export interface StoryBuildSession {
   phase: SandboxSessionPhase;
   /** The runtime that ran it ('docker' today), null before detection. */
@@ -209,6 +217,9 @@ export interface StoryBuildSession {
   credentialLine: string | null;
   services: SandboxServicesStatus | null;
   network: SandboxNetworkEntry[];
+  /** Screenshots the agent took in the build's browser, newest first, checked and copied out as it took them
+   *  (docs/SANDBOX.md § The browser → Live screenshots). Each is `GET /api/story-builds/:id/shots/:sha`. */
+  liveShots?: SandboxLiveShot[];
   spend: SandboxSessionSpend;
   /** The ticket as the agent was last told it (TICKET.md): `AC<n>: text` lines and the open points. */
   ticket: SandboxSessionTicket;
@@ -233,6 +244,8 @@ export type SandboxSessionStreamEvent =
   | { type: 'item'; item: SandboxConversationItem }
   | { type: 'network'; entry: SandboxNetworkEntry }
   | { type: 'services'; status: SandboxServicesStatus }
+  /** A screenshot the agent took was copied out (newest first). */
+  | { type: 'shots'; shots: SandboxLiveShot[] }
   /** Plan first: the plan stage changed (a new revision, a decision, a reply, approval). */
   | { type: 'plan'; plan: BuildPlanView }
   /** Plan first: the planned pull requests after a build turn's extraction. */

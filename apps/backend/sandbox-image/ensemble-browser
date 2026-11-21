@@ -39,7 +39,7 @@ const fail = (msg, code = 1) => {
 };
 
 // ── start / stop / status: Ensemble on the host ──────────────────────────────────────────────────
-function askEnsemble(argv) {
+function askEnsemble(argv, quiet = false) {
   return new Promise((resolve) => {
     const sock = net.connect(SOCKET);
     let buf = '';
@@ -58,18 +58,20 @@ function askEnsemble(argv) {
         } catch {
           continue;
         }
-        if (typeof m.o === 'string') process.stdout.write(m.o);
-        else if (typeof m.e === 'string') process.stderr.write(m.e);
+        if (typeof m.o === 'string' && !quiet) process.stdout.write(m.o);
+        else if (typeof m.e === 'string' && !quiet) process.stderr.write(m.e);
         else if (typeof m.x === 'number') code = m.x;
       }
     });
     sock.on('error', (e) => {
+      if (code === null && quiet) code = 0;
       if (code === null) {
         process.stderr.write(e && (e.code === 'ENOENT' || e.code === 'ECONNREFUSED') ? 'ensemble-browser: a browser is not available in this session.\n' : `ensemble-browser: ${e && e.message ? e.message : e}\n`);
         code = 3;
       }
     });
     sock.on('close', () => {
+      if (code === null && quiet) code = 0;
       if (code === null) {
         process.stderr.write('ensemble-browser: Ensemble stopped answering.\n');
         code = 3;
@@ -220,6 +222,7 @@ function fileName(url, width) {
 async function shot(rest) {
   const o = parseArgs(rest);
   fs.mkdirSync(o.out, { recursive: true });
+  const written = [];
   await withPage(async (cdp) => {
     await cdp.send('Page.enable');
     for (const width of o.widths) {
@@ -236,8 +239,12 @@ async function shot(rest) {
       const file = path.join(o.out, fileName(o.url, width));
       fs.writeFileSync(file, Buffer.from(r.data, 'base64'));
       process.stdout.write(`${file}\n`);
+      written.push(file);
     }
   });
+  // Tell Ensemble, so the reader sees them as they are taken (it checks and copies only its own folder's PNGs).
+  // Quiet, and never a failure of this command: without a relay they simply stay here.
+  if (written.length > 0) await askEnsemble(['noted', ...written], true);
 }
 
 const preview = (v) => {

@@ -264,11 +264,15 @@ test.describe('Implement, plan first', () => {
     await expect(rows.nth(0)).toContainText('with the mock-up report-header-csv.png');
     await expect(rows.nth(1)).toContainText('No design to compare');
     await expect(rows.nth(1).getByTestId('story-build-screen-show')).toHaveCount(0);
-    // Nothing is fetched until the reader asks.
-    expect(shotRequests).toEqual([]);
+    // The live screenshots (what the agent saw, newest first) show as they are: their own section.
+    const live = page.getByTestId('story-build-overlay').getByTestId('story-build-shots');
+    await expect(live.getByTestId('story-build-live-shot')).toHaveCount(2);
+    await expect(live.getByTestId('story-build-live-shot').first()).toHaveAttribute('src', /\/api\/story-builds\/\d+\/shots\/b{64}$/);
+    // (They load lazily, as they scroll into view.) The report's screenshots are not drawn until the reader asks.
+    await expect(rows.nth(0).getByTestId('story-build-screen-shot')).toHaveCount(0);
     await rows.nth(0).getByTestId('story-build-screen-show').click();
     await expect(rows.nth(0).getByTestId('story-build-screen-shot')).toHaveCount(2);
-    await expect.poll(() => shotRequests.length).toBe(2);
+    await expect(rows.nth(0).getByTestId('story-build-screen-shot').first()).toBeVisible();
 
     // "Post screenshots to the ticket": ONE press, and the line says what was posted.
     await page.route(/\/api\/story-builds\/\d+\/screens\/post$/, (route) =>

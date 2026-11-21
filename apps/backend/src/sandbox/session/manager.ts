@@ -968,7 +968,22 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       if (l.ticketRelay) await sub.onTicketFiles?.(l).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: the plan context after the ticket relay`));
       // THE BROWSER'S RELAY (`ensemble-browser start | stop | status`): the browser itself starts only on the
       // reader's tick at Approve or the agent's ask. Never fatal: the client then says no browser is available.
-      const browser = deps.newBrowser({ runtime: rt, owner: l.owner, sandbox: box.name, proxyUrl: PROXY_URL, notice: (t) => notice(l, t) });
+      const browser = deps.newBrowser({
+        runtime: rt,
+        owner: l.owner,
+        sandbox: box.name,
+        proxyUrl: PROXY_URL,
+        notice: (t) => notice(l, t),
+        // LIVE SCREENSHOTS: each shot the agent takes is checked, copied out and shown in the build tab as it lands.
+        onShots: async (paths) => {
+          const got = (await sub.onLiveShots?.(l, paths)) ?? [];
+          if (got.length === 0) return;
+          const seen = new Set(got.map((x) => x.sha));
+          l.state.liveShots = [...got, ...(l.state.liveShots ?? []).filter((x) => !seen.has(x.sha))].slice(0, LIVE_SHOTS_SHOWN);
+          emit(l, { type: 'shots', shots: l.state.liveShots });
+          scheduleSave(l);
+        },
+      });
       try {
         await browser.startRelay({ onProblem: (line) => notice(l, line) });
         l.browser = browser;
@@ -1513,6 +1528,9 @@ export async function approveSessionPlan(ctx: AgentContext, accountId: number, b
   return r;
 }
 
+/** Live screenshots the build tab shows (the newest). */
+const LIVE_SHOTS_SHOWN = 12;
+
 /** The plan recommends a browser for its build (its `ui` section). */
 function planWantsBrowser(row: { planJson: unknown } | null): boolean {
   const ui = (row?.planJson as { ui?: { needed?: boolean; browser?: boolean } | null } | undefined)?.ui;
@@ -1918,6 +1936,8 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
   const isStacked = (l: SubjectLive): boolean => stateOf(l).planFirst === true && plan.isApproved() && !hotfixBuild;
   /** Build continuations sent since the reader last acted (at most CONTINUATIONS_MAX). */
   let continuations = 0;
+  /** Live screenshots this session copied out (LIVE_SHOTS_MAX in all). */
+  let liveShotsTaken = 0;
   let lastUnfinished = false;
   const machine = (l: Live): PlanMachine => ({ notice: (t) => notice(l, t), emitPlan: (v) => emit(l, { type: 'plan', plan: v }), scheduleSave: () => scheduleSave(l) });
 
@@ -2079,6 +2099,21 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     branch: () => sessionBranch(row.ticketKey),
     seed() {
       return { ticket: ticket!, mode: action, planFirst: planFirstFlag && !plan.isApproved() };
+    },
+    async onLiveShots(sl, paths) {
+      const l = sl as Live;
+      if (!l.container) return [];
+      const container = l.container;
+      const { storeLiveShot, LIVE_SHOTS_MAX } = await import('../../coding/story-build/screens.js');
+      const out: import('@pierre-review/shared').SandboxLiveShot[] = [];
+      for (const p of paths) {
+        if (liveShotsTaken >= LIVE_SHOTS_MAX) break;
+        const r = await storeLiveShot(ctx, { accountId, buildId, path: p, read: (x) => l.runtime.readFile(container, x, { maxBytes: 5 * 1024 * 1024 }) }).catch(() => null);
+        if (r == null) continue;
+        liveShotsTaken += 1;
+        out.unshift({ sha: r.sha, name: r.name, at: new Date(deps.now()).toISOString() });
+      }
+      return out;
     },
     async onTicketFiles(l) {
       // The checker's context names the ticket's files from now on (the seed's copy was written before them).

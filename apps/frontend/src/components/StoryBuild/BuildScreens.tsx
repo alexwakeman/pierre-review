@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { storyBuildPath, type StoryBuild, type StoryBuildScreen } from '@pierre-review/shared';
+import { storyBuildPath, type SandboxLiveShot, type StoryBuild, type StoryBuildScreen } from '@pierre-review/shared';
 import { usePostStoryBuildScreens } from '../../hooks/useStoryBuild.js';
 import { dateTime } from '../../lib/ui.js';
 import { InfoButton } from '../InfoModal.js';
@@ -99,5 +99,30 @@ function ScreenRow({ buildId, screen }: { buildId: number; screen: StoryBuildScr
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * LIVE SCREENSHOTS (docs/SANDBOX.md § The browser → Live screenshots): the newest screenshots the agent took in the
+ * build's browser, shown as they land (the session's `shots` frames). Each is Ensemble's checked copy, from the build's
+ * own route. A click opens it full size.
+ */
+export function LiveShots({ buildId, shots, live }: { buildId: number; shots: readonly SandboxLiveShot[]; live: boolean }): JSX.Element | null {
+  if (shots.length === 0) return null;
+  return (
+    <div data-testid="story-build-live-shots">
+      <p className="mb-2 text-meta text-ui-mute">
+        {live ? 'What the agent sees in the browser, newest first.' : 'What the agent saw in the browser, newest first.'}
+      </p>
+      <ul className="flex flex-wrap items-start gap-2">
+        {shots.map((s) => (
+          <li key={s.sha}>
+            <a href={storyBuildPath('shot', { id: buildId, sha: s.sha })} target="_blank" rel="noreferrer noopener" title={s.name}>
+              <img data-testid="story-build-live-shot" src={storyBuildPath('shot', { id: buildId, sha: s.sha })} alt={s.name} loading="lazy" className="max-h-40 max-w-full rounded-ui border border-ui-line" />
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
