@@ -5,6 +5,8 @@
 > workspace mirror, the agent drivers, services, the session manager) and how a reader sets one up is
 > [SANDBOX.md](SANDBOX.md). CLAUDE.md keeps only the doc-map row; put new detail in one of the two.
 > Code: `apps/backend/src/sandbox/` (the session), `apps/backend/src/coding/story-build/` (the data, the
+> Not built yet: building front ends (the `ensemble-ticket` relay, optional Figma, an on-demand browser) is
+> planned in [IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md).
 > bases, the gap fold, Push), `packages/shared/src/story-build.ts` + `sandbox-session.ts`, the build tab
 > `apps/frontend/src/components/StoryBuild/`.
 
