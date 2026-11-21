@@ -72,6 +72,7 @@ import type {
   WorkspaceTrackerSettings,
   TrackerCopySourcesResponse,
   WorkspaceSonarSettings,
+  WorkspaceFigmaSettings,
   WikiCredentialsSettings,
   SonarPrResponse,
   PrSequenceDiagramsResponse,
@@ -1448,6 +1449,29 @@ export function storyPlanRevision(revision: number, o: Partial<BuildPlanRevision
       why: 'The story does not say what happens above the current 500-row cap.',
       contentions: ['C1'],
     },
+    ui: {
+      needed: true,
+      browser: true,
+      reason: 'A Download CSV button in the header of every report.',
+      renderTarget: 'storybook',
+      designInputs: [{ id: 'a-0123456789', name: 'report-header-csv.png', kind: 'image', used: true, note: 'The mock-up of the header.' }],
+      designSystem: { summary: 'Tailwind tokens and the Button and Menu components in acme/web src/ui.', evidence: [] },
+      nearestScreens: [
+        {
+          kind: 'code',
+          repoId: 10,
+          fullName: 'acme/web',
+          path: 'src/reports/ReportHeader.tsx',
+          startLine: 12,
+          endLine: 14,
+          baseSha: 'c'.repeat(40),
+          excerpt: '<header className="flex items-center gap-2">\n  <Button variant="secondary">Print</Button>\n</header>\n',
+          linesCorrected: false,
+        },
+      ],
+      newComponents: [],
+      gaps: ['The mock-up shows no loading state while the file streams.'],
+    },
     dropped: { contentions: 1, evidence: 0, reasons: ['A quote was not in the file at the session start.'] },
     ...o,
   };
@@ -1523,9 +1547,38 @@ export function stackBuiltFrom(b: StoryBuild): StoryBuild {
       storyBuildPr(502, 'P2', 1, { stackIndex: 2, branch: 'ACME-1-2', title: 'Stream reports as CSV', criteria: ['AC2', 'AC3'], dependsOn: ['P1'], summary: 'Adds GET /reports/:id.csv, streamed.', reported: 'done', checks: [{ command: 'pnpm test', result: 'passed', note: null }] }),
       storyBuildPr(503, 'P3', 2, { repoId: 10, fullName: 'acme/web', title: 'Add the Download CSV button', criteria: ['AC1'], dependsOn: ['P2'], filesChanged: ['src/reports/ReportHeader.tsx'], reported: 'partly', checks: [{ command: 'pnpm lint', result: 'not_run', note: 'No lint config.' }] }),
     ],
-    session: { ...builtFrom(b).session!, plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) } },
+    session: {
+      ...builtFrom(b).session!,
+      plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) },
+      // Live screenshots the agent took during the build (newest first).
+      liveShots: [
+        { sha: STORY_SHOT_SHA_2, name: '20261121-101012-localhost-6006-375.png', at: iso(0.001) },
+        { sha: STORY_SHOT_SHA, name: '20261121-101010-localhost-6006-1280.png', at: iso(0.001) },
+      ],
+    },
+    // The build report's screens (docs/SANDBOX.md § The browser): the agent's verdict and the copied screenshots.
+    screens: [
+      {
+        name: 'Report header',
+        url: 'http://localhost:6006/?path=/story/reports-header',
+        comparedWith: 'the mock-up report-header-csv.png',
+        verdict: 'matches',
+        note: 'The Download CSV button sits after Print, in the same secondary style.',
+        shots: [
+          { sha: STORY_SHOT_SHA, name: '20261121-101010-localhost-6006-1280.png', bytes: STORY_SHOT_PNG.length },
+          { sha: STORY_SHOT_SHA_2, name: '20261121-101010-localhost-6006-375.png', bytes: STORY_SHOT_PNG.length },
+        ],
+      },
+      { name: 'Empty report', url: null, comparedWith: null, verdict: 'no_design', note: 'Built to fit the reports list.', shots: [] },
+    ],
+    screensTicket: { offered: true, postedAt: null, attachments: null, error: null, posting: false },
   };
 }
+
+/** A 1×1 PNG, and the shas the build's screens name (the shot route answers it for any sha). */
+export const STORY_SHOT_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+export const STORY_SHOT_SHA = 'a'.repeat(64);
+export const STORY_SHOT_SHA_2 = 'b'.repeat(64);
 
 export const STORY_SESSION_STACK_BUILT: StoryBuild = stackBuiltFrom(STORY_SESSION_PLAN_READY);
 
@@ -2675,6 +2728,10 @@ export async function installMockApi(
           tokenUnreadable: false,
           repos: [],
         } satisfies WorkspaceSonarSettings);
+      }
+      // FIGMA (docs/IMPLEMENT-UI-PLAN.md § 3): no token in e2e.
+      if (/\/api\/workspaces\/\d+\/figma$/.test(path)) {
+        return json(route, { workspaceId: WORKSPACE.id, hasToken: false, tokenUnreadable: false } satisfies WorkspaceFigmaSettings);
       }
       const sonarMatch = path.match(/\/api\/prs\/(\d+)\/sonar$/);
       if (sonarMatch) {

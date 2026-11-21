@@ -94,6 +94,7 @@ let db: any;
 let schema: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let M: typeof import('./manager.js');
+const browserStarts: string[] = [];
 let P: typeof import('./plan.js');
 let fake: import('../runtime/fake.js').FakeRuntime;
 let wsId = 0;
@@ -261,6 +262,10 @@ beforeAll(async () => {
   M.setSessionDepsForTests({
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident === IDENT ? 'ACME-400' : 'ACME-401', title: 'Export a report as CSV', empty: false }),
+    // `ensemble-ticket` needs the real relay program (relay.test.ts, ticket/relay.test.ts); a stand-in here.
+    // The browser's relay needs the real relay program (browser/*.test.ts); a stand-in here.
+    newBrowser: () => ({ startRelay: async () => {}, start: async (by) => (browserStarts.push(by), false), stop: async () => {}, close: () => {} }),
+    startTicketRelay: async () => ({ controller: { filesNow: () => [] } as never, close: () => {} }),
     readTicket: async (_c, _a, _w, ident) => ({
       ident,
       key: ident === IDENT ? 'ACME-400' : 'ACME-401',
@@ -468,7 +473,7 @@ describe('plan first, end to end', () => {
       ],
     };
     const turnsBefore = sentToClaude.length;
-    const r = await post(`/api/story-builds/${id}/plan/approve`, { revision: 2, text: 'Keep the commits small.' });
+    const r = await post(`/api/story-builds/${id}/plan/approve`, { revision: 2, text: 'Keep the commits small.', browser: true });
     expect(r.statusCode).toBe(202);
     const b = await until(id, (x) => x.session?.phase === 'built' && sentToClaude.length === turnsBefore + 2, 'built after the continuation', 180_000);
     const sent = sentToClaude.at(-2)!;
@@ -479,6 +484,8 @@ describe('plan first, end to end', () => {
     // ONE automatic continuation, the budget gate asked first; the second turn ended normally, so no more.
     expect(sentToClaude.at(-1)).toBe('Go on with the build from where you stopped. Follow PLAN.md, and finish with the build report.');
     expect(continueAsked).toEqual(['claude']);
+    // "Give the build a browser" (the reader's tick): started once, by the reader, before the build turn.
+    expect(browserStarts).toEqual(['reader']);
     expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === 'The build stopped at the turn limit with work left, so Ensemble asked the agent to go on (1 of 2).')).toBe(true);
     expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 2 });
     expect(b.prs!.map((p) => [p.key, p.fullName, p.position, p.stackIndex, p.branch, p.status, p.criteria])).toEqual([
@@ -623,6 +630,7 @@ describe('Approve the plan automatically', () => {
     await M._closeAllSessionsForTest();
     gateAllows = true;
     gateAsked.length = 0;
+    browserStarts.length = 0;
     const IDENT4 = 'jira:https://acme.atlassian.net#ACME-403';
     answers.push(withBlock('Two repositories, two pull requests.', PLAN()));
     const turnsBefore = sentToClaude.length;
@@ -640,6 +648,8 @@ describe('Approve the plan automatically', () => {
     expect(b.autoApprovePlan).toBe(true);
     expect(b.planAutoApprovedAt).not.toBeNull();
     expect(b.ticketReviewDoneAt).toBeNull();
+    // The plan changes no screen: no browser.
+    expect(browserStarts).toEqual([]);
     // Approved: the switch cannot change now.
     expect((await post(`/api/story-builds/${id}/auto-approve`, { on: false })).statusCode).toBe(409);
     // The builds toast: built, the review loop off ⇒ the Push gate.
@@ -650,6 +660,35 @@ describe('Approve the plan automatically', () => {
     expect(done.json().ticketReviewDoneAt).not.toBeNull();
     expect((await read(id)).ticketReviewDoneAt).not.toBeNull();
     expect((await post(`/api/story-builds/${id}/ticket-review`, { done: 'yes' })).statusCode).toBe(400);
+  });
+
+  it('a plan that recommends a browser: approved automatically, the browser starts before the build turn, with no press', { timeout: 120_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    gateAllows = true;
+    browserStarts.length = 0;
+    const IDENT6 = 'jira:https://acme.atlassian.net#ACME-405';
+    const ui = {
+      needed: true,
+      browser: true,
+      reason: 'A Download CSV button on the reports page.',
+      renderTarget: 'storybook',
+      designInputs: [],
+      designSystem: { summary: 'The export helpers in acme/api.', evidence: [{ kind: 'code', repo: 'acme/api', path: 'src/export.ts', lines: [2, 2], quote: 'export const MAX_ROWS = 1000;' }] },
+      nearestScreens: [],
+      newComponents: [],
+      gaps: [],
+    };
+    answers.push(withBlock('Two repositories, two pull requests, one screen.', PLAN({ ui })));
+    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT6, autoApprovePlan: true });
+    expect(r.statusCode, r.body).toBe(202);
+    const id = r.json().buildId;
+    const b = await until(id, (x) => x.session?.phase === 'built', 'built with no press', 60_000);
+    expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 1 });
+    expect(b.session!.plan!.latest!.ui).toMatchObject({ needed: true, browser: true, renderTarget: 'storybook' });
+    // The plan's own recommendation decides (the reader consented to automatic approval): started once, as the
+    // reader's, before the build turn's instruction.
+    expect(browserStarts).toEqual(['reader']);
+    expect(sentToClaude.at(-1)).toMatch(/^The reader approved the plan \(revision 1\)\. Build it now\./);
   });
 
   it('refused by the spend gate: the plan waits for the reader, with one line', { timeout: 60_000 }, async () => {

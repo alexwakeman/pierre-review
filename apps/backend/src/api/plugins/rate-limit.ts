@@ -188,6 +188,9 @@ function tierFor(method: string, path: string): readonly Tier[] {
   // for the organization + one per repo, ≤ 20) — a THIRD-PARTY quota, so `search`. GET/PUT
   // `…/sonar` are DB-only and fall to `read` on the next line, decided rather than inherited.
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/sonar\/check$/.test(path)) return [TIERS.search, TIERS.read];
+  // FIGMA (figma/routes.ts): "Test token" calls Figma's API with the saved token (one call). `…/figma` GET/PUT are
+  // DB-only and fall to `read`.
+  if (method === 'POST' && /^\/api\/workspaces\/\d+\/figma\/check$/.test(path)) return [TIERS.search, TIERS.read];
   // WIKI CREDENTIALS (reference-docs/wiki/routes.ts): "Test connection" is one read of the customer's
   // Confluence with the saved token → `search`. GET/PUT `…/wiki-credentials` are DB-only → `read` below.
   if (method === 'POST' && /^\/api\/workspaces\/\d+\/wiki-credentials\/check$/.test(path)) return [TIERS.search, TIERS.read];
@@ -669,6 +672,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
     if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/|prs\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
     // The review loop's Continue: the reader's press may start reviews, a fix turn and pushes.
     if (mutating && /^\/api\/story-builds\/\d+\/loop\/continue$/.test(path)) return [TIERS.ai, TIERS.aiHourly, TIERS.githubWrite];
+    // "Post screenshots to the ticket": a TRACKER write (Jira attachments + one comment), the ticket update's tier.
+    if (mutating && /^\/api\/story-builds\/\d+\/screens\/post$/.test(path)) return [TIERS.search, TIERS.read];
     return [TIERS.read];
   }
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {

@@ -167,6 +167,16 @@ ticket, its comments, other people's PRs, the repositories). It is the ONE place
 only inside a sandbox `sandbox/runtime` started: Implement on a story, and every AI Fix run. Every review,
 and every chat keep the no-shell rule above.
 
+**The ticket relay and the browser** (docs/SANDBOX.md § The ticket relay, § The browser): the tracker is read on
+the HOST, for this session's ticket only, read only, its credential never inside; an attachment address is checked
+to be on the tracker's site before the credential is sent. The browser shares the sandbox's network namespace
+(nothing the sandbox cannot already reach), goes out through the same proxy, and runs non-root and read-only from a
+pinned image. **Figma** (`figma/client.ts`): the workspace's sealed token goes ONLY to the fixed host
+`api.figma.com`, GET only, through the tracker's guarded transport (https, public addresses, no redirect
+followed, timeout, size cap); a file key or node id from a ticket is shape-checked before it enters the path; a
+frame's picture is read from Figma's signed address WITHOUT the token, public addresses only; failures are
+sentences we wrote.
+
 ⚠ **A MERGE FROM THE SANDBOX IS CHECKED, THEN REBUILT** (docs/SANDBOX.md § AI Fix sessions, "The merge"). The
 agent's commits leave as a git bundle — untrusted bytes. The host reads it only in Ensemble's clone cache with
 hooks, fsmonitor, the reader's config, replace objects and lazy fetch OFF, fetches it with every object

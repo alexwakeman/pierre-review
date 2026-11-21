@@ -7,6 +7,9 @@
 > Code: `apps/backend/src/sandbox/` (the session), `apps/backend/src/coding/story-build/` (the data, the
 > bases, the gap fold, Push), `packages/shared/src/story-build.ts` + `sandbox-session.ts`, the build tab
 > `apps/frontend/src/components/StoryBuild/`.
+>
+> Not built yet: building front ends (the `ensemble-ticket` relay, optional Figma, an on-demand browser) is
+> planned in [IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md).
 
 ## What it is
 
@@ -737,6 +740,13 @@ round the PR opens ready anyway, naming what is still open), and then THE TICKET
      `automaticRunAllowed` first, and a refusal, no credential, a 45 s timeout or a failure just leaves it
      out — the lines still say what changed. Summary and titles are model text: `wikiLabel` escapes
      mention/macro characters.
+  3. The build's SCREENSHOTS (2026-11-21; docs/SANDBOX.md § The browser): when the build report has screens with
+     screenshots, they are uploaded as attachments BEFORE the comment and shown inline in it (a "*Screenshots*"
+     part: each screen's name, the agent's verdict said as the agent's, its note, the pictures), through
+     `coding/story-build/screens.ts` `screensForTicketStep` under the SAME claim (`screens_ticket_json`) as the
+     build tab's "Post screenshots" button, so the two never both post. An upload that wrote nothing releases
+     that claim (the button still works) and the comment goes without them; a comment that fails after the
+     upload is recorded, never retried. `StoryBuildEndToEndTicket.screenshots` counts them.
   ⚠ The status is never changed. ⚠ Jira only: another tracker records `skipped: 'not_jira'` and writes
   nothing. A failed update is recorded, still commented on, and leaves the tab's ticket step OPEN (Update
   ticket is still there); otherwise the step closes (`ticket_review_done_at`). The tab leads the step with

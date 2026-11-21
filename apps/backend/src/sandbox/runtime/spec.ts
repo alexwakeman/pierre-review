@@ -103,6 +103,58 @@ export function proxyRunArgs(spec: ProxySpec, name: string, labels: Record<strin
   ];
 }
 
+/**
+ * THE BROWSER (docs/SANDBOX.md § The browser): a pinned headless Chromium, started by Ensemble when the reader
+ * ticks "Give the build a browser" or the agent asks (`ensemble-browser start`).
+ *
+ *   • It SHARES THE SANDBOX'S NETWORK NAMESPACE (`--network container:<sandbox>`): `localhost:5173` in the
+ *     browser is the agent's own dev server (no Host-header or cookie surprises), the agent reaches the
+ *     DevTools endpoint at `localhost:9222`, and the browser can reach exactly what the sandbox can — the
+ *     internal network and the proxy — no more.
+ *   • DevTools listens on 127.0.0.1 only (inside that shared namespace).
+ *   • Non-root (`nobody`), the usual hardening, a read-only root, a small /tmp for its profile, capped.
+ *   • Its requests out go through the session's proxy (`proxyUrl`): the same allow-list, the same log.
+ */
+export const BROWSER_IMAGE = 'docker.io/chromedp/headless-shell@sha256:381353d3530ab9d579d2fe8b9c0f4519c995617f5a71daf6bb649e2d12005bd9';
+export const BROWSER_USER = '65534:65534';
+export const BROWSER_DEBUG_PORT = 9222;
+export const BROWSER_RESOURCES: SandboxResources = { cpus: 1, memoryBytes: 1024 ** 3, pids: 512, diskBytes: 0 };
+
+export function browserRunArgs(spec: { sandbox: string; image: string; proxyUrl: string | null }, name: string, labels: Record<string, string>): string[] {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(spec.sandbox)) throw new Error(`Not a valid sandbox container name: ${JSON.stringify(spec.sandbox)}`);
+  if (spec.proxyUrl != null && !/^http:\/\/[A-Za-z0-9.-]+:\d{1,5}$/.test(spec.proxyUrl)) throw new Error(`Not a valid proxy address: ${JSON.stringify(spec.proxyUrl)}`);
+  return [
+    'run', '--detach', '--name', name,
+    ...labelArgs(labels),
+    '--network', `container:${spec.sandbox}`,
+    '--user', BROWSER_USER,
+    ...HARDENING,
+    ...resourceArgs(BROWSER_RESOURCES),
+    '--read-only', '--tmpfs', '/tmp:rw,size=256m',
+    '--env', 'HOME=/tmp',
+    '--entrypoint', '/headless-shell/headless-shell',
+    spec.image,
+    // Chromium's own sandbox needs privileges the container does not have; the container is the boundary.
+    '--no-sandbox',
+    '--headless',
+    `--remote-debugging-address=127.0.0.1`,
+    `--remote-debugging-port=${BROWSER_DEBUG_PORT}`,
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-networking',
+    '--disable-component-update',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--user-data-dir=/tmp/profile',
+    // Out through the session's proxy, like the sandbox (its allow-list, its log). Chromium never proxies
+    // loopback, so `localhost` stays the sandbox; `<local>` keeps the session's service names direct too.
+    ...(spec.proxyUrl != null ? [`--proxy-server=${spec.proxyUrl}`, '--proxy-bypass-list=<local>'] : []),
+    'about:blank',
+  ];
+}
+
 /** The one-off root step that makes a fresh volume the agent's: CHOWN only, never held by the agent. */
 export function volumeChownArgs(image: string, volume: string, labels: Record<string, string>): string[] {
   return [

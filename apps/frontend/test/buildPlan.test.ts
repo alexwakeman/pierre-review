@@ -37,6 +37,7 @@ import {
   pushAllPrCount,
   stackRows,
   stepAfterPick,
+  uiPlanRows,
 } from '../src/lib/buildPlan.js';
 
 const at = '2026-11-08T10:00:00.000Z';
@@ -354,5 +355,37 @@ describe('the decision wizard', () => {
       { id: 'C1', step: 0, label: 'Point 1', about: 'AC2', problem: 'The cap is 500.', choice: null },
       { id: 'C2', step: 1, label: 'Point 2', about: 'AC3', problem: 'No such report.', choice: 'Keep the story' },
     ]);
+  });
+});
+
+describe('uiPlanRows (the plan’s Screens block)', () => {
+  const ui = {
+    needed: true,
+    browser: true,
+    reason: 'A refunds panel.',
+    renderTarget: 'storybook' as const,
+    designInputs: [
+      { id: 'a-0123456789', name: 'refunds-mock.png', kind: 'image', used: true, note: '' },
+      { id: 'l-0123456789', name: 'Old spec', kind: 'link', used: false, note: 'Out of date.' },
+    ],
+    designSystem: { summary: 'Tailwind tokens and packages/ui.', evidence: [] },
+    nearestScreens: [],
+    newComponents: [{ name: 'RefundRow', why: 'No row shows an amount and a status.' }],
+    gaps: ['No empty state.'],
+  };
+  it('names the design used, the system, where it shows, what is new and what is left to choose', () => {
+    expect(uiPlanRows(ui)).toEqual([
+      { key: 'design', label: 'Design', text: 'refunds-mock.png' },
+      { key: 'system', label: 'Design system', text: 'Tailwind tokens and packages/ui.' },
+      { key: 'where', label: 'Shown in', text: 'Storybook · the agent asks for a browser' },
+      { key: 'new', label: 'New', text: 'RefundRow: No row shows an amount and a status.' },
+      { key: 'gaps', label: 'To choose', text: 'No empty state.' },
+    ]);
+  });
+  it('no design in the ticket says so; no screen change is no block', () => {
+    expect(uiPlanRows({ ...ui, designInputs: [], newComponents: [], gaps: [] })![0]!.text).toBe('None in the ticket. Built to fit the existing screens.');
+    expect(uiPlanRows({ ...ui, needed: false })).toBeNull();
+    expect(uiPlanRows(null)).toBeNull();
+    expect(uiPlanRows(undefined)).toBeNull();
   });
 });

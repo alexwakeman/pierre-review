@@ -171,7 +171,7 @@ export default function Page(): JSX.Element {
         <li>
           On a Jira ticket, Ensemble updates the description and acceptance criteria the plan changed, and comments on the
           ticket as you, in plain English for anyone who reads the ticket: links to the pull requests, a short summary
-          of what changed and why, and the lines removed and added. It never changes the ticket&rsquo;s status. The earlier text is in the ticket&rsquo;s history
+          of what changed and why, the lines removed and added, and the screenshots the agent took of the screens it built. It never changes the ticket&rsquo;s status. The earlier text is in the ticket&rsquo;s history
           in Jira.
         </li>
       </Steps>
@@ -190,10 +190,12 @@ export default function Page(): JSX.Element {
         rows={[
           { _key: 'r', w: 'Every repository in the workspace', d: 'At the same paths as your own clones, which Ensemble finds through the folders where you use Claude Code, so your Claude notes still apply. A repository outside the workspace is named and left out.' },
           { _key: 't', w: 'The ticket in full', d: 'Description, numbered acceptance criteria and open points.' },
+          { _key: 'f', w: 'The ticket’s files', d: 'What the ticket attaches or links: designs, screenshots, sketches, JSON. The agent asks Ensemble for the ones it needs, and Ensemble reads them from your tracker. Your tracker token stays on your computer. Jira attachments for now; links from any tracker.' },
           { _key: 'n', w: 'Your Claude notes', d: 'The notes of each repository’s clone (untick one in Settings → Sandbox), your CLAUDE.md and, if you allow, skills. Copied in; the originals are never changed. Each repository’s own CLAUDE.md and AGENTS.md are in its code. Past sessions are never brought in.' },
           { _key: 'k', w: 'Skills', d: 'Skills your repositories keep in .claude/skills come with the code, and the agent is told where each one is. Your own ~/.claude/skills come only if you allow it in Settings → Sandbox.' },
           { _key: 'd', w: 'Reference documents', d: 'When the workspace has them: the parts of the library that match the story, read only. The agent reads their index first and uses only what helps; the plan says which it used.' },
           { _key: 's', w: 'Services', d: 'The compose services you picked, for integration tests. The agent starts them when it needs them.' },
+          { _key: 'b', w: 'A browser', d: 'On Docker, when you tick it at Approve or the agent asks for one: a headless Chromium to look at the screens it builds. It reaches only what the sandbox reaches.' },
         ]}
       />
       <p>

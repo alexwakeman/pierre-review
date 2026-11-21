@@ -39,7 +39,7 @@ export function appInstance(env: NodeJS.ProcessEnv = process.env, home: string =
   return `d${createHash('sha256').update(hashed).digest('hex').slice(0, 12)}`;
 }
 
-export type ResourceRole = 'sandbox' | 'proxy' | 'service' | 'setup' | 'network' | 'volume' | 'image' | 'store';
+export type ResourceRole = 'sandbox' | 'proxy' | 'service' | 'setup' | 'network' | 'volume' | 'image' | 'store' | 'browser';
 
 /** The repo store's volume name for one Limn install (a test passes its own instance). */
 export function repoStoreName(instance: string): string {

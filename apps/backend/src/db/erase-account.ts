@@ -272,6 +272,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     // directories themselves become unledgered orphans the worktree sweep collects by age.
     await tx.delete(schema.worktreeLedger).where(eq(schema.worktreeLedger.accountId, accountId)).execute();
     await tx.delete(schema.workspaceSonar).where(eq(schema.workspaceSonar.accountId, accountId)).execute();
+    // Figma (migration 0213): the workspace rows hold the SEALED token. Cascades from workspaces too; explicit anyway.
+    await tx.delete(schema.workspaceFigma).where(eq(schema.workspaceFigma.accountId, accountId)).execute();
     // Sequence diagrams (migration 0115 / pg 0102): no FKs, so this is the whole guarantee (story rows
     // carry no pr_id and are reached ONLY here).
     await tx.delete(schema.sequenceDiagrams).where(eq(schema.sequenceDiagrams.accountId, accountId)).execute();
@@ -305,6 +307,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.storyBuildStoryChecks).where(eq(schema.storyBuildStoryChecks.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildReviewFindings).where(eq(schema.storyBuildReviewFindings.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildReviews).where(eq(schema.storyBuildReviews.accountId, accountId)).execute();
+    // The build report's screenshots (migration 0214): cascade from story_builds too; explicit anyway.
+    await tx.delete(schema.storyBuildShots).where(eq(schema.storyBuildShots.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildPrs).where(eq(schema.storyBuildPrs.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildPlans).where(eq(schema.storyBuildPlans.accountId, accountId)).execute();
     await tx.delete(schema.storyBuildRepos).where(eq(schema.storyBuildRepos.accountId, accountId)).execute();
@@ -501,6 +505,10 @@ export function accountScopedTables(): {
     // The worktree ledger (migration 0146), erased explicitly above.
     { name: 'worktreeLedger', col: schema.worktreeLedger.accountId, table: schema.worktreeLedger },
     { name: 'workspaceSonar', col: schema.workspaceSonar.accountId, table: schema.workspaceSonar },
+    // Figma (migration 0213), erased explicitly above; it holds a credential.
+    { name: 'workspaceFigma', col: schema.workspaceFigma.accountId, table: schema.workspaceFigma },
+    // The build report's screenshots (migration 0214), erased explicitly above.
+    { name: 'storyBuildShots', col: schema.storyBuildShots.accountId, table: schema.storyBuildShots },
     // Sequence diagrams (migration 0115 / pg 0102), erased explicitly above.
     { name: 'sequenceDiagrams', col: schema.sequenceDiagrams.accountId, table: schema.sequenceDiagrams },
     // Reference docs (migration 0116 / pg 0103), erased explicitly above (their files too).

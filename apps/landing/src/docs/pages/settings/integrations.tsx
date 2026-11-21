@@ -3,7 +3,7 @@ import { DocLink, H2, H3, Illustration, Note, Pill, SettingsRow, TextBox, Ui, Wa
 
 export const meta: DocMeta = {
   title: 'Integrations settings',
-  summary: 'The issue tracker, the acceptance criteria field, SonarCloud and Slack.',
+  summary: 'The issue tracker, the acceptance criteria field, SonarCloud, Figma and Slack.',
 };
 
 export default function Page(): JSX.Element {
@@ -11,7 +11,7 @@ export default function Page(): JSX.Element {
     <>
       <p>
         The <Ui>Integrations</Ui> tab connects the current workspace to the services around your code: one issue
-        tracker, SonarCloud and Slack. Every setting here applies to this workspace only. Each service has its own
+        tracker, SonarCloud, Figma and Slack. Every setting here applies to this workspace only. Each service has its own
         guide under Integrations; this page says what each section of the tab holds.
       </p>
 
@@ -96,6 +96,12 @@ export default function Page(): JSX.Element {
         to SonarCloud&rsquo;s own; type one only if yours differs. Select <Ui>Test connection</Ui>: each repository
         shows <Ui>Found</Ui> or <Ui>Not found</Ui>. Ensemble only reads. See{' '}
         <DocLink to="integrations/sonarcloud">SonarCloud</DocLink>.
+      </p>
+
+      <H2 id="figma">Figma</H2>
+      <p>
+        Optional. Paste a Figma personal access token and press Enter; <Ui>Test token</Ui> checks it. With it, Implement
+        story reads the Figma frames a ticket links. Ensemble only reads. See <DocLink to="integrations/figma">Figma</DocLink>.
       </p>
 
       <H2 id="slack">Slack</H2>

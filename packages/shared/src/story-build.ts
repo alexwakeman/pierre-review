@@ -426,6 +426,46 @@ export interface StoryBuildHowToTest {
   seen: boolean;
 }
 
+/**
+ * ONE SCREEN the agent looked at in the build's browser (docs/SANDBOX.md § The browser → Screens in the build
+ * report). A SELF-REPORT: shown as "the agent says", never a gate. `shots` are screenshots Ensemble copied out of
+ * the sandbox after checking each is a PNG; each is served by `GET /api/story-builds/:id/shots/:sha` on a click.
+ */
+export interface StoryBuildScreen {
+  name: string;
+  url: string | null;
+  /** What the agent compared it with, in its words ("the mock-up a-1f2e3d4c5b", "the orders page"); null = nothing. */
+  comparedWith: string | null;
+  verdict: 'matches' | 'differs' | 'no_design';
+  note: string;
+  shots: Array<{ sha: string; name: string; bytes: number }>;
+}
+
+/** The stored state of "Post screenshots to the ticket" (`story_builds.screens_ticket_json`). */
+export interface StoryBuildScreensTicketState {
+  claimedAt: string;
+  postedAt?: string | null;
+  attachments?: number | null;
+  /** A failure AFTER something was written: never tried again. */
+  error?: string | null;
+}
+
+/** `StoryBuild.screensTicket`: whether the button is offered, and how the post went. */
+export interface StoryBuildScreensTicket {
+  /** The ticket is a Jira ticket and the build has screenshots. */
+  offered: boolean;
+  postedAt: string | null;
+  attachments: number | null;
+  error: string | null;
+  /** Pressed and still running (claimed, neither posted nor failed). */
+  posting: boolean;
+}
+
+/** `POST …/screens/post` — the answer. */
+export interface StoryBuildScreensPostResponse {
+  screensTicket: StoryBuildScreensTicket;
+}
+
 export interface StoryBuild {
   id: number;
   workspaceId: number;
@@ -502,6 +542,10 @@ export interface StoryBuild {
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
   prs?: StoryBuildPr[];
+  /** The build report's screens (the newest build turn), with their copied screenshots. Absent / [] = none. */
+  screens?: StoryBuildScreen[];
+  /** "Post screenshots to the ticket" (Jira; one press). Absent on an older server. */
+  screensTicket?: StoryBuildScreensTicket;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -697,6 +741,10 @@ export const STORY_BUILD_API = {
   ticketReview: '/api/story-builds/:id/ticket-review',
   /** The build tab's "How to test" pointer: the reader opened or dismissed it. DB only. */
   howToTestSeen: '/api/story-builds/:id/how-to-test/seen',
+  /** One screenshot the build report named (docs/SANDBOX.md § The browser): PNG bytes, on a click. DB only. */
+  shot: '/api/story-builds/:id/shots/:sha',
+  /** "Post screenshots to the ticket": ONE Jira attachment per screenshot and one comment, on the reader's press. */
+  screensPost: '/api/story-builds/:id/screens/post',
   /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
   active: '/api/story-builds/active',
   /** HOTFIX: each workspace repository's latest release (the hotfix base) and whether the option is offered. */
@@ -724,11 +772,12 @@ export interface StoryBuildHowToTestSeenResponse {
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;
 
 /** A concrete path: `storyBuildPath('repoPush', { id: 7, repoId: 3 })`. */
-export function storyBuildPath(route: StoryBuildApiRoute, params: { id?: number; repoId?: number; prId?: number } = {}): string {
+export function storyBuildPath(route: StoryBuildApiRoute, params: { id?: number; repoId?: number; prId?: number; sha?: string } = {}): string {
   return STORY_BUILD_API[route]
     .replace(':id', params.id == null ? ':id' : String(params.id))
     .replace(':repoId', params.repoId == null ? ':repoId' : String(params.repoId))
-    .replace(':prId', params.prId == null ? ':prId' : String(params.prId));
+    .replace(':prId', params.prId == null ? ':prId' : String(params.prId))
+    .replace(':sha', params.sha == null ? ':sha' : encodeURIComponent(params.sha));
 }
 
 // ---- the sprint card ----------------------------------------------------------------------------------
@@ -852,6 +901,8 @@ export interface StoryBuildEndToEndTicket {
   skipped?: 'not_jira' | null;
   /** The plain sentence of the first write that failed; null when every write succeeded. */
   error?: string | null;
+  /** The build's screenshots added to the ticket with the comment (0 / absent: none). */
+  screenshots?: number;
 }
 
 /** The start body's one-click option, and its fixed settings. */

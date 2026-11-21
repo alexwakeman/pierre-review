@@ -90,6 +90,7 @@ let scratch = '';
 const usage: any[] = [];
 const sentToClaude: string[] = [];
 let ticketReads = 0;
+const ticketRelayRoots: string[] = [];
 let releaseTurn: () => void = () => {};
 const held = new Promise<void>((r) => (releaseTurn = r));
 let extractAnswer: (path: string) => string = () => '';
@@ -215,6 +216,13 @@ beforeAll(async () => {
     planFirst: false,
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident === IDENT ? 'ACME-300' : 'ACME-301', title: 'Export a report as CSV', empty: false }),
+    // `ensemble-ticket`: the real relay is ticket/relay.test.ts; here, that the machine starts it at the layout root.
+    // The browser's relay needs the real relay program (browser/*.test.ts); a stand-in here.
+    newBrowser: () => ({ startRelay: async () => {}, start: async () => false, stop: async () => {}, close: () => {} }),
+    startTicketRelay: async (o) => {
+      ticketRelayRoots.push(o.root);
+      return { controller: { filesNow: () => [] } as never, close: () => {} };
+    },
     readTicket: async () => {
       ticketReads += 1;
       // The build's re-read finds a third criterion (open points and criteria change in flight).
@@ -329,6 +337,8 @@ describe('a workspace session, end to end', () => {
     const started = fake.calls.find((c) => c.method === 'startSandbox')!.args[0] as { env: Record<string, string> };
     expect(JSON.stringify(started.env)).not.toContain('REAL-SECRET');
     expect(started.env.CLAUDE_CODE_OAUTH_TOKEN).toMatch(/^limn-placeholder-/);
+    // `ensemble-ticket` was started for the story, at the layout root.
+    expect(ticketRelayRoots).toEqual(['/workspace']);
     // Never on the wire: the seed, a patch.
     expect(JSON.stringify(b)).not.toContain('seedJson');
     M.subscribeSession(id, 1, (e) => void frames.push(e));

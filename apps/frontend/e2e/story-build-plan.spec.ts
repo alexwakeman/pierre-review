@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { fixtures, installMockApi, STORY_SESSION_PLAN_READY, STORY_SESSION_STACK_BUILT } from './mock-api.js';
+import { fixtures, installMockApi, STORY_SESSION_PLAN_READY, STORY_SESSION_STACK_BUILT, STORY_SHOT_PNG } from './mock-api.js';
 import type { BuildPlanDecisionBody, BuildPlanReplyBody, StoryBuild, StoryDocsAlignmentResponse, TicketPrsResponse, TicketUpdateBody, TicketUpdateResponse } from '@pierre-review/shared';
 
 // "IMPLEMENT, PLAN FIRST" against the mocked API (docs/STORY-BUILD.md § Plan first; mock-api.ts keeps
@@ -100,6 +100,15 @@ test.describe('Implement, plan first', () => {
     await expect(plan.getByTestId('story-plan-criterion')).toHaveCount(3);
     await expect(plan.getByTestId('story-plan-pr')).toHaveText([/P1.*Lift the export row cap/, /P2.*Builds on P1/, /P3.*After P2/]);
     await expect(plan.getByTestId('story-plan-dropped')).toHaveText('Ensemble left out 1 point it could not check.');
+    // The Screens block (the plan's ui section): the design used, the system, where it shows, the nearest screen.
+    const screens = plan.getByTestId('story-plan-ui');
+    await expect(screens.getByTestId('story-plan-ui-row')).toHaveText([
+      /Design\s*report-header-csv\.png/,
+      /Design system\s*Tailwind tokens/,
+      /Shown in\s*Storybook · the agent asks for a browser/,
+      /To choose\s*The mock-up shows no loading state/,
+    ]);
+    await expect(screens.getByTestId('story-plan-evidence')).toContainText('acme/web · src/reports/ReportHeader.tsx:12–14');
 
     // The wizard opens on the first open point: one step, headed with its criteria.
     const wizard = plan.getByTestId('story-plan-contentions');
@@ -195,9 +204,14 @@ test.describe('Implement, plan first', () => {
     await expect(review).toBeVisible();
     await expect(approve).toBeEnabled();
     await expect(view.getByTestId('story-plan-approve-reason')).toHaveCount(0);
+    // "Give the build a browser": offered because the plan changes a screen, ticked as the agent recommends; the
+    // reader's untick is what is sent.
+    const browserTick = view.getByTestId('story-plan-browser');
+    await expect(browserTick).toBeChecked();
+    await browserTick.uncheck();
     const approved = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/approve'));
     await approve.click();
-    expect((await approved).postDataJSON()).toEqual({ revision: 3 });
+    expect((await approved).postDataJSON()).toEqual({ revision: 3, browser: false });
 
     // The plan folds to one line; the changes are the planned pull requests, in order.
     await expect(view.getByTestId('story-plan')).toHaveAttribute('data-status', 'approved');
@@ -234,6 +248,44 @@ test.describe('Implement, plan first', () => {
     await expect(p2.getByRole('button', { name: 'Push as draft' })).toBeVisible();
     await expect(p2).toContainText('Builds on #81 (P1)');
   });
+  test('the screens the agent looked at: its verdict, and the screenshots only on a press', async ({ page }) => {
+    await withAi(page, { storyBuild: STORY_SESSION_STACK_BUILT });
+    const shotRequests: string[] = [];
+    await page.route(/\/api\/story-builds\/\d+\/shots\/[0-9a-f]{64}$/, async (route) => {
+      shotRequests.push(route.request().url());
+      await route.fulfill({ status: 200, contentType: 'image/png', body: STORY_SHOT_PNG });
+    });
+    await page.goto(tabUrl);
+    const section = page.getByTestId('story-build-overlay').getByTestId('story-build-screens');
+    const rows = section.getByTestId('story-build-screen');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toContainText('Report header');
+    await expect(rows.nth(0)).toContainText('Matches');
+    await expect(rows.nth(0)).toContainText('with the mock-up report-header-csv.png');
+    await expect(rows.nth(1)).toContainText('No design to compare');
+    await expect(rows.nth(1).getByTestId('story-build-screen-show')).toHaveCount(0);
+    // The live screenshots (what the agent saw, newest first) show as they are: their own section.
+    const live = page.getByTestId('story-build-overlay').getByTestId('story-build-shots');
+    await expect(live.getByTestId('story-build-live-shot')).toHaveCount(2);
+    await expect(live.getByTestId('story-build-live-shot').first()).toHaveAttribute('src', /\/api\/story-builds\/\d+\/shots\/b{64}$/);
+    // (They load lazily, as they scroll into view.) The report's screenshots are not drawn until the reader asks.
+    await expect(rows.nth(0).getByTestId('story-build-screen-shot')).toHaveCount(0);
+    await rows.nth(0).getByTestId('story-build-screen-show').click();
+    await expect(rows.nth(0).getByTestId('story-build-screen-shot')).toHaveCount(2);
+    await expect(rows.nth(0).getByTestId('story-build-screen-shot').first()).toBeVisible();
+
+    // "Post screenshots to the ticket": ONE press, and the line says what was posted.
+    await page.route(/\/api\/story-builds\/\d+\/screens\/post$/, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ screensTicket: { offered: true, postedAt: '2026-11-21T10:00:00.000Z', attachments: 2, error: null, posting: false } }) }),
+    );
+    const posted = page.waitForRequest((r) => r.method() === 'POST' && /\/screens\/post$/.test(r.url()));
+    await section.getByTestId('story-build-screens-post').click();
+    await posted;
+    await expect(section.getByTestId('story-build-screens-ticket')).toContainText('Posted to ACME-1');
+    await expect(section.getByTestId('story-build-screens-ticket')).toContainText('2 screenshots and one comment');
+    await expect(section.getByTestId('story-build-screens-post')).toHaveCount(0);
+  });
+
   test('the ticket draft is editable, and Update ticket writes only what changes to Jira once asked', async ({ page }) => {
     await withAi(page, { storyBuild: STORY_SESSION_PLAN_READY });
     const sent: TicketUpdateBody[] = [];

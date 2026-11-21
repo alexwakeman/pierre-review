@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // limn-svc — the agent's way to ask Limn for the session's services (docs/SANDBOX.md § Services).
+// Installed again as `ensemble-ticket`: the agent's way to ask for the session's ticket (§ The ticket relay).
 // It only FORWARDS: argv + the working folder go to Limn's relay (limn-svcd.cjs) over a unix socket,
 // and Limn — on the HOST — decides, polices and runs `docker compose`. There is no Docker, socket or
 // credential in the sandbox. Every word it prints comes from Limn. Plain Node, no dependencies.
 // ES module syntax: Node detects it in an extensionless file (also under a `"type": "module"` folder).
 import net from 'node:net';
+import { basename } from 'node:path';
 
-const SOCKET = process.env.LIMN_SVC_SOCKET || '/tmp/limn-svc.sock';
+// The same file is installed as `limn-svc` and as `ensemble-ticket` (docs/SANDBOX.md § The ticket relay):
+// its name picks its socket.
+const NAME = basename(process.argv[1] || '') === 'ensemble-ticket' ? 'ensemble-ticket' : 'limn-svc';
+const SOCKET = (NAME === 'limn-svc' ? process.env.LIMN_SVC_SOCKET : process.env.ENSEMBLE_TICKET_SOCKET) || `/tmp/${NAME}.sock`;
 
 const sock = net.connect(SOCKET);
 let buf = '';
@@ -36,15 +41,15 @@ sock.on('error', (e) => {
   if (code === null) {
     process.stderr.write(
       e && (e.code === 'ENOENT' || e.code === 'ECONNREFUSED')
-        ? 'limn-svc: services are not available in this session.\n'
-        : `limn-svc: ${e && e.message ? e.message : e}\n`,
+        ? `${NAME}: ${NAME === 'limn-svc' ? 'services are' : 'the ticket is'} not available in this session.\n`
+        : `${NAME}: ${e && e.message ? e.message : e}\n`,
     );
     code = 3;
   }
 });
 sock.on('close', () => {
   if (code === null) {
-    process.stderr.write('limn-svc: Limn stopped answering.\n');
+    process.stderr.write(`${NAME}: Ensemble stopped answering.\n`);
     code = 3;
   }
   process.exitCode = code;

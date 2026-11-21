@@ -27,10 +27,26 @@ export interface BuildReportPr {
   checks: Array<{ command: string; result: 'passed' | 'failed' | 'not_run'; note?: string }>;
 }
 
+/** Where the agent's screenshots live (`ensemble-browser shot`): the only folder a report's `shots` may name. */
+export const BROWSER_SHOTS_DIR = '/home/agent/.limn/browser/';
+
+/** One screen the agent looked at in the browser (docs/SANDBOX.md § The browser): a SELF-REPORT. */
+export interface BuildReportScreen {
+  name: string;
+  url?: string;
+  /** Screenshot paths under BROWSER_SHOTS_DIR. */
+  shots: string[];
+  comparedWith?: string;
+  verdict: 'matches' | 'differs' | 'no_design';
+  note: string;
+}
+
 export interface BuildReportPayload {
   prs: BuildReportPr[];
   criteria: Array<{ ref: string; status: 'met' | 'partly' | 'not_met'; how: string }>;
   openPoints?: Array<{ n: number; note: string }>;
+  /** The screens the agent looked at (only when the work changes a screen and a browser ran). */
+  screens?: BuildReportScreen[];
 }
 
 /** `build-context.json`: the planned PR ids and the criteria refs the report must cover. */
@@ -53,6 +69,7 @@ export const BUILD_REPORT_VALIDATOR_SOURCE = String.raw`function validateBuildRe
   if (!Array.isArray(raw.prs) || raw.prs.length > 6) p.push('"prs" must be a list of at most 6 entries.');
   if (!Array.isArray(raw.criteria) || raw.criteria.length > 60) p.push('"criteria" must be a list of at most 60 entries.');
   if (raw.openPoints !== undefined && (!Array.isArray(raw.openPoints) || raw.openPoints.length > 50)) p.push('"openPoints" must be a list of at most 50 entries.');
+  if (raw.screens !== undefined && (!Array.isArray(raw.screens) || raw.screens.length > 10)) p.push('"screens" must be a list of at most 10 entries.');
   if (p.length > 0) return { report: null, problems: p };
   var seen = Object.create(null);
   for (var i = 0; i < raw.prs.length; i++) {
@@ -90,6 +107,22 @@ export const BUILD_REPORT_VALIDATOR_SOURCE = String.raw`function validateBuildRe
   for (var o = 0; o < ops.length; o++) {
     var op = ops[o];
     if (op === null || typeof op !== 'object' || typeof op.n !== 'number' || !isStr(op.note, 800)) p.push('"openPoints"[' + o + '] must be { "n": number, "note": text }.');
+  }
+  var scr = raw.screens || [];
+  for (var q = 0; q < scr.length; q++) {
+    var sc = scr[q];
+    var sat = '"screens"[' + q + ']';
+    if (sc === null || typeof sc !== 'object' || Array.isArray(sc)) { p.push(sat + ' must be an object.'); continue; }
+    if (!isStr(sc.name, 120)) p.push(sat + '.name must be a non-empty string of at most 120 characters.');
+    if (sc.url !== undefined && sc.url !== null && (typeof sc.url !== 'string' || sc.url.length > 500)) p.push(sat + '.url must be a string of at most 500 characters.');
+    if (sc.comparedWith !== undefined && sc.comparedWith !== null && (typeof sc.comparedWith !== 'string' || sc.comparedWith.length > 200)) p.push(sat + '.comparedWith must be a string of at most 200 characters.');
+    if (!one(sc.verdict, ['matches', 'differs', 'no_design'])) p.push(sat + '.verdict must be matches, differs or no_design.');
+    if (!isStr(sc.note, 600)) p.push(sat + '.note must be a non-empty string of at most 600 characters.');
+    if (!Array.isArray(sc.shots) || sc.shots.length === 0 || sc.shots.length > 4) { p.push(sat + '.shots must list 1 to 4 screenshots.'); continue; }
+    for (var r = 0; r < sc.shots.length; r++) {
+      var sp = sc.shots[r];
+      if (typeof sp !== 'string' || sp.indexOf('${BROWSER_SHOTS_DIR}') !== 0 || sp.length > 300 || !/^[A-Za-z0-9._\/-]+\.png$/.test(sp) || sp.split('/').indexOf('..') >= 0) p.push(sat + '.shots[' + r + '] must be a .png path in ${BROWSER_SHOTS_DIR} (what ensemble-browser shot printed).');
+    }
   }
   return { report: p.length > 0 ? null : raw, problems: p };
 }`;

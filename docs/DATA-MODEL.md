@@ -856,6 +856,27 @@ Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).
 - ⚠ The plugin-era copies (`pro_workspace_settings.issue_*`/`jira_*`, `pro_pr_jira_tickets`) are
   MOVED and cleared at boot, never read again; the columns are dormant.
 
+## `story_builds.screens_json` + `story_build_shots` — the build report's screens (CORE; migration `0214`)
+
+`screens_json`: the newest build report's `screens` (a SELF-REPORT: name, address, what the agent compared it with,
+verdict, note) with each copied screenshot's sha256, name and size; NULL = none reported. `story_build_shots`: the
+screenshots' PNG bytes, unique per `(account_id, build_id, sha256)`, the named composite FK onto
+`story_builds (id, account_id)` (cascade). Written only by `coding/story-build/screens.ts` (checked PNGs from the
+agent's browser folder, capped); read only by `GET /api/story-builds/:id/shots/:sha`. Erased with the account; the
+export carries the screens, not the bytes.
+
+`screens_ticket_json` (migration `0215`): the reader's one "Post screenshots to the ticket" press —
+`{claimedAt, postedAt?, attachments?, error?}`, claimed (compare-and-set from NULL) before the first Jira write; NULL
+again after a failure that wrote nothing. Wire: `StoryBuild.screensTicket`.
+
+## `workspace_figma` — the workspace's Figma token (CORE; migration `0213`)
+
+ONE row per workspace (unique `(account_id, workspace_id)`, the named COMPOSITE FK onto `workspaces (id,
+account_id)`): `auth_token`, the SEALED write-only Figma personal access token (tracker/secret.ts forms, as
+`workspace_sonar`). No row = no token. Read only on the host by `ensemble-ticket figma` (docs/SANDBOX.md § The
+ticket relay) and the Settings "Test token". Erased with the account (`accountScopedTables()`); exported as
+`hasToken` only.
+
 ## `repo_relations` — related repos (CORE; migration `0131`)
 
 Repos of ONE workspace the reader reviews together; a deep review of a PR in one reads the matching

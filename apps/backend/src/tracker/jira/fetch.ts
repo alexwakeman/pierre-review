@@ -241,6 +241,8 @@ export interface RawResponse {
 export interface TransportInit {
   method: 'POST' | 'PUT';
   body: string;
+  /** A file upload's bytes (`jiraPostFile` only): sent INSTEAD of `body`, which then names the file for the logs. */
+  bytes?: Buffer;
 }
 
 export type JiraTransport = (
@@ -266,7 +268,7 @@ export const nodeTransport: JiraTransport = (url, headers, opts, init) =>
     }
     const reqOpts: RequestOptions = {
       method: init?.method ?? 'GET',
-      headers: init != null ? { ...headers, 'content-length': String(Buffer.byteLength(init.body)) } : headers,
+      headers: init != null ? { ...headers, 'content-length': String(init.bytes != null ? init.bytes.length : Buffer.byteLength(init.body)) } : headers,
       ...(opts.lookup ? { lookup: opts.lookup as unknown as RequestOptions['lookup'] } : {}),
     };
     const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -314,7 +316,7 @@ export const nodeTransport: JiraTransport = (url, headers, opts, init) =>
     req.on('error', (err: unknown) =>
       fail(err instanceof JiraFetchError ? err : new JiraFetchError('network')),
     );
-    req.end(init?.body);
+    req.end(init?.bytes ?? init?.body);
   });
 
 /**
@@ -377,6 +379,47 @@ export async function jiraPutJson(
   transport: JiraTransport = nodeTransport,
 ): Promise<unknown> {
   return jiraSendJson('PUT', rawUrl, headers, body, policy, transport);
+}
+
+/**
+ * POST ONE FILE as multipart/form-data — used ONLY by the reader's "Post screenshots to the ticket" press
+ * (../ticket-screens.ts: `POST …/issue/<key>/attachments`, which Jira requires with `X-Atlassian-Token: no-check`).
+ * The same guard, size cap and no-redirect rule as every write. The file name and type are ours, never the
+ * agent's. A 2xx body must be JSON.
+ */
+export async function jiraPostFile(
+  rawUrl: string,
+  headers: Record<string, string>,
+  file: { name: string; contentType: string; bytes: Buffer },
+  policy: JiraFetchPolicy,
+  transport: JiraTransport = nodeTransport,
+): Promise<unknown> {
+  if (!/^[A-Za-z0-9._-]{1,120}$/.test(file.name) || !/^[a-z]+\/[a-z0-9.+-]+$/.test(file.contentType)) throw new JiraFetchError('bad_url');
+  const url = checkJiraUrl(rawUrl, policy);
+  const boundary = `----ensemble${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${file.contentType}\r\n\r\n`, 'utf8'),
+    file.bytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'),
+  ]);
+  const res = await transport(
+    url,
+    { accept: 'application/json', 'content-type': `multipart/form-data; boundary=${boundary}`, 'user-agent': 'Ensemble', 'x-atlassian-token': 'no-check', ...headers },
+    { lookup: policy.cloud ? guardedLookup() : undefined, timeoutMs: JIRA_TIMEOUT_MS * 3, maxBytes: JIRA_MAX_BYTES },
+    { method: 'POST', body: `[file ${file.name}]`, bytes: body },
+  );
+  if (res.status >= 300 && res.status < 400) throw new JiraFetchError('redirect', res.status);
+  if (res.status === 401) throw new JiraFetchError('unauthorized', 401);
+  if (res.status === 403) throw new JiraFetchError('forbidden', 403);
+  if (res.status === 404) throw new JiraFetchError('not_found', 404);
+  if (res.status === 413) throw new JiraFetchError('too_large', 413);
+  if (res.status < 200 || res.status >= 300) throw new JiraFetchError('http', res.status);
+  if (!/\bjson\b/i.test(res.contentType)) throw new JiraFetchError('not_json', res.status);
+  try {
+    return JSON.parse(res.body) as unknown;
+  } catch {
+    throw new JiraFetchError('not_json', res.status);
+  }
 }
 
 async function jiraSendJson(

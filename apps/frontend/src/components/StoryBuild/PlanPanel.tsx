@@ -19,6 +19,7 @@ import {
   pickDecision,
   planStageLine,
   stackRows,
+  uiPlanRows,
 } from '../../lib/buildPlan.js';
 import { REVIEW_CHIP, REVIEW_SUBHEAD } from '../../lib/reviewStyles.js';
 import { sessionErrorText, sessionTurnRunning } from '../../lib/sandboxSession.js';
@@ -31,7 +32,7 @@ import { Button } from '../ui/Button.js';
 import { cx } from '../ui/cx.js';
 import { Menu, type MenuEntry } from '../ui/Menu.js';
 import { PlanDecisionWizard } from './PlanDecisionWizard.js';
-import { ApproveRow, ContentionCard, type DecidedMap } from './PlanParts.js';
+import { ApproveRow, ContentionCard, EvidenceRow, type DecidedMap } from './PlanParts.js';
 
 // THE PLAN PANEL ("Implement, plan first"; docs/STORY-BUILD.md § Plan first, docs/FRONTEND.md § The build
 // tab). A plan-first session opens with a planning turn Limn sends itself; what the agent proposes comes
@@ -227,6 +228,7 @@ function RevisionBody({
       )}
       <PlanRepos rev={rev} />
       <PlanCriteria rev={rev} fillGaps={plan.fillGaps} />
+      <PlanUi build={build} rev={rev} />
       {points != null && <PlanStack rev={rev} />}
       {points == null && rev.contentions.length > 0 && (
         <div data-testid="story-plan-contentions">
@@ -339,6 +341,41 @@ function PlanCriteria({ rev, fillGaps }: { rev: BuildPlanRevision; fillGaps: boo
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+/** The screens the work changes (the plan's `ui` section): the design it used, the design system and the
+ *  nearest screens it follows (checked code quotes), where they render. Absent when no screen changes. */
+function PlanUi({ build, rev }: { build: StoryBuild; rev: BuildPlanRevision }): JSX.Element | null {
+  const rows = uiPlanRows(rev.ui);
+  if (rows == null || rev.ui == null) return null;
+  const evidence = [...rev.ui.designSystem.evidence, ...rev.ui.nearestScreens];
+  return (
+    <div data-testid="story-plan-ui">
+      <div className="mb-1 flex items-center gap-1.5">
+        <h4 className={REVIEW_SUBHEAD}>Screens</h4>
+        <InfoButton title="Screens">
+          <p>The agent looked for the design system and the screens nearest to this work in your repositories. Ensemble checked each quote against the code at the start of the session.</p>
+          <p className="mt-2">When the ticket has no design, the agent builds to fit the existing screens.</p>
+        </InfoButton>
+      </div>
+      {rev.ui.reason !== '' && <p className="mb-1 max-w-3xl break-words text-body text-ui-ink">{rev.ui.reason}</p>}
+      <dl className="space-y-0.5">
+        {rows.map((r) => (
+          <div key={r.key} data-testid="story-plan-ui-row" data-key={r.key} className="grid gap-x-3 text-body sm:grid-cols-[minmax(6rem,8rem)_1fr]">
+            <dt className="text-meta text-ui-mute">{r.label}</dt>
+            <dd className="min-w-0 break-words text-ui-ink">{r.text}</dd>
+          </div>
+        ))}
+      </dl>
+      {evidence.length > 0 && (
+        <ul className="mt-1.5 space-y-1.5">
+          {evidence.map((e, i) => (
+            <EvidenceRow key={i} workspaceId={build.workspaceId} e={e} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

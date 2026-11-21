@@ -173,6 +173,7 @@ export function planBuildInstruction(o: {
     ...work,
     '- Do not stop to ask. If something blocks a pull request, do what you can and say why in the report.',
     `- Finish with the build report: write \`${posix.join(o.root, BUILD_REPORT_FILE)}\` (per pull request: id, status done / partly / not_done, a summary of at most 2,000 characters for its description, the checks you ran with passed / failed / not_run; per acceptance criterion: ref, status met / partly / not_met, how). Check it with \`node ${BUILD_REPORT_CHECKER}\` until it prints OK.`,
+    `- When the work changes a screen and a browser ran: add \`screens\` to the report — per screen you looked at: name, url, shots (1 to 4 paths that \`ensemble-browser shot\` printed), comparedWith (the design id or the existing screen you compared it with), verdict matches / differs / no_design, and a note. Ensemble shows the screenshots to the reader.`,
     '- Then end with one line per acceptance criterion: done, partly done or not done, and why.',
   ];
   if (o.ticketChanged) lines.unshift('TICKET.md was read again just now and the acceptance criteria changed. Build the approved plan; say at the end what the change means.', '');
@@ -268,6 +269,9 @@ export interface PlanStageOpts {
   approvedPlanId: () => Promise<number | null>;
   /** A HOTFIX build: Approve writes no planned-PR rows (Push opens two PRs per repository instead). */
   hotfix?: boolean;
+  /** The ticket's files (`ensemble-ticket`'s manifest, once read): the plan's `ui.designInputs` must name
+   *  them. null / absent ⇒ no relay in this session. */
+  ticketFiles?: (l: PlanLive) => ReadonlyArray<{ id: string; name: string; kind: string }> | null;
 }
 
 export type ApproveCheck = { ok: true; plan: StoryBuildPlanRow } | { ok: false; code: 'PlanStale' | 'PlanUnanswered' | 'NoPlan' | 'NotFound'; message: string };
@@ -372,6 +376,9 @@ export class PlanStage {
           const row = await insertPlanRevision(this.o.ctx, { accountId: this.o.accountId, buildId: this.o.buildId, source, plan: r.plan, rawSha: r.rawSha, now: new Date(seams.now()) });
           this.hasPlan = true;
           m.notice(planReadyLine(row.revision, r.plan.dropped));
+          // A plan that recommends a browser: get its image now, while the reader reads the plan, so a start at
+          // Approve does not wait for the first download (docs/SANDBOX.md § The browser). Never awaited.
+          if (r.plan.ui?.needed === true && r.plan.ui.browser) void l.runtime.prepareBrowser?.().catch(() => {});
         }
         l.state.planStage = 'ready';
         l.state.planProblem = null;
@@ -412,6 +419,7 @@ export class PlanStage {
       ...(ticket.gaps?.missing ?? []).map((m) => [m.ref.toUpperCase(), m.text] as [string, string]),
     ]);
     const runs = runsOf(l);
+    const files = this.o.ticketFiles?.(l) ?? null;
     const library = docsDir ? await seams.library(this.o.accountId, l.workspaceId) : null;
     const verifySeams: PlanVerifySeams = {
       readBlob: (repo, path) => seams.readBlob(this.o.accountId, repo.fullName, repo.baseSha, path),
@@ -420,7 +428,7 @@ export class PlanStage {
     };
     return verifyBuildPlan({
       body,
-      check: { criteria: check.criteria, gaps: check.gaps, repos: check.repos, runs: check.runs, docs: check.docs, fillGaps: check.fillGaps, ticket: check.ticket ?? null },
+      check: { criteria: check.criteria, gaps: check.gaps, repos: check.repos, runs: check.runs, docs: check.docs, fillGaps: check.fillGaps, ticket: check.ticket ?? null, ticketFiles: files?.map((f) => f.id) ?? [] },
       repos: l.state.repos.map((r: SandboxSessionRepo) => ({ repoId: r.repoId, fullName: r.fullName, baseSha: r.baseSha })),
       ticketText: ticketMarkdown(ticket, mode, docsDir),
       criteriaText,
@@ -430,6 +438,7 @@ export class PlanStage {
         const f = ticketLayoutFacts(ticket);
         return { description: f.description, criteria: f.criteria, acLocation: f.acLocation };
       })(),
+      ticketFiles: files,
     });
   }
 
@@ -440,6 +449,8 @@ export class PlanStage {
     const docsDir = this.docsDir(l);
     const layout = { repos: l.state.repos.map((r) => ({ fullName: r.fullName, path: r.path })) };
     const ctx = planContextFor({ ticket, mode: this.o.mode(), layout: layout as never, docs: docsDir ? { dir: docsDir } : null }, runsOf(l).map((r) => r.id));
+    const files = this.o.ticketFiles?.(l);
+    if (files != null) ctx.ticketFiles = files.map((f) => f.id);
     await l.runtime.copyIn(l.container, [{ path: posix.join(l.layoutRoot, PLAN_CONTEXT_FILE), content: `${JSON.stringify(ctx)}\n` }]).catch(() => {});
   }
 

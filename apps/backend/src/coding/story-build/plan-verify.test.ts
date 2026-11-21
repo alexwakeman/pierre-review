@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LibrarySnapshot } from '../../reference-docs/review-refs.js';
 import type { ServiceRunRecord } from '../../sandbox/services/run-log.js';
-import { CTX, goodPlan } from '../../sandbox/workspace/plan.test-support.js';
+import { CTX, goodPlan, goodUi } from '../../sandbox/workspace/plan.test-support.js';
 import { carryDecisions } from './plan-persist.js';
 import { ticketLayoutOf } from '@pierre-review/shared';
 import {
@@ -243,5 +243,33 @@ describe('the ticket update layout check (never a refusal)', () => {
         description: ticketLayoutOf('## Acceptance criteria\n1. Given a report'),
       }),
     ).toContain('The criteria were a numbered list; the draft uses bullets.');
+  });
+});
+
+describe('verifyBuildPlan — the ui section', () => {
+  const files = [{ id: 'a-0123456789', name: 'refunds-mock.png', kind: 'image' }];
+  it('verifies every quote on the host and takes the design input\'s name from the ticket', async () => {
+    const r = await verifyBuildPlan(input(goodPlan({ ui: goodUi({ designInputs: [{ id: 'a-0123456789', used: true, note: 'The mock-up.' }] }) }), { ticketFiles: files }));
+    if (!r.ok) throw new Error(r.problems.join('; '));
+    const ui = r.plan.ui!;
+    expect(ui.designInputs).toEqual([{ id: 'a-0123456789', name: 'refunds-mock.png', kind: 'image', used: true, note: 'The mock-up.' }]);
+    expect(ui.designSystem.evidence).toMatchObject([{ kind: 'code', fullName: 'acme/api', path: 'src/export.ts', startLine: 5 }]);
+    expect(ui.nearestScreens).toHaveLength(1);
+    expect(ui.browser).toBe(true);
+    expect(r.plan.dropped.evidence).toBe(0);
+  });
+  it('drops a quote that is not in the file, and a design input with no relay; counts them', async () => {
+    const ui = goodUi({ nearestScreens: [{ kind: 'code', repo: 'acme/api', path: 'src/export.ts', lines: [1, 2], quote: 'export const NOT_IN_THE_FILE = 1;' }] });
+    const r = await verifyBuildPlan(input(goodPlan({ ui })));
+    if (!r.ok) throw new Error(r.problems.join('; '));
+    expect(r.plan.ui!.nearestScreens).toEqual([]);
+    expect(r.plan.ui!.designInputs).toEqual([]);
+    expect(r.plan.dropped.evidence).toBe(2);
+    expect(r.plan.dropped.reasons).toEqual(expect.arrayContaining(['quoted code that is not at the lines it cited', 'named a ticket file that is not in the ticket']));
+  });
+  it('no ui: null on the revision', async () => {
+    const r = await verifyBuildPlan(input(goodPlan()));
+    if (!r.ok) throw new Error(r.problems.join('; '));
+    expect(r.plan.ui).toBeNull();
   });
 });

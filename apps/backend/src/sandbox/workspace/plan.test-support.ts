@@ -37,3 +37,20 @@ export function goodPlan(over: Record<string, unknown> = {}): any {
   };
 }
 
+
+/** A good `ui` section (docs/IMPLEMENT-UI-PLAN.md § 4): quotes `acme/api:src/export.ts` as plan-verify.test.ts holds it. */
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+export function goodUi(over: Record<string, unknown> = {}): any {
+  return {
+    needed: true,
+    browser: true,
+    reason: 'A Download CSV button on the orders page.',
+    renderTarget: 'storybook',
+    designInputs: [{ id: 'a-0123456789', used: true, note: 'The mock-up.' }],
+    designSystem: { summary: 'The components in src.', evidence: [{ kind: 'code', repo: 'acme/api', path: 'src/export.ts', lines: [5, 6], quote: 'export function rows() {' }] },
+    nearestScreens: [{ kind: 'code', repo: 'acme/api', path: 'src/export.ts', lines: [1, 1], quote: 'import { db } from "./db";' }],
+    newComponents: [{ name: 'CsvButton', why: 'No download button exists.' }],
+    gaps: ['No empty state is shown.'],
+    ...over,
+  };
+}

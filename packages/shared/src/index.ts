@@ -24,6 +24,7 @@ export * from './pr-tab-summary.js';
 export * from './story-rules.js';
 export * from './blast-radius.js';
 export * from './sonar.js';
+export * from './figma.js';
 export * from './sequence-diagrams.js';
 export * from './reference-docs.js';
 export * from './reference-docs-wiki.js';

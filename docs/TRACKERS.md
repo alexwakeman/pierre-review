@@ -1064,6 +1064,14 @@ is a different feature). ⚠ **READ-ONLY**: no Notion write exists; the status p
   and blockers are read (comments are left to the per-ticket reader and the story check's re-read). Ghost
   lookups: none (Jira only).
 
+## Attachments for a workspace session — `ensemble-ticket` (`tracker/artifacts.ts`, `tracker/ticket-artifacts.ts`)
+
+The ONE tracker read made for a running Implement session's AGENT, never for a view: the ticket's attachments
+(Jira: `issue/<KEY>?fields=attachment`, then each file), on the host, with the workspace's credential, when the
+session starts and when the agent asks for a file. READ ONLY. Nothing is stored in `tracker_tickets`: the manifest
+lives in the session only. The rules (site check before the credential, the credential-free media hop, caps) are in
+[SANDBOX.md](SANDBOX.md) § The ticket relay. Other providers: links only, for now.
+
 ## Credential — the sealed per-workspace token
 
 `workspace_trackers.auth_token` (with `auth_email`). Jira: email set → HTTP Basic
@@ -1081,6 +1089,27 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
   value reads as `unreadable` ("save it again"), never sent as garbage.
 - The account export carries the tracker row with the token reduced to `hasToken`
   (`db/export-account.ts`); erasure deletes all three tables.
+
+## The build's screenshots — A TRACKER WRITE (`tracker/ticket-screens.ts`, `coding/story-build/screens.ts`; 2026-11-21)
+
+"Post screenshots to <KEY>" in the build tab's **Screens** block (docs/SANDBOX.md § The browser): the reader's ONE
+press, Jira only (offered when the ticket is a Jira ticket and the build report's screens have screenshots).
+
+- **CLAIMED before the first write** (`story_builds.screens_ticket_json`, migration 0215: compare-and-set from NULL):
+  a second press answers `409 AlreadyPosted`. A failure BEFORE anything was written releases the claim (the reader may
+  press again); a failure AFTER (an attachment already uploaded) is recorded and NEVER retried — the line says some
+  screenshots may be on the ticket already.
+- **What it writes**, under the reader's own Jira login, behind the same `statusGate` as every tracker write (the
+  workspace reads Jira; the ticket is one Ensemble holds): at most 10 screenshots, each one ATTACHMENT
+  (`POST …/issue/<key>/attachments`, multipart, `X-Atlassian-Token: no-check`; `jira/fetch.ts` `jiraPostFile`, the
+  same guard, no redirect) named by Ensemble (`ensemble-<build>-<n>.png`, never the agent's name); then ONE COMMENT
+  (wiki) that shows them inline (`!name|thumbnail!`, using the names Jira stored) with each screen's name and the
+  agent's verdict, SAID AS THE AGENT'S. The agent's words go through `wikiPlain` (one line, no markup or mention
+  characters, capped): its text cannot mention anyone or embed anything.
+- A failure is a sentence Ensemble wrote; the log carries the code only. The ticket is marked due for a read.
+- **"Build end to end"** puts the screenshots in its ticket step's ONE comment instead (STORY-BUILD.md § Build end to
+  end, item 3): the same upload (`uploadTicketShots`), the same claim, so a build's screenshots reach the ticket once.
+- Other trackers: not offered yet. GitHub Issues has no supported image upload; Linear and Notion are not built.
 
 ## Copying a tracker — "Copy from another workspace" (`tracker/copy.ts`)
 

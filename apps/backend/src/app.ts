@@ -21,6 +21,7 @@ import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
 import { registerTracker } from './tracker/index.js';
 import { registerSonar } from './sonar/index.js';
+import { registerFigma } from './figma/index.js';
 import { repoRoutes } from './api/routes/repos.js';
 import { workspaceRoutes } from './api/routes/workspaces.js';
 import { releaseRoutes } from './api/routes/releases.js';
@@ -255,6 +256,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // SONARCLOUD (CORE, FREE; docs/SONARCLOUD.md): the workspace's SonarCloud settings + connection
   // check, a PR's stored snapshot, a refresh, and the one PR comment.
   registerSonar(app);
+  registerFigma(app);
 
   return app;
 }

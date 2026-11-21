@@ -69,6 +69,11 @@ export default function Page(): JSX.Element {
         <li>
           <b>A ticket update (draft)</b>, when the story needs work.
         </li>
+        <li>
+          <b>Screens</b>, when the work changes what a person sees: the design it uses from the ticket, your design system
+          and the existing screens it follows (code Ensemble checks), and what the design leaves it to choose. With no
+          design in the ticket, the agent builds to fit your existing screens.
+        </li>
       </ul>
 
       <H2 id="evidence">Evidence Ensemble checks</H2>
@@ -141,6 +146,10 @@ export default function Page(): JSX.Element {
           go back to that point. An open point says <Ui>Not answered</Ui>.
         </li>
         <li>
+          When the plan changes a screen, <Ui>Give the build a browser</Ui> is ticked if the agent asks for one. Untick it
+          if you do not want it.
+        </li>
+        <li>
           Press <Ui>Approve and start</Ui>. Ensemble reads the ticket again and the agent switches to building.
         </li>
         <li>
@@ -170,6 +179,16 @@ export default function Page(): JSX.Element {
         <Ui>Not done</Ui>, a summary, and the checks it ran (<Ui>Passed</Ui>, <Ui>Failed</Ui> or <Ui>Not run</Ui>), and per
         criterion whether it is met. This is the agent's own account, not a gate: read the diff. If the agent ran out of
         steps with work unfinished, Ensemble asks it to carry on, at most twice.
+      </p>
+      <p>
+        While the agent builds, <Ui>Screenshots</Ui> shows what it sees in the browser, newest first, as it takes each one.
+      </p>
+      <p>
+        When the agent looked at its screens in a browser, <Ui>Screens</Ui> lists each one: whether it says the screen{' '}
+        <Ui>Matches</Ui> the design, <Ui>Differs</Ui>, or had <Ui>No design to compare</Ui>, and why.{' '}
+        <Ui>Show screenshots</Ui> shows what it saw. For a Jira ticket, <Ui>Post screenshots to</Ui> the ticket adds them to
+        it as attachments, with one comment that shows them and the agent&rsquo;s verdicts. It uses your Jira login, once
+        per build.
       </p>
       <p>
         Then push the result: see <DocLink to="implement-story/push">Push the result</DocLink>.

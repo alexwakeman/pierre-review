@@ -85,6 +85,15 @@ describe('the stream fold', () => {
     expect(s.partials.get('a')).toBe('Hel');
   });
 
+  it('live screenshots: a shots frame replaces the list, and the stream owns it over the read', () => {
+    let s = applySessionEvent(EMPTY_SESSION_STREAM, { type: 'snapshot', session: session({ phase: 'building' }) });
+    const shots = [{ sha: 'b'.repeat(64), name: 'b.png', at }, { sha: 'a'.repeat(64), name: 'a.png', at }];
+    s = applySessionEvent(s, { type: 'shots', shots });
+    expect(s.session?.liveShots).toEqual(shots);
+    expect(mergeSessionViews(session({ phase: 'building', live: true }), s.session)?.liveShots).toEqual(shots);
+    expect(mergeSessionViews(session({ phase: 'building', live: true, liveShots: [shots[1]!] }), session({ phase: 'building', live: true }))?.liveShots).toEqual([shots[1]]);
+  });
+
   it('upserts boot steps, items and network rows by key, and appends deltas', () => {
     let s = applySessionEvent(EMPTY_SESSION_STREAM, { type: 'snapshot', session: session({ phase: 'booting' }) });
     s = applySessionEvent(s, { type: 'boot', step: { key: 'runtime', label: 'Finding', state: 'running', detail: null } });

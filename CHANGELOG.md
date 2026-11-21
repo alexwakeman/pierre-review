@@ -13,6 +13,28 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Implement story: the agent can read what the ticket attaches or links (designs, screenshots, sketches, JSON). It
+  asks for the files it needs, and Ensemble reads them from your tracker. Jira attachments for now; links from any
+  tracker. Your tracker token stays on your computer, and each read shows in the session's **Network** panel.
+- Implement story: when the work changes a screen, the plan has a **Screens** part: the design it uses from the
+  ticket, your design system and the nearest existing screens (code Ensemble checks), and what it still has to
+  choose. With no design in the ticket, the agent builds to fit your existing screens.
+- Implement story: **Give the build a browser** at Approve, when the plan changes a screen. The agent looks at the
+  screens it builds in a headless Chromium on your computer, which reaches only what the sandbox reaches. The agent
+  can also ask for one during the build. Docker only.
+- **Settings → Integrations → Figma**: an optional Figma token. With it, Implement story reads the Figma frames a
+  ticket links (an outline of the layers and a picture). Without it, the agent works from the ticket's other files.
+- Implement story: the build tab's **Screens** block. When the agent looked at its screens in the browser, it says
+  for each whether it matches the design (or your existing screens), and **Show screenshots** shows what it saw.
+- Implement story: **Screenshots** in the build tab show what the agent sees in the browser while it builds, newest
+  first, as it takes each one.
+- Implement story: **Post screenshots to** the Jira ticket, from the build tab's Screens block. One press adds the
+  screenshots as attachments and one comment that shows them with the agent's verdicts.
+- **Build end to end**: its comment on the Jira ticket now shows the screenshots the agent took of the screens it
+  built.
+
 ## [1.0.71] - 2026-11-20
 
 ### Changed

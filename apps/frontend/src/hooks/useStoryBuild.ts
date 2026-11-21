@@ -317,6 +317,21 @@ export function useStoryBuildHowToTestSeen(workspaceId: number | null, ident: st
   });
 }
 
+/** "Post screenshots to the ticket" (Jira; one press). The answer is the post's state; a refusal is its sentence. */
+export function usePostStoryBuildScreens(workspaceId: number | null, ident: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.postStoryBuildScreens(id),
+    onSuccess: (r) => {
+      qc.setQueryData<StoryBuildForTicketResponse>(storyBuildForKey(workspaceId, ident), (old) =>
+        old?.build == null ? old : { ...old, build: { ...old.build, screensTicket: r.screensTicket } },
+      );
+    },
+    // A refusal may still have written something (the server says so): read the build again.
+    onError: () => void qc.invalidateQueries({ queryKey: storyBuildForKey(workspaceId, ident) }),
+  });
+}
+
 /** THE BUILDS TOAST's query. */
 export function storyBuildActivityKey(workspaceId: number | null): [string, string] {
   return ['story-build-activity', workspaceKey(workspaceId)];

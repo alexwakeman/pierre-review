@@ -36,9 +36,15 @@ RUN arch="$(uname -m)" \
 
 # limn-svc (the agent's command) and its relay (Limn starts it over `docker exec`): docs/SANDBOX.md
 # § Services. Root-owned, so the agent cannot change them. Part of the recipe hash (image.ts).
+# `ensemble-ticket` is the SAME client under its own name (its name picks its socket), served by the same
+# relay program: docs/SANDBOX.md § The ticket relay.
 COPY limn-svc /usr/local/bin/limn-svc
+COPY ensemble-ticket /usr/local/bin/ensemble-ticket
+# `ensemble-browser`: the agent's look at its screens (docs/SANDBOX.md § The browser). Ensemble starts the browser;
+# this talks to it over the DevTools protocol, with Node's own WebSocket. No dependencies.
+COPY ensemble-browser /usr/local/bin/ensemble-browser
 COPY limn-svcd.cjs /usr/local/lib/limn/limn-svcd.cjs
-RUN chmod 0755 /usr/local/bin/limn-svc && chmod 0644 /usr/local/lib/limn/limn-svcd.cjs
+RUN chmod 0755 /usr/local/bin/limn-svc /usr/local/bin/ensemble-ticket /usr/local/bin/ensemble-browser && chmod 0644 /usr/local/lib/limn/limn-svcd.cjs
 
 # The recipe hash (src/sandbox/runtime/image.ts `recipeHash`): Limn passes it, so a local image built
 # from a different Dockerfile or other pins is never reused. Not part of the hash itself. Declared

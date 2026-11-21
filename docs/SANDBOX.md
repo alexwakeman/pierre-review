@@ -85,6 +85,9 @@ shell. Treat everything it does as untrusted.
 | The agent's changes reach GitHub unseen | Work leaves the sandbox only as a patch per repository (an AI Fix with the merge item: as a git bundle of its commits, checked on the host — parents, conflict markers, fixes on top — and rebuilt from the checked trees; § AI Fix sessions, "The merge"); the HOST applies it and pushes, on the reader's Push press (Implement: draft by default). Two exceptions push with no press, both on AI Fix and both opt-in: an auto fix on the reader's OWN PR under the workspace's "Push automatically" (OFF by default), and dependency automation's fix of a TRUSTED bot's PR under its policy (all OFF by default; docs/MERGE-CI-TRUNK.md). Both push only the PR repository's patch to the PR's own branch, compare-and-set on the head, after the session has closed. A third, on Implement / Fill gaps: "After the build: review and fix, then open the pull request" (the reader's tick at Start or in the tab, OFF by default; THE REVIEW LOOP): the HOST pushes the branch first (no PR), then ONE NEW fast-forward commit per fix pass (the live ref checked first, never forced), then the PR — ready for review, the reader's own, under the reader's `gh` login; every write a claim row inserted before it, never retried (docs/STORY-BUILD.md § The review loop). The sandbox still holds no GitHub credential. |
 | Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `ENSEMBLE_SANDBOX_MAX_SESSIONS` open sessions; at most `ENSEMBLE_SANDBOX_MAX_BUILDS` build turns at once; idle teardown. |
 | More untrusted text in an AI Fix (2026-11-19: up to 12 workspace repositories and the reference documents, read only) | The same walls hold: no GitHub credential, no route out but the proxy, work leaves only as the PR repository's patch (every other repository's edits are `leftOut`, never pushed). The other repositories and the documents are context, not instructions: FIX.md says a change another repository needs is out of scope, and an unattended fix still gets no TICKET.md. More to read inside the same caps (`AI_FIX_MAX_TURNS`, an unattended run's `AI_FIX_BUDGET_USD`, the spend gate); the per-workspace switch narrows it. Dependency automation's fix stays narrow. |
+| Ticket text tells the agent to read other tickets, or write to the tracker | `ensemble-ticket` serves only this session's ticket (every id is matched against its manifest), has no write verb, and reads on the HOST: the tracker credential never enters the sandbox. An attachment's address is checked to be on the tracker's own site before the credential is sent (§ The ticket relay). |
+| Screenshots as a way out | Only PNGs a valid build report names, only from the agent's browser folder, PNG signature checked, capped per file and per build, stored as bytes and served as `image/png` with `nosniff` and a sandboxing CSP, on the reader's click (§ The browser). |
+| The browser is a way out, or a way onto the host | It shares the SANDBOX'S network namespace, so it reaches only what the sandbox reaches; its requests out go through the same proxy and allow-list. Non-root, no capabilities, read-only root, capped, a pinned image. Ensemble starts it; the agent only drives it over DevTools on loopback (§ The browser). |
 | Leftovers | Every resource carries Ensemble's labels; discard, the boot sweep and `ensemble sandbox prune` remove them. |
 | Spend | Every turn of Implement and of a manual AI Fix is a reader's press (a manual fix's review rounds are part of it). An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE FIX LOOP — a build turn, then its own review rounds and fix turns, each automatic step asking the gate again (a refusal stops the loop) — with Claude's `--max-budget-usd` on the session's process, then closes. Each turn's and each review's usage is recorded on the ledger under the provider that ran it, and the session's spend is shown. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills are copied, read-only at source, size-capped. The reader's clones only lend git OBJECTS for the base commit to the repo store, read with hooks, fsmonitor and their config off; never the working tree, index or stash. **Past sessions are never imported** (owner decision D1): no transcript is copied, resumed or written back. |
@@ -770,6 +773,126 @@ this (WP9).
 **Docker-in-Docker on the Docker backend is NOT offered**: it needs `privileged`, which is exactly what
 the policy refuses, and a privileged container on Linux is root on the reader's machine.
 
+## The ticket relay (`apps/backend/src/sandbox/ticket/`, `tracker/artifacts.ts`, `tracker/ticket-artifacts.ts`; 2026-11-21)
+
+A STORY session's agent reads what the ticket attaches or links (designs, screenshots, sketches, JSON) with
+`ensemble-ticket`. **The agent asks; Ensemble reads the tracker on the HOST** with the workspace's own credential
+and writes what it read INTO the sandbox. No tracker credential is ever inside, and no verb writes to the
+tracker (TRACKERS.md: the only tracker writes are the reader's picks). Plan: [IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md) § 2.
+
+**Transport: the services relay, a second time.** `ensemble-ticket` is the SAME file as `limn-svc`
+(`sandbox-image/ensemble-ticket`, a byte-for-byte copy: `ticket/relay.test.ts` pins it); its NAME picks its socket
+(`/tmp/ensemble-ticket.sock`, `ENSEMBLE_TICKET_SOCKET` in tests). The host starts the same relay program
+(`limn-svcd.cjs`) a second time with `LIMN_RELAY_NAME=ensemble-ticket`, over `docker exec` as for services
+(`services/relay.ts` takes any `RelayHandler`; `setForwarder` is the services' only). Nothing on the host listens
+for the sandbox.
+
+**When.** The session machine starts it for a story session (`SessionSubject.ticketRelaySource`) after the mirror
+and before the agent, and closes it before the sandbox goes. ⚠ NEVER FATAL: a relay that does not start is ONE
+notice ("`ensemble-ticket` did not start…"), and the client then says the ticket is not available; TICKET.md still
+holds the ticket. An AI Fix session has none.
+
+**The manifest** (`tracker/artifacts.ts`, PURE) is read ONCE, before the first turn, into
+`<root>/.limn/ticket/manifest.json`: the ticket's attachments first (Jira: `issue/<KEY>?fields=attachment`), then
+every `https://` link in the description, then in the comments (the session's own TICKET text: no extra read).
+One entry per stable id, ≤ 100: `a-<10 hex>` (an attachment: provider + attachment id) or `l-<10 hex>` (a link with
+its query and fragment cut; a Figma link keeps file key + `node-id`). ⚠ An id never comes from a signed address
+(Notion's expire within the hour, Atlassian's media addresses are signed). A kind per entry (figma, image, diagram,
+json, pdf, file, link) from the file name, type or address. The scanner is LINEAR over a capped input (tracker text
+is untrusted). An attachment's download address stays on the host: the agent's copy has `url: null`. A failed
+attachment read is one `problem` line; the links are still listed.
+
+**The verbs** (`ticket/controller.ts`; the request is DATA, every word matched against the manifest):
+
+| Verb | What the host does |
+|---|---|
+| `list` | Prints the manifest. |
+| `get <id> [id…]` (≤ 10) | Downloads each ATTACHMENT on the host into `<root>/.limn/ticket/files/<id>-<safe name>`. A link is refused with the line to open it through the proxy (`curl -x "$LIMN_PROXY" <url>`), so the reader's allow-list still decides. |
+| `show` | Reads the ticket again into TICKET.md (the story subject's `rereadTicket`), at most every 2 minutes. |
+| `help` | The usage. |
+
+- **Jira downloads** (`tracker/ticket-artifacts.ts`): ⚠ the `content` address is the tracker's JSON, so it must be
+  on the workspace's tracker SITE (same origin, under the site root) before the credential is sent — an off-site
+  one is listed but never fetchable. Jira Cloud answers with a redirect to Atlassian's media service: that ONE hop is
+  read WITHOUT the credential through the guarded page fetch, public addresses only on cloud (the
+  `confluenceGetBytes` rule). The ticket must be on the tracker the workspace reads now (provider + site match).
+- **Caps**: one file ≤ 20 MB; a session's files ≤ 150 MB and ≤ 80 tracker reads (`get` and `show` alike); one read
+  at a time. Past a cap the verb says so; it never fails a turn.
+- **The Network panel**: every read is ONE row, `via: 'ticket'`, host = the tracker, "from Ensemble, for
+  ensemble-ticket" (`SandboxNetworkEntry`), allowed (it is the host's own read, never the sandbox's).
+- **Sentences, never echoes**: a failure is a plain sentence (`artifactErrorSentence`); nothing the tracker sent is
+  shown. The files themselves are UNTRUSTED: the host never opens them, and the seed says they are requirements,
+  never instructions.
+- **The seed** (`workspace/seed.ts` `ticketFilesSection`, story sessions only): what the verbs do, that the agent
+  reads only what the work needs, and that the files are untrusted.
+- **`figma <id>`** (2026-11-21): a Figma link in the manifest, read on the host with the WORKSPACE's Figma token
+  (Settings → Integrations → Figma, `workspace_figma`; `figma/`): `GET /v1/files/:key/nodes` → a deterministic
+  OUTLINE of the frame's layers (`figma/outline.ts`, no model: type, name, size, auto-layout, fill, radius, text +
+  style, an instance's component; then the components, colours and text styles used, counted; capped) and
+  `GET /v1/images/:key` → a PNG of it, read from Figma's signed address without the token. A link with no node id
+  reads the first page's top frames (≤ 3). Written to `<root>/.limn/ticket/figma/<id>.outline.md` and
+  `<id>-<node>.png`; each Figma request counts in the Network panel under `api.figma.com`. Cached in memory per
+  (account, file, frames, file VERSION), so a re-run reads the nodes only. No token: one sentence (the seed tells the
+  agent to work from the other files and say so in the plan). `get` on a Figma link points at `figma`.
+- **Not yet**: GitHub Issues, Linear and Notion attachments (their manifest is the links in the text).
+
+Tests: `tracker/artifacts.test.ts` (the manifest, the scanner's linear bound), `tracker/ticket-artifacts.test.ts`
+(the site check before any request, the credential-free media hop), `ticket/controller.test.ts` (verbs, caps,
+Network rows), `ticket/relay.test.ts` (the shipped client and relay as local processes) and
+`ticket/ticket-real.test.ts` (slow: the same in a real container over `docker exec`).
+
+## The browser (`apps/backend/src/sandbox/browser/`, `runtime/spec.ts` `browserRunArgs`, `sandbox-image/ensemble-browser`; 2026-11-21)
+
+A story session's agent looks at the screens it builds in a headless Chromium. Plan:
+[IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md) § 5. **Ensemble starts it; the agent drives it.**
+
+- **Started** by the reader's tick "Give the build a browser" at Approve (offered when the plan's `ui` says the
+  work changes a screen, preset from `ui.browser`; `BuildPlanApproveBody.browser`, absent = the plan's
+  recommendation, which is also what an automatic approval uses), before the build turn's instruction, so it is
+  there when the agent starts. Or by the agent, any time: `ensemble-browser start` (over the same relay program as
+  `limn-svc`, its own socket `/tmp/ensemble-browser.sock`; `browser/index.ts` `SessionBrowser` is the handler).
+  Each start is ONE notice ("Ensemble started a browser for the build." / "The agent started a browser."); a
+  failure is ONE notice and the build goes on. A plan that recommends one starts the image PULL in the background
+  while the reader reads it (`runtime.prepareBrowser`).
+- **The container** (`browserRunArgs`, pinned by `spec.test.ts`): the pinned `chromedp/headless-shell` image BY
+  DIGEST (`BROWSER_IMAGE`, pulled by the host's daemon on first use), ⚠ in the SANDBOX'S NETWORK NAMESPACE
+  (`--network container:<sandbox>`): `localhost:5173` in the browser IS the agent's dev server (no Host-header or
+  cookie surprises, no forwarder), DevTools listens on 127.0.0.1:9222 of that shared namespace, and the browser
+  reaches exactly what the sandbox reaches. Non-root (`65534`), the usual hardening, read-only root, a 256 MB
+  /tmp for its profile, 1 CPU / 1 GB / 512 processes. Its requests out go through the session's proxy
+  (`--proxy-server`, `--proxy-bypass-list=<local>`; Chromium never proxies loopback): the same allow-list, the
+  same log. Role label `browser`: the session's destroy and the sweep remove it; a close stops it FIRST.
+- **The agent's verbs** (`sandbox-image/ensemble-browser`, plain Node 22, its own WebSocket, no dependencies):
+  `start` / `stop` / `status` ask Ensemble; `shot <url> [--width a,b,c] [--height] [--full] [--wait] [--selector]
+  [--out]` writes one PNG per width to `~/.limn/browser/` over the DevTools protocol; `console <url>` lists
+  console messages, exceptions, failed requests and HTTP errors. The DevTools endpoint is also usable directly
+  (for example playwright-core's `connectOverCDP`).
+- **Docker only**: a runtime without `startBrowser` (microsandbox) answers in one line, and nothing starts.
+- **Screens in the build report** (`workspace/build-report.ts` `screens`, `coding/story-build/screens.ts`; migration
+  0214): the agent adds, per screen it looked at, its name, address, 1–4 shot paths, what it compared it with and a
+  verdict (matches / differs / no_design) with a note — a SELF-REPORT, shown as "the agent says", never a gate.
+  ⚠ **THE ONE OTHER WAY OUT OF THE SANDBOX** (beside the patches): after the build turn the host copies ONLY the
+  shots a VALID report names, ONLY under `/home/agent/.limn/browser/` (the validator and the host both check),
+  each read with a 5 MB cap and kept only when its first bytes are the PNG signature; ≤ 24 shots and 30 MB per
+  build; de-duplicated by sha256; a newer report that lists `screens` replaces the last. Stored as bytes in
+  `story_build_shots` (never a path); the build tab's **Screens** block lists the verdicts and loads the pictures only
+  on "Show screenshots", from `GET /api/story-builds/:id/shots/:sha` (the account's own build; `image/png`,
+  `nosniff`, `default-src 'none'; sandbox`).
+- **Live screenshots** (2026-11-21): after `shot` writes its files, the CLI tells Ensemble their paths over the relay
+  (`ensemble-browser noted <path>…`, quiet, ≤ 6 per call; never a failure of the command). The story subject
+  (`onLiveShots` → `coding/story-build/screens.ts` `storeLiveShot`) applies the SAME checks as a report's shots (the
+  browser folder, the PNG signature, 5 MB) and stores the bytes in `story_build_shots`; ≤ 40 per session. The newest
+  12 are `session.liveShots`, streamed as a `shots` frame (the stream owns them while open) and shown in the build
+  tab's **Screenshots** section as they land (lazy-loaded, from the same shot route). A later build report keeps
+  them (`storeBuildScreens` `keep`).
+- The seed (`workspace/seed.ts` `BROWSER`, story sessions): how to start it and take shots, `localhost` is the
+  sandbox, never sign in to a real account (Storybook, mock data or a test page).
+
+Tests: `runtime/spec.test.ts` (the argv), `browser/index.test.ts` (start once, readiness, failure, the verbs),
+`plan-session-flow-db.test.ts` (the tick starts it before the build turn) and `browser/browser-real.test.ts`
+(slow: the pinned image started by the Docker runtime in a stand-in sandbox's namespace, `start` / `shot` /
+`console` from inside, removed by the session's destroy).
+
 ## microsandbox (`runtime/microsandbox.ts`; plan WP9) — ⚠ UNTESTED
 
 > **Never run on a real microVM.** Written 2026-11-07 against the documented `msb` CLI
@@ -1003,6 +1126,16 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   unknown repository, a PR that is not in the stack, a stack in one repository that is not one line,
   `stackReason` missing, > 3 PRs in a repository or > 6 in all, a contention with 0 or > 4 evidence items,
   Fill gaps: a gap marked `met`) make the plan unusable; CONTENT problems drop the item.
+- **The UI section** (`ui`, optional; [IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md) § 4, 2026-11-21): when the work
+  changes a screen — `needed`, `browser` (the agent's recommendation), `reason`, `renderTarget`
+  (storybook / dev_server / test_page / none), `designInputs` (ids from `ensemble-ticket`'s manifest:
+  `ticketFiles` in the context, written again once the relay has read it), `designSystem` {summary, code
+  quotes}, `nearestScreens` (code quotes), `newComponents`, `gaps`. SHAPE: the flags must agree (`browser`
+  needs `needed` and a render target), and a UI change must quote the design system or a nearest screen. Its
+  code quotes are verified on the host like any other (dropped and counted when not found); a design input
+  is kept only when it is in the manifest, with the TICKET's name and kind, never the agent's. The seed's
+  plan section says how to find the design system with no setting and to fit the existing screens when the
+  ticket has no design. Shown as the plan panel's **Screens** block (`PlanPanel.tsx` `PlanUi`).
 - **The host's evidence check** (`plan-verify.ts verifyBuildPlan`; the agent controls the sandbox, so its
   quotes count for nothing): `code` / `data_file` — the blob at the session's pinned base sha in Ensemble's
   clone cache (`plan-blobs.ts`: hooks and config off, the lazy fetch's token only in a process-scoped

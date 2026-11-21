@@ -11,12 +11,15 @@ import {
   text,
   integer,
   real,
+  blob,
   index,
   uniqueIndex,
   foreignKey,
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type {
+  StoryBuildScreen,
+  StoryBuildScreensTicketState,
   StoryBuildEndToEndTicket,
   StoryBuildHotfixBranch,
   HotfixPortClaim,
@@ -4534,6 +4537,31 @@ export const sprintAssessments = sqliteTable(
 // (tracker/secret.ts's `sealed:v1:` / `plain:` forms) and per-repo project-key OVERRIDES
 // (`{ "<repoId>": "<key>" }`; a repo absent from the map uses `<owner>_<repo>`). `workspace_id`
 // arrives in a request PATH, so its FK is the named COMPOSITE one onto `workspaces (id, account_id)`.
+// FIGMA (migration 0213; docs/IMPLEMENT-UI-PLAN.md § 3): ONE row per workspace, the SEALED write-only Figma
+// personal access token (tracker/secret.ts forms). Read only on the host, by `ensemble-ticket figma`.
+export const workspaceFigma = sqliteTable(
+  'workspace_figma',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    authToken: text('auth_token'),
+    updatedAt: integer('updated_at', { mode: 'timestamp' })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    accountWorkspaceUx: uniqueIndex('workspace_figma_account_workspace').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_figma_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
 export const workspaceSonar = sqliteTable(
   'workspace_sonar',
   {
@@ -5110,6 +5138,11 @@ export const storyBuilds = sqliteTable(
     howToTestKey: text('how_to_test_key'),
     howToTestChatId: integer('how_to_test_chat_id'),
     howToTestSeenAt: integer('how_to_test_seen_at', { mode: 'timestamp' }),
+    // SCREENS (migration 0214; docs/SANDBOX.md § The browser): the build report's screens (a self-report),
+    // each with the sha256 of the screenshots copied out into `story_build_shots`. NULL = none reported.
+    screensJson: text('screens_json', { mode: 'json' }).$type<StoryBuildScreen[]>(),
+    // The reader's ONE "Post screenshots to the ticket" press (migration 0215): claimed before the first Jira write.
+    screensTicketJson: text('screens_ticket_json', { mode: 'json' }).$type<StoryBuildScreensTicketState>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),
@@ -5124,6 +5157,32 @@ export const storyBuilds = sqliteTable(
       name: 'story_builds_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// story_build_shots — the screenshots a build report named, copied out of the sandbox AFTER the host checked
+// each is a PNG under its caps (migration 0214; docs/SANDBOX.md § The browser). Bytes in the row (capped per
+// build), keyed by sha256 within a build; cascades from the build; erased with the account. Never a path.
+export const storyBuildShots = sqliteTable(
+  'story_build_shots',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    buildId: integer('build_id').notNull(),
+    sha256: text('sha256').notNull(),
+    png: blob('png', { mode: 'buffer' }).notNull(),
+    bytes: integer('bytes').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    buildShaUx: uniqueIndex('story_build_shots_build_sha').on(t.accountId, t.buildId, t.sha256),
+    buildAccountFk: foreignKey({
+      name: 'story_build_shots_build_account_fk',
+      columns: [t.buildId, t.accountId],
+      foreignColumns: [storyBuilds.id, storyBuilds.accountId],
     }).onDelete('cascade'),
   }),
 );

@@ -110,9 +110,9 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
   { id: 'releases', label: 'Releases', summary: 'Release and hotfix tag suffixes', global: [], workspace: ['ReleasesSection'] },
   {
     id: 'integrations',
-    label: 'Integrations', summary: 'Issue tracker, acceptance criteria field, SonarCloud, Slack',
+    label: 'Integrations', summary: 'Issue tracker, acceptance criteria field, SonarCloud, Figma, Slack',
     global: [],
-    workspace: ['IssueLinksSection', 'SonarSection', 'SlackSection'],
+    workspace: ['IssueLinksSection', 'SonarSection', 'FigmaSection', 'SlackSection'],
   },
   {
     id: 'bots',

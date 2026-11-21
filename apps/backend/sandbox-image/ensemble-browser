@@ -1,0 +1,297 @@
+#!/usr/bin/env node
+// ensemble-browser — the agent's look at the screens it builds (docs/SANDBOX.md § The browser).
+//
+//   start / stop / status   ASK Ensemble (on the host, over the relay socket, as limn-svc does): Ensemble starts
+//                           a pinned headless Chromium that shares THIS sandbox's network, so `localhost` is the
+//                           same in both. There is no Docker here.
+//   shot / console          talk to that Chromium directly over the DevTools protocol at localhost:9222.
+//
+// Plain Node 22 (its built-in WebSocket and fetch), no dependencies. ES module syntax.
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+
+const SOCKET = process.env.ENSEMBLE_BROWSER_SOCKET || '/tmp/ensemble-browser.sock';
+const DEVTOOLS = process.env.ENSEMBLE_BROWSER_DEVTOOLS || 'http://localhost:9222';
+const OUT_DIR = path.join(os.homedir(), '.limn', 'browser');
+const NAV_TIMEOUT_MS = 30_000;
+const MAX_FULL_HEIGHT = 10_000;
+const MAX_WIDTHS = 6;
+
+const USAGE = `ensemble-browser — look at the screens you build in a headless Chromium.
+
+  ensemble-browser start                ask Ensemble to start the browser (it shares this sandbox's network)
+  ensemble-browser status               is it running
+  ensemble-browser shot <url> [--width 1280[,768,375]] [--height 900] [--full] [--wait <ms>] [--selector <css>] [--out <dir>]
+                                        screenshots, one PNG per width (default folder ${OUT_DIR})
+  ensemble-browser console <url> [--wait <ms>]
+                                        the page's console messages, errors and failed requests
+  ensemble-browser stop                 stop the browser
+
+\`localhost\` in the browser is this sandbox: open your dev server or Storybook at its usual address.
+The DevTools endpoint is ${DEVTOOLS} (for example playwright-core's chromium.connectOverCDP).
+`;
+
+const fail = (msg, code = 1) => {
+  process.stderr.write(`ensemble-browser: ${msg}\n`);
+  process.exit(code);
+};
+
+// ── start / stop / status: Ensemble on the host ──────────────────────────────────────────────────
+function askEnsemble(argv, quiet = false) {
+  return new Promise((resolve) => {
+    const sock = net.connect(SOCKET);
+    let buf = '';
+    let code = null;
+    sock.setEncoding('utf8');
+    sock.on('connect', () => sock.write(JSON.stringify({ argv, cwd: process.cwd() }) + '\n'));
+    sock.on('data', (chunk) => {
+      buf += chunk;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        let m;
+        try {
+          m = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (typeof m.o === 'string' && !quiet) process.stdout.write(m.o);
+        else if (typeof m.e === 'string' && !quiet) process.stderr.write(m.e);
+        else if (typeof m.x === 'number') code = m.x;
+      }
+    });
+    sock.on('error', (e) => {
+      if (code === null && quiet) code = 0;
+      if (code === null) {
+        process.stderr.write(e && (e.code === 'ENOENT' || e.code === 'ECONNREFUSED') ? 'ensemble-browser: a browser is not available in this session.\n' : `ensemble-browser: ${e && e.message ? e.message : e}\n`);
+        code = 3;
+      }
+    });
+    sock.on('close', () => {
+      if (code === null && quiet) code = 0;
+      if (code === null) {
+        process.stderr.write('ensemble-browser: Ensemble stopped answering.\n');
+        code = 3;
+      }
+      resolve(code);
+    });
+  });
+}
+
+// ── the DevTools protocol ───────────────────────────────────────────────────────────────────────
+async function devtools(pathname, method = 'GET') {
+  let res;
+  try {
+    res = await fetch(`${DEVTOOLS}${pathname}`, { method });
+  } catch {
+    fail('the browser is not running. Start it with `ensemble-browser start`.', 3);
+  }
+  if (!res.ok) fail(`the browser answered ${res.status} to ${pathname}.`);
+  return res.json();
+}
+
+class Cdp {
+  constructor(ws) {
+    this.ws = ws;
+    this.id = 0;
+    this.pending = new Map();
+    this.listeners = [];
+    ws.addEventListener('message', (ev) => {
+      let m;
+      try {
+        m = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8'));
+      } catch {
+        return;
+      }
+      if (m.id != null && this.pending.has(m.id)) {
+        const p = this.pending.get(m.id);
+        this.pending.delete(m.id);
+        if (m.error) p.reject(new Error(m.error.message || 'DevTools error'));
+        else p.resolve(m.result || {});
+      } else if (m.method) {
+        for (const l of this.listeners) l(m.method, m.params || {});
+      }
+    });
+  }
+  static open(url) {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      ws.addEventListener('open', () => resolve(new Cdp(ws)));
+      ws.addEventListener('error', () => reject(new Error('could not open the DevTools connection')));
+    });
+  }
+  send(method, params = {}) {
+    const id = ++this.id;
+    this.ws.send(JSON.stringify({ id, method, params }));
+    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+  }
+  on(f) {
+    this.listeners.push(f);
+  }
+  waitFor(method, ms) {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => resolve(false), ms);
+      this.on((m) => {
+        if (m === method) {
+          clearTimeout(t);
+          resolve(true);
+        }
+      });
+    });
+  }
+  close() {
+    try {
+      this.ws.close();
+    } catch {
+      /* gone */
+    }
+  }
+}
+
+async function withPage(f) {
+  const target = await devtools('/json/new?about:blank', 'PUT');
+  const cdp = await Cdp.open(target.webSocketDebuggerUrl);
+  try {
+    return await f(cdp);
+  } finally {
+    cdp.close();
+    await fetch(`${DEVTOOLS}/json/close/${target.id}`).catch(() => {});
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function load(cdp, url, o) {
+  const loaded = cdp.waitFor('Page.loadEventFired', NAV_TIMEOUT_MS);
+  const nav = await cdp.send('Page.navigate', { url });
+  if (nav.errorText) fail(`${url}: ${nav.errorText}`);
+  if (!(await loaded)) process.stderr.write(`ensemble-browser: ${url} did not finish loading in ${NAV_TIMEOUT_MS / 1000} s; going on.\n`);
+  if (o.selector) {
+    const until = Date.now() + NAV_TIMEOUT_MS;
+    for (;;) {
+      const r = await cdp.send('Runtime.evaluate', { expression: `!!document.querySelector(${JSON.stringify(o.selector)})`, returnByValue: true });
+      if (r.result && r.result.value === true) break;
+      if (Date.now() > until) fail(`no element matches ${o.selector}.`);
+      await sleep(200);
+    }
+  }
+  await sleep(o.wait);
+}
+
+function parseArgs(rest) {
+  const o = { url: null, widths: [1280], height: 900, full: false, wait: 500, selector: null, out: OUT_DIR };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const val = () => {
+      if (i + 1 >= rest.length) fail(`${a} needs a value.`, 2);
+      return rest[++i];
+    };
+    if (a === '--width') o.widths = val().split(',').map((w) => Number(w.trim()));
+    else if (a === '--height') o.height = Number(val());
+    else if (a === '--full') o.full = true;
+    else if (a === '--wait') o.wait = Number(val());
+    else if (a === '--selector') o.selector = val();
+    else if (a === '--out') o.out = path.resolve(val());
+    else if (a.startsWith('--')) fail(`unknown option ${a}.`, 2);
+    else if (o.url === null) o.url = a;
+    else fail(`one address at a time (got ${a}).`, 2);
+  }
+  if (o.url === null) fail('give an address, for example http://localhost:6006.', 2);
+  if (!/^(https?:|file:|about:)/i.test(o.url)) o.url = `http://${o.url}`;
+  if (o.widths.length === 0 || o.widths.length > MAX_WIDTHS || o.widths.some((w) => !Number.isInteger(w) || w < 200 || w > 3840)) fail(`--width takes 1 to ${MAX_WIDTHS} widths from 200 to 3840.`, 2);
+  if (!Number.isInteger(o.height) || o.height < 200 || o.height > 4000) fail('--height is from 200 to 4000.', 2);
+  if (!Number.isFinite(o.wait) || o.wait < 0 || o.wait > 60_000) fail('--wait is from 0 to 60000 ms.', 2);
+  return o;
+}
+
+function fileName(url, width) {
+  let slug = 'page';
+  try {
+    const u = new URL(url);
+    slug = `${u.hostname}${u.port ? `-${u.port}` : ''}${u.pathname}${u.hash}`.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'page';
+  } catch {
+    /* keep the default */
+  }
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-');
+  return `${stamp}-${slug}-${width}.png`;
+}
+
+async function shot(rest) {
+  const o = parseArgs(rest);
+  fs.mkdirSync(o.out, { recursive: true });
+  const written = [];
+  await withPage(async (cdp) => {
+    await cdp.send('Page.enable');
+    for (const width of o.widths) {
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width, height: o.height, deviceScaleFactor: 1, mobile: width < 600 });
+      await load(cdp, o.url, o);
+      const params = { format: 'png' };
+      if (o.full) {
+        const m = await cdp.send('Page.getLayoutMetrics');
+        const size = m.cssContentSize || m.contentSize || { height: o.height };
+        params.captureBeyondViewport = true;
+        params.clip = { x: 0, y: 0, width, height: Math.min(Math.ceil(size.height), MAX_FULL_HEIGHT), scale: 1 };
+      }
+      const r = await cdp.send('Page.captureScreenshot', params);
+      const file = path.join(o.out, fileName(o.url, width));
+      fs.writeFileSync(file, Buffer.from(r.data, 'base64'));
+      process.stdout.write(`${file}\n`);
+      written.push(file);
+    }
+  });
+  // Tell Ensemble, so the reader sees them as they are taken (it checks and copies only its own folder's PNGs).
+  // Quiet, and never a failure of this command: without a relay they simply stay here.
+  if (written.length > 0) await askEnsemble(['noted', ...written], true);
+}
+
+const preview = (v) => {
+  if (!v) return '';
+  if (v.type === 'string') return v.value;
+  if (v.value !== undefined) return JSON.stringify(v.value);
+  return v.description || v.type;
+};
+
+async function consoleOf(rest) {
+  const o = parseArgs(rest);
+  if (!rest.includes('--wait')) o.wait = 2_000;
+  const lines = [];
+  await withPage(async (cdp) => {
+    cdp.on((method, p) => {
+      if (method === 'Runtime.consoleAPICalled') lines.push(`console.${p.type}: ${(p.args || []).map(preview).join(' ')}`);
+      else if (method === 'Runtime.exceptionThrown') lines.push(`error: ${(p.exceptionDetails && ((p.exceptionDetails.exception && p.exceptionDetails.exception.description) || p.exceptionDetails.text)) || 'an exception'}`);
+      else if (method === 'Log.entryAdded' && p.entry && (p.entry.level === 'error' || p.entry.level === 'warning')) lines.push(`${p.entry.level}: ${p.entry.text}${p.entry.url ? ` (${p.entry.url})` : ''}`);
+      else if (method === 'Network.loadingFailed' && !p.canceled) lines.push(`request failed: ${p.errorText}${p.blockedReason ? ` (${p.blockedReason})` : ''}`);
+      else if (method === 'Network.responseReceived' && p.response && p.response.status >= 400) lines.push(`HTTP ${p.response.status}: ${p.response.url}`);
+    });
+    await Promise.all([cdp.send('Page.enable'), cdp.send('Runtime.enable'), cdp.send('Log.enable'), cdp.send('Network.enable')]);
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: o.widths[0], height: o.height, deviceScaleFactor: 1, mobile: o.widths[0] < 600 });
+    await load(cdp, o.url, o);
+  });
+  process.stdout.write(lines.length === 0 ? 'No console messages, errors or failed requests.\n' : `${lines.slice(0, 200).join('\n')}\n`);
+}
+
+const [verb, ...rest] = process.argv.slice(2);
+switch (verb) {
+  case undefined:
+  case 'help':
+  case '--help':
+  case '-h':
+    process.stdout.write(USAGE);
+    break;
+  case 'start':
+  case 'stop':
+  case 'status':
+    process.exitCode = await askEnsemble([verb]);
+    break;
+  case 'shot':
+    await shot(rest).catch((e) => fail(e && e.message ? e.message : String(e)));
+    break;
+  case 'console':
+    await consoleOf(rest).catch((e) => fail(e && e.message ? e.message : String(e)));
+    break;
+  default:
+    fail(`unknown command \`${String(verb).slice(0, 40)}\`.\n\n${USAGE}`, 2);
+}

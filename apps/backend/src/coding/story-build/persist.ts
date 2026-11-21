@@ -16,6 +16,7 @@ import {
   type StoryBuildRepoHotfix,
   type StoryBuildHotfixPort,
   type StoryBuildRepoStatus,
+  type StoryBuildScreensTicket,
   type StoryBuildStatus,
   type StoryBuildSummary,
   type StoryDocsCriteriaSource,
@@ -431,6 +432,19 @@ export interface ToStoryBuildOpts {
   sessionBudgetUsd: number;
 }
 
+/** "Post screenshots to the ticket" on the wire: offered for a Jira ticket whose build has screenshots. */
+export function screensTicketOf(row: Pick<StoryBuildRow, 'ident' | 'screensJson' | 'screensTicketJson'>): StoryBuildScreensTicket {
+  const st = row.screensTicketJson ?? null;
+  const hasShots = (row.screensJson ?? []).some((s) => s.shots.length > 0);
+  return {
+    offered: row.ident.startsWith('jira:') && hasShots,
+    postedAt: st?.postedAt ?? null,
+    attachments: st?.attachments ?? null,
+    error: st?.error ?? null,
+    posting: st != null && st.postedAt == null && st.error == null,
+  };
+}
+
 /** THE wire mapper. Never a patch, the seed, or a worktree path. */
 export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRepoRow[], opts: ToStoryBuildOpts): StoryBuild {
   const candidates = row.candidatesJson ?? [];
@@ -484,6 +498,8 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     endToEndTicket: row.e2eTicketJson ?? null,
     howToTest: row.howToTestChatId != null ? { chatId: row.howToTestChatId, seen: row.howToTestSeenAt != null } : null,
     hotfix: row.hotfix === true,
+    screens: row.screensJson ?? [],
+    screensTicket: screensTicketOf(row),
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),

@@ -524,7 +524,7 @@ The old Pro plugin, now core at **`apps/backend/src/platform/`** (reporting, Bot
 - **Trackers** (docs/TRACKERS.md): ONE per workspace; read when a PR is
   RECEIVED, never when VIEWED (exceptions: sprint list, release Confirm, a local review). ⚠ **The ONLY tracker
   writes are the reader's picks**: the Jira status, the plan's Jira update, the assignee (not Notion),
-  "Build end to end"'s update + comment, the release comment. Customer hosts: `tracker/jira/fetch.ts`.
+  "Build end to end"'s update + comment, the release comment, a build's screenshots. Customer hosts: `tracker/jira/fetch.ts`.
   Idents only via `trackerTicketIdent`/`trackerTicketRow`.
 
 ## ML severity/category on bot comments (no LLM)

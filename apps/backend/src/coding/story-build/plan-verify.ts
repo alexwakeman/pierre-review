@@ -35,6 +35,8 @@ import {
   type BuildPlanPr,
   type BuildPlanRaw,
   type BuildPlanRevision,
+  type BuildPlanUi,
+  type BuildPlanUiRaw,
   acSectionText,
   compareTicketLayout,
   findAcSection,
@@ -82,6 +84,9 @@ export interface PlanVerifyInput {
   /** The ticket's layout as Limn held it at plan time (seed.ts `ticketLayoutFacts`): the draft ticket
    *  update is checked against it (`layoutProblems`). Absent/null = no check. */
   ticketLayout?: { description: TicketLayout; criteria: TicketLayout; acLocation: TicketAcLocation } | null;
+  /** The ticket's files (`ensemble-ticket`'s manifest): a `ui.designInputs` id must be one, and its name and
+   *  kind are taken from here, never from the agent. Absent/null = no relay: every design input is dropped. */
+  ticketFiles?: ReadonlyArray<{ id: string; name: string; kind: string }> | null;
 }
 
 /** Said when the draft held a Jira mention or macro the ticket did not: it is written as plain text. */
@@ -227,6 +232,64 @@ function verifyDocsEvidence(e: Extract<BuildPlanEvidenceRaw, { kind: 'docs' }>, 
   return { ok: true, evidence: { kind: 'docs', ...ref } };
 }
 
+/**
+ * THE UI SECTION, verified (docs/IMPLEMENT-UI-PLAN.md § 4): every code quote checked like a contention's (a
+ * failure drops it), design inputs kept only when they are in the ticket's list (their name and kind are the
+ * ticket's). The flags and the agent's words stay as written; they are its plan, shown as such.
+ */
+async function verifyUi(
+  ui: BuildPlanUiRaw,
+  skip: Readonly<Record<string, number[]>>,
+  repos: ReadonlyMap<string, PlanSessionRepo>,
+  seams: PlanVerifySeams,
+  files: ReadonlyArray<{ id: string; name: string; kind: string }> | null,
+  note: (reason: string) => void,
+): Promise<BuildPlanUi> {
+  const verifyList = async (list: readonly BuildPlanEvidenceRaw[], key: string): Promise<BuildPlanEvidence[]> => {
+    const bad = new Set(skip[key] ?? []);
+    const out: BuildPlanEvidence[] = [];
+    const seen = new Set<string>();
+    for (const [i, e] of list.entries()) {
+      if (bad.has(i) || e.kind !== 'code') {
+        note('cited evidence Ensemble could not check');
+        continue;
+      }
+      const v = await verifyFileEvidence(e, repos, seams);
+      if (!v.ok) {
+        note(v.reason);
+        continue;
+      }
+      const k = evidenceKey(v.evidence);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(v.evidence);
+    }
+    return out;
+  };
+  const byId = new Map((files ?? []).map((f) => [f.id, f] as const));
+  const designInputs: BuildPlanUi['designInputs'] = [];
+  for (const d of ui.designInputs) {
+    const f = byId.get(d.id);
+    if (!f) {
+      note('named a ticket file that is not in the ticket');
+      continue;
+    }
+    if (designInputs.some((x) => x.id === f.id)) continue;
+    designInputs.push({ id: f.id, name: f.name, kind: f.kind, used: d.used, note: clipText(d.note, BUILD_PLAN_LIMITS.uiNote) });
+  }
+  return {
+    needed: ui.needed,
+    browser: ui.needed && ui.browser,
+    reason: clipText(ui.reason, BUILD_PLAN_LIMITS.uiReason),
+    renderTarget: ui.renderTarget,
+    designInputs,
+    designSystem: { summary: clipText(ui.designSystem.summary, BUILD_PLAN_LIMITS.uiSummary), evidence: await verifyList(ui.designSystem.evidence, 'ui.designSystem.evidence') },
+    nearestScreens: await verifyList(ui.nearestScreens, 'ui.nearestScreens'),
+    newComponents: ui.newComponents.map((n) => ({ name: clipText(n.name, BUILD_PLAN_LIMITS.uiComponentName), why: clipText(n.why, BUILD_PLAN_LIMITS.uiWhy) })),
+    gaps: ui.gaps.map((g) => g.trim()).filter(Boolean),
+  };
+}
+
 /** THE entry (see the header). */
 export async function verifyBuildPlan(input: PlanVerifyInput): Promise<PlanVerifyResult> {
   let raw: unknown;
@@ -285,6 +348,14 @@ export async function verifyBuildPlan(input: PlanVerifyInput): Promise<PlanVerif
     });
   }
   const kept = new Set(contentions.map((c) => c.id));
+  // The UI section's dropped quotes and design inputs count with the rest.
+  let uiDropped = 0;
+  const ui = plan.ui
+    ? await verifyUi(plan.ui, check.droppedEvidence, byName, input.seams, input.ticketFiles ?? null, (reason) => {
+        uiDropped += 1;
+        reasons.add(reason);
+      })
+    : null;
   const repoOf = (name: string): PlanSessionRepo => byName.get(name.trim().toLowerCase())!;
   const perRepo = new Map<number, number>();
   const stack: BuildPlanPr[] = plan.stack.map((p) => {
@@ -330,7 +401,8 @@ export async function verifyBuildPlan(input: PlanVerifyInput): Promise<PlanVerif
             ].slice(0, 6),
           }
         : null,
-      dropped: { contentions: droppedContentions, evidence: droppedEvidence, reasons: [...reasons] },
+      ui,
+      dropped: { contentions: droppedContentions, evidence: droppedEvidence + uiDropped, reasons: [...reasons] },
     },
   };
 }

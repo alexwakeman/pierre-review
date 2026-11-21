@@ -15,6 +15,7 @@ import {
   type SandboxBootStepKey,
   type SandboxConversationItem,
   type SandboxNetworkEntry,
+  type SandboxLiveShot,
   type SandboxServicesStatus,
   type SandboxSessionPhase,
   type SandboxSessionRepo,
@@ -48,6 +49,8 @@ export interface SessionStateJson {
   openPoints: string[];
   services: SandboxServicesStatus | null;
   network: SandboxNetworkEntry[];
+  /** Screenshots the agent took, checked and copied out as it took them (newest first, capped). */
+  liveShots?: SandboxLiveShot[];
   /** The next conversation item id. */
   seq: number;
   /** AI Fix: edits in repositories that are NOT pushed (only the PR's repository is). */
@@ -104,6 +107,7 @@ export function readSessionState(raw: unknown, action: SessionStateJson['action'
     criteria: Array.isArray(s.criteria) ? s.criteria : [],
     openPoints: Array.isArray(s.openPoints) ? s.openPoints : [],
     network: Array.isArray(s.network) ? s.network : [],
+    ...(Array.isArray(s.liveShots) ? { liveShots: s.liveShots } : {}),
     ...(s.leftOut !== undefined ? { leftOut: Array.isArray(s.leftOut) ? s.leftOut : [] } : {}),
     // Plan first: only on the rows that have it (an older row reads exactly as before).
     ...(s.planFirst === true
@@ -267,6 +271,7 @@ export function toStoryBuildSession(
     credentialLine: state.credentialLine,
     services: state.services,
     network: state.network,
+    ...(state.liveShots != null && state.liveShots.length > 0 ? { liveShots: state.liveShots } : {}),
     spend: {
       costUsd: cost.length === 0 ? null : cost.reduce((a, b) => a + b, 0),
       inputTokens: row.inputTokens ?? 0,

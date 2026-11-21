@@ -24,6 +24,7 @@ import { PAGE_GUTTER } from '../ui/PageHeader.js';
 import { BuildSection } from './BuildSection.js';
 import { PlanPanel } from './PlanPanel.js';
 import { StackView } from './StackView.js';
+import { BuildScreens, LiveShots } from './BuildScreens.js';
 import { SessionView } from './SessionView.js';
 import { StartPanel } from './StartPanel.js';
 import { AutoPushLine } from './AutoPushOption.js';
@@ -141,6 +142,16 @@ function StoryBuildBody({
             <BuildSection build={build} draft={draft} />
           </StoryBuildSection>
         )
+      )}
+      {open != null && (open.session.liveShots?.length ?? 0) > 0 && (
+        <StoryBuildSection title="Screenshots" testId="story-build-shots">
+          <LiveShots buildId={open.build.id} shots={open.session.liveShots ?? []} live={open.session.live} />
+        </StoryBuildSection>
+      )}
+      {build != null && (build.screens?.length ?? 0) > 0 && (
+        <StoryBuildSection title="Screens" testId="story-build-screens">
+          <BuildScreens build={build} />
+        </StoryBuildSection>
       )}
       <StoryBuildCommands build={open?.build ?? null} session={open?.session ?? null} />
     </>

@@ -568,7 +568,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
     {
       schema: {
         ...idParams,
-        body: { type: 'object', required: ['revision'], additionalProperties: false, properties: { revision: { type: 'integer', minimum: 1 }, text: { type: 'string' } } },
+        body: { type: 'object', required: ['revision'], additionalProperties: false, properties: { revision: { type: 'integer', minimum: 1 }, text: { type: 'string' }, browser: { type: 'boolean' } } },
       },
     },
     async (req, reply) => {
@@ -578,7 +578,7 @@ export function registerSandboxSessionRoutes(app: FastifyInstance, ctx: AgentCon
       const body = req.body as BuildPlanApproveBody;
       const extra = (body.text ?? '').trim();
       if (extra.length > SANDBOX_MESSAGE_MAX) return fail(reply, 400, 'BadRequest', `Keep the message under ${SANDBOX_MESSAGE_MAX.toLocaleString('en-US')} characters.`);
-      return sendAction(reply, await approveSessionPlan(ctx, ctx.accountIdOf(req), id, { revision: body.revision, text: extra === '' ? null : extra }));
+      return sendAction(reply, await approveSessionPlan(ctx, ctx.accountIdOf(req), id, { revision: body.revision, text: extra === '' ? null : extra, ...(body.browser != null ? { browser: body.browser } : {}) }));
     },
   );
 
