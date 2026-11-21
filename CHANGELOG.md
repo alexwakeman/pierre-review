@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.72] - 2026-11-21
+
 ### Added
 
 - Implement story: the agent can read what the ticket attaches or links (designs, screenshots, sketches, JSON). It
