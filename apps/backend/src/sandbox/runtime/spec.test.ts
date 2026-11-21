@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { labelArgs, repoStoreName, resourceLabels, resourceName, storeLabels } from './labels.js';
-import { composeArgs, mountArgs, proxyRunArgs, sandboxRunArgs, serviceBuildArgv, storeMaintenanceArgs, volumeChownArgs } from './spec.js';
+import { BROWSER_IMAGE, browserRunArgs, composeArgs, mountArgs, proxyRunArgs, sandboxRunArgs, serviceBuildArgv, storeMaintenanceArgs, volumeChownArgs } from './spec.js';
 import { DEFAULT_RESOURCES, type SandboxSpec } from './types.js';
 
 const spec: SandboxSpec = {
@@ -144,5 +144,32 @@ describe('the repo store argv (docs/SANDBOX.md § The repo store)', () => {
     expect(repoStoreName('d1')).toBe('limn-repo-store-d1');
     expect(() => repoStoreName('../x')).toThrow();
     expect(storeLabels('d1', { 'limn.test': '1', 'limn.managed': 'x' })).toEqual({ 'limn.test': '1', 'limn.store': 'd1', 'limn.role': 'store' });
+  });
+});
+
+describe('the browser argv (docs/SANDBOX.md § The browser)', () => {
+  const labels = { 'limn.session': 's1', 'limn.role': 'browser' };
+  const args = browserRunArgs({ sandbox: 'limn-s1-sandbox', image: BROWSER_IMAGE, proxyUrl: 'http://limn-proxy:3128' }, 'limn-s1-browser', labels);
+  const joined = args.join(' ');
+  it('shares the sandbox\'s network, and nothing else', () => {
+    expect(args).toContain('container:limn-s1-sandbox');
+    expect(args.filter((a) => a === '--network')).toHaveLength(1);
+  });
+  it('is non-root, hardened, read-only and capped', () => {
+    expect(args.slice(args.indexOf('--user'), args.indexOf('--user') + 2)).toEqual(['--user', '65534:65534']);
+    for (const f of ['--cap-drop ALL', '--security-opt no-new-privileges', '--init', '--read-only', '--pids-limit 512', '--memory 1073741824']) expect(joined).toContain(f);
+    expect(joined).not.toMatch(/--privileged|--cap-add|docker\.sock|--mount|-v /);
+  });
+  it('the pinned image; DevTools on loopback only; out through the proxy', () => {
+    expect(BROWSER_IMAGE).toMatch(/@sha256:[0-9a-f]{64}$/);
+    expect(args).toContain(BROWSER_IMAGE);
+    expect(args).toContain('--remote-debugging-address=127.0.0.1');
+    expect(args).toContain('--proxy-server=http://limn-proxy:3128');
+    expect(args).toContain('--proxy-bypass-list=<local>');
+    expect(browserRunArgs({ sandbox: 'x', image: BROWSER_IMAGE, proxyUrl: null }, 'n', labels).join(' ')).not.toContain('--proxy-server');
+  });
+  it('refuses a sandbox name or proxy address that is not plain', () => {
+    expect(() => browserRunArgs({ sandbox: 'x --privileged', image: BROWSER_IMAGE, proxyUrl: null }, 'n', labels)).toThrow(/sandbox container name/);
+    expect(() => browserRunArgs({ sandbox: 'x', image: BROWSER_IMAGE, proxyUrl: 'http://a:1 --x' }, 'n', labels)).toThrow(/proxy address/);
   });
 });

@@ -2,7 +2,8 @@
 
 Status: **BEING BUILT** (2026-11-21). BUILT: § 2 (the ticket relay: Jira attachments and every provider's links;
 [SANDBOX.md](SANDBOX.md) § The ticket relay), § 4 (the plan's UI section) and §§ 6–7 (the design-system and
-no-design rules, in the seed's plan section; SANDBOX.md § The plan and its checks). The rest is not built yet. When a part is built, move
+no-design rules, in the seed's plan section; SANDBOX.md § The plan and its checks) and § 5 (the browser; SANDBOX.md
+§ The browser). The rest is not built yet. When a part is built, move
 its detail into [STORY-BUILD.md](STORY-BUILD.md) / [SANDBOX.md](SANDBOX.md) / [TRACKERS.md](TRACKERS.md) and
 mark it built here, as [CODEX-PLAN.md](CODEX-PLAN.md) does.
 
@@ -223,6 +224,13 @@ ui?: {
 ---
 
 ## 5. The browser — optional, chosen in the plan
+
+> **Built 2026-11-21.** Decisions on the open questions: (1) the image is the pinned `chromedp/headless-shell` by
+> digest (small, maintained, no recipe of our own); (2) its network is the SANDBOX'S namespace and its requests out
+> go through the session proxy; (3) the agent may start it mid-build with `ensemble-browser start`, which is one
+> notice to the reader. Differences from the design below: no forwarder is needed (the shared namespace makes
+> `localhost` the sandbox), there is no `run <script>` verb (the DevTools endpoint is open to the agent's own
+> tools, for example playwright-core), and screenshots stay in the sandbox (§ 8 is not built).
 
 ### Why a separate container
 

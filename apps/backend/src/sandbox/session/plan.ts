@@ -375,6 +375,9 @@ export class PlanStage {
           const row = await insertPlanRevision(this.o.ctx, { accountId: this.o.accountId, buildId: this.o.buildId, source, plan: r.plan, rawSha: r.rawSha, now: new Date(seams.now()) });
           this.hasPlan = true;
           m.notice(planReadyLine(row.revision, r.plan.dropped));
+          // A plan that recommends a browser: get its image now, while the reader reads the plan, so a start at
+          // Approve does not wait for the first download (docs/SANDBOX.md § The browser). Never awaited.
+          if (r.plan.ui?.needed === true && r.plan.ui.browser) void l.runtime.prepareBrowser?.().catch(() => {});
         }
         l.state.planStage = 'ready';
         l.state.planProblem = null;

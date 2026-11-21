@@ -21,6 +21,9 @@ no internals.
 - Implement story: when the work changes a screen, the plan has a **Screens** part: the design it uses from the
   ticket, your design system and the nearest existing screens (code Ensemble checks), and what it still has to
   choose. With no design in the ticket, the agent builds to fit your existing screens.
+- Implement story: **Give the build a browser** at Approve, when the plan changes a screen. The agent looks at the
+  screens it builds in a headless Chromium on your computer, which reaches only what the sandbox reaches. The agent
+  can also ask for one during the build. Docker only.
 
 ## [1.0.71] - 2026-11-20
 

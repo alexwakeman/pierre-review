@@ -324,6 +324,20 @@ function ticketFilesSection(i: SeedInput): string {
   ].join('\n');
 }
 
+/** `ensemble-browser` (docs/SANDBOX.md § The browser): a look at the screens the agent builds. Story sessions. */
+const BROWSER = [
+  '## A browser',
+  '',
+  'To look at the screens you build, use `ensemble-browser` (`ensemble-browser help` lists every command).',
+  '',
+  '- When the reader asked for a browser, Ensemble starts it before the build: check with `ensemble-browser status`. Else `ensemble-browser start` asks Ensemble for one.',
+  '- It shares this sandbox\'s network: `localhost` in the browser is this sandbox. Start your dev server or Storybook here, then `ensemble-browser shot http://localhost:6006/<page> --width 1280,375`.',
+  '- Screenshots go to `~/.limn/browser/`. Open them to look at them. Compare them with the design and with the nearest existing screens, then fix what does not fit.',
+  '- `ensemble-browser console <url>` lists the page\'s console errors and failed requests.',
+  '- The browser\'s requests out go through the same proxy and allow-list as yours.',
+  '- Never sign in to a real account. Show the screens with Storybook, mock data or a test page.',
+].join('\n');
+
 const NETWORK = [
   '## The network',
   '',
@@ -413,6 +427,8 @@ function agentFile(i: SeedInput, provider: AiProviderId): string {
     memoriesSection(i, provider),
     '',
     servicesSection(i),
+    '',
+    BROWSER,
     '',
     NETWORK,
     '',

@@ -146,6 +146,10 @@ export default function Page(): JSX.Element {
           go back to that point. An open point says <Ui>Not answered</Ui>.
         </li>
         <li>
+          When the plan changes a screen, <Ui>Give the build a browser</Ui> is ticked if the agent asks for one. Untick it
+          if you do not want it.
+        </li>
+        <li>
           Press <Ui>Approve and start</Ui>. Ensemble reads the ticket again and the agent switches to building.
         </li>
         <li>

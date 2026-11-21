@@ -86,6 +86,7 @@ shell. Treat everything it does as untrusted.
 | Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `ENSEMBLE_SANDBOX_MAX_SESSIONS` open sessions; at most `ENSEMBLE_SANDBOX_MAX_BUILDS` build turns at once; idle teardown. |
 | More untrusted text in an AI Fix (2026-11-19: up to 12 workspace repositories and the reference documents, read only) | The same walls hold: no GitHub credential, no route out but the proxy, work leaves only as the PR repository's patch (every other repository's edits are `leftOut`, never pushed). The other repositories and the documents are context, not instructions: FIX.md says a change another repository needs is out of scope, and an unattended fix still gets no TICKET.md. More to read inside the same caps (`AI_FIX_MAX_TURNS`, an unattended run's `AI_FIX_BUDGET_USD`, the spend gate); the per-workspace switch narrows it. Dependency automation's fix stays narrow. |
 | Ticket text tells the agent to read other tickets, or write to the tracker | `ensemble-ticket` serves only this session's ticket (every id is matched against its manifest), has no write verb, and reads on the HOST: the tracker credential never enters the sandbox. An attachment's address is checked to be on the tracker's own site before the credential is sent (§ The ticket relay). |
+| The browser is a way out, or a way onto the host | It shares the SANDBOX'S network namespace, so it reaches only what the sandbox reaches; its requests out go through the same proxy and allow-list. Non-root, no capabilities, read-only root, capped, a pinned image. Ensemble starts it; the agent only drives it over DevTools on loopback (§ The browser). |
 | Leftovers | Every resource carries Ensemble's labels; discard, the boot sweep and `ensemble sandbox prune` remove them. |
 | Spend | Every turn of Implement and of a manual AI Fix is a reader's press (a manual fix's review rounds are part of it). An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE FIX LOOP — a build turn, then its own review rounds and fix turns, each automatic step asking the gate again (a refusal stops the loop) — with Claude's `--max-budget-usd` on the session's process, then closes. Each turn's and each review's usage is recorded on the ledger under the provider that ran it, and the session's spend is shown. |
 | The reader's own files leak in | Only the ticked memory projects, the user `CLAUDE.md` and (opt-in) skills are copied, read-only at source, size-capped. The reader's clones only lend git OBJECTS for the base commit to the repo store, read with hooks, fsmonitor and their config off; never the working tree, index or stash. **Past sessions are never imported** (owner decision D1): no transcript is copied, resumed or written back. |
@@ -830,6 +831,42 @@ Tests: `tracker/artifacts.test.ts` (the manifest, the scanner's linear bound), `
 (the site check before any request, the credential-free media hop), `ticket/controller.test.ts` (verbs, caps,
 Network rows), `ticket/relay.test.ts` (the shipped client and relay as local processes) and
 `ticket/ticket-real.test.ts` (slow: the same in a real container over `docker exec`).
+
+## The browser (`apps/backend/src/sandbox/browser/`, `runtime/spec.ts` `browserRunArgs`, `sandbox-image/ensemble-browser`; 2026-11-21)
+
+A story session's agent looks at the screens it builds in a headless Chromium. Plan:
+[IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md) § 5. **Ensemble starts it; the agent drives it.**
+
+- **Started** by the reader's tick "Give the build a browser" at Approve (offered when the plan's `ui` says the
+  work changes a screen, preset from `ui.browser`; `BuildPlanApproveBody.browser`, absent = the plan's
+  recommendation, which is also what an automatic approval uses), before the build turn's instruction, so it is
+  there when the agent starts. Or by the agent, any time: `ensemble-browser start` (over the same relay program as
+  `limn-svc`, its own socket `/tmp/ensemble-browser.sock`; `browser/index.ts` `SessionBrowser` is the handler).
+  Each start is ONE notice ("Ensemble started a browser for the build." / "The agent started a browser."); a
+  failure is ONE notice and the build goes on. A plan that recommends one starts the image PULL in the background
+  while the reader reads it (`runtime.prepareBrowser`).
+- **The container** (`browserRunArgs`, pinned by `spec.test.ts`): the pinned `chromedp/headless-shell` image BY
+  DIGEST (`BROWSER_IMAGE`, pulled by the host's daemon on first use), ⚠ in the SANDBOX'S NETWORK NAMESPACE
+  (`--network container:<sandbox>`): `localhost:5173` in the browser IS the agent's dev server (no Host-header or
+  cookie surprises, no forwarder), DevTools listens on 127.0.0.1:9222 of that shared namespace, and the browser
+  reaches exactly what the sandbox reaches. Non-root (`65534`), the usual hardening, read-only root, a 256 MB
+  /tmp for its profile, 1 CPU / 1 GB / 512 processes. Its requests out go through the session's proxy
+  (`--proxy-server`, `--proxy-bypass-list=<local>`; Chromium never proxies loopback): the same allow-list, the
+  same log. Role label `browser`: the session's destroy and the sweep remove it; a close stops it FIRST.
+- **The agent's verbs** (`sandbox-image/ensemble-browser`, plain Node 22, its own WebSocket, no dependencies):
+  `start` / `stop` / `status` ask Ensemble; `shot <url> [--width a,b,c] [--height] [--full] [--wait] [--selector]
+  [--out]` writes one PNG per width to `~/.limn/browser/` over the DevTools protocol; `console <url>` lists
+  console messages, exceptions, failed requests and HTTP errors. The DevTools endpoint is also usable directly
+  (for example playwright-core's `connectOverCDP`).
+- **Docker only**: a runtime without `startBrowser` (microsandbox) answers in one line, and nothing starts.
+- **Screenshots stay in the sandbox** for now: nothing reads them out to the reader (IMPLEMENT-UI-PLAN.md § 8).
+- The seed (`workspace/seed.ts` `BROWSER`, story sessions): how to start it and take shots, `localhost` is the
+  sandbox, never sign in to a real account (Storybook, mock data or a test page).
+
+Tests: `runtime/spec.test.ts` (the argv), `browser/index.test.ts` (start once, readiness, failure, the verbs),
+`plan-session-flow-db.test.ts` (the tick starts it before the build turn) and `browser/browser-real.test.ts`
+(slow: the pinned image started by the Docker runtime in a stand-in sandbox's namespace, `start` / `shot` /
+`console` from inside, removed by the session's destroy).
 
 ## microsandbox (`runtime/microsandbox.ts`; plan WP9) — ⚠ UNTESTED
 

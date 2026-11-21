@@ -204,9 +204,14 @@ test.describe('Implement, plan first', () => {
     await expect(review).toBeVisible();
     await expect(approve).toBeEnabled();
     await expect(view.getByTestId('story-plan-approve-reason')).toHaveCount(0);
+    // "Give the build a browser": offered because the plan changes a screen, ticked as the agent recommends; the
+    // reader's untick is what is sent.
+    const browserTick = view.getByTestId('story-plan-browser');
+    await expect(browserTick).toBeChecked();
+    await browserTick.uncheck();
     const approved = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/plan/approve'));
     await approve.click();
-    expect((await approved).postDataJSON()).toEqual({ revision: 3 });
+    expect((await approved).postDataJSON()).toEqual({ revision: 3, browser: false });
 
     // The plan folds to one line; the changes are the planned pull requests, in order.
     await expect(view.getByTestId('story-plan')).toHaveAttribute('data-status', 'approved');

@@ -21,6 +21,7 @@ import { DocReferenceList } from '../DocReferences.js';
 import { BookIcon, CheckIcon, ChevronIcon, DatabaseIcon, DiffIcon, ExternalLinkIcon, ScalesIcon, WrenchIcon } from '../Icons.js';
 import { Button } from '../ui/Button.js';
 import { cx } from '../ui/cx.js';
+import { Checkbox } from '../ui/FormControls.js';
 
 // THE PLAN PANEL'S SHARED PARTS (./PlanPanel.tsx, ./PlanDecisionWizard.tsx; docs/STORY-BUILD.md § Plan
 // first): one point to settle with its evidence, the Reply box under a point, and "Approve and start".
@@ -270,6 +271,11 @@ export function ApproveRow({
   const approve = usePlanApprove(build.workspaceId, build.ident);
   const busy = useIsMutating({ mutationKey: storyBuildMutationKey(build.ident) }) > 0;
   const state = planApproveState(session, decided);
+  // "Give the build a browser" (docs/SANDBOX.md § The browser): offered when the plan changes a screen,
+  // preset from the agent's recommendation; a new revision resets it.
+  const uiWork = rev.ui?.needed === true;
+  const [browser, setBrowser] = useState<{ revision: number; on: boolean } | null>(null);
+  const browserOn = browser != null && browser.revision === rev.revision ? browser.on : rev.ui?.browser === true;
   if (!state.shown) return null;
   const err = planErrorText(approve.error);
   return (
@@ -284,7 +290,7 @@ export function ApproveRow({
           disabled={!state.enabled || busy}
           busy={approve.isPending}
           busyLabel="Starting…"
-          onClick={() => approve.mutate({ id: build.id, body: { revision: rev.revision } })}
+          onClick={() => approve.mutate({ id: build.id, body: { revision: rev.revision, ...(uiWork ? { browser: browserOn } : {}) } })}
         >
           Approve and start
         </Button>
@@ -293,6 +299,15 @@ export function ApproveRow({
         <span data-testid="story-plan-approve-reason" className="text-meta text-ui-mute">
           {state.reason}
         </span>
+      )}
+      {uiWork && (
+        <Checkbox
+          data-testid="story-plan-browser"
+          label="Give the build a browser"
+          checked={browserOn}
+          disabled={approve.isPending}
+          onChange={(e) => setBrowser({ revision: rev.revision, on: e.target.checked })}
+        />
       )}
       {state.enabled && <span className="text-meta text-ui-mute">The agent then builds to the end. You can stop it or message it.</span>}
       {err != null && <span className="text-meta text-ui-danger">{err}</span>}

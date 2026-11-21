@@ -217,6 +217,8 @@ beforeAll(async () => {
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident === IDENT ? 'ACME-300' : 'ACME-301', title: 'Export a report as CSV', empty: false }),
     // `ensemble-ticket`: the real relay is ticket/relay.test.ts; here, that the machine starts it at the layout root.
+    // The browser's relay needs the real relay program (browser/*.test.ts); a stand-in here.
+    newBrowser: () => ({ startRelay: async () => {}, start: async () => false, stop: async () => {}, close: () => {} }),
     startTicketRelay: async (o) => {
       ticketRelayRoots.push(o.root);
       return { controller: { filesNow: () => [] } as never, close: () => {} };

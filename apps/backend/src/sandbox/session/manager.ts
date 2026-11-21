@@ -94,7 +94,8 @@ import { clampLoopRounds } from '@pierre-review/shared';
 import { buildLoopRounds } from '../../ai/run-profile.js';
 import { defaultSandboxSettings, readSandboxSettings, type SandboxSettingsRow } from '../../db/sandbox-settings.js';
 import { resolveSandboxAgentChoice, startSandboxAgent, type SandboxAgentChoice, type SandboxAgentDriver, type SandboxUsageSink } from '../drivers/index.js';
-import { credentialModeLine } from '../proxy/credentials.js';
+import { credentialModeLine, PROXY_URL } from '../proxy/credentials.js';
+import { SessionBrowser, type BrowserHost } from '../browser/index.js';
 import { startEgress, type EgressSession } from '../proxy/egress.js';
 import { bootSweepSettled, sandboxRuntime } from '../runtime/index.js';
 import { DEFAULT_RESOURCES, type SandboxResources, type SandboxRuntime, type SessionOwner } from '../runtime/types.js';
@@ -192,6 +193,8 @@ export interface SessionDeps {
   startServices: typeof startSessionServices;
   /** `ensemble-ticket` (docs/SANDBOX.md § The ticket relay). */
   startTicketRelay: typeof startTicketRelay;
+  /** The session's browser (docs/SANDBOX.md § The browser); its relay starts at boot, the browser on demand. */
+  newBrowser(host: BrowserHost): SessionBrowserLike;
   readTicket(ctx: AgentContext, accountId: number, workspaceId: number, ident: string, coverage: StoryBuildCoverage | null): Promise<SessionTicket | null>;
   /** Fill gaps: the latest story check's verdicts (no new check is started). */
   coverage(ctx: AgentContext, accountId: number, ident: string): Promise<StoryBuildCoverage | null>;
@@ -228,6 +231,7 @@ const defaultDeps: SessionDeps = {
   startAgent: startSandboxAgent,
   startServices: startSessionServices,
   startTicketRelay,
+  newBrowser: (host) => new SessionBrowser(host),
   readTicket: (ctx, accountId, workspaceId, ident, coverage) => readSessionTicket(ctx, accountId, workspaceId, ident, { coverage }),
   async coverage(ctx, accountId, ident) {
     const { latestTicketCheck, foldCoverage } = await import('../../coding/story-build/coverage.js');
@@ -310,6 +314,8 @@ export interface Live extends SubjectLive {
   services: SessionServices | null;
   /** `ensemble-ticket` (a story session; null when it did not start). */
   ticketRelay: TicketRelay | null;
+  /** The browser's relay and (once started) the browser: a story session only. */
+  browser: SessionBrowserLike | null;
   driver: SandboxAgentDriver | null;
   container: string | null;
   layoutRoot: string | null;
@@ -644,6 +650,7 @@ export function newLive(
     egress: null,
     services: null,
     ticketRelay: null,
+    browser: null,
     driver: null,
     container: null,
     layoutRoot: null,
@@ -937,8 +944,8 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
       step(l, 'patches', 'done', `${n} repositories`);
     }
 
-    // THE TICKET RELAY (`ensemble-ticket`, docs/SANDBOX.md § The ticket relay): a story session only.
-    // Never fatal — without it the agent has TICKET.md, and the client says the ticket is not available.
+    // THE TICKET RELAY (`ensemble-ticket`, docs/SANDBOX.md § The ticket relay) and THE BROWSER'S RELAY: a story
+    // session only. Never fatal — without it the agent has TICKET.md, and the client says the ticket is not available.
     const ticketSource = sub.ticketRelaySource?.(l) ?? null;
     if (ticketSource != null) {
       try {
@@ -959,6 +966,16 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
         notice(l, '`ensemble-ticket` did not start, so the agent has TICKET.md only.');
       }
       if (l.ticketRelay) await sub.onTicketFiles?.(l).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: the plan context after the ticket relay`));
+      // THE BROWSER'S RELAY (`ensemble-browser start | stop | status`): the browser itself starts only on the
+      // reader's tick at Approve or the agent's ask. Never fatal: the client then says no browser is available.
+      const browser = deps.newBrowser({ runtime: rt, owner: l.owner, sandbox: box.name, proxyUrl: PROXY_URL, notice: (t) => notice(l, t) });
+      try {
+        await browser.startRelay({ onProblem: (line) => notice(l, line) });
+        l.browser = browser;
+      } catch (err) {
+        browser.close();
+        l.ctx.log.warn({ err }, `sandbox session ${l.key}: the browser relay did not start`);
+      }
       stopIfClosing(l);
     }
 
@@ -1199,7 +1216,11 @@ function claimAutoBuild(l: Live): boolean {
   const stage = l.subject.kind === 'story' ? (l.subject as StorySubject).plan : null;
   if (stage == null || stage.pendingApprove == null) return false;
   const r = l.driver != null && !l.driver.busy() && l.driver.mode() === 'chat'
-    ? claimBuildTurn(l, { readerText: 'Approve and start (automatic)', instruction: () => l.subject.buildInstruction(l, null) })
+    ? claimBuildTurn(l, {
+        readerText: 'Approve and start (automatic)',
+        // Approved automatically: the plan's own recommendation decides the browser.
+        instruction: async () => (planWantsBrowser(stage.pendingApprove) ? await l.browser?.start('reader') : undefined, l.subject.buildInstruction(l, null)),
+      })
     : ({ status: 'agent_busy' } as SessionActionResult);
   if (r.status === 'queued') return true;
   stage.autoBuildRefused((t) => notice(l, t), r.status === 'build_busy' ? AUTO_APPROVE_BUSY_LINE : `The plan waits for you: ${'message' in r && typeof r.message === 'string' ? r.message : 'the build could not start'}.`);
@@ -1472,7 +1493,7 @@ export async function replySessionPlan(ctx: AgentContext, accountId: number, bui
 }
 
 /** Approve and start: the LATEST revision, every point answered, the session live and the build slot free. */
-export async function approveSessionPlan(ctx: AgentContext, accountId: number, buildId: number, b: { revision: number; text: string | null }): Promise<SessionActionResult> {
+export async function approveSessionPlan(ctx: AgentContext, accountId: number, buildId: number, b: { revision: number; text: string | null; browser?: boolean }): Promise<SessionActionResult> {
   const l = await liveFor(storyKey(buildId), accountId, storyRowExists(ctx, accountId, buildId));
   if (!isLive(l)) return l.status === 'not_live' ? { status: 'not_live', message: 'Resume the session first.' } : l;
   if (l.state.planFirst !== true) return notPlanFirst();
@@ -1484,9 +1505,26 @@ export async function approveSessionPlan(ctx: AgentContext, accountId: number, b
   // must not overwrite (and then clear) the first press's held plan — its approveNow would find none.
   if (l.turn || l.driver!.busy()) return { status: 'agent_busy' };
   stage.pendingApprove = check.plan;
-  const r = claimBuildTurn(l, { readerText: b.text ?? 'Approve and start', instruction: () => l.subject.buildInstruction(l, b.text) });
+  // "Give the build a browser" (the reader's tick; absent = the plan's recommendation): started before the
+  // build turn's instruction, so it is there when the agent starts. A failure is one notice; the build goes on.
+  const wantBrowser = b.browser ?? planWantsBrowser(check.plan);
+  const r = claimBuildTurn(l, { readerText: b.text ?? 'Approve and start', instruction: async () => (wantBrowser ? await l.browser?.start('reader') : undefined, l.subject.buildInstruction(l, b.text)) });
   if (r.status !== 'queued') stage.pendingApprove = null;
   return r;
+}
+
+/** The plan recommends a browser for its build (its `ui` section). */
+function planWantsBrowser(row: { planJson: unknown } | null): boolean {
+  const ui = (row?.planJson as { ui?: { needed?: boolean; browser?: boolean } | null } | undefined)?.ui;
+  return ui?.needed === true && ui.browser === true;
+}
+
+/** What the machine needs of a session's browser (browser/index.ts; a fake in tests). */
+export interface SessionBrowserLike {
+  startRelay(o?: { onProblem?: (line: string) => void }): Promise<void>;
+  start(by: 'reader' | 'agent'): Promise<boolean>;
+  stop(): Promise<void>;
+  close(): void;
 }
 
 /** One stored revision (the history list). */
@@ -1509,6 +1547,10 @@ export async function closeSession(l: Live, o: { phase: SandboxSessionPhase; err
     await l.driver?.close().catch(() => {});
     l.ticketRelay?.close();
     l.ticketRelay = null;
+    // The browser shares the sandbox's network: it goes first.
+    await l.browser?.stop().catch(() => {});
+    l.browser?.close();
+    l.browser = null;
     await l.services?.close().catch(() => {});
     if (l.egress) {
       for (const e of l.egress.log.snapshot()) putNetworkEntry(l.state, e);
@@ -1544,6 +1586,9 @@ async function reapAfterClose(l: Live): Promise<void> {
   await l.driver?.close().catch(() => {});
   l.ticketRelay?.close();
   l.ticketRelay = null;
+  await l.browser?.stop().catch(() => {});
+  l.browser?.close();
+  l.browser = null;
   await l.services?.close().catch(() => {});
   l.egress?.close();
   await destroyNow(l);

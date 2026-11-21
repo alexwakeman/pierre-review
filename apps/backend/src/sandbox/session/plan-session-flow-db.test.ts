@@ -94,6 +94,7 @@ let db: any;
 let schema: any;
 let closeDb: (() => Promise<void> | void) | undefined;
 let M: typeof import('./manager.js');
+const browserStarts: string[] = [];
 let P: typeof import('./plan.js');
 let fake: import('../runtime/fake.js').FakeRuntime;
 let wsId = 0;
@@ -262,6 +263,8 @@ beforeAll(async () => {
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident === IDENT ? 'ACME-400' : 'ACME-401', title: 'Export a report as CSV', empty: false }),
     // `ensemble-ticket` needs the real relay program (relay.test.ts, ticket/relay.test.ts); a stand-in here.
+    // The browser's relay needs the real relay program (browser/*.test.ts); a stand-in here.
+    newBrowser: () => ({ startRelay: async () => {}, start: async (by) => (browserStarts.push(by), false), stop: async () => {}, close: () => {} }),
     startTicketRelay: async () => ({ controller: { filesNow: () => [] } as never, close: () => {} }),
     readTicket: async (_c, _a, _w, ident) => ({
       ident,
@@ -470,7 +473,7 @@ describe('plan first, end to end', () => {
       ],
     };
     const turnsBefore = sentToClaude.length;
-    const r = await post(`/api/story-builds/${id}/plan/approve`, { revision: 2, text: 'Keep the commits small.' });
+    const r = await post(`/api/story-builds/${id}/plan/approve`, { revision: 2, text: 'Keep the commits small.', browser: true });
     expect(r.statusCode).toBe(202);
     const b = await until(id, (x) => x.session?.phase === 'built' && sentToClaude.length === turnsBefore + 2, 'built after the continuation', 180_000);
     const sent = sentToClaude.at(-2)!;
@@ -481,6 +484,8 @@ describe('plan first, end to end', () => {
     // ONE automatic continuation, the budget gate asked first; the second turn ended normally, so no more.
     expect(sentToClaude.at(-1)).toBe('Go on with the build from where you stopped. Follow PLAN.md, and finish with the build report.');
     expect(continueAsked).toEqual(['claude']);
+    // "Give the build a browser" (the reader's tick): started once, by the reader, before the build turn.
+    expect(browserStarts).toEqual(['reader']);
     expect(b.session!.conversation.some((c) => c.kind === 'notice' && c.text === 'The build stopped at the turn limit with work left, so Ensemble asked the agent to go on (1 of 2).')).toBe(true);
     expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 2 });
     expect(b.prs!.map((p) => [p.key, p.fullName, p.position, p.stackIndex, p.branch, p.status, p.criteria])).toEqual([

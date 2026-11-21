@@ -110,6 +110,13 @@ export interface ProxySpec extends SessionOwner {
   env: Record<string, string>;
 }
 
+/** A session's browser: it shares `sandbox`'s network namespace. */
+export interface BrowserSpec extends SessionOwner {
+  sandbox: string;
+  /** The session proxy's address (`http://limn-proxy:3128`); null = no route out at all. */
+  proxyUrl: string | null;
+}
+
 export interface NetworkHandle {
   name: string;
 }
@@ -271,6 +278,15 @@ export interface SandboxRuntime {
    */
   proxyControl?(proxy: string, path: '/rules' | '/credentials', body: unknown): Promise<boolean>;
   startSandbox(spec: SandboxSpec): Promise<ContainerHandle>;
+  /**
+   * THE BROWSER (Docker only; docs/SANDBOX.md § The browser): a pinned headless Chromium in the sandbox's
+   * network namespace, pulled on first use. Absent ⇒ this runtime has none.
+   */
+  startBrowser?(spec: BrowserSpec): Promise<ContainerHandle>;
+  /** Pull the browser image in the background (a plan that recommends one). Never throws. */
+  prepareBrowser?(): Promise<void>;
+  /** Remove a session's browser (the session's end removes it anyway). */
+  stopBrowser?(owner: SessionOwner): Promise<void>;
   /** Start a process in a container and stream it. */
   exec(container: string, argv: string[], opts?: ExecOptions): ExecHandle;
   /** `exec` to completion, output collected. */

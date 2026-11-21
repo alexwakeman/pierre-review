@@ -166,6 +166,8 @@ beforeAll(async () => {
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident.split('#')[1]!, title: 'T', empty: false }),
     // `ensemble-ticket` needs the real relay program (relay.test.ts, ticket/relay.test.ts); a stand-in here.
+    // The browser's relay needs the real relay program (browser/*.test.ts); a stand-in here.
+    newBrowser: () => ({ startRelay: async () => {}, start: async () => false, stop: async () => {}, close: () => {} }),
     startTicketRelay: async () => ({ controller: { filesNow: () => [] } as never, close: () => {} }),
     readTicket: async (_c, _a, _w, ident) => ticket(ident),
     coverage: async () => null,

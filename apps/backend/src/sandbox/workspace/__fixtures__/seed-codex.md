@@ -67,6 +67,17 @@ Ensemble runs these services for this session, outside the sandbox. Ask for them
 - There is no Docker in the sandbox. `docker` and `docker compose` do not work: use `limn-svc`.
 - Ensemble refuses a compose file that breaks the session rules, and gives the reasons. Do not try to go around a refusal: say so in your report.
 
+## A browser
+
+To look at the screens you build, use `ensemble-browser` (`ensemble-browser help` lists every command).
+
+- When the reader asked for a browser, Ensemble starts it before the build: check with `ensemble-browser status`. Else `ensemble-browser start` asks Ensemble for one.
+- It shares this sandbox's network: `localhost` in the browser is this sandbox. Start your dev server or Storybook here, then `ensemble-browser shot http://localhost:6006/<page> --width 1280,375`.
+- Screenshots go to `~/.limn/browser/`. Open them to look at them. Compare them with the design and with the nearest existing screens, then fix what does not fit.
+- `ensemble-browser console <url>` lists the page's console errors and failed requests.
+- The browser's requests out go through the same proxy and allow-list as yours.
+- Never sign in to a real account. Show the screens with Storybook, mock data or a test page.
+
 ## The network
 
 The sandbox reaches the internet only through Ensemble's proxy, and only the hosts on its allow-list: package registries (npm, Yarn, PyPI, Maven Central), nodejs.org and GitHub to read. npm, pnpm, Yarn, pip and git already use the proxy. For another program, use the proxy in `$LIMN_PROXY` (for example `curl -x "$LIMN_PROXY" …`).

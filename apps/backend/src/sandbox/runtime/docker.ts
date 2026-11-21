@@ -12,7 +12,7 @@ import { bridgeNetworkFor, daemonProblem, licenceNoteFor, notInstalled, parseInf
 import { DockerfileTap } from './dockerfile.js';
 import { buildArgv, imageRecipe, pinnedPullRef, readImagePin, RECIPE_LABEL, type ImagePin, type ImageRecipe } from './image.js';
 import { appInstance, LABEL_MANAGED, LABEL_ROLE, LABEL_SESSION, LABEL_STORE, labelArgs, repoStoreName, resourceLabels, resourceName, storeLabels, type ResourceRole } from './labels.js';
-import { composeArgs, proxyRunArgs, sandboxRunArgs, SANDBOX_USER, serviceBuildArgv, storeMaintenanceArgs, volumeChownArgs } from './spec.js';
+import { BROWSER_IMAGE, browserRunArgs, composeArgs, proxyRunArgs, sandboxRunArgs, SANDBOX_USER, serviceBuildArgv, storeMaintenanceArgs, volumeChownArgs } from './spec.js';
 import { tarFiles } from './tar.js';
 import type {
   ComposeCall,
@@ -107,6 +107,20 @@ export function createDockerRuntime(opts: DockerRuntimeOptions = {}): SandboxRun
     if (r.code !== 0) throw new Error(`${what} failed: ${r.timedOut ? 'timed out' : lastLines(r.stderr) || `exit ${r.code}`}`);
     return r;
   };
+  // The browser image is pulled BY DIGEST on first use, once at a time (docs/SANDBOX.md § The browser).
+  let browserPull: Promise<void> | null = null;
+  const ensureBrowserImage = (): Promise<void> => {
+    browserPull ??= (async () => {
+      const have = await run(['image', 'inspect', '--format', '{{.Id}}', BROWSER_IMAGE], { timeoutMs: LIST_TIMEOUT });
+      if (have.code === 0) return;
+      await must(['pull', BROWSER_IMAGE], 'Getting the browser image', { timeoutMs: 15 * 60_000 });
+    })().catch((err: unknown) => {
+      browserPull = null;
+      throw err;
+    });
+    return browserPull;
+  };
+
   const labelsFor = (owner: SessionOwner, role: ResourceRole) => resourceLabels(instance, owner, role, extraLabels);
   const managedFilter = ['--filter', `label=${LABEL_MANAGED}=${instance}`];
 
@@ -288,6 +302,22 @@ export function createDockerRuntime(opts: DockerRuntimeOptions = {}): SandboxRun
       const name = resourceName(spec.sessionId, 'sandbox');
       await must(sandboxRunArgs(spec, name, labelsFor(spec, 'sandbox')), 'Starting the sandbox');
       return { name };
+    },
+
+    async startBrowser(spec) {
+      await ensureBrowserImage();
+      const name = resourceName(spec.sessionId, 'browser');
+      await run(['rm', '--force', name], { timeoutMs: LIST_TIMEOUT });
+      await must(browserRunArgs({ sandbox: spec.sandbox, image: BROWSER_IMAGE, proxyUrl: spec.proxyUrl }, name, labelsFor(spec, 'browser')), 'Starting the browser');
+      return { name };
+    },
+
+    async prepareBrowser() {
+      await ensureBrowserImage().catch(() => {});
+    },
+
+    async stopBrowser(owner) {
+      await run(['rm', '--force', resourceName(owner.sessionId, 'browser')], { timeoutMs: LIST_TIMEOUT });
     },
 
     exec(container: string, argv: string[], o: ExecOptions = {}): ExecHandle {

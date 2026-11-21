@@ -367,6 +367,8 @@ export interface BuildPlanReplyBody {
 export interface BuildPlanApproveBody {
   revision: number;
   text?: string;
+  /** "Give the build a browser" (docs/SANDBOX.md § The browser). Absent = the plan's recommendation (`ui.browser`). */
+  browser?: boolean;
 }
 
 /** `GET …/plan?revision=` — one revision (the history list). */

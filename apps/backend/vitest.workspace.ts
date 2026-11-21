@@ -66,6 +66,8 @@ export const SLOW_TESTS = [
   'src/sandbox/services/services-real.test.ts',
   // `ensemble-ticket` on a real daemon: the shipped client and relay in a plain Node container, over `docker exec`.
   'src/sandbox/ticket/ticket-real.test.ts',
+  // The browser on a real daemon: the pinned image in a stand-in sandbox's network, the shipped ensemble-browser.
+  'src/sandbox/browser/browser-real.test.ts',
   // Real git (a blobless cache, worktrees, shallow fetches) and a real daemon: the workspace mirror end to
   // end; its Docker part is skipped with its reason when no daemon answers.
   'src/sandbox/workspace/mirror-real.test.ts',
