@@ -166,7 +166,7 @@ beforeAll(async () => {
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident.split('#')[1]!, title: 'T', empty: false }),
     // `ensemble-ticket` needs the real relay program (relay.test.ts, ticket/relay.test.ts); a stand-in here.
-    startTicketRelay: async () => ({ controller: {} as never, close: () => {} }),
+    startTicketRelay: async () => ({ controller: { filesNow: () => [] } as never, close: () => {} }),
     readTicket: async (_c, _a, _w, ident) => ticket(ident),
     coverage: async () => null,
     settings: async () => null,

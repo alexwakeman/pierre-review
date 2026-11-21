@@ -43,6 +43,13 @@ export interface BuildPlanCheckContext {
    * The validator enforces only the location rule; the layout check is the host's (plan-verify.ts).
    */
   ticket?: { acLocation: 'field' | 'description' | 'none'; headings: string[]; criteriaStyle: string; gherkin: boolean } | null;
+  /**
+   * The ids of the ticket's files (`ensemble-ticket`'s manifest, docs/SANDBOX.md § The ticket relay): a
+   * `ui.designInputs` id must be one. Absent / null: not known here (the seed's first context file is
+   * written before the manifest), so any well-formed id passes the agent's check; the HOST's check passes
+   * the list.
+   */
+  ticketFiles?: string[] | null;
 }
 
 export interface BuildPlanCheck {
@@ -267,6 +274,63 @@ export const BUILD_PLAN_CHECK_SOURCE = String.raw`(function () {
         else for (var u = 0; u < tu.contentions.length; u++) if (!ids[tu.contentions[u]]) content.push('ticketUpdate.contentions: ' + tu.contentions[u] + ' is not a point of contention.');
       }
     }
+    // ---- ui (optional; docs/IMPLEMENT-UI-PLAN.md § 4) ----
+    var ui = raw.ui;
+    var uiCode = function (list, key) {
+      var bad = [];
+      for (var x = 0; x < list.length; x++) {
+        var ev = list[x];
+        var eat = key + '[' + x + ']';
+        var linesOk = obj(ev) && Array.isArray(ev.lines) && ev.lines.length === 2 && ev.lines.every(function (n) { return typeof n === 'number' && Math.floor(n) === n; });
+        if (!obj(ev) || ev.kind !== 'code' || !str(ev.repo, 200) || !str(ev.path, 500) || !linesOk || typeof ev.quote !== 'string' || ev.quote.length > L.quoteMax) {
+          shape.push(eat + ' must be { "kind": "code", "repo", "path", "lines": [start, end], "quote" } (quote at most ' + L.quoteMax + ' characters).');
+          continue;
+        }
+        var why = null;
+        if (letters(ev.quote) < L.quoteMinLetters) why = 'the quote is too short to check (at least ' + L.quoteMinLetters + ' letters or digits).';
+        else if (!sessionRepos[low(ev.repo)]) why = '"' + ev.repo + '" is not a repository of this session.';
+        else if (/^\//.test(ev.path) || ev.path.split('/').indexOf('..') >= 0 || /(^|\/)\.git(\/|$)/.test(ev.path)) why = '"path" must be relative to the repository root, without "..", and not under .git.';
+        else if (ev.lines[0] < 1 || ev.lines[1] < ev.lines[0] || ev.lines[1] - ev.lines[0] + 1 > L.lineSpan) why = '"lines" must be [start, end] with 1 <= start <= end and at most ' + L.lineSpan + ' lines.';
+        if (why !== null) { content.push(eat + ': ' + why); bad.push(x); }
+      }
+      if (bad.length > 0) droppedEvidence[key] = bad;
+      return list.length - bad.length;
+    };
+    if (ui !== null && ui !== undefined) {
+      if (!obj(ui)) shape.push('"ui" must be null or an object.');
+      else {
+        if (typeof ui.needed !== 'boolean' || typeof ui.browser !== 'boolean') shape.push('"ui.needed" and "ui.browser" must be true or false.');
+        if (!str(ui.reason, L.uiReason)) shape.push('"ui.reason" must be a non-empty string of at most ' + L.uiReason + ' characters.');
+        if (['storybook', 'dev_server', 'test_page', 'none'].indexOf(ui.renderTarget) < 0) shape.push('"ui.renderTarget" must be "storybook", "dev_server", "test_page" or "none".');
+        if (ui.needed === false && ui.browser === true) shape.push('"ui.browser" is true, but "ui.needed" is false.');
+        if (ui.browser === true && ui.renderTarget === 'none') shape.push('"ui.browser" is true: say where the screens render ("ui.renderTarget").');
+        if (!Array.isArray(ui.designInputs) || ui.designInputs.length > L.uiDesignInputs) shape.push('"ui.designInputs" must be a list of at most ' + L.uiDesignInputs + ' items.');
+        else {
+          var badInputs = [];
+          for (var di = 0; di < ui.designInputs.length; di++) {
+            var inp = ui.designInputs[di];
+            if (!obj(inp) || typeof inp.id !== 'string' || !/^[al]-[0-9a-f]{10}$/.test(inp.id) || typeof inp.used !== 'boolean' || !str(inp.note, L.uiNote, true)) {
+              shape.push('"ui.designInputs"[' + di + '] must be { "id": an id from ensemble-ticket list, "used": true or false, "note": "…" } (note at most ' + L.uiNote + ' characters).');
+              continue;
+            }
+            if (Array.isArray(ctx.ticketFiles) && ctx.ticketFiles.indexOf(inp.id) < 0) { content.push('ui.designInputs: "' + inp.id + '" is not in the ticket\'s list (ensemble-ticket list).'); badInputs.push(di); }
+          }
+          if (badInputs.length > 0) droppedEvidence['ui.designInputs'] = badInputs;
+        }
+        var ds = ui.designSystem;
+        var dsLeft = 0;
+        if (!obj(ds) || !str(ds.summary, L.uiSummary) || !Array.isArray(ds.evidence) || ds.evidence.length > L.uiEvidenceMax) shape.push('"ui.designSystem" must be { "summary": "…" (at most ' + L.uiSummary + ' characters), "evidence": at most ' + L.uiEvidenceMax + ' code quotes }.');
+        else dsLeft = uiCode(ds.evidence, 'ui.designSystem.evidence');
+        var nsLeft = 0;
+        if (!Array.isArray(ui.nearestScreens) || ui.nearestScreens.length > L.uiScreensMax) shape.push('"ui.nearestScreens" must be a list of at most ' + L.uiScreensMax + ' code quotes.');
+        else nsLeft = uiCode(ui.nearestScreens, 'ui.nearestScreens');
+        if (!Array.isArray(ui.newComponents) || ui.newComponents.length > L.uiNewComponents || !ui.newComponents.every(function (n) { return obj(n) && str(n.name, L.uiComponentName) && str(n.why, L.uiWhy); })) shape.push('"ui.newComponents" must be a list of at most ' + L.uiNewComponents + ' { "name", "why" } items.');
+        if (!strList(ui.gaps, L.uiGaps, L.uiGap)) shape.push('"ui.gaps" must be a list of at most ' + L.uiGaps + ' strings of at most ' + L.uiGap + ' characters.');
+        if (ui.needed === true && Array.isArray(ui.nearestScreens) && obj(ds) && Array.isArray(ds.evidence) && ds.evidence.length === 0 && ui.nearestScreens.length === 0) shape.push('"ui.needed" is true: show the design system ("ui.designSystem.evidence") or the nearest existing screens ("ui.nearestScreens") with code quotes. When the repositories have no screens yet, set "ui" to null.');
+        else if (ui.needed === true && dsLeft + nsLeft === 0 && shape.length === 0) content.push('ui: no design system or nearest-screen quote is left that Ensemble can check.');
+      }
+    }
+
     if (shape.length > 0) return out();
     return { plan: raw, shapeProblems: [], contentProblems: content, droppedEvidence: droppedEvidence };
   }

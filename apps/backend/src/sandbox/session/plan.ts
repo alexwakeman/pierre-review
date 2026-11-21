@@ -268,6 +268,9 @@ export interface PlanStageOpts {
   approvedPlanId: () => Promise<number | null>;
   /** A HOTFIX build: Approve writes no planned-PR rows (Push opens two PRs per repository instead). */
   hotfix?: boolean;
+  /** The ticket's files (`ensemble-ticket`'s manifest, once read): the plan's `ui.designInputs` must name
+   *  them. null / absent ⇒ no relay in this session. */
+  ticketFiles?: (l: PlanLive) => ReadonlyArray<{ id: string; name: string; kind: string }> | null;
 }
 
 export type ApproveCheck = { ok: true; plan: StoryBuildPlanRow } | { ok: false; code: 'PlanStale' | 'PlanUnanswered' | 'NoPlan' | 'NotFound'; message: string };
@@ -412,6 +415,7 @@ export class PlanStage {
       ...(ticket.gaps?.missing ?? []).map((m) => [m.ref.toUpperCase(), m.text] as [string, string]),
     ]);
     const runs = runsOf(l);
+    const files = this.o.ticketFiles?.(l) ?? null;
     const library = docsDir ? await seams.library(this.o.accountId, l.workspaceId) : null;
     const verifySeams: PlanVerifySeams = {
       readBlob: (repo, path) => seams.readBlob(this.o.accountId, repo.fullName, repo.baseSha, path),
@@ -420,7 +424,7 @@ export class PlanStage {
     };
     return verifyBuildPlan({
       body,
-      check: { criteria: check.criteria, gaps: check.gaps, repos: check.repos, runs: check.runs, docs: check.docs, fillGaps: check.fillGaps, ticket: check.ticket ?? null },
+      check: { criteria: check.criteria, gaps: check.gaps, repos: check.repos, runs: check.runs, docs: check.docs, fillGaps: check.fillGaps, ticket: check.ticket ?? null, ticketFiles: files?.map((f) => f.id) ?? [] },
       repos: l.state.repos.map((r: SandboxSessionRepo) => ({ repoId: r.repoId, fullName: r.fullName, baseSha: r.baseSha })),
       ticketText: ticketMarkdown(ticket, mode, docsDir),
       criteriaText,
@@ -430,6 +434,7 @@ export class PlanStage {
         const f = ticketLayoutFacts(ticket);
         return { description: f.description, criteria: f.criteria, acLocation: f.acLocation };
       })(),
+      ticketFiles: files,
     });
   }
 
@@ -440,6 +445,8 @@ export class PlanStage {
     const docsDir = this.docsDir(l);
     const layout = { repos: l.state.repos.map((r) => ({ fullName: r.fullName, path: r.path })) };
     const ctx = planContextFor({ ticket, mode: this.o.mode(), layout: layout as never, docs: docsDir ? { dir: docsDir } : null }, runsOf(l).map((r) => r.id));
+    const files = this.o.ticketFiles?.(l);
+    if (files != null) ctx.ticketFiles = files.map((f) => f.id);
     await l.runtime.copyIn(l.container, [{ path: posix.join(l.layoutRoot, PLAN_CONTEXT_FILE), content: `${JSON.stringify(ctx)}\n` }]).catch(() => {});
   }
 

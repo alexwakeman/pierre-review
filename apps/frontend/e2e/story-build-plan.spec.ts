@@ -100,6 +100,15 @@ test.describe('Implement, plan first', () => {
     await expect(plan.getByTestId('story-plan-criterion')).toHaveCount(3);
     await expect(plan.getByTestId('story-plan-pr')).toHaveText([/P1.*Lift the export row cap/, /P2.*Builds on P1/, /P3.*After P2/]);
     await expect(plan.getByTestId('story-plan-dropped')).toHaveText('Ensemble left out 1 point it could not check.');
+    // The Screens block (the plan's ui section): the design used, the system, where it shows, the nearest screen.
+    const screens = plan.getByTestId('story-plan-ui');
+    await expect(screens.getByTestId('story-plan-ui-row')).toHaveText([
+      /Design\s*report-header-csv\.png/,
+      /Design system\s*Tailwind tokens/,
+      /Shown in\s*Storybook · the agent asks for a browser/,
+      /To choose\s*The mock-up shows no loading state/,
+    ]);
+    await expect(screens.getByTestId('story-plan-evidence')).toContainText('acme/web · src/reports/ReportHeader.tsx:12–14');
 
     // The wizard opens on the first open point: one step, headed with its criteria.
     const wizard = plan.getByTestId('story-plan-contentions');

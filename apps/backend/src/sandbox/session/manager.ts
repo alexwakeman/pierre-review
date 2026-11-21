@@ -958,6 +958,7 @@ async function boot(l: Live, memberRepoIds: readonly number[]): Promise<void> {
         l.ctx.log.warn({ err }, `sandbox session ${l.key}: the ticket relay did not start`);
         notice(l, '`ensemble-ticket` did not start, so the agent has TICKET.md only.');
       }
+      if (l.ticketRelay) await sub.onTicketFiles?.(l).catch((err: unknown) => l.ctx.log.warn({ err }, `sandbox session ${l.key}: the plan context after the ticket relay`));
       stopIfClosing(l);
     }
 
@@ -1865,6 +1866,7 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     mode: () => action,
     approvedPlanId: async () => (await getStoryBuildRow(ctx, accountId, buildId))?.approvedPlanId ?? null,
     hotfix: hotfixBuild,
+    ticketFiles: (pl) => (pl as unknown as Live).ticketRelay?.controller.filesNow() ?? null,
   });
   const inPlan = (l: SubjectLive): boolean => stateOf(l).planFirst === true && !plan.isApproved();
   /** Plan first, after Approve: the work is the approved stack (one branch per planned PR). */
@@ -2032,6 +2034,10 @@ function storySubject(ctx: AgentContext, row: Pick<StoryBuildRow, 'id' | 'accoun
     branch: () => sessionBranch(row.ticketKey),
     seed() {
       return { ticket: ticket!, mode: action, planFirst: planFirstFlag && !plan.isApproved() };
+    },
+    async onTicketFiles(l) {
+      // The checker's context names the ticket's files from now on (the seed's copy was written before them).
+      if (inPlan(l)) await plan.writeContext(l as Live);
     },
     ticketRelaySource(sl) {
       if (ticket == null) return null;

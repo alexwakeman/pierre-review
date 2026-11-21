@@ -14,7 +14,9 @@ import {
   type BuildPlanDecision,
   type BuildPlanEvidence,
   type BuildPlanPr,
+  type BuildPlanRenderTarget,
   type BuildPlanRevision,
+  type BuildPlanUi,
   type BuildPlanView,
   type StoryBuildPr,
   type StoryBuildPrCheck,
@@ -379,4 +381,33 @@ export function ticketUpdateConfirm(body: { description: string | null; acceptan
     .filter((x) => x != null)
     .join(' and ');
   return `Replace the ticket's ${what} in Jira?`;
+}
+
+// ── the plan's UI section (docs/IMPLEMENT-UI-PLAN.md § 4) ─────────────────────────────────────────
+
+export const RENDER_TARGET_WORDS: Record<BuildPlanRenderTarget, string> = {
+  storybook: 'Storybook',
+  dev_server: 'The dev server, with mock data',
+  test_page: 'A test page',
+  none: 'Not shown in a browser',
+};
+
+export interface UiPlanRow {
+  key: 'design' | 'system' | 'where' | 'new' | 'gaps';
+  label: string;
+  text: string;
+}
+
+/** The UI section as label + text rows; null when the work changes no screen. Pure. */
+export function uiPlanRows(ui: BuildPlanUi | null | undefined): UiPlanRow[] | null {
+  if (ui == null || !ui.needed) return null;
+  const used = ui.designInputs.filter((d) => d.used);
+  const rows: UiPlanRow[] = [
+    { key: 'design', label: 'Design', text: used.length > 0 ? used.map((d) => d.name).join(' · ') : 'None in the ticket. Built to fit the existing screens.' },
+    { key: 'system', label: 'Design system', text: ui.designSystem.summary },
+    { key: 'where', label: 'Shown in', text: `${RENDER_TARGET_WORDS[ui.renderTarget]}${ui.browser ? ' · the agent asks for a browser' : ''}` },
+  ];
+  if (ui.newComponents.length > 0) rows.push({ key: 'new', label: 'New', text: ui.newComponents.map((n) => `${n.name}: ${n.why}`).join(' · ') });
+  if (ui.gaps.length > 0) rows.push({ key: 'gaps', label: 'To choose', text: ui.gaps.join(' · ') });
+  return rows;
 }

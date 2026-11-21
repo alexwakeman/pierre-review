@@ -123,7 +123,7 @@ export function ContentionCard({
   );
 }
 
-function EvidenceRow({ workspaceId, e }: { workspaceId: number; e: BuildPlanEvidence }): JSX.Element {
+export function EvidenceRow({ workspaceId, e }: { workspaceId: number; e: BuildPlanEvidence }): JSX.Element {
   const [open, setOpen] = useState(e.kind !== 'docs');
   const label = evidenceLabel(e);
   const url = safeExternalUrl(evidenceGithubUrl(e));

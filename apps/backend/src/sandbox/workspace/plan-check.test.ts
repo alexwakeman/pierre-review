@@ -2,7 +2,7 @@
 // rule and the quote finder. The checker script: plan-check-script.test.ts (real node + git).
 import { describe, expect, it } from 'vitest';
 import { findQuote, validateBuildPlan, type BuildPlanCheckContext } from './plan-check.js';
-import { CTX, goodPlan } from './plan.test-support.js';
+import { CTX, goodPlan, goodUi } from './plan.test-support.js';
 
 const shape = (raw: unknown, ctx: Partial<BuildPlanCheckContext> = {}): string[] => validateBuildPlan(raw, { ...CTX, ...ctx }).shapeProblems;
 
@@ -162,5 +162,50 @@ describe('findQuote', () => {
     expect(findQuote(file, 'export const MAX_ROWS = 1000;', 30, 30).at).toBe('ambiguous');
     expect(findQuote(file, 'export const MAX_ROWS = 1000;', 8, 8)).toEqual({ at: 'in', start: 8, end: 8 });
     expect(findQuote(file, 'nothing like this', 1, 1).at).toBe('none');
+  });
+});
+
+describe('validateBuildPlan — the ui section', () => {
+  const FILES = { ticketFiles: ['a-0123456789'] };
+  it('is optional: absent and null pass', () => {
+    expect(shape(goodPlan())).toEqual([]);
+    expect(shape(goodPlan({ ui: null }))).toEqual([]);
+  });
+  it('passes a good section', () => {
+    const r = validateBuildPlan(goodPlan({ ui: goodUi() }), { ...CTX, ...FILES });
+    expect(r.shapeProblems).toEqual([]);
+    expect(r.contentProblems).toEqual([]);
+  });
+  it('the flags must agree', () => {
+    expect(shape(goodPlan({ ui: goodUi({ needed: false }) })).join('\n')).toMatch(/"ui.browser" is true, but "ui.needed" is false/);
+    expect(shape(goodPlan({ ui: goodUi({ renderTarget: 'none' }) })).join('\n')).toMatch(/say where the screens render/);
+    expect(shape(goodPlan({ ui: goodUi({ renderTarget: 'production' }) })).join('\n')).toMatch(/"ui.renderTarget" must be/);
+    expect(shape(goodPlan({ ui: goodUi({ needed: 'yes' }) })).join('\n')).toMatch(/must be true or false/);
+  });
+  it('a UI change must show the design system or the nearest screen', () => {
+    const none = goodUi({ designSystem: { summary: 'None found.', evidence: [] }, nearestScreens: [] });
+    expect(shape(goodPlan({ ui: none })).join('\n')).toMatch(/show the design system/);
+  });
+  it('a design input must be an id from the ticket\'s list (when the list is known)', () => {
+    const r = validateBuildPlan(goodPlan({ ui: goodUi({ designInputs: [{ id: 'a-ffffffffff', used: true, note: '' }] }) }), { ...CTX, ...FILES });
+    expect(r.shapeProblems).toEqual([]);
+    expect(r.contentProblems.join('\n')).toMatch(/not in the ticket's list/);
+    expect(r.droppedEvidence['ui.designInputs']).toEqual([0]);
+    // Not known (the seed's first context file): the id's shape is enough.
+    expect(validateBuildPlan(goodPlan({ ui: goodUi({ designInputs: [{ id: 'a-ffffffffff', used: true, note: '' }] }) }), CTX).contentProblems).toEqual([]);
+    expect(shape(goodPlan({ ui: goodUi({ designInputs: [{ id: '../x', used: true, note: '' }] }) })).join('\n')).toMatch(/an id from ensemble-ticket list/);
+  });
+  it('bad quotes are dropped like a contention\'s; a wrong shape is refused', () => {
+    const ui = goodUi({ nearestScreens: [{ kind: 'code', repo: 'acme/other', path: 'a.ts', lines: [1, 2], quote: 'long enough to check this one' }] });
+    const r = validateBuildPlan(goodPlan({ ui }), { ...CTX, ...FILES });
+    expect(r.shapeProblems).toEqual([]);
+    expect(r.droppedEvidence['ui.nearestScreens']).toEqual([0]);
+    const docs = goodUi({ nearestScreens: [{ kind: 'docs', link: 'x', quote: 'y' }] });
+    expect(shape(goodPlan({ ui: docs })).join('\n')).toMatch(/must be \{ "kind": "code"/);
+  });
+  it('caps the lists', () => {
+    const many = Array.from({ length: 4 }, () => ({ kind: 'code', repo: 'acme/api', path: 'src/export.ts', lines: [1, 1], quote: 'import { db } from "./db";' }));
+    expect(shape(goodPlan({ ui: goodUi({ nearestScreens: many }) })).join('\n')).toMatch(/at most 3 code quotes/);
+    expect(shape(goodPlan({ ui: goodUi({ gaps: ['x'.repeat(301)] }) })).join('\n')).toMatch(/"ui.gaps"/);
   });
 });

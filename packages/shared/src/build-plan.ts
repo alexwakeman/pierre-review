@@ -45,6 +45,18 @@ export const BUILD_PLAN_LIMITS = {
   ticketWhy: 600,
   /** A reader's reply (the composer's own cap is SANDBOX_MESSAGE_MAX). */
   reply: 4_000,
+  // The UI section (`ui`, docs/IMPLEMENT-UI-PLAN.md § 4).
+  uiReason: 600,
+  uiSummary: 800,
+  uiDesignInputs: 30,
+  uiNote: 300,
+  uiEvidenceMax: 6,
+  uiScreensMax: 3,
+  uiNewComponents: 10,
+  uiComponentName: 80,
+  uiWhy: 300,
+  uiGaps: 10,
+  uiGap: 300,
 } as const;
 
 // ---- what the agent writes (the raw shape) -------------------------------------------------------------
@@ -57,6 +69,31 @@ export type BuildPlanEvidenceRaw =
   | { kind: 'docs'; link: string; quote: string }
   | { kind: 'data_file'; what: BuildPlanDataKind; repo: string; path: string; lines: [number, number]; quote: string }
   | { kind: 'data_run'; run: string; quote: string };
+
+/** Where the planned screens render, for a look in a browser (docs/IMPLEMENT-UI-PLAN.md § 4). */
+export type BuildPlanRenderTarget = 'storybook' | 'dev_server' | 'test_page' | 'none';
+export const BUILD_PLAN_RENDER_TARGETS: readonly BuildPlanRenderTarget[] = ['storybook', 'dev_server', 'test_page', 'none'];
+
+export type BuildPlanCodeEvidenceRaw = Extract<BuildPlanEvidenceRaw, { kind: 'code' }>;
+
+/**
+ * THE UI SECTION (optional; docs/IMPLEMENT-UI-PLAN.md § 4): whether the work changes a screen, what design the
+ * ticket gives (manifest ids from `ensemble-ticket list`), the design system and the nearest existing screens AS
+ * CODE QUOTES (verified like every other code evidence), and what the agent would add or has to choose.
+ */
+export interface BuildPlanUiRaw {
+  needed: boolean;
+  /** The agent's recommendation: the build should get a browser to look at its screens. */
+  browser: boolean;
+  reason: string;
+  renderTarget: BuildPlanRenderTarget;
+  designInputs: Array<{ id: string; used: boolean; note: string }>;
+  designSystem: { summary: string; evidence: BuildPlanCodeEvidenceRaw[] };
+  nearestScreens: BuildPlanCodeEvidenceRaw[];
+  newComponents: Array<{ name: string; why: string }>;
+  /** What the design does not show (empty, error or mobile states, …) and the agent will choose. */
+  gaps: string[];
+}
 
 /** What the agent writes inside the ```limn-plan block. */
 export interface BuildPlanRaw {
@@ -76,6 +113,8 @@ export interface BuildPlanRaw {
   stack: Array<{ id: string; repo: string; title: string; contains: string; criteria: string[]; dependsOn: string[] }>;
   stackReason: string | null;
   ticketUpdate: null | { description: string | null; acceptanceCriteria: string | null; why: string; contentions: string[] };
+  /** Absent or null: the work changes no screen (or an older plan). */
+  ui?: BuildPlanUiRaw | null;
 }
 
 // ---- what the host stores and sends (the verified shape) ------------------------------------------------
@@ -168,6 +207,21 @@ export interface BuildPlanCriterion {
   openPoints: number[];
 }
 
+/** The UI section as the host verified it. Design inputs not in the ticket's list, and code evidence Ensemble
+ *  could not find, are removed (counted in `dropped`). */
+export interface BuildPlanUi {
+  needed: boolean;
+  browser: boolean;
+  reason: string;
+  renderTarget: BuildPlanRenderTarget;
+  /** `name` and `kind` are the ticket's (the manifest), never the agent's. */
+  designInputs: Array<{ id: string; name: string; kind: string; used: boolean; note: string }>;
+  designSystem: { summary: string; evidence: BuildPlanEvidence[] };
+  nearestScreens: BuildPlanEvidence[];
+  newComponents: Array<{ name: string; why: string }>;
+  gaps: string[];
+}
+
 export interface BuildPlanRevision {
   revision: number;
   source: BuildPlanSource;
@@ -179,6 +233,8 @@ export interface BuildPlanRevision {
   stack: BuildPlanPr[];
   stackReason: string | null;
   ticketUpdate: BuildPlanTicketUpdate | null;
+  /** The UI section (absent on an older revision, null when the work changes no screen). */
+  ui?: BuildPlanUi | null;
   /** What Limn removed: counts and plain reasons, never the dropped claims' text. */
   dropped: { contentions: number; evidence: number; reasons: string[] };
 }

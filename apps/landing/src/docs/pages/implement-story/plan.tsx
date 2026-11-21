@@ -69,6 +69,11 @@ export default function Page(): JSX.Element {
         <li>
           <b>A ticket update (draft)</b>, when the story needs work.
         </li>
+        <li>
+          <b>Screens</b>, when the work changes what a person sees: the design it uses from the ticket, your design system
+          and the existing screens it follows (code Ensemble checks), and what the design leaves it to choose. With no
+          design in the ticket, the agent builds to fit your existing screens.
+        </li>
       </ul>
 
       <H2 id="evidence">Evidence Ensemble checks</H2>

@@ -219,7 +219,7 @@ beforeAll(async () => {
     // `ensemble-ticket`: the real relay is ticket/relay.test.ts; here, that the machine starts it at the layout root.
     startTicketRelay: async (o) => {
       ticketRelayRoots.push(o.root);
-      return { controller: {} as never, close: () => {} };
+      return { controller: { filesNow: () => [] } as never, close: () => {} };
     },
     readTicket: async () => {
       ticketReads += 1;

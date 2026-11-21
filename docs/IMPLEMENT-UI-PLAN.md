@@ -1,7 +1,8 @@
 # Plan: Implement story builds front ends — the ticket relay, Figma, and an on-demand browser
 
-Status: **BEING BUILT** (2026-11-21). § 2 (the ticket relay) is BUILT for Jira attachments and every provider's links:
-[SANDBOX.md](SANDBOX.md) § The ticket relay is now its contract. The rest is not built yet. When a part is built, move
+Status: **BEING BUILT** (2026-11-21). BUILT: § 2 (the ticket relay: Jira attachments and every provider's links;
+[SANDBOX.md](SANDBOX.md) § The ticket relay), § 4 (the plan's UI section) and §§ 6–7 (the design-system and
+no-design rules, in the seed's plan section; SANDBOX.md § The plan and its checks). The rest is not built yet. When a part is built, move
 its detail into [STORY-BUILD.md](STORY-BUILD.md) / [SANDBOX.md](SANDBOX.md) / [TRACKERS.md](TRACKERS.md) and
 mark it built here, as [CODEX-PLAN.md](CODEX-PLAN.md) does.
 
@@ -187,6 +188,10 @@ Endpoints and response shapes are from memory **(unverified)**; check Figma's cu
 ---
 
 ## 4. The plan's UI section
+
+> **Built 2026-11-21.** As designed below, except: `nearestScreens` is a list of code quotes (no wrapper object);
+> a design input not in the manifest is dropped by the host (the agent's checker only drops it once the relay
+> has read the manifest); the Approve tick for the browser comes with § 5.
 
 The `limn-plan` block gets an optional `ui` section. It is checked by the SAME validator text the host and
 the agent share (`BUILD_PLAN_CHECK_SOURCE`), and its code evidence is verified on the host like every other

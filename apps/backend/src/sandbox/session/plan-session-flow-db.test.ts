@@ -262,7 +262,7 @@ beforeAll(async () => {
     runtime: () => fake,
     storyInputs: async (_c, _a, _w, ident) => ({ ticketKey: ident === IDENT ? 'ACME-400' : 'ACME-401', title: 'Export a report as CSV', empty: false }),
     // `ensemble-ticket` needs the real relay program (relay.test.ts, ticket/relay.test.ts); a stand-in here.
-    startTicketRelay: async () => ({ controller: {} as never, close: () => {} }),
+    startTicketRelay: async () => ({ controller: { filesNow: () => [] } as never, close: () => {} }),
     readTicket: async (_c, _a, _w, ident) => ({
       ident,
       key: ident === IDENT ? 'ACME-400' : 'ACME-401',

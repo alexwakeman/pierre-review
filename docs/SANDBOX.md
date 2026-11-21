@@ -1064,6 +1064,16 @@ ONE automatic follow-up turn, which `runTurn` claims in the same tick.
   unknown repository, a PR that is not in the stack, a stack in one repository that is not one line,
   `stackReason` missing, > 3 PRs in a repository or > 6 in all, a contention with 0 or > 4 evidence items,
   Fill gaps: a gap marked `met`) make the plan unusable; CONTENT problems drop the item.
+- **The UI section** (`ui`, optional; [IMPLEMENT-UI-PLAN.md](IMPLEMENT-UI-PLAN.md) § 4, 2026-11-21): when the work
+  changes a screen — `needed`, `browser` (the agent's recommendation), `reason`, `renderTarget`
+  (storybook / dev_server / test_page / none), `designInputs` (ids from `ensemble-ticket`'s manifest:
+  `ticketFiles` in the context, written again once the relay has read it), `designSystem` {summary, code
+  quotes}, `nearestScreens` (code quotes), `newComponents`, `gaps`. SHAPE: the flags must agree (`browser`
+  needs `needed` and a render target), and a UI change must quote the design system or a nearest screen. Its
+  code quotes are verified on the host like any other (dropped and counted when not found); a design input
+  is kept only when it is in the manifest, with the TICKET's name and kind, never the agent's. The seed's
+  plan section says how to find the design system with no setting and to fit the existing screens when the
+  ticket has no design. Shown as the plan panel's **Screens** block (`PlanPanel.tsx` `PlanUi`).
 - **The host's evidence check** (`plan-verify.ts verifyBuildPlan`; the agent controls the sandbox, so its
   quotes count for nothing): `code` / `data_file` — the blob at the session's pinned base sha in Ensemble's
   clone cache (`plan-blobs.ts`: hooks and config off, the lazy fetch's token only in a process-scoped

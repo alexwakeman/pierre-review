@@ -132,6 +132,8 @@ export interface SessionSubject {
   onServiceRun?(l: SubjectLive): void;
   /** `ensemble-ticket`'s source (a story session; docs/SANDBOX.md § The ticket relay). null / absent ⇒ none. */
   ticketRelaySource?(l: SubjectLive): import('../ticket/index.js').TicketRelaySource | null;
+  /** The ticket relay read its manifest (plan first: the checker's context names the files now). */
+  onTicketFiles?(l: SubjectLive): Promise<void>;
   /** Start build (the button): switch the driver first (the machine does), then this is the instruction. */
   buildInstruction(l: SubjectLive, extra: string | null): Promise<string>;
   /** A reader's message in build mode: the text the agent gets (story: the message as written). */

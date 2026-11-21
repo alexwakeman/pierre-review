@@ -115,6 +115,26 @@ The session starts with a plan. Ensemble sends the first message. Read and inves
   - Keep the ticket's layout (TICKET.md, "Acceptance criteria as written in the ticket" and "Description layout"): the same headings in the same order, the same list style, GIVEN / WHEN / THEN when the ticket uses it, and the same spelling (British English if the ticket uses it).
   - When the criteria live in the description, put the new criteria inside `description`, in the same section, and set `acceptanceCriteria` to null.
   - Ensemble shows the draft to the reader, who can change it and press Update ticket. Ensemble writes nothing to the tracker by itself.
+- `ui`: REQUIRED when the work adds or changes a screen, a page or a component a person sees. Else null.
+  ```json
+  "ui": {
+    "needed": true,
+    "browser": true,
+    "reason": "A new refunds panel on the order page.",
+    "renderTarget": "storybook",
+    "designInputs": [{ "id": "a-1f2e3d4c5b", "used": true, "note": "The mock-up of the panel." }],
+    "designSystem": { "summary": "Tailwind tokens and the components in packages/ui.", "evidence": [{ "kind": "code", "repo": "acme/web", "path": "packages/ui/src/Button.tsx", "lines": [1, 20], "quote": "…" }] },
+    "nearestScreens": [{ "kind": "code", "repo": "acme/web", "path": "src/pages/orders/OrderPage.tsx", "lines": [10, 60], "quote": "…" }],
+    "newComponents": [{ "name": "RefundRow", "why": "No list row in packages/ui shows an amount and a status." }],
+    "gaps": ["The mock-up shows no empty state.", "There is no mobile layout."]
+  }
+  ```
+  - Find the design system in the repositories yourself: design tokens (a Tailwind config, CSS custom properties, theme files), a component library (a `components` or `ui` folder, a UI package, another repository of this session, or a package in `node_modules`), Storybook (`.storybook/`, `*.stories.*`), and the 1 to 3 existing screens nearest to this work. Quote them in `designSystem.evidence` and `nearestScreens`: Ensemble checks every quote like any other code evidence.
+  - `designInputs`: the ticket's files and links you used or looked at (ids from `ensemble-ticket list`). `used: false` with a note when one does not apply.
+  - No design in the ticket: build to fit the existing design. Follow the nearest screens and use the existing components and tokens. Say so in `reason`.
+  - Use the existing components and tokens. Put every new component or one-off style in `newComponents`, with the reason.
+  - `gaps`: what the design does not show and you will have to choose (empty, error and loading states, mobile, copy).
+  - `browser`: true when you need to look at the screens you build. `renderTarget` is where they render without a login or a real back end: `storybook`, `dev_server` (with mock data) or `test_page`.
 - Check the plan before you send it: `node /home/agent/.limn/plan-check.cjs <<'EOF'` … `EOF` prints OK or the problems. If your tools do not let you run it, send the plan: Ensemble checks it anyway.
 - The reader answers each point of contention: agree, keep the story, or a reply. When you revise the plan, keep the ids of the points that did not change, and send the WHOLE plan again in one `limn-plan` block.
 - The build starts only when the reader approves the plan. Then `/Users/alex/Projects/DEFRA/bng-fe-be/PLAN.md` has the approved plan and the reader's decisions.
