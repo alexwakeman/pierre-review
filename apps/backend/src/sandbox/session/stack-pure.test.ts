@@ -82,6 +82,26 @@ describe('the build report', () => {
   });
 });
 
+describe('the build report — screens', () => {
+  const ctx = { prs: ['P1'], criteria: ['AC1'] };
+  const base = { prs: [{ id: 'P1', status: 'done', summary: 'Done.', checks: [] }], criteria: [{ ref: 'AC1', status: 'met', how: 'Yes.' }] };
+  const screen = (over: Record<string, unknown> = {}) => ({ name: 'Refunds', shots: ['/home/agent/.limn/browser/20261121-101010-localhost-6006-1280.png'], verdict: 'matches', note: 'Fits the mock-up.', ...over });
+  it('optional; a good screen passes', () => {
+    expect(validateBuildReport(base, ctx).problems).toEqual([]);
+    expect(validateBuildReport({ ...base, screens: [screen({ url: 'http://localhost:6006', comparedWith: 'the mock-up' })] }, ctx).problems).toEqual([]);
+  });
+  it('shots must be PNGs in the browser folder, 1 to 4', () => {
+    for (const bad of ['/etc/passwd.png', '/home/agent/.limn/browser/../../x.png', '/home/agent/.limn/browser/a.svg', '/home/agent/.limn/browser/a b.png']) {
+      expect(validateBuildReport({ ...base, screens: [screen({ shots: [bad] })] }, ctx).problems.join('\n')).toMatch(/must be a \.png path in \/home\/agent\/\.limn\/browser\//);
+    }
+    expect(validateBuildReport({ ...base, screens: [screen({ shots: [] })] }, ctx).problems.join('\n')).toMatch(/1 to 4 screenshots/);
+  });
+  it('the verdict and the caps', () => {
+    expect(validateBuildReport({ ...base, screens: [screen({ verdict: 'perfect' })] }, ctx).problems.join('\n')).toMatch(/matches, differs or no_design/);
+    expect(validateBuildReport({ ...base, screens: Array.from({ length: 11 }, () => screen()) }, ctx).problems.join('\n')).toMatch(/at most 10/);
+  });
+});
+
 describe('the extraction\'s stdout', () => {
   it('reads tips, missing branches, dirty work and the bundle (last, to the end)', () => {
     const a = 'a'.repeat(40);

@@ -190,7 +190,7 @@ describe('tierFor — implement story', () => {
   it('spells every shared route path into a decided tier', async () => {
     const { STORY_BUILD_API, storyBuildPath } = await import('@pierre-review/shared');
     for (const route of Object.keys(STORY_BUILD_API) as Array<keyof typeof STORY_BUILD_API>) {
-      const path = storyBuildPath(route, { id: 7, repoId: 3, prId: 4 });
+      const path = storyBuildPath(route, { id: 7, repoId: 3, prId: 4, sha: 'a'.repeat(64) });
       expect(path, route).not.toMatch(/:/);
       expect(tiers('GET', path).length, route).toBeGreaterThan(0);
     }
@@ -269,6 +269,13 @@ describe('tierFor — SonarCloud', () => {
     expect(tiers('GET', '/api/prs/42/sonar/refresh')).not.toEqual(['search', 'read']);
     expect(tiers('POST', '/api/prs/42/sonar/posts')).not.toEqual(['github_write']);
     expect(tiers('GET', '/api/workspaces/3/sonar/check')).toEqual(['read']);
+  });
+});
+
+// A build report's screenshot (coding/story-build/routes-build.ts): DB only.
+describe('tierFor — a build screenshot', () => {
+  it('is a read', () => {
+    expect(tiers('GET', `/api/story-builds/7/shots/${'a'.repeat(64)}`)).toEqual(['read']);
   });
 });
 

@@ -173,6 +173,7 @@ export function planBuildInstruction(o: {
     ...work,
     '- Do not stop to ask. If something blocks a pull request, do what you can and say why in the report.',
     `- Finish with the build report: write \`${posix.join(o.root, BUILD_REPORT_FILE)}\` (per pull request: id, status done / partly / not_done, a summary of at most 2,000 characters for its description, the checks you ran with passed / failed / not_run; per acceptance criterion: ref, status met / partly / not_met, how). Check it with \`node ${BUILD_REPORT_CHECKER}\` until it prints OK.`,
+    `- When the work changes a screen and a browser ran: add \`screens\` to the report — per screen you looked at: name, url, shots (1 to 4 paths that \`ensemble-browser shot\` printed), comparedWith (the design id or the existing screen you compared it with), verdict matches / differs / no_design, and a note. Ensemble shows the screenshots to the reader.`,
     '- Then end with one line per acceptance criterion: done, partly done or not done, and why.',
   ];
   if (o.ticketChanged) lines.unshift('TICKET.md was read again just now and the acceptance criteria changed. Build the approved plan; say at the end what the change means.', '');

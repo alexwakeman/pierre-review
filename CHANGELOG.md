@@ -26,6 +26,8 @@ no internals.
   can also ask for one during the build. Docker only.
 - **Settings → Integrations → Figma**: an optional Figma token. With it, Implement story reads the Figma frames a
   ticket links (an outline of the layers and a picture). Without it, the agent works from the ticket's other files.
+- Implement story: the build tab's **Screens** block. When the agent looked at its screens in the browser, it says
+  for each whether it matches the design (or your existing screens), and **Show screenshots** shows what it saw.
 
 ## [1.0.71] - 2026-11-20
 

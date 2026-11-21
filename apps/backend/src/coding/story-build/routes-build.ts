@@ -252,6 +252,23 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
     return reply.send(resp);
   });
 
+  // ONE SCREENSHOT the build report named (coding/story-build/screens.ts): checked PNG bytes copied out of the
+  // sandbox, the account's own build only. DB only. Served as an image that cannot run anything.
+  app.get<{ Params: { id: string; sha: string } }>(STORY_BUILD_API.shot, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const id = parseId(req.params.id);
+    if (id == null) return reply.code(404).send(NOT_FOUND);
+    const { readBuildShot, isPng } = await import('./screens.js');
+    const png = await readBuildShot(ctx, accountId, id, req.params.sha);
+    if (png == null || !isPng(png)) return reply.code(404).send(NOT_FOUND);
+    return reply
+      .header('content-type', 'image/png')
+      .header('x-content-type-options', 'nosniff')
+      .header('content-security-policy', "default-src 'none'; sandbox")
+      .header('cache-control', 'private, max-age=3600')
+      .send(png);
+  });
+
   // HOTFIX (docs/STORY-BUILD.md § Hotfix builds): the Start panel's base list — each workspace repository's
   // latest release, or read only — and whether "Treat as a hotfix" is offered. DB only (the synced tags).
   app.get<{ Querystring: { workspace?: string } }>(STORY_BUILD_API.hotfixBases, async (req, reply) => {

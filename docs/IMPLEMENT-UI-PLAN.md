@@ -3,7 +3,8 @@
 Status: **BEING BUILT** (2026-11-21). BUILT: § 2 (the ticket relay: Jira attachments and every provider's links;
 [SANDBOX.md](SANDBOX.md) § The ticket relay), § 4 (the plan's UI section) and §§ 6–7 (the design-system and
 no-design rules, in the seed's plan section; SANDBOX.md § The plan and its checks) and § 5 (the browser; SANDBOX.md
-§ The browser) and § 3 (Figma; SANDBOX.md § The ticket relay → `figma <id>`). The rest is not built yet. When a part is built, move
+§ The browser) and § 3 (Figma; SANDBOX.md § The ticket relay → `figma <id>`), and § 8 (screens in the build report; SANDBOX.md § The
+browser). The model-run visual round in the review loop (§ 12, step 5) is NOT built: see § 8's note. When a part is built, move
 its detail into [STORY-BUILD.md](STORY-BUILD.md) / [SANDBOX.md](SANDBOX.md) / [TRACKERS.md](TRACKERS.md) and
 mark it built here, as [CODEX-PLAN.md](CODEX-PLAN.md) does.
 
@@ -329,6 +330,12 @@ vague input come out looking like the rest of the product.
 ---
 
 ## 8. Evidence for the reader, and what leaves the sandbox
+
+> **Built 2026-11-21**, with one change of scope. The visual check is the AGENT'S, inside the build turn (the seed
+> and the build instruction tell it to compare its screenshots with the design or the nearest screens and fix what
+> does not fit), recorded as `screens` in the build report and shown as "the agent says". A SECOND, model-run
+> comparison in the review loop is not built: it would need a vision pipeline on the host for every round, and the
+> loop's rounds review code. The screenshots reach the reader through the checked exit below.
 
 - **The plan**: the UI section (§ 4).
 - **The build report** (`workspace/build-report.ts`): per screen, before / after screenshots at the planned

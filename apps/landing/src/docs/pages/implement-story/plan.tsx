@@ -181,6 +181,11 @@ export default function Page(): JSX.Element {
         steps with work unfinished, Ensemble asks it to carry on, at most twice.
       </p>
       <p>
+        When the agent looked at its screens in a browser, <Ui>Screens</Ui> lists each one: whether it says the screen{' '}
+        <Ui>Matches</Ui> the design, <Ui>Differs</Ui>, or had <Ui>No design to compare</Ui>, and why.{' '}
+        <Ui>Show screenshots</Ui> shows what it saw.
+      </p>
+      <p>
         Then push the result: see <DocLink to="implement-story/push">Push the result</DocLink>.
       </p>
     </>

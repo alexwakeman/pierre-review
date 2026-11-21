@@ -19,7 +19,7 @@ import { listPlanRows, listPlannedPrRows, toPlanRevision, toStoryBuildPr, update
 import { listStoryBuildRepoRows, storyBuildRepoNames, updateStoryBuildRepo } from '../../coding/story-build/persist.js';
 import type { StackPlannedPr, StackVerdict, VerifyStackInput } from '../../coding/story-build/stack-verify.js';
 import type { SandboxRuntime } from '../runtime/types.js';
-import { readBuildReport, type BuildContextFile, type BuildReportPayload } from '../workspace/build-report.js';
+import { readBuildReport, type BuildContextFile, type BuildReportPayload, type BuildReportScreen } from '../workspace/build-report.js';
 import { extractRepoPatch } from './patches.js';
 import { extractStack, restoreStackPr, type StackExtract } from './stack.js';
 import type { SessionStateJson } from './state.js';
@@ -43,11 +43,17 @@ export interface StackMachine {
 }
 
 export interface StackSeams {
+  /** The build report's screens and their screenshots, out of the sandbox (coding/story-build/screens.ts). */
+  storeScreens(ctx: Ctx, o: { accountId: number; buildId: number; screens: readonly BuildReportScreen[]; read: (path: string) => Promise<Buffer | null> }): Promise<{ skipped: number }>;
   verify(accountId: number, fullName: string, input: Omit<VerifyStackInput, 'gitDir' | 'token'>): Promise<StackVerdict>;
   extract(runtime: SandboxRuntime, container: string, repoPath: string, branches: readonly string[]): Promise<StackExtract>;
 }
 
 export const defaultStackSeams: StackSeams = {
+  async storeScreens(ctx, o) {
+    const { storeBuildScreens } = await import('../../coding/story-build/screens.js');
+    return storeBuildScreens(ctx, o);
+  },
   async verify(accountId, fullName, input) {
     const { verifyStackInCloneCache } = await import('../../coding/story-build/stack-verify.js');
     return verifyStackInCloneCache(accountId, fullName, input);
@@ -108,6 +114,17 @@ export async function extractApprovedStack(
   if (read.kind === 'ok' && read.check.report) report = read.check.report;
   else if (read.kind === 'ok') m.notice(`The build report did not pass Ensemble's checks (${read.check.problems[0] ?? 'its shape'}), so each pull request shows the agent's last words.`);
   else if (read.kind === 'unreadable') m.notice(read.reason);
+  // The screens the agent looked at (a self-report) and the screenshots it names, checked and copied out. Only a
+  // report that lists `screens` replaces the stored ones; never fatal.
+  if (report?.screens != null) {
+    const container = l.container;
+    try {
+      const r = await seams.storeScreens(ctx, { accountId, buildId: o.buildId, screens: report.screens, read: (p) => l.runtime.readFile(container, p, { maxBytes: 5 * 1024 * 1024 }).catch(() => null) });
+      if (r.skipped > 0) m.notice(`${r.skipped} screenshot${r.skipped === 1 ? ' was' : 's were'} left out: not a PNG, not found, or past the size limit.`);
+    } catch (err) {
+      ctx.log?.warn({ err }, `story build ${o.buildId}: storing the screens failed`);
+    }
+  }
   const reported = new Map((report?.prs ?? []).map((p) => [p.id, p]));
   const fallbackSummary = l.lastAgentText.trim() ? l.lastAgentText.trim().slice(0, 2_000) : null;
 

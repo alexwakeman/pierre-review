@@ -426,6 +426,21 @@ export interface StoryBuildHowToTest {
   seen: boolean;
 }
 
+/**
+ * ONE SCREEN the agent looked at in the build's browser (docs/SANDBOX.md § The browser → Screens in the build
+ * report). A SELF-REPORT: shown as "the agent says", never a gate. `shots` are screenshots Ensemble copied out of
+ * the sandbox after checking each is a PNG; each is served by `GET /api/story-builds/:id/shots/:sha` on a click.
+ */
+export interface StoryBuildScreen {
+  name: string;
+  url: string | null;
+  /** What the agent compared it with, in its words ("the mock-up a-1f2e3d4c5b", "the orders page"); null = nothing. */
+  comparedWith: string | null;
+  verdict: 'matches' | 'differs' | 'no_design';
+  note: string;
+  shots: Array<{ sha: string; name: string; bytes: number }>;
+}
+
 export interface StoryBuild {
   id: number;
   workspaceId: number;
@@ -502,6 +517,8 @@ export interface StoryBuild {
   session?: StoryBuildSession | null;
   /** Plan first: the planned pull requests, created at Approve, in plan order (no patch). */
   prs?: StoryBuildPr[];
+  /** The build report's screens (the newest build turn), with their copied screenshots. Absent / [] = none. */
+  screens?: StoryBuildScreen[];
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -697,6 +714,8 @@ export const STORY_BUILD_API = {
   ticketReview: '/api/story-builds/:id/ticket-review',
   /** The build tab's "How to test" pointer: the reader opened or dismissed it. DB only. */
   howToTestSeen: '/api/story-builds/:id/how-to-test/seen',
+  /** One screenshot the build report named (docs/SANDBOX.md § The browser): PNG bytes, on a click. DB only. */
+  shot: '/api/story-builds/:id/shots/:sha',
   /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
   active: '/api/story-builds/active',
   /** HOTFIX: each workspace repository's latest release (the hotfix base) and whether the option is offered. */
@@ -724,11 +743,12 @@ export interface StoryBuildHowToTestSeenResponse {
 export type StoryBuildApiRoute = keyof typeof STORY_BUILD_API;
 
 /** A concrete path: `storyBuildPath('repoPush', { id: 7, repoId: 3 })`. */
-export function storyBuildPath(route: StoryBuildApiRoute, params: { id?: number; repoId?: number; prId?: number } = {}): string {
+export function storyBuildPath(route: StoryBuildApiRoute, params: { id?: number; repoId?: number; prId?: number; sha?: string } = {}): string {
   return STORY_BUILD_API[route]
     .replace(':id', params.id == null ? ':id' : String(params.id))
     .replace(':repoId', params.repoId == null ? ':repoId' : String(params.repoId))
-    .replace(':prId', params.prId == null ? ':prId' : String(params.prId));
+    .replace(':prId', params.prId == null ? ':prId' : String(params.prId))
+    .replace(':sha', params.sha == null ? ':sha' : encodeURIComponent(params.sha));
 }
 
 // ---- the sprint card ----------------------------------------------------------------------------------

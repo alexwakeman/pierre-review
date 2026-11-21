@@ -86,6 +86,7 @@ shell. Treat everything it does as untrusted.
 | Resource exhaustion | Per-session CPU / memory / process caps (disk enforced on microsandbox only); a total cap on services; at most `ENSEMBLE_SANDBOX_MAX_SESSIONS` open sessions; at most `ENSEMBLE_SANDBOX_MAX_BUILDS` build turns at once; idle teardown. |
 | More untrusted text in an AI Fix (2026-11-19: up to 12 workspace repositories and the reference documents, read only) | The same walls hold: no GitHub credential, no route out but the proxy, work leaves only as the PR repository's patch (every other repository's edits are `leftOut`, never pushed). The other repositories and the documents are context, not instructions: FIX.md says a change another repository needs is out of scope, and an unattended fix still gets no TICKET.md. More to read inside the same caps (`AI_FIX_MAX_TURNS`, an unattended run's `AI_FIX_BUDGET_USD`, the spend gate); the per-workspace switch narrows it. Dependency automation's fix stays narrow. |
 | Ticket text tells the agent to read other tickets, or write to the tracker | `ensemble-ticket` serves only this session's ticket (every id is matched against its manifest), has no write verb, and reads on the HOST: the tracker credential never enters the sandbox. An attachment's address is checked to be on the tracker's own site before the credential is sent (§ The ticket relay). |
+| Screenshots as a way out | Only PNGs a valid build report names, only from the agent's browser folder, PNG signature checked, capped per file and per build, stored as bytes and served as `image/png` with `nosniff` and a sandboxing CSP, on the reader's click (§ The browser). |
 | The browser is a way out, or a way onto the host | It shares the SANDBOX'S network namespace, so it reaches only what the sandbox reaches; its requests out go through the same proxy and allow-list. Non-root, no capabilities, read-only root, capped, a pinned image. Ensemble starts it; the agent only drives it over DevTools on loopback (§ The browser). |
 | Leftovers | Every resource carries Ensemble's labels; discard, the boot sweep and `ensemble sandbox prune` remove them. |
 | Spend | Every turn of Implement and of a manual AI Fix is a reader's press (a manual fix's review rounds are part of it). An UNATTENDED AI Fix (auto fix, dependency automation) asks the ONE spend gate before it starts, runs ONE FIX LOOP — a build turn, then its own review rounds and fix turns, each automatic step asking the gate again (a refusal stops the loop) — with Claude's `--max-budget-usd` on the session's process, then closes. Each turn's and each review's usage is recorded on the ledger under the provider that ran it, and the session's spend is shown. |
@@ -867,7 +868,16 @@ A story session's agent looks at the screens it builds in a headless Chromium. P
   console messages, exceptions, failed requests and HTTP errors. The DevTools endpoint is also usable directly
   (for example playwright-core's `connectOverCDP`).
 - **Docker only**: a runtime without `startBrowser` (microsandbox) answers in one line, and nothing starts.
-- **Screenshots stay in the sandbox** for now: nothing reads them out to the reader (IMPLEMENT-UI-PLAN.md § 8).
+- **Screens in the build report** (`workspace/build-report.ts` `screens`, `coding/story-build/screens.ts`; migration
+  0214): the agent adds, per screen it looked at, its name, address, 1–4 shot paths, what it compared it with and a
+  verdict (matches / differs / no_design) with a note — a SELF-REPORT, shown as "the agent says", never a gate.
+  ⚠ **THE ONE OTHER WAY OUT OF THE SANDBOX** (beside the patches): after the build turn the host copies ONLY the
+  shots a VALID report names, ONLY under `/home/agent/.limn/browser/` (the validator and the host both check),
+  each read with a 5 MB cap and kept only when its first bytes are the PNG signature; ≤ 24 shots and 30 MB per
+  build; de-duplicated by sha256; a newer report that lists `screens` replaces the last. Stored as bytes in
+  `story_build_shots` (never a path); the build tab's **Screens** block lists the verdicts and loads the pictures only
+  on "Show screenshots", from `GET /api/story-builds/:id/shots/:sha` (the account's own build; `image/png`,
+  `nosniff`, `default-src 'none'; sandbox`).
 - The seed (`workspace/seed.ts` `BROWSER`, story sessions): how to start it and take shots, `localhost` is the
   sandbox, never sign in to a real account (Storybook, mock data or a test page).
 

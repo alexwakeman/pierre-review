@@ -484,6 +484,7 @@ export function toStoryBuild(row: StoryBuildRow, repoRows: readonly StoryBuildRe
     endToEndTicket: row.e2eTicketJson ?? null,
     howToTest: row.howToTestChatId != null ? { chatId: row.howToTestChatId, seen: row.howToTestSeenAt != null } : null,
     hotfix: row.hotfix === true,
+    screens: row.screensJson ?? [],
     createdAt: iso(row.createdAt) ?? new Date(0).toISOString(),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),

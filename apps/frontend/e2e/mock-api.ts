@@ -1548,8 +1548,28 @@ export function stackBuiltFrom(b: StoryBuild): StoryBuild {
       storyBuildPr(503, 'P3', 2, { repoId: 10, fullName: 'acme/web', title: 'Add the Download CSV button', criteria: ['AC1'], dependsOn: ['P2'], filesChanged: ['src/reports/ReportHeader.tsx'], reported: 'partly', checks: [{ command: 'pnpm lint', result: 'not_run', note: 'No lint config.' }] }),
     ],
     session: { ...builtFrom(b).session!, plan: { ...plan, decisions, unanswered: 0, status: 'approved', approvedRevision: plan.latest?.revision ?? 1, approvedAt: iso(0) } },
+    // The build report's screens (docs/SANDBOX.md § The browser): the agent's verdict and the copied screenshots.
+    screens: [
+      {
+        name: 'Report header',
+        url: 'http://localhost:6006/?path=/story/reports-header',
+        comparedWith: 'the mock-up report-header-csv.png',
+        verdict: 'matches',
+        note: 'The Download CSV button sits after Print, in the same secondary style.',
+        shots: [
+          { sha: STORY_SHOT_SHA, name: '20261121-101010-localhost-6006-1280.png', bytes: STORY_SHOT_PNG.length },
+          { sha: STORY_SHOT_SHA_2, name: '20261121-101010-localhost-6006-375.png', bytes: STORY_SHOT_PNG.length },
+        ],
+      },
+      { name: 'Empty report', url: null, comparedWith: null, verdict: 'no_design', note: 'Built to fit the reports list.', shots: [] },
+    ],
   };
 }
+
+/** A 1×1 PNG, and the shas the build's screens name (the shot route answers it for any sha). */
+export const STORY_SHOT_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+export const STORY_SHOT_SHA = 'a'.repeat(64);
+export const STORY_SHOT_SHA_2 = 'b'.repeat(64);
 
 export const STORY_SESSION_STACK_BUILT: StoryBuild = stackBuiltFrom(STORY_SESSION_PLAN_READY);
 

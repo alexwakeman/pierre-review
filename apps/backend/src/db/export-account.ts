@@ -438,6 +438,8 @@ export async function exportAccountData(accountId: number): Promise<AccountExpor
       plan: schema.storyBuilds.planJson,
       planRevision: schema.storyBuilds.planRevision,
       transcript: schema.storyBuilds.transcriptJson,
+      // The build report's screens (migration 0214): the agent's words and the screenshots' shas; the PNG bytes are not exported.
+      screens: schema.storyBuilds.screensJson,
       design: schema.storyBuilds.designJson,
       docsStatus: schema.storyBuilds.docsStatus,
       docs: schema.storyBuilds.docsJson,
