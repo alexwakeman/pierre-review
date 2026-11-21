@@ -276,6 +276,8 @@ describe('tierFor — SonarCloud', () => {
 describe('tierFor — a build screenshot', () => {
   it('is a read', () => {
     expect(tiers('GET', `/api/story-builds/7/shots/${'a'.repeat(64)}`)).toEqual(['read']);
+    // Posting them to the ticket is a tracker write: the ticket update's tier.
+    expect(tiers('POST', '/api/story-builds/7/screens/post')).toEqual(['search', 'read']);
   });
 });
 

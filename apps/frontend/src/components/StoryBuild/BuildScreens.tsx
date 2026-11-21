@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { storyBuildPath, type StoryBuild, type StoryBuildScreen } from '@pierre-review/shared';
+import { usePostStoryBuildScreens } from '../../hooks/useStoryBuild.js';
+import { dateTime } from '../../lib/ui.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 
@@ -30,6 +32,36 @@ export function BuildScreens({ build }: { build: StoryBuild }): JSX.Element | nu
           <ScreenRow key={`${i}-${s.name}`} buildId={build.id} screen={s} />
         ))}
       </ul>
+      <TicketPost build={build} />
+    </div>
+  );
+}
+
+/** "Post screenshots to the ticket" (Jira; ONE press, claimed on the server; never tried again after a write). */
+function TicketPost({ build }: { build: StoryBuild }): JSX.Element | null {
+  const post = usePostStoryBuildScreens(build.workspaceId, build.ident);
+  const t = build.screensTicket;
+  if (t == null || !t.offered) return null;
+  const err = post.error instanceof Error ? post.error.message : null;
+  return (
+    <div data-testid="story-build-screens-ticket" className="mt-3 flex flex-wrap items-center gap-2 border-t border-ui-line pt-3">
+      {t.postedAt != null ? (
+        <span className="text-meta text-ui-mute">
+          Posted to {build.ticketKey} on {dateTime(t.postedAt)}: {t.attachments ?? 0} screenshot{t.attachments === 1 ? '' : 's'} and one comment.
+        </span>
+      ) : t.error != null ? (
+        <span className="text-meta text-ui-danger">{t.error} Some screenshots may be on the ticket already.</span>
+      ) : (
+        <>
+          <Button size="sm" variant="secondary" data-testid="story-build-screens-post" disabled={post.isPending || t.posting} busy={post.isPending} busyLabel="Posting…" onClick={() => post.mutate(build.id)}>
+            Post screenshots to {build.ticketKey}
+          </Button>
+          <InfoButton title="Post screenshots to the ticket">
+            <p>Ensemble adds the screenshots to the Jira ticket as attachments, and posts one comment that shows them with the agent&rsquo;s verdicts. It uses your Jira login, once per build.</p>
+          </InfoButton>
+          {err != null && <span className="text-meta text-ui-danger">{err}</span>}
+        </>
+      )}
     </div>
   );
 }

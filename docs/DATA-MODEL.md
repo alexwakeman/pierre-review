@@ -865,6 +865,10 @@ screenshots' PNG bytes, unique per `(account_id, build_id, sha256)`, the named c
 agent's browser folder, capped); read only by `GET /api/story-builds/:id/shots/:sha`. Erased with the account; the
 export carries the screens, not the bytes.
 
+`screens_ticket_json` (migration `0215`): the reader's one "Post screenshots to the ticket" press —
+`{claimedAt, postedAt?, attachments?, error?}`, claimed (compare-and-set from NULL) before the first Jira write; NULL
+again after a failure that wrote nothing. Wire: `StoryBuild.screensTicket`.
+
 ## `workspace_figma` — the workspace's Figma token (CORE; migration `0213`)
 
 ONE row per workspace (unique `(account_id, workspace_id)`, the named COMPOSITE FK onto `workspaces (id,

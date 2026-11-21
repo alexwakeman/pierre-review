@@ -441,6 +441,31 @@ export interface StoryBuildScreen {
   shots: Array<{ sha: string; name: string; bytes: number }>;
 }
 
+/** The stored state of "Post screenshots to the ticket" (`story_builds.screens_ticket_json`). */
+export interface StoryBuildScreensTicketState {
+  claimedAt: string;
+  postedAt?: string | null;
+  attachments?: number | null;
+  /** A failure AFTER something was written: never tried again. */
+  error?: string | null;
+}
+
+/** `StoryBuild.screensTicket`: whether the button is offered, and how the post went. */
+export interface StoryBuildScreensTicket {
+  /** The ticket is a Jira ticket and the build has screenshots. */
+  offered: boolean;
+  postedAt: string | null;
+  attachments: number | null;
+  error: string | null;
+  /** Pressed and still running (claimed, neither posted nor failed). */
+  posting: boolean;
+}
+
+/** `POST …/screens/post` — the answer. */
+export interface StoryBuildScreensPostResponse {
+  screensTicket: StoryBuildScreensTicket;
+}
+
 export interface StoryBuild {
   id: number;
   workspaceId: number;
@@ -519,6 +544,8 @@ export interface StoryBuild {
   prs?: StoryBuildPr[];
   /** The build report's screens (the newest build turn), with their copied screenshots. Absent / [] = none. */
   screens?: StoryBuildScreen[];
+  /** "Post screenshots to the ticket" (Jira; one press). Absent on an older server. */
+  screensTicket?: StoryBuildScreensTicket;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -716,6 +743,8 @@ export const STORY_BUILD_API = {
   howToTestSeen: '/api/story-builds/:id/how-to-test/seen',
   /** One screenshot the build report named (docs/SANDBOX.md § The browser): PNG bytes, on a click. DB only. */
   shot: '/api/story-builds/:id/shots/:sha',
+  /** "Post screenshots to the ticket": ONE Jira attachment per screenshot and one comment, on the reader's press. */
+  screensPost: '/api/story-builds/:id/screens/post',
   /** THE BUILDS TOAST: the workspace's running builds and the ones at a gate (`?workspace=`). */
   active: '/api/story-builds/active',
   /** HOTFIX: each workspace repository's latest release (the hotfix base) and whether the option is offered. */

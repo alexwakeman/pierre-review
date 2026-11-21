@@ -349,6 +349,7 @@ import type {
   StoryBuildAutoPushResponse,
   StoryBuildTicketReviewResponse,
   StoryBuildHowToTestSeenResponse,
+  StoryBuildScreensPostResponse,
   StoryBuildLoopContinueBody,
   StoryBuildLoopRouteResponse,
   StoryBuildLoopSettingsBody,
@@ -2043,6 +2044,9 @@ export const api = {
   setStoryBuildTicketReview: (id: number, done: boolean) =>
     fetch(storyBuildPath('ticketReview', { id }), jsonBody('POST', { done })).then((r) => handle<StoryBuildTicketReviewResponse>(r)),
   // "How to test" after a build: the build tab's pointer was opened or dismissed.
+  // "Post screenshots to the ticket" (Jira): the reader's ONE press; the server claims it before the first write.
+  postStoryBuildScreens: (id: number) =>
+    fetch(storyBuildPath('screensPost', { id }), jsonBody('POST', {})).then((r) => handle<StoryBuildScreensPostResponse>(r)),
   setStoryBuildHowToTestSeen: (id: number) =>
     fetch(storyBuildPath('howToTestSeen', { id }), jsonBody('POST', {})).then((r) => handle<StoryBuildHowToTestSeenResponse>(r)),
   // THE BUILDS TOAST: the workspace's running builds and the ones at a gate.

@@ -672,6 +672,8 @@ function tierFor(method: string, path: string): readonly Tier[] {
     if (mutating && /^\/api\/story-builds\/\d+\/(repos\/\d+\/|prs\/\d+\/)?push$/.test(path)) return [TIERS.githubWrite];
     // The review loop's Continue: the reader's press may start reviews, a fix turn and pushes.
     if (mutating && /^\/api\/story-builds\/\d+\/loop\/continue$/.test(path)) return [TIERS.ai, TIERS.aiHourly, TIERS.githubWrite];
+    // "Post screenshots to the ticket": a TRACKER write (Jira attachments + one comment), the ticket update's tier.
+    if (mutating && /^\/api\/story-builds\/\d+\/screens\/post$/.test(path)) return [TIERS.search, TIERS.read];
     return [TIERS.read];
   }
   if (/^\/api\/claude-reviews\/[^/]+\/chat$/.test(path)) {

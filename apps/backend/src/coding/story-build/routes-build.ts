@@ -13,6 +13,7 @@ import {
   type StoryBuildLoopState,
   type StoryBuildTicketReviewResponse,
   type StoryBuildHowToTestSeenResponse,
+  type StoryBuildScreensPostResponse,
   type StoryBuildDiffResponse,
   type StoryBuildHotfixBasesResponse,
   type StoryBuildPrDiffResponse,
@@ -267,6 +268,19 @@ export function registerStoryBuildBuildRoutes(app: FastifyInstance, ctx: AgentCo
       .header('content-security-policy', "default-src 'none'; sandbox")
       .header('cache-control', 'private, max-age=3600')
       .send(png);
+  });
+
+  // "POST SCREENSHOTS TO THE TICKET" (coding/story-build/screens.ts, tracker/ticket-screens.ts): the reader's ONE press,
+  // claimed before the first Jira write. A tracker write: Jira attachments + one comment.
+  app.post<{ Params: { id: string } }>(STORY_BUILD_API.screensPost, async (req, reply) => {
+    const accountId = ctx.accountIdOf(req);
+    const id = parseId(req.params.id);
+    if (id == null) return reply.code(404).send(NOT_FOUND);
+    const { postBuildScreensToTicket } = await import('./screens.js');
+    const r = await postBuildScreensToTicket(ctx, accountId, id);
+    if (r.status !== 200 || !('screensTicket' in r)) return reply.code(r.status).send('error' in r ? { error: r.error, message: r.message } : NOT_FOUND);
+    const resp: StoryBuildScreensPostResponse = { screensTicket: r.screensTicket };
+    return reply.send(resp);
   });
 
   // HOTFIX (docs/STORY-BUILD.md § Hotfix builds): the Start panel's base list — each workspace repository's

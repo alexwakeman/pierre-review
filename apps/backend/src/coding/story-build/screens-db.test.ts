@@ -104,6 +104,50 @@ describe('storeBuildScreens', () => {
     expect(r.skipped).toBe(5);
   });
 
+  it('the ticket comment: the agent’s words made plain, its verdict said as its own, the pictures inline', () => {
+    const screens = [
+      { name: 'Refunds [~admin]', url: null, comparedWith: 'the mock-up {color:red}x{color}', verdict: 'differs' as const, note: 'The total wraps.\n!evil.png!', shots: [{ sha: 'a'.repeat(64), name: 'x.png', bytes: 1 }] },
+      { name: 'Empty', url: null, comparedWith: null, verdict: 'no_design' as const, note: '', shots: [] },
+    ];
+    const picked = S.ticketShotsOf(7, screens, 10);
+    expect(picked).toEqual([{ sha: 'a'.repeat(64), name: 'ensemble-7-1.png', screen: 0 }]);
+    const text = S.screensTicketComment({ ticketKey: 'ACME-1', screens, shots: picked, names: ['ensemble-7-1.png'] });
+    expect(text).toContain("h4. Screenshots from Ensemble's build of ACME-1");
+    expect(text).toContain('*Refunds admin*: the agent says it differs, compared with the mock-up color:red x color.');
+    expect(text).toContain('The total wraps. evil.png');
+    expect(text).toContain('!ensemble-7-1.png|thumbnail!');
+    expect(text).not.toContain('Empty');
+    expect(text.match(/!/g)).toHaveLength(2);
+  });
+
+  it('the press: claimed once; a failure before any write releases the claim; after a write it is never retried', async () => {
+    // A Jira ticket on this build.
+    await db.update(schema.storyBuilds).set({ ident: 'jira:https://acme.atlassian.net#ACME-1', screensTicketJson: null }).execute();
+    let posts = 0;
+    const refuse = { post: async () => (posts++, { ok: false as const, status: 502, error: 'JiraError', message: 'Jira could not be reached.', wrote: false }), now: () => 0 };
+    const r1 = await S.postBuildScreensToTicket(ctx, 1, buildId, refuse);
+    expect(r1).toMatchObject({ status: 502 });
+    const [after1] = await db.select({ t: schema.storyBuilds.screensTicketJson }).from(schema.storyBuilds).execute();
+    expect(after1.t).toBeNull();
+    const partly = { post: async () => (posts++, { ok: false as const, status: 502, error: 'JiraError', message: 'Jira stopped.', wrote: true }), now: () => 0 };
+    const r2 = await S.postBuildScreensToTicket(ctx, 1, buildId, partly);
+    expect(r2).toMatchObject({ status: 502, message: expect.stringContaining('will not try again') });
+    expect(await S.postBuildScreensToTicket(ctx, 1, buildId, partly)).toMatchObject({ status: 409, error: 'AlreadyPosted' });
+    expect(posts).toBe(2);
+    // Another account's build: 404, nothing claimed.
+    expect(await S.postBuildScreensToTicket(ctx, 2, buildId, partly)).toMatchObject({ status: 404 });
+  });
+
+  it('a good post records it, and the wire says so', async () => {
+    await db.update(schema.storyBuilds).set({ screensTicketJson: null }).execute();
+    const seen: string[] = [];
+    const ok = { post: async (a: any) => (seen.push(a.comment(a.shots.map((s: any) => s.name))), { ok: true as const, attachments: a.shots.length }), now: () => 1_700_000_000_000 };
+    const r = await S.postBuildScreensToTicket(ctx, 1, buildId, ok);
+    expect(r).toMatchObject({ status: 200, screensTicket: { offered: true, attachments: 10, error: null, posting: false } });
+    // The build holds 24 screenshots by now (the cap test): a post carries at most TICKET_SHOTS_MAX (10).
+    expect(seen[0]).toContain('|thumbnail!');
+  });
+
   it('the account erasure takes the screenshots', async () => {
     const { eraseAccountData } = await import('../../db/erase-account.js');
     await eraseAccountData(1);

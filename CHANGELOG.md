@@ -28,6 +28,8 @@ no internals.
   ticket links (an outline of the layers and a picture). Without it, the agent works from the ticket's other files.
 - Implement story: the build tab's **Screens** block. When the agent looked at its screens in the browser, it says
   for each whether it matches the design (or your existing screens), and **Show screenshots** shows what it saw.
+- Implement story: **Post screenshots to** the Jira ticket, from the build tab's Screens block. One press adds the
+  screenshots as attachments and one comment that shows them with the agent's verdicts.
 
 ## [1.0.71] - 2026-11-20
 

@@ -19,6 +19,7 @@ import {
 import { sql } from 'drizzle-orm';
 import type {
   StoryBuildScreen,
+  StoryBuildScreensTicketState,
   StoryBuildEndToEndTicket,
   StoryBuildHotfixBranch,
   HotfixPortClaim,
@@ -5140,6 +5141,8 @@ export const storyBuilds = sqliteTable(
     // SCREENS (migration 0214; docs/SANDBOX.md § The browser): the build report's screens (a self-report),
     // each with the sha256 of the screenshots copied out into `story_build_shots`. NULL = none reported.
     screensJson: text('screens_json', { mode: 'json' }).$type<StoryBuildScreen[]>(),
+    // The reader's ONE "Post screenshots to the ticket" press (migration 0215): claimed before the first Jira write.
+    screensTicketJson: text('screens_ticket_json', { mode: 'json' }).$type<StoryBuildScreensTicketState>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),
     startedAt: integer('started_at', { mode: 'timestamp' }),
     completedAt: integer('completed_at', { mode: 'timestamp' }),

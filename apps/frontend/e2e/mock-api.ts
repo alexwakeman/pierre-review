@@ -1563,6 +1563,7 @@ export function stackBuiltFrom(b: StoryBuild): StoryBuild {
       },
       { name: 'Empty report', url: null, comparedWith: null, verdict: 'no_design', note: 'Built to fit the reports list.', shots: [] },
     ],
+    screensTicket: { offered: true, postedAt: null, attachments: null, error: null, posting: false },
   };
 }
 

@@ -269,6 +269,17 @@ test.describe('Implement, plan first', () => {
     await rows.nth(0).getByTestId('story-build-screen-show').click();
     await expect(rows.nth(0).getByTestId('story-build-screen-shot')).toHaveCount(2);
     await expect.poll(() => shotRequests.length).toBe(2);
+
+    // "Post screenshots to the ticket": ONE press, and the line says what was posted.
+    await page.route(/\/api\/story-builds\/\d+\/screens\/post$/, (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ screensTicket: { offered: true, postedAt: '2026-11-21T10:00:00.000Z', attachments: 2, error: null, posting: false } }) }),
+    );
+    const posted = page.waitForRequest((r) => r.method() === 'POST' && /\/screens\/post$/.test(r.url()));
+    await section.getByTestId('story-build-screens-post').click();
+    await posted;
+    await expect(section.getByTestId('story-build-screens-ticket')).toContainText('Posted to ACME-1');
+    await expect(section.getByTestId('story-build-screens-ticket')).toContainText('2 screenshots and one comment');
+    await expect(section.getByTestId('story-build-screens-post')).toHaveCount(0);
   });
 
   test('the ticket draft is editable, and Update ticket writes only what changes to Jira once asked', async ({ page }) => {

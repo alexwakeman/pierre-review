@@ -183,7 +183,9 @@ export default function Page(): JSX.Element {
       <p>
         When the agent looked at its screens in a browser, <Ui>Screens</Ui> lists each one: whether it says the screen{' '}
         <Ui>Matches</Ui> the design, <Ui>Differs</Ui>, or had <Ui>No design to compare</Ui>, and why.{' '}
-        <Ui>Show screenshots</Ui> shows what it saw.
+        <Ui>Show screenshots</Ui> shows what it saw. For a Jira ticket, <Ui>Post screenshots to</Ui> the ticket adds them to
+        it as attachments, with one comment that shows them and the agent&rsquo;s verdicts. It uses your Jira login, once
+        per build.
       </p>
       <p>
         Then push the result: see <DocLink to="implement-story/push">Push the result</DocLink>.
