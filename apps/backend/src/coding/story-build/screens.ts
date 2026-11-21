@@ -28,7 +28,7 @@ export function shotPathAllowed(p: string): boolean {
   return p.startsWith(BROWSER_SHOTS_DIR) && p.length <= 300 && /^[A-Za-z0-9._/-]+\.png$/.test(p) && !p.split('/').includes('..');
 }
 
-type Ctx = Pick<AgentContext, 'db' | 'schema'> & Partial<Pick<AgentContext, 'runTransaction'>>;
+type Ctx = Pick<AgentContext, 'db' | 'schema'> & Partial<Pick<AgentContext, 'runTransaction' | 'log'>>;
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 const T = (ctx: Pick<AgentContext, 'schema'>): { shots: any; builds: any } => ({ shots: (ctx.schema as any).storyBuildShots, builds: (ctx.schema as any).storyBuilds });
 
@@ -151,6 +151,13 @@ const VERDICT_WIKI: Record<StoryBuildScreen['verdict'], string> = { matches: 'ma
  */
 export function screensTicketComment(o: { ticketKey: string; screens: readonly StoryBuildScreen[]; shots: ReadonlyArray<{ screen: number }>; names: ReadonlyArray<string | null> }): string {
   const lines = [`h4. Screenshots from Ensemble's build of ${wikiPlain(o.ticketKey, 40)}`, '', 'The agent took these while it built the change, and compared each screen itself. The verdicts are its own.', ''];
+  lines.push(...screensWikiLines(o));
+  return lines.join('\n').trim();
+}
+
+/** Per screen with a picture: its name and the agent's verdict, its note, then its pictures inline. Pure. */
+export function screensWikiLines(o: { screens: readonly StoryBuildScreen[]; shots: ReadonlyArray<{ screen: number }>; names: ReadonlyArray<string | null> }): string[] {
+  const lines: string[] = [];
   for (const [i, s] of o.screens.entries()) {
     const pics = o.shots.map((sh, k) => (sh.screen === i ? o.names[k] : null)).filter((n): n is string => n != null);
     if (pics.length === 0) continue;
@@ -159,7 +166,7 @@ export function screensTicketComment(o: { ticketKey: string; screens: readonly S
     if (s.note) lines.push(wikiPlain(s.note, 600));
     lines.push(pics.map((n) => `!${n}|thumbnail!`).join(' '), '');
   }
-  return lines.join('\n').trim();
+  return lines;
 }
 
 export interface PostScreensDeps {
@@ -255,4 +262,82 @@ export async function storeLiveShot(
   const { shots: t } = T(ctx);
   await ctx.db.insert(t).values({ accountId: o.accountId, buildId: o.buildId, sha256: sha, png: b, bytes: b.length }).onConflictDoNothing().execute();
   return { sha, name: o.path.slice(o.path.lastIndexOf('/') + 1) };
+}
+
+// ── THE SCREENSHOTS IN "BUILD END TO END"'S TICKET STEP (end-to-end.ts) ─────────────────────────────────────────
+
+export interface StepScreens {
+  /** The comment's screenshot lines (empty: none uploaded). */
+  lines: string[];
+  attachments: number;
+  /** A plain sentence when the upload failed. */
+  error: string | null;
+  /** After the comment: record the post (never tried again once something was written). */
+  settle(commentOk: boolean): Promise<void>;
+}
+
+/**
+ * The build's screenshots for the end-to-end ticket step: CLAIM the build's screenshot post (the SAME claim the
+ * "Post screenshots" button takes, so the two can never both post), upload them as attachments, and answer the
+ * lines for the step's ONE comment. null: no screenshots, not a Jira ticket, or already posted by the button.
+ * An upload that wrote nothing releases the claim (the button still works). Never throws.
+ */
+export async function screensForTicketStep(
+  ctx: Ctx,
+  accountId: number,
+  buildId: number,
+  upload: (a: { workspaceId: number; ident: string; shots: Array<{ name: string; png: Buffer }> }) => Promise<import('../../tracker/ticket-screens.js').UploadShotsResult>,
+  now: () => number,
+): Promise<StepScreens | null> {
+  try {
+    const { builds: b } = T(ctx);
+    const [row] = (await ctx.db.select().from(b).where(and(eq(b.id, buildId), eq(b.accountId, accountId))).limit(1).execute()) as Array<{
+      id: number;
+      workspaceId: number;
+      ident: string;
+      screensJson: StoryBuildScreen[] | null;
+      screensTicketJson: unknown;
+    }>;
+    if (row == null || !row.ident.startsWith('jira:') || row.screensTicketJson != null) return null;
+    const screens = row.screensJson ?? [];
+    const { TICKET_SHOTS_MAX } = await import('../../tracker/ticket-screens.js');
+    const picked = ticketShotsOf(row.id, screens, TICKET_SHOTS_MAX);
+    const files: Array<{ name: string; png: Buffer }> = [];
+    for (const p of picked) {
+      const png = await readBuildShot(ctx, accountId, buildId, p.sha);
+      if (png != null && isPng(png)) files.push({ name: p.name, png });
+    }
+    if (files.length === 0) return null;
+    const claimedAt = new Date(now()).toISOString();
+    const won = (await ctx.db
+      .update(b)
+      .set({ screensTicketJson: { claimedAt } })
+      .where(and(eq(b.id, buildId), eq(b.accountId, accountId), isNull(b.screensTicketJson)))
+      .returning({ id: b.id })
+      .execute()) as Array<{ id: number }>;
+    if (won.length === 0) return null;
+    const record = (state: import('@pierre-review/shared').StoryBuildScreensTicketState | null): Promise<unknown> =>
+      ctx.db.update(b).set({ screensTicketJson: state }).where(and(eq(b.id, buildId), eq(b.accountId, accountId))).execute();
+    const r = await upload({ workspaceId: row.workspaceId, ident: row.ident, shots: files });
+    if (!r.ok) {
+      await record(r.wrote ? { claimedAt, error: r.message } : null);
+      return { lines: [], attachments: 0, error: r.message, settle: async () => {} };
+    }
+    const kept = picked.filter((p) => files.some((f) => f.name === p.name));
+    return {
+      lines: screensWikiLines({ screens, shots: kept, names: r.names }),
+      attachments: files.length,
+      error: null,
+      settle: async (commentOk) => {
+        await record(
+          commentOk
+            ? { claimedAt, postedAt: new Date(now()).toISOString(), attachments: files.length }
+            : { claimedAt, error: 'The screenshots were added to the ticket, but the comment that shows them could not be posted.' },
+        );
+      },
+    };
+  } catch (err) {
+    ctx.log?.warn?.({ err, buildId }, 'build end to end: the screenshots failed');
+    return null;
+  }
 }

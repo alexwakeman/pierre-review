@@ -630,6 +630,7 @@ describe('Approve the plan automatically', () => {
     await M._closeAllSessionsForTest();
     gateAllows = true;
     gateAsked.length = 0;
+    browserStarts.length = 0;
     const IDENT4 = 'jira:https://acme.atlassian.net#ACME-403';
     answers.push(withBlock('Two repositories, two pull requests.', PLAN()));
     const turnsBefore = sentToClaude.length;
@@ -647,6 +648,8 @@ describe('Approve the plan automatically', () => {
     expect(b.autoApprovePlan).toBe(true);
     expect(b.planAutoApprovedAt).not.toBeNull();
     expect(b.ticketReviewDoneAt).toBeNull();
+    // The plan changes no screen: no browser.
+    expect(browserStarts).toEqual([]);
     // Approved: the switch cannot change now.
     expect((await post(`/api/story-builds/${id}/auto-approve`, { on: false })).statusCode).toBe(409);
     // The builds toast: built, the review loop off ⇒ the Push gate.
@@ -657,6 +660,35 @@ describe('Approve the plan automatically', () => {
     expect(done.json().ticketReviewDoneAt).not.toBeNull();
     expect((await read(id)).ticketReviewDoneAt).not.toBeNull();
     expect((await post(`/api/story-builds/${id}/ticket-review`, { done: 'yes' })).statusCode).toBe(400);
+  });
+
+  it('a plan that recommends a browser: approved automatically, the browser starts before the build turn, with no press', { timeout: 120_000 }, async () => {
+    await M._closeAllSessionsForTest();
+    gateAllows = true;
+    browserStarts.length = 0;
+    const IDENT6 = 'jira:https://acme.atlassian.net#ACME-405';
+    const ui = {
+      needed: true,
+      browser: true,
+      reason: 'A Download CSV button on the reports page.',
+      renderTarget: 'storybook',
+      designInputs: [],
+      designSystem: { summary: 'The export helpers in acme/api.', evidence: [{ kind: 'code', repo: 'acme/api', path: 'src/export.ts', lines: [2, 2], quote: 'export const MAX_ROWS = 1000;' }] },
+      nearestScreens: [],
+      newComponents: [],
+      gaps: [],
+    };
+    answers.push(withBlock('Two repositories, two pull requests, one screen.', PLAN({ ui })));
+    const r = await post('/api/story-builds', { workspaceId: wsId, ident: IDENT6, autoApprovePlan: true });
+    expect(r.statusCode, r.body).toBe(202);
+    const id = r.json().buildId;
+    const b = await until(id, (x) => x.session?.phase === 'built', 'built with no press', 60_000);
+    expect(b.session!.plan).toMatchObject({ status: 'approved', approvedRevision: 1 });
+    expect(b.session!.plan!.latest!.ui).toMatchObject({ needed: true, browser: true, renderTarget: 'storybook' });
+    // The plan's own recommendation decides (the reader consented to automatic approval): started once, as the
+    // reader's, before the build turn's instruction.
+    expect(browserStarts).toEqual(['reader']);
+    expect(sentToClaude.at(-1)).toMatch(/^The reader approved the plan \(revision 1\)\. Build it now\./);
   });
 
   it('refused by the spend gate: the plan waits for the reader, with one line', { timeout: 60_000 }, async () => {

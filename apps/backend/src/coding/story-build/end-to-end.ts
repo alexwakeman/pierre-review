@@ -27,6 +27,9 @@ import { listPlanRows, listPlannedPrRows, toPlanRevision } from './plan-persist.
 //      open a mention (`[~…]`) or a macro. ⚠ The summary is an AUTOMATIC model run: it asks the spend gate
 //      (`automaticRunAllowed`) and is simply left out when refused, unsigned-in, slow or failed — the lines
 //      still say what changed. Both writes run under the reader's own Jira login. The status never changes.
+//   3. the build's SCREENSHOTS (when its report has any, docs/SANDBOX.md § The browser): uploaded as attachments
+//      before the comment and shown inline in it, under the SAME claim the build tab's "Post screenshots" button
+//      takes (screens.ts `screensForTicketStep`), so they are never posted twice. Never tried again once written.
 //
 // ⚠ THE READER'S ONE PRESS IS THE CONSENT, and it is spent ONCE: `story_builds.e2e_ticket_claimed_at` is
 // claimed (compare-and-set from NULL) BEFORE the first Jira write; a failure is recorded on
@@ -54,6 +57,9 @@ export interface EndToEndDeps {
   comment(ctx: AgentContext, a: { accountId: number; workspaceId: number; ident: string; wiki: string }): Promise<{ ok: true } | { ok: false; message: string }>;
   /** The short plain summary of the ticket change, or null (no model, over budget, failed). */
   summarise(ctx: AgentContext, accountId: number, input: SummaryInput): Promise<string | null>;
+  /** The build's screenshots, uploaded for the ONE comment (screens.ts `screensForTicketStep`); null = none.
+   *  Absent = the step adds no screenshots (an older caller). */
+  screenshots?(ctx: AgentContext, accountId: number, buildId: number): Promise<import('./screens.js').StepScreens | null>;
 }
 
 export interface SummaryInput {
@@ -147,6 +153,10 @@ export function defaultEndToEndDeps(notice: (text: string) => void): EndToEndDep
       return out.ok ? { ok: true } : { ok: false, message: out.message };
     },
     summarise: summariseWithModel,
+    async screenshots(ctx, accountId, buildId) {
+      const [{ screensForTicketStep }, { uploadTicketShots }, t] = await Promise.all([import('./screens.js'), import('../../tracker/ticket-screens.js'), tracker()]);
+      return screensForTicketStep(ctx, accountId, buildId, (a) => uploadTicketShots(t.tctx, { accountId, ...a }), () => Date.now());
+    },
   };
 }
 
@@ -172,6 +182,8 @@ export interface EndToEndCommentFacts {
   summary?: string | null;
   /** The lines each written field lost and gained. Shown only when the ticket was updated. */
   changes?: FieldChange[];
+  /** The screenshots' lines (screens.ts `screensWikiLines`: names made plain, pictures inline). Absent / []: none. */
+  screens?: string[];
 }
 
 // The plan's internal references (AC1, C2, P1, Q3) mean nothing to a reader of the ticket.
@@ -256,7 +268,10 @@ export function endToEndCommentWiki(f: EndToEndCommentFacts): string {
     }
     out.push('', "The earlier version is in this ticket's history.");
   }
-  return out.join('\n');
+  if (f.screens != null && f.screens.length > 0) {
+    out.push('', '*Screenshots*', 'The agent took these while it built the change, and compared each screen itself. The verdicts are its own.', '', ...f.screens);
+  }
+  return out.join('\n').trimEnd();
 }
 
 /** Claim the one ticket step (compare-and-set from NULL). False ⇒ another run has it, or it already ran. */
@@ -304,7 +319,7 @@ function noticeLine(r: StoryBuildEndToEndTicket): string {
   if (r.skipped === 'not_jira') return 'Ensemble did not update the ticket: it writes to Jira only.';
   const parts: string[] = [];
   if (r.updated.length > 0) parts.push('updated the ticket');
-  if (r.commented) parts.push('commented on it');
+  if (r.commented) parts.push((r.screenshots ?? 0) > 0 ? `commented on it with ${r.screenshots} screenshot${r.screenshots === 1 ? '' : 's'}` : 'commented on it');
   const did = parts.length > 0 ? `Ensemble ${parts.join(' and ')}.` : 'Ensemble made no change to the ticket.';
   return r.error != null ? `${did} ${r.error}` : did;
 }
@@ -375,13 +390,24 @@ async function doStep(
       })
       .catch(() => null);
   }
+  // The build's screenshots, in the SAME comment (the one press is the consent): uploaded as attachments first.
+  const shots = deps.screenshots ? await deps.screenshots(ctx, accountId, row.id).catch(() => null) : null;
+  if (shots?.error != null && error == null) error = shots.error;
   const wiki = endToEndCommentWiki({
     prs: opened.map((p) => ({ repo: names.get(p.repoId) ?? `repo ${p.repoId}`, number: p.number, url: p.url, title: p.title })),
     ticket,
     summary,
     changes,
+    screens: shots?.lines ?? [],
   });
   const c = await deps.comment(ctx, { ...base, wiki });
   if (!c.ok && error == null) error = c.message;
-  return done({ updated: ticket != null && 'updated' in ticket ? ticket.updated : [], commented: c.ok, skipped: null, error });
+  await shots?.settle(c.ok).catch(() => {});
+  return done({
+    updated: ticket != null && 'updated' in ticket ? ticket.updated : [],
+    commented: c.ok,
+    skipped: null,
+    error,
+    ...(shots != null && shots.lines.length > 0 && c.ok ? { screenshots: shots.attachments } : {}),
+  });
 }

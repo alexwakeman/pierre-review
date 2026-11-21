@@ -1107,6 +1107,8 @@ press, Jira only (offered when the ticket is a Jira ticket and the build report'
   agent's verdict, SAID AS THE AGENT'S. The agent's words go through `wikiPlain` (one line, no markup or mention
   characters, capped): its text cannot mention anyone or embed anything.
 - A failure is a sentence Ensemble wrote; the log carries the code only. The ticket is marked due for a read.
+- **"Build end to end"** puts the screenshots in its ticket step's ONE comment instead (STORY-BUILD.md § Build end to
+  end, item 3): the same upload (`uploadTicketShots`), the same claim, so a build's screenshots reach the ticket once.
 - Other trackers: not offered yet. GitHub Issues has no supported image upload; Linear and Notion are not built.
 
 ## Copying a tracker — "Copy from another workspace" (`tracker/copy.ts`)

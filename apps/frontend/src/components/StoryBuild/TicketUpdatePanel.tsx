@@ -389,11 +389,13 @@ export function endToEndTicketLine(r: StoryBuildEndToEndTicket | null): { text: 
   if (r == null) return { text: 'Updating the Jira ticket…', bad: false };
   if (r.skipped === 'not_jira') return { text: 'Ensemble updates Jira tickets only, so it did not change this one.', bad: false };
   const what = r.updated.map((f) => (f === 'description' ? 'description' : 'acceptance criteria')).join(' and ');
+  const n = r.screenshots ?? 0;
+  const shots = n > 0 ? ` with ${n} screenshot${n === 1 ? '' : 's'}` : '';
   const did =
     r.updated.length > 0
-      ? `Ensemble updated the ticket's ${what}${r.commented ? ' and commented on it in Jira.' : ' in Jira.'}`
+      ? `Ensemble updated the ticket's ${what}${r.commented ? ` and commented on it in Jira${shots}.` : ' in Jira.'}`
       : r.commented
-        ? 'Ensemble commented on the ticket in Jira. The plan did not change the ticket text.'
+        ? `Ensemble commented on the ticket in Jira${shots}. The plan did not change the ticket text.`
         : 'Ensemble did not change the ticket.';
   return r.error != null ? { text: `${did} ${r.error}`, bad: true } : { text: did, bad: false };
 }

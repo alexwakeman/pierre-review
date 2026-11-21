@@ -32,6 +32,8 @@ no internals.
   first, as it takes each one.
 - Implement story: **Post screenshots to** the Jira ticket, from the build tab's Screens block. One press adds the
   screenshots as attachments and one comment that shows them with the agent's verdicts.
+- **Build end to end**: its comment on the Jira ticket now shows the screenshots the agent took of the screens it
+  built.
 
 ## [1.0.71] - 2026-11-20
 

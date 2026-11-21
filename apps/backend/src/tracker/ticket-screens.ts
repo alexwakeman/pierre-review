@@ -44,6 +44,35 @@ function uploadedNames(raw: unknown): string[] {
 /** A Jira wiki image reference must not break out of `!…!`. */
 const safeWikiName = (n: string): string | null => (/^[A-Za-z0-9._ ()-]{1,200}$/.test(n) ? n : null);
 
+export type UploadShotsResult =
+  | { ok: true; names: Array<string | null> }
+  | { ok: false; status: number; error: string; message: string; wrote: boolean };
+
+/**
+ * Upload the shots as attachments ONLY (no comment): "Build end to end"'s ticket step puts them in its own one
+ * comment. The same gate and rules as `postTicketScreenshots`. Never throws.
+ */
+export async function uploadTicketShots(
+  ctx: TrackerContext,
+  a: { accountId: number; workspaceId: number; ident: string; shots: readonly TicketShot[] },
+  transport?: JiraTransport,
+): Promise<UploadShotsResult> {
+  const gate = await statusGate(ctx, a.accountId, a.workspaceId, a.ident, transport, MSG_NOT_JIRA);
+  if (!gate.ok) return { ok: false, status: gate.status, error: gate.error, message: gate.message, wrote: false };
+  const names: Array<string | null> = [];
+  for (const [i, s] of a.shots.slice(0, TICKET_SHOTS_MAX).entries()) {
+    try {
+      const raw = await jiraPostFile(`${issueUrl(gate.call, gate.key)}/attachments`, auth(gate.call), { name: s.name, contentType: 'image/png', bytes: s.png }, gate.call.policy, gate.call.transport);
+      names.push(safeWikiName(uploadedNames(raw)[0] ?? s.name));
+    } catch (err) {
+      const code = err instanceof JiraFetchError ? err.code : 'unknown';
+      ctx.log.warn({ accountId: a.accountId, workspaceId: a.workspaceId, route: 'ticket-screens', step: 'attachment', code }, 'jira screenshot upload failed');
+      return { ok: false, status: 502, error: 'JiraError', message: statusChangeErrorMessage(err), wrote: i > 0 };
+    }
+  }
+  return { ok: true, names };
+}
+
 /**
  * Upload the shots and post the one comment. `comment(names)` builds the wiki text from the names Jira stored.
  * Never throws.

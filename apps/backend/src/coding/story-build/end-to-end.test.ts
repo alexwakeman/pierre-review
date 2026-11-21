@@ -190,6 +190,65 @@ describe('the ticket step', () => {
     expect(wiki).not.toMatch(/(^|[^\\])\[~accountid:123\]/);
   });
 
+  describe('the build’s screenshots, in the same comment', () => {
+    const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9]);
+    const withShot = async (): Promise<number> => {
+      const id = await openedBuild({ endToEnd: true });
+      const S = await import('./screens.js');
+      await S.storeBuildScreens(ctx, {
+        accountId: 1,
+        buildId: id,
+        read: async () => PNG,
+        screens: [{ name: 'Refunds [~admin]', shots: ['/home/agent/.limn/browser/r-1280.png'], verdict: 'matches', comparedWith: 'the mock-up', note: 'Same spacing.' }],
+      });
+      return id;
+    };
+    const withScreens = (f: ReturnType<typeof fakeDeps>, upload: (a: any) => Promise<any>): EndToEndDeps => ({
+      ...f.deps,
+      screenshots: async (c, a, id) => (await import('./screens.js')).screensForTicketStep(c, a, id, upload, () => Date.parse('2026-11-12T12:00:00Z')),
+    });
+
+    it('uploaded first, shown inline in the ONE comment; the button can no longer post them', async () => {
+      const id = await withShot();
+      const uploads: any[] = [];
+      const f = fakeDeps();
+      const r = await E.runEndToEndTicketStep(ctx, 1, id, withScreens(f, async (a) => (uploads.push(a), { ok: true, names: a.shots.map((s: any) => s.name) })));
+      expect(uploads).toHaveLength(1);
+      expect(uploads[0].shots.map((s: any) => s.name)).toEqual([`ensemble-${id}-1.png`]);
+      expect(f.comments).toHaveLength(1);
+      const wiki: string = f.comments[0].wiki;
+      expect(wiki).toContain('*Screenshots*');
+      expect(wiki).toContain('*Refunds admin*: the agent says it matches, compared with the mock-up.');
+      expect(wiki).toContain(`!ensemble-${id}-1.png|thumbnail!`);
+      expect(wiki).not.toMatch(/Ensemble|Limn/);
+      expect(r).toMatchObject({ commented: true, screenshots: 1, error: null });
+      expect(f.notices).toEqual(['Ensemble updated the ticket and commented on it with 1 screenshot.']);
+      const row = await P.getStoryBuildRow(ctx, 1, id);
+      expect(row?.screensTicketJson).toMatchObject({ postedAt: expect.any(String), attachments: 1 });
+      const S = await import('./screens.js');
+      expect(await S.postBuildScreensToTicket(ctx, 1, id, { post: async () => ({ ok: true, attachments: 1 }), now: () => 0 })).toMatchObject({ status: 409 });
+    });
+
+    it('an upload that wrote nothing: the comment still goes, without them, and the button can still post them', async () => {
+      const id = await withShot();
+      const f = fakeDeps();
+      const r = await E.runEndToEndTicketStep(ctx, 1, id, withScreens(f, async () => ({ ok: false, status: 502, error: 'JiraError', message: 'Jira refused the file.', wrote: false })));
+      expect(f.comments[0].wiki).not.toContain('*Screenshots*');
+      expect(r).toMatchObject({ commented: true, error: 'Jira refused the file.' });
+      expect(r?.screenshots).toBeUndefined();
+      expect((await P.getStoryBuildRow(ctx, 1, id))?.screensTicketJson).toBeNull();
+    });
+
+    it('uploaded but the comment failed: recorded, never tried again', async () => {
+      const id = await withShot();
+      const f = fakeDeps();
+      const deps = withScreens(f, async (a) => ({ ok: true, names: a.shots.map((s: any) => s.name) }));
+      deps.comment = async () => ({ ok: false, message: 'Jira did not answer.' });
+      await E.runEndToEndTicketStep(ctx, 1, id, deps);
+      expect((await P.getStoryBuildRow(ctx, 1, id))?.screensTicketJson).toMatchObject({ error: expect.stringContaining('could not be posted') });
+    });
+  });
+
   it('never touches an ordinary build', async () => {
     const id = await openedBuild({ endToEnd: false });
     const f = fakeDeps();

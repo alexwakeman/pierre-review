@@ -901,6 +901,8 @@ export interface StoryBuildEndToEndTicket {
   skipped?: 'not_jira' | null;
   /** The plain sentence of the first write that failed; null when every write succeeded. */
   error?: string | null;
+  /** The build's screenshots added to the ticket with the comment (0 / absent: none). */
+  screenshots?: number;
 }
 
 /** The start body's one-click option, and its fixed settings. */
