@@ -432,12 +432,13 @@ export interface ToStoryBuildOpts {
   sessionBudgetUsd: number;
 }
 
-/** "Post screenshots to the ticket" on the wire: offered for a Jira ticket whose build has screenshots. */
+/** "Post screenshots to the ticket" on the wire: offered for a Jira or Linear ticket whose build has screenshots. */
 export function screensTicketOf(row: Pick<StoryBuildRow, 'ident' | 'screensJson' | 'screensTicketJson'>): StoryBuildScreensTicket {
   const st = row.screensTicketJson ?? null;
   const hasShots = (row.screensJson ?? []).some((s) => s.shots.length > 0);
   return {
-    offered: row.ident.startsWith('jira:') && hasShots,
+    // Jira and Linear (coding/story-build/screens.ts `screensPostable`).
+    offered: (row.ident.startsWith('jira:') || row.ident.startsWith('linear:')) && hasShots,
     postedAt: st?.postedAt ?? null,
     attachments: st?.attachments ?? null,
     error: st?.error ?? null,
