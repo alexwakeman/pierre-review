@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.73] - 2026-11-22
+
 ### Added
 
 - Implement story: **Post screenshots to** the ticket now works with Linear tickets too: the screenshots and one
