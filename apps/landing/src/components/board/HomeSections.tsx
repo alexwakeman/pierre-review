@@ -49,7 +49,7 @@ export function HowItWorks(): JSX.Element {
 const ENSEMBLE_POINTS: { h: string; p: string }[] = [
   {
     h: 'Your plan, no bot seat',
-    p: 'Reviews run on your own Claude or Codex. Nothing to buy, nothing to host.',
+    p: 'Reviews run on your own Claude or Codex. No review-bot seat, nothing to host; you pay only your own AI usage.',
   },
   {
     h: 'Checked against the ticket',

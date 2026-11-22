@@ -11,17 +11,17 @@ export default function Page(): JSX.Element {
     <>
       <p>
         The <Ui>Dependencies</Ui> tab decides what Ensemble does with the pull requests that Dependabot, Renovate and other
-        dependency bots open in the current workspace. Every switch is on until you turn it off, and each change saves
+        dependency bots open in the current workspace. Every switch is off until you turn it on, and each change saves
         at once. This page lists the settings; how the automation behaves day to day is in{' '}
         <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
       </p>
 
       <H2 id="what-ensemble-can-do">What Ensemble can do</H2>
-      <Illustration label="The four dependency switches, all on." caption="The four actions. All start on.">
-        <SettingsRow label="Merge them automatically" hint="Once their required checks pass." control={<Toggle on />} />
-        <SettingsRow label="Approve them automatically" hint="Once CI passes, as you. Trusted bots only." control={<Toggle on />} />
-        <SettingsRow label="Resolve their conflicts" hint="Asks the bot to rebase. Trusted bots only." control={<Toggle on />} />
-        <SettingsRow label="Fix them with AI" hint="When CI fails, AI fixes the branch and pushes." control={<Toggle on />} />
+      <Illustration label="The four dependency switches, all off." caption="The four actions. All start off.">
+        <SettingsRow label="Merge them automatically" hint="Once their required checks pass." control={<Toggle on={false} />} />
+        <SettingsRow label="Approve them automatically" hint="Once CI passes, as you. Trusted bots only." control={<Toggle on={false} />} />
+        <SettingsRow label="Resolve their conflicts" hint="Asks the bot to rebase. Trusted bots only." control={<Toggle on={false} />} />
+        <SettingsRow label="Fix them with AI" hint="When CI fails, AI fixes the branch and pushes." control={<Toggle on={false} />} />
       </Illustration>
       <ul>
         <li>

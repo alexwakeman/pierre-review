@@ -17,6 +17,8 @@ no internals.
 
 - A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
   priced by how many people use Ensemble.
+- A security and trust page for security and procurement reviewers: where your data goes, what the AI
+  agents can do, what happens without a click, and how to report a security problem.
 
 ### Fixed
 
@@ -25,6 +27,8 @@ no internals.
 
 ### Changed
 
+- The site and README no longer say there is nothing to buy or that setup takes one minute: your own AI
+  usage is billed by your provider, and builds and fixes need a container runtime.
 - Settings → Dependencies: every switch (merge, approve, resolve conflicts, fix with AI) is now off until
   you switch it on. Workspaces where nobody changed these settings are switched off; a workspace whose
   dependency settings someone saved keeps them.

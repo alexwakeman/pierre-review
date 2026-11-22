@@ -1,9 +1,10 @@
 # Ensemble (`ensemble-review`)
 
-A **local dashboard for tracking your team's GitHub PR activity** across
-multiple repositories. Run it on your machine, see at a glance who's doing what,
-which PRs are stalled, which review threads are sitting untouched, and what needs
-_your_ attention right now — all rendered as an interactive timeline.
+**From ticket to merged pull request, on your own machine. You press the button.**
+Ensemble checks a ticket against your docs and code, implements it in a sandbox,
+reviews the change with Claude and Codex, fixes what they find and brings it to a
+merge, on your own AI account. It also shows your team's pull requests across every
+GitHub repository: what is waiting on you, what is stuck and what can land now.
 
 There's no hosted backend, no database server, and no stored credentials. It
 authenticates by shelling out to your already-logged-in `gh` CLI, syncs activity

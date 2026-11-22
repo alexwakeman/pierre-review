@@ -15,6 +15,7 @@ import Automation from './pages/Automation';
 import EverythingElse from './pages/EverythingElse';
 import Contact from './pages/Contact';
 import Pricing from './pages/Pricing';
+import Trust from './pages/Trust';
 import About from './pages/About';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
@@ -31,6 +32,8 @@ const ROUTES: Record<string, () => JSX.Element> = {
   // Contact. Also where a licence is asked for when it cannot be bought on /pricing.
   '/contact': Contact,
   '/pricing': Pricing,
+  // Security and trust: the summary a security or procurement reviewer reads.
+  '/trust': Trust,
   // About: what Ensemble is, and the plain statement on running Claude on a plan login.
   '/about': About,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and

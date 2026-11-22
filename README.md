@@ -1,11 +1,13 @@
 # Ensemble (`ensemble-review`)
 
-**The calm layer above your review bot.** Bring your own reviewer — CodeRabbit,
-Greptile, Copilot, whatever you run — and Ensemble becomes the cross-repo triage
-layer *above* it: what's stalled, whose turn it is, and which of the bot's comments
-a human still needs to read. A single-page dashboard for a whole team's GitHub
-activity across many repos: a horizontal timeline per repo, member sub-lanes, and
-drill-down into PRs and review threads (read them in-app).
+**From ticket to merged pull request, on your own machine. You press the button.**
+Ensemble checks a ticket against your docs and code, implements it in a sandbox,
+reviews the change with Claude and Codex, fixes what they find and brings it to a
+merge, on your own AI account. It also shows your team's pull requests across every
+GitHub repository: what is waiting on you, what is stuck and what can land now.
+
+Already run a review bot (CodeRabbit, Greptile, Copilot, …)? Ensemble sits above it:
+which of the bot's comments were acted on and which a person still needs to read.
 
 Third-party review-bot output (CodeRabbit · Greptile · Copilot · Qodo · Sourcery)
 is a **first-class, triaged signal**, not generic noise: bot threads a later commit

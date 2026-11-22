@@ -33,9 +33,9 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS EIGHT CONTENT PAGES plus the three legal ones (and the docs, whose
+ * THE SITE IS NINE CONTENT PAGES plus the three legal ones (and the docs, whose
  * routes come from the docs manifest): home, Build, Ensemble review, Automation,
- * Everything else, Pricing, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
+ * Everything else, Pricing, Security and trust, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
  * /reporting and /how-we-measure 301 to their sections of /everything-else.) The earlier feature-area pages (/features, /bots, /pro,
  * /how-it-works, /arcade) and then the two role pages (/for-developers,
  * /for-managers) were retired; their URLs survive as aliases. The Getting started
@@ -76,6 +76,10 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/pricing': {
     title: `Pricing — free for up to ${FREE_TEAM_SIZE} people, then one licence a year · ${SITE_NAME}`,
     description: `${SITE_NAME} is free for individuals and for organisations where no more than ${FREE_TEAM_SIZE} people use it. Above that, one licence a year for the organisation, from ${formatGbp(LOWEST_PRICE_GBP)} plus VAT, priced by how many people use it. Your AI usage is billed by your own provider.`,
+  },
+  '/trust': {
+    title: `Security and trust · ${SITE_NAME}`,
+    description: `${SITE_NAME} runs on your own computers and sends nothing to its maker. Where your data goes, what the AI agents can do, what happens without a click, and how to report a security problem.`,
   },
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,
