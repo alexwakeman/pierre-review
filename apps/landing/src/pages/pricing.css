@@ -1,0 +1,102 @@
+/* ===========================================================================
+   "Pricing" (pages/Pricing.tsx). Layout only; tokens, tiles, pigments and buttons
+   come from src/board.css. Every rule is scoped under `.lb.pricing`.
+
+   CLASSES
+     header   .p-head > .p-name (h1, .p-lead)
+     bands    .p-bands > .tile (.k, h2 + .per, ul, .cmd) · .madder.p-more
+     facts    .p-facts > .tile (h2, ul.p-list | p)
+     vendor   .p-vendor > .tile
+   =========================================================================== */
+
+.lb.pricing h2 {
+  font-size: clamp(28px, 2.6vw, 40px);
+  line-height: 1.05;
+  margin: 8px 0 14px;
+}
+.lb.pricing code {
+  overflow-wrap: anywhere;
+}
+.lb.pricing .tile a:not(.btn) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.lb.pricing .p-name {
+  grid-column: 1 / -1;
+  padding: 40px;
+}
+.lb.pricing .p-name h1 {
+  font-size: clamp(36px, 4.4vw, 64px);
+  line-height: 1.02;
+  text-wrap: balance;
+  margin: 0 0 18px;
+}
+.lb.pricing .p-lead {
+  font-size: 18px;
+  max-width: 60ch;
+}
+
+.lb.pricing .p-bands > .tile {
+  grid-column: span 3;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+}
+.lb.pricing .p-bands .per {
+  font-size: 16px;
+  font-weight: 400;
+}
+.lb.pricing .p-bands ul,
+.lb.pricing .p-list {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+}
+.lb.pricing .p-bands li,
+.lb.pricing .p-list li {
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 16px;
+}
+.lb.pricing .p-bands .gold li {
+  border-color: rgba(18, 17, 16, 0.18);
+}
+.lb.pricing .p-bands .cmd {
+  margin-top: auto;
+}
+.lb.pricing .lapis .btn.alt {
+  background: transparent;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 2px var(--ink);
+}
+.lb.pricing .lapis .btn.alt:hover {
+  background: rgba(241, 241, 239, 0.1);
+}
+
+.lb.pricing .p-bands > .p-more {
+  grid-column: 1 / -1;
+}
+.lb.pricing .p-facts > .tile {
+  grid-column: span 4;
+  padding: 28px;
+}
+.lb.pricing .p-vendor > .tile {
+  grid-column: 1 / -1;
+  padding: 28px;
+}
+
+@media (max-width: 1100px) {
+  .lb.pricing .p-bands > .tile {
+    grid-column: span 6;
+  }
+}
+@media (max-width: 720px) {
+  .lb.pricing .p-name,
+  .lb.pricing .p-bands > .tile,
+  .lb.pricing .p-facts > .tile {
+    grid-column: 1 / -1;
+    padding: 24px;
+  }
+}

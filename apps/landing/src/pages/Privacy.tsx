@@ -56,7 +56,7 @@ export default function Privacy(): JSX.Element {
     >
       <LegalSection id="controller" heading="1. Who is responsible">
         <P>
-          The data controller is <T>{LEGAL_CONTROLLER}</T>, a sole trader based in the United
+          The data controller is <T>{LEGAL_CONTROLLER}</T>, a company registered in the United
           Kingdom, contactable at <Mail />. The same person who wrote the code answers the
           email.
         </P>

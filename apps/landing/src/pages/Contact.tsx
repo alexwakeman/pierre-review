@@ -11,17 +11,13 @@ import './contact.css';
 //
 // Ensemble is free for individuals, and for organisations where no more than FREE_TEAM_SIZE
 // people use it (the Ensemble License at the repository root). More users than that need a
-// commercial licence, and there is no checkout: it starts
-// with a message here. So the first sentence says who this page is for, and the
+// commercial licence: /pricing has the prices, and a licence that cannot be bought there
+// (no checkout yet, more than the largest band, a purchase order) starts with a message here. So the first sentence says who this page is for, and the
 // form opens on the licence topic when the visitor arrives from a licence link
 // (`?topic=licence`).
 //
 // NO PHONE NUMBER, NO ADDRESS, NO "our team". It is one person answering, the
 // page says so, and that is the most useful true thing on it.
-//
-// /pricing RESOLVES TO THIS PAGE (App.tsx and prerender.mjs): somebody asking what it
-// costs finds the answer in the first two lines — nothing, unless more than
-// FREE_TEAM_SIZE people in the organisation use it.
 //
 // Drawn in the home page's board style (src/board.css); page-only layout and the
 // form's styles live in ./contact.css, scoped under `.lb.contact`.
@@ -39,8 +35,8 @@ export default function Contact(): JSX.Element {
           <h1 id="c-h1">More than {FREE_TEAM_SIZE} users? Ask for a licence here.</h1>
           <p className="c-lead">
             {SITE_NAME} is free for individuals, and for organisations where no more than{' '}
-            {FREE_TEAM_SIZE} people use it. More users than that need a licence. Send a message and we will sort one out. Questions and bug
-            reports are welcome here too.
+            {FREE_TEAM_SIZE} people use it. More users than that need a licence: the prices are on the <a href="/pricing">pricing page</a>. Send
+            a message to ask for one. Questions and bug reports are welcome here too.
           </p>
           <p className="btns">
             <a className="btn" href={LICENSE_URL}>
@@ -125,7 +121,7 @@ export default function Contact(): JSX.Element {
           <p>
             {SITE_NAME} runs only on your machine. It reads GitHub through your{' '}
             <code>gh</code> login and keeps its data in a file on your
-            disk. There is no account and nothing to pay.
+            disk. There is no account, and it is free for up to {FREE_TEAM_SIZE} people.
           </p>
           <p>
             Nothing is sent to us. We run no server for the app, and it has no tracking. Your
@@ -136,18 +132,18 @@ export default function Contact(): JSX.Element {
             <code>{INSTALL_COMMAND}</code>
           </p>
           <p className="btns">
-            <a className="btn" href="/contact?topic=licence">
+            <a className="btn" href="/pricing">
               More than {FREE_TEAM_SIZE} users in your organisation? →
             </a>
           </p>
         </div>
         <div className="tile c-facts rise">
           <ul className="c-list">
-            <li>100% free. No sign-in, no card, no repository limit.</li>
+            <li>Every feature, free for up to {FREE_TEAM_SIZE} people. No sign-in, no card, no repository limit.</li>
             <li>Runs only on your machine. No data is sent to our servers.</li>
             <li>
               Available only from npm: <code>{INSTALL_COMMAND}</code>.
-              Needs Node 20 or later.
+              Needs Node 22 or later.
             </li>
             <li>
               Runs on your own AI agent tooling. Reviews and fixes use your Anthropic API key
@@ -155,8 +151,7 @@ export default function Contact(): JSX.Element {
             </li>
             <li>
               Free for individuals, and for organisations where no more than {FREE_TEAM_SIZE}{' '}
-              people use it. More users than that need a licence —{' '}
-              <a href="/contact?topic=licence">ask through the contact form</a>.
+              people use it. More users than that need a licence — <a href="/pricing">see the prices</a>.
             </li>
           </ul>
         </div>

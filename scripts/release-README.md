@@ -9,8 +9,8 @@ There's no hosted backend, no database server, and no stored credentials. It
 authenticates by shelling out to your already-logged-in `gh` CLI, syncs activity
 into a local SQLite file, and serves the dashboard from a single local process.
 
-**100% free.** Every feature, no paid tier, no sign-up (see [License](#license)
-for the one limit, on large organisations).
+**Every feature, free for up to 3 people**, with no sign-up. Larger organisations
+buy one licence a year (see [License](#license)).
 
 > **Renamed.** This package used to be `limn-review` (and before that
 > `pierre-review`). The command is now `ensemble`; both old packages only forward
@@ -167,8 +167,9 @@ detail then works fully offline.
 
 Source-available under the **Ensemble License 1.0** — see [LICENSE](./LICENSE).
 Ensemble is free for individuals, and for organisations where no more than 3 people
-use it (affiliates count together). More users than that need a licence — ask
-through the [contact form](https://ensemble.ac/contact?topic=licence). You may
+use it (affiliates count together). More users than that need a licence: one a
+year for the organisation, from £600 plus VAT, priced by how many people use it —
+see [pricing](https://ensemble.ac/pricing). You may
 **not** offer Ensemble, or a product built from it, as a competing commercial
 product or service.
 The AI runtimes Ensemble downloads on first use (Anthropic's Claude Agent SDK and

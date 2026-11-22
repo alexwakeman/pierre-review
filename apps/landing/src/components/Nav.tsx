@@ -28,11 +28,12 @@ const NAV_LINKS = [
   { to: '/docs', label: 'Docs' },
   // Contact is in the header, not only the footer, because it is how an organisation
   // with more than three people gets a licence — a path in a footer is one nobody takes.
+  { to: '/pricing', label: 'Pricing' },
   { to: '/contact', label: 'Contact' },
 ];
 
 // The legacy aliases render a surviving page (App.tsx), so the header has to light up
-// the link that page belongs to — otherwise a visitor on /pricing sees a page with no
+// the link that page belongs to — otherwise a visitor on /insights sees a page with no
 // nav item marked.
 //
 // ⚠ THIS TABLE MUST TRACK THE ALIASES IN App.tsx. It previously mapped /insights and
@@ -45,7 +46,6 @@ const ALIAS_OF: Record<string, string> = {
   '/pro': '/everything-else',
   '/insights': '/everything-else',
   '/reviews': '/everything-else',
-  '/pricing': '/contact',
 };
 
 function isActive(path: string, to: string): boolean {

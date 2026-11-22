@@ -1,4 +1,5 @@
 import { FREE_TEAM_SIZE, NPM_PACKAGE, SITE_NAME } from './site';
+import { LOWEST_PRICE_GBP, formatGbp } from './licence';
 
 // The landing site's route table and its per-route SEO copy — ONE source of truth,
 // read by two consumers that must never disagree:
@@ -32,10 +33,10 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS SEVEN CONTENT PAGES plus the three legal ones (and the docs, whose
+ * THE SITE IS EIGHT CONTENT PAGES plus the three legal ones (and the docs, whose
  * routes come from the docs manifest): home, Build, Ensemble review, Automation,
- * Everything else, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
- * /reporting and /how-we-measure 301 to their sections of /everything-else.) The earlier feature-area pages (/features, /bots, /pro, /pricing,
+ * Everything else, Pricing, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
+ * /reporting and /how-we-measure 301 to their sections of /everything-else.) The earlier feature-area pages (/features, /bots, /pro,
  * /how-it-works, /arcade) and then the two role pages (/for-developers,
  * /for-managers) were retired; their URLs survive as aliases. The Getting started
  * page was folded into the docs (/docs/getting-started/…): /getting-started,
@@ -71,6 +72,10 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/everything-else': {
     title: `Everything else — open pull requests, reports and how we measure · ${SITE_NAME}`,
     description: `The rest of ${SITE_NAME}: every open pull request grouped by its ticket, reports per sprint or month, Chronology, what your review bots are worth, and the two models behind the numbers. It runs on your own machine.`,
+  },
+  '/pricing': {
+    title: `Pricing — free for up to ${FREE_TEAM_SIZE} people, then one licence a year · ${SITE_NAME}`,
+    description: `${SITE_NAME} is free for individuals and for organisations where no more than ${FREE_TEAM_SIZE} people use it. Above that, one licence a year for the organisation, from ${formatGbp(LOWEST_PRICE_GBP)} plus VAT, priced by how many people use it. Your AI usage is billed by your own provider.`,
   },
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,

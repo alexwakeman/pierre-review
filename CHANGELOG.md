@@ -13,10 +13,15 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
+  priced by how many people use Ensemble.
+
 ### Fixed
 
 - Terms, the npm page and the README: they now say that AI Fix and Implement story run commands in a
-  sandbox, and where your data goes.
+  sandbox, and where your data goes. Ensemble is now made by Corevo Systems Limited.
 
 ### Changed
 

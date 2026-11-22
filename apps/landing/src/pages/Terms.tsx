@@ -64,7 +64,7 @@ export default function Terms(): JSX.Element {
     >
       <LegalSection id="who" heading="1. Who you are dealing with">
         <P>
-          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, a sole trader in the United
+          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, a company registered in the United
           Kingdom, contactable at <Mail />. These terms are governed by the laws of England
           and Wales, and the courts of England and Wales have exclusive jurisdiction.
         </P>

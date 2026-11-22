@@ -14,6 +14,7 @@ import EnsembleReview from './pages/EnsembleReview';
 import Automation from './pages/Automation';
 import EverythingElse from './pages/EverythingElse';
 import Contact from './pages/Contact';
+import Pricing from './pages/Pricing';
 import About from './pages/About';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
@@ -27,9 +28,9 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/ensemble-review': EnsembleReview,
   '/automation': Automation,
   '/everything-else': EverythingElse,
-  // Contact. Also where an organisation with more than three people asks for a
-  // licence, which is why /pricing aliases to it below.
+  // Contact. Also where a licence is asked for when it cannot be bought on /pricing.
   '/contact': Contact,
+  '/pricing': Pricing,
   // About: what Ensemble is, and the plain statement on running Claude on a plan login.
   '/about': About,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and
@@ -46,9 +47,6 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/how-it-works': EverythingElse,
   '/bots': EverythingElse,
   '/pro': EverythingElse,
-  // /pricing goes to CONTACT: its first two lines say what it costs (nothing, unless
-  // the organisation has more than three users) and how to get a licence.
-  '/pricing': Contact,
   '/insights': EverythingElse,
   '/reviews': EverythingElse,
 };

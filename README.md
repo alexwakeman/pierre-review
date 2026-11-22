@@ -211,8 +211,10 @@ Ensemble is **source-available** under the [Ensemble License 1.0](./LICENSE).
 - **Free** for individuals, and for any team or organisation where **3 people or
   fewer** use it. You may use, copy and change it.
 - **More than 3 people** in one organisation (affiliates count together) need a
-  commercial licence — ask through the
-  [contact form](https://ensemble.ac/contact).
+  commercial licence: one a year for the organisation, £600 for 4–10 people, £1,200
+  for 11–25, £2,400 for 26–50, plus VAT where it applies; above 50, ask. See
+  [pricing](https://ensemble.ac/pricing). Your AI usage is billed by your own
+  provider, not included. Licences are sold by Corevo Systems Limited.
 - You may **not** offer Ensemble, or a product built from it, as a competing
   commercial product or service.
 - Copies you pass on must keep the licence and copyright notice.
