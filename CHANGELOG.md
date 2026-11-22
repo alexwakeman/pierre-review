@@ -280,15 +280,15 @@ no internals.
 - This Sprint → Releases: the candidate is now the tag just below the oldest tag that can't be released, because
   releasing a tag ships everything below it. A tag whose own tickets are Complete says which older tag holds it
   back. Before your first release the whole history is checked, and a candidate shows once it has all been read.
-- This Sprint → Releases: every reason names the ticket's title beside its number, for example "BMD-1061
-  “Send the report” is In Code Review".
+- This Sprint → Releases: every reason names the ticket's title beside its number, for example "PAY-1061
+  “Export statements” is In Code Review".
 - This Sprint → Releases: Refresh shows a progress bar saying what it reads.
 - This Sprint → Releases: a cancelled ticket, such as "Won't Do", no longer stops a release. It is listed with a
   tick and gets no comment.
 - This Sprint → Releases: the repositories are picked together. A Complete ticket with work in several tags or
   repositories is released whole or not at all, and the tag that would ship part of it says what it would
   ship without and the ticket that is really holding things up, for example "… which waits on
-  bng-metric-frontend 0.341.0: BMD-1061 is In Code Review".
+  web 0.341.0: PAY-1061 is In Code Review".
 - Release notes for a first release list everything up to the tag.
 - This Sprint → Releases is now a list of tickets, newest tag first, with one card per ticket even when its work is
   in several repositories. It opens on the newest ticket in the release candidates, with "Show 3 later tickets"
@@ -385,10 +385,10 @@ no internals.
 - This Sprint → Releases: the candidate is now the newest tag whose tickets are Complete with no pull request
   still open. It checks from the newest tag down and stops at the first one that qualifies. After a release, a
   tag's tickets are everything merged since that release; before the first release, only what the tag itself
-  added. Each newer tag says why it does not qualify, for example "BMD-1048 is In PO Review" or "BMD-1050 has
+  added. Each newer tag says why it does not qualify, for example "PAY-1048 is In PO Review" or "PAY-1050 has
   an open pull request in web (#812)".
 - This Sprint → Releases: a ticket the tracker cannot find no longer holds the release back. It is listed under
-  its tag, "BMD-123 not found", for you to check, and so are pull requests with no ticket.
+  its tag, "PAY-123 not found", for you to check, and so are pull requests with no ticket.
 - Release notes before the first release list only the tag's own stories and say "Earlier changes are not
   listed."
 
@@ -433,7 +433,7 @@ no internals.
 - This Sprint → Releases: only a Complete ticket is Done. A cancelled ticket ("Won't do") now holds a tag back like
   any other unfinished ticket.
 - This Sprint → Releases: one row per repository: "Release 0.388.0 → 0.388.0-rc" (with the latest version tag
-  beside it when different), or "No tag can be released: the oldest tag, 0.12.0, already contains BMD-127 (In
+  beside it when different), or "No tag can be released: the oldest tag, 0.12.0, already contains PAY-127 (In
   Progress)". Open a row to see every tag after the candidate and why each one is held back. The separate tickets
   list is gone.
 

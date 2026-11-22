@@ -31,7 +31,7 @@ export default function Page(): JSX.Element {
         A repository with no version tags is released from its merged pull requests instead. Each pull request merged
         into the default branch stands in for a tag, and the same rules pick the newest one that can be released: every
         pull request merged since the last release, up to it, has its tickets Complete with no pull request still open.
-        The strip reads &ldquo;Up to #539 &ldquo;Edit an area&rdquo; → 2026.11.19-rc&rdquo;.
+        The strip reads &ldquo;Up to #539 &ldquo;Refund a payment&rdquo; → 2026.11.19-rc&rdquo;.
       </p>
       <p>
         Release… tags that pull request&rsquo;s commit with the day&rsquo;s date and your release suffix
@@ -90,7 +90,7 @@ export default function Page(): JSX.Element {
         <Ui>Show 3 earlier tickets</Ui> add more each way.
       </p>
       <p>
-        The ★ card names the candidate of each repository, for example &ldquo;bng-metric-backend 0.316.0 →
+        The ★ card names the candidate of each repository, for example &ldquo;payments 0.316.0 →
         0.316.0-rc&rdquo;, the release tag a release would create, the candidate&rsquo;s commit (select it to open it on
         GitHub) and its date, and &ldquo;Latest 0.418.0&rdquo; when a newer tag can&rsquo;t be released yet. One{' '}
         <Ui>Release…</Ui> button releases them together.
@@ -107,8 +107,8 @@ export default function Page(): JSX.Element {
       </ul>
       <p>
         A card shows the ticket&rsquo;s status, its latest tag in each repository, and one line. On a card that is not
-        in the candidates, the line says what it waits on, for example &ldquo;Waits on BMD-1061: In Code Review&rdquo;.
-        Select <Ui>Show BMD-1061</Ui> to go to that ticket. On a card in the candidates, the line says what was done, for
+        in the candidates, the line says what it waits on, for example &ldquo;Waits on PAY-1061: In Code Review&rdquo;.
+        Select <Ui>Show PAY-1061</Ui> to go to that ticket. On a card in the candidates, the line says what was done, for
         example &ldquo;9 PRs, last merged 23 Oct by robin&rdquo;.
       </p>
       <p>
@@ -158,7 +158,7 @@ export default function Page(): JSX.Element {
         <li>
           A Complete ticket with work in more than one tag is released whole or not at all. If part of it is above a
           candidate, in any repository you release, the tags holding the rest can&rsquo;t be released either, for
-          example &ldquo;BMD-1048 &ldquo;Edit an area&rdquo; would ship without bng-metric-backend #539 (in
+          example &ldquo;PAY-1048 &ldquo;Refund a payment&rdquo; would ship without payments #539 (in
           0.326.0)&rdquo;.
         </li>
         <li>Commits with no pull request are noted on their tag.</li>
