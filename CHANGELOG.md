@@ -15,8 +15,14 @@ no internals.
 
 ### Fixed
 
-- Terms and the npm page: they now say that AI Fix and Implement story run commands in a sandbox, where
-  your data goes, and that Dependabot and Renovate updates are approved and merged by default.
+- Terms and the npm page: they now say that AI Fix and Implement story run commands in a sandbox, and
+  where your data goes.
+
+### Changed
+
+- Settings → Dependencies: every switch (merge, approve, resolve conflicts, fix with AI) is now off until
+  you switch it on. Workspaces where nobody changed these settings are switched off; a workspace whose
+  dependency settings someone saved keeps them.
 
 ## [1.0.72] - 2026-11-21
 

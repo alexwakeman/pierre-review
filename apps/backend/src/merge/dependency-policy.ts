@@ -5,8 +5,8 @@
 //   • "Merge or arm all" on Pending → Dependencies (`runDependencyMergeAll`, a click): every
 //     listed dependency-automation PR the account can push to is merged now when GitHub says it
 //     can land, otherwise armed "merge when ready" through the ordinary consent-anchored watcher.
-//   • "Merge dependency updates automatically" (`workspaces.dependency_auto_merge`, ON by
-//     default since migration 0193 — NULL reads ON, off is an explicit false; `runDependencyPolicyTick`): the server arms those PRs itself, pinned to their
+//   • "Merge dependency updates automatically" (`workspaces.dependency_auto_merge`, OFF until
+//     switched on — opt-in since migration 0216, NULL reads OFF; `runDependencyPolicyTick`): the server arms those PRs itself, pinned to their
 //     current head, marked `armedByPolicy`. The watcher (merge/auto-merge-runner.ts) lands a
 //     policy intent exactly as it lands a click's: once the REQUIRED checks pass ('clean' /
 //     'has_hooks' / 'unstable' — a red OPTIONAL check never blocks it).
@@ -27,7 +27,7 @@
 // ⚠ A PERSON'S CANCEL WINS FOR EVER: the DELETE route records the PR in `auto_merge_policy_skips`
 // and the sweep never arms a PR with a row there.
 import type { FastifyBaseLogger } from 'fastify';
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type {
   AutomatedReviewerKind,
   DependencyMergeItem,
@@ -94,8 +94,8 @@ export async function getDependencyAutoMerge(
   return row ? { enabled: dependencySwitchOn(row.on) } : null;
 }
 
-/** The ONE writer. ⚠ Off is stored as an explicit false: NULL reads ON (migration 0193). false = no
- *  such workspace. */
+/** The ONE writer. Off is stored as an explicit false; NULL also reads OFF (opt-in, migration 0216).
+ *  false = no such workspace. */
 export async function setDependencyAutoMerge(
   accountId: number,
   workspaceId: number,
@@ -427,8 +427,8 @@ export async function runDependencyPolicyTick(log: FastifyBaseLogger): Promise<v
         ecosystems: workspaces.dependencyEcosystems,
       })
       .from(workspaces)
-      // ON BY DEFAULT: NULL is on (migration 0193); only an explicit false is off.
-      .where(or(isNull(workspaces.dependencyAutoMerge), eq(workspaces.dependencyAutoMerge, true)))
+      // OPT-IN (migration 0216): only an explicit true is on.
+      .where(eq(workspaces.dependencyAutoMerge, true))
       .execute();
     for (const ws of roster) {
       if (budget <= 0) break;

@@ -993,7 +993,7 @@ workspace's bot maps, the same resolution the Dependencies tab's membership read
   ⚠ ALWAYS GitHub's merge-in update, never the local clone rebase — a force-push onto a Dependabot /
   Renovate branch makes the bot stop maintaining it (same as the policy sweep). Outcomes come back per PR and land as
   ONE card in the toast cluster; the SPA refetches through `invalidateAfterPrWrite`.
-- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, NULL = ON since migration 0193, off = an explicit false, Settings →
+- **"Merge them automatically"** (`workspaces.dependency_auto_merge`, OPT-IN: NULL = OFF since migration 0216 (0193 had made NULL read ON), off = an explicit false, Settings →
   Dependencies; a draft + Save like every other section — ticking the box writes nothing). The
   panel's POLICY (§ Dependency automation, below) gates it like the other two switches.
   `runDependencyPolicyTick` runs on the watcher's cron just before it
@@ -1040,10 +1040,12 @@ probe stamped.
 ### Dependency automation (`merge/dependency-automation.ts` + pure `merge/dependency-rules.ts`, CORE)
 
 **Settings → Dependencies** (`DependencyAutomationSection`, its own tab; it used to be one checkbox
-under Bots) holds, per workspace and ⚠ EVERY ONE ON BY DEFAULT (owner's decision 2026-11-14, migration
-0193: the existing NULLs were set to 1 — including workspaces whose NULL meant "switched off" — and from
-then on NULL reads ON (`dependencySwitchOn`, `!== false`; the merge sweep's roster reads `IS NULL OR = 1`)
-and OFF is stored as an explicit false by the two writers): merge (above), **approve**,
+under Bots) holds, per workspace and ⚠ EVERY ONE OFF UNTIL SWITCHED ON (owner's decision 2026-11-22, migration
+0216, reversing 0193's ON-by-default of 2026-11-14: NULL reads OFF (`dependencySwitchOn`, `=== true`;
+the merge sweep's roster reads `= 1`). 0216 reset every switch to NULL in workspaces with no
+`dependency_automation` / `dependency_auto_merge` row in `workspace_setting_events` — i.e. where 0193's
+1s were never chosen — and kept the values of every workspace someone saved. OFF is still stored as an
+explicit false by the two writers): merge (above), **approve**,
 **resolve conflicts** and **fix with AI** (2026-11-03, `workspaces.dependency_auto_fix`, migration
 0162; shown only where agentic AI runs — and, stored on while the AI is off, it does NOTHING: it
 counts toward the conflict steps only while the AI can run), plus ONE **policy** that gates all four, plus the **trusted
@@ -1475,11 +1477,11 @@ shorter form of each rule; this is the full wording.
 
 ### Dependency auto-merge
 
-- **Dependency auto-merge** (`merge/dependency-policy.ts`): ON by default (NULL = on, off stored false); a policy intent merges
+- **Dependency auto-merge** (`merge/dependency-policy.ts`): OPT-IN (NULL = off, migration 0216); a policy intent merges
   like a click; a person's cancel is never overridden; red CI backs off after ONE live-proven
   failure (`checks_failed`).
 - **Dependency automation** (`merge/dependency-automation.ts`, Settings → Dependencies): approve +
-  resolve conflicts + fix with AI, ON by default, TRUSTED bots only (the stored mark; untouched =
+  resolve conflicts + fix with AI, OPT-IN (off until switched on), TRUSTED bots only (the stored mark; untouched =
   dependabot[bot] / renovate[bot]); one policy gates every switch; claim before write (DB + the
   ledgered `ensemble/deps` team line, reconciled), never retried; ≤ 2
   AI runs per PR per 24 h; an AI-pushed head must be green again; "Merged" is logged only on a landing.

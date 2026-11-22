@@ -13,14 +13,15 @@ export default function Page(): JSX.Element {
         Dependabot, Renovate and other dependency bots open a steady stream of small pull requests. Dependency
         automation lets Ensemble handle them for you, by rules you set per workspace: merge them when their checks pass,
         approve them, ask the bot to rebase when they conflict, and, with AI on, fix them when CI fails. Everything is
-        on until you switch it off, for Dependabot and Renovate; any other bot waits until you trust it.
+        off until you switch it on. Dependabot and Renovate are trusted by default; any other bot waits until you
+        trust it.
       </p>
 
 
       <H2 id="switch-it-on">Choose what it does</H2>
       <Illustration
         label="The Dependency updates section of Settings: Merge them automatically on, Approve them automatically on, Resolve their conflicts on, Fix them with AI on"
-        caption="Settings → Dependencies, for one workspace."
+        caption="Settings → Dependencies, for one workspace, with every switch on."
       >
         <SettingsRow
           label="Merge them automatically"
@@ -37,9 +38,9 @@ export default function Page(): JSX.Element {
           workspace you have selected.
         </li>
         <li>
-          Switch off any action you don&rsquo;t want: <Ui>Merge them automatically</Ui>,{' '}
+          Switch on the actions you want: <Ui>Merge them automatically</Ui>,{' '}
           <Ui>Approve them automatically</Ui>, <Ui>Resolve their conflicts</Ui> and, while AI is on,{' '}
-          <Ui>Fix them with AI</Ui>. All four start on.
+          <Ui>Fix them with AI</Ui>. All four start off.
         </li>
         <li>
           Under <Ui>Which updates</Ui>, choose <Ui>Patch updates only</Ui>, <Ui>Patch and minor updates</Ui> or{' '}

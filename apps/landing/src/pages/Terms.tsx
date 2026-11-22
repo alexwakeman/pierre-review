@@ -194,11 +194,8 @@ export default function Terms(): JSX.Element {
             untrusted, never as an instruction from you.
           </li>
           <li>
-            <T>Nothing pushed without you, with one exception.</T> Nothing is posted to GitHub or
-            pushed until you press the button, unless you switch on an automatic setting yourself.
-            The exception is dependency updates: {SITE_NAME} approves and merges pull requests from
-            Dependabot and Renovate once their checks pass, unless you switch that off in Settings →
-            Dependencies.
+            <T>Nothing pushed without you.</T> Nothing is posted to GitHub or pushed until you
+            press the button, unless you switch on an automatic setting yourself.
           </li>
         </UL>
         <P>

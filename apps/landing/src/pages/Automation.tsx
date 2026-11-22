@@ -89,7 +89,7 @@ export default function Automation(): JSX.Element {
         <div className="tile lapis bd-facts">
           <Marks
             items={[
-              <>On by default, in every workspace. Switch any part off in Settings → Dependencies.</>,
+              <>Off until you switch it on, per workspace, in Settings → Dependencies.</>,
               'Dependabot and Renovate are trusted by default. Any other bot you trust by hand.',
               'It acts only in repositories you can push to.',
             ]}

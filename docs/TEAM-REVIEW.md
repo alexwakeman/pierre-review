@@ -208,8 +208,8 @@ stateDiagram-v2
 
 ### Dependency updates (2026-11-14)
 
-Settings → Dependencies is **on by default** in every workspace: merge, approve, resolve conflicts and fix
-with AI, for Dependabot and Renovate (trusted by default; any other bot is trusted by hand, and an
+Settings → Dependencies is **off until switched on** (opt-in since 2026-11-22, migration 0216; it was on
+by default from 2026-11-14): merge, approve, resolve conflicts and fix with AI, for Dependabot and Renovate (trusted by default; any other bot is trusted by hand, and an
 untick wins). So when two people run Ensemble on the same repos, both would act on the same bot PR. They
 share it the way auto reviews share a commit, with one more status line on the PR's head, `ensemble/deps`
 (engineering detail: [MERGE-CI-TRUNK.md](MERGE-CI-TRUNK.md) § Team claims for dependency work).

@@ -186,17 +186,17 @@ beforeEach(async () => {
 });
 
 describe('the panel', () => {
-  it('is ON by default (NULL reads ON), lists only dependency bots, and 404s a foreign workspace', async () => {
+  it('is OFF by default (NULL reads OFF, opt-in), lists only dependency bots, and 404s a foreign workspace', async () => {
     const ws = schema.workspaces;
     const nulls = { dependencyAutoMerge: null, dependencyAutoApprove: null, dependencyAutoResolve: null, dependencyAutoFix: null };
     await db.update(ws).set(nulls).where(eq(ws.id, wsId)).execute();
     await db.update(schema.workspaceReviewers).set({ dependencyTrusted: null }).execute();
     const got = await auto.getDependencyAutomation(A, wsId);
     expect(got.settings).toEqual({
-      autoMerge: true,
-      autoApprove: true,
-      autoResolveConflicts: true,
-      autoFix: true,
+      autoMerge: false,
+      autoApprove: false,
+      autoResolveConflicts: false,
+      autoFix: false,
       policy: { maxLevel: 'major', securityOnly: false, ecosystems: null },
     });
     // Untouched trust: dependabot[bot] and renovate[bot] are trusted; any other bot is not.

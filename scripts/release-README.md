@@ -56,9 +56,7 @@ Codex instead (below).
   virtual machine on your computer) with no GitHub credentials. They need a
   container runtime such as Docker, Colima or Podman.
 - Nothing is posted or pushed until you press the button, unless you switch on an
-  automatic setting. One exception is on by default: Ensemble approves and merges
-  Dependabot and Renovate pull requests once their checks pass. Switch it off in
-  **Settings → Dependencies**.
+  automatic setting yourself.
 - Untick **Use my API keys first** (Settings → AI), or set
   `ENSEMBLE_AI_USE_API_KEY=false`, to use your Claude Code login even when
   `ANTHROPIC_API_KEY` is set.

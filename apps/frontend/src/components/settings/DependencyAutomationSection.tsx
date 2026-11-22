@@ -18,7 +18,7 @@ import { SaveState, useAutoSave, useEchoGuard } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 // SETTINGS → DEPENDENCIES (CORE, free). Everything the server does to dependency updates in THIS
-// workspace, every switch ON by default since 2026-11-14 (off is stored; docs/MERGE-CI-TRUNK.md §
+// workspace, every switch OFF until switched on (opt-in since 2026-11-22; docs/MERGE-CI-TRUNK.md §
 // Dependency automation):
 //   • merge them once their required checks pass (`dependency_auto_merge`, the older switch);
 //   • approve them once CI passes — trusted bots only;

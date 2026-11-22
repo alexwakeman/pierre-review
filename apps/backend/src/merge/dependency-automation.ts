@@ -1,7 +1,7 @@
 // ── DEPENDENCY AUTOMATION: APPROVE, RESOLVE CONFLICTS, FIX WITH AI (CORE, free) ─────────────────
 //
 // docs/MERGE-CI-TRUNK.md § Dependency automation. Settings → Dependencies holds, per workspace and
-// every one ON by default (2026-11-14, migration 0193: NULL reads ON, off is an explicit false):
+// every one OFF until switched on (opt-in since 2026-11-22, migration 0216: NULL reads OFF):
 // "merge" (merge/dependency-policy.ts, the older switch), "approve",
 // "resolve conflicts" and "fix with AI" (this file), and ONE policy (size, security-only,
 // ecosystems) that gates them all. The decisions are pure and tested in merge/dependency-rules.ts;
@@ -199,7 +199,7 @@ type SettingsRow = {
 };
 
 function settingsOf(row: SettingsRow): DependencyAutomationSettings {
-  // ON BY DEFAULT (migration 0193): NULL is on, only an explicit false is off.
+  // OPT-IN (migration 0216): only an explicit true is on.
   return {
     autoMerge: dependencySwitchOn(row.autoMerge),
     autoApprove: dependencySwitchOn(row.autoApprove),
@@ -268,8 +268,8 @@ export async function getDependencyAutomation(
 
 /**
  * THE ONE WRITER of the panel. Only what the patch names changes. `autoMerge` goes through the
- * older setting's own writer (it records its own history line). ⚠ OFF IS STORED AS false: NULL reads
- * ON (migration 0193). `trustedBotIds` is the FULL trusted set among the workspace's dependency bots:
+ * older setting's own writer (it records its own history line). Off is stored as false; NULL also
+ * reads OFF (opt-in, migration 0216). `trustedBotIds` is the FULL trusted set among the workspace's dependency bots:
  * listed ones become trusted, the rest untrusted — both stored EXPLICITLY, so an untick of a default
  * trusted bot (dependabot[bot], renovate[bot]) wins; a bot whose resolved trust does not change is not
  * written. An id that is not one of them is ignored. false = no such workspace.

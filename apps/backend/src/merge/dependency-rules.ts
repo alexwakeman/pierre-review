@@ -11,7 +11,7 @@
 //   • IS THE AUTHOR TRUSTED — `isTrustedDependencyBot`: the STORED bot row (automated, role
 //     `dependency`, and the reader's trust mark, `dependencyTrustedOf`: an untouched mark trusts
 //     dependabot[bot] and renovate[bot] only). The stored judgement first; the login only for the default.
-//   • IS A SWITCH ON — `dependencySwitchOn`: NULL is ON (migration 0193), only false is OFF.
+//   • IS A SWITCH ON — `dependencySwitchOn`: OPT-IN (migration 0216), only true is ON; NULL is OFF.
 //   • HOW TO ASK IT TO REBASE — `rebaseRequestFor`, by the STORED vendor kind.
 //   • WHAT TO DO ABOUT A CONFLICT — `conflictStep`: ask the bot once per head, wait, then AI (an
 //     unattended AI Fix session with the merge item; `dependencyConflictInstruction`, or — the PR is red
@@ -246,9 +246,9 @@ export function isTrustedDependencyBot(row: StoredBotRow | null | undefined): bo
   );
 }
 
-/** A dependency switch's stored value, read (migration 0193): NULL = ON (the default), only an
- *  explicit false is OFF. */
-export const dependencySwitchOn = (stored: boolean | null | undefined): boolean => stored !== false;
+/** A dependency switch's stored value, read (migration 0216): OPT-IN. Only an explicit true is ON;
+ *  NULL (never set) and false are OFF. */
+export const dependencySwitchOn = (stored: boolean | null | undefined): boolean => stored === true;
 
 // ── Asking the bot to rebase ─────────────────────────────────────────────────────────────────
 
