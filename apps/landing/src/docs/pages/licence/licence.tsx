@@ -57,7 +57,7 @@ export default function Page(): JSX.Element {
         £1,200 for 11 to 25 and £2,400 for 26 to 50, plus VAT where it applies. Above 50, ask. See the{' '}
         <a className="dx-link" href="/pricing">pricing page</a>, or ask through the{' '}
         <a className="dx-link" href="/contact">contact form</a>. Your AI usage is not included: your AI provider bills
-        you for it as usual.
+        you for it as usual. In the app, <b>Settings → Licence</b> says who needs a licence.
       </p>
 
       <H2 id="what-you-may-do">What you may do</H2>

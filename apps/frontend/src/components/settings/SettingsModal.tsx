@@ -14,6 +14,7 @@ import { AppearanceSection } from './AppearanceSection.js';
 import { ClaudeSpendSection, CLAUDE_SPEND_SECTION_HEADING_ID } from './ClaudeSpendSection.js';
 import { AiProviderSection, AI_SECTION_HEADING_ID } from './AiProviderSection.js';
 import { DiskSpaceSection } from './DiskSpaceSection.js';
+import { LicenceSection } from './LicenceSection.js';
 import { PendingMuteSection } from './PendingMuteSection.js';
 import { DependencyAutomationSection } from './DependencyAutomationSection.js';
 import { SonarSection } from './SonarSection.js';
@@ -112,6 +113,7 @@ const SECTIONS: Record<string, () => JSX.Element | null> = {
   ToolsSection,
   BotClassificationSection,
   DependencyAutomationSection,
+  LicenceSection,
 };
 
 function renderSections(names: readonly string[]): (JSX.Element | null)[] {

@@ -29,7 +29,8 @@ export type SettingsTabId =
   | 'reports'
   | 'releases'
   | 'integrations'
-  | 'bots';
+  | 'bots'
+  | 'licence';
 
 export interface SettingsTabDef {
   id: SettingsTabId;
@@ -121,6 +122,8 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     // Every bot in the workspace with its category (it was Bots Monitoring → Classification).
     workspace: ['BotClassificationSection'],
   },
+  // WHO NEEDS A LICENCE (the Ensemble License): the app's only statement of it, last in the list.
+  { id: 'licence', label: 'Licence', summary: 'Who needs a licence', global: ['LicenceSection'], workspace: [] },
 ];
 
 /** The tabs on screen: the AI ones only where agentic AI runs. */

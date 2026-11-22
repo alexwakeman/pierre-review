@@ -17,6 +17,7 @@ no internals.
 
 - A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
   priced by how many people use Ensemble.
+- Settings → Licence: says who may use Ensemble free and who needs a licence, with a link to the prices.
 - A security and trust page for security and procurement reviewers: where your data goes, what the AI
   agents can do, what happens without a click, and how to report a security problem.
 
