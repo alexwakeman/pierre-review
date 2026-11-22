@@ -15,8 +15,8 @@ no internals.
 
 ### Fixed
 
-- Terms and the npm page: they now say that AI Fix and Implement story run commands in a sandbox, and
-  where your data goes.
+- Terms, the npm page and the README: they now say that AI Fix and Implement story run commands in a
+  sandbox, and where your data goes.
 
 ### Changed
 
