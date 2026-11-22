@@ -13,6 +13,11 @@ no internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- Terms and the npm page: they now say that AI Fix and Implement story run commands in a sandbox, where
+  your data goes, and that Dependabot and Renovate updates are approved and merged by default.
+
 ## [1.0.72] - 2026-11-21
 
 ### Added

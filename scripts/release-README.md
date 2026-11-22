@@ -34,14 +34,14 @@ npm install -g ensemble-review
 ensemble
 ```
 
-## Review and fix with Claude — free, on your own Claude
+## Review and fix with Claude or Codex, on your own account
 
 Claude Review (a code review of any PR, follow-ups, a check against a user
-story you paste, and a chat about the review) and AI Fix are free. By default
-they use your local Claude Code login: if you are signed in to Claude Code,
-there is nothing to set up. An Anthropic API key is the alternative: set
-`ANTHROPIC_API_KEY`. Ensemble stores no key and charges nothing for it. They can
-run on Codex instead (below).
+story, and a chat about the review), AI Fix and Implement story run on your own
+AI account. Ensemble charges nothing for them; your AI provider bills you for the
+usage as usual. By default they use `ANTHROPIC_API_KEY` when it is set, and your
+local Claude Code login when it is not. Ensemble stores no key. They can run on
+Codex instead (below).
 
 - **Claude and Codex work out of the box.** The first time Ensemble starts, it
   downloads both in the background (Claude about 110 MB, Codex about 360 MB
@@ -52,10 +52,16 @@ run on Codex instead (below).
 - Set `ENSEMBLE_CLAUDE_PATH` to the `claude` you already have to use it instead of
   the bundled copy (the download then skips it).
 - The reviewer reads code. It cannot edit files, run commands or reach the web.
-- The fixer edits files. It has no shell, and builds and tests nothing.
-- Nothing is posted or pushed until you press the button.
-- **Use my API keys first** (Settings → AI), or `ENSEMBLE_AI_USE_API_KEY=true`, uses
-  `ANTHROPIC_API_KEY` even when you are signed in to Claude Code.
+- AI Fix and Implement story run commands, but only in a sandbox (a container or
+  virtual machine on your computer) with no GitHub credentials. They need a
+  container runtime such as Docker, Colima or Podman.
+- Nothing is posted or pushed until you press the button, unless you switch on an
+  automatic setting. One exception is on by default: Ensemble approves and merges
+  Dependabot and Renovate pull requests once their checks pass. Switch it off in
+  **Settings → Dependencies**.
+- Untick **Use my API keys first** (Settings → AI), or set
+  `ENSEMBLE_AI_USE_API_KEY=false`, to use your Claude Code login even when
+  `ANTHROPIC_API_KEY` is set.
 - `ENSEMBLE_AI_DISABLED=true` turns every AI feature off.
 
 ### Codex instead of Claude
@@ -82,7 +88,7 @@ with an OpenAI API key is not available yet.
 
 ## Prerequisites
 
-- **Node.js ≥ 20** (with npm).
+- **Node.js ≥ 22** (with npm).
 - **GitHub CLI**, installed and authenticated. Install it from
   <https://cli.github.com>, then run:
 
@@ -113,7 +119,7 @@ ensemble ai install
 | `--port <n>` | `PORT` | `4000` | Port to listen on. |
 | `--db <path>` | `DATABASE_URL` | `~/.ensemble/pierre-review.sqlite` | SQLite DB path. |
 | — | `ENSEMBLE_DATA_DIR` | `~/.ensemble` | Where Ensemble keeps its data. |
-| — | `PERSIST_BODIES` | `false` | Store full comment/PR text in the DB instead of loading it on demand (larger DB, but PR detail works fully offline). |
+| — | `PERSIST_BODIES` | `false` | Also store PR descriptions, diff hunks and commit messages instead of loading them on demand (larger DB, but PR detail works fully offline). |
 | `-h`, `--help` | — | — | Show usage. |
 
 Examples:
@@ -134,8 +140,10 @@ Everything Ensemble keeps lives in `~/.ensemble`:
 ```
 
 The directory is created automatically. Override it with `ENSEMBLE_DATA_DIR`, or
-just the database with `--db` / `DATABASE_URL`. No team activity data or
-credentials are ever sent anywhere — everything stays on your machine.
+just the database with `--db` / `DATABASE_URL`. Ensemble sends nothing to its
+author. Your data goes only to GitHub, and, when you use those features, to your AI
+provider (Anthropic or OpenAI) under your own account and to the issue tracker,
+Slack or SonarCloud you connect.
 
 ## How it works
 
@@ -150,11 +158,12 @@ repo belongs to exactly one workspace; new ones land in **Default** (renameable,
 deletable), and you can create more and move repos between them from *Manage repos &
 workspaces*.
 
-To keep the database small and backfills fast, bulky text — PR/comment/review
-bodies and diff hunks — isn't stored; it's fetched from GitHub (using your `gh`
+To keep the database small and backfills fast, bulky text (PR descriptions, diff
+hunks and commit messages) isn't stored; it's fetched from GitHub (using your `gh`
 token) the first time you open a PR and cached in your browser, so re-opening an
-unchanged PR is instant and offline. Set `PERSIST_BODIES=true` to store that text
-locally instead — a larger database, but PR detail then works fully offline.
+unchanged PR is instant and offline. Comment and review text is always stored. Set
+`PERSIST_BODIES=true` to store the rest locally too: a larger database, but PR
+detail then works fully offline.
 
 ## License
 
@@ -164,5 +173,6 @@ use it (affiliates count together). More users than that need a licence — ask
 through the [contact form](https://ensemble.ac/contact?topic=licence). You may
 **not** offer Ensemble, or a product built from it, as a competing commercial
 product or service.
-The AI runtime Ensemble downloads on first use is Anthropic's, under Anthropic's own
-terms; it is not part of this package.
+The AI runtimes Ensemble downloads on first use (Anthropic's Claude Agent SDK and
+OpenAI's Codex CLI) are under their makers' own terms; they are not part of this
+package.
