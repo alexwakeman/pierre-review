@@ -6328,3 +6328,36 @@ export const workspaceReleaseRepos = sqliteTable(
     }).onDelete('cascade'),
   }),
 );
+
+// "EXPLAIN WHAT'S BLOCKING" (migration 0217; docs/RELEASES.md § Explain what's blocking). ONE row per
+// (account, workspace): the last report a reader's press wrote over the release check, the hash of the
+// input it was written from (stale = the check's input hash differs now; no clock in the hash), and what
+// ran. Written and read only by db/release-blocker-reports.ts. Tenancy via the named composite FK onto
+// `workspaces (id, account_id)`. ⚠ Every `onConflictDoUpdate` targets exactly [accountId, workspaceId].
+export const releaseBlockerReports = sqliteTable(
+  'release_blocker_reports',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    /** Shared `ReleaseBlockersReport` minus its run facts (those are the columns below). */
+    reportJson: text('report_json', { mode: 'json' }).$type<unknown>().notNull(),
+    model: text('model'),
+    provider: text('provider'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    writtenAt: integer('written_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('release_blocker_reports_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'release_blocker_reports_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);

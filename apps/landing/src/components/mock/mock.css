@@ -822,6 +822,16 @@
   border-radius: 8px;
   padding: 10px;
 }
+.lb .rp-releases .box.blockers p {
+  margin: 0;
+}
+.lb .rp-releases .box.blockers ol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
 .lb .rp-releases .box.apart {
   margin-top: 18px;
 }

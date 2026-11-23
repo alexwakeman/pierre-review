@@ -24,6 +24,7 @@ import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { FOCUS_RING } from '../ui/cx.js';
 import { SprintProgressBar } from '../Activity/SprintProgressBar.js';
+import { ReleaseBlockersPanel } from './ReleaseBlockersPanel.js';
 import { ReleaseDetailModal, ReleaseDialog } from './ReleaseDialog.js';
 import {
   latestReleaseLine,
@@ -53,6 +54,7 @@ import {
   ticketCardPrLines,
   ticketCardStatus,
   ticketList,
+  ticketMergedWords,
   ticketWindow,
   type NoTicketGroup,
   type ReleaseHolder,
@@ -67,7 +69,9 @@ import {
 //   • A line per releasable repo with NO candidate (no version tags, nothing new, none can be released, or
 //     "Checking…" with a bar and ONE line). The candidates are on the candidate ticket.
 //   • THE TICKET LIST (releaseTicketsModel.ts), in its own bordered box: ONE list of ticket cards in tag order,
-//     newest first, opened on the candidate ticket (★) with one either side, "Show 3 later / earlier tickets".
+//     newest first, opened on the candidate ticket (★) with one either side, "Show next 3 of 7" /
+//     "Show previous 3 of 7" (no total while older tags are unread); each card carries its newest merge date
+//     ("merged 2 Nov").
 //     The ★ card names each repository's candidate and its commit (the HEAD that would be released) and has
 //     ONE "Release…" for all of them (SHOWN only with a candidate the reader can push — hidden, never
 //     disabled). PRs with no ticket are narrow rows between the cards; bot PRs are left out of their lists
@@ -75,9 +79,11 @@ import {
 //     latest tag per repository and ONE line; its PRs and tags open behind the arrow.
 //   • Below it, apart in a second bordered box: "Not in a tag yet" (tickets with only open work) and "Holding
 //     the release" (always shown).
+//   • "What's blocking" (ReleaseBlockersPanel.tsx, AI on only): above the list, the last "Explain what's
+//     blocking" report (it arrives with the GET; nothing runs unless the reader presses).
 //
 // ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB + memory only); it POLLS that same GET every ~3 s only
-// while a repo is checking or its older tags are read (hooks/useReleases.ts). "Show earlier tickets" past
+// while a repo is checking or its older tags are read (hooks/useReleases.ts). "Read earlier tags" past
 // what the server sent is a press (POST /api/releases/older-tags); a card's detail is in the check already
 // (no fetch on open). Refresh (a press) reads the tickets not Complete, not read yet or not found again
 // from the tracker (POST /api/releases/refresh).
@@ -132,7 +138,7 @@ export function ReleasesView(): JSX.Element | null {
             Releasing a tag ships everything below it. So the candidate is the newest version tag on main where that tag
             and every tag below it have all their tickets Complete, with no pull request still open for any of them in a
             released repository. Before the first release every tag on main counts; after a release, only the tags since
-            it. The repositories are picked together: no Complete ticket is released with only part of its work.
+            it. The repositories are picked together: no Complete ticket is released with its work in one repository but not another.
           </p>
           <p>
             A repository with no version tags is released from its merged pull requests instead: each pull request
@@ -181,6 +187,8 @@ export function ReleasesView(): JSX.Element | null {
           </ul>
         </section>
       )}
+
+      <ReleaseBlockersPanel workspaceId={workspaceId} state={data.blockers} check={check} />
 
       <TicketListView check={check} workspaceId={workspaceId} onRelease={() => setDialogOpen(true)} />
 
@@ -345,7 +353,7 @@ function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheck
         {w.moreDown > 0 ? (
           <MoreButton onClick={() => setDown((n) => n + TICKET_WINDOW_STEP)} testId="release-show-earlier">
             <ChevronIcon dir="down" size={11} className="shrink-0" />
-            {showTicketsWords('earlier', w.moreDown)}
+            {showTicketsWords('earlier', w.moreDown, olderToAsk.length === 0)}
           </MoreButton>
         ) : (
           olderToAsk.length > 0 &&
@@ -450,6 +458,7 @@ function TicketCard({
   const t = card.ticket;
   const line = ticketCardLine(card, ctx);
   const status = ticketCardStatus(t);
+  const merged = ticketMergedWords(card);
   const missing = card.mark === 'missing';
   const box = `min-w-0 flex-1 rounded-ui border ${
     card.isAnchor ? 'border-ui-accent bg-ui-raise' : missing ? 'border-dashed border-ui-line bg-transparent' : 'border-ui-line bg-ui-surface'
@@ -487,6 +496,11 @@ function TicketCard({
           <span className={`shrink-0 font-medium ${missing ? 'text-ui-mute' : 'text-ui-ink'}`}>{t.key}</span>
           <span className={`min-w-0 truncate ${missing ? 'italic text-ui-mute' : 'text-ui-ink'}`}>{t.title ?? (missing ? 'No title — not in the tracker’s data' : '')}</span>
           {status != null && <span className="shrink-0 text-meta text-ui-mute">· {status}</span>}
+          {merged != null && (
+            <span className="shrink-0 text-meta text-ui-mute" data-testid="release-ticket-merged">
+              · {merged}
+            </span>
+          )}
           <ChevronIcon dir={open ? 'down' : 'right'} size={11} className="ml-auto shrink-0 text-ui-mute" />
         </div>
         <div className={`flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta ${railed ? '' : 'pl-[18px]'}`}>

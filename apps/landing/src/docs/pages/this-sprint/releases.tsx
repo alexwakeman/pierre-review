@@ -17,7 +17,7 @@ export default function Page(): JSX.Element {
         <strong>candidate</strong> is the newest version tag on the default branch where that tag and every tag below it
         have all their tickets Complete, with no pull request still open for any of them. That is the tag just below
         the oldest tag that can&rsquo;t be released. The repositories are picked together, so no ticket is released
-        with only part of its work. Check what the tab
+        with its work in one repository but not another. Check what the tab
         lists, then one press tags every candidate as a release, publishes the release notes and comments on each
         ticket.
       </p>
@@ -86,8 +86,9 @@ export default function Page(): JSX.Element {
       <p>
         Below the repositories is one list of tickets for all of them, newest tag first. A ticket with work in two
         repositories is one card. It sits where its latest tag sits, in either repository. The list opens on the newest
-        ticket in the release candidates, marked ★, with one ticket either side. <Ui>Show 3 later tickets</Ui> and{' '}
-        <Ui>Show 3 earlier tickets</Ui> add more each way.
+        ticket in the release candidates, marked ★, with one ticket either side. <Ui>Show next 3 of 7</Ui> and{' '}
+        <Ui>Show previous 3 of 12</Ui> add three more each way. The second number is how many are still hidden that
+        way. While older tags are not read yet, the button below says only <Ui>Show previous 3</Ui>.
       </p>
       <p>
         The ★ card names the candidate of each repository, for example &ldquo;payments 0.316.0 →
@@ -106,10 +107,11 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        A card shows the ticket&rsquo;s status, its latest tag in each repository, and one line. On a card that is not
+        A card shows the ticket&rsquo;s status, the day its last pull request was merged (&ldquo;merged 23
+        Oct&rdquo;), its latest tag in each repository, and one line. On a card that is not
         in the candidates, the line says what it waits on, for example &ldquo;Waits on PAY-1061: In Code Review&rdquo;.
         Select <Ui>Show PAY-1061</Ui> to go to that ticket. On a card in the candidates, the line says what was done, for
-        example &ldquo;9 PRs, last merged 23 Oct by robin&rdquo;.
+        example &ldquo;9 PRs, the last by robin&rdquo;.
       </p>
       <p>
         Below the list, in a separate box, <Ui>Not in a tag yet</Ui> lists tickets whose only work is an open pull
@@ -135,6 +137,20 @@ export default function Page(): JSX.Element {
         limit and waits when the limit is low.
       </p>
 
+      <H2 id="whats-blocking">Explain what&rsquo;s blocking</H2>
+      <p>
+        With AI on, and a newer tag that can&rsquo;t be released, <Ui>Explain what&rsquo;s blocking</Ui> sits above the
+        ticket list. Press it and Claude (or Codex) reads the check on this tab and writes a short report: one line on
+        what holds back the newest release you could reach soon, the steps to take in order, each with what it unlocks
+        and links to its tickets and pull requests, and one line per repository on why its newer tags are blocked.
+      </p>
+      <p>
+        It reads nothing else and changes nothing. It may name only tickets and pull requests that are in the check: a
+        step that names anything else is left out, and the report says so. The report stays until you press{' '}
+        <Ui>Explain again</Ui>. It reads <Ui>Out of date</Ui> when the check has changed since it was written. It runs
+        only when you press the button, on your own AI subscription or key.
+      </p>
+
       <H2 id="the-rules">The rules</H2>
       <ul>
         <li>
@@ -156,10 +172,11 @@ export default function Page(): JSX.Element {
           and in the notes under untracked or dependency and bot changes.
         </li>
         <li>
-          A Complete ticket with work in more than one tag is released whole or not at all. If part of it is above a
-          candidate, in any repository you release, the tags holding the rest can&rsquo;t be released either, for
-          example &ldquo;PAY-1048 &ldquo;Refund a payment&rdquo; would ship without payments #539 (in
-          0.326.0)&rdquo;.
+          A Complete ticket with work in more than one repository is released whole or not at all. If its work in
+          one repository is above that repository&rsquo;s candidate, the tags holding its work in the other
+          repositories can&rsquo;t be released either, for example &ldquo;PAY-1048 &ldquo;Refund a payment&rdquo;
+          would ship without payments #539 (in 0.326.0)&rdquo;. Later work on a ticket in the same repository never
+          holds back its earlier tags: it goes out in a later release.
         </li>
         <li>Commits with no pull request are noted on their tag.</li>
         <li>Pull requests into a hotfix branch never count.</li>

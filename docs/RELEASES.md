@@ -102,9 +102,9 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    (BNG backend, 2026-11-16: 0.324.0 holds BMD-1061 In Code Review, so the candidate is 0.323.0 although
    0.415.0–0.418.0 are clear on their own).
 6. **PICKED TOGETHER (owner, 2026-11-16): no Complete ticket ships half.** After every repository's walk, a
-   ticket with merged work at or below one repository's candidate AND merged work above a candidate — in any
-   releasable repository, the same one included; "not in a tag yet" (merged after the newest tag) and a
-   repository with no candidate count as above — blocks the tags holding it in each repository where part of
+   ticket with merged work at or below one repository's candidate AND merged work above ANOTHER releasable
+   repository's candidate — "not in a tag yet" (merged after the newest tag) and a repository with no
+   candidate count as above — blocks the tags holding it in each repository where part of
    it would ship: "BMD-1048 “Edit an AREA” would ship without bng-metric-backend #539 (in 0.326.0), which waits
    on bng-metric-backend 0.324.0: BMD-1061 “…” is In Code Review." The reason always ends at the ROOT CAUSE —
    the tag holding a ticket not Complete or with an open PR, followed through earlier splits (`root`), never
@@ -113,7 +113,12 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    run again until nothing changes (candidates only move down). A repository still checking, or with no
    version tags, takes no part yet. Cancelled and not-found tickets never block, so they are never split.
    (BNG, 2026-11-16: backend 0.316.0, frontend 0.328.0 — BMD-1048, BMD-1083 and BMD-1086 had work on both
-   sides.)
+   sides.) **NEVER WITHIN ONE REPOSITORY (owner, 2026-11-23):** later work on a Complete ticket in the SAME
+   repository (in a later tag or not in a tag yet) is the next increment, never a split — releasing a tag
+   ships everything below it, and the earlier part already stood alone on `main`. (BNG, 2026-11-23: BMD-887
+   had bng-library #28 (3 Aug) and #129 (3 Nov); counting that as a split dropped bng-library below #28 and,
+   through the cross-repository tickets below it, every repository back to late June. Cross-repository only:
+   bng-library #118, backend 0.316.0, frontend 0.328.0.)
 
 - **Tickets the tracker could not give do NOT block** (not found, no access, failed past the retry limit,
   a tracker that cannot read at all). A "not found" or "no access" that comes AFTER an older successful
@@ -174,17 +179,17 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    bng-library   No version tags on main yet
    ┌───────────────────────────────────────────────────────────────────────────────────────────┐
    │ ☐ Show PRs with no ticket                                                                 │
-   │ ⌃ Show 3 later tickets
-   ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done                ›
+   │ ⌃ Show next 3 of 7
+   ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done · merged 4 Nov ›
        bng-metric-backend 0.326.0   Waits on BMD-1061: In Code Review   Show BMD-1061
      › 14 PRs with no ticket · 13 by bots
-   ★ BMD-1082 NEW TEMPLATE: Support the new data structure … · Done                            ›
-       bng-metric-backend 0.316.0   9 PRs, last merged 23 Oct by robin-dunn
+   ★ BMD-1082 NEW TEMPLATE: Support the new data structure … · Done · merged 23 Oct            ›
+       bng-metric-backend 0.316.0   9 PRs, the last by robin-dunn
        bng-metric-backend  0.316.0 → 0.316.0-rc · e18c3b2 · 23 Oct · Latest 0.418.0
        bng-metric-frontend 0.328.0 → 0.328.0-rc · 1e3249f · 27 Oct · Latest 0.420.0   [Release…]
      › 14 PRs with no ticket · 12 by bots
-   ✓ BMD-1028 Trading Summary Page - Hedgerows · Done                                           ›
-   │ ⌄ Show 3 earlier tickets                                                                  │
+   ✓ BMD-1028 Trading Summary Page - Hedgerows · Done · merged 21 Oct                           ›
+   │ ⌄ Show previous 3 of 12                                                                   │
    └───────────────────────────────────────────────────────────────────────────────────────────┘
 
    ┌─ (apart, at the bottom) ──────────────────────────────────────────────────────────────────┐
@@ -199,8 +204,11 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    - **Order** (`ticketList`): a ticket sits where its LATEST TAG sits — the newest tag, in any releasable
      repository, holding its merged work (tags of different repositories by commit date, `tagAt`).
    - **The window** (`ticketWindow`): it opens on THE CANDIDATE TICKET (★) — the newest ticket all of whose work
-     is in the release candidates — with ONE ticket either side; "Show 3 later tickets" / "Show 3 earlier
-     tickets" add 3 (component state). Past the tickets sent, "Read earlier tags" asks the server for more.
+     is in the release candidates — with ONE ticket either side; "Show next 3 of 7" (above) / "Show previous 3
+     of 12" (below) add 3 (component state), the second figure being the tickets still hidden that way
+     ("Show next 2 of 2" when fewer are left). While a repository has older tags the server has not read
+     (`older.moreAvailable`), the total below is NOT KNOWN and is not given: "Show previous 3". Past the
+     tickets sent, "Read earlier tags" asks the server for more.
    - **Holding the release** (`releaseHolders`, always shown, in the box BELOW the list): the ticket that stops the tag
      just above each repository's candidate — a split followed to its ROOT — once, naming the repositories it
      holds ("Holds back bng-metric-backend and bng-metric-frontend").
@@ -208,10 +216,12 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
      tagged work AND an open PR stays in the list; its line names the open PR.
    - **The card** is simple: the mark (✓ in the candidates · ✗ RED not Complete or an open PR · ⊘ AMBER Complete
      but held back · ? the tracker could not give it — a DASHED card, "Not found in Jira — check it by hand",
-     never a block · a part-circle not read yet), key, title, the tracker's status, the latest tag per
-     repository, and ONE line: what it WAITS ON ("Waits on BMD-1061: In Code Review", with "Show BMD-1061"
-     scrolling to the holder; never another held ticket), or for a ✓ card what was DONE ("9 PRs, last merged
-     23 Oct by robin-dunn"). Every PR and tag is behind the arrow: "Type · Assignee · Jira status read 5 hours
+     never a block · a part-circle not read yet), key, title, the tracker's status, the date its LAST PR
+     was merged ("merged 23 Oct", the newest `mergedAt` over its merged PRs in the releasable repos — the same
+     `ticketLatest` fold that orders the list; nothing when none is merged), the latest tag per repository,
+     and ONE line: what it WAITS ON ("Waits on BMD-1061: In Code Review", with "Show BMD-1061"
+     scrolling to the holder; never another held ticket), or for a ✓ card what was DONE ("9 PRs, the last by
+     robin-dunn"; its date is on the card). Every PR and tag is behind the arrow: "Type · Assignee · Jira status read 5 hours
      ago", "Open in Jira", "Story", and each PR (open first, then merged newest first: "merged 23 Oct ·
      robin-dunn · in 0.316.0", "not in a tag yet", OPEN), each opening its PR tab or GitHub. Nothing is fetched
      to open it.
@@ -247,6 +257,34 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
 > Approved for release by <reader's display name> on 14 Nov 2026.
 > api v2.4.0-rc · web v1.8.2-rc
 > Release notes: <link to the GitHub pre-release>
+
+## Explain what's blocking (owner, 2026-11-23)
+
+An AGENTIC report on the Releases tab, for action: which in-flight work (tickets and pull requests, named)
+unlocks which newer release, why each repository's newer tags are blocked, and the order to do things in.
+
+- **The panel** ("What's blocking", `Sprint/ReleaseBlockersPanel.tsx`) sits above the ticket list. It is VISIBLE
+  only while `me.ai.enabled` and GET /api/releases carries `blockers` with a report or `explainable` (the check is
+  decided — no repository checking — and some repository with a candidate or none has a newer tag that does not
+  qualify). The button "Explain what's blocking" ("Explain again" once a report exists) shows only while
+  `explainable` (HIDE, never disable), inside `AiRunGate kind="complete"`; its explanation is behind the ⓘ.
+- **Nothing runs on its own and nothing fetches on mount**: the stored report rides GET /api/releases (ONE fetch
+  on mount stays true); "Out of date" when the input hash differs from the one the report was written from.
+- **ONE completion per press** (`POST /api/releases/blockers`, docs/CLAUDE-REVIEW.md § Release blockers) over
+  the check the server already folded — no GitHub or tracker read. The input (`releases/blockers-input.ts`,
+  pure): per repository the last release, what can be released now, the newest tag, and the blocked newer tags
+  OLDEST FIRST with their OWN reasons and the CUMULATIVE "Needs before it can be released" (a newer tag's
+  reasons are whole, so this is every ticket to finish first; a split is followed to its ROOT; a split whose
+  other half is in no tag yet needs a new version tag); tags with no reason of their own are folded into a
+  count (≤ 15 listed per repository, plus the newest); the tickets holding a release back (status, assignee,
+  open and merged PRs, "holds back: <repo> from <tag>") and the tickets with only an open PR (≤ 40). ⚠ Titles,
+  statuses, names and tag names are UNTRUSTED: one line each, capped, inside ONE nonce fence.
+- **Refuse rather than guess**: the answer may cite only the input's tickets (by key) and PRs ("repo #n"). A
+  step or repository line naming anything else is dropped and counted ("1 point left out: it named work not in
+  the check"); a headline doing so refuses the answer (one retry, then nothing is stored and the old report
+  stays). Ticket links go to the tracker, PR links to the PR tab (or GitHub), every URL through `safeExternalUrl`.
+- **Stored per workspace** (`release_blocker_reports`, migration 0217) with the input's hash: sha256 of
+  `RELEASE_BLOCKERS_VERSION` + the input text — no clock-derived field.
 
 ## Release notes
 
@@ -330,8 +368,9 @@ reader's side; only what a "tag" is changes.
 - **Hotfix**: unchanged — the base is the latest release tag, which a release here creates.
 
 **Risks, as decided.** A REVERTED PR stays in the scope and still holds its tag if its ticket is not Complete
-(as with tags). A ticket spread over several PRs is released whole or not at all (picked together, inside one
-repository too). A PR with no ticket never blocks.
+(as with tags). A ticket spread over several repositories is released whole or not at all (picked together);
+later PRs on it in the SAME repository are the next increment and never hold an earlier point. A PR with no
+ticket never blocks.
 
 ## Invariants this feature adds
 
@@ -469,7 +508,9 @@ The ticket list (owner, 2026-11-16)
 49. ONE CARD PER TICKET: a ticket with PRs in two repositories is one card, placed by its latest tag in either
     (tags of both repositories by commit date), with the latest tag per repository on it.
 50. THE WINDOW: the list opens on the candidate ticket (★, the newest ticket all in the candidates) with one ticket
-    either side; "Show 3 later / earlier tickets" add 3.
+    either side; "Show next 3 of n" / "Show previous 3 of n" add 3, n = the tickets still hidden that way
+    (fewer left: "Show next 2 of 2"); while older tags are unread the total below is not known and not given
+    ("Show previous 3").
 51. HOLDING THE RELEASE: the ticket stopping the tag above each candidate (a split: its root) is always shown
     above the list, once, naming the repositories it holds; every ⊘ card says "Waits on <that ticket>".
 52. NOT IN A TAG YET: a ticket whose only work is an open PR is listed apart at the top.
@@ -482,12 +523,15 @@ The ticket list (owner, 2026-11-16)
 56. PROGRESS OVER 5 SECONDS: the history read, the ticket reads and Refresh each show a bar with a line saying
     what is being read.
 57. PICKED TOGETHER: T2's api PR is in v1.1.0 and its web PR in w1.1.0, above web's candidate → api v1.1.0 does
-    not qualify ("T2 would ship without web #21 (in w1.1.0).") and api's candidate drops below it; a PR merged
-    after the newest tag ("not in a tag yet") and a second PR in the SAME repository above its candidate count
-    the same; Cancelled / not-found tickets and a repository still checking take no part.
+    not qualify ("T2 would ship without web #21 (in w1.1.0).") and api's candidate drops below it; a web PR
+    merged after web's newest tag ("not in a tag yet") counts the same; a second PR in the SAME repository
+    (in a later tag or not in a tag yet) NEVER does; Cancelled / not-found tickets and a repository still
+    checking take no part.
 58. CARD DETAIL: a card opens in place to its type, assignee and "Jira status read 4 min ago", "Open in Jira",
     "Story", and every PR for it in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet".
-    Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, last merged 2 Nov by alex").
+    Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, the last by alex").
+    Every card with a merged PR shows its newest merge date on its row ("merged 2 Nov"); one with none shows
+    nothing.
 59. THE CANDIDATE'S COMMIT: the candidate ticket names each repository's candidate and its commit (short sha, a
     GitHub link), with ONE Release…; only repositories with no candidate get a line above the list.
 60. BOT PRS: a no-ticket row lists only human PRs until "Show bot PRs" is ticked; its words count the bots.
