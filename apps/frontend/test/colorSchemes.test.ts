@@ -135,3 +135,26 @@ describe('the stored choice', () => {
     expect(head).toMatch(/<script src="\/theme-boot\.js"><\/script>/);
   });
 });
+
+// MEADOW'S SIDEBAR is a dark island with its own tokens (index.css § SCHEME FLAIR). Same floors.
+describe('the Meadow sidebar', () => {
+  const m = /html\[data-scheme='meadow'\] \[data-testid='sidebar'\] \{([^}]*)\}/.exec(SCHEME_CSS);
+  const ui: Record<string, string> = {};
+  for (const d of (m?.[1] ?? '').matchAll(/--(ui|ai)-([a-z0-9-]+):\s*(\d+)\s+(\d+)\s+(\d+);/g))
+    ui[`${d[1] === 'ai' ? 'ai-' : ''}${d[2]}`] = `#${[d[3], d[4], d[5]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`;
+
+  it('declares its surfaces and inks', () => {
+    for (const k of [...SURFACES, ...INKS, 'accent-fill', 'on-accent', 'ai-signal']) expect(ui[k], k).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('every text ink (and the AI signal) clears AA on every sidebar surface; the button text too', () => {
+    const fails: string[] = [];
+    for (const ink of [...INKS, 'ai-signal'])
+      for (const g of SURFACES) {
+        const r = contrast(ui[ink]!, ui[g]!);
+        if (r < AA) fails.push(`${ink} on ${g}: ${r.toFixed(2)}`);
+      }
+    expect(fails).toEqual([]);
+    expect(contrast(ui['on-accent']!, ui['accent-fill']!)).toBeGreaterThanOrEqual(AA);
+  });
+});

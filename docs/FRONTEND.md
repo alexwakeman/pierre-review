@@ -5272,8 +5272,17 @@ button. A failed write shows beside the field and as ONE `SettingsSaveToast` in 
 Twelve schemes: the two defaults (Ensemble Light, Ensemble Dark) and ten named ones — LIGHT: Solarized
 Light, GitHub Light, Gruvbox Light, Meadow; DARK: Solarized Dark, Dracula, Nord, Tokyo Night, Neon,
 Green Screen. Neon, Green Screen and Meadow have no canonical palette: Neon keeps its neon on accents,
-fills and status marks (body text stays a light neutral); Meadow's success is a teal so it does not
-read as its green accent.
+fills, borders and status marks (body text stays a light neutral); Meadow's success is a teal so it
+does not read as its green accent.
+
+- **SCHEME FLAIR (Neon, Meadow)** — `index.css` § SCHEME FLAIR: decoration keyed on
+  `html[data-scheme=…]` ONLY (so it never paints a Settings chip). Neon: an ultraviolet grid with
+  magenta/cyan haze, a gradient wordmark that slowly pulses (motion-safe only), a glowing title,
+  selection, tabs and primary buttons. Meadow: a DARK FOREST SIDEBAR (its own `--ui-*` tokens on
+  `[data-testid='sidebar']`, measured by `test/colorSchemes.test.ts` § the Meadow sidebar), sunlight
+  and a faint leaf pattern on the page. The page ground is painted on `[data-shell-main]` AND every
+  `.bg-ui-bg` inside it with `background-attachment: fixed`, so stacked opaque layers read as one
+  ground. ⚠ Flair never sets a text colour that is not a measured token, and never a size.
 
 - **One CSS block per scheme** in `index.css`, `[data-scheme='<id>'] { --ui-*: …; --ai-*: …; }` —
   all 16 `--ui-*` and all 8 `--ai-*` roles. The defaults are the existing `:root` / `.dark` blocks,
