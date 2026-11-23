@@ -5267,8 +5267,11 @@ button. A failed write shows beside the field and as ONE `SettingsSaveToast` in 
 
 ## Colour schemes (`lib/colorSchemes.ts`, Settings → Appearance)
 
-Nine schemes: the two defaults (Ensemble Light, Ensemble Dark) and seven named ones — LIGHT: Solarized
-Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo Night.
+Twelve schemes: the two defaults (Ensemble Light, Ensemble Dark) and ten named ones — LIGHT: Solarized
+Light, GitHub Light, Gruvbox Light, Meadow; DARK: Solarized Dark, Dracula, Nord, Tokyo Night, Neon,
+Green Screen. Neon, Green Screen and Meadow have no canonical palette: Neon keeps its neon on accents,
+fills and status marks (body text stays a light neutral); Meadow's success is a teal so it does not
+read as its green accent.
 
 - **One CSS block per scheme** in `index.css`, `[data-scheme='<id>'] { --ui-*: …; --ai-*: …; }` —
   all 16 `--ui-*` and all 8 `--ai-*` roles. The defaults are the existing `:root` / `.dark` blocks,
@@ -5302,6 +5305,10 @@ Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo N
   storage rule; the test pins the keys. The hook re-applies on load.
 - **The picker** is the custom `Select`; each option is a chip with `data-scheme=<id>`, so that
   scheme's block repaints the chip alone and its name shows in its own ink on its own page.
+- **The UI font is `--ui-font`**, declared on `:root, [data-scheme]` (the sans stack) ABOVE the named
+  blocks, so a named block overrides it and a sans chip never inherits another scheme's face. `body`,
+  every `[data-scheme]` element and Tailwind's `font-sans` (tailwind.config.ts) read it. Only Green
+  Screen sets it (a system monospace stack — no remote font, CSP). `font-mono` is untouched.
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 

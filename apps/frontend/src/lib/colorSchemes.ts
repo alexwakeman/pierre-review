@@ -1,6 +1,6 @@
 // ── COLOUR SCHEMES (docs/FRONTEND.md § Colour schemes) ───────────────────────────────────────────
 //
-// Two defaults and seven named schemes. Each is ONE block of `--ui-*` + `--ai-*` channel values in
+// Two defaults and ten named schemes. Each is ONE block of `--ui-*` + `--ai-*` channel values in
 // index.css, keyed `[data-scheme='<id>']`; this file is the list of them (id, name, mode) and the
 // browser-storage rule. `test/colorSchemes.test.ts` proves every id here has its CSS block and every
 // block passes the same contrast floors as the defaults.
@@ -19,11 +19,14 @@ export const COLOR_SCHEMES = [
   { id: 'solarized-light', label: 'Solarized Light', mode: 'light' },
   { id: 'github-light', label: 'GitHub Light', mode: 'light' },
   { id: 'gruvbox-light', label: 'Gruvbox Light', mode: 'light' },
+  { id: 'meadow', label: 'Meadow', mode: 'light' },
   { id: 'dark', label: 'Ensemble Dark', mode: 'dark' },
   { id: 'solarized-dark', label: 'Solarized Dark', mode: 'dark' },
   { id: 'dracula', label: 'Dracula', mode: 'dark' },
   { id: 'nord', label: 'Nord', mode: 'dark' },
   { id: 'tokyo-night', label: 'Tokyo Night', mode: 'dark' },
+  { id: 'neon', label: 'Neon', mode: 'dark' },
+  { id: 'green-screen', label: 'Green Screen', mode: 'dark' },
 ] as const satisfies readonly { id: string; label: string; mode: SchemeMode }[];
 
 export type ColorScheme = (typeof COLOR_SCHEMES)[number];

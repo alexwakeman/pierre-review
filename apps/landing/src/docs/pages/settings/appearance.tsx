@@ -6,8 +6,8 @@ export const meta: DocMeta = {
   summary: 'Choose the colour scheme.',
 };
 
-const SCHEMES_LIGHT = ['Ensemble Light', 'Solarized Light', 'GitHub Light', 'Gruvbox Light'];
-const SCHEMES_DARK = ['Ensemble Dark', 'Solarized Dark', 'Dracula', 'Nord', 'Tokyo Night'];
+const SCHEMES_LIGHT = ['Ensemble Light', 'Solarized Light', 'GitHub Light', 'Gruvbox Light', 'Meadow'];
+const SCHEMES_DARK = ['Ensemble Dark', 'Solarized Dark', 'Dracula', 'Nord', 'Tokyo Night', 'Neon', 'Green Screen'];
 
 export default function Page(): JSX.Element {
   return (
@@ -53,7 +53,7 @@ export default function Page(): JSX.Element {
       >
         <SettingsRow label="Colour scheme" hint="Saved in this browser." control={<Pill tone="grey">Ensemble Light</Pill>} />
       </Illustration>
-      <p>There are nine schemes:</p>
+      <p>There are twelve schemes:</p>
       <ul>
         <li>
           <b>Light:</b> {SCHEMES_LIGHT.join(', ')}.
@@ -62,6 +62,10 @@ export default function Page(): JSX.Element {
           <b>Dark:</b> {SCHEMES_DARK.join(', ')}.
         </li>
       </ul>
+      <p>
+        Meadow is soft greens on off-white. Neon keeps its bright colours for buttons, links and marks, and keeps text a
+        plain light grey. Green Screen is green text on black in a typewriter-style font.
+      </p>
       <p>Every scheme is checked for contrast, so text stays readable whichever one you pick.</p>
 
       <H2 id="where-it-is-saved">Where the choice is saved</H2>
