@@ -242,7 +242,7 @@ export async function releaseStaleOwnClaims(ctx: AgentContext, deps: ReleaseDeps
       if (attempts >= RELEASE_MAX_ATTEMPTS) {
         out.gaveUp += 1;
         ctx.log.warn(
-          `team claim pr ${row.prId}: could not release the ${provider === 'story' ? 'story check' : provider} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${error}); Clear it from the AI Review tab`,
+          `team claim pr ${row.prId}: could not release the ${provider === 'story' ? 'story check' : provider} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${error}); ${provider === 'story' ? 'its lease ends on its own' : 'Clear it from the AI Review tab'}`,
         );
       }
     };

@@ -3628,7 +3628,9 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   the key: `teamClaimPendingFor`'s Clear, the reconciler's `busy`); the reconciler releases an orphaned
   story row on ITS context with ITS words (`claimKeyContext`, `unfinishedLineFor`, `deps.storyBusy` =
   `storyClaimBusy`); a teammate's expired story claim is released once (`releaseExpiredStoryTeammateLines`,
-  from `releaseStaleTeamClaims`). Lines: pending "alex is checking the story"; success "alex checked the
+  from `releaseStaleTeamClaims`; ⚠ a head `storyClaimBusy` holds is skipped, and each head's read + post
+  runs inside `trackClaimRelease` — a story check claiming that head meanwhile, another ticket's included,
+  waits for it, so "claim expired" never lands over its fresh pending line). Lines: pending "alex is checking the story"; success "alex checked the
   story · 3 gaps" / "· no gaps" / "· no new gaps" (holds) or "· kept in Ensemble" (gaps found, nothing on
   GitHub: FREE, a `KEPT_PHRASES` entry); "Cleared by alex: story check didn't finish · free to claim".
   - **PER MEMBER HEAD**: the line goes on every OPEN member PR's head (`storyClaimHeads`, in the

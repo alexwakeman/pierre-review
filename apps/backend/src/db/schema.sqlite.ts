@@ -5629,7 +5629,8 @@ export const teamClaimLines = sqliteTable(
     owner: text('owner'),
     name: text('name'),
     headSha: text('head_sha').notNull(),
-    // 'claude' | 'codex' — the status context (`limn/review-<provider>`).
+    // 'claude' | 'codex' — the status context (`limn/review-<provider>`); 'story' — the story check's
+    // `ensemble/story-check` (review/ticket-review/story-claim.ts; `reviewId` stays NULL).
     provider: text('provider').notNull(),
     // The run the claim was for (NULL until its row is written, and on a teammate's line).
     reviewId: integer('review_id'),

@@ -53,6 +53,7 @@ import {
   storyClaimContext,
   storyUnfinishedLine,
   teammateHolds,
+  trackClaimRelease,
   waitForClaimRelease,
   type TeamClaimDecision,
   type TeamClaimGithub,
@@ -519,33 +520,42 @@ export async function releaseExpiredStoryTeammateLines(
     const me = await gh.login(accountId).catch(() => null);
     if (!me) continue;
     for (const h of e.where) {
-      try {
-        const lines = await gh.listLines(accountId, h.owner, h.name, h.headSha, storyClaimContext());
-        const stale = staleTeammateLine(lines, me, nowMs);
-        if (!stale || (await teammateLineReleased(ctx, accountId, h.prId, h.headSha, STORY_CLAIM_KEY, stale.login))) continue;
-        let lastError: string | null = null;
-        try {
-          const theirs = newestLine(lines.filter((l) => sameGithubLogin(l.login, stale.login)));
-          await gh.postLine(accountId, h.owner, h.name, h.headSha, releaseContextOf(theirs, storyClaimContext()), {
-            state: 'success',
-            description: releasedLine(stale.login, me),
-          });
-          out.released += 1;
-        } catch (err) {
-          const kind = claimErrorKind(err, accountId);
-          if (kind === 'rate_limited') {
-            out.limited = true;
-            return out;
+      // ⚠ A story check of ours is claiming this head right now (another ticket's, or this one's after
+      // its wait ended): its own pending line replaces theirs. Asked with NO await before the release is
+      // registered (`trackClaimRelease`), so a claim that starts from here on waits for it and never has
+      // its fresh pending line overwritten by "claim expired".
+      if (storyClaimBusy(accountId, h.prId, h.headSha)) continue;
+      const res = await trackClaimRelease(
+        { accountId, prId: h.prId, headSha: h.headSha, provider: STORY_CLAIM_KEY },
+        async (): Promise<'ok' | 'limited'> => {
+          try {
+            const lines = await gh.listLines(accountId, h.owner, h.name, h.headSha, storyClaimContext());
+            const stale = staleTeammateLine(lines, me, nowMs);
+            if (!stale || (await teammateLineReleased(ctx, accountId, h.prId, h.headSha, STORY_CLAIM_KEY, stale.login))) return 'ok';
+            let lastError: string | null = null;
+            try {
+              const theirs = newestLine(lines.filter((l) => sameGithubLogin(l.login, stale.login)));
+              await gh.postLine(accountId, h.owner, h.name, h.headSha, releaseContextOf(theirs, storyClaimContext()), {
+                state: 'success',
+                description: releasedLine(stale.login, me),
+              });
+              out.released += 1;
+            } catch (err) {
+              const kind = claimErrorKind(err, accountId);
+              if (kind === 'rate_limited') return 'limited';
+              lastError = kind === 'no_access' ? 'no_access' : errText(err);
+            }
+            await recordTeammateRelease(ctx, { accountId, prId: h.prId, headSha: h.headSha, provider: STORY_CLAIM_KEY, login: stale.login, lastError });
+          } catch (err) {
+            if (claimErrorKind(err, accountId) === 'rate_limited') return 'limited';
+            ctx.log.warn(`story claim ${ident}: teammate line not checked: ${errText(err)}`);
           }
-          lastError = kind === 'no_access' ? 'no_access' : errText(err);
-        }
-        await recordTeammateRelease(ctx, { accountId, prId: h.prId, headSha: h.headSha, provider: STORY_CLAIM_KEY, login: stale.login, lastError });
-      } catch (err) {
-        if (claimErrorKind(err, accountId) === 'rate_limited') {
-          out.limited = true;
-          return out;
-        }
-        ctx.log.warn(`story claim ${ident}: teammate line not checked: ${errText(err)}`);
+          return 'ok';
+        },
+      );
+      if (res === 'limited') {
+        out.limited = true;
+        return out;
       }
     }
   }

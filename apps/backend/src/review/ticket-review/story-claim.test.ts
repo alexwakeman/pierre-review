@@ -573,4 +573,22 @@ describe('the reconciler and teammates’ expired lines', () => {
     const mates = await db.select().from(schema.teamClaimLines).where(eq(schema.teamClaimLines.whose, 'teammate')).execute();
     expect(mates).toMatchObject([{ provider: 'story', login: 'bob', state: 'released' }]);
   });
+
+  it("⚠ a head a story check of ours is claiming now is left alone: its own pending line replaces bob's", async () => {
+    const f = fakeGh();
+    f.seed('h1', line('bob', 'pending', NOW - MIN, storyCheckingLine('bob')));
+    expect((await sc.claimStoryBeforeAutoRun(ctx, target([heads()[0]!]), { nowMs: now }, f.gh)).kind).toBe('skip');
+    const later = NOW + TEAM_CLAIM_LEASE_MS + MIN;
+    // Another ticket's check holds the same head (the PR is on both tickets) before its own line is up
+    // (here: its read failed, so it runs without one — the head is still held).
+    const blind = fakeGh({ readFails: () => new Error('boom') });
+    const second = await sc.claimStoryBeforeAutoRun(ctx, { accountId: 1, ident: 'jira:acme:PAY-2', heads: [heads()[0]!] }, { nowMs: () => later }, blind.gh);
+    expect(second.kind).toBe('run');
+    expect(sc.storyClaimBusy(1, prIds[0]!, 'h1')).toBe(true);
+    const posted = f.posts.length;
+    const out = await sc.releaseExpiredStoryTeammateLines(ctx, { gh: f.gh, nowMs: later, held: () => false });
+    expect(out.released).toBe(0);
+    expect(f.posts.length).toBe(posted);
+    if (second.kind === 'run') await sc.finishStoryClaim(ctx, second.handle, { kind: 'unfinished' }, f.gh, () => later);
+  });
 });
