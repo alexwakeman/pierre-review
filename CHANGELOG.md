@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.74] - 2026-11-23
+
 ### Fixed
 
 - Automatic reviews: when Codex’s usage limit ran out right at its reset time, Ensemble could keep Codex
