@@ -122,30 +122,28 @@ beforeEach(async () => {
 });
 
 describe('the setting', () => {
-  it('is ON by default (a NULL reads ON), per workspace, and 404s a foreign workspace', async () => {
-    // A NULL column — a workspace made after migration 0193, which names no switch — reads ON.
+  it('is OFF by default (a NULL reads OFF, opt-in), per workspace, and 404s a foreign workspace', async () => {
+    // A NULL column — a workspace nobody switched on (migration 0216) — reads OFF.
     await db.update(schema.workspaces).set({ dependencyAutoMerge: null }).where(eq(schema.workspaces.id, wsId)).execute();
-    expect(await policy.getDependencyAutoMerge(A, wsId)).toEqual({ enabled: true });
+    expect(await policy.getDependencyAutoMerge(A, wsId)).toEqual({ enabled: false });
     expect(await policy.setDependencyAutoMerge(A, wsId, true)).toBe(true);
     expect(await policy.getDependencyAutoMerge(A, wsId)).toEqual({ enabled: true });
     expect(await policy.getDependencyAutoMerge(A, 99_999)).toBeNull();
     expect(await policy.setDependencyAutoMerge(A, 99_999, true)).toBe(false);
-    // ⚠ OFF IS STORED: an explicit false, never NULL (which would read ON again).
+    // Off is stored as an explicit false.
     await policy.setDependencyAutoMerge(A, wsId, false);
     const [row] = await db.select().from(schema.workspaces).where(eq(schema.workspaces.id, wsId)).execute();
     expect(row.dependencyAutoMerge).toBe(false);
     expect(await policy.getDependencyAutoMerge(A, wsId)).toEqual({ enabled: false });
   });
 
-  it('a NULL setting is ON for the sweep too; an explicit false is off', async () => {
+  it('a NULL setting is OFF for the sweep too; only an explicit true arms', async () => {
     await db.update(schema.workspaces).set({ dependencyAutoMerge: null }).where(eq(schema.workspaces.id, wsId)).execute();
     await policy.runDependencyPolicyTick(log);
-    expect(await intentFor(depPr)).toMatchObject({ state: 'armed', armedByPolicy: true });
-    await db.delete(schema.autoMergeRequests).execute();
-    await db.delete(schema.dependencyAutomationActions).execute();
-    await policy.setDependencyAutoMerge(A, wsId, false);
-    await policy.runDependencyPolicyTick(log);
     expect(await intentFor(depPr)).toBeUndefined();
+    await policy.setDependencyAutoMerge(A, wsId, true);
+    await policy.runDependencyPolicyTick(log);
+    expect(await intentFor(depPr)).toMatchObject({ state: 'armed', armedByPolicy: true });
   });
 });
 

@@ -316,7 +316,7 @@ export function HowWeMeasureSection(): JSX.Element {
           <code className="hwm-cmd">{INSTALL_COMMAND}</code>
           <p className="btns">
             <CopyCommand label={`Copy ${INSTALL_COMMAND}`} />
-            <Link className="btn alt" to="/contact?topic=licence">
+            <Link className="btn alt" to="/pricing">
               More than {FREE_TEAM_SIZE} users in your organisation? →
             </Link>
           </p>
@@ -324,10 +324,10 @@ export function HowWeMeasureSection(): JSX.Element {
         <div className="tile hwm-txt hwm-start-list rise">
           <Marks
             items={[
-              '100% free. No sign-in, no card, no repository limit.',
+              `Every feature, free for up to ${FREE_TEAM_SIZE} people. No sign-in, no card, no repository limit.`,
               'Runs only on your machine. No data is sent to our servers.',
               <>
-                Available only from npm: <code>{INSTALL_COMMAND}</code>. Needs Node 20 or later.
+                Available only from npm: <code>{INSTALL_COMMAND}</code>. Needs Node 22 or later.
               </>,
               'Runs on your own AI agent tooling. Reviews and fixes use your Anthropic API key or Codex on your ChatGPT plan.',
               <>

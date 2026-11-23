@@ -19,13 +19,13 @@ import '../pages/legal.css';
  * that HAS changed is a compliance problem, and three separately-maintained dates
  * is the shape in which one of them gets forgotten.
  *
- * Last moved when the terms gained the AI safeguards and liability sections, and the
- * privacy policy's download line changed (Claude and Codex download on first start). */
-export const LEGAL_LAST_UPDATED = '30 October 2026';
+ * Last moved when Corevo Systems Limited became the party behind Ensemble, and the terms
+ * corrected what the sandboxed agents can do. */
+export const LEGAL_LAST_UPDATED = '22 November 2026';
 
 /** The controller's contact point, referenced from all three documents. */
 export const LEGAL_CONTACT_EMAIL = 'wakemana@gmail.com';
-export const LEGAL_CONTROLLER = 'Alex Wakeman';
+export const LEGAL_CONTROLLER = 'Corevo Systems Limited';
 
 /** The in-copy link style (an underline in the page's ink, gold on hover). */
 export const LEGAL_LINK = 'lg-a';

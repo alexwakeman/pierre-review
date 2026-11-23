@@ -462,6 +462,7 @@ export const APP_COVERAGE = {
     releases: 'settings/releases',
     integrations: 'settings/integrations',
     bots: 'settings/bots',
+    licence: 'licence/licence',
   },
   /** The Pending board's tabs. */
   pendingTabs: {

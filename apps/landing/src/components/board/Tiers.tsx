@@ -1,5 +1,6 @@
 import { Link } from '../../router';
 import { FREE_TEAM_SIZE, INSTALL_COMMAND } from '../../lib/site';
+import { LOWEST_PRICE_GBP, formatGbp } from '../../lib/licence';
 import { CopyCommand } from './CopyCommand';
 
 // "Every feature, free": the two tiers. The team size comes from FREE_TEAM_SIZE
@@ -27,15 +28,15 @@ export function Tiers(): JSX.Element {
         </div>
         <div className="tile lapis rise">
           <p className="k">More than {FREE_TEAM_SIZE} people</p>
-          <h3>A licence</h3>
+          <h3>From {formatGbp(LOWEST_PRICE_GBP)} a year</h3>
           <ul>
             <li>The same app, the same features</li>
-            <li>One licence for the organisation</li>
-            <li>We answer every message</li>
+            <li>One licence for the organisation, priced by team size</li>
+            <li>Your AI usage stays on your own provider&rsquo;s bill</li>
           </ul>
           <p className="cmd">
-            <Link className="btn alt" to="/contact?topic=licence">
-              Ask for a licence
+            <Link className="btn alt" to="/pricing">
+              See the prices
             </Link>
           </p>
         </div>

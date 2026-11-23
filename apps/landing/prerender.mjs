@@ -229,11 +229,6 @@ const ALIASES = {
   'how-it-works': 'everything-else',
   bots: 'everything-else',
   pro: 'everything-else',
-  // ⚠ /pricing goes to CONTACT, not to a content page like its siblings. Somebody
-  // arriving on /pricing is asking what it costs; the contact page answers that in its
-  // first two lines (free, unless the organisation is bigger than three people) and is
-  // where a licence is asked for. Mirrors the alias table in App.tsx.
-  pricing: 'contact',
   insights: 'everything-else',
   reviews: 'everything-else',
 };

@@ -15,7 +15,7 @@ export function Close(): JSX.Element {
         </div>
       </div>
       <div className="tile lapis side rise">
-        <p>One minute to set up. After that, the routine work runs itself.</p>
+        <p>One command starts the dashboard. Reviews need a Claude or Codex sign-in; builds and fixes also need a container runtime.</p>
         <p>
           <Link to="/docs/getting-started/install-and-run">Install and run →</Link>
         </p>

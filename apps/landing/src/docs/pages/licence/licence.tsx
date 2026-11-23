@@ -52,8 +52,12 @@ export default function Page(): JSX.Element {
 
       <H2 id="commercial-licence">A commercial licence</H2>
       <p>
-        If more than three people in your organisation use Ensemble, you need a separate commercial licence from the
-        licensor. Ask for one through the <a className="dx-link" href="/contact">contact form</a>.
+        If more than three people in your organisation use Ensemble, you need a separate commercial licence. It is one
+        licence a year for the organisation, priced by how many people use Ensemble: £600 a year for 4 to 10 people,
+        £1,200 for 11 to 25 and £2,400 for 26 to 50, plus VAT where it applies. Above 50, ask. See the{' '}
+        <a className="dx-link" href="/pricing">pricing page</a>, or ask through the{' '}
+        <a className="dx-link" href="/contact">contact form</a>. Your AI usage is not included: your AI provider bills
+        you for it as usual. In the app, <b>Settings → Licence</b> says who needs a licence.
       </p>
 
       <H2 id="what-you-may-do">What you may do</H2>

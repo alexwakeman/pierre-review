@@ -90,12 +90,12 @@ describe('arrow keys move between tabs', () => {
     expect(tabForKey('ArrowDown', 'pull-requests', tabs)).toBe('pending');
     expect(tabForKey('ArrowRight', 'pull-requests', tabs)).toBe('pending');
     expect(tabForKey('ArrowUp', 'pull-requests', tabs)).toBe('appearance');
-    expect(tabForKey('ArrowUp', 'appearance', tabs)).toBe('bots');
+    expect(tabForKey('ArrowUp', 'appearance', tabs)).toBe('licence');
     expect(tabForKey('ArrowLeft', 'bots', tabs)).toBe('integrations');
-    expect(tabForKey('ArrowDown', 'bots', tabs)).toBe('appearance');
+    expect(tabForKey('ArrowDown', 'licence', tabs)).toBe('appearance');
   });
   it('Home and End jump; other keys do nothing', () => {
-    expect(tabForKey('End', 'pending', tabs)).toBe('bots');
+    expect(tabForKey('End', 'pending', tabs)).toBe('licence');
     expect(tabForKey('Home', 'bots', tabs)).toBe('appearance');
     expect(tabForKey('Enter', 'bots', tabs)).toBeNull();
   });

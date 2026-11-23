@@ -1,11 +1,13 @@
 # Ensemble (`ensemble-review`)
 
-**The calm layer above your review bot.** Bring your own reviewer — CodeRabbit,
-Greptile, Copilot, whatever you run — and Ensemble becomes the cross-repo triage
-layer *above* it: what's stalled, whose turn it is, and which of the bot's comments
-a human still needs to read. A single-page dashboard for a whole team's GitHub
-activity across many repos: a horizontal timeline per repo, member sub-lanes, and
-drill-down into PRs and review threads (read them in-app).
+**From ticket to merged pull request, on your own machine. You press the button.**
+Ensemble checks a ticket against your docs and code, implements it in a sandbox,
+reviews the change with Claude and Codex, fixes what they find and brings it to a
+merge, on your own AI account. It also shows your team's pull requests across every
+GitHub repository: what is waiting on you, what is stuck and what can land now.
+
+Already run a review bot (CodeRabbit, Greptile, Copilot, …)? Ensemble sits above it:
+which of the bot's comments were acted on and which a person still needs to read.
 
 Third-party review-bot output (CodeRabbit · Greptile · Copilot · Qodo · Sourcery)
 is a **first-class, triaged signal**, not generic noise: bot threads a later commit
@@ -17,8 +19,7 @@ run on your own Claude Code login or Anthropic API key — see
 Repos are organised into **Workspaces** — a named group of repos, and the one scope
 the whole app runs on. Every repo lives in exactly one workspace (new repos land in
 **Default**, which you can rename but not delete), so switching workspace re-scopes
-the feed, the timeline, the metrics and the review-bot settings together. Reports
-can compare workspaces side by side once you have more than one.
+the feed, the timeline, the metrics and the review-bot settings together.
 
 Ensemble runs **only on your machine**: SQLite, your `gh` CLI for GitHub, no accounts and
 no hosted backend. `npx ensemble-review` opens straight to the app. Every feature is
@@ -29,7 +30,7 @@ once, on first start, and settings named `LIMN_…` still work.)
 ## Screenshots
 
 Pending — everything waiting on you or your workspace, across every repository, in
-seven ranked tabs:
+ranked tabs:
 
 ![Ensemble Pending board](apps/landing/public/shots/pending-board.png)
 
@@ -49,6 +50,8 @@ Every review thread already triaged, and every bot comment graded for severity:
 - pnpm ≥ 9 (from a checkout)
 - GitHub CLI (`gh`) authenticated: `gh auth login`. For org repos behind SSO you
   may need `gh auth refresh -h github.com -s read:org`.
+- For AI Fix and Implement story: a container runtime (Docker, Colima or Podman) with
+  at least 8 GB of memory, 4 CPUs and 60 GB of disk.
 
 ## Quick start
 
@@ -67,8 +70,9 @@ warrants.
 
 By default bulky text (PR descriptions, diff hunks, commit messages) isn't stored —
 it's fetched from GitHub when you open a PR and cached in the browser, keeping the DB
-small and backfills fast. Set `PERSIST_BODIES=true` to store it locally (larger DB,
-PR detail works fully offline).
+small and backfills fast. Comment and review text is always stored. Set
+`PERSIST_BODIES=true` to store the rest locally too (larger DB, PR detail works fully
+offline).
 
 ### One-off sync without the server
 
@@ -87,15 +91,22 @@ set. It runs on Claude or on Codex (see [Codex instead of Claude](#codex-instead
   a story and it checks the change against it. **Auto review** reviews new pull
   requests as they arrive; it is off for every workspace until you switch it on.
 - **Ask Claude** — a chat on the review, and on each finding.
-- **AI Fix** — pick the review comments you want fixed. It edits a copy of the
-  branch, shows you the diff, and pushes only when you click Push.
+- **AI Fix** — pick the review comments, failing CI or merge conflicts you want
+  fixed. It works on a copy of the branch in a sandbox, shows you the diff, and
+  pushes only when you click Push.
+- **Implement story** — an agent implements a ticket in a sandbox and shows you one
+  diff per repository; you press Push.
 
 What the agents can do:
 
 - The reviewer (and the chat) reads the code. It cannot edit files, run commands or
   reach the web.
-- The fixer edits files. It has no shell, so it builds and tests nothing.
-- Nothing is posted or pushed until you press the button.
+- AI Fix and Implement story run commands, but only in a sandbox: a container or
+  virtual machine on your computer, with no GitHub credentials. Their only way out is
+  Ensemble's allow-list proxy. They need a container runtime such as Docker, Colima
+  or Podman (see the docs' sandbox runtimes page).
+- Nothing is posted or pushed until you press the button, unless you switch on an
+  automatic setting yourself.
 
 With an issue tracker connected (Jira, GitHub Issues or Linear, in Settings), a
 review can fill its story from the linked ticket, auto review included. Without one,
@@ -103,8 +114,8 @@ paste the story in.
 
 ### Your Claude, not ours
 
-It runs on your own Anthropic API key. Ensemble stores no key and charges nothing
-for it. Every AI feature (reviews, fixes, chats, report write-ups) uses the same two
+It runs on your own Anthropic API key or Claude Code login. Ensemble stores no key
+and charges nothing; your AI provider bills you for the usage as usual. Every AI feature (reviews, fixes, chats, report write-ups) uses the same two
 sources, first one wins:
 
 1. **`ANTHROPIC_API_KEY`** in the environment (the default, and the route Anthropic's
@@ -202,8 +213,10 @@ Ensemble is **source-available** under the [Ensemble License 1.0](./LICENSE).
 - **Free** for individuals, and for any team or organisation where **3 people or
   fewer** use it. You may use, copy and change it.
 - **More than 3 people** in one organisation (affiliates count together) need a
-  commercial licence — ask through the
-  [contact form](https://ensemble.ac/contact).
+  commercial licence: one a year for the organisation, £600 for 4–10 people, £1,200
+  for 11–25, £2,400 for 26–50, plus VAT where it applies; above 50, ask. See
+  [pricing](https://ensemble.ac/pricing). Your AI usage is billed by your own
+  provider, not included. Licences are sold by Corevo Systems Limited.
 - You may **not** offer Ensemble, or a product built from it, as a competing
   commercial product or service.
 - Copies you pass on must keep the licence and copyright notice.

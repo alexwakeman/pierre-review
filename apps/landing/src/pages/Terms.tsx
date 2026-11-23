@@ -22,7 +22,7 @@ import {
 // at the repository root, NOT by this page. §3 summarises that licence and says the
 // licence wins; FREE_TEAM_SIZE mirrors it.
 //
-// The clauses that genuinely matter: §4 (you are responsible for what you point Limn
+// The clauses that genuinely matter: §4 (you are responsible for what you point Ensemble
 // at, because it reads repositories with your token), §5 (AI output is a suggestion,
 // and you review anything pushed), §6 (what we do against leaks and prompt injection,
 // stated as effort, never as a guarantee — every safeguard named there exists in the
@@ -64,13 +64,13 @@ export default function Terms(): JSX.Element {
     >
       <LegalSection id="who" heading="1. Who you are dealing with">
         <P>
-          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, a sole trader in the United
+          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, a company registered in the United
           Kingdom, contactable at <Mail />. These terms are governed by the laws of England
           and Wales, and the courts of England and Wales have exclusive jurisdiction.
         </P>
       </LegalSection>
 
-      <LegalSection id="what" heading="2. What Limn is">
+      <LegalSection id="what" heading={`2. What ${SITE_NAME} is`}>
         <P>
           {SITE_NAME} is software that runs on your own computer. You install and start it with{' '}
           <code>{INSTALL_COMMAND}</code>. It reads pull-request
@@ -150,8 +150,8 @@ export default function Terms(): JSX.Element {
           to find, or for a change made on the strength of one.
         </P>
         <P>
-          <T>Only frontier models are supported</T> for the AI coding tools (AI Review, AI Fix and
-          the conflict resolver): the Claude models {SITE_NAME} offers, through Claude Code or an
+          <T>Only frontier models are supported</T> for the AI coding tools (AI Review, AI Fix,
+          Implement story and the conflict resolver): the Claude models {SITE_NAME} offers, through Claude Code or an
           Anthropic API key, and the Codex models it offers, through a ChatGPT sign-in. Their
           safeguards and their judgement are part of what keeps a run safe. Pointing{' '}
           {SITE_NAME} at any other model is unsupported and at your own risk.
@@ -170,17 +170,24 @@ export default function Terms(): JSX.Element {
             pull request&apos;s own working copy. Paths outside it are refused.
           </li>
           <li>
-            <T>No shell for reviewers.</T> A review or a chat can only read. The fixer can edit
-            files but cannot run commands, so it builds and tests nothing.
+            <T>No shell for reviewers.</T> A review or a chat can only read. It cannot edit files
+            or run commands.
+          </li>
+          <li>
+            <T>A sandbox for agents that build.</T> AI Fix and Implement story can run commands,
+            but only inside a container or virtual machine on your computer. It holds no GitHub
+            credentials and cannot write to your files. Its only way out is {SITE_NAME}&apos;s proxy,
+            which allows package registries and read-only GitHub downloads unless you add more. Its
+            changes leave only as a patch, which {SITE_NAME} pushes from your computer.
           </li>
           <li>
             <T>Allow-listed tools.</T> Each agent gets a fixed list of tools. Anything else is
             refused before it runs.
           </li>
           <li>
-            <T>Sandboxing.</T> Agents work in a throwaway copy of the repository, with no web
-            access, and apart from your own Claude Code and Codex settings, plugins and connected
-            accounts.
+            <T>Isolation.</T> Agents work in a throwaway copy of the repository, apart from your
+            own Claude Code and Codex settings, plugins and connected accounts. Reviewers have no
+            web access.
           </li>
           <li>
             <T>Untrusted input.</T> Anything an agent reads from a pull request is treated as

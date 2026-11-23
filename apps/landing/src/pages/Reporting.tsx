@@ -142,7 +142,7 @@ export function ReportingSection(): JSX.Element {
           <h3>Faster reviews, fewer bottlenecks</h3>
           <p>
             On a nine-repository delivery team, Ensemble took over the reviews in October. Half of their pull requests now merge
-            within an hour of working time, and twice as many land each week. It cost them nothing extra.
+            within an hour of working time, and twice as many land each week. Apart from their own AI usage, it cost them nothing extra.
           </p>
           <p className="src">
             Measured by Ensemble's Chronology report: merged pull requests by people, working hours, September vs October 2026 after
