@@ -20,6 +20,10 @@
 //     registered in flight (`trackClaimRelease`) and a claim at that head waits for it, so it never
 //     lands after the claim's own pending line. The row's own owner/name let it
 //     release a line after the PR or repo left Limn (the delete paths keep open rows).
+//   ⚠ STORY-CHECK ROWS (`provider = 'story'`, ticket-review/story-claim.ts) go through the SAME pass,
+//     on their own context (`ensemble/story-check`) with their own release words ("Cleared by alex:
+//     story check didn't finish · free to claim"); "is a run holding it?" is the story claim's own
+//     `storyClaimBusy` (deps.storyBusy).
 //   TEAMMATES' LINES (`releaseExpiredTeammateLines`): a "being reviewed by @bob" skip this Limn
 //     remembered, whose lease has ended and whose PR the sweeper did not take back: if the head's
 //     newest line is still bob's pending one (expired, or an older Limn's pending "free to claim"),
@@ -34,6 +38,8 @@ import { and, eq } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 import {
   claimErrorKind,
+  claimKeyContext,
+  claimKeyOf,
   claimLineFinishing,
   decideTeamClaim,
   defaultTeamClaimGithub,
@@ -48,8 +54,9 @@ import {
   staleTeammateLine,
   teamClaimContext,
   trackClaimRelease,
-  unfinishedLine,
+  unfinishedLineFor,
   type TeamClaimGithub,
+  type TeamClaimKey,
   type TeamClaimLine,
 } from './team-claim.js';
 import {
@@ -71,6 +78,8 @@ export function releaseBackoffMs(attempts: number): number {
 export interface ReleaseDeps {
   /** Is a run of this process still holding `provider`'s line at `headSha` on this PR? */
   busy: (accountId: number, prId: number, provider: AiProviderId, headSha: string) => boolean;
+  /** Is a story check of this process still holding its story line at `headSha` on this PR? Absent = no. */
+  storyBusy?: (accountId: number, prId: number, headSha: string) => boolean;
   /** Is a review of this PR queued, starting or running in this process (the teammate pass)? */
   held?: (prId: number) => boolean;
   gh?: TeamClaimGithub;
@@ -151,10 +160,11 @@ async function releaseOne(
   gh: TeamClaimGithub,
   row: ClaimLineRow,
   where: { owner: string; name: string },
-  provider: AiProviderId,
+  key: TeamClaimKey,
   me: string,
 ): Promise<RowOutcome> {
-  const context = teamClaimContext(provider);
+  const context = claimKeyContext(key);
+  const unfinishedLine = (login: string): string => unfinishedLineFor(key, login);
   const failure = (err: unknown): RowOutcome => {
     const kind = claimErrorKind(err, row.accountId);
     if (kind === 'rate_limited') return { kind: 'limited' };
@@ -188,7 +198,7 @@ async function releaseOne(
     return { kind: 'closed', why: 'settled', state: row.finalDescription != null ? 'finished' : 'released' };
   }
   // ⚠ Asked again after the read: a run may have started on this head meanwhile.
-  if (deps.busy(row.accountId, row.prId, provider, row.headSha)) return { kind: 'busy' };
+  if (keyBusy(deps, row, key)) return { kind: 'busy' };
   const finalLine = row.finalDescription != null;
   try {
     // Settled on the context our pending line was read under (an older Limn's `limn/…` line included).
@@ -201,6 +211,12 @@ async function releaseOne(
     return failure(err);
   }
   return finalLine ? { kind: 'finished' } : { kind: 'released' };
+}
+
+/** Is a run of this process still holding the row's line (the review's `busy`, the story's `storyBusy`)? */
+function keyBusy(deps: ReleaseDeps, row: ClaimLineRow, key: TeamClaimKey): boolean {
+  if (key === 'story') return deps.storyBusy?.(row.accountId, row.prId, row.headSha) ?? false;
+  return deps.busy(row.accountId, row.prId, key, row.headSha);
 }
 
 /** OUR open lines whose run is over: release them (see the header). Never throws. */
@@ -219,21 +235,22 @@ export async function releaseStaleOwnClaims(ctx: AgentContext, deps: ReleaseDeps
       return out;
     }
     const logins = new Map<number, string | null>();
-    const fail = async (row: ClaimLineRow, provider: AiProviderId, error: string): Promise<void> => {
+    const fail = async (row: ClaimLineRow, provider: TeamClaimKey, error: string): Promise<void> => {
       const attempts = row.releaseAttempts + 1;
       await setClaimLine(ctx, row.id, { releaseAttempts: attempts, lastError: error }).catch(() => {});
       out.failed += 1;
       if (attempts >= RELEASE_MAX_ATTEMPTS) {
         out.gaveUp += 1;
         ctx.log.warn(
-          `team claim pr ${row.prId}: could not release the ${provider} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${error}); Clear it from the AI Review tab`,
+          `team claim pr ${row.prId}: could not release the ${provider === 'story' ? 'story check' : provider} line at ${row.headSha.slice(0, 7)} after ${attempts} tries (${error}); Clear it from the AI Review tab`,
         );
       }
     };
     for (const row of rows) {
-      const provider: AiProviderId = row.provider === 'codex' ? 'codex' : 'claude';
+      // The claim the row holds: a review per provider, or the story check ('story').
+      const provider = claimKeyOf(row.provider);
       if (row.releaseAttempts >= RELEASE_MAX_ATTEMPTS) continue;
-      if (deps.busy(row.accountId, row.prId, provider, row.headSha)) continue;
+      if (keyBusy(deps, row, provider)) continue;
       if (claimLineFinishing(row.id, nowMs)) continue;
       const lastAt = row.updatedAt instanceof Date ? row.updatedAt.getTime() : Number(row.updatedAt);
       if (row.releaseAttempts > 0 && nowMs < lastAt + releaseBackoffMs(row.releaseAttempts)) continue;
@@ -264,7 +281,7 @@ export async function releaseStaleOwnClaims(ctx: AgentContext, deps: ReleaseDeps
       }
       // ⚠ Asked again right before the release, with NO await between this check and its registration
       // (`trackClaimRelease`): a claim that starts at this head from here on waits for the release.
-      if (deps.busy(row.accountId, row.prId, provider, row.headSha)) continue;
+      if (keyBusy(deps, row, provider)) continue;
       const at = { accountId: row.accountId, prId: row.prId, headSha: row.headSha, provider };
       const login = me;
       const target = where;
@@ -393,10 +410,15 @@ export async function releaseExpiredTeammateLines(ctx: AgentContext, deps: Relea
 export async function releaseStaleTeamClaims(ctx: AgentContext, gh?: TeamClaimGithub): Promise<void> {
   try {
     const { reviewClaimBusy, reviewHeldForPr } = await import('./manager.js');
-    const deps: ReleaseDeps = { busy: reviewClaimBusy, held: reviewHeldForPr, ...(gh ? { gh } : {}) };
+    // The story check's claims (ticket-review/story-claim.ts): its rows share the ledger; its teammate
+    // lines have their own pass (its skip memory is its own).
+    const story = await import('../ticket-review/story-claim.js');
+    const deps: ReleaseDeps = { busy: reviewClaimBusy, held: reviewHeldForPr, storyBusy: story.storyClaimBusy, ...(gh ? { gh } : {}) };
     const own = await releaseStaleOwnClaims(ctx, deps);
     if (own.limited) return;
-    await releaseExpiredTeammateLines(ctx, deps);
+    const mate = await releaseExpiredTeammateLines(ctx, deps);
+    if (mate.limited) return;
+    await story.releaseExpiredStoryTeammateLines(ctx, gh ? { gh } : {});
   } catch (err) {
     ctx.log.warn(`team claim release: ${errText(err)}`);
   }

@@ -76,6 +76,30 @@ export default function Page(): JSX.Element {
         teammates' automatic reviews step aside for that model.
       </p>
 
+      <H3 id="story-check-claim">The story check has its own line</H3>
+      <p>
+        Not everyone on a team has story checks: they need a tracker set up and a ticket that matches the pull request.
+        So an automatic story check posts its own line on each of the ticket's open pull requests,{' '}
+        <b>ensemble/story-check</b>: "alex is checking the story", then "alex checked the story · 3 gaps". There is one line
+        for the whole team, whichever model runs the check.
+      </p>
+      <ul>
+        <li>
+          A teammate who reviews the code but has no story checks never holds the story check. Your Ensemble checks the
+          story and posts its gaps as usual.
+        </li>
+        <li>
+          If a teammate already checked the story at those commits, your Ensemble skips it. The story check says "No
+          automatic story check — @robin checked the story at these commits".
+        </li>
+        <li>A push to any of the ticket's pull requests frees the line again.</li>
+        <li>
+          A check that found gaps but put nothing on GitHub reads "kept in Ensemble" and holds nothing, so a teammate's
+          check can still post them.
+        </li>
+        <li>Re-check never waits and never posts a line.</li>
+      </ul>
+
       <H2 id="what-you-see">What you see when your Ensemble steps aside</H2>
       <ul>
         <li>

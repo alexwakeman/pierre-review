@@ -3,7 +3,8 @@
 // makes is written here BEFORE its pending line is posted, and moved on after every write, so a
 // restart, a dropped run or a failed final write leaves a row the reconciler (team-claim-release.ts)
 // can still find and release. DB only — no GitHub call ever runs in here.
-import type { AiProviderId } from '@pierre-review/shared';
+// 'claude' | 'codex' (a review claim) | 'story' (the story check's claim, ticket-review/story-claim.ts).
+import type { TeamClaimKey } from './team-claim.js';
 import { and, asc, eq, inArray, lt } from 'drizzle-orm';
 import type { AgentContext } from '../agent-context.js';
 
@@ -23,7 +24,7 @@ export interface ClaimLineRow {
   owner: string | null;
   name: string | null;
   headSha: string;
-  provider: AiProviderId;
+  provider: TeamClaimKey;
   reviewId: number | null;
   whose: 'mine' | 'teammate';
   state: ClaimLineState;
@@ -47,7 +48,7 @@ const clipErr = (s: string | null | undefined): string | null => (s == null ? nu
  */
 export async function recordClaimIntent(
   ctx: AgentContext,
-  row: { accountId: number; prId: number; headSha: string; provider: AiProviderId; login: string; owner?: string; name?: string },
+  row: { accountId: number; prId: number; headSha: string; provider: TeamClaimKey; login: string; owner?: string; name?: string },
 ): Promise<number> {
   const tl = t(ctx);
   const prs = ctx.schema.pullRequests;
@@ -155,7 +156,7 @@ export async function releaseClaimLinesAtHead(
   accountId: number,
   prId: number,
   headSha: string,
-  provider: AiProviderId,
+  provider: TeamClaimKey,
   why: string | null,
 ): Promise<number> {
   const tl = t(ctx);
@@ -182,7 +183,7 @@ export async function teammateLineReleased(
   accountId: number,
   prId: number,
   headSha: string,
-  provider: AiProviderId,
+  provider: TeamClaimKey,
   login: string,
 ): Promise<boolean> {
   const tl = t(ctx);
@@ -205,7 +206,7 @@ export async function teammateLineReleased(
 /** Record a teammate's line this machine released (or tried to: `lastError`). */
 export async function recordTeammateRelease(
   ctx: AgentContext,
-  row: { accountId: number; prId: number; headSha: string; provider: AiProviderId; login: string; lastError: string | null },
+  row: { accountId: number; prId: number; headSha: string; provider: TeamClaimKey; login: string; lastError: string | null },
 ): Promise<void> {
   const tl = t(ctx);
   const prs = ctx.schema.pullRequests;

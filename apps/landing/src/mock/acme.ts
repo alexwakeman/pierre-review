@@ -644,6 +644,8 @@ export const TEAM = {
       { name: 'test-web', limn: false, state: 'passed', tone: 'green', note: null },
       { name: 'ensemble/review-claude', limn: true, state: 'passed', tone: 'green', note: 'sam reviewed · 2 comments' },
       { name: 'ensemble/review-codex', limn: true, state: 'running', tone: 'amber', note: 'dana is reviewing with Codex' },
+      // The story check's own line (review/ticket-review/story-claim.ts): one for the team, whichever model.
+      { name: 'ensemble/story-check', limn: true, state: 'passed', tone: 'green', note: 'sam checked the story · 1 gap' },
     ] as { name: string; limn: boolean; state: string; tone: Tone; note: string | null }[],
     /** The "Ensemble" label's tooltip in CheckList.tsx. */
     limnTitle: 'Posted by Ensemble to mark an auto review. Not CI.',

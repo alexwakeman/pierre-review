@@ -282,6 +282,19 @@ export function ticketAutoCheckWords(
           title: 'This workspace has used its automatic ticket checks for today. Tickets with your own PRs are not limited. Re-check runs one now.',
         };
       }
+      if (auto.reason === 'teammate') {
+        if (!auto.teammate) return null;
+        const who = `@${auto.teammate.login}`;
+        return auto.teammate.kind === 'reviewing'
+          ? {
+              label: `No automatic story check — ${who} is checking the story now`,
+              title: 'Their Ensemble claimed it on GitHub. Yours checks again if theirs stops. Re-check runs one now.',
+            }
+          : {
+              label: `No automatic story check — ${who} checked the story at these commits`,
+              title: 'Their Ensemble already checked it. A new push starts a new check. Re-check runs one now.',
+            };
+      }
       if (auto.reason === 'over_budget') {
         return { label: 'No automatic story check — the AI spend limit is reached', title: 'It starts again when spend is under the limit (Settings → AI). Re-check runs one now.' };
       }

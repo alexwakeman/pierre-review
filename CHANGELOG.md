@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Reviewing as a team: an automatic story check now claims its own status line, ensemble/story-check, on
+  the ticket's open pull requests. A teammate who reviews the code but has no story checks no longer
+  stops yours: your Ensemble checks the story and posts its gaps as before. When a teammate already
+  checked the story at those commits, the story check says so and yours skips it.
+
 ## [1.0.75] - 2026-11-23
 
 ### Added

@@ -139,6 +139,23 @@ describe('team claims in the auto lane', () => {
     expect(m.autoPendingPrIds().has(40)).toBe(false);
   });
 
+  it("⚠ a review skipped for a teammate's claim still kicks the PR's story check (its own claim decides)", async () => {
+    const kicks: number[] = [];
+    m.onAutoReviewLaunched((_c, _a, prId) => kicks.push(prId));
+    try {
+      m.enqueueAutoReview(ctx, 1, 40); // bob is reviewing: no row, but the tickets are looked at
+      pairPrs.add(42);
+      ownPrs.add(42);
+      claudeHeld.add(42); // the own-PR pair stand-down: the same
+      m.enqueueAutoReview(ctx, 1, 42);
+      await flush();
+      expect(inserted).toEqual([]);
+      expect(kicks).toEqual([40, 42]);
+    } finally {
+      m.onAutoReviewLaunched(null);
+    }
+  });
+
   it('a claimed run stores its record, and its end posts the final line', async () => {
     m.enqueueAutoReview(ctx, 1, 41);
     await flush();

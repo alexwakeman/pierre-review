@@ -18,6 +18,13 @@ import {
   type StartTicketResult,
 } from './manager.js';
 import { automationAllowedForPr, externalRepoIdsVia } from '../../db/external-repos.js';
+import {
+  claimStoryBeforeAutoRun,
+  finishStoryClaim,
+  storyClaimHeads,
+  type StoryClaimStart,
+  type StoryClaimTarget,
+} from './story-claim.js';
 
 // THE TICKET REVIEW SWEEPER — re-checks a ticket when the PRs on it move, where auto review is on.
 //
@@ -50,6 +57,11 @@ import { automationAllowedForPr, externalRepoIdsVia } from '../../db/external-re
 //      2026-11-09: it counted PR joins and story edits as pushes, and held BMD-1175 until midnight).
 //      The spend budget is the money brake.
 //   5. Each queued run stores its CAUSE (`ticket_reviews.cause`).
+//   6. THE STORY CLAIM (story-claim.ts; docs/TEAM-REVIEW.md § The story check's own claim), right before
+//      a due check is queued: its own `ensemble/story-check` line on every open member head. A teammate
+//      holding every head ⇒ nothing is queued (no row, no cap use) and the ticket WAITS (the plan reads
+//      `held` / `teammate` from the claim's memory until the holder's lease ends or a head moves). The
+//      run settles the claim on every exit; a call that did not queue settles it here.
 //
 // THE WORKSPACE. Members may span workspaces (same Jira site); the run counts against an
 // AUTO-ENABLED member workspace — the changed PR's when it is one. A ticket with no member in an
@@ -92,6 +104,8 @@ export interface TicketSweepDeps {
   dailyCap: number;
   // The reader's users.id (the cap exemption); default reads it from the account.
   readerUserId?: (ctx: AgentContext, accountId: number) => Promise<number | null>;
+  // The story claim before a run is queued (story-claim.ts); default the real one.
+  claimStory?: (ctx: AgentContext, target: StoryClaimTarget) => Promise<StoryClaimStart>;
 }
 
 const defaultDeps: TicketSweepDeps = {
@@ -319,16 +333,34 @@ export async function runTicketReviewSweep(
         const trigger = st.first ? 'auto' : 'cascade';
         const workspaceId = st.workspaceId;
         const live = st.live;
-        const r = await deps.enqueue(ctx, {
-          accountId,
-          workspaceId,
-          ident,
-          ticketKey: st.ticket?.key ?? null,
-          ticketTitle: st.ticket?.title ?? null,
-          originPrId: cand.viaPrId ?? live.find((m) => m.state === 'open')?.prId ?? live[0]!.prId,
-          trigger,
-          cause: st.cause,
-        });
+        // THE STORY CLAIM (header, 6). A teammate holds every open member head: wait, queue nothing.
+        const heads = await storyClaimHeads(ctx, accountId, live).catch(() => []);
+        const claim = await (deps.claimStory ?? claimStoryBeforeAutoRun)(ctx, { accountId, ident, heads });
+        if (claim.kind === 'skip') {
+          wait();
+          continue;
+        }
+        const storyClaim = claim.handle;
+        const settle = (): void => void finishStoryClaim(ctx, storyClaim, { kind: 'unfinished' }).catch(() => {});
+        let r: StartTicketResult;
+        try {
+          r = await deps.enqueue(ctx, {
+            accountId,
+            workspaceId,
+            ident,
+            ticketKey: st.ticket?.key ?? null,
+            ticketTitle: st.ticket?.title ?? null,
+            originPrId: cand.viaPrId ?? live.find((m) => m.state === 'open')?.prId ?? live[0]!.prId,
+            trigger,
+            cause: st.cause,
+            storyClaim,
+          });
+        } catch (err) {
+          settle();
+          throw err;
+        }
+        // Not queued: the run never takes the claim, so it is released here.
+        if (r.outcome !== 'queued') settle();
         if (r.outcome === 'queued') {
           capUsed.set(workspaceId, (capUsed.get(workspaceId) ?? 0) + 1);
           result.queued.push({ ident, trigger, workspaceId });
