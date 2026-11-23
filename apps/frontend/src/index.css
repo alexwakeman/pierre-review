@@ -106,6 +106,15 @@
   --ui-scrim: 0 0 0;
 }
 
+/* THE UI FONT. One variable so a scheme can change it (only Green Screen does: monospace). Declared
+   on every `[data-scheme]` so a chip for a sans scheme does not inherit Green Screen's face; a named
+   block below overrides it at the same specificity by coming later. The Tailwind `font-sans` utility
+   reads it too (tailwind.config.ts). No remote font: CSP. */
+:root,
+[data-scheme] {
+  --ui-font: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
 /* ── THE NAMED COLOUR SCHEMES (docs/FRONTEND.md § Colour schemes; the list is lib/colorSchemes.ts) ──
    One block per scheme: all 16 `--ui-*` roles and all 8 `--ai-*` roles. `[data-scheme]` sits on
    <html> beside the mode's `.dark` class; these blocks come AFTER the defaults so, at the same
@@ -299,6 +308,90 @@
   --ai-signal: 187 154 247;       /* #bb9af7 */
   --ai-signal-fill: 187 154 247;  /* #bb9af7 */
 }
+/* Three schemes with no canonical palette to keep. NEON puts its magenta, cyan, lime and yellow on
+   accents, fills and status marks only; body text stays a calm light neutral. GREEN SCREEN is
+   phosphor green on black in a monospace face (`--ui-font`, the one per-scheme font), with dimmer
+   greens for secondary text and cyan / red / amber kept for their meanings. MEADOW is sage on
+   off-white with deep greens; its success is a teal so it does not read as the accent. */
+[data-scheme='neon'] {
+  --ui-bg: 11 10 18;              /* #0b0a12 */
+  --ui-surface: 18 16 28;         /* #12101c */
+  --ui-raise: 25 22 38;           /* #191626 */
+  --ui-hover: 33 29 49;           /* #211d31 */
+  --ui-sel: 42 37 61;             /* #2a253d */
+  --ui-line: 61 53 88;            /* #3d3558 */
+  --ui-ink: 236 235 245;          /* #ecebf5 */
+  --ui-mute: 201 198 220;         /* #c9c6dc */
+  --ui-faint: 166 162 194;        /* #a6a2c2 */
+  --ui-accent: 0 229 255;         /* #00e5ff */
+  --ui-accent-fill: 255 43 214;   /* #ff2bd6 */
+  --ui-on-accent: 11 10 18;       /* #0b0a12 */
+  --ui-danger: 255 107 107;       /* #ff6b6b */
+  --ui-success: 57 255 136;       /* #39ff88 */
+  --ui-warn: 255 225 77;          /* #ffe14d */
+  --ui-scrim: 0 0 0;              /* #000000 */
+  --ai-surface: 18 16 28;         /* #12101c */
+  --ai-surface-2: 25 22 38;       /* #191626 */
+  --ai-border: 61 53 88;          /* #3d3558 */
+  --ai-hairline: 33 29 49;        /* #211d31 */
+  --ai-ink: 236 235 245;          /* #ecebf5 */
+  --ai-muted: 166 162 194;        /* #a6a2c2 */
+  --ai-signal: 201 155 255;       /* #c99bff */
+  --ai-signal-fill: 179 92 255;   /* #b35cff */
+}
+[data-scheme='green-screen'] {
+  --ui-font: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --ui-bg: 5 10 5;                /* #050a05 */
+  --ui-surface: 9 18 9;           /* #091209 */
+  --ui-raise: 13 24 13;           /* #0d180d */
+  --ui-hover: 18 31 18;           /* #121f12 */
+  --ui-sel: 24 40 24;             /* #182818 */
+  --ui-line: 42 74 47;            /* #2a4a2f */
+  --ui-ink: 140 245 154;          /* #8cf59a */
+  --ui-mute: 114 214 129;         /* #72d681 */
+  --ui-faint: 92 184 106;         /* #5cb86a */
+  --ui-accent: 102 224 255;       /* #66e0ff */
+  --ui-accent-fill: 51 204 85;    /* #33cc55 */
+  --ui-on-accent: 5 10 5;         /* #050a05 */
+  --ui-danger: 255 122 102;       /* #ff7a66 */
+  --ui-success: 200 255 90;       /* #c8ff5a */
+  --ui-warn: 255 184 77;          /* #ffb84d */
+  --ui-scrim: 0 0 0;              /* #000000 */
+  --ai-surface: 9 18 9;           /* #091209 */
+  --ai-surface-2: 13 24 13;       /* #0d180d */
+  --ai-border: 42 74 47;          /* #2a4a2f */
+  --ai-hairline: 18 31 18;        /* #121f12 */
+  --ai-ink: 140 245 154;          /* #8cf59a */
+  --ai-muted: 92 184 106;         /* #5cb86a */
+  --ai-signal: 210 168 255;       /* #d2a8ff */
+  --ai-signal-fill: 185 140 255;  /* #b98cff */
+}
+[data-scheme='meadow'] {
+  --ui-bg: 246 248 241;           /* #f6f8f1 */
+  --ui-surface: 239 243 232;      /* #eff3e8 */
+  --ui-raise: 231 237 223;        /* #e7eddf */
+  --ui-hover: 223 231 213;        /* #dfe7d5 */
+  --ui-sel: 211 221 198;          /* #d3ddc6 */
+  --ui-line: 195 208 180;         /* #c3d0b4 */
+  --ui-ink: 31 42 31;             /* #1f2a1f */
+  --ui-mute: 52 67 52;            /* #344334 */
+  --ui-faint: 71 86 70;           /* #475646 */
+  --ui-accent: 43 99 50;          /* #2b6332 */
+  --ui-accent-fill: 58 122 63;    /* #3a7a3f */
+  --ui-on-accent: 255 255 255;    /* #ffffff */
+  --ui-danger: 158 48 39;         /* #9e3027 */
+  --ui-success: 14 95 80;         /* #0e5f50 */
+  --ui-warn: 127 83 0;            /* #7f5300 */
+  --ui-scrim: 31 42 31;           /* #1f2a1f */
+  --ai-surface: 239 243 232;      /* #eff3e8 */
+  --ai-surface-2: 231 237 223;    /* #e7eddf */
+  --ai-border: 195 208 180;       /* #c3d0b4 */
+  --ai-hairline: 223 231 213;     /* #dfe7d5 */
+  --ai-ink: 31 42 31;             /* #1f2a1f */
+  --ai-muted: 71 86 70;           /* #475646 */
+  --ai-signal: 104 60 150;        /* #683c96 */
+  --ai-signal-fill: 122 76 171;   /* #7a4cab */
+}
 
 /* ── THE TYPE SCALE (tailwind.config.ts `text-meta/body/title/display`) ─────────────────────────────
    Page content is ~15% larger than the original scale (2026-10-31, with the wider sidebar); the
@@ -347,10 +440,15 @@ body {
   overscroll-behavior: none;
 }
 
+/* THE UI FONT is `--ui-font` (declared above the named schemes). Set on every `[data-scheme]`
+   element too, so each Settings chip shows its own scheme's face. */
+[data-scheme] {
+  font-family: var(--ui-font);
+}
+
 body {
   @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--ui-font);
 }
 
 /* ---- brand wordmark ---- */

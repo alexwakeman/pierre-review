@@ -13,6 +13,11 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Three colour schemes in Settings → Appearance: Neon (dark, bright neon accents), Green Screen (dark,
+  green on black in a monospace font) and Meadow (light, calm greens).
+
 ## [1.0.75] - 2026-11-23
 
 ### Added

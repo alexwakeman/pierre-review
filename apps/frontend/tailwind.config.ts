@@ -21,6 +21,11 @@ export default {
         // A headline figure: one big number, never prose (docs/redesign/DESIGN.md § 2).
         figure: ['var(--fs-figure)', { lineHeight: 'var(--lh-figure)', fontWeight: '600', letterSpacing: '-0.02em' }],
       },
+      // The UI face is a per-scheme variable (index.css `--ui-font`; Green Screen sets monospace), so
+      // `font-sans` and the base `html` font follow the scheme too.
+      fontFamily: {
+        sans: ['var(--ui-font)'],
+      },
       borderRadius: {
         ui: '6px',
       },
