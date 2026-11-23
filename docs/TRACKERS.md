@@ -1093,7 +1093,8 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
 ## The build's screenshots — A TRACKER WRITE (`tracker/ticket-screens.ts`, `coding/story-build/screens.ts`; 2026-11-21)
 
 "Post screenshots to <KEY>" in the build tab's **Screens** block (docs/SANDBOX.md § The browser): the reader's ONE
-press, Jira only (offered when the ticket is a Jira ticket and the build report's screens have screenshots).
+press, Jira or Linear (offered when the ticket is one of those and the build report's screens have screenshots;
+`screens.ts` `screensPostable`).
 
 - **CLAIMED before the first write** (`story_builds.screens_ticket_json`, migration 0215: compare-and-set from NULL):
   a second press answers `409 AlreadyPosted`. A failure BEFORE anything was written releases the claim (the reader may
@@ -1109,7 +1110,16 @@ press, Jira only (offered when the ticket is a Jira ticket and the build report'
 - A failure is a sentence Ensemble wrote; the log carries the code only. The ticket is marked due for a read.
 - **"Build end to end"** puts the screenshots in its ticket step's ONE comment instead (STORY-BUILD.md § Build end to
   end, item 3): the same upload (`uploadTicketShots`), the same claim, so a build's screenshots reach the ticket once.
-- Other trackers: not offered yet. GitHub Issues has no supported image upload; Linear and Notion are not built.
+- **Linear** (2026-11-21; `tracker/linear/upload.ts`), behind `assignGate` (the gate of Ensemble's other Linear write:
+  the workspace reads Linear, the ticket is one Ensemble holds), with the workspace's Linear key: per screenshot
+  `fileUpload(contentType, filename, size)` → a SIGNED upload address, Linear's upload headers and the `assetUrl`;
+  the bytes are PUT to that address through the guarded transport (https, public addresses, no redirect) WITHOUT the
+  Linear key, with Linear's headers except any that carry a credential or steer the connection; then the issue's id
+  by its key and ONE `commentCreate` (markdown: `screensTicketMarkdown`, the agent's words through `mdPlain` — no
+  link, image, emphasis, code or `@` mention characters — and each picture as `![name](assetUrl)`, an address that
+  cannot break out of it). The same claim, the same never-retried rule: an uploaded file counts as written.
+  "Build end to end" has no Linear ticket step, so its screenshots go by the button.
+- Other trackers: not offered yet. GitHub Issues has no supported image upload; Notion is not built.
 
 ## Copying a tracker — "Copy from another workspace" (`tracker/copy.ts`)
 

@@ -37,7 +37,7 @@ export function BuildScreens({ build }: { build: StoryBuild }): JSX.Element | nu
   );
 }
 
-/** "Post screenshots to the ticket" (Jira; ONE press, claimed on the server; never tried again after a write). */
+/** "Post screenshots to the ticket" (Jira or Linear; ONE press, claimed on the server; never tried again after a write). */
 function TicketPost({ build }: { build: StoryBuild }): JSX.Element | null {
   const post = usePostStoryBuildScreens(build.workspaceId, build.ident);
   const t = build.screensTicket;
@@ -57,7 +57,7 @@ function TicketPost({ build }: { build: StoryBuild }): JSX.Element | null {
             Post screenshots to {build.ticketKey}
           </Button>
           <InfoButton title="Post screenshots to the ticket">
-            <p>Ensemble adds the screenshots to the Jira ticket as attachments, and posts one comment that shows them with the agent&rsquo;s verdicts. It uses your Jira login, once per build.</p>
+            <p>Ensemble adds the screenshots to the ticket, and posts one comment that shows them with the agent&rsquo;s verdicts. On Jira it uses your Jira login; on Linear, the workspace&rsquo;s Linear key. Once per build.</p>
           </InfoButton>
           {err != null && <span className="text-meta text-ui-danger">{err}</span>}
         </>

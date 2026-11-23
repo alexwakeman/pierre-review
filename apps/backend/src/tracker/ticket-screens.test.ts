@@ -36,7 +36,7 @@ beforeAll(() => {
     'CREATE TABLE accounts (id integer PRIMARY KEY); INSERT INTO accounts VALUES (1),(2);' +
       'CREATE TABLE workspaces (id integer PRIMARY KEY, account_id integer NOT NULL);' +
       'CREATE UNIQUE INDEX workspaces_id_account ON workspaces (id, account_id);' +
-      'INSERT INTO workspaces VALUES (1,1),(2,1);' +
+      'INSERT INTO workspaces VALUES (1,1),(2,1),(3,1);' +
       'CREATE TABLE sprint_tickets (id integer PRIMARY KEY AUTOINCREMENT, account_id integer NOT NULL, workspace_id integer NOT NULL, ident text NOT NULL);' +
       'CREATE TABLE sprint_ref_tickets (id integer PRIMARY KEY AUTOINCREMENT, account_id integer NOT NULL, workspace_id integer NOT NULL, ident text NOT NULL);',
   );
@@ -58,13 +58,18 @@ beforeEach(() => {
   sqlite.exec('DELETE FROM tracker_tickets; DELETE FROM workspace_trackers;');
   sqlite.exec(
     "INSERT INTO workspace_trackers (account_id, workspace_id, provider, base_url, auth_email, auth_token) VALUES " +
-      "(1, 2, 'jira', 'https://acme.atlassian.net', 'dev@acme.io', 'plain:secret'), (1, 1, 'github', NULL, NULL, NULL)",
+      "(1, 2, 'jira', 'https://acme.atlassian.net', 'dev@acme.io', 'plain:secret'), (1, 1, 'github', NULL, NULL, NULL), (1, 3, 'linear', 'https://linear.app/acme', NULL, 'plain:lin_api_secret')",
   );
   sqlite
     .prepare(
       "INSERT INTO tracker_tickets (account_id, workspace_id, pr_id, provider, issue_key, detected_from, detect_order, api_root, url, state, fetched_at, checked_at, next_check_at) VALUES (1, 2, 10, 'jira', 'ENG-7', 'title', 0, ?, '', 'ok', 1700000000, 1700000000, 1800000000)",
     )
     .run(SITE);
+  sqlite
+    .prepare(
+      "INSERT INTO tracker_tickets (account_id, workspace_id, pr_id, provider, issue_key, detected_from, detect_order, api_root, url, state, fetched_at, checked_at, next_check_at) VALUES (1, 3, 11, 'linear', 'ENG-7', 'title', 0, 'https://linear.app/acme', '', 'ok', 1700000000, 1700000000, 1800000000)",
+    )
+    .run();
 });
 
 const shots = [
@@ -107,6 +112,35 @@ describe('postTicketScreenshots', () => {
   it('the gate: a workspace not on Jira, and a ticket Ensemble does not hold, call nobody', async () => {
     expect(await post({ workspaceId: 1 })).toMatchObject({ ok: false, error: 'NotJira', wrote: false });
     expect(await post({ ident: ident('ENG-404') })).toMatchObject({ ok: false, status: 404, wrote: false });
+    expect(calls).toEqual([]);
+  });
+
+  it('Linear: each shot through its file upload, then ONE markdown comment with the asset addresses', async () => {
+    const formats: string[] = [];
+    respond = (url) => {
+      if (url.startsWith('https://api.linear.app/')) {
+        const q = JSON.parse(calls.at(-1)!.body!) as { query: string };
+        if (q.query.includes('fileUpload')) return json({ data: { fileUpload: { success: true, uploadFile: { uploadUrl: `https://storage.googleapis.com/u/${calls.length}`, assetUrl: `https://uploads.linear.app/a/${calls.length}.png`, headers: [] } } } });
+        if (q.query.includes('issue(id')) return json({ data: { issue: { id: 'uuid-7' } } });
+        return json({ data: { commentCreate: { success: true } } });
+      }
+      return { status: 200, contentType: '', body: '' };
+    };
+    const r = await postTicketScreenshots(
+      ctx,
+      { accountId: 1, workspaceId: 3, ident: 'linear:https://linear.app/acme#ENG-7', shots, comment: (refs, format) => (formats.push(format), refs.map((u) => `![x](${u})`).join(' ')) },
+      transport,
+    );
+    expect(r).toEqual({ ok: true, attachments: 2 });
+    expect(formats).toEqual(['linear']);
+    expect(calls.filter((c) => c.method === 'PUT').map((c) => c.url)).toEqual(['https://storage.googleapis.com/u/1', 'https://storage.googleapis.com/u/3']);
+    const comment = JSON.parse(calls.at(-1)!.body!) as { variables: { issueId: string; body: string } };
+    expect(comment.variables).toEqual({ issueId: 'uuid-7', body: '![x](https://uploads.linear.app/a/1.png) ![x](https://uploads.linear.app/a/3.png)' });
+  });
+
+  it('Linear: a ticket Ensemble does not hold calls nobody', async () => {
+    const r = await postTicketScreenshots(ctx, { accountId: 1, workspaceId: 3, ident: 'linear:https://linear.app/acme#ENG-404', shots, comment: () => '' }, transport);
+    expect(r).toMatchObject({ ok: false, status: 404, wrote: false });
     expect(calls).toEqual([]);
   });
 });

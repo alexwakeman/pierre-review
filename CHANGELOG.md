@@ -37,6 +37,13 @@ no internals.
   you switch it on. Workspaces where nobody changed these settings are switched off; a workspace whose
   dependency settings someone saved keeps them.
 
+## [1.0.73] - 2026-11-22
+
+### Added
+
+- Implement story: **Post screenshots to** the ticket now works with Linear tickets too: the screenshots and one
+  comment that shows them, with the workspace’s Linear key.
+
 ## [1.0.72] - 2026-11-21
 
 ### Added

@@ -171,7 +171,13 @@ export function screensWikiLines(o: { screens: readonly StoryBuildScreen[]; shot
 
 export interface PostScreensDeps {
   /** The tracker write (tracker/ticket-screens.ts with the tracker runtime's context). */
-  post(a: { accountId: number; workspaceId: number; ident: string; shots: Array<{ name: string; png: Buffer }>; comment: (names: Array<string | null>) => string }): Promise<import('../../tracker/ticket-screens.js').PostScreensResult>;
+  post(a: {
+    accountId: number;
+    workspaceId: number;
+    ident: string;
+    shots: Array<{ name: string; png: Buffer }>;
+    comment: (refs: Array<string | null>, format: import('../../tracker/ticket-screens.js').ShotsCommentFormat) => string;
+  }): Promise<import('../../tracker/ticket-screens.js').PostScreensResult>;
   now(): number;
 }
 
@@ -206,7 +212,7 @@ export async function postBuildScreensToTicket(ctx: Ctx, accountId: number, buil
   const screens = row.screensJson ?? [];
   const { TICKET_SHOTS_MAX } = await import('../../tracker/ticket-screens.js');
   const picked = ticketShotsOf(row.id, screens, TICKET_SHOTS_MAX);
-  if (!row.ident.startsWith('jira:')) return { status: 400, error: 'NotJira', message: 'Posting screenshots to the ticket works with Jira only.' };
+  if (!screensPostable(row.ident)) return { status: 400, error: 'NotJira', message: 'Posting screenshots to the ticket works with Jira and Linear.' };
   if (picked.length === 0) return { status: 400, error: 'NoScreenshots', message: 'This build has no screenshots to post.' };
   const files: Array<{ name: string; png: Buffer }> = [];
   for (const p of picked) {
@@ -229,7 +235,8 @@ export async function postBuildScreensToTicket(ctx: Ctx, accountId: number, buil
     workspaceId: row.workspaceId,
     ident: row.ident,
     shots: files,
-    comment: (names) => screensTicketComment({ ticketKey: row.ticketKey, screens, shots: kept, names }),
+    comment: (refs, format) =>
+      format === 'linear' ? screensTicketMarkdown({ ticketKey: row.ticketKey, screens, shots: kept, urls: refs }) : screensTicketComment({ ticketKey: row.ticketKey, screens, shots: kept, names: refs }),
   });
   const state: import('@pierre-review/shared').StoryBuildScreensTicketState | null = r.ok
     ? { claimedAt, postedAt: new Date(deps.now()).toISOString(), attachments: r.attachments }
@@ -340,4 +347,40 @@ export async function screensForTicketStep(
     ctx.log?.warn?.({ err, buildId }, 'build end to end: the screenshots failed');
     return null;
   }
+}
+
+// ── LINEAR (markdown) ──────────────────────────────────────────────────────────────────────────────────────────
+
+/** The trackers "Post screenshots to the ticket" writes to (by the ticket's ident). Pure. */
+export function screensPostable(ident: string): boolean {
+  return ident.startsWith('jira:') || ident.startsWith('linear:');
+}
+
+/** The agent's words, safe in Linear markdown: one line, no link, image, emphasis, code, heading or mention
+ *  characters, capped. Pure. */
+export function mdPlain(s: string, max = 300): string {
+  // eslint-disable-next-line no-control-regex
+  const t = s.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/[[\]()!*_`#<>|~@\\]/g, ' ').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+}
+
+/** An asset address safe inside `![…](…)`: https, no space or bracket. */
+const safeAssetUrl = (u: string | null): string | null => (u != null && /^https:\/\/[^\s()<>]+$/.test(u) ? u : null);
+
+/**
+ * THE LINEAR COMMENT (markdown): a heading, one line saying these are the agent's own words, then per screen its
+ * name and verdict, its note, and its pictures by Linear's asset addresses (`urls[k]` for the k-th shot). Pure.
+ */
+export function screensTicketMarkdown(o: { ticketKey: string; screens: readonly StoryBuildScreen[]; shots: ReadonlyArray<{ screen: number }>; urls: ReadonlyArray<string | null> }): string {
+  const lines = [`### Screenshots from Ensemble's build of ${mdPlain(o.ticketKey, 40)}`, '', 'The agent took these while it built the change, and compared each screen itself. The verdicts are its own.', ''];
+  for (const [i, s] of o.screens.entries()) {
+    const pics = o.shots.map((sh, k) => (sh.screen === i ? safeAssetUrl(o.urls[k] ?? null) : null)).filter((u): u is string => u != null);
+    if (pics.length === 0) continue;
+    const name = mdPlain(s.name, 120);
+    const compared = s.comparedWith ? `, compared with ${mdPlain(s.comparedWith, 200)}` : '';
+    lines.push(`**${name}**: the agent says it ${VERDICT_WIKI[s.verdict]}${compared}.`);
+    if (s.note) lines.push('', mdPlain(s.note, 600));
+    lines.push('', ...pics.map((u) => `![${name}](${u})`), '');
+  }
+  return lines.join('\n').trim();
 }

@@ -175,7 +175,9 @@ pinned image. **Figma** (`figma/client.ts`): the workspace's sealed token goes O
 `api.figma.com`, GET only, through the tracker's guarded transport (https, public addresses, no redirect
 followed, timeout, size cap); a file key or node id from a ticket is shape-checked before it enters the path; a
 frame's picture is read from Figma's signed address WITHOUT the token, public addresses only; failures are
-sentences we wrote.
+sentences we wrote. **Linear screenshot uploads** (`tracker/linear/upload.ts`): the Linear key goes to
+`api.linear.app` only; the bytes go to Linear's signed upload address without it, https and public addresses only,
+with none of Linear's returned headers that carry a credential or steer the connection.
 
 ⚠ **A MERGE FROM THE SANDBOX IS CHECKED, THEN REBUILT** (docs/SANDBOX.md § AI Fix sessions, "The merge"). The
 agent's commits leave as a git bundle — untrusted bytes. The host reads it only in Ensemble's clone cache with
