@@ -12,13 +12,16 @@
 //     limit until 8:54 PM.") and the press runs.
 //
 // IN MEMORY, per process. A boot re-derives it from the newest failed review row
-// (`restoreUsageLockouts`). The lock ends at the reset the error names (`parseRetryAtMs`: "try again
-// at 8:54 PM", "try again in 45 minutes", an epoch), else LOCKOUT_DEFAULT_MS after the failure.
+// (`restoreUsageLockouts`). The lock ends LOCKOUT_RESET_GRACE_MS after the reset the error names
+// (`parseRetryAtMs`: "try again at 8:54 PM", "try again in 45 minutes", an epoch; a time of day
+// just past is NOW, never tomorrow), else LOCKOUT_DEFAULT_MS after the failure.
 import type { AiProviderId } from '@pierre-review/shared';
 import { parseRetryAtMs } from '../review/claude-review/auto-retry.js';
 
 /** How long a usage limit locks a provider out when its error names no reset time. */
 export const LOCKOUT_DEFAULT_MS = 60 * 60 * 1000;
+/** How long past a NAMED reset the lock still holds (the reset is printed to the minute). */
+export const LOCKOUT_RESET_GRACE_MS = 2 * 60 * 1000;
 /** A lock never runs longer than this (a misread date must not lock a provider out for a month). */
 export const LOCKOUT_MAX_MS = 8 * 24 * 60 * 60 * 1000;
 
@@ -40,7 +43,9 @@ export function isUsageLockoutError(error: string | null | undefined): boolean {
 export function lockoutUntilFromError(error: string | null | undefined, failedAtMs: number): number | null {
   if (!isUsageLockoutError(error)) return null;
   const named = parseRetryAtMs(error, failedAtMs);
-  const until = named != null && named > failedAtMs ? named : failedAtMs + LOCKOUT_DEFAULT_MS;
+  // A named reset (even one happening now) ends the lock LOCKOUT_RESET_GRACE_MS after it: the
+  // provider prints it to the minute, and a run at that exact second is refused again.
+  const until = named != null ? Math.max(named, failedAtMs) + LOCKOUT_RESET_GRACE_MS : failedAtMs + LOCKOUT_DEFAULT_MS;
   return Math.min(until, failedAtMs + LOCKOUT_MAX_MS);
 }
 

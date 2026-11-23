@@ -761,7 +761,11 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   (`isUsageLockoutError`: "usage limit", "hit your … limit" (never "hit your rate limit"), "out of usage credits", "quota exceeded" —
   ⚠ NOT a plain rate limit, a 429 or an overload) LOCKS IT OUT until the reset the error names
   (`parseRetryAtMs`: "try again at 8:54 PM" as the next such local time, "try again in 45 minutes", an
-  epoch, a dated time, an ISO-8601 time after the reset words), else for `LOCKOUT_DEFAULT_MS` (1 h), never past `LOCKOUT_MAX_MS` (8 days).
+  epoch, a dated time, an ISO-8601 time after the reset words) plus `LOCKOUT_RESET_GRACE_MS` (2 min — the
+  reset is printed to the minute), else for `LOCKOUT_DEFAULT_MS` (1 h), never past `LOCKOUT_MAX_MS` (8 days).
+  ⚠ A time of day at most `RESET_JUST_PASSED_MS` (15 min) BEFORE the failure is the reset happening NOW,
+  never tomorrow's. Real (2026-11-23, run 2142): a weekly lock ended at 10:14:00, Codex refused a run at
+  10:14:03 with "try again at 10:14 AM", and the roll-forward locked it out of automatic runs for 24 h.
   Noted where the failure is made: every Codex run kind (`codex.ts failureOf`) and every review run
   of either provider (`manager.ts`). IN MEMORY per process; the boot re-derives it from the failed
   review rows newer than each provider's latest success (`failedRunsSinceLastSuccess` →
