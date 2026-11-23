@@ -2,6 +2,7 @@ import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import { SITE_NAME } from '../lib/site';
+import { LICENCE_BANDS } from '../lib/licence';
 import {
   LEGAL_CONTROLLER,
   LEGAL_LINK,
@@ -14,6 +15,9 @@ import {
   T,
   UL,
 } from '../components/legal';
+
+/** The card checkout is live once a band has its Polar link (lib/licence.ts). */
+const canBuyOnline = LICENCE_BANDS.some((b) => b.checkoutUrl !== '');
 
 // The privacy notice.
 //
@@ -145,7 +149,31 @@ export default function Privacy(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="processors" heading="4. Who else the website data reaches">
+      <LegalSection id="prospects" heading="4. If we contact you about Ensemble">
+        <P>
+          We sometimes email people at companies whose engineering teams might use {SITE_NAME}. For that we hold your
+          name, your role, your company, your work email address and where we found it, such as your company&apos;s
+          website or a talk you gave. We never take an address from a GitHub profile.
+        </P>
+        <P>
+          The lawful basis is our legitimate interest in telling businesses about {SITE_NAME}. We write only to
+          addresses at companies, never to sole traders or partnerships without consent, and the first message says
+          where we found your address.
+        </P>
+        <P>
+          Reply &ldquo;no&rdquo;, or email <Mail />, and we stop. That right is absolute. We then keep only your email
+          address, on a do-not-contact list, so that we never write again. Otherwise we delete your details once a
+          conversation has ended.
+        </P>
+        {canBuyOnline && (
+          <P>
+            If you buy a licence by card, Polar handles the payment as the seller of record and receives the details
+            you give at checkout, under its own privacy policy.
+          </P>
+        )}
+      </LegalSection>
+
+      <LegalSection id="processors" heading="5. Who else the website data reaches">
         <P>No data is sold, and there are no advertising or data-broker relationships.</P>
         <LegalTable
           label="Who else the website data reaches"
@@ -178,7 +206,7 @@ export default function Privacy(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="retention" heading="5. How long it is kept">
+      <LegalSection id="retention" heading="6. How long it is kept">
         <UL>
           <li>
             <T>Contact-form messages</T> — kept in the Slack channel for as long as the
@@ -197,7 +225,7 @@ export default function Privacy(): JSX.Element {
         </UL>
       </LegalSection>
 
-      <LegalSection id="rights" heading="6. Your rights">
+      <LegalSection id="rights" heading="7. Your rights">
         <P>
           Under UK/EU GDPR you can ask us to give you a copy of your data, correct it, delete
           it, restrict or object to how we use it, and withdraw any consent you have given.
@@ -221,7 +249,7 @@ export default function Privacy(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="security" heading="7. Security">
+      <LegalSection id="security" heading="8. Security">
         <P>
           The site is served over HTTPS with HSTS and a strict content security policy. If you
           find a vulnerability, report it privately to <Mail /> rather than opening a public
@@ -229,7 +257,7 @@ export default function Privacy(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="california" heading="8. California residents">
+      <LegalSection id="california" heading="9. California residents">
         <P>
           We do not sell personal information and do not share it for cross-context
           behavioural advertising, as the CCPA/CPRA define those terms. You have the right to
@@ -239,7 +267,7 @@ export default function Privacy(): JSX.Element {
         </P>
       </LegalSection>
 
-      <LegalSection id="changes" heading="9. Changes">
+      <LegalSection id="changes" heading="10. Changes">
         <P>
           If this notice changes materially we will update the date at the top and, where the
           change affects consent, ask again. The full history is in the public git repository.
