@@ -5974,19 +5974,16 @@ the Claude reviews frame, `AiFixBanner`, `StoryBuildsToast` (docs/STORY-BUILD.md
   being out of the flow — a toast appearing or going never moves a pixel of any page. The cluster
   itself is a floating pill (`bg-ui-bg`, `ring-1 ring-ui-line`, `shadow-lg` — DESIGN.md § 4: floating
   things get the shadow).
-- **IT RISES OVER A PINNED ACTION BAR** (`useToastLift`, `components/ui/toastObstacles.ts`; pure half
-  `toastLift`, lib/toastAnchor.ts). A `SidePanel` footer (docked at lg+, a sheet below) registers
-  itself while mounted; when one reaches the cluster's corner (its right edge within 160px of the
-  viewport's right) and sits at the viewport's bottom, the cluster's `bottom` becomes that bar's
-  height + 8px, so it never sits on Merge / Dismiss. Re-measured on register, resize, a
-  `ResizeObserver`, any scroll and `animationend`; an open panel re-anchors when the lift changes.
-  ⚠ **MEASURE AFTER LAYOUT SETTLES** (2026-11-04): each read is taken on the next frame AND again on
-  the frame after, and the `ResizeObserver` watches the bar's PANEL (its parent) as well as the bar.
-  The Open PRs docked panel re-fills to the pane's bottom on scroll (`useFillToPaneBottom`) in its own
-  rAF + a later React commit; a single read on the scroll took the footer's in-between position and
-  kept it, so the cluster sat ~40px too high until the next event.
-- **Z-ORDER**: the dock is `z-[51]` — ABOVE a `SidePanel` sheet (`z-50`), so the Undo for an action
-  taken in a sheet (Dismiss, Approve, Merge) is always reachable; BELOW the mobile drawer
+- **IT NEVER MOVES FOR A PANEL** (owner, 2026-11-23: "keep its position stable"). It used to RISE over
+  a `SidePanel`'s pinned action bar (`useToastLift` / `toastObstacles.ts` / `toastLift`, all DELETED),
+  so opening a PR drawer on Activity → Open PRs moved it up ~60px and back on close. Now the cluster
+  STACKS over the panel (z-order below) and the panel's action bar keeps its right end clear instead:
+  `FOOTER_TOAST_ROOM` (`md:pr-24`, SidePanel.tsx — room for three overlapping circles and the gutter),
+  so the cluster never sits on Merge / Dismiss. Below md the cluster already sits above the phone's
+  bottom bar, clear of a full-screen sheet's footer. ⚠ Never re-add a lift: fix a clash in the panel's
+  layout, never by moving the cluster.
+- **Z-ORDER**: the dock is `z-[51]` — ABOVE a `SidePanel` (docked or a sheet, `z-50`), so the Undo for an action
+  taken in a panel (Dismiss, Approve, Merge) is always reachable and an open drawer never hides it; BELOW the mobile drawer
   (`z-[55]`/`[56]`), the modals (Settings, Help, the sync-progress modal, `InfoModal` — all `z-[60]`
   now; Settings/Help/SyncProgress were `z-50` and would have sat under the cluster), popovers
   (`UserProfilePopover`, `MarkerPopover` → `z-[60]`), the resolver (`z-[60]`) and the workspace manager

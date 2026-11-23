@@ -19,6 +19,11 @@ no internals.
   show it. Cancelled tickets still count in the pace and the release check. If you saved statuses with a
   Cancelled column, it stays.
 
+### Fixed
+
+- Activity → Open PRs: the notifications in the bottom right no longer move up when a pull request's panel
+  is open. They stay in place, above the panel.
+
 ## [1.0.75] - 2026-11-23
 
 ### Added
