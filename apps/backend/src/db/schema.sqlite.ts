@@ -2597,7 +2597,7 @@ export const workspaces = sqliteTable(
     // written; kept rather than rebuilding the table to drop a column.
     sprintChecks: text('sprint_checks', { mode: 'json' }).$type<unknown>(),
     // Activity → This Sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
-    // OVERRIDES ONLY (`SprintStatusSettings` = {buckets, mergedColumn}: named status buckets, each with
+    // OVERRIDES ONLY (`SprintStatusSettings` = {buckets, mergedColumn, showCancelled}: named status buckets, each with
     // a stage meaning; stored retired {sections} / {order, deliveredFrom} values are converted on
     // read, no migration); NULL = the
     // automatic layout (`sprint_reads.status_order_json` + category + name + PR evidence).

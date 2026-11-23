@@ -112,7 +112,7 @@ function layout(over: Partial<SprintStatusLayout> = {}): SprintStatusLayout {
       { status: 'Ready for QA', withPrs: 6, allMerged: 4 },
       { status: 'In PO Review', withPrs: 11, allMerged: 11 },
     ],
-    settings: { buckets: null, mergedColumn: true },
+    settings: { buckets: null, mergedColumn: true, showCancelled: false },
     ...over,
   };
 }
@@ -212,14 +212,17 @@ describe('status buckets', () => {
     expect(bucketsDraftChanged(layout(), d)).toBe(false);
     expect(bucketsDraftChanged(layout(), moved)).toBe(true);
     expect(bucketsDraftChanged(layout(), { ...d, mergedColumn: false })).toBe(true);
+    expect(bucketsDraftChanged(layout(), { ...d, showCancelled: true })).toBe(true);
     expect(bucketsDraftChanged(layout(), renameBucket(d, 'done', 'Complete '))).toBe(false);
   });
 
   it('save payload: buckets untouched → the stored buckets (automatic stays automatic); changed → every bucket, names trimmed', () => {
     const l = layout();
     const d = bucketsDraftOf(l);
-    expect(bucketsToSave(l, d)).toEqual({ buckets: null, mergedColumn: true });
-    expect(bucketsToSave(l, { ...d, mergedColumn: false })).toEqual({ buckets: null, mergedColumn: false });
+    expect(bucketsToSave(l, d)).toStrictEqual({ buckets: null, mergedColumn: true, showCancelled: false });
+    expect(bucketsToSave(l, { ...d, mergedColumn: false })).toStrictEqual({ buckets: null, mergedColumn: false, showCancelled: false });
+    // Showing the Cancelled column alone keeps the buckets automatic.
+    expect(bucketsToSave(l, { ...d, showCancelled: true })).toStrictEqual({ buckets: null, mergedColumn: true, showCancelled: true });
     const moved = renameBucket(moveStatusStep(d, 2, 0, -1), 'done', ' Shipped ');
     const out = bucketsToSave(l, moved);
     expect(out.buckets?.map((b) => `${b.id}:${b.name}:${b.statuses.join('|')}`)).toEqual([

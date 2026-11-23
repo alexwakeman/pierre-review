@@ -130,8 +130,8 @@ export function useSprintRefreshing(workspaceId: number | null): boolean {
   return useIsMutating({ mutationKey: ['sprint-refresh', workspaceKey(workspaceId)] }) > 0;
 }
 
-/** Replace the workspace's status buckets override (`{buckets, mergedColumn}`). `{buckets: null,
- *  mergedColumn: true}` = back to automatic. The layout lands at once; the sprint refetches because
+/** Replace the workspace's status buckets override (`{buckets, mergedColumn, showCancelled}`).
+ *  `SPRINT_STATUS_SETTINGS_DEFAULT` = back to automatic. The layout lands at once; the sprint refetches because
  *  every node's stage and column move with it. */
 export function useSprintSetStatuses(workspaceId: number | null) {
   const qc = useQueryClient();

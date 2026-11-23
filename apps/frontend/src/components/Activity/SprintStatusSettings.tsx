@@ -81,9 +81,12 @@ export function SprintStatusSettings({
   const counts = new Map(layout.order.map((o) => [o.name, o.count]));
   const unplaced = unplacedStatuses(layout);
   const isDefault =
-    layout.settings.buckets == null && layout.settings.mergedColumn === SPRINT_STATUS_SETTINGS_DEFAULT.mergedColumn;
+    layout.settings.buckets == null &&
+    layout.settings.mergedColumn === SPRINT_STATUS_SETTINGS_DEFAULT.mergedColumn &&
+    layout.settings.showCancelled === SPRINT_STATUS_SETTINGS_DEFAULT.showCancelled;
   const empty = draft.buckets.every((b) => b.statuses.length === 0);
   const hasProductReview = draft.buckets.some((b) => b.meaning === 'product_review');
+  const hasCancelled = draft.buckets.some((b) => b.meaning === 'cancelled');
   const changed = bucketsDraftChanged(layout, draft);
   const problem = changed ? bucketsDraftProblem(layout, draft) : null;
   const leftOut = changed ? statusesLeftOutOnSave(layout, draft) : new Set<string>();
@@ -164,7 +167,7 @@ export function SprintStatusSettings({
         <span className={`font-normal ${MUTED}`}>· {statusOrderSourceLabel(changed ? 'override' : layout.orderSource)}</span>
         <InfoButton title="Statuses">
           <p>
-            Each bucket is a column on This Sprint. Put any of your tracker’s statuses in a bucket, and say what the
+            Each bucket is a column on This Sprint (Cancelled only when you show it). Put any of your tracker’s statuses in a bucket, and say what the
             bucket means: Not started, In progress, Code review, Product review, Complete or Cancelled. Buckets must go
             in that order, but you can have two of one kind, such as two review stages. Product review is for QA, testing
             and other sign-offs after the code is reviewed.
@@ -387,6 +390,22 @@ export function SprintStatusSettings({
         </InfoButton>
       </div>
       {!hasProductReview && <p className={`text-meta ${MUTED}`}>Add a bucket meaning Product review to use this.</p>}
+      <div className="flex items-center gap-1 text-meta text-ui-ink">
+        <Checkbox
+          checked={draft.showCancelled}
+          disabled={!hasCancelled}
+          onChange={(e) => setDraft({ ...draft, showCancelled: e.target.checked })}
+          label="Show the Cancelled column"
+          className="text-meta"
+        />
+        <InfoButton title="Cancelled column">
+          <p>
+            The Cancelled column is hidden unless you tick this. Cancelled tickets still count as cancelled in the sprint’s
+            pace and in the release check.
+          </p>
+        </InfoButton>
+      </div>
+      {!hasCancelled && <p className={`text-meta ${MUTED}`}>Add a bucket meaning Cancelled to use this.</p>}
       {leftOut.size > 0 && (
         <p className={`text-meta ${MUTED}`} data-testid="sprint-status-left-out">
           Save keeps {SPRINT_STATUS_ORDER_MAX} statuses at most, so it leaves out {[...leftOut].map((n) => `“${n}”`).join(', ')}.

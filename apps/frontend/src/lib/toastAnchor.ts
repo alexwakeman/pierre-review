@@ -59,26 +59,3 @@ export function toastRank(
   const tier = t.alert ? 3 : t.action ? 2 : t.progress ? 1 : 0;
   return tier * 100_000 + (seq % 100_000);
 }
-
-/**
- * How far the cluster must rise so it never sits on a panel's action bar pinned to the bottom right
- * (a SidePanel's footer — docked at lg+, a sheet below). `obstacles` are those bars' rects; one
- * counts only when it reaches the cluster's corner (its right edge within `reach` of the viewport's
- * right) and sits at the viewport's bottom. Returns the px from the viewport bottom to the highest
- * such bar's top, or 0.
- */
-export function toastLift(
-  obstacles: ReadonlyArray<{ top: number; bottom: number; right: number; height: number }>,
-  viewportWidth: number,
-  viewportHeight: number,
-  reach = 160,
-): number {
-  let lift = 0;
-  for (const r of obstacles) {
-    if (r.height <= 0) continue;
-    if (r.right < viewportWidth - reach) continue;
-    if (r.bottom < viewportHeight - 24) continue;
-    lift = Math.max(lift, Math.round(viewportHeight - r.top));
-  }
-  return lift;
-}

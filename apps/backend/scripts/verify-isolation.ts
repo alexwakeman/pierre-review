@@ -4217,6 +4217,7 @@ check(
       { id: 'done', name: 'Done', meaning: 'done' as const, statuses: ['Done'] },
     ],
     mergedColumn: true,
+    showCancelled: false,
   });
   const bOrder = bucketsOf('Doing');
   const bReview = async () => (await statusSettings.getSprintStatusSettings(2, defaultB)).buckets?.find((b) => b.id === 'review')?.statuses[0];

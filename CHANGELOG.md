@@ -19,6 +19,14 @@ no internals.
   the ticket's open pull requests. A teammate who reviews the code but has no story checks no longer
   stops yours: your Ensemble checks the story and posts its gaps as before. When a teammate already
   checked the story at those commits, the story check says so and yours skips it.
+- This Sprint: the Cancelled column is hidden by default. Tick "Show the Cancelled column" under Statuses to
+  show it. Cancelled tickets still count in the pace and the release check. If you saved statuses with a
+  Cancelled column, it stays.
+
+### Fixed
+
+- Activity → Open PRs: the notifications in the bottom right no longer move up when a pull request's panel
+  is open. They stay in place, above the panel.
 
 ## [1.0.75] - 2026-11-23
 

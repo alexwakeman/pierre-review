@@ -813,7 +813,7 @@ const SPRINT_GRAPH: SprintGraphResponse = {
       { id: 'product_review', name: 'Product review', meaning: 'product_review' },
       { id: 'done', name: 'Complete', meaning: 'done' },
     ],
-    settings: { buckets: null, mergedColumn: true },
+    settings: { buckets: null, mergedColumn: true, showCancelled: false },
   },
   nodes: [
     {

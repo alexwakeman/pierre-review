@@ -283,7 +283,7 @@ describe('sprintColumnsOf', () => {
 });
 
 describe('mergeRuleTarget', () => {
-  const layout = (buckets: SprintBucket[], mergedColumn: boolean) => ({ buckets: buckets.map((b) => ({ ...b, statuses: [] })), settings: { buckets, mergedColumn } });
+  const layout = (buckets: SprintBucket[], mergedColumn: boolean) => ({ buckets: buckets.map((b) => ({ ...b, statuses: [] })), settings: { buckets, mergedColumn, showCancelled: false } });
   it('the FIRST Product review bucket while the rule is on; off or none → null', () => {
     const bs = [B('r', 'R', 'in_review', []), B('q1', 'QA', 'product_review', []), B('q2', 'UAT', 'product_review', [])];
     expect(mergeRuleTarget(layout(bs, true))).toBe('q1');
@@ -331,7 +331,7 @@ describe('resolveSprintStatusLayout', () => {
     expect(l.evidence.map((e) => `${e.status}:${e.allMerged}/${e.withPrs}`)).toEqual(['In Development:0/0', 'Ready for QA:0/0', 'In PO Review:3/3']);
   });
 
-  it('automatic → six buckets named by stage, QA names in Product review, Won’t do in Cancelled (never Complete); one column per bucket', () => {
+  it('automatic → six buckets named by stage, QA names in Product review, Won’t do in Cancelled (never Complete); one column per bucket, Cancelled hidden by default', () => {
     const l = resolveSprintStatusLayout({ autoOrder: BOARD, settings: SPRINT_STATUS_SETTINGS_DEFAULT, tickets, evidence: new Map() });
     expect(l.buckets.map((b) => `${b.id}:${b.name}:${names(b.statuses).join('|')}`)).toEqual([
       'not_started:Not started:To Do',
@@ -341,8 +341,12 @@ describe('resolveSprintStatusLayout', () => {
       'done:Complete:Done',
       'cancelled:Cancelled:Won’t do',
     ]);
-    expect(l.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'product_review', 'done', 'cancelled']);
+    // The Cancelled bucket holds its statuses (so Won’t do still reads as cancelled) but draws no column.
+    expect(l.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'product_review', 'done']);
+    expect(l.order.find((o) => o.name === 'Won’t do')?.stage).toBe('cancelled');
     expect(mergeRuleTarget(l)).toBe('product_review');
+    const shown = resolveSprintStatusLayout({ autoOrder: BOARD, settings: { ...SPRINT_STATUS_SETTINGS_DEFAULT, showCancelled: true }, tickets, evidence: new Map() });
+    expect(shown.columns.map((c) => c.id)).toEqual(['not_started', 'in_progress', 'in_review', 'product_review', 'done', 'cancelled']);
   });
 
   it('custom buckets: two review stages, Won’t do moved; the columns are the buckets', () => {
@@ -357,6 +361,7 @@ describe('resolveSprintStatusLayout', () => {
           B('done', 'Done', 'done', ['Done']),
         ],
         mergedColumn: true,
+        showCancelled: false,
       },
       tickets,
       evidence: new Map(),
@@ -374,7 +379,7 @@ describe('resolveSprintStatusLayout', () => {
   it('an override is the source; an empty stage has no coding status', () => {
     const l = resolveSprintStatusLayout({
       autoOrder: BOARD,
-      settings: { buckets: [B('p', 'Doing', 'in_progress', ['In PO Review', 'Ready for QA', 'In Development'])], mergedColumn: false },
+      settings: { buckets: [B('p', 'Doing', 'in_progress', ['In PO Review', 'Ready for QA', 'In Development'])], mergedColumn: false, showCancelled: false },
       tickets,
       evidence: new Map(),
     });
@@ -393,7 +398,7 @@ describe('resolveSprintStatusLayout', () => {
   it('a ticket’s stage is the layout’s placement; an unknown status falls back to category / name', () => {
     const l = resolveSprintStatusLayout({
       autoOrder: BOARD,
-      settings: { buckets: sectionsToBuckets({ ...noSections(), in_review: ['Done'] }), mergedColumn: true },
+      settings: { buckets: sectionsToBuckets({ ...noSections(), in_review: ['Done'] }), mergedColumn: true, showCancelled: false },
       tickets,
       evidence: new Map(),
     });
@@ -437,25 +442,25 @@ describe('storedSettingsFor (the retired shapes)', () => {
       ...noSections(),
       in_progress: ['In Development', 'Ready for QA'],
     });
-    expect(storedSettingsFor({ order: null, deliveredFrom: 'Ready for QA' }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true });
+    expect(storedSettingsFor({ order: null, deliveredFrom: 'Ready for QA' }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
   });
 
   it('{sections} → four buckets named by stage; an empty one → automatic', () => {
     const s = storedSettingsFor({ sections: { ...noSections(), in_review: ['Done'], done: ['Won’t do'] } }, BOARD, []);
     // Won’t do moves out of Complete into the added Cancelled bucket.
     expect(sec(s)).toEqual({ ...noSections(), in_review: ['Done'], done: [], cancelled: ['Won’t do'] });
-    expect(storedSettingsFor({ sections: noSections() }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true });
-    expect(storedSettingsFor({ sections: null }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true });
+    expect(storedSettingsFor({ sections: noSections() }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
+    expect(storedSettingsFor({ sections: null }, BOARD, [])).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
   });
 
   it('a stored bucket list whose meanings go backwards reads as automatic; mergedColumn kept', () => {
-    const back = { buckets: [B('d', 'Done', 'done', []), B('t', 'Todo', 'not_started', [])], mergedColumn: false };
-    expect(storedSettingsFor(back, BOARD, [])).toEqual({ buckets: null, mergedColumn: false });
+    const back = { buckets: [B('d', 'Done', 'done', []), B('t', 'Todo', 'not_started', [])], mergedColumn: false, showCancelled: false };
+    expect(storedSettingsFor(back, BOARD, [])).toEqual({ buckets: null, mergedColumn: false, showCancelled: false });
   });
 
   it('a stored bucket whose name repeats an earlier one (any case) is dropped, its statuses with it', () => {
-    const twice = { version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'Review', 'in_review', ['Code Review']), B('b', 'review', 'in_review', ['PO Review'])], mergedColumn: true };
-    expect(storedSettingsFor(twice, BOARD, [])).toEqual({ buckets: [B('a', 'Review', 'in_review', ['Code Review'])], mergedColumn: true });
+    const twice = { version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'Review', 'in_review', ['Code Review']), B('b', 'review', 'in_review', ['PO Review'])], mergedColumn: true, showCancelled: false };
+    expect(storedSettingsFor(twice, BOARD, [])).toEqual({ buckets: [B('a', 'Review', 'in_review', ['Code Review'])], mergedColumn: true, showCancelled: false });
   });
 
   it('a stored value WITHOUT the version (saved before Product review) gets one; WITH it, read as saved', () => {
@@ -468,6 +473,7 @@ describe('storedSettingsFor (the retired shapes)', () => {
         B('done', 'Complete', 'done', ['Done']),
       ],
       mergedColumn: true,
+      showCancelled: false,
     };
     const s = storedSettingsFor(legacy, null, []);
     expect(s.buckets?.map((b) => `${b.id}:${b.name}:${b.meaning}:${b.statuses.join('|')}`)).toEqual([
@@ -506,6 +512,7 @@ describe('storedSettingsFor (the retired shapes)', () => {
         B('shipped', 'Shipped', 'done', ['Released', 'Duplicate']),
       ],
       mergedColumn: false,
+      showCancelled: false,
     };
     const s = storedSettingsFor(v2, null, []);
     expect(s.buckets?.map((b) => `${b.id}:${b.name}:${b.meaning}:${b.statuses.join('|')}`)).toEqual([
@@ -528,8 +535,8 @@ describe('storedSettingsFor (the retired shapes)', () => {
     expect(ids({ version: 2, buckets: nine })).toHaveLength(10);
     expect(ids({ version: 2, buckets: [B('a', 'cancelled', 'done', ['Won’t do'])] })).toEqual(['a']);
     expect(ids({ version: 2, buckets: [B('cancelled', 'Later', 'done', [])] })).toEqual(['cancelled', 'cancelled_2']);
-    const current = { version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('d', 'Done', 'done', ['Done', 'Won’t do'])], mergedColumn: true };
-    expect(storedSettingsFor(current, null, [])).toEqual({ buckets: [B('d', 'Done', 'done', ['Done', 'Won’t do'])], mergedColumn: true });
+    const current = { version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('d', 'Done', 'done', ['Done', 'Won’t do'])], mergedColumn: true, showCancelled: false };
+    expect(storedSettingsFor(current, null, [])).toEqual({ buckets: [B('d', 'Done', 'done', ['Done', 'Won’t do'])], mergedColumn: true, showCancelled: false });
   });
 });
 

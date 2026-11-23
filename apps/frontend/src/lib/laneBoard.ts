@@ -8,7 +8,8 @@
 // each card takes, which arrows can be drawn); the second half builds each view's lanes, cards and
 // arrows from `SprintGraphResponse`.
 //
-//   COLUMNS   `statusLayout.columns`, verbatim. "Outside the sprint" is added at the LEFT only for the
+//   COLUMNS   `statusLayout.columns`, verbatim (a Cancelled bucket is on it only when the workspace
+//             shows it; a card in a bucket it leaves out is not drawn, `onDrawnColumns`). "Outside the sprint" is added at the LEFT only for the
 //             Critical path view and only when a path names a ticket outside the sprint; "Status not
 //             known" at the right only when a card has no column. A Complete or Cancelled column (the
 //             last ones) is COLLAPSED by default (a count and "Show"), so a sprint with many done or
@@ -545,6 +546,18 @@ function cardsFor(nodes: ReadonlyArray<SprintGraphNode>, lane: string, view: Spr
   }));
 }
 
+/** Only cards on a drawn column: a hidden bucket (the Cancelled one, unless the workspace shows it —
+ *  `statusLayout.columns` leaves it out) draws no card and counts in no lane or table. The two
+ *  pseudo-columns always draw. No layout columns → every card. */
+function onDrawnColumns(
+  cards: Array<BoardCardDef<SprintCardData>>,
+  layoutColumns: ReadonlyArray<SprintColumn> | null | undefined,
+): Array<BoardCardDef<SprintCardData>> {
+  if (layoutColumns == null) return cards;
+  const ids = new Set(layoutColumns.map((c) => c.id));
+  return cards.filter((c) => c.column === OUTSIDE_COLUMN_ID || c.column === UNKNOWN_COLUMN_ID || ids.has(c.column));
+}
+
 function needs(cards: ReadonlyArray<BoardCardDef<SprintCardData>>): { outside: boolean; unknown: boolean } {
   return {
     outside: cards.some((c) => c.column === OUTSIDE_COLUMN_ID),
@@ -569,7 +582,8 @@ export function pathsBoard(i: BoardInput): SprintBoard {
     // A path none of whose tickets is on today's map (or passes the filters) draws no lane (never a
     // header-only board).
     if (mine.length === 0) return;
-    const laneCards = cardsFor(mine, id, 'paths', critical, waiting);
+    const laneCards = onDrawnColumns(cardsFor(mine, id, 'paths', critical, waiting), i.columns);
+    if (laneCards.length === 0) return;
     lanes.push({ id, label: p.title, data: { kind: 'path', risk: p.risk, advice: p.advice, prs: lanePrCount(laneCards) } });
     cards.push(...laneCards);
     const here = new Set(mine.map((n) => n.ident));
@@ -618,7 +632,9 @@ export function themesBoard(i: BoardInput & { themes: ReadonlyArray<SprintTheme>
           { id: 'other', label: OTHER_THEME_LABEL, other: true, last: true, summary: null },
         ];
   const laneOf = new Map(nodes.map((n) => [n.ident, laneIdOf(n)]));
-  const cardsOf = new Map(stored.map((l) => [l.id, cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'themes', critical, waiting)]));
+  const cardsOf = new Map(
+    stored.map((l) => [l.id, onDrawnColumns(cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'themes', critical, waiting), i.columns)]),
+  );
   const order = byPrCount(stored, (id) => lanePrCount(cardsOf.get(id) ?? []));
   const cards = order.flatMap((l) => cardsOf.get(l.id) ?? []);
   const columns = sprintColumns(i.columns, needs(cards));
@@ -690,7 +706,9 @@ export function peopleBoard(i: BoardInput & { people: ReadonlyArray<SprintPerson
   const alpha = [...lanesById.values()]
     .sort((a, b) => Number(a.unassigned) - Number(b.unassigned) || a.label.localeCompare(b.label) || a.id.localeCompare(b.id))
     .map((l) => ({ ...l, last: l.unassigned }));
-  const cardsOf = new Map(alpha.map((l) => [l.id, cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'people', critical, waiting)]));
+  const cardsOf = new Map(
+    alpha.map((l) => [l.id, onDrawnColumns(cardsFor(nodes.filter((n) => laneOf.get(n.ident) === l.id), l.id, 'people', critical, waiting), i.columns)]),
+  );
   const order = alpha;
   const cards = order.flatMap((l) => cardsOf.get(l.id) ?? []);
   const columns = sprintColumns(i.columns, needs(cards));

@@ -156,13 +156,14 @@ describe('parseSprintStatusSettings', () => {
   const tolerant = (v: unknown) => settings.parseSprintStatusSettings(v, false);
 
   it('accepts a clean post, trimming names; buckets null → automatic; mergedColumn defaults on', () => {
-    expect(strict({ buckets: [B('a', ' To do ', 'not_started', [' To Do ']), B('b', 'QA', 'in_review', ['In Dev'])], mergedColumn: false })).toEqual({
+    expect(strict({ buckets: [B('a', ' To do ', 'not_started', [' To Do ']), B('b', 'QA', 'in_review', ['In Dev'])], mergedColumn: false, showCancelled: false })).toEqual({
       buckets: [B('a', 'To do', 'not_started', ['To Do']), B('b', 'QA', 'in_review', ['In Dev'])],
       mergedColumn: false,
+      showCancelled: false,
     });
-    expect(strict({ buckets: null })).toEqual({ buckets: null, mergedColumn: true });
+    expect(strict({ buckets: null })).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
     // Two review buckets; no bucket of some meaning is fine.
-    expect(strict({ buckets: [B('r1', 'QA', 'in_review'), B('r2', 'PO review', 'in_review')], mergedColumn: true })).not.toBeNull();
+    expect(strict({ buckets: [B('r1', 'QA', 'in_review'), B('r2', 'PO review', 'in_review')], mergedColumn: true, showCancelled: false })).not.toBeNull();
   });
 
   it('refuses a malformed post, saying what is wrong in plain words', () => {
@@ -194,34 +195,54 @@ describe('parseSprintStatusSettings', () => {
     expect(why({ buckets: [B('a', 'A', 'done', ['x'.repeat(101)])] })).toBe('A status name is not valid.');
     expect(why({ buckets: [B('a', 'A', 'done', Array.from({ length: 61 }, (_, i) => `S${i}`))] })).toBe('Place at most 60 statuses.');
     expect(why({ buckets: null, mergedColumn: 'yes' })).toBe('Say whether merged tickets move to Product review.');
+    expect(why({ buckets: null, showCancelled: 'yes' })).toBe('Say whether to show the Cancelled column.');
+  });
+
+  it('showCancelled: posted absent → off; stored v4 as stored; v3 on only when its saved buckets include Cancelled; older and retired → off', () => {
+    expect(strict({ buckets: null })).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
+    expect(strict({ buckets: null, showCancelled: true })).toEqual({ buckets: null, mergedColumn: true, showCancelled: true });
+    const withC = [B('a', 'A', 'in_progress', ['X']), B('c', 'Gone', 'cancelled', ['Won’t Do'])];
+    const noC = [B('a', 'A', 'in_progress', ['X']), B('d', 'Done', 'done', ['Done'])];
+    expect(tolerant({ version: 4, buckets: withC, mergedColumn: true })?.showCancelled).toBe(false);
+    expect(tolerant({ version: 4, buckets: null, mergedColumn: true, showCancelled: true })?.showCancelled).toBe(true);
+    // Saved before the switch, WITH a Cancelled bucket: the reader keeps the column.
+    expect(tolerant({ version: 3, buckets: withC, mergedColumn: true })).toEqual({ buckets: withC, mergedColumn: true, showCancelled: true });
+    expect(tolerant({ version: 3, buckets: noC, mergedColumn: true })?.showCancelled).toBe(false);
+    expect(tolerant({ version: 3, buckets: null, mergedColumn: false })?.showCancelled).toBe(false);
+    // Version 2: the Cancelled bucket is added at read time, never chosen → hidden.
+    const v2 = tolerant({ version: 2, buckets: [...noC.slice(0, 1), B('d', 'Done', 'done', ['Done', 'Won’t Do'])], mergedColumn: true })!;
+    expect(v2.buckets?.some((b) => b.meaning === 'cancelled')).toBe(true);
+    expect(v2.showCancelled).toBe(false);
+    expect(tolerant({ sections: { done: ['Done'] } })?.showCancelled).toBe(false);
   });
 
   it('reads a stored value tolerantly, the retired shapes included', () => {
-    expect(tolerant(null)).toEqual({ buckets: null, mergedColumn: true });
-    expect(tolerant('junk')).toEqual({ buckets: null, mergedColumn: true });
+    expect(tolerant(null)).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
+    expect(tolerant('junk')).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
     expect(sec(tolerant({ sections: { done: ['A', 'a', 3, ''] } }))).toEqual({ not_started: [], in_progress: [], in_review: [], product_review: [], done: ['A'], cancelled: [] });
     // No categories handed in: every retired status reads as in progress until deliveredFrom.
     expect(sec(tolerant({ order: ['A', 'B'], deliveredFrom: 'b' }))).toEqual({ not_started: [], in_progress: ['A'], in_review: ['B'], product_review: [], done: [], cancelled: [] });
     // Bad buckets dropped, good ones kept.
-    expect(tolerant({ version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'A', 'in_progress', ['X', 'x']), { id: 'B!', name: 'B', meaning: 'done', statuses: [] }], mergedColumn: false })).toEqual({
+    expect(tolerant({ version: SPRINT_STATUS_SETTINGS_VERSION, buckets: [B('a', 'A', 'in_progress', ['X', 'x']), { id: 'B!', name: 'B', meaning: 'done', statuses: [] }], mergedColumn: false, showCancelled: false })).toEqual({
       buckets: [B('a', 'A', 'in_progress', ['X'])],
       mergedColumn: false,
+      showCancelled: false,
     });
   });
 });
 
 describe('get / set', () => {
-  const S = { buckets: [B('dev', 'Building', 'in_progress', ['In Development']), B('qa', 'QA', 'in_review', ['Ready for QA'])], mergedColumn: true };
+  const S = { buckets: [B('dev', 'Building', 'in_progress', ['In Development']), B('qa', 'QA', 'in_review', ['Ready for QA'])], mergedColumn: true, showCancelled: false };
   it('stores overrides, the default as NULL, and refuses another tenant’s workspace', async () => {
     expect(await settings.setSprintStatusSettings(1, wsA, S as any)).toBe(true);
     expect(await settings.getSprintStatusSettings(1, wsA)).toEqual(S);
-    expect(await settings.getSprintStatusSettings(1, wsA2)).toEqual({ buckets: null, mergedColumn: true });
+    expect(await settings.getSprintStatusSettings(1, wsA2)).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
     expect(await settings.setSprintStatusSettings(1, wsB, S as any)).toBe(false);
-    expect(await settings.getSprintStatusSettings(2, wsB)).toEqual({ buckets: null, mergedColumn: true });
+    expect(await settings.getSprintStatusSettings(2, wsB)).toEqual({ buckets: null, mergedColumn: true, showCancelled: false });
     // Automatic buckets with the merged column off is NOT the default: it is stored.
-    expect(await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: false })).toBe(true);
-    expect(await settings.getSprintStatusSettings(1, wsA)).toEqual({ buckets: null, mergedColumn: false });
-    expect(await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true })).toBe(true);
+    expect(await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: false, showCancelled: false })).toBe(true);
+    expect(await settings.getSprintStatusSettings(1, wsA)).toEqual({ buckets: null, mergedColumn: false, showCancelled: false });
+    expect(await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true, showCancelled: false })).toBe(true);
     const [r] = await db.select({ v: schema.workspaces.sprintStatuses }).from(schema.workspaces).where((await import('drizzle-orm')).eq(schema.workspaces.id, wsA)).execute();
     expect(r.v).toBeNull();
   });
@@ -247,6 +268,7 @@ describe('evidence and the layout', () => {
     await settings.setSprintStatusSettings(1, wsA, {
       buckets: settings.sectionsToBuckets({ not_started: [], in_progress: [], in_review: ['In Development'], product_review: [], done: [], cancelled: [] }),
       mergedColumn: true,
+      showCancelled: false,
     });
     const set = await layout.sprintLayoutFor(1, wsA);
     expect(set?.orderSource).toBe('override');
@@ -269,7 +291,7 @@ describe('evidence and the layout', () => {
       done: ['Done'],
       cancelled: [],
     });
-    await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true });
+    await settings.setSprintStatusSettings(1, wsA, { buckets: null, mergedColumn: true, showCancelled: false });
     // Never read: no site, no layout.
     expect(await layout.sprintLayoutFor(1, wsA2)).toBeNull();
   });
