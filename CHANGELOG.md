@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.75] - 2026-11-23
+
 ### Added
 
 - A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
