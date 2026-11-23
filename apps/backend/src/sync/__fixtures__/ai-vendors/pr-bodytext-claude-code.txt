@@ -1,0 +1,11 @@
+Summary
+
+Retry the webhook sender three times with jittered backoff.
+Log the final failure with the delivery id.
+
+Test plan
+
+ pnpm test passes
+ Manual 502 from the stub server retries
+
+🤖 Generated with Claude Code

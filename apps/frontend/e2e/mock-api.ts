@@ -137,10 +137,14 @@ import type {
   RepoOverviewResponse,
   SyncStatus,
   BotBehaviourResponse,
+  AiAdoptionReport,
+  AdoptionCommentaryRequest,
+  AdoptionCommentaryResponse,
 } from '@pierre-review/shared';
 // VALUES, not types — the fixtures quote the shipped default rather than re-typing 1500, and
 // build the Pending tabs from the shipped list rather than re-typing it.
 import {
+  AI_ADOPTION_REPORT_SCHEMA_VERSION,
   AI_BUDGET_DEFAULTS,
   AI_FIX_LOOP_STOP_LINE,
   aiKindsAll,
@@ -2248,6 +2252,128 @@ const CLONE_STORAGE: CloneStorageResponse = {
   freedBytes30d: 1.6 * 1024 ** 3,
   lastSweepAt: null,
 };
+// REPORTS → DOWNLOAD REPORT (GET /api/reports/ai-adoption): a small, complete report — two people,
+// Claude and Copilot seen, one setting change, one review bot, spend as a share of a week. Fetched only
+// on the Download press, never on mount (e2e/report-download.spec.ts).
+const PCT = (value: number, sampleSize: number) => ({ available: true as const, value, unit: 'pct' as const, sampleSize });
+const COUNT = (value: number, sampleSize: number) => ({ available: true as const, value, unit: 'count' as const, sampleSize });
+const HOURS = (value: number, sampleSize: number) => ({ available: true as const, value, unit: 'hours' as const, sampleSize });
+const LOW = <U extends 'pct' | 'count' | 'hours' | 'lines' | 'usd' | 'week_pct' | 'ratio'>(unit: U) => ({ available: false as const, unit, sampleSize: 2, reason: 'low_sample' as const });
+export const AI_ADOPTION_REPORT = {
+  schemaVersion: AI_ADOPTION_REPORT_SCHEMA_VERSION,
+  workspaceId: WORKSPACE.id,
+  workspaceName: WORKSPACE.name,
+  generatedAt: iso(0),
+  window: { mode: 'rolling_14', from: iso(14), to: iso(0), end: iso(0), days: 14, elapsedDays: 14 },
+  after: { from: iso(14), to: iso(0), days: 14 },
+  before: { from: iso(28), to: iso(14), days: 14 },
+  repos: { measured: 1, total: 1 },
+  detection: { scannedPrs: 40, totalPrs: 40, scannedPct: 100, complete: true, detectorVersion: 1, coversFrom: iso(90) },
+  markers: [{ at: iso(20), kind: 'auto_review', summary: 'Auto review switched on' }],
+  settingHistoryFrom: iso(60),
+  summary: {
+    headlines: [{ key: 'ai_share', before: PCT(20, 18), after: PCT(36, 22), direction: 'up_good', significant: true }],
+    significantCount: 1,
+  },
+  adoption: {
+    periods: [
+      { from: iso(42), to: iso(28), partial: false, mergedPrs: 15, aiPrs: 2, share: PCT(13, 15), byVendor: { claude: 2 }, scannedPct: 100 },
+      { from: iso(28), to: iso(14), partial: false, mergedPrs: 18, aiPrs: 4, share: PCT(22, 18), byVendor: { claude: 3, copilot: 1 }, scannedPct: 100 },
+      { from: iso(14), to: iso(0), partial: false, mergedPrs: 22, aiPrs: 8, share: PCT(36, 22), byVendor: { claude: 6, copilot: 2 }, scannedPct: 100 },
+    ],
+    aiShare: { key: 'ai_share', before: PCT(22, 18), after: PCT(36, 22), direction: 'up_good', significant: true },
+    vendors: [
+      { vendor: 'claude', before: COUNT(3, 18), after: COUNT(6, 22), afterShare: PCT(27, 22) },
+      { vendor: 'copilot', before: COUNT(1, 18), after: COUNT(2, 22), afterShare: PCT(9, 22) },
+    ],
+    sources: [{ source: 'commit_trailer', prs: 6 }, { source: 'pr_body', prs: 2 }],
+    otherAutomationPrs: 3,
+  },
+  people: {
+    peopleUsingAi: { key: 'people_using_ai', before: COUNT(3, 6), after: COUNT(4, 7), direction: 'up_good', significant: false },
+    peopleShare: PCT(57, 7),
+    peopleWithMergedPrs: 7,
+    vendors: [
+      { vendor: 'claude', people: COUNT(4, 7), prShare: PCT(27, 22) },
+      { vendor: 'copilot', people: { available: false, unit: 'count', sampleSize: 7, reason: 'few_people' }, prShare: PCT(9, 22) },
+    ],
+    periods: [
+      { from: iso(42), to: iso(28), partial: false, people: 6, usingAi: { available: false, unit: 'count', sampleSize: 6, reason: 'few_people' }, share: { available: false, unit: 'pct', sampleSize: 6, reason: 'few_people' } },
+      { from: iso(28), to: iso(14), partial: false, people: 6, usingAi: COUNT(3, 6), share: PCT(50, 6) },
+      { from: iso(14), to: iso(0), partial: false, people: 7, usingAi: COUNT(4, 7), share: PCT(57, 7) },
+    ],
+    agentPrs: { mergedPrs: 2, byVendor: { copilot: 2 } },
+    withheld: null,
+  },
+  delivery: {
+    comparisons: [
+      { key: 'merged_prs', before: COUNT(18, 18), after: COUNT(22, 22), direction: 'up_good', significant: false },
+      { key: 'lead_time', before: HOURS(30, 18), after: HOURS(21, 22), direction: 'down_good', significant: true },
+      { key: 'reviewer_concentration', before: LOW('pct'), after: PCT(40, 22), direction: 'down_good', significant: false },
+    ],
+    aiVsOther: null,
+  },
+  courts: {
+    comparisons: [
+      { key: 'court_reviewer', before: PCT(50, 15), after: PCT(42, 19), direction: 'down_good', significant: true },
+      { key: 'court_author', before: PCT(30, 15), after: PCT(33, 19), direction: 'neutral', significant: false },
+      { key: 'court_landing', before: PCT(20, 15), after: PCT(25, 19), direction: 'down_good', significant: true },
+    ],
+    measuredPrs: { before: 15, after: 19 },
+    refusals: [],
+  },
+  reviewBots: {
+    bots: [
+      {
+        key: 'coderabbit',
+        label: 'CodeRabbit',
+        kind: 'coderabbit',
+        threads: 30,
+        comments: 60,
+        commentsPerPr: { available: true, value: 2.7, unit: 'ratio', sampleSize: 22 },
+        actedOnPct: PCT(40, 30),
+        actedOnPctBefore: PCT(35, 20),
+        seatPriceMonthlyUsd: null,
+        costPerActedOnUsd: { available: false, unit: 'usd', sampleSize: 0, reason: 'no_price' },
+      },
+    ],
+    ensemble: null,
+    ensembleActedOn: { key: 'ensemble_acted_on', before: LOW('pct'), after: LOW('pct'), direction: 'up_good', significant: false },
+    mergedPrs: 22,
+  },
+  guardrails: {
+    comparisons: [
+      { key: 'ci_pass', before: PCT(90, 18), after: PCT(91, 22), direction: 'up_good', significant: false },
+      { key: 'human_review_coverage', before: PCT(94, 18), after: PCT(95, 22), direction: 'up_good', significant: false },
+    ],
+  },
+  cost: {
+    costUnit: 'week_pct',
+    aiEnabled: true,
+    comparisons: [
+      { key: 'ai_cost_total', before: { available: true, value: 6, unit: 'week_pct', sampleSize: 10 }, after: { available: true, value: 9, unit: 'week_pct', sampleSize: 14 }, direction: 'neutral', significant: false },
+      { key: 'ai_cost_per_pr', before: { available: true, value: 0.33, unit: 'week_pct', sampleSize: 18 }, after: { available: true, value: 0.41, unit: 'week_pct', sampleSize: 22 }, direction: 'neutral', significant: false },
+    ],
+    runs: { before: 10, after: 14 },
+    tokens: { before: 50_000, after: 70_000 },
+    machineWideRuns: 0,
+    seats: [],
+    seatsMonthlyUsd: null,
+  },
+} satisfies AiAdoptionReport;
+
+/** POST /api/reports/ai-adoption/commentary (served only while a spec turns AI on): a valid template. */
+export function adoptionCommentaryFor(body: AdoptionCommentaryRequest): AdoptionCommentaryResponse {
+  return {
+    slide: body.slide,
+    source: 'ai',
+    template: 'These figures cover the period {{period.after}}.',
+    provider: 'claude',
+    model: 'claude-haiku-5-5',
+    costUsd: 0.002,
+  } satisfies AdoptionCommentaryResponse;
+}
+
 // The Claude spend budget (GET /api/ai/budget): never set, so off with the shipped defaults. Read
 // only while `me.ai.enabled` (dark above), but served so a spec that flips AI on gets a real shape
 // rather than the catch-all `{}` (the header toast and every Run button read it).
@@ -2619,6 +2745,12 @@ export async function installMockApi(
         } satisfies MeResponse);
       }
       if (path.endsWith('/api/ai/budget')) return json(route, AI_BUDGET);
+      // Reports → Download report: the figures (DB only, always registered) and one slide's commentary
+      // (registered only while AI is on: a 404 here, as the server, until a spec turns AI on).
+      if (path === '/api/reports/ai-adoption') return json(route, AI_ADOPTION_REPORT);
+      if (path === '/api/reports/ai-adoption/commentary') {
+        return json(route, { error: 'NotFound', message: 'Route POST:/api/reports/ai-adoption/commentary not found' }, 404);
+      }
       if (path.endsWith('/api/storage/clones')) return json(route, CLONE_STORAGE);
       if (path.endsWith('/api/licence')) return json(route, LICENCE_STATUS);
       // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`
@@ -3196,4 +3328,5 @@ export const fixtures = {
   DAILY_BRIEF,
   BRANCH_STATUS,
   ME_RESPONSE,
+  AI_ADOPTION_REPORT,
 };

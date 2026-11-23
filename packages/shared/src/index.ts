@@ -75,3 +75,5 @@ export * from './release-write.js';
 export * from './hotfix.js';
 export * from './story-chat.js';
 export * from './local-review.js';
+export * from './ai-vendor-detect.js';
+export * from './ai-adoption-report.js';

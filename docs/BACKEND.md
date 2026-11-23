@@ -127,9 +127,13 @@ incremental, fetch loop, cancel, rate limits). In brief:
 consolidated Feed can render full markdown (and review bodies still drive
 substantive-review detection). Only the truly bulky, regenerable text stays
 **lean-gated** — under lean, sync neither persists nor fetches the **PR description**
-(`pullRequests.body`), the review-comment **`diffHunk`**, commit **`message`**, and the
+(`pullRequests.body`), the review-comment **`diffHunk`**, and the
 **`checkRuns` JSON** (the `ciStatus` enum is kept); `reviewComments.excerpt` is always
-kept too. That gated text is **hydrated on demand** when a
+kept too. The commit **`message`** is lean-STORED but no longer lean-FETCHED (migration 0218): the
+walk reads it, with the git author/committer name and email, so the AI vendor detector can scan its
+trailers, and stores only the verdict (`commits.ai_signals`, `pull_requests.ai_signals`;
+docs/AI-ADOPTION-REPORT.md § Detection). `commits.message` is still written only on PERSIST_BODIES,
+and names and emails are never stored. That gated text is **hydrated on demand** when a
 PR/thread opens (`sync/hydrate-detail.ts` → `PR_DETAIL_QUERY`, matched by node id/sha) and
 **browser-cached** in IndexedDB (`PersistQueryClientProvider`; `pr`/`thread` queries
 `staleTime:Infinity`; `useDetailCache.ts` invalidates on a newer feed `updatedAt`, or when a

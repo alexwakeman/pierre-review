@@ -133,6 +133,12 @@ export default function Privacy(): JSX.Element {
             with them. We never see it.
           </li>
           <li>
+            <T>The AI adoption report is made on your computer</T> — the PDF from Reports →
+            Download report goes nowhere unless you send it. It names nobody: it counts how many
+            people used AI, never who. With AI commentary on, only each slide’s figures and the AI
+            tool names go to your AI provider, never repositories.
+          </li>
+          <li>
             <T>Optional integrations</T> you set up yourself — a Slack webhook, an issue
             tracker, SonarCloud — receive or send only what those features need, directly
             from your machine.

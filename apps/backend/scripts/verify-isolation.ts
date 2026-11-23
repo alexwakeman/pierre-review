@@ -2544,9 +2544,9 @@ check(
   const wsB = await q.resolveWorkspaceScope(2, null);
   check(
     'setDependencyAutoMerge(B, A’s workspace) refuses (IDOR blocked)',
-    // ON by default (migration 0193): B tries to switch A's OFF, and A's must still read ON.
-    (await setDependencyAutoMerge(2, wsA.workspaceId, false)) === false &&
-      (await getDependencyAutoMerge(1, wsA.workspaceId))?.enabled === true,
+    // OFF until switched on (migration 0216): B tries to switch A's ON, and A's must still read OFF.
+    (await setDependencyAutoMerge(2, wsA.workspaceId, true)) === false &&
+      (await getDependencyAutoMerge(1, wsA.workspaceId))?.enabled === false,
   );
   check(
     'getDependencyAutoMerge(B, A’s workspace) reads nothing',
@@ -2578,9 +2578,9 @@ check(
   const wsA = await q.resolveWorkspaceScope(1, null);
   check(
     'setDependencyAutomation(B, A’s workspace) refuses (IDOR blocked)',
-    // ON by default (migration 0193): B tries to switch A's OFF, and A's must still read ON.
-    (await auto.setDependencyAutomation(2, wsA.workspaceId, { autoApprove: false })) === false &&
-      (await auto.getDependencyAutomation(1, wsA.workspaceId))?.settings.autoApprove === true,
+    // OFF until switched on (migration 0216): B tries to switch A's ON, and A's must still read OFF.
+    (await auto.setDependencyAutomation(2, wsA.workspaceId, { autoApprove: true })) === false &&
+      (await auto.getDependencyAutomation(1, wsA.workspaceId))?.settings.autoApprove === false,
   );
   check(
     'getDependencyAutomation(B, A’s workspace) reads nothing',
@@ -5085,6 +5085,169 @@ check(
   check("resolveLocalRepo(A, B's owner/name) is refused (not A's repository)", refused);
   await db.delete(schema.localReviewFindings).execute();
   await db.delete(schema.localReviews).execute();
+}
+
+// ── AI VENDOR SIGNALS (db/ai-signals.ts, sync/backfill-ai-signals.ts) ─────────────────────────
+// `getPrAiSignals` takes ids (a report hands it the window's PR ids) and reads three tables with no
+// account column of their own in the join path (`commits`) or with one (`ai_fixes`,
+// `story_build_prs`); `aiSignalsFirstScanMs` takes repo ids; the backfill worklist takes a repo id
+// and spends GitHub quota on what it returns.
+//
+// ⚠ SEEDED NON-VACUOUSLY: each account gets a scanned PR with its own vendor on the PR, on a commit
+// and an AI Fix push, plus an unscanned PR for its worklist, so the own-tenant direction is
+// asserted first and a reader that returned nothing would fail.
+{
+  const { getPrAiSignals, aiSignalsFirstScanMs } = await import('../src/db/ai-signals.js');
+  const { aiSignalsBackfillWorklist } = await import('../src/sync/backfill-ai-signals.js');
+  const seedAi = async (accountId: number, tag: string, repoId: number, vendor: string) => {
+    const [scanned] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_ai_iso_${tag}`,
+        accountId,
+        repoId,
+        number: 7101,
+        title: `AI ${tag}`,
+        state: 'open',
+        isDraft: false,
+        openedAt: now,
+        updatedAt: now,
+        aiSignals: JSON.stringify([{ vendor, source: 'pr_author' }]),
+        aiSignalsVersion: (await import('@pierre-review/shared')).AI_SIGNALS_VERSION,
+        aiSignalsCheckedAt: now,
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(schema.commits)
+      .values({ prId: scanned!.id, sha: `ai_iso_${tag}`, committedAt: now, aiSignals: JSON.stringify([{ vendor, source: 'commit_trailer' }]) })
+      .execute();
+    await db
+      .insert(schema.aiFixes)
+      .values({ accountId, repoId, prId: scanned!.id, baseSha: 'b', status: 'done', model: 'm', seed: 'review', pushedAt: now })
+      .execute();
+    const [unscanned] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_ai_iso_new_${tag}`,
+        accountId,
+        repoId,
+        number: 7102,
+        title: `AI new ${tag}`,
+        state: 'open',
+        isDraft: false,
+        openedAt: now,
+        updatedAt: now,
+      })
+      .returning()
+      .execute();
+    return { scanned: scanned!.id, unscanned: unscanned!.id };
+  };
+  const aiA = await seedAi(1, 'A', A.repoId, 'claude');
+  const aiB = await seedAi(2, 'B', B.repoId, 'devin');
+
+  const ownA = await getPrAiSignals(1, [aiA.scanned]);
+  check(
+    'getPrAiSignals(A, [A’s PR]) reads A’s PR, commit and AI Fix push',
+    JSON.stringify(ownA.get(aiA.scanned)?.signals.map((s) => `${s.vendor}:${s.source}`)) ===
+      JSON.stringify(['claude:commit_trailer', 'claude:pr_author', 'ensemble:ensemble']),
+  );
+  const crossA = await getPrAiSignals(1, [aiA.scanned, aiB.scanned]);
+  check('getPrAiSignals(A, [A’s, B’s]) answers for A’s PR only (IDOR blocked)', [...crossA.keys()].join() === String(aiA.scanned));
+  check(
+    'getPrAiSignals(A, …) carries no vendor of B’s',
+    [...crossA.values()].every((v) => v.signals.every((s) => s.vendor !== 'devin')),
+  );
+  const ownB = await getPrAiSignals(2, [aiB.scanned, aiA.scanned]);
+  check('getPrAiSignals(B, [B’s, A’s]) answers for B’s PR only (mutation check)', [...ownB.keys()].join() === String(aiB.scanned));
+
+  check('aiSignalsFirstScanMs(A, [A’s repo]) finds A’s scan', (await aiSignalsFirstScanMs(1, [A.repoId])) != null);
+  check('aiSignalsFirstScanMs(A, [B’s repo]) is null (IDOR blocked)', (await aiSignalsFirstScanMs(1, [B.repoId])) === null);
+
+  check(
+    'aiSignalsBackfillWorklist(B, B’s repo) lists B’s unscanned PR',
+    (await aiSignalsBackfillWorklist(2, B.repoId)).some((r) => r.id === aiB.unscanned),
+  );
+  check(
+    'aiSignalsBackfillWorklist(A, B’s repo) lists nothing (IDOR blocked)',
+    (await aiSignalsBackfillWorklist(1, B.repoId)).length === 0,
+  );
+}
+
+// ── THE AI ADOPTION REPORT (db/adoption-report.ts, db/human-review-coverage.ts) ───────────────────
+// `buildAiAdoptionReport` takes a raw workspace id (resolved like `?workspace=`), reads merged PRs,
+// their signals and approvals, and names PEOPLE. `humanApprovedPrIds` takes PR ids from its caller.
+//
+// ⚠ SEEDED NON-VACUOUSLY: each account gets a merged PR by its own person with its own vendor (A:
+// Aider, B: Amp) and a person's approval, so the own-tenant direction is asserted first.
+{
+  const { buildAiAdoptionReport } = await import('../src/db/adoption-report.js');
+  const { humanApprovedPrIds } = await import('../src/db/human-review-coverage.js');
+  const { users } = schema;
+  const { resolveActorLanes } = await import('../src/db/actor-lanes.js');
+  const mergedAt = new Date(now.getTime() - 86_400_000);
+  const seedReport = async (accountId: number, tag: string, repoId: number, vendor: string) => {
+    const [person] = await db.insert(users).values({ githubLogin: `adopt-${tag}`, displayName: `Adoption Person ${tag}` }).returning().execute();
+    const [reviewer] = await db.insert(users).values({ githubLogin: `adopt-rev-${tag}` }).returning().execute();
+    const [pr] = await db
+      .insert(pullRequests)
+      .values({
+        githubNodeId: `PR_adopt_iso_${tag}`,
+        accountId,
+        repoId,
+        number: 7201,
+        title: `Adoption ${tag}`,
+        state: 'merged',
+        isDraft: false,
+        authorId: person!.id,
+        openedAt: new Date(mergedAt.getTime() - 3_600_000),
+        updatedAt: mergedAt,
+        mergedAt,
+        aiSignals: JSON.stringify([{ vendor, source: 'pr_body' }]),
+        aiSignalsVersion: (await import('@pierre-review/shared')).AI_SIGNALS_VERSION,
+        aiSignalsCheckedAt: now,
+      })
+      .returning()
+      .execute();
+    await db
+      .insert(schema.reviews)
+      .values({ githubNodeId: `RV_adopt_iso_${tag}`, prId: pr!.id, authorId: reviewer!.id, state: 'approved', submittedAt: new Date(mergedAt.getTime() - 60_000) })
+      .execute();
+    const [home] = await db
+      .select({ ws: schema.workspaceRepos.workspaceId })
+      .from(schema.workspaceRepos)
+      .where(and(eq(schema.workspaceRepos.accountId, accountId), eq(schema.workspaceRepos.repoId, repoId)))
+      .execute();
+    return { prId: pr!.id, ws: home!.ws, mergedAtMs: mergedAt.getTime() };
+  };
+  const rA = await seedReport(1, 'A', A.repoId, 'aider');
+  const rB = await seedReport(2, 'B', B.repoId, 'amp');
+  // Every merged PR of both repos counts as scanned, so the per-tool figures are drawn (not withheld).
+  await db
+    .update(pullRequests)
+    .set({ aiSignalsVersion: (await import('@pierre-review/shared')).AI_SIGNALS_VERSION })
+    .where(inArray(pullRequests.repoId, [A.repoId, B.repoId]))
+    .execute();
+  const opts = { aiEnabled: false };
+  const vendorsOf = (r: Awaited<ReturnType<typeof buildAiAdoptionReport>>) => [
+    ...r.adoption.vendors.map((v) => v.vendor),
+    ...r.people.vendors.map((v) => v.vendor),
+  ];
+
+  const ownA = await buildAiAdoptionReport(1, rA.ws, Date.now(), opts);
+  check('buildAiAdoptionReport(A, A’s workspace) reads A’s merged PR and vendor', ownA.workspaceId === rA.ws && vendorsOf(ownA).includes('aider'));
+  const crossA = await buildAiAdoptionReport(1, rB.ws, Date.now(), opts);
+  check('buildAiAdoptionReport(A, B’s workspace) resolves to A’s Default (never B’s)', crossA.workspaceId !== rB.ws);
+  check('buildAiAdoptionReport(A, B’s workspace) carries no vendor of B’s (IDOR blocked)', !vendorsOf(crossA).includes('amp'));
+  const ownB = await buildAiAdoptionReport(2, rA.ws, Date.now(), opts);
+  check('buildAiAdoptionReport(B, A’s workspace) carries nothing of A’s (mutation check)', ownB.workspaceId !== rA.ws && !vendorsOf(ownB).includes('aider'));
+
+  const lanesA = await resolveActorLanes(1, { workspaceId: rA.ws, repoIds: [A.repoId] });
+  const refs = [rA, rB].map((r) => ({ id: r.prId, mergedAtMs: r.mergedAtMs }));
+  const approvedA = await humanApprovedPrIds(1, refs, lanesA);
+  check('humanApprovedPrIds(A, [A’s, B’s]) finds A’s approval only (IDOR blocked)', approvedA.has(rA.prId) && !approvedA.has(rB.prId));
+  const approvedB = await humanApprovedPrIds(2, refs, lanesA);
+  check('humanApprovedPrIds(B, [A’s, B’s]) finds B’s approval only (mutation check)', approvedB.has(rB.prId) && !approvedB.has(rA.prId));
 }
 
 console.log(`\nISOLATION: ${pass} passed, ${fail} failed`);

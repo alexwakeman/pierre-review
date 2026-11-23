@@ -1527,6 +1527,13 @@
       "when": 1795507200000,
       "tag": "0217_account_licence",
       "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "6",
+      "when": 1795593600000,
+      "tag": "0218_ai_signals",
+      "breakpoints": true
     }
   ]
 }

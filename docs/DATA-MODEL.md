@@ -799,6 +799,38 @@ Four small DERIVED columns (migration `0067`), read at sync by
   footer is a positive statement that the group is a version update.
 - No new table, so erasure, both delete paths and the account export already cover the columns.
 
+## `pull_requests.ai_signals` + `commits.ai_signals` — AI vendor signals (CORE; migration `0218`)
+
+Which AI coding tools touched a PR, for the AI adoption report ([AI-ADOPTION-REPORT.md](AI-ADOPTION-REPORT.md)
+§ Detection). Read at sync by the ONE shared detector (`packages/shared/src/ai-vendor-detect.ts`) while the text
+is in hand; only the VERDICT is stored.
+
+| Column | Holds |
+|---|---|
+| `pull_requests.ai_signals` | JSON `[{vendor, source}]` from the PR's OWN title, `bodyText` (and markdown `body` on PERSIST_BODIES), head branch and author; NULL = never scanned, `[]` = scanned clean |
+| `pull_requests.ai_signals_version` | the detector version (`AI_SIGNALS_VERSION`) of that scan AND of its commits' scan in the same payload |
+| `pull_requests.ai_signals_checked_at` | when it was scanned (timestamp) |
+| `commits.ai_signals` | JSON from that commit's author, committer (login, git name, git email) and FULL message; NULL = not scanned, `[]` = clean |
+
+- **NO TEXT.** The commit message is now FETCHED on every walk but still STORED only on `PERSIST_BODIES`; git
+  names and emails are never stored. The columns hold vendor ids and source ids only.
+- ⚠ **THREE-STATE, BOTH WRITERS THROUGH ONE HELPER** (`sync/upsert.ts` `aiPrColumnsFor` / `aiCommitColumnsFor`,
+  used by `persistPr` and `sync/backfill-ai-signals.ts`). The PR's three columns are written only when the
+  payload carried `title`, `bodyText` AND every commit's `message` (the version vouches for the commits too);
+  a commit's only when its `message` arrived. Otherwise the key is omitted, never cleared. Detection runs
+  BEFORE `runTransaction`.
+- **`ai_signals_version` NULL or below `AI_SIGNALS_VERSION` is the backfill's worklist** (open, or merged in the
+  last 90 days) — [SYNC.md](SYNC.md) § AI-signals backfill.
+- **READ ONLY THROUGH `db/ai-signals.ts` `getPrAiSignals`**: PR ∪ commits ∪ Ensemble's own pushes ON READ
+  (`ai_fixes.pushed_at`; `story_build_prs.pushed_pr_number` / `loop_pushed_sha`, resolved within
+  `(accountId, repoId)`). ⚠ Never from `limn_actions` 'push' or `commits.limn_pushed_by_user_id` — those also
+  cover branch updates and hand-made conflict resolutions, which are not AI.
+- ⚠ An Ensemble-Run trailer in the FETCHED message does NOT feed `commitIsLimn` on a lean install (rule (d) of
+  db/limn-bots.ts still reads the message only on `PERSIST_BODIES`); `upsert-ai-signals.test.ts` pins it.
+- Columns on existing tables: erasure (`pull_requests` is in `accountScopedTables()`, `commits` goes with its PR),
+  `deleteRepo`, retention cleanup and the account export (`pull_requests` is exported whole) already cover them.
+  No new FK, index or delete path.
+
 ## The issue tracker — `workspace_trackers`, `tracker_tickets`, `pro_jira_ac_fields` (CORE)
 
 Core since migration `0088`; the contract is [TRACKERS.md](TRACKERS.md).

@@ -209,6 +209,23 @@ nothing and stays on the worklist — retried on a later walk, bounded by the pe
 loop. It writes through the same `securityColumnsFor` as `persistPr`, and fills `head_ref_name`
 only where the walk never stored one.
 
+### AI-signals backfill (after EVERY walk, user or scheduled)
+
+`persistPr` scans every PR it writes for AI vendor signals (the shared detector over the PR's title,
+description, branch and author and each commit's author, committer and message; [DATA-MODEL.md](DATA-MODEL.md)
+§ `pull_requests.ai_signals`). The text is not stored, so a PR synced before migration 0218 can only be
+scanned by reading it again. After every walk, on both paths, after the commit-headline backfill,
+`sync/backfill-ai-signals.ts` re-reads up to 60 PRs per repo that are open or merged in the last 90 days and
+whose `ai_signals_version` is NULL or below `AI_SIGNALS_VERSION` (a detector change re-scans the same way).
+Newest first, `nodes(ids:)` batches of 20 (`AI_SIGNALS_NODES_QUERY`: title, `bodyText`, branch, author,
+`commits(last: 100)` with message and git identities; about one point a batch). It writes through the same
+`aiPrColumnsFor` / `aiCommitColumnsFor` as `persistPr`, commit verdicts by `(pr_id, sha)` onto rows the walk
+stored (it creates none), and stamps a PR with more than 100 commits anyway (its older commits are never seen).
+Budget: it skips on `isLimited` OR `isBudgetLow` (it is the lowest-priority reader), `noteLimited` on a limit and
+stops, `noteBudget` on every response, never clears `limitedUntil`; a limit is never surfaced as an error. A PR
+GitHub does not return, or returns with a selection nulled, stays unstamped; the in-process `attempted` set asks
+it at most once per process. Strictly non-fatal. A 90-day repo converges in a few walks.
+
 ### Unsettled-PR backstop (after EVERY walk, user or scheduled, and every settle sweep)
 
 `sync/unsettled-prs.ts` `runUnsettledPrBackstop`, fire-and-forget (it never holds the repo's
@@ -473,10 +490,18 @@ By default (`config.persistBodies` is `false`; see **Lean storage** in `CLAUDE.m
 sync stays lean:
 
 - `REPO_ACTIVITY_QUERY` is **trimmed** to stop fetching the bulky text it no longer
-  stores — PR body, PR-comment body, commit message, and review-comment **diff
-  hunks** — which shrinks every backfill page. (It keeps **review** bodies, needed to
-  detect substantive reviews, and **review-comment** bodies, needed for the stored
-  excerpt.)
+  stores — PR body and review-comment **diff hunks** — which shrinks every backfill
+  page. (It keeps **review** bodies, needed to detect substantive reviews, and
+  **review-comment** bodies, needed for the stored excerpt.)
+- ⚠ **Commit messages ARE fetched under lean since migration 0218** (with the git
+  author/committer `name` + `email`), for the AI vendor detector; they are read in
+  memory and only the verdict is stored (`commits.message` stays NULL under lean).
+  COST: scalars, so NO GraphQL points; the payload grows by the message plus about
+  120 bytes of name/email per commit. ESTIMATED, not measured live (GraphQL is not
+  reachable from the build container): this repository's last 108 commit messages
+  are 451 bytes median, 577 mean, 1,135 p90, so a `pullRequests(first: 25)` page of
+  typical PRs (~5 commits each) grows by about 90 KB, and the worst case (25 PRs ×
+  100 commits) by about 1.7 MB. Re-measure on a real repo when a walk feels slow.
 - `persistPr` writes `null` for the dropped columns and stores a short
   `reviewComments.excerpt` (≤160 chars) for the triage path.
 

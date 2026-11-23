@@ -135,13 +135,14 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Reports',
     group: 'The app',
     writer: 'W4',
-    blurb: 'Flow metrics, Chronology, stories and AI usage for the workspace.',
+    blurb: 'Flow metrics, Chronology, stories, AI usage and the AI adoption report for the workspace.',
     pages: [
       { slug: 'overview' },
       { slug: 'reporting-window' },
       { slug: 'chronology' },
       { slug: 'stories' },
       { slug: 'ai-usage' },
+      { slug: 'download-report' },
     ],
   },
   {

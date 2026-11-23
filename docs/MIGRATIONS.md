@@ -1805,6 +1805,16 @@ account-scoped table: erasure and the export already cover it. Additive; journal
 `1794988800000`. [DATA-MODEL.md](DATA-MODEL.md) § `workspaces.storyCheckAllRepos`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
 § Ticket review → OUTSIDE THE TICKET.
 
+### `0218_ai_signals` — AI vendor signals on PRs and commits (2026-11-25)
+
+Four additive, nullable columns, no default, no SQL backfill: `pull_requests.ai_signals` (text JSON),
+`pull_requests.ai_signals_version` (integer), `pull_requests.ai_signals_checked_at` (integer timestamp) and
+`commits.ai_signals` (text JSON). VERDICTS ONLY (`[{vendor, source}]` from the shared detector), never text: lean
+storage holds. NULL = not scanned; the one-time, bounded `sync/backfill-ai-signals.ts` reads the last 90 days by
+node id. Existing tables: erasure, `deleteRepo` and the export already cover them. Journal idx 218, `when`
+`1795593600000`. [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests.ai_signals`; [AI-ADOPTION-REPORT.md](AI-ADOPTION-REPORT.md)
+§ Detection.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

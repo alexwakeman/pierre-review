@@ -36,6 +36,10 @@ import {
   rollupStateWithoutLimn,
   TICKET_AUTO_GRACE_MS,
   type CheckRun,
+  AI_SIGNALS_VERSION,
+  detectAiCommitSignals,
+  detectAiPrSignals,
+  serializeAiSignals,
 } from '@pierre-review/shared';
 import {
   commentIsLimn,
@@ -784,6 +788,88 @@ export function securityColumnsFor(input: PrSecurityInput): SecurityColumns {
   };
 }
 
+/** The three `pull_requests` AI-signal columns (migration 0218), ALWAYS written together. */
+export interface AiPrColumns {
+  aiSignals: string;
+  aiSignalsVersion: number;
+  aiSignalsCheckedAt: Date;
+}
+
+/** One git identity as either writer receives it (the walk's `GqlCommitNode`, the backfill's node). */
+interface AiGitActorInput {
+  name?: string | null;
+  email?: string | null;
+  user?: { login?: string | null } | null;
+}
+
+/** What `aiPrColumnsFor` reads: the walk's `GqlPullRequest` and the backfill's node both fit. */
+export interface AiPrColumnsInput {
+  title?: string | null;
+  bodyText?: string | null;
+  body?: string | null;
+  headRefName?: string | null;
+  author?: { login?: string | null; __typename?: string | null } | null;
+  commits?: {
+    nodes?: ReadonlyArray<{ commit?: { message?: string | null } | null } | null> | null;
+  } | null;
+}
+
+/**
+ * AI VENDOR SIGNALS from the PR's OWN fields → the three columns, for BOTH writers (`persistPr` and
+ * sync/backfill-ai-signals.ts), so a walk and a backfill can never store the same PR two ways
+ * (docs/AI-ADOPTION-REPORT.md § Detection). THREE-STATE: `{}` (write nothing, never clear) unless the
+ * payload carried the PR's text (`title` + `bodyText`, both `String!`) AND every commit's `message`
+ * in the same connection — `ai_signals_version` vouches for the commits' scan too, so a PR is
+ * stamped only when its commits were scanned with it. ⚠ Call it BEFORE `runTransaction`: it is
+ * pure CPU over author-written text. Commits beyond the connection's last 100 are never seen.
+ */
+export function aiPrColumnsFor(pr: AiPrColumnsInput): AiPrColumns | Record<string, never> {
+  if (typeof pr.bodyText !== 'string' || typeof pr.title !== 'string') return {};
+  const nodes = pr.commits?.nodes;
+  if (!Array.isArray(nodes)) return {};
+  for (const n of nodes) if (typeof n?.commit?.message !== 'string') return {};
+  return {
+    aiSignals: serializeAiSignals(
+      detectAiPrSignals({
+        title: pr.title,
+        bodyText: pr.bodyText,
+        body: pr.body ?? null,
+        headRefName: pr.headRefName ?? null,
+        authorLogin: pr.author?.login ?? null,
+        authorType: pr.author?.__typename ?? null,
+      }),
+    ),
+    aiSignalsVersion: AI_SIGNALS_VERSION,
+    aiSignalsCheckedAt: new Date(),
+  };
+}
+
+/**
+ * AI VENDOR SIGNALS from ONE commit → `commits.ai_signals`, for both writers. `{}` when the message
+ * was not received (a nulled selection, an old fixture): the stored verdict is left alone. Names and
+ * emails are READ here and never stored. Pure; call it before the transaction.
+ */
+export function aiCommitColumnsFor(c: {
+  message?: string | null;
+  author?: AiGitActorInput | null;
+  committer?: AiGitActorInput | null;
+}): { aiSignals: string } | Record<string, never> {
+  if (typeof c.message !== 'string') return {};
+  return {
+    aiSignals: serializeAiSignals(
+      detectAiCommitSignals({
+        message: c.message,
+        authorLogin: c.author?.user?.login ?? null,
+        authorName: c.author?.name ?? null,
+        authorEmail: c.author?.email ?? null,
+        committerLogin: c.committer?.user?.login ?? null,
+        committerName: c.committer?.name ?? null,
+        committerEmail: c.committer?.email ?? null,
+      }),
+    ),
+  };
+}
+
 /** The review a thread comment belongs to (`review_comments.review_database_id`), written only when
  *  GitHub sent the key — an omitted selection leaves the stored value alone. */
 function reviewKeyOf(c: { pullRequestReview?: { fullDatabaseId: string | null } | null }): { reviewDatabaseId?: string | null } {
@@ -815,6 +901,11 @@ export async function persistPr(
           bodyText: pr.bodyText,
         })
       : {};
+  // AI VENDOR SIGNALS — the same three-state write (`aiPrColumnsFor`), and the same rule: detected
+  // BEFORE the transaction, from the FULL text while it is in hand; only the verdict is stored.
+  const aiObserved = aiPrColumnsFor(pr);
+  const aiCommitByOid = new Map<string, { aiSignals: string } | Record<string, never>>();
+  for (const node of pr.commits.nodes) aiCommitByOid.set(node.commit.oid, aiCommitColumnsFor(node.commit));
   // Set inside the transaction from the `prev` read; the SPA change signal is raised only AFTER
   // the commit, so it can never announce a row a reader cannot see yet.
   let boardMoved = false;
@@ -1016,6 +1107,7 @@ export async function persistPr(
         ...queueObserved,
         labels,
         ...securityObserved,
+        ...aiObserved,
         checkRuns: config.persistBodies ? checkRuns : null,
         additions,
         deletions,
@@ -1050,6 +1142,7 @@ export async function persistPr(
           ...queueObserved,
           labels,
           ...securityObserved,
+          ...aiObserved,
           checkRuns: config.persistBodies ? checkRuns : null,
           additions,
           deletions,
@@ -1628,8 +1721,13 @@ export async function persistPr(
       );
       const committedAt = new Date(c.committedDate);
       // A commit Limn made (the ledger's sha, or its `Limn-Run:` trailer) is the poster's bot's.
+      // ⚠ The trailer half (rule (d)) reads the message ONLY on PERSIST_BODIES, exactly as before
+      // migration 0218 made the message arrive on every walk: on a lean install it is not read, so
+      // fetching it for the AI detector re-attributes no commit (sync/upsert-limn-attribution tests).
       const commitBot =
-        wideLimn && commitAuthorId != null && commitIsLimn({ sha: c.oid, message: c.message }, { ledger: ledgerIds })
+        wideLimn &&
+        commitAuthorId != null &&
+        commitIsLimn({ sha: c.oid, message: config.persistBodies ? c.message : undefined }, { ledger: ledgerIds })
           ? await limnBots.botFor(c.author?.user?.login)
           : null;
       const commitAttribution = wideLimn
@@ -1641,6 +1739,8 @@ export async function persistPr(
         c.messageHeadline === undefined
           ? {}
           : { messageHeadline: c.messageHeadline == null ? null : c.messageHeadline.slice(0, 200) };
+      // The AI verdict, computed before the transaction; `{}` when the message was not received.
+      const aiCommit = aiCommitByOid.get(c.oid) ?? {};
       // Upsert (not DoNothing) so we always get the row id back to point the
       // timeline event at — the marker modal resolves the commit via ref_id.
       const commitRow = (
@@ -1653,12 +1753,13 @@ export async function persistPr(
           committerId,
           message: config.persistBodies ? c.message : null,
           ...headline,
+          ...aiCommit,
           committedAt,
           ...commitAttribution,
         })
         .onConflictDoUpdate({
           target: [commits.sha, commits.prId],
-          set: { message: config.persistBodies ? c.message : null, ...headline, committedAt, ...commitAttribution },
+          set: { message: config.persistBodies ? c.message : null, ...headline, ...aiCommit, committedAt, ...commitAttribution },
         })
         .returning({ id: commits.id })
         .execute()

@@ -906,6 +906,7 @@ its own key, evaluation and "remind me later". Detail: [LICENSING.md](LICENSING.
 | D4 | A thread the reader resolved is the reader's decision (2026-11-09): a "not addressed" judgement there posts nothing by itself (Ensemble shows what is still needed; "Post still open" posts it); an "addressed" one posts its how once, only when no Ensemble reply follows the person's last comment. | § 6 |
 | D5 | Newest judgement wins on the thread pill (2026-11-09), your Ensemble's or a teammate's, labelled with who made it. | § 6 |
 | D3 | Ensemble's actions never count as the person (2026-11-08): a reply to your Ensemble's finding does not summon you; a PR your Ensemble opened is still yours; a request only your Ensemble answered still stands. Chronology shows two views, "People" and "People + bots", so Ensemble's effect on the waits is visible. | § 8 |
+| D6 | The AI adoption report names nobody (2026-11-23), like Chronology and Slack. "How widely AI is used" counts people (overall, per AI tool, per period) and never says who: no name, login or per-person row reaches the browser, the PDF or the AI model. A count of 1 or 2 people prints "Fewer than 3", so a small team's figures cannot point at anyone. A PR an AI coding agent opened counts towards the tools' PR shares and towards no person. | docs/AI-ADOPTION-REPORT.md |
 
 ### Gaps that remain
 

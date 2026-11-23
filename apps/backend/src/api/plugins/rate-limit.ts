@@ -569,6 +569,15 @@ function tierFor(method: string, path: string): readonly Tier[] {
     return config.aiEnabled ? [TIERS.search, TIERS.ai, TIERS.aiHourly] : [TIERS.search, TIERS.read];
   }
   if (mutating && path === '/api/sprint-graph/ask') return [TIERS.ai, TIERS.aiHourly];
+  // REPORTS → DOWNLOAD REPORT (docs/AI-ADOPTION-REPORT.md § Routes), matched EXACTLY, FOLLOWING THE TOKEN:
+  //   GET  /api/reports/ai-adoption              DB only, but one request runs the period metrics,
+  //                                              Chronology and the bot analytics twice each, the usage
+  //                                              ledger four times and a merged-PR scan with its
+  //                                              signals and approvals                → search + read
+  //   POST /api/reports/ai-adoption/commentary   ONE completion per slide (≤ 8 per download, under
+  //                                              the 20/min `ai` bucket)              → ai + ai_hourly
+  if (!mutating && path === '/api/reports/ai-adoption') return [TIERS.search, TIERS.read];
+  if (mutating && path === '/api/reports/ai-adoption/commentary') return [TIERS.ai, TIERS.aiHourly];
   if (
     path === '/api/sprint-graph' ||
     path === '/api/sprint-graph/token' ||

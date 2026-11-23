@@ -39,6 +39,7 @@ import { openPrsRoutes } from './api/routes/open-prs.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { aiUsageReportRoutes } from './api/routes/ai-usage-report.js';
+import { adoptionReportRoutes } from './api/routes/adoption-report.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
@@ -238,6 +239,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   if (config.aiEnabled) await app.register(aiBudgetRoutes);
   // Reports → AI usage: the ledger read back (DB only).
   if (config.aiEnabled) await app.register(aiUsageReportRoutes);
+  // Reports → Download report: the AI adoption report's figures (DB only). ALWAYS registered, AI off
+  // too; its commentary route is agentic (review/adoption-report/routes.ts).
+  await app.register(adoptionReportRoutes);
   // The AI provider choice (Settings → AI): PUT /api/ai/provider. Same gate.
   if (config.aiEnabled) await app.register(aiProviderRoutes);
   // Settings → AI → Disk space: the clone cache and its per-run checkouts (review/worktree-gc.ts).

@@ -29,6 +29,10 @@ no internals.
 - Privacy: a section on how we handle your details if we contact you about Ensemble, and how to stop it.
 - A security and trust page for security and procurement reviewers: where your data goes, what the AI
   agents can do, what happens without a click, and how to report a security problem.
+- Reports → Download report: a PDF shaped like a slide deck on AI adoption and delivery, made on your
+  computer. It shows which AI coding tools were involved in merged pull requests, how many people used
+  each, and what changed against the period before, with an option to have AI write the commentary. It
+  names nobody: counts of 1 or 2 people show as "Fewer than 3".
 
 ### Fixed
 

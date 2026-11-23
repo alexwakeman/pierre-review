@@ -36,7 +36,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [SONARCLOUD](docs/SONARCLOUD.md) | the per-(PR, head) snapshot, the review block, the one PR comment, AI Fix's `Q<n>` items |
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
-| [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
+| [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) · [AI-ADOPTION-REPORT](docs/AI-ADOPTION-REPORT.md) | window purity, coverage bias, actor lanes, the person vector · the PDF deck (names nobody), AI vendor detection, the grounding gate |
 | [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, Slack |
 | [LICENSING](docs/LICENSING.md) | the signed licence key (offline check), Polar activation, the reminder (never a block) |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, AI routes, data export, dependency posture |

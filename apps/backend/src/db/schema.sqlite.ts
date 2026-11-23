@@ -522,6 +522,17 @@ export const pullRequests = sqliteTable(
     // Canonical advisory ids named by the vendor-selected fields; NULL when there are none.
     advisoryIds: text('advisory_ids', { mode: 'json' }).$type<string[]>(),
     securityCheckedAt: integer('security_checked_at', { mode: 'timestamp' }),
+    // ---- AI VENDOR SIGNALS (migration 0218; docs/AI-ADOPTION-REPORT.md § Detection) — the AI coding
+    // tools the PR's OWN fields name (title, FULL bodyText, markdown body when fetched, branch,
+    // author), read at sync by shared `detectAiPrSignals` (sync/upsert.ts `aiPrColumnsFor`). JSON
+    // `[{vendor, source}]` — VERDICTS ONLY, never text (lean storage). Three-state like the security
+    // columns: written only from a response that carried `bodyText`; NULL = never scanned, `[]` =
+    // scanned clean. `ai_signals_version` is the detector version of this scan AND of the commits'
+    // scan in the same payload; below `AI_SIGNALS_VERSION` (or NULL) is the backfill's worklist
+    // (sync/backfill-ai-signals.ts). Read ONLY through db/ai-signals.ts `getPrAiSignals`.
+    aiSignals: text('ai_signals'),
+    aiSignalsVersion: integer('ai_signals_version'),
+    aiSignalsCheckedAt: integer('ai_signals_checked_at', { mode: 'timestamp' }),
     // ---- GITHUB ISSUES LINKS (migration 0089; docs/TRACKERS.md § GitHub Issues) ----
     // The issues this PR CLOSES, as GitHub states them (`closingIssuesReferences`: "Fixes #12",
     // "Closes owner/repo#12", or a Development-panel link), as lower-cased `owner/repo#12` keys in
@@ -818,6 +829,11 @@ export const commits = sqliteTable(
     // card (migration 0072 / pg 0059).
     messageHeadline: text('message_headline'),
     committedAt: integer('committed_at', { mode: 'timestamp' }).notNull(),
+    // AI VENDOR SIGNALS from this commit's author / committer (login, name, email) and FULL message
+    // (trailers, "Generated with X"), read at sync by shared `detectAiCommitSignals` (migration 0218).
+    // JSON `[{vendor, source}]`, verdicts only: the message is still stored only on PERSIST_BODIES
+    // and names / emails never are. NULL = not scanned, `[]` = scanned clean.
+    aiSignals: text('ai_signals'),
     // A commit Limn made (an AI Fix, a conflict resolution, a branch update, an Implement push;
     // migration 0180): `authorId` holds the poster's `limn:<login>` bot and the person is HERE.
     limnPushedByUserId: integer('limn_pushed_by_user_id').references(() => users.id),

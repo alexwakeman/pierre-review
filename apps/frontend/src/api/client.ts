@@ -1,4 +1,5 @@
 import type { AskablePeopleResponse } from '@pierre-review/shared';
+import type { AdoptionCommentaryRequest, AdoptionCommentaryResponse, AiAdoptionReport } from '@pierre-review/shared';
 import type {
   JiraAcFieldSettingsBody,
   JiraAcFieldSettingsResponse,
@@ -408,10 +409,11 @@ async function handle<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-function get<T>(url: string): Promise<T> {
+function get<T>(url: string, opts?: { signal?: AbortSignal }): Promise<T> {
   // `credentials: 'same-origin'`;
   // it's harmless (and a no-op) in local mode where there is no cookie.
-  return fetch(url, { credentials: 'same-origin' }).then((r) => handle<T>(r));
+  // `signal` (optional): a caller that can be cancelled (Reports → Download report) aborts the read.
+  return fetch(url, { credentials: 'same-origin', signal: opts?.signal }).then((r) => handle<T>(r));
 }
 
 function jsonBody(method: string, body?: unknown): RequestInit {
@@ -1191,6 +1193,16 @@ export const api = {
   // Reports → AI usage: the ledger over the reporting window + the last 12 weeks (AI on only).
   aiUsageReport: (workspaceId: number) =>
     get<AiUsageReportResponse>(withQuery('/api/ai/usage-report', workspaceParam(workspaceId))),
+  // Reports → Download report (docs/AI-ADOPTION-REPORT.md): the figures, DB only. Read on the
+  // reader's press, never on mount; the dialog's one AbortController cancels it.
+  aiAdoptionReport: (workspaceId: number, opts?: { signal?: AbortSignal }) =>
+    get<AiAdoptionReport>(withQuery('/api/reports/ai-adoption', workspaceParam(workspaceId)), opts),
+  // One slide's commentary (registered only while AI is on). Any non-'ai' answer or error ⇒ the
+  // slide's template wording; the caller never retries.
+  adoptionCommentary: (body: AdoptionCommentaryRequest, opts?: { signal?: AbortSignal }) =>
+    fetch('/api/reports/ai-adoption/commentary', { ...jsonBody('POST', body), signal: opts?.signal }).then((r) =>
+      handle<AdoptionCommentaryResponse>(r),
+    ),
   // This Sprint (a fixed tab). The graph GET
   // stamps the workspace as viewed, which is what lets the worker read its sprint at all. Both GETs
   // are DB only.
