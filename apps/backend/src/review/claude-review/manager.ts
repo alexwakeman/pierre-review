@@ -721,8 +721,21 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     // do nothing and flag the issues"): the pair stands down — no Codex half alone. Their findings show
     // on the AI Review tab, and the reader's replies are judged by a replies pass (auto.ts, the held
     // head). On a teammate's PR the second half runs alone as before.
+    // ⚠ THE STORY CHECK IS NOT HELD BY A REVIEW CLAIM (docs/TEAM-REVIEW.md § The story check's own
+    // claim): this auto review was due, so the PR's tickets are kicked as if it had launched — the story
+    // check claims its own `ensemble/story-check` line (ticket-review/story-claim.ts). A teammate without
+    // story checks who has the review must not cost the PR its story check (the first check's onboarding
+    // floor counts the kick).
+    const kickStory = (): void => {
+      try {
+        autoLaunchHook?.(ctx, accountId, prId);
+      } catch {
+        /* the ticket sweep's kick must never break the PR review */
+      }
+    };
     if (claim.kind === 'skip' && pair?.secondProvider && (await ownPrSafe(ctx, accountId, prId))) {
       ctx.log.info(`auto claude review pr ${prId}: own PR, a teammate's Ensemble has ${provider}: standing down`);
+      kickStory();
       return;
     }
     if (claim.kind === 'skip' && pair?.secondProvider) {
@@ -731,7 +744,10 @@ async function startAutoItem(a: AutoItem): Promise<void> {
       pair = undefined;
       claim = await claimFor(provider);
     }
-    if (claim.kind === 'skip') return;
+    if (claim.kind === 'skip') {
+      kickStory();
+      return;
+    }
     teamClaim = claim.kind === 'run' ? claim.handle : null;
     // No stories: the PR's tickets are checked by the ticket review's own sweep, never here.
     const reviewId = await insertQueuedReview(

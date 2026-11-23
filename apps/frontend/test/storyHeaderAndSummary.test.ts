@@ -100,6 +100,20 @@ describe('why it waits', () => {
     expect(ticketAutoCheckWords(undefined, () => null, now)).toBeNull();
   });
 
+  it("names the teammate whose Ensemble holds the story check (its own ensemble/story-check line)", () => {
+    const now = Date.parse('2026-11-23T10:00:00Z');
+    const held = (kind: 'reviewing' | 'reviewed') =>
+      ticketAutoCheckWords(
+        { status: 'held', reason: 'teammate', startsAt: null, lastChange: null, teammate: { kind, login: 'robin' } },
+        () => null,
+        now,
+      )?.label;
+    expect(held('reviewing')).toBe('No automatic story check — @robin is checking the story now');
+    expect(held('reviewed')).toBe('No automatic story check — @robin checked the story at these commits');
+    // No teammate named: no line, never an empty name or another reason's words.
+    expect(ticketAutoCheckWords({ status: 'held', reason: 'teammate', startsAt: null, lastChange: null }, () => null, now)).toBeNull();
+  });
+
   it('a short countdown', () => {
     expect(shortDuration(100_000)).toBe('1m 40s');
     expect(shortDuration(45_000)).toBe('45s');

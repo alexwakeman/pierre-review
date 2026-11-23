@@ -699,3 +699,44 @@ describe("a person's comment the latest check did not see", () => {
     expect((await state(nowMs))!.plan.status).toBe('due');
   });
 });
+
+describe("the story claim (story-claim.ts, docs/TEAM-REVIEW.md § The story check's own claim)", () => {
+  it('⚠ a teammate holding every head ⇒ nothing queued and the ticket waits; a claim that did not queue is settled', async () => {
+    await endQueuedRuns();
+    dailyCap = 500;
+    const tick = T0 + 45 * 60_000;
+    await push('x', 'h_x_story', tick - 3 * 60_000);
+    const targets: Array<{ ident: string; heads: ReadonlyArray<{ headSha: string }> }> = [];
+    const held = await sweep.runTicketReviewSweep(ctx, tick, {
+      ...deps(),
+      claimStory: async (_c, t) => {
+        targets.push(t);
+        return { kind: 'skip', skip: { kind: 'reviewed', login: 'bob', at: '', description: null, heads: '' } };
+      },
+    });
+    expect(held.considered).toEqual(expect.arrayContaining([T1, T2]));
+    expect(held.queued).toEqual([]);
+    expect(enqueued).toEqual([]);
+    // The claim is asked about the open members' CURRENT heads.
+    expect(targets.find((t) => t.ident === T2)?.heads.map((h) => h.headSha)).toEqual(['h_x_story']);
+    // Next tick (still watching): the claim lets it run, and the handle reaches the lane with the run.
+    const handles: Array<{ done: boolean }> = [];
+    const seen: unknown[] = [];
+    await sweep.runTicketReviewSweep(ctx, tick + 1000, {
+      ...deps(),
+      claimStory: async (_c, t) => {
+        const h = { target: t, login: null, heads: [], timer: null, done: false };
+        handles.push(h);
+        return { kind: 'run', handle: h };
+      },
+      enqueue: async (_c, a) => {
+        seen.push(a.storyClaim);
+        return { outcome: 'busy' };
+      },
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0]).toBe(handles[0]);
+    // Not queued: the sweep released it (the run never took it).
+    expect(handles[0]!.done).toBe(true);
+  });
+});

@@ -362,6 +362,11 @@ export function AutoReviewSection(): JSX.Element {
             with the same provider. If a review doesn’t finish, Ensemble marks its status free to claim.
             Without write access to the repo, Ensemble reviews without a status.
           </p>
+          <p>
+            An automatic story check puts its own status on each of the ticket’s open PRs:
+            ensemble/story-check. A teammate who reviews the code but has no story checks never holds the
+            story check, so yours still runs.
+          </p>
           <p>Don’t make ensemble/ statuses required checks. A pending one would block merges.</p>
         </InfoButton>
       }

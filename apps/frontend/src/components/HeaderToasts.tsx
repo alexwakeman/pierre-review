@@ -14,7 +14,6 @@ import { createPortal } from 'react-dom';
 import { CloseIcon } from './Icons.js';
 import { anchorClusterPanel, toastRank, type ToastPanelBox } from '../lib/toastAnchor.js';
 import { claimActivePopover } from '../lib/activePopover.js';
-import { useToastLift } from './ui/toastObstacles.js';
 
 // ── THE ONE TOAST CLUSTER ────────────────────────────────────────────────────────────────────
 //
@@ -30,9 +29,10 @@ import { useToastLift } from './ui/toastObstacles.js';
 //    urgent, then the newest, sits furthest right and on top (`toastRank`). Each circle carries its
 //    words for assistive tech (`sr-only`) and a tooltip.
 //  • WHERE IT SITS: `right` 12px (or the safe-area inset), `bottom` 12px + the safe-area inset —
-//    below md, ABOVE the phone's bottom bar (56px). It rises above a SidePanel's pinned action bar in
-//    its corner (`useToastLift`, ui/toastObstacles.ts). z-[51]: above a SidePanel sheet (z-50), so
-//    the Undo for an action taken in the sheet stays reachable; below the drawer (z-[55]/[56]), the
+//    below md, ABOVE the phone's bottom bar (56px). ⚠ IT NEVER MOVES (owner, 2026-11-23): an open
+//    PR drawer or other SidePanel does not lift it; it STACKS over the panel instead, and the panel's
+//    action bar keeps its right end clear (SidePanel.tsx). z-[51]: above a SidePanel (z-50), so
+//    the Undo for an action taken in the panel stays reachable; below the drawer (z-[55]/[56]), the
 //    modals and the resolver (z-[60]+). The fixed box is `pointer-events-none` and an EMPTY cluster
 //    is `hidden`, never unmounted (the circles portal into it): it takes no space and catches no
 //    click, and since it is out of the page flow a toast appearing never moves the page.
@@ -83,7 +83,6 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelId = useId();
   const expanded = box != null;
-  const lift = useToastLift();
   const names = Object.values(labels);
   const count = names.length;
 
@@ -128,17 +127,6 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
     b.addEventListener('click', onClick);
     return () => b.removeEventListener('click', onClick);
   }, []);
-
-  // The cluster rose or fell (a panel's action bar came or went under it): re-anchor the open
-  // panel to where the cluster now is, after the move has laid out.
-  useEffect(() => {
-    if (!expanded) return;
-    const frame = requestAnimationFrame(() => {
-      const b = buttonRef.current;
-      if (b != null) setBox(anchorClusterPanel(b.getBoundingClientRect(), contentLeft(), window.innerWidth, window.innerHeight));
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [lift, expanded]);
 
   // Nothing left to show: close.
   useEffect(() => {
@@ -214,8 +202,8 @@ export function HeaderToastStrip({ children }: { children: ReactNode }): JSX.Ele
         // docked panel (useClickOutside, OpenPrsRows): acting on an Undo must not close them.
         data-floating-layer=""
         // Bottom right of the main content, out of the page flow; above the phone's bottom bar
-        // (h-14) and the safe areas. A registered action bar in the corner lifts it (inline style).
-        style={lift > 0 ? { bottom: lift + 8 } : undefined}
+        // (h-14) and the safe areas. ⚠ Nothing moves it: an open drawer's action bar sits UNDER it
+        // (z-[51]) and keeps its right end clear (SidePanel.tsx `FOOTER_TOAST_ROOM`).
         className="pointer-events-none fixed bottom-[calc(12px+env(safe-area-inset-bottom))] right-[max(12px,env(safe-area-inset-right))] z-[51] flex justify-end max-md:bottom-[calc(68px+env(safe-area-inset-bottom))]"
       >
         <div role="status" aria-live="polite" aria-atomic="false" aria-relevant="additions" aria-label="Notifications" className="pointer-events-auto">

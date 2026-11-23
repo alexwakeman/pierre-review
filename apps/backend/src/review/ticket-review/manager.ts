@@ -80,6 +80,7 @@ import { preflightFor } from '../../ai/run-choice.js';
 import { claudeModelChoice, getProvider } from '../../ai/provider.js';
 import { promptTools } from '../../ai/prompt-tools.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
+import { finishStoryClaim, storyCheckedSummary, type StoryClaimFinish, type StoryClaimHandle } from './story-claim.js';
 
 // THE TICKET REVIEW QUEUE — one run per TICKET (never per PR), beside the PR review's own queue
 // (claude-review/manager.ts) and SEPARATE from it: its own rows, its own claim, its own lane, so a
@@ -129,6 +130,9 @@ export interface TicketJob {
   // Spent before the agent's own run (the card pre-pass), so every terminal write — including the
   // launch catch's — carries it into the run's cost.
   spentUsd: number;
+  // THE STORY CLAIM (story-claim.ts) the sweeper took before queueing this automatic run; its final line
+  // is written once the run (and its auto-post) is over, on EVERY exit path.
+  storyClaim?: StoryClaimHandle | null;
 }
 
 // `${accountId}:${ident}` → the run id holding it (-1 while its row is being written).
@@ -184,6 +188,9 @@ export interface StartTicketArgs {
   trigger: TicketReviewTrigger;
   // Why the automatic sweeper queued it (ticket_reviews.cause); absent on a manual run.
   cause?: string | null;
+  // The story claim the sweeper took (story-claim.ts). ⚠ Settled by the run once queued; a caller whose
+  // call did NOT queue settles it itself.
+  storyClaim?: StoryClaimHandle | null;
 }
 
 export type StartTicketResult =
@@ -235,6 +242,7 @@ export async function startTicketReview(ctx: AgentContext, a: StartTicketArgs): 
     trigger: a.trigger,
     model: DEFAULT_CLAUDE_REVIEW_MODEL,
     spentUsd: 0,
+    storyClaim: a.storyClaim ?? null,
   };
   // A manual item goes ahead of every automatic one; FIFO within each.
   const firstAuto = lane.findIndex(isAuto);
@@ -304,19 +312,28 @@ function launch(job: TicketJob): void {
           ctx.log.warn(`story design after ticket review ${runId}: ${err instanceof Error ? err.message : String(err)}`),
         );
       // AUTO-POSTING: an AUTOMATIC run that succeeded may post its story gaps on their owner PRs
-      // (./auto-post.ts decides, reads the run's status itself, never throws, never retries).
+      // (./auto-post.ts decides, reads the run's status itself, never throws, never retries). The story
+      // claim's final line waits for it: what reached GitHub decides what the line says.
       if (!isAuto(job)) return;
       void import('./auto-post.js')
         .then((m) => m.maybeAutoPostTicketReview(ctx, { accountId: job.accountId, runId }))
-        .catch((err) =>
-          ctx.log.warn(`auto post ticket review ${runId}: ${err instanceof Error ? err.message : String(err)}`),
-        );
+        .catch((err) => {
+          ctx.log.warn(`auto post ticket review ${runId}: ${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        })
+        .then(async (out) => {
+          if (!job.storyClaim) return;
+          const run = await getTicketReviewById(ctx, job.accountId, runId).catch(() => null);
+          await settleStoryClaim(job, storyCheckedSummary(run, out));
+        })
+        .catch(() => {});
     })
     .catch(async (err) => {
       ctx.log.error(
         { err },
         `ticket review ${runId} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+      void settleStoryClaim(job, { kind: 'unfinished' });
       // A throw (network, git, database) says nothing about the inputs: retryable.
       await markTicketReviewFailed(
         ctx,
@@ -352,6 +369,14 @@ function launch(job: TicketJob): void {
       pump();
       pumpReviewLane();
     });
+}
+
+/** The story claim's final line, once (story-claim.ts `finishStoryClaim`; never throws). */
+async function settleStoryClaim(job: TicketJob, outcome: StoryClaimFinish): Promise<void> {
+  const handle = job.storyClaim;
+  if (!handle) return;
+  job.storyClaim = null;
+  await finishStoryClaim(job.ctx, handle, outcome).catch(() => {});
 }
 
 async function runPipeline(
@@ -779,6 +804,7 @@ export function requestTicketReviewCancel(accountId: number, runId: number): boo
   if (idx < 0) return false;
   const job = lane.splice(idx, 1)[0]!;
   claimed.delete(keyOf(job.accountId, job.ident));
+  void settleStoryClaim(job, { kind: 'unfinished' });
   void markTicketReviewCancelled(job.ctx, job.accountId, job.runId).catch(() => {});
   return true;
 }

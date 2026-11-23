@@ -1190,7 +1190,7 @@ export const api = {
     fetch('/api/sprint-stories/refresh', jsonBody('POST', { workspaceId })).then((r) =>
       handle<SprintRefreshResponse>(r),
     ),
-  // The status buckets override; `{buckets: null, mergedColumn: true}` resets.
+  // The status buckets override; `SPRINT_STATUS_SETTINGS_DEFAULT` resets.
   sprintSetStatuses: (body: SprintStatusesUpdate) =>
     fetch('/api/sprint-stories/statuses', jsonBody('PUT', body)).then((r) => handle<SprintStatusesResponse>(r)),
   // The story view (the ticket tab; core, FREE): one ticket's open / merged / closed PRs as TimelinePr

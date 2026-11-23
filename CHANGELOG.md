@@ -20,6 +20,8 @@ no internals.
 - This Sprint → Releases: "Explain what's blocking" (with AI on). One press writes a short report from the
   release check: what holds back the newest release you could reach, the steps to take in order with what
   each unlocks, and links to the tickets and pull requests to watch. It names only work that is in the check.
+- Three colour schemes in Settings → Appearance: Neon (dark, bright neon accents), Green Screen (dark,
+  green on black in a monospace font) and Meadow (light, calm greens).
 
 ### Changed
 
@@ -28,6 +30,18 @@ no internals.
   ticket could pull every repository's candidate back by months.
 - This Sprint → Releases: the buttons that show more tickets say how many are still hidden, for example "Show
   next 3 of 7". Each ticket card shows the day its last pull request was merged.
+- Reviewing as a team: an automatic story check now claims its own status line, ensemble/story-check, on
+  the ticket's open pull requests. A teammate who reviews the code but has no story checks no longer
+  stops yours: your Ensemble checks the story and posts its gaps as before. When a teammate already
+  checked the story at those commits, the story check says so and yours skips it.
+- This Sprint: the Cancelled column is hidden by default. Tick "Show the Cancelled column" under Statuses to
+  show it. Cancelled tickets still count in the pace and the release check. If you saved statuses with a
+  Cancelled column, it stays.
+
+### Fixed
+
+- Activity → Open PRs: the notifications in the bottom right no longer move up when a pull request's panel
+  is open. They stay in place, above the panel.
 
 ## [1.0.75] - 2026-11-23
 

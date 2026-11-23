@@ -3616,6 +3616,42 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   THIS section's per-provider lines on the branch head they review (`loop/review-lines.ts`: `reviewingLine`,
   then `reviewedLine(login, null)` — kept, nothing went to GitHub), read by the ONE fold once the PR opens
   (the author's lines still hold nothing for a teammate). docs/STORY-BUILD.md § The team claim.
+- **THE STORY CHECK HAS ITS OWN LINE** (2026-11-23; `review/ticket-review/story-claim.ts`; docs/TEAM-REVIEW.md
+  § The story check's own claim). Not every teammate has story checks (a tracker, a ticket that resolves), so
+  the review claims above NEVER hold the automatic ticket review: it claims `ensemble/story-check`
+  (`storyClaimContext`, shared `STORY_CLAIM_STATUS_NAME`) — ⚠ ONE context, not one per provider: a story
+  check is a single-vendor run (`storyCheckProvider`), never a pair, so a second model adds no second
+  opinion. THIS section's machinery, reused, not forked: the per-head fold is `decideTeamClaim` itself
+  (lease, renewal, earliest live claimant, "Cleared by" free lines, `releaseContextOf`, the `limn/` read
+  via `sameStatusContext` — no Limn wrote one); the ledger is `team_claim_lines` with `provider =
+  'story'` (`TeamClaimKey`, no migration — the column is free text; every review reader of the ledger skips
+  the key: `teamClaimPendingFor`'s Clear, the reconciler's `busy`); the reconciler releases an orphaned
+  story row on ITS context with ITS words (`claimKeyContext`, `unfinishedLineFor`, `deps.storyBusy` =
+  `storyClaimBusy`); a teammate's expired story claim is released once (`releaseExpiredStoryTeammateLines`,
+  from `releaseStaleTeamClaims`; ⚠ a head `storyClaimBusy` holds is skipped, and each head's read + post
+  runs inside `trackClaimRelease` — a story check claiming that head meanwhile, another ticket's included,
+  waits for it, so "claim expired" never lands over its fresh pending line). Lines: pending "alex is checking the story"; success "alex checked the
+  story · 3 gaps" / "· no gaps" / "· no new gaps" (holds) or "· kept in Ensemble" (gaps found, nothing on
+  GitHub: FREE, a `KEPT_PHRASES` entry); "Cleared by alex: story check didn't finish · free to claim".
+  - **PER MEMBER HEAD**: the line goes on every OPEN member PR's head (`storyClaimHeads`, in the
+    account's repos, ordered by repository and number). ONE pure rule, `decideStoryClaim`: a teammate holds
+    the story check only when they hold EVERY head; otherwise the free heads (and the reader's own live
+    ones) are claimed. After posting, each claimed head is re-read; the check stands down only when it
+    LOST EVERY head it claimed (a split race runs twice — a duplicate, never a check nobody runs). ⚠ The
+    PR AUTHOR'S story lines COUNT (no `author` passed): a story check gives no verdict.
+  - **WHERE**: the sweeper (`ticket-review/sweep.ts`, step 6), right before a DUE automatic check is
+    queued. Held ⇒ nothing queued (no row, no cap use), the ticket stays watched, and the plan reads
+    `held` / `teammate` (`TicketAutoCheck.teammate`, from the claim's in-memory skip — per ticket AND per
+    set of heads; a moved head reads GitHub at once) — "No automatic story check — @robin checked the
+    story at these commits". The run carries the handle (`StartTicketArgs.storyClaim` → `TicketJob`);
+    ⚠ EVERY exit settles it once (`settleStoryClaim`: after the auto-post on success — what reached GitHub
+    words the line, `storyCheckedSummary` —, the launch catch, a cancel while queued); a call that did
+    not queue settles it in the sweeper. A click (Re-check) never claims.
+  - **THE KICK**: an auto PR review that steps aside for a teammate's REVIEW claim (`startAutoItem`'s
+    skip and the own-PR pair stand-down) still fires `onAutoReviewLaunched`, so a first story check is not
+    lost to the onboarding floor when the teammate who has the review has no story checks.
+  - Not claimed: the review loops' story checks (Implement, AI Fix, the local branch review — a branch
+    or a run the reader started, never a teammate's race).
 - ⚠ **ENSEMBLE'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`ensemble/` or the older `limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
   My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge

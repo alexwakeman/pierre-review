@@ -242,6 +242,13 @@ export function sprintColumnsOf(buckets: ReadonlyArray<Pick<SprintBucket, 'id' |
   return buckets.map((b) => ({ id: b.id, name: b.name, meaning: b.meaning }));
 }
 
+/** The drawn x axis: the buckets, less the Cancelled ones unless `showCancelled` (a Cancelled bucket
+ *  still holds its statuses — only its column goes). Every bucket when all of them mean Cancelled. Pure. */
+export function drawnColumnsOf(buckets: ReadonlyArray<Pick<SprintBucket, 'id' | 'name' | 'meaning'>>, showCancelled: boolean): SprintColumn[] {
+  const drawn = showCancelled ? buckets : buckets.filter((b) => b.meaning !== 'cancelled');
+  return sprintColumnsOf(drawn.length > 0 ? drawn : buckets);
+}
+
 /** The column a ticket is drawn in: its bucket — or, when the merge rule is on (`productReviewId` set:
  *  the FIRST Product review bucket's id), its stage is Code review, and it has ≥ 1 merged pull request
  *  and none open (closed unmerged ones ignored), that Product review bucket. Pure; THE ONE column rule
@@ -342,7 +349,7 @@ export function resolveSprintStatusLayout(input: StatusLayoutInput): SprintStatu
   return {
     order,
     buckets,
-    columns: sprintColumnsOf(bucketList),
+    columns: drawnColumnsOf(bucketList, settings.showCancelled),
     orderSource: settings.buckets != null ? 'override' : (input.autoOrder?.source ?? 'fallback'),
     codingBegins: order.find((o) => o.stage === 'in_progress')?.name ?? null,
     codingEnds: (order.find((o) => o.stage === 'in_review') ?? order.find((o) => o.stage === 'product_review'))?.name ?? null,

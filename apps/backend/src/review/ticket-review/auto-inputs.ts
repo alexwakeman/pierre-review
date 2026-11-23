@@ -9,6 +9,10 @@ import { countAutoTicketReviewsSince, getTicketStateInputs } from './persist.js'
 import { jiraStoryFor, ticketCommentsFor } from './prepare.js';
 import { newCommentsMakeStale } from '../../tracker/comments.js';
 import { latestAllMet, ticketAutoCheckPlan, type TicketAutoChange, type TicketAutoPlan } from './auto-plan.js';
+import { storyClaimSkipFor, type StoryClaimSkip } from './story-claim.js';
+
+const teammateOf = (s: StoryClaimSkip | null): { kind: 'reviewing' | 'reviewed'; login: string } | null =>
+  s ? { kind: s.kind, login: s.login } : null;
 
 // THE AUTOMATIC STORY CHECK'S INPUTS, read from stored rows — ONE reader for the sweeper (sweep.ts,
 // which acts on the plan) and the states route (routes.ts, which shows it). The rule itself is the
@@ -249,6 +253,8 @@ export async function loadTicketAutoState(
       lastRunAtMs: await lastRunAtMs(ctx, accountId, ident),
       cap: { used, limit: a.dailyCap, exempt },
       laneRoom: a.laneRoom,
+      // The story claim's memory (story-claim.ts): a teammate holds every open member head right now.
+      teammate: teammateOf(storyClaimSkipFor(accountId, ident, live.filter((m) => m.state === 'open' && m.headSha !== ''), nowMs)),
     },
     nowMs,
   );

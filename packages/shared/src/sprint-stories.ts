@@ -171,7 +171,7 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 //     its automatic stage and joins the FIRST bucket with that meaning; with none, the bucket of the
 //     nearest EARLIER meaning (else the nearest later one) — marked `auto` either way.
 //   • THE COLUMNS (`SprintStatusLayout.columns`) — the x axis of every This Sprint view: the buckets in
-//     order, nothing else (the derived "Merged, not signed off" column is GONE: it became the first-class
+//     order (Cancelled ones only with `showCancelled`), nothing else (the derived "Merged, not signed off" column is GONE: it became the first-class
 //     Product review bucket). THE MERGE RULE: while `mergedColumn` is on (the default) a ticket whose
 //     bucket means Code review and that has ≥ 1 merged pull request and none open (closed unmerged ones
 //     ignored) is drawn in the FIRST Product review bucket instead — `SprintGraphNode.column`, computed
@@ -185,6 +185,12 @@ export const SPRINT_PHASE_LABEL: Record<SprintPhase, string> = {
 //     the last Complete bucket (else last), taking the Complete buckets' statuses whose names read as
 //     cancelled — when there is room (≤ 9 buckets) and the name "Cancelled" is free. Read-time only,
 //     like Product review: nothing is written until the reader saves.
+//   • THE CANCELLED COLUMN is HIDDEN unless `showCancelled` (default OFF, since 2026-11-23): the
+//     Cancelled bucket still exists and holds its statuses, so a cancelled ticket keeps its `stage`
+//     and counts as it did (pace, release check, never Complete); only `columns` leaves the bucket
+//     out, and the board draws no card for it. A value stamped 3 (saved before the switch) reads it ON
+//     when its saved buckets include a Cancelled one — the reader saved a layout with that column — and
+//     OFF otherwise (automatic buckets, or a Cancelled bucket only added at read time).
 //   • "Coding begins" = the first status of the first In progress bucket; "Coding ends" = the first
 //     of the first Code review bucket, else of the first Product review one (`codingBegins` /
 //     `codingEnds`) — derived, never stored.
@@ -299,14 +305,19 @@ export interface SprintStatusSettings {
   /** Move a Code review ticket whose pull requests have all merged (none open) into the first Product
    *  review bucket. (The key keeps its old name: it once drew the "Merged, not signed off" column.) */
   mergedColumn: boolean;
+  /** Draw the Cancelled bucket(s) as columns. OFF by default: a Cancelled bucket still holds its
+   *  statuses and its tickets still read as cancelled everywhere (pace, release check); only the
+   *  column is left off `SprintStatusLayout.columns`. */
+  showCancelled: boolean;
 }
 
 /** Stamped on every stored value. A stored value WITHOUT it was saved before Product review became a
  *  bucket (read with a Product review bucket added, then a Cancelled one); one stamped 2 was saved
- *  before Cancelled (read with a Cancelled bucket added). See the header. */
-export const SPRINT_STATUS_SETTINGS_VERSION = 3;
+ *  before Cancelled (read with a Cancelled bucket added); one stamped 3 was saved before
+ *  `showCancelled` (read with it ON only when its saved buckets include a Cancelled one). See the header. */
+export const SPRINT_STATUS_SETTINGS_VERSION = 4;
 
-export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { buckets: null, mergedColumn: true };
+export const SPRINT_STATUS_SETTINGS_DEFAULT: SprintStatusSettings = { buckets: null, mergedColumn: true, showCancelled: false };
 
 /** The six automatic buckets (no statuses named). */
 export function sprintAutomaticBuckets(): SprintBucket[] {
@@ -404,7 +415,7 @@ export interface SprintStatusLayout {
   order: SprintStatusLayoutEntry[];
   /** The resolved buckets, in order (six automatic ones when none are set). */
   buckets: SprintStatusLayoutBucket[];
-  /** The drawn x axis: the buckets, in order. */
+  /** The drawn x axis: the buckets, in order — less the Cancelled ones unless `settings.showCancelled`. */
   columns: SprintColumn[];
   /** Where the order came from: the override, the tracker, or the category fallback. */
   orderSource: 'override' | SprintStatusAutoOrder['source'] | 'fallback';
@@ -421,8 +432,8 @@ export interface SprintStatusLayout {
 /** PUT /api/sprint-stories/statuses — replace the workspace's override (FREE; the `read` tier; scope
  *  via `resolveWorkspaceScope`, an id that does not resolve to itself → 400 `bad_workspace`). Strict:
  *  `buckets` null or an array passing `sprintBucketsProblem`; `mergedColumn` a boolean → otherwise 400
- *  `bad_request` with the problem in `message`, and nothing is written. `{buckets: null, mergedColumn:
- *  true}` = "Reset to automatic" (stored as NULL). */
+ *  `bad_request` with the problem in `message`, and nothing is written; `showCancelled` absent = false.
+ *  `SPRINT_STATUS_SETTINGS_DEFAULT` = "Reset to automatic" (stored as NULL). */
 export interface SprintStatusesUpdate {
   workspaceId: number;
   settings: SprintStatusSettings;

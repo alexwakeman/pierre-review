@@ -104,7 +104,7 @@ afterAll(async () => {
 const put = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/sprint-stories/statuses', payload: payload as any });
 
 const B = (id: string, name: string, meaning: string, statuses: unknown) => ({ id, name, meaning, statuses });
-const buckets = (...bs: unknown[]) => ({ buckets: bs, mergedColumn: true });
+const buckets = (...bs: unknown[]) => ({ buckets: bs, mergedColumn: true, showCancelled: false });
 
 describe('PUT /api/sprint-stories/statuses', () => {
   it('is FREE: no 402 without Reports', async () => {
@@ -150,6 +150,7 @@ describe('PUT /api/sprint-stories/statuses', () => {
         B('done', 'Done', 'done', ['Done']),
       ],
       mergedColumn: true,
+      showCancelled: false,
     };
     const res = await put({ workspaceId: ownWs, settings: S });
     expect(res.statusCode).toBe(200);
@@ -169,7 +170,7 @@ describe('PUT /api/sprint-stories/statuses', () => {
     // Stored with the version, so a later read never adds Product review to what the reader saved.
     expect(await stored(ownWs)).toEqual({ ...S, version: SPRINT_STATUS_SETTINGS_VERSION });
 
-    const reset = await put({ workspaceId: ownWs, settings: { buckets: null, mergedColumn: true } });
+    const reset = await put({ workspaceId: ownWs, settings: { buckets: null, mergedColumn: true, showCancelled: false } });
     expect(reset.statusCode).toBe(200);
     expect(reset.json().statusLayout.orderSource).toBe('jira_board');
     expect(reset.json().statusLayout.buckets.map((b: any) => b.name)).toEqual(['Not started', 'In progress', 'Code review', 'Product review', 'Complete', 'Cancelled']);

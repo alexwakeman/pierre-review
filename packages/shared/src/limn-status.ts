@@ -28,6 +28,14 @@ export function ensembleStatusContext(name: string): string {
   return `${ENSEMBLE_STATUS_PREFIX}${name}`;
 }
 
+/**
+ * THE STORY CHECK'S CLAIM (docs/TEAM-REVIEW.md § The story check's own claim): ONE context for the
+ * whole team, whichever model ran it — a story check is never a pair, so a second model adds no second
+ * opinion. Separate from the review contexts, so a teammate without story checks who reviews a commit
+ * never holds its story check. Never CI (the prefix): `isLimnStatusContext` covers it.
+ */
+export const STORY_CLAIM_STATUS_NAME = 'story-check';
+
 /** The line name under either prefix (`limn/deps` and `ensemble/deps` → `deps`); null for any other context. */
 export function statusContextName(context: string | null | undefined): string | null {
   if (typeof context !== 'string') return null;

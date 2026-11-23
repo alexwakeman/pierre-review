@@ -9065,7 +9065,9 @@ export interface TicketReviewState {
 //               (`reason` 'lane_full')
 //   due         it starts within a minute (the sweeper's next tick)
 //   held        it will not start until `reason` clears: 'daily_limit' (`startsAt` = 00:00 UTC),
-//               'over_budget', 'ai_not_ready'
+//               'over_budget', 'ai_not_ready', 'teammate' (a teammate's Ensemble holds the story check of
+//               every open member head — `teammate` says who; docs/TEAM-REVIEW.md § The story check's
+//               own claim)
 //   off         no automatic check: 'auto_off', 'too_many_prs', 'no_floor' (its PRs predate auto
 //               review), 'already_tried' (the last automatic attempt failed on these same PRs),
 //               'stopped' (a person stopped the queued check; the next change re-opens it),
@@ -9082,7 +9084,8 @@ export type TicketAutoCheckReason =
   | 'no_floor'
   | 'already_tried'
   | 'stopped'
-  | 'all_met';
+  | 'all_met'
+  | 'teammate';
 // The newest change the grace window counts from: a push to a member PR (or its opening), a PR
 // joining the ticket, a member merging, the ticket itself changing (story text, a PR leaving), or a
 // person's comment the latest check did not see (only while that check has a criterion not done).
@@ -9093,6 +9096,9 @@ export interface TicketAutoCheck {
   // When it will start (ISO-8601): the end of the grace window, or 00:00 UTC for the daily cap.
   startsAt: string | null;
   lastChange: { prId: number | null; kind: TicketAutoChangeKind; at: string } | null;
+  // With reason 'teammate': the teammate whose Ensemble checked these commits' story ('reviewed') or is
+  // checking it now ('reviewing'). Their GitHub login, from the `ensemble/story-check` line.
+  teammate?: { kind: 'reviewing' | 'reviewed'; login: string } | null;
 }
 
 // One run, in full.

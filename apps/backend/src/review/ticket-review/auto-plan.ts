@@ -65,6 +65,9 @@ export interface TicketAutoPlanInputs {
   cap: { used: number; limit: number; exempt: boolean };
   // Free automatic check slots right now (null = not known; never a reason then).
   laneRoom: number | null;
+  // A teammate's Ensemble holds the story check of every open member head (story-claim.ts, its memory):
+  // checked there, or checking now. Absent/null = nobody.
+  teammate?: { kind: 'reviewing' | 'reviewed'; login: string } | null;
 }
 
 export interface TicketAutoPlan {
@@ -74,6 +77,8 @@ export interface TicketAutoPlan {
   lastChange: TicketAutoChange | null;
   // The sweeper queues the check now.
   due: boolean;
+  // With reason 'teammate': who holds it.
+  teammate?: { kind: 'reviewing' | 'reviewed'; login: string } | null;
 }
 
 /** Every acceptance criterion of a stored assessment is done (met, or met outside code). No criteria = false. */
@@ -136,6 +141,9 @@ export function ticketAutoCheckPlan(inp: TicketAutoPlanInputs, nowMs: number): T
   if (inp.alreadyTried) return out('off', 'already_tried');
   if (inp.stopped === true) return out('off', 'stopped');
   if (inp.first && !inp.floorOk) return out('off', 'no_floor');
+  // A teammate has these commits' story check (docs/TEAM-REVIEW.md § The story check's own claim): held
+  // until their lease ends or a head moves — never a time promised.
+  if (inp.teammate) return { ...out('held', 'teammate'), teammate: { kind: inp.teammate.kind, login: inp.teammate.login } };
   // What holds it past the window is said first: a time that will not be kept is never promised.
   if (!inp.aiReady) return out('held', 'ai_not_ready');
   if (inp.overBudget) return out('held', 'over_budget');
@@ -151,6 +159,7 @@ export function toWireAutoCheck(p: TicketAutoPlan): TicketAutoCheck {
     status: p.status,
     reason: p.reason,
     startsAt: p.startsAtMs != null ? new Date(p.startsAtMs).toISOString() : null,
+    ...(p.teammate ? { teammate: p.teammate } : {}),
     lastChange:
       p.lastChange != null
         ? { prId: p.lastChange.prId, kind: p.lastChange.kind, at: new Date(p.lastChange.atMs).toISOString() }
