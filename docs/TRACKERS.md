@@ -506,7 +506,17 @@ so every reader of `stage` works whatever the buckets are.
   Complete buckets' statuses whose names read as cancelled — only when it has ≤ 9 buckets and no bucket
   is already called "Cancelled"; otherwise those statuses stay in Complete. Read-time only; Save stores
   version 3, after which a removed Cancelled bucket stays removed (a cancelled-named status no bucket
-  names then joins the nearest earlier bucket, Complete). Only the new shape may be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
+  names then joins the nearest earlier bucket, Complete). Only the new shape may be POSTED. The default (`SPRINT_STATUS_SETTINGS_DEFAULT`, `{buckets: null, mergedColumn: true, showCancelled: false}`) is stored as NULL.
+  ⚠ **THE CANCELLED COLUMN IS HIDDEN BY DEFAULT** (`showCancelled`, version 4, owner 2026-11-23): the
+  Cancelled bucket still EXISTS (it holds its statuses, so a cancelled ticket keeps `stage: 'cancelled'`
+  and counts as it did — pace, `isClosed`, the release check, never Complete); only
+  `SprintStatusLayout.columns` leaves it out (`drawnColumnsOf`) and the board draws no card for it
+  (`lib/laneBoard.ts` `onDrawnColumns`). ⚠ Removing the bucket instead would move cancelled statuses
+  into Complete. The settings stored NULL for "automatic" could not tell default from chosen, so the
+  version decides: a value stamped 3 reads `showCancelled` ON only when its SAVED buckets include a
+  Cancelled one (the reader saved that column); automatic, version < 3 (Cancelled only added at read
+  time) and the retired shapes read OFF; version 4 stores the switch. The sprint paths' input lists
+  EVERY bucket (`sprintColumnsOf(statusLayout.buckets)`), so the switch never moves its hash.
 - "Coding begins" / "Coding ends" = the first status of the first In progress / Code review bucket
   (else the first Product review one), derived.
 

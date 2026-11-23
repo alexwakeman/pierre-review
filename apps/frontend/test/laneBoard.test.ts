@@ -151,6 +151,16 @@ describe('the ghost column is the Critical path view only', () => {
 });
 
 describe('lanes per view', () => {
+  it('a card in a bucket the columns leave out (a hidden Cancelled one) is not drawn and counts in no lane', () => {
+    const nodes = [node('A-1', { column: 'doing' }), node('A-2', { column: 'cancelled', stage: 'cancelled' }), node('A-3', { column: 'cancelled', stage: 'cancelled' })];
+    const t = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: null });
+    expect(t.cards.map((c) => c.data.node.key)).toEqual(['A-1']);
+    expect(t.columns.map((c) => c.id)).not.toContain('__unknown');
+    const p = peopleBoard({ nodes, edges: [], paths: null, columns: COLUMNS, people: [] });
+    expect(p.cards.map((c) => c.data.node.key)).toEqual(['A-1']);
+    const shown = themesBoard({ nodes, edges: [], paths: null, columns: [...COLUMNS, { id: 'cancelled', name: 'Cancelled', meaning: 'cancelled' }], themes: null });
+    expect(shown.cards.map((c) => c.data.node.key)).toEqual(['A-1', 'A-2', 'A-3']);
+  });
   it('Theme: the stored theme order, then "No theme" for tickets no theme holds', () => {
     const nodes = [node('A-1', { theme: 'Search' }), node('A-2', { theme: 'Import' }), node('A-3', { theme: 'Gone' }), node('A-4')];
     const b = themesBoard({ nodes, edges: [], paths: null, columns: COLUMNS, themes: [{ name: 'Import', summary: null }, { name: 'Search', summary: null }] });

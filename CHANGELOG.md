@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- This Sprint: the Cancelled column is hidden by default. Tick "Show the Cancelled column" under Statuses to
+  show it. Cancelled tickets still count in the pace and the release check. If you saved statuses with a
+  Cancelled column, it stays.
+
 ## [1.0.75] - 2026-11-23
 
 ### Added

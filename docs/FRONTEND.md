@@ -3113,7 +3113,11 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   - **COLUMNS are `statusLayout.columns`, verbatim** — the workspace's status buckets in order (the gear's
     bucket editor): Not started, In progress, **Code review**, **Product review** (QA and other sign-offs —
     a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete, then
-    **Cancelled** (won't do, duplicate — closed, NOT done: it never counts as Complete). A ticket's
+    **Cancelled** (won't do, duplicate — closed, NOT done: it never counts as Complete) — ⚠ HIDDEN by
+    default: the server leaves a Cancelled bucket off `columns` unless `settings.showCancelled`
+    ("Show the Cancelled column" in Statuses), and `lib/laneBoard.ts` `onDrawnColumns` drops a card whose
+    column is not drawn (no card, no lane count, no "Status not known"); the ticket still counts as
+    cancelled everywhere else (docs/TRACKERS.md § The status order and buckets). A ticket's
     column is `SprintGraphNode.column`, computed ONCE in the server's fold (its bucket, or the first
     Product review bucket when the merge rule moves a Code review ticket whose PRs have all merged) — the
     SPA never re-derives it. Two pseudo-columns appear only when a card needs one: "Outside the sprint"
@@ -3304,7 +3308,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   meaning select per bucket, statuses moved by drag and drop or the keyboard Move up / down buttons across
   buckets, ticket counts, "not placed yet" on a status the buckets do not name, a meaning select that
   offers Code review and Product review, the "Move tickets whose pull requests have all merged into
-  Product review" switch with its ⓘ (disabled, with one line, when no bucket means Product review), Save / Cancel / Reset to automatic; Save waits on shared
+  Product review" switch with its ⓘ (disabled, with one line, when no bucket means Product review), the
+  "Show the Cancelled column" checkbox with its ⓘ (OFF by default; disabled, with one line, when no bucket
+  means Cancelled), Save / Cancel / Reset to automatic; Save waits on shared
   `sprintBucketsProblem`'s sentence, run on what Save SENDS; over the 60-status cap Save leaves out
   0-count statuses first — a renamed or retired tracker status lingers as one — and says which
   (`statusesLeftOutOnSave`), so the cap never locks the editor; each bucket's name field and meaning
