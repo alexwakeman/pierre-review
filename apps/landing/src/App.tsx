@@ -17,6 +17,7 @@ import Contact from './pages/Contact';
 import Pricing from './pages/Pricing';
 import Trust from './pages/Trust';
 import Compare from './pages/Compare';
+import Licence from './pages/Licence';
 import About from './pages/About';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
@@ -37,6 +38,8 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/trust': Trust,
   // Ensemble beside CodeRabbit, Copilot code review and Claude Code Review, dated and sourced.
   '/compare': Compare,
+  // Activate a licence: a Polar key in, a signed Ensemble key out (docs/LICENSING.md).
+  '/licence': Licence,
   // About: what Ensemble is, and the plain statement on running Claude on a plan login.
   '/about': About,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and

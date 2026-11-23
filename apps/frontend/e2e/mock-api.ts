@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 import type {
+  LicenceStatusResponse,
   AskablePeopleResponse,
   StoryChatListResponse,
   StoryChatLive,
@@ -2231,6 +2232,14 @@ function json(route: Route, body: unknown, status = 200): Promise<void> {
 // ask for — and matching on the pathname keeps it that way whether or not a given surface has
 // resolved its workspace yet. If a spec ever needs two workspaces to differ, read
 // `new URL(route.request().url()).searchParams.get('workspace')` here and branch on it.
+// The licence (GET /api/licence, read at boot by the reminder toast): one person, no key, no
+// reminder — so no spec sees the licence circle unless it serves its own status.
+const LICENCE_STATUS: LicenceStatusResponse = {
+  freeUsers: 3,
+  licence: null,
+  users: { count: 1, owner: null },
+  reminder: { show: false, reason: null, evaluationEndsAt: null, canEvaluate: true },
+};
 // Settings → AI → Disk space (GET /api/storage/clones): two repositories cloned, no checkouts left.
 const CLONE_STORAGE: CloneStorageResponse = {
   cloneBytes: 412 * 1024 * 1024,
@@ -2611,6 +2620,7 @@ export async function installMockApi(
       }
       if (path.endsWith('/api/ai/budget')) return json(route, AI_BUDGET);
       if (path.endsWith('/api/storage/clones')) return json(route, CLONE_STORAGE);
+      if (path.endsWith('/api/licence')) return json(route, LICENCE_STATUS);
       // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`
       // frame is a complete, successful install.
       if (path.endsWith('/api/ai/runtime/install'))

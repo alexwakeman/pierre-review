@@ -16,6 +16,7 @@ import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
 import { aiCodexRoutes } from './api/routes/ai-codex.js';
 import { aiBudgetRoutes } from './api/routes/ai-budget.js';
 import { storageRoutes } from './api/routes/storage.js';
+import { licenceRoutes } from './api/routes/licence.js';
 import { aiProviderRoutes } from './api/routes/ai-provider.js';
 import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
@@ -179,6 +180,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   // a repo belongs to exactly one — so assignment is a MOVE and there is no "unassign" route.
   // Account-scoped, no AI, no GitHub calls.
   await app.register(workspaceRoutes);
+  // The commercial licence: the offline key check and the reminder (licence/; DB only).
+  await app.register(licenceRoutes);
   // Releases (CORE, docs/RELEASES.md): the per-workspace release + hotfix suffixes. DB only.
   await app.register(releaseRoutes);
   await app.register(userRoutes);

@@ -57,7 +57,23 @@ export default function Page(): JSX.Element {
         £1,200 for 11 to 25 and £2,400 for 26 to 50, plus VAT where it applies. Above 50, ask. See the{' '}
         <a className="dx-link" href="/pricing">pricing page</a>, or ask through the{' '}
         <a className="dx-link" href="/contact">contact form</a>. Your AI usage is not included: your AI provider bills
-        you for it as usual. In the app, <b>Settings → Licence</b> says who needs a licence.
+        you for it as usual.
+      </p>
+
+      <H2 id="licence-key">Your licence key</H2>
+      <p>
+        After you buy, activate the licence on the <a className="dx-link" href="/licence">activation page</a>: paste the
+        licence key from your purchase email and your organisation&rsquo;s name, and you get an Ensemble licence key.
+        Everyone in your organisation pastes that key into <b>Settings → Licence</b>. Ensemble checks it on your computer
+        and never contacts us. A yearly licence gets a new key each year from the same page.
+      </p>
+
+      <H2 id="the-reminder">The reminder</H2>
+      <p>
+        Ensemble counts, on your computer, how many people have posted through Ensemble in your organisation&rsquo;s
+        repositories in the last 90 days. When that is more than three and no licence key covers them, a Licence notice
+        appears in the corner of the app. It never stops anything working. You can start one 30-day evaluation from it,
+        or ask to be reminded in 7 days. People who only read in Ensemble are not counted, so the number is a lower bound.
       </p>
 
       <H2 id="what-you-may-do">What you may do</H2>

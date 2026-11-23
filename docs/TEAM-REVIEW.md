@@ -887,6 +887,14 @@ version.
 
 ---
 
+## 12a. Counting teammates for the licence
+
+Each person's Ensemble counts, on its own machine, how many people post through Ensemble in the
+repositories it syncs (the person behind each Ensemble-posted comment and review, last 90 days, per
+GitHub owner), to show a licence reminder above the free limit. It is a floor (a teammate who only
+reads posts nothing) and only ever a reminder: nothing is blocked and nothing is sent. Each copy keeps
+its own key, evaluation and "remind me later". Detail: [LICENSING.md](LICENSING.md).
+
 ## 13. Known gaps and decisions
 
 ### Decided

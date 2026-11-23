@@ -750,3 +750,17 @@ nothing answers (the clients read the 404 as "AI is off"). Wire types: shared `l
 | `GET /api/local-reviews/:id?waitMs=` | one run → `LocalReview` (findings, follow-up on earlier findings, the ticket or why there is none, the story check's criteria with `open` / `cannotMeet` / `notApplicable`, the answers it was sent). While it runs, waits up to `waitMs` (≤ `LOCAL_REVIEW_WAIT_MAX_MS` = 50 000) for it to end. `404` for another account's id. Rate tier `read` |
 | `GET /api/local-reviews?owner=&name=&branch=` | the runs of a repository (and branch), newest first, ≤ 20 → `LocalReviewListResponse {repo, branch, reviews: LocalReviewListItem[]}`. Refusals as the start. Rate tier `read` |
 | `POST /api/local-reviews/:id/cancel` | stop a running run (its reviews abort at the next checkpoint) → `{cancelled, review}`; `cancelled: false` when it was not running. Rate tier `read` |
+
+## Licence
+
+docs/LICENSING.md. DB only: the key is checked offline; the count reads synced rows. No GitHub call,
+no model, so no rate-limit tier.
+
+| Route | What |
+|---|---|
+| `GET /api/licence` | `LicenceStatusResponse`: `freeUsers`, the stored key checked now (`licence`), the colleague count (`users`), and `reminder { show, reason, evaluationEndsAt, canEvaluate }` |
+| `PUT /api/licence` `{ key }` | store a key that checks out now → the new status; `400 { error: 'licence_key_rejected', problem }` otherwise (`malformed` · `unknown_signer` · `bad_signature` · `expired`) |
+| `DELETE /api/licence` | remove the key → the new status |
+| `POST /api/licence/evaluating` | start the one 30-day evaluation (no-op once started) → the new status |
+| `POST /api/licence/later` | "Remind me in 7 days" → the new status |
+

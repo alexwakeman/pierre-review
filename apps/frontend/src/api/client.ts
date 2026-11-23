@@ -369,6 +369,9 @@ import type {
   StoryChatListResponse,
   StoryChatLive,
   StoryChatPrepareBody,
+  LicenceKeyProblem,
+  LicenceKeyRequest,
+  LicenceStatusResponse,
 } from '@pierre-review/shared';
 import { aiFixSessionPath, buildPlanPath, sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
 
@@ -426,6 +429,14 @@ function jsonBody(method: string, body?: unknown): RequestInit {
 }
 
 export { ApiError };
+
+/** PUT /api/licence refused the key: why, in the server's words (docs/LICENSING.md). */
+export class LicenceKeyRejected extends Error {
+  constructor(public problem: LicenceKeyProblem) {
+    super(`licence key rejected: ${problem}`);
+    this.name = 'LicenceKeyRejected';
+  }
+}
 
 // ── THE ONE SCOPE PARAMETER ──────────────────────────────────────────────────────────────────
 // `workspace=<id>` (no leading `?`/`&`). A plain positive integer and nothing else: there is no
@@ -1118,6 +1129,20 @@ export const api = {
   // Settings → AI → Disk space (backend api/routes/storage.ts): the clone cache and its per-run
   // checkouts. Machine-wide. Registered only when AI is on.
   cloneStorage: () => get<CloneStorageResponse>('/api/storage/clones'),
+  // The commercial licence (docs/LICENSING.md): DB only, the key checked offline on the server.
+  licence: () => get<LicenceStatusResponse>('/api/licence'),
+  saveLicence: async (key: string): Promise<LicenceStatusResponse> => {
+    const r = await fetch('/api/licence', jsonBody('PUT', { key } satisfies LicenceKeyRequest));
+    if (r.status === 400) {
+      const body = (await r.json().catch(() => ({}))) as { problem?: LicenceKeyProblem };
+      if (body.problem) throw new LicenceKeyRejected(body.problem);
+    }
+    return handle<LicenceStatusResponse>(r);
+  },
+  removeLicence: () => fetch('/api/licence', jsonBody('DELETE')).then((r) => handle<LicenceStatusResponse>(r)),
+  startLicenceEvaluation: () =>
+    fetch('/api/licence/evaluating', jsonBody('POST')).then((r) => handle<LicenceStatusResponse>(r)),
+  snoozeLicenceReminder: () => fetch('/api/licence/later', jsonBody('POST')).then((r) => handle<LicenceStatusResponse>(r)),
   // THE AI PROVIDER CHOICE (Settings → AI; backend api/routes/ai-provider.ts). 409 while
   // LIMN_AI_PROVIDER is set (the environment decides). The read side is `/api/me` (`ai.provider`,
   // `ai.providerSetting`): invalidate `['me']` after a write.

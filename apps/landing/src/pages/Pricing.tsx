@@ -133,6 +133,9 @@ export default function Pricing(): JSX.Element {
           <p>
             Paying by bank transfer or purchase order? <Link to="/contact?topic=licence">Ask here</Link>.
           </p>
+          <p>
+            Already bought? <Link to="/licence">Activate your licence</Link>.
+          </p>
         </div>
       </section>
     </div>

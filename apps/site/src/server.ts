@@ -14,10 +14,17 @@
 //   HSTS_MAX_AGE               seconds; 0 disables. Default 31536000.
 //   TRUST_PROXY_HOPS           proxies in front that append to X-Forwarded-For
 //                              (Railway: 1). Default 0 — the header is ignored.
+//   LICENCE_SIGNING_KEY        the private licence signing key (JSON JWK from licence:keygen).
+//   POLAR_ACCESS_TOKEN         Polar organisation access token, scope license_keys:write.
+//   POLAR_ORGANIZATION_ID      the Polar organisation's id.
+//   POLAR_BENEFIT_SEATS        which licence-key benefit grants how many seats: `id=10,id=25,id=50`.
+//   POLAR_API_URL              default https://api.polar.sh (sandbox: https://sandbox-api.polar.sh).
+//                              Activation is off unless the signing key AND the three Polar values are set.
 import { createServer } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createSiteHandler, hasIndex, type Logger } from './app.js';
+import { loadSigningKey, parseBenefitSeats } from './licence.js';
 
 const siteRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -41,6 +48,28 @@ const logger: Logger = {
 const landingDir = resolve(process.env.LANDING_DIR ?? join(siteRoot, '..', 'landing', 'dist'));
 const canonical = (process.env.SITE_URL ?? '').trim().replace(/\/$/, '');
 
+function licenceFromEnv(): Parameters<typeof createSiteHandler>[0]['licence'] {
+  const signingKey = process.env.LICENCE_SIGNING_KEY ?? '';
+  const token = process.env.POLAR_ACCESS_TOKEN ?? '';
+  const organizationId = process.env.POLAR_ORGANIZATION_ID ?? '';
+  const benefitSeats = parseBenefitSeats(process.env.POLAR_BENEFIT_SEATS ?? '');
+  if (!signingKey || !token || !organizationId || benefitSeats.size === 0) return null;
+  try {
+    return {
+      signer: loadSigningKey(signingKey),
+      polar: {
+        apiUrl: (process.env.POLAR_API_URL ?? 'https://api.polar.sh').replace(/\/$/, ''),
+        token,
+        organizationId,
+        benefitSeats,
+      },
+    };
+  } catch (err) {
+    logger.error({ err: err instanceof Error ? err.message : String(err) }, 'licence activation disabled: bad LICENCE_SIGNING_KEY');
+    return null;
+  }
+}
+
 const handler = createSiteHandler({
   landingDir,
   contactWebhookUrl: process.env.CONTACT_SLACK_WEBHOOK_URL ?? '',
@@ -52,6 +81,7 @@ const handler = createSiteHandler({
     .filter(Boolean),
   hstsMaxAge: intFromEnv('HSTS_MAX_AGE', 31536000),
   trustProxyHops: intFromEnv('TRUST_PROXY_HOPS', 0),
+  licence: licenceFromEnv(),
   logger,
 });
 

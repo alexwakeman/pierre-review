@@ -17,7 +17,13 @@ no internals.
 
 - A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
   priced by how many people use Ensemble.
-- Settings → Licence: says who may use Ensemble free and who needs a licence, with a link to the prices.
+- Settings → Licence: says who may use Ensemble free and who needs a licence, with a link to the prices. Paste
+  a licence key there; Ensemble checks it on your computer and never contacts us.
+- Licence activation at ensemble.ac/licence: swap the licence key from your purchase email for an Ensemble
+  licence key.
+- A licence reminder in the corner of the app when more than 3 people in your organisation post through
+  Ensemble and no licence key covers them. It never blocks anything; you can evaluate for 30 days or be
+  reminded in 7 days.
 - A comparison page: Ensemble beside CodeRabbit, GitHub Copilot code review and Claude Code Review, with
   each vendor's facts linked and dated, and where the others are stronger.
 - Privacy: a section on how we handle your details if we contact you about Ensemble, and how to stop it.

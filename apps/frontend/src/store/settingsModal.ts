@@ -34,7 +34,9 @@ export type SettingsFocus =
   | 'sandbox'
   | 'releases'
   // Settings → Features → AI and bot comment analysis: the one place the app downloads either.
-  | 'tools';
+  | 'tools'
+  // Settings → Licence: the licence reminder's "Enter a key".
+  | 'licence';
 
 interface SettingsModalState {
   open: boolean;

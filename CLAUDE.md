@@ -38,6 +38,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
 | [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
 | [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, Slack |
+| [LICENSING](docs/LICENSING.md) | the signed licence key (offline check), Polar activation, the reminder (never a block) |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, AI routes, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |

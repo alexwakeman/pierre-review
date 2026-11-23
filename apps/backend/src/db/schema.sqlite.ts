@@ -138,6 +138,14 @@ export const accounts = sqliteTable('accounts', {
   // Stripe customer id (cus_…), captured from checkout.session.completed so later
   // subscription webhooks can resolve the account. Null until first checkout.
   stripeCustomerId: text('stripe_customer_id'),
+  // THE COMMERCIAL LICENCE (licence/, migration 0217; docs/LICENSING.md). `licenceKey` is the signed
+  // key the reader pasted into Settings → Licence, stored as typed and verified OFFLINE on every read
+  // (licence/key.ts) — never sent anywhere. `licenceEvaluationEndsAt`: the end of the ONE 30-day
+  // evaluation the reader may start when the reminder first shows; `licenceReminderSnoozedUntil`:
+  // "Remind me later" after it. Both only quiet the reminder — nothing is ever blocked.
+  licenceKey: text('licence_key'),
+  licenceEvaluationEndsAt: integer('licence_evaluation_ends_at', { mode: 'timestamp' }),
+  licenceReminderSnoozedUntil: integer('licence_reminder_snoozed_until', { mode: 'timestamp' }),
   // Per-account monthly SUMMARY-AI credit allowance override (metered cloud plan). null =
   // use the plan default (2,500 for a paid cloud account); local/unlimited accounts ignore
   // it entirely. A forward hook for top-ups / alternate plans without another migration.

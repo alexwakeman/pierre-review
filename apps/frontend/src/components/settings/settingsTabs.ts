@@ -142,6 +142,7 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   sandbox: 'sandbox',
   releases: 'releases',
   tools: 'features',
+  licence: 'licence',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a

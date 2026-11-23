@@ -143,6 +143,13 @@ export default function Privacy(): JSX.Element {
             host the first time you ask for it. Those services see the request, as with any
             download.
           </li>
+          <li>
+            <T>The licence check stays on your computer</T> — {SITE_NAME} checks a licence key
+            itself and counts, from that file, how many people post through {SITE_NAME} in your
+            repositories, to remind an organisation above the free limit. Nothing about it is sent
+            to us. Activating a licence on our website sends your Polar licence key and the
+            organisation name you type to us and to Polar, once, to make the key.
+          </li>
         </UL>
         <P>
           If you run {SITE_NAME} for a team, you are the controller for the data it holds, under

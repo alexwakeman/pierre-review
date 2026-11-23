@@ -7,6 +7,7 @@ export * from './pending-rules.js';
 export * from './flow-settings.js';
 export * from './flow-trend.js';
 export * from './my-turn-settings.js';
+export * from './licence.js';
 export * from './claude-review.js';
 export * from './reporting-window.js';
 export * from './dependency-merge.js';

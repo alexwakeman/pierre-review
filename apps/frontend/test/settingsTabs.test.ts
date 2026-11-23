@@ -60,6 +60,7 @@ describe('opening at a section opens its tab', () => {
       sandbox: 'SandboxSection',
       releases: 'ReleasesSection',
       tools: 'ToolsSection',
+      licence: 'LicenceSection',
     };
     for (const [focus, tabId] of Object.entries(SETTINGS_FOCUS_TAB)) {
       const tab = SETTINGS_TABS.find((t) => t.id === tabId)!;

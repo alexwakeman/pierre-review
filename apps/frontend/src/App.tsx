@@ -26,6 +26,7 @@ import { GlobalLoadingBar } from './components/GlobalLoadingBar.js';
 import { HeaderToastStrip } from './components/HeaderToasts.js';
 import { AiBudgetToast } from './components/AiBudget.js';
 import { AutoReviewCapToast } from './components/AutoReviewCapToast.js';
+import { LicenceReminderToast } from './components/LicenceReminderToast.js';
 import { SettingsSaveToast } from './components/settings/autosave.js';
 import { HelpModal } from './components/HelpModal.js';
 import { SettingsModal } from './components/settings/SettingsModal.js';
@@ -274,6 +275,7 @@ export default function App(): JSX.Element {
       <AiBudgetToast />
       {/* Auto reviews near, or at, the workspace's daily limit. */}
       <AutoReviewCapToast />
+      <LicenceReminderToast />
       {/* A Settings write failed (Settings saves as you go — components/settings/autosave.tsx). */}
       <SettingsSaveToast />
       {/* The way back into a conflict resolver the reader closed with decisions still in the store.
