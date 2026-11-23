@@ -77,11 +77,14 @@ const MONTHS: Record<string, number> = {
   jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
 };
 const UNIT_MS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1000 };
+/** A named time of day at most this far BEFORE the failure is the reset happening now (see below). */
+export const RESET_JUST_PASSED_MS = 15 * 60_000;
 
 /**
  * The time the error says the limit lifts, in ms, or null when it names none. Times of day are read
  * in this machine's local time (the provider prints the reader's), as the NEXT such moment after
- * the failure.
+ * the failure — except a time at most RESET_JUST_PASSED_MS before it, which is the failure time
+ * itself (the reset is happening now).
  */
 export function parseRetryAtMs(error: string | null | undefined, failedAtMs: number): number | null {
   const e = (error ?? '').slice(0, 2000);
@@ -134,6 +137,11 @@ export function parseRetryAtMs(error: string | null | undefined, failedAtMs: num
     }
     d.setHours(hour, minute, 0, 0);
     let ms = d.getTime();
+    // ⚠ A time JUST PAST is the reset happening NOW, not tomorrow's. The provider prints the reset
+    // to the MINUTE, so a run in that minute (or a few seconds' clock skew later) is refused with
+    // its own reset time. Real (2026-11-23, run 2142): "try again at 10:14 AM" at 10:14:03 read as
+    // the next day and locked Codex out of automatic reviews for 24 hours.
+    if (ms <= failedAtMs && failedAtMs - ms <= RESET_JUST_PASSED_MS) return failedAtMs;
     if (ms <= failedAtMs) {
       if (monthIdx !== undefined && year == null) {
         d.setFullYear(d.getFullYear() + 1);

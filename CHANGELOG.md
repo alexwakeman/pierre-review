@@ -37,6 +37,13 @@ no internals.
   you switch it on. Workspaces where nobody changed these settings are switched off; a workspace whose
   dependency settings someone saved keeps them.
 
+## [1.0.74] - 2026-11-23
+
+### Fixed
+
+- Automatic reviews: when Codex’s usage limit ran out right at its reset time, Ensemble could keep Codex
+  out of automatic reviews for another day and run Claude alone. It now tries Codex again two minutes later.
+
 ## [1.0.73] - 2026-11-22
 
 ### Added

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   LOCKOUT_DEFAULT_MS,
+  LOCKOUT_RESET_GRACE_MS,
   anyUsageLockout,
   automaticRunProviders,
   clearUsageLockout,
@@ -21,6 +22,8 @@ const CODEX =
 // 2026-11-02 20:03:00 local time.
 const FAILED = new Date(2026, 10, 2, 20, 3, 0).getTime();
 const MIN = 60_000;
+// Every named reset holds this much longer (the provider prints it to the minute).
+const G = LOCKOUT_RESET_GRACE_MS;
 
 afterEach(() => clearUsageLockout());
 
@@ -40,32 +43,45 @@ describe('what a lockout is', () => {
 
 describe('when it ends (the parse)', () => {
   it('"try again at 8:54 PM" — the next such local time', () => {
-    expect(lockoutUntilFromError(CODEX, FAILED)).toBe(new Date(2026, 10, 2, 20, 54, 0).getTime());
+    expect(lockoutUntilFromError(CODEX, FAILED)).toBe(new Date(2026, 10, 2, 20, 54, 0).getTime() + G);
   });
-  it('a time already past today is tomorrow', () => {
-    const late = new Date(2026, 10, 2, 21, 0, 0).getTime();
-    expect(lockoutUntilFromError(CODEX, late)).toBe(new Date(2026, 10, 3, 20, 54, 0).getTime());
+  it('a time already past today (beyond 15 minutes) is tomorrow', () => {
+    const late = new Date(2026, 10, 2, 21, 30, 0).getTime();
+    expect(lockoutUntilFromError(CODEX, late)).toBe(new Date(2026, 10, 3, 20, 54, 0).getTime() + G);
   });
   it('"try again in 45 minutes" and "in 2 hours 5 minutes"', () => {
-    expect(lockoutUntilFromError('You’ve hit your usage limit, try again in 45 minutes.', FAILED)).toBe(FAILED + 45 * MIN);
-    expect(lockoutUntilFromError('Usage limit reached. Try again in 2 hours 5 minutes', FAILED)).toBe(FAILED + 125 * MIN);
+    expect(lockoutUntilFromError('You’ve hit your usage limit, try again in 45 minutes.', FAILED)).toBe(FAILED + 45 * MIN + G);
+    expect(lockoutUntilFromError('Usage limit reached. Try again in 2 hours 5 minutes', FAILED)).toBe(FAILED + 125 * MIN + G);
   });
   it('an epoch ("usage limit reached|<seconds>")', () => {
     const at = Math.floor((FAILED + 3 * 60 * MIN) / 1000);
-    expect(lockoutUntilFromError(`Claude AI usage limit reached|${at}`, FAILED)).toBe(at * 1000);
+    expect(lockoutUntilFromError(`Claude AI usage limit reached|${at}`, FAILED)).toBe(at * 1000 + G);
   });
   it('a dated time ("try again at Nov 3rd, 2026 9:15 AM")', () => {
     expect(lockoutUntilFromError('You’ve hit your usage limit. Try again at Nov 3rd, 2026 9:15 AM.', FAILED)).toBe(
-      new Date(2026, 10, 3, 9, 15, 0).getTime(),
+      new Date(2026, 10, 3, 9, 15, 0).getTime() + G,
     );
   });
   it('an ISO-8601 time ("try again at 2026-11-02T20:54:00Z", and a local one)', () => {
     expect(lockoutUntilFromError('You’ve hit your usage limit. Try again at 2026-11-02T22:54:00Z.', FAILED)).toBe(
-      Date.parse('2026-11-02T22:54:00Z'),
+      Date.parse('2026-11-02T22:54:00Z') + G,
     );
     expect(lockoutUntilFromError('Usage limit reached; resets at 2026-11-02 21:10', FAILED)).toBe(
-      new Date(2026, 10, 2, 21, 10, 0).getTime(),
+      new Date(2026, 10, 2, 21, 10, 0).getTime() + G,
     );
+  });
+  it('a reset time JUST PAST is now, never tomorrow (2026-11-23, run 2142)', () => {
+    // The real error, refused at 10:14:03 by a reset printed as 10:14.
+    const err =
+      'Codex could not finish: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 10:14 AM.';
+    const at = new Date(2026, 10, 23, 10, 14, 3).getTime();
+    expect(lockoutUntilFromError(err, at)).toBe(at + LOCKOUT_RESET_GRACE_MS);
+    // A few minutes of clock skew reads the same way.
+    const skew = new Date(2026, 10, 23, 10, 20, 0).getTime();
+    expect(lockoutUntilFromError(err, skew)).toBe(skew + LOCKOUT_RESET_GRACE_MS);
+    // And the boot's re-derivation does not lock it for a day either.
+    noteProviderFailure('codex', err, at);
+    expect(isLockedOut('codex', at + LOCKOUT_RESET_GRACE_MS + 1)).toBe(false);
   });
   it('no time named ⇒ the default hour', () => {
     expect(lockoutUntilFromError('You’ve hit your usage limit.', FAILED)).toBe(FAILED + LOCKOUT_DEFAULT_MS);
@@ -78,7 +94,7 @@ describe('when it ends (the parse)', () => {
 describe('the lock', () => {
   it('holds until the reset, then is forgotten', () => {
     noteProviderFailure('codex', CODEX, FAILED);
-    const until = new Date(2026, 10, 2, 20, 54, 0).getTime();
+    const until = new Date(2026, 10, 2, 20, 54, 0).getTime() + G;
     expect(usageLockout('codex', FAILED + MIN)).toEqual({ untilMs: until });
     expect(isLockedOut('claude', FAILED + MIN)).toBe(false);
     expect(usageLockedUntilIso('codex', FAILED + MIN)).toBe(new Date(until).toISOString());
@@ -93,7 +109,7 @@ describe('the lock', () => {
   it('an earlier reset never shortens a longer lock', () => {
     noteProviderFailure('codex', 'usage limit, try again in 3 hours', FAILED);
     noteProviderFailure('codex', 'usage limit, try again in 10 minutes', FAILED);
-    expect(usageLockout('codex', FAILED)?.untilMs).toBe(FAILED + 180 * MIN);
+    expect(usageLockout('codex', FAILED)?.untilMs).toBe(FAILED + 180 * MIN + G);
   });
   it('the boot re-derives it from stored failures, and drops one already over', async () => {
     const now = Date.now();
