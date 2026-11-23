@@ -19,6 +19,12 @@ no internals.
   wordmark and glowing selections and buttons. Meadow has a forest-green sidebar, sunlight and leaves.
   Text keeps the same contrast.
 
+## [1.0.77] - 2026-11-23
+
+### Changed
+
+- Maintenance release: no changes you would notice.
+
 ## [1.0.76] - 2026-11-23
 
 ### Added
