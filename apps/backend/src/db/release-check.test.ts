@@ -392,27 +392,30 @@ describe('foldReleaseCheck — the cumulative rule, newest first, per repo', () 
     expect(tagOf(res, 1, 'v1.2.0').blockers.map(releaseBlockerText)).toEqual(['T2 (from v1.1.0) would ship without web #21 (in w1.1.0), which waits on web w1.0.0: W9 is In Progress.']);
   });
 
-  it('PICKED TOGETHER — merged after the newest tag ("not in a tag yet") counts as above', () => {
-    const res = run({
-      repos: [threeTags()],
-      prs: threePrs(),
-      mergedPrs: [{ repoId: 1, repoName: 'api', number: 40, title: 'T2: follow-up', url: 'https://github.com/acme/api/pull/40', prId: 400, authorLogin: null, mergedAt: day(9), ticketIdents: ['T2'] }],
-      tickets: allDone(),
+  it('PICKED TOGETHER — merged after the newest tag ("not in a tag yet") in ANOTHER repo counts as above', () => {
+    const web = repo(2, 'web', [{ name: 'w1.0.0', d: 2, prs: [21] }]);
+    const follow = (repoId: number, repoName: string) => ({
+      repoId, repoName, number: 40, title: 'T2: follow-up', url: `https://github.com/acme/${repoName}/pull/40`, prId: 400, authorLogin: null, mergedAt: day(9), ticketIdents: ['T2'],
     });
+    const base = { repos: [threeTags(), web], prs: [...threePrs(), pr(21, 2, ['W1'])], tickets: [...allDone(), ticket('W1')] };
+    const res = run({ ...base, mergedPrs: [follow(2, 'web')] });
     expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
-    expect(reasons(res, 1, 'v1.1.0')).toEqual(['T2 would ship without api #40 (not in a tag yet).']);
+    expect(reasons(res, 1, 'v1.1.0')).toEqual(['T2 would ship without web #40 (not in a tag yet).']);
+    // The same follow-up in api itself is the next increment: nothing is held.
+    expect(repoOf(run({ ...base, mergedPrs: [follow(1, 'api')] }), 1).candidate?.name).toBe('v1.2.0');
   });
 
-  it('PICKED TOGETHER — the same repo too: a ticket with work on both sides of the candidate holds it back', () => {
-    // T1 in v1.0.0 and again in v1.2.0; T2 (v1.1.0) is In Progress, so the first candidate is v1.0.0 — which
-    // would ship T1 without its v1.2.0 work: no tag can be released.
+  it('PICKED TOGETHER — never within one repo: later work on a Complete ticket in the same repo does not hold its earlier tag', () => {
+    // T1 in v1.0.0 and again in v1.2.0; T2 (v1.1.0) is In Progress, so the candidate is v1.0.0 — it ships
+    // T1's first part, and its v1.2.0 work is the next increment (BNG: BMD-887 pulled every repo back to June).
     const res = run({
       repos: [threeTags()],
       prs: [pr(1, 1, ['T1']), pr(2, 1, ['T2']), pr(3, 1, ['T1'])],
       tickets: [ticket('T1'), ticket('T2', { done: false, statusName: 'In Progress' })],
     });
-    expect(repoOf(res, 1).status).toBe('none');
-    expect(reasons(res, 1, 'v1.0.0')).toEqual(['T1 would ship without api #3 (in v1.2.0), which waits on api v1.1.0: T2 is In Progress.']);
+    expect(repoOf(res, 1).candidate?.name).toBe('v1.0.0');
+    expect(tagOf(res, 1, 'v1.0.0').blockers).toEqual([]);
+    expect(ticketOf(res, 'T1').blocker).toBeNull();
   });
 
   it('PICKED TOGETHER — Cancelled and not-found tickets are never split, and a checking repo takes no part yet', () => {

@@ -1,6 +1,9 @@
 import {
   SPRINT_STAGE_LABEL,
+  aiRunLabel,
   releasesChecking,
+  type ReleaseBlockersReport,
+  type ReleaseBlockersState,
   type ReleaseCheckResult,
   type ReleaseRepoCheck,
   type ReleasesResponse,
@@ -156,3 +159,22 @@ export function releaseTagsLine(check: Pick<ReleaseCheckResult, 'repos'>, ticked
     .join(' · ');
 }
 
+
+// ── "Explain what's blocking" (ReleaseBlockersPanel.tsx; docs/RELEASES.md § Explain what's blocking) ──
+
+/** The panel shows while AI is on here and there is a report, or something newer is blocked. Pure. */
+export function blockersPanelShown(aiEnabled: boolean, state: ReleaseBlockersState | null | undefined): boolean {
+  return aiEnabled && state != null && (state.explainable || state.report != null);
+}
+
+/** The report's last line: "Written 23 Nov · <what ran> · US$0.04 · 1 point left out: it named work not in
+ *  the check". `cost` comes from `useRunCostText` (null = say nothing about cost). Pure. */
+export function blockersReportMeta(report: ReleaseBlockersReport, cost: string | null): string {
+  const parts: string[] = [];
+  const day = releaseDayWords(report.writtenAt);
+  if (day != null) parts.push(`Written ${day}`);
+  if (report.model != null) parts.push(aiRunLabel(report.provider, report.model));
+  if (cost != null) parts.push(cost);
+  if (report.dropped > 0) parts.push(`${plural(report.dropped, 'point')} left out: ${report.dropped === 1 ? 'it' : 'they'} named work not in the check`);
+  return parts.join(' · ');
+}

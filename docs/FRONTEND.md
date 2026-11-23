@@ -3031,7 +3031,8 @@ the newest version tag such that it and every tag below it have their tickets Co
 `repoStripText`: "No tag can be released", "Checking…" + the bar and ONE line (`repoProgress`), "Nothing new since
 0.390.0-rc", "No version tags on main yet"). Then, in its own bordered box, `Sprint/releaseTicketsModel.ts`: ONE
 list of ticket cards newest first (`ticketList`, by the latest tag's `tagAt` across repositories) opened on the CANDIDATE
-TICKET ★ ± 1 (`ticketWindow`; "Show 3 later / earlier tickets", component state; "Read earlier tags" POSTs
+TICKET ★ ± 1 (`ticketWindow`; "Show next 3 of 7" / "Show previous 3 of 12" — `showTicketsWords`, the total
+hidden that way, NONE below while any candidate repo has `older.moreAvailable`; component state; "Read earlier tags" POSTs
 `/api/releases/older-tags` past what was sent). PRs with no ticket are narrow grouped rows between cards
 (`noTicketGroupWords`); bot PRs are left out of their lists unless "Show bot PRs" (top of the box, off,
 component state; `noTicketShownPrs`) is ticked, and are shown at all only while "Show PRs with no ticket"
@@ -3041,9 +3042,10 @@ component state; `noTicketShownPrs`) is ticked, and are shown at all only while 
 (`repoLatestNote`), and ONE "Release…" (HIDDEN unless `showCreateRelease`) opening `ReleaseDialog`. Below
 the list, in a second bordered box: "Not in a tag yet" (`notTagged`: only open PRs) and "Holding the release"
 (`releaseHolders`, always shown). A card: `ticketMark` (✓ · ✗ `CloseIcon` · ⊘ `SkipIcon` amber · ? `QuestionIcon`, dashed
-card · part-circle), key, title, `ticketCardStatus`, the latest tag per repo (`repoTagWords`) and ONE line
+card · part-circle), key, title, `ticketCardStatus`, "merged 23 Oct" (`ticketMergedWords`: the newest `mergedAt`, from `ticketLatest`),
+the latest tag per repo (`repoTagWords`) and ONE line
 (`ticketCardLine`: "Waits on BMD-1061: In Code Review" + "Show BMD-1061", which scrolls to and opens the holder
-card; "9 PRs, last merged 23 Oct by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR
+card; "9 PRs, the last by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR
 (`ticketCardPrLines`) — all from the check, NO fetch on open. A PR known only from the history read (`prId`
 null) links to GitHub. "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED

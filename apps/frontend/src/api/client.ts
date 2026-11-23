@@ -269,6 +269,7 @@ import type {
   ReleaseOlderTagsBody,
   ReleaseOlderTagsResponse,
   ReleasesRefreshResponse,
+  ReleaseBlockersRunResponse,
   ReleasesResponse,
   ReleasePreviewBody,
   ReleasePreviewResponse,
@@ -687,6 +688,12 @@ export const api = {
   refreshReleases: (workspaceId: number) =>
     fetch(withQuery('/api/releases/refresh', workspaceParam(workspaceId)), { method: 'POST' }).then((r) =>
       handle<ReleasesRefreshResponse>(r),
+    ),
+  // "Explain what's blocking" (a reader's press): ONE model completion over the stored check; the answer
+  // is the report state GET /api/releases carries from then on.
+  explainReleaseBlockers: (workspaceId: number) =>
+    fetch(withQuery('/api/releases/blockers', workspaceParam(workspaceId)), { method: 'POST' }).then((r) =>
+      handle<ReleaseBlockersRunResponse>(r),
     ),
   // "Show 50 more" (a reader's press): one repo's older band lists up to `wanted` tags; the scan reads
   // on in the background (the tab's poll shows its progress).
