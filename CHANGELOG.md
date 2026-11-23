@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.76] - 2026-11-23
+
 ### Added
 
 - This Sprint → Releases: "Explain what's blocking" (with AI on). One press writes a short report from the
