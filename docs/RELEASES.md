@@ -102,9 +102,9 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    (BNG backend, 2026-11-16: 0.324.0 holds BMD-1061 In Code Review, so the candidate is 0.323.0 although
    0.415.0–0.418.0 are clear on their own).
 6. **PICKED TOGETHER (owner, 2026-11-16): no Complete ticket ships half.** After every repository's walk, a
-   ticket with merged work at or below one repository's candidate AND merged work above a candidate — in any
-   releasable repository, the same one included; "not in a tag yet" (merged after the newest tag) and a
-   repository with no candidate count as above — blocks the tags holding it in each repository where part of
+   ticket with merged work at or below one repository's candidate AND merged work above ANOTHER releasable
+   repository's candidate — "not in a tag yet" (merged after the newest tag) and a repository with no
+   candidate count as above — blocks the tags holding it in each repository where part of
    it would ship: "BMD-1048 “Edit an AREA” would ship without bng-metric-backend #539 (in 0.326.0), which waits
    on bng-metric-backend 0.324.0: BMD-1061 “…” is In Code Review." The reason always ends at the ROOT CAUSE —
    the tag holding a ticket not Complete or with an open PR, followed through earlier splits (`root`), never
@@ -113,7 +113,12 @@ nothing is in production yet; the aim is always the newest safe tag; "Done" = co
    run again until nothing changes (candidates only move down). A repository still checking, or with no
    version tags, takes no part yet. Cancelled and not-found tickets never block, so they are never split.
    (BNG, 2026-11-16: backend 0.316.0, frontend 0.328.0 — BMD-1048, BMD-1083 and BMD-1086 had work on both
-   sides.)
+   sides.) **NEVER WITHIN ONE REPOSITORY (owner, 2026-11-23):** later work on a Complete ticket in the SAME
+   repository (in a later tag or not in a tag yet) is the next increment, never a split — releasing a tag
+   ships everything below it, and the earlier part already stood alone on `main`. (BNG, 2026-11-23: BMD-887
+   had bng-library #28 (3 Aug) and #129 (3 Nov); counting that as a split dropped bng-library below #28 and,
+   through the cross-repository tickets below it, every repository back to late June. Cross-repository only:
+   bng-library #118, backend 0.316.0, frontend 0.328.0.)
 
 - **Tickets the tracker could not give do NOT block** (not found, no access, failed past the retry limit,
   a tracker that cannot read at all). A "not found" or "no access" that comes AFTER an older successful
@@ -330,8 +335,9 @@ reader's side; only what a "tag" is changes.
 - **Hotfix**: unchanged — the base is the latest release tag, which a release here creates.
 
 **Risks, as decided.** A REVERTED PR stays in the scope and still holds its tag if its ticket is not Complete
-(as with tags). A ticket spread over several PRs is released whole or not at all (picked together, inside one
-repository too). A PR with no ticket never blocks.
+(as with tags). A ticket spread over several repositories is released whole or not at all (picked together);
+later PRs on it in the SAME repository are the next increment and never hold an earlier point. A PR with no
+ticket never blocks.
 
 ## Invariants this feature adds
 
@@ -482,9 +488,10 @@ The ticket list (owner, 2026-11-16)
 56. PROGRESS OVER 5 SECONDS: the history read, the ticket reads and Refresh each show a bar with a line saying
     what is being read.
 57. PICKED TOGETHER: T2's api PR is in v1.1.0 and its web PR in w1.1.0, above web's candidate → api v1.1.0 does
-    not qualify ("T2 would ship without web #21 (in w1.1.0).") and api's candidate drops below it; a PR merged
-    after the newest tag ("not in a tag yet") and a second PR in the SAME repository above its candidate count
-    the same; Cancelled / not-found tickets and a repository still checking take no part.
+    not qualify ("T2 would ship without web #21 (in w1.1.0).") and api's candidate drops below it; a web PR
+    merged after web's newest tag ("not in a tag yet") counts the same; a second PR in the SAME repository
+    (in a later tag or not in a tag yet) NEVER does; Cancelled / not-found tickets and a repository still
+    checking take no part.
 58. CARD DETAIL: a card opens in place to its type, assignee and "Jira status read 4 min ago", "Open in Jira",
     "Story", and every PR for it in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet".
     Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, last merged 2 Nov by alex").

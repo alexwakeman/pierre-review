@@ -132,7 +132,7 @@ export function ReleasesView(): JSX.Element | null {
             Releasing a tag ships everything below it. So the candidate is the newest version tag on main where that tag
             and every tag below it have all their tickets Complete, with no pull request still open for any of them in a
             released repository. Before the first release every tag on main counts; after a release, only the tags since
-            it. The repositories are picked together: no Complete ticket is released with only part of its work.
+            it. The repositories are picked together: no Complete ticket is released with its work in one repository but not another.
           </p>
           <p>
             A repository with no version tags is released from its merged pull requests instead: each pull request

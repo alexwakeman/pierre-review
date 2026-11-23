@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- This Sprint → Releases: later work on a Complete ticket in the same repository no longer holds back the
+  earlier tags that hold its first part. Only work in another repository does. One late pull request on an old
+  ticket could pull every repository's candidate back by months.
+
 ## [1.0.75] - 2026-11-23
 
 ### Added

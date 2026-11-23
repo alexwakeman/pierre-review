@@ -33,10 +33,12 @@
 //     (more reading only adds tickets), so a tag can be ruled out early.
 //
 // PICKED TOGETHER (owner, 2026-11-16): no Complete ticket may ship half. After each repository's own walk, a
-// ticket with merged work AT OR BELOW one repository's candidate and merged work ABOVE a candidate (any
-// releasable repository, the same one included; "not in a tag yet" and a repository with no candidate count
-// as above) blocks — as `split` — the tags that hold it in each repository where part of it would ship. The
-// candidates are walked again until nothing changes (they only ever move down, so it ends). A repository
+// ticket with merged work AT OR BELOW one repository's candidate and merged work ABOVE ANOTHER releasable
+// repository's candidate ("not in a tag yet" and a repository with no candidate count as above) blocks — as
+// `split` — the tags that hold it in each repository where part of it would ship. Later work in the SAME
+// repository never splits (owner, 2026-11-23): releasing a tag ships everything below it, so that work is
+// just the next increment (BNG: BMD-887's bng-library #129, three months after #28, pulled every repository
+// back to June). The candidates are walked again until nothing changes (they only ever move down, so it ends). A repository
 // still CHECKING, or with no version tags, takes no part yet. Cancelled and not-found tickets never block, so
 // they are never split either.
 //
@@ -1085,8 +1087,9 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       for (const repoId of new Set(list.filter((p) => p.below).map((p) => p.repoId))) {
         const k = `${repoId}|${ident}`;
         if (splitBy.has(k)) continue;
-        // Name a PR in ANOTHER repository first: that is the cross-repository case the reader asked about.
-        const miss = above.find((p) => p.repoId !== repoId) ?? above[0]!;
+        // CROSS-REPOSITORY ONLY: later work in the SAME repository is the next increment, never a split.
+        const miss = above.find((p) => p.repoId !== repoId);
+        if (miss == null) continue;
         splitBy.set(k, {
           kind: 'split',
           repoName: repoNameOf.get(miss.repoId) ?? '',

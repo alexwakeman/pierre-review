@@ -17,7 +17,7 @@ export default function Page(): JSX.Element {
         <strong>candidate</strong> is the newest version tag on the default branch where that tag and every tag below it
         have all their tickets Complete, with no pull request still open for any of them. That is the tag just below
         the oldest tag that can&rsquo;t be released. The repositories are picked together, so no ticket is released
-        with only part of its work. Check what the tab
+        with its work in one repository but not another. Check what the tab
         lists, then one press tags every candidate as a release, publishes the release notes and comments on each
         ticket.
       </p>
@@ -156,10 +156,11 @@ export default function Page(): JSX.Element {
           and in the notes under untracked or dependency and bot changes.
         </li>
         <li>
-          A Complete ticket with work in more than one tag is released whole or not at all. If part of it is above a
-          candidate, in any repository you release, the tags holding the rest can&rsquo;t be released either, for
-          example &ldquo;PAY-1048 &ldquo;Refund a payment&rdquo; would ship without payments #539 (in
-          0.326.0)&rdquo;.
+          A Complete ticket with work in more than one repository is released whole or not at all. If its work in
+          one repository is above that repository&rsquo;s candidate, the tags holding its work in the other
+          repositories can&rsquo;t be released either, for example &ldquo;PAY-1048 &ldquo;Refund a payment&rdquo;
+          would ship without payments #539 (in 0.326.0)&rdquo;. Later work on a ticket in the same repository never
+          holds back its earlier tags: it goes out in a later release.
         </li>
         <li>Commits with no pull request are noted on their tag.</li>
         <li>Pull requests into a hotfix branch never count.</li>
