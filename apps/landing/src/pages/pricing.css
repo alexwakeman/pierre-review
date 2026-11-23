@@ -87,6 +87,32 @@
   padding: 28px;
 }
 
+/* the comparison table (pages/Compare.tsx) */
+.lb.pricing .p-tablewrap {
+  overflow-x: auto;
+}
+.lb.pricing .p-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+.lb.pricing .p-table th,
+.lb.pricing .p-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+.lb.pricing .p-table thead th {
+  border-top: 0;
+  font-size: 16px;
+}
+.lb.pricing .p-table tbody th {
+  font-weight: 600;
+  width: 18%;
+}
+
 @media (max-width: 1100px) {
   .lb.pricing .p-bands > .tile {
     grid-column: span 6;

@@ -56,6 +56,7 @@ export default function Footer(): JSX.Element {
           <Link to="/contact">Contact</Link>
           <Link to="/pricing">Pricing</Link>
           <Link to="/trust">Security and trust</Link>
+          <Link to="/compare">Compare</Link>
           <a href={REPO_URL} target="_blank" rel="noreferrer noopener">
             GitHub
           </a>

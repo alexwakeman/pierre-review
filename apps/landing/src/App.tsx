@@ -16,6 +16,7 @@ import EverythingElse from './pages/EverythingElse';
 import Contact from './pages/Contact';
 import Pricing from './pages/Pricing';
 import Trust from './pages/Trust';
+import Compare from './pages/Compare';
 import About from './pages/About';
 import Privacy from './pages/Privacy';
 import Cookies from './pages/Cookies';
@@ -34,6 +35,8 @@ const ROUTES: Record<string, () => JSX.Element> = {
   '/pricing': Pricing,
   // Security and trust: the summary a security or procurement reviewer reads.
   '/trust': Trust,
+  // Ensemble beside CodeRabbit, Copilot code review and Claude Code Review, dated and sourced.
+  '/compare': Compare,
   // About: what Ensemble is, and the plain statement on running Claude on a plan login.
   '/about': About,
   // Legal. Required before the site can lawfully collect anything in the EU/UK, and

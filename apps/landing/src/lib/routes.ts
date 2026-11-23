@@ -33,9 +33,9 @@ export type RouteSeo = {
 /**
  * Canonical, indexable routes. Order is the order they appear in the sitemap.
  *
- * THE SITE IS NINE CONTENT PAGES plus the three legal ones (and the docs, whose
+ * THE SITE IS TEN CONTENT PAGES plus the three legal ones (and the docs, whose
  * routes come from the docs manifest): home, Build, Ensemble review, Automation,
- * Everything else, Pricing, Security and trust, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
+ * Everything else, Pricing, Security and trust, Compare, Contact and About. (2026-11: /teams 301s to /ensemble-review, and
  * /reporting and /how-we-measure 301 to their sections of /everything-else.) The earlier feature-area pages (/features, /bots, /pro,
  * /how-it-works, /arcade) and then the two role pages (/for-developers,
  * /for-managers) were retired; their URLs survive as aliases. The Getting started
@@ -80,6 +80,10 @@ export const ROUTE_SEO: Record<string, RouteSeo> = {
   '/trust': {
     title: `Security and trust · ${SITE_NAME}`,
     description: `${SITE_NAME} runs on your own computers and sends nothing to its maker. Where your data goes, what the AI agents can do, what happens without a click, and how to report a security problem.`,
+  },
+  '/compare': {
+    title: `${SITE_NAME} compared with CodeRabbit, Copilot code review and Claude Code Review`,
+    description: `Where the review runs, what is installed on your GitHub organisation, how you pay and when it reviews: ${SITE_NAME} beside CodeRabbit, GitHub Copilot code review and Claude Code Review, from each vendor's own pages.`,
   },
   '/contact': {
     title: `Contact — licences, questions and bug reports · ${SITE_NAME}`,
