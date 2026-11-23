@@ -656,7 +656,7 @@ function SprintCardBox({ card }: { card: SprintCard }): JSX.Element {
 const MARK_GLYPH: Record<ReleaseMark, string> = { anchor: '★', ok: '✓', blocked: '✗', held: '⊘', missing: '?' };
 const MARK_TONE: Record<ReleaseMark, string> = { anchor: 'ok', ok: 'ok', blocked: 'bad', held: 'warn', missing: 'unknown' };
 
-/** A ticket card: mark, key, title, status, the latest tag per repository and ONE line; the detail on a click. */
+/** A ticket card: mark, key, title, status, newest merge date, the latest tag per repository and ONE line; the detail on a click. */
 function ReleaseCard({ c, extra, railed = false }: { c: ReleaseMockCard; extra?: JSX.Element | null; railed?: boolean }): JSX.Element {
   const cls = ['rcard', c.mark === 'anchor' ? 'anchor' : '', c.mark === 'missing' ? 'missing' : ''].filter(Boolean).join(' ');
   if (railed) {
@@ -688,6 +688,7 @@ function ReleaseCardBox({ c, extra, cls, railed = false, as = 'div' }: { c: Rele
           )}
           <span className="key">{c.key}</span> <span className="ti">{c.title || 'No title — not in the tracker’s data'}</span>
           {c.status ? <small> · {c.status}</small> : null}
+          {c.merged ? <small> · {c.merged}</small> : null}
         </span>
         <span className="sub">
           {c.tags.map((t) => (
@@ -739,7 +740,7 @@ function ReleaseNoTicket({ n, showBots }: { n: ReleaseMockNoTicket; showBots: bo
 
 /** This Sprint → Releases: the latest release, a line per repository with NO candidate, then the ticket list in its
  *  own box — "Show bot PRs", the candidate ticket (★) with each repository's candidate, its commit and ONE
- *  Release…, one ticket either side, "Show 3 later / earlier tickets" — and below it, apart, "Not in a tag yet"
+ *  Release…, one ticket either side, "Show next 3 of 4" / "Show previous 3 of 9" — and below it, apart, "Not in a tag yet"
  *  and "Holding the release". */
 function ReleasesPanel(): JSX.Element {
   const R = SPRINT_RELEASES;

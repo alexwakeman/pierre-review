@@ -18,6 +18,8 @@ no internals.
 - This Sprint → Releases: later work on a Complete ticket in the same repository no longer holds back the
   earlier tags that hold its first part. Only work in another repository does. One late pull request on an old
   ticket could pull every repository's candidate back by months.
+- This Sprint → Releases: the buttons that show more tickets say how many are still hidden, for example "Show
+  next 3 of 7". Each ticket card shows the day its last pull request was merged.
 
 ## [1.0.75] - 2026-11-23
 

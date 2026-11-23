@@ -491,6 +491,8 @@ export interface ReleaseMockCard {
   mark: ReleaseMark;
   /** The tracker's status beside the title; absent when not read. */
   status?: string;
+  /** Its newest merged PR's day ("merged 15 Oct", `ticketMergedWords`); absent when none is merged. */
+  merged?: string;
   /** The latest tag per repository (`repoTagWords`). */
   tags: string[];
   /** `ticketCardLine`: what it waits on, or what was done. */
@@ -517,8 +519,8 @@ export const SPRINT_RELEASES = {
   latest: 'Latest release: 14 Oct',
   /** The dialog opened from the candidate ticket's Release… (Sprint/ReleaseDialog.tsx). */
   dialog: 'Tags acme/payments v3.2.0-rc and acme/web v1.8.2-rc, publishes the notes and comments on 3 tickets.',
-  showLater: 'Show 3 later tickets',
-  showEarlier: 'Show 3 earlier tickets',
+  showLater: 'Show next 3 of 4',
+  showEarlier: 'Show previous 3 of 9',
   /** The candidate ticket's candidates (`CandidateBlock`): one Release… for all. */
   candidates: [
     { name: REPOS.payments, text: 'v3.2.0 → v3.2.0-rc', sha: '9f8e7d6', day: '15 Oct' },
@@ -548,6 +550,7 @@ export const SPRINT_RELEASES = {
       title: 'Saved cards on mobile',
       mark: 'blocked',
       status: 'In review',
+      merged: 'merged 15 Oct',
       tags: ['acme/web v1.9.0'],
       line: 'Holds back acme/web',
       detail: { facts: 'Type: Story · Assignee: Wei Zhang · Jira status read 4 min ago', prs: ['web #622 “PAY-150: saved cards” merged 15 Oct · wei · in v1.9.0'] },
@@ -558,12 +561,13 @@ export const SPRINT_RELEASES = {
       title: 'Rename ledger tables',
       mark: 'blocked',
       status: 'Done',
+      merged: 'merged 12 Oct',
       tags: ['acme/ledger v0.9.0'],
       line: 'Holds back acme/ledger · open PR: acme/payments #611',
     },
   ] as ReleaseMockCard[],
   list: [
-    { kind: 'ticket', key: 'PAY-152', title: 'Card form labels', mark: 'held', status: 'Done', tags: ['acme/web v1.9.1'], line: 'Waits on PAY-150: In review', holder: 'PAY-150' },
+    { kind: 'ticket', key: 'PAY-152', title: 'Card form labels', mark: 'held', status: 'Done', merged: 'merged 16 Oct', tags: ['acme/web v1.9.1'], line: 'Waits on PAY-150: In review', holder: 'PAY-150' },
     {
       kind: 'no_ticket',
       line: '2 PRs with no ticket · 1 by bots',
@@ -576,8 +580,9 @@ export const SPRINT_RELEASES = {
       title: 'Payout dates in the export',
       mark: 'anchor',
       status: 'Done',
+      merged: 'merged 15 Oct',
       tags: ['acme/payments v3.2.0', 'acme/web v1.8.1'],
-      line: '2 PRs, last merged 15 Oct by alex',
+      line: '2 PRs, the last by alex',
       detail: {
         facts: 'Type: Story · Assignee: Robin Lee · Jira status read 4 min ago',
         prs: ['payments #612 “PAY-134: export payout dates” merged 15 Oct · alex · in v3.2.0', 'web #598 “PAY-134: payout date column” merged 9 Oct · sam · in v1.8.1'],

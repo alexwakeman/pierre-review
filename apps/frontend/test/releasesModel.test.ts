@@ -41,6 +41,7 @@ import {
   repoStripText,
   repoTagWords,
   showTicketsWords,
+  ticketMergedWords,
   ticketCardLine,
   ticketCardPrLines,
   ticketCardStatus,
@@ -248,10 +249,14 @@ describe('THE TICKET LIST: one list of ticket cards in tag order (owner, 2026-11
     const w = ticketWindow(l, TICKET_WINDOW_START, TICKET_WINDOW_START);
     expect(keys(w.items)).toEqual(['T9', 'T8', 'T7']);
     expect(w).toMatchObject({ moreUp: 6, moreDown: 6 });
-    expect(showTicketsWords('later', w.moreUp)).toBe('Show 3 later tickets');
+    expect(showTicketsWords('later', w.moreUp)).toBe('Show next 3 of 6');
     const w2 = ticketWindow(l, TICKET_WINDOW_START + TICKET_WINDOW_STEP, TICKET_WINDOW_START);
     expect(keys(w2.items)).toEqual(['T12', 'T11', 'T10', 'T9', 'T8', 'T7']);
-    expect(showTicketsWords('earlier', 2)).toBe('Show 2 earlier tickets');
+    expect(showTicketsWords('earlier', w2.moreDown)).toBe('Show previous 3 of 6');
+    expect(showTicketsWords('earlier', 2)).toBe('Show previous 2 of 2');
+    expect(showTicketsWords('later', 1)).toBe('Show next 1 of 1');
+    // Older tags not read yet: the total is not known, so it is not given.
+    expect(showTicketsWords('earlier', 6, false)).toBe('Show previous 3');
     // Marks: ✗ not Complete; ⊘ Complete but above the candidate; ✓ in it.
     expect(l.tickets.find((c) => c.ticket.key === 'T9')!.mark).toBe('blocked');
     expect(l.tickets.find((c) => c.ticket.key === 'T10')!.mark).toBe('held');
@@ -270,7 +275,12 @@ describe('THE TICKET LIST: one list of ticket cards in tag order (owner, 2026-11
     expect(line('T5')).toMatchObject({ tone: 'warn', text: 'Waits on T3: In Code Review', holder: { ident: 'T3' } });
     expect(line('T3')).toMatchObject({ tone: 'bad', text: 'Holds back api', holder: null });
     // Done: what was done.
-    expect(line('T2')).toMatchObject({ tone: 'mute', text: '1 PR, last merged 2 Nov by alex' });
+    expect(line('T2')).toMatchObject({ tone: 'mute', text: '1 PR by alex' });
+    // Every card with merged work carries its newest merge date; the ✓ line does not repeat it.
+    const t2 = l.tickets.find((c) => c.ticket.key === 'T2')!;
+    expect(ticketMergedWords(t2)).toBe('merged 2 Nov');
+    expect(ticketMergedWords(l.tickets.find((c) => c.ticket.key === 'T3')!)).toMatch(/^merged \d{1,2} [A-Z][a-z]{2}$/);
+    expect(ticketMergedWords({ mergedAt: null })).toBeNull();
   });
 
   it('picked together: a Complete ticket split across repositories waits on the ROOT ticket, not its other half', () => {

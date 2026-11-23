@@ -179,17 +179,17 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    bng-library   No version tags on main yet
    ┌───────────────────────────────────────────────────────────────────────────────────────────┐
    │ ☐ Show PRs with no ticket                                                                 │
-   │ ⌃ Show 3 later tickets
-   ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done                ›
+   │ ⌃ Show next 3 of 7
+   ⊘ BMD-1060 VALIDATION: Save invalid habitat data combinations as null · Done · merged 4 Nov ›
        bng-metric-backend 0.326.0   Waits on BMD-1061: In Code Review   Show BMD-1061
      › 14 PRs with no ticket · 13 by bots
-   ★ BMD-1082 NEW TEMPLATE: Support the new data structure … · Done                            ›
-       bng-metric-backend 0.316.0   9 PRs, last merged 23 Oct by robin-dunn
+   ★ BMD-1082 NEW TEMPLATE: Support the new data structure … · Done · merged 23 Oct            ›
+       bng-metric-backend 0.316.0   9 PRs, the last by robin-dunn
        bng-metric-backend  0.316.0 → 0.316.0-rc · e18c3b2 · 23 Oct · Latest 0.418.0
        bng-metric-frontend 0.328.0 → 0.328.0-rc · 1e3249f · 27 Oct · Latest 0.420.0   [Release…]
      › 14 PRs with no ticket · 12 by bots
-   ✓ BMD-1028 Trading Summary Page - Hedgerows · Done                                           ›
-   │ ⌄ Show 3 earlier tickets                                                                  │
+   ✓ BMD-1028 Trading Summary Page - Hedgerows · Done · merged 21 Oct                           ›
+   │ ⌄ Show previous 3 of 12                                                                   │
    └───────────────────────────────────────────────────────────────────────────────────────────┘
 
    ┌─ (apart, at the bottom) ──────────────────────────────────────────────────────────────────┐
@@ -204,8 +204,11 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
    - **Order** (`ticketList`): a ticket sits where its LATEST TAG sits — the newest tag, in any releasable
      repository, holding its merged work (tags of different repositories by commit date, `tagAt`).
    - **The window** (`ticketWindow`): it opens on THE CANDIDATE TICKET (★) — the newest ticket all of whose work
-     is in the release candidates — with ONE ticket either side; "Show 3 later tickets" / "Show 3 earlier
-     tickets" add 3 (component state). Past the tickets sent, "Read earlier tags" asks the server for more.
+     is in the release candidates — with ONE ticket either side; "Show next 3 of 7" (above) / "Show previous 3
+     of 12" (below) add 3 (component state), the second figure being the tickets still hidden that way
+     ("Show next 2 of 2" when fewer are left). While a repository has older tags the server has not read
+     (`older.moreAvailable`), the total below is NOT KNOWN and is not given: "Show previous 3". Past the
+     tickets sent, "Read earlier tags" asks the server for more.
    - **Holding the release** (`releaseHolders`, always shown, in the box BELOW the list): the ticket that stops the tag
      just above each repository's candidate — a split followed to its ROOT — once, naming the repositories it
      holds ("Holds back bng-metric-backend and bng-metric-frontend").
@@ -213,10 +216,12 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
      tagged work AND an open PR stays in the list; its line names the open PR.
    - **The card** is simple: the mark (✓ in the candidates · ✗ RED not Complete or an open PR · ⊘ AMBER Complete
      but held back · ? the tracker could not give it — a DASHED card, "Not found in Jira — check it by hand",
-     never a block · a part-circle not read yet), key, title, the tracker's status, the latest tag per
-     repository, and ONE line: what it WAITS ON ("Waits on BMD-1061: In Code Review", with "Show BMD-1061"
-     scrolling to the holder; never another held ticket), or for a ✓ card what was DONE ("9 PRs, last merged
-     23 Oct by robin-dunn"). Every PR and tag is behind the arrow: "Type · Assignee · Jira status read 5 hours
+     never a block · a part-circle not read yet), key, title, the tracker's status, the date its LAST PR
+     was merged ("merged 23 Oct", the newest `mergedAt` over its merged PRs in the releasable repos — the same
+     `ticketLatest` fold that orders the list; nothing when none is merged), the latest tag per repository,
+     and ONE line: what it WAITS ON ("Waits on BMD-1061: In Code Review", with "Show BMD-1061"
+     scrolling to the holder; never another held ticket), or for a ✓ card what was DONE ("9 PRs, the last by
+     robin-dunn"; its date is on the card). Every PR and tag is behind the arrow: "Type · Assignee · Jira status read 5 hours
      ago", "Open in Jira", "Story", and each PR (open first, then merged newest first: "merged 23 Oct ·
      robin-dunn · in 0.316.0", "not in a tag yet", OPEN), each opening its PR tab or GitHub. Nothing is fetched
      to open it.
@@ -475,7 +480,9 @@ The ticket list (owner, 2026-11-16)
 49. ONE CARD PER TICKET: a ticket with PRs in two repositories is one card, placed by its latest tag in either
     (tags of both repositories by commit date), with the latest tag per repository on it.
 50. THE WINDOW: the list opens on the candidate ticket (★, the newest ticket all in the candidates) with one ticket
-    either side; "Show 3 later / earlier tickets" add 3.
+    either side; "Show next 3 of n" / "Show previous 3 of n" add 3, n = the tickets still hidden that way
+    (fewer left: "Show next 2 of 2"); while older tags are unread the total below is not known and not given
+    ("Show previous 3").
 51. HOLDING THE RELEASE: the ticket stopping the tag above each candidate (a split: its root) is always shown
     above the list, once, naming the repositories it holds; every ⊘ card says "Waits on <that ticket>".
 52. NOT IN A TAG YET: a ticket whose only work is an open PR is listed apart at the top.
@@ -494,7 +501,9 @@ The ticket list (owner, 2026-11-16)
     checking take no part.
 58. CARD DETAIL: a card opens in place to its type, assignee and "Jira status read 4 min ago", "Open in Jira",
     "Story", and every PR for it in the releasable repos — OPEN, merged "in v1.2.0", or "not in a tag yet".
-    Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, last merged 2 Nov by alex").
+    Nothing is fetched to open it. A ✓ card's line says what was done ("2 PRs, the last by alex").
+    Every card with a merged PR shows its newest merge date on its row ("merged 2 Nov"); one with none shows
+    nothing.
 59. THE CANDIDATE'S COMMIT: the candidate ticket names each repository's candidate and its commit (short sha, a
     GitHub link), with ONE Release…; only repositories with no candidate get a line above the list.
 60. BOT PRS: a no-ticket row lists only human PRs until "Show bot PRs" is ticked; its words count the bots.

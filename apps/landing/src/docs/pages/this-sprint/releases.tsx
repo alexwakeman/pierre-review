@@ -86,8 +86,9 @@ export default function Page(): JSX.Element {
       <p>
         Below the repositories is one list of tickets for all of them, newest tag first. A ticket with work in two
         repositories is one card. It sits where its latest tag sits, in either repository. The list opens on the newest
-        ticket in the release candidates, marked ★, with one ticket either side. <Ui>Show 3 later tickets</Ui> and{' '}
-        <Ui>Show 3 earlier tickets</Ui> add more each way.
+        ticket in the release candidates, marked ★, with one ticket either side. <Ui>Show next 3 of 7</Ui> and{' '}
+        <Ui>Show previous 3 of 12</Ui> add three more each way. The second number is how many are still hidden that
+        way. While older tags are not read yet, the button below says only <Ui>Show previous 3</Ui>.
       </p>
       <p>
         The ★ card names the candidate of each repository, for example &ldquo;payments 0.316.0 →
@@ -106,10 +107,11 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        A card shows the ticket&rsquo;s status, its latest tag in each repository, and one line. On a card that is not
+        A card shows the ticket&rsquo;s status, the day its last pull request was merged (&ldquo;merged 23
+        Oct&rdquo;), its latest tag in each repository, and one line. On a card that is not
         in the candidates, the line says what it waits on, for example &ldquo;Waits on PAY-1061: In Code Review&rdquo;.
         Select <Ui>Show PAY-1061</Ui> to go to that ticket. On a card in the candidates, the line says what was done, for
-        example &ldquo;9 PRs, last merged 23 Oct by robin&rdquo;.
+        example &ldquo;9 PRs, the last by robin&rdquo;.
       </p>
       <p>
         Below the list, in a separate box, <Ui>Not in a tag yet</Ui> lists tickets whose only work is an open pull

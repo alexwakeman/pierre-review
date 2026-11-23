@@ -15,10 +15,11 @@ import { releaseDayWords, ticketStatusWords, type ReleasePrLine } from './releas
 // its LATEST tag sits (the newest tag, in any releasable repository, that holds its merged work; tags
 // of different repositories ordered by commit date), newest at the top. Pull requests with no ticket
 // sit between the cards as narrow rows. The list opens on THE CANDIDATE TICKET — the newest ticket all of
-// whose work is in the release candidates — with one ticket either side; "Show 3 …" grows each way. The
+// whose work is in the release candidates — with one ticket either side; "Show next 3 of 7" / "Show previous
+// 3 of 7" grow each way (the total hidden that way; no total while older tags are unread). The
 // tickets HOLDING the release stay visible above the list; tickets whose only work is an open pull
-// request sit at the top, apart ("Not in a tag yet"). A card is simple: its mark, key, title, status, the
-// latest tag per repository, and ONE line — what it waits on, or what was done. Everything else (each
+// request sit at the top, apart ("Not in a tag yet"). A card is simple: its mark, key, title, status, its
+// newest merge date, the latest tag per repository, and ONE line — what it waits on, or what was done. Everything else (each
 // PR, each tag) is behind the arrow.
 // ⚠ The check is the SHARED fold, run on the server — this only orders and words it.
 
@@ -58,6 +59,8 @@ export interface TicketCardModel {
   latest: TicketRepoTag[];
   /** The latest tag's commit date (ISO); null = no tagged work. */
   at: string | null;
+  /** Its newest merged pull request's merge date (ISO); null = nothing merged. Shown on the card. */
+  mergedAt: string | null;
 }
 
 export interface NoTicketGroup {
@@ -195,7 +198,7 @@ export function ticketList(check: Pick<ReleaseCheckResult, 'tickets' | 'prs'>): 
   const notTagged: TicketCardModel[] = [];
   for (const t of check.tickets) {
     const l = ticketLatest(t);
-    const card: TicketCardModel = { kind: 'ticket', ticket: t, mark: ticketMark(t), isAnchor: false, latest: l.latest, at: l.at };
+    const card: TicketCardModel = { kind: 'ticket', ticket: t, mark: ticketMark(t), isAnchor: false, latest: l.latest, at: l.at, mergedAt: l.mergedAt };
     if (!t.pullRequests.some((p) => !p.open)) notTagged.push(card);
     else rows.push({ at: l.at, mergedAt: l.mergedAt, key: t.key, item: card });
   }
@@ -236,10 +239,18 @@ export function ticketWindow(
   return { items: list.items.slice(first, last + 1), moreUp: lo, moreDown: n - 1 - hi };
 }
 
-/** "Show 3 later tickets" / "Show 2 earlier tickets" (fewer left). Pure. */
-export function showTicketsWords(dir: 'later' | 'earlier', left: number): string {
+/** "Show next 3 of 7" (later, above) / "Show previous 3 of 7" (earlier, below); fewer left: "Show next 2 of
+ *  2". `left` = the tickets not shown that way. `known: false` = more tags the server has not read yet, so
+ *  the total is not known and is never guessed: "Show previous 3". Pure. */
+export function showTicketsWords(dir: 'later' | 'earlier', left: number, known = true): string {
   const n = Math.min(TICKET_WINDOW_STEP, left);
-  return `Show ${n} ${dir} ${n === 1 ? 'ticket' : 'tickets'}`;
+  return `Show ${dir === 'later' ? 'next' : 'previous'} ${n}${known ? ` of ${left}` : ''}`;
+}
+
+/** The card's merge date: "merged 2 Nov" (its newest merged pull request); null = nothing merged. Pure. */
+export function ticketMergedWords(card: Pick<TicketCardModel, 'mergedAt'>): string | null {
+  const day = releaseDayWords(card.mergedAt);
+  return day != null ? `merged ${day}` : null;
 }
 
 /** "bng-metric-backend 0.420.0", "bng-metric-frontend: open PR". */
@@ -254,7 +265,7 @@ function prList(prs: ReadonlyArray<{ repoName: string; number: number }>): strin
 }
 
 /** The card's ONE line — what it waits on, or what was done — and a holder to link to:
- *    ✓ "2 PRs, last merged 22 Oct by alex"
+ *    ✓ "2 PRs, the last by alex"                      (its date sits on the card: "merged 22 Oct")
  *    ✗ "Open PR: bng-metric-frontend #482"            (its status sits beside the title)
  *    ⊘ "Waits on BMD-1061 “…”: In Code Review"         (Complete, held back)
  *    ? "Not found in Jira — check it by hand"
@@ -291,9 +302,9 @@ export function ticketCardLine(
   const merged = t.pullRequests.filter((p) => !p.open && p.mergedAt != null).sort((a, b) => byAtDesc(a.mergedAt, b.mergedAt));
   const newest = merged[0];
   if (newest == null) return { tone: 'mute', text: ticketStatusWords(t), holder: null };
-  const day = releaseDayWords(newest.mergedAt);
-  const by = newest.authorLogin != null ? ` by ${newest.authorLogin}` : '';
-  return { tone: 'mute', text: `${plural(merged.length, 'PR')}, last merged ${day ?? ''}${by}`.replace(/ {2,}/g, ' '), holder: null };
+  // The date is on the card ("merged 22 Oct", ticketMergedWords); the line says how many and by whom.
+  const by = newest.authorLogin != null ? (merged.length === 1 ? ` by ${newest.authorLogin}` : `, the last by ${newest.authorLogin}`) : '';
+  return { tone: 'mute', text: `${plural(merged.length, 'PR')}${by}`, holder: null };
 }
 
 /** The status beside the title: the tracker's own words ("In Code Review"), no bucket — the mark says
