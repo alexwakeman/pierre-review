@@ -27,7 +27,8 @@ no internals.
 ### Fixed
 
 - Terms, the npm page and the README: they now say that AI Fix and Implement story run commands in a
-  sandbox, and where your data goes. Ensemble is now made by Corevo Systems Limited.
+  sandbox, and where your data goes. Ensemble is now made by Corevo Systems Limited, whose company
+  details are in the footer and on the legal pages.
 
 ### Changed
 

@@ -5,9 +5,7 @@ import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/
 import {
   LARGEST_BAND,
   LICENCE_BANDS,
-  VENDOR_COMPANY_NUMBER,
-  VENDOR_NAME,
-  VENDOR_REGISTERED_OFFICE,
+  VENDOR_LEGAL_LINE,
   bandHref,
   bandLabel,
   formatGbp,
@@ -129,9 +127,7 @@ export default function Pricing(): JSX.Element {
         <div className="tile rise">
           <h2>Who you buy from</h2>
           <p>
-            {VENDOR_NAME}
-            {VENDOR_COMPANY_NUMBER !== '' && <>, a company registered in the United Kingdom, number {VENDOR_COMPANY_NUMBER}</>}
-            {VENDOR_REGISTERED_OFFICE !== '' && <>. Registered office: {VENDOR_REGISTERED_OFFICE}</>}.
+            {VENDOR_LEGAL_LINE}
             {canBuyOnline && <> Card payments go through Polar, which issues the invoice and handles VAT.</>}
           </p>
           <p>

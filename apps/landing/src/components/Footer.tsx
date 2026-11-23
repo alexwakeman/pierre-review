@@ -3,7 +3,8 @@ import type { MouseEvent } from 'react';
 import { Link } from '../router';
 import { resetConsent } from '../lib/consent';
 import { analyticsConfigured, revokeAnalytics } from '../lib/analytics';
-import { LICENSE_URL, REPO_URL, SITE_NAME } from '../lib/site';
+import { LICENSE_URL, REPO_URL } from '../lib/site';
+import { VENDOR_LEGAL_LINE } from '../lib/licence';
 
 // ---------------------------------------------------------------------------
 // The footer, on the board's dark ground (styles: .lb-foot in board.css): 
@@ -81,7 +82,9 @@ export default function Footer(): JSX.Element {
       </div>
 
       <div className="last">
-        <span>© 2026 {SITE_NAME}</span>
+        <span>
+          © 2026 {VENDOR_LEGAL_LINE}
+        </span>
         <a className="btn" href="#" onClick={backToTop}>
           Back to top
         </a>

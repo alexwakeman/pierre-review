@@ -2,7 +2,7 @@ import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import { REPO_URL, SITE_NAME } from '../lib/site';
-import { VENDOR_COMPANY_NUMBER, VENDOR_NAME } from '../lib/licence';
+import { VENDOR_LEGAL_LINE, VENDOR_NAME } from '../lib/licence';
 import { LEGAL_CONTACT_EMAIL } from '../components/legal';
 import { useReveal } from '../components/board/useReveal';
 import './pricing.css';
@@ -111,9 +111,7 @@ export default function Trust(): JSX.Element {
         <div className="tile rise">
           <h2>Who makes it</h2>
           <p>
-            {VENDOR_NAME}
-            {VENDOR_COMPANY_NUMBER !== '' && <>, company number {VENDOR_COMPANY_NUMBER}</>}, a company registered in the
-            United Kingdom. Read the <Link to="/terms">terms</Link>, the <Link to="/privacy">privacy policy</Link> and the{' '}
+            {VENDOR_LEGAL_LINE} Read the <Link to="/terms">terms</Link>, the <Link to="/privacy">privacy policy</Link> and the{' '}
             <Link to="/pricing">licence prices</Link>.
           </p>
         </div>

@@ -1,4 +1,5 @@
 import { useSeo } from '../lib/seo';
+import { VENDOR_COMPANY_NUMBER, VENDOR_REGISTERED_OFFICE } from '../lib/licence';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/site';
@@ -64,8 +65,9 @@ export default function Terms(): JSX.Element {
     >
       <LegalSection id="who" heading="1. Who you are dealing with">
         <P>
-          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, a company registered in the United
-          Kingdom, contactable at <Mail />. These terms are governed by the laws of England
+          {SITE_NAME} is made by <T>{LEGAL_CONTROLLER}</T>, registered in England and Wales
+          (company number {VENDOR_COMPANY_NUMBER}, registered office {VENDOR_REGISTERED_OFFICE}),
+          contactable at <Mail />. These terms are governed by the laws of England
           and Wales, and the courts of England and Wales have exclusive jurisdiction.
         </P>
       </LegalSection>
