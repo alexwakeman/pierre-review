@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- This Sprint → Releases: "Explain what's blocking" (with AI on). One press writes a short report from the
+  release check: what holds back the newest release you could reach, the steps to take in order with what
+  each unlocks, and links to the tickets and pull requests to watch. It names only work that is in the check.
+
 ### Changed
 
 - This Sprint → Releases: later work on a Complete ticket in the same repository no longer holds back the

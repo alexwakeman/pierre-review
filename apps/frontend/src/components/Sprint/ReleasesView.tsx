@@ -24,6 +24,7 @@ import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { FOCUS_RING } from '../ui/cx.js';
 import { SprintProgressBar } from '../Activity/SprintProgressBar.js';
+import { ReleaseBlockersPanel } from './ReleaseBlockersPanel.js';
 import { ReleaseDetailModal, ReleaseDialog } from './ReleaseDialog.js';
 import {
   latestReleaseLine,
@@ -78,6 +79,8 @@ import {
 //     latest tag per repository and ONE line; its PRs and tags open behind the arrow.
 //   • Below it, apart in a second bordered box: "Not in a tag yet" (tickets with only open work) and "Holding
 //     the release" (always shown).
+//   • "What's blocking" (ReleaseBlockersPanel.tsx, AI on only): above the list, the last "Explain what's
+//     blocking" report (it arrives with the GET; nothing runs unless the reader presses).
 //
 // ⚠ ONE FETCH ON MOUNT: GET /api/releases (DB + memory only); it POLLS that same GET every ~3 s only
 // while a repo is checking or its older tags are read (hooks/useReleases.ts). "Read earlier tags" past
@@ -184,6 +187,8 @@ export function ReleasesView(): JSX.Element | null {
           </ul>
         </section>
       )}
+
+      <ReleaseBlockersPanel workspaceId={workspaceId} state={data.blockers} check={check} />
 
       <TicketListView check={check} workspaceId={workspaceId} onRelease={() => setDialogOpen(true)} />
 

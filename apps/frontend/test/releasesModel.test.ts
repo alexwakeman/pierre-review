@@ -6,6 +6,7 @@
 //   ./apps/backend/node_modules/.bin/vitest run --root apps/frontend test/releasesModel.test.ts
 import { describe, expect, it } from 'vitest';
 import {
+  SPRINT_PATHS_MODEL,
   foldReleaseCheck,
   type ReleaseCheckInput,
   type ReleaseCheckPrInput,
@@ -15,6 +16,8 @@ import {
 } from '@pierre-review/shared';
 import {
   RELEASES_POLL_MS,
+  blockersPanelShown,
+  blockersReportMeta,
   confirmStops,
   defaultTickedRepoIds,
   editedSections,
@@ -478,5 +481,32 @@ describe('Settings → Releases: the suffix-change warning', () => {
     expect(
       releaseSuffixChangeWarning({ releaseSuffix: null, hotfixSuffix: null, hasReleases: true }, { releaseSuffix: '-rc', hotfixSuffix: '-hotfix' }),
     ).toBeNull();
+  });
+});
+
+describe("Explain what's blocking: the panel's words", () => {
+  const report = {
+    headline: 'BMD-1061 holds back api 0.324.0.',
+    steps: [],
+    repos: [],
+    dropped: 0,
+    writtenAt: '2026-11-23T10:00:00.000Z',
+    model: SPRINT_PATHS_MODEL,
+    provider: 'claude' as const,
+    costUsd: 0.04,
+  };
+
+  it('shows only with AI on, and with a report or something blocked', () => {
+    expect(blockersPanelShown(false, { explainable: true, report: null, stale: false })).toBe(false);
+    expect(blockersPanelShown(true, null)).toBe(false);
+    expect(blockersPanelShown(true, { explainable: false, report: null, stale: false })).toBe(false);
+    expect(blockersPanelShown(true, { explainable: true, report: null, stale: false })).toBe(true);
+    expect(blockersPanelShown(true, { explainable: false, report, stale: true })).toBe(true);
+  });
+
+  it('the last line: day, what ran, the cost, and what was left out', () => {
+    expect(blockersReportMeta(report, 'US$0.04')).toMatch(/^Written 23 Nov · Claude .+ · US\$0\.04$/);
+    expect(blockersReportMeta({ ...report, dropped: 2 }, null)).toMatch(/· 2 points left out: they named work not in the check$/);
+    expect(blockersReportMeta({ ...report, dropped: 1, model: null }, null)).toBe('Written 23 Nov · 1 point left out: it named work not in the check');
   });
 });

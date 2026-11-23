@@ -2,6 +2,7 @@ import { skipToken, useIsMutating, useMutation, useQuery, useQueryClient } from 
 import type {
   CreateReleaseBody,
   CreateReleaseResponse,
+  ReleaseBlockersRunResponse,
   ReleaseDetail,
   ReleaseOlderTagsResponse,
   ReleasePreviewResponse,
@@ -59,6 +60,31 @@ export function useRefreshReleases(workspaceId: number | null) {
       qc.setQueryData<ReleasesResponse>(releasesKey(data.workspaceId), rest);
     },
   });
+}
+
+const EXPLAIN_KEY = 'releases-explain';
+
+/** "Explain what's blocking" (a reader's press): `POST /api/releases/blockers` — ONE model completion over
+ *  the stored check. The answer's report state is written into the releases query. ⚠ SHARED MUTATION KEY,
+ *  read through `useIsMutating` (`useExplainingBlockers`): a tab switch mid-run must not offer a second
+ *  billed press. */
+export function useExplainBlockers(workspaceId: number | null) {
+  const qc = useQueryClient();
+  return useMutation<ReleaseBlockersRunResponse, Error, void>({
+    mutationKey: [EXPLAIN_KEY, workspaceKey(workspaceId)],
+    mutationFn: () => {
+      if (workspaceId == null) return Promise.reject(new Error('No workspace selected'));
+      return api.explainReleaseBlockers(workspaceId);
+    },
+    onSuccess: (data) => {
+      qc.setQueryData<ReleasesResponse>(releasesKey(data.workspaceId), (old) => (old == null ? old : { ...old, blockers: data.blockers }));
+    },
+  });
+}
+
+/** A run is in flight for this workspace (from any mount). */
+export function useExplainingBlockers(workspaceId: number | null): boolean {
+  return useIsMutating({ mutationKey: [EXPLAIN_KEY, workspaceKey(workspaceId)] }) > 0;
 }
 
 /** "Show 50 more" (a reader's press): `POST /api/releases/older-tags` raises one repo's older band; the

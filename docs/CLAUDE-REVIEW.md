@@ -5752,6 +5752,22 @@ model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`:
 `SPRINT_ASK_MAX_TURNS` − 1 pairs, each re-capped; `trimmedTurns` counts the rest). Short Markdown naming
 ticket keys; no ranking of people. Spend: feature `sprint_ask`. Tier `ai` + `ai_hourly`.
 
+## Release blockers (This Sprint → Releases)
+
+`POST /api/releases/blockers?workspace=<id>` — "Explain what's blocking" (`review/release-blockers/`),
+registered by `registerAgenticRoutes`; the SPA gates it on `me.ai` and its button on `AiRunGate kind="complete"`.
+A READER'S PRESS, never automatic, so never asked of the spend gate. ONE `cheapComplete` on the STANDARD role
+(the sprint builder's model on Claude; Codex resolves the role) — a one-shot, not an agent: the release check
+already holds everything (no tool would add anything). Grounded ONLY in the check `getReleases` folds
+(`releases/blockers-input.ts`: per repository the blocked tags oldest first with their own reasons and the
+cumulative "Needs", a split followed to its root; the holding tickets with status, assignee, open PRs; the
+tickets with only an open PR), the whole text inside ONE nonce fence. The answer is JSON (headline, ordered
+steps with what each unlocks and the tickets / PRs it names, a line per repository), VALIDATED by
+`validate.ts`: a key or `#n` not in the input drops its step (counted) or refuses the answer (in the
+headline); ONE retry. Stored per workspace with the input's hash (`release_blocker_reports`); stale = the hash
+differs. ⚠ Changing the prompt or the text: bump `RELEASE_BLOCKERS_VERSION`. Spend: feature `release_blockers`.
+Tier `ai` + `ai_hourly`. Details: [RELEASES.md](RELEASES.md) § Explain what's blocking.
+
 ## Moved from CLAUDE.md (2026-10-26)
 
 Verbatim text taken out of CLAUDE.md to keep it under its size budget. CLAUDE.md keeps a

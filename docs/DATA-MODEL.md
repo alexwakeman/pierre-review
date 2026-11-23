@@ -1003,6 +1003,12 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
   `refused` row holds no name, so a later press is a new claim on a new row.
 - **`release_ticket_comments`** — one row per `(release, ticket_key)`: `tracker_kind`, `state`
   (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
+- **`release_blocker_reports`** (migration `0217`) — one row per `(account_id, workspace_id)`: the last
+  "Explain what's blocking" report (`report_json`: headline, steps, repos, dropped), `input_hash` (sha256 of
+  the prompt version + the input text; no clock), `model` / `provider` / `cost_usd` / `input_tokens` /
+  `output_tokens`, `written_at`. Composite FK to `workspaces` (cascade). ONE reader/writer
+  `db/release-blocker-reports.ts`; ⚠ `onConflictDoUpdate` targets `[accountId, workspaceId]`. Erased and in
+  `accountScopedTables()`.
 - **`workspace_release_repos`** (migration `0199`) — one row per `(account_id, workspace_id, repo_id)`
   the reader ticked "Released from this workspace" (Settings → Releases; default: none). ONLY these are
   folded by the release check, tagged, ranged by the tag sync and offered as hotfix bases; no row = ignored

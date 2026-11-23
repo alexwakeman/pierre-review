@@ -59,6 +59,7 @@
 // The fold never reads the clock and never fetches. Timestamps come in as Date and go out as ISO-8601.
 import { tagKind, releasePointNumber, releaseTagName, type ReleaseBasis, type ReleaseSettings, type TagKind } from './releases.js';
 import type { SprintStage } from './sprint-stories.js';
+import type { ReleaseBlockersState } from './release-blockers.js';
 
 /** A ticket's read state: `ok`, or why the tracker gave nothing; `not_read` = no answer yet. */
 export type ReleaseTicketReadState = 'ok' | 'not_found' | 'no_access' | 'failed' | 'not_read';
@@ -1390,6 +1391,9 @@ export interface ReleasesResponse {
   /** The newest release or hotfix tag across the releasable repos, by its commit date. */
   latestReleaseTagAt: string | null;
   check: ReleaseCheckResult | null;
+  /** "Explain what's blocking" (release-blockers.ts): the last report and whether the button shows.
+   *  Absent / null = AI is off here. */
+  blockers?: ReleaseBlockersState | null;
 }
 
 /** POST /api/releases/refresh?workspace=<id> — Refresh: the tickets not Complete, not read yet or not

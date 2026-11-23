@@ -738,6 +738,48 @@ function ReleaseNoTicket({ n, showBots }: { n: ReleaseMockNoTicket; showBots: bo
   );
 }
 
+/** "What's blocking" (Sprint/ReleaseBlockersPanel.tsx): the button, then the report it writes — a headline, the
+ *  steps in order with what each unlocks and its tickets and PRs, one line per repository. */
+function ReleaseBlockersBox(): JSX.Element {
+  const B = SPRINT_RELEASES.blockers;
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="box blockers">
+      <div className="top">
+        <b>What’s blocking</b>
+        <Act pressed={shown} onClick={() => setShown((s) => !s)}>
+          {shown ? 'Explain again' : B.button}
+        </Act>
+      </div>
+      {shown ? (
+        <>
+          <p>{B.headline}</p>
+          <ol>
+            {B.steps.map((st) => (
+              <li key={st.text}>
+                {st.text} <small>Unlocks {st.unlocks}.</small>{' '}
+                {st.refs.map((r) => (
+                  <span key={r} className="chip">
+                    {r}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ol>
+          <ul>
+            {B.repos.map((r) => (
+              <li key={r.name}>
+                <b>{r.name}</b> <small>{r.text}</small>
+              </li>
+            ))}
+          </ul>
+          <small>{B.meta}</small>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 /** This Sprint → Releases: the latest release, a line per repository with NO candidate, then the ticket list in its
  *  own box — "Show bot PRs", the candidate ticket (★) with each repository's candidate, its commit and ONE
  *  Release…, one ticket either side, "Show next 3 of 4" / "Show previous 3 of 9" — and below it, apart, "Not in a tag yet"
@@ -790,6 +832,7 @@ function ReleasesPanel(): JSX.Element {
           </li>
         ))}
       </ul>
+      <ReleaseBlockersBox />
       <div className="box">
         <div className="toggles">
           <label className="bots">

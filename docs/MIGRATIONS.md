@@ -1805,6 +1805,15 @@ account-scoped table: erasure and the export already cover it. Additive; journal
 `1794988800000`. [DATA-MODEL.md](DATA-MODEL.md) § `workspaces.storyCheckAllRepos`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
 § Ticket review → OUTSIDE THE TICKET.
 
+### `0217_release_blocker_reports` — "Explain what's blocking"
+
+`CREATE TABLE release_blocker_reports` (one row per `(account_id, workspace_id)`, unique index
+`release_blocker_reports_account_ws`; `account_id` → `accounts` cascade; the named composite FK
+`release_blocker_reports_workspace_account_fk` → `workspaces (id, account_id)` cascade): the last report, its
+input hash and what ran. A new account-bearing table: erased explicitly, listed in `accountScopedTables()`.
+No backfill. Additive; journal idx 217, `when` `1795507200000`. [DATA-MODEL.md](DATA-MODEL.md) §
+`release_blocker_reports`; [RELEASES.md](RELEASES.md) § Explain what's blocking.
+
 ### `0198_story_build_port_report` — the hotfix port report
 
 `ALTER TABLE story_build_repos ADD port_report_json` (text JSON, shared `HotfixPortClaim`): the agent's word on

@@ -137,6 +137,20 @@ export default function Page(): JSX.Element {
         limit and waits when the limit is low.
       </p>
 
+      <H2 id="whats-blocking">Explain what&rsquo;s blocking</H2>
+      <p>
+        With AI on, and a newer tag that can&rsquo;t be released, <Ui>Explain what&rsquo;s blocking</Ui> sits above the
+        ticket list. Press it and Claude (or Codex) reads the check on this tab and writes a short report: one line on
+        what holds back the newest release you could reach soon, the steps to take in order, each with what it unlocks
+        and links to its tickets and pull requests, and one line per repository on why its newer tags are blocked.
+      </p>
+      <p>
+        It reads nothing else and changes nothing. It may name only tickets and pull requests that are in the check: a
+        step that names anything else is left out, and the report says so. The report stays until you press{' '}
+        <Ui>Explain again</Ui>. It reads <Ui>Out of date</Ui> when the check has changed since it was written. It runs
+        only when you press the button, on your own AI subscription or key.
+      </p>
+
       <H2 id="the-rules">The rules</H2>
       <ul>
         <li>

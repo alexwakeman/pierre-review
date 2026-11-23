@@ -258,6 +258,34 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
 > api v2.4.0-rc · web v1.8.2-rc
 > Release notes: <link to the GitHub pre-release>
 
+## Explain what's blocking (owner, 2026-11-23)
+
+An AGENTIC report on the Releases tab, for action: which in-flight work (tickets and pull requests, named)
+unlocks which newer release, why each repository's newer tags are blocked, and the order to do things in.
+
+- **The panel** ("What's blocking", `Sprint/ReleaseBlockersPanel.tsx`) sits above the ticket list. It is VISIBLE
+  only while `me.ai.enabled` and GET /api/releases carries `blockers` with a report or `explainable` (the check is
+  decided — no repository checking — and some repository with a candidate or none has a newer tag that does not
+  qualify). The button "Explain what's blocking" ("Explain again" once a report exists) shows only while
+  `explainable` (HIDE, never disable), inside `AiRunGate kind="complete"`; its explanation is behind the ⓘ.
+- **Nothing runs on its own and nothing fetches on mount**: the stored report rides GET /api/releases (ONE fetch
+  on mount stays true); "Out of date" when the input hash differs from the one the report was written from.
+- **ONE completion per press** (`POST /api/releases/blockers`, docs/CLAUDE-REVIEW.md § Release blockers) over
+  the check the server already folded — no GitHub or tracker read. The input (`releases/blockers-input.ts`,
+  pure): per repository the last release, what can be released now, the newest tag, and the blocked newer tags
+  OLDEST FIRST with their OWN reasons and the CUMULATIVE "Needs before it can be released" (a newer tag's
+  reasons are whole, so this is every ticket to finish first; a split is followed to its ROOT; a split whose
+  other half is in no tag yet needs a new version tag); tags with no reason of their own are folded into a
+  count (≤ 15 listed per repository, plus the newest); the tickets holding a release back (status, assignee,
+  open and merged PRs, "holds back: <repo> from <tag>") and the tickets with only an open PR (≤ 40). ⚠ Titles,
+  statuses, names and tag names are UNTRUSTED: one line each, capped, inside ONE nonce fence.
+- **Refuse rather than guess**: the answer may cite only the input's tickets (by key) and PRs ("repo #n"). A
+  step or repository line naming anything else is dropped and counted ("1 point left out: it named work not in
+  the check"); a headline doing so refuses the answer (one retry, then nothing is stored and the old report
+  stays). Ticket links go to the tracker, PR links to the PR tab (or GitHub), every URL through `safeExternalUrl`.
+- **Stored per workspace** (`release_blocker_reports`, migration 0217) with the input's hash: sha256 of
+  `RELEASE_BLOCKERS_VERSION` + the input text — no clock-derived field.
+
 ## Release notes
 
 One document per release, a section per repo (each section is also that repo's pre-release body). Each
