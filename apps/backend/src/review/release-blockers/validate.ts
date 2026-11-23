@@ -16,6 +16,8 @@ import { prKey, type ReleaseBlockersInput } from '../../releases/blockers-input.
 //   • A STEP is dropped (counted in `dropped`) when its text or `unlocks` names a key or `#n` not in the
 //     input, when a listed ticket / pull request is not in the input, or when a text is blank or over its
 //     cap — never cut, never repaired. Keys and pull requests named in its text join its links.
+//   • "repo #n" naming a releasable repository is checked as THAT pull request (or release point), not
+//     just its number. A GitHub Issues key ("acme/web#12") is matched whole, never read as a `#n`.
 //   • A REPO NOTE is dropped the same way, and when its repository is not a releasable one.
 //   • Control characters stripped, whitespace folded. At most RELEASE_BLOCKERS_CAPS.steps steps kept.
 
@@ -43,15 +45,26 @@ interface Refs {
 /** The refs a text names, or null when it names one not in the input. */
 function refsIn(text: string, input: ReleaseBlockersInput): Refs | null {
   const out: Refs = { tickets: [], prs: [] };
-  for (const m of text.matchAll(KEY)) {
+  // GitHub Issues keys ("acme/web#12") are not ABC-12 shaped: find the input's own first and blank them,
+  // so their `#12` is not read as a pull request.
+  let rest = text;
+  for (const t of input.tickets.values()) {
+    if (!t.key.includes('#') || !rest.includes(t.key)) continue;
+    rest = rest.split(t.key).join(' ');
+    if (!out.tickets.includes(t)) out.tickets.push(t);
+  }
+  for (const m of rest.matchAll(KEY)) {
     const t = input.tickets.get(m[0]);
     if (t == null) return null;
     if (!out.tickets.includes(t)) out.tickets.push(t);
   }
-  for (const m of text.matchAll(PR_IN_TEXT)) {
+  for (const m of rest.matchAll(PR_IN_TEXT)) {
     const n = Number(m[2]);
     if (!input.numbers.has(n)) return null;
-    const pr = m[1] != null ? input.prs.get(prKey(m[1], n)) : undefined;
+    const repo = m[1];
+    const pr = repo != null ? input.prs.get(prKey(repo, n)) : undefined;
+    // "web #90" when only "api #90" is in the input: the number is known, the pull request is not.
+    if (pr == null && repo != null && input.repoNames.has(repo) && !input.releasePoints.has(prKey(repo, n))) return null;
     if (pr != null && !out.prs.includes(pr)) out.prs.push(pr);
   }
   return out;

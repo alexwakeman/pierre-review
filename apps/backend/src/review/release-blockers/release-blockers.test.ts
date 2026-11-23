@@ -94,7 +94,8 @@ const notDone1061: Extract<ReleaseBlocker, { kind: 'not_done' }> = { kind: 'not_
 const openPr518 = { repoId: 2, repoName: 'frontend', number: 518, url: 'https://github.com/acme/frontend/pull/518', prId: 7 };
 
 function fixture(over: { checking?: boolean } = {}): ReleaseCheckResult {
-  return {
+  // A deep copy: the blocker constants above are shared, and tests mutate what they get.
+  return structuredClone<ReleaseCheckResult>({
     trackerName: 'Jira',
     repos: [
       repo(1, 'backend', 'candidate', [
@@ -149,7 +150,7 @@ function fixture(over: { checking?: boolean } = {}): ReleaseCheckResult {
       }),
     ],
     prs: [],
-  };
+  });
 }
 
 let current: ReleaseCheckResult | null = fixture();
@@ -295,6 +296,34 @@ describe('validateReleaseBlockers', () => {
     expect(v).toMatchObject({ ok: true, report: { steps: [], dropped: 1 } });
     expect(validate.validateReleaseBlockers('no json here', i())).toEqual({ ok: false, reason: 'not_json' });
     expect(validate.validateReleaseBlockers(JSON.stringify({ headline: '' }), i())).toEqual({ ok: false, reason: 'shape' });
+  });
+
+  it('a known number under the wrong repository is refused; merged PRs the ticket lines name may be cited', () => {
+    // #90 is frontend's, not backend's.
+    expect(validate.validateReleaseBlockers(JSON.stringify({ headline: 'Merge backend #90 first.', steps: [] }), i())).toEqual({ ok: false, reason: 'unknown_ref' });
+    const c = fixture();
+    c.tickets[1]!.pullRequests = [
+      { id: null, prId: 11, repoId: 1, repoName: 'backend', number: 77, title: 'Split part', url: 'https://github.com/acme/backend/pull/77', authorLogin: null, mergedAt: '2026-10-20T00:00:00.000Z', open: false, tagName: '0.326.0', tagAt: null, untagged: false },
+    ];
+    const v = validate.validateReleaseBlockers(JSON.stringify({ headline: 'BMD-1048 shipped in backend #77.', steps: [] }), input.releaseBlockersInput(c));
+    expect(v.ok).toBe(true);
+  });
+
+  it('a GitHub Issues key ("acme/web#12") is matched whole, not read as a pull request number', () => {
+    const c = fixture();
+    c.tickets[0]!.key = 'acme/web#12';
+    for (const t of c.repos[0]!.tags) for (const b of t.blockers) {
+      if (b.kind === 'not_done') b.key = 'acme/web#12';
+      if (b.kind === 'split' && b.root != null && b.root.blocker.kind === 'not_done') b.root.blocker.key = 'acme/web#12';
+    }
+    const ii = input.releaseBlockersInput(c);
+    const v = validate.validateReleaseBlockers(
+      JSON.stringify({ headline: 'acme/web#12 holds back backend 0.324.0.', steps: [{ do: 'Finish acme/web#12.', unlocks: null, tickets: ['acme/web#12'], prs: [] }] }),
+      ii,
+    );
+    expect(v).toMatchObject({ ok: true, report: { dropped: 0 } });
+    if (v.ok) expect(v.report.steps[0]!.tickets.map((t) => t.key)).toEqual(['acme/web#12']);
+    expect(validate.validateReleaseBlockers(JSON.stringify({ headline: 'acme/web#13 holds it.', steps: [] }), ii)).toEqual({ ok: false, reason: 'unknown_ref' });
   });
 });
 

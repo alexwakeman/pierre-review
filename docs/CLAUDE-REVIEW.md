@@ -5764,7 +5764,8 @@ cumulative "Needs", a split followed to its root; the holding tickets with statu
 tickets with only an open PR), the whole text inside ONE nonce fence. The answer is JSON (headline, ordered
 steps with what each unlocks and the tickets / PRs it names, a line per repository), VALIDATED by
 `validate.ts`: a key or `#n` not in the input drops its step (counted) or refuses the answer (in the
-headline); ONE retry. Stored per workspace with the input's hash (`release_blocker_reports`); stale = the hash
+headline); "repo #n" with a releasable repo must be THAT repo's PR (or release point), not just a known number;
+a GitHub Issues key (`acme/web#12`) is matched whole, never read as a PR number; ONE retry. Stored per workspace with the input's hash (`release_blocker_reports`); stale = the hash
 differs. ⚠ Changing the prompt or the text: bump `RELEASE_BLOCKERS_VERSION`. Spend: feature `release_blockers`.
 Tier `ai` + `ai_hourly`. Details: [RELEASES.md](RELEASES.md) § Explain what's blocking.
 

@@ -167,7 +167,7 @@ export function blockersPanelShown(aiEnabled: boolean, state: ReleaseBlockersSta
   return aiEnabled && state != null && (state.explainable || state.report != null);
 }
 
-/** The report's last line: "Written 23 Nov · Claude Sonnet 5 · $0.04 · 1 point left out: it named work not in
+/** The report's last line: "Written 23 Nov · <what ran> · US$0.04 · 1 point left out: it named work not in
  *  the check". `cost` comes from `useRunCostText` (null = say nothing about cost). Pure. */
 export function blockersReportMeta(report: ReleaseBlockersReport, cost: string | null): string {
   const parts: string[] = [];

@@ -49,6 +49,8 @@ export interface ReleaseBlockersInput {
   repoNames: Set<string>;
   /** Every `#n` the text gives (pull requests and release points named by one). */
   numbers: Set<number>;
+  /** "repo #n" for each release point a `prs`-basis repository names by its pull request. */
+  releasePoints: Set<string>;
 }
 
 const one = (s: string | null | undefined, max = 120): string => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -114,6 +116,7 @@ export function releaseBlockersInput(check: ReleaseCheckResult): ReleaseBlockers
   const tickets = new Map<string, ReleaseBlockersTicketRef>();
   const prs = new Map<string, ReleaseBlockersPrRef>();
   const numbers = new Set<number>();
+  const releasePoints = new Set<string>();
   const repoNames = new Set(check.repos.map((r) => r.name));
   const prTitle = new Map<string, string>();
   for (const p of check.prs) {
@@ -185,7 +188,10 @@ export function releaseBlockersInput(check: ReleaseCheckResult): ReleaseBlockers
       }
       if (prsBasis) {
         const n = Number(tag.name.replace(/^#/, ''));
-        if (Number.isSafeInteger(n)) numbers.add(n);
+        if (Number.isSafeInteger(n)) {
+          numbers.add(n);
+          releasePoints.add(prKey(repo.name, n));
+        }
       }
       const own = tag.blockers.filter((b) => b.fromTag == null && b.kind !== 'checking');
       const newest = i === blocked.length - 1;
@@ -213,6 +219,8 @@ export function releaseBlockersInput(check: ReleaseCheckResult): ReleaseBlockers
     for (const p of open) addPr(p.repoName, p.number, p.url, p.prId);
     if (open.length > 0) parts.push(`open pull requests: ${open.map((p) => `${prKey(one(p.repoName, 80), p.number)} “${one(p.title, 100)}”`).join(', ')}`);
     const merged = t.pullRequests.filter((p) => !p.open && p.mergedAt != null).slice(0, PRS_PER_TICKET);
+    // The text names them, so the answer may cite them too.
+    for (const p of merged) addPr(p.repoName, p.number, p.url, p.prId);
     if (merged.length > 0) {
       parts.push(`merged: ${merged.map((p) => `${prKey(one(p.repoName, 80), p.number)} (${p.tagName != null ? `in ${one(p.tagName, 60)}` : 'not in a tag yet'})`).join(', ')}`);
     }
@@ -248,5 +256,5 @@ export function releaseBlockersInput(check: ReleaseCheckResult): ReleaseBlockers
   }
   const text = lines.join('\n');
   const hash = createHash('sha256').update(`v${RELEASE_BLOCKERS_VERSION}\n${text}`).digest('hex');
-  return { explainable, text, hash, tickets, prs, repoNames, numbers };
+  return { explainable, text, hash, tickets, prs, repoNames, numbers, releasePoints };
 }
