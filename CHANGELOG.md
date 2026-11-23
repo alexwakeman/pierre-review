@@ -13,6 +13,11 @@ no internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- Automatic reviews: when Codex’s usage limit ran out right at its reset time, Ensemble could keep Codex
+  out of automatic reviews for another day and run Claude alone. It now tries Codex again two minutes later.
+
 ## [1.0.73] - 2026-11-22
 
 ### Added

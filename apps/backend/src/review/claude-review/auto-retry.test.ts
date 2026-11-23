@@ -76,6 +76,14 @@ describe('parseRetryAtMs', () => {
   it('reads Codex’s "try again at 5:04 PM" as the next 5:04 PM after the failure, local time', () => {
     expect(parseRetryAtMs(CODEX_LIMIT, FAILED)).toBe(new Date(2026, 9, 27, 17, 4).getTime());
   });
+  it('reads a time of day JUST PAST (≤ 15 min) as the failure time, never the next day', () => {
+    const at = new Date(2026, 10, 23, 10, 14, 3).getTime();
+    expect(parseRetryAtMs('You’ve hit your usage limit … try again at 10:14 AM.', at)).toBe(at);
+    const later = new Date(2026, 10, 23, 10, 29, 0).getTime();
+    expect(parseRetryAtMs('try again at 10:14 AM.', later)).toBe(later);
+    const past = new Date(2026, 10, 23, 10, 29, 1).getTime();
+    expect(parseRetryAtMs('try again at 10:14 AM.', past)).toBe(new Date(2026, 10, 24, 10, 14).getTime());
+  });
   it('rolls a time already past on the failure’s day to the next day', () => {
     expect(parseRetryAtMs('try again at 9:15 AM.', FAILED)).toBe(new Date(2026, 9, 28, 9, 15).getTime());
   });
