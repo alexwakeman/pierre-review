@@ -63,8 +63,9 @@ export default function Page(): JSX.Element {
         </li>
       </ul>
       <p>
-        Meadow is soft greens on off-white. Neon keeps its bright colours for buttons, links and marks, and keeps text a
-        plain light grey. Green Screen is green text on black in a typewriter-style font.
+        Meadow is leaf greens on off-white, with a forest-green sidebar and a little sunlight. Neon is ultraviolet
+        black with a glowing grid and magenta and cyan for buttons, links and marks; text stays a plain light grey.
+        Green Screen is green text on black in a typewriter-style font.
       </p>
       <p>Every scheme is checked for contrast, so text stays readable whichever one you pick.</p>
 

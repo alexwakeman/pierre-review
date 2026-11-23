@@ -13,6 +13,12 @@ no internals.
 
 ## [Unreleased]
 
+### Changed
+
+- Settings → Appearance: Neon and Meadow are much bolder. Neon has a glowing ultraviolet grid, a neon
+  wordmark and glowing selections and buttons. Meadow has a forest-green sidebar, sunlight and leaves.
+  Text keeps the same contrast.
+
 ## [1.0.77] - 2026-11-23
 
 ### Changed

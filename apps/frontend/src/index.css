@@ -308,35 +308,37 @@
   --ai-signal: 187 154 247;       /* #bb9af7 */
   --ai-signal-fill: 187 154 247;  /* #bb9af7 */
 }
-/* Three schemes with no canonical palette to keep. NEON puts its magenta, cyan, lime and yellow on
-   accents, fills and status marks only; body text stays a calm light neutral. GREEN SCREEN is
+/* Three schemes with no canonical palette to keep. NEON is ultraviolet black with magenta, cyan, lime
+   and yellow on accents, fills, borders and status marks; body text stays a calm light neutral (its
+   glows and grid are the FLAIR layer below). GREEN SCREEN is
    phosphor green on black in a monospace face (`--ui-font`, the one per-scheme font), with dimmer
-   greens for secondary text and cyan / red / amber kept for their meanings. MEADOW is sage on
-   off-white with deep greens; its success is a teal so it does not read as the accent. */
+   greens for secondary text and cyan / red / amber kept for their meanings. MEADOW is leaf green on
+   off-white with deep forest accents (and a forest sidebar, in the FLAIR layer); its success is a
+   teal so it does not read as the accent. */
 [data-scheme='neon'] {
-  --ui-bg: 11 10 18;              /* #0b0a12 */
-  --ui-surface: 18 16 28;         /* #12101c */
-  --ui-raise: 25 22 38;           /* #191626 */
-  --ui-hover: 33 29 49;           /* #211d31 */
-  --ui-sel: 42 37 61;             /* #2a253d */
-  --ui-line: 61 53 88;            /* #3d3558 */
-  --ui-ink: 236 235 245;          /* #ecebf5 */
-  --ui-mute: 201 198 220;         /* #c9c6dc */
-  --ui-faint: 166 162 194;        /* #a6a2c2 */
-  --ui-accent: 0 229 255;         /* #00e5ff */
+  --ui-bg: 10 6 20;               /* #0a0614 */
+  --ui-surface: 18 10 34;         /* #120a22 */
+  --ui-raise: 26 15 46;           /* #1a0f2e */
+  --ui-hover: 35 20 61;           /* #23143d */
+  --ui-sel: 46 24 80;             /* #2e1850 */
+  --ui-line: 77 37 133;           /* #4d2585 */
+  --ui-ink: 244 238 255;          /* #f4eeff */
+  --ui-mute: 214 202 242;         /* #d6caf2 */
+  --ui-faint: 184 168 222;        /* #b8a8de */
+  --ui-accent: 0 240 255;         /* #00f0ff */
   --ui-accent-fill: 255 43 214;   /* #ff2bd6 */
-  --ui-on-accent: 11 10 18;       /* #0b0a12 */
-  --ui-danger: 255 107 107;       /* #ff6b6b */
+  --ui-on-accent: 10 6 20;        /* #0a0614 */
+  --ui-danger: 255 92 122;        /* #ff5c7a */
   --ui-success: 57 255 136;       /* #39ff88 */
   --ui-warn: 255 225 77;          /* #ffe14d */
   --ui-scrim: 0 0 0;              /* #000000 */
-  --ai-surface: 18 16 28;         /* #12101c */
-  --ai-surface-2: 25 22 38;       /* #191626 */
-  --ai-border: 61 53 88;          /* #3d3558 */
-  --ai-hairline: 33 29 49;        /* #211d31 */
-  --ai-ink: 236 235 245;          /* #ecebf5 */
-  --ai-muted: 166 162 194;        /* #a6a2c2 */
-  --ai-signal: 201 155 255;       /* #c99bff */
+  --ai-surface: 18 10 34;         /* #120a22 */
+  --ai-surface-2: 26 15 46;       /* #1a0f2e */
+  --ai-border: 77 37 133;         /* #4d2585 */
+  --ai-hairline: 35 20 61;        /* #23143d */
+  --ai-ink: 244 238 255;          /* #f4eeff */
+  --ai-muted: 184 168 222;        /* #b8a8de */
+  --ai-signal: 212 168 255;       /* #d4a8ff */
   --ai-signal-fill: 179 92 255;   /* #b35cff */
 }
 [data-scheme='green-screen'] {
@@ -367,30 +369,147 @@
   --ai-signal-fill: 185 140 255;  /* #b98cff */
 }
 [data-scheme='meadow'] {
-  --ui-bg: 246 248 241;           /* #f6f8f1 */
-  --ui-surface: 239 243 232;      /* #eff3e8 */
-  --ui-raise: 231 237 223;        /* #e7eddf */
-  --ui-hover: 223 231 213;        /* #dfe7d5 */
-  --ui-sel: 211 221 198;          /* #d3ddc6 */
-  --ui-line: 195 208 180;         /* #c3d0b4 */
-  --ui-ink: 31 42 31;             /* #1f2a1f */
-  --ui-mute: 52 67 52;            /* #344334 */
-  --ui-faint: 71 86 70;           /* #475646 */
-  --ui-accent: 43 99 50;          /* #2b6332 */
-  --ui-accent-fill: 58 122 63;    /* #3a7a3f */
+  --ui-bg: 243 248 236;           /* #f3f8ec */
+  --ui-surface: 233 242 223;      /* #e9f2df */
+  --ui-raise: 222 234 209;        /* #deead1 */
+  --ui-hover: 210 227 194;        /* #d2e3c2 */
+  --ui-sel: 195 217 174;          /* #c3d9ae */
+  --ui-line: 163 196 142;         /* #a3c48e */
+  --ui-ink: 16 36 26;             /* #10241a */
+  --ui-mute: 36 64 44;            /* #24402c */
+  --ui-faint: 51 82 58;           /* #33523a */
+  --ui-accent: 26 84 38;          /* #1a5426 */
+  --ui-accent-fill: 43 122 52;    /* #2b7a34 */
   --ui-on-accent: 255 255 255;    /* #ffffff */
-  --ui-danger: 158 48 39;         /* #9e3027 */
-  --ui-success: 14 95 80;         /* #0e5f50 */
-  --ui-warn: 127 83 0;            /* #7f5300 */
-  --ui-scrim: 31 42 31;           /* #1f2a1f */
-  --ai-surface: 239 243 232;      /* #eff3e8 */
-  --ai-surface-2: 231 237 223;    /* #e7eddf */
-  --ai-border: 195 208 180;       /* #c3d0b4 */
-  --ai-hairline: 223 231 213;     /* #dfe7d5 */
-  --ai-ink: 31 42 31;             /* #1f2a1f */
-  --ai-muted: 71 86 70;           /* #475646 */
-  --ai-signal: 104 60 150;        /* #683c96 */
+  --ui-danger: 147 31 23;         /* #931f17 */
+  --ui-success: 10 80 72;         /* #0a5048 */
+  --ui-warn: 107 69 0;            /* #6b4500 */
+  --ui-scrim: 16 36 26;           /* #10241a */
+  --ai-surface: 233 242 223;      /* #e9f2df */
+  --ai-surface-2: 222 234 209;    /* #deead1 */
+  --ai-border: 163 196 142;       /* #a3c48e */
+  --ai-hairline: 210 227 194;     /* #d2e3c2 */
+  --ai-ink: 16 36 26;             /* #10241a */
+  --ai-muted: 51 82 58;           /* #33523a */
+  --ai-signal: 94 38 144;         /* #5e2690 */
   --ai-signal-fill: 122 76 171;   /* #7a4cab */
+}
+
+/* ── SCHEME FLAIR (Neon, Meadow) ──────────────────────────────────────────────────────────────────
+   Decoration on top of a scheme's tokens: grounds, glows, gradients, a sidebar of its own. Keyed on
+   `html[data-scheme=…]` ONLY, so it paints the app and never a Settings chip (a chip carries the
+   attribute on its own element). Rules: nothing here changes what a text says or its size; every
+   text colour set here is a token already measured above (or Meadow's sidebar tokens, measured by
+   test/colorSchemes.test.ts § the Meadow sidebar); glows are box/text shadows only; anything that
+   moves sits behind `prefers-reduced-motion: no-preference`. */
+
+/* NEON — ultraviolet grid, magenta/cyan haze, glowing selection. */
+/* The page's ground is painted on the shell AND on every opaque page layer inside it, pinned to the
+   viewport (`fixed`), so the layers line up and read as one continuous ground. */
+html[data-scheme='neon'] [data-shell-main],
+html[data-scheme='neon'] [data-shell-main] .bg-ui-bg {
+  background-image:
+    radial-gradient(1100px 560px at 100% -8%, rgb(255 43 214 / 0.2), transparent 62%),
+    radial-gradient(900px 520px at 20% 112%, rgb(0 240 255 / 0.16), transparent 62%),
+    linear-gradient(rgb(122 47 214 / 0.11) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(122 47 214 / 0.11) 1px, transparent 1px);
+  background-size: auto, auto, 44px 44px, 44px 44px;
+  background-attachment: fixed;
+}
+html[data-scheme='neon'] [data-testid='sidebar'] {
+  background-image: linear-gradient(180deg, #1c0b34 0%, #110821 55%, #0a0614 100%);
+  box-shadow: inset -1px 0 0 rgb(255 43 214 / 0.6), 6px 0 28px -10px rgb(255 43 214 / 0.45);
+}
+html[data-scheme='neon'] [data-testid='sidebar'] [aria-current='page'] {
+  background-image: linear-gradient(90deg, rgb(255 43 214 / 0.34), rgb(0 240 255 / 0.1));
+  box-shadow: inset 3px 0 0 #ff2bd6, 0 0 16px -2px rgb(255 43 214 / 0.45);
+}
+html[data-scheme='neon'] .brand-title > span:last-child {
+  background-image: linear-gradient(90deg, #ff2bd6, #b35cff 45%, #00f0ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 6px rgb(255 43 214 / 0.55));
+}
+html[data-scheme='neon'] [data-page-title] {
+  color: rgb(var(--ui-accent));
+  text-shadow: 0 0 10px rgb(0 240 255 / 0.55), 0 0 28px rgb(0 240 255 / 0.25);
+  letter-spacing: 0.01em;
+}
+html[data-scheme='neon'] [role='tab'][aria-selected='true'] {
+  box-shadow: inset 0 -2px 0 #00f0ff, 0 0 14px -3px rgb(0 240 255 / 0.6);
+}
+html[data-scheme='neon'] .bg-ui-accent-fill {
+  box-shadow: 0 0 0 1px rgb(255 43 214 / 0.6), 0 0 18px -2px rgb(255 43 214 / 0.7);
+}
+html[data-scheme='neon'] ::selection {
+  background: rgb(255 43 214 / 0.45);
+  color: #ffffff;
+}
+html[data-scheme='neon'] * {
+  scrollbar-color: rgb(179 92 255 / 0.7) transparent;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html[data-scheme='neon'] .brand-title > span:last-child {
+    animation: neon-flicker 6s ease-in-out infinite;
+  }
+}
+@keyframes neon-flicker {
+  0%, 100% { filter: drop-shadow(0 0 6px rgb(255 43 214 / 0.55)); }
+  50% { filter: drop-shadow(0 0 10px rgb(0 240 255 / 0.65)); }
+}
+
+/* MEADOW — a forest sidebar, sunlight and leaves on the page. The sidebar is a DARK island: it
+   carries its own tokens (measured in test/colorSchemes.test.ts § the Meadow sidebar). */
+html[data-scheme='meadow'] [data-testid='sidebar'] {
+  --ui-bg: 16 48 28;              /* #10301c */
+  --ui-surface: 21 58 34;         /* #153a22 */
+  --ui-raise: 27 69 41;           /* #1b4529 */
+  --ui-hover: 31 78 47;           /* #1f4e2f */
+  --ui-sel: 36 88 58;             /* #24583a */
+  --ui-line: 58 110 74;           /* #3a6e4a */
+  --ui-ink: 246 242 216;          /* #f6f2d8 */
+  --ui-mute: 224 227 196;         /* #e0e3c4 */
+  --ui-faint: 207 218 181;        /* #cfdab5 */
+  --ui-accent: 255 209 102;       /* #ffd166 */
+  --ui-accent-fill: 255 209 102;  /* #ffd166 */
+  --ui-on-accent: 16 48 28;       /* #10301c */
+  --ui-danger: 255 194 184;       /* #ffc2b8 */
+  --ui-success: 168 236 192;      /* #a8ecc0 */
+  --ui-warn: 255 209 102;         /* #ffd166 */
+  --ai-signal: 226 196 255;       /* #e2c4ff */
+  --ai-signal-fill: 200 160 255;  /* #c8a0ff */
+  color-scheme: dark;
+  background-image: linear-gradient(180deg, #1d5131 0%, #153a22 45%, #10301c 100%);
+  box-shadow: 4px 0 22px -12px rgb(16 48 28 / 0.6);
+}
+html[data-scheme='meadow'] [data-testid='sidebar'] [aria-current='page'] {
+  box-shadow: inset 3px 0 0 #ffd166;
+}
+html[data-scheme='meadow'] [data-testid='sidebar'] .brand-title > span:last-child {
+  color: rgb(var(--ui-ink));
+}
+html[data-scheme='meadow'] [data-shell-main],
+html[data-scheme='meadow'] [data-shell-main] .bg-ui-bg {
+  background-attachment: fixed;
+  background-image:
+    radial-gradient(900px 420px at 100% -10%, rgb(255 214 102 / 0.32), transparent 65%),
+    radial-gradient(800px 460px at 0% 110%, rgb(126 186 98 / 0.22), transparent 65%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'%3E%3Cg fill='%232b7a34' fill-opacity='0.07'%3E%3Cpath d='M22 30c10-14 30-14 36 0-10 12-28 13-36 0z'/%3E%3Cpath d='M96 92c6-16 25-21 34-9-7 14-25 19-34 9z'/%3E%3Cpath d='M78 22c3-11 17-14 23-5-4 10-17 13-23 5z'/%3E%3Cpath d='M18 104c4-12 19-15 26-6-5 11-19 14-26 6z'/%3E%3C/g%3E%3C/svg%3E");
+}
+html[data-scheme='meadow'] [data-page-title] {
+  color: rgb(var(--ui-accent));
+  letter-spacing: -0.01em;
+}
+html[data-scheme='meadow'] [role='tab'][aria-selected='true'] {
+  box-shadow: inset 0 -2px 0 #2b7a34;
+}
+html[data-scheme='meadow'] .bg-ui-accent-fill {
+  box-shadow: 0 2px 10px -3px rgb(43 122 52 / 0.55);
+}
+html[data-scheme='meadow'] ::selection {
+  background: rgb(255 209 102 / 0.6);
+  color: #10241a;
 }
 
 /* ── THE TYPE SCALE (tailwind.config.ts `text-meta/body/title/display`) ─────────────────────────────
