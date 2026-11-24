@@ -31,6 +31,7 @@ vi.mock('./backfill-pr-security.js', () => ({ backfillPrSecurity: vi.fn(async ()
 vi.mock('./backfill-commit-headlines.js', () => ({
   backfillCommitHeadlines: vi.fn(async () => {}),
 }));
+vi.mock('./backfill-ai-signals.js', () => ({ backfillAiSignals: vi.fn(async () => {}) }));
 vi.mock('./unsettled-prs.js', () => ({ runUnsettledPrBackstop: vi.fn(async () => {}) }));
 vi.mock('../db/file-coupling.js', () => ({ rebuildRepoCoupling: vi.fn(async () => {}) }));
 vi.mock('./classify-change-shape.js', () => ({
