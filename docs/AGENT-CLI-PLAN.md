@@ -120,6 +120,20 @@ Expect a CODEX-SPIKE-sized set of measurements.
   - OpenRouter: the reader's choice of model per depth role (`deep` / `standard` / `fast`);
   - local: the models Ollama / LM Studio report, mapped the same way.
   Only TESTED models are offered by default (§ 7).
+- ⚠ **NO CLAUDE THROUGH OPENCODE.** The profile hides every Anthropic model, whether OpenCode would
+  reach it directly (its "Anthropic (API key)" provider) or through OpenRouter (`openrouter/anthropic/*`).
+  The picker points the reader to Ensemble's own Claude provider, which already runs on an API key FIRST
+  BY DEFAULT (`resolveAiCredential`) and keeps what OpenCode would lose: the tuned prompts and goldens,
+  the review specialists, effort and thinking, the rate-limit readings, the warm story-chat session and
+  image description. One model, one route — so a "Claude Opus" label, its cost and its ledger row are
+  never ambiguous. The refusal is checked at RUN time too (`resolveManualRunChoice`), not only hidden in
+  the menu. A Claude Pro/Max login is never possible anyway: OpenCode removed it in v1.3.0 (March 2026)
+  at Anthropic's legal request, and the lockdown turns off the community plugins that restore it.
+- **The developer override.** `ENSEMBLE_OPENCODE_ALLOW_ANTHROPIC=true` lifts that exclusion, for testing
+  the harness on a Claude API key (§ 9, Phase 0). It is an environment variable ONLY — never a Settings
+  control, never on `/api/me`, never in user docs. Like every user-set `ENSEMBLE_X`, it is read through
+  `env-name.ts` `readEnv` and listed in `USER_ENV_NAMES`. A run under it is labelled what it is
+  ("OpenCode · Claude Haiku 5.5"), never as a run of Ensemble's Claude provider.
 - **Usage and cost.**
   - OpenRouter: tokens, and US$ if OpenCode (or its `serve` API) reports it. Otherwise US$ is UNKNOWN —
     ⚠ never zero, and never priced from a table Ensemble keeps by hand.
@@ -193,6 +207,16 @@ docs/SECURITY.md gains a section in the same commit as OpenCode ships.
    - session files written, and how to delete them;
    - sandbox: the OpenRouter key injected through the proxy; a route to a host-local Ollama.
    - Comparison: one Codex → OpenRouter run on the same fixture.
+
+   **Test credentials — three, each for what only it can show:**
+
+   | Credential | Model | Tests | Why not the others |
+   |---|---|---|---|
+   | The owner's Anthropic API key (under the developer override, § 5) | Claude Haiku | the HARNESS: transport, permission flow, MCP passthrough, isolation, lockdown traffic, session files, process control, the run-stream mapping | Claude is the most forgiving tool-caller, so a failure here is a harness failure, not a model one. ⚠ It cannot show how open-weight models behave — a harness that passes on Claude can still fail on them. |
+   | None (local Ollama) | a mid-size open-weight coding model | tool-call reliability, the result-tool contract, retries and loops, on the local route Ensemble ships; the sandbox-to-host route | Free. Limited by the machine's memory, so it does not show the larger models. |
+   | A small OpenRouter top-up, bought from OpenRouter directly (a credit limit set on the key) | the larger open-weight models Ensemble would list | OpenRouter's usage and US$ through OpenCode, zero-data-retention routing, the sandbox proxy injecting a key for `openrouter.ai`, the eval runs (§ 7) | — |
+
+   OpenCode's own model gateway is NOT used: billing stays on OpenRouter, the route readers will take.
 1. **The seam refactor** (§ 6). No new provider.
 2. **The agent-CLI provider + OpenCode profile on host runs** (OpenRouter + Ollama / LM Studio), with
    the eval harness (§ 7).
@@ -210,6 +234,11 @@ landing mocks that show provider choice, in the same commit.
 4. **OpenRouter routing.** Zero-data-retention only by default?
 5. **`auto`.** Does `auto` ever pick OpenCode, or only Claude / Codex?
 6. **Sandbox-to-host route.** Is a route from the sandbox to a host-local model port acceptable?
+7. **OpenAI models on an OpenAI API key.** Ensemble's Codex provider REFUSES an OpenAI API key until it
+   can price one (`CODEX_PRICES_PER_MTOK`; docs/CODEX-PLAN.md). OpenCode could run OpenAI models on that
+   key (directly, or `openrouter/openai/*`), and so would be the only way in for an OpenAI API-key user —
+   but it would get round a refusal that was made on purpose. Hide OpenAI models as Anthropic's are
+   hidden (§ 5), or allow them, labelled as OpenCode runs, with US$ unknown unless OpenCode reports it?
 
 ## 11. Out of scope (later profiles)
 
@@ -220,7 +249,7 @@ reporting). None of them is planned here.
 
 ## Sources (2026-11-24)
 
-- OpenCode: [ACP](https://opencode.ai/docs/cli/acp/), [CLI](https://opencode.ai/docs/cli),
+- OpenCode: [ACP](https://opencode.ai/docs/cli/acp/), [CLI](https://opencode.ai/docs/cli), [v1.3.0 changelog](https://opencode.ai/changelog/v1.3.0.md),
   [providers](https://opencode.ai/docs/providers),
   [Ollama integration](https://docs.ollama.com/integrations/opencode)
 - Codex + OpenRouter (the comparison): [OpenRouter guide](https://openrouter.ai/docs/guides/coding-agents/codex-cli)
