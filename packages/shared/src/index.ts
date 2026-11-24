@@ -70,6 +70,7 @@ export * from './auto-fix-queue.js';
 export * from './ai-fix-loop.js';
 export * from './releases.js';
 export * from './release-check.js';
+export * from './release-graph.js';
 export * from './release-blockers.js';
 export * from './release-write.js';
 export * from './hotfix.js';

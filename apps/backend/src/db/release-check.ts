@@ -32,6 +32,7 @@
 //     most that many older tags. THE TICKET DETAIL (GET /api/releases only, `detail`): each ticket's type,
 //     assignee and last read from the stored reads, and the MERGED stored PRs naming it in the releasable
 //     repos (the "Elsewhere" list) — still DB only.
+import type { TicketLinkBlocker } from '@pierre-review/shared';
 import { and, count, desc, eq, gte, inArray, max } from 'drizzle-orm';
 import {
   TRACKER_PROVIDER_LABEL,
@@ -165,6 +166,8 @@ export interface TicketReadCandidate {
   attempts?: number;
   typeName?: string | null;
   assigneeName?: string | null;
+  /** The tracker's "is blocked by" links (`blocked_by_json`); null/absent = this store has none. */
+  blockedBy?: TicketLinkBlocker[] | null;
 }
 
 /**
@@ -418,6 +421,7 @@ export async function loadReleaseCheck(
     checkedAt: trackerTickets.checkedAt,
     issueTypeName: trackerTickets.issueTypeName,
     assigneeName: trackerTickets.assigneeName,
+    blockedBy: trackerTickets.blockedByJson,
   };
   const siteWhere =
     site != null ? and(eq(trackerTickets.accountId, accountId), eq(trackerTickets.provider, site.provider), eq(trackerTickets.apiRoot, site.apiRoot)) : null;
@@ -549,6 +553,7 @@ export async function loadReleaseCheck(
           checkedAt: r.checkedAt,
           typeName: r.issueTypeName,
           assigneeName: r.assigneeName,
+          blockedBy: r.blockedBy,
         });
       }
     }
@@ -585,6 +590,7 @@ export async function loadReleaseCheck(
           url: sprintTickets.url,
           issueTypeName: sprintTickets.issueTypeName,
           assigneeName: sprintTickets.assigneeName,
+          blockedBy: sprintTickets.blockedByJson,
         })
         .from(sprintTickets)
         .where(and(eq(sprintTickets.accountId, accountId), eq(sprintTickets.workspaceId, workspaceId), inArray(sprintTickets.ident, part)))
@@ -602,6 +608,7 @@ export async function loadReleaseCheck(
           checkedAt: r.fetchedAt,
           typeName: r.issueTypeName,
           assigneeName: r.assigneeName,
+          blockedBy: r.blockedBy,
         });
       }
     }
@@ -635,6 +642,9 @@ export async function loadReleaseCheck(
       typeName: pick((c) => c.typeName),
       assigneeName: pick((c) => c.assigneeName),
       readAt: okReads[0]?.fetchedAt ?? null,
+      // The tracker's own "is blocked by" links (the release graph's ticket → ticket edges): the
+      // freshest successful read that stored them. null = none stored, never "no links".
+      blockedBy: okReads.find((c) => c.blockedBy != null)?.blockedBy ?? null,
     };
   });
 

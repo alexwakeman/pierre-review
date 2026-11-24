@@ -258,6 +258,34 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
 > api v2.4.0-rc · web v1.8.2-rc
 > Release notes: <link to the GitHub pre-release>
 
+## The path to newer releases — the release graph (owner, 2026-11-24)
+
+Shared `release-graph.ts` `releaseGraph(check)`: ONE pure fold over the release check's result (no fetch,
+no clock, no AI). The SPA folds it on read; the backend folds the same for "Explain what's blocking".
+
+- **The shape.** At or below a repository's candidate everything can be released: a straight line. Above
+  it each repository is a LADDER — releasing a tag ships everything below it, so a newer tag needs what an
+  older one needs plus its own. The graph is the edges between ladders and work: tag → ticket (`not_done`,
+  `open_pr`), ticket → open PR, tag → tag in ANOTHER repository (a `split`: that point's needs join),
+  tag → "a new version tag" (a split whose other half is in no tag yet), and ticket → ticket from the
+  TRACKER's "is blocked by" links (`blockedBy`, read from `blocked_by_json` on the freshest successful
+  read). Tracker links are not the release rule, so a stop keeps them APART (`via`), but the plan counts
+  them: a ticket cannot really be finished before what it waits on.
+- **A stop** = a run of newer tags with the same needs, named by its highest tag (where the candidate moves
+  once they are done). `adds` = what it needs beyond the stop below it.
+- **The plan (`moves`).** Within one ladder the needs are nested, so the cheapest next stop is exact.
+  Across ladders (splits, shared tickets) the fewest tickets for the most releases is set cover, so the
+  plan is GREEDY: each move takes the next stop, in any ladder, with the fewest unfinished items, ties
+  broken by how many release points it unlocks. ≤ `RELEASE_PLAN_MOVES_MAX` (8).
+- **Per work item**: `holds` (the first point it holds back in each repository) and `unlocksAlone` (finish
+  only this, and what it waits on, and these become releasable — the highest per repository).
+- **Loops** of tracker links (A waits on B waits on A) are found (Tarjan) and marked `inCycle`; the plan
+  takes the loop as one move.
+- ⚠ **UNKNOWN IS NEVER ZERO.** A tag already ruled out lists NO reason for a ticket not read yet (the check
+  stops at the first certain reason), so a tag whose own tickets are still unread is `partial`: it never
+  folds into the stop below, nothing is promised from it upward, and the plan stops there. A tag still
+  `checking` ends the ladder (`checkingFrom`).
+
 ## Explain what's blocking (owner, 2026-11-23)
 
 An AGENTIC report on the Releases tab, for action: which in-flight work (tickets and pull requests, named)
