@@ -1,151 +1,122 @@
-import {
-  RELEASE_BLOCKERS_CAPS,
-  type ReleaseBlockersPrRef,
-  type ReleaseBlockersReport,
-  type ReleaseBlockersRepoNote,
-  type ReleaseBlockersStep,
-  type ReleaseBlockersTicketRef,
-} from '@pierre-review/shared';
-import { prKey, type ReleaseBlockersInput } from '../../releases/blockers-input.js';
+import { RELEASE_BLOCKERS_CAPS, RELEASE_BLOCKERS_ID_IN_TEXT, type ReleaseBlockersReport, type ReleaseBlockersRef, type ReleaseBlockersRepoNote, type ReleaseBlockersStep } from '@pierre-review/shared';
+import type { ReleaseBlockersInput } from '../../releases/blockers-input.js';
 
-// "EXPLAIN WHAT'S BLOCKING" — THE ANSWER, VALIDATED (release-blockers.test.ts). REFUSE RATHER THAN GUESS:
-// the report may cite ONLY tickets and pull requests that are in the input.
+// "EXPLAIN WHAT'S BLOCKING" — THE ANSWER, VALIDATED BY ID (release-blockers.test.ts). REFUSE RATHER THAN
+// GUESS, one point at a time — never the whole answer:
 //
-//   • JSON with a non-empty `headline` (else refused). A headline that names a ticket key or a `#n` that
-//     is not in the input, or is over its cap, REFUSES the whole answer (it is the line people act on).
-//   • A STEP is dropped (counted in `dropped`) when its text or `unlocks` names a key or `#n` not in the
-//     input, when a listed ticket / pull request is not in the input, or when a text is blank or over its
-//     cap — never cut, never repaired. Keys and pull requests named in its text join its links.
-//   • "repo #n" naming a releasable repository is checked as THAT pull request (or release point), not
-//     just its number. A GitHub Issues key ("acme/web#12") is matched whole, never read as a `#n`.
-//   • A REPO NOTE is dropped the same way, and when its repository is not a releasable one.
-//   • Control characters stripped, whitespace folded. At most RELEASE_BLOCKERS_CAPS.steps steps kept.
+//   • NOT JSON, or not the shape ({headline, steps[], repos[]}) → `not_json` / `shape`: the route retries
+//     ONCE. That is the ONLY retry.
+//   • A text (the headline, a step, a repository note) is DROPPED (counted in `dropped`) when it cites an id
+//     the input does not define, writes a bare ticket key or `#n` that is not in the input, is blank, or is
+//     over its cap — never cut, never repaired. A dropped headline is null; the steps and notes stay.
+//   • `{T3, P7}` is read as `{T3}, {P7}`. `refs` = exactly the ids the kept texts cite.
+//   • A repository note must name a repository whose ladder has stops (each named once).
+//   • Control characters stripped, whitespace folded. At most RELEASE_BLOCKERS_CAPS.steps / .repos kept.
+//   • Nothing kept at all → `empty` (the route stores nothing and says so; no retry).
 
 export type ReleaseBlockersAnswer =
-  | { ok: true; report: Pick<ReleaseBlockersReport, 'headline' | 'steps' | 'repos' | 'dropped'> }
-  | { ok: false; reason: 'not_json' | 'shape' | 'unknown_ref' | 'too_long' };
+  | { ok: true; report: Pick<ReleaseBlockersReport, 'headline' | 'steps' | 'repos' | 'refs' | 'dropped'> }
+  | { ok: false; reason: 'not_json' | 'shape' | 'empty'; dropped: number };
 
 const C = RELEASE_BLOCKERS_CAPS;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 /** A tracker key's shape (ABC-12). */
 const KEY = /\b[A-Z][A-Z0-9_]*-\d+\b/g;
-/** "repository #12" or a bare "#12". */
-const PR_IN_TEXT = /(?:([A-Za-z0-9_.-]+)\s+)?#(\d+)\b/g;
+/** A bare `#12`. */
+const NUMBER = /#(\d+)\b/g;
+/** `{T3, P7}` — a list of ids in one pair of braces. */
+const ID_LIST = /\{\s*([TPR]\d{1,4}(?:\s*,\s*[TPR]\d{1,4})+)\s*\}/g;
 
 const asRecord = (v: unknown): Record<string, unknown> | null =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-const clean = (v: unknown): string | null => (typeof v === 'string' ? v.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim() : null);
+const clean = (v: unknown): string | null =>
+  typeof v === 'string'
+    ? v
+        .replace(CONTROL, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(ID_LIST, (_m, list: string) => list.split(/\s*,\s*/).map((x) => `{${x}}`).join(', '))
+    : null;
 
-interface Refs {
-  tickets: ReleaseBlockersTicketRef[];
-  prs: ReleaseBlockersPrRef[];
-}
-
-/** The refs a text names, or null when it names one not in the input. */
-function refsIn(text: string, input: ReleaseBlockersInput): Refs | null {
-  const out: Refs = { tickets: [], prs: [] };
-  // GitHub Issues keys ("acme/web#12") are not ABC-12 shaped: find the input's own first and blank them,
-  // so their `#12` is not read as a pull request.
-  let rest = text;
-  for (const t of input.tickets.values()) {
-    if (!t.key.includes('#') || !rest.includes(t.key)) continue;
-    rest = rest.split(t.key).join(' ');
-    if (!out.tickets.includes(t)) out.tickets.push(t);
+/** The ids a text cites, or null when it cites one the input does not define or a bare unknown key / `#n`. */
+function citedIds(text: string, input: ReleaseBlockersInput): string[] | null {
+  const ids: string[] = [];
+  for (const m of text.matchAll(RELEASE_BLOCKERS_ID_IN_TEXT)) {
+    if (!input.refs.has(m[1]!)) return null;
+    if (!ids.includes(m[1]!)) ids.push(m[1]!);
   }
-  for (const m of rest.matchAll(KEY)) {
-    const t = input.tickets.get(m[0]);
-    if (t == null) return null;
-    if (!out.tickets.includes(t)) out.tickets.push(t);
-  }
-  for (const m of rest.matchAll(PR_IN_TEXT)) {
-    const n = Number(m[2]);
-    if (!input.numbers.has(n)) return null;
-    const repo = m[1];
-    const pr = repo != null ? input.prs.get(prKey(repo, n)) : undefined;
-    // "web #90" when only "api #90" is in the input: the number is known, the pull request is not.
-    if (pr == null && repo != null && input.repoNames.has(repo) && !input.releasePoints.has(prKey(repo, n))) return null;
-    if (pr != null && !out.prs.includes(pr)) out.prs.push(pr);
-  }
-  return out;
-}
-
-const merge = (a: Refs, b: Refs): Refs => ({
-  tickets: [...a.tickets, ...b.tickets.filter((t) => !a.tickets.includes(t))],
-  prs: [...a.prs, ...b.prs.filter((p) => !a.prs.includes(p))],
-});
-
-/** A step's listed tickets / pull requests, or null when one is not in the input. */
-function listedRefs(o: Record<string, unknown>, input: ReleaseBlockersInput): Refs | null {
-  const out: Refs = { tickets: [], prs: [] };
-  const tickets = o.tickets ?? [];
-  const prs = o.prs ?? [];
-  if (!Array.isArray(tickets) || !Array.isArray(prs)) return null;
-  for (const k of tickets) {
-    const t = typeof k === 'string' ? input.tickets.get(k.trim()) : undefined;
-    if (t == null) return null;
-    if (!out.tickets.includes(t)) out.tickets.push(t);
-  }
-  for (const p of prs) {
-    const m = typeof p === 'string' ? /^\s*(.+?)\s*#(\d+)\s*$/.exec(p) : null;
-    const pr = m != null ? input.prs.get(prKey(m[1]!, Number(m[2]))) : undefined;
-    if (pr == null) return null;
-    if (!out.prs.includes(pr)) out.prs.push(pr);
-  }
-  return out;
+  // Outside the braces: a key or a number must still be one the input gives. A GitHub Issues key
+  // ("acme/web#12") is matched whole first, so its `#12` is not read as a number.
+  let rest = text.replace(RELEASE_BLOCKERS_ID_IN_TEXT, ' ');
+  for (const k of input.keys) if (k.includes('#') && rest.includes(k)) rest = rest.split(k).join(' ');
+  for (const m of rest.matchAll(KEY)) if (!input.keys.has(m[0])) return null;
+  for (const m of rest.matchAll(NUMBER)) if (!input.numbers.has(Number(m[1]))) return null;
+  return ids;
 }
 
 /** Validate one answer against its input. Pure. */
 export function validateReleaseBlockers(raw: string, input: ReleaseBlockersInput): ReleaseBlockersAnswer {
   const a = raw.indexOf('{');
   const b = raw.lastIndexOf('}');
-  if (a < 0 || b <= a) return { ok: false, reason: 'not_json' };
+  if (a < 0 || b <= a) return { ok: false, reason: 'not_json', dropped: 0 };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw.slice(a, b + 1));
   } catch {
-    return { ok: false, reason: 'not_json' };
+    return { ok: false, reason: 'not_json', dropped: 0 };
   }
   const o = asRecord(parsed);
-  if (o == null) return { ok: false, reason: 'shape' };
-  const headline = clean(o.headline);
-  if (headline == null || headline === '') return { ok: false, reason: 'shape' };
-  if (headline.length > C.headline) return { ok: false, reason: 'too_long' };
-  if (refsIn(headline, input) == null) return { ok: false, reason: 'unknown_ref' };
-  if ((o.steps != null && !Array.isArray(o.steps)) || (o.repos != null && !Array.isArray(o.repos))) return { ok: false, reason: 'shape' };
-
-  let dropped = 0;
-  const steps: ReleaseBlockersStep[] = [];
-  for (const s of (o.steps as unknown[] | undefined) ?? []) {
-    const r = asRecord(s);
-    const text = clean(r?.do);
-    const unlocks = r?.unlocks == null ? null : clean(r.unlocks);
-    if (r == null || text == null || text === '' || text.length > C.step || (unlocks != null && unlocks.length > C.unlocks)) {
-      dropped += 1;
-      continue;
-    }
-    const inText = refsIn(`${text} ${unlocks ?? ''}`, input);
-    const listed = listedRefs(r, input);
-    if (inText == null || listed == null) {
-      dropped += 1;
-      continue;
-    }
-    const refs = merge(listed, inText);
-    if (steps.length >= C.steps) continue;
-    steps.push({ text, unlocks: unlocks === '' ? null : unlocks, tickets: refs.tickets.slice(0, C.refsPerStep), prs: refs.prs.slice(0, C.refsPerStep) });
+  if (o == null || (o.headline != null && typeof o.headline !== 'string') || (o.steps != null && !Array.isArray(o.steps)) || (o.repos != null && !Array.isArray(o.repos))) {
+    return { ok: false, reason: 'shape', dropped: 0 };
   }
 
+  let dropped = 0;
+  /** A kept text, or null (counted) when it must go. */
+  const keep = (v: unknown, cap: number): string | null => {
+    const text = clean(v);
+    if (text == null || text === '') {
+      if (v != null) dropped += 1;
+      return null;
+    }
+    if (text.length > cap || citedIds(text, input) == null) {
+      dropped += 1;
+      return null;
+    }
+    return text;
+  };
+
+  const headline = keep(o.headline, C.headline);
+  const steps: ReleaseBlockersStep[] = [];
+  for (const s of (o.steps as unknown[] | undefined) ?? []) {
+    // A step is a string; `{do: "…"}` (the old shape) is read too.
+    const v = typeof s === 'string' ? s : (asRecord(s)?.do ?? null);
+    if (v == null) {
+      dropped += 1;
+      continue;
+    }
+    const text = keep(v, C.step);
+    if (text != null && steps.length < C.steps) steps.push({ text });
+  }
   const repos: ReleaseBlockersRepoNote[] = [];
   for (const n of (o.repos as unknown[] | undefined) ?? []) {
     const r = asRecord(n);
     const repoName = clean(r?.repo);
-    const text = clean(r?.why);
-    if (repoName == null || !input.repoNames.has(repoName) || text == null || text === '' || text.length > C.repoNote || refsIn(text, input) == null) {
+    if (repoName == null || !input.blockedRepoNames.has(repoName) || repos.some((x) => x.repoName === repoName)) {
       dropped += 1;
       continue;
     }
-    if (repos.some((x) => x.repoName === repoName)) continue;
-    repos.push({ repoName, text });
+    const text = keep(r?.why, C.repoNote);
+    if (text != null && repos.length < C.repos) repos.push({ repoName, text });
   }
-  return { ok: true, report: { headline, steps, repos, dropped } };
+  if (headline == null && steps.length === 0 && repos.length === 0) return { ok: false, reason: 'empty', dropped };
+
+  // Exactly the ids the kept texts cite.
+  const refs: Record<string, ReleaseBlockersRef> = {};
+  const keptText = [headline ?? '', ...steps.map((s) => s.text), ...repos.map((r) => r.text)].join(' ');
+  for (const m of keptText.matchAll(RELEASE_BLOCKERS_ID_IN_TEXT)) {
+    const ref = input.refs.get(m[1]!);
+    if (ref != null) refs[m[1]!] = ref;
+  }
+  return { ok: true, report: { headline, steps, repos, refs, dropped } };
 }

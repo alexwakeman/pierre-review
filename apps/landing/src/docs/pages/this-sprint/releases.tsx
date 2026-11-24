@@ -171,13 +171,18 @@ export default function Page(): JSX.Element {
       <H2 id="whats-blocking">Explain what&rsquo;s blocking</H2>
       <p>
         With AI on, and a newer tag that can&rsquo;t be released, <Ui>Explain what&rsquo;s blocking</Ui> sits above the
-        ticket list. Press it and Claude (or Codex) reads the check on this tab and writes a short report: one line on
-        what holds back the newest release you could reach soon, the steps to take in order, each with what it unlocks
-        and links to its tickets and pull requests, and one line per repository on why its newer tags are blocked.
+        ticket list. Press it and Ensemble works out, from the check on this tab, which work unlocks which newer
+        release and the order to do it in. Claude (or Codex) then explains that plan in a short report: one line on
+        what holds back the newest release you could reach soon, the steps in order with what each unlocks, and one
+        line per repository on why its newer tags are blocked.
+      </p>
+      <p>
+        The tickets and pull requests in the report are links. A ticket opens its story in Ensemble, and the small
+        arrow beside it opens your tracker. A pull request opens its tab, or GitHub when Ensemble has not stored it.
       </p>
       <p>
         It reads nothing else and changes nothing. It may name only tickets and pull requests that are in the check: a
-        step that names anything else is left out, and the report says so. The report stays until you press{' '}
+        point that names anything else is left out, and the report says so. The report stays until you press{' '}
         <Ui>Explain again</Ui>. It reads <Ui>Out of date</Ui> when the check has changed since it was written. It runs
         only when you press the button, on your own AI subscription or key.
       </p>

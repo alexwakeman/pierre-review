@@ -20,6 +20,13 @@ no internals.
   of its newer tags, with what each one still needs. Tickets that block a newer tag say what they
   hold back or what finishing them unlocks.
 
+### Changed
+
+- This Sprint → Releases: "Explain what's blocking" is faster. Ensemble now works out the order to do things
+  in, and the AI only explains it. Tickets and pull requests in the report are links in the text: a ticket
+  opens its story in Ensemble, a pull request opens its tab. Press "Explain again" once to replace a report
+  written before this change.
+
 ## [1.0.79] - 2026-11-24
 
 ### Fixed
