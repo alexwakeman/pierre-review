@@ -74,7 +74,7 @@ import { pairConsolidationRecord, pairRoleOf } from '../../review-loop/branch-re
 import { cannotMeetOf, nextAfterReview, notCheckedFindingsOf, onlyCannotMeetLeft, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
 import { markLoopReviewOnPr } from '../../review-loop/review-on-pr.js';
 import { loopBodySection } from './pr-body.js';
-import { effectiveRepoTeamPolicy } from '../../../db/team-policy.js';
+import { effectiveMultiRepoTeamPolicy } from '../../../db/team-policy.js';
 
 export const LOOP_FIX_FEATURE = 'story_loop_fix';
 
@@ -228,13 +228,20 @@ export async function maybeStartLoop(ctx: AgentContext, input: { accountId: numb
     if (!b || !b.autoPush || b.hotfix === true || b.loopClaimedAt != null || b.autoPushClaimedAt != null || b.status !== 'ready') return 'skipped';
     const targets = (await loopTargets(ctx, accountId, buildId)).filter(isLive);
     if (targets.length === 0) return 'skipped';
-    // THE TEAM POLICY (docs/TEAM-POLICY.md): `"auto_push": false` on ANY target's repository means
-    // nothing is pushed by itself — the loop does not start, and the reader pushes by hand as usual.
-    for (const t of targets) {
-      if (!policyAllowsAutomation(await effectiveRepoTeamPolicy(accountId, t.repoId, ctx), 'auto_push')) {
-        seams.session.notice(buildId, `${t.fullName}’s team policy turns off automatic pushes. Push by hand when you are ready.`);
-        return 'skipped';
-      }
+    // THE TEAM POLICY (docs/TEAM-POLICY.md § Different rules): the build pushes to every target repo at
+    // once, so ONE policy decides — the targets' policy when they agree; when they differ, the workspace's
+    // chosen repo's policy (it overrides the repos' own files), else the strictest rule from each. When it
+    // turns automatic pushes off the loop does not start, and the reader pushes by hand as usual.
+    const decided = await effectiveMultiRepoTeamPolicy(accountId, b.workspaceId, [...new Set(targets.map((t) => t.repoId))], ctx);
+    if (!policyAllowsAutomation(decided.policy, 'auto_push')) {
+      const why =
+        decided.source === 'chosen'
+          ? 'The team policy this workspace uses when repositories’ rules differ'
+          : decided.source === 'strictest'
+            ? 'The repositories’ team policies differ, and the strictest rule'
+            : 'The repository’s team policy';
+      seams.session.notice(buildId, `${why} turns off automatic pushes. Push by hand when you are ready.`);
+      return 'skipped';
     }
     if (running.has(buildId)) return 'skipped';
     if (!(await claimLoopStart(ctx, accountId, buildId, seams.now()))) return 'skipped';

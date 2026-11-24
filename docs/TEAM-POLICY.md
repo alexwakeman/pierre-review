@@ -87,13 +87,23 @@ There is no conflict to resolve: a policy governs only its own repository's PRs,
 
 - Multi-PR work reads each PR's own policy: the ticket review's auto-post calls
   `readWorkspaceAutoPostForPr` per member PR; dependency automation and auto fix are per PR.
-- The one multi-repo writer, Implement story's loop, takes the STRICTEST: any target repo with
-  `auto_push: false` stops the loop (`maybeStartLoop`).
+- WORK THAT SPANS REPOSITORIES is the one place policies can clash (today: Implement story's loop,
+  `maybeStartLoop`). ONE resolver, `effectiveMultiRepoTeamPolicy` → shared `resolvePolicyClash`: the
+  targets' policy when they agree (`sameTeamPolicyRules`, the note ignored); when they differ, the
+  WORKSPACE'S CHOICE (`workspace_policy_choices`, migration 0221; workspaces are teams) — the chosen
+  repo's policy OVERRIDES the targets' own files, and may be looser than one of them; with no choice,
+  or a chosen repo whose file is now invalid, the strictest rule from each (`strictestTeamPolicy`).
+  Settings → Team policy → "When repositories' rules differ" (shown from two valid policies); the
+  write accepts only a member repo of that workspace (`setWorkspaceClashChoice`; named composite FKs;
+  `verify:isolation`). The loop's notice says which decided. A future multi-repo writer uses the same
+  resolver.
 - Copies converge at their next sync of the repo (the snapshot reads the file each walk); until then
   two copies may hold different commits of it (`commit_oid` says which).
 - No organisation-wide file yet (§ Not yet): the same rules everywhere means the same file in each repo.
 
 ## In the app
+
+- `PUT /api/team-policy/clash?workspace=<id>` `{ repoId | null }` saves the workspace's choice.
 
 - `GET /api/team-policy?workspace=<id>` → `TeamPolicyResponse` (docs/API.md § Team policy). DB only.
 - Settings → **Team policy** (`TeamPolicySection`, a workspace tab): per repo the rules in words

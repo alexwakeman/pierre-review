@@ -1,11 +1,11 @@
 import { TEAM_POLICY_PATH, type RepoTeamPolicy } from '@pierre-review/shared';
 import { api } from '../../api/client.js';
 import { useLicenceAction, useLicenceStatus } from '../../hooks/useLicence.js';
-import { useTeamPolicy } from '../../hooks/useTeamPolicy.js';
+import { useSetTeamPolicyClash, useTeamPolicy } from '../../hooks/useTeamPolicy.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/index.js';
-import { SectionShell } from './ui.js';
+import { RadioInput, SectionShell } from './ui.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 
 // SETTINGS → TEAM POLICY (docs/TEAM-POLICY.md): the rules a team commits to each repository, as this
@@ -41,8 +41,8 @@ function Info(): JSX.Element {
   return (
     <InfoButton title="Team policy">
       <p>
-        Commit a file named <code>{TEAM_POLICY_PATH}</code> to a repository’s default branch. Every copy of Ensemble
-        that syncs the repository reads it and applies it to that repository’s pull requests.
+        Commit a file named <code>{TEAM_POLICY_PATH}</code> to a repository’s default branch. Every copy of Ensemble that syncs the
+        repository reads it and applies it to that repository’s pull requests.
       </p>
       <p className="mt-2">A policy only switches things off. A missing rule leaves each person’s own setting.</p>
       <pre className="mt-2 overflow-x-auto rounded-ui bg-ui-raise p-2 font-mono text-meta">{EXAMPLE}</pre>
@@ -54,8 +54,14 @@ function Info(): JSX.Element {
         ))}
       </ul>
       <p className="mt-2">
-        A file with a mistake is not applied at all, and this page lists the problems. Team policies need a licence key
-        or the 30-day evaluation on each copy of Ensemble.
+        Each pull request follows its own repository’s policy. Work that touches several repositories at once, such
+        as Implement story’s push, needs one: when the repositories agree it is theirs; when they differ it is the
+        one you choose under “When repositories’ rules differ”, which overrides the others there, or by default the
+        strictest rule from each.
+      </p>
+      <p className="mt-2">
+        A file with a mistake is not applied at all, and this page lists the problems. Team policies need a licence key or the 30-day
+        evaluation on each copy of Ensemble.
       </p>
     </InfoButton>
   );
@@ -90,6 +96,54 @@ function RepoPolicy({ r }: { r: RepoTeamPolicy }): JSX.Element {
       )}
       {r.commitOid != null && <p className="mt-1 text-meta text-ui-mute">Read at commit {r.commitOid.slice(0, 7)}.</p>}
     </li>
+  );
+}
+
+/**
+ * WHEN REPOSITORIES' RULES DIFFER: the workspace (a team) picks the policy for work that spans
+ * repositories — Implement story's push today. It overrides the repositories' own files in a clash; the
+ * default is the strictest rule from each. Shown once two or more repositories have a valid policy.
+ */
+function ClashChoice({
+  workspaceId,
+  repos,
+  clash,
+}: {
+  workspaceId: number;
+  repos: RepoTeamPolicy[];
+  clash: { repoId: number | null; repo: string | null; usable: boolean };
+}): JSX.Element {
+  const save = useSetTeamPolicyClash(workspaceId);
+  const options: { repoId: number | null; label: string }[] = [
+    { repoId: null, label: 'The strictest rule from each repository' },
+    ...repos.map((r) => ({ repoId: r.repoId, label: `${r.repo}’s policy` })),
+  ];
+  return (
+    <fieldset className="space-y-1.5" data-testid="team-policy-clash">
+      <legend className="mb-1 text-body font-semibold text-ui-ink">When repositories’ rules differ</legend>
+      <p className="text-meta text-ui-mute">For work that touches several repositories at once. This choice wins there.</p>
+      {options.map((o) => (
+        <label key={o.repoId ?? 'strictest'} className="flex items-center gap-2 text-body">
+          <RadioInput
+            name={`policy-clash-${workspaceId}`}
+            checked={clash.repoId === o.repoId}
+            disabled={save.isPending}
+            onChange={() => save.mutate(o.repoId)}
+          />
+          {o.label}
+        </label>
+      ))}
+      {!clash.usable && clash.repoId != null && (
+        <p className="text-body text-ui-danger">
+          {clash.repo ?? 'The chosen repository'} has no valid policy now, so the strictest rule applies.
+        </p>
+      )}
+      {save.isError && (
+        <p role="alert" className="text-body text-ui-danger">
+          Ensemble could not save the choice. Try again.
+        </p>
+      )}
+    </fieldset>
   );
 }
 
@@ -133,6 +187,9 @@ export function TeamPolicySection(): JSX.Element {
             <RepoPolicy key={r.repoId} r={r} />
           ))}
         </ul>
+      )}
+      {withFile.filter((r) => r.state === 'ok').length >= 2 && (
+        <ClashChoice workspaceId={workspaceId} repos={withFile.filter((r) => r.state === 'ok')} clash={data.clash} />
       )}
       {withFile.length > 0 && without > 0 && (
         <p className="text-meta text-ui-mute">

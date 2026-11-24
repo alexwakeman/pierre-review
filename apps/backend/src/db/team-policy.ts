@@ -11,7 +11,14 @@
 // this copy has no licence key and no running evaluation (an organisation feature). Callers never
 // read the table or the licence themselves.
 import { and, eq, inArray } from 'drizzle-orm';
-import { parseTeamPolicy, policyAllowsAutomation, TEAM_POLICY_MAX_BYTES, type TeamPolicy } from '@pierre-review/shared';
+import {
+  parseTeamPolicy,
+  policyAllowsAutomation,
+  resolvePolicyClash,
+  TEAM_POLICY_MAX_BYTES,
+  type PolicyClashSource,
+  type TeamPolicy,
+} from '@pierre-review/shared';
 import { db, schema } from './client.js';
 import { orgFeaturesUnlockedFor } from '../licence/status.js';
 import type { GateSource } from './external-repos.js';
@@ -176,4 +183,81 @@ export async function dependencyActionAllowedByPolicy(accountId: number, prId: n
       .execute()
   )[0];
   return row != null && trusted.includes(row.login.toLowerCase());
+}
+
+// ── When repositories' policies differ: the workspace's choice ──────────────────────────────────
+
+/** The repo whose policy this workspace applies when policies clash; null = the strictest rule. */
+export async function workspaceClashChoice(accountId: number, workspaceId: number, on?: GateSource): Promise<number | null> {
+  const src = sourceOf(on);
+  const wpc = src?.t.workspacePolicyChoices;
+  if (src == null || wpc == null) return null;
+  const rows = (await src.d
+    .select({ repoId: wpc.clashRepoId })
+    .from(wpc)
+    .where(and(eq(wpc.accountId, accountId), eq(wpc.workspaceId, workspaceId)))
+    .limit(1)
+    .execute()) as Array<{ repoId: number }>;
+  return rows[0]?.repoId ?? null;
+}
+
+/**
+ * Set (or clear, `repoId: null`) the workspace's choice. Refused (false) unless the workspace is the
+ * account's and the repo is one of ITS members: a repo id arrives in a request body.
+ */
+export async function setWorkspaceClashChoice(
+  accountId: number,
+  workspaceId: number,
+  repoId: number | null,
+  nowMs = Date.now(),
+): Promise<boolean> {
+  const { workspaces, workspaceRepos, workspacePolicyChoices: wpc } = schema;
+  const ws = await db
+    .select({ id: workspaces.id })
+    .from(workspaces)
+    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.accountId, accountId)))
+    .limit(1)
+    .execute();
+  if (ws.length === 0) return false;
+  if (repoId == null) {
+    await db.delete(wpc).where(and(eq(wpc.accountId, accountId), eq(wpc.workspaceId, workspaceId))).execute();
+    return true;
+  }
+  const member = await db
+    .select({ repoId: workspaceRepos.repoId })
+    .from(workspaceRepos)
+    .where(and(eq(workspaceRepos.accountId, accountId), eq(workspaceRepos.workspaceId, workspaceId), eq(workspaceRepos.repoId, repoId)))
+    .limit(1)
+    .execute();
+  if (member.length === 0) return false;
+  await db
+    .insert(wpc)
+    .values({ accountId, workspaceId, clashRepoId: repoId, updatedAt: new Date(nowMs) })
+    .onConflictDoUpdate({ target: [wpc.accountId, wpc.workspaceId], set: { clashRepoId: repoId, updatedAt: new Date(nowMs) } })
+    .execute();
+  return true;
+}
+
+/**
+ * THE POLICY FOR WORK THAT SPANS REPOSITORIES (shared `resolvePolicyClash`): the involved repos'
+ * policies when they agree; when they differ, the workspace's chosen repo's policy (it overrides the
+ * repos' own files), else the strictest rule from each. Null policy without a licence key or evaluation.
+ */
+export async function effectiveMultiRepoTeamPolicy(
+  accountId: number,
+  workspaceId: number,
+  repoIds: readonly number[],
+  on?: GateSource,
+  nowMs = Date.now(),
+): Promise<{ policy: TeamPolicy | null; source: PolicyClashSource; chosenRepoId: number | null }> {
+  const none = { policy: null, source: 'agreed' as const, chosenRepoId: null };
+  const src = sourceOf(on);
+  if (src == null || repoIds.length === 0) return none;
+  const involved = await Promise.all(repoIds.map((id) => storedPolicyOf(src, accountId, id)));
+  if (involved.every((p) => p == null)) return none;
+  if (!(await orgFeaturesUnlockedFor(accountId, nowMs))) return none;
+  const chosenRepoId = await workspaceClashChoice(accountId, workspaceId, on);
+  const chosen = chosenRepoId == null ? null : await storedPolicyOf(src, accountId, chosenRepoId);
+  const r = resolvePolicyClash(involved, chosen);
+  return { ...r, chosenRepoId: r.source === 'chosen' ? chosenRepoId : null };
 }

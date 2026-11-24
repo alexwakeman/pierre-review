@@ -152,6 +152,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.trackerTicketStatus).where(eq(schema.trackerTicketStatus.accountId, accountId)).execute();
     // Releasable repositories (migration 0199).
     await tx.delete(schema.workspaceReleaseRepos).where(eq(schema.workspaceReleaseRepos.accountId, accountId)).execute();
+    // The workspace's choice when team policies differ (migration 0221).
+    await tx.delete(schema.workspacePolicyChoices).where(eq(schema.workspacePolicyChoices.accountId, accountId)).execute();
     // Team policies read from each repo (migration 0220).
     await tx.delete(schema.repoTeamPolicies).where(eq(schema.repoTeamPolicies.accountId, accountId)).execute();
     // "Explain what's blocking" reports (migration 0217).
@@ -596,6 +598,8 @@ export function accountScopedTables(): {
     { name: 'releaseTicketComments', col: schema.releaseTicketComments.accountId, table: schema.releaseTicketComments },
     // Releasable repositories (migration 0199).
     { name: 'workspaceReleaseRepos', col: schema.workspaceReleaseRepos.accountId, table: schema.workspaceReleaseRepos },
+    // The workspace's choice when team policies differ (migration 0221).
+    { name: 'workspacePolicyChoices', col: schema.workspacePolicyChoices.accountId, table: schema.workspacePolicyChoices },
     // Team policies read from each repo (migration 0220).
     { name: 'repoTeamPolicies', col: schema.repoTeamPolicies.accountId, table: schema.repoTeamPolicies },
     // "Explain what's blocking" reports (migration 0217).

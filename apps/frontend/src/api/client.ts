@@ -374,6 +374,7 @@ import type {
   LicenceKeyProblem,
   LicenceKeyRequest,
   LicenceStatusResponse,
+  TeamPolicyClashChoiceBody,
   TeamPolicyResponse,
 } from '@pierre-review/shared';
 import { aiFixSessionPath, buildPlanPath, sandboxSessionPath, storyBuildPath } from '@pierre-review/shared';
@@ -1155,6 +1156,11 @@ export const api = {
   snoozeLicenceReminder: () => fetch('/api/licence/later', jsonBody('POST')).then((r) => handle<LicenceStatusResponse>(r)),
   // The team policy (docs/TEAM-POLICY.md): DB only; each repo's `.ensemble/policy.json` as sync read it.
   teamPolicy: (workspaceId: number) => get<TeamPolicyResponse>(`/api/team-policy?${workspaceParam(workspaceId)}`),
+  // When repositories' policies differ: the repo whose policy the workspace applies (null = the strictest).
+  setTeamPolicyClash: (workspaceId: number, repoId: number | null) =>
+    fetch(`/api/team-policy/clash?${workspaceParam(workspaceId)}`, jsonBody('PUT', { repoId } satisfies TeamPolicyClashChoiceBody)).then((r) =>
+      handle<TeamPolicyResponse>(r),
+    ),
   // THE AI PROVIDER CHOICE (Settings → AI; backend api/routes/ai-provider.ts). 409 while
   // LIMN_AI_PROVIDER is set (the environment decides). The read side is `/api/me` (`ai.provider`,
   // `ai.providerSetting`): invalidate `['me']` after a write.

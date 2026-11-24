@@ -1035,6 +1035,10 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
   `refused` row holds no name, so a later press is a new claim on a new row.
 - **`release_ticket_comments`** — one row per `(release, ticket_key)`: `tracker_kind`, `state`
   (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
+- **`workspace_policy_choices`** (migration `0221`; docs/TEAM-POLICY.md § Different rules) — one row per
+  `(account_id, workspace_id)`: `clash_repo_id`, the repo whose policy wins when the repos a piece of work
+  spans have different policies. No row = the strictest rule. Composite FKs to `workspaces` and `repos`
+  (cascade). ONE writer `setWorkspaceClashChoice` (member repos only). Erased and exported.
 - **`repo_team_policies`** (migration `0220`; docs/TEAM-POLICY.md) — one row per `(account_id, repo_id)`:
   the repo's `.ensemble/policy.json` as the default-branch snapshot read it — `policy_json` (shared
   `TeamPolicy`, null when invalid), `errors_json`, `commit_oid`, `read_at`. Composite FK to `repos` (cascade).

@@ -18,7 +18,9 @@ no internals.
 - Settings → Team policy: rules your team commits to a repository, in `.ensemble/policy.json`, apply to its
   pull requests on every copy of Ensemble. They only switch things off: auto review, automatic posting, AI
   approvals, auto fix, automatic pushes, resolving threads and dependency automation, or which bots dependency
-  automation trusts. Team policy needs a licence key or the 30-day evaluation.
+  automation trusts. Team policy needs a licence key or the 30-day evaluation. When work spans repositories
+  whose rules differ, such as Implement story's push, the workspace chooses which repository's policy applies;
+  by default it is the strictest rule from each.
 - Settings → Licence: paste a licence key; Ensemble checks it on your computer and never contacts us.
 - Licence activation at ensemble.ac/licence: swap the licence key from your purchase email for an Ensemble
   licence key.

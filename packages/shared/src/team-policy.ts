@@ -216,4 +216,73 @@ export interface TeamPolicyResponse {
   /** Why not, when not: no key or an invalid one, and the evaluation is not running. */
   notAppliedReason: 'no_licence' | null;
   repos: RepoTeamPolicy[];
+  /**
+   * WHEN REPOSITORIES' RULES DIFFER (work that spans repositories): the workspace's choice. `repoId`
+   * null = the strictest rule from each. `usable` is false when the chosen repo no longer has a valid
+   * policy in this workspace (the strictest rule applies until it does).
+   */
+  clash: { repoId: number | null; repo: string | null; usable: boolean };
+}
+
+// ── When repositories' rules differ (a workspace's choice) ─────────────────────────────────────
+
+/** Two policies set the same rules (the note is ignored). Null = no policy. */
+export function sameTeamPolicyRules(a: TeamPolicy | null, b: TeamPolicy | null): boolean {
+  const rules = (p: TeamPolicy | null) =>
+    p == null
+      ? 'none'
+      : JSON.stringify({
+          automation: TEAM_POLICY_AUTOMATIONS.map((k) => p.automation[k] === false),
+          approve: p.ai.approve === false,
+          bots: p.dependencies.trustedBots == null ? null : [...p.dependencies.trustedBots].sort(),
+        });
+  return rules(a) === rules(b);
+}
+
+/**
+ * The strictest combination: an automation is off if ANY policy switches it off, an AI approval is
+ * held if any forbids it, and the trusted bots are the bots EVERY listing policy trusts. Pure.
+ */
+export function strictestTeamPolicy(policies: readonly TeamPolicy[]): TeamPolicy {
+  const out: TeamPolicy = { version: 1, automation: {}, ai: {}, dependencies: {} };
+  for (const p of policies) {
+    for (const k of TEAM_POLICY_AUTOMATIONS) if (p.automation[k] === false) out.automation[k] = false;
+    if (p.ai.approve === false) out.ai.approve = false;
+    const bots = p.dependencies.trustedBots;
+    if (bots != null) {
+      const prev = out.dependencies.trustedBots;
+      out.dependencies.trustedBots = prev == null ? [...bots] : prev.filter((b) => bots.includes(b));
+    }
+  }
+  return out;
+}
+
+/** Where a multi-repo action's policy came from (for the line that explains a refusal). */
+export type PolicyClashSource =
+  /** Every repository involved sets the same rules (or only one is involved). */
+  | 'agreed'
+  /** They differ and the workspace chose a repository's policy. */
+  | 'chosen'
+  /** They differ and the workspace has no (usable) choice: the strictest rule from each. */
+  | 'strictest';
+
+/**
+ * THE POLICY FOR WORK THAT SPANS REPOSITORIES (Implement story's push today). Each involved repo's
+ * policy (null = none) is compared; when they agree that is the policy. When they differ, the
+ * WORKSPACE'S CHOICE wins — it overrides the repositories' own files — and with no choice (or a
+ * chosen repo whose policy is not usable) the strictest combination applies. Pure.
+ */
+export function resolvePolicyClash(
+  involved: readonly (TeamPolicy | null)[],
+  chosen: TeamPolicy | null,
+): { policy: TeamPolicy | null; source: PolicyClashSource } {
+  const first = involved[0] ?? null;
+  if (involved.every((p) => sameTeamPolicyRules(p, first))) return { policy: first, source: 'agreed' };
+  if (chosen != null) return { policy: chosen, source: 'chosen' };
+  return { policy: strictestTeamPolicy(involved.filter((p): p is TeamPolicy => p != null)), source: 'strictest' };
+}
+
+/** PUT /api/team-policy/clash?workspace=<id>. `repoId: null` = the strictest rule from each. */
+export interface TeamPolicyClashChoiceBody {
+  repoId: number | null;
 }

@@ -2533,6 +2533,21 @@ check(
   );
 }
 
+// ── TEAM POLICY: THE WORKSPACE'S CHOICE WHEN POLICIES DIFFER (db/team-policy.ts) ──────────
+// PUT /api/team-policy/clash carries a repo id in its BODY: another tenant's repo, or another tenant's
+// workspace, must be refused. Non-vacuous: A choosing A's own repo in A's workspace succeeds.
+{
+  const tp = await import('../src/db/team-policy.js');
+  const wsA = await q.resolveWorkspaceScope(1, null);
+  const wsB = await q.resolveWorkspaceScope(2, null);
+  check('setWorkspaceClashChoice(A, A’s workspace, A’s repo) is allowed', (await tp.setWorkspaceClashChoice(1, wsA.workspaceId, A.repoId)) === true);
+  check('setWorkspaceClashChoice(A, A’s workspace, B’s repo) refuses (IDOR blocked)', (await tp.setWorkspaceClashChoice(1, wsA.workspaceId, B.repoId)) === false);
+  check('setWorkspaceClashChoice(B, A’s workspace, A’s repo) refuses (IDOR blocked)', (await tp.setWorkspaceClashChoice(2, wsA.workspaceId, A.repoId)) === false);
+  check('workspaceClashChoice(B, A’s workspace) reads nothing', (await tp.workspaceClashChoice(2, wsA.workspaceId)) === null);
+  check('workspaceClashChoice(B, B’s workspace) is not A’s choice', (await tp.workspaceClashChoice(2, wsB.workspaceId)) !== A.repoId);
+  await tp.setWorkspaceClashChoice(1, wsA.workspaceId, null);
+}
+
 // ── DEPENDENCY AUTO-MERGE (merge/dependency-policy.ts) ──────────────────────────
 // The setting is id-addressed by a PATH param, and "Merge or arm all" takes PR ids in a BODY:
 // both must refuse another tenant's ids. Non-vacuous: A's workspace and A's PR really exist.

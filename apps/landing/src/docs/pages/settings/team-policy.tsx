@@ -107,8 +107,10 @@ export default function Page(): JSX.Element {
           pull request&rsquo;s own rules.
         </li>
         <li>
-          Implement story pushes to several repositories at once, so it follows the strictest rule. If any of them
-          turns off automatic pushes, nothing is pushed automatically.
+          Implement story pushes to several repositories at once, so one policy has to decide. When the repositories
+          agree, theirs applies. When they differ, your workspace decides: under <Ui>When repositories&rsquo; rules
+          differ</Ui> in <Ui>Settings → Team policy</Ui>, choose one repository&rsquo;s policy, which then overrides
+          the others for that work, or leave the default, the strictest rule from each.
         </li>
         <li>
           There is no rule for a whole GitHub organisation yet. To apply the same rules everywhere, commit the same

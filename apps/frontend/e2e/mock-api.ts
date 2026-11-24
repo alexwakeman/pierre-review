@@ -2262,6 +2262,7 @@ const TEAM_POLICY: TeamPolicyResponse = {
       readAt: '2026-11-24T10:00:00.000Z',
     },
   ],
+  clash: { repoId: null, repo: null, usable: true },
 };
 // Settings → AI → Disk space (GET /api/storage/clones): two repositories cloned, no checkouts left.
 const CLONE_STORAGE: CloneStorageResponse = {

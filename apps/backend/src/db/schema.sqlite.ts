@@ -6418,3 +6418,33 @@ export const repoTeamPolicies = sqliteTable(
     }).onDelete('cascade'),
   }),
 );
+
+// WHEN REPOSITORIES' TEAM POLICIES DIFFER (migration 0221; docs/TEAM-POLICY.md § Different rules). ONE row
+// per (account, workspace): the repo whose policy the workspace applies to work that spans repositories
+// when their policies clash. No row = the strictest rule from each. Both ids are guarded by named
+// composite FKs (the repo id arrives in a request BODY); deleting the repo or the workspace drops the row.
+export const workspacePolicyChoices = sqliteTable(
+  'workspace_policy_choices',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    clashRepoId: integer('clash_repo_id').notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('workspace_policy_choices_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_policy_choices_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'workspace_policy_choices_repo_account_fk',
+      columns: [t.clashRepoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);

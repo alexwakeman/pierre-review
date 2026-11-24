@@ -776,5 +776,6 @@ docs/TEAM-POLICY.md. DB only (sync read each repo's `.ensemble/policy.json`), so
 
 | Route | What |
 |---|---|
-| `GET /api/team-policy?workspace=<id>` | `TeamPolicyResponse { workspaceId, applied, notAppliedReason, repos[] }`: every member repo with `state` (`none` · `invalid` · `ok`), the parsed `policy`, its `rules` in words, the parser's `errors`, the `commitOid` and `readAt`. `applied` = this copy holds a valid licence key or a running evaluation |
+| `PUT /api/team-policy/clash?workspace=<id>` `{ repoId \| null }` | the workspace's choice for when repositories' policies differ (null = the strictest rule from each) → the new `TeamPolicyResponse`; `400 not_a_member` when the repo is not in that workspace |
+| `GET /api/team-policy?workspace=<id>` | `TeamPolicyResponse { workspaceId, applied, notAppliedReason, repos[], clash }`: every member repo with `state` (`none` · `invalid` · `ok`), the parsed `policy`, its `rules` in words, the parser's `errors`, the `commitOid` and `readAt`. `applied` = this copy holds a valid licence key or a running evaluation; `clash { repoId, repo, usable }` = the workspace's choice |
 
