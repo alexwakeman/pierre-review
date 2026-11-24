@@ -94,7 +94,7 @@ export default function Page(): JSX.Element {
           {
             _key: 'reply',
             what: "A reply on one of your Ensemble's posted findings",
-            then: 'A short replies pass after 5 quiet minutes, at most 5 a day per pull request.',
+            then: 'A short replies pass after 2 quiet minutes, at most 5 a day per pull request.',
           },
           {
             _key: 'comment',

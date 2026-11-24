@@ -106,7 +106,7 @@ Claims are **on by default**.
 |---|---|
 | A person opens a PR (after auto review was switched on) | Reviews it on the next one-minute tick. |
 | New commits | Reviews at once if nothing ran in the last 5 minutes; otherwise waits for 5 quiet minutes, never more than 20 minutes after the first push. A run in progress is never cancelled. |
-| A reply on one of your Ensemble's posted findings | A short "replies pass" (§ 7), after 5 quiet minutes. At most 5 a day per PR. Also on a new commit a teammate's claim holds, so a reply after a push is not left waiting. |
+| A reply on one of your Ensemble's posted findings | A short "replies pass" (§ 7), after 2 quiet minutes. At most 5 a day per PR. Also on a new commit a teammate's claim holds, so a reply after a push is not left waiting. |
 | Another new comment in an unresolved thread, by a person or a review bot | A light "Check threads" pass. At most 30 a day per workspace. |
 | A thread is resolved, CI finishes, a deploy or coverage bot comments, your own Ensemble posts | **Nothing.** Resolving adds no comment, so it starts nothing. |
 | The author's own Ensemble reviewed their PR, and no teammate's Ensemble has reviewed that commit | Reviews it **first**, ahead of other automatic reviews (§ 4, "A teammate's verdict"). |
@@ -694,7 +694,7 @@ open.
 ## 7. Replies and pushback
 
 When the author answers one of your Ensemble's findings, your Ensemble judges the reply without waiting for a
-full review: the **replies pass**. It starts after 5 quiet minutes (automatic, at most 5 a day per
+full review: the **replies pass**. It starts after 2 quiet minutes (automatic, at most 5 a day per
 PR, within the spend budget); there is no button for it on the AI Review tab. It is cheap (a smaller model, a hard
 cost cap) and never runs while a full review is running.
 

@@ -99,7 +99,7 @@ export default function Page(): JSX.Element {
       <H2 id="when-it-runs-by-itself">When it runs by itself</H2>
       <p>
         With auto review on for the workspace, a new comment by a person or a review bot in an open thread starts a
-        check once the pull request has been quiet for 5 minutes. A new commit starts a full review instead. Automatic
+        check once the pull request has been quiet for 2 minutes. A new commit starts a full review instead. Automatic
         checks are limited to 30 a day per workspace and ask your spend budget first; checks you start do not count.
       </p>
 
