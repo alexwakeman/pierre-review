@@ -26,7 +26,7 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [FRONTEND](docs/FRONTEND.md) | stores, tabs/overlays, FilterBar scoping, timeline internals, PrDetail, This Sprint |
 | [MERGE-CI-TRUNK](docs/MERGE-CI-TRUNK.md) | merge verdict/queue, auto-merge runner, the in-app conflict resolver, CI logs, trunk status |
 | [TEAM-REVIEW](docs/TEAM-REVIEW.md) | ANY multi-user behaviour (claims, author vs reviewer, verdicts, threads, pushback) — the plain-English design; update it in the same commit |
-| [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history |
+| [CLAUDE-REVIEW](docs/CLAUDE-REVIEW.md) · [CODEX-PLAN](docs/CODEX-PLAN.md) · [REVIEW-TRIGGERS](docs/REVIEW-TRIGGERS.md) | Claude Review, ticket/CI reviews, diagrams, AI Fix, auto-posting, sprint briefs/paths, the Codex provider · its build history · every automatic start, one table |
 | [STORY-BUILD](docs/STORY-BUILD.md) · [SANDBOX](docs/SANDBOX.md) | Implement story (flow, Fill gaps, Push) · its sandbox (and AI Fix's): setup, proxy, drivers, services, threats |
 | [STORY-CHAT](docs/STORY-CHAT.md) | "Ask about this story": read-only warm agent, reaper |
 | [BOTTLENECKS](docs/BOTTLENECKS.md) | the court ledger behind Reports → Chronology, its budgets and pointers |

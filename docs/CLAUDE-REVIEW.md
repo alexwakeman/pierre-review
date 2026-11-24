@@ -3066,6 +3066,8 @@ and Claude assesses EACH ON ITS OWN**; the screen renders one section per ticket
 
 ## Auto review (per workspace)
 
+Every automatic start across the review features, in one table: [REVIEW-TRIGGERS](REVIEW-TRIGGERS.md).
+
 Settings → Workspace → **Auto Claude review** (shown wherever `MeResponse.ai.enabled` is; **OFF until switched on**, because it spends the user's own Claude in the background). When a
 workspace switches it on, Claude reviews each **human-authored, non-draft PR OPENED at
 or after that moment** — once per HEAD, plus once per burst of new review comments (see re-review below) — with the same model (`DEFAULT_CLAUDE_REVIEW_MODEL`) and
@@ -3091,7 +3093,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   2. **WAITING** until `autoReviewDue` (`auto.ts`, pure) says go. A FIRST review: at once. A
      MOVED HEAD: at once ("on receipt", the next tick) when no run is in flight and none started or
      finished in the 5 min before this burst's first push was seen (`lastRunAtMs` on the candidate);
-     otherwise, and always for NEW COMMENTS, `quiet ≥ 5 min OR burst ≥ 20 min`.
+     otherwise `quiet ≥ 5 min OR burst ≥ 20 min`; NEW COMMENTS at the same head, `quiet ≥ 2 min OR
+     burst ≥ 20 min` (`AUTO_COMMENT_SETTLE_MS`, 2026-11-24).
      *Quiet* = since the key (head, newest qualifying comment) last changed — every push or comment
      resets it (`AUTO_REREVIEW_SETTLE_MS`). *Burst* = since the FIRST trigger of this burst; a key
      change never resets it (`AUTO_REREVIEW_MAX_WAIT_MS`), and the burst ends when its run is
