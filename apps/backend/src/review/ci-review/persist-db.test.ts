@@ -5,7 +5,7 @@
 //      GitHub call; a push or a changed failing set reads stale.
 //   3. ⚠ The sweeper queues a red, human-opened PR AT ONCE (no settle, no CI hold), skips a bot's PR,
 //      a failure observed before auto review was switched on, a PR whose run is held, and inputs a
-//      run already took (a refusal included); its daily cap counts rows written when queued.
+//      run already took (a refusal included). No daily count holds it (the AI budget is the only limit).
 //   4. AI Fix's CI half is the latest succeeded run AT THE CURRENT HEAD, fixable items only.
 //   5. Both delete paths' helper removes the runs and their items.
 //
@@ -110,7 +110,6 @@ async function seedRun(tag: string, head: string, failing: string[], items = [it
 }
 
 const queued: number[] = [];
-let dailyCap = 20;
 let held = new Set<number>();
 const deps = (): import('./sweep.js').CiSweepDeps => ({
   roster: async () => [{ accountId: 1, workspaceId: ws, enabledAtMs: ENABLED_AT }],
@@ -131,7 +130,6 @@ const deps = (): import('./sweep.js').CiSweepDeps => ({
   laneRoom: () => 20,
   held: (_a, prId) => held.has(prId),
   automationUserIds: async () => new Set([botUserId]),
-  dailyCap,
 });
 
 async function endQueuedRuns(): Promise<void> {
@@ -259,7 +257,7 @@ describe('the sweeper', () => {
     held = new Set();
   });
 
-  it('a refusal on exactly these inputs is not retried; the daily cap counts automatic rows', async () => {
+  it('a refusal on exactly these inputs is not retried; a new failing set is due at once', async () => {
     queued.length = 0;
     const id = await persist.insertQueuedCiReview(ctx, {
       accountId: 1,
@@ -276,13 +274,8 @@ describe('the sweeper', () => {
     expect(queued).toEqual([]);
     const st = (await routes.ciStatesFor(ctx, 1, [pr.red!])).get(pr.red!)!;
     expect(st).toMatchObject({ status: 'stale', staleBecause: 'pushed', refused: 'no_logs' });
-    // A new failing set: due — unless the workspace's automatic runs for today are spent.
+    // A new failing set: due — no daily count of automatic runs holds it.
     await event('red', 'h_red2', 'failure', ['test', 'build'], T0 - 5_000);
-    const used = await persist.countAutoCiReviewsSince(ctx, 1, ws, 0);
-    dailyCap = used;
-    await sweep.runCiReviewSweep(ctx, T0, deps());
-    expect(queued).toEqual([]);
-    dailyCap = 20;
     await sweep.runCiReviewSweep(ctx, T0, deps());
     expect(queued).toEqual([pr.red]);
     expect(await persist.countAutoCiReviewsSince(ctx, 2, ws, 0)).toBe(0);
@@ -291,7 +284,7 @@ describe('the sweeper', () => {
 });
 
 // A MANUAL Claude review also starts the CI review when it is due (with-review.ts): the sweeper's
-// own rule, through the CI review's own door, as a click (never the auto cap).
+// own rule, through the CI review's own door, as a click.
 describe('the CI review beside a manual review', () => {
   it('starts once for a red head with no CI review of its failing set; never for green, held or covered', async () => {
     const wr = await import('./with-review.js');

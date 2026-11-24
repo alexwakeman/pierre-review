@@ -2,12 +2,11 @@
 //   1. The grace window: 2 quiet minutes after the newest change, restarted by a push to ANY member,
 //      a PR joining or the ticket changing — a FIRST check too.
 //   2. The 20-minute ceiling from the burst's first change (changes after the latest run only).
-//   3. What holds it is said before a time that would not be kept; the cap spares the reader's PRs.
+//   3. What holds it is said before a time that would not be kept (no daily count — removed 2026-11-24).
 import { describe, expect, it } from 'vitest';
 import { TICKET_AUTO_GRACE_MS, TICKET_AUTO_MAX_WAIT_MS } from '@pierre-review/shared';
 import {
   latestAllMet,
-  nextUtcMidnightMs,
   ticketAutoCheckPlan,
   ticketAutoDueAt,
   toWireAutoCheck,
@@ -33,7 +32,6 @@ const base = (over: Partial<TicketAutoPlanInputs> = {}): TicketAutoPlanInputs =>
   overBudget: false,
   changes: [push(0)],
   lastRunAtMs: at(-60),
-  cap: { used: 0, limit: 60, exempt: false },
   laneRoom: 4,
   ...over,
 });
@@ -141,14 +139,6 @@ describe('ticketAutoCheckPlan', () => {
   it('⚠ a hold is said before a time it would not keep', () => {
     expect(ticketAutoCheckPlan(base({ overBudget: true }), at(1))).toMatchObject({ status: 'held', reason: 'over_budget' });
     expect(ticketAutoCheckPlan(base({ aiReady: false }), at(1)).reason).toBe('ai_not_ready');
-    const capped = ticketAutoCheckPlan(base({ cap: { used: 60, limit: 60, exempt: false } }), at(1));
-    expect(capped).toMatchObject({ status: 'held', reason: 'daily_limit', startsAtMs: nextUtcMidnightMs(at(1)) });
-    expect(new Date(capped.startsAtMs!).toISOString()).toBe('2026-11-10T00:00:00.000Z');
-  });
-
-  it('⚠ a ticket with a PR the reader owns is never held by the cap', () => {
-    const mine = ticketAutoCheckPlan(base({ cap: { used: 99, limit: 60, exempt: true } }), at(3));
-    expect(mine.status).toBe('due');
   });
 
   it('a full lane waits without a time', () => {

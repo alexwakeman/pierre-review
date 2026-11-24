@@ -630,6 +630,9 @@ backfill: cards appear as ticket reviews run. Both delete paths clear it through
 
 ### `0085_auto_review_daily_cap`
 
+⚠ **DORMANT since 2026-11-24** — never read or written (the daily count was removed; the AI quotas are
+the limit). Kept, never dropped. The history below is how it worked.
+
 One nullable column, `workspaces.auto_review_daily_cap` (`integer`, no
 default) — the per-workspace auto Claude review daily cap (docs/CLAUDE-REVIEW.md § Auto review).
 OVERRIDES ONLY: NULL means the product default `AUTO_REVIEW_DAILY_CAP` (20), resolved through

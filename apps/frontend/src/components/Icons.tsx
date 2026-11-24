@@ -480,6 +480,17 @@ export function RequestChangesIcon({ size = 13, ...rest }: IconProps): JSX.Eleme
   );
 }
 
+// A bare bang — "look at this" (the near-quota toast; it may bounce). No triangle: it sits in a
+// round toast circle, where a triangle reads too small.
+export function ExclaimIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <line x1="12" y1="4.5" x2="12" y2="14.5" />
+      <circle cx="12" cy="19" r="1.3" fill="currentColor" stroke="none" />
+    </IconShell>
+  );
+}
+
 // Triangle + bang — a warning. Replaces ⚠, which renders as a FULL-COLOUR EMOJI on several
 // platforms (the variation-selector default), making it the loudest thing on the screen.
 export function WarningIcon({ size = 13, ...rest }: IconProps): JSX.Element {

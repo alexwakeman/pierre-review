@@ -98,7 +98,8 @@ export default function Page(): JSX.Element {
       </p>
       <H3>Will automatic reviews use up my plan?</H3>
       <p>
-        Ensemble&rsquo;s automatic runs stop at a share of your week, 50% by default on a subscription. Your own runs are
+        Ensemble&rsquo;s automatic runs stop at a daily and a weekly quota: by default on a subscription, 10%
+        of your week a day and 50% a week. Your own runs are
         never refused.
       </p>
 

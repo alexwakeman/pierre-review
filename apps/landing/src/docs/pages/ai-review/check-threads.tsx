@@ -100,7 +100,7 @@ export default function Page(): JSX.Element {
       <p>
         With auto review on for the workspace, a new comment by a person or a review bot in an open thread starts a
         check once the pull request has been quiet for 2 minutes. A new commit starts a full review instead. Automatic
-        checks are limited to 30 a day per workspace and ask your spend budget first; checks you start do not count.
+        checks ask your spend budget first; checks you start are never refused.
       </p>
 
       <H2 id="what-it-changes">What it changes</H2>

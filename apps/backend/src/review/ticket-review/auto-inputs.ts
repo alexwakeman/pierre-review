@@ -2,10 +2,9 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { TICKET_REVIEW_MAX_PRS, type ClaudeReviewTicket, type TicketReviewStaleReason } from '@pierre-review/shared';
 import type { AgentContext } from '../agent-context.js';
 import { getTicketSource } from '../../tracker/ticket-source.js';
-import { utcDayStartMs } from '../claude-review/auto.js';
 import { fingerprint, readLiveMembers, staleReasons, ticketHash, type LiveMember } from './fingerprint.js';
 import { storyCheckAllReposOn } from './outside.js';
-import { countAutoTicketReviewsSince, getTicketStateInputs } from './persist.js';
+import { getTicketStateInputs } from './persist.js';
 import { jiraStoryFor, ticketCommentsFor } from './prepare.js';
 import { newCommentsMakeStale } from '../../tracker/comments.js';
 import { latestAllMet, ticketAutoCheckPlan, type TicketAutoChange, type TicketAutoPlan } from './auto-plan.js';
@@ -38,11 +37,6 @@ export interface TicketAutoContext {
   laneRoom: number | null;
   // A run is claimed in the lane (manager.ts `ticketReviewHeld`).
   held: boolean;
-  dailyCap: number;
-  // The reader's users.id (null = not known: nothing is exempt).
-  readerUserId: number | null;
-  // Shared across one sweep tick: workspaceId → automatic runs counted today.
-  capUsed?: Map<number, number>;
 }
 
 export interface TicketAutoState {
@@ -225,17 +219,6 @@ export async function loadTicketAutoState(
     floorOk = live.some((m) => m.state === 'open' && (opened.get(m.prId) ?? 0) >= floor);
   }
 
-  // ---- the daily cap: a ticket with a PR the reader owns is never held by it ----
-  let used = 0;
-  if (workspaceId != null) {
-    const cached = a.capUsed?.get(workspaceId);
-    used = cached ?? (await countAutoTicketReviewsSince(ctx, accountId, workspaceId, utcDayStartMs(nowMs)));
-    a.capUsed?.set(workspaceId, used);
-  }
-  const exempt =
-    a.readerUserId != null &&
-    clocks.some((c) => c.authorId === a.readerUserId || c.limnOpenedForUserId === a.readerUserId);
-
   const plan = ticketAutoCheckPlan(
     {
       running: a.held || st?.runningRunId != null,
@@ -251,7 +234,6 @@ export async function loadTicketAutoState(
       overBudget: a.overBudget,
       changes,
       lastRunAtMs: await lastRunAtMs(ctx, accountId, ident),
-      cap: { used, limit: a.dailyCap, exempt },
       laneRoom: a.laneRoom,
       // The story claim's memory (story-claim.ts): a teammate holds every open member head right now.
       teammate: teammateOf(storyClaimSkipFor(accountId, ident, live.filter((m) => m.state === 'open' && m.headSha !== ''), nowMs)),

@@ -9,7 +9,7 @@ import { autoReviewAvailable } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { onAutoReviewLaunched } from '../claude-review/manager.js';
 import { getTicketIdentsForPr } from './persist.js';
-import { loadTicketAutoState, readerUserIdOf } from './auto-inputs.js';
+import { loadTicketAutoState } from './auto-inputs.js';
 import {
   startTicketReview,
   ticketAutoLaneRoom,
@@ -51,11 +51,9 @@ import {
 //      change. A ticket whose run is queued or running WAITS (never cancelled) and is judged again
 //      once the run has stored its fingerprint; the changes it did not see restart the window then.
 //      NO CI hold.
-//   4. ITS OWN DAILY CAP, `TICKET_REVIEW_DAILY_CAP` (60) automatic runs ('auto' and 'cascade') per
-//      workspace per UTC day — counted from rows, which an automatic run writes when it is QUEUED.
-//      ⚠ A ticket with a PR the READER owns is never held by it. NO per-ticket limit (removed
+//   4. NO DAILY COUNT (the per-workspace cap was removed 2026-11-24) and NO per-ticket limit (removed
 //      2026-11-09: it counted PR joins and story edits as pushes, and held BMD-1175 until midnight).
-//      The spend budget is the money brake.
+//      The spend budget's daily and weekly quotas are the money brake.
 //   5. Each queued run stores its CAUSE (`ticket_reviews.cause`).
 //   6. THE STORY CLAIM (story-claim.ts; docs/TEAM-REVIEW.md § The story check's own claim), right before
 //      a due check is queued: its own `ensemble/story-check` line on every open member head. A teammate
@@ -101,9 +99,6 @@ export interface TicketSweepDeps {
   enqueue(ctx: AgentContext, a: StartTicketArgs): Promise<StartTicketResult>;
   laneRoom(): number;
   held(accountId: number, ident: string): boolean;
-  dailyCap: number;
-  // The reader's users.id (the cap exemption); default reads it from the account.
-  readerUserId?: (ctx: AgentContext, accountId: number) => Promise<number | null>;
   // The story claim before a run is queued (story-claim.ts); default the real one.
   claimStory?: (ctx: AgentContext, target: StoryClaimTarget) => Promise<StoryClaimStart>;
 }
@@ -113,8 +108,6 @@ const defaultDeps: TicketSweepDeps = {
   enqueue: startTicketReview,
   laneRoom: ticketAutoLaneRoom,
   held: ticketReviewHeld,
-  dailyCap: config.ticketReviewDailyCap,
-  readerUserId: readerUserIdOf,
 };
 
 export interface TicketSweepResult {
@@ -265,8 +258,6 @@ export async function runTicketReviewSweep(
       }
 
       // ---- 2–5. per ticket: one rule (auto-plan.ts), read from stored rows ----
-      const capUsed = new Map<number, number>();
-      const readerUserId = await (deps.readerUserId ?? readerUserIdOf)(ctx, accountId).catch(() => null);
       const ordered = [...candidates].sort(([a], [b]) => a.localeCompare(b));
       for (let ci = 0; ci < ordered.length; ci += 1) {
         const [ident, cand] = ordered[ci]!;
@@ -305,9 +296,6 @@ export async function runTicketReviewSweep(
             overBudget: false,
             laneRoom: deps.laneRoom(),
             held: false,
-            dailyCap: deps.dailyCap,
-            readerUserId,
-            capUsed,
           },
           nowMs,
         );
@@ -362,7 +350,6 @@ export async function runTicketReviewSweep(
         // Not queued: the run never takes the claim, so it is released here.
         if (r.outcome !== 'queued') settle();
         if (r.outcome === 'queued') {
-          capUsed.set(workspaceId, (capUsed.get(workspaceId) ?? 0) + 1);
           result.queued.push({ ident, trigger, workspaceId });
           forget();
         } else if (r.outcome === 'already_running') {

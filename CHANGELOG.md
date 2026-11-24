@@ -17,6 +17,11 @@ no internals.
 
 ### Added
 
+- Settings → AI spend: a daily quota beside the weekly one. Ensemble's automatic runs stop for the day
+  once they use it, and start again at midnight on your computer. The default is 10% of your week (the
+  weekly 50% over five working days). On an API key it is a share of the weekly budget.
+- A notification at 80% of the daily or weekly AI quota, with "Change quota". The card when a quota is
+  used has "Change quota" too.
 - Settings → Team policy: rules your team commits to a repository, in `.ensemble/policy.json`, apply to its
   pull requests on every copy of Ensemble. They only switch things off: auto review, automatic posting, AI
   approvals, auto fix, automatic pushes, resolving threads and dependency automation, or which bots dependency
@@ -40,6 +45,14 @@ no internals.
   else stays free for individuals and for organisations where no more than 3 people use Ensemble.
 - Corevo Systems Limited's company number and registered office are in the website's footer and on the
   legal pages.
+
+### Removed
+
+- The daily counts of automatic runs per workspace: auto reviews (the "auto reviews a day" setting),
+  thread checks, CI reviews, story checks, design diagrams and docs checks. The AI quotas are now the one
+  limit.
+- Open pull requests: the "auto reviews today" counter, and the "Auto reviews stopped for today" message.
+- Settings → AI spend: the separate 5-hour limit. It now follows the weekly quota.
 
 ## [1.0.79] - 2026-11-24
 

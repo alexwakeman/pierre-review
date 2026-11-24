@@ -88,7 +88,8 @@ export default function Page(): JSX.Element {
       <H2 id="limits-and-spend">Limits and spend</H2>
       <p>
         On an API key, there is no cap until you set a weekly amount in US dollars. On a Claude Code login,
-        Ensemble&rsquo;s automatic runs stop at 50% of your week unless you change it. See{' '}
+        Ensemble&rsquo;s automatic runs stop at 10% of your week a day and 50% a week unless you change
+        it. See{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>
 

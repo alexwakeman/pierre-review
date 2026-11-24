@@ -90,10 +90,9 @@ export default function Page(): JSX.Element {
           after you turned it on.
         </li>
         <li>Drafts wait until they are marked ready. Pull requests opened by bots are skipped.</li>
-        <li>The workspace may have reached its daily limit of auto reviews (20 by default). The rest run the next day (UTC).</li>
         <li>
-          Ensemble may have used its share of your week: a message says when automatic runs resume. See{' '}
-          <DocLink to="settings/ai-usage-and-spend#when-it-runs-out">When Ensemble&rsquo;s share is used</DocLink>.
+          Ensemble may have used its daily or weekly AI quota: a message says when automatic runs resume. See{' '}
+          <DocLink to="settings/ai-usage-and-spend#when-it-runs-out">When a quota is used</DocLink>.
         </li>
         <li>A teammate&rsquo;s Ensemble may already be reviewing that commit with the same provider.</li>
       </ul>

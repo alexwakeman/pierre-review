@@ -10,6 +10,7 @@ import {
   formatUsd,
   meterText,
   pausedSentence,
+  quotaWarningCopy,
   reviewsPerDayText,
   runButtonsIn,
   usedSentence,
@@ -81,9 +82,9 @@ describe('the Claude spend meter', () => {
     expect(usedSentence(status({}))).toBe('Ensemble has used 2% of your week');
     expect(formatSharePct(0)).toBe('0%');
     expect(formatSharePct(4.6)).toBe('5%');
-    expect(reviewsPerDayText(25)).toBe('about 25 automatic reviews a working day');
-    expect(reviewsPerDayText(1)).toBe('about 1 automatic review a working day');
-    expect(reviewsPerDayText(0)).toBe('under one automatic review a working day');
+    expect(reviewsPerDayText(25)).toBe('about 25 automatic reviews a day');
+    expect(reviewsPerDayText(1)).toBe('about 1 automatic review a day');
+    expect(reviewsPerDayText(0)).toBe('under one automatic review a day');
     expect(reviewsPerDayText(null)).toBeNull();
     expect(reviewsPerDayText(Number.NaN)).toBeNull();
     expect(formatUsd(4.1)).toBe('$4.10');
@@ -101,6 +102,41 @@ describe('the Claude spend meter', () => {
       'Ensemble has used its share of your week. Automatic runs are paused.',
     );
     expect(pausedSentence(status({ mode: 'api_key', overBudget: true }), now)).toMatch(/^Ensemble has used its weekly budget\./);
+  });
+});
+
+describe('the daily quota: meter, paused line and near-quota card', () => {
+  const day = { daySharePct: 10, dayUsedSharePct: 3, dayResetsAt: '2026-10-25T00:00:00.000Z' };
+
+  it('the meter leads with today', () => {
+    expect(meterText(status({ subscription: sub({ ...day, sharePct: 50, usedSharePct: 12 }) }))).toBe(
+      'Ensemble today: 3% of 10% · week 12% of 50%',
+    );
+    const key = status({
+      mode: 'api_key',
+      route: 'api_key',
+      subscription: null,
+      apiKey: { weeklyUsd: 25, usedUsd: 4.1, dailyUsd: 2.5, todayUsd: 1.2, dayResetsAt: day.dayResetsAt },
+    });
+    expect(meterText(key)).toBe('Today $1.20 of $2.50 · week $4.10 of $25');
+  });
+
+  it('paused by the day says so', () => {
+    const now = Date.parse('2026-10-24T09:00:00');
+    expect(pausedSentence(status({ overBudget: true, limitedBy: 'day', resumesAt: null }), now)).toBe(
+      "Ensemble has used today's quota. Automatic runs are paused.",
+    );
+    expect(pausedSentence(status({ mode: 'api_key', overBudget: true, limitedBy: 'day', resumesAt: null }), now)).toMatch(
+      /^Ensemble has used today's budget\./,
+    );
+  });
+
+  it('the near card names the quota and never says 100%', () => {
+    expect(quotaWarningCopy({ level: 'near', which: 'day', usedOfQuotaPct: 85, resetsAt: null })).toEqual({
+      label: 'Daily AI quota nearly used',
+      summary: "Ensemble has used 85% of today's AI quota. Automatic runs pause at 100%.",
+    });
+    expect(quotaWarningCopy({ level: 'near', which: 'week', usedOfQuotaPct: 100, resetsAt: null }).summary).toContain('99%');
   });
 });
 

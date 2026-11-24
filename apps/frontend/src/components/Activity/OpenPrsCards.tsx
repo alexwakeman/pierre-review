@@ -1668,42 +1668,10 @@ export function resetsInLabel(iso: string, nowMs: number): string {
 }
 
 /**
- * "7 of 20 auto reviews today · resets in 3h 12m" — this workspace's auto CODE reviews against its
- * daily cap (a calendar UTC day). Shown only while auto review is on (the GET sends `usage` only
- * then) and agentic AI runs here. Re-reads the count once a minute while mounted.
- */
-export function AutoReviewUsageLine(): JSX.Element | null {
-  const aiOn = useAiCapabilities().enabled;
-  const workspaceId = useFilters((s) => s.workspaceId);
-  const { data, refetch } = useWorkspaceAutoReview(aiOn, workspaceId);
-  const [now, setNow] = useState(() => Date.now());
-  const usage = data?.usage ?? null;
-  const live = usage != null;
-  useEffect(() => {
-    if (!live) return;
-    const t = window.setInterval(() => {
-      setNow(Date.now());
-      void refetch();
-    }, 60_000);
-    return () => window.clearInterval(t);
-  }, [live, refetch]);
-  if (usage == null) return null;
-  const full = usage.used >= usage.cap;
-  return (
-    <span
-      className={`text-meta tabular-nums ${full ? 'text-ui-warn' : 'text-ui-faint'}`}
-      title="Auto code reviews started today in this Workspace (the day is counted in UTC)"
-    >
-      {usage.used} of {usage.cap} auto reviews today · resets in {resetsInLabel(usage.resetsAt, now)}
-    </span>
-  );
-}
-
-/**
  * "Run auto reviews now" — ONE auto-review sweep of this workspace now (POST …/auto-review/sweep):
  * every open PR auto review covers that is due, failed auto runs at the current head (whatever the
  * retry wait), and new commits or comments not yet reviewed. Queued as auto runs on the default
- * provider, under the daily cap. Shown only while auto review is on here and AI runs here; behind
+ * provider, within the AI quotas. Shown only while auto review is on here and AI runs here; behind
  * the AI gate (an over-budget press takes two presses). One plain line answers the press.
  */
 export function RunAutoReviewsButton(): JSX.Element | null {

@@ -28,15 +28,14 @@ import { Select } from '../ui/index.js';
 // so it sits in the modal's global half. ON by default at 50% of the week on a subscription (the
 // reader may change it or switch it off); on an API key nothing applies until the reader sets a figure.
 //
-// The form follows the CREDENTIAL ROUTE the server reports: the Claude Code login gets ONE number,
-// Limn's share of the weekly allowance (1–100%) — the 5-hour share follows it unless the reader opens
-// "Set a separate 5-hour limit" (claudeSpendForm.ts) — plus the subscription (detected, or picked where
-// Claude's report is ambiguous) — percentages only, never US$; an API key gets a weekly US$ budget.
-// The server decides; this section only edits the settings and words the status.
+// TWO QUOTAS, the DAILY one first: Ensemble's spend since midnight as a share of the week (on an API
+// key, of the weekly US$), and the WEEKLY one. The Claude Code login gets two percentages plus the
+// subscription (detected, or picked where Claude's report is ambiguous) — never US$; an API key gets a
+// weekly US$ budget and the daily share of it. The server decides; this section only edits the
+// settings and words the status. They replaced every per-feature daily COUNT (2026-11-24).
 //
-// THE 5-HOUR PARTS (the separate 5-hour limit, its status line, its ⓘ paragraph) show ONLY while the
-// provider has reported a 5-hour window lately (`usage.fiveHourLimit`, shared `hasFiveHourWindow`):
-// some plans have a weekly limit only. A stored separate 5-hour share is kept, just not shown.
+// THE 5-HOUR SHARE IS ENFORCED BUT NOT SHOWN: it follows the weekly share (every save sends null). Its
+// status line and ⓘ sentence show only while the provider reported a 5-hour window lately.
 //
 // It judges the ACTIVE provider (`status.provider`). On Codex with a ChatGPT sign-in there is no
 // subscription to pick: Codex reports its own 5-hour and weekly windows, shown here in percent, and
@@ -52,12 +51,6 @@ const bodyOf = claudeSpendBodyOf;
 const BTN =
   'inline-flex h-7 items-center gap-1 rounded-ui bg-ui-raise px-2.5 text-body font-medium text-ui-ink hover:bg-ui-hover touch:h-10 outline-none focus-visible:ring-2 focus-visible:ring-ui-accent';
 const NUM = `${inputCls} w-20`;
-
-/** " (5%)" for a valid weekly share in the draft, else "". */
-function parseShareHint(week: string): string {
-  const t = week.trim().replace(/%$/, '');
-  return /^\d+$/.test(t) ? ` (${Number(t)}%)` : '';
-}
 
 export function ClaudeSpendSection(): JSX.Element | null {
   const q = useAiBudget();
@@ -151,15 +144,19 @@ export function ClaudeSpendSection(): JSX.Element | null {
         info={info}
         desc={
           route === 'api_key'
-            ? `Off. Set a weekly US$ limit for Ensemble’s automatic ${name} runs.`
-            : `Off. Give Ensemble’s automatic ${name} runs a share of your week.`
+            ? `Off. Set daily and weekly US$ limits for Ensemble’s automatic ${name} runs.`
+            : `Off. Give Ensemble’s automatic ${name} runs a daily and a weekly quota.`
         }
       >
         <button
           type="button"
           className={BTN}
           onClick={() =>
-            setNow({ enabled: true, weekSharePct: String(AI_BUDGET_DEFAULTS.weekSharePct) })
+            setNow({
+              enabled: true,
+              weekSharePct: String(AI_BUDGET_DEFAULTS.weekSharePct),
+              daySharePct: String(AI_BUDGET_DEFAULTS.daySharePct),
+            })
           }
         >
           Set a budget
@@ -172,7 +169,10 @@ export function ClaudeSpendSection(): JSX.Element | null {
   // The subscription the form shows: Claude's report when it settles it, else the reader's draft pick.
   const pickFrom = sub?.pickFrom ?? null;
   const reportedMax = sub?.reportedSubscription?.trim().toLowerCase() === 'max';
-  const shareDirty = draft.weekSharePct !== String(settings.weekSharePct) || draft.subscription !== settings.subscription;
+  const shareDirty =
+    draft.weekSharePct !== String(settings.weekSharePct) ||
+    draft.daySharePct !== String(settings.daySharePct ?? AI_BUDGET_DEFAULTS.daySharePct) ||
+    draft.subscription !== settings.subscription;
   const fiveUsed = status.enabled && fiveHourLimit ? fiveHourUsedSentence(status) : null;
   const perDay = shareDirty ? null : reviewsPerDayText(sub?.reviewsPerDay);
   const used = status.enabled ? usedSentence(status) : null;
@@ -184,16 +184,32 @@ export function ClaudeSpendSection(): JSX.Element | null {
       info={info}
       desc={
         route === 'api_key'
-          ? 'Your API key: pause automatic runs over this much a week.'
-          : `Your ${provider === 'codex' ? 'ChatGPT plan' : 'Claude subscription'}: pause automatic runs once Ensemble has used its share of your week.`
+          ? 'Your API key: pause automatic runs over these amounts.'
+          : `Your ${provider === 'codex' ? 'ChatGPT plan' : 'Claude subscription'}: pause automatic runs once Ensemble has used its quota for the day or the week.`
       }
     >
       <label className="flex items-center gap-2 text-body">
         <CheckInput checked={draft.enabled} onChange={(e) => setNow({ enabled: e.target.checked })} />
-        <span className="font-medium text-ui-ink">Pause automatic runs over budget</span>
+        <span className="font-medium text-ui-ink">Pause automatic runs over a quota</span>
       </label>
 
       <div className={`space-y-2.5 pl-5 ${draft.enabled ? '' : 'opacity-60'}`}>
+        <Field
+          label={route === 'api_key' ? 'Daily quota (% of the weekly budget)' : `Daily quota (% of your weekly ${name} usage)`}
+          htmlFor="ai-budget-day-share"
+          hint={(route === 'api_key' ? null : perDay) ?? `1 to ${AI_BUDGET_SHARE_MAX}. Resets at midnight.`}
+        >
+          <input
+            id="ai-budget-day-share"
+            type="text"
+            inputMode="numeric"
+            className={NUM}
+            value={draft.daySharePct}
+            onChange={(e) => set({ daySharePct: e.target.value })}
+            onBlur={autosave.flush}
+            onKeyDown={onKeyDown}
+          />
+        </Field>
         {route === 'api_key' ? (
           <Field label="Weekly budget (US$)" htmlFor="ai-budget-weekly">
             <input
@@ -211,9 +227,9 @@ export function ClaudeSpendSection(): JSX.Element | null {
         ) : (
           <>
             <Field
-              label={`Ensemble’s share of your weekly ${name} usage (%)`}
+              label={`Weekly quota (% of your weekly ${name} usage)`}
               htmlFor="ai-budget-share"
-              hint={perDay ?? `1 to ${AI_BUDGET_SHARE_MAX}`}
+              hint={`1 to ${AI_BUDGET_SHARE_MAX}`}
             >
               <input
                 id="ai-budget-share"
@@ -226,44 +242,6 @@ export function ClaudeSpendSection(): JSX.Element | null {
               onKeyDown={onKeyDown}
               />
             </Field>
-            {/* THE 5-HOUR SHARE: follows the weekly one unless the reader sets their own. Collapsed
-                by default; open when a separate figure is stored. Clearing it = same as weekly.
-                Only while the plan has a 5-hour window. */}
-            {fiveHourLimit && (
-              <details open={settings.fiveHourSharePct != null} data-testid="ai-budget-five-hour">
-                <summary className="hit cursor-pointer text-meta text-ui-mute">
-                  Set a separate 5-hour limit
-                </summary>
-                <div className="mt-1.5 space-y-1.5">
-                  <Field
-                    label="Ensemble’s share of each 5-hour session (%)"
-                    htmlFor="ai-budget-five-hour-share"
-                    hint={
-                      draft.fiveHourSharePct.trim() === ''
-                        ? `Same as your weekly share${parseShareHint(draft.weekSharePct)}`
-                        : `1 to ${AI_BUDGET_SHARE_MAX}`
-                    }
-                  >
-                    <input
-                      id="ai-budget-five-hour-share"
-                      type="text"
-                      inputMode="numeric"
-                      className={NUM}
-                      placeholder={draft.weekSharePct}
-                      value={draft.fiveHourSharePct}
-                      onChange={(e) => set({ fiveHourSharePct: e.target.value })}
-              onBlur={autosave.flush}
-              onKeyDown={onKeyDown}
-                    />
-                  </Field>
-                  {draft.fiveHourSharePct.trim() !== '' && (
-                    <button type="button" className={BTN} onClick={() => setNow({ fiveHourSharePct: '' })}>
-                      Use the weekly share
-                    </button>
-                  )}
-                </div>
-              </details>
-            )}
             {/* The subscription shows once the budget is saved on: until then the server has not
                 read Claude's report, so there is nothing to offer (a picker with no choices). */}
             {sub == null ? null : provider === 'codex' ? (
@@ -354,6 +332,11 @@ function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; 
         CI and ticket reviews, diagrams, This Sprint's briefs and the Slack summary. This limits those
         runs.
       </p>
+      <p className="mt-2">
+        The daily quota counts from midnight on this computer, as a share of your week. When it is used,
+        automatic runs stop until midnight. The weekly quota works the same way over the week. A
+        notification warns you at 80% of either.
+      </p>
       {provider === 'codex' ? (
         <>
           <p className="mt-2">
@@ -363,10 +346,7 @@ function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; 
             starting automatic runs until the window resets.
           </p>
           {fiveHourLimit && (
-            <p className="mt-2">
-              Ensemble takes the same share of a 5-hour window as of the week, unless you set a separate 5-hour
-              limit.
-            </p>
+            <p className="mt-2">Ensemble also takes no more than its weekly share of each 5-hour window.</p>
           )}
         </>
       ) : (
@@ -379,12 +359,13 @@ function SpendInfo({ provider, fiveHourLimit }: { provider: 'claude' | 'codex'; 
           </p>
           {fiveHourLimit && (
             <p className="mt-2">
-              Your plan also limits each 5-hour session. Ensemble takes the same share of a session as of the
-              week (5% of the week means 5% of each session), unless you set a separate 5-hour limit. Over
-              it, automatic runs wait for the session to reset.
+              Your plan also limits each 5-hour session. Ensemble takes no more than its weekly share of a
+              session. Over it, automatic runs wait for the session to reset.
             </p>
           )}
-          <p className="mt-2">With an API key, the limit is what Ensemble's runs cost over the last 7 days.</p>
+          <p className="mt-2">
+            With an API key, the limits are what Ensemble's runs cost today and over the last 7 days.
+          </p>
         </>
       )}
       <p className="mt-2">

@@ -4,10 +4,10 @@ import { globalAutomationUserIds } from '../../db/automation-ids.js';
 import type { AgentContext } from '../agent-context.js';
 import { agenticRunReady, singleReviewProvider } from '../claude-review/ai-ready.js';
 import { automaticRunAllowed } from '../budget-gate.js';
-import { autoReviewAvailable, utcDayStartMs } from '../claude-review/auto.js';
+import { autoReviewAvailable } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { ciReviewDue } from './currency.js';
-import { countAutoCiReviewsSince, getCiStateInputs, readSyncedCi } from './persist.js';
+import { getCiStateInputs, readSyncedCi } from './persist.js';
 import { ciAutoLaneRoom, ciReviewHeld, startCiReview, type StartCiArgs, type StartCiResult } from './manager.js';
 import { trueAuthorId } from '../../db/true-author.js';
 import { externalRepoIdsVia } from '../../db/external-repos.js';
@@ -33,9 +33,8 @@ import { externalRepoIdsVia } from '../../db/external-repos.js';
 //      carries what is already explained (prepare.ts) and reads only the new failures.
 //   5. THE ONBOARDING FLOOR. Only a failure the sync OBSERVED at or after the workspace switched auto
 //      review on — so switching it on never explains every red PR at once.
-//   6. ITS OWN DAILY CAP, `CI_REVIEW_DAILY_CAP` automatic runs per workspace per UTC day — counted
-//      from rows, which an automatic run writes when it is QUEUED. Never shared with the PR or
-//      ticket review's caps.
+//   6. NO DAILY COUNT (the per-workspace cap was removed 2026-11-24): the spend budget's daily and
+//      weekly quotas are the only limit, asked once per account per tick.
 //
 // The claim, lane and shared concurrency are the manager's (manager.ts).
 
@@ -49,7 +48,6 @@ export interface CiSweepDeps {
   laneRoom(): number;
   held(accountId: number, prId: number): boolean;
   automationUserIds(): Promise<Set<number>>;
-  dailyCap: number;
 }
 
 const defaultDeps: CiSweepDeps = {
@@ -58,7 +56,6 @@ const defaultDeps: CiSweepDeps = {
   laneRoom: ciAutoLaneRoom,
   held: ciReviewHeld,
   automationUserIds: globalAutomationUserIds,
-  dailyCap: config.ciReviewDailyCap,
 };
 
 export interface CiSweepResult {
@@ -118,7 +115,6 @@ export async function runCiReviewSweep(
   }
   sweeping = true;
   try {
-    const dayStartMs = utcDayStartMs(nowMs);
     const roster = await deps.roster(ctx);
     const byAccount = new Map<number, Map<number, number>>(); // account → (workspace → enabledAtMs)
     for (const w of roster) {
@@ -149,7 +145,6 @@ export async function runCiReviewSweep(
         readSyncedCi(ctx, accountId, ids),
         getCiStateInputs(ctx, accountId, ids),
       ]);
-      const capUsed = new Map<number, number>();
       for (const p of red) {
         result.considered.push(p.prId);
         if (deps.held(accountId, p.prId)) continue;
@@ -160,12 +155,6 @@ export async function runCiReviewSweep(
         const floor = enabled.get(p.workspaceId) ?? Number.POSITIVE_INFINITY;
         if (sc.observedAtMs == null || sc.observedAtMs < floor) continue;
 
-        let used = capUsed.get(p.workspaceId);
-        if (used == null) {
-          used = await countAutoCiReviewsSince(ctx, accountId, p.workspaceId, dayStartMs);
-          capUsed.set(p.workspaceId, used);
-        }
-        if (used >= deps.dailyCap) continue;
         if (deps.laneRoom() <= 0) {
           result.stopped = 'lane_full';
           break;
@@ -180,7 +169,6 @@ export async function runCiReviewSweep(
           trigger: 'auto',
         });
         if (r.outcome === 'queued') {
-          capUsed.set(p.workspaceId, used + 1);
           result.queued.push({ prId: p.prId, workspaceId: p.workspaceId });
         } else if (r.outcome === 'busy') {
           result.stopped = 'lane_full';

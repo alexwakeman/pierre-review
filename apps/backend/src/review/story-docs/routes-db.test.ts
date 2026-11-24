@@ -3,7 +3,7 @@
 //   1. 400 on a manual / unparseable ident; `available: false` and the `no_docs` refusal with no built doc.
 //   2. POST 202 → the run is stored with only GROUNDED points; GET shows it current; a library change
 //      makes it "Out of date" ('library'); a later failed run keeps the last good result beside it.
-//   3. `no_story` when there is nothing to read; the daily cap refuses with no row.
+//   3. `no_story` when there is nothing to read; no daily count refuses a check (removed 2026-11-24).
 //   5. REUSE: a click with nothing changed answers `reused` with the good run — no row, no model call;
 //      `force` runs anyway. A library that fits the inline budget skips the shortlist call.
 //   4. Tenancy: another account's workspace id falls back to the caller's Default (no run seen); the
@@ -246,7 +246,7 @@ describe('a check', () => {
   });
 });
 
-describe('tenancy, cap and restart', () => {
+describe('tenancy and restart', () => {
   it('another account never sees these runs, and its workspace id falls back to its own Default', async () => {
     const r = (await get(2, IDENT, wsA)).json();
     expect(r).toMatchObject({ workspaceId: wsB, run: null, lastSucceeded: null, available: false });
@@ -298,14 +298,13 @@ describe('tenancy, cap and restart', () => {
     expect((await persist.getStoryDocsRow(ctx, 1, p.json().runId))?.workspaceId).toBe(wsA);
   });
 
-  it('the daily cap refuses with no new row — but a held check answers already_running first', async () => {
-    const { config } = await import('../../config.js');
+  it('a held check answers already_running; many checks today never refuse the next (no daily cap)', async () => {
     let release!: () => void;
     gate = new Promise<void>((r) => (release = r));
     const first = (await post(1, { ident: IDENT, force: true })).json();
     expect(first).toMatchObject({ outcome: 'queued' });
     const have = await persist.countStoryDocsRunsSince(ctx, 1, 0);
-    for (let i = have; i < config.storyDocsDailyCap; i += 1) {
+    for (let i = have; i < have + 30; i += 1) {
       await persist.insertQueuedStoryDocs(ctx, {
         accountId: 1,
         workspaceId: wsA,
@@ -325,7 +324,10 @@ describe('tenancy, cap and restart', () => {
     release();
     gate = null;
     await manager._storyDocsIdleForTest();
-    expect((await post(1, { ident: IDENT, force: true })).json()).toEqual({ outcome: 'refused', runId: null, refusal: 'daily_cap' });
-    expect(await persist.countStoryDocsRunsSince(ctx, 1, 0)).toBe(n);
+    const next = (await post(1, { ident: IDENT, force: true })).json();
+    expect(next).toMatchObject({ outcome: 'queued' });
+    expect(next.refusal).toBeUndefined();
+    expect(await persist.countStoryDocsRunsSince(ctx, 1, 0)).toBe(n + 1);
+    await manager._storyDocsIdleForTest();
   });
 });

@@ -2401,6 +2401,7 @@ const AI_BUDGET: AiBudgetResponse = {
   settings: {
     enabled: false,
     weekSharePct: AI_BUDGET_DEFAULTS.weekSharePct,
+    daySharePct: AI_BUDGET_DEFAULTS.daySharePct,
     // Follows the weekly share.
     fiveHourSharePct: null,
     subscription: null,
@@ -3030,7 +3031,6 @@ export async function installMockApi(
           autoReview: {
             enabled: false,
             enabledAt: null,
-            dailyCap: 20,
             autoFixEnabled: false,
             autoDiagramsEnabled: true,
             // Story checks read every repository: ON by default (migration 0211).

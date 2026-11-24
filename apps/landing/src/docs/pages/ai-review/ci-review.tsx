@@ -116,8 +116,7 @@ export default function Page(): JSX.Element {
       <p>
         With auto review on for the workspace, a check that fails on a pull request a person opened is looked at on its
         own, once for each set of failing checks on a commit. Only failures seen after auto review was switched on are
-        checked. Automatic CI checks have their own daily limit, 20 per workspace by default, and ask your spend budget
-        first. Checks you start never count.
+        checked. Automatic CI checks ask your spend budget first. Checks you start are never refused.
       </p>
       <Warning title="Posting">
         With auto-posting on and <Ui>CI failure reasons, in one PR comment</Ui> ticked under <Ui>What to post</Ui>, the

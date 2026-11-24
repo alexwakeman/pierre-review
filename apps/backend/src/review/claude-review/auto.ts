@@ -16,9 +16,9 @@
 // item is waiting and has its OWN queue cap, so auto work can never make a click answer 'busy'.
 // PRO_REVIEW_CONCURRENCY is unchanged and shared.
 //
-// THE COST GUARD is the workspace's daily cap (`workspaces.auto_review_daily_cap`, default
-// `AUTO_REVIEW_DAILY_CAP` = 20, set in Settings) auto runs per workspace per UTC day, counting rows
-// already started today plus items still waiting in the lane. Past it, PRs wait for tomorrow.
+// THE COST GUARD is the AI SPEND BUDGET's daily and weekly quotas (ai/budget.ts), asked once per account
+// per tick here and again by the lane before each run starts (manager.ts). There is NO count of runs a
+// day (the old per-workspace daily cap was removed 2026-11-24): over a quota, PRs wait for its reset.
 //
 // RE-REVIEW ON NEW COMMITS. A PR already reviewed (a SUCCEEDED run, manual or auto — opened at or
 // after the switch-on, like every auto candidate) whose synced head moves past every run — new
@@ -26,7 +26,7 @@
 // candidate read (`reReview`) re-derives it from the DB each tick, and any row at the new head
 // settles it. The first push after a quiet spell starts AT ONCE; pushes during or just after a run
 // are DEBOUNCED (the rule below), so a burst of pushes costs one more run on the last head. A
-// restart only restarts the wait. The run is an ordinary auto run: same lane, slot, daily cap,
+// restart only restarts the wait. The run is an ordinary auto run: same lane, slot, budget,
 // model; it carries the previous run's stories, and the follow-up (follow-up.ts) reads what was
 // already posted.
 //
@@ -77,8 +77,8 @@
 //                        themselves. The lane re-checks the failed run is still the latest at the head.
 //     A READER'S PRESS   → "Run auto reviews now" / "Retry" (POST …/auto-review/sweep): one sweep of
 //                        one workspace (or one PR) through THIS rule with `pressed` — the settle waits,
-//                        the retry backoff, the attempt cap and the transient test are waived; the
-//                        daily cap and a run in flight are not; the spend budget is not asked (the
+//                        the retry backoff, the attempt cap and the transient test are waived; a
+//                        run in flight is not; the spend budget is not asked (the
 //                        SPA's over-budget confirm is the reader's choice). For a press the head is
 //                        done only when an AUTO run succeeded at it: a failed auto run there is re-run
 //                        even when manual runs came after it (db/auto-retry-at-head.ts); the tick keeps
@@ -103,9 +103,8 @@
 // head (`verdictNeeded`, db/teammate-verdict-pickup.ts: the author's own review at the head — its held
 // APPROVE first — or a head moved past teammates' reviews only), never the reader's own PR. Each tick
 // starts these BEFORE first reviews and re-reviews, at most VERDICT_PICKUP_PER_TICK of them, through the
-// same start rule, team claim, ONE budget gate and daily cap; the lane puts them ahead of ordinary auto
-// items (manager.ts `priority`). ⚠ NOT EXEMPT FROM THE DAILY CAP: other people's PRs drive this list, and
-// on an API key the spend budget is unset by default, so the cap is the one count-based bound left.
+// same start rule, team claim and ONE budget gate; the lane puts them ahead of ordinary auto
+// items (manager.ts `priority`). Other people's PRs drive this list, so the per-tick bound stays.
 //
 // CATCH-UP ON RETURN. The first tick after a boot, or after a gap of AUTO_CATCH_UP_GAP_MS or more (the
 // machine slept, the process stalled), opens a catch-up: each workspace's pass waits until its repos'
@@ -181,7 +180,7 @@ const headSeen = new Map<string, { key: string; firstSeenMs: number; burstStartM
 // `${accountId}:${prId}` → why that PR's auto review is waiting right now.
 const waitingNow = new Map<string, ClaudeAutoReviewWaiting>();
 // `${accountId}:${prId}` → { head, the newest own-finding reply time } a replies pass covered WITHOUT a
-// row: it had nothing to judge, or the PR's daily cap was used. That half of the burst is settled
+// row: it had nothing to judge, or the PR's 24-hour limit was used. That half of the burst is settled
 // until a newer reply (or a new head); a restart asks once more (no model: a refusal reads the DB).
 const repliesSettled = new Map<string, { headSha: string; ms: number }>();
 // `${accountId}:${prId}` → { head, when } the sweeper last asked for a replies pass on a MOVED head
@@ -247,8 +246,7 @@ export interface AutoRetryInput {
  * when this burst's first push was seen.
  * `retry`: the latest AUTO run at the current head FAILED (the RETRY branch, below).
  * `pressed`: the reader pressed "Run auto reviews now" / "Retry" — the settle wait, the retry
- * backoff, the attempt cap and the transient test are waived (a run in flight still waits; the
- * daily cap is the sweeper's and is never waived).
+ * backoff, the attempt cap and the transient test are waived (a run in flight still waits).
  *
  * THE RETRY BRANCH. A failed auto run is retried automatically only when its error is TRANSIENT
  * (`classifyAutoReviewFailure`), fewer than AUTO_RETRY_MAX_ATTEMPTS auto rows exist at this head,
@@ -339,7 +337,10 @@ export function autoReviewAvailable(ctx: AgentContext): boolean {
   return AGENTIC_AI_ENABLED;
 }
 
-/** 00:00 UTC of the day `nowMs` falls in — the daily cap's day. */
+/** The candidate read's page size: a lane's worth of new PRs a tick (a page, never a quota). */
+export const AUTO_REVIEW_CANDIDATE_PAGE = 50;
+
+/** 00:00 UTC of the day `nowMs` falls in (the candidate read's `autoToday` count). */
 export function utcDayStartMs(nowMs: number): number {
   const d = new Date(nowMs);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -405,8 +406,6 @@ export interface AutoSweepResult {
   overBudget?: boolean;
   // Of `queued`, how many were RETRIES of a failed auto run at the PR's current head.
   retried?: number;
-  // True when at least one due PR was left for tomorrow by the workspace's daily cap.
-  capped?: boolean;
   // A press only: another sweep was running, so this one did nothing (never two at once).
   busy?: boolean;
   // A press only: auto review is not on for that workspace (or it is not the account's).
@@ -416,7 +415,7 @@ export interface AutoSweepResult {
 /** A READER'S PRESS ("Run auto reviews now", or "Retry" on one PR): ONE workspace (and, for
  *  Retry, one PR). It waives the settle wait, the retry backoff, the attempt cap and the transient
  *  test (`autoReviewDue`'s `pressed`), and does not ask the spend budget (the SPA's over-budget
- *  confirm is the reader's choice). The daily cap, the lane cap and AI readiness still hold. */
+ *  confirm is the reader's choice). The lane cap and AI readiness still hold. */
 export interface AutoSweepPress {
   accountId: number;
   workspaceId: number;
@@ -482,7 +481,7 @@ export async function runAutoReviewSweep(
     return result;
   }
   sweeping = true;
-  // Due heads this pass did not start, and why (the daily cap; the spend budget) — said on the PR once
+  // Due heads this pass did not start, and why (the spend budget; AI not ready) — said on the PR once
   // each, at the end of the pass (team-claim-skip.ts).
   const skipped: SkippedHead[] = [];
   try {
@@ -539,8 +538,8 @@ export async function runAutoReviewSweep(
       const res = await candidatesOf(ws.accountId, ws.workspaceId, {
         openedSinceMs: ws.enabledAtMs,
         dayStartMs,
-        // Enough to see every waiting item of ours plus a full day's worth of new ones.
-        limit: ws.dailyCap + waiting.size,
+        // A page, not a quota: every waiting item of ours plus a lane's worth of new ones.
+        limit: AUTO_REVIEW_CANDIDATE_PAGE + waiting.size,
         // A PRESS reads the press's retry rule (db/auto-retry-at-head.ts): a head is done only when
         // an AUTO run succeeded there; manual rows are ignored. The sweeper's own tick keeps the
         // automatic rule (a manual success makes the head final).
@@ -549,17 +548,6 @@ export async function runAutoReviewSweep(
         ...(press?.prId != null ? { pressPrId: press.prId } : {}),
       });
       if (!res) continue; // the workspace is gone
-      const waitingHere = [
-        ...new Set([
-          ...res.prIds,
-          ...(res.reReview ?? []).map((r) => r.prId),
-          ...(res.retry ?? []).map((r) => r.prId),
-          // ⚠ A queued verdict pick-up has no row yet, so `autoToday` does not count it, and the read
-          // takes it out of `prIds`: without this line the daily cap is overshot.
-          ...(res.verdictNeeded ?? []).map((v) => v.prId),
-        ]),
-      ].filter((id) => waiting.has(id)).length;
-      let budget = ws.dailyCap - res.autoToday - waitingHere;
       // TEAM CLAIMS: a PR a teammate's Limn holds at its synced head waits for its recheck time
       // without taking a lane place (team-claim.ts). A press reads GitHub afresh.
       const heldByTeammate = async (prId: number, headSha?: string | null): Promise<boolean> => {
@@ -606,11 +594,6 @@ export async function runAutoReviewSweep(
         }
         waitingNow.delete(k);
         if (await heldByTeammate(v.prId, v.headSha)) continue;
-        if (budget <= 0) {
-          result.capped = true;
-          skipped.push({ accountId: ws.accountId, prId: v.prId, headSha: v.headSha, reason: 'daily_cap' });
-          continue;
-        }
         const r = enqueueAutoReview(ctx, ws.accountId, v.prId, ws.workspaceId, null, {
           pressed,
           priority: true,
@@ -621,7 +604,6 @@ export async function runAutoReviewSweep(
           result.queued += 1;
           result.verdictPickups = (result.verdictPickups ?? 0) + 1;
           pickedUp += 1;
-          budget -= 1;
         } else if (r === 'full') {
           result.stopped = 'lane_full';
           break;
@@ -635,19 +617,12 @@ export async function runAutoReviewSweep(
         if (!only(prId)) continue;
         if (waiting.has(prId) || verdictPrIds.has(prId)) continue;
         if (await heldByTeammate(prId)) continue;
-        if (budget <= 0) {
-          result.capped = true;
-          // Said on the PR (team-claim-skip.ts); the rest of the list is noted the same way.
-          skipped.push({ accountId: ws.accountId, prId, headSha: null, reason: 'daily_cap' });
-          continue;
-        }
         const k = `${ws.accountId}:${prId}`;
         livePrs.add(k);
         waitingNow.delete(k); // a first review is always due: queued, or waits on the cap / lane
         const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId);
         if (r === 'queued') {
           result.queued += 1;
-          budget -= 1;
         } else if (r === 'full') {
           result.stopped = 'lane_full';
           break;
@@ -693,10 +668,6 @@ export async function runAutoReviewSweep(
           pressed,
         });
         if (!due.due) continue;
-        if (budget <= 0) {
-          result.capped = true;
-          continue;
-        }
         const r = enqueueAutoReview(ctx, ws.accountId, cand.prId, ws.workspaceId, null, {
           retryOfReviewId: cand.failedReviewId,
           pressed,
@@ -707,7 +678,6 @@ export async function runAutoReviewSweep(
           waitingNow.delete(`${ws.accountId}:${cand.prId}`);
           result.queued += 1;
           result.retried = (result.retried ?? 0) + 1;
-          budget -= 1;
         } else if (r === 'full') {
           result.stopped = 'lane_full';
           break;
@@ -728,7 +698,6 @@ export async function runAutoReviewSweep(
       }
 
       // ---- re-reviews: a moved head, or new review comments ----
-      let checkBudget: number | null = null;
       for (const cand of res.reReview ?? []) {
         const { prId, headSha, commentsAtMs, lastRunAtMs, coveredMs } = cand;
         if (!only(prId)) continue;
@@ -821,13 +790,7 @@ export async function runAutoReviewSweep(
           waitingNow.delete(k);
           const tcm = await import('./thread-check.js');
           if (tcm.threadCheckHeld(ws.accountId, prId)) continue;
-          if (checkBudget == null) {
-            const { countAutoThreadChecksSince } = await import('./thread-check-persist.js');
-            checkBudget =
-              config.threadCheckDailyCap -
-              (await countAutoThreadChecksSince(ctx, ws.accountId, ws.workspaceId, dayStartMs));
-          }
-          if (checkBudget <= 0 || tcm.threadCheckAutoRoom() === 0) continue;
+          if (tcm.threadCheckAutoRoom() === 0) continue;
           const r = await tcm.startThreadCheck(ctx, {
             accountId: ws.accountId,
             workspaceId: ws.workspaceId,
@@ -839,7 +802,6 @@ export async function runAutoReviewSweep(
           });
           if (r.outcome === 'queued' || r.outcome === 'already_running' || r.outcome === 'refused') headSeen.delete(k);
           if (r.outcome === 'queued') {
-            checkBudget -= 1;
             result.checksQueued = (result.checksQueued ?? 0) + 1;
           }
           continue;
@@ -859,11 +821,11 @@ export async function runAutoReviewSweep(
           if (isSettleWait(due.reason)) waitingNow.set(k, due.reason);
           continue;
         }
-        waitingNow.delete(k); // due: from here it is queued, or waits on the daily cap / lane
+        waitingNow.delete(k); // due: from here it is queued, or waits on the lane
         if (await heldByTeammate(prId, headSha)) {
           // A teammate's Limn holds this MOVED head's full review. The reader's replies on their own
           // Limn findings since the last own review are judged by a replies pass at this head — the
-          // same per-PR daily cap, the ONE budget gate (inside `startRepliesCheck`) and the same holds.
+          // same per-PR 24-hour limit, the ONE budget gate (inside `startRepliesCheck`) and the same holds.
           if (commentsAtMs == null && teamClaimRepliesDue(teamClaimRepliesTried.get(k), headSha, nowMs)) {
             teamClaimRepliesTried.set(k, { headSha, atMs: nowMs });
             const rc = await import('./replies-check.js');
@@ -882,12 +844,6 @@ export async function runAutoReviewSweep(
           }
           continue;
         }
-        if (budget <= 0) {
-          result.capped = true;
-          // A MOVED HEAD is a head never reviewed: said on the PR. A same-head comment burst is not.
-          if (commentsAtMs == null) skipped.push({ accountId: ws.accountId, prId, headSha, reason: 'daily_cap' });
-          continue;
-        }
         const r = enqueueAutoReview(ctx, ws.accountId, prId, ws.workspaceId, commentsAtMs ?? null, { pressed });
         // Queued (or a person already started it): this burst is covered. Forget its clocks NOW —
         // the PR can be a candidate again before any full pass prunes it (a comment landing while
@@ -897,7 +853,6 @@ export async function runAutoReviewSweep(
         if (r === 'queued') {
           result.queued += 1;
           result.reQueued += 1;
-          budget -= 1;
         } else if (r === 'full') {
           result.stopped = 'lane_full';
           break;
@@ -929,7 +884,7 @@ export async function runAutoReviewSweep(
 
 // ---- the skipped line (team-claim-skip.ts) ----
 
-type SkipReasonHere = 'budget' | 'daily_cap' | 'not_ready';
+type SkipReasonHere = 'budget' | 'not_ready';
 interface SkippedHead {
   accountId: number;
   prId: number;
@@ -973,14 +928,14 @@ async function dueHeadsHeld(
   ctx: AgentContext,
   nowMs: number,
   candidatesOf: CandidatesOf,
-  ws: { accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number },
+  ws: { accountId: number; workspaceId: number; enabledAtMs: number },
   reason: SkipReasonHere,
 ): Promise<SkippedHead[]> {
   const waiting = autoPendingPrIds();
   const res = await candidatesOf(ws.accountId, ws.workspaceId, {
     openedSinceMs: ws.enabledAtMs,
     dayStartMs: utcDayStartMs(nowMs),
-    limit: ws.dailyCap + waiting.size,
+    limit: AUTO_REVIEW_CANDIDATE_PAGE + waiting.size,
   });
   if (!res) return [];
   const retrying = new Set((res.retry ?? []).map((r) => r.prId));

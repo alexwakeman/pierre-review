@@ -174,8 +174,8 @@ export default function Page(): JSX.Element {
 
       <H2 id="ai-spend">AI spend</H2>
       <p>
-        <Ui>AI spend</Ui> limits the runs Ensemble starts by itself, so they use only a share of your week. It is on by
-        default at 50% of the week on a subscription. Your own runs are never limited. The full explanation is on{' '}
+        <Ui>AI spend</Ui> limits the runs Ensemble starts by itself, with a daily and a weekly quota. It is on by
+        default on a subscription: 10% of your week a day, 50% a week. Your own runs are never limited. The full explanation is on{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>
 

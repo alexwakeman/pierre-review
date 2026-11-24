@@ -134,11 +134,11 @@ export default function Page(): JSX.Element {
         <DocLink to="ai-review/run-a-review">Run a review</DocLink>.
       </p>
 
-      <H3>Auto reviews today</H3>
+      <H3>Run auto reviews now</H3>
       <p>
-        While auto review is on for the workspace, the page's header says how many auto reviews started today
-        and when the count resets, for example "7 of 20 auto reviews today · resets in 3h 12m". The day is
-        counted in UTC. <Ui>Run auto reviews now</Ui> starts the reviews auto review is due to run, now.
+        While auto review is on for the workspace, <Ui>Run auto reviews now</Ui> in the page's header starts the
+        reviews auto review is due to run, now. Auto reviews stop when Ensemble&rsquo;s daily or weekly{' '}
+        <DocLink to="settings/ai-usage-and-spend#spend-budget">AI quota</DocLink> is used.
       </p>
 
       <Warning>

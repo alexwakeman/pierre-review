@@ -9,7 +9,7 @@
 //
 // THE RULE (db/auto-retry-at-head.ts):
 //   • a READER'S PRESS (the sweep button, and Retry with prId): the head is done only when an AUTO run
-//     succeeded there; manual rows at the head are ignored. In flight still blocks; the daily cap holds.
+//     succeeded there; manual rows at the head are ignored. In flight still blocks.
 //   • the AUTOMATIC tick is unchanged: a manual success at the head makes it final.
 //   • the lane's start-time re-check (`isAutoRetryStillDue`) and the AI Review tab's Retry line
 //     (`getFailedAutoAtHead`) read the same fold.
@@ -41,7 +41,7 @@ vi.mock('./manager.js', () => ({
   },
 }));
 vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
-let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
+let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number }> = [];
 vi.mock('./auto-settings.js', () => ({ listAutoReviewWorkspaces: async () => roster }));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -241,7 +241,7 @@ describe('getAutoReviewCandidates — a press ignores manual rows at the head', 
 describe('runAutoReviewSweep over the real read — press queues, tick does not', () => {
   beforeEach(() => {
     enqueued.length = 0;
-    roster = [{ accountId: 1, workspaceId, enabledAtMs: FLOOR, dailyCap: 20 }];
+    roster = [{ accountId: 1, workspaceId, enabledAtMs: FLOOR }];
     auto._resetAutoReReviewForTest();
     auto._setAutoProviderForTest(() => 'codex');
   });
@@ -270,16 +270,6 @@ describe('runAutoReviewSweep over the real read — press queues, tick does not'
     const r = await auto.runAutoReviewSweep(ctx, now + 48 * HOUR);
     expect(enqueued.some((e) => e.prId === pr.live183039 || e.prId === pr.live182932)).toBe(false);
     expect(r.retried ?? 0).toBe(0);
-  });
-
-  it('the daily cap still holds for a press', async () => {
-    const { utcDayStartMs } = auto;
-    const today = (await q.getAutoReviewCandidates(1, workspaceId, { ...opts(), dayStartMs: utcDayStartMs(now), limit: 0 }))!;
-    // Room for exactly ONE more auto run today: the press queues one of the two and reports the cap.
-    roster = [{ accountId: 1, workspaceId, enabledAtMs: FLOOR, dailyCap: today.autoToday + 1 }];
-    const r = await auto.runAutoReviewSweep(ctx, now, { accountId: 1, workspaceId });
-    expect(enqueued).toHaveLength(1);
-    expect(r).toMatchObject({ queued: 1, capped: true });
   });
 });
 

@@ -276,12 +276,6 @@ export function ticketAutoCheckWords(
     case 'due':
       return { label: 'Story check starts within a minute', title: 'The PRs have been quiet for 2 minutes.' };
     case 'held':
-      if (auto.reason === 'daily_limit') {
-        return {
-          label: 'Story check starts at 00:00 UTC — the daily limit of automatic checks is reached',
-          title: 'This workspace has used its automatic ticket checks for today. Tickets with your own PRs are not limited. Re-check runs one now.',
-        };
-      }
       if (auto.reason === 'teammate') {
         if (!auto.teammate) return null;
         const who = `@${auto.teammate.login}`;
