@@ -1,4 +1,4 @@
-// AI VENDOR SIGNALS in persistPr — migration 0218's columns (docs/AI-ADOPTION-REPORT.md § Detection).
+// AI VENDOR SIGNALS in persistPr — migration 0219's columns (docs/AI-ADOPTION-REPORT.md § Detection).
 // Throwaway sqlite; the real persistPr, no GitHub. PERSIST_BODIES is OFF (lean, the default).
 //
 // What this pins:

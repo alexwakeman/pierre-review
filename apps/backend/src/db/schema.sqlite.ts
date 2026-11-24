@@ -138,7 +138,7 @@ export const accounts = sqliteTable('accounts', {
   // Stripe customer id (cus_…), captured from checkout.session.completed so later
   // subscription webhooks can resolve the account. Null until first checkout.
   stripeCustomerId: text('stripe_customer_id'),
-  // THE COMMERCIAL LICENCE (licence/, migration 0217; docs/LICENSING.md). `licenceKey` is the signed
+  // THE COMMERCIAL LICENCE (licence/, migration 0218; docs/LICENSING.md). `licenceKey` is the signed
   // key the reader pasted into Settings → Licence, stored as typed and verified OFFLINE on every read
   // (licence/key.ts) — never sent anywhere. `licenceEvaluationEndsAt`: the end of the ONE 30-day
   // evaluation the reader may start when the reminder first shows; `licenceReminderSnoozedUntil`:
@@ -522,7 +522,7 @@ export const pullRequests = sqliteTable(
     // Canonical advisory ids named by the vendor-selected fields; NULL when there are none.
     advisoryIds: text('advisory_ids', { mode: 'json' }).$type<string[]>(),
     securityCheckedAt: integer('security_checked_at', { mode: 'timestamp' }),
-    // ---- AI VENDOR SIGNALS (migration 0218; docs/AI-ADOPTION-REPORT.md § Detection) — the AI coding
+    // ---- AI VENDOR SIGNALS (migration 0219; docs/AI-ADOPTION-REPORT.md § Detection) — the AI coding
     // tools the PR's OWN fields name (title, FULL bodyText, markdown body when fetched, branch,
     // author), read at sync by shared `detectAiPrSignals` (sync/upsert.ts `aiPrColumnsFor`). JSON
     // `[{vendor, source}]` — VERDICTS ONLY, never text (lean storage). Three-state like the security
@@ -830,7 +830,7 @@ export const commits = sqliteTable(
     messageHeadline: text('message_headline'),
     committedAt: integer('committed_at', { mode: 'timestamp' }).notNull(),
     // AI VENDOR SIGNALS from this commit's author / committer (login, name, email) and FULL message
-    // (trailers, "Generated with X"), read at sync by shared `detectAiCommitSignals` (migration 0218).
+    // (trailers, "Generated with X"), read at sync by shared `detectAiCommitSignals` (migration 0219).
     // JSON `[{vendor, source}]`, verdicts only: the message is still stored only on PERSIST_BODIES
     // and names / emails never are. NULL = not scanned, `[]` = scanned clean.
     aiSignals: text('ai_signals'),
@@ -2621,7 +2621,7 @@ export const workspaces = sqliteTable(
     // written; kept rather than rebuilding the table to drop a column.
     sprintChecks: text('sprint_checks', { mode: 'json' }).$type<unknown>(),
     // Activity → This Sprint: the workspace's STATUS LAYOUT override (migration 0103 / pg 0090).
-    // OVERRIDES ONLY (`SprintStatusSettings` = {buckets, mergedColumn}: named status buckets, each with
+    // OVERRIDES ONLY (`SprintStatusSettings` = {buckets, mergedColumn, showCancelled}: named status buckets, each with
     // a stage meaning; stored retired {sections} / {order, deliveredFrom} values are converted on
     // read, no migration); NULL = the
     // automatic layout (`sprint_reads.status_order_json` + category + name + PR evidence).
@@ -5653,7 +5653,8 @@ export const teamClaimLines = sqliteTable(
     owner: text('owner'),
     name: text('name'),
     headSha: text('head_sha').notNull(),
-    // 'claude' | 'codex' — the status context (`limn/review-<provider>`).
+    // 'claude' | 'codex' — the status context (`limn/review-<provider>`); 'story' — the story check's
+    // `ensemble/story-check` (review/ticket-review/story-claim.ts; `reviewId` stays NULL).
     provider: text('provider').notNull(),
     // The run the claim was for (NULL until its row is written, and on a teammate's line).
     reviewId: integer('review_id'),
@@ -6349,6 +6350,39 @@ export const workspaceReleaseRepos = sqliteTable(
       name: 'workspace_release_repos_repo_account_fk',
       columns: [t.repoId, t.accountId],
       foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// "EXPLAIN WHAT'S BLOCKING" (migration 0217; docs/RELEASES.md § Explain what's blocking). ONE row per
+// (account, workspace): the last report a reader's press wrote over the release check, the hash of the
+// input it was written from (stale = the check's input hash differs now; no clock in the hash), and what
+// ran. Written and read only by db/release-blocker-reports.ts. Tenancy via the named composite FK onto
+// `workspaces (id, account_id)`. ⚠ Every `onConflictDoUpdate` targets exactly [accountId, workspaceId].
+export const releaseBlockerReports = sqliteTable(
+  'release_blocker_reports',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    inputHash: text('input_hash').notNull(),
+    /** Shared `ReleaseBlockersReport` minus its run facts (those are the columns below). */
+    reportJson: text('report_json', { mode: 'json' }).$type<unknown>().notNull(),
+    model: text('model'),
+    provider: text('provider'),
+    costUsd: real('cost_usd'),
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    writtenAt: integer('written_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('release_blocker_reports_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'release_blocker_reports_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
     }).onDelete('cascade'),
   }),
 );

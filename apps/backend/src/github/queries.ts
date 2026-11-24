@@ -6,7 +6,7 @@ import { config } from '../config.js';
 // Only the PR description and the large review-comment diff hunks stay lean-gated (neither is
 // used at sync time and neither is stored when lean) — dropping them from the query shrinks each
 // backfill page substantially. COMMIT MESSAGES (and the git author/committer name + email) are
-// fetched UNCONDITIONALLY since migration 0218: the AI vendor detector reads their trailers at sync
+// fetched UNCONDITIONALLY since migration 0219: the AI vendor detector reads their trailers at sync
 // (docs/AI-ADOPTION-REPORT.md § What sync fetches). Only the verdict is stored; `commits.message`
 // is still written only on PERSIST_BODIES, and names / emails never are.
 const fullText = config.persistBodies;
@@ -855,7 +855,7 @@ export interface GqlCommitNode {
     /** The subject line. ALWAYS selected (not lean-gated); optional because hand-built fixtures
      *  and tolerant partials may lack it — absent means "not received", never "empty". */
     messageHeadline?: string | null;
-    /** The FULL message, ALWAYS selected (migration 0218: the AI vendor detector reads its
+    /** The FULL message, ALWAYS selected (migration 0219: the AI vendor detector reads its
      *  trailers). Optional for hand-built fixtures: absent / null = "not received", and then the
      *  commit's `ai_signals` is left alone. Stored only on PERSIST_BODIES. */
     message?: string | null;

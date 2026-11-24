@@ -3031,7 +3031,8 @@ the newest version tag such that it and every tag below it have their tickets Co
 `repoStripText`: "No tag can be released", "Checking…" + the bar and ONE line (`repoProgress`), "Nothing new since
 0.390.0-rc", "No version tags on main yet"). Then, in its own bordered box, `Sprint/releaseTicketsModel.ts`: ONE
 list of ticket cards newest first (`ticketList`, by the latest tag's `tagAt` across repositories) opened on the CANDIDATE
-TICKET ★ ± 1 (`ticketWindow`; "Show 3 later / earlier tickets", component state; "Read earlier tags" POSTs
+TICKET ★ ± 1 (`ticketWindow`; "Show next 3 of 7" / "Show previous 3 of 12" — `showTicketsWords`, the total
+hidden that way, NONE below while any candidate repo has `older.moreAvailable`; component state; "Read earlier tags" POSTs
 `/api/releases/older-tags` past what was sent). PRs with no ticket are narrow grouped rows between cards
 (`noTicketGroupWords`); bot PRs are left out of their lists unless "Show bot PRs" (top of the box, off,
 component state; `noTicketShownPrs`) is ticked, and are shown at all only while "Show PRs with no ticket"
@@ -3041,9 +3042,10 @@ component state; `noTicketShownPrs`) is ticked, and are shown at all only while 
 (`repoLatestNote`), and ONE "Release…" (HIDDEN unless `showCreateRelease`) opening `ReleaseDialog`. Below
 the list, in a second bordered box: "Not in a tag yet" (`notTagged`: only open PRs) and "Holding the release"
 (`releaseHolders`, always shown). A card: `ticketMark` (✓ · ✗ `CloseIcon` · ⊘ `SkipIcon` amber · ? `QuestionIcon`, dashed
-card · part-circle), key, title, `ticketCardStatus`, the latest tag per repo (`repoTagWords`) and ONE line
+card · part-circle), key, title, `ticketCardStatus`, "merged 23 Oct" (`ticketMergedWords`: the newest `mergedAt`, from `ticketLatest`),
+the latest tag per repo (`repoTagWords`) and ONE line
 (`ticketCardLine`: "Waits on BMD-1061: In Code Review" + "Show BMD-1061", which scrolls to and opens the holder
-card; "9 PRs, last merged 23 Oct by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR
+card; "9 PRs, the last by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR
 (`ticketCardPrLines`) — all from the check, NO fetch on open. A PR known only from the history read (`prId`
 null) links to GitHub. "Released" is never said of a ticket.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
@@ -3113,7 +3115,11 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   - **COLUMNS are `statusLayout.columns`, verbatim** — the workspace's status buckets in order (the gear's
     bucket editor): Not started, In progress, **Code review**, **Product review** (QA and other sign-offs —
     a FIRST-CLASS bucket now; the derived "Merged, not signed off" column is GONE), Complete, then
-    **Cancelled** (won't do, duplicate — closed, NOT done: it never counts as Complete). A ticket's
+    **Cancelled** (won't do, duplicate — closed, NOT done: it never counts as Complete) — ⚠ HIDDEN by
+    default: the server leaves a Cancelled bucket off `columns` unless `settings.showCancelled`
+    ("Show the Cancelled column" in Statuses), and `lib/laneBoard.ts` `onDrawnColumns` drops a card whose
+    column is not drawn (no card, no lane count, no "Status not known"); the ticket still counts as
+    cancelled everywhere else (docs/TRACKERS.md § The status order and buckets). A ticket's
     column is `SprintGraphNode.column`, computed ONCE in the server's fold (its bucket, or the first
     Product review bucket when the merge rule moves a Code review ticket whose PRs have all merged) — the
     SPA never re-derives it. Two pseudo-columns appear only when a card needs one: "Outside the sprint"
@@ -3304,7 +3310,9 @@ sprint. The API route keeps its old name (`GET /api/sprint-graph`); only the SPA
   meaning select per bucket, statuses moved by drag and drop or the keyboard Move up / down buttons across
   buckets, ticket counts, "not placed yet" on a status the buckets do not name, a meaning select that
   offers Code review and Product review, the "Move tickets whose pull requests have all merged into
-  Product review" switch with its ⓘ (disabled, with one line, when no bucket means Product review), Save / Cancel / Reset to automatic; Save waits on shared
+  Product review" switch with its ⓘ (disabled, with one line, when no bucket means Product review), the
+  "Show the Cancelled column" checkbox with its ⓘ (OFF by default; disabled, with one line, when no bucket
+  means Cancelled), Save / Cancel / Reset to automatic; Save waits on shared
   `sprintBucketsProblem`'s sentence, run on what Save SENDS; over the 60-status cap Save leaves out
   0-count statuses first — a renamed or retired tracker status lingers as one — and says which
   (`statusesLeftOutOnSave`), so the cap never locks the editor; each bucket's name field and meaning
@@ -5308,8 +5316,20 @@ button. A failed write shows beside the field and as ONE `SettingsSaveToast` in 
 
 ## Colour schemes (`lib/colorSchemes.ts`, Settings → Appearance)
 
-Nine schemes: the two defaults (Ensemble Light, Ensemble Dark) and seven named ones — LIGHT: Solarized
-Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo Night.
+Twelve schemes: the two defaults (Ensemble Light, Ensemble Dark) and ten named ones — LIGHT: Solarized
+Light, GitHub Light, Gruvbox Light, Meadow; DARK: Solarized Dark, Dracula, Nord, Tokyo Night, Neon,
+Green Screen. Neon, Green Screen and Meadow have no canonical palette: Neon keeps its neon on accents,
+fills, borders and status marks (body text stays a light neutral); Meadow's success is a teal so it
+does not read as its green accent.
+
+- **SCHEME FLAIR (Neon, Meadow)** — `index.css` § SCHEME FLAIR: decoration keyed on
+  `html[data-scheme=…]` ONLY (so it never paints a Settings chip). Neon: an ultraviolet grid with
+  magenta/cyan haze, a gradient wordmark that slowly pulses (motion-safe only), a glowing title,
+  selection, tabs and primary buttons. Meadow: a DARK FOREST SIDEBAR (its own `--ui-*` tokens on
+  `[data-testid='sidebar']`, measured by `test/colorSchemes.test.ts` § the Meadow sidebar), sunlight
+  and a faint leaf pattern on the page. The page ground is painted on `[data-shell-main]` AND every
+  `.bg-ui-bg` inside it with `background-attachment: fixed`, so stacked opaque layers read as one
+  ground. ⚠ Flair never sets a text colour that is not a measured token, and never a size.
 
 - **One CSS block per scheme** in `index.css`, `[data-scheme='<id>'] { --ui-*: …; --ai-*: …; }` —
   all 16 `--ui-*` and all 8 `--ai-*` roles. The defaults are the existing `:root` / `.dark` blocks,
@@ -5343,6 +5363,10 @@ Light, GitHub Light, Gruvbox Light; DARK: Solarized Dark, Dracula, Nord, Tokyo N
   storage rule; the test pins the keys. The hook re-applies on load.
 - **The picker** is the custom `Select`; each option is a chip with `data-scheme=<id>`, so that
   scheme's block repaints the chip alone and its name shows in its own ink on its own page.
+- **The UI font is `--ui-font`**, declared on `:root, [data-scheme]` (the sans stack) ABOVE the named
+  blocks, so a named block overrides it and a sans chip never inherits another scheme's face. `body`,
+  every `[data-scheme]` element and Tailwind's `font-sans` (tailwind.config.ts) read it. Only Green
+  Screen sets it (a system monospace stack — no remote font, CSP). `font-mono` is untouched.
 
 ## The AI-surface palette (`ai-*` tokens) — and the purple that STAYS
 
@@ -6015,19 +6039,16 @@ the Claude reviews frame, `AiFixBanner`, `StoryBuildsToast` (docs/STORY-BUILD.md
   being out of the flow — a toast appearing or going never moves a pixel of any page. The cluster
   itself is a floating pill (`bg-ui-bg`, `ring-1 ring-ui-line`, `shadow-lg` — DESIGN.md § 4: floating
   things get the shadow).
-- **IT RISES OVER A PINNED ACTION BAR** (`useToastLift`, `components/ui/toastObstacles.ts`; pure half
-  `toastLift`, lib/toastAnchor.ts). A `SidePanel` footer (docked at lg+, a sheet below) registers
-  itself while mounted; when one reaches the cluster's corner (its right edge within 160px of the
-  viewport's right) and sits at the viewport's bottom, the cluster's `bottom` becomes that bar's
-  height + 8px, so it never sits on Merge / Dismiss. Re-measured on register, resize, a
-  `ResizeObserver`, any scroll and `animationend`; an open panel re-anchors when the lift changes.
-  ⚠ **MEASURE AFTER LAYOUT SETTLES** (2026-11-04): each read is taken on the next frame AND again on
-  the frame after, and the `ResizeObserver` watches the bar's PANEL (its parent) as well as the bar.
-  The Open PRs docked panel re-fills to the pane's bottom on scroll (`useFillToPaneBottom`) in its own
-  rAF + a later React commit; a single read on the scroll took the footer's in-between position and
-  kept it, so the cluster sat ~40px too high until the next event.
-- **Z-ORDER**: the dock is `z-[51]` — ABOVE a `SidePanel` sheet (`z-50`), so the Undo for an action
-  taken in a sheet (Dismiss, Approve, Merge) is always reachable; BELOW the mobile drawer
+- **IT NEVER MOVES FOR A PANEL** (owner, 2026-11-23: "keep its position stable"). It used to RISE over
+  a `SidePanel`'s pinned action bar (`useToastLift` / `toastObstacles.ts` / `toastLift`, all DELETED),
+  so opening a PR drawer on Activity → Open PRs moved it up ~60px and back on close. Now the cluster
+  STACKS over the panel (z-order below) and the panel's action bar keeps its right end clear instead:
+  `FOOTER_TOAST_ROOM` (`md:pr-24`, SidePanel.tsx — room for three overlapping circles and the gutter),
+  so the cluster never sits on Merge / Dismiss. Below md the cluster already sits above the phone's
+  bottom bar, clear of a full-screen sheet's footer. ⚠ Never re-add a lift: fix a clash in the panel's
+  layout, never by moving the cluster.
+- **Z-ORDER**: the dock is `z-[51]` — ABOVE a `SidePanel` (docked or a sheet, `z-50`), so the Undo for an action
+  taken in a panel (Dismiss, Approve, Merge) is always reachable and an open drawer never hides it; BELOW the mobile drawer
   (`z-[55]`/`[56]`), the modals (Settings, Help, the sync-progress modal, `InfoModal` — all `z-[60]`
   now; Settings/Help/SyncProgress were `z-50` and would have sat under the cluster), popovers
   (`UserProfilePopover`, `MarkerPopover` → `z-[60]`), the resolver (`z-[60]`) and the workspace manager

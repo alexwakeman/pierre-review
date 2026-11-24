@@ -684,6 +684,7 @@ describe('tierFor — GitHub quota spenders', () => {
     // re-reads the tickets (tracker quota) and writes tags, pre-releases and comments (GitHub writes).
     expect(tiers('GET', '/api/releases/12')).toEqual(['read']);
     expect(tiers('POST', '/api/releases/preview')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('POST', '/api/releases/blockers')).toEqual(['ai', 'ai_hourly']);
     expect(tiers('POST', '/api/releases/refresh')).toEqual(['search']);
     // "Show 50 more" starts the scan (history pages + ticket reads): the `sync` bucket.
     expect(tiers('POST', '/api/releases/older-tags')).toEqual(['sync']);

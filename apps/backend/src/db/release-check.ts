@@ -67,6 +67,8 @@ import { olderTagsWanted } from '../releases/older-tags.js';
 import { historyView, releasePointsOf, type HistoryIncrement } from '../releases/history-fold.js';
 import { RELEASE_TICKET_FAILS_MAX } from '../tracker/ticket-status.js';
 import { sprintLayoutFor, sprintStageOf } from './sprint-status-layout.js';
+import { releaseBlockersStateFor } from './release-blocker-reports.js';
+import { config } from '../config.js';
 
 const { repos, pullRequests, trackerTickets, sprintTickets, releases, releaseItems, releaseHistoryCommits, releaseRangePrs, trackerTicketStatus, users } = schema;
 
@@ -907,9 +909,12 @@ export async function getReleases(accountId: number, rawWorkspace: string | numb
       }
     }
   }
+  const check = withLiveProgress(foldReleaseCheck(input), input);
   return {
     ...withRepos,
     latestReleaseTagAt: latestTagMs == null ? null : new Date(latestTagMs).toISOString(),
-    check: withLiveProgress(foldReleaseCheck(input), input),
+    check,
+    // "Explain what's blocking" (agentic, so only while AI is on): the stored report and whether it is stale.
+    blockers: config.aiEnabled ? await releaseBlockersStateFor(accountId, workspaceId, check) : null,
   };
 }

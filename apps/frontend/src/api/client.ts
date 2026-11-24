@@ -270,6 +270,7 @@ import type {
   ReleaseOlderTagsBody,
   ReleaseOlderTagsResponse,
   ReleasesRefreshResponse,
+  ReleaseBlockersRunResponse,
   ReleasesResponse,
   ReleasePreviewBody,
   ReleasePreviewResponse,
@@ -700,6 +701,12 @@ export const api = {
   refreshReleases: (workspaceId: number) =>
     fetch(withQuery('/api/releases/refresh', workspaceParam(workspaceId)), { method: 'POST' }).then((r) =>
       handle<ReleasesRefreshResponse>(r),
+    ),
+  // "Explain what's blocking" (a reader's press): ONE model completion over the stored check; the answer
+  // is the report state GET /api/releases carries from then on.
+  explainReleaseBlockers: (workspaceId: number) =>
+    fetch(withQuery('/api/releases/blockers', workspaceParam(workspaceId)), { method: 'POST' }).then((r) =>
+      handle<ReleaseBlockersRunResponse>(r),
     ),
   // "Show 50 more" (a reader's press): one repo's older band lists up to `wanted` tags; the scan reads
   // on in the background (the tab's poll shows its progress).
@@ -1220,7 +1227,7 @@ export const api = {
     fetch('/api/sprint-stories/refresh', jsonBody('POST', { workspaceId })).then((r) =>
       handle<SprintRefreshResponse>(r),
     ),
-  // The status buckets override; `{buckets: null, mergedColumn: true}` resets.
+  // The status buckets override; `SPRINT_STATUS_SETTINGS_DEFAULT` resets.
   sprintSetStatuses: (body: SprintStatusesUpdate) =>
     fetch('/api/sprint-stories/statuses', jsonBody('PUT', body)).then((r) => handle<SprintStatusesResponse>(r)),
   // The story view (the ticket tab; core, FREE): one ticket's open / merged / closed PRs as TimelinePr

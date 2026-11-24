@@ -788,7 +788,7 @@ export function securityColumnsFor(input: PrSecurityInput): SecurityColumns {
   };
 }
 
-/** The three `pull_requests` AI-signal columns (migration 0218), ALWAYS written together. */
+/** The three `pull_requests` AI-signal columns (migration 0219), ALWAYS written together. */
 export interface AiPrColumns {
   aiSignals: string;
   aiSignalsVersion: number;
@@ -1722,7 +1722,7 @@ export async function persistPr(
       const committedAt = new Date(c.committedDate);
       // A commit Limn made (the ledger's sha, or its `Limn-Run:` trailer) is the poster's bot's.
       // ⚠ The trailer half (rule (d)) reads the message ONLY on PERSIST_BODIES, exactly as before
-      // migration 0218 made the message arrive on every walk: on a lean install it is not read, so
+      // migration 0219 made the message arrive on every walk: on a lean install it is not read, so
       // fetching it for the AI detector re-attributes no commit (sync/upsert-limn-attribution tests).
       const commitBot =
         wideLimn &&

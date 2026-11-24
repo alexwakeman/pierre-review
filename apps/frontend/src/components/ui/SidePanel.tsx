@@ -5,7 +5,6 @@ import { IconButton } from './Button.js';
 import { cx } from './cx.js';
 import { escapeBelongsToLayer } from './keys.js';
 import { useIsDesktop, useIsPhone } from './media.js';
-import { registerToastObstacle } from './toastObstacles.js';
 
 // THE SIDE PANEL (docs/redesign/DESIGN.md § Side panel).
 //
@@ -19,13 +18,19 @@ import { registerToastObstacle } from './toastObstacles.js';
 // `footer` is the action bar: pinned to the bottom, where a thumb reaches it on a phone.
 // As a sheet it starts below the slim top bar (`[data-shell-topbar]`, measured at open), so the menu
 // and the location stay on screen.
-// ⚠ THE TOAST CLUSTER STAYS ABOVE A SHEET (HeaderToasts.tsx: z-[51] over this z-50), so the Undo for
-// an action taken in the sheet (Dismiss, Approve, Merge) is always reachable; the footer registers as
-// a toast obstacle (ui/toastObstacles.ts) so the cluster rises above the action bar, never onto it.
+// ⚠ THE TOAST CLUSTER STAYS PUT AND ABOVE THIS PANEL (HeaderToasts.tsx: fixed at the bottom right,
+// z-[51] over this z-50), so the Undo for an action taken here (Dismiss, Approve, Merge) is always
+// reachable. It never moves for the panel (owner, 2026-11-23: it used to rise over the action bar);
+// instead the action bar keeps its right end clear (`FOOTER_TOAST_ROOM`) from md up, where the
+// cluster sits on the bar's corner. Below md the cluster sits above the phone's bottom bar, clear of it.
 
 /** A header action sized like the close button (an IconButton size="sm"): pass to a CopyButton or a
  *  link so the row lines up. */
 export const HEADER_ACTION_CLASS = 'h-7 w-7 justify-center touch:h-10 touch:w-10';
+
+/** The action bar's right padding from md up: room for the toast cluster resting on its corner (three
+ *  overlapping circles and the gutter), so the cluster never sits on a button. */
+const FOOTER_TOAST_ROOM = 'md:pr-24';
 
 export function SidePanel({
   open,
@@ -62,9 +67,6 @@ export function SidePanel({
   const phone = useIsPhone();
   const titleId = useId();
   const panelRef = useRef<HTMLElement>(null);
-  // The action bar, so the toast cluster rises above it rather than sitting on its buttons.
-  const [footerEl, setFooterEl] = useState<HTMLDivElement | null>(null);
-  useEffect(() => (footerEl != null ? registerToastObstacle(footerEl) : undefined), [footerEl]);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -158,7 +160,7 @@ export function SidePanel({
         {children}
       </div>
       {footer != null && (
-        <div ref={setFooterEl} className="flex shrink-0 flex-wrap items-center gap-2 bg-ui-surface px-5 py-3 max-md:px-4 max-md:pb-[max(12px,env(safe-area-inset-bottom))]">
+        <div className={`flex shrink-0 flex-wrap items-center gap-2 bg-ui-surface px-5 py-3 ${FOOTER_TOAST_ROOM} max-md:px-4 max-md:pb-[max(12px,env(safe-area-inset-bottom))]`}>
           {footer}
         </div>
       )}

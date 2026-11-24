@@ -1525,14 +1525,21 @@
       "idx": 217,
       "version": "6",
       "when": 1795507200000,
-      "tag": "0217_account_licence",
+      "tag": "0217_release_blocker_reports",
       "breakpoints": true
     },
     {
       "idx": 218,
       "version": "6",
       "when": 1795593600000,
-      "tag": "0218_ai_signals",
+      "tag": "0218_account_licence",
+      "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "6",
+      "when": 1795680000000,
+      "tag": "0219_ai_signals",
       "breakpoints": true
     }
   ]

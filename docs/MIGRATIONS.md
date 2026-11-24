@@ -1805,15 +1805,31 @@ account-scoped table: erasure and the export already cover it. Additive; journal
 `1794988800000`. [DATA-MODEL.md](DATA-MODEL.md) § `workspaces.storyCheckAllRepos`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
 § Ticket review → OUTSIDE THE TICKET.
 
-### `0218_ai_signals` — AI vendor signals on PRs and commits (2026-11-25)
+### `0218_account_licence` — the commercial licence key and its reminder
+
+Three additive, nullable columns on `accounts`, no default, no backfill: `licence_key` (text, the signed key as
+typed, re-checked on every read), `licence_evaluation_ends_at` and `licence_reminder_snoozed_until` (integer
+timestamps). An existing account-bearing table: erasure and the export already cover it. Journal idx 218, `when`
+`1795593600000`. [LICENSING.md](LICENSING.md) § In the app.
+
+### `0219_ai_signals` — AI vendor signals on PRs and commits (2026-11-25)
 
 Four additive, nullable columns, no default, no SQL backfill: `pull_requests.ai_signals` (text JSON),
 `pull_requests.ai_signals_version` (integer), `pull_requests.ai_signals_checked_at` (integer timestamp) and
 `commits.ai_signals` (text JSON). VERDICTS ONLY (`[{vendor, source}]` from the shared detector), never text: lean
 storage holds. NULL = not scanned; the one-time, bounded `sync/backfill-ai-signals.ts` reads the last 90 days by
-node id. Existing tables: erasure, `deleteRepo` and the export already cover them. Journal idx 218, `when`
-`1795593600000`. [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests.ai_signals`; [AI-ADOPTION-REPORT.md](AI-ADOPTION-REPORT.md)
+node id. Existing tables: erasure, `deleteRepo` and the export already cover them. Journal idx 219, `when`
+`1795680000000`. [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests.ai_signals`; [AI-ADOPTION-REPORT.md](AI-ADOPTION-REPORT.md)
 § Detection.
+
+### `0217_release_blocker_reports` — "Explain what's blocking"
+
+`CREATE TABLE release_blocker_reports` (one row per `(account_id, workspace_id)`, unique index
+`release_blocker_reports_account_ws`; `account_id` → `accounts` cascade; the named composite FK
+`release_blocker_reports_workspace_account_fk` → `workspaces (id, account_id)` cascade): the last report, its
+input hash and what ran. A new account-bearing table: erased explicitly, listed in `accountScopedTables()`.
+No backfill. Additive; journal idx 217, `when` `1795507200000`. [DATA-MODEL.md](DATA-MODEL.md) §
+`release_blocker_reports`; [RELEASES.md](RELEASES.md) § Explain what's blocking.
 
 ### `0198_story_build_port_report` — the hotfix port report
 

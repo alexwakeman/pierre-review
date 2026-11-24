@@ -129,7 +129,7 @@ substantive-review detection). Only the truly bulky, regenerable text stays
 **lean-gated** — under lean, sync neither persists nor fetches the **PR description**
 (`pullRequests.body`), the review-comment **`diffHunk`**, and the
 **`checkRuns` JSON** (the `ciStatus` enum is kept); `reviewComments.excerpt` is always
-kept too. The commit **`message`** is lean-STORED but no longer lean-FETCHED (migration 0218): the
+kept too. The commit **`message`** is lean-STORED but no longer lean-FETCHED (migration 0219): the
 walk reads it, with the git author/committer name and email, so the AI vendor detector can scan its
 trailers, and stores only the verdict (`commits.ai_signals`, `pull_requests.ai_signals`;
 docs/AI-ADOPTION-REPORT.md § Detection). `commits.message` is still written only on PERSIST_BODIES,

@@ -64,7 +64,7 @@ import {
   type SprintReadRow,
   type SprintTicketDbRow,
 } from './sprint-store.js';
-import { getSprintStatusLayout, mergeRuleTarget, sprintPlacementOf } from './sprint-status-layout.js';
+import { getSprintStatusLayout, mergeRuleTarget, sprintColumnsOf, sprintPlacementOf } from './sprint-status-layout.js';
 
 // REPORTS → THIS SPRINT AS A GRAPH (`GET /api/sprint-graph`; and the story view's `GET /api/ticket-story`;
 // docs/API.md § This sprint). DB ONLY — no tracker, GitHub or model call: a view STAMPS the workspace
@@ -445,7 +445,9 @@ export async function getSprintGraph(
   // RE-BILL gate (review/sprint-paths/manager.ts), never the display gate. `pathsStatus` says where the
   // builder stands for TODAY's input (`sprintPathsStatusOf`, the ONE fold).
   const timing = await sprintTimingFor(accountId, workspaceId, source, opts.now, readRow);
-  const pathsInput = opts.aiEnabled ? sprintPathsInputOf(source, g, statusLayout.columns, timing) : null;
+  // ⚠ EVERY bucket, not the drawn columns: hiding the Cancelled column is a view choice and must not
+  // move the paths' input hash (a re-bill).
+  const pathsInput = opts.aiEnabled ? sprintPathsInputOf(source, g, sprintColumnsOf(statusLayout.buckets), timing) : null;
   const pathsRow = pathsInput?.eligible ? await storedSprintPaths(accountId, workspaceId) : null;
   const keyIdent = new Map(g.nodes.map((n) => [n.key.toUpperCase(), n.ident] as const));
   // Resolved against TODAY's nodes only: a key that left the sprint and the ghost set is dropped (a
@@ -610,7 +612,7 @@ export async function sprintPathsTodo(accountId: number, workspaceId: number): P
     ...(themes != null ? { themes: themes.byIdent } : {}),
   });
   const source = readRow?.sourceJson ?? null;
-  return sprintPathsInputOf(source, g, statusLayout.columns, await sprintTimingFor(accountId, workspaceId, source, Date.now(), readRow));
+  return sprintPathsInputOf(source, g, sprintColumnsOf(statusLayout.buckets), await sprintTimingFor(accountId, workspaceId, source, Date.now(), readRow));
 }
 
 /** GET /api/ticket-story — the STORY VIEW's lean read (docs/API.md § GET /api/ticket-story). DB only:

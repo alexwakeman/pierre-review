@@ -26,6 +26,7 @@ import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { registerSprintBriefs } from './sprint-briefs/index.js';
 import { registerSprintAskRoutes } from './sprint-ask/routes.js';
 import { registerAdoptionReportRoutes } from './adoption-report/routes.js';
+import { registerReleaseBlockersRoutes } from './release-blockers/routes.js';
 import { bindDependencyAutomationAi } from '../merge/dependency-automation.js';
 import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
 import { reconcileReferenceDocsOnStartup } from '../reference-docs/startup.js';
@@ -81,6 +82,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // REPORTS → DOWNLOAD REPORT's commentary: one Haiku completion per slide on the reader's press,
   // grounded by the shared gate (docs/AI-ADOPTION-REPORT.md). The figures route is core (app.ts).
   registerAdoptionReportRoutes(app, ctx);
+  // "EXPLAIN WHAT'S BLOCKING" (This Sprint → Releases): on a press, ONE completion over the release check
+  // the server holds — which work unlocks which release, and in what order. Agentic, so here only.
+  registerReleaseBlockersRoutes(app, ctx);
   // THE REFERENCE DOCS LIBRARY (Activity → Docs): upload / URL → a Sonnet 5 build into a markdown
   // tree (INDEX → CONTENTS → sections) + the docs chat. Agentic and local-only, so here and nowhere else.
   registerReferenceDocsRoutes(app, ctx);

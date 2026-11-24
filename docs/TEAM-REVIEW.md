@@ -4,7 +4,8 @@
 diagrams lives in Claude Docs ("Ensemble on a team: how shared reviews work"); this file is the source. Checked against the code on
 2026-11-05 (Ensemble 1.0.5); § 4 "A teammate's verdict" and § 3's catch-up on 2026-11-10; claims, resolving
 Ensemble's threads and lifting a teammate's block made always on (no settings) on 2026-11-10; dependency
-claims (§ 3 Dependency updates) on 2026-11-14. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
+claims (§ 3 Dependency updates) on 2026-11-14; the story check's own claim (§ 3 The story check's own claim)
+on 2026-11-23. **Keep it true:** any change to claims, auto review, auto-posting, verdicts,
 withdrawals, teammate reviews, thread judgements, replies, pushback, resolving or still-open points
 updates this file in the same commit — so does any change to the dependency automation's claims. Engineering detail (names, tables, markers) lives in
 [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md); this file says what happens and why, in plain words.
@@ -56,6 +57,7 @@ What travels between Ensemble installs:
 | **Finding comments** with a severity word ("**Warning**") and a hidden marker | An Ensemble finding, raised by that person's Ensemble. Every Ensemble treats it as a bot ("Ensemble · alex"), never as the person. |
 | An **`Ensemble-Run:` line** at the end of a commit message | A commit Ensemble made (AI Fix, a conflict resolution, Implement, a branch update). Every Ensemble treats it as the bot's, never the person's. |
 | **"Still open:" replies** with a hidden marker | Which commit it was said at, and whether this thread has already been reopened once. |
+| An **`ensemble/story-check` line** on the latest commit of each of a ticket's open PRs ("alex is checking the story", "alex checked the story · 3 gaps") | Who is checking this ticket's story at these commits, and whether it is done. Separate from the review lines, so a teammate without story checks never holds it (§ 3 The story check's own claim). Never CI. |
 | An **`ensemble/build` line** on the head of a ticket's branch ("alex is building PAY-142") | Someone is building that ticket with Implement or Fill gaps: the story view shows who instead of the button (§ 3 Implement and Fill gaps). |
 
 What never travels: costs, settings, drafts, reviews kept in Ensemble, chat, and anything about the
@@ -205,6 +207,45 @@ stateDiagram-v2
 - **Your replies are still judged (2026-11-09).** When you reply on your own Ensemble's findings after a
   push and Robin's claim makes your Ensemble skip that commit, your Ensemble runs a **replies pass** at that
   commit instead (§ 7): the same 5-a-day cap per PR and the same spend budget. Robin keeps the review.
+
+### The story check's own claim (2026-11-23)
+
+The story check (the ticket review: do the ticket's PRs together deliver what the ticket asks?) runs only
+for people whose Ensemble has a tracker set up and finds the PR's ticket. Not everyone on a team has that.
+So the story check has its **own status line**, `ensemble/story-check`, apart from the review lines. A
+teammate who reviews the code but has no story checks never holds the story check.
+
+- **One line for the team, not one per model.** A story check runs on one model and is never a pair, so
+  a second model would add no second opinion. Whoever checks first, with Claude or Codex, checks it for
+  everyone.
+- **On every open PR of the ticket.** The story check reads all of the ticket's PRs, so its line goes on
+  the latest commit of each open one. A teammate holds the story check only when they hold it on every
+  one of those commits. A push to any of the PRs makes a new commit with no line, and the next story
+  check is anyone's again.
+- **The same rules as a review claim.** "alex is checking the story", renewed every 8 minutes; the
+  earliest live claim wins a race; the lease ends after 25 minutes without a renewal; a finished check
+  reads "alex checked the story · 3 gaps", "· no gaps" or "· no new gaps" (its gaps are already on the
+  PR). Free again: "Cleared by alex: story check didn't finish · free to claim", "Cleared by alex: bob's
+  claim expired", and "alex checked the story · kept in Ensemble" (it found gaps but put nothing on
+  GitHub, so a teammate's check can still post them). A late final line is never posted over a
+  teammate's newer one. A line left pending by a restart is released, as for reviews.
+- **Only automatic story checks claim.** Re-check (a click) never waits and never posts a line.
+- **The PR author's line counts.** A story check gives no verdict, so the author's own Ensemble checking
+  the story is as good as anyone's (unlike a review, § 3 How a claim works).
+- **What each reader's Ensemble does:**
+
+| You | A teammate | Your Ensemble |
+|---|---|---|
+| Story checks on | Has the review and the story check | Runs neither; the story line says "No automatic story check — @robin checked the story at these commits". |
+| Story checks on | Has the review, no story checks | Runs **only the story check**: it claims `ensemble/story-check` and posts its gaps on the PR as usual. |
+| Story checks off | Anything | Claims and settles only the review lines; the story line stays free for a teammate who has story checks. |
+| Story checks on | Is checking the story now | Waits until their lease could end, or a new push. |
+
+- **No run, no daily allowance spent** while a teammate holds it. Your Ensemble looks again when their
+  lease could end, 30 minutes after a "checked" line, or at once on a new push. A restart forgets the
+  wait; the next push or change reads GitHub again.
+- **A race can split.** If two Ensembles each win the line on a different PR of the ticket, both run.
+  That is a duplicate check, never a check nobody runs.
 
 ### Dependency updates (2026-11-14)
 
@@ -801,6 +842,13 @@ All names and times are illustrative; every step follows the current rules.
 4. Alex posts his own review with the Post button. Bob's line is newer, so Alex's Ensemble writes no line for Claude.
 5. On commit E, nobody's Ensemble has claimed Codex when Alex posts a Codex review by hand. His Ensemble writes "alex reviewed · 1 comment" for Codex, and Bob's and Carol's automatic runs review E with Claude only.
 
+### 9.15 The reviewer has no story checks
+1. 10:00 Dana pushes commit G to #50, the only PR of ticket PAY-7. Bob's Ensemble has no tracker set up; Robin's has Jira.
+2. 10:01 Bob's Ensemble claims G for the review: "bob is reviewing with Claude". Robin's automatic review steps aside for it.
+3. 10:03 Robin's Ensemble finds `ensemble/story-check` free on G (Bob's Ensemble never writes it). It posts "robin is checking the story" and runs only the story check.
+4. 10:09 Robin's story check posts its 2 gaps on #50 and its line reads "robin checked the story · 2 gaps". Bob's review lands at 10:12 with its own line.
+5. Sam's Ensemble, which has story checks too, finds both lines done and runs nothing on G.
+
 ---
 
 ## 10. What Ensemble never does
@@ -820,7 +868,7 @@ All names and times are illustrative; every step follows the current rules.
 - Retry a GitHub write that failed — except its own status lines (up to 5 tries) and a refused
   verdict, which is sent once more as a plain comment.
 - Treat its findings, reminders or any of its replies as a person's reply.
-- Count its `ensemble/` (or older `limn/`) status lines as CI.
+- Count its `ensemble/` (or older `limn/`) status lines as CI, the story check's `ensemble/story-check` included.
 - Show a teammate anything that was kept in Ensemble.
 - Replace a branch that holds real work: a build's push replaces only its own empty claim commit, or one
   nobody holds, and never without a lease.
@@ -837,7 +885,7 @@ All are per workspace, in Settings → Auto review, except where noted.
 | Auto reviews a day | 20 | Daily cap (1–500). |
 | Auto reviews use | Claude + Codex when both signed in | One merged review. |
 | When Claude and Codex disagree | Strict | Strict: both must approve. Relaxed: one approves, neither asks for changes. |
-| Claims (status lines) | Always on, no setting | The team shares the work per model. |
+| Claims (status lines) | Always on, no setting | The team shares the work per model. The story check has its own line, one for the team (§ 3 The story check's own claim). |
 | When an auto review finishes | Post to GitHub | Or keep it in Ensemble (invisible to teammates). Ensemble still withdraws its own earlier automatic approval when a later run does not approve. |
 | Which PRs | Mine | Or every PR. "Mine" includes a PR whose author's own Ensemble review waits for a teammate's verdict (§ 4). |
 | What to post | Blockers, warnings, questions, CI failures, story gaps, SonarCloud | Nits and "not asked for" off. |
@@ -862,7 +910,11 @@ markers and its `Limn-Run:` commits. It does not work the other way:
 Limn does not read the new `ensemble/` status lines, so a teammate on Limn neither sees your claims nor
 waits for them, and you may both review the same commit. **Update the whole team together.**
 
-**Build claims (2026-11-15).** An Ensemble from before this change does not read `ensemble/build`: it offers
+**Story check claims (2026-11-23).** An Ensemble from before this change does not read `ensemble/story-check`:
+it runs its own story check on a ticket a teammate is checking, so the team may get two story checks. A newer
+Ensemble reads an older teammate's review lines as before; they never held the story check.
+
+**Build claims (2026-11-15). An Ensemble from before this change does not read `ensemble/build`: it offers
 Implement on a ticket a teammate is building, and its Push refuses the teammate's empty claim branch as
 "a branch named PAY-142 already exists" (a rename still works). Nothing it does replaces a teammate's work.
 
@@ -921,3 +973,5 @@ Confirmed in the code on 2026-11-05. Each is a candidate for the next change; up
 | 16 | Two of one person's machines both run dependency automation on the same PR at once. | Both read the other's live `ensemble/deps` claim as their own (lines carry no machine identity), so both may act on that commit. |
 | 17 | A build whose session is closed (kept, resumable) but not pushed. | Its claim is released when the session closes, so a teammate may start the same ticket while the first build waits for Resume or Push; the second build's push then finds the branch taken (the first build's real work is never replaced). |
 | 18 | Two teammates' builds on the same ticket in workspaces that share no repository. | Each reads only its own workspace's repositories, so neither sees the other's claim. |
+| 19 | Two teammates whose workspaces hold different PRs of one ticket. | Each claims the story check on the PRs it sees; when those differ, both may run the story check. |
+| 20 | Your Ensemble restarts while a teammate holds a ticket's story check. | It forgets the wait. If their check then does not finish and nothing on the ticket changes, your Ensemble does not check the story again until the next push or change. |

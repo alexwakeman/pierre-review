@@ -63,7 +63,7 @@ import type {
   ClaudeReviewVerdict,
   ClaudeTeamClaimSkip,
 } from '@pierre-review/shared';
-import { aiProviderName, ensembleStatusContext, sameStatusContext } from '@pierre-review/shared';
+import { STORY_CLAIM_STATUS_NAME, aiProviderName, ensembleStatusContext, sameStatusContext } from '@pierre-review/shared';
 import { isRateLimitError } from '../../github/client.js';
 import { noteLimited } from '../../github/rate-budget.js';
 import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
@@ -98,6 +98,32 @@ export function teamClaimContext(provider: AiProviderId): string {
 }
 
 /**
+ * THE STORY CHECK'S CLAIM CONTEXT (`ensemble/story-check`, docs/TEAM-REVIEW.md § The story check's own
+ * claim): ONE for the team, whichever model runs it — a story check is never a pair. Written and read by
+ * review/ticket-review/story-claim.ts with the SAME fold and line rules as the review contexts.
+ */
+export function storyClaimContext(): string {
+  return ensembleStatusContext(STORY_CLAIM_STATUS_NAME);
+}
+
+/**
+ * WHAT ONE CLAIM HOLDS: the code review per provider family (`'claude'` | `'codex'`), or the story
+ * check (`'story'`). Stored in `team_claim_lines.provider` (and nowhere on the wire). A story row is
+ * written ONLY by the story claim; every review reader of the ledger skips it (`isStoryClaimKey`).
+ */
+export type TeamClaimKey = AiProviderId | 'story';
+export const STORY_CLAIM_KEY = 'story' as const;
+export const isStoryClaimKey = (stored: string | null | undefined): boolean => stored === STORY_CLAIM_KEY;
+/** A stored ledger value read back as a key (anything unknown reads as Claude, as before). */
+export function claimKeyOf(stored: string | null | undefined): TeamClaimKey {
+  return stored === STORY_CLAIM_KEY ? STORY_CLAIM_KEY : stored === 'codex' ? 'codex' : 'claude';
+}
+/** The status context a key's lines are written under. */
+export function claimKeyContext(key: TeamClaimKey): string {
+  return key === STORY_CLAIM_KEY ? storyClaimContext() : teamClaimContext(key);
+}
+
+/**
  * The context to post a RELEASE (a success line settling a pending one) under: the context the
  * newest line was read under, so a pending line an older Limn posted as `limn/…` is settled on that
  * same context (else it stays pending on GitHub beside our new `ensemble/…` line). A CLAIM (pending)
@@ -108,6 +134,7 @@ export function releaseContextOf(newest: TeamClaimLine | null | undefined, writt
 }
 
 const KEPT_WORDS = 'kept in Ensemble';
+const STORY_CHECKED = 'checked the story';
 
 const clamp = (s: string): string =>
   s.length <= TEAM_CLAIM_DESCRIPTION_MAX ? s : `${s.slice(0, TEAM_CLAIM_DESCRIPTION_MAX - 1)}…`;
@@ -158,6 +185,32 @@ export function reviewedLineSummary(
     return { comments: 0, verdict: null, onGithub: false };
   }
   return { comments: null, verdict: null, onGithub: false };
+}
+
+// ---- the story check's lines (story-claim.ts; the same shapes as the review's) ----
+
+/** The story claim's pending line: "alex is checking the story". */
+export function storyCheckingLine(login: string): string {
+  return clamp(`${login} is checking the story`);
+}
+/**
+ * THE STORY CHECK'S "CHECKED" LINE. `gaps`: the gaps this run put on GitHub. 0 with `alreadyPosted` ⇒
+ * every gap was already there ("no new gaps"); 0 alone ⇒ it found none. ⚠ null = the run found gaps and
+ * put NOTHING on GitHub (auto-posting off, a post that failed): "kept in Ensemble", which every Ensemble
+ * reads as FREE, like the review's.
+ */
+export function storyCheckedLine(login: string, gaps: number | null, alreadyPosted = false): string {
+  if (gaps == null) return clamp(`${login} ${STORY_CHECKED} · ${KEPT_WORDS}`);
+  if (gaps === 0) return clamp(`${login} ${STORY_CHECKED} · ${alreadyPosted ? 'no new gaps' : 'no gaps'}`);
+  return clamp(`${login} ${STORY_CHECKED} · ${gaps} gap${gaps === 1 ? '' : 's'}`);
+}
+/** The release line for a story check of ours that did not finish (free, like the review's). */
+export function storyUnfinishedLine(login: string): string {
+  return clamp(`${CLEARED_PREFIX}${login}: story check didn't finish · ${FREE_PHRASE}`);
+}
+/** The release line a key's run that did not finish posts. */
+export function unfinishedLineFor(key: TeamClaimKey, login: string): string {
+  return key === STORY_CLAIM_KEY ? storyUnfinishedLine(login) : unfinishedLine(login);
 }
 
 /** A teammate's expired (or older Limn's pending "free to claim") line, released by `by` (the reader). */
@@ -222,7 +275,8 @@ export interface TeamClaimLine {
 // nothing (2026-11-03 — robin-dunn's kept-in-Limn Claude reviews held six PRs, the pair fell back to a
 // Codex over its usage limit, and nobody got a review).
 // Written as "kept in Ensemble"; an older Limn's "kept in Limn" line reads the same.
-const KEPT_PHRASES = [' reviewed · kept in Ensemble', ' reviewed · kept in Limn'];
+// The story check's kept line (story-claim.ts) reads the same.
+const KEPT_PHRASES = [' reviewed · kept in Ensemble', ' reviewed · kept in Limn', ` ${STORY_CHECKED} · kept in Ensemble`];
 const isFreeLine = (l: TeamClaimLine): boolean => {
   const d = l.description ?? '';
   if (l.state === 'pending') return d.includes(FREE_PHRASE);
@@ -793,7 +847,7 @@ export function claimLineFinishing(ledgerId: number, nowMs: number = Date.now())
 // A claim starting at that head waits for it before reading GitHub, so the release can never land
 // AFTER the claim's fresh pending line and free a head that is being reviewed.
 const releasesInFlight = new Map<string, Promise<unknown>>();
-const releaseKey = (accountId: number, prId: number, headSha: string, provider: AiProviderId): string =>
+const releaseKey = (accountId: number, prId: number, headSha: string, provider: TeamClaimKey): string =>
   `${accountId}:${prId}:${headSha}:${provider}`;
 
 /**
@@ -801,7 +855,7 @@ const releaseKey = (accountId: number, prId: number, headSha: string, provider: 
  * caller's last "is a run busy here?" check and this call must have no `await` between them.
  */
 export function trackClaimRelease<T>(
-  where: { accountId: number; prId: number; headSha: string; provider: AiProviderId },
+  where: { accountId: number; prId: number; headSha: string; provider: TeamClaimKey },
   release: () => Promise<T>,
 ): Promise<T> {
   const key = releaseKey(where.accountId, where.prId, where.headSha, where.provider);
@@ -815,7 +869,7 @@ export function trackClaimRelease<T>(
 }
 
 /** Wait for a release of our line at this head and provider, if one is in flight (never throws). */
-export async function waitForClaimRelease(accountId: number, prId: number, headSha: string, provider: AiProviderId): Promise<void> {
+export async function waitForClaimRelease(accountId: number, prId: number, headSha: string, provider: TeamClaimKey): Promise<void> {
   const p = releasesInFlight.get(releaseKey(accountId, prId, headSha, provider));
   if (p) await p.catch(() => {});
 }
@@ -1184,7 +1238,8 @@ export async function teamClaimPendingFor(
   );
   if (seen) return { provider: seen.provider, login: seen.login, mine: false };
   if (running) return null;
-  const row = (await openClaimLinesAtHead(ctx, accountId, prId, headSha)).find((r) => !claimLineFinishing(r.id));
+  // A story-check row (story-claim.ts) is not a review claim: the AI Review tab's Clear never offers it.
+  const row = (await openClaimLinesAtHead(ctx, accountId, prId, headSha)).find((r) => !isStoryClaimKey(r.provider) && !claimLineFinishing(r.id));
   if (!row) return null;
   const login = row.login ?? (await defaultTeamClaimGithub.login(accountId).catch(() => null)) ?? 'you';
   return { provider: row.provider === 'codex' ? 'codex' : 'claude', login, mine: true };

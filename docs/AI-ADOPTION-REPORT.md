@@ -141,8 +141,8 @@ migration. Do not.
 | `pull_requests.ai_signals_checked_at` integer (timestamp) | when it was scanned |
 | `commits.ai_signals` text | JSON from that commit (`commit_author`, `commit_trailer`, `commit_message`). NULL = not scanned, `[]` = scanned clean |
 
-- Migration `0218_ai_signals.sql`, hand-written and additive; journal entry `idx 218`,
-  `when 1795593600000`. No SQL backfill: NULL means not scanned.
+- Migration `0219_ai_signals.sql`, hand-written and additive; journal entry `idx 219`,
+  `when 1795680000000`. No SQL backfill: NULL means not scanned.
 - Three-state writes (the security-columns precedent, upsert.ts `securityColumnsFor`), through ONE pair of
   helpers for both writers, `aiPrColumnsFor` / `aiCommitColumnsFor` (sync/upsert.ts): the PR columns are
   written only when the payload carried `title`, `bodyText` AND every commit's `message` (the version stamp

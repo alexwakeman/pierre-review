@@ -3,7 +3,7 @@
 //
 // `persistPr` scans every PR it writes (shared `detectAiPrSignals` / `detectAiCommitSignals`, on the
 // FULL title, description and commit messages while they are in hand), but an incremental walk only
-// touches PRs updated since the last one. A PR merged last month, before migration 0218, would never
+// touches PRs updated since the last one. A PR merged last month, before migration 0219, would never
 // be scanned, and the adoption report's "before" window is exactly those PRs. The text is not stored
 // (lean storage), so the only way to scan it is to read it again.
 //

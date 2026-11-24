@@ -61,7 +61,7 @@ Activation is off (503) unless the website has `LICENCE_SIGNING_KEY`, `POLAR_ACC
 
 ## In the app
 
-- **Storage:** `accounts.licence_key` (migration 0217), stored as typed, re-checked on every read.
+- **Storage:** `accounts.licence_key` (migration 0218), stored as typed, re-checked on every read.
   `PUT /api/licence` refuses a key that does not check out now and says why (`problem`).
 - **Settings → Licence** (`LicenceSection`): the free limit, the colleague count, the stored key's
   state, and the box to paste a key.

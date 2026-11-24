@@ -506,7 +506,17 @@ so every reader of `stage` works whatever the buckets are.
   Complete buckets' statuses whose names read as cancelled — only when it has ≤ 9 buckets and no bucket
   is already called "Cancelled"; otherwise those statuses stay in Complete. Read-time only; Save stores
   version 3, after which a removed Cancelled bucket stays removed (a cancelled-named status no bucket
-  names then joins the nearest earlier bucket, Complete). Only the new shape may be POSTED. The default (`{buckets: null, mergedColumn: true}`) is stored as NULL.
+  names then joins the nearest earlier bucket, Complete). Only the new shape may be POSTED. The default (`SPRINT_STATUS_SETTINGS_DEFAULT`, `{buckets: null, mergedColumn: true, showCancelled: false}`) is stored as NULL.
+  ⚠ **THE CANCELLED COLUMN IS HIDDEN BY DEFAULT** (`showCancelled`, version 4, owner 2026-11-23): the
+  Cancelled bucket still EXISTS (it holds its statuses, so a cancelled ticket keeps `stage: 'cancelled'`
+  and counts as it did — pace, `isClosed`, the release check, never Complete); only
+  `SprintStatusLayout.columns` leaves it out (`drawnColumnsOf`) and the board draws no card for it
+  (`lib/laneBoard.ts` `onDrawnColumns`). ⚠ Removing the bucket instead would move cancelled statuses
+  into Complete. The settings stored NULL for "automatic" could not tell default from chosen, so the
+  version decides: a value stamped 3 reads `showCancelled` ON only when its SAVED buckets include a
+  Cancelled one (the reader saved that column); automatic, version < 3 (Cancelled only added at read
+  time) and the retired shapes read OFF; version 4 stores the switch. The sprint paths' input lists
+  EVERY bucket (`sprintColumnsOf(statusLayout.buckets)`), so the switch never moves its hash.
 - "Coding begins" / "Coding ends" = the first status of the first In progress / Code review bucket
   (else the first Product review one), derived.
 
@@ -1093,7 +1103,8 @@ block, named for its first provider — `jira.token` / `jira.hasToken` / `jira.c
 ## The build's screenshots — A TRACKER WRITE (`tracker/ticket-screens.ts`, `coding/story-build/screens.ts`; 2026-11-21)
 
 "Post screenshots to <KEY>" in the build tab's **Screens** block (docs/SANDBOX.md § The browser): the reader's ONE
-press, Jira only (offered when the ticket is a Jira ticket and the build report's screens have screenshots).
+press, Jira or Linear (offered when the ticket is one of those and the build report's screens have screenshots;
+`screens.ts` `screensPostable`).
 
 - **CLAIMED before the first write** (`story_builds.screens_ticket_json`, migration 0215: compare-and-set from NULL):
   a second press answers `409 AlreadyPosted`. A failure BEFORE anything was written releases the claim (the reader may
@@ -1109,7 +1120,16 @@ press, Jira only (offered when the ticket is a Jira ticket and the build report'
 - A failure is a sentence Ensemble wrote; the log carries the code only. The ticket is marked due for a read.
 - **"Build end to end"** puts the screenshots in its ticket step's ONE comment instead (STORY-BUILD.md § Build end to
   end, item 3): the same upload (`uploadTicketShots`), the same claim, so a build's screenshots reach the ticket once.
-- Other trackers: not offered yet. GitHub Issues has no supported image upload; Linear and Notion are not built.
+- **Linear** (2026-11-21; `tracker/linear/upload.ts`), behind `assignGate` (the gate of Ensemble's other Linear write:
+  the workspace reads Linear, the ticket is one Ensemble holds), with the workspace's Linear key: per screenshot
+  `fileUpload(contentType, filename, size)` → a SIGNED upload address, Linear's upload headers and the `assetUrl`;
+  the bytes are PUT to that address through the guarded transport (https, public addresses, no redirect) WITHOUT the
+  Linear key, with Linear's headers except any that carry a credential or steer the connection; then the issue's id
+  by its key and ONE `commentCreate` (markdown: `screensTicketMarkdown`, the agent's words through `mdPlain` — no
+  link, image, emphasis, code or `@` mention characters — and each picture as `![name](assetUrl)`, an address that
+  cannot break out of it). The same claim, the same never-retried rule: an uploaded file counts as written.
+  "Build end to end" has no Linear ticket step, so its screenshots go by the button.
+- Other trackers: not offered yet. GitHub Issues has no supported image upload; Notion is not built.
 
 ## Copying a tracker — "Copy from another workspace" (`tracker/copy.ts`)
 

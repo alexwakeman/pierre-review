@@ -213,7 +213,7 @@ only where the walk never stored one.
 
 `persistPr` scans every PR it writes for AI vendor signals (the shared detector over the PR's title,
 description, branch and author and each commit's author, committer and message; [DATA-MODEL.md](DATA-MODEL.md)
-§ `pull_requests.ai_signals`). The text is not stored, so a PR synced before migration 0218 can only be
+§ `pull_requests.ai_signals`). The text is not stored, so a PR synced before migration 0219 can only be
 scanned by reading it again. After every walk, on both paths, after the commit-headline backfill,
 `sync/backfill-ai-signals.ts` re-reads up to 60 PRs per repo that are open or merged in the last 90 days and
 whose `ai_signals_version` is NULL or below `AI_SIGNALS_VERSION` (a detector change re-scans the same way).
@@ -493,7 +493,7 @@ sync stays lean:
   stores — PR body and review-comment **diff hunks** — which shrinks every backfill
   page. (It keeps **review** bodies, needed to detect substantive reviews, and
   **review-comment** bodies, needed for the stored excerpt.)
-- ⚠ **Commit messages ARE fetched under lean since migration 0218** (with the git
+- ⚠ **Commit messages ARE fetched under lean since migration 0219** (with the git
   author/committer `name` + `email`), for the AI vendor detector; they are read in
   memory and only the verdict is stored (`commits.message` stays NULL under lean).
   COST: scalars, so NO GraphQL points; the payload grows by the message plus about

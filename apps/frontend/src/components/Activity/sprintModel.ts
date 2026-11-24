@@ -33,15 +33,17 @@ export interface BucketDraft {
   statuses: string[];
 }
 
-/** The editor's draft: every bucket with every status, and the merge rule's switch (move a Code review
- *  ticket whose pull requests have all merged into Product review). */
+/** The editor's draft: every bucket with every status, the merge rule's switch (move a Code review
+ *  ticket whose pull requests have all merged into Product review) and the Cancelled column's. */
 export interface StatusBucketsDraft {
   buckets: BucketDraft[];
   mergedColumn: boolean;
+  showCancelled: boolean;
 }
 
 const copyDraft = (d: StatusBucketsDraft): StatusBucketsDraft => ({
   mergedColumn: d.mergedColumn,
+  showCancelled: d.showCancelled,
   buckets: d.buckets.map((b) => ({ ...b, statuses: [...b.statuses] })),
 });
 
@@ -49,6 +51,7 @@ const copyDraft = (d: StatusBucketsDraft): StatusBucketsDraft => ({
 export function bucketsDraftOf(layout: Pick<SprintStatusLayout, 'buckets' | 'settings'>): StatusBucketsDraft {
   return {
     mergedColumn: layout.settings.mergedColumn,
+    showCancelled: layout.settings.showCancelled,
     buckets: layout.buckets.map((b) => ({ id: b.id, name: b.name, meaning: b.meaning, statuses: b.statuses.map((s) => s.name) })),
   };
 }
@@ -195,7 +198,7 @@ const sameBuckets = (a: readonly BucketDraft[], b: readonly BucketDraft[]): bool
 /** Did the reader change anything from what was shown? (Save is offered only then.) */
 export function bucketsDraftChanged(layout: Pick<SprintStatusLayout, 'buckets' | 'settings'>, draft: StatusBucketsDraft): boolean {
   const shown = bucketsDraftOf(layout);
-  return shown.mergedColumn !== draft.mergedColumn || !sameBuckets(shown.buckets, draft.buckets);
+  return shown.mergedColumn !== draft.mergedColumn || shown.showCancelled !== draft.showCancelled || !sameBuckets(shown.buckets, draft.buckets);
 }
 
 /** The statuses Save leaves out to stay within SPRINT_STATUS_ORDER_MAX overall: none while the draft
@@ -222,10 +225,10 @@ export function statusesLeftOutOnSave(layout: Pick<SprintStatusLayout, 'order'>,
 }
 
 /** What Save sends: buckets unchanged from what was shown → the stored buckets as they were (automatic
- *  stays automatic when only the switch moved); changed → every bucket with its statuses, names
+ *  stays automatic when only a switch moved); changed → every bucket with its statuses, names
  *  trimmed, less `statusesLeftOutOnSave`. */
 export function bucketsToSave(layout: Pick<SprintStatusLayout, 'buckets' | 'settings' | 'order'>, draft: StatusBucketsDraft): SprintStatusSettings {
-  if (sameBuckets(bucketsDraftOf(layout).buckets, draft.buckets)) return { buckets: layout.settings.buckets, mergedColumn: draft.mergedColumn };
+  if (sameBuckets(bucketsDraftOf(layout).buckets, draft.buckets)) return { buckets: layout.settings.buckets, mergedColumn: draft.mergedColumn, showCancelled: draft.showCancelled };
   const leftOut = statusesLeftOutOnSave(layout, draft);
   const buckets: SprintBucket[] = draft.buckets.map((b) => ({
     id: b.id,
@@ -233,7 +236,7 @@ export function bucketsToSave(layout: Pick<SprintStatusLayout, 'buckets' | 'sett
     meaning: b.meaning,
     statuses: b.statuses.filter((n) => !leftOut.has(n)),
   }));
-  return { buckets, mergedColumn: draft.mergedColumn };
+  return { buckets, mergedColumn: draft.mergedColumn, showCancelled: draft.showCancelled };
 }
 
 /** What stops Save, in plain words (the server's own check, shared `sprintBucketsProblem`, run on what

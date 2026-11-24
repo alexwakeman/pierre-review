@@ -761,7 +761,11 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
   (`isUsageLockoutError`: "usage limit", "hit your … limit" (never "hit your rate limit"), "out of usage credits", "quota exceeded" —
   ⚠ NOT a plain rate limit, a 429 or an overload) LOCKS IT OUT until the reset the error names
   (`parseRetryAtMs`: "try again at 8:54 PM" as the next such local time, "try again in 45 minutes", an
-  epoch, a dated time, an ISO-8601 time after the reset words), else for `LOCKOUT_DEFAULT_MS` (1 h), never past `LOCKOUT_MAX_MS` (8 days).
+  epoch, a dated time, an ISO-8601 time after the reset words) plus `LOCKOUT_RESET_GRACE_MS` (2 min — the
+  reset is printed to the minute), else for `LOCKOUT_DEFAULT_MS` (1 h), never past `LOCKOUT_MAX_MS` (8 days).
+  ⚠ A time of day at most `RESET_JUST_PASSED_MS` (15 min) BEFORE the failure is the reset happening NOW,
+  never tomorrow's. Real (2026-11-23, run 2142): a weekly lock ended at 10:14:00, Codex refused a run at
+  10:14:03 with "try again at 10:14 AM", and the roll-forward locked it out of automatic runs for 24 h.
   Noted where the failure is made: every Codex run kind (`codex.ts failureOf`) and every review run
   of either provider (`manager.ts`). IN MEMORY per process; the boot re-derives it from the failed
   review rows newer than each provider's latest success (`failedRunsSinceLastSuccess` →
@@ -3612,6 +3616,42 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
   THIS section's per-provider lines on the branch head they review (`loop/review-lines.ts`: `reviewingLine`,
   then `reviewedLine(login, null)` — kept, nothing went to GitHub), read by the ONE fold once the PR opens
   (the author's lines still hold nothing for a teammate). docs/STORY-BUILD.md § The team claim.
+- **THE STORY CHECK HAS ITS OWN LINE** (2026-11-23; `review/ticket-review/story-claim.ts`; docs/TEAM-REVIEW.md
+  § The story check's own claim). Not every teammate has story checks (a tracker, a ticket that resolves), so
+  the review claims above NEVER hold the automatic ticket review: it claims `ensemble/story-check`
+  (`storyClaimContext`, shared `STORY_CLAIM_STATUS_NAME`) — ⚠ ONE context, not one per provider: a story
+  check is a single-vendor run (`storyCheckProvider`), never a pair, so a second model adds no second
+  opinion. THIS section's machinery, reused, not forked: the per-head fold is `decideTeamClaim` itself
+  (lease, renewal, earliest live claimant, "Cleared by" free lines, `releaseContextOf`, the `limn/` read
+  via `sameStatusContext` — no Limn wrote one); the ledger is `team_claim_lines` with `provider =
+  'story'` (`TeamClaimKey`, no migration — the column is free text; every review reader of the ledger skips
+  the key: `teamClaimPendingFor`'s Clear, the reconciler's `busy`); the reconciler releases an orphaned
+  story row on ITS context with ITS words (`claimKeyContext`, `unfinishedLineFor`, `deps.storyBusy` =
+  `storyClaimBusy`); a teammate's expired story claim is released once (`releaseExpiredStoryTeammateLines`,
+  from `releaseStaleTeamClaims`; ⚠ a head `storyClaimBusy` holds is skipped, and each head's read + post
+  runs inside `trackClaimRelease` — a story check claiming that head meanwhile, another ticket's included,
+  waits for it, so "claim expired" never lands over its fresh pending line). Lines: pending "alex is checking the story"; success "alex checked the
+  story · 3 gaps" / "· no gaps" / "· no new gaps" (holds) or "· kept in Ensemble" (gaps found, nothing on
+  GitHub: FREE, a `KEPT_PHRASES` entry); "Cleared by alex: story check didn't finish · free to claim".
+  - **PER MEMBER HEAD**: the line goes on every OPEN member PR's head (`storyClaimHeads`, in the
+    account's repos, ordered by repository and number). ONE pure rule, `decideStoryClaim`: a teammate holds
+    the story check only when they hold EVERY head; otherwise the free heads (and the reader's own live
+    ones) are claimed. After posting, each claimed head is re-read; the check stands down only when it
+    LOST EVERY head it claimed (a split race runs twice — a duplicate, never a check nobody runs). ⚠ The
+    PR AUTHOR'S story lines COUNT (no `author` passed): a story check gives no verdict.
+  - **WHERE**: the sweeper (`ticket-review/sweep.ts`, step 6), right before a DUE automatic check is
+    queued. Held ⇒ nothing queued (no row, no cap use), the ticket stays watched, and the plan reads
+    `held` / `teammate` (`TicketAutoCheck.teammate`, from the claim's in-memory skip — per ticket AND per
+    set of heads; a moved head reads GitHub at once) — "No automatic story check — @robin checked the
+    story at these commits". The run carries the handle (`StartTicketArgs.storyClaim` → `TicketJob`);
+    ⚠ EVERY exit settles it once (`settleStoryClaim`: after the auto-post on success — what reached GitHub
+    words the line, `storyCheckedSummary` —, the launch catch, a cancel while queued); a call that did
+    not queue settles it in the sweeper. A click (Re-check) never claims.
+  - **THE KICK**: an auto PR review that steps aside for a teammate's REVIEW claim (`startAutoItem`'s
+    skip and the own-PR pair stand-down) still fires `onAutoReviewLaunched`, so a first story check is not
+    lost to the onboarding floor when the teammate who has the review has no story checks.
+  - Not claimed: the review loops' story checks (Implement, AI Fix, the local branch review — a branch
+    or a run the reader started, never a teammate's race).
 - ⚠ **ENSEMBLE'S LINES ARE NEVER CI** (always on, no setting): shared `isLimnStatusContext` (`ensemble/` or the older `limn/` prefix)
   and `rollupStateWithoutLimn`. The PR head's stored `ci_status` (`ciStatusFromHead` in sync/upsert.ts —
   My Turn's ci_failing card, the CI-failure feed, dependency auto-merge's red-CI gate, the merge
@@ -5772,6 +5812,23 @@ calls per download. The model is `SPRINT_BRIEF_MODEL` on Claude (Haiku 5.5) thro
   no_credential` / `runtime`, `502` on any other failure. Tier `ai` + `ai_hourly`. Test seam
   `setAdoptionCommentaryCompleteForTests`. No `prompt-golden.json` entry: that file pins the code-review
   prompts only.
+
+## Release blockers (This Sprint → Releases)
+
+`POST /api/releases/blockers?workspace=<id>` — "Explain what's blocking" (`review/release-blockers/`),
+registered by `registerAgenticRoutes`; the SPA gates it on `me.ai` and its button on `AiRunGate kind="complete"`.
+A READER'S PRESS, never automatic, so never asked of the spend gate. ONE `cheapComplete` on the STANDARD role
+(the sprint builder's model on Claude; Codex resolves the role) — a one-shot, not an agent: the release check
+already holds everything (no tool would add anything). Grounded ONLY in the check `getReleases` folds
+(`releases/blockers-input.ts`: per repository the blocked tags oldest first with their own reasons and the
+cumulative "Needs", a split followed to its root; the holding tickets with status, assignee, open PRs; the
+tickets with only an open PR), the whole text inside ONE nonce fence. The answer is JSON (headline, ordered
+steps with what each unlocks and the tickets / PRs it names, a line per repository), VALIDATED by
+`validate.ts`: a key or `#n` not in the input drops its step (counted) or refuses the answer (in the
+headline); "repo #n" with a releasable repo must be THAT repo's PR (or release point), not just a known number;
+a GitHub Issues key (`acme/web#12`) is matched whole, never read as a PR number; ONE retry. Stored per workspace with the input's hash (`release_blocker_reports`); stale = the hash
+differs. ⚠ Changing the prompt or the text: bump `RELEASE_BLOCKERS_VERSION`. Spend: feature `release_blockers`.
+Tier `ai` + `ai_hourly`. Details: [RELEASES.md](RELEASES.md) § Explain what's blocking.
 
 ## Moved from CLAUDE.md (2026-10-26)
 

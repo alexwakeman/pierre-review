@@ -13,6 +13,52 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.78] - 2026-11-23
+
+### Changed
+
+- Settings → Appearance: Neon and Meadow are much bolder. Neon has a glowing ultraviolet grid, a neon
+  wordmark and glowing selections and buttons. Meadow has a forest-green sidebar, sunlight and leaves.
+  Text keeps the same contrast.
+
+## [1.0.77] - 2026-11-23
+
+### Changed
+
+- Maintenance release: no changes you would notice.
+
+## [1.0.76] - 2026-11-23
+
+### Added
+
+- This Sprint → Releases: "Explain what's blocking" (with AI on). One press writes a short report from the
+  release check: what holds back the newest release you could reach, the steps to take in order with what
+  each unlocks, and links to the tickets and pull requests to watch. It names only work that is in the check.
+- Three colour schemes in Settings → Appearance: Neon (dark, bright neon accents), Green Screen (dark,
+  green on black in a monospace font) and Meadow (light, calm greens).
+
+### Changed
+
+- This Sprint → Releases: later work on a Complete ticket in the same repository no longer holds back the
+  earlier tags that hold its first part. Only work in another repository does. One late pull request on an old
+  ticket could pull every repository's candidate back by months.
+- This Sprint → Releases: the buttons that show more tickets say how many are still hidden, for example "Show
+  next 3 of 7". Each ticket card shows the day its last pull request was merged.
+- Reviewing as a team: an automatic story check now claims its own status line, ensemble/story-check, on
+  the ticket's open pull requests. A teammate who reviews the code but has no story checks no longer
+  stops yours: your Ensemble checks the story and posts its gaps as before. When a teammate already
+  checked the story at those commits, the story check says so and yours skips it.
+- This Sprint: the Cancelled column is hidden by default. Tick "Show the Cancelled column" under Statuses to
+  show it. Cancelled tickets still count in the pace and the release check. If you saved statuses with a
+  Cancelled column, it stays.
+
+### Fixed
+
+- Activity → Open PRs: the notifications in the bottom right no longer move up when a pull request's panel
+  is open. They stay in place, above the panel.
+
+## [1.0.75] - 2026-11-23
+
 ### Added
 
 - A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
@@ -47,6 +93,20 @@ no internals.
 - Settings → Dependencies: every switch (merge, approve, resolve conflicts, fix with AI) is now off until
   you switch it on. Workspaces where nobody changed these settings are switched off; a workspace whose
   dependency settings someone saved keeps them.
+
+## [1.0.74] - 2026-11-23
+
+### Fixed
+
+- Automatic reviews: when Codex’s usage limit ran out right at its reset time, Ensemble could keep Codex
+  out of automatic reviews for another day and run Claude alone. It now tries Codex again two minutes later.
+
+## [1.0.73] - 2026-11-22
+
+### Added
+
+- Implement story: **Post screenshots to** the ticket now works with Linear tickets too: the screenshots and one
+  comment that shows them, with the workspace’s Linear key.
 
 ## [1.0.72] - 2026-11-21
 

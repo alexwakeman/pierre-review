@@ -1,6 +1,6 @@
 // Activity → This Sprint — the workspace's STATUS BUCKETS override. The ONE reader and writer of
 // `workspaces.sprint_statuses` (migration 0103 / pg 0090; shared `SprintStatusSettings`). OVERRIDES
-// ONLY: NULL (or the default `{buckets: null, mergedColumn: true}`, stored as NULL) = the automatic
+// ONLY: NULL (or the default `{buckets: null, mergedColumn: true, showCancelled: false}`, stored as NULL) = the automatic
 // layout (db/sprint-status-layout.ts). Each bucket lists the status NAMES the reader placed there, in
 // order; the fold matches names case-insensitively.
 //
@@ -21,6 +21,9 @@
 // end), holding the Complete buckets' statuses whose names read as cancelled
 // (`SPRINT_CANCELLED_STATUS_RE`) — only when there is room (≤ SPRINT_BUCKETS_MAX − 1 buckets) and no
 // bucket is already called "Cancelled". Read-time only; a removed Cancelled bucket stays removed after Save.
+// ⚠ SHOW CANCELLED (since 2026-11-23, version 4; OFF by default) is read from a value stamped 3 as ON
+// only when its saved buckets include a Cancelled one (the reader saved that column), else OFF; older
+// values (whose Cancelled bucket is added at read time) and the retired shapes read OFF.
 // Only a POSTED value is strict (`parseSprintStatusSettingsStrict`, whose problem is the 400's message).
 import { and, eq } from 'drizzle-orm';
 import {
@@ -205,11 +208,13 @@ export function parseSprintStatusSettingsStrict(
 ): { ok: true; settings: SprintStatusSettings } | { ok: false; message: string } {
   const bad = (message: string) => ({ ok: false as const, message });
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return bad('Send the status settings.');
-  const r = raw as { buckets?: unknown; mergedColumn?: unknown };
+  const r = raw as { buckets?: unknown; mergedColumn?: unknown; showCancelled?: unknown };
   if (!('buckets' in r)) return bad('Send the status settings.');
   if (r.mergedColumn !== undefined && typeof r.mergedColumn !== 'boolean') return bad('Say whether merged tickets move to Product review.');
+  if (r.showCancelled !== undefined && typeof r.showCancelled !== 'boolean') return bad('Say whether to show the Cancelled column.');
   const mergedColumn = r.mergedColumn ?? true;
-  if (r.buckets === null) return { ok: true, settings: { buckets: null, mergedColumn } };
+  const showCancelled = r.showCancelled ?? false;
+  if (r.buckets === null) return { ok: true, settings: { buckets: null, mergedColumn, showCancelled } };
   if (!Array.isArray(r.buckets)) return bad('Send the buckets as a list.');
   for (const b of r.buckets) {
     if (b == null || typeof b !== 'object' || Array.isArray(b)) return bad('Each bucket needs an id, a name, a meaning and its statuses.');
@@ -222,7 +227,7 @@ export function parseSprintStatusSettingsStrict(
   }));
   const problem = sprintBucketsProblem(buckets);
   if (problem != null) return bad(problem);
-  return { ok: true, settings: { buckets, mergedColumn } };
+  return { ok: true, settings: { buckets, mergedColumn, showCancelled } };
 }
 
 /** A stored or posted value as clean settings, or null when a POSTED one is malformed (`strict`, see
@@ -230,7 +235,7 @@ export function parseSprintStatusSettingsStrict(
  *  RETIRED `{sections}` value → buckets; a RETIRED `{order, deliveredFrom}` value → buckets via
  *  `legacyToSections` (with `categoryOf` — absent → every status reads as in progress); a stored value
  *  without a `version` gets its Product review bucket (`withProductReview`), and one below the current
- *  `version` its Cancelled bucket (`withCancelled`). */
+ *  `version` its Cancelled bucket (`withCancelled`); `showCancelled` per the header. */
 export function parseSprintStatusSettings(
   raw: unknown,
   strict: boolean,
@@ -242,15 +247,31 @@ export function parseSprintStatusSettings(
   }
   const dflt = (): SprintStatusSettings => ({ ...SPRINT_STATUS_SETTINGS_DEFAULT });
   if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return dflt();
-  const r = raw as { buckets?: unknown; mergedColumn?: unknown; sections?: unknown; order?: unknown; deliveredFrom?: unknown; version?: unknown };
+  const r = raw as {
+    buckets?: unknown;
+    mergedColumn?: unknown;
+    showCancelled?: unknown;
+    sections?: unknown;
+    order?: unknown;
+    deliveredFrom?: unknown;
+    version?: unknown;
+  };
   const mergedColumn = typeof r.mergedColumn === 'boolean' ? r.mergedColumn : true;
+  // Retired shapes never carried a Cancelled column the reader chose: OFF.
+  const showCancelled = false;
 
   if ('buckets' in r) {
     const buckets = tolerantBuckets(r.buckets);
     const version = typeof r.version === 'number' ? r.version : 1;
-    if (buckets == null || version >= SPRINT_STATUS_SETTINGS_VERSION) return { buckets, mergedColumn };
+    if (version >= SPRINT_STATUS_SETTINGS_VERSION) {
+      return { buckets, mergedColumn, showCancelled: typeof r.showCancelled === 'boolean' ? r.showCancelled : false };
+    }
+    // Version 3 was saved WITH a Cancelled meaning but before the switch: the column stays when the
+    // reader saved buckets that include one.
+    if (version === 3) return { buckets, mergedColumn, showCancelled: buckets?.some((b) => b.meaning === 'cancelled') ?? false };
+    if (buckets == null) return { buckets, mergedColumn, showCancelled };
     // version 2 had Product review already; anything older gets both, in the order they arrived.
-    return { buckets: withCancelled(version >= 2 ? buckets : withProductReview(buckets)), mergedColumn };
+    return { buckets: withCancelled(version >= 2 ? buckets : withProductReview(buckets)), mergedColumn, showCancelled };
   }
 
   if ('sections' in r) {
@@ -261,7 +282,7 @@ export function parseSprintStatusSettings(
     const room = { left: SPRINT_STATUS_ORDER_MAX };
     const sections = emptySections();
     for (const stage of SPRINT_STAGES) sections[stage] = cleanNames(raws[stage], seen, room);
-    return seen.size === 0 ? dflt() : { buckets: withCancelled(withProductReview(sectionsToBuckets(sections))), mergedColumn };
+    return seen.size === 0 ? dflt() : { buckets: withCancelled(withProductReview(sectionsToBuckets(sections))), mergedColumn, showCancelled };
   }
 
   if ('order' in r || 'deliveredFrom' in r) {
@@ -269,13 +290,13 @@ export function parseSprintStatusSettings(
     const order = cleanNames(r.order, new Set(), { left: SPRINT_STATUS_ORDER_MAX });
     const df = typeof r.deliveredFrom === 'string' && !badName(r.deliveredFrom.trim()) ? r.deliveredFrom.trim() : null;
     if (order.length === 0) return dflt();
-    return { buckets: withCancelled(withProductReview(sectionsToBuckets(legacyToSections(order, df, categoryOf)))), mergedColumn };
+    return { buckets: withCancelled(withProductReview(sectionsToBuckets(legacyToSections(order, df, categoryOf)))), mergedColumn, showCancelled };
   }
   return dflt();
 }
 
 /** Is this the default (stored as NULL)? */
-export const isDefaultSprintStatusSettings = (s: SprintStatusSettings): boolean => s.buckets == null && s.mergedColumn;
+export const isDefaultSprintStatusSettings = (s: SprintStatusSettings): boolean => s.buckets == null && s.mergedColumn && !s.showCancelled;
 
 /** The stored JSON as it is (null = none), for a caller that parses it with categories. */
 export async function getSprintStatusSettingsRaw(accountId: number, workspaceId: number): Promise<unknown> {
@@ -315,6 +336,7 @@ export async function setSprintStatusSettings(
     version: SPRINT_STATUS_SETTINGS_VERSION,
     buckets: settings.buckets,
     mergedColumn: settings.mergedColumn,
+    showCancelled: settings.showCancelled,
   };
   const rows = await db
     .update(workspaces)
