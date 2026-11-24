@@ -738,8 +738,25 @@ function ReleaseNoTicket({ n, showBots }: { n: ReleaseMockNoTicket; showBots: bo
   );
 }
 
+/** A report text: each `{…}` drawn as an inline link (the panel opens the story or the PR tab). */
+function BlockersText({ text }: { text: string }): JSX.Element {
+  return (
+    <>
+      {text.split(/(\{[^}]+\})/).map((part, i) =>
+        part.startsWith('{') && part.endsWith('}') ? (
+          <span key={i} className="ref">
+            {part.slice(1, -1)}
+          </span>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 /** "What's blocking" (Sprint/ReleaseBlockersPanel.tsx): the button, then the report it writes — a headline, the
- *  steps in order with what each unlocks and its tickets and PRs, one line per repository. */
+ *  steps in the plan's order and one line per repository, the tickets and PRs as inline links. */
 function ReleaseBlockersBox(): JSX.Element {
   const B = SPRINT_RELEASES.blockers;
   const [shown, setShown] = useState(false);
@@ -753,23 +770,23 @@ function ReleaseBlockersBox(): JSX.Element {
       </div>
       {shown ? (
         <>
-          <p>{B.headline}</p>
+          <p>
+            <BlockersText text={B.headline} />
+          </p>
           <ol>
             {B.steps.map((st) => (
-              <li key={st.text}>
-                {st.text} <small>Unlocks {st.unlocks}.</small>{' '}
-                {st.refs.map((r) => (
-                  <span key={r} className="chip">
-                    {r}
-                  </span>
-                ))}
+              <li key={st}>
+                <BlockersText text={st} />
               </li>
             ))}
           </ol>
           <ul>
             {B.repos.map((r) => (
               <li key={r.name}>
-                <b>{r.name}</b> <small>{r.text}</small>
+                <b>{r.name}</b>{' '}
+                <small>
+                  <BlockersText text={r.text} />
+                </small>
               </li>
             ))}
           </ul>

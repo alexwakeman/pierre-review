@@ -290,6 +290,7 @@ no clock, no AI). The SPA folds it on read; the backend folds the same for "Expl
 
 An AGENTIC report on the Releases tab, for action: which in-flight work (tickets and pull requests, named)
 unlocks which newer release, why each repository's newer tags are blocked, and the order to do things in.
+The order is the code's (the release graph's plan); the model only words it.
 
 - **The panel** ("What's blocking", `Sprint/ReleaseBlockersPanel.tsx`) sits above the ticket list. It is VISIBLE
   only while `me.ai.enabled` and GET /api/releases carries `blockers` with a report or `explainable` (the check is
@@ -299,20 +300,48 @@ unlocks which newer release, why each repository's newer tags are blocked, and t
 - **Nothing runs on its own and nothing fetches on mount**: the stored report rides GET /api/releases (ONE fetch
   on mount stays true); "Out of date" when the input hash differs from the one the report was written from.
 - **ONE completion per press** (`POST /api/releases/blockers`, docs/CLAUDE-REVIEW.md § Release blockers) over
-  the check the server already folded — no GitHub or tracker read. The input (`releases/blockers-input.ts`,
-  pure): per repository the last release, what can be released now, the newest tag, and the blocked newer tags
-  OLDEST FIRST with their OWN reasons and the CUMULATIVE "Needs before it can be released" (a newer tag's
-  reasons are whole, so this is every ticket to finish first; a split is followed to its ROOT; a split whose
-  other half is in no tag yet needs a new version tag); tags with no reason of their own are folded into a
-  count (≤ 15 listed per repository, plus the newest); the tickets holding a release back (status, assignee,
-  open and merged PRs, "holds back: <repo> from <tag>") and the tickets with only an open PR (≤ 40). ⚠ Titles,
-  statuses, names and tag names are UNTRUSTED: one line each, capped, inside ONE nonce fence.
-- **Refuse rather than guess**: the answer may cite only the input's tickets (by key) and PRs ("repo #n"). A
-  step or repository line naming anything else is dropped and counted ("1 point left out: it named work not in
-  the check"); a headline doing so refuses the answer (one retry, then nothing is stored and the old report
-  stays). Ticket links go to the tracker, PR links to the PR tab (or GitHub), every URL through `safeExternalUrl`.
+  the RELEASE GRAPH (§ The path to newer releases) of the check the server already folded — no GitHub or
+  tracker read. ⚠ **THE CODE PLANS, THE MODEL EXPLAINS** (owner, 2026-11-24: the old input made the model work
+  out the structure from each tag's cumulative "Needs", which was slow and long). The input
+  (`releases/blockers-input.ts`, pure) defines every item ONCE with a short id — tickets `T1…` (key, why it
+  holds, assignee, open PRs, tracker links, title), pull requests `P1…` ("repo #n", open / merged in no tag
+  yet, title), release points `R1…` ("repo tag") — then names ids only: the LADDERS (each stop: `adds`, `via`,
+  `with`, `partial`; "still being checked" from a tag) and the code's PLAN (`moves`: work → the points it
+  unlocks). Example:
+
+  ```
+  T1 BMD-1061 · not done (In Code Review) · assigned to Robin · “Edit baseline”
+  P1 frontend #518 · open · “Area edit”
+  R3 backend 0.324.0
+  backend · can be released now: R1 · newest: R2
+    R3 adds T1
+    R2 adds T2; with R4
+  Plan (in order):
+  1. T1 → R3
+  2. T2 → R2 R4
+  ```
+
+  On a three-repository test check (36 tags) this is 2,160 characters where the old input
+  was 5,357. ⚠ Titles, statuses, names, repository and tag names are UNTRUSTED: one line each, capped, inside
+  ONE nonce fence.
+- **The answer** is a headline, ONE short step per plan move IN THE PLAN'S ORDER (it may merge or skip a
+  trivial move, never reorder), and a line per blocked repository. It cites work ONLY as `{T3}` / `{P7}` /
+  `{R2}`; the stored report keeps those texts and a `refs` map resolving each id, and the panel draws the texts
+  as segments with INLINE links (shared `releaseBlockersSegments`): a ticket opens its STORY view
+  (`useOpenStory`, the tracker a small icon beside it), a pull request its PR tab (else GitHub), a ticket only
+  the tracker names (`k:`) its tracker page, a release point plain text. Every URL through `safeExternalUrl`.
+- **Refuse rather than guess, by id**: a text citing an id the input does not define, or a bare key or `#n` not
+  in the input, is dropped and counted ("1 point left out: it named work not in the check"); a dropped headline
+  leaves the steps. ONE retry, only when the answer is not JSON of the shape; nothing kept ⇒ nothing stored and
+  the old report stays.
 - **Stored per workspace** (`release_blocker_reports`, migration 0217) with the input's hash: sha256 of
-  `RELEASE_BLOCKERS_VERSION` + the input text — no clock-derived field.
+  `RELEASE_BLOCKERS_VERSION` + the input text — no clock-derived field. `report_json` also holds the shape's
+  `version` (2) and the run's `durationMs`. ⚠ A row in the OLD shape (no `version`) reads as NO report: its
+  hash is stale anyway, and it has no ids to draw. The next press replaces it.
+- **Timing**: each attempt is logged (`release blockers: completion attempt`: ms, tokens in/out, input size)
+  and the total (`release blockers: done`). **What runs is ONE constant**, `RELEASE_BLOCKERS_RUN` (model +
+  role, `review/release-blockers/prompt.ts`): a one-line switch to a faster model once one is verified on
+  real data.
 
 ## Release notes
 

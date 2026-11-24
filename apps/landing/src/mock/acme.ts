@@ -526,17 +526,18 @@ export const SPRINT_RELEASES = {
     { name: REPOS.payments, text: 'v3.2.0 → v3.2.0-rc', sha: '9f8e7d6', day: '15 Oct' },
     { name: REPOS.web, text: 'v1.8.2 → v1.8.2-rc', sha: '3e2d1c0', day: '13 Oct', latest: 'Latest v1.9.1' },
   ] as Array<{ name: string; text: string; sha: string; day: string; latest?: string }>,
-  /** "Explain what's blocking" (Sprint/ReleaseBlockersPanel.tsx): the button, and the report it writes. */
+  /** "Explain what's blocking" (Sprint/ReleaseBlockersPanel.tsx): the button, and the report it writes. A `{…}`
+   *  is an INLINE link, as the panel draws a cited ticket or pull request. */
   blockers: {
     button: 'Explain what’s blocking',
-    headline: 'PAY-150 holds back acme/web v1.9.0 and later. Finish its review first.',
+    headline: 'Finish {PAY-150} first, so acme/web v1.9.1 can be released.',
     steps: [
-      { text: 'Finish the review of PAY-150 and move it to Done.', unlocks: 'acme/web v1.9.0 to v1.9.1', refs: ['PAY-150', 'web #622'] },
-      { text: 'Merge acme/payments #611, so PAY-146 has no open pull request.', unlocks: 'acme/ledger v0.9.0', refs: ['PAY-146', 'payments #611'] },
+      'Finish the review of {PAY-150} and move it to Done, so acme/web v1.9.1 can be released.',
+      'Merge {payments #611}, so {PAY-146} has no open pull request and acme/ledger v0.9.0 can be released.',
     ],
     repos: [
-      { name: REPOS.web, text: 'PAY-150 is In review, and PAY-152 is in the same tags.' },
-      { name: REPOS.ledger, text: 'PAY-146 is Done but still has an open pull request in acme/payments.' },
+      { name: REPOS.web, text: '{PAY-150} is In review, and {PAY-152} is in the same tags.' },
+      { name: REPOS.ledger, text: '{PAY-146} is Done but still has an open pull request in acme/payments.' },
     ],
     meta: 'Written 16 Oct · Claude',
   },

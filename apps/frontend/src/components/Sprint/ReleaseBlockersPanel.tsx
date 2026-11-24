@@ -1,12 +1,22 @@
-import { aiProviderOfModel, type ReleaseBlockersPrRef, type ReleaseBlockersState, type ReleaseBlockersTicketRef, type ReleaseCheckResult } from '@pierre-review/shared';
+import {
+  aiProviderOfModel,
+  releaseBlockersRefLabel,
+  releaseBlockersSegments,
+  type ReleaseBlockersPrRef,
+  type ReleaseBlockersRef,
+  type ReleaseBlockersState,
+  type ReleaseBlockersTicketRef,
+  type ReleaseCheckResult,
+} from '@pierre-review/shared';
 import { useAiCapabilities, useAiProviderName } from '../../hooks/useAiCapabilities.js';
 import { useRunCostText } from '../../hooks/useAiBudget.js';
 import { useExplainBlockers, useExplainingBlockers } from '../../hooks/useReleases.js';
+import { useOpenStory } from '../../lib/ticketTab.js';
 import { safeExternalUrl } from '../../lib/ui.js';
 import { usePinnedTabs } from '../../store/pinnedTabs.js';
 import { AiRunGate } from '../AiSetup.js';
 import { AiStatusLine } from '../AiStatusLine.js';
-import { RefreshIcon, SparkleIcon } from '../Icons.js';
+import { ExternalLinkIcon, RefreshIcon, SparkleIcon } from '../Icons.js';
 import { InfoButton } from '../InfoModal.js';
 import { Button } from '../ui/Button.js';
 import { FOCUS_RING } from '../ui/cx.js';
@@ -19,8 +29,11 @@ import { blockersPanelShown, blockersReportMeta } from './releasesModel.js';
 //     run over the spend budget, a reader's press is never refused).
 //   • The button shows only while something newer is blocked (HIDE, never disable). Nothing runs on mount
 //     or on its own: the stored report arrives with GET /api/releases, "Out of date" when the check changed.
-//   • The report: a headline, the steps in order (each with what it unlocks and its tickets and PRs as
-//     links — every data-derived URL through `safeExternalUrl`), and one line per repository.
+//   • The report: a headline, the steps in the plan's order, and one line per repository. Each text carries
+//     `{id}`s, drawn INLINE (shared `releaseBlockersSegments`): a ticket opens its STORY view in the app
+//     (`useOpenStory`; the tracker link is a small icon beside it), a pull request its PR tab (else GitHub),
+//     a ticket only the tracker names its tracker page; a release point is plain text. Every data-derived
+//     URL goes through `safeExternalUrl`.
 
 export function ReleaseBlockersPanel({
   workspaceId,
@@ -47,10 +60,11 @@ export function ReleaseBlockersPanel({
         <h3 className="text-body font-semibold text-ui-ink">What&rsquo;s blocking</h3>
         <InfoButton title="Explain what's blocking">
           <p>
-            {aiName} reads the release check on this page — the tags that cannot be released, the tickets that hold them and
-            their pull requests — and writes the order to do things in to reach a newer release.
+            Ensemble works out from the release check which work unlocks which newer release, and the order to do it in.{' '}
+            {aiName} then explains that plan in plain words.
           </p>
           <p>It reads nothing else and changes nothing. It names only tickets and pull requests that are in the check: anything else it names is left out.</p>
+          <p>A ticket opens its story here; the small arrow beside it opens the tracker. A pull request opens its tab.</p>
           <p>It runs only when you press the button. “Out of date” means the check changed since it was written.</p>
         </InfoButton>
         {report != null && state!.stale && (
@@ -80,23 +94,16 @@ export function ReleaseBlockersPanel({
       {run.isError && !busy && <p className="text-meta text-ui-danger">{run.error.message}</p>}
       {report != null && (
         <div className="space-y-2" data-testid="release-blockers-report">
-          <p className="text-body text-ui-ink">{report.headline}</p>
+          {report.headline != null && (
+            <p className="text-body text-ui-ink">
+              <RefText text={report.headline} refs={report.refs} check={check} />
+            </p>
+          )}
           {report.steps.length > 0 && (
             <ol className="list-decimal space-y-1.5 pl-5 text-body text-ui-ink">
               {report.steps.map((s, i) => (
                 <li key={i}>
-                  <span>{s.text}</span>
-                  {s.unlocks != null && <span className="text-ui-mute"> Unlocks {s.unlocks}.</span>}
-                  {(s.tickets.length > 0 || s.prs.length > 0) && (
-                    <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-meta">
-                      {s.tickets.map((t) => (
-                        <TicketRef key={t.key} t={t} />
-                      ))}
-                      {s.prs.map((p) => (
-                        <PrRef key={`${p.repoName}#${p.number}`} p={p} check={check} />
-                      ))}
-                    </span>
-                  )}
+                  <RefText text={s.text} refs={report.refs} check={check} />
                 </li>
               ))}
             </ol>
@@ -105,7 +112,10 @@ export function ReleaseBlockersPanel({
             <ul className="space-y-0.5 text-meta">
               {report.repos.map((r) => (
                 <li key={r.repoName}>
-                  <span className="font-medium text-ui-ink">{r.repoName}</span> <span className="text-ui-mute">{r.text}</span>
+                  <span className="font-medium text-ui-ink">{r.repoName}</span>{' '}
+                  <span className="text-ui-mute">
+                    <RefText text={r.text} refs={report.refs} check={check} />
+                  </span>
                 </li>
               ))}
             </ul>
@@ -117,31 +127,82 @@ export function ReleaseBlockersPanel({
   );
 }
 
-const LINK = `rounded-ui font-medium text-ui-ink hover:underline ${FOCUS_RING}`;
+const LINK = `rounded-ui font-medium text-ui-ink underline underline-offset-2 hover:no-underline ${FOCUS_RING}`;
 
-function TicketRef({ t }: { t: ReleaseBlockersTicketRef }): JSX.Element {
-  const href = t.url != null ? safeExternalUrl(t.url) : null;
-  if (href == null) return <span className="font-medium text-ui-ink">{t.key}</span>;
+/** A report text with its `{id}`s drawn as INLINE links (shared `releaseBlockersSegments`). */
+function RefText({ text, refs, check }: { text: string; refs: Record<string, ReleaseBlockersRef>; check: ReleaseCheckResult }): JSX.Element {
   return (
-    <a href={href} target="_blank" rel="noreferrer noopener" className={LINK} title={t.title ?? undefined}>
-      {t.key}
-    </a>
+    <>
+      {releaseBlockersSegments(text, refs).map((seg, i) =>
+        seg.kind === 'text' ? (
+          <span key={i}>{seg.text}</span>
+        ) : seg.ref.kind === 'ticket' ? (
+          <TicketLink key={i} t={seg.ref} />
+        ) : seg.ref.kind === 'pr' ? (
+          <PrLink key={i} p={seg.ref} check={check} />
+        ) : (
+          <span key={i} className="font-medium">
+            {releaseBlockersRefLabel(seg.ref)}
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
+/** A ticket: its STORY view in the app (`useOpenStory`), the tracker link a small icon beside it. A ticket
+ *  only the tracker names (no `ident`: not in the check) links to the tracker. */
+function TicketLink({ t }: { t: ReleaseBlockersTicketRef }): JSX.Element {
+  const openStory = useOpenStory();
+  const href = t.url != null ? safeExternalUrl(t.url) : null;
+  if (t.ident == null) {
+    return href != null ? (
+      <a href={href} target="_blank" rel="noreferrer noopener" className={LINK} title={t.title ?? undefined}>
+        {t.key}
+      </a>
+    ) : (
+      <span className="font-medium" title={t.title ?? undefined}>
+        {t.key}
+      </span>
+    );
+  }
+  const ident = t.ident;
+  return (
+    <span className="whitespace-nowrap">
+      <button type="button" className={LINK} title={t.title ?? undefined} onClick={() => openStory({ ident, key: t.key, title: t.title })}>
+        {t.key}
+      </button>
+      {href != null && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label={`Open ${t.key} in the tracker`}
+          title={`Open ${t.key} in the tracker`}
+          className={`ml-0.5 inline-flex rounded-ui align-baseline text-ui-mute hover:text-ui-ink ${FOCUS_RING}`}
+        >
+          <ExternalLinkIcon size={11} />
+        </a>
+      )}
+    </span>
   );
 }
 
 /** "web #518": the PR tab when the PR is stored, else GitHub. */
-function PrRef({ p, check }: { p: ReleaseBlockersPrRef; check: ReleaseCheckResult }): JSX.Element {
+function PrLink({ p, check }: { p: ReleaseBlockersPrRef; check: ReleaseCheckResult }): JSX.Element {
   const openPrDetailTab = usePinnedTabs((s) => s.openPrDetailTab);
-  const label = `${p.repoName} #${p.number}`;
-  const repo = check.repos.find((r) => r.name === p.repoName);
-  if (p.prId == null || repo == null) {
-    const href = safeExternalUrl(p.url);
+  const label = releaseBlockersRefLabel(p);
+  const repoFullName = p.repoFullName ?? check.repos.find((r) => r.name === p.repoName)?.fullName ?? null;
+  if (p.prId == null || repoFullName == null) {
+    const href = p.url != null ? safeExternalUrl(p.url) : null;
     return href != null ? (
       <a href={href} target="_blank" rel="noreferrer noopener" className={LINK} title={p.title ?? undefined}>
         {label}
       </a>
     ) : (
-      <span className="font-medium text-ui-ink">{label}</span>
+      <span className="font-medium" title={p.title ?? undefined}>
+        {label}
+      </span>
     );
   }
   const prId = p.prId;
@@ -151,7 +212,7 @@ function PrRef({ p, check }: { p: ReleaseBlockersPrRef; check: ReleaseCheckResul
       title={p.title ?? undefined}
       onClick={() =>
         openPrDetailTab(
-          { id: prId, number: p.number, title: p.title ?? '', repoFullName: repo.fullName, authorLogin: null, authorDisplayName: null, authorAvatarUrl: null },
+          { id: prId, number: p.number, title: p.title ?? '', repoFullName, authorLogin: null, authorDisplayName: null, authorAvatarUrl: null },
           { fromActivity: true },
         )
       }
@@ -161,4 +222,3 @@ function PrRef({ p, check }: { p: ReleaseBlockersPrRef; check: ReleaseCheckResul
     </button>
   );
 }
-
