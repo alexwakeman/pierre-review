@@ -75,6 +75,7 @@ const {
   runAutoReviewSweep,
   utcDayStartMs,
   AUTO_REREVIEW_SETTLE_MS,
+  AUTO_COMMENT_SETTLE_MS,
   AUTO_REREVIEW_MAX_WAIT_MS,
   autoReviewDue,
   autoReviewWaiting,
@@ -385,7 +386,8 @@ describe('runAutoReviewSweep — re-review on a moved head', () => {
 // qualifying comment's time (core pins WHICH comments qualify — Limn's own never do — in
 // claude-review/threads-db.test.ts); the sweeper debounces on (head, comment time).
 describe('runAutoReviewSweep — re-review on new review comments', () => {
-  const SETTLE = AUTO_REREVIEW_SETTLE_MS;
+  // A same-head comment burst settles after 2 quiet minutes (pushes keep 5).
+  const SETTLE = AUTO_COMMENT_SETTLE_MS;
   const C1 = NOW - 60_000;
   const commented = (commentsAtMs: number, headSha = 'h1') =>
     answers.set(7, { prIds: [], autoToday: 0, reReview: [{ prId: 40, headSha, commentsAtMs }] });
@@ -427,9 +429,11 @@ describe('runAutoReviewSweep — re-review on new review comments', () => {
       autoToday: 0,
       reReview: [{ prId: 40, headSha: 'h2', commentsAtMs: null, lastRunAtMs: NOW - 60_000 }],
     });
+    // The push is a moved head: it settles on the PUSH wait (5 min), not the comment one.
     await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE + AUTO_REREVIEW_SETTLE_MS - 1);
     expect(enqueued).toEqual([]);
-    await runAutoReviewSweep(makeCtx(), NOW + 2 * SETTLE);
+    await runAutoReviewSweep(makeCtx(), NOW + SETTLE + AUTO_REREVIEW_SETTLE_MS);
     expect(enqueued).toEqual([[1, 40]]);
     expect(enqueuedCommentsAt).toEqual([null]);
   });
@@ -465,12 +469,14 @@ describe('autoReviewDue — the one start rule', () => {
     expect(autoReviewDue({ nowMs: T, settle: null }).due).toBe(true);
   });
   it('waits for quiet, says which kind of activity', () => {
-    expect(autoReviewDue({ nowMs: T, settle: settle(4, 4) })).toEqual({ due: false, reason: 'comments' });
+    // A same-head COMMENT burst settles after 2 quiet minutes; a moved head after 5.
+    expect(autoReviewDue({ nowMs: T, settle: settle(1.9, 1.9) })).toEqual({ due: false, reason: 'comments' });
+    expect(autoReviewDue({ nowMs: T, settle: settle(2, 2) }).due).toBe(true);
     expect(autoReviewDue({ nowMs: T, settle: settle(4, 4, 'head'), lastRunAtMs: T - 2 * MIN })).toEqual({
       due: false,
       reason: 'commits',
     });
-    expect(autoReviewDue({ nowMs: T, settle: settle(5, 5) }).due).toBe(true);
+    expect(autoReviewDue({ nowMs: T, settle: settle(5, 5, 'head'), lastRunAtMs: T - 2 * MIN }).due).toBe(true);
   });
   it('⚠ a moved head with no run in the last 5 minutes is due on receipt', () => {
     expect(autoReviewDue({ nowMs: T, settle: settle(0, 0, 'head'), lastRunAtMs: null }).due).toBe(true);

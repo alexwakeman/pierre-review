@@ -13,6 +13,16 @@ no internals.
 
 ## [Unreleased]
 
+### Fixed
+
+- A reply on an Ensemble review comment now gets checked even when the author resolves the thread
+  straight after. Before, the resolve hid the reply, so the review was not approved or pushed back on
+  until the next push.
+
+### Changed
+
+- Replies and new review comments are checked after 2 quiet minutes, not 5. Pushes still wait 5.
+
 ## [1.0.78] - 2026-11-23
 
 ### Changed

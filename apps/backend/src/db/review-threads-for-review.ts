@@ -7,7 +7,8 @@
 //   • the auto-review sweeper re-reviews the SAME head when a newer qualifying comment arrives
 //     (`newestReviewCommentAt`, read by `getAutoReviewCandidates`).
 //
-// ⚠ A QUALIFYING COMMENT is a review-thread comment in an UNRESOLVED thread that Limn did NOT post,
+// ⚠ A QUALIFYING COMMENT is a review-thread comment in an UNRESOLVED thread (or ANY thread rooted on
+// Limn's own posted finding — a reply-then-resolve there still owes a replies pass) that Limn did NOT post,
 // by a person or a review bot (the `countsAuthor` filter below). Both readers go through `isLimnPostedComment`, so the comment
 // the run records as "seen" (`claude_reviews.comments_through`) and the comment the sweeper treats
 // as "new" can never disagree; if they did, a review could re-trigger itself forever.
@@ -172,6 +173,7 @@ export async function newestReviewCommentTimes(
       databaseId: rc.databaseId,
       authorId: rc.authorId,
       authorLogin: users.githubLogin,
+      isResolved: rt.isResolved,
       // A thread ROOT (the earliest comment): a Limn reply is never one (`isLimnThreadReply` below).
       isRoot: sql<number>`not exists (select 1 from review_comments rc2 where rc2.thread_id = ${rc.threadId} and (rc2.created_at < ${rc.createdAt} or (rc2.created_at = ${rc.createdAt} and rc2.id < ${rc.id})))`,
     })
@@ -184,7 +186,7 @@ export async function newestReviewCommentTimes(
       and(
         eq(prs.accountId, accountId),
         inArray(rc.prId, [...prIds]),
-        eq(rt.isResolved, false),
+        // Resolved threads too: one rooted on Limn's own finding still counts (below).
         gt(rc.createdAt, since),
       ),
     )
@@ -236,8 +238,13 @@ export async function newestReviewCommentTimes(
     }
   }
   for (const r of kept) {
-    const prev = out.get(r.prId);
     const isOwn = r.threadId != null && ownRooted.has(r.threadId);
+    // ⚠ A RESOLVED thread counts ONLY when rooted on Limn's own finding: a reply and then a resolve
+    // there is the author's answer, and the replies pass must still judge it (it pushes back or lets
+    // the review approve). Before 2026-11-24 the resolve hid the reply, so a quick "fixed, resolved"
+    // never got a pass (PR 244582). Any other resolved thread never moves the trigger.
+    if (r.isResolved && !isOwn) continue;
+    const prev = out.get(r.prId);
     if (!prev) {
       out.set(r.prId, { newest: r.createdAt, newestOwn: isOwn ? r.createdAt : null, newestOther: isOwn ? null : r.createdAt });
       continue;
@@ -377,7 +384,7 @@ export interface ReviewThreadsForReview {
   // thread rooted on Limn's own finding, which the sweeper also treats as new — by an author the
   // `countsAuthor` filter keeps (a person or a review bot). null = none.
   newestCommentAt: Date | null;
-  // The same, inside UNRESOLVED threads rooted on Limn's OWN posted findings only — a reply there
+  // The same, inside threads rooted on Limn's OWN posted findings only (RESOLVED ones too) — a reply there
   // needs a full review (finding replies, pushback); the auto sweeper routes on it. null = none.
   newestOwnThreadCommentAt: Date | null;
   // How many threads were left out because they are rooted on Limn's OWN posted findings (the
@@ -387,9 +394,9 @@ export interface ReviewThreadsForReview {
 
 /**
  * Every review thread on the PR — resolved or not — that is NOT rooted on one of Limn's own posted
- * findings, with its comments. ⚠ `newestCommentAt` still counts UNRESOLVED threads only: it is the
- * auto re-review trigger, and a reply on a resolved thread must not start a full review (the auto
- * Check threads pass covers it). Account-scoped (a foreign PR reads as no threads). `authorIsBot` is the GLOBAL
+ * findings, with its comments. ⚠ `newestCommentAt` still counts UNRESOLVED threads only, plus RESOLVED
+ * threads rooted on Limn's own finding (a reply-then-resolve there owes a replies pass): it is the
+ * auto re-review trigger, and a reply on any other resolved thread must not start a run. Account-scoped (a foreign PR reads as no threads). `authorIsBot` is the GLOBAL
  * automation set (`globalAutomationUserIds`) — the ball rule's set, which needs no workspace.
  */
 export async function loadReviewThreadsForReview(
@@ -472,7 +479,10 @@ export async function loadReviewThreadsForReview(
     const rootIsOwn = isLimnPostedComment(root, own, login);
     const kept = list.filter((c) => !isLimnPostedComment(c, own, login));
     for (const c of kept) {
-      if (root.isResolved) continue;
+      // A RESOLVED thread moves nothing, EXCEPT one rooted on Limn's own finding: "reply, then
+      // resolve" is the author's answer to the finding, and the replies pass must judge it (the
+      // sweeper's filter is the same, `newestReviewCommentTimes`).
+      if (root.isResolved && !rootIsOwn) continue;
       // A Limn REPLY (a teammate's "Still open:", pushback, acknowledgement — any Limn marker) is the
       // review's word, never new input: it never moves the trigger (the sweeper's filter is the same).
       if (c !== root && isLimnThreadReply(c.body)) continue;

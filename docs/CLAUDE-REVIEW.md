@@ -1746,7 +1746,11 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
 - **Who starts it.** AUTO: the sweeper (auto.ts `commentBurstRoute` → `'replies'`) when a same-head
   reply on an Ensemble finding is newer than what the full reviews AND the replies passes at that head
   covered (the candidate read's `repliesCoveredMs`), on a workspace with auto review on, after the
-  usual 5-quiet-minutes settle (one pass covers a burst on several threads). ⚠ The other half of the
+  comment settle, 2 quiet minutes (`AUTO_COMMENT_SETTLE_MS`, 2026-11-24; pushes keep 5) (one pass covers a burst on several threads). ⚠ **A RESOLVED THREAD on an
+  Ensemble finding still counts** (2026-11-24, PR 244582): "fixed" and then a resolve within the settle
+  wait used to hide the reply, so no pass ran and the held verdict never moved
+  (`newestReviewCommentTimes`, and the loader's `newestOwnThreadCommentAt`); any other resolved
+  thread still never moves the trigger. ⚠ The other half of the
   burst (any other thread) goes to Check threads as before (`newestOtherCommentAtMs`); a same-head
   burst no longer starts a FULL review. At most `REPLIES_PASS_AUTO_DAILY_CAP` (5) AUTOMATIC passes
   per PR per rolling 24 h, counted in the DB (rows); the ONE automatic budget gate is asked first
@@ -3161,7 +3165,8 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   saw, written when it loads the threads), else its `created_at` (older rows, or a run that failed
   before loading — never 0, or a deploy would re-review every commented PR). `reReview` items carry
   `commentsAtMs` (null for a moved head) and `reason: 'head' | 'comments'`. ⚠ **THE SETTLE KEY IS
-  (head, newest comment time)**: any change restarts `AUTO_REREVIEW_SETTLE_MS`, so a burst of
+  (head, newest comment time)**: any change restarts the settle (`AUTO_COMMENT_SETTLE_MS`, 2 min,
+  for a same-head comment burst; `AUTO_REREVIEW_SETTLE_MS`, 5 min, for a moved head), so a burst of
   comments, pushes or both costs ONE run — but never more than `AUTO_REREVIEW_MAX_WAIT_MS` after
   its first trigger. ⚠ **ONLY REAL REVIEWERS COUNT** (`db/queries.ts`
   `reReviewCommentAuthorFilter`, passed into `newestReviewCommentAt`): an author qualifies when it
