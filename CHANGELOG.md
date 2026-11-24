@@ -13,6 +13,13 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- This Sprint → Releases shows the path to newer releases. "Do these first" names the work that
+  unlocks the most releases for the least work, best step first. Below it, each repository is a row
+  of its newer tags, with what each one still needs. Tickets that block a newer tag say what they
+  hold back or what finishing them unlocks.
+
 ## [1.0.79] - 2026-11-24
 
 ### Fixed

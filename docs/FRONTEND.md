@@ -3048,6 +3048,15 @@ the latest tag per repo (`repoTagWords`) and ONE line
 card; "9 PRs, the last by robin-dunn"); opened, facts, "Open in Jira", "Story" and every PR
 (`ticketCardPrLines`) — all from the check, NO fetch on open. A PR known only from the history read (`prId`
 null) links to GitHub. "Released" is never said of a ticket.
+THE PATH TO NEWER RELEASES (2026-11-24, docs/RELEASES.md § Releases tab 3b): `ReleasesView` folds the shared
+`releaseGraph(check)` ONCE per check in a `useMemo` (no fetch) into `Sprint/releaseGraphModel.ts`
+(`planCards`, `ladderRows`, `ticketGraphBadges`; test/releaseGraphModel.test.ts) and draws
+`Sprint/ReleasePath.tsx`: "Do these first" at the top (the plan's first 3 moves, the first THE best next
+move), "Path to newer releases" above the list (ONE LADDER ROW PER REPOSITORY, scrolling sideways inside
+itself; picked-together points are a "with web w1.1.0" MARKER that scrolls to and rings the other row's
+stop — NO drawn connectors, NO force graph), and a one-line card badge ("Unlocks api 0.330.0" / "Holds back
+…"). Ticket chips → `useOpenStory()`; their open PRs → `openPrDetailTab` (or GitHub); tracker-only tickets →
+the tracker via `safeExternalUrl`.
 The words are pure in `Sprint/releasesModel.ts` (test/releasesModel.test.ts); the check is the SHARED
 fold, never a second one here. The dialog (`Sprint/ReleaseDialog.tsx`, on `InfoModal`) reads the preview only
 while open; each repo is judged on its own, so only "none ticked" hides Confirm (`confirmStops`); it

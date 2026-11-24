@@ -1050,3 +1050,123 @@
 .lb .rp-releases .mark.unknown i {
   color: #e0b860;
 }
+
+/* The path to newer releases (Sprint/ReleasePath.tsx): "Do these first", then one ladder per repository. */
+.lb .rp-releases .plan ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+}
+.lb .rp-releases .plan li {
+  display: flex;
+  gap: 8px;
+  border: 1px solid #2e3036;
+  border-radius: 6px;
+  padding: 8px;
+}
+.lb .rp-releases .plan li.best,
+.lb .rp-releases .ladder .stop.best {
+  border: 2px solid var(--accent, #6b8afd);
+  background: rgba(255, 255, 255, 0.05);
+}
+.lb .rp-releases .plan li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.lb .rp-releases .plan .bestw {
+  font-size: 12px;
+}
+.lb .rp-releases .plan .unl {
+  color: var(--ink);
+}
+.lb .rp-releases .step {
+  flex: 0 0 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #26272c;
+  font-size: 11px;
+  font-weight: 600;
+}
+.lb .rp-releases .best .step {
+  background: var(--accent, #6b8afd);
+  color: #fff;
+}
+.lb .rp-releases .row,
+.lb .rp-releases .wk {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.lb .rp-releases .chip.key {
+  color: var(--ink);
+}
+.lb .rp-releases .wk .pr {
+  color: #e0b860;
+}
+.lb .rp-releases .line + .graph,
+.lb .rp-releases .graph {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: #26272c;
+  color: var(--ink);
+}
+.lb .rp-releases .ladders {
+  gap: 8px;
+}
+.lb .rp-releases .ladder ol {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 3px 0 4px;
+}
+.lb .rp-releases .ladder li {
+  flex: 0 0 auto;
+}
+.lb .rp-releases .ladder .cand,
+.lb .rp-releases .ladder .stop {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid #2e3036;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.lb .rp-releases .ladder .cand {
+  width: 120px;
+}
+.lb .rp-releases .ladder .stop {
+  width: 200px;
+  justify-content: flex-start;
+}
+.lb .rp-releases .ladder .stop.partial {
+  border-style: dashed;
+}
+.lb .rp-releases .ladder .hd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lb .rp-releases .ladder .hd .step {
+  margin-left: auto;
+}
+.lb .rp-releases .ladder .arrow {
+  align-self: center;
+  color: var(--muted);
+}
+.lb .rp-releases .ladder .with {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  color: var(--ink);
+}
+.lb .rp-releases .ladder .repo {
+  color: var(--ink);
+  font-weight: 600;
+}

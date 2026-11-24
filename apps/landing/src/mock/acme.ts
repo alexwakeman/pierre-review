@@ -501,6 +501,30 @@ export interface ReleaseMockCard {
   holder?: string;
   /** Opened in place: the facts, then each PR (`ticketCardPrLines`). */
   detail?: { facts: string; prs: string[] };
+  /** The release graph's badge (`ticketGraphBadges`): "Unlocks …" / "Holds back …". */
+  graph?: string;
+}
+
+/** A work chip on the path to newer releases (Sprint/releaseGraphModel.ts `workChip`): a ticket, its open PR. */
+export interface ReleaseMockWork {
+  key: string;
+  prs?: string[];
+}
+
+/** One stop of a repository's ladder (`ladderRows`). */
+export interface ReleaseMockStop {
+  tag: string;
+  /** "2 tags" when the stop covers more than one. */
+  tags?: string;
+  /** The plan step that releases it. */
+  step?: number;
+  needs: ReleaseMockWork[];
+  /** "Waits on" — the tracker's own links. */
+  via?: ReleaseMockWork[];
+  /** "with acme/ledger v0.9.0" — picked together. */
+  with?: string;
+  /** "Still reading its tickets". */
+  partial?: boolean;
 }
 
 export interface ReleaseMockNoTicket {
@@ -540,6 +564,23 @@ export const SPRINT_RELEASES = {
     ],
     meta: 'Written 16 Oct · Claude',
   },
+  /** The path to newer releases (Sprint/ReleasePath.tsx): "Do these first", then one ladder per repository. */
+  plan: [
+    { step: 1, work: [{ key: 'DES-12' }, { key: 'PAY-150' }], unlocks: 'Unlocks acme/web v1.9.1' },
+    { step: 2, work: [{ key: 'PAY-146', prs: ['payments #611'] }], unlocks: 'Unlocks acme/payments v3.3.0 · acme/ledger v0.9.0' },
+  ] as Array<{ step: number; work: ReleaseMockWork[]; unlocks: string }>,
+  ladders: [
+    { name: REPOS.payments, candidate: 'v3.2.0', stops: [{ tag: 'v3.3.0', step: 2, needs: [{ key: 'PAY-146', prs: ['payments #611'] }], with: 'acme/ledger v0.9.0' }] },
+    { name: REPOS.web, candidate: 'v1.8.2', stops: [{ tag: 'v1.9.1', tags: '2 tags', step: 1, needs: [{ key: 'PAY-150' }], via: [{ key: 'DES-12' }] }] },
+    {
+      name: REPOS.ledger,
+      candidate: null,
+      stops: [
+        { tag: 'v0.9.0', step: 2, needs: [{ key: 'PAY-146', prs: ['payments #611'] }], with: 'acme/payments v3.3.0' },
+        { tag: 'v0.9.1', needs: [], partial: true },
+      ],
+    },
+  ] as Array<{ name: string; candidate: string | null; stops: ReleaseMockStop[] }>,
   showBots: 'Show bot PRs',
   showNoTicket: 'Show PRs with no ticket',
   /** Only the repositories with NO candidate get a line above the list. */
@@ -567,6 +608,7 @@ export const SPRINT_RELEASES = {
       merged: 'merged 15 Oct',
       tags: ['acme/web v1.9.0'],
       line: 'Holds back acme/web',
+      graph: 'Unlocks acme/web v1.9.1',
       detail: { facts: 'Type: Story · Assignee: Wei Zhang · Jira status read 4 min ago', prs: ['web #622 “PAY-150: saved cards” merged 15 Oct · wei · in v1.9.0'] },
     },
     {
@@ -578,6 +620,7 @@ export const SPRINT_RELEASES = {
       merged: 'merged 12 Oct',
       tags: ['acme/ledger v0.9.0'],
       line: 'Holds back acme/ledger · open PR: acme/payments #611',
+      graph: 'Unlocks acme/payments v3.3.0 · acme/ledger v0.9.0',
     },
   ] as ReleaseMockCard[],
   list: [

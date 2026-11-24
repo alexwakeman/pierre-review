@@ -12,6 +12,7 @@ import {
   type ReleaseCheckRepoInput,
   type ReleaseCheckResult,
   type ReleaseCheckTicketInput,
+  type ReleasePointRef,
   type TicketLinkBlocker,
 } from '@pierre-review/shared';
 
@@ -47,7 +48,7 @@ const link = (key: string, category: 'new' | 'indeterminate' | 'done' = 'indeter
   key, title: `${key} title`, status: category === 'done' ? 'Done' : 'In Progress', category, relation: 'is blocked by', url: null,
 });
 const run = (parts: Partial<ReleaseCheckInput>): ReleaseCheckResult => foldReleaseCheck({ settings: SETTINGS, repos: [], prs: [], tickets: [], ...parts });
-const words = (ps: Array<{ repoName: string; tagName: string }>) => ps.map(releasePointWords);
+const words = (ps: ReleasePointRef[]) => ps.map(releasePointWords);
 
 // api: v1 (T1 ✓) · v2 (T2 in progress) · v3 (T3 ✓) · v4 (T4 in progress) · v5 (T5 ✓, open PR).
 const fiveTags = () => repo(1, 'api', [

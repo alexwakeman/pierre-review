@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { RELEASE_OLDER_TAGS_MAX, type ReleaseCheckPr, type ReleaseCheckResult, type ReleaseRepoCheck } from '@pierre-review/shared';
+import { RELEASE_OLDER_TAGS_MAX, releaseGraph, type ReleaseCheckPr, type ReleaseCheckResult, type ReleaseRepoCheck } from '@pierre-review/shared';
 import { useRefreshReleases, useReleases, useShowMoreOlderTags } from '../../hooks/useReleases.js';
 import { useOpenStory } from '../../lib/ticketTab.js';
 import { safeExternalUrl } from '../../lib/ui.js';
@@ -25,6 +25,8 @@ import { Button } from '../ui/Button.js';
 import { FOCUS_RING } from '../ui/cx.js';
 import { SprintProgressBar } from '../Activity/SprintProgressBar.js';
 import { ReleaseBlockersPanel } from './ReleaseBlockersPanel.js';
+import { ReleaseLadders, ReleasePlanStrip } from './ReleasePath.js';
+import { ladderRows, planCards, ticketGraphBadges, type TicketGraphBadge } from './releaseGraphModel.js';
 import { ReleaseDetailModal, ReleaseDialog } from './ReleaseDialog.js';
 import {
   latestReleaseLine,
@@ -79,6 +81,10 @@ import {
 //     latest tag per repository and ONE line; its PRs and tags open behind the arrow.
 //   • Below it, apart in a second bordered box: "Not in a tag yet" (tickets with only open work) and "Holding
 //     the release" (always shown).
+//   • THE PATH TO NEWER RELEASES (ReleasePath.tsx, releaseGraphModel.ts): the shared `releaseGraph(check)`
+//     folded HERE on read (no fetch): "Do these first" (the plan's moves) at the top, "Path to newer
+//     releases" (one ladder per repository) above the list, and a card badge ("Unlocks api 0.330.0" /
+//     "Holds back api 0.330.0") on every ticket that is work in the graph.
 //   • "What's blocking" (ReleaseBlockersPanel.tsx, AI on only): above the list, the last "Explain what's
 //     blocking" report (it arrives with the GET; nothing runs unless the reader presses).
 //
@@ -99,6 +105,14 @@ export function ReleasesView(): JSX.Element | null {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [viewRelease, setViewRelease] = useState<number | null>(null);
   const onRefresh = useCallback(() => refresh.mutate(), [refresh]);
+  // THE RELEASE GRAPH, folded on read from the check already here (docs/RELEASES.md § The path to newer releases).
+  const graphCheck = q.data?.check ?? null;
+  const path = useMemo(() => {
+    if (graphCheck == null) return null;
+    const g = releaseGraph(graphCheck);
+    const fullNames = new Map(graphCheck.repos.map((r) => [r.repoId, r.fullName]));
+    return { plan: planCards(g, fullNames), ladders: ladderRows(g, graphCheck), badges: ticketGraphBadges(g) };
+  }, [graphCheck]);
 
   if (workspaceId == null) return null;
   if (q.isLoading) return <p className="py-6 text-body text-ui-mute">Loading releases…</p>;
@@ -178,6 +192,8 @@ export function ReleasesView(): JSX.Element | null {
         <p className="text-meta text-ui-mute">The tracker did not answer for {refresh.data.unread.join(', ')}.</p>
       )}
 
+      {path != null && <ReleasePlanStrip cards={path.plan} />}
+
       {otherRepos.length > 0 && (
         <section aria-label="Repositories with no candidate">
           <ul className="divide-y divide-ui-line overflow-hidden rounded-ui bg-ui-surface">
@@ -190,7 +206,9 @@ export function ReleasesView(): JSX.Element | null {
 
       <ReleaseBlockersPanel workspaceId={workspaceId} state={data.blockers} check={check} />
 
-      <TicketListView check={check} workspaceId={workspaceId} onRelease={() => setDialogOpen(true)} />
+      {path != null && <ReleaseLadders rows={path.ladders} check={check} />}
+
+      <TicketListView check={check} workspaceId={workspaceId} badges={path?.badges ?? NO_BADGES} onRelease={() => setDialogOpen(true)} />
 
       {dialogOpen && (
         <ReleaseDialog
@@ -285,7 +303,19 @@ function CandidateBlock({ check, onRelease }: { check: ReleaseCheckResult; onRel
 }
 
 /** The candidate tickets in their own bordered box; below it, apart, "Not in a tag yet" and "Holding the release". */
-function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheckResult; workspaceId: number; onRelease: () => void }): JSX.Element {
+const NO_BADGES: ReadonlyMap<string, TicketGraphBadge> = new Map();
+
+function TicketListView({
+  check,
+  workspaceId,
+  badges,
+  onRelease,
+}: {
+  check: ReleaseCheckResult;
+  workspaceId: number;
+  badges: ReadonlyMap<string, TicketGraphBadge>;
+  onRelease: () => void;
+}): JSX.Element {
   const list = useMemo(() => ticketList(check), [check]);
   const holders = useMemo(() => releaseHolders(check), [check]);
   const repoNames = useMemo(() => new Map(check.repos.map((r) => [r.repoId, r.name])), [check]);
@@ -314,6 +344,7 @@ function TicketListView({ check, workspaceId, onRelease }: { check: ReleaseCheck
       ctx={ctx}
       onFocus={onFocus}
       focus={where === 'hold' && focus?.ident === c.ticket.ident ? focus.seq : null}
+      badge={badges.get(c.ticket.ident) ?? null}
       extra={where === 'list' && c.isAnchor ? <CandidateBlock check={check} onRelease={onRelease} /> : null}
       railed={where === 'list'}
     />
@@ -436,6 +467,7 @@ function TicketCard({
   onFocus,
   focus,
   extra,
+  badge,
   railed = false,
 }: {
   card: TicketCardModel;
@@ -445,6 +477,8 @@ function TicketCard({
   focus: number | null;
   /** The candidate ticket's candidates and Release… (always shown, under its line). */
   extra?: ReactNode;
+  /** From the release graph: "Unlocks api 0.330.0" / "Holds back api 0.330.0" (one line). */
+  badge: TicketGraphBadge | null;
   /** In the ticket list: the mark sits on the rail at the left, not in the card. */
   railed?: boolean;
 }): JSX.Element {
@@ -510,6 +544,15 @@ function TicketCard({
             </span>
           ))}
           <span className={LINE_CLASS[line.tone]}>{line.text}</span>
+          {badge != null && (
+            <span
+              data-testid="release-ticket-graph"
+              data-tone={badge.tone}
+              className={`max-w-full truncate rounded-ui bg-ui-raise px-1.5 font-medium text-ui-ink ${badge.tone === 'unlocks' ? 'ring-1 ring-ui-accent' : ''}`}
+            >
+              {badge.text}
+            </span>
+          )}
           {line.holder != null && (
             <button
               type="button"

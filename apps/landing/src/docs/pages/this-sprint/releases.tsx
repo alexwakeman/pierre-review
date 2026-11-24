@@ -82,6 +82,37 @@ export default function Page(): JSX.Element {
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
+      <H3 id="the-path-to-newer-releases">The path to newer releases</H3>
+      <p>
+        When a newer tag can&rsquo;t be released yet, <Ui>Do these first</Ui> at the top of the tab says what to finish
+        first. Each card names the tickets to finish and what that unlocks, for example &ldquo;Finish PAY-11 · Unlocks
+        api 0.327.0 · web w1.2.0&rdquo;. The first card is the best next step. <Ui>Show all</Ui> lists the rest.
+      </p>
+      <p>
+        <Ui>Path to newer releases</Ui> has one row per repository. Each row starts at the candidate (★) and moves right
+        through the newer tags. Releasing a tag ships everything below it, so each box needs what the boxes before it
+        need, plus the tickets it shows. A box that covers several tags with the same needs says so (&ldquo;2
+        tags&rdquo;). The number on a box is the step in <Ui>Do these first</Ui> that releases it.
+      </p>
+      <ul>
+        <li>
+          &ldquo;Waits on OPS-9&rdquo; is a ticket your tracker says a needed ticket is blocked by. It is not part of the
+          release rule, but the plan counts it.
+        </li>
+        <li>
+          &ldquo;with web w1.1.0&rdquo; means the two tags must be released together, because a ticket has work in
+          both. Select it to go to that tag.
+        </li>
+        <li>
+          &ldquo;Still reading its tickets&rdquo; and &ldquo;Still checking&rdquo; mean the work shown is the least the
+          tag needs. There may be more.
+        </li>
+      </ul>
+      <p>
+        Select a ticket to open its story, or a pull request to open it. A ticket that is only in your tracker opens
+        there. In the ticket list, a ticket that holds a newer tag back says &ldquo;Unlocks api 0.330.0&rdquo; when
+        finishing it alone makes that tag releasable, or &ldquo;Holds back api 0.330.0&rdquo; when more is needed.
+      </p>
       <H3 id="the-ticket-list">The ticket list</H3>
       <p>
         Below the repositories is one list of tickets for all of them, newest tag first. A ticket with work in two

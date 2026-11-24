@@ -13,7 +13,7 @@ import {
   SPRINT_RELEASES,
   WHERE,
 } from '../../mock/acme';
-import type { PeriodGrain, ReleaseMark, ReleaseMockCard, ReleaseMockNoTicket, SprintCard, SprintView } from '../../mock/acme';
+import type { PeriodGrain, ReleaseMark, ReleaseMockCard, ReleaseMockNoTicket, ReleaseMockStop, ReleaseMockWork, SprintCard, SprintView } from '../../mock/acme';
 import { Act, Chip, CourtBar, Group, HBar, MiniTable, MockFrame, MockTabs, Segmented, Stat } from './kit';
 
 // The Reporting and How we measure pages' mocks. Words and numbers:
@@ -697,6 +697,7 @@ function ReleaseCardBox({ c, extra, cls, railed = false, as = 'div' }: { c: Rele
             </span>
           ))}
           <small className={`line ${MARK_TONE[c.mark]}`}>{c.line}</small>
+          {c.graph ? <small className="graph">{c.graph}</small> : null}
           {c.holder ? <small className="more">Show {c.holder}</small> : null}
         </span>
       </button>
@@ -735,6 +736,91 @@ function ReleaseNoTicket({ n, showBots }: { n: ReleaseMockNoTicket; showBots: bo
         ) : null}
       </div>
     </li>
+  );
+}
+
+/** A work chip (Sprint/ReleasePath.tsx `WorkChip`): the ticket, then its open PRs. */
+function ReleaseWorkChips({ work }: { work: ReleaseMockWork[] }): JSX.Element {
+  return (
+    <>
+      {work.map((w) => (
+        <span key={w.key} className="wk">
+          <span className="chip key">{w.key}</span>
+          {(w.prs ?? []).map((p) => (
+            <small key={p} className="pr">
+              {p}
+            </small>
+          ))}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** "Do these first" (Sprint/ReleasePath.tsx `ReleasePlanStrip`): the plan's moves, the first THE best next step. */
+function ReleasePlanMock(): JSX.Element {
+  return (
+    <div className="plan">
+      <p className="sec">Do these first</p>
+      <ol>
+        {SPRINT_RELEASES.plan.map((m) => (
+          <li key={m.step} className={m.step === 1 ? 'best' : undefined}>
+            <span className="step">{m.step}</span>
+            <div>
+              {m.step === 1 ? <b className="bestw">Best next step</b> : null}
+              <span className="row">
+                <small>Finish</small> <ReleaseWorkChips work={m.work} />
+              </span>
+              <small className="unl">{m.unlocks}</small>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** "Path to newer releases" (Sprint/ReleasePath.tsx `ReleaseLadders`): one ladder per repository, left → right. */
+function ReleaseLaddersMock(): JSX.Element {
+  const stop = (s: ReleaseMockStop): JSX.Element => (
+    <li key={s.tag} className={`stop${s.step === 1 ? ' best' : ''}${s.partial ? ' partial' : ''}`}>
+      <span className="hd">
+        <b>{s.tag}</b>
+        {s.tags ? <small> {s.tags}</small> : null}
+        {s.step ? <span className="step">{s.step}</span> : null}
+      </span>
+      {s.needs.length > 0 ? (
+        <span className="row">
+          <small>Needs</small> <ReleaseWorkChips work={s.needs} />
+        </span>
+      ) : null}
+      {s.via ? (
+        <span className="row">
+          <small>Waits on</small> <ReleaseWorkChips work={s.via} /> <small>(link in Jira)</small>
+        </span>
+      ) : null}
+      {s.with ? <small className="with">with {s.with}</small> : null}
+      {s.partial ? <small>Still reading its tickets</small> : null}
+    </li>
+  );
+  return (
+    <div className="box ladders">
+      <b>Path to newer releases</b>
+      {SPRINT_RELEASES.ladders.map((l) => (
+        <div key={l.name} className="ladder">
+          <small className="repo">{l.name}</small>
+          <ol>
+            <li className="cand">{l.candidate ? <><b>★ {l.candidate}</b><small>Releasable now</small></> : <small>Nothing releasable yet</small>}</li>
+            {l.stops.map((s) => [
+              <li key={`${s.tag}-arrow`} className="arrow" aria-hidden="true">
+                →
+              </li>,
+              stop(s),
+            ])}
+          </ol>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -814,6 +900,7 @@ function ReleasesPanel(): JSX.Element {
         <b>{R.latest}</b>
       </div>
       {open ? <p className="dlg">{R.dialog}</p> : null}
+      <ReleasePlanMock />
       <ul className="repos">
         {R.repos.map((r) => (
           <li key={r.name}>
@@ -833,6 +920,7 @@ function ReleasesPanel(): JSX.Element {
         ))}
       </ul>
       <ReleaseBlockersBox />
+      <ReleaseLaddersMock />
       <div className="box">
         <div className="toggles">
           <label className="bots">
