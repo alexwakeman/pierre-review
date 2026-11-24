@@ -229,16 +229,16 @@ export async function maybeStartLoop(ctx: AgentContext, input: { accountId: numb
     const targets = (await loopTargets(ctx, accountId, buildId)).filter(isLive);
     if (targets.length === 0) return 'skipped';
     // THE TEAM POLICY (docs/TEAM-POLICY.md § Different rules): the build pushes to every target repo at
-    // once, so ONE policy decides — the targets' policy when they agree; when they differ, the workspace's
-    // chosen repo's policy (it overrides the repos' own files), else the strictest rule from each. When it
+    // once, so ONE policy decides — the targets' policy when they agree; when they differ, the strictest
+    // rule from each plus the workspace's chosen repo's rules (it can only tighten). When it
     // turns automatic pushes off the loop does not start, and the reader pushes by hand as usual.
     const decided = await effectiveMultiRepoTeamPolicy(accountId, b.workspaceId, [...new Set(targets.map((t) => t.repoId))], ctx);
     if (!policyAllowsAutomation(decided.policy, 'auto_push')) {
       const why =
         decided.source === 'chosen'
-          ? 'The team policy this workspace uses when repositories’ rules differ'
+          ? 'The repositories’ team policies differ, and the strictest rule from each, with the rules this workspace adds,'
           : decided.source === 'strictest'
-            ? 'The repositories’ team policies differ, and the strictest rule'
+            ? 'The repositories’ team policies differ, and the strictest rule from each'
             : 'The repository’s team policy';
       seams.session.notice(buildId, `${why} turns off automatic pushes. Push by hand when you are ready.`);
       return 'skipped';

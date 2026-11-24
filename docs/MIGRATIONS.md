@@ -1817,8 +1817,8 @@ timestamps). An existing account-bearing table: erasure and the export already c
 `CREATE TABLE workspace_policy_choices` (one row per `(account_id, workspace_id)`, unique index
 `workspace_policy_choices_account_ws`; named composite FKs `workspace_policy_choices_workspace_account_fk` →
 `workspaces (id, account_id)` and `workspace_policy_choices_repo_account_fk` → `repos (id, account_id)`, both
-cascade): the repo whose policy the workspace applies to work spanning repositories when their policies clash.
-No row = the strictest rule from each. A new account-bearing table: erased explicitly, listed in
+cascade): the repo whose rules the workspace adds to the strictest rule from each when the repos a piece of work
+spans clash (it can only tighten). No row = nothing added. A new account-bearing table: erased explicitly, listed in
 `accountScopedTables()`. Additive; journal idx 221, `when` `1795852800000`. [TEAM-POLICY.md](TEAM-POLICY.md).
 
 ### `0220_repo_team_policies` — the team policy (2026-11-24)

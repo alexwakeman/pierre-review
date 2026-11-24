@@ -21,6 +21,7 @@ import {
   policyAllowsAutomation,
   policyTrustedBots,
   resolvePolicyClash,
+  sameTeamPolicyRules,
   strictestTeamPolicy,
   type TeamPolicy,
 } from '@pierre-review/shared';
@@ -128,9 +129,16 @@ describe('when repositories’ policies differ (resolvePolicyClash)', () => {
     expect(r.policy?.dependencies.trustedBots).toEqual(['renovate[bot]']);
   });
 
-  it('a clash with a workspace choice applies the chosen policy, overriding the others', () => {
-    expect(resolvePolicyClash([noPush, null], renovateOnly)).toEqual({ policy: renovateOnly, source: 'chosen' });
-    expect(policyAllowsAutomation(resolvePolicyClash([noPush, null], renovateOnly).policy, 'auto_push')).toBe(true);
+  it('a clash with a workspace choice adds the chosen rules to the strictest; it can only tighten', () => {
+    const r = resolvePolicyClash([noPush, null], renovateOnly);
+    expect(r.source).toBe('chosen');
+    // The chosen policy never loosens: acme/web's "no automatic push" still holds.
+    expect(policyAllowsAutomation(r.policy, 'auto_push')).toBe(false);
+    // And it adds its own rule.
+    expect(r.policy?.dependencies.trustedBots).toEqual(['renovate[bot]']);
+    // A chosen policy with no rules changes nothing.
+    const empty = resolvePolicyClash([noPush, null], p({}));
+    expect(sameTeamPolicyRules(empty.policy, strictestTeamPolicy([noPush]))).toBe(true);
   });
 
   it('strictest of nothing restricts nothing', () => {
@@ -299,7 +307,7 @@ describe('the store and the gate (sqlite)', () => {
     expect(await store.dependencyActionAllowedByPolicy(1, botPr)).toBe(true);
   });
 
-  it('the workspace’s choice: only a member repo; it decides a clash; cleared, the strictest rule applies', async () => {
+  it('the workspace’s choice: only a member repo; it adds rules in a clash, never removes; cleared, the strictest rule', async () => {
     await evaluating(true);
     const { eq } = await import('drizzle-orm');
     const [ws] = await db.insert(schema.workspaces).values({ accountId: 1, name: 'Team A' }).returning().execute();
@@ -310,7 +318,7 @@ describe('the store and the gate (sqlite)', () => {
       await db.insert(schema.workspaceRepos).values({ accountId: 1, workspaceId: ws.id, repoId: id }).execute();
     }
     await store.recordRepoTeamPolicy(1, repoId, { text: '{"version": 1, "automation": {"auto_push": false}}', commitOid: 'w1' });
-    await store.recordRepoTeamPolicy(1, api.id, { text: '{"version": 1}', commitOid: 'a1' });
+    await store.recordRepoTeamPolicy(1, api.id, { text: '{"version": 1, "ai": {"approve": false}}', commitOid: 'a1' });
 
     // No choice: they differ, so the strictest rule applies (auto push off).
     let r = await store.effectiveMultiRepoTeamPolicy(1, ws.id, [repoId, api.id]);
@@ -321,12 +329,13 @@ describe('the store and the gate (sqlite)', () => {
     expect(await store.setWorkspaceClashChoice(1, ws.id, other.id)).toBe(false);
     expect(await store.setWorkspaceClashChoice(2, ws.id, api.id)).toBe(false);
 
-    // The workspace chooses acme/api's policy: it overrides acme/web's.
+    // The workspace adds acme/api's rules: acme/web's rule still holds (it can only tighten).
     expect(await store.setWorkspaceClashChoice(1, ws.id, api.id)).toBe(true);
     expect(await store.workspaceClashChoice(1, ws.id)).toBe(api.id);
     r = await store.effectiveMultiRepoTeamPolicy(1, ws.id, [repoId, api.id]);
     expect(r).toMatchObject({ source: 'chosen', chosenRepoId: api.id });
-    expect(policyAllowsAutomation(r.policy, 'auto_push')).toBe(true);
+    expect(policyAllowsAutomation(r.policy, 'auto_push')).toBe(false);
+    expect(policyAllowsAiApproval(r.policy)).toBe(false);
     // Single-repo work is not a clash: acme/web's own rule still applies to its PRs.
     expect(policyAllowsAutomation(await store.effectiveRepoTeamPolicy(1, repoId), 'auto_push')).toBe(false);
 

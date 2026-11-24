@@ -1,6 +1,6 @@
 -- WHEN REPOSITORIES' TEAM POLICIES DIFFER (2026-11-24; docs/TEAM-POLICY.md § Different rules). ONE row per
--- (account, workspace): the repo whose policy the workspace applies to work spanning repositories when their
--- policies clash. No row = the strictest rule from each. Additive; no backfill. Tenancy via named composite FKs.
+-- (account, workspace): the repo whose rules the workspace adds to the strictest rule from each when the repos
+-- a piece of work spans clash (it can only tighten). No row = nothing added. Additive; no backfill. Tenancy via named composite FKs.
 CREATE TABLE IF NOT EXISTS `workspace_policy_choices` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`account_id` integer NOT NULL,

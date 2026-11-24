@@ -90,9 +90,11 @@ There is no conflict to resolve: a policy governs only its own repository's PRs,
 - WORK THAT SPANS REPOSITORIES is the one place policies can clash (today: Implement story's loop,
   `maybeStartLoop`). ONE resolver, `effectiveMultiRepoTeamPolicy` → shared `resolvePolicyClash`: the
   targets' policy when they agree (`sameTeamPolicyRules`, the note ignored); when they differ, the
-  WORKSPACE'S CHOICE (`workspace_policy_choices`, migration 0221; workspaces are teams) — the chosen
-  repo's policy OVERRIDES the targets' own files, and may be looser than one of them; with no choice,
-  or a chosen repo whose file is now invalid, the strictest rule from each (`strictestTeamPolicy`).
+  strictest rule from each (`strictestTeamPolicy`) PLUS the WORKSPACE'S CHOICE
+  (`workspace_policy_choices`, migration 0221; workspaces are teams): a repo whose rules are ADDED.
+  ⚠ THE CHOICE CAN ONLY TIGHTEN (the owner's decision, 2026-11-24): it never loosens a rule an involved
+  repo sets, so choosing one of the involved repos changes nothing — it earns its place as a "team
+  rules" repo outside the work. A chosen repo whose file is now invalid adds nothing.
   Settings → Team policy → "When repositories' rules differ" (shown from two valid policies); the
   write accepts only a member repo of that workspace (`setWorkspaceClashChoice`; named composite FKs;
   `verify:isolation`). The loop's notice says which decided. A future multi-repo writer uses the same

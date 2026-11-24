@@ -187,7 +187,7 @@ export async function dependencyActionAllowedByPolicy(accountId: number, prId: n
 
 // ── When repositories' policies differ: the workspace's choice ──────────────────────────────────
 
-/** The repo whose policy this workspace applies when policies clash; null = the strictest rule. */
+/** The repo whose rules this workspace adds when policies clash; null = the strictest rule alone. */
 export async function workspaceClashChoice(accountId: number, workspaceId: number, on?: GateSource): Promise<number | null> {
   const src = sourceOf(on);
   const wpc = src?.t.workspacePolicyChoices;
@@ -240,8 +240,8 @@ export async function setWorkspaceClashChoice(
 
 /**
  * THE POLICY FOR WORK THAT SPANS REPOSITORIES (shared `resolvePolicyClash`): the involved repos'
- * policies when they agree; when they differ, the workspace's chosen repo's policy (it overrides the
- * repos' own files), else the strictest rule from each. Null policy without a licence key or evaluation.
+ * policies when they agree; when they differ, the strictest rule from each plus the workspace's chosen
+ * repo's rules (it can only tighten). Null policy without a licence key or evaluation.
  */
 export async function effectiveMultiRepoTeamPolicy(
   accountId: number,

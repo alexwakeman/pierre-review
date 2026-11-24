@@ -56,8 +56,8 @@ function Info(): JSX.Element {
       <p className="mt-2">
         Each pull request follows its own repository’s policy. Work that touches several repositories at once, such
         as Implement story’s push, needs one: when the repositories agree it is theirs; when they differ it is the
-        one you choose under “When repositories’ rules differ”, which overrides the others there, or by default the
-        strictest rule from each.
+        strictest rule from each, plus any repository’s rules you add under “When repositories’ rules differ”. That
+        choice can only add rules, never remove one.
       </p>
       <p className="mt-2">
         A file with a mistake is not applied at all, and this page lists the problems. Team policies need a licence key or the 30-day
@@ -101,8 +101,8 @@ function RepoPolicy({ r }: { r: RepoTeamPolicy }): JSX.Element {
 
 /**
  * WHEN REPOSITORIES' RULES DIFFER: the workspace (a team) picks the policy for work that spans
- * repositories — Implement story's push today. It overrides the repositories' own files in a clash; the
- * default is the strictest rule from each. Shown once two or more repositories have a valid policy.
+ * repositories — Implement story's push today: the strictest rule from each, plus the chosen repo's rules.
+ * ⚠ It can only tighten, never loosen a rule an involved repository sets. Shown once two or more repositories have a valid policy.
  */
 function ClashChoice({
   workspaceId,
@@ -116,12 +116,12 @@ function ClashChoice({
   const save = useSetTeamPolicyClash(workspaceId);
   const options: { repoId: number | null; label: string }[] = [
     { repoId: null, label: 'The strictest rule from each repository' },
-    ...repos.map((r) => ({ repoId: r.repoId, label: `${r.repo}’s policy` })),
+    ...repos.map((r) => ({ repoId: r.repoId, label: `The strictest rule from each, plus ${r.repo}’s rules` })),
   ];
   return (
     <fieldset className="space-y-1.5" data-testid="team-policy-clash">
       <legend className="mb-1 text-body font-semibold text-ui-ink">When repositories’ rules differ</legend>
-      <p className="text-meta text-ui-mute">For work that touches several repositories at once. This choice wins there.</p>
+      <p className="text-meta text-ui-mute">For work that touches several repositories at once. It can only add rules.</p>
       {options.map((o) => (
         <label key={o.repoId ?? 'strictest'} className="flex items-center gap-2 text-body">
           <RadioInput
@@ -135,7 +135,7 @@ function ClashChoice({
       ))}
       {!clash.usable && clash.repoId != null && (
         <p className="text-body text-ui-danger">
-          {clash.repo ?? 'The chosen repository'} has no valid policy now, so the strictest rule applies.
+          {clash.repo ?? 'The chosen repository'} has no valid policy now, so only the strictest rule from each applies.
         </p>
       )}
       {save.isError && (

@@ -6420,8 +6420,8 @@ export const repoTeamPolicies = sqliteTable(
 );
 
 // WHEN REPOSITORIES' TEAM POLICIES DIFFER (migration 0221; docs/TEAM-POLICY.md § Different rules). ONE row
-// per (account, workspace): the repo whose policy the workspace applies to work that spans repositories
-// when their policies clash. No row = the strictest rule from each. Both ids are guarded by named
+// per (account, workspace): the repo whose rules the workspace ADDS to the strictest rule from each when the
+// repos a piece of work spans clash (it can only tighten). No row = nothing added. Both ids are guarded by named
 // composite FKs (the repo id arrives in a request BODY); deleting the repo or the workspace drops the row.
 export const workspacePolicyChoices = sqliteTable(
   'workspace_policy_choices',

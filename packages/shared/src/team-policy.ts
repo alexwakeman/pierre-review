@@ -217,8 +217,8 @@ export interface TeamPolicyResponse {
   notAppliedReason: 'no_licence' | null;
   repos: RepoTeamPolicy[];
   /**
-   * WHEN REPOSITORIES' RULES DIFFER (work that spans repositories): the workspace's choice. `repoId`
-   * null = the strictest rule from each. `usable` is false when the chosen repo no longer has a valid
+   * WHEN REPOSITORIES' RULES DIFFER (work that spans repositories): the repo whose policy the workspace
+   * ADDS to the strictest rule from each (it can only tighten). `repoId` null = nothing added. `usable` is false when the chosen repo no longer has a valid
    * policy in this workspace (the strictest rule applies until it does).
    */
   clash: { repoId: number | null; repo: string | null; usable: boolean };
@@ -261,7 +261,7 @@ export function strictestTeamPolicy(policies: readonly TeamPolicy[]): TeamPolicy
 export type PolicyClashSource =
   /** Every repository involved sets the same rules (or only one is involved). */
   | 'agreed'
-  /** They differ and the workspace chose a repository's policy. */
+  /** They differ and the workspace added a repository's policy on top of the strictest rule. */
   | 'chosen'
   /** They differ and the workspace has no (usable) choice: the strictest rule from each. */
   | 'strictest';
@@ -269,8 +269,8 @@ export type PolicyClashSource =
 /**
  * THE POLICY FOR WORK THAT SPANS REPOSITORIES (Implement story's push today). Each involved repo's
  * policy (null = none) is compared; when they agree that is the policy. When they differ, the
- * WORKSPACE'S CHOICE wins — it overrides the repositories' own files — and with no choice (or a
- * chosen repo whose policy is not usable) the strictest combination applies. Pure.
+ * strictest rule from each applies, and the WORKSPACE'S CHOICE (a repo's policy) is ADDED on top.
+ * ⚠ THE CHOICE CAN ONLY TIGHTEN: it never loosens a rule any involved repository sets. Pure.
  */
 export function resolvePolicyClash(
   involved: readonly (TeamPolicy | null)[],
@@ -278,11 +278,12 @@ export function resolvePolicyClash(
 ): { policy: TeamPolicy | null; source: PolicyClashSource } {
   const first = involved[0] ?? null;
   if (involved.every((p) => sameTeamPolicyRules(p, first))) return { policy: first, source: 'agreed' };
-  if (chosen != null) return { policy: chosen, source: 'chosen' };
-  return { policy: strictestTeamPolicy(involved.filter((p): p is TeamPolicy => p != null)), source: 'strictest' };
+  const set = involved.filter((p): p is TeamPolicy => p != null);
+  if (chosen != null) return { policy: strictestTeamPolicy([...set, chosen]), source: 'chosen' };
+  return { policy: strictestTeamPolicy(set), source: 'strictest' };
 }
 
-/** PUT /api/team-policy/clash?workspace=<id>. `repoId: null` = the strictest rule from each. */
+/** PUT /api/team-policy/clash?workspace=<id>. `repoId: null` = the strictest rule from each, nothing added. */
 export interface TeamPolicyClashChoiceBody {
   repoId: number | null;
 }
