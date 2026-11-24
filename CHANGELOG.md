@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.78] - 2026-11-23
+
 ### Changed
 
 - Settings → Appearance: Neon and Meadow are much bolder. Neon has a glowing ultraviolet grid, a neon
