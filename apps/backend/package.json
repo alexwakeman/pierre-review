@@ -1,6 +1,6 @@
 {
   "name": "@pierre-review/backend",
-  "version": "1.0.78",
+  "version": "1.0.79",
   "private": true,
   "license": "SEE LICENSE IN ../../LICENSE",
   "type": "module",

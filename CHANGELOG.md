@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.79] - 2026-11-24
+
 ### Fixed
 
 - A reply on an Ensemble review comment now gets checked even when the author resolves the thread
