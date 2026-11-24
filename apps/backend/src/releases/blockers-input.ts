@@ -185,10 +185,15 @@ export function releaseBlockersInput(check: ReleaseCheckResult): ReleaseBlockers
     const now = l.candidate != null ? pointRef(l.repoName, l.candidate) : 'nothing';
     const newest = l.newest != null ? pointRef(l.repoName, l.newest) : 'none';
     ladderLines.push(`${one(l.repoName, 80)} · can be released now: ${now} · newest: ${newest}`);
+    // A stop's picked-together points carry upward (a newer stop needs them too): name each ONCE, on the
+    // first stop that needs it, like `adds`.
+    const named = new Set<string>();
     for (const st of l.stops) {
+      const newPoints = st.withPoints.filter((p) => !named.has(pointRef(p.repoName, p.tagName)));
+      for (const p of newPoints) named.add(pointRef(p.repoName, p.tagName));
       const parts = [`${pointRef(l.repoName, st.tagName)}${st.tags > 1 ? ` (${st.tags} tags)` : ''} adds ${st.adds.length > 0 ? ids(st.adds) : 'nothing new'}`];
       if (st.via.length > 0) parts.push(`via ${ids(st.via)}`);
-      if (st.withPoints.length > 0) parts.push(`with ${st.withPoints.map((p) => pointRef(p.repoName, p.tagName)).join(' ')}`);
+      if (newPoints.length > 0) parts.push(`with ${newPoints.map((p) => pointRef(p.repoName, p.tagName)).join(' ')}`);
       if (st.partial) parts.push('partial: some tickets not read yet');
       ladderLines.push(`  ${parts.join('; ')}`);
     }
