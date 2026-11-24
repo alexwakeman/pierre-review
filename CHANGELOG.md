@@ -13,6 +13,30 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → Team policy: rules your team commits to a repository, in `.ensemble/policy.json`, apply to its
+  pull requests on every copy of Ensemble. They only switch things off: auto review, automatic posting, AI
+  approvals, auto fix, automatic pushes, resolving threads and dependency automation, or which bots dependency
+  automation trusts. Team policy needs a licence key or the 30-day evaluation.
+- Settings → Licence: paste a licence key; Ensemble checks it on your computer and never contacts us.
+- Licence activation at ensemble.ac/licence: swap the licence key from your purchase email for an Ensemble
+  licence key.
+- A licence reminder in the corner of the app when more than 3 people in your organisation post through
+  Ensemble and no licence key covers them. It never blocks anything; you can evaluate for 30 days or be
+  reminded in 7 days.
+- Reports → Download report: a PDF shaped like a slide deck on AI adoption and delivery, made on your
+  computer. It shows which AI coding tools were involved in merged pull requests, how many people used
+  each, and what changed against the period before, with an option to have AI write the commentary. It
+  names nobody: counts of 1 or 2 people show as "Fewer than 3".
+
+### Changed
+
+- The website and docs no longer say every feature is free: team policy needs a licence key. Everything
+  else stays free for individuals and for organisations where no more than 3 people use Ensemble.
+- Corevo Systems Limited's company number and registered office are in the website's footer and on the
+  legal pages.
+
 ## [1.0.78] - 2026-11-23
 
 ### Changed
@@ -63,28 +87,17 @@ no internals.
 
 - A pricing page: free for up to 3 people, then one licence a year for the organisation, from £600 plus VAT,
   priced by how many people use Ensemble.
-- Settings → Licence: says who may use Ensemble free and who needs a licence, with a link to the prices. Paste
-  a licence key there; Ensemble checks it on your computer and never contacts us.
-- Licence activation at ensemble.ac/licence: swap the licence key from your purchase email for an Ensemble
-  licence key.
-- A licence reminder in the corner of the app when more than 3 people in your organisation post through
-  Ensemble and no licence key covers them. It never blocks anything; you can evaluate for 30 days or be
-  reminded in 7 days.
+- Settings → Licence: says who may use Ensemble free and who needs a licence, with a link to the prices.
 - A comparison page: Ensemble beside CodeRabbit, GitHub Copilot code review and Claude Code Review, with
   each vendor's facts linked and dated, and where the others are stronger.
 - Privacy: a section on how we handle your details if we contact you about Ensemble, and how to stop it.
 - A security and trust page for security and procurement reviewers: where your data goes, what the AI
   agents can do, what happens without a click, and how to report a security problem.
-- Reports → Download report: a PDF shaped like a slide deck on AI adoption and delivery, made on your
-  computer. It shows which AI coding tools were involved in merged pull requests, how many people used
-  each, and what changed against the period before, with an option to have AI write the commentary. It
-  names nobody: counts of 1 or 2 people show as "Fewer than 3".
 
 ### Fixed
 
 - Terms, the npm page and the README: they now say that AI Fix and Implement story run commands in a
-  sandbox, and where your data goes. Ensemble is now made by Corevo Systems Limited, whose company
-  details are in the footer and on the legal pages.
+  sandbox, and where your data goes. Ensemble is now made by Corevo Systems Limited.
 
 ### Changed
 

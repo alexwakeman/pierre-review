@@ -276,6 +276,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
       { slug: 'releases' },
       { slug: 'integrations' },
       { slug: 'bots' },
+      { slug: 'team-policy' },
       { slug: 'ai-usage-and-spend' },
       { slug: 'how-providers-treat-your-work' },
     ],
@@ -463,6 +464,7 @@ export const APP_COVERAGE = {
     releases: 'settings/releases',
     integrations: 'settings/integrations',
     bots: 'settings/bots',
+    'team-policy': 'settings/team-policy',
     licence: 'licence/licence',
   },
   /** The Pending board's tabs. */

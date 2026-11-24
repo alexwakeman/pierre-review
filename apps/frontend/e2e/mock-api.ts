@@ -1,6 +1,7 @@
 import type { Page, Route } from '@playwright/test';
 import type {
   LicenceStatusResponse,
+  TeamPolicyResponse,
   AskablePeopleResponse,
   StoryChatListResponse,
   StoryChatLive,
@@ -2244,6 +2245,24 @@ const LICENCE_STATUS: LicenceStatusResponse = {
   users: { count: 1, owner: null },
   reminder: { show: false, reason: null, evaluationEndsAt: null, canEvaluate: true },
 };
+// Settings → Team policy (GET /api/team-policy): one repo with a policy, not applied (no key).
+const TEAM_POLICY: TeamPolicyResponse = {
+  workspaceId: 1,
+  applied: false,
+  notAppliedReason: 'no_licence',
+  repos: [
+    {
+      repoId: 1,
+      repo: 'acme/web',
+      state: 'ok',
+      policy: { version: 1, automation: { auto_push: false }, ai: { approve: false }, dependencies: {} },
+      rules: ['Nothing is pushed automatically.', 'An AI review never approves; an approval is posted as a comment.'],
+      errors: [],
+      commitOid: 'a1b2c3d4e5f6',
+      readAt: '2026-11-24T10:00:00.000Z',
+    },
+  ],
+};
 // Settings → AI → Disk space (GET /api/storage/clones): two repositories cloned, no checkouts left.
 const CLONE_STORAGE: CloneStorageResponse = {
   cloneBytes: 412 * 1024 * 1024,
@@ -2753,6 +2772,7 @@ export async function installMockApi(
       }
       if (path.endsWith('/api/storage/clones')) return json(route, CLONE_STORAGE);
       if (path.endsWith('/api/licence')) return json(route, LICENCE_STATUS);
+      if (path.endsWith('/api/team-policy')) return json(route, TEAM_POLICY);
       // The one-time AI runtime download streams `AiRuntimeInstallEvent` SSE frames; one `done`
       // frame is a complete, successful install.
       if (path.endsWith('/api/ai/runtime/install'))

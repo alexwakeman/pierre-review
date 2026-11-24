@@ -16,6 +16,7 @@ import { InfoButton } from '../InfoModal.js';
 import { CheckInput, RadioInput, SectionShell } from './ui.js';
 import { SaveState, useAutoSave, useEchoGuard } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
+import { TeamPolicyNote } from './TeamPolicySection.js';
 
 // SETTINGS → DEPENDENCIES (CORE, free). Everything the server does to dependency updates in THIS
 // workspace, every switch OFF until switched on (opt-in since 2026-11-22; docs/MERGE-CI-TRUNK.md §
@@ -208,6 +209,7 @@ export function DependencyAutomationSection(): JSX.Element {
         </InfoButton>
       }
     >
+      {workspaceId != null && <TeamPolicyNote workspaceId={workspaceId} />}
       <div className="space-y-2">
         <SwitchRow
           checked={draft.autoMerge}

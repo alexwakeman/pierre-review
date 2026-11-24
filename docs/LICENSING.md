@@ -9,8 +9,13 @@ for an organisation where no more than three people use Ensemble; a commercial l
 1. **The app never calls home.** A licence key is checked OFFLINE, on the reader's computer, against
    public keys built into the app. The app sends nothing to Corevo, to Polar or to anyone else for
    licensing. The one network step happens on the website, in the buyer's browser, when they choose.
-2. **A reminder, never a block.** No feature reads the licence status. The reminder is a circle in
-   the one toast cluster, and every choice on it quiets it.
+2. **A reminder, never a block.** The colleague count and the reminder block nothing: the reminder is
+   a circle in the one toast cluster, and every choice on it quiets it.
+2a. **Organisation features need a key** (2026-11-24). Team policy (docs/TEAM-POLICY.md) is applied
+   only while the copy holds a VALID key or its one 30-day evaluation runs: `orgFeaturesUnlockedFor`
+   (licence/status.ts; cheap, no count) on the server, shared `orgFeaturesUnlocked` over a status.
+   Team size does not matter (a small team asks for a free key). Nothing else is locked. The licence
+   text (`LICENSE`) is unchanged: it governs who may use the software, not which features exist.
 3. **The free limit is ONE constant**: `LICENCE_FREE_USERS` (packages/shared `licence.ts`, 3). The
    landing's `FREE_TEAM_SIZE` mirrors it.
 

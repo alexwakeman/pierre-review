@@ -59,7 +59,7 @@ export function LicenceSection(): JSX.Element {
   return (
     <SectionShell
       title="Licence"
-      desc={`Every feature is in this copy. It is free for one person, and for an organisation where ${LICENCE_FREE_USERS} or fewer people use it.`}
+      desc={`Ensemble is free for one person, and for an organisation where ${LICENCE_FREE_USERS} or fewer people use it. A licence key also turns on team policy.`}
     >
       <ul className="mt-2 list-disc space-y-1 pl-5">
         <li>

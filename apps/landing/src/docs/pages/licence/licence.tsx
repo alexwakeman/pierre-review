@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { ExtLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
+import { DocLink, ExtLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'The Ensemble License',
@@ -23,8 +23,10 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Ensemble is released under the Ensemble License 1.0 (formerly the Limn License). Every feature is included for
-        everyone the licence covers: there are no locked features and no trial. This page explains the licence in plain English. The licence text itself is
+        Ensemble is released under the Ensemble License 1.0 (formerly the Limn License). Everything an individual or a
+        small team uses is included for everyone the licence covers. Organisation features, starting with{' '}
+        <DocLink to="settings/team-policy">team policy</DocLink>, need a licence key or the 30-day evaluation; a team of
+        three or fewer can ask for a free key. This page explains the licence in plain English. The licence text itself is
         what counts; read it in full in the <code>LICENSE</code> file that comes with Ensemble, or{' '}
         <ExtLink href={LICENSE_URL}>on GitHub</ExtLink>.
       </p>

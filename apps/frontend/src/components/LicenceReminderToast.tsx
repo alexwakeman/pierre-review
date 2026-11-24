@@ -7,7 +7,7 @@ import { PeopleIcon } from './Icons.js';
 
 // THE LICENCE REMINDER (docs/LICENSING.md § The reminder): a circle in the ONE toast cluster when
 // more than LICENCE_FREE_USERS people are seen posting through Ensemble in one organisation and no
-// licence covers them. ⚠ A REMINDER, NEVER A BLOCK: nothing in the app reads it, every choice quiets
+// licence covers them. ⚠ A REMINDER, NEVER A BLOCK: no feature reads the reminder, every choice quiets
 // it, and the count it quotes is a floor (people who only read are not seen).
 //
 //   Enter a key      → Settings → Licence

@@ -36,7 +36,9 @@ export type SettingsFocus =
   // Settings → Features → AI and bot comment analysis: the one place the app downloads either.
   | 'tools'
   // Settings → Licence: the licence reminder's "Enter a key".
-  | 'licence';
+  | 'licence'
+  // Settings → Team policy: the "See Team policy" line under a switch a policy overrides.
+  | 'team-policy';
 
 interface SettingsModalState {
   open: boolean;

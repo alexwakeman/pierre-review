@@ -1035,6 +1035,11 @@ values; ONE reader/writer `db/release-settings.ts`, validated by shared `validat
   `refused` row holds no name, so a later press is a new claim on a new row.
 - **`release_ticket_comments`** — one row per `(release, ticket_key)`: `tracker_kind`, `state`
   (`pending`→`claimed`→`posted`|`failed`|`skipped`), `comment_id`, `error`, `claimed_at`, `posted_at`.
+- **`repo_team_policies`** (migration `0220`; docs/TEAM-POLICY.md) — one row per `(account_id, repo_id)`:
+  the repo's `.ensemble/policy.json` as the default-branch snapshot read it — `policy_json` (shared
+  `TeamPolicy`, null when invalid), `errors_json`, `commit_oid`, `read_at`. Composite FK to `repos` (cascade).
+  ONE writer `recordRepoTeamPolicy` (⚠ deleted only on GitHub's positive "no file"); every enforcement point
+  reads `effectiveRepoTeamPolicy` (null without a licence key or evaluation). Erased and exported.
 - **`release_blocker_reports`** (migration `0217`) — one row per `(account_id, workspace_id)`: the last
   "Explain what's blocking" report (`report_json`: headline, steps, repos, dropped), `input_hash` (sha256 of
   the prompt version + the input text; no clock), `model` / `provider` / `cost_usd` / `input_tokens` /

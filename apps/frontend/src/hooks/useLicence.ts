@@ -20,6 +20,10 @@ export function useLicenceAction<A>(fn: (arg: A) => Promise<LicenceStatusRespons
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: (status) => qc.setQueryData(LICENCE_QUERY_KEY, status),
+    onSuccess: (status) => {
+      qc.setQueryData(LICENCE_QUERY_KEY, status);
+      // Whether team policies apply follows the licence (docs/TEAM-POLICY.md).
+      void qc.invalidateQueries({ queryKey: ['team-policy'] });
+    },
   });
 }

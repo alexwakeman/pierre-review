@@ -770,3 +770,11 @@ no model, so no rate-limit tier.
 | `POST /api/licence/evaluating` | start the one 30-day evaluation (no-op once started) → the new status |
 | `POST /api/licence/later` | "Remind me in 7 days" → the new status |
 
+## Team policy
+
+docs/TEAM-POLICY.md. DB only (sync read each repo's `.ensemble/policy.json`), so no rate-limit tier.
+
+| Route | What |
+|---|---|
+| `GET /api/team-policy?workspace=<id>` | `TeamPolicyResponse { workspaceId, applied, notAppliedReason, repos[] }`: every member repo with `state` (`none` · `invalid` · `ok`), the parsed `policy`, its `rules` in words, the parser's `errors`, the `commitOid` and `readAt`. `applied` = this copy holds a valid licence key or a running evaluation |
+

@@ -2,7 +2,8 @@
 // people the account's repositories show posting through Ensemble, and whether to show the reminder.
 //
 // ⚠ A REMINDER, NEVER A BLOCK. The count is a floor and a guess (see `countEnsembleUsers`), so it
-// may only ever show a notice the reader can quiet; no feature reads it.
+// may only ever show a notice the reader can quiet; no feature reads the COUNT. Organisation features
+// (team policy) read only `orgFeaturesUnlockedFor`: a valid key or the running evaluation.
 import { and, eq, gte, isNotNull, sql } from 'drizzle-orm';
 import {
   LICENCE_EVALUATION_DAYS,
@@ -198,4 +199,16 @@ export async function snoozeLicenceReminder(accountId: number, nowMs = Date.now(
     .set({ licenceReminderSnoozedUntil: new Date(nowMs + LICENCE_SNOOZE_DAYS * DAY) })
     .where(eq(schema.accounts.id, accountId))
     .execute();
+}
+
+/**
+ * Does this copy unlock ORGANISATION FEATURES now (the team policy first)? A valid key, or the one
+ * evaluation still running. Cheap: one account row and an offline signature check, no count.
+ * Shared `orgFeaturesUnlocked` is the same rule over a `LicenceStatusResponse`.
+ */
+export async function orgFeaturesUnlockedFor(accountId: number, nowMs = Date.now()): Promise<boolean> {
+  const row = await accountRow(accountId);
+  if (!row) return false;
+  if (row.key && checkLicenceKey(row.key, nowMs).ok) return true;
+  return row.evaluationEndsAt != null && row.evaluationEndsAt.getTime() > nowMs;
 }

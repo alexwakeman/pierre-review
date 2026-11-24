@@ -26,7 +26,8 @@ export default function Page(): JSX.Element {
         The <Ui>AI review</Ui> tab holds two settings for the current workspace: <Ui>Auto review</Ui>, which reviews
         new pull requests without anyone pressing a button, and <Ui>Related repos</Ui>, which lets a review read code
         in the repositories a change depends on. Each workspace has its own settings. What a review does is explained
-        in <DocLink to="ai-review/overview">AI review</DocLink>; this page lists the switches.
+        in <DocLink to="ai-review/overview">AI review</DocLink>; this page lists the switches. A repository&rsquo;s{' '}
+        <DocLink to="settings/team-policy">team policy</DocLink> can switch some of them off for its pull requests.
       </p>
 
       <H2 id="auto-review">Auto review</H2>

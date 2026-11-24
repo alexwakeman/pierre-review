@@ -152,6 +152,8 @@ export async function eraseAccountData(accountId: number): Promise<EraseResult> 
     await tx.delete(schema.trackerTicketStatus).where(eq(schema.trackerTicketStatus.accountId, accountId)).execute();
     // Releasable repositories (migration 0199).
     await tx.delete(schema.workspaceReleaseRepos).where(eq(schema.workspaceReleaseRepos.accountId, accountId)).execute();
+    // Team policies read from each repo (migration 0220).
+    await tx.delete(schema.repoTeamPolicies).where(eq(schema.repoTeamPolicies.accountId, accountId)).execute();
     // "Explain what's blocking" reports (migration 0217).
     await tx.delete(schema.releaseBlockerReports).where(eq(schema.releaseBlockerReports.accountId, accountId)).execute();
     // Story chats (migration 0192): turns first (their FK names the chat), then the chats.
@@ -594,6 +596,8 @@ export function accountScopedTables(): {
     { name: 'releaseTicketComments', col: schema.releaseTicketComments.accountId, table: schema.releaseTicketComments },
     // Releasable repositories (migration 0199).
     { name: 'workspaceReleaseRepos', col: schema.workspaceReleaseRepos.accountId, table: schema.workspaceReleaseRepos },
+    // Team policies read from each repo (migration 0220).
+    { name: 'repoTeamPolicies', col: schema.repoTeamPolicies.accountId, table: schema.repoTeamPolicies },
     // "Explain what's blocking" reports (migration 0217).
     { name: 'releaseBlockerReports', col: schema.releaseBlockerReports.accountId, table: schema.releaseBlockerReports },
     // The one history pass (migration 0202).

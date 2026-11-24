@@ -142,7 +142,8 @@ export const accounts = sqliteTable('accounts', {
   // key the reader pasted into Settings → Licence, stored as typed and verified OFFLINE on every read
   // (licence/key.ts) — never sent anywhere. `licenceEvaluationEndsAt`: the end of the ONE 30-day
   // evaluation the reader may start when the reminder first shows; `licenceReminderSnoozedUntil`:
-  // "Remind me later" after it. Both only quiet the reminder — nothing is ever blocked.
+  // "Remind me later" after it. Both quiet the reminder; the key and the evaluation also unlock the
+  // organisation features (team policy, `orgFeaturesUnlockedFor`). The count never blocks anything.
   licenceKey: text('licence_key'),
   licenceEvaluationEndsAt: integer('licence_evaluation_ends_at', { mode: 'timestamp' }),
   licenceReminderSnoozedUntil: integer('licence_reminder_snoozed_until', { mode: 'timestamp' }),
@@ -6383,6 +6384,37 @@ export const releaseBlockerReports = sqliteTable(
       name: 'release_blocker_reports_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// THE TEAM POLICY (migration 0220; docs/TEAM-POLICY.md). ONE row per (account, repo): the
+// `.ensemble/policy.json` read from the repo's DEFAULT BRANCH by the default-branch snapshot. No row =
+// GitHub said there is no file (or it was never read). ⚠ The row is DELETED only on a positive
+// statement from GitHub that the file is absent; a failed read leaves it as it was. Whether a copy
+// APPLIES it is decided on read (shared `orgFeaturesUnlocked`), never stored.
+export const repoTeamPolicies = sqliteTable(
+  'repo_team_policies',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    /** Shared `TeamPolicy` when the file parsed; null when it did not. */
+    policyJson: text('policy_json', { mode: 'json' }).$type<unknown>(),
+    /** The parser's problems, in words; [] when the file parsed. */
+    errorsJson: text('errors_json', { mode: 'json' }).$type<string[]>().notNull(),
+    /** The default-branch commit the file was read at. */
+    commitOid: text('commit_oid'),
+    readAt: integer('read_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountRepoUx: uniqueIndex('repo_team_policies_account_repo').on(t.accountId, t.repoId),
+    repoAccountFk: foreignKey({
+      name: 'repo_team_policies_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),
 );

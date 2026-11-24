@@ -23,6 +23,7 @@
 import { buildLoopRounds } from '../../../ai/run-profile.js';
 import {
   clampLoopRounds,
+  policyAllowsAutomation,
   STORY_BUILD_LOOP_PAUSE_LINE,
   type AiProviderId,
   type ClaudeReviewTicket,
@@ -73,6 +74,7 @@ import { pairConsolidationRecord, pairRoleOf } from '../../review-loop/branch-re
 import { cannotMeetOf, nextAfterReview, notCheckedFindingsOf, onlyCannotMeetLeft, openCriteriaOf, openFindingsOf, priorForTarget, roundOpen } from '../../review-loop/rounds.js';
 import { markLoopReviewOnPr } from '../../review-loop/review-on-pr.js';
 import { loopBodySection } from './pr-body.js';
+import { effectiveRepoTeamPolicy } from '../../../db/team-policy.js';
 
 export const LOOP_FIX_FEATURE = 'story_loop_fix';
 
@@ -226,6 +228,14 @@ export async function maybeStartLoop(ctx: AgentContext, input: { accountId: numb
     if (!b || !b.autoPush || b.hotfix === true || b.loopClaimedAt != null || b.autoPushClaimedAt != null || b.status !== 'ready') return 'skipped';
     const targets = (await loopTargets(ctx, accountId, buildId)).filter(isLive);
     if (targets.length === 0) return 'skipped';
+    // THE TEAM POLICY (docs/TEAM-POLICY.md): `"auto_push": false` on ANY target's repository means
+    // nothing is pushed by itself — the loop does not start, and the reader pushes by hand as usual.
+    for (const t of targets) {
+      if (!policyAllowsAutomation(await effectiveRepoTeamPolicy(accountId, t.repoId, ctx), 'auto_push')) {
+        seams.session.notice(buildId, `${t.fullName}’s team policy turns off automatic pushes. Push by hand when you are ready.`);
+        return 'skipped';
+      }
+    }
     if (running.has(buildId)) return 'skipped';
     if (!(await claimLoopStart(ctx, accountId, buildId, seams.now()))) return 'skipped';
     seams.session.hold(buildId);

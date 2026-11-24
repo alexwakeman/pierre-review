@@ -1812,6 +1812,15 @@ typed, re-checked on every read), `licence_evaluation_ends_at` and `licence_remi
 timestamps). An existing account-bearing table: erasure and the export already cover it. Journal idx 218, `when`
 `1795593600000`. [LICENSING.md](LICENSING.md) § In the app.
 
+### `0220_repo_team_policies` — the team policy (2026-11-24)
+
+`CREATE TABLE repo_team_policies` (one row per `(account_id, repo_id)`, unique index
+`repo_team_policies_account_repo`; `account_id` → `accounts` cascade; the named composite FK
+`repo_team_policies_repo_account_fk` → `repos (id, account_id)` cascade): the parsed `.ensemble/policy.json`
+from the repo's default branch (`policy_json`), or the parser's problems (`errors_json`), the commit and when.
+A new account-bearing table: erased explicitly, listed in `accountScopedTables()`. No backfill (the next sync
+reads it). Additive; journal idx 220, `when` `1795766400000`. [TEAM-POLICY.md](TEAM-POLICY.md).
+
 ### `0219_ai_signals` — AI vendor signals on PRs and commits (2026-11-25)
 
 Four additive, nullable columns, no default, no SQL backfill: `pull_requests.ai_signals` (text JSON),

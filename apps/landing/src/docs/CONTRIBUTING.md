@@ -101,8 +101,9 @@ Plain English, as the app's own copy (`CLAUDE.md` § Product voice), leaning on 
 - Address the reader as "you". A developer and an engineering manager both read these pages; say
   in the text what each gets where the answer differs. No per-page "who it helps" blocks.
 - British spelling, as the rest of the site ("licence" the noun, "organisation", "colour").
-- No "Pro", "paid", "upgrade" or credits wording: every feature is free under the Ensemble License
-  (free for individuals and for organisations where no more than three people use it).
+- No "Pro", "paid", "upgrade" or credits wording. Ensemble is free under the Ensemble License for
+  individuals and for organisations where no more than three people use it. An organisation feature
+  (team policy) says only that it "needs a licence key"; nothing else is locked.
 - Do not promise what Ensemble does not do. Where Ensemble guesses (Likely addressed, blast radius),
   say it is a guess. Where Ensemble refuses (the benchmark), say so and why.
 - Numbers: round them, and say what they count.
