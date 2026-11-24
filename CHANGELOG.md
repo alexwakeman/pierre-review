@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.80] - 2026-11-24
+
 ### Added
 
 - Settings → Team policy: rules your team commits to a repository, in `.ensemble/policy.json`, apply to its
