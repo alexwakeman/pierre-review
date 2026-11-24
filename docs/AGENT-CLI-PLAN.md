@@ -208,15 +208,24 @@ docs/SECURITY.md gains a section in the same commit as OpenCode ships.
    - sandbox: the OpenRouter key injected through the proxy; a route to a host-local Ollama.
    - Comparison: one Codex → OpenRouter run on the same fixture.
 
-   **Test credentials — three, each for what only it can show:**
+   **Test credentials — two, IN ORDER, each for what only it can show:**
 
-   | Credential | Model | Tests | Why not the others |
+   | Step | Credential | Model | Tests |
    |---|---|---|---|
-   | The owner's Anthropic API key (under the developer override, § 5) | Claude Haiku | the HARNESS: transport, permission flow, MCP passthrough, isolation, lockdown traffic, session files, process control, the run-stream mapping | Claude is the most forgiving tool-caller, so a failure here is a harness failure, not a model one. ⚠ It cannot show how open-weight models behave — a harness that passes on Claude can still fail on them. |
-   | None (local Ollama) | a mid-size open-weight coding model | tool-call reliability, the result-tool contract, retries and loops, on the local route Ensemble ships; the sandbox-to-host route | Free. Limited by the machine's memory, so it does not show the larger models. |
-   | A small OpenRouter top-up, bought from OpenRouter directly (a credit limit set on the key) | the larger open-weight models Ensemble would list | OpenRouter's usage and US$ through OpenCode, zero-data-retention routing, the sandbox proxy injecting a key for `openrouter.ai`, the eval runs (§ 7) | — |
+   | 1. Harness first | The owner's Anthropic API key (under the developer override, § 5) | Claude Haiku | the HARNESS: transport, permission flow, MCP passthrough, isolation, lockdown traffic, session files, process control, the run-stream mapping. Claude is the most forgiving tool-caller, so a failure here is a harness failure, not a model one. ⚠ It cannot show how open-weight models behave — a harness that passes on Claude can still fail on them. |
+   | 2. Then the real test | OpenRouter credits, bought from OpenRouter directly once step 1 passes (a credit limit set on the key) | the open-weight models Ensemble would list | tool-call reliability, the result-tool contract, retries and loops; OpenRouter's usage and US$ through OpenCode; zero-data-retention routing; the sandbox proxy injecting a key for `openrouter.ai`; the eval runs (§ 7) |
 
    OpenCode's own model gateway is NOT used: billing stays on OpenRouter, the route readers will take.
+
+   ⚠ **NO LOCAL MODEL ON THE OWNER'S MACHINE** (it cannot run one). So the local route (Ollama / LM
+   Studio) is tested in two weaker ways, and the plan says so wherever it claims the route works:
+   - **Plumbing only, on a Linux machine** (a cloud container or CI): Ollama with a TINY model on CPU. It
+     proves the provider config, the model list, the "server answers" check, US$ 0 on the ledger and the
+     sandbox-to-host route. ⚠ A tiny model proves nothing about quality.
+   - **Quality by proxy**: the same open weights run on OpenRouter in step 2. ⚠ Not the same thing — a
+     local model is usually QUANTISED, and smaller quantisations call tools less reliably. A local model
+     is therefore never marked "tested" (§ 7) from an OpenRouter result alone (owner decision § 10).
+
 1. **The seam refactor** (§ 6). No new provider.
 2. **The agent-CLI provider + OpenCode profile on host runs** (OpenRouter + Ollama / LM Studio), with
    the eval harness (§ 7).
@@ -239,6 +248,9 @@ landing mocks that show provider choice, in the same commit.
    key (directly, or `openrouter/openai/*`), and so would be the only way in for an OpenAI API-key user —
    but it would get round a refusal that was made on purpose. Hide OpenAI models as Anthropic's are
    hidden (§ 5), or allow them, labelled as OpenCode runs, with US$ unknown unless OpenCode reports it?
+8. **The local route without a local test.** The owner cannot run a local model (§ 9, Phase 0). Ship
+   the local route with plumbing proven and models UNMARKED (none "tested"), or defer the local route to
+   a later phase and ship OpenRouter only?
 
 ## 11. Out of scope (later profiles)
 
