@@ -258,6 +258,20 @@ beforeAll(async () => {
       { authorId: aliceId, at: AFTER + 60_000, body: 'Fixed, thanks.' },
     ]);
   }
+  // ...and the same reply when the author then RESOLVED the thread: still owed a replies pass (PR
+  // 244582: "fixed", resolved five minutes later, and the resolve hid the reply from the sweeper).
+  {
+    const id = await run(await seedPr('reply-to-own-resolved'), 'head_reply-to-own-resolved');
+    await postedFinding(id, 'Null check missing.');
+    await threadWith(
+      pr['reply-to-own-resolved']!,
+      [
+        { authorId: viewerId, at: AFTER, body: 'Null check missing.' },
+        { authorId: aliceId, at: AFTER + 60_000, body: 'Fixed in the next line, resolving.' },
+      ],
+      { resolved: true },
+    );
+  }
   // A burst a CHECK THREADS run at this head already covered: settled in the read, never offered
   // (it used to sit in `reReview` until the head moved, using up a slot on every tick).
   const check = (prId: number, headSha: string, through: number) =>
@@ -400,6 +414,13 @@ describe('getAutoReviewCandidates — re-review on new review comments', () => {
     });
     expect(offered.get(pr['reply-to-own']!)?.newestOwnThreadCommentAtMs).toBe(AFTER + 60_000);
     expect(offered.get(pr.human!)?.newestOwnThreadCommentAtMs).toBeNull();
+    // A RESOLVED thread on Limn's own finding still routes its reply to a replies pass; any other
+    // resolved thread (`resolved`) is never offered.
+    expect(offered.get(pr['reply-to-own-resolved']!)).toMatchObject({
+      commentsAtMs: AFTER + 60_000,
+      newestOwnThreadCommentAtMs: AFTER + 60_000,
+      newestOtherCommentAtMs: null,
+    });
   });
 });
 

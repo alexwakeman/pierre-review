@@ -348,8 +348,8 @@ export function AutoReviewSection(): JSX.Element {
           <p>
             A reviewed PR is reviewed again when new commits are pushed, or when a person or a
             review bot adds review comments. A first push after a quiet spell starts a review at
-            once. Pushes during a review or within 5 minutes of one, and new comments, wait until
-            the PR has been quiet for 5 minutes, or 20 minutes at most. Ensemble’s own comments never
+            once. Pushes during a review or within 5 minutes of one wait until the PR has been quiet
+            for 5 minutes; new comments, for 2 minutes; 20 minutes at most. Ensemble’s own comments never
             start a review.
           </p>
           <p>

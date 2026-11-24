@@ -150,6 +150,9 @@ export const AUTO_REVIEW_CRON = '* * * * *';
 
 /** How long a moved head must hold still before its re-review is queued. */
 export const AUTO_REREVIEW_SETTLE_MS = 5 * 60 * 1000;
+// A same-head COMMENT burst (a replies pass or Check threads — both light runs) settles sooner: 2 quiet
+// minutes, so a reply is judged while the author is still on the PR (2026-11-24). Pushes keep 5.
+export const AUTO_COMMENT_SETTLE_MS = 2 * 60 * 1000;
 /** The settle never delays a run more than this from the FIRST trigger of the burst. */
 export const AUTO_REREVIEW_MAX_WAIT_MS = 20 * 60 * 1000;
 /** The replies pass's per-PR cap counts automatic passes in this rolling window. */
@@ -296,7 +299,7 @@ export function autoReviewDue(input: {
   ) {
     return { due: true };
   }
-  const quiet = nowMs - settle.quietSinceMs >= AUTO_REREVIEW_SETTLE_MS;
+  const quiet = nowMs - settle.quietSinceMs >= (settle.reason === 'comments' ? AUTO_COMMENT_SETTLE_MS : AUTO_REREVIEW_SETTLE_MS);
   const ceiling = nowMs - settle.burstStartMs >= AUTO_REREVIEW_MAX_WAIT_MS;
   return quiet || ceiling ? { due: true } : { due: false, reason };
 }

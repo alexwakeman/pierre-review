@@ -79,8 +79,9 @@ export default function Page(): JSX.Element {
 
       <H2 id="when-it-starts">When it starts</H2>
       <p>
-        By itself, when auto review is on for the workspace: after 5 quiet minutes on the pull request, at most 5 a day
-        per pull request, within your spend budget. It never runs while a full review is running, because a full review
+        By itself, when auto review is on for the workspace: after 2 quiet minutes on the pull request, at most 5 a day
+        per pull request, within your spend budget. It also starts when the author replies and then resolves the
+        thread. It never runs while a full review is running, because a full review
         checks the replies itself. There is no button for it.
       </p>
       <p>
