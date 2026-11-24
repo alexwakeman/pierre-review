@@ -120,6 +120,11 @@ Expect a CODEX-SPIKE-sized set of measurements.
   - OpenRouter: the reader's choice of model per depth role (`deep` / `standard` / `fast`);
   - local: the models Ollama / LM Studio report, mapped the same way.
   Only TESTED models are offered by default (§ 7).
+- **The local notice** (decided 2026-11-24). Every local model carries ONE short notice where it is
+  picked and on a run it labels: local models are smaller and less reliable than hosted ones, and
+  reviews and fixes may miss things or fail. Plain English, behind an ⓘ where it needs more than one
+  sentence (the product-voice rule). The notice does not replace the "tested" marker (§ 7): a local
+  model is marked tested only when its OWN quantised weights passed the eval on Modal (§ 9).
 - ⚠ **NO CLAUDE THROUGH OPENCODE.** The profile hides every Anthropic model, whether OpenCode would
   reach it directly (its "Anthropic (API key)" provider) or through OpenRouter (`openrouter/anthropic/*`).
   The picker points the reader to Ensemble's own Claude provider, which already runs on an API key FIRST
@@ -217,14 +222,27 @@ docs/SECURITY.md gains a section in the same commit as OpenCode ships.
 
    OpenCode's own model gateway is NOT used: billing stays on OpenRouter, the route readers will take.
 
-   ⚠ **NO LOCAL MODEL ON THE OWNER'S MACHINE** (it cannot run one). So the local route (Ollama / LM
-   Studio) is tested in two weaker ways, and the plan says so wherever it claims the route works:
-   - **Plumbing only, on a Linux machine** (a cloud container or CI): Ollama with a TINY model on CPU. It
-     proves the provider config, the model list, the "server answers" check, US$ 0 on the ledger and the
-     sandbox-to-host route. ⚠ A tiny model proves nothing about quality.
-   - **Quality by proxy**: the same open weights run on OpenRouter in step 2. ⚠ Not the same thing — a
-     local model is usually QUANTISED, and smaller quantisations call tools less reliably. A local model
-     is therefore never marked "tested" (§ 7) from an OpenRouter result alone (owner decision § 10).
+   ⚠ **NO LOCAL MODEL ON THE OWNER'S MACHINE** (it cannot run one). The local route is tested on
+   **Modal** instead (the GPU cloud the ML model build used), in two parts:
+   - **Quality, on the REAL quantised weights.** A Modal GPU container runs Ollama with the SAME model
+     tags (the same quantisation) a reader would pull, as an HTTPS endpoint. The owner's OpenCode, in
+     Ensemble's home, points its Ollama provider at that endpoint, and the eval harness (§ 7) runs
+     against it. This is the real local model, only on another computer — unlike an OpenRouter run of
+     the same weights, which is usually not quantised.
+     - ⚠ The endpoint is PRIVATE: Modal's proxy authentication (a token on every request), never an
+       open URL — an open Ollama endpoint is a free GPU for anyone who finds it. The token goes in the
+       spike's OpenCode config only, never in the repo.
+     - ⚠ Scale to zero when idle, and a timeout on the container: a GPU left running costs money by
+       the second.
+     - ⚠ The GPU must be one a reader might own (e.g. 24 GB of memory), or the test flatters the model:
+       a bigger GPU allows a bigger quantisation or context than the reader gets.
+   - **Plumbing, on `localhost` for real.** The endpoint above is remote, so it does NOT prove the local
+     plumbing. That needs Ollama, OpenCode and Ensemble on ONE Linux machine: the provider config, the
+     model list, the "server answers" check, US$ 0 on the ledger. A tiny model on CPU is enough, because
+     only the plumbing is under test. Run it in a Modal container, a cloud container or CI.
+   - ⚠ **The sandbox-to-host route is NOT tested on Modal**: an Implement or AI Fix session needs Docker
+     (or Podman) on the machine, and a Modal container cannot run one. Test that route on a Linux
+     machine with Docker (CI, or a cloud VM), again with a tiny model.
 
 1. **The seam refactor** (§ 6). No new provider.
 2. **The agent-CLI provider + OpenCode profile on host runs** (OpenRouter + Ollama / LM Studio), with
@@ -248,9 +266,8 @@ landing mocks that show provider choice, in the same commit.
    key (directly, or `openrouter/openai/*`), and so would be the only way in for an OpenAI API-key user —
    but it would get round a refusal that was made on purpose. Hide OpenAI models as Anthropic's are
    hidden (§ 5), or allow them, labelled as OpenCode runs, with US$ unknown unless OpenCode reports it?
-8. **The local route without a local test.** The owner cannot run a local model (§ 9, Phase 0). Ship
-   the local route with plumbing proven and models UNMARKED (none "tested"), or defer the local route to
-   a later phase and ship OpenRouter only?
+8. ~~The local route without a local test.~~ **DECIDED 2026-11-24: keep local models.** They ship with a
+   notice (§ 5 "The local notice"); quality is tested on Modal (§ 9, Phase 0).
 
 ## 11. Out of scope (later profiles)
 
