@@ -939,6 +939,14 @@ version.
 
 ---
 
+## 12a. Counting teammates for the licence
+
+Each person's Ensemble counts, on its own machine, how many people post through Ensemble in the
+repositories it syncs (the person behind each Ensemble-posted comment and review, last 90 days, per
+GitHub owner), to show a licence reminder above the free limit. It is a floor (a teammate who only
+reads posts nothing) and only ever a reminder: nothing is blocked and nothing is sent. Each copy keeps
+its own key, evaluation and "remind me later". Detail: [LICENSING.md](LICENSING.md).
+
 ## 13. Known gaps and decisions
 
 ### Decided
@@ -950,6 +958,8 @@ version.
 | D4 | A thread the reader resolved is the reader's decision (2026-11-09): a "not addressed" judgement there posts nothing by itself (Ensemble shows what is still needed; "Post still open" posts it); an "addressed" one posts its how once, only when no Ensemble reply follows the person's last comment. | § 6 |
 | D5 | Newest judgement wins on the thread pill (2026-11-09), your Ensemble's or a teammate's, labelled with who made it. | § 6 |
 | D3 | Ensemble's actions never count as the person (2026-11-08): a reply to your Ensemble's finding does not summon you; a PR your Ensemble opened is still yours; a request only your Ensemble answered still stands. Chronology shows two views, "People" and "People + bots", so Ensemble's effect on the waits is visible. | § 8 |
+| D7 | A team's rules travel with the repository (2026-11-24): a committed `.ensemble/policy.json` applies to that repository's PRs on every teammate's copy, so ten laptops do not need ten matching settings. It can only switch things off (auto review, automatic posting, AI approvals, auto fix, automatic pushes, resolving threads, dependency automation, untrusted bots); a person's own press still works. A copy without a licence key or evaluation applies nothing and says so. Where one piece of work spans repositories whose rules differ (Implement story's push), the strictest rule from each applies, and the workspace — the team — may add one repository's rules on top; that choice only ever tightens. | docs/TEAM-POLICY.md |
+| D6 | The AI adoption report names nobody (2026-11-23), like Chronology and Slack. "How widely AI is used" counts people (overall, per AI tool, per period) and never says who: no name, login or per-person row reaches the browser, the PDF or the AI model. A count of 1 or 2 people prints "Fewer than 3", so a small team's figures cannot point at anyone. A PR an AI coding agent opened counts towards the tools' PR shares and towards no person. | docs/AI-ADOPTION-REPORT.md |
 
 ### Gaps that remain
 

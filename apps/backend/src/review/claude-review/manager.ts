@@ -2,6 +2,7 @@ import { runHasOpenPoints, withoutUnbackedOpenPoints } from './open-point-prose.
 import {
   aiRunProvider,
   CLAUDE_REVIEW_MAX_TICKETS,
+  policyAllowsAutomation,
   TICKET_REVIEW_PEER_MAX_FOR_PR_REVIEW,
   type ActiveReview,
   type ClaudeReviewModel,
@@ -110,6 +111,7 @@ import { openPointsForPrompt, reconcileOpenPoints, type OpenPointsPlan } from '.
 import { cleanPushSummary, planPushes, previousFullReviewHead } from './push-summary.js';
 import { bindAutoFixQueueFacts } from '../../coding/ai-fix/auto-fix-queue.js';
 import { automationAllowedForPr } from '../../db/external-repos.js';
+import { effectivePrTeamPolicy } from '../../db/team-policy.js';
 
 // The Claude Review queue/concurrency/SSE manager (CORE, free, local-only) — the analog of the
 // AI-Fix manager. It owns the product pipeline (prepare → route → prompt → run → persist), calling
@@ -635,6 +637,10 @@ async function startAutoItem(a: AutoItem): Promise<void> {
     });
   };
   try {
+    // THE TEAM POLICY (docs/TEAM-POLICY.md): `"auto_review": false` drops every item of the AUTO LANE
+    // for this repo's PRs — the tick, "Run auto reviews now", a retry — with no row and no skip line.
+    // A reader's Review press on the PR (`startReview`) is not this lane and still runs.
+    if (!policyAllowsAutomation(await effectivePrTeamPolicy(accountId, prId, ctx), 'auto_review')) return;
     // AI went away since the sweep (runtime removed, signed out): drop the item BEFORE its row
     // exists, or the PR's one automatic review is spent on a failure (ai-ready.ts).
     if (!agenticRunReady(ctx, 'review', singleReviewProvider(ctx))) {

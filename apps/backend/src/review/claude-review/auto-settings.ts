@@ -8,6 +8,8 @@ import {
   AUTO_POST_DEFAULT_KINDS,
   AUTO_POST_DEFAULT_RESOLVE_OWN_PRS,
   AUTO_POST_DEFAULT_SCOPE,
+  policyAllowsAiApproval,
+  policyAllowsAutomation,
   type ApproveLeftovers,
   type AutoApproveImpact,
   type AutoFixInclude,
@@ -35,6 +37,7 @@ import {
 } from './auto-verdict.js';
 import { onOff, writeSettingEvent } from '../../db/setting-event-write.js';
 import { repoModeOf } from '../../db/external-repos.js';
+import { effectivePrTeamPolicy } from '../../db/team-policy.js';
 
 // AUTO CLAUDE REVIEW — THE PER-WORKSPACE SWITCH (CORE since migration 0074 / pg 0061; it lived on
 // the plugin's `pro_workspace_settings` until Claude Review left the plugin, and plugin migration
@@ -237,6 +240,8 @@ export async function readWorkspaceAutoPostForPr(
   // Is AUTO REVIEW on for this workspace? Auto-posting is ON by default, so a caller that may act on a
   // PR outside the workspace that started the run (a ticket review's member PRs) checks this too.
   autoReviewOn: boolean;
+  // The repo's TEAM POLICY forbids an AI approval (`verdictGate` holds APPROVE as COMMENT).
+  policyNoApprove: boolean;
 } | null> {
   const { workspaces: w, workspaceRepos: wr, pullRequests: prs } = ctx.schema;
   const rows = (await ctx.db
@@ -270,11 +275,22 @@ export async function readWorkspaceAutoPostForPr(
   // ticket review's post all read these switches, so all of them read OFF here. A "Review and post"
   // press needs no switch (the press is the consent) and still posts — as COMMENT.
   const external = repoModeOf(r.repoMode) === 'external';
+  // THE TEAM POLICY (db/team-policy.ts; docs/TEAM-POLICY.md): it can only switch these OFF, the same
+  // way as an external repo. `auto_post: false` stops automatic posts (a "Review and post" press still
+  // posts: the press is the consent); `auto_resolve: false` stops Ensemble resolving threads; an AI
+  // approval is held by `verdictGate`; `auto_review: false` reads auto review off for the callers here.
+  const policy = await effectivePrTeamPolicy(accountId, prId, ctx);
+  const policed = {
+    ...settings,
+    ...(policyAllowsAutomation(policy, 'auto_post') ? {} : { enabled: false }),
+    ...(policyAllowsAutomation(policy, 'auto_resolve') ? {} : { resolveOwnPrs: false }),
+  };
   return {
     workspaceId: r.workspaceId,
-    settings: external ? { ...settings, enabled: false, autoVerdict: false, resolveOwnPrs: false } : settings,
+    settings: external ? { ...policed, enabled: false, autoVerdict: false, resolveOwnPrs: false } : policed,
     pairStrictness: resolvePairStrictness(r.pairStrictness),
-    autoReviewOn: !external && r.autoReviewOn === true,
+    autoReviewOn: !external && r.autoReviewOn === true && policyAllowsAutomation(policy, 'auto_review'),
+    policyNoApprove: !policyAllowsAiApproval(policy),
   };
 }
 
@@ -343,14 +359,16 @@ export async function readWorkspaceAutoFixSettingsForPr(
     .limit(1)
     .execute()) as Array<{ workspaceId: number; on: boolean | null; stored: StoredAutoFixSettings | null; repoMode?: string | null }>;
   const r = rows[0];
-  // EXTERNAL REPOS (db/external-repos.ts): never an auto fix there.
-  return r
-    ? {
-        workspaceId: r.workspaceId,
-        enabled: r.on === true && repoModeOf(r.repoMode) !== 'external',
-        settings: resolveAutoFixSettings(r.stored),
-      }
-    : null;
+  if (!r) return null;
+  // EXTERNAL REPOS (db/external-repos.ts): never an auto fix there. THE TEAM POLICY may switch auto fix
+  // and the automatic push off for this repo (docs/TEAM-POLICY.md).
+  const policy = await effectivePrTeamPolicy(accountId, prId, ctx);
+  const settings = resolveAutoFixSettings(r.stored);
+  return {
+    workspaceId: r.workspaceId,
+    enabled: r.on === true && repoModeOf(r.repoMode) !== 'external' && policyAllowsAutomation(policy, 'auto_fix'),
+    settings: policyAllowsAutomation(policy, 'auto_push') ? settings : { ...settings, autoPush: false },
+  };
 }
 
 const autoCols = (w: AgentContext['schema'][string]) => ({

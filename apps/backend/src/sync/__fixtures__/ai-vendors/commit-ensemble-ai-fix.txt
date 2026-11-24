@@ -1,0 +1,5 @@
+Fix the null check in parseConfig
+
+Addresses the two review findings on src/config.ts.
+
+Ensemble-Run: ai-fix/12

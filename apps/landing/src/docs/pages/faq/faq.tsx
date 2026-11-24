@@ -16,8 +16,8 @@ export default function Page(): JSX.Element {
       <H2 id="cost-and-licence">Cost and licence</H2>
       <H3>What does Ensemble cost?</H3>
       <p>
-        Nothing, for individuals and for organisations where no more than three people use it. Every feature is
-        included. Above three people, ask for a commercial licence. See{' '}
+        Nothing, for individuals and for organisations where no more than three people use it. Team policy needs a
+        licence key, which a small team can ask for free. Above three people, buy a licence. See{' '}
         <DocLink to="licence/licence">The Ensemble License</DocLink>.
       </p>
       <H3>Do the AI features cost extra?</H3>

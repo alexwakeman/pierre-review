@@ -2638,6 +2638,16 @@ if (proSeeded) {
 }
 
 // ===========================================================================
+// AI VENDOR SIGNALS (scripts/seed-demo-ai-signals.ts): every seeded PR scanned, a rising mix of AI
+// coding tools by person, so the AI adoption report has data. After every PR and commit above.
+// ===========================================================================
+{
+  const { seedDemoAiSignals } = await import('./seed-demo-ai-signals.js');
+  const a = await seedDemoAiSignals({ db, schema, now });
+  console.log(`  ai signals: ${JSON.stringify(a)}`);
+}
+
+// ===========================================================================
 // SETTINGS, MERGE STATE AND THE WRITTEN SUMMARIES (scripts/seed-demo-platform.ts) — last, because
 // the summaries hash what everything above wrote.
 // ===========================================================================

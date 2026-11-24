@@ -1349,6 +1349,17 @@ export function UploadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   );
 }
 
+// An arrow down into a tray — saving a file (Reports → Download report).
+export function DownloadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
+      <polyline points="7.5 10.5 12 15 16.5 10.5" />
+      <line x1="12" y1="4" x2="12" y2="15" />
+    </IconShell>
+  );
+}
+
 // A globe — a web page or site as a Docs source (the add-documents wizard's first step).
 export function GlobeIcon({ size = 14, ...rest }: IconProps): JSX.Element {
   return (

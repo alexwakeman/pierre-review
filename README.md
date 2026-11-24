@@ -22,8 +22,8 @@ the whole app runs on. Every repo lives in exactly one workspace (new repos land
 the feed, the timeline, the metrics and the review-bot settings together.
 
 Ensemble runs **only on your machine**: SQLite, your `gh` CLI for GitHub, no accounts and
-no hosted backend. `npx ensemble-review` opens straight to the app. Every feature is
-free (see [License](#license)). (The package was `limn-review`, and before that
+no hosted backend. `npx ensemble-review` opens straight to the app. It is free for
+individuals and small teams; team policy needs a licence key (see [License](#license)). (The package was `limn-review`, and before that
 `pierre-review`; both names are deprecated. Your data moves from `~/.limn` to `~/.ensemble`
 once, on first start, and settings named `LIMN_…` still work.)
 

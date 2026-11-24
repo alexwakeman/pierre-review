@@ -1,0 +1,8 @@
+Summary
+- add a retry around the flaky upload step
+
+Testing
+- npm test
+
+------
+https://chatgpt.com/codex/tasks/task_e_6b043ba3cf90832d9900399f2c64c529

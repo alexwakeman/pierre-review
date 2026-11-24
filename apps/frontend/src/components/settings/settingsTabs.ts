@@ -30,6 +30,7 @@ export type SettingsTabId =
   | 'releases'
   | 'integrations'
   | 'bots'
+  | 'team-policy'
   | 'licence';
 
 export interface SettingsTabDef {
@@ -122,6 +123,15 @@ export const SETTINGS_TABS: readonly SettingsTabDef[] = [
     // Every bot in the workspace with its category (it was Bots Monitoring → Classification).
     workspace: ['BotClassificationSection'],
   },
+  // THE TEAM POLICY (docs/TEAM-POLICY.md): each repo's committed rules, read-only, and whether this copy
+  // applies them (an organisation feature: a licence key or the evaluation).
+  {
+    id: 'team-policy',
+    label: 'Team policy',
+    summary: 'Rules committed to your repositories',
+    global: [],
+    workspace: ['TeamPolicySection'],
+  },
   // WHO NEEDS A LICENCE (the Ensemble License): the app's only statement of it, last in the list.
   { id: 'licence', label: 'Licence', summary: 'Who needs a licence', global: ['LicenceSection'], workspace: [] },
 ];
@@ -142,6 +152,8 @@ export const SETTINGS_FOCUS_TAB: Record<SettingsFocus, SettingsTabId> = {
   sandbox: 'sandbox',
   releases: 'releases',
   tools: 'features',
+  'team-policy': 'team-policy',
+  licence: 'licence',
 };
 
 /** The tab the modal opens on: the focus's tab, else the last one shown, else the first — never a

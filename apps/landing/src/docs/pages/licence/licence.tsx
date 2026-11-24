@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { ExtLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
+import { DocLink, ExtLink, H2, H3, MiniTable, Note, Warning } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'The Ensemble License',
@@ -23,8 +23,10 @@ export default function Page(): JSX.Element {
   return (
     <>
       <p>
-        Ensemble is released under the Ensemble License 1.0 (formerly the Limn License). Every feature is included for
-        everyone the licence covers: there are no locked features and no trial. This page explains the licence in plain English. The licence text itself is
+        Ensemble is released under the Ensemble License 1.0 (formerly the Limn License). Everything an individual or a
+        small team uses is included for everyone the licence covers. Organisation features, starting with{' '}
+        <DocLink to="settings/team-policy">team policy</DocLink>, need a licence key or the 30-day evaluation; a team of
+        three or fewer can ask for a free key. This page explains the licence in plain English. The licence text itself is
         what counts; read it in full in the <code>LICENSE</code> file that comes with Ensemble, or{' '}
         <ExtLink href={LICENSE_URL}>on GitHub</ExtLink>.
       </p>
@@ -57,7 +59,31 @@ export default function Page(): JSX.Element {
         £1,200 for 11 to 25 and £2,400 for 26 to 50, plus VAT where it applies. Above 50, ask. See the{' '}
         <a className="dx-link" href="/pricing">pricing page</a>, or ask through the{' '}
         <a className="dx-link" href="/contact">contact form</a>. Your AI usage is not included: your AI provider bills
-        you for it as usual. In the app, <b>Settings → Licence</b> says who needs a licence.
+        you for it as usual.
+      </p>
+
+      <H2 id="licence-key">Your licence key</H2>
+      <p>
+        After you buy, activate the licence on the <a className="dx-link" href="/licence">activation page</a>: paste the
+        licence key from your purchase email and your organisation&rsquo;s name, and you get an Ensemble licence key.
+        Everyone in your organisation pastes that key into <b>Settings → Licence</b>. Ensemble checks it on your computer
+        and never contacts us. A yearly licence gets a new key each year from the same page.
+      </p>
+
+      <H2 id="what-needs-a-key">What needs a licence key</H2>
+      <p>
+        One feature: <DocLink to="settings/team-policy">team policy</DocLink>, rules your team commits to a repository
+        for every copy of Ensemble. Everything else works without a key. A team of three or fewer can ask for a free key
+        through the <a className="dx-link" href="/contact">contact form</a>, and any copy can use team policy during its
+        30-day evaluation.
+      </p>
+
+      <H2 id="the-reminder">The reminder</H2>
+      <p>
+        Ensemble counts, on your computer, how many people have posted through Ensemble in your organisation&rsquo;s
+        repositories in the last 90 days. When that is more than three and no licence key covers them, a Licence notice
+        appears in the corner of the app. It never stops anything working. You can start one 30-day evaluation from it,
+        or ask to be reminded in 7 days. People who only read in Ensemble are not counted, so the number is a lower bound.
       </p>
 
       <H2 id="what-you-may-do">What you may do</H2>

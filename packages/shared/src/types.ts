@@ -4700,7 +4700,10 @@ export type AutoVerdictHeldReason =
   | 'pair_strict'
   // A replies pass's APPROVE held: a teammate's Limn judged, after the full review, a point this pass
   // settled still open (replies-pass.ts `teammateStillOpenHold`).
-  | 'team_open';
+  | 'team_open'
+  // The repository's TEAM POLICY says an AI review never approves (`"ai": {"approve": false}`;
+  // docs/TEAM-POLICY.md).
+  | 'team_policy';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;

@@ -16,6 +16,8 @@ import { aiRuntimeRoutes } from './api/routes/ai-runtime.js';
 import { aiCodexRoutes } from './api/routes/ai-codex.js';
 import { aiBudgetRoutes } from './api/routes/ai-budget.js';
 import { storageRoutes } from './api/routes/storage.js';
+import { licenceRoutes } from './api/routes/licence.js';
+import { teamPolicyRoutes } from './api/routes/team-policy.js';
 import { aiProviderRoutes } from './api/routes/ai-provider.js';
 import { mlRuntimeRoutes } from './api/routes/ml-runtime.js';
 import { registerAgenticRoutes } from './review/agentic.js';
@@ -38,6 +40,7 @@ import { openPrsRoutes } from './api/routes/open-prs.js';
 import { mergersRoutes } from './api/routes/mergers.js';
 import { insightsRoutes } from './api/routes/insights.js';
 import { aiUsageReportRoutes } from './api/routes/ai-usage-report.js';
+import { adoptionReportRoutes } from './api/routes/adoption-report.js';
 import { activityRoutes } from './api/routes/activity.js';
 import { searchRoutes } from './api/routes/search.js';
 import { dailyBriefRoutes } from './api/routes/daily-brief.js';
@@ -179,6 +182,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   // a repo belongs to exactly one — so assignment is a MOVE and there is no "unassign" route.
   // Account-scoped, no AI, no GitHub calls.
   await app.register(workspaceRoutes);
+  // The commercial licence: the offline key check and the reminder (licence/; DB only).
+  await app.register(licenceRoutes);
+  await app.register(teamPolicyRoutes);
   // Releases (CORE, docs/RELEASES.md): the per-workspace release + hotfix suffixes. DB only.
   await app.register(releaseRoutes);
   await app.register(userRoutes);
@@ -235,6 +241,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   if (config.aiEnabled) await app.register(aiBudgetRoutes);
   // Reports → AI usage: the ledger read back (DB only).
   if (config.aiEnabled) await app.register(aiUsageReportRoutes);
+  // Reports → Download report: the AI adoption report's figures (DB only). ALWAYS registered, AI off
+  // too; its commentary route is agentic (review/adoption-report/routes.ts).
+  await app.register(adoptionReportRoutes);
   // The AI provider choice (Settings → AI): PUT /api/ai/provider. Same gate.
   if (config.aiEnabled) await app.register(aiProviderRoutes);
   // Settings → AI → Disk space: the clone cache and its per-run checkouts (review/worktree-gc.ts).

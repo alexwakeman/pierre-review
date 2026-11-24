@@ -618,6 +618,30 @@ async function recordTrunkCiTransition(args: {
 }
 
 /**
+ * What this snapshot learnt about the team policy file (db/team-policy.ts `recordRepoTeamPolicy`):
+ * `undefined` = nothing we may act on (a partial response, no repository); `{text: null}` = GitHub
+ * positively said there is no file; text otherwise. A directory, binary or truncated blob carries
+ * `unreadable`, stored as the file's one problem. Pure; exported for tests.
+ */
+export function teamPolicyObservation(
+  resp: DefaultBranchResponse,
+  partial: boolean,
+  headSha: string | null,
+): { text: string | null; commitOid: string | null; unreadable?: string } | undefined {
+  if (partial || resp.repository == null) return undefined;
+  const blob = resp.repository.teamPolicy;
+  if (blob === undefined) return undefined;
+  if (blob === null) return { text: null, commitOid: headSha };
+  if (blob.__typename != null && blob.__typename !== 'Blob') {
+    return { text: '', commitOid: headSha, unreadable: '.ensemble/policy.json is not a file.' };
+  }
+  if (blob.isBinary === true || blob.isTruncated === true || typeof blob.text !== 'string') {
+    return { text: '', commitOid: headSha, unreadable: 'The file could not be read as text.' };
+  }
+  return { text: blob.text, commitOid: headSha };
+}
+
+/**
  * Snapshot a repo's DEFAULT BRANCH: its head sha + CI rollup onto `repos`, and the most recent
  * `BRANCH_COMMIT_WINDOW` trunk commits (with their own per-commit CI state, the checks that were
  * failing on them, and the PR each landed from) into `branch_commits`.
@@ -643,16 +667,21 @@ export async function syncBranchStatus(
   const client = getGraphqlClientFor(token);
   const fullName = `${owner}/${name}`;
 
+  // A partial response can null ANY field, so the team policy's "no file" cannot be told apart from
+  // "not received" on one: the policy is then left as it was (`teamPolicyObservation`).
+  let partial = false;
   const resp = await withGithubRetry(() =>
     graphqlTolerant<DefaultBranchResponse>(
       client,
       DEFAULT_BRANCH_QUERY,
       { owner, name, first: BRANCH_COMMIT_WINDOW },
-      (errors) =>
+      (errors) => {
+        partial = true;
         opts.log?.warn(
           `branch-status ${fullName}: partial GraphQL — continuing without forbidden fields`,
           errors,
-        ),
+        );
+      },
     ),
   );
 
@@ -771,6 +800,18 @@ export async function syncBranchStatus(
   } catch (err) {
     opts.log?.warn(
       `branch-status ${fullName}: trunk CI transition log failed (non-fatal): ` +
+        `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
+    );
+  }
+
+  // THE TEAM POLICY (db/team-policy.ts): AFTER the snapshot's transaction, in its own guard, so a bad
+  // policy write can never cost the strip.
+  try {
+    const { recordRepoTeamPolicy } = await import('../db/team-policy.js');
+    await recordRepoTeamPolicy(accountId, repoId, teamPolicyObservation(resp, partial, headSha));
+  } catch (err) {
+    opts.log?.warn(
+      `branch-status ${fullName}: team policy read failed (non-fatal): ` +
         `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
     );
   }

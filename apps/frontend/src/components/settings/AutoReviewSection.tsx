@@ -33,6 +33,7 @@ import { SaveState, useAutoSave } from './autosave.js';
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { Select } from '../ui/index.js';
 import { useSettingsModal } from '../../store/settingsModal.js';
+import { TeamPolicyNote } from './TeamPolicySection.js';
 
 /**
  * AUTO CLAUDE REVIEW for the currently-selected workspace — CORE, on the workspace row (migration
@@ -352,6 +353,7 @@ export function AutoReviewSection(): JSX.Element {
         </InfoButton>
       }
     >
+      {workspaceId != null && <TeamPolicyNote workspaceId={workspaceId} />}
       <label className="flex items-start gap-2 text-body">
         <CheckInput
           className="mt-0.5"

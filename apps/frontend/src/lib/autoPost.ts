@@ -127,6 +127,8 @@ export function autoVerdictLine(
       return v.impact === 'high' || v.impact === 'medium' || v.impact === 'low'
         ? `${verb}: ${v.impact[0]!.toUpperCase()}${v.impact.slice(1)} impact.`
         : `${verb}: impact unknown.`;
+    case 'team_policy':
+      return `${verb}: the repository’s team policy does not let an AI review approve.`;
     case 'refused':
       return a.status === 'posted' || a.status === 'partial'
         ? `${verb}: GitHub refused it, so the comments were posted on their own.`

@@ -5794,6 +5794,31 @@ model text over the same data. ⚠ The turn cap is SERVER-side (`capAskHistory`:
 `SPRINT_ASK_MAX_TURNS` − 1 pairs, each re-capped; `trimmedTurns` counts the rest). Short Markdown naming
 ticket keys; no ranking of people. Spend: feature `sprint_ask`. Tier `ai` + `ai_hourly`.
 
+## The adoption report's commentary (Reports → Download report)
+
+`POST /api/reports/ai-adoption/commentary` — one one-shot completion per slide (`review/adoption-report/`:
+`prompt.ts`, `commentary.ts`, `routes.ts`), registered by `registerAgenticRoutes`; the SPA gates the
+"Write commentary with AI" box on `me.ai.enabled` inside `AiRunGate kind="complete"`. At most eight
+calls per download. The model is `SPRINT_BRIEF_MODEL` on Claude (Haiku 5.5) through `cheapComplete`
+(the active provider; the WRITING RULES are added at the provider door).
+
+- ⚠ **GROUNDING IS CODE'S.** The prompt carries only the slide title and its figure table
+  (`commentaryFigures`: key, label, code's words, usable), inside a `---BEGIN FIGURES <nonce>---` fence
+  (a review bot's label is reader-typed). Never a person, login, repo, workspace name or "Prepared
+  for" (pinned by `routes.test.ts` on the captured prompt). The model must name every number as
+  `{{key}}`; `validateCommentary` (shared) refuses the whole text on any numeral (Unicode too), any
+  number or multiplying word ("three", "half", "twice", "percent"), a move word beside a change that is
+  not clear, an unknown or unusable key, markup, `@`, a causal claim, or the wrong length. Valid ⇒ the TEMPLATE goes
+  back and the SPA fills it; refused ⇒ `{source: 'fallback', reason: 'rejected'}` and the SPA uses
+  `fallbackCommentary`. Nothing to interpret (only period phrases, sample sizes or zero counts) ⇒
+  `nothing_to_say` with no call. A report the memo no longer holds ⇒ `stale` with no call (never a
+  recompute; docs/AI-ADOPTION-REPORT.md § Routes).
+- The reader's click: no `automaticRunAllowed`. Spend: feature `adoption_report`, seam `summary`,
+  recorded on every completed call, accepted or refused (a machine-wide ledger row). `503
+  no_credential` / `runtime`, `502` on any other failure. Tier `ai` + `ai_hourly`. Test seam
+  `setAdoptionCommentaryCompleteForTests`. No `prompt-golden.json` entry: that file pins the code-review
+  prompts only.
+
 ## Release blockers (This Sprint → Releases)
 
 `POST /api/releases/blockers?workspace=<id>` — "Explain what's blocking" (`review/release-blockers/`),

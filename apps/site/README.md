@@ -58,6 +58,14 @@ pool), `headersTimeout` is 75 s, and `requestTimeout` (30 s) is the slow-loris g
 | `REDIRECT_HOSTS` | none | comma list of other hosts 301'd to `SITE_URL`, e.g. `limn-review.com,www.limn-review.com,pierre-review.com,www.pierre-review.com` |
 | `HSTS_MAX_AGE` | 31536000 | seconds; 0 disables |
 | `TRUST_PROXY_HOPS` | 0 | proxies that append to `X-Forwarded-For` |
+| `LICENCE_SIGNING_KEY` | — | the PRIVATE licence signing key (the JSON from `licence:keygen`). Secret |
+| `POLAR_ACCESS_TOKEN` | — | Polar organisation access token, scope `license_keys:write`. Secret |
+| `POLAR_ORGANIZATION_ID` | — | the Polar organisation's id |
+| `POLAR_BENEFIT_SEATS` | — | which licence-key benefit grants how many seats: `benefitId=10,benefitId=25,benefitId=50` |
+| `POLAR_API_URL` | `https://api.polar.sh` | `https://sandbox-api.polar.sh` to test against Polar's sandbox |
+
+Licence activation (`POST /api/licence/activate`, the `/licence` page) answers 503 until the signing
+key and all three Polar values are set. How keys work: [docs/LICENSING.md](../../docs/LICENSING.md).
 
 ## Commands
 
@@ -67,6 +75,8 @@ pnpm --filter @pierre-review/site dev        # tsx watch, on :4300
 pnpm --filter @pierre-review/site test       # vitest
 pnpm --filter @pierre-review/site build      # → dist/, run with `node dist/server.js`
 pnpm --filter @pierre-review/site precompress <dir>...   # write .br/.gz sidecars (after build)
+pnpm --filter @pierre-review/site licence:keygen [kid]   # a new licence signing key pair (run on your own computer)
+LICENCE_SIGNING_KEY='…' pnpm --filter @pierre-review/site licence:issue -- --org "Acme Ltd" --seats 10 --expires 2027-12-31
 ```
 
 Deployed by `.github/workflows/deploy-site.yml` from the root `Dockerfile`.

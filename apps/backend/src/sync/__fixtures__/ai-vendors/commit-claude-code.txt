@@ -1,0 +1,9 @@
+Add retry with backoff to the webhook sender
+
+The sender gave up after one 502. It now retries three times with
+jittered backoff and logs the final failure.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01AbCdEfGhIjKlMnOpQrStUv

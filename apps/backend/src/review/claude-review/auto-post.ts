@@ -354,10 +354,17 @@ export function ownPrVerdictOf(
  *  second REQUEST_CHANGES is held as 'already_requested'. */
 export function verdictGate(
   wanted: AutoVerdictEvent,
-  g: { authorIsMe: boolean; ownLatest: OwnLatestReview; impact?: { level: ImpactLevel; allowed: AutoApproveImpact } },
+  g: {
+    authorIsMe: boolean;
+    ownLatest: OwnLatestReview;
+    impact?: { level: ImpactLevel; allowed: AutoApproveImpact };
+    /** The repo's TEAM POLICY forbids an AI approval (docs/TEAM-POLICY.md): APPROVE is held as COMMENT. */
+    policyNoApprove?: boolean;
+  },
 ): ClaudeAutoVerdictRecord {
   if (wanted === 'COMMENT') return { wanted, submitted: 'COMMENT', heldReason: null };
   if (g.authorIsMe) return { wanted, submitted: 'COMMENT', heldReason: 'own_pr' };
+  if (wanted === 'APPROVE' && g.policyNoApprove === true) return { wanted, submitted: 'COMMENT', heldReason: 'team_policy' };
   if (wanted === 'APPROVE' && g.impact != null) {
     const impact = g.impact.level;
     if (!impactAllowsApprove(impact, g.impact.allowed)) return { wanted, submitted: 'COMMENT', heldReason: 'impact', impact };
@@ -1247,7 +1254,12 @@ async function autoPostReview(
     }
   }
   if (wanted != null && wanted !== 'COMMENT') {
-    verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest: standing.state, ...(impact ? { impact } : {}) });
+    verdict = verdictGate(wanted, {
+      authorIsMe: facts.authorIsMe,
+      ownLatest: standing.state,
+      ...(impact ? { impact } : {}),
+      policyNoApprove: ws.policyNoApprove,
+    });
     // An APPROVE over Limn's own block is a lift too: held while a blocker behind it is unjudged.
     if (verdict.submitted === 'APPROVE' && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && blockersRemain) {
       verdict = { ...verdict, submitted: 'COMMENT', heldReason: 'already_requested' };

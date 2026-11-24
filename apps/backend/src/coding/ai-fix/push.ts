@@ -1,4 +1,4 @@
-import { PRODUCT_NAME, type LimnActionOrigin } from '@pierre-review/shared';
+import { policyAllowsAutomation, PRODUCT_NAME, type LimnActionOrigin } from '@pierre-review/shared';
 import type { AiFixPushResult } from '@pierre-review/shared';
 import type { ApplyAndPushTarget } from '../../platform/contract.js';
 import type { AgentContext } from '../../review/agent-context.js';
@@ -6,6 +6,7 @@ import { getFixPrContext, getViewerCanPush } from './pr-context.js';
 import { getFixById, markFixPushed } from './persist.js';
 import { beginFixPush, endFixPush } from './push-guard.js';
 import { fixRowHasWork, readMergeState } from '../../sandbox/session/fix-merge.js';
+import { effectiveRepoTeamPolicy } from '../../db/team-policy.js';
 
 // PUSH A FINISHED FIX, AS-IS — the ONE path the Push button (routes.ts) and the AUTOMATIC push
 // (auto-push.ts) share. Never a force push: onto the PR's own head branch (refused with HEAD_MOVED
@@ -97,6 +98,10 @@ async function pushFixHeld(
 
   if (!(await getViewerCanPush(ctx, accountId, pr.repoId)))
     return { ok: false, code: 'no_write', message: 'You cannot push to this repository.' };
+  // THE TEAM POLICY (docs/TEAM-POLICY.md): `"auto_push": false` stops every AUTOMATIC push of a fix —
+  // "Push automatically", "Push when done" and dependency automation's push. The reader's Push press goes.
+  if (automatic && !policyAllowsAutomation(await effectiveRepoTeamPolicy(accountId, pr.repoId, ctx), 'auto_push'))
+    return { ok: false, code: 'not_pushable', message: 'Not pushed: the repository’s team policy turns off automatic pushes. Press Push to push.' };
 
   const commitMessage = row.commitMessage ?? 'AI fix';
 

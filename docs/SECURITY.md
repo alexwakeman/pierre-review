@@ -72,6 +72,14 @@ agreeing with the code is only evidence of intent when the code is right. Genuin
 correctly on `read`: `/bot-behaviour`, `/bot-dedup`, `/mention-candidates`, the retrieval-only
 `/claude-review`, `GET /api/auto-merge` and `GET /api/branch-status`.
 
+**The AI adoption report (2026-11-23)** adds two exact-path tiers: `GET /api/reports/ai-adoption` on
+`search` + `read` (DB only, but one request runs the period metrics, Chronology and the bot analytics
+twice each, the usage ledger four times and a merged-PR scan with its signals and approvals), and
+`POST /api/reports/ai-adoption/commentary` on `ai` + `ai_hourly` (one completion per slide, at most
+eight per download). Both pinned in `rate-limit.test.ts`, with `-x` suffix negatives. The commentary
+sends the model aggregate figures and vendor names only — never a person's name, a login, a repo or
+"Prepared for" — and the report itself is built into a PDF in the browser and goes nowhere.
+
 **Fastify factory hardening** (`app.ts`): `trustProxy: false` (it would let a client choose its
 own rate-limit key), `bodyLimit` 256 KiB (one route raises it: the 25 MB reference-docs upload), `requestTimeout` 60s,
 `routerOptions.maxParamLength` 200 (top-level is FSTDEP022-deprecated), and a pino **`redact`**

@@ -671,6 +671,11 @@ describe('tierFor — GitHub quota spenders', () => {
     // The change token the SPA polls: DB only.
     expect(tiers('GET', '/api/sprint-graph/token')).toEqual(['read']);
     expect(tiers('POST', '/api/sprint-graph/ask')).toEqual(['ai', 'ai_hourly']);
+    // Reports → Download report: the figures are a heavy DB read; each slide's commentary bills one completion.
+    expect(tiers('GET', '/api/reports/ai-adoption')).toEqual(['search', 'read']);
+    expect(tiers('POST', '/api/reports/ai-adoption/commentary')).toEqual(['ai', 'ai_hourly']);
+    expect(tiers('GET', '/api/reports/ai-adoption-x')).not.toContain('search');
+    expect(tiers('POST', '/api/reports/ai-adoption/commentary-x')).not.toContain('ai');
     expect(tiers('PUT', '/api/sprint-stories/statuses')).toEqual(['read']);
     // The story view (the ticket tab): DB-only, decided.
     expect(tiers('GET', '/api/ticket-prs')).toEqual(['read']);

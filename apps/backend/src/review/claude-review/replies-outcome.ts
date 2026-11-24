@@ -416,7 +416,12 @@ async function postOutcome(
   }
   let verdict: ClaudeAutoVerdictRecord | null = null;
   if (wanted != null && wanted !== 'COMMENT') {
-    verdict = verdictGate(wanted, { authorIsMe: facts.authorIsMe, ownLatest: standing.state, ...(impact ? { impact } : {}) });
+    verdict = verdictGate(wanted, {
+      authorIsMe: facts.authorIsMe,
+      ownLatest: standing.state,
+      ...(impact ? { impact } : {}),
+      policyNoApprove: ws.policyNoApprove,
+    });
     if (verdict.submitted === 'APPROVE' && standing.state === 'LIMN_AUTO_CHANGES_REQUESTED' && blockersRemain) {
       verdict = { ...verdict, submitted: 'COMMENT', heldReason: 'already_requested' };
     }

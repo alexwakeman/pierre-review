@@ -23,7 +23,9 @@ export default function Page(): JSX.Element {
         narrow it. To measure a different set of repositories, switch workspace (see{' '}
         <DocLink to="getting-started/workspaces">Workspaces</DocLink>). The tabs along the top are{' '}
         <Ui>Overview</Ui>, <Ui>Chronology</Ui>, <Ui>Stories</Ui> and, while AI is on, <Ui>AI usage</Ui>. Press{' '}
-        <Kbd>1</Kbd> to <Kbd>4</Kbd> to switch between them.
+        <Kbd>1</Kbd> to <Kbd>4</Kbd> to switch between them. <Ui>Download report</Ui>, beside the title, makes a PDF
+        of AI adoption and delivery for the workspace (see{' '}
+        <DocLink to="reports/download-report">Download the AI adoption report</DocLink>).
       </p>
 
       <H2 id="flow-metrics">Flow metrics</H2>

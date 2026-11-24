@@ -345,11 +345,17 @@ describe('persistPr — every Limn row is the bot\'s', () => {
     const { and, eq, isNull } = await import('drizzle-orm');
     // (In the app the origin names the PR when it is stored; the seed wrote them before it was.)
     await db.update(schema.limnActions).set({ prId: pr.id }).where(and(eq(schema.limnActions.repoId, repoId), isNull(schema.limnActions.prId))).execute();
+    // The trailer rule reads the commit message only on PERSIST_BODIES (migration 0219 fetches the
+    // message on lean installs too, for the AI vendor detector, and must not re-attribute commits
+    // there: sync/upsert-ai-signals.test.ts pins the lean side).
+    const lean = config.persistBodies;
+    config.persistBodies = true;
     await persist(busyPr(10));
     await expectAttributed(10);
     // A second walk is idempotent.
     await persist(busyPr(10));
     await expectAttributed(10);
+    config.persistBodies = lean;
     config.limnAttributeAll = false;
   });
 });

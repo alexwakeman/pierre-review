@@ -707,6 +707,11 @@ body:has(.lb) {
   color: var(--muted);
   gap: 20px;
 }
+/* The company line wraps; the button never does. */
+.lb-foot .last .btn {
+  flex: none;
+  white-space: nowrap;
+}
 .lb-foot p {
   margin: 0;
 }
