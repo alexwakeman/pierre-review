@@ -70,6 +70,14 @@ export default function Page(): JSX.Element {
         and never contacts us. A yearly licence gets a new key each year from the same page.
       </p>
 
+      <H2 id="what-needs-a-key">What needs a licence key</H2>
+      <p>
+        One feature: <DocLink to="settings/team-policy">team policy</DocLink>, rules your team commits to a repository
+        for every copy of Ensemble. Everything else works without a key. A team of three or fewer can ask for a free key
+        through the <a className="dx-link" href="/contact">contact form</a>, and any copy can use team policy during its
+        30-day evaluation.
+      </p>
+
       <H2 id="the-reminder">The reminder</H2>
       <p>
         Ensemble counts, on your computer, how many people have posted through Ensemble in your organisation&rsquo;s

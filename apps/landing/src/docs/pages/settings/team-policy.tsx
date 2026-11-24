@@ -1,5 +1,5 @@
 import type { DocMeta } from '../../types';
-import { DocLink, H2, Note, Steps, Ui } from '../../kit';
+import { DocLink, H2, Steps, Ui } from '../../kit';
 
 export const meta: DocMeta = {
   title: 'Team policy',
@@ -24,11 +24,17 @@ export default function Page(): JSX.Element {
         reads it and applies its rules to that repository&rsquo;s pull requests. Ten people no longer need ten matching
         sets of settings, and a change to the rules is a pull request your team reviews like any other.
       </p>
-      <Note title="Needs a licence key">
-        Team policy is an organisation feature. A copy of Ensemble applies policies while it holds a licence key or
-        during its 30-day evaluation. Without either, <Ui>Settings → Team policy</Ui> says the rules are not applied. A
-        team of three or fewer can ask for a free key. See <DocLink to="licence/licence">the licence page</DocLink>.
-      </Note>
+
+      <H2 id="needs-a-licence-key">Needs a licence key</H2>
+      <p>
+        Team policy is the one Ensemble feature that needs a licence key. A copy of Ensemble applies policies while it
+        holds a licence key or during its 30-day evaluation. Without either, it applies no policy, and{' '}
+        <Ui>Settings → Team policy</Ui> says so. Rules your team relies on need the key on every person&rsquo;s copy.
+      </p>
+      <p>
+        Team size does not matter: a team of three or fewer can ask for a free key. See{' '}
+        <DocLink to="licence/licence">the licence page</DocLink>.
+      </p>
 
       <H2 id="add-a-policy">Add a policy</H2>
       <Steps>
@@ -88,6 +94,30 @@ export default function Page(): JSX.Element {
         <Ui>Settings → Team policy</Ui> lists each problem. Rules for allowed AI providers and a spending limit per run
         are not available yet.
       </p>
+
+      <H2 id="different-rules">When repositories have different rules</H2>
+      <p>
+        Rules never clash. Each repository&rsquo;s file governs only that repository&rsquo;s pull requests, and every
+        pull request belongs to one repository. Two repositories in one workspace can have different rules, or one can
+        have none.
+      </p>
+      <ul>
+        <li>
+          Work that spans repositories obeys each one: a story check posts to each pull request under that
+          pull request&rsquo;s own rules.
+        </li>
+        <li>
+          Implement story pushes to several repositories at once, so it follows the strictest rule. If any of them
+          turns off automatic pushes, nothing is pushed automatically.
+        </li>
+        <li>
+          There is no rule for a whole GitHub organisation yet. To apply the same rules everywhere, commit the same
+          file to each repository.
+        </li>
+        <li>
+          After a change to the file, each copy of Ensemble picks it up at its next sync, usually within a few minutes.
+        </li>
+      </ul>
 
       <H2 id="where-you-see-it">Where you see it</H2>
       <ul>

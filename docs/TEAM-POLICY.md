@@ -81,6 +81,18 @@ every point by source scan.
 
 A reader's own press (Review, Post, Push, Merge, Approve) is never refused by a policy.
 
+## Different rules in different repositories
+
+There is no conflict to resolve: a policy governs only its own repository's PRs, and a PR has one repo.
+
+- Multi-PR work reads each PR's own policy: the ticket review's auto-post calls
+  `readWorkspaceAutoPostForPr` per member PR; dependency automation and auto fix are per PR.
+- The one multi-repo writer, Implement story's loop, takes the STRICTEST: any target repo with
+  `auto_push: false` stops the loop (`maybeStartLoop`).
+- Copies converge at their next sync of the repo (the snapshot reads the file each walk); until then
+  two copies may hold different commits of it (`commit_oid` says which).
+- No organisation-wide file yet (§ Not yet): the same rules everywhere means the same file in each repo.
+
 ## In the app
 
 - `GET /api/team-policy?workspace=<id>` → `TeamPolicyResponse` (docs/API.md § Team policy). DB only.
