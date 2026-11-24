@@ -222,27 +222,26 @@ docs/SECURITY.md gains a section in the same commit as OpenCode ships.
 
    OpenCode's own model gateway is NOT used: billing stays on OpenRouter, the route readers will take.
 
-   ⚠ **NO LOCAL MODEL ON THE OWNER'S MACHINE** (it cannot run one). The local route is tested on
-   **Modal** instead (the GPU cloud the ML model build used), in two parts:
-   - **Quality, on the REAL quantised weights.** A Modal GPU container runs Ollama with the SAME model
-     tags (the same quantisation) a reader would pull, as an HTTPS endpoint. The owner's OpenCode, in
-     Ensemble's home, points its Ollama provider at that endpoint, and the eval harness (§ 7) runs
-     against it. This is the real local model, only on another computer — unlike an OpenRouter run of
-     the same weights, which is usually not quantised.
-     - ⚠ The endpoint is PRIVATE: Modal's proxy authentication (a token on every request), never an
-       open URL — an open Ollama endpoint is a free GPU for anyone who finds it. The token goes in the
-       spike's OpenCode config only, never in the repo.
-     - ⚠ Scale to zero when idle, and a timeout on the container: a GPU left running costs money by
-       the second.
-     - ⚠ The GPU must be one a reader might own (e.g. 24 GB of memory), or the test flatters the model:
-       a bigger GPU allows a bigger quantisation or context than the reader gets.
-   - **Plumbing, on `localhost` for real.** The endpoint above is remote, so it does NOT prove the local
-     plumbing. That needs Ollama, OpenCode and Ensemble on ONE Linux machine: the provider config, the
-     model list, the "server answers" check, US$ 0 on the ledger. A tiny model on CPU is enough, because
-     only the plumbing is under test. Run it in a Modal container, a cloud container or CI.
-   - ⚠ **The sandbox-to-host route is NOT tested on Modal**: an Implement or AI Fix session needs Docker
-     (or Podman) on the machine, and a Modal container cannot run one. Test that route on a Linux
-     machine with Docker (CI, or a cloud VM), again with a tiny model.
+   ⚠ **NO USEFUL-SIZED LOCAL MODEL ON THE OWNER'S MACHINE.** The owner's Mac runs only a SMALL model.
+   So the local route is tested in three places, each for what only it can show:
+
+   | Where | Model | Proves | Does NOT prove |
+   |---|---|---|---|
+   | **The owner's Mac** (Ollama on macOS, the sandbox in Colima or Docker Desktop) | a small model | the PLUMBING on a real reader's setup: the provider config, the model list, the "server answers" check, US$ 0 on the ledger; and the PROXY — the sandbox reaching the host's model port through Ensemble's allow-list proxy (§ 4), and nothing else on the host | quality (a small model proves nothing about it); the Linux route |
+   | **Modal** (the GPU cloud the ML model build used) | the SAME quantised Ollama tags a reader would pull | QUALITY: the eval harness (§ 7) on the real local weights | the plumbing (the endpoint is remote, not `localhost`); the sandbox (no Docker in a Modal container) |
+   | **A Linux machine with Docker** (CI or a cloud VM) | a tiny model on CPU | the sandbox-to-host route on LINUX, where Docker reaches the host differently (no VM in between; the host gateway, not Docker Desktop's or Colima's) | quality |
+
+   **Modal, in detail.** A Modal GPU container runs Ollama as an HTTPS endpoint. The owner's OpenCode,
+   in Ensemble's home, points its Ollama provider at it, and the eval harness runs against it. This is the
+   real local model, only on another computer — unlike an OpenRouter run of the same weights, which is
+   usually not quantised.
+   - ⚠ The endpoint is PRIVATE: Modal's proxy authentication (a token on every request), never an open
+     URL — an open Ollama endpoint is a free GPU for anyone who finds it. The token goes in the spike's
+     OpenCode config only, never in the repo.
+   - ⚠ Scale to zero when idle, and a timeout on the container: a GPU left running costs money by the
+     second.
+   - ⚠ The GPU must be one a reader might own (e.g. 24 GB of memory), or the test flatters the model: a
+     bigger GPU allows a bigger quantisation or context than the reader gets.
 
 1. **The seam refactor** (§ 6). No new provider.
 2. **The agent-CLI provider + OpenCode profile on host runs** (OpenRouter + Ollama / LM Studio), with
@@ -267,7 +266,7 @@ landing mocks that show provider choice, in the same commit.
    but it would get round a refusal that was made on purpose. Hide OpenAI models as Anthropic's are
    hidden (§ 5), or allow them, labelled as OpenCode runs, with US$ unknown unless OpenCode reports it?
 8. ~~The local route without a local test.~~ **DECIDED 2026-11-24: keep local models.** They ship with a
-   notice (§ 5 "The local notice"); quality is tested on Modal (§ 9, Phase 0).
+   notice (§ 5 "The local notice"); plumbing and the proxy are tested on the owner's Mac with a small model, quality on Modal (§ 9, Phase 0).
 
 ## 11. Out of scope (later profiles)
 
