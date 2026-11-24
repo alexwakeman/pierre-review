@@ -90,7 +90,6 @@ describe('why it waits', () => {
     const now = Date.parse('2026-11-09T16:00:00Z');
     const w = (status: 'held' | 'off', reason: TicketAutoCheckReason) =>
       ticketAutoCheckWords({ status, reason, startsAt: null, lastChange: null }, () => null, now)?.label;
-    expect(w('held', 'daily_limit')).toBe('Story check starts at 00:00 UTC — the daily limit of automatic checks is reached');
     expect(w('held', 'over_budget')).toBe('No automatic story check — the AI spend limit is reached');
     expect(w('off', 'auto_off')).toBe('No automatic story check — auto review is off in this workspace');
     expect(w('off', 'already_tried')).toBe('No automatic story check — the last one failed on these PRs');
@@ -122,9 +121,6 @@ describe('why it waits', () => {
   });
 
   it('a design a review did not draw says why', () => {
-    expect(autoSkippedLine({ autoSkipped: 'daily_limit', diagram: null })).toBe(
-      'Not drawn yet: today’s automatic designs are used up. They start again at 00:00 UTC.',
-    );
     expect(autoSkippedLine({ autoSkipped: 'redraw_limit', diagram: {} as never })).toBe('Not redrawn: it was already redrawn today.');
     expect(autoSkippedLine({ autoSkipped: null, diagram: null })).toBeNull();
   });

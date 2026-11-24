@@ -219,15 +219,13 @@ export default function Page(): JSX.Element {
           { _key: '5', r: 'Paused: the AI spend limit is reached.' },
           { _key: '6', r: 'Paused: no container runtime is running on this computer.' },
           { _key: '7', r: 'No auto fix: 3 already ran on this pull request in the last 24 hours.' },
-          { _key: '8', r: 'No auto review today: the limit of 20 is reached.' },
         ]}
       />
       <p>
-        The last line uses your workspace&apos;s daily limit of auto reviews. A reason appears only after the review finishes. With
-        auto AI Fix off there is no line.
+        A reason appears only after the review finishes. With auto AI Fix off there is no line.
       </p>
       <p>
-        Ensemble tries again by itself after an error, a sign-in, a busy sandbox, the AI spend limit, or a new day. The
+        Ensemble tries again by itself after an error, a sign-in, a busy sandbox, or the AI spend limit. The
         rest wait until the pull request changes.
       </p>
 

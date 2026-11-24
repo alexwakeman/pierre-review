@@ -13,6 +13,22 @@ no internals.
 
 ## [Unreleased]
 
+### Added
+
+- Settings → AI spend: a daily quota beside the weekly one. Ensemble's automatic runs stop for the day
+  once they use it, and start again at midnight on your computer. The default is 10% of your week (the
+  weekly 50% over five working days). On an API key it is a share of the weekly budget.
+- A notification at 80% of the daily or weekly AI quota, with "Change quota". The card when a quota is
+  used has "Change quota" too.
+
+### Removed
+
+- The daily counts of automatic runs per workspace: auto reviews (the "auto reviews a day" setting),
+  thread checks, CI reviews, story checks, design diagrams and docs checks. The AI quotas are now the one
+  limit.
+- Open pull requests: the "auto reviews today" counter, and the "Auto reviews stopped for today" message.
+- Settings → AI spend: the separate 5-hour limit. It now follows the weekly quota.
+
 ### Fixed
 
 - A reply on an Ensemble review comment now gets checked even when the author resolves the thread

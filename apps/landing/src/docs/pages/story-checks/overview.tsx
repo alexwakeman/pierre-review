@@ -168,12 +168,8 @@ export default function Page(): JSX.Element {
           the criteria may have changed. This Sprint&rsquo;s <Ui>Refresh</Ui> skips these tickets too.
         </li>
         <li>
-          <strong>A daily limit.</strong> A workspace has up to 60 automatic story checks a day. After that the line
-          says &ldquo;Story check starts at 00:00 UTC&rdquo;. Tickets with your own pull requests are not limited.
-        </li>
-        <li>
           <strong>The spend budget.</strong> An automatic check is skipped when your{' '}
-          <DocLink to="settings/ai-usage-and-spend">AI spend budget</DocLink> is used up.
+          <DocLink to="settings/ai-usage-and-spend">daily or weekly AI quota</DocLink> is used.
         </li>
       </ul>
       <Tip>

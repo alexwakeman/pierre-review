@@ -16,7 +16,6 @@ import {
   type AutoPostScope,
   type AutoReviewSweepBody,
   type AutoReviewSweepResponse,
-  type AutoReviewUsage,
   type PairVerdictStrictness,
   type SetWorkspaceAutoReviewBody,
   type StoredAutoFixSettings,
@@ -62,10 +61,9 @@ import { repoModeOf } from '../../db/external-repos.js';
 // ({ include?, autoPush? }), resolved through `resolveAutoFixSettings` — the ONE fold. A fix is
 // pushed only when `autoPush` is on.
 //
-// THE DAILY CAP rides the same route as a FOURTH column, `auto_review_daily_cap` (migration 0085 /
-// pg 0072): how many auto runs this workspace may start per UTC day. OVERRIDES ONLY — NULL means
-// the product default, `AUTO_REVIEW_DAILY_CAP`; `resolveAutoReviewDailyCap` is the ONE fold, read
-// by the wire shape and the sweeper's roster alike. Bounded 1..500 at the route.
+// ⚠ THE DAILY CAP IS REMOVED (2026-11-24): `auto_review_daily_cap` (migration 0085) is DORMANT — never
+// read or written. The AI spend budget's daily and weekly quotas (ai/budget.ts) are the only limit.
+// A PUT naming `dailyCap` is answered 200 with the key ignored (ajv's removeAdditional strips it).
 //
 // AUTO-POSTING rides the same route as two more columns (migration 0087 / pg 0074):
 // `auto_post_enabled` (⚠ ON BY DEFAULT since 2026-11-04 — NULL reads ON, only a stored false is
@@ -100,22 +98,6 @@ import { repoModeOf } from '../../db/external-repos.js';
 // in the writer. Independent of `auto_review_enabled`. Off stops only the automatic draw; the
 // Draw / Redraw button still works. Read by the trigger through `diagramsSwitchedOnForPr`
 // (review/diagrams/persist.ts).
-
-/** Auto Claude reviews started per workspace per UTC day. Past it, PRs wait for the next day. */
-export const AUTO_REVIEW_DAILY_CAP = 20;
-/** The bounds a stored per-workspace cap must sit inside (the PUT 400s outside them). */
-export const AUTO_REVIEW_DAILY_CAP_MIN = 1;
-export const AUTO_REVIEW_DAILY_CAP_MAX = 500;
-
-/** The stored override → the cap in force. NULL (or anything out of bounds) ⇒ the default. */
-export function resolveAutoReviewDailyCap(stored: number | null | undefined): number {
-  return typeof stored === 'number' &&
-    Number.isInteger(stored) &&
-    stored >= AUTO_REVIEW_DAILY_CAP_MIN &&
-    stored <= AUTO_REVIEW_DAILY_CAP_MAX
-    ? stored
-    : AUTO_REVIEW_DAILY_CAP;
-}
 
 const AUTO_POST_KIND_KEYS = Object.keys(AUTO_POST_DEFAULT_KINDS) as Array<keyof AutoPostKinds>;
 export const APPROVE_IMPACT_KEYS = Object.keys(AUTO_POST_DEFAULT_APPROVE_IMPACT) as Array<keyof AutoApproveImpact>;
@@ -215,7 +197,6 @@ interface AutoRow {
   autoDiagramsEnabled: boolean | null;
   // Story checks read every repository (migration 0211): NULL = on.
   storyCheckAllRepos?: boolean | null;
-  dailyCap: number | null;
   autoPostEnabled: boolean | null;
   autoPostSettings: StoredAutoPostSettings | null;
   autoFixSettings: StoredAutoFixSettings | null;
@@ -228,7 +209,6 @@ export function autoReviewOf(row: AutoRow | null): WorkspaceAutoReviewSettings {
   return {
     enabled,
     enabledAt: atMs == null ? null : new Date(atMs).toISOString(),
-    dailyCap: resolveAutoReviewDailyCap(row?.dailyCap),
     autoFixEnabled: row?.autoFixEnabled === true,
     // ON unless explicitly switched off (0126).
     autoDiagramsEnabled: row?.autoDiagramsEnabled !== false,
@@ -381,7 +361,6 @@ const autoCols = (w: AgentContext['schema'][string]) => ({
   autoFixEnabled: w.autoFixEnabled,
   autoDiagramsEnabled: w.autoDiagramsEnabled,
   storyCheckAllRepos: w.storyCheckAllRepos,
-  dailyCap: w.autoReviewDailyCap,
   autoPostEnabled: w.autoPostEnabled,
   autoPostSettings: w.autoPostSettings,
   autoFixSettings: w.autoFixSettings,
@@ -406,8 +385,7 @@ export async function readWorkspaceAutoReview(
 
 /**
  * The ONE writer. null when the workspace is not this account's (→ 404). Each of `enabled` /
- * `autoFixEnabled` / `autoDiagramsEnabled` / `dailyCap` is optional and a field left out keeps its stored value. A
- * `dailyCap` equal to the default is stored as NULL (overrides only). Switching auto review
+ * `autoFixEnabled` / `autoDiagramsEnabled` is optional and a field left out keeps its stored value. Switching auto review
  * OFF also drops this workspace's items still WAITING in the auto lane (no row yet, so nothing is
  * lost) — they are not reviewed, and not billed, after the switch. A run already started keeps
  * its Stop. Switching auto fix off stops only FUTURE auto fixes; one already started keeps going.
@@ -433,7 +411,6 @@ export async function setWorkspaceAutoReview(
     autoFixEnabled,
     autoDiagramsEnabled,
     storyCheckAllRepos,
-    dailyCap,
     autoPost,
     autoFix,
     autoReviewProviders,
@@ -462,8 +439,6 @@ export async function setWorkspaceAutoReview(
   // Only a stored false is off (ON by default, 0211).
   const allReposWas = existing.storyCheckAllRepos !== false;
   const allRepos = storyCheckAllRepos ?? allReposWas;
-  const capOverride =
-    dailyCap === undefined ? existing.dailyCap : dailyCap === AUTO_REVIEW_DAILY_CAP ? null : dailyCap;
   // Auto-posting: each field optional; a kind left out keeps its stored value.
   const postBefore = resolveAutoPostSettings(existing.autoPostEnabled, existing.autoPostSettings, existing.approveLeftovers);
   const postAfter: WorkspaceAutoPostSettings = {
@@ -513,7 +488,6 @@ export async function setWorkspaceAutoReview(
     autoDiagramsEnabled: diagrams,
     // NULL stays NULL until someone changes it (overrides only).
     storyCheckAllRepos: storyCheckAllRepos !== undefined && storyCheckAllRepos !== allReposWas ? storyCheckAllRepos : (existing.storyCheckAllRepos ?? null),
-    dailyCap: capOverride,
     autoPostEnabled: postAfter.enabled,
     autoPostSettings: postOverrides,
     autoFixSettings: fixOverrides,
@@ -531,9 +505,6 @@ export async function setWorkspaceAutoReview(
   }
   if (storyCheckAllRepos !== undefined && storyCheckAllRepos !== allReposWas) {
     set.storyCheckAllRepos = allRepos;
-  }
-  if (dailyCap !== undefined && capOverride !== existing.dailyCap) {
-    set.autoReviewDailyCap = capOverride;
   }
   if (autoReviewProviders !== undefined && providers !== providersWas) {
     set.autoReviewProviders = storedAutoReviewProviders(providers);
@@ -580,7 +551,6 @@ function settingChanges(
   const wasOn = existing.enabled === true && toMs(existing.enabledAt) != null;
   const isOn = next.enabled === true && toMs(next.enabledAt) != null;
   if ('autoReviewEnabled' in set && wasOn !== isOn) out.push(['auto_review', `Auto review ${onOff(isOn)}`]);
-  if ('autoReviewDailyCap' in set) out.push(['auto_review', 'Auto review daily limit changed']);
   if ('autoReviewProviders' in set) {
     out.push(['auto_review', next.providers === 'both' ? 'Auto reviews use Claude + Codex' : 'Auto reviews use one vendor']);
   }
@@ -624,8 +594,6 @@ export interface AutoReviewRosterEntry {
   accountId: number;
   workspaceId: number;
   enabledAtMs: number;
-  /** The cap in force for this workspace (the stored override, else the default). */
-  dailyCap: number;
 }
 
 /**
@@ -641,7 +609,6 @@ export async function listAutoReviewWorkspaces(
       accountId: w.accountId,
       workspaceId: w.id,
       enabledAt: w.autoReviewEnabledAt,
-      dailyCap: w.autoReviewDailyCap,
     })
     .from(w)
     .where(eq(w.autoReviewEnabled, true))
@@ -649,7 +616,6 @@ export async function listAutoReviewWorkspaces(
     accountId: number;
     workspaceId: number;
     enabledAt: Date | number | null;
-    dailyCap: number | null;
   }>;
   const out: AutoReviewRosterEntry[] = [];
   for (const r of rows) {
@@ -659,38 +625,10 @@ export async function listAutoReviewWorkspaces(
         accountId: r.accountId,
         workspaceId: r.workspaceId,
         enabledAtMs: ms,
-        dailyCap: resolveAutoReviewDailyCap(r.dailyCap),
       });
     }
   }
   return out;
-}
-
-/**
- * Today's auto CODE reviews against the cap, for the Open PRs counter. null while auto review is
- * off (or the host has no candidate query). `used` is the sweeper's own count
- * (`getAutoReviewCandidates(...).autoToday`, asked with `limit: 0` so it reads nothing else).
- */
-export async function readAutoReviewUsage(
-  ctx: AgentContext,
-  accountId: number,
-  workspaceId: number,
-  settings: WorkspaceAutoReviewSettings,
-  nowMs: number = Date.now(),
-): Promise<AutoReviewUsage | null> {
-  const candidatesOf = ctx.queries?.getAutoReviewCandidates?.bind(ctx.queries);
-  if (!settings.enabled || !candidatesOf) return null;
-  // 00:00 UTC today — the same day `utcDayStartMs` (auto.ts) gives the sweeper (not imported:
-  // auto.ts imports this module).
-  const d = new Date(nowMs);
-  const dayStartMs = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const res = await candidatesOf(accountId, workspaceId, { openedSinceMs: nowMs, dayStartMs, limit: 0 });
-  if (!res) return null;
-  return {
-    used: res.autoToday,
-    cap: settings.dailyCap,
-    resetsAt: new Date(dayStartMs + 86_400_000).toISOString(),
-  };
 }
 
 const idParam = {
@@ -709,14 +647,13 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
       reply.status(404);
       return { error: 'NotFound', message: `Workspace ${id} not found` };
     }
-    const usage = await readAutoReviewUsage(ctx, ctx.accountIdOf(req), id, autoReview);
-    const resp: WorkspaceAutoReviewResponse = { workspaceId: id, autoReview, ...(usage ? { usage } : {}) };
+    const resp: WorkspaceAutoReviewResponse = { workspaceId: id, autoReview };
     return resp;
   });
 
   // RUN AUTO REVIEWS NOW (the Open PRs header) / RETRY ONE PR (the AI Review tab): ONE sweep of this
   // workspace through the sweeper itself (auto.ts `runAutoReviewSweep` with a press), so every auto
-  // rule still holds — trigger 'auto', the default provider, auto-post settings, the daily cap, the
+  // rule still holds — trigger 'auto', the default provider, auto-post settings, the spend budget, the
   // lane cap — and never two sweeps at once (its in-flight guard answers `busy`). The press waives
   // the settle waits, the retry backoff and the attempt cap; the spend budget's over-limit confirm is
   // the SPA's two-press (`OverBudgetConfirm`). Rate limit: `ai` + `aiHourly` (it starts model runs).
@@ -748,7 +685,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
         retried: 0,
         checksQueued: 0,
         repliesQueued: 0,
-        capped: false,
         laneFull: false,
         aiNotReady: false,
         busy: false,
@@ -768,7 +704,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
         retried: r.retried ?? 0,
         checksQueued: r.checksQueued ?? 0,
         repliesQueued: r.repliesQueued ?? 0,
-        capped: r.capped === true,
         laneFull: r.stopped === 'lane_full',
         aiNotReady: r.stopped === 'ai_not_ready',
         busy: r.busy === true,
@@ -795,12 +730,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
             storyCheckAllRepos: { type: 'boolean' },
             autoReviewProviders: { type: 'string', enum: ['default', 'both'] },
             pairStrictness: { type: 'string', enum: ['strict', 'relaxed'] },
-            // An integer 1..500; anything else (a fraction, a string, out of range) is a 400.
-            dailyCap: {
-              type: 'integer',
-              minimum: AUTO_REVIEW_DAILY_CAP_MIN,
-              maximum: AUTO_REVIEW_DAILY_CAP_MAX,
-            },
             autoPost: {
               type: 'object',
               minProperties: 1,
@@ -872,13 +801,6 @@ export function registerAutoReviewSettingsRoutes(app: FastifyInstance, ctx: Agen
         ) {
           reply.status(400);
           return reply.send({ error: 'BadRequest', message: 'autoFix switches must be true or false' });
-        }
-        if ('dailyCap' in raw && typeof raw.dailyCap !== 'number') {
-          reply.status(400);
-          return reply.send({
-            error: 'BadRequest',
-            message: `dailyCap must be a whole number from ${AUTO_REVIEW_DAILY_CAP_MIN} to ${AUTO_REVIEW_DAILY_CAP_MAX}`,
-          });
         }
       },
     },

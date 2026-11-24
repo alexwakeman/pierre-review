@@ -457,32 +457,23 @@ export const config = {
   // The per-card spend cap of the ticket review's CARD PRE-PASS (Sonnet 5, diff-only, one tool —
   // review/ticket-review/prepass.ts). Its spend is added to the ticket run's cost. Env only.
   ticketCardBudgetUsd: floatFromEnv('TICKET_CARD_BUDGET_USD', 0.4),
-  // AUTOMATIC ticket reviews (trigger 'auto' / 'cascade') per workspace per UTC day. Not shared with
-  // the PR review's own auto cap. Manual runs never count, and a ticket with a PR the reader owns is
-  // never held by it. Default = shared TICKET_REVIEW_DAILY_CAP (60). No per-ticket limit (2026-11-09).
-  ticketReviewDailyCap: intFromEnv('TICKET_REVIEW_DAILY_CAP', 60),
+  // ⚠ NO DAILY COUNTS (removed 2026-11-24): TICKET_REVIEW_DAILY_CAP, CI_REVIEW_DAILY_CAP,
+  // THREAD_CHECK_DAILY_CAP, SEQUENCE_DIAGRAM_DAILY_CAP and STORY_DOCS_ALIGNMENT_DAILY_CAP are no longer
+  // read. The AI spend budget's daily and weekly quotas (ai/budget.ts) are the limit.
   // ---- CI review (one run per (PR, head, failing-check set) — review/ci-review/) ----
   // Its OWN spend cap and turn cap: a CI run reads log excerpts and the files they point at, nothing
   // more. Env only — no route sets it.
   ciReviewBudgetUsd: floatFromEnv('CI_REVIEW_BUDGET_USD', 2),
   ciReviewMaxTurns: intFromEnv('CI_REVIEW_MAX_TURNS', 25),
-  // AUTOMATIC CI reviews per workspace per UTC day. Not shared with the PR or ticket review caps.
-  // Manual runs never count. Default = shared CI_REVIEW_DAILY_CAP.
-  ciReviewDailyCap: intFromEnv('CI_REVIEW_DAILY_CAP', 20),
   // ---- Check threads (a light, threads-only pass — review/claude-review/thread-check.ts) ----
   // Its OWN spend and turn caps (Sonnet 5, read-only). Env only — no route sets them.
   threadCheckBudgetUsd: floatFromEnv('THREAD_CHECK_BUDGET_USD', 1),
   threadCheckMaxTurns: intFromEnv('THREAD_CHECK_MAX_TURNS', 20),
-  // AUTOMATIC checks per workspace per UTC day. Not shared with any review's cap; clicks never count.
-  threadCheckDailyCap: intFromEnv('THREAD_CHECK_DAILY_CAP', 30),
   // ---- Sequence diagrams (one Sonnet 5 run per PR head / per ticket's member set —
   // review/diagrams/, docs/CLAUDE-REVIEW.md § Design diagrams) ----
   // Its OWN spend and turn caps. Env only — no route sets them.
   sequenceDiagramBudgetUsd: floatFromEnv('SEQUENCE_DIAGRAM_BUDGET_USD', 1.5),
   sequenceDiagramMaxTurns: intFromEnv('SEQUENCE_DIAGRAM_MAX_TURNS', 30),
-  // Diagrams STARTED BY A FINISHED REVIEW per account per UTC day (PR + story together). A Redraw
-  // click never counts. Not shared with any review's cap.
-  sequenceDiagramDailyCap: intFromEnv('SEQUENCE_DIAGRAM_DAILY_CAP', 30),
   // ---- Reference docs (the per-workspace library — reference-docs/, docs/REFERENCE-DOCS.md) ----
   // Where the markdown tree lives: `<docsDir>/<accountId>/<workspaceId>/library/` (+ `sources/`).
   // LIMN_DOCS_DIR overrides. Default: ONE ROOT PER DATABASE (data-dir.ts `defaultDocsDir`) —
@@ -503,8 +494,7 @@ export const config = {
   docsChatMaxTurns: intFromEnv('DOCS_CHAT_MAX_TURNS', 30),
   // "Check against docs" on a story (review/story-docs/, docs/REFERENCE-DOCS.md § Check a story
   // against the docs): a Haiku shortlist, then ONE Sonnet 5 read of only those documents. Every run is
-  // a click, so every run counts toward the daily cap (per account, per UTC day). Env only.
-  storyDocsDailyCap: intFromEnv('STORY_DOCS_ALIGNMENT_DAILY_CAP', 30),
+  // a click: no daily count (removed 2026-11-24). Env only.
   storyDocsBudgetUsd: floatFromEnv('STORY_DOCS_ALIGNMENT_BUDGET_USD', 1.5),
   storyDocsMaxTurns: intFromEnv('STORY_DOCS_ALIGNMENT_MAX_TURNS', 16),
   // ---- Story labels (the label run — review/story-labels/) ----

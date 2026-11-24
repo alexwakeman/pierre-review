@@ -170,8 +170,8 @@ export default function Page(): JSX.Element {
           <Ui>Queued: needs a verdict (alex’s own review would approve)</Ui>.
         </li>
         <li>
-          It needs auto review on in the teammate's workspace. It counts toward their daily limit and asks their
-          spend budget, like every automatic review.
+          It needs auto review on in the teammate's workspace. It asks their spend budget, like every automatic
+          review.
         </li>
         <li>
           Your Ensemble "would approve" only when your own <Ui>Approve or request changes for me</Ui> is on and your

@@ -1,7 +1,7 @@
 // Auto review's quiet states (lib/claudeAutoReview.ts): the header's "waiting" words, when the Auto fix
 // section's one line shows, and the Open PRs strip's AI Fix pill.
 import { describe, expect, it } from 'vitest';
-import { AUTO_FIX_DAILY_CAP, AUTO_FIX_QUEUE_LINE, autoReviewCappedLine, type ClaudeReviewPrState } from '@pierre-review/shared';
+import { AUTO_FIX_DAILY_CAP, AUTO_FIX_QUEUE_LINE, type ClaudeReviewPrState } from '@pierre-review/shared';
 import {
   AUTO_REVIEW_WAITING_LABEL,
   anyFixRunning,
@@ -18,7 +18,6 @@ describe('"Run auto reviews now" / Retry — the one result line', () => {
     queued: 0,
     retried: 0,
     checksQueued: 0,
-    capped: false,
     laneFull: false,
     aiNotReady: false,
     busy: false,
@@ -36,13 +35,13 @@ describe('"Run auto reviews now" / Retry — the one result line', () => {
     expect(autoSweepResultLine({ ...base, queued: 1, retried: 1, repliesQueued: 1 }, true)).toBe(
       'Queued 1 review and 1 reply check.',
     );
-    expect(autoSweepResultLine({ ...base, queued: 2, capped: true })).toBe(
-      'Queued 2 reviews. Daily limit reached for the rest.',
+    expect(autoSweepResultLine({ ...base, queued: 2, laneFull: true })).toBe(
+      'Queued 2 reviews. The queue is full; the rest follow on their own.',
     );
   });
   it('says why nothing was queued', () => {
     expect(autoSweepResultLine(base)).toBe('Nothing to review.');
-    expect(autoSweepResultLine({ ...base, capped: true })).toBe('Daily limit reached — 0 queued.');
+    expect(autoSweepResultLine({ ...base, laneFull: true })).toBe('The auto review queue is full — 0 queued.');
     expect(autoSweepResultLine({ ...base, busy: true })).toMatch(/already being checked/);
     expect(autoSweepResultLine({ ...base, off: true })).toBe('Auto review is off for this workspace.');
     expect(autoSweepResultLine({ ...base, aiNotReady: true })).toMatch(/not set up/);
@@ -78,7 +77,6 @@ describe('the ONE auto fix line (2026-11-18): a reason only after the review fin
     expect(AUTO_FIX_QUEUE_LINE.no_ai_login).toBe('No auto fix: AI is not signed in on this computer.');
     expect(AUTO_FIX_QUEUE_LINE.error).toBe('No auto fix: an error stopped it.');
     expect(AUTO_FIX_QUEUE_LINE.cap).toContain(`${AUTO_FIX_DAILY_CAP} already ran`);
-    expect(autoReviewCappedLine(20)).toBe('No auto review today: the limit of 20 is reached.');
     expect(Object.values(AUTO_FIX_QUEUE_LINE).some((l) => /could not start/.test(l))).toBe(false);
   });
 });

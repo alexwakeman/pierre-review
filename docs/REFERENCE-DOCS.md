@@ -1027,9 +1027,9 @@ automatic, never on view. `registerAgenticRoutes` registers the two routes (docs
   workspace takes its runs with it (their links name THAT library — never re-homed to Default). In
   `accountScopedTables()`, erased, checked by `verify:isolation`.
 - **The queue** (`manager.ts`): one claim per (account, workspace, ident), one FIFO lane (≤ 10 waiting ⇒ 409),
-  the shared review slot as a PEER (a PR-review click goes first). Per-account daily cap
-  `STORY_DOCS_ALIGNMENT_DAILY_CAP` (30, every row counts — every row is a click); a POST for a story already
-  held answers `already_running` with its id BEFORE the cap or any preflight. A wall-clock
+  the shared review slot as a PEER (a PR-review click goes first). No daily count (the per-account
+  `STORY_DOCS_ALIGNMENT_DAILY_CAP` was removed 2026-11-24: every run is a click, and a click is never
+  refused); a POST for a story already held answers `already_running` with its id BEFORE any preflight. A wall-clock
   `STORY_DOCS_TIMEOUT_MS` (10 min) aborts a wedged run ("Claude took too long. Run it again."), freeing the
   claim and the slot. A restart fails every
   in-flight run ("Stopped when Ensemble restarted. Run it again."). Usage: `story_docs_shortlist` (seam

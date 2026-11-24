@@ -2617,10 +2617,8 @@ export const workspaces = sqliteTable(
     // (coding/ai-fix/auto-fix.ts); the ONE writer is `setWorkspaceAutoReview`. It only matters
     // while auto review is on.
     autoFixEnabled: integer('auto_fix_enabled', { mode: 'boolean' }).notNull().default(false),
-    // AUTO REVIEW DAILY CAP (migration 0085 / pg 0072): auto runs this workspace may start per UTC
-    // day. OVERRIDES ONLY — NULL = the default `AUTO_REVIEW_DAILY_CAP` (20), resolved through
-    // `resolveAutoReviewDailyCap`; the route bounds it 1..500. The ONE writer is
-    // `setWorkspaceAutoReview`, the reader the sweeper's roster (`listAutoReviewWorkspaces`).
+    // AUTO REVIEW DAILY CAP (migration 0085 / pg 0072). ⚠ DORMANT since 2026-11-24: never read or
+    // written — the daily count was removed and the AI spend budget's quotas are the limit. Kept.
     autoReviewDailyCap: integer('auto_review_daily_cap'),
     // AUTO-POSTING (migration 0087 / pg 0074): may a SUCCEEDED AUTO review (and an auto ticket
     // review) post its output to GitHub without a click? NULL/false = OFF — the default for every

@@ -82,7 +82,6 @@ let ciItems = 0;
 let starts: Array<{ reviewId: number | null }> = [];
 let answer: { status: string; fixId?: number; reason?: any } = { status: 'started', fixId: 9 };
 let busyPairs = new Set<number>();
-let usage: { used: number; cap: number } | null = null;
 
 const deps: AutoFixQueueDeps = {
   isOwn: async () => own,
@@ -94,7 +93,6 @@ const deps: AutoFixQueueDeps = {
   liveChecks: async () => (live == null ? null : { headSha: 'h1', total: 3, running: live.running, failing: live.failing, complete: true }),
   ciItemsAtHead: async () => ciItems,
   pairBusy: async (pairId) => busyPairs.has(pairId),
-  autoReviewUsage: async () => usage,
   start: async (_c, input) => {
     starts.push({ reviewId: input.reviewId });
     return answer;
@@ -136,7 +134,6 @@ beforeEach(() => {
   starts = [];
   answer = { status: 'started', fixId: 9 };
   busyPairs = new Set();
-  usage = null;
   Q._resetAutoFixQueueForTest();
 });
 
@@ -383,36 +380,17 @@ describe('the auto fix queue', () => {
     expect(s!.line).toContain(String(AUTO_FIX_DAILY_CAP));
   });
 
-  it('⚠ REVIEW_CAPPED: the AI review is due but today’s auto review cap is reached ⇒ said, never a wait forever', async () => {
+  it('a DUE AI review is waited for: no daily count of auto reviews stops it (review_capped is gone)', async () => {
     const id = await pr({ ciStatus: 'success' });
-    usage = { used: 20, cap: 20 };
     const s = await decide(id);
-    expect(s).toMatchObject({ status: 'idle', reason: 'review_capped', line: 'No auto review today: the limit of 20 is reached.' });
+    expect(s).toMatchObject({ status: 'waiting', reason: 'review_due' });
+    expect(s!.reason).not.toBe('review_capped');
     expect(starts).toEqual([]);
-    // Under the cap: the usual wait.
-    usage = { used: 19, cap: 20 };
-    expect(await decide(id, NOW + 60_000, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_due' });
-    // With CI causes at the cap: the CI-only fix goes at once (the review will not come).
-    usage = { used: 20, cap: 20 };
-    const id2 = await pr({ ciStatus: 'failure' });
-    live = { running: 0, failing: 1 };
-    await ciReview(id2);
-    ciItems = 1;
-    expect(await decide(id2)).toMatchObject({ status: 'started', source: 'ci' });
   });
 
-  it('review_capped is decided again by the sweep (a new day resets the cap)', async () => {
-    const id = await pr({ ciStatus: 'success' });
-    usage = { used: 5, cap: 5 };
-    expect(await decide(id)).toMatchObject({ reason: 'review_capped' });
-    usage = { used: 0, cap: 5 };
-    expect(await decide(id, NOW + 60_000, 'sweep')).toMatchObject({ status: 'waiting', reason: 'review_due' });
-  });
-
-  it('a RUNNING review is never asked about the cap (it is coming)', async () => {
+  it('a RUNNING review is waited for (it is coming)', async () => {
     const id = await pr({ ciStatus: 'success' });
     reviewHeld = true;
-    usage = { used: 20, cap: 20 };
     expect(await decide(id)).toMatchObject({ status: 'waiting', reason: 'review_running' });
   });
 });

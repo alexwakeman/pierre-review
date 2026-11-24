@@ -4,7 +4,7 @@
 // pins what the sweeper adds on top:
 //
 //   1. the FLOOR it asks with is the workspace's own `enabledAt`, and the day is the UTC day;
-//   2. ⚠ THE DAILY CAP counts runs already started today PLUS items still waiting in the lane;
+//   2. ⚠ NO DAILY COUNT (removed 2026-11-24): today’s runs never stop it; a PR waiting in the lane is not queued again;
 //   3. it does nothing on a host without the seam;
 //   4. a full lane stops the tick — the rest wait, since the database is the queue;
 //   5. ⚠ while AI is not set up (no runtime / no credential) it queues NOTHING, so no PR gets a
@@ -66,7 +66,7 @@ let aiReady = true;
 let providerNow: 'claude' | 'codex' = 'claude';
 vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => aiReady }));
 
-let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
+let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number }> = [];
 vi.mock('./auto-settings.js', () => ({
   listAutoReviewWorkspaces: async () => roster,
 }));
@@ -82,6 +82,7 @@ const {
   _resetAutoReReviewForTest,
   _setAutoProviderForTest,
   autoRetryProviderNow,
+  AUTO_REVIEW_CANDIDATE_PAGE,
 } = await import('./auto.js');
 
 const NOW = Date.UTC(2026, 8, 30, 15, 30);
@@ -126,7 +127,7 @@ beforeEach(() => {
   aiReady = true;
   calls = [];
   answers = new Map();
-  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000, dailyCap: 20 }];
+  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 3_600_000 }];
   _resetAutoReReviewForTest();
 });
 
@@ -148,62 +149,37 @@ describe('runAutoReviewSweep', () => {
     expect(r.queued).toBe(2);
   });
 
-  it('⚠ stops at the daily cap, counting today’s runs AND waiting items', async () => {
-    // 17 started today, PR 1 already waiting in the lane ⇒ room for 2 more, not 3.
+  it('⚠ no daily count: today’s runs do not stop the sweep; a PR waiting in the lane is not queued again', async () => {
+    // 20 started today (the old cap) and PR 1 waiting in the lane: every other due PR is queued.
     waiting = new Set([1]);
-    answers.set(7, { prIds: ids(10), autoToday: 17 });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued.map(([, p]) => p)).toEqual([2, 3]);
-    // The waiting PR is not said; the ones past the cap are.
-    expect(skipPosts.map((p) => p.prId)).toEqual([4, 5, 6, 7, 8, 9, 10]);
-  });
-
-  it('enqueues nothing once the cap is reached — those PRs wait for tomorrow', async () => {
-    answers.set(7, { prIds: ids(5), autoToday: 20 });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued).toEqual([]);
-    // Each due head is said on the PR (the skipped line; once per head — team-claim-skip.ts).
-    expect(skipPosts.map((p) => [p.prId, p.headSha ?? null, p.skips.map((k) => k.reason)])).toEqual(
-      ids(5).map((id) => [id, null, ['daily_cap']]),
-    );
-  });
-
-  it('the daily cap: a due MOVED head is said on the PR; a same-head comment burst is not', async () => {
-    answers.set(7, {
-      prIds: [],
-      autoToday: 20,
-      reReview: [
-        { prId: 31, headSha: 'h31', lastRunAtMs: NOW - 3_600_000 },
-        { prId: 32, headSha: 'h32', commentsAtMs: NOW - 3_600_000, lastRunAtMs: NOW - 3_600_000 },
-      ],
-    });
+    answers.set(7, { prIds: ids(10), autoToday: 20 });
     const r = await runAutoReviewSweep(makeCtx(), NOW);
-    expect(r.capped).toBe(true);
-    // Past the settle wait, the comment burst is due too — and still not said.
-    await runAutoReviewSweep(makeCtx(), NOW + 2 * AUTO_REREVIEW_SETTLE_MS);
-    expect([...new Set(skipPosts.map((p) => `${p.prId}:${p.headSha}`))]).toEqual(['31:h31']);
+    expect(enqueued.map(([, p]) => p)).toEqual(ids(9, 2));
+    expect(skipPosts).toEqual([]);
+    expect(r).not.toHaveProperty('capped');
   });
 
-  it('⚠ each workspace uses its OWN stored cap — in the budget and in the candidate limit', async () => {
+  it('the candidate read asks for one page plus the PRs already waiting, in every workspace', async () => {
     roster = [
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 3 },
-      { accountId: 1, workspaceId: 9, enabledAtMs: 0, dailyCap: 60 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 9, enabledAtMs: 0 },
     ];
-    answers.set(7, { prIds: ids(10), autoToday: 1 }); // room for 2 under a cap of 3
-    answers.set(9, { prIds: ids(5, 100), autoToday: 30 }); // 30 today is under 60
+    waiting = new Set([500, 501]);
+    answers.set(7, { prIds: ids(10), autoToday: 1 });
+    answers.set(9, { prIds: ids(5, 100), autoToday: 30 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(calls.map((c) => [c.workspaceId, c.limit])).toEqual([
-      [7, 3],
-      [9, 60],
+      [7, AUTO_REVIEW_CANDIDATE_PAGE + 2],
+      [9, AUTO_REVIEW_CANDIDATE_PAGE + 2],
     ]);
-    expect(enqueued.map(([, p]) => p)).toEqual([1, 2, 100, 101, 102, 103, 104]);
+    expect(enqueued.map(([, p]) => p)).toEqual([...ids(10), ...ids(5, 100)]);
   });
 
   it('a full lane stops the tick', async () => {
     laneRoom = 1;
     roster = [
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 },
-      { accountId: 1, workspaceId: 9, enabledAtMs: 0, dailyCap: 20 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 9, enabledAtMs: 0 },
     ];
     answers.set(7, { prIds: [1, 2, 3], autoToday: 0 });
     answers.set(9, { prIds: [4], autoToday: 0 });
@@ -230,11 +206,11 @@ describe('runAutoReviewSweep', () => {
     }
   });
 
-  it('a PR a person already started does not use up the day', async () => {
+  it('a PR a person already started is not queued; the rest are', async () => {
     answers.set(7, { prIds: [1, 2, 3], autoToday: 19 });
     enqueueAnswer = (p) => (p === 1 ? 'already' : 'queued');
     await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued.map(([, p]) => p)).toEqual([2]);
+    expect(enqueued.map(([, p]) => p)).toEqual([2, 3]);
   });
 
   it('⚠ queues nothing while AI is not set up — those PRs still qualify later', async () => {
@@ -266,7 +242,7 @@ describe('runAutoReviewSweep', () => {
   });
 
   it('⚠ drops waiting items of a workspace switched off since they were queued', async () => {
-    roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 }];
+    roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: 0 }];
     answers.set(7, { prIds: [], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);
     expect(dropKeep).not.toBeNull();
@@ -277,8 +253,8 @@ describe('runAutoReviewSweep', () => {
 
   it('skips a workspace that is gone (null) and carries on', async () => {
     roster = [
-      { accountId: 1, workspaceId: 404, enabledAtMs: 0, dailyCap: 20 },
-      { accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 },
+      { accountId: 1, workspaceId: 404, enabledAtMs: 0 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: 0 },
     ];
     answers.set(7, { prIds: [5], autoToday: 0 });
     await runAutoReviewSweep(makeCtx(), NOW);
@@ -374,12 +350,6 @@ describe('runAutoReviewSweep — re-review on a moved head', () => {
     expect(enqueued).toEqual([]);
   });
 
-  it('the daily cap applies to re-reviews too', async () => {
-    answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 30, headSha: 'f1', lastRunAtMs: null }] });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
-    expect(enqueued).toEqual([]);
-  });
 });
 
 // RE-REVIEW ON NEW REVIEW COMMENTS: the candidate read offers an unchanged head with the newest
@@ -446,12 +416,6 @@ describe('runAutoReviewSweep — re-review on new review comments', () => {
     expect(enqueued).toEqual([]);
   });
 
-  it('respects the daily cap', async () => {
-    answers.set(7, { prIds: [], autoToday: 20, reReview: [{ prId: 40, headSha: 'h1', commentsAtMs: C1 }] });
-    await runAutoReviewSweep(makeCtx(), NOW);
-    await runAutoReviewSweep(makeCtx(), NOW + SETTLE);
-    expect(enqueued).toEqual([]);
-  });
 });
 
 // THE START RULE: a first review at once; a moved head at once unless a run is in flight or one
@@ -883,13 +847,6 @@ describe('runAutoReviewSweep — retrying a failed auto run', () => {
     expect(enqueued.map(([, p]) => p)).toEqual([37]);
   });
 
-  it('the daily cap holds for retries, and says so', async () => {
-    answers.set(7, { prIds: [], autoToday: 20, retry: [failed(38)] });
-    const r = await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued).toEqual([]);
-    expect(r).toMatchObject({ queued: 0, capped: true });
-  });
-
   it('a PR queued as a retry is not queued again as a comment re-review in the same tick', async () => {
     answers.set(7, {
       prIds: [],
@@ -918,8 +875,8 @@ describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Re
 
   beforeEach(() => {
     roster = [
-      { accountId: 1, workspaceId: 7, enabledAtMs: NOW - HOUR, dailyCap: 20 },
-      { accountId: 1, workspaceId: 8, enabledAtMs: NOW - HOUR, dailyCap: 20 },
+      { accountId: 1, workspaceId: 7, enabledAtMs: NOW - HOUR },
+      { accountId: 1, workspaceId: 8, enabledAtMs: NOW - HOUR },
     ];
   });
 
@@ -945,13 +902,6 @@ describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Re
     const r = await runAutoReviewSweep(ctx, NOW, press);
     expect(enqueued.map(([, p]) => p)).toEqual([44]);
     expect(r.overBudget).toBeUndefined();
-  });
-
-  it('never waives the daily cap', async () => {
-    answers.set(7, { prIds: [45], autoToday: 20, retry: [failed(46)] });
-    const r = await runAutoReviewSweep(makeCtx(), NOW, press);
-    expect(enqueued).toEqual([]);
-    expect(r).toMatchObject({ queued: 0, capped: true });
   });
 
   it('Retry names one PR: only it is queued', async () => {
@@ -1005,7 +955,6 @@ describe('runAutoReviewSweep — a reader’s press ("Run auto reviews now" / Re
     answers.set(7, { prIds: [], autoToday: 0 });
     const r = await runAutoReviewSweep(makeCtx(), NOW, press);
     expect(r).toMatchObject({ queued: 0, stopped: null });
-    expect(r.capped).toBeUndefined();
   });
 });
 

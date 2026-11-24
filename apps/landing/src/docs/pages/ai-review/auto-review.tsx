@@ -23,7 +23,7 @@ export const meta: DocMeta = {
 function SettingsPicture(): JSX.Element {
   return (
     <Illustration
-      label="The Auto review settings: Review new PRs automatically is on, Auto reviews use Claude + Codex, When an auto review finishes is Post to GitHub, and up to 20 auto reviews a day."
+      label="The Auto review settings: Review new PRs automatically is on, Auto reviews use Claude + Codex, When an auto review finishes is Post to GitHub."
       caption="Settings → AI review: the switches that shape auto review for one workspace."
       title="Auto review"
       meta="Settings → AI review"
@@ -31,7 +31,6 @@ function SettingsPicture(): JSX.Element {
       <SettingsRow label="Review new PRs automatically" hint="Only PRs opened after you turn this on." control={<Toggle on />} />
       <SettingsRow label="Auto reviews use" control={<TextBox value="Claude + Codex (the default)" />} />
       <SettingsRow label="When an auto review finishes" hint="As soon as it finishes." control={<TextBox value="Post to GitHub" />} />
-      <SettingsRow label="Up to" hint="auto reviews a day (UTC). The rest wait for the next day." control={<TextBox value="20" />} />
     </Illustration>
   );
 }
@@ -99,7 +98,7 @@ export default function Page(): JSX.Element {
           {
             _key: 'comment',
             what: 'A new comment by a person or a review bot in an open thread',
-            then: 'A light Check threads pass, at most 30 a day per workspace.',
+            then: 'A light Check threads pass.',
           },
           {
             _key: 'none',
@@ -125,8 +124,7 @@ export default function Page(): JSX.Element {
       <p>
         When Ensemble starts, or your computer wakes after five minutes or more, auto review waits until your repositories
         have synced, so it never reviews a commit that has since moved. It waits 30 minutes at most. Then it reviews
-        what changed while you were away, the verdicts teammates wait for first, within the daily limit and the spend
-        budget.
+        what changed while you were away, the verdicts teammates wait for first, within your AI quotas.
       </p>
       <p>
         When a pull request has failing checks, the CI review looks at them on its own too. See{' '}
@@ -136,12 +134,9 @@ export default function Page(): JSX.Element {
       <H2 id="limits">Limits and the spend budget</H2>
       <ul>
         <li>
-          <b>A daily limit</b>: 20 automatic reviews a day per workspace by default, from 1 to 500 (UTC days). A
-          Claude + Codex review counts once. The rest wait for the next day.
-        </li>
-        <li>
-          <b>The spend budget</b>: every automatic run asks it first. When your budget is used up, the run is
-          skipped, not queued. A review you start yourself is never refused. See{' '}
+          <b>The spend budget</b>: every automatic run asks it first. It has a daily quota (10% of your week by default,
+          reset at midnight on this computer) and a weekly quota (50% by default). When either is used, the run is
+          skipped, not queued. There is no count of reviews a day. A review you start yourself is never refused. See{' '}
           <DocLink to="settings/ai-usage-and-spend">AI usage and spend</DocLink>.
         </li>
         <li>
@@ -167,7 +162,7 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           On <Ui>Open pull requests</Ui>, <Ui>Run auto reviews now</Ui> reviews every pull request that is due at once,
-          within the daily limit, and retries failed runs. See{' '}
+          within your AI quotas, and retries failed runs. See{' '}
           <DocLink to="open-pull-requests/ai-review-column">The AI review column</DocLink>.
         </li>
       </ul>

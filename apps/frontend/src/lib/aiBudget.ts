@@ -5,6 +5,7 @@ import {
   formatSharePct as formatFineSharePct,
   limnShareScale,
   runWeekShareText,
+  type AiQuotaWarning,
   type AiBudgetResponse,
   type AiProviderId,
   type AiUsageCostUnit,
@@ -41,20 +42,23 @@ export function usedSentence(status: AiBudgetStatus): string | null {
   return `Ensemble has used ${formatSharePct(s.usedSharePct)} of your week`;
 }
 
-/** "about 25 automatic reviews a working day", or null when not known. */
+/** "about 25 automatic reviews a day" (from the daily quota), or null when not known. */
 export function reviewsPerDayText(n: number | null | undefined): string | null {
   if (n == null || !Number.isFinite(n) || n < 0) return null;
-  if (n === 0) return 'under one automatic review a working day';
-  return `about ${n} automatic review${n === 1 ? '' : 's'} a working day`;
+  if (n === 0) return 'under one automatic review a day';
+  return `about ${n} automatic review${n === 1 ? '' : 's'} a day`;
 }
 
-/** The meter's line, or null when the budget is off (nothing to show).
- *  Subscription: "Limn: 2% of your week · limit 5%". API key: "This week $4.10 of $25". */
+/** The meter's line, or null when the budget is off (nothing to show). The DAILY quota leads.
+ *  Subscription: "Ensemble today: 3% of 10% · week 12% of 50%". API key: "Today $1.20 of $2.50 · week $4.10 of $25". */
 export function meterText(status: AiBudgetStatus): string | null {
   if (!status.enabled || status.mode === 'off') return null;
   if (status.overBudget) return 'Over budget';
   if (status.mode === 'api_key' && status.apiKey != null) {
-    return `This week ${formatUsd(status.apiKey.usedUsd)} of ${formatUsd(status.apiKey.weeklyUsd)}`;
+    const a = status.apiKey;
+    // An older server sends no daily figures.
+    const today = a.dailyUsd != null && a.todayUsd != null ? `Today ${formatUsd(a.todayUsd)} of ${formatUsd(a.dailyUsd)} · week ` : 'This week ';
+    return `${today}${formatUsd(a.usedUsd)} of ${formatUsd(a.weeklyUsd)}`;
   }
   const s = status.subscription;
   if (s == null) return null;
@@ -63,7 +67,10 @@ export function meterText(status: AiBudgetStatus): string | null {
     if (s.usedSharePct == null) return 'Ensemble: usage not read yet';
   } else if (s.subscription == null || s.usedSharePct == null) return 'Ensemble: pick your subscription';
   if (s.usedSharePct == null) return null;
-  return `Ensemble: ${formatSharePct(s.usedSharePct)} of your week · limit ${s.sharePct}%`;
+  if (s.dayUsedSharePct == null || s.daySharePct == null) {
+    return `Ensemble: ${formatSharePct(s.usedSharePct)} of your week · limit ${s.sharePct}%`;
+  }
+  return `Ensemble today: ${formatSharePct(s.dayUsedSharePct)} of ${s.daySharePct}% · week ${formatSharePct(s.usedSharePct)} of ${s.sharePct}%`;
 }
 
 /** "14:30" today, "Mon 14:30" within a week, "3 Nov 14:30" beyond. Empty for null or a bad date. */
@@ -83,13 +90,27 @@ export function formatResume(iso: string | null, now: number = Date.now()): stri
  *  Over the 5-hour share only (`limitedBy: 'five_hour'`): "…its share of this 5-hour session. …" */
 export function pausedSentence(status: AiBudgetStatus, now: number = Date.now()): string {
   const used =
-    status.mode === 'api_key'
-      ? 'Ensemble has used its weekly budget.'
-      : status.limitedBy === 'five_hour'
-        ? 'Ensemble has used its share of this 5-hour session.'
-        : 'Ensemble has used its share of your week.';
+    status.limitedBy === 'day'
+      ? status.mode === 'api_key'
+        ? "Ensemble has used today's budget."
+        : "Ensemble has used today's quota."
+      : status.mode === 'api_key'
+        ? 'Ensemble has used its weekly budget.'
+        : status.limitedBy === 'five_hour'
+          ? 'Ensemble has used its share of this 5-hour session.'
+          : 'Ensemble has used its share of your week.';
   const when = formatResume(status.resumesAt, now);
   return when === '' ? `${used} Automatic runs are paused.` : `${used} Automatic runs resume ${when}.`;
+}
+
+/** The near-quota toast's label and summary (the quota is still under 100%: a reached quota is the
+ *  paused card, `pausedSentence`). */
+export function quotaWarningCopy(w: AiQuotaWarning): { label: string; summary: string } {
+  const quota = w.which === 'day' ? "today's AI quota" : "this week's AI quota";
+  return {
+    label: w.which === 'day' ? 'Daily AI quota nearly used' : 'Weekly AI quota nearly used',
+    summary: `Ensemble has used ${Math.min(99, w.usedOfQuotaPct)}% of ${quota}. Automatic runs pause at 100%.`,
+  };
 }
 
 /**

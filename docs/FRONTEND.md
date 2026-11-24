@@ -576,10 +576,8 @@ One sidebar, one slim top bar, the page (`components/shell/`, docs/redesign/DESI
   wrapper around buttons). **The card HEADER carries a work chip** (`ClaudeWorkChip`,
   `reviewWorkInProgress`): "Reviewing · Checking story · Checking CI · Fixing" with a pulsing dot
   while ANY of the code review (queued/running, auto lane included), the ticket review, the CI
-  review or AI Fix is in flight — read off the same batched answers, no request of its own. **The
-  tab header prints "7 of 20 auto reviews today · resets in 3h 12m"** (`AutoReviewUsageLine`,
-  `usage` on `GET /api/workspaces/:id/auto-review`, present only while auto review is on; code
-  reviews only, the calendar UTC day the sweeper caps on; re-read once a minute while mounted).
+  review or AI Fix is in flight — read off the same batched answers, no request of its own. (The "N of 20 auto reviews today" header counter was REMOVED
+  2026-11-24 with the daily count; the AI quota toast replaces it.)
   ⚠ **Absent is never zero**: no summary, no CI reading, no story alignment, no follow-up, no thread
   assessment ⇒ nothing drawn. The pills reuse the Claude Review tab's palette
   (`lib/claudeReviewFollowUp.ts`). **Sorting is ONE "Sort:" menu in the tab header**
@@ -2381,22 +2379,26 @@ while the tab is visible), feeds every surface below; the decision is the server
   Claude run's cost directly. Bot prices and Chronology's hourly cost are not Claude runs and keep US$.
 
 - **The meter** (`AiBudgetMeter`, mounted by `AiRunGate` beside every Run button while the budget is
-  on): "Ensemble: 2% of your week · limit 5%" on a subscription, "This week $4.10 of $25" on an API key,
+  on): "Ensemble today: 3% of 10% · week 12% of 50%" on a subscription (the DAILY quota leads; an older
+  server with no daily figures: "Ensemble: 2% of your week · limit 5%"), "Today $1.20 of $2.50 · week
+  $4.10 of $25" on an API key,
   "Ensemble: pick your subscription" while it is unknown. ⚠ A subscription is worded in percentages
   only — never a US$ figure.
-- **The toast** (`AiBudgetToast`, in the ONE header strip): "Ensemble has used its share of your week.
-  Automatic runs resume <day, time>." (`limitedBy: 'five_hour'`: "…its share of this 5-hour
-  session…"; API key: "…its weekly budget…").
+- **The toast** (`AiBudgetToast`, in the ONE header strip; § THE AI QUOTA CARD): near a quota it
+  warns; over one: "Ensemble has used its share of your week. Automatic runs resume <day, time>."
+  (`limitedBy: 'day'`: "…today's quota…" / API key "…today's budget…"; `'five_hour'`: "…its share of
+  this 5-hour session…"; API key week: "…its weekly budget…").
 - **The second press** (`OverBudgetConfirm`): over budget, only the gate's RUN control (`data-ai-run`,
   else the only button) is held once and armed for 15 s; an ⓘ / Discard beside it works as usual.
-- **Settings → AI spend** (`ClaudeSpendSection`): subscription = the share (1–50 %), the
-  subscription (shown when Claude's report settles it; else a picker of `status.subscription.pickFrom`
-  — the Max pair for a reported "max"), "Ensemble has used X% of your week" and "about N automatic
-  reviews a working day" (the SAVED share's figure; hidden while the share is edited). The 5-hour
-  share FOLLOWS the weekly one: a collapsed `<details>` "Set a separate 5-hour limit" (open when one
-  is stored) holds its box; empty = `fiveHourSharePct: null` = same as weekly, "Use the weekly share"
-  clears it (draft/body in `settings/claudeSpendForm.ts`). API key = "Weekly budget (US$)", no 5-hour
-  setting. The explanation is behind the ⓘ.
+- **Settings → AI spend** (`ClaudeSpendSection`): TWO QUOTAS, the daily one first — "Daily quota (%
+  of your weekly Claude usage)" (hint "about N automatic reviews a day", the SAVED figure; hidden
+  while edited) and "Weekly quota (…)", both 1–100 — then the subscription (shown when Claude's report
+  settles it; else a picker of `status.subscription.pickFrom` — the Max pair for a reported "max") and
+  "Ensemble has used X% of your week". The 5-hour share is NOT shown: every save sends
+  `fiveHourSharePct: null` (draft/body in `settings/claudeSpendForm.ts`). API key = "Daily quota (% of
+  the weekly budget)" + "Weekly budget (US$)". The explanation is behind the ⓘ. Settings → Auto
+  review has no count field: one line, "Auto runs stop for the day when Ensemble's daily AI quota is
+  used. Change quota".
 
 ### The AI Fix tab (`AiFixTab.tsx`, `components/AiFix/FixPicker.tsx`, `components/AiFix/FixReport.tsx`, `components/sandbox/SessionView.tsx`)
 
@@ -5980,7 +5982,7 @@ circle in ONE cluster, `<HeaderToastStrip>` (the component names keep "Header" f
 the top bar / a page header's toast seat; both are GONE, 2026-11-04), mounted ONCE by App.tsx OUTSIDE
 the page flow and FIXED AT THE BOTTOM RIGHT of the main content. App.tsx mounts the jobs: `UndoToast`,
 the Claude reviews frame, `AiFixBanner`, `StoryBuildsToast` (docs/STORY-BUILD.md § The builds toast),
-`AutoFixToast` (the auto fixes: docs/CLAUDE-REVIEW.md § The auto fix queue), `AiBudgetToast`, `AutoReviewCapToast`, `ClosedResolverToast`,
+`AutoFixToast` (the auto fixes: docs/CLAUDE-REVIEW.md § The auto fix queue), `AiBudgetToast`, `ClosedResolverToast`,
 `DependencyMergeToast`, `AutoMergeBanner`, `GlobalLoadingBar` — the circles' left-to-right order is
 `toastRank`, not this mount order.
 
@@ -6006,16 +6008,13 @@ the Claude reviews frame, `AiFixBanner`, `StoryBuildsToast` (docs/STORY-BUILD.md
   now; Settings/Help/SyncProgress were `z-50` and would have sat under the cluster), popovers
   (`UserProfilePopover`, `MarkerPopover` → `z-[60]`), the resolver (`z-[60]`) and the workspace manager
   (`z-[80]`). The expanded panel is `z-[60]`.
-- **THE DAILY AUTO-REVIEW LIMIT** (`AutoReviewCapToast`, pure half `lib/autoReviewCap.ts`): reads the
-  auto-review GET's `usage` (`useWorkspaceAutoReview`, the Open PRs counter's query; re-read once a
-  minute while auto review is on). `autoReviewCapState` folds it: **near** at ≥ 80% of the cap AND
-  ≥ 2 used ("Auto reviews · 16 of 20 used today."), **reached** at `used >= cap` ("Auto reviews
-  stopped for today · The daily limit of 20 is used. They start again at <local time of the next
-  00:00 UTC>.", with "Change limit" → Settings at `auto-review`). Shown only with `me.ai.enabled`
-  and auto review ON for the workspace; tone `ai`, never `alert` (it is news, not a failure). A
-  dismissal holds for ONE `<workspaceId>:<UTC day>:<state>` (`autoReviewCapDismissKey`; a dismissed
-  near still shows reached; other days' keys are pruned), kept in `localStorage` (try/catch; a blocked
-  store keeps it for the session only).
+- **THE AI QUOTA CARD** (`AiBudgetToast`, `components/AiBudget.tsx`; it replaced `AutoReviewCapToast`
+  2026-11-24): from the ONE `['ai-budget']` query. NEAR (shared `aiQuotaWarning`, ≥ 80% of the daily
+  or weekly quota) → "Daily AI quota nearly used · Ensemble has used 85% of today's AI quota.
+  Automatic runs pause at 100%."; OVER → the paused card (`pausedSentence`, `alert`). Both carry a
+  bouncing "!" (`ExclaimIcon`, `motion-safe:animate-bounce`) and "Change quota" → Settings at
+  `claude-spend`; tone `ai`. A dismissal holds until the state key changes (level, quota, reset), in
+  memory only.
 - **A CLUSTER OF CIRCLES, ONE PER ACTIVE JOB** (2026-11-02; it replaced the row of one-line cards).
   Each job component still renders ONE `HeaderToast`, which PORTALS a 28px circle into the cluster
   button and its section into the panel. A circle is the job's icon, a PROGRESS RING when `progress`

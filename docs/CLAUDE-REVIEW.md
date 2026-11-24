@@ -226,9 +226,13 @@ stored; the ladder is read at call time, so an env change takes effect on the ne
 ### The AI spend budget (on by default, one per machine)
 
 A limit that PAUSES Ensemble's AUTOMATIC model runs before they use up the reader's Claude
-allowance or API bill. ON BY DEFAULT on a subscription at 50% of the week (a NULL row reads as on);
-the reader may change the share (1–100%) or switch it off in Settings → AI spend, and a stored
-`enabled: false` stays off. On an API key a never-set row applies NO US$ cap (`budgetSettingsInForce`:
+allowance or API bill: TWO QUOTAS, a DAILY one and a WEEKLY one. ON BY DEFAULT on a subscription at
+10% of the week a day and 50% a week (a NULL row reads as on); the reader may change either (1–100%)
+or switch it off in Settings → AI spend, and a stored `enabled: false` stays off. ⚠ **THE QUOTAS ARE
+THE ONLY LIMIT** (2026-11-24): every per-workspace / per-account daily COUNT of automatic runs (auto
+reviews, Check threads, CI reviews, story checks, diagrams, docs checks) was removed; the per-subject
+loop guards stay (retries per head, replies passes per PR, auto fixes per PR, diagram redraws per
+subject). docs/REVIEW-TRIGGERS.md lists every start and its limits. On an API key a never-set row applies NO US$ cap (`budgetSettingsInForce`:
 there is no allowance to take a share of) until the reader types one. ONE per account =
 per machine (the login / key it guards is the machine's), never per workspace. Types, defaults and
 the estimate table: `packages/shared/src/ai-budget.ts`; the decision, the reading and the gate:
@@ -238,7 +242,7 @@ the estimate table: `packages/shared/src/ai-budget.ts`; the decision, the readin
 The credential route picks the mode (`decideAiBudget`, pure):
 
 - **Subscription (the login): Ensemble's SHARE of the week and of the 5-hour session.**
-  `weekSharePct` (whole number 1–50, default 5). Share = Ensemble's OWN `ai_usage.cost_usd` in the
+  `weekSharePct` (whole number 1–100, default 50). Share = Ensemble's OWN `ai_usage.cost_usd` in the
   current week ÷ `SUBSCRIPTION_ESTIMATES[sub].week` (ESTIMATES with their source comment — Anthropic
   publishes no figure). Over when the share ≥ `weekSharePct`. The week is `[reset − 7 days, reset)`
   when Claude's weekly reset has been read and is still ahead (then `resumesAt` = the reset),
@@ -309,15 +313,32 @@ The credential route picks the mode (`decideAiBudget`, pure):
   RATE, the one US$-named field a subscription carries) turns it into "0.3% of your week" /
   "<0.1% of your week" through the shared `runWeekShareText`, so the SPA never needs the estimate
   table. Unknown subscription ⇒ nothing; API key ⇒ US$ as before.
-- **Reviews a working day** (`reviewsPerDay`, shown beside the share): `floor(share × weekly
-  allowance ÷ 5 ÷ cycle)`, cycle = the mean `claude_review` cost over 28 days (fallback $0.42) + the
+- **THE DAILY QUOTA** (`daySharePct`, 1–100, default 10 = the weekly 50% over 5 working days):
+  Ensemble's spend since LOCAL MIDNIGHT on this machine (`todayFromMs`; the server is the reader's
+  machine) as a share of the SAME weekly allowance — no provider has a daily limit of its own. Over ⇒
+  `limitedBy: 'day'`, reason "Ensemble has used today's quota.", `resumesAt` = the next local midnight
+  (a calendar day, DST-safe). The week still wins `limitedBy` when both are over. On Codex it is
+  token-weighted like the week: today's Ensemble tokens ÷ the account's tokens over the week's span ×
+  the week's `usedPercent`, counted INSIDE the account's span. On an API key it is `daySharePct` of
+  `weeklyUsd` (`apiKey.dailyUsd` / `todayUsd`). Status: `subscription.daySharePct` /
+  `dayUsedSharePct` / `dayResetsAt`; the header's usage view adds `limn.daySharePct`.
+- **THE NEAR-QUOTA WARNING** (shared `aiQuotaWarning`, `AI_QUOTA_WARN_FRACTION` 0.8): the most pressing
+  of the day and the week (reached before near, the week before the day); the 5-hour share is enforced
+  but never warned about. The SPA's `AiBudgetToast` shows it in the ONE toast cluster with a bouncing
+  "!" (`ExclaimIcon`, `motion-safe:animate-bounce`) and "Change quota" → Settings → AI spend.
+- **The 5-hour share is HIDDEN** (2026-11-24): Settings no longer shows it; every save sends
+  `fiveHourSharePct: null`, so it follows the weekly share. It is still enforced.
+- **Reviews a day** (`reviewsPerDay`, shown beside the DAILY quota): `floor(daily share × weekly
+  allowance ÷ cycle)`, cycle = the mean `claude_review` cost over 28 days (fallback $0.42) + the
   mean `sequence_diagram` cost (fallback $0.22) when ANY of the account's workspaces has
   `auto_diagrams_enabled`. Null when the subscription is unknown; never NaN / Infinity / negative
   (shared `reviewsPerDayFor` / `cycleCostUsd`).
-- **API key.** A US$ budget per rolling 7 days (`weeklyUsd`, default 25); `status.apiKey {weeklyUsd,
-  usedUsd}`. `resumesAt` = when enough recorded spend rolls out. (The daily budget is gone.)
+- **API key.** A US$ budget per rolling 7 days (`weeklyUsd`, default 25) and the daily quota as a share
+  of it; `status.apiKey {weeklyUsd, usedUsd, dailyUsd, todayUsd, dayResetsAt}`. `resumesAt` = when
+  enough recorded spend rolls out (the week) or the next local midnight (the day). (The old `dailyUsd`
+  SETTING stays retired: the daily figure is derived from `daySharePct`.)
 
-Settings: `PUT` takes `{enabled, weekSharePct, fiveHourSharePct, subscription, weeklyUsd}` (API key:
+Settings: `PUT` takes `{enabled, weekSharePct, daySharePct, fiveHourSharePct, subscription, weeklyUsd}` (API key:
 no 5-hour setting is used); an unknown key — including
 the retired `fiveHourPct` / `weekPct` / `dailyUsd` — is a 400, but a stored row still holding them is
 read fine (ignored, dropped on the next write). The GET/PUT answer's `settings.weeklyUsd` is `null`
@@ -663,7 +684,7 @@ nothing of each other, and the pair is the DEFAULT wherever both providers can r
     'replies'` row with `followUp.cover = {provider}` (every "latest review" reader skips it; its
     items overlay the chain like a pass's). Never disputes, no pushback, no still-open comment on the
     other provider's findings; auto resolve only. An AUTO pair's cover asks the spend budget first
-    (skipped, never queued, when over); it counts toward the per-PR daily cap of automatic passes. Its
+    (skipped, never queued, when over); it counts toward the per-PR 24-hour limit of automatic passes. Its
     row records the pair's start as its coverage, so it claims no reply the pair had not seen.
     Labelled "Checked Codex's findings" (`repliesRunLabel`); summary "Checked Codex's 3 open findings:
     1 dealt with, 2 still open." The failed provider is NOT re-run (usage limits are hours); when it
@@ -1684,7 +1705,7 @@ read threads; a PR comment has none. Now a PR-level finding has the same lifecyc
 - **It starts a replies pass** like a reply on a thread: `newestPrLevelReplyTimes`
   (db/review-threads-for-review.ts) — a person's PR comment or review body after one of Ensemble's PR-level
   findings (own or a teammate's imported one) — is folded into `newestOwn` (`foldPrLevelReply`, never
-  a Check threads input). Same 5-minute settle, daily cap and budget gate; the pass runs on the
+  a Check threads input). Same settle, per-PR 24-hour limit and budget gate; the pass runs on the
   owner's provider; coverage counts the comment's time.
 - **GitHub writes** (`pr-level-writes.ts`), each a NEW PR comment that links the finding and carries
   `<!-- pierre:claude-review-followup on=<finding comment id> act=still_open|ack -->` (Ensemble-posted for
@@ -1739,7 +1760,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
 - **A MOVED head a teammate's claim holds (2026-11-09).** The full review of the new head is skipped
   for the claim, so a reply the reader wrote after the push would wait for the next push. The sweeper
   instead asks `startRepliesCheck` at that head (auto.ts, the re-review loop's `heldByTeammate` branch,
-  `teamClaimRepliesDue`: at most once per head per settle wait) — the same per-PR daily cap, holds and
+  `teamClaimRepliesDue`: at most once per head per settle wait) — the same per-PR 24-hour limit, holds and
   ONE budget gate; the pass plans from the DB and refuses with no row when no reply waits. The pass
   never needed the same head: it reads the code at the current head. Pinned by
   `team-claim-replies.test.ts`.
@@ -1813,7 +1834,7 @@ JUST the replies, cheaply, at the current head. Pure half `claude-review/replies
   `getLatestClaudeReview` (the tab's `review`), `getLatestSucceededReviewId` (AI Fix),
   `listAllClaudeReviews`, `getUnseenOwnAiReviews` (My Turn), `hasReviewAtHead` /
   `isAutoReReviewSettled` / `isAutoRetryStillDue` / `getFailedAutoAtHead`, `loadPriorRunForCarry`,
-  the candidate read (first review, re-review, retry, in flight, the daily cap). The Open PRs column
+  the candidate read (first review, re-review, retry, in flight). The Open PRs column
   shows the latest FULL review with later passes' items folded over its "Earlier:" counts
   (`overlayFollowUpItems`, newer wins, `not_checked` never overrides).
 - ⚠ **THE CHAIN ANCHORS ON THE LATEST FULL REVIEW.** `loadPriorReviewForFollowUp` skips passes (a
@@ -2006,8 +2027,8 @@ CODE, not by prompt:
   DENIED; connectors isolated; ONE tool `submit_threads` whose item is the review's. The prompt is
   `pushReviewThreadsSection` (nonce-fenced) + the fenced title. Reconcile is the review's
   (`reconcileThreads`: never invents "addressed", locks `addressed` at the same head). Caps:
-  `THREAD_CHECK_BUDGET_USD` ($1), `THREAD_CHECK_MAX_TURNS` (20), auto `THREAD_CHECK_DAILY_CAP` (30
-  per workspace per UTC day; clicks never count). One run per PR (claimed synchronously), the ONE
+  `THREAD_CHECK_BUDGET_USD` ($1), `THREAD_CHECK_MAX_TURNS` (20); no daily count (the AI quotas, since
+  2026-11-24). One run per PR (claimed synchronously), the ONE
   shared `REVIEW_CONCURRENCY` slot (`registerReviewSlotPeer`; a PR-review click goes first).
 - **STORED** in `claude_thread_checks` (migration `0122`): one row per run, the WHOLE
   reconciled set (changed + carried) in `thread_assessments`, `comments_through` = the newest
@@ -2187,8 +2208,7 @@ CURRENT head — an earlier commit's is hidden whether the head is green or red
   the newest `ci_status_events` row AT the synced head. ⚠ **NO SETTLE AND NO CI HOLD** — a failing
   check is final, so a run is queued on the first tick that sees it; a set that grows later is a new
   key. The onboarding floor: only a failure OBSERVED at or after the workspace switched auto review
-  on. Its own `CI_REVIEW_DAILY_CAP` (default 20) automatic runs per workspace per UTC day, counted
-  from rows (written when QUEUED); manual runs and server REFUSALS (no model ran) never count.
+  on. No daily count (removed 2026-11-24): the AI quotas, asked once per account per tick.
 - **Beside a manual review (2026-10-19)** (`with-review.ts` `startCiReviewBesideManualReview`, called
   by `POST /api/prs/:id/claude-review` after a successful MANUAL start — the tab's Run and the Open
   PRs Review button): when the synced rollup is red and `ciReviewDue` holds for the current head's
@@ -2313,23 +2333,18 @@ table, the routes' paths, the queue and the `SEQUENCE_DIAGRAM_*` env names keep 
   Draw / Redraw (`routes.ts` → `startDiagram`, `trigger: 'manual'`) still works. Skip rules (`fingerprint.ts` `diagramSkipReason`): no CODE
   (stored file list through `db/code-loc.ts`'s `isNonCodeFile` — docs/config/lockfile-only ⇒ none;
   unknown ⇒ the pipeline decides from the diff with the same classifier), a row already at this
-  fingerprint (any status — a click redraws a failure), one in flight, or the daily cap
-  (`SEQUENCE_DIAGRAM_DAILY_CAP`, default 30, review-started rows per ACCOUNT per UTC day that ran or
-  will run the model — every row EXCEPT the server-decided free refusals `no_code`, `tests_only`,
-  `copy_only`, `too_small`, `head_moved`, `unreadable`, `too_few_prs`, `too_many_prs`; ⚠
-  `invalid_diagram` and the model's `no_flow` COUNT, they were billed; a Redraw
-  never counts). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
+  fingerprint (any status — a click redraws a failure), one in flight, or the AI quotas (the
+  account-wide `SEQUENCE_DIAGRAM_DAILY_CAP` was removed 2026-11-24). A no-code change is STORED as a `refused/no_code` row (no model, no cost)
   so the pane can say why and the same head is never judged twice.
 - ⚠ **A REDRAW IS LIMITED** (2026-10-28: one story drawn 11 times and one PR 9 times spent the cap of
   30 by 14:52; every later review drew nothing, silently, and BMD-1086 never got a story design). A
   subject drawn before — a story with the SAME pull requests (`persist.ts` `subjectDrawHistory`
   compares the newest drawn row's members) — is a REDRAW: at most `SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS`
-  (2, its first draw included) counted review rows per subject per UTC day (`redraw_limit`), and never
-  the cap's last slots (shared `repeatRunLimit`). A first draw, and a story whose PRs changed (one
-  joined or left), are held only by the cap. A skip for a limit is LOGGED (`logTriggerLimits`) and
+  (2, its first draw included) counted review rows per subject per UTC day (`redraw_limit`). A first
+  draw, and a story whose PRs changed (one joined or left), are never held by a count. A skip for a limit is LOGGED (`logTriggerLimits`) and
   kept in memory per subject at that fingerprint (`diagramAutoSkip`), served as the slot's
-  `autoSkipped` (`daily_limit` / `redraw_limit`) while those inputs are live, so the pane says why
-  ("Not drawn yet: today's automatic designs are used up…"). A succeeded TICKET review also asks for
+  `autoSkipped` (`redraw_limit`) while those inputs are live, so the pane says why
+  ("Not redrawn: it was already redrawn today."). A succeeded TICKET review also asks for
   its story design (`maybeDrawStoryDiagramAfterTicketReview`): a PR's ticket link is read when the PR
   is received and can land after that PR's review ended, so the PR trigger saw a one-PR ticket.
 - **Fingerprints** (clock-free): PR = sha256(version, prId, headSha) — only a push redraws it;
@@ -2662,8 +2677,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   succeeded run found every criterion done (`latestAllMet`) and the stored `ticket_hash` still equals the
   live story's (a story edit re-opens it), the automatic check's own rule. Order: never checked first, then stale; newest member
   activity first within each (≤ 40 examined). Each goes through `startTicketReview(…, trigger: 'manual')`:
-  a person pressed the button, so it is ahead of automatic items and NOT counted against
-  `TICKET_REVIEW_DAILY_CAP`. No credential → `skipped: 'no_credential'`; the 202
+  a person pressed the button, so it is ahead of automatic items. No credential → `skipped: 'no_credential'`; the 202
   carries `ticketChecks {started, skipped}`. The cards read the latest SUCCEEDED run's verdicts from the DB
   on the graph GET (`db/sprint-ticket-checks.ts`: three batched queries; `stale` = a member PR gone /
   closed / pushed / merged since, or a new open / merged PR in the workspace — ⚠ a ticket-TEXT edit is
@@ -2849,10 +2863,8 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
   day's 20 checks ran on part of a ticket, each followed by a "PR joined" re-check). THE CEILING:
   `TICKET_AUTO_MAX_WAIT_MS` (20 min) from the burst's first change — changes each under 2 min apart,
   after the latest run; one column only holds a PR's newest push, so `pull_requests.head_burst_at`
-  keeps where its run of pushes began. NO CI hold. THE LIMITS: the per-workspace
-  `TICKET_REVIEW_DAILY_CAP` (60), counted from rows (an automatic run writes its row when queued) —
-  ⚠ never for a ticket with a PR the READER owns (author, or the person an Ensemble-opened PR is for) — and
-  the spend budget. ⚠ **NO PER-TICKET LIMIT** (removed 2026-11-09): the old "3 push re-checks per
+  keeps where its run of pushes began. NO CI hold. THE LIMIT: the AI quotas only (the per-workspace
+  `TICKET_REVIEW_DAILY_CAP` was removed 2026-11-24). ⚠ **NO PER-TICKET LIMIT** (removed 2026-11-09): the old "3 push re-checks per
   ticket per day" counted every `cascade` row, so a PR joining and two story edits used it up and ten
   real pushes waited until midnight; the grace window now folds a burst into one check and the spend
   budget is the money brake. ⚠ **ALL MET STOPS IT** (2026-11-11): when the latest SUCCEEDED run found every
@@ -2865,8 +2877,7 @@ route strips a stale `ticket`/`tickets` key. Wire contract: [API.md](API.md) § 
 - **The wait is said, in one line, in both places** — the PR pane's AI Review tab (`TicketCoverage.tsx`)
   and the Ticket / story view (`OpenPrsCards.tsx` `StoryCurrencyLine`), through ONE component,
   `TicketAutoCheckLine` (formatter `lib/ticketReview.ts` `ticketAutoCheckWords`): "Story check starts
-  in 1m 40s — waiting 2 quiet minutes after the last push to backend#615", "Story check starts at
-  00:00 UTC — the daily limit of automatic checks is reached", "No automatic story check — auto review
+  in 1m 40s — waiting 2 quiet minutes after the last push to backend#615", "No automatic story check — auto review
   is off in this workspace" (the detail is the title). Nothing while up to date or running. The
   countdown ticks locally (never a fetch). Re-check (a click) is never held by any of it.
 - **The summary is at most THREE short sentences of 20 words** (2026-10-28; tightened 2026-10-31, one
@@ -3108,7 +3119,7 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
      `autoReviewWaiting` says why (`comments` / `commits`; `ci` is never produced now) and the Claude
      Review header prints "…for comments to settle" / "…for pushes to settle".
      All clocks are in memory: a restart restarts a wait, never skips one;
-  3. **QUEUED → RUNNING** on the auto lane (daily cap, lane cap, lock — below);
+  3. **QUEUED → RUNNING** on the auto lane (the AI quotas, lane cap, lock — below);
   4. on SUCCESS, **AUTO FIX** when the PR is the reader's OWN (§ AI Fix → Auto fix).
 - **A PULL SWEEPER, NOT A HOOK** (`review/claude-review/auto.ts`, every minute on the core
   scheduler). `sync/upsert.ts` runs inside a transaction and sees every PR of a first sync or a
@@ -3224,11 +3235,11 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   interrupted — "Interrupted: the run stopped making progress". ⚠ An interrupted run is FAILED, never
   cancelled (a Stop is never retried), and both reasons are TRANSIENT (`classifyAutoReviewFailure`),
   so THE SAME RETRY RULE re-runs an auto run only while still required: the head unchanged, nothing
-  succeeded there, the PR open, under the per-head cap (3) and the daily cap. A manual run is failed the
+  succeeded there, the PR open, under the per-head cap (3) and the AI quotas. A manual run is failed the
   same way and never retried by itself. ⚠ A HUNG RUN NEVER BLOCKS THE QUEUE: one that ignores its abort
   is failed in the DB and released 2 min later (the pipeline races a hard stop, so the pair's end, the
   claim's final line and the seat's release still run).
-  A retry is an ordinary auto run (same lane, daily cap, spend-budget gate, default provider,
+  A retry is an ordinary auto run (same lane, spend-budget gate, default provider,
   auto-post / auto fix rules); the lane re-checks `isAutoRetryStillDue` (the failed run is still the
   LATEST row at the head; for a press, the latest AUTO row with no AUTO success there — below) before
   writing its row. ⚠ **TWO RULES FOR "THIS HEAD IS DONE", ONE FOLD** (`db/auto-retry-at-head.ts`,
@@ -3255,25 +3266,19 @@ repeated on, and cleared on off, so nothing opened while it was off is picked up
   is waived. Both call `POST /api/workspaces/:id/auto-review/sweep {prId?}`,
   which runs `runAutoReviewSweep(ctx, now, press)` for ONE workspace (and one PR): `autoReviewDue`
   with `pressed` waives the settle waits, the retry backoff, the attempt cap and the transient test;
-  a run in flight still waits; the DAILY CAP and lane cap are never waived; the spend budget is not
+  a run in flight still waits; the lane cap is never waived; the spend budget is not
   asked (the press is the reader's choice: `OverBudgetConfirm` takes two presses when over, and the
   queued items carry `pressed`, so `startAutoItem` skips its budget check). Runs are `trigger:'auto'`
   on the default provider. ⚠ NEVER TWO SWEEPS AT ONCE: the sweeper's own `sweeping` guard answers a
   press during a tick `busy`. A press never prunes the in-memory settle clocks (it is not a full
   pass). The answer is one plain line (`autoSweepResultLine`): "Queued 3 reviews." / "Nothing to
-  review." / "Daily limit reached — 0 queued." / "Retry queued.".
-- **THE COST GUARD**: a daily cap of auto runs per workspace per **UTC** day, counting
-  today's auto rows plus items still waiting in the lane. The cap is SET PER WORKSPACE in Settings
-  ("Up to N auto reviews a day", `workspaces.auto_review_daily_cap`, migration 0085):
-  OVERRIDES ONLY — NULL is the default `AUTO_REVIEW_DAILY_CAP` = 20, folded by
-  `resolveAutoReviewDailyCap` for both the wire and the sweeper's roster; the PUT bounds it 1..500.
-  First reviews and re-reviews share it (one busy PR's pushes can use most of it). A Claude + Codex
-  PAIR counts ONCE (its second half's row, `pair_role = 'second'`, is not counted). Past it, PRs wait for the next day.
-  The SPA warns in the toast cluster (`AutoReviewCapToast`, docs/FRONTEND.md § There is ONE
-  toast cluster): near at ≥ 80% of the cap (≥ 2 used), reached at the cap, from the auto-review GET's
-  `usage` — the sweeper's own count (`getAutoReviewCandidates(...).autoToday`), so the toast and the
-  sweeper never disagree. ⚠ The count must stay the reader's OWN auto runs: a review row imported
-  from a teammate must be filtered out of `autoToday` (it would spend the reader's cap).
+  review." / "The auto review queue is full — 0 queued." / "Retry queued.".
+- **THE COST GUARD** is the AI quotas (§ The AI spend budget), asked once per account per tick and
+  again when the lane starts an item (`startAutoItem`), so the overshoot past a quota is at most the
+  runs already in flight. ⚠ **NO DAILY COUNT** (removed 2026-11-24): `workspaces.auto_review_daily_cap`
+  (migration 0085) is DORMANT; the GET no longer returns `usage`; a PUT naming `dailyCap` is ignored (ajv strips it).
+  The candidate read's `limit` is a PAGE (`AUTO_REVIEW_CANDIDATE_PAGE` 50 + the waiting items), never
+  a quota. The Open PRs counter and `AutoReviewCapToast` are gone; the quota toast replaces them.
 - ⚠ **IT NEVER RUNS WHERE CLAUDE REVIEW IS OFF.** `autoReviewAvailable` = `config.aiEnabled`; under
   ENSEMBLE_AI_DISABLED neither the job nor the auto-review routes are registered.
 - **Who hears about it.** ⚠ **OWNERSHIP IS PRIMARY**: an auto run raises the My Turn "Claude
@@ -3312,12 +3317,9 @@ review is never a verdict (GitHub forbids self-approval), so another Ensemble mu
 - **THE SWEEPER** (`auto.ts`). Each workspace's pass starts `verdictNeeded` BEFORE first reviews,
   retries and re-reviews: the same start rule (`autoReviewDue`, settle reason `head`, the head's
   clock shared with the re-review loop — which then skips that PR), the team-claim hold, the ONE
-  budget gate (over it, the due ones are said on the PR as "skipped · budget"), and the daily cap.
-  At most `VERDICT_PICKUP_PER_TICK` (5) a tick across workspaces. ⚠ **NOT EXEMPT FROM THE DAILY
-  CAP**, and a queued pick-up (no row yet, out of `prIds`) is counted in `waitingHere`, or the cap is
-  overshot tick after tick: own-PR ticket checks may be, because the reader's own pushes bound them; this list grows
-  with other people's PRs, and on an API key the spend budget is unset by default, so the cap is the
-  one count-based bound left. Prioritised means the cap is spent on these first.
+  budget gate (over it, the due ones are said on the PR as "skipped · budget").
+  At most `VERDICT_PICKUP_PER_TICK` (5) a tick across workspaces: this list grows with other people's
+  PRs, so the per-tick bound stays. Prioritised means the quota is spent on these first.
 - **THE LANE** (`manager.ts`): `enqueueAutoReview(…, {priority: true, why})` inserts ahead of every
   ordinary auto item (behind earlier priority items; manual items still go first).
   `autoReviewQueueWhy` → `ClaudeReviewResponse.autoReviewWhy` (the author's login resolved in the
@@ -3356,7 +3358,7 @@ review is never a verdict (GitHub forbids self-approval), so another Ensemble mu
   press does not wait. A host without the seam does not wait.
 - **THEN NOTHING SPECIAL.** The DB is the queue: the candidate read covers every open PR however long
   the break, so moved heads and owed verdicts are found as usual, the verdicts first, oldest wait
-  first, bounded by the per-tick pick-up cap, the lane and the daily cap, under the budget gate.
+  first, bounded by the per-tick pick-up cap and the lane, under the budget gate.
 
 ## Team claims (2026-10-27; ALWAYS ON since 2026-11-10)
 
@@ -3503,16 +3505,15 @@ auto-review switch, with an ⓘ). Code: `review/claude-review/team-claim.ts` (th
     ready (`agenticRunReady`, once per tick), a READ-ONLY pass (`dueHeadsHeld`) lists the heads the tick
     would have started — first reviews, and MOVED heads whose start rule says go, read without touching
     a clock — never one waiting in the lane, held for a teammate, a retry, or a same-head comment burst
-    (its head already carries this Ensemble's own line); past the workspace's daily cap, the capped first
-    reviews and moved heads (the first-review loop now notes each capped PR instead of stopping). At most
+    (its head already carries this Ensemble's own line). (`daily_cap` lines are no longer written; old rows
+    keep the reason.) At most
     `AUTO_SKIP_LINES_PER_TICK` (25) PRs a tick. The lane (`startAutoItem`): an item dropped before its row
     — AI went away, every provider over its usage limit (each locked provider's line, with its end), or
     the per-provider budget check — says so in the background (`postAutoSkipLinesLater`), again only
     for a first review or a moved head. The providers are the run's would-be ones (`autoProvidersForPr`:
     the workspace's pair when both can review, else the default); "not ready" names the default provider.
   - **A PRESS** ("Run auto reviews now" / Retry) never asks the budget and runs past a usage limit when
-    every provider is locked: it runs normally and says nothing. It does not waive the daily cap, so a
-    capped press is said like a tick. A press while AI is not ready says nothing (the next tick does).
+    every provider is locked: it runs normally and says nothing. A press while AI is not ready says nothing (the next tick does).
   - **ONCE, CLAIMED FIRST, NEVER RETRIED.** `team_claim_skip_lines`: one row per (account, PR, head,
     provider, reason), inserted (unique key, `ON CONFLICT DO NOTHING`) BEFORE the GitHub write; 'posted'
     / 'failed' (GitHub's error; never retried) / 'not_needed'. The context is READ first: posted only
@@ -4407,7 +4408,7 @@ GitHub** (summary + finding comments) joins the reader's AI Review tab as part o
 - ⚠ **Every reader that means "the reader's own runs" leaves these rows out.** `kind IS NULL`
   already does (latest review, latest succeeded, listAll, hasReviewAtHead, settle/retry/failed-auto
   at head, carry, follow-up `loadPriorReviewForFollowUp`, replies anchor, team-claim record,
-  getUnseenOwnAiReviews, the auto sweeper's daily cap and runs). A reader with no kind filter
+  getUnseenOwnAiReviews, the auto sweeper's runs). A reader with no kind filter
   uses `db/teammate-reviews.ts` `ownRunsOnly(cr.kind)` / `ownFindingsOnly(crf.reviewId)`: the tab's
   `history`, Open PRs states (`getLatestReviewStates`), posted-state reconcile, earlier-runs chain
   (`loadEarlierRuns`), usage-lockout boot read (`failedRunsSinceLastSuccess`), post contexts (→ 404),
@@ -5046,7 +5047,7 @@ since `0177`; `merge_json` + `merge_bundle` (the MERGE item) since `0178`. (The 
   fix chains from it (the queue says `reviewed_by_fix`). The old push → auto re-review → fix chain survives only
   through a head the loop did not review (a stopped loop, a later commit). Without Push automatically every turn
   needs a PERSON pressing Push (an unpushed fix blocks the next one); with it the OUTER bound is the cap (3 per PR
-  per 24h, rarely reached now) plus the auto-review daily cap. `already_tried` stops the push-free loop (a fix that
+  per 24h, rarely reached now) plus the AI quotas. `already_tried` stops the push-free loop (a fix that
   changed nothing, retried on every comment-triggered review). Items match across reviews by
   (kind, thread id, story index, path, title) — refs and finding ids are per review — so a finding
   a later review RE-WORDS counts as new and only the cap stops it. There is no "discard" for a fix,
@@ -5290,11 +5291,8 @@ OWN open non-draft PR in a workspace with auto AI Fix on is judged. The rule, in
    `pushed_commit_sha` and a `loop_review_id`). With no CI causes it is idle with that reason — REVIEWED, never a
    wait for an auto review that will not come, and no auto fix starts from that review. CI causes at that head
    still start a CI-only fix.
-   ⚠ **`review_capped`** (2026-11-18): the review is due or settling (not running) but the workspace's AUTO
-   REVIEW daily cap is reached — the sweeper's own count, `readAutoReviewUsage` (`getAutoReviewCandidates(…,
-   {limit: 0}).autoToday` vs the cap in force), the fold `AutoReviewCapToast` reads, asked ONLY on this
-   branch. With no CI causes ⇒ idle "No auto review today: the limit of N is reached." (the cap printed);
-   with CI causes ⇒ the CI-only fix at once. Never "Waiting for the AI review" for a review that cannot come;
+   (`review_capped` is no longer produced: the auto-review daily cap was removed 2026-11-24; the reason
+   stays in the type so an older stored state still reads.)
 5. `maybeStartAutoFix` (every gate above). TRANSIENT refusals (`sandbox_busy`, `over_budget`, `no_sandbox`,
    `fix_in_progress`) are WAITS the sweep retries — a start that went into THE FIX START QUEUE reads its place
    there (`bindAutoFixStartPlace`): behind the same ticket's running fix it is `ticket_fix_running` ("Waiting for

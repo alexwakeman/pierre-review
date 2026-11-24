@@ -35,7 +35,7 @@ vi.mock('./team-claim-skip.js', () => ({
 }));
 let aiReady = true;
 vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => aiReady }));
-let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number; dailyCap: number }> = [];
+let roster: Array<{ accountId: number; workspaceId: number; enabledAtMs: number }> = [];
 vi.mock('./auto-settings.js', () => ({ listAutoReviewWorkspaces: async () => roster }));
 
 const {
@@ -98,7 +98,7 @@ beforeEach(() => {
   skipPosts.length = 0;
   freshAsks.length = 0;
   waiting = new Set();
-  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 86_400_000, dailyCap: 20 }];
+  roster = [{ accountId: 1, workspaceId: 7, enabledAtMs: NOW - 86_400_000 }];
   answer = { prIds: [], autoToday: 0 };
   fresh = () => true;
   aiReady = true;
@@ -119,17 +119,12 @@ describe("a teammate's verdict first", () => {
     expect(r).toMatchObject({ queued: 3, verdictPickups: 1 });
   });
 
-  it('is not exempt from the daily cap: the cap is spent on it first, and a capped one is said on the PR', async () => {
+  it('no daily count holds a pick-up: today’s runs do not stop it, and first reviews follow it', async () => {
     answer = { prIds: [21], autoToday: 19, verdictNeeded: [owed(30), owed(31)] };
     const r = await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued.map((q) => q.prId)).toEqual([30]);
-    expect(r.capped).toBe(true);
-    expect(skipPosts).toEqual(
-      expect.arrayContaining([
-        { prId: 31, headSha: 'h31', reasons: ['daily_cap'] },
-        { prId: 21, headSha: null, reasons: ['daily_cap'] },
-      ]),
-    );
+    expect(enqueued.map((q) => q.prId)).toEqual([30, 31, 21]);
+    expect(r).not.toHaveProperty('capped');
+    expect(skipPosts).toEqual([]);
   });
 
   it(`queues at most ${VERDICT_PICKUP_PER_TICK} a tick; the rest wait for the next tick`, async () => {
@@ -153,14 +148,13 @@ describe("a teammate's verdict first", () => {
     expect(enqueued.map((q) => q.prId)).toEqual([30]);
   });
 
-  it('a queued pick-up still waiting in the lane counts against the daily cap', async () => {
-    // #30 was queued on an earlier tick and has not started: no row yet, so `autoToday` misses it.
+  it('a queued pick-up still waiting in the lane is skipped; the others are queued', async () => {
+    // #30 was queued on an earlier tick and has not started.
     waiting = new Set([30]);
     answer = { prIds: [], autoToday: 18, verdictNeeded: [owed(30), owed(31), owed(32)] };
-    const r = await runAutoReviewSweep(makeCtx(), NOW);
-    expect(enqueued.map((q) => q.prId)).toEqual([31]);
-    expect(r.capped).toBe(true);
-    expect(skipPosts).toEqual([{ prId: 32, headSha: 'h32', reasons: ['daily_cap'] }]);
+    await runAutoReviewSweep(makeCtx(), NOW);
+    expect(enqueued.map((q) => q.prId)).toEqual([31, 32]);
+    expect(skipPosts).toEqual([]);
   });
 
   it('a PR already waiting in the lane is not queued again', async () => {

@@ -602,7 +602,7 @@ export function autoLaneRoom(): number {
 }
 
 /** PRs the auto lane holds that have NO row yet — waiting, or mid-start. The sweeper counts
- *  these against the daily cap, since `autoToday` (rows) cannot see them. */
+ *  skips these (already waiting), since the candidate read (rows) cannot see them. */
 export function autoPendingPrIds(): Set<number> {
   return new Set([...autoPending.map((a) => a.prId), ...startingAuto.keys()]);
 }

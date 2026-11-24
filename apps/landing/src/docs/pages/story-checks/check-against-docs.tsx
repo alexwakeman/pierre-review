@@ -115,7 +115,7 @@ export default function Page(): JSX.Element {
       </p>
       <Note>
         The docs check runs only when you press the button. It never runs by itself and never posts to GitHub. Each
-        check is a run on your AI provider, and you can run up to 30 a day.
+        check is a run on your AI provider.
       </Note>
     </>
   );

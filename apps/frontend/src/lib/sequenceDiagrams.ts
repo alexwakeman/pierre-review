@@ -70,8 +70,6 @@ export function redrawRefusalText(r: RedrawSequenceDiagramResponse | undefined, 
 export function autoSkippedLine(slot: Pick<SequenceDiagramSlot, 'autoSkipped' | 'diagram'>): string | null {
   const what = slot.diagram == null ? 'Not drawn yet' : 'Not redrawn';
   switch (slot.autoSkipped) {
-    case 'daily_limit':
-      return `${what}: today’s automatic designs are used up. They start again at 00:00 UTC.`;
     case 'redraw_limit':
       return `${what}: it was already redrawn today.`;
     default:

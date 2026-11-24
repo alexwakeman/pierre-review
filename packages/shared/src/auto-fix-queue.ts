@@ -37,7 +37,8 @@ export type AutoFixQueueReason =
   // the head is the push of an AI fix whose OWN review loop reviewed it (its closing review is the PR's AI
   // review at that head): no auto fix starts from that review
   | 'reviewed_by_fix'
-  // the auto review that would seed the fix will not run today (the workspace's daily cap)
+  // LEGACY, no longer produced (the auto-review daily cap was removed 2026-11-24); kept so an older
+  // stored state still reads
   | 'review_capped'
   // faults: the fix did not start (the sweep decides again each minute, so a passing one clears)
   | 'no_ai_login'
@@ -86,11 +87,6 @@ export const AUTO_FIX_QUEUE_LINE: Record<AutoFixQueueReason, string> = {
   pr_unavailable: 'No auto fix: the pull request could not be read from GitHub.',
   error: 'No auto fix: an error stopped it.',
 };
-
-/** `review_capped` with the workspace's cap in force (the sweeper's own number). */
-export function autoReviewCappedLine(cap: number): string {
-  return `No auto review today: the limit of ${cap} is reached.`;
-}
 
 /** The ended reasons the sweep decides again each minute (a fault that may pass; a cap that resets). */
 export const AUTO_FIX_QUEUE_REDECIDE: ReadonlySet<AutoFixQueueReason> = new Set<AutoFixQueueReason>([

@@ -17,7 +17,7 @@ import { effectiveSort, pickSort, reverseSort, sortOptionsFor } from '../../lib/
 import { MetricRepoFilter } from './MetricRepoFilter.js';
 import { FirstRunOnboarding } from './FirstRunOnboarding.js';
 import { DefaultBranchesSlot } from './DefaultBranchesSlot.js';
-import { AutoReviewUsageLine, OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle, RunAutoReviewsButton } from './OpenPrsCards.js';
+import { OpenPrsCards, OpenPrsSortMenu, OpenPrsViewToggle, RunAutoReviewsButton } from './OpenPrsCards.js';
 import type { OpenPrsSort } from '../../lib/openPrsSort.js';
 
 // Activity → Open PRs — the FIRST rail line and the app's default (a URL with no `view=`), so it
@@ -190,9 +190,8 @@ export function OpenPrsDetail(): JSX.Element {
             <div className="mt-2 flex flex-wrap items-start gap-x-4 gap-y-1">
               {/* The workspace's default branches — informational, never a count. */}
               <div className="min-w-0 flex-1 basis-64">{!emptyWorkspace && <DefaultBranchesSlot />}</div>
-              {/* Today's auto reviews against the cap, and one sweep now — only while auto review is on. */}
+              {/* One sweep now — only while auto review is on. */}
               <div className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1">
-                <AutoReviewUsageLine />
                 <RunAutoReviewsButton />
               </div>
             </div>

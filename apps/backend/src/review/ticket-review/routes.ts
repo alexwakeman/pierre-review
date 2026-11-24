@@ -29,7 +29,7 @@ import { preflightFor } from '../../ai/run-choice.js';
 import { autoReviewAvailable } from '../claude-review/auto.js';
 import { listAutoReviewWorkspaces } from '../claude-review/auto-settings.js';
 import { automaticRunAllowed } from '../budget-gate.js';
-import { loadTicketAutoState, readerUserIdOf, type TicketAutoContext } from './auto-inputs.js';
+import { loadTicketAutoState, type TicketAutoContext } from './auto-inputs.js';
 import { toWireAutoCheck } from './auto-plan.js';
 import {
   getLatestTicketReview,
@@ -153,9 +153,6 @@ async function statesFor(
       aiReady: agenticRunReady(ctx, 'ticket_review', singleReviewProvider(ctx)),
       overBudget: roster.length > 0 && !(await automaticRunAllowed(ctx, accountId, 'ticket review', singleReviewProvider(ctx))),
       laneRoom: ticketAutoLaneRoom(),
-      dailyCap: config.ticketReviewDailyCap,
-      readerUserId: await readerUserIdOf(ctx, accountId).catch(() => null),
-      capUsed: new Map(),
     };
     return autoBase;
   };

@@ -1,17 +1,17 @@
-import { AI_BUDGET_SHARE_MAX, type AiBudgetBody, type AiBudgetResponse, type AiSubscriptionKind } from '@pierre-review/shared';
+import { AI_BUDGET_DEFAULTS, AI_BUDGET_SHARE_MAX, type AiBudgetBody, type AiBudgetResponse, type AiSubscriptionKind } from '@pierre-review/shared';
 
 // The pure half of Settings → Claude spend (ClaudeSpendSection.tsx): the draft, its parse and the
 // PUT body, so tests can import it without React.
 //
-// THE 5-HOUR SHARE FOLLOWS THE WEEK. `fiveHourSharePct: ''` in the draft = no separate setting: the
-// body sends `null` and the server uses the weekly share ("5% a week → 5% a session"). A typed figure
-// is the reader's own 5-hour share; clearing the box returns it to "same as weekly".
+// TWO QUOTAS: the DAILY share (`daySharePct`, Ensemble's spend since midnight as a share of the week;
+// on an API key, of the weekly US$) and the WEEKLY share. THE 5-HOUR SHARE IS NOT SHOWN: it follows
+// the weekly one, and every save sends `fiveHourSharePct: null` so no hidden figure stays in force.
 
 export interface ClaudeSpendDraft {
   enabled: boolean;
   weekSharePct: string;
-  /** '' = the same as the weekly share. */
-  fiveHourSharePct: string;
+  /** The daily quota, % of the week. */
+  daySharePct: string;
   subscription: AiSubscriptionKind | null;
   weeklyUsd: string;
 }
@@ -21,7 +21,8 @@ export function claudeSpendDraftOf(data: AiBudgetResponse): ClaudeSpendDraft {
   return {
     enabled: s.enabled,
     weekSharePct: String(s.weekSharePct),
-    fiveHourSharePct: s.fiveHourSharePct == null ? '' : String(s.fiveHourSharePct),
+    // An older server sends no daily share: the default.
+    daySharePct: String(s.daySharePct ?? AI_BUDGET_DEFAULTS.daySharePct),
     subscription: s.subscription,
     // Never set on an API key: the reader types their own figure (the default is the placeholder).
     weeklyUsd: data.isDefault || s.weeklyUsd == null ? '' : String(s.weeklyUsd),
@@ -48,24 +49,14 @@ export function claudeSpendBodyOf(
   route: 'login' | 'api_key' | 'none',
 ): { body: AiBudgetBody } | { error: string } {
   if (!d.enabled) return { body: { enabled: false } };
+  const daySharePct = parseShare(d.daySharePct);
+  if (daySharePct == null) return { error: `Enter a daily quota from 1 to ${AI_BUDGET_SHARE_MAX}.` };
   if (route === 'api_key') {
     const weeklyUsd = parseUsd(d.weeklyUsd);
     if (weeklyUsd == null) return { error: 'Enter a weekly US$ amount.' };
-    return { body: { enabled: true, weeklyUsd } };
+    return { body: { enabled: true, weeklyUsd, daySharePct } };
   }
   const weekSharePct = parseShare(d.weekSharePct);
-  if (weekSharePct == null) return { error: `Enter a whole number from 1 to ${AI_BUDGET_SHARE_MAX}.` };
-  let fiveHourSharePct: number | null = null;
-  if (d.fiveHourSharePct.trim() !== '') {
-    fiveHourSharePct = parseShare(d.fiveHourSharePct);
-    if (fiveHourSharePct == null) {
-      return { error: `Enter a 5-hour share from 1 to ${AI_BUDGET_SHARE_MAX}, or leave it empty to use the weekly share.` };
-    }
-  }
-  return { body: { enabled: true, weekSharePct, fiveHourSharePct, subscription: d.subscription } };
-}
-
-/** The 5-hour share the draft would put in force: its own figure, else the weekly one (null if neither parses). */
-export function draftFiveHourShare(d: ClaudeSpendDraft): number | null {
-  return d.fiveHourSharePct.trim() === '' ? parseShare(d.weekSharePct) : parseShare(d.fiveHourSharePct);
+  if (weekSharePct == null) return { error: `Enter a weekly quota from 1 to ${AI_BUDGET_SHARE_MAX}.` };
+  return { body: { enabled: true, weekSharePct, daySharePct, fiveHourSharePct: null, subscription: d.subscription } };
 }
