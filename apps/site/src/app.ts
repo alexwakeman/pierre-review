@@ -8,6 +8,7 @@
 //                      sections of /everything-else (MOVED)
 //   /api/health        liveness, for Railway's health check
 //   /api/contact/...   the contact form (contact.ts)
+//   /api/licence/activate  a Polar licence key in, a signed Ensemble licence key out (licence.ts)
 //
 // Plain node:http, no framework: the whole surface is three routes and one folder.
 import { existsSync } from 'node:fs';
@@ -21,6 +22,8 @@ import {
   validateContactBody,
 } from './contact.js';
 import { FixedWindowLimiter, clientIp } from './rate-limit.js';
+import { activateWithPolar, type PolarConfig } from './licence.js';
+import type { KeyObject } from 'node:crypto';
 import { applySecurity, isCrossSiteWrite } from './security.js';
 import { cachePolicyFor, fileAt, safeJoin, sendFile } from './static.js';
 
@@ -59,6 +62,12 @@ export interface SiteOptions {
   /** TRUST_PROXY_HOPS: proxies in front of us that append to X-Forwarded-For. */
   trustProxyHops: number;
   logger: Logger;
+  /**
+   * Licence activation. Null (either half missing) ⇒ /api/licence/activate answers 503: the
+   * signing key (LICENCE_SIGNING_KEY) and Polar (POLAR_ACCESS_TOKEN, POLAR_ORGANIZATION_ID,
+   * POLAR_BENEFIT_SEATS) are both needed.
+   */
+  licence?: { signer: { key: KeyObject; kid: string }; polar: PolarConfig } | null;
   /** Injected for tests. */
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -72,6 +81,8 @@ export const CONTACT_LIMIT = 5;
  * the tight bucket. Sharing one bucket meant five reloads locked the form for an hour.
  */
 export const TICKET_LIMIT = 60;
+/** Licence activations per IP per hour: a buyer needs one; a few retries are normal. */
+export const ACTIVATE_LIMIT = 10;
 const HOUR = 60 * 60 * 1000;
 /** A contact message is at most a few kB; anything larger is not one. */
 const MAX_BODY_BYTES = 16 * 1024;
@@ -124,6 +135,7 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
   const contactConfigured = normalizeContactWebhookUrl(opts.contactWebhookUrl) != null;
   const contactLimiter = new FixedWindowLimiter(CONTACT_LIMIT, HOUR);
   const ticketLimiter = new FixedWindowLimiter(TICKET_LIMIT, HOUR);
+  const activateLimiter = new FixedWindowLimiter(ACTIVATE_LIMIT, HOUR);
   const log = opts.logger;
 
   function limited(req: IncomingMessage, res: ServerResponse, limiter: FixedWindowLimiter): boolean {
@@ -238,6 +250,51 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
     sendJson(res, 200, { ok: true });
   }
 
+  async function handleActivate(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (isCrossSiteWrite(req)) {
+      sendJson(res, 403, { error: 'Forbidden', message: 'Cross-origin request blocked.' });
+      return;
+    }
+    if (limited(req, res, activateLimiter)) return;
+    if (!opts.licence) {
+      sendJson(res, 503, { error: 'licence_unavailable', message: 'Licence activation is not available yet. Use the contact form.' });
+      return;
+    }
+    const type = String(req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase();
+    if (type !== 'application/json') {
+      sendJson(res, 415, { error: 'Unsupported Media Type', message: 'Send the form as JSON.' });
+      return;
+    }
+    const raw = await readBody(req, 4 * 1024);
+    let body: { polarKey?: unknown; organisation?: unknown } = {};
+    try {
+      body = raw == null ? {} : (JSON.parse(raw.toString('utf-8')) as typeof body);
+    } catch {
+      body = {};
+    }
+    const polarKey = typeof body.polarKey === 'string' ? body.polarKey.trim() : '';
+    const organisation = typeof body.organisation === 'string' ? body.organisation.trim() : '';
+    if (polarKey === '' || polarKey.length > 200 || organisation === '' || organisation.length > 120) {
+      sendJson(res, 400, { error: 'Bad Request', message: 'Enter the licence key from Polar and your organisation’s name.' });
+      return;
+    }
+    const result = await activateWithPolar({
+      polarKey,
+      organisation,
+      polar: opts.licence.polar,
+      signer: opts.licence.signer,
+      nowMs: now(),
+      fetchImpl: opts.fetchImpl,
+    });
+    if (!result.ok) {
+      log.warn({ error: result.error }, 'licence activation refused');
+      sendJson(res, result.status, { error: result.error, message: result.message });
+      return;
+    }
+    log.info({ seats: result.seats, expires: result.expires }, 'licence activated');
+    sendJson(res, 200, { key: result.key, organisation: result.org, seats: result.seats, expires: result.expires });
+  }
+
   async function handleApi(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     const method = req.method ?? 'GET';
     if (path === '/api/health') {
@@ -260,6 +317,11 @@ export function createSiteHandler(opts: SiteOptions): (req: IncomingMessage, res
     if (path === '/api/contact') {
       if (method !== 'POST') return methodNotAllowed(res, 'POST');
       await handleContact(req, res);
+      return;
+    }
+    if (path === '/api/licence/activate') {
+      if (method !== 'POST') return methodNotAllowed(res, 'POST');
+      await handleActivate(req, res);
       return;
     }
     sendJson(res, 404, { error: 'Not Found' });

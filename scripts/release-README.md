@@ -10,8 +10,8 @@ There's no hosted backend, no database server, and no stored credentials. It
 authenticates by shelling out to your already-logged-in `gh` CLI, syncs activity
 into a local SQLite file, and serves the dashboard from a single local process.
 
-**Every feature, free for up to 3 people**, with no sign-up. Larger organisations
-buy one licence a year (see [License](#license)).
+**Free for up to 3 people**, with no sign-up. Larger organisations buy one licence a
+year, which also turns on team policy (see [License](#license)).
 
 > **Renamed.** This package used to be `limn-review` (and before that
 > `pierre-review`). The command is now `ensemble`; both old packages only forward

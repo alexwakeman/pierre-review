@@ -6,9 +6,9 @@ which PRs are stalled, which review threads sit untouched, and what needs _your_
 
 It ships to npm as **Ensemble** (`npx ensemble-review`) and runs **only on your machine**: SQLite, no
 hosted backend, no sign-in, no stored GitHub credentials (it shells out to your logged-in `gh`).
-**Every feature is free** under the Ensemble License 1.0 (`LICENSE`: free for individuals and for
-organisations where ≤ 3 people use it; a commercial licence above that, via the contact form; no
-competing use). The agentic features run on the reader's own Claude or Codex (`ENSEMBLE_AI_PROVIDER`,
+**Free** under the Ensemble License 1.0 (`LICENSE`: individuals, and organisations where ≤ 3 people
+use it; a commercial licence above that; no competing use), except team policy, which needs a licence
+key (docs/TEAM-POLICY.md). The agentic features run on the reader's own Claude or Codex (`ENSEMBLE_AI_PROVIDER`,
 or Settings → AI). The website is a separate service, `apps/site`.
 
 > **How to use this file.** The mental model, commands, invariants and landmines to know BEFORE
@@ -36,8 +36,9 @@ or Settings → AI). The website is a separate service, `apps/site`.
 | [SONARCLOUD](docs/SONARCLOUD.md) | the per-(PR, head) snapshot, the review block, the one PR comment, AI Fix's `Q<n>` items |
 | [REFERENCE-DOCS](docs/REFERENCE-DOCS.md) | the workspace reference library: ingest, the INDEX → CONTENTS → section tree, `docsContextFor` |
 | [ML-SEVERITY](docs/ML-SEVERITY.md) · [ML-NODE-PORT](docs/ML-NODE-PORT.md) | ML severity/category of bot comments · the in-process scorer (`ml/`) |
-| [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) | window purity, coverage bias, actor lanes, the person vector |
+| [PERIOD-REPORTING](docs/PERIOD-REPORTING.md) · [AI-ADOPTION-REPORT](docs/AI-ADOPTION-REPORT.md) | window purity, coverage bias, actor lanes, the person vector · the PDF deck, AI vendor detection |
 | [PLATFORM](docs/PLATFORM.md) | the platform features (formerly Pro): Activity, Feed, Bots Monitoring, the peer benchmark, Slack |
+| [LICENSING](docs/LICENSING.md) · [TEAM-POLICY](docs/TEAM-POLICY.md) | signed keys (offline), Polar activation, the reminder (never a block) · the ONE key-gated feature |
 | [SECURITY](docs/SECURITY.md) | app.ts, CORS/CSP, host guard, rate limits, AI routes, data export, dependency posture |
 | [PACKAGING](docs/PACKAGING.md) · [RELEASE](docs/RELEASE.md) | build-release, CLI, the AI/ML runtimes · CI publishing |
 | [MIGRATIONS](docs/MIGRATIONS.md) · [TESTING](docs/TESTING.md) | any migration; history and fold rules · test projects, CI |
@@ -246,7 +247,7 @@ shortest honest version wins.
   heading it explains — never caption paragraphs or definitions folded into row labels.
 - **SMALL TEXT IS NOT FREE.** 11px floor for a label, 12px for a sentence; contrast enforced by
   `textContrast.test.ts` + `vendorInk.test.ts`.
-- **No "Pro", "paid", "plan" or credits wording anywhere** — everything is available.
+- **No "Pro", "paid", "plan" or credits wording anywhere.** The ONE key-gated feature (team policy) says only "needs a licence key".
 
 ## Frontend
 

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.0",
+    "@pdf-lib/fontkit": "1.1.1",
     "@pierre-review/shared": "workspace:*",
     "@tanstack/query-async-storage-persister": "^5.101.0",
     "@tanstack/query-core": "^5.101.0",
@@ -21,6 +22,7 @@
     "d3-force": "^3.0.0",
     "highlight.js": "^11.11.1",
     "idb-keyval": "^6.2.1",
+    "pdf-lib": "1.17.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^9.0.3",

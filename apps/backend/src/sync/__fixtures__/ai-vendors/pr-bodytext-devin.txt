@@ -1,0 +1,4 @@
+Updates the API docs so they describe the behaviour the endpoint has today.
+
+Link to Devin session: https://app.devin.ai/sessions/acc177332e1d47ba97776eb5e3116216
+Requested by: @alice-dev

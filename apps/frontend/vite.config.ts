@@ -19,6 +19,9 @@ const BUILD: BuildOptions = {
       // unchanged — this only regroups chunks.
       manualChunks(id) {
         if (!id.includes('node_modules')) return undefined;
+        // Reports → Download report's PDF writer (pdf-lib, fontkit, pako): loaded only by the dynamic
+        // import in report/renderDeckPdf.ts, so the app never fetches it until the reader presses Download.
+        if (/pdf-lib|@pdf-lib|pako/.test(id)) return 'pdf';
         if (/vis-timeline|vis-data|vis-util|keycharm/.test(id)) return 'vis';
         if (/highlight\.js|lowlight|rehype-highlight/.test(id)) return 'highlight';
         if (/react-markdown|remark|rehype|micromark|mdast|hast|unist|property-information|hastscript|vfile/.test(id))

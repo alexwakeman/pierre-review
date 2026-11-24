@@ -135,13 +135,14 @@ const SECTION_DEFS: readonly SectionDef[] = [
     title: 'Reports',
     group: 'The app',
     writer: 'W4',
-    blurb: 'Flow metrics, Chronology, stories and AI usage for the workspace.',
+    blurb: 'Flow metrics, Chronology, stories, AI usage and the AI adoption report for the workspace.',
     pages: [
       { slug: 'overview' },
       { slug: 'reporting-window' },
       { slug: 'chronology' },
       { slug: 'stories' },
       { slug: 'ai-usage' },
+      { slug: 'download-report' },
     ],
   },
   {
@@ -275,6 +276,7 @@ const SECTION_DEFS: readonly SectionDef[] = [
       { slug: 'releases' },
       { slug: 'integrations' },
       { slug: 'bots' },
+      { slug: 'team-policy' },
       { slug: 'ai-usage-and-spend' },
       { slug: 'how-providers-treat-your-work' },
     ],
@@ -462,6 +464,7 @@ export const APP_COVERAGE = {
     releases: 'settings/releases',
     integrations: 'settings/integrations',
     bots: 'settings/bots',
+    'team-policy': 'settings/team-policy',
     licence: 'licence/licence',
   },
   /** The Pending board's tabs. */

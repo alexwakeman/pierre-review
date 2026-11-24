@@ -710,6 +710,13 @@ this feature reporting repo onboarding as team output (39 → 570 merged PRs ove
 
 ## The series — THE Reports chart, code only (2026-11-08)
 
+**ONE LABELLED EXCEPTION (2026-11-23):** the AI adoption report's commentary
+(`POST /api/reports/ai-adoption/commentary`, docs/AI-ADOPTION-REPORT.md). It is agentic only, runs on
+the reader's click for the downloaded PDF alone, is labelled AI-written in the PDF, and holds no
+number of its own: the model writes `{{key}}` placeholders and code fills every figure. Nothing else
+in reporting calls a model; the report's figures route (`GET /api/reports/ai-adoption`) is DB only
+and reuses this file's folds (the ONE reporting window, one repo set, `PERIOD_METRIC_META` floors).
+
 Owner decision 2026-11-08: Reports is CODE ONLY. The AI write-up, its Generate route
 (`POST /api/pro/insights/reports/:periodKey/generate`, removed with its rate-limit arm) and the
 period picker are gone; the pane is ONE chart over every period (docs/FRONTEND.md § Reports pane).

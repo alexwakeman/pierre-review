@@ -405,6 +405,8 @@ export function heldReasonText(v: Pick<ClaudeAutoVerdictRecord, 'heldReason' | '
     }
     case 'refused':
       return sentence('GitHub refused it.');
+    case 'team_policy':
+      return sentence('the repository’s team policy does not let an AI review approve.');
     default:
       return null;
   }

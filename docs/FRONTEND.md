@@ -3458,6 +3458,53 @@ convention this file has to remember.
   dialog (inside `aria-modal`), and while open it marks itself `data-owns-escape` so
   `SettingsModal`'s capture-phase Escape steps aside (`lib/escapeOwner.ts`).
 
+### Reports → Download report (`Activity/report/`; the design: docs/AI-ADOPTION-REPORT.md)
+
+A **Download report** action in the Reports `PageHeader` (`reportChrome.tsx` passes `actions` through;
+every Reports tab) and one ⌘K command (`reports:download`) open ONE dialog (`ReportDownloadDialog`, on
+`InfoModal`). The open state lives in `InsightsView` so both reach it; `workspaceId === null` ⇒ the
+button and the command are absent. The dialog is its own file: `apps/landing/test/docs.test.ts` reads any
+`{ id: '…', label: '` literal in `InsightsView.tsx` as a Reports tab.
+
+- **Nothing fetches on mount or on open.** The Download press runs `buildReport.ts` (itself a dynamic
+  import): GET `/api/reports/ai-adoption` → (AI ticked) ONE `POST …/commentary` per commentary slide, in
+  turn → `deckModel.ts` → `renderDeckPdf.ts` → `lib/downloadFile.ts`. ONE AbortController per build:
+  closing the dialog (×, Escape, the backdrop, Cancel) or unmounting aborts it, with no toast.
+- **The progress bar is NEUTRAL** (`role="progressbar"`, `bg-ui-accent-fill`; never the `--ai-*`
+  `RegenProgressBar`) with one `aria-live` stage line: Fetching figures 0–15, Writing commentary · slide
+  i of N 15–85 (AI ticked only), Drawing slides 85–95, Building the PDF 95–100 (`REPORT_STAGES`). Done
+  ⇒ one line (`doneLine`): with AI not asked for, nothing about AI.
+- **"Write commentary with AI"** renders only while `useAiCapabilities().enabled`, inside `<AiRunGate
+  kind="complete" meter={false}>` (no credential ⇒ the gate's sign-in line). Ticked, the Download
+  button sits in `<AiRunGate kind="complete">` marked `data-ai-run`, so `OverBudgetConfirm`'s two-press
+  holds it; a reader's press is never refused. ⚠ Any non-`'ai'` answer (404, 503, 502, `fallback`, a
+  network error) ⇒ that slide's template wording, NEVER retried; after a 404/503/429 the remaining
+  slides skip the call. An `'ai'` template is RE-VALIDATED client side (`validateCommentary` against
+  the SPA's own `commentaryFigures`) before `fillCommentary` (`commentaryFromResponse`). Only `{workspaceId,
+  slide, generatedAt}` is sent: no name, login, repo or "Prepared for".
+- **The figure formatter** (`deckFigureFormatter`) words `usd` / `week_pct` through `usageCostText` —
+  ⚠ `week_pct` is never US$; only seat prices (entered in US$) say US$.
+- **The deck model is pure** (`deckModel.ts`, `deckCharts.ts`): report + commentary + options + an
+  injected `DeckTextMetrics` (the embedded fonts' widths and character set) → pages of positioned
+  primitives on a 960 × 540 pt canvas (y down). No pdf-lib there, so `test/deckModel.test.ts` checks
+  the rules without a PDF: "—" + `ADOPTION_WITHHELD_TEXT` for a withheld figure (never 0), a
+  non-significant change reads "No clear change", every text colour ≥ 4.5:1 on white (`deckColors.ts`:
+  a FIXED white ground and fixed inks whatever the colour scheme; vendor colours are marks only, so
+  every chart carries value labels and a legend), 11pt floor. ⚠ "How widely AI is used" NAMES
+  NOBODY: counts of people only (the wire carries no name), one page; a `few_people` figure prints
+  "Fewer than 3" (`figureCell`), never the number. There is no "Anonymise" option.
+- **The renderer** (`renderDeckPdf.ts`) is the ONLY importer of `pdf-lib` / `@pdf-lib/fontkit` (exact
+  pins 1.17.1 / 1.1.1), loaded by dynamic import into the `pdf` chunk (`vite.config.ts`
+  `manualChunks`). Fonts: subset Inter TTFs in `src/fonts/` (OFL), fetched through `?url` imports. ⚠
+  Never WOFF2 (fontkit's subsetter crashes on it), never the standard-14 fonts (they cannot encode
+  "→" or "Łukasz"). Real selectable text, tables as text, charts as `drawSvgPath` vectors, no image;
+  metadata title "AI adoption report — <workspace>", author/creator/producer "Ensemble", language
+  en-GB, never a person. `test/renderDeckPdf.test.ts` reads the TTFs from disk, renders, loads the
+  bytes back and decodes the text through the ToUnicode maps.
+- E2E: `e2e/report-download.spec.ts` (no fetch before the press, the bar, a `%PDF-` download, the AI box
+  absent with AI off, eight commentary calls with it ticked, Escape cancels). Fixtures:
+  `AI_ADOPTION_REPORT`, `adoptionCommentaryFor` in `mock-api.ts`.
+
 ### Reports → Overview → Flow metrics → "Where the work is happening"
 
 `WorkspaceFlowMetrics` renders `WorkspaceMetricsPanel` (tiles + the 12-week trend band) and, under

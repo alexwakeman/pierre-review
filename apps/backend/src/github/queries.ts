@@ -3,12 +3,14 @@ import { config } from '../config.js';
 // Comment + review bodies are now ALWAYS persisted (the consolidated Feed renders
 // full markdown), so they're always fetched: review bodies + review-comment bodies
 // are already unconditional in the query below, and PR-comment bodies join them here.
-// Only the PR description, commit messages, and the large review-comment diff hunks
-// stay lean-gated (none are used at sync time and they aren't stored when lean) —
-// dropping them from the query shrinks each backfill page substantially.
+// Only the PR description and the large review-comment diff hunks stay lean-gated (neither is
+// used at sync time and neither is stored when lean) — dropping them from the query shrinks each
+// backfill page substantially. COMMIT MESSAGES (and the git author/committer name + email) are
+// fetched UNCONDITIONALLY since migration 0219: the AI vendor detector reads their trailers at sync
+// (docs/AI-ADOPTION-REPORT.md § What sync fetches). Only the verdict is stored; `commits.message`
+// is still written only on PERSIST_BODIES, and names / emails never are.
 const fullText = config.persistBodies;
 const prBodyField = fullText ? '\n          body' : '';
-const commitMessageField = fullText ? '\n                message' : '';
 const reviewCommentDiffHunkField = fullText ? '\n                  diffHunk' : '';
 const prCommentBodyField = '\n              body';
 
@@ -316,14 +318,19 @@ const PR_NODE_FIELDS = /* GraphQL */ `
       commit {
         oid
         committedDate
-        messageHeadline${commitMessageField}
+        messageHeadline
+        message
         author {
+          name
+          email
           user {
             login
             id
           }
         }
         committer {
+          name
+          email
           user {
             login
             id
@@ -848,9 +855,13 @@ export interface GqlCommitNode {
     /** The subject line. ALWAYS selected (not lean-gated); optional because hand-built fixtures
      *  and tolerant partials may lack it — absent means "not received", never "empty". */
     messageHeadline?: string | null;
-    message: string;
-    author: { user: { login: string; id: string } | null } | null;
-    committer: { user: { login: string; id: string } | null } | null;
+    /** The FULL message, ALWAYS selected (migration 0219: the AI vendor detector reads its
+     *  trailers). Optional for hand-built fixtures: absent / null = "not received", and then the
+     *  commit's `ai_signals` is left alone. Stored only on PERSIST_BODIES. */
+    message?: string | null;
+    /** `name` / `email` are git's own (not a GitHub account), read by the detector, NEVER stored. */
+    author: { name?: string | null; email?: string | null; user: { login: string; id: string } | null } | null;
+    committer: { name?: string | null; email?: string | null; user: { login: string; id: string } | null } | null;
   };
 }
 
@@ -1465,6 +1476,66 @@ export interface CommitHeadlineNodesResponse {
     id?: string;
     commits?: {
       nodes: Array<{ commit?: { oid?: string; messageHeadline?: string | null } | null } | null>;
+    } | null;
+  } | null>;
+  rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;
+}
+
+// The one-time AI VENDOR SIGNALS backfill (sync/backfill-ai-signals.ts): exactly the inputs the
+// shared detector reads, the same fields PR_NODE_FIELDS carries, so a backfilled PR and a walked one
+// are scanned from identical text. `commits(last: 100)` is the walk's window; about one point per
+// batch (the scalars are free, the payload is the cost). The markdown `body` is NOT selected: the
+// walk reads it only on PERSIST_BODIES, and `bodyText` keeps every phrase the detector needs.
+export const AI_SIGNALS_NODES_QUERY = /* GraphQL */ `
+  query AiSignalsNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on PullRequest {
+        id
+        title
+        bodyText
+        headRefName
+        author { __typename login }
+        commits(last: 100) {
+          nodes {
+            commit {
+              oid
+              message
+              author { name email user { login } }
+              committer { name email user { login } }
+            }
+          }
+        }
+      }
+    }
+    rateLimit { remaining resetAt cost }
+  }
+`;
+
+/** One git identity as the backfill receives it. Every field optional (a nulled selection). */
+export interface AiSignalsGitActor {
+  name?: string | null;
+  email?: string | null;
+  user?: { login?: string | null } | null;
+}
+
+/** Every field optional: an id can resolve to a non-PullRequest and `graphqlTolerant` NULLS a
+ *  forbidden field — both are "not received", never "empty". */
+export interface AiSignalsNodesResponse {
+  nodes: Array<{
+    id?: string;
+    title?: string | null;
+    bodyText?: string | null;
+    headRefName?: string | null;
+    author?: { __typename?: string | null; login?: string | null } | null;
+    commits?: {
+      nodes?: Array<{
+        commit?: {
+          oid?: string | null;
+          message?: string | null;
+          author?: AiSignalsGitActor | null;
+          committer?: AiSignalsGitActor | null;
+        } | null;
+      } | null> | null;
     } | null;
   } | null>;
   rateLimit?: { remaining?: number | null; resetAt?: string | null; cost?: number | null } | null;

@@ -34,7 +34,9 @@ export async function aiUsageReportRoutes(app: FastifyInstance): Promise<void> {
   });
 }
 
-async function costRate(accountId: number, nowMs: number): Promise<AiUsageCostRate> {
+/** Claude's ONE cost unit and its multiplier from US$ (also the AI adoption report's, api/routes/
+ *  adoption-report.ts). Never throws: no reading ⇒ no unit (tokens only). */
+export async function costRate(accountId: number, nowMs: number): Promise<AiUsageCostRate> {
   try {
     const route = getProvider('claude').credentialRoute();
     if (route === 'api_key') return { unit: 'usd', perUsd: 1 };

@@ -5,9 +5,7 @@ import { FREE_TEAM_SIZE, INSTALL_COMMAND, LICENSE_URL, SITE_NAME } from '../lib/
 import {
   LARGEST_BAND,
   LICENCE_BANDS,
-  VENDOR_COMPANY_NUMBER,
-  VENDOR_NAME,
-  VENDOR_REGISTERED_OFFICE,
+  VENDOR_LEGAL_LINE,
   bandHref,
   bandLabel,
   formatGbp,
@@ -41,8 +39,9 @@ export default function Pricing(): JSX.Element {
             Free for up to {FREE_TEAM_SIZE} people. One licence for the organisation above that.
           </h1>
           <p className="p-lead">
-            Every feature is in the free version. An organisation where more than {FREE_TEAM_SIZE} people
-            use {SITE_NAME} buys one licence a year, priced by how many people use it.
+            Everything a person or a small team uses is free. An organisation where more than {FREE_TEAM_SIZE}{' '}
+            people use {SITE_NAME} buys one licence a year, priced by how many people use it. The licence also
+            unlocks team policy.
           </p>
         </div>
       </section>
@@ -52,7 +51,7 @@ export default function Pricing(): JSX.Element {
           <p className="k">Up to {FREE_TEAM_SIZE} people</p>
           <h2>Free</h2>
           <ul>
-            <li>Every feature</li>
+            <li>Review, fix, ship and reports</li>
             <li>No account, no card</li>
           </ul>
           <p className="cmd">
@@ -68,7 +67,7 @@ export default function Pricing(): JSX.Element {
             </h2>
             <ul>
               <li>Plus VAT where it applies</li>
-              <li>The same app, every feature</li>
+              <li>Team policy for your repositories</li>
             </ul>
             <p className="cmd">
               {band.checkoutUrl !== '' ? (
@@ -129,13 +128,14 @@ export default function Pricing(): JSX.Element {
         <div className="tile rise">
           <h2>Who you buy from</h2>
           <p>
-            {VENDOR_NAME}
-            {VENDOR_COMPANY_NUMBER !== '' && <>, a company registered in the United Kingdom, number {VENDOR_COMPANY_NUMBER}</>}
-            {VENDOR_REGISTERED_OFFICE !== '' && <>. Registered office: {VENDOR_REGISTERED_OFFICE}</>}.
+            {VENDOR_LEGAL_LINE}
             {canBuyOnline && <> Card payments go through Polar, which issues the invoice and handles VAT.</>}
           </p>
           <p>
             Paying by bank transfer or purchase order? <Link to="/contact?topic=licence">Ask here</Link>.
+          </p>
+          <p>
+            Already bought? <Link to="/licence">Activate your licence</Link>.
           </p>
         </div>
       </section>

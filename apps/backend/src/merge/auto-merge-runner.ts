@@ -145,6 +145,7 @@ import { stampPrMergeQueueState } from '../db/pr-merge-queue-stamp.js';
 import { AUTO_MERGE_TTL_MS } from './arm-intent.js';
 import { limnOriginForPr, orReader } from '../db/limn-actions.js';
 import { recordLimnPush, type WriteOrigin } from '../github/write-origin.js';
+import { dependencyActionAllowedByPolicy } from '../db/team-policy.js';
 
 /**
  * LIMN'S WORK IS BOT WORK (docs/CLAUDE-REVIEW.md § Limn's actions are bots): every write the watcher
@@ -760,6 +761,14 @@ async function processOne(
   // window, so the tick that sees green is exempt too). A person's click keeps its window.
   if (work.expiresAt.getTime() <= now && !(wasBackedOff && work.armedByPolicy)) {
     await resolve(work.id, 'expired', 'the 72-hour window passed without the PR becoming mergeable');
+    return;
+  }
+
+  // THE TEAM POLICY (docs/TEAM-POLICY.md): a POLICY intent (dependency automation armed it) is disarmed
+  // when the repo's policy now switches dependency automation off or no longer trusts the PR's bot. A
+  // person's click is theirs, and lands.
+  if (work.armedByPolicy && !(await dependencyActionAllowedByPolicy(work.accountId, work.prId))) {
+    await resolve(work.id, 'disarmed_blocked', 'the repository’s team policy does not allow dependency automation here');
     return;
   }
 

@@ -11,7 +11,9 @@
     "dev": "tsx watch src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:all": "vitest run"
+    "test:all": "vitest run",
+    "licence:keygen": "tsx src/licence-keygen.ts",
+    "licence:issue": "tsx src/licence-issue.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

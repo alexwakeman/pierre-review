@@ -25,6 +25,7 @@ import { reconcileFixesOnStartup } from '../coding/ai-fix/manager.js';
 import { registerStoryLabelRoutes } from './story-labels/routes.js';
 import { registerSprintBriefs } from './sprint-briefs/index.js';
 import { registerSprintAskRoutes } from './sprint-ask/routes.js';
+import { registerAdoptionReportRoutes } from './adoption-report/routes.js';
 import { registerReleaseBlockersRoutes } from './release-blockers/routes.js';
 import { bindDependencyAutomationAi } from '../merge/dependency-automation.js';
 import { registerReferenceDocsRoutes } from '../reference-docs/routes.js';
@@ -78,6 +79,9 @@ export function registerAgenticRoutes(app: FastifyInstance): AgentContext | null
   // tables are dormant.)
   registerSprintBriefs(ctx);
   registerSprintAskRoutes(app, ctx);
+  // REPORTS → DOWNLOAD REPORT's commentary: one Haiku completion per slide on the reader's press,
+  // grounded by the shared gate (docs/AI-ADOPTION-REPORT.md). The figures route is core (app.ts).
+  registerAdoptionReportRoutes(app, ctx);
   // "EXPLAIN WHAT'S BLOCKING" (This Sprint → Releases): on a press, ONE completion over the release check
   // the server holds — which work unlocks which release, and in what order. Agentic, so here only.
   registerReleaseBlockersRoutes(app, ctx);

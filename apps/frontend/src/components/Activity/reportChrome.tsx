@@ -10,15 +10,18 @@ import { cx, FOCUS_RING, PageHeader as SharedPageHeader } from '../ui/index.js';
 export function PageHeader({
   title,
   sub,
+  actions,
   children,
 }: {
   title: ReactNode;
   sub?: ReactNode;
+  /** The end of the title row (Reports: "Download report"). */
+  actions?: ReactNode;
   /** The page's tab strip. */
   children?: ReactNode;
 }): JSX.Element {
   return (
-    <SharedPageHeader inset={false} title={title} sub={sub}>
+    <SharedPageHeader inset={false} title={title} sub={sub} actions={actions}>
       {children != null && <div className="mt-3">{children}</div>}
     </SharedPageHeader>
   );

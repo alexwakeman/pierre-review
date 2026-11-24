@@ -1805,6 +1805,41 @@ account-scoped table: erasure and the export already cover it. Additive; journal
 `1794988800000`. [DATA-MODEL.md](DATA-MODEL.md) § `workspaces.storyCheckAllRepos`; [CLAUDE-REVIEW.md](CLAUDE-REVIEW.md)
 § Ticket review → OUTSIDE THE TICKET.
 
+### `0218_account_licence` — the commercial licence key and its reminder
+
+Three additive, nullable columns on `accounts`, no default, no backfill: `licence_key` (text, the signed key as
+typed, re-checked on every read), `licence_evaluation_ends_at` and `licence_reminder_snoozed_until` (integer
+timestamps). An existing account-bearing table: erasure and the export already cover it. Journal idx 218, `when`
+`1795593600000`. [LICENSING.md](LICENSING.md) § In the app.
+
+### `0221_workspace_policy_choices` — when team policies differ (2026-11-24)
+
+`CREATE TABLE workspace_policy_choices` (one row per `(account_id, workspace_id)`, unique index
+`workspace_policy_choices_account_ws`; named composite FKs `workspace_policy_choices_workspace_account_fk` →
+`workspaces (id, account_id)` and `workspace_policy_choices_repo_account_fk` → `repos (id, account_id)`, both
+cascade): the repo whose rules the workspace adds to the strictest rule from each when the repos a piece of work
+spans clash (it can only tighten). No row = nothing added. A new account-bearing table: erased explicitly, listed in
+`accountScopedTables()`. Additive; journal idx 221, `when` `1795852800000`. [TEAM-POLICY.md](TEAM-POLICY.md).
+
+### `0220_repo_team_policies` — the team policy (2026-11-24)
+
+`CREATE TABLE repo_team_policies` (one row per `(account_id, repo_id)`, unique index
+`repo_team_policies_account_repo`; `account_id` → `accounts` cascade; the named composite FK
+`repo_team_policies_repo_account_fk` → `repos (id, account_id)` cascade): the parsed `.ensemble/policy.json`
+from the repo's default branch (`policy_json`), or the parser's problems (`errors_json`), the commit and when.
+A new account-bearing table: erased explicitly, listed in `accountScopedTables()`. No backfill (the next sync
+reads it). Additive; journal idx 220, `when` `1795766400000`. [TEAM-POLICY.md](TEAM-POLICY.md).
+
+### `0219_ai_signals` — AI vendor signals on PRs and commits (2026-11-25)
+
+Four additive, nullable columns, no default, no SQL backfill: `pull_requests.ai_signals` (text JSON),
+`pull_requests.ai_signals_version` (integer), `pull_requests.ai_signals_checked_at` (integer timestamp) and
+`commits.ai_signals` (text JSON). VERDICTS ONLY (`[{vendor, source}]` from the shared detector), never text: lean
+storage holds. NULL = not scanned; the one-time, bounded `sync/backfill-ai-signals.ts` reads the last 90 days by
+node id. Existing tables: erasure, `deleteRepo` and the export already cover them. Journal idx 219, `when`
+`1795680000000`. [DATA-MODEL.md](DATA-MODEL.md) § `pull_requests.ai_signals`; [AI-ADOPTION-REPORT.md](AI-ADOPTION-REPORT.md)
+§ Detection.
+
 ### `0217_release_blocker_reports` — "Explain what's blocking"
 
 `CREATE TABLE release_blocker_reports` (one row per `(account_id, workspace_id)`, unique index

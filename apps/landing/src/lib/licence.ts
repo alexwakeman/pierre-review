@@ -10,11 +10,13 @@ import { FREE_TEAM_SIZE } from './site';
 
 /** The company that sells the commercial licence. */
 export const VENDOR_NAME = 'Corevo Systems Limited';
-/** Companies House number and registered office. A UK company must show both on its
- *  website, so fill them in before the pricing page goes live; while empty, the pages
- *  show only the name. */
-export const VENDOR_COMPANY_NUMBER = '';
-export const VENDOR_REGISTERED_OFFICE = '';
+/** Companies House details. A UK company must show its name, number, place of registration
+ *  and registered office on its website: VENDOR_LEGAL_LINE carries all four, and the footer,
+ *  pricing, trust and legal pages show it. */
+export const VENDOR_COMPANY_NUMBER = '16638768';
+export const VENDOR_REGISTERED_IN = 'England and Wales';
+export const VENDOR_REGISTERED_OFFICE = 'Mansion House, Manchester Road, Altrincham, Cheshire, WA14 4RW';
+export const VENDOR_LEGAL_LINE = `${VENDOR_NAME}, registered in ${VENDOR_REGISTERED_IN}, company number ${VENDOR_COMPANY_NUMBER}. Registered office: ${VENDOR_REGISTERED_OFFICE}.`;
 
 export interface LicenceBand {
   /** The largest number of people using Ensemble that this band covers. */
