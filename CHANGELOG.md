@@ -29,6 +29,8 @@ no internals.
 - Open pull requests: the "auto reviews today" counter, and the "Auto reviews stopped for today" message.
 - Settings → AI spend: the separate 5-hour limit. It now follows the weekly quota.
 
+## [1.0.79] - 2026-11-24
+
 ### Fixed
 
 - A reply on an Ensemble review comment now gets checked even when the author resolves the thread
