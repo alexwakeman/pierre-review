@@ -1,0 +1,11 @@
+{
+  "name": "ensemble-opencode-spike",
+  "private": true,
+  "type": "module",
+  "description": "Spike only: OpenCode driven over ACP (docs/AGENT-CLI-SPIKE.md). Not a pnpm workspace; npm install here.",
+  "dependencies": {
+    "opencode-ai": "1.19.6",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  }
+}

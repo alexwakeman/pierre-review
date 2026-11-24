@@ -1,0 +1,1 @@
+Run the shell command `touch spike-bash-marker && echo done` in the repository, then tell me what it printed.
