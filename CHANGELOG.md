@@ -13,6 +13,8 @@ no internals.
 
 ## [Unreleased]
 
+## [1.0.82] - 2026-11-25
+
 ### Added
 
 - This Sprint → Releases shows the path to newer releases. "Do these first" names the work that
