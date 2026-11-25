@@ -82,6 +82,37 @@ export default function Page(): JSX.Element {
         <li>&ldquo;Nothing new since 0.390.0-rc&rdquo;. This repository is left out of the release.</li>
         <li>&ldquo;No version tags on main yet&rdquo;.</li>
       </ul>
+      <H3 id="the-path-to-newer-releases">The path to newer releases</H3>
+      <p>
+        When a newer tag can&rsquo;t be released yet, <Ui>Do these first</Ui> at the top of the tab says what to finish
+        first. Each card names the tickets to finish and what that unlocks, for example &ldquo;Finish PAY-11 · Unlocks
+        api 0.327.0 · web w1.2.0&rdquo;. The first card is the best next step. <Ui>Show all</Ui> lists the rest.
+      </p>
+      <p>
+        <Ui>Path to newer releases</Ui> has one row per repository. Each row starts at the candidate (★) and moves right
+        through the newer tags. Releasing a tag ships everything below it, so each box needs what the boxes before it
+        need, plus the tickets it shows. A box that covers several tags with the same needs says so (&ldquo;2
+        tags&rdquo;). The number on a box is the step in <Ui>Do these first</Ui> that releases it.
+      </p>
+      <ul>
+        <li>
+          &ldquo;Waits on OPS-9&rdquo; is a ticket your tracker says a needed ticket is blocked by. It is not part of the
+          release rule, but the plan counts it.
+        </li>
+        <li>
+          &ldquo;with web w1.1.0&rdquo; means the two tags must be released together, because a ticket has work in
+          both. Select it to go to that tag.
+        </li>
+        <li>
+          &ldquo;Still reading its tickets&rdquo; and &ldquo;Still checking&rdquo; mean the work shown is the least the
+          tag needs. There may be more.
+        </li>
+      </ul>
+      <p>
+        Select a ticket to open its story, or a pull request to open it. A ticket that is only in your tracker opens
+        there. In the ticket list, a ticket that holds a newer tag back says &ldquo;Unlocks api 0.330.0&rdquo; when
+        finishing it alone makes that tag releasable, or &ldquo;Holds back api 0.330.0&rdquo; when more is needed.
+      </p>
       <H3 id="the-ticket-list">The ticket list</H3>
       <p>
         Below the repositories is one list of tickets for all of them, newest tag first. A ticket with work in two
@@ -140,13 +171,18 @@ export default function Page(): JSX.Element {
       <H2 id="whats-blocking">Explain what&rsquo;s blocking</H2>
       <p>
         With AI on, and a newer tag that can&rsquo;t be released, <Ui>Explain what&rsquo;s blocking</Ui> sits above the
-        ticket list. Press it and Claude (or Codex) reads the check on this tab and writes a short report: one line on
-        what holds back the newest release you could reach soon, the steps to take in order, each with what it unlocks
-        and links to its tickets and pull requests, and one line per repository on why its newer tags are blocked.
+        ticket list. Press it and Ensemble works out, from the check on this tab, which work unlocks which newer
+        release and the order to do it in. Claude (or Codex) then explains that plan in a short report: one line on
+        what holds back the newest release you could reach soon, the steps in order with what each unlocks, and one
+        line per repository on why its newer tags are blocked.
+      </p>
+      <p>
+        The tickets and pull requests in the report are links. A ticket opens its story in Ensemble, and the small
+        arrow beside it opens your tracker. A pull request opens its tab, or GitHub when Ensemble has not stored it.
       </p>
       <p>
         It reads nothing else and changes nothing. It may name only tickets and pull requests that are in the check: a
-        step that names anything else is left out, and the report says so. The report stays until you press{' '}
+        point that names anything else is left out, and the report says so. The report stays until you press{' '}
         <Ui>Explain again</Ui>. It reads <Ui>Out of date</Ui> when the check has changed since it was written. It runs
         only when you press the button, on your own AI subscription or key.
       </p>

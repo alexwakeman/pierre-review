@@ -234,6 +234,43 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
      a disc on it — ★ the candidate ticket, ✓, ✗, ⊘, ?, a part-circle — and a merge mark for each group of PRs
      with no ticket. In the list the card carries no mark of its own.
    - "Released" is never said unless a release tag contains it.
+3b. **THE PATH TO NEWER RELEASES** (owner, 2026-11-24; `Sprint/ReleasePath.tsx`, `Sprint/releaseGraphModel.ts`).
+   The release graph (§ The path to newer releases) folded ON READ from the check the tab already has
+   (`useMemo(() => releaseGraph(check))` — nothing new fetches). A LADDER, never a free node-link graph.
+   ```
+   Do these first
+   ┌ ① Best next step ───────────────┐ ┌ ② Finish PAY-2 ─────┐ ┌ ③ Finish PAY-4 api #60 ┐
+   │ Finish PAY-11                   │ │ Unlocks api 0.328.0 │ │ Unlocks api 0.329.0    │
+   │ Unlocks api 0.327.0 · web w1.2.0│ └─────────────────────┘ └────────────────────────┘
+   └─────────────────────────────────┘   Show all 4
+   ┌ Path to newer releases ⓘ ─────────────────────────────────────────────────────────────────┐
+   │ api  [★ 0.326.0 Releasable now] → [0.327.0 ① Needs PAY-11 · with web w1.1.0] → [0.328.0 ②…]│
+   │ web  [★ w1.0.0  Releasable now] → [w1.2.0 2 tags ① Needs PAY-11] → [w1.3.0 Still reading…]│
+   └───────────────────────────────────────────────────────────────────────────────────────────┘
+   ```
+   - **"Do these first"** (top of the tab, only while the plan has moves): the plan's first 3 moves as cards
+     ("Show all n" for the rest), each "Finish <work chips>" and "Unlocks api 0.330.0 · web w1.1.0"
+     (`releasePointWords`). The FIRST card is THE best next move: accent border, a filled step disc, "Best
+     next step".
+   - **"Path to newer releases"** (above the ticket list, its ⓘ explains the ladder and the plan): ONE ROW
+     PER REPOSITORY, left → right: the candidate (★ "Releasable now", or "Nothing releasable yet") → each
+     stop (its tag, "3 tags" when it covers more than one, "Needs" + its `adds`, "Waits on X-9 (link in Jira)"
+     for `via` in a dashed chip, "with web w1.1.0", "Still reading its tickets" on a `partial` stop, dashed) →
+     "Still checking from v6" (`checkingFrom`). A stop carries the number of the plan step that releases it
+     (a move names only the highest point per repository; the stops below it take its number); step 1's stops
+     have the accent border. A repository with no stops and nothing checking gets NO row (its state is the
+     repository line above; never "nothing needed"); no rows ⇒ no section. A row scrolls sideways INSIDE
+     itself; the page never does.
+   - **Picked together is a MARKER, not a drawn line**: "with web w1.1.0" scrolls the other row to the stop
+     that holds that tag (a stop may cover several tags) and rings it briefly. Each row scrolls on its own at
+     phone width, so a connector drawn between two rows would detach as soon as either one scrolls.
+   - **Work chips**: a ticket in the check opens its STORY (`useOpenStory()`), its title naming key, title,
+     status and assignee; its open PRs follow it (the PR tab via `openPrDetailTab`, else GitHub through
+     `safeExternalUrl`); a ticket only a tracker link names links to the tracker (`safeExternalUrl`); merged
+     work in no tag reads "New version tag in web for #40"; a ticket in a loop of links adds "waits in a loop".
+   - **The card badge**: in the ticket list, a ticket that is work in the graph carries ONE pill —
+     "Unlocks api 0.330.0" (`unlocksAlone`, several joined with " · ") else "Holds back api 0.330.0" (the
+     first of `holds`).
 4. No warnings panel: nothing about a pull request with no ticket is a warning (removed 2026-11-16).
 5. **"Release…"** on the candidate ticket — ONE for every repository with a candidate; shown only with a
    candidate in a writable repo (HIDE, never disable). Dialog: the releasable repos with a candidate (ticked unless
@@ -258,10 +295,39 @@ rate budget, and keeps what it read: the next scan reads only the commits newer 
 > api v2.4.0-rc · web v1.8.2-rc
 > Release notes: <link to the GitHub pre-release>
 
+## The path to newer releases — the release graph (owner, 2026-11-24)
+
+Shared `release-graph.ts` `releaseGraph(check)`: ONE pure fold over the release check's result (no fetch,
+no clock, no AI). The SPA folds it on read; the backend folds the same for "Explain what's blocking".
+
+- **The shape.** At or below a repository's candidate everything can be released: a straight line. Above
+  it each repository is a LADDER — releasing a tag ships everything below it, so a newer tag needs what an
+  older one needs plus its own. The graph is the edges between ladders and work: tag → ticket (`not_done`,
+  `open_pr`), ticket → open PR, tag → tag in ANOTHER repository (a `split`: that point's needs join),
+  tag → "a new version tag" (a split whose other half is in no tag yet), and ticket → ticket from the
+  TRACKER's "is blocked by" links (`blockedBy`, read from `blocked_by_json` on the freshest successful
+  read). Tracker links are not the release rule, so a stop keeps them APART (`via`), but the plan counts
+  them: a ticket cannot really be finished before what it waits on.
+- **A stop** = a run of newer tags with the same needs, named by its highest tag (where the candidate moves
+  once they are done). `adds` = what it needs beyond the stop below it.
+- **The plan (`moves`).** Within one ladder the needs are nested, so the cheapest next stop is exact.
+  Across ladders (splits, shared tickets) the fewest tickets for the most releases is set cover, so the
+  plan is GREEDY: each move takes the next stop, in any ladder, with the fewest unfinished items, ties
+  broken by how many release points it unlocks. ≤ `RELEASE_PLAN_MOVES_MAX` (8).
+- **Per work item**: `holds` (the first point it holds back in each repository) and `unlocksAlone` (finish
+  only this, and what it waits on, and these become releasable — the highest per repository).
+- **Loops** of tracker links (A waits on B waits on A) are found (Tarjan) and marked `inCycle`; the plan
+  takes the loop as one move.
+- ⚠ **UNKNOWN IS NEVER ZERO.** A tag already ruled out lists NO reason for a ticket not read yet (the check
+  stops at the first certain reason), so a tag whose own tickets are still unread is `partial`: it never
+  folds into the stop below, nothing is promised from it upward, and the plan stops there. A tag still
+  `checking` ends the ladder (`checkingFrom`).
+
 ## Explain what's blocking (owner, 2026-11-23)
 
 An AGENTIC report on the Releases tab, for action: which in-flight work (tickets and pull requests, named)
 unlocks which newer release, why each repository's newer tags are blocked, and the order to do things in.
+The order is the code's (the release graph's plan); the model only words it.
 
 - **The panel** ("What's blocking", `Sprint/ReleaseBlockersPanel.tsx`) sits above the ticket list. It is VISIBLE
   only while `me.ai.enabled` and GET /api/releases carries `blockers` with a report or `explainable` (the check is
@@ -271,20 +337,48 @@ unlocks which newer release, why each repository's newer tags are blocked, and t
 - **Nothing runs on its own and nothing fetches on mount**: the stored report rides GET /api/releases (ONE fetch
   on mount stays true); "Out of date" when the input hash differs from the one the report was written from.
 - **ONE completion per press** (`POST /api/releases/blockers`, docs/CLAUDE-REVIEW.md § Release blockers) over
-  the check the server already folded — no GitHub or tracker read. The input (`releases/blockers-input.ts`,
-  pure): per repository the last release, what can be released now, the newest tag, and the blocked newer tags
-  OLDEST FIRST with their OWN reasons and the CUMULATIVE "Needs before it can be released" (a newer tag's
-  reasons are whole, so this is every ticket to finish first; a split is followed to its ROOT; a split whose
-  other half is in no tag yet needs a new version tag); tags with no reason of their own are folded into a
-  count (≤ 15 listed per repository, plus the newest); the tickets holding a release back (status, assignee,
-  open and merged PRs, "holds back: <repo> from <tag>") and the tickets with only an open PR (≤ 40). ⚠ Titles,
-  statuses, names and tag names are UNTRUSTED: one line each, capped, inside ONE nonce fence.
-- **Refuse rather than guess**: the answer may cite only the input's tickets (by key) and PRs ("repo #n"). A
-  step or repository line naming anything else is dropped and counted ("1 point left out: it named work not in
-  the check"); a headline doing so refuses the answer (one retry, then nothing is stored and the old report
-  stays). Ticket links go to the tracker, PR links to the PR tab (or GitHub), every URL through `safeExternalUrl`.
+  the RELEASE GRAPH (§ The path to newer releases) of the check the server already folded — no GitHub or
+  tracker read. ⚠ **THE CODE PLANS, THE MODEL EXPLAINS** (owner, 2026-11-24: the old input made the model work
+  out the structure from each tag's cumulative "Needs", which was slow and long). The input
+  (`releases/blockers-input.ts`, pure) defines every item ONCE with a short id — tickets `T1…` (key, why it
+  holds, assignee, open PRs, tracker links, title), pull requests `P1…` ("repo #n", open / merged in no tag
+  yet, title), release points `R1…` ("repo tag") — then names ids only: the LADDERS (each stop: `adds`, `via`,
+  `with`, `partial`; "still being checked" from a tag) and the code's PLAN (`moves`: work → the points it
+  unlocks). Example:
+
+  ```
+  T1 BMD-1061 · not done (In Code Review) · assigned to Robin · “Edit baseline”
+  P1 frontend #518 · open · “Area edit”
+  R3 backend 0.324.0
+  backend · can be released now: R1 · newest: R2
+    R3 adds T1
+    R2 adds T2; with R4
+  Plan (in order):
+  1. T1 → R3
+  2. T2 → R2 R4
+  ```
+
+  On a three-repository test check (36 tags) this is 2,160 characters where the old input
+  was 5,357. ⚠ Titles, statuses, names, repository and tag names are UNTRUSTED: one line each, capped, inside
+  ONE nonce fence.
+- **The answer** is a headline, ONE short step per plan move IN THE PLAN'S ORDER (it may merge or skip a
+  trivial move, never reorder), and a line per blocked repository. It cites work ONLY as `{T3}` / `{P7}` /
+  `{R2}`; the stored report keeps those texts and a `refs` map resolving each id, and the panel draws the texts
+  as segments with INLINE links (shared `releaseBlockersSegments`): a ticket opens its STORY view
+  (`useOpenStory`, the tracker a small icon beside it), a pull request its PR tab (else GitHub), a ticket only
+  the tracker names (`k:`) its tracker page, a release point plain text. Every URL through `safeExternalUrl`.
+- **Refuse rather than guess, by id**: a text citing an id the input does not define, or a bare key or `#n` not
+  in the input, is dropped and counted ("1 point left out: it named work not in the check"); a dropped headline
+  leaves the steps. ONE retry, only when the answer is not JSON of the shape; nothing kept ⇒ nothing stored and
+  the old report stays.
 - **Stored per workspace** (`release_blocker_reports`, migration 0217) with the input's hash: sha256 of
-  `RELEASE_BLOCKERS_VERSION` + the input text — no clock-derived field.
+  `RELEASE_BLOCKERS_VERSION` + the input text — no clock-derived field. `report_json` also holds the shape's
+  `version` (2) and the run's `durationMs`. ⚠ A row in the OLD shape (no `version`) reads as NO report: its
+  hash is stale anyway, and it has no ids to draw. The next press replaces it.
+- **Timing**: each attempt is logged (`release blockers: completion attempt`: ms, tokens in/out, input size)
+  and the total (`release blockers: done`). **What runs is ONE constant**, `RELEASE_BLOCKERS_RUN` (model +
+  role, `review/release-blockers/prompt.ts`): a one-line switch to a faster model once one is verified on
+  real data.
 
 ## Release notes
 
@@ -550,6 +644,21 @@ Releasing without version tags (owner, 2026-11-19)
 67. CONFIRM: the point's commit no longer on the default branch ⇒ stopped, nothing written.
 68. SPEED: 1,500 merged PRs with the oldest held fold in well under a second (each point's reasons are whole;
     only the candidate, the tag the walk stopped at and the oldest read list their whole scope).
+
+The path to newer releases (owner, 2026-11-24)
+69. DO THESE FIRST: with moves, the strip shows the first 3 ("Show all n" for more); the first is marked "Best
+    next step"; each says "Unlocks api v3" (several points joined with " · "). No moves ⇒ no strip.
+70. THE LADDER: api v1 (candidate) · v2 T2 in progress · v3 ✓ · v4 T4 in progress · v5 T5 open PR ⇒ ★ v1 →
+    v3 "2 tags" Needs T2 ① → v4 Needs T4 ② → v5 Needs T5 + its PR ③.
+71. TRACKER LINKS: T2 "is blocked by" X-9 (not Complete, not in the check) ⇒ v3's stop says "Waits on X-9" (a
+    link to the tracker) and the plan's first move is X-9 + T2; a loop of links marks both "waits in a loop".
+72. PICKED TOGETHER: api v1.1.0 needs web w1.1.0 ⇒ "with web w1.1.0" on api's stop; pressing it shows web's stop
+    holding w1.1.0; one move numbers both rows ①.
+73. UNKNOWN IS NEVER ZERO: a repository with nothing above its candidate has no row; a partial stop reads "Still
+    reading its tickets" and has no step; a checking tag ends the row "Still checking from …".
+74. THE BADGE: T2 (finishing it alone releases v3) reads "Unlocks api v3"; T4 reads "Holds back api …"; a ticket
+    that is not work in the graph has none.
+75. NO FETCH: opening the tab makes the same ONE GET as before; the graph is folded from it.
 
 ## Implementation
 

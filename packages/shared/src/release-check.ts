@@ -60,6 +60,7 @@
 import { tagKind, releasePointNumber, releaseTagName, type ReleaseBasis, type ReleaseSettings, type TagKind } from './releases.js';
 import type { SprintStage } from './sprint-stories.js';
 import type { ReleaseBlockersState } from './release-blockers.js';
+import type { TicketLinkBlocker } from './story-issues.js';
 
 /** A ticket's read state: `ok`, or why the tracker gave nothing; `not_read` = no answer yet. */
 export type ReleaseTicketReadState = 'ok' | 'not_found' | 'no_access' | 'failed' | 'not_read';
@@ -290,6 +291,9 @@ export interface ReleaseCheckTicketInput {
   assigneeName?: string | null;
   /** The last SUCCESSFUL read (any store); null = never. */
   readAt?: Date | null;
+  /** The tracker's "is blocked by" / "depends on" links, from the freshest read that stored them; null =
+   *  none stored (never read as "no links"). The release graph's ticket → ticket edges. */
+  blockedBy?: TicketLinkBlocker[] | null;
 }
 
 export interface ReleaseCheckInput {
@@ -534,6 +538,8 @@ export interface ReleaseTicketCheck {
   readAt: string | null;
   /** Every PR for it in the releasable repos — merged (with the tag holding it) and open. */
   pullRequests: ReleaseTicketPr[];
+  /** The tracker's "is blocked by" links (null = none stored). */
+  blockedBy?: TicketLinkBlocker[] | null;
 }
 
 export interface ReleaseCheckPr {
@@ -1270,6 +1276,7 @@ export function foldReleaseCheck(input: ReleaseCheckInput): ReleaseCheckResult {
       typeName: t.typeName ?? null,
       assigneeName: t.assigneeName ?? null,
       readAt: iso(t.readAt ?? null),
+      blockedBy: t.blockedBy ?? null,
       pullRequests: [...(ticketPrs.get(ident) ?? [])].sort(
         (a, b) => a.repoName.localeCompare(b.repoName) || a.number - b.number,
       ),

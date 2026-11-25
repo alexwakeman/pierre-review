@@ -5823,17 +5823,24 @@ calls per download. The model is `SPRINT_BRIEF_MODEL` on Claude (Haiku 5.5) thro
 
 `POST /api/releases/blockers?workspace=<id>` — "Explain what's blocking" (`review/release-blockers/`),
 registered by `registerAgenticRoutes`; the SPA gates it on `me.ai` and its button on `AiRunGate kind="complete"`.
-A READER'S PRESS, never automatic, so never asked of the spend gate. ONE `cheapComplete` on the STANDARD role
-(the sprint builder's model on Claude; Codex resolves the role) — a one-shot, not an agent: the release check
-already holds everything (no tool would add anything). Grounded ONLY in the check `getReleases` folds
-(`releases/blockers-input.ts`: per repository the blocked tags oldest first with their own reasons and the
-cumulative "Needs", a split followed to its root; the holding tickets with status, assignee, open PRs; the
-tickets with only an open PR), the whole text inside ONE nonce fence. The answer is JSON (headline, ordered
-steps with what each unlocks and the tickets / PRs it names, a line per repository), VALIDATED by
-`validate.ts`: a key or `#n` not in the input drops its step (counted) or refuses the answer (in the
-headline); "repo #n" with a releasable repo must be THAT repo's PR (or release point), not just a known number;
-a GitHub Issues key (`acme/web#12`) is matched whole, never read as a PR number; ONE retry. Stored per workspace with the input's hash (`release_blocker_reports`); stale = the hash
-differs. ⚠ Changing the prompt or the text: bump `RELEASE_BLOCKERS_VERSION`. Spend: feature `release_blockers`.
+A READER'S PRESS, never automatic, so never asked of the spend gate. ONE `cheapComplete` on
+`RELEASE_BLOCKERS_RUN` (`prompt.ts`: model + role in ONE constant — today the STANDARD role, the sprint
+builder's model on Claude; Codex resolves the role; a one-line switch once a faster model is verified on real
+data) — a one-shot, not an agent: everything is already in the release graph. ⚠ **THE CODE PLANS, THE MODEL
+EXPLAINS**: the input (`releases/blockers-input.ts`) is shared `releaseGraph` written compactly — tickets
+`T…`, pull requests `P…`, release points `R…` each defined ONCE, then the ladders and the code's plan by id —
+inside ONE nonce fence (`---BEGIN RELEASE GRAPH <nonce>---`). The answer is strict JSON `{headline,
+steps: string[], repos: [{repo, why}]}`: one step per plan move in the plan's order (merge or skip a trivial
+one, never reorder), citing work ONLY as `{T3}` / `{P7}` / `{R2}`. Caps (`RELEASE_BLOCKERS_CAPS`): headline
+300, step 240 (≤ 8), repository note 280 (≤ 6); `RELEASE_BLOCKERS_MAX_TOKENS` = 1,400 (≤ 3,900 characters
+of text ≈ 1,100 tokens + JSON). VALIDATED BY ID (`validate.ts`): a text citing an undefined id, or a bare key
+/ `#n` not in the input (a GitHub Issues key `acme/web#12` matched whole), is dropped and counted — never the
+whole answer; ONE retry, ONLY for an answer that is not JSON of the shape; nothing kept ⇒ `502 refused`.
+The stored report carries the texts with their ids and `refs` (each id resolved: ticket ident / key / title /
+url, PR repo / number / title / url / prId / repo full name, point repo / tag). Each attempt and the total are
+logged with ms and tokens; the total is stored as `durationMs`. Stored per workspace with the input's hash
+(`release_blocker_reports`); stale = the hash differs; an old-shape row reads as no report. ⚠ Changing the
+prompt or the text: bump `RELEASE_BLOCKERS_VERSION`. Spend: feature `release_blockers`.
 Tier `ai` + `ai_hourly`. Details: [RELEASES.md](RELEASES.md) § Explain what's blocking.
 
 ## Moved from CLAUDE.md (2026-10-26)

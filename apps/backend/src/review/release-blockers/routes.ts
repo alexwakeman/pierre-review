@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { SPRINT_PATHS_MODEL, type ClaudeReviewModel, type ReleaseBlockersRunResponse } from '@pierre-review/shared';
+import type { ReleaseBlockersRunResponse } from '@pierre-review/shared';
 import { config } from '../../config.js';
 import { resolveWorkspaceScope } from '../../db/queries.js';
 import type { AgentContext } from '../agent-context.js';
@@ -9,7 +9,7 @@ import { pickReviewNonce } from '../claude-review/prompts.js';
 import { cheapUsage } from '../cheap-usage.js';
 import { estimateCostUsd } from '../pricing.js';
 import type { CompleteFn } from '../story-labels/manager.js';
-import { RELEASE_BLOCKERS_MAX_TOKENS, RELEASE_BLOCKERS_SYSTEM, releaseBlockersPrompt } from './prompt.js';
+import { RELEASE_BLOCKERS_MAX_TOKENS, RELEASE_BLOCKERS_RUN, RELEASE_BLOCKERS_SYSTEM, releaseBlockersPrompt } from './prompt.js';
 import { validateReleaseBlockers } from './validate.js';
 
 // POST /api/releases/blockers?workspace=<id> — "Explain what's blocking" on This Sprint → Releases
@@ -18,18 +18,21 @@ import { validateReleaseBlockers } from './validate.js';
 // refused by the spend gate (the SPA asks first, through `AiRunGate kind="complete"`).
 //
 //   • ONE one-shot completion (`cheapComplete`, through ai/provider.ts; the writing rules are added at its
-//     door) on the STANDARD role — the sprint builder's model on Claude, Codex's own depth there. A
-//     one-shot, not an agent: everything it needs is already in the release check (no tool to call).
-//   • THE INPUT is the check the server holds (db/release-check.ts `getReleases`, DB + memory only →
-//     releases/blockers-input.ts). No GitHub or tracker read.
-//   • THE ANSWER is validated against that input (./validate.ts): only its tickets and pull requests may
-//     be cited; ONE retry on a refused answer, then a 502 (nothing stored).
+//     door) on `RELEASE_BLOCKERS_RUN` (prompt.ts: the ONE model/role switch). A one-shot, not an agent:
+//     everything it needs is already in the release graph (no tool to call).
+//   • THE INPUT is the release GRAPH over the check the server holds (db/release-check.ts `getReleases`, DB +
+//     memory only → releases/blockers-input.ts): ids defined once, the ladders, the code's plan. No GitHub
+//     or tracker read.
+//   • THE ANSWER is validated BY ID (./validate.ts): a point citing an id or key not in the input is dropped
+//     and counted. ONE retry, and only when the answer is not JSON of the shape; nothing kept → 502.
+//   • TIMED: each attempt and the total are logged (ms, tokens in/out, input size); the total is stored as
+//     `durationMs`.
 //   • ONE RUN PER (account, workspace), claimed SYNCHRONOUSLY; a second press while one runs is a 409.
 //   • Spend recorded (`recordAiUsage`, feature 'release_blockers'), also for a refused answer.
 //   • Stored per workspace with the input's hash (db/release-blocker-reports.ts); GET /api/releases carries it.
 // Rate tier: ai + ai_hourly (`tierFor`).
 
-const MODEL: ClaudeReviewModel = SPRINT_PATHS_MODEL;
+const MODEL = RELEASE_BLOCKERS_RUN.model;
 export const RELEASE_BLOCKERS_FEATURE = 'release_blockers';
 
 let completeOverride: CompleteFn | null = null;
@@ -83,16 +86,23 @@ export function registerReleaseBlockersRoutes(app: FastifyInstance, ctx: AgentCo
       let costUsd = 0;
       let inputTokens = 0;
       let outputTokens = 0;
+      let dropped = 0;
+      const started = performance.now();
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const nonce = pickReviewNonce([input.text]);
+        const t0 = performance.now();
         const out = await complete({
           model: MODEL,
-          role: 'standard',
+          role: RELEASE_BLOCKERS_RUN.role,
           system: RELEASE_BLOCKERS_SYSTEM,
           prompt: releaseBlockersPrompt(input.text, nonce),
           maxTokens: RELEASE_BLOCKERS_MAX_TOKENS,
         });
         const u = cheapUsage(out, MODEL, (i, o) => estimateCostUsd(MODEL, { inputTokens: i, outputTokens: o, cacheReadTokens: 0, cacheCreationTokens: 0 }));
+        ctx.log.info(
+          { accountId, workspaceId, attempt, ms: Math.round(performance.now() - t0), inputTokens: u.inputTokens, outputTokens: u.outputTokens, inputChars: input.text.length, provider: u.provider, model: u.model },
+          'release blockers: completion attempt',
+        );
         costUsd += u.costUsd;
         inputTokens += u.inputTokens ?? 0;
         outputTokens += u.outputTokens ?? 0;
@@ -101,10 +111,17 @@ export function registerReleaseBlockersRoutes(app: FastifyInstance, ctx: AgentCo
           .catch((err) => ctx.log.warn({ err }, 'release blockers: usage record failed'));
         const v = validateReleaseBlockers(out.text, input);
         if (!v.ok) {
-          ctx.log.info({ accountId, reason: v.reason, attempt }, 'release blockers: answer refused by validation');
+          dropped = v.dropped;
+          ctx.log.info({ accountId, reason: v.reason, attempt, dropped }, 'release blockers: answer refused by validation');
+          // Only an answer that is not JSON of the shape is asked for again; one whose every point was dropped is not.
+          if (v.reason === 'empty') break;
           continue;
         }
-        const writtenAt = new Date();
+        const durationMs = Math.round(performance.now() - started);
+        ctx.log.info(
+          { accountId, workspaceId, attempts: attempt + 1, ms: durationMs, inputTokens, outputTokens, dropped: v.report.dropped },
+          'release blockers: done',
+        );
         await storeReleaseBlockersReport(accountId, workspaceId, {
           inputHash: input.hash,
           report: v.report,
@@ -113,13 +130,18 @@ export function registerReleaseBlockersRoutes(app: FastifyInstance, ctx: AgentCo
           costUsd,
           inputTokens,
           outputTokens,
-          writtenAt,
+          durationMs,
+          writtenAt: new Date(),
         });
         const stored = await getReleaseBlockersReport(accountId, workspaceId);
         return { workspaceId, blockers: { explainable: true, report: stored?.report ?? null, stale: false } };
       }
+      ctx.log.info({ accountId, workspaceId, ms: Math.round(performance.now() - started), inputTokens, outputTokens, dropped }, 'release blockers: nothing kept');
       reply.status(502);
-      return { error: 'refused', message: `${providerName()} named work that is not in the check, so the answer was not kept. Try again.` };
+      return {
+        error: 'refused',
+        message: dropped > 0 ? `${providerName()} named work that is not in the check, so the answer was not kept. Try again.` : `${providerName()} did not answer in the expected form. Try again.`,
+      };
     } catch (err) {
       if (err instanceof AiRuntimeMissingError) {
         reply.status(503);
