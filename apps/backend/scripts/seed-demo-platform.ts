@@ -238,7 +238,7 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
       startMinute: 9 * 60,
       endMinute: 17 * 60 + 30,
     });
-    await call('PUT', `/api/workspaces/${platformWs}/auto-review`, { enabled: true, dailyCap: 30 });
+    await call('PUT', `/api/workspaces/${platformWs}/auto-review`, { enabled: true });
     await call('PUT', `/api/workspaces/${platformWs}/auto-review`, {
       autoPost: { enabled: true, scope: 'mine', kinds: { blockers: true, warnings: true, nits: false, questions: true, ciFailures: true, storyGaps: true }, autoVerdict: false, autoResolve: true },
     });
@@ -349,22 +349,6 @@ export async function seedDemoPlatform(c: PlatformSeedCtx): Promise<Record<strin
     out.settingEvents = events.length;
     // The auto-review switch's own clock follows its marker.
     await db.update(schema.workspaces).set({ autoReviewEnabledAt: new Date(nowMs - 84 * DAY) }).where(eq(schema.workspaces.id, platformWs)).execute();
-    // THE DAILY LIMIT TOAST (components/AutoReviewCapToast.tsx): Platform's daily limit sits at what
-    // today's auto reviews already used, so the header shows "limit reached" with "Change limit" (or
-    // "nearly used up" once four or more ran today). Today = since 00:00 UTC, so the count depends on
-    // the hour the seed runs; with none today the toast stays hidden. Written straight to the column:
-    // a route write would add a setting marker after the ones dated above.
-    {
-      const { getAutoReviewCandidates } = await import('../src/db/queries.js');
-      const d0 = new Date(nowMs);
-      const dayStartMs = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate());
-      const used = (await getAutoReviewCandidates(1, platformWs, { openedSinceMs: nowMs, dayStartMs, limit: 0 }))?.autoToday ?? 0;
-      if (used > 0) {
-        const cap = used >= 4 ? Math.max(used + 1, Math.floor(used / 0.8)) : used;
-        await db.update(schema.workspaces).set({ autoReviewDailyCap: cap }).where(eq(schema.workspaces.id, platformWs)).execute();
-      }
-      out.autoReviewToday = used;
-    }
 
     // ---- 4. the written summaries through their real routes ----
     for (const window of ['rolling_14', 'rolling_30', 'sprint']) {

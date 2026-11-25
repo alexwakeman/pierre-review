@@ -13,7 +13,8 @@ export default function Page(): JSX.Element {
         The <Ui>Dependencies</Ui> tab decides what Ensemble does with the pull requests that Dependabot, Renovate and other
         dependency bots open in the current workspace. Every switch is off until you turn it on, and each change saves
         at once. This page lists the settings; how the automation behaves day to day is in{' '}
-        <DocLink to="merging/dependency-automation">Dependency automation</DocLink>.
+        <DocLink to="merging/dependency-automation">Dependency automation</DocLink>. A repository&rsquo;s{' '}
+        <DocLink to="settings/team-policy">team policy</DocLink> can switch it off there, or trust only some bots.
       </p>
 
       <H2 id="what-ensemble-can-do">What Ensemble can do</H2>

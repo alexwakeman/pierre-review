@@ -139,7 +139,7 @@ export default function Contact(): JSX.Element {
         </div>
         <div className="tile c-facts rise">
           <ul className="c-list">
-            <li>Every feature, free for up to {FREE_TEAM_SIZE} people. No sign-in, no card, no repository limit.</li>
+            <li>Free for up to {FREE_TEAM_SIZE} people. No sign-in, no card, no repository limit.</li>
             <li>Runs only on your machine. No data is sent to our servers.</li>
             <li>
               Available only from npm: <code>{INSTALL_COMMAND}</code>.

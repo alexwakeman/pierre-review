@@ -27,6 +27,53 @@ no internals.
   opens its story in Ensemble, a pull request opens its tab. Press "Explain again" once to replace a report
   written before this change.
 
+## [1.0.81] - 2026-11-24
+
+### Changed
+
+- Maintenance release: no changes you would notice.
+
+## [1.0.80] - 2026-11-24
+
+### Added
+
+- Settings → AI spend: a daily quota beside the weekly one. Ensemble's automatic runs stop for the day
+  once they use it, and start again at midnight on your computer. The default is 10% of your week (the
+  weekly 50% over five working days). On an API key it is a share of the weekly budget.
+- A notification at 80% of the daily or weekly AI quota, with "Change quota". The card when a quota is
+  used has "Change quota" too.
+- Settings → Team policy: rules your team commits to a repository, in `.ensemble/policy.json`, apply to its
+  pull requests on every copy of Ensemble. They only switch things off: auto review, automatic posting, AI
+  approvals, auto fix, automatic pushes, resolving threads and dependency automation, or which bots dependency
+  automation trusts. Team policy needs a licence key or the 30-day evaluation. When work spans repositories
+  whose rules differ, such as Implement story's push, the strictest rule from each applies, and the workspace
+  can add one repository's rules on top. It can only add rules, never remove one.
+- Settings → Licence: paste a licence key; Ensemble checks it on your computer and never contacts us.
+- Licence activation at ensemble.ac/licence: swap the licence key from your purchase email for an Ensemble
+  licence key.
+- A licence reminder in the corner of the app when more than 3 people in your organisation post through
+  Ensemble and no licence key covers them. It never blocks anything; you can evaluate for 30 days or be
+  reminded in 7 days.
+- Reports → Download report: a PDF shaped like a slide deck on AI adoption and delivery, made on your
+  computer. It shows which AI coding tools were involved in merged pull requests, how many people used
+  each, and what changed against the period before, with an option to have AI write the commentary. It
+  names nobody: counts of 1 or 2 people show as "Fewer than 3".
+
+### Changed
+
+- The website and docs no longer say every feature is free: team policy needs a licence key. Everything
+  else stays free for individuals and for organisations where no more than 3 people use Ensemble.
+- Corevo Systems Limited's company number and registered office are in the website's footer and on the
+  legal pages.
+
+### Removed
+
+- The daily counts of automatic runs per workspace: auto reviews (the "auto reviews a day" setting),
+  thread checks, CI reviews, story checks, design diagrams and docs checks. The AI quotas are now the one
+  limit.
+- Open pull requests: the "auto reviews today" counter, and the "Auto reviews stopped for today" message.
+- Settings → AI spend: the separate 5-hour limit. It now follows the weekly quota.
+
 ## [1.0.79] - 2026-11-24
 
 ### Fixed

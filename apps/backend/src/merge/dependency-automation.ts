@@ -132,6 +132,7 @@ import {
 import { dbDepsClaimLedger, ownRebaseLineAt, updateDepsClaimLine } from './deps-claim-ledger.js';
 import { limnOriginForPr, orReader } from '../db/limn-actions.js';
 import type { WriteOrigin } from '../github/write-origin.js';
+import { dependencyActionAllowedByPolicy } from '../db/team-policy.js';
 
 const {
   autoMergePolicySkips,
@@ -608,6 +609,9 @@ export async function beginDependencyAction(
   opts: { ciGreen?: boolean } = {},
 ): Promise<ActionClaim | null> {
   if (depsHeldNow(pr.accountId, pr.id, pr.headSha, familyOfAction(action), now, action)) return null;
+  // THE TEAM POLICY (docs/TEAM-POLICY.md): the repo's policy may switch dependency automation off, or
+  // trust only some bots. Asked before any claim or write, so a refused PR leaves no row and no line.
+  if (!(await dependencyActionAllowedByPolicy(pr.accountId, pr.id))) return null;
   const target = { accountId: pr.accountId, prId: pr.id, owner: pr.owner, name: pr.name, headSha: pr.headSha, action };
   const read = await readDepsClaim(target, c.log, now, opts);
   if (read.awaitingCi) {

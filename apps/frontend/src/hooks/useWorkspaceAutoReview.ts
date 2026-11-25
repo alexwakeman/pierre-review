@@ -55,10 +55,8 @@ export function useSetWorkspaceAutoReview(workspaceId: number | null) {
       return api.setWorkspaceAutoReview(workspaceId, body);
     },
     onSuccess: (res) => {
-      // The PUT echo carries no `usage` (only the GET counts it): keep the cached one, then
-      // refetch so a switch on/off shows or drops the counter.
       const key = workspaceAutoReviewKey(res.workspaceId);
-      qc.setQueryData<WorkspaceAutoReviewResponse>(key, (prev) => ({ ...res, usage: prev?.usage ?? null }));
+      qc.setQueryData<WorkspaceAutoReviewResponse>(key, res);
       void qc.invalidateQueries({ queryKey: key });
     },
   });

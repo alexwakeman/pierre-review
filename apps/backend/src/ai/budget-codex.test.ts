@@ -244,7 +244,7 @@ describe('the decision and the header view on Codex', () => {
     });
     expect(s.mode).toBe('api_key');
     expect(s.overBudget).toBe(true);
-    expect(s.apiKey).toEqual({ weeklyUsd: 10, usedUsd: 11 });
+    expect(s.apiKey).toMatchObject({ weeklyUsd: 10, usedUsd: 11 });
   });
   it('a Claude decision without a provider is byte-for-byte what it was (no provider key)', () => {
     const s = decideAiBudget({ settings: on, route: 'none', reading: null, ledger: [], costs: NO_COSTS, nowMs: NOW });

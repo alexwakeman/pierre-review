@@ -326,9 +326,8 @@ export async function seedDemoAgentic(c: AgenticSeedCtx): Promise<Record<string,
   const nowMs = now.getTime();
   const { eq, and, inArray } = await import('drizzle-orm');
   // A succeeded review queues its design diagram, a real agent run. The designs here are written
-  // below instead, so the trigger's daily cap is zero for this process (read when it first loads).
-  const { config } = await import('../src/config.js');
-  (config as { sequenceDiagramDailyCap: number }).sequenceDiagramDailyCap = 0;
+  // below instead, so this process queues no automatic design.
+  (await import('../src/review/diagrams/trigger.js'))._stopAutomaticDiagramsForSeed();
   const { buildAgentContext } = await import('../src/review/agent-context.js');
   const base = buildAgentContext(quiet as never) as unknown as Record<string, unknown>;
   const at = (hoursAgo: number) => new Date(nowMs - hoursAgo * HOUR);

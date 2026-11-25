@@ -324,7 +324,7 @@ export function HowWeMeasureSection(): JSX.Element {
         <div className="tile hwm-txt hwm-start-list rise">
           <Marks
             items={[
-              `Every feature, free for up to ${FREE_TEAM_SIZE} people. No sign-in, no card, no repository limit.`,
+              `Free for up to ${FREE_TEAM_SIZE} people. No sign-in, no card, no repository limit.`,
               'Runs only on your machine. No data is sent to our servers.',
               <>
                 Available only from npm: <code>{INSTALL_COMMAND}</code>. Needs Node 22 or later.

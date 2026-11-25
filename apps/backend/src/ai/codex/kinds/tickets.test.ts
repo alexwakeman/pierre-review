@@ -539,7 +539,6 @@ describe('the spend-budget gate under Codex', () => {
       laneRoom: () => 5,
       held: () => false,
       automationUserIds: async () => new Set(),
-      dailyCap: 10,
     });
     expect(kinds).toEqual(['ci_review']);
     expect(asked).toEqual([[4, 'CI review']]);

@@ -25,8 +25,9 @@ import {
 //   ALL MET. When the latest succeeded check found EVERY acceptance criterion done (`criterionDone`),
 //   nothing re-checks it automatically — pushes, joins, merges and comments alike — until the story
 //   text changes (its criteria may then differ). A click (Re-check) still runs one.
-//   THE LIMITS. The workspace's daily cap (not for a ticket with a PR the reader owns) and the spend
-//   budget. NO per-ticket limit (removed 2026-11-09: it counted joins and story edits as pushes).
+//   THE LIMIT. The spend budget's daily and weekly quotas only. NO daily count (the workspace cap was
+//   removed 2026-11-24) and NO per-ticket limit (removed 2026-11-09: it counted joins and story edits
+//   as pushes).
 
 export interface TicketAutoChange {
   atMs: number;
@@ -62,7 +63,6 @@ export interface TicketAutoPlanInputs {
   changes: readonly TicketAutoChange[];
   // When the latest run of the ticket (any status) was queued or started; null = none.
   lastRunAtMs: number | null;
-  cap: { used: number; limit: number; exempt: boolean };
   // Free automatic check slots right now (null = not known; never a reason then).
   laneRoom: number | null;
   // A teammate's Ensemble holds the story check of every open member head (story-claim.ts, its memory):
@@ -87,11 +87,6 @@ export function latestAllMet(
 ): boolean {
   const criteria = assessment?.criteria ?? [];
   return criteria.length > 0 && criteria.every((c) => criterionDone(c.status));
-}
-
-/** The next 00:00 UTC after `nowMs` — when the daily cap resets. */
-export function nextUtcMidnightMs(nowMs: number): number {
-  return nowMs - (nowMs % 86_400_000) + 86_400_000;
 }
 
 /**
@@ -147,7 +142,6 @@ export function ticketAutoCheckPlan(inp: TicketAutoPlanInputs, nowMs: number): T
   // What holds it past the window is said first: a time that will not be kept is never promised.
   if (!inp.aiReady) return out('held', 'ai_not_ready');
   if (inp.overBudget) return out('held', 'over_budget');
-  if (!inp.cap.exempt && inp.cap.used >= inp.cap.limit) return out('held', 'daily_limit', nextUtcMidnightMs(nowMs));
   if (dueAtMs != null && nowMs < dueAtMs) return out('waiting', 'settling', dueAtMs);
   if (inp.laneRoom != null && inp.laneRoom <= 0) return out('waiting', 'lane_full');
   return out('due', null, dueAtMs);

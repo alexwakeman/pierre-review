@@ -28,6 +28,7 @@ import {
   resolveAiSubscription,
   reviewsPerDayFor,
   validateAiBudgetBody,
+  aiQuotaWarning,
   type AiBudgetSettings,
   type AiBudgetStatus,
   type AiUsageReading,
@@ -203,14 +204,15 @@ describe('decideAiBudget — Limn’s share of the week (subscription)', () => {
       [
         'pickFrom', 'reportedSubscription', 'reviewsPerDay', 'sharePct', 'subscription', 'subscriptionSource', 'usedSharePct', 'weekResetsAt', 'window',
         'fiveHourSharePct', 'fiveHourFollowsWeek', 'fiveHourUsedSharePct', 'fiveHourWindow', 'fiveHourResetsAt',
+        'daySharePct', 'dayUsedSharePct', 'dayResetsAt',
       ].sort(),
     );
   });
 
-  it('reviews a working day: share × allowance ÷ 5 ÷ cycle cost, diagrams counted only when drawn automatically', () => {
+  it('reviews a day: the DAILY share × weekly allowance ÷ cycle cost, diagrams counted only when drawn automatically', () => {
     const r = reading('max', NOW + D);
-    const s = on({ subscription: 'max20x' });
-    // Fallbacks: 5% × 1650 / 5 = 16.5 → ÷ 0.42 = 39.
+    const s = on({ subscription: 'max20x', daySharePct: 1 });
+    // Fallbacks: 1% × 1650 = 16.5 → ÷ 0.42 = 39.
     expect(decide({ settings: s, reading: r }).subscription!.reviewsPerDay).toBe(39);
     // With diagrams: ÷ 0.64 = 25.
     expect(decide({ settings: s, reading: r, costs: { ...NO_COSTS, autoDiagrams: true } }).subscription!.reviewsPerDay).toBe(25);
@@ -294,7 +296,8 @@ describe('decideAiBudget — Limn’s share of a 5-hour session (subscription)',
 
   it('⚠ API key: no 5-hour limit — a busy 5 hours under the weekly US$ never pauses', () => {
     const s = decide({
-      settings: on({ weeklyUsd: 25, fiveHourSharePct: 1 }),
+      // The daily quota at 100% of the week, so only the 5-hour rule is under test.
+      settings: on({ weeklyUsd: 25, fiveHourSharePct: 1, daySharePct: 100 }),
       route: 'api_key',
       reading: five(NOW + 2 * H),
       ledger: [{ atMs: NOW - H, usd: 20 }],
@@ -546,7 +549,7 @@ describe('reviewsPerDayFor / cycleCostUsd — never NaN, Infinity or negative', 
     expect(reviewsPerDayFor(5, Number.POSITIVE_INFINITY, 0.42)).toBeNull();
     expect(reviewsPerDayFor(0, 170, 0.42)).toBeNull();
     expect(reviewsPerDayFor(1, 170, 100)).toBe(0); // under one a day is 0, not a fraction
-    expect(reviewsPerDayFor(5, 170, 0.42)).toBe(4); // 8.5 / 5 / 0.42 = 4.05
+    expect(reviewsPerDayFor(1, 170, 0.42)).toBe(4); // 1.7 / 0.42 = 4.05
     // A zero, negative or non-finite mean falls back to the typical figure.
     expect(cycleCostUsd({ reviewMeanUsd: 0, diagramMeanUsd: Number.NaN, autoDiagrams: true })).toBeCloseTo(
       AI_CYCLE_COST_FALLBACKS.review + AI_CYCLE_COST_FALLBACKS.diagram,
@@ -575,15 +578,92 @@ describe('decideAiBudget — API key', () => {
       { atMs: NOW - 6 * D, usd: 15 },
       { atMs: NOW - 2 * H, usd: 10 },
     ];
-    const s = decide({ settings: on({ weeklyUsd: 25 }), route: 'api_key', reading: reading('pro', NOW + D), ledger });
+    const s = decide({ settings: on({ weeklyUsd: 25, daySharePct: 100 }), route: 'api_key', reading: reading('pro', NOW + D), ledger });
     expect(s.mode).toBe('api_key');
     expect(s.subscription).toBeNull();
-    expect(s.apiKey).toEqual({ weeklyUsd: 25, usedUsd: 25 });
+    expect(s.apiKey).toMatchObject({ weeklyUsd: 25, usedUsd: 25 });
     expect(s.overBudget).toBe(true);
     expect(s.reason).toBe('Ensemble has used its weekly budget.');
     // Dropping the oldest row ($15) brings it under: it rolls out 7 days after it was spent.
     expect(s.resumesAt).toBe(new Date(NOW - 6 * D + B.WEEK_MS).toISOString());
-    expect(decide({ settings: on({ weeklyUsd: 30 }), route: 'api_key', ledger }).overBudget).toBe(false);
+    expect(decide({ settings: on({ weeklyUsd: 30, daySharePct: 100 }), route: 'api_key', ledger }).overBudget).toBe(false);
+  });
+});
+
+describe('decideAiBudget — THE DAILY QUOTA (a share of the week since local midnight)', () => {
+  // Pro: week ≈ $170. At 10% a day: $17 a day. The weekly share is 50% here so only the day binds.
+  const today = { todayFromMs: NOW - 6 * H, tomorrowFromMs: NOW + 18 * H };
+  const pro = reading('pro', NOW + 3 * D);
+
+  it('pauses on the day alone, names it, and resumes at the next local midnight', () => {
+    const s = decide({
+      settings: on({ weekSharePct: 50, daySharePct: 10 }),
+      reading: pro,
+      ledger: [{ atMs: NOW - 8 * H, usd: 30 }, { atMs: NOW - H, usd: 17 }],
+      ...today,
+    });
+    // Yesterday's $30 counts toward the week, not today.
+    expect(s.subscription).toMatchObject({ daySharePct: 10, dayResetsAt: new Date(NOW + 18 * H).toISOString() });
+    expect(s.subscription!.dayUsedSharePct).toBeCloseTo((17 / 170) * 100, 2);
+    expect(s).toMatchObject({ overBudget: true, limitedBy: 'day', reason: "Ensemble has used today's quota." });
+    expect(s.resumesAt).toBe(new Date(NOW + 18 * H).toISOString());
+  });
+
+  it('under the day: no pause; the week still wins when both are over', () => {
+    const under = decide({ settings: on({ weekSharePct: 50, daySharePct: 10 }), reading: pro, ledger: [{ atMs: NOW - H, usd: 16 }], ...today });
+    expect(under.overBudget).toBe(false);
+    const both = decide({ settings: on({ weekSharePct: 5, daySharePct: 10 }), reading: pro, ledger: [{ atMs: NOW - H, usd: 20 }], ...today });
+    expect(both.limitedBy).toBe('week');
+  });
+
+  it('API key: the day is daySharePct of the weekly US$', () => {
+    const s = decide({ settings: on({ weeklyUsd: 50, daySharePct: 10 }), route: 'api_key', ledger: [{ atMs: NOW - H, usd: 5 }], ...today });
+    expect(s.apiKey).toMatchObject({ dailyUsd: 5, todayUsd: 5, dayResetsAt: new Date(NOW + 18 * H).toISOString() });
+    expect(s).toMatchObject({ overBudget: true, limitedBy: 'day', reason: "Ensemble has used today's budget." });
+    expect(decide({ settings: on({ weeklyUsd: 50, daySharePct: 10 }), route: 'api_key', ledger: [{ atMs: NOW - H, usd: 4 }], ...today }).overBudget).toBe(false);
+  });
+
+  it('Codex: today\'s tokens weighted against the week, inside the account\'s span', () => {
+    const r: AiUsageReading = { week: { utilization: 40, resetsAtMs: NOW + 3 * D, observedAtMs: NOW } };
+    const s = decide({
+      provider: 'codex',
+      settings: on({ weekSharePct: 50, daySharePct: 10 }),
+      reading: r,
+      ledger: [{ atMs: NOW - 2 * D, usd: 0, inputTokens: 500 }, { atMs: NOW - H, usd: 0, inputTokens: 300 }],
+      accountTokens: { week: { tokens: 1000, fromMs: NOW - 4 * D, inclusive: true, toMs: NOW }, fiveHour: null },
+      ...today,
+    });
+    // 300 ÷ 1000 × 40% = 12% of the week today; the week is 800 ÷ 1000 × 40% = 32%.
+    expect(s.subscription).toMatchObject({ dayUsedSharePct: 12, usedSharePct: 32 });
+    expect(s.limitedBy).toBe('day');
+  });
+
+  it('validates daySharePct 1–100', () => {
+    expect(validateAiBudgetBody({ daySharePct: 10 })).toBeNull();
+    expect(validateAiBudgetBody({ daySharePct: 0 })).not.toBeNull();
+    expect(validateAiBudgetBody({ daySharePct: 101 })).not.toBeNull();
+    expect(validateAiBudgetBody({ daySharePct: 2.5 })).not.toBeNull();
+  });
+});
+
+describe('aiQuotaWarning — the near-quota toast rule', () => {
+  // Built lazily: the module under test loads in beforeAll.
+  const sub = (over: Partial<NonNullable<AiBudgetStatus['subscription']>>): AiBudgetStatus => {
+    const base = decide({ settings: on({ weekSharePct: 50, daySharePct: 10 }), reading: reading('pro', NOW + 3 * D) });
+    return { ...base, subscription: { ...base.subscription!, ...over } };
+  };
+
+  it('null under 80% of both; near from 80%; reached at 100%, which wins over near', () => {
+    expect(aiQuotaWarning(sub({ usedSharePct: 39, dayUsedSharePct: 7.9 }))).toBeNull();
+    expect(aiQuotaWarning(sub({ usedSharePct: 10, dayUsedSharePct: 8 }))).toMatchObject({ level: 'near', which: 'day', usedOfQuotaPct: 80 });
+    expect(aiQuotaWarning(sub({ usedSharePct: 45, dayUsedSharePct: 10 }))).toMatchObject({ level: 'reached', which: 'day' });
+    expect(aiQuotaWarning(sub({ usedSharePct: 50, dayUsedSharePct: 9 }))).toMatchObject({ level: 'reached', which: 'week' });
+  });
+
+  it('nothing when the budget is off or the share is unknown', () => {
+    expect(aiQuotaWarning(null)).toBeNull();
+    expect(aiQuotaWarning({ ...sub({ dayUsedSharePct: 10 }), enabled: false })).toBeNull();
+    expect(aiQuotaWarning(sub({ usedSharePct: null, dayUsedSharePct: null }))).toBeNull();
   });
 });
 
@@ -727,7 +807,7 @@ describe('the gate', () => {
     mode: 'api_key',
     route: 'api_key',
     subscription: null,
-    apiKey: { weeklyUsd: 25, usedUsd: 0 },
+    apiKey: { weeklyUsd: 25, usedUsd: 0, dailyUsd: 2.5, todayUsd: 0, dayResetsAt: new Date(0).toISOString() },
     overBudget,
     limitedBy: overBudget ? 'week' : null,
     reason: null,
@@ -772,13 +852,13 @@ describe('validateAiBudgetBody', () => {
 
   it('old stored JSON (fiveHourPct / weekPct / dailyUsd) is tolerated and ignored on read', () => {
     const s = resolveAiBudgetSettings({ enabled: true, fiveHourPct: 70, weekPct: 80, dailyUsd: 3, weeklyUsd: 12 } as never);
-    expect(s).toEqual({ enabled: true, weekSharePct: 50, fiveHourSharePct: null, subscription: null, weeklyUsd: 12 });
+    expect(s).toEqual({ enabled: true, weekSharePct: 50, daySharePct: 10, fiveHourSharePct: null, subscription: null, weeklyUsd: 12 });
   });
 
   it('a NULL (never-set) row is ON at the default 50% share; only a stored enabled:false is off', () => {
     expect(AI_BUDGET_DEFAULTS.weekSharePct).toBe(50);
     for (const raw of [null, undefined, {}]) {
-      expect(resolveAiBudgetSettings(raw)).toEqual({ enabled: true, weekSharePct: 50, fiveHourSharePct: null, subscription: null, weeklyUsd: AI_BUDGET_DEFAULTS.weeklyUsd });
+      expect(resolveAiBudgetSettings(raw)).toEqual({ enabled: true, weekSharePct: 50, daySharePct: 10, fiveHourSharePct: null, subscription: null, weeklyUsd: AI_BUDGET_DEFAULTS.weeklyUsd });
     }
     expect(resolveAiBudgetSettings({ enabled: false }).enabled).toBe(false);
     // Junk is not a switch-off: only the literal false is.
@@ -833,9 +913,9 @@ describe('on the database', () => {
     await B.writeAiBudgetSettings(2, { weekSharePct: 7 });
     const after = await B.readAiBudgetSettings(2);
     expect(after.isDefault).toBe(false);
-    expect(after.settings).toEqual({ enabled: true, weeklyUsd: 12, weekSharePct: 7, fiveHourSharePct: null, subscription: null });
+    expect(after.settings).toEqual({ enabled: true, weeklyUsd: 12, weekSharePct: 7, daySharePct: 10, fiveHourSharePct: null, subscription: null });
     const raw = await db.select({ s: schema.accounts.aiBudgetSettings }).from(schema.accounts).where(eqId(2)).execute();
-    expect(Object.keys(raw[0].s).sort()).toEqual(['enabled', 'fiveHourSharePct', 'subscription', 'weekSharePct', 'weeklyUsd']);
+    expect(Object.keys(raw[0].s).sort()).toEqual(['daySharePct', 'enabled', 'fiveHourSharePct', 'subscription', 'weekSharePct', 'weeklyUsd']);
     // A separate 5-hour share, then cleared back to "same as weekly".
     await B.writeAiBudgetSettings(2, { fiveHourSharePct: 12 });
     expect((await B.readAiBudgetSettings(2)).settings.fiveHourSharePct).toBe(12);
@@ -853,7 +933,7 @@ describe('on the database', () => {
     ]).execute();
     const s = await B.aiBudgetStatus(2, { nowMs: NOW, probe: false });
     expect(s.mode).toBe('api_key');
-    expect(s.apiKey).toEqual({ weeklyUsd: 12, usedUsd: 13 });
+    expect(s.apiKey).toMatchObject({ weeklyUsd: 12, usedUsd: 13 });
     expect(s.overBudget).toBe(true);
   });
 

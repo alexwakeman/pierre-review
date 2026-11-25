@@ -245,6 +245,14 @@ describe('the wiring', () => {
       // A one-shot: it runs on any signed-in provider (Codex too).
       expect(s, n).toMatch(/<AiRunGate kind="complete">/);
     }
+    // Reports → Download report: "Write commentary with AI" shows only while AI is on, inside the one
+    // gate (no meter beside a checkbox); ticked, the Download press is the gate's Run control.
+    const dialog = activity(join('report', 'ReportDownloadDialog.tsx'));
+    expect(dialog).toMatch(/useAiCapabilities\(\)\.enabled/);
+    expect(dialog).toMatch(/aiReadyFor\(useAiCapabilities\(\), 'complete'\)/);
+    expect(dialog).toMatch(/<AiRunGate kind="complete" meter=\{false\}>/);
+    expect(dialog).toMatch(/<AiRunGate kind="complete">\{download\}<\/AiRunGate>/);
+    expect(dialog).toMatch(/data-ai-run=\{withAi \? '' : undefined\}/);
     for (const [n, kind] of [
       ['SprintAskPanel.tsx', 'complete'],
       ['DocsView.tsx', 'docs_build'],

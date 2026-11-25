@@ -119,6 +119,17 @@ ${BRANCH_COMMIT_FIELDS}
           }
         }
       }
+      # THE TEAM POLICY (docs/TEAM-POLICY.md): the file on the default branch, riding the snapshot so it
+      # costs no extra request. null = no such file (a positive statement, on a clean response).
+      teamPolicy: object(expression: "HEAD:.ensemble/policy.json") {
+        __typename
+        ... on Blob {
+          text
+          byteSize
+          isBinary
+          isTruncated
+        }
+      }
     }
   }
 `;
@@ -198,6 +209,14 @@ export interface DefaultBranchResponse {
         statusCheckRollup?: { state?: string | null } | null;
         history?: { nodes: (GqlBranchCommit | null)[] } | null;
       } | null;
+    } | null;
+    /** `.ensemble/policy.json` on the default branch; null = no such file. */
+    teamPolicy?: {
+      __typename?: string;
+      text?: string | null;
+      byteSize?: number | null;
+      isBinary?: boolean | null;
+      isTruncated?: boolean | null;
     } | null;
   } | null;
 }

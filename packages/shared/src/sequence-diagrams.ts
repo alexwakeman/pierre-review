@@ -216,13 +216,13 @@ export interface SequenceDiagramProgress {
 // Automatic draws of ONE subject (a PR, a story) per UTC day that count against the cap: its draw and
 // one redraw. A story whose pull requests changed (one joined, left) is drawn past it — that is a new
 // picture, not a redraw. (2026-10-28: one story was drawn 11 times and one PR 9 times in a day, and
-// the cap of 30 was gone by 14:52.) Redraws also never take the cap's last slots (`repeatRunLimit`).
+// the cap of 30 was gone by 14:52; that account-wide cap was removed 2026-11-24 — the AI spend budget's
+// quotas are the limit now.)
 export const SEQUENCE_DIAGRAM_SUBJECT_DAILY_DRAWS = 2;
 
 // Why a finished review did not draw a design that is out of date, said on the slot (`autoSkipped`):
-//   daily_limit   the account's automatic designs for today are used (resets 00:00 UTC)
 //   redraw_limit  this design was already redrawn today
-export type SequenceDiagramAutoSkip = 'daily_limit' | 'redraw_limit';
+export type SequenceDiagramAutoSkip = 'redraw_limit';
 
 // Why a run stored no design, decided by the SERVER (never the model).
 export type SequenceDiagramRefusal =

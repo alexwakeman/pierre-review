@@ -88,6 +88,7 @@ import {
 } from './replies-check-prompt.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
 import { automationAllowedForPr } from '../../db/external-repos.js';
+import { policyAllowsAutoReview } from '../../db/team-policy.js';
 
 // THE REPLIES PASS — the I/O half (docs/CLAUDE-REVIEW.md § The replies pass; the pure half is
 // replies-pass.ts). A cheap run that judges ONLY people's replies on Limn's own posted findings, at
@@ -522,8 +523,9 @@ export async function startRepliesCheck(ctx: AgentContext, a: StartRepliesCheckA
     // Over the spend budget, or every provider it would use is locked out: skipped, never queued. The
     // gate is asked about the providers the pass RUNS on, not the default.
     if (auto && !a.pressed) {
-      // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR.
-      if (!(await automationAllowedForPr(a.accountId, a.prId, ctx))) {
+      // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR. THE TEAM POLICY
+      // (docs/TEAM-POLICY.md): `"auto_review": false` stops the auto lane's replies pass too.
+      if (!(await automationAllowedForPr(a.accountId, a.prId, ctx)) || !(await policyAllowsAutoReview(ctx, a.accountId, a.prId))) {
         claimed.delete(key);
         return { outcome: 'disabled' };
       }
@@ -652,8 +654,13 @@ export async function startCoverCheck(ctx: AgentContext, a: StartCoverCheckArgs)
         claimed.delete(key);
         return { outcome: 'not_open' };
       }
-      // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR.
-      if (auto && !a.pressed && !(await automationAllowedForPr(a.accountId, a.prId, ctx))) {
+      // EXTERNAL REPOS (db/external-repos.ts): no automatic run on an external repo's PR; nor where the
+      // TEAM POLICY switches auto review off.
+      if (
+        auto &&
+        !a.pressed &&
+        (!(await automationAllowedForPr(a.accountId, a.prId, ctx)) || !(await policyAllowsAutoReview(ctx, a.accountId, a.prId)))
+      ) {
         claimed.delete(key);
         return { outcome: 'disabled' };
       }

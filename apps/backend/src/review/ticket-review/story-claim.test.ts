@@ -218,7 +218,6 @@ describe('the automatic plan', () => {
     overBudget: false,
     changes: [],
     lastRunAtMs: null,
-    cap: { used: 0, limit: 60, exempt: false },
     laneRoom: 5,
   };
   it('a teammate holding every head HOLDS the check (no time promised) and the wire names them', () => {

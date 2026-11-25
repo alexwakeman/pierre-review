@@ -2,7 +2,7 @@ import { useSeo } from '../lib/seo';
 import { seoFor } from '../lib/routes';
 import { Link } from '../router';
 import { SITE_NAME } from '../lib/site';
-import { LICENCE_BANDS } from '../lib/licence';
+import { LICENCE_BANDS, VENDOR_COMPANY_NUMBER, VENDOR_REGISTERED_OFFICE } from '../lib/licence';
 import {
   LEGAL_CONTROLLER,
   LEGAL_LINK,
@@ -60,8 +60,9 @@ export default function Privacy(): JSX.Element {
     >
       <LegalSection id="controller" heading="1. Who is responsible">
         <P>
-          The data controller is <T>{LEGAL_CONTROLLER}</T>, a company registered in the United
-          Kingdom, contactable at <Mail />. The same person who wrote the code answers the
+          The data controller is <T>{LEGAL_CONTROLLER}</T>, registered in England and Wales
+          (company number {VENDOR_COMPANY_NUMBER}, registered office {VENDOR_REGISTERED_OFFICE}),
+          contactable at <Mail />. The same person who wrote the code answers the
           email.
         </P>
         <P>
@@ -132,6 +133,12 @@ export default function Privacy(): JSX.Element {
             with them. We never see it.
           </li>
           <li>
+            <T>The AI adoption report is made on your computer</T> — the PDF from Reports →
+            Download report goes nowhere unless you send it. It names nobody: it counts how many
+            people used AI, never who. With AI commentary on, only each slide’s figures and the AI
+            tool names go to your AI provider, never repositories.
+          </li>
+          <li>
             <T>Optional integrations</T> you set up yourself — a Slack webhook, an issue
             tracker, SonarCloud — receive or send only what those features need, directly
             from your machine.
@@ -141,6 +148,13 @@ export default function Privacy(): JSX.Element {
             npm the first time {SITE_NAME} starts, and the comment-grading model from the model
             host the first time you ask for it. Those services see the request, as with any
             download.
+          </li>
+          <li>
+            <T>The licence check stays on your computer</T> — {SITE_NAME} checks a licence key
+            itself and counts, from that file, how many people post through {SITE_NAME} in your
+            repositories, to remind an organisation above the free limit. Nothing about it is sent
+            to us. Activating a licence on our website sends your Polar licence key and the
+            organisation name you type to us and to Polar, once, to make the key.
           </li>
         </UL>
         <P>

@@ -162,7 +162,8 @@ export default function Page(): JSX.Element {
         </li>
         <li>
           <b>Check the AI budget.</b> On an API key, there is no limit until you set a weekly budget in US dollars. On a
-          ChatGPT plan, Ensemble may use 50% of your week for its automatic runs until you change it. See{' '}
+          ChatGPT plan, Ensemble may use 10% of your week a day, and 50% a week, for its automatic
+          runs until you change it. See{' '}
           <DocLink to="settings/ai-usage-and-spend#spend-budget">The spend budget</DocLink>.
         </li>
         <li>

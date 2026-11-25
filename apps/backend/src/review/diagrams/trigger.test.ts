@@ -25,8 +25,9 @@ import {
 //   1. fingerprints: a PR's moves with its head only; a story's with any member's head or state,
 //      never with member order;
 //   2. the code gate goes through db/code-loc.ts (docs-only / lockfile-only ⇒ none);
-//   3. the trigger: no code ⇒ none, same head ⇒ none, a MANUAL and an AUTO review both draw, the
-//      daily cap holds, and a story diagram is queued only for a ticket with MORE THAN ONE PR;
+//   3. the trigger: no code ⇒ none, same head ⇒ none, a MANUAL and an AUTO review both draw, a
+//      subject is redrawn at most twice a day, and a story diagram is queued only for a ticket with
+//      MORE THAN ONE PR (no daily count across subjects — removed 2026-11-24);
 //   4. the agent's surface: no shell, no write tools; submit_design refuses an invalid design with
 //      what to fix;
 //   5. the prompt fences every untrusted string and describes a DESIGN grid (no Mermaid left).
@@ -78,13 +79,12 @@ describe('the code gate (db/code-loc.ts classifier)', () => {
     expect(diffHasCode([])).toBe(false);
   });
   it('the skip rule', () => {
-    const base = { code: 'yes' as const, drawnAtFingerprint: false, inFlight: false, usedToday: 0, dailyCap: 5 };
+    const base = { code: 'yes' as const, drawnAtFingerprint: false, inFlight: false };
     expect(diagramSkipReason(base)).toBeNull();
     expect(diagramSkipReason({ ...base, code: 'unknown' })).toBeNull();
     expect(diagramSkipReason({ ...base, code: 'no' })).toBe('no_code');
     expect(diagramSkipReason({ ...base, drawnAtFingerprint: true })).toBe('drawn');
     expect(diagramSkipReason({ ...base, inFlight: true })).toBe('in_flight');
-    expect(diagramSkipReason({ ...base, usedToday: 5 })).toBe('daily_cap');
     expect(diagramSkipReason({ ...base, memberCount: 1 })).toBe('too_few_prs');
     expect(diagramSkipReason({ ...base, memberCount: 2 })).toBeNull();
   });
@@ -124,7 +124,6 @@ function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; 
       changedFiles: 1,
     }),
     exists: async (_c, _a, kind, subject, fp) => drawn.has(`${kind}|${subject}|${fp}`),
-    usedToday: async () => 0,
     // Every draw in this fake is today's.
     history: async (_c, _a, kind, subject) => {
       const rows = queued.filter((q) => q.kind === kind && q.subject === subject);
@@ -149,7 +148,6 @@ function fakeDeps(over: Partial<TriggerDeps> & { files?: StoredPrFile[] | null; 
       refused.push({ kind: a.kind, subject: a.subject });
       drawn.add(`${a.kind}|${a.subject}|${a.fingerprint}`);
     },
-    dailyCap: 30,
     subjectCap: 2,
     enabled: true,
     ...over,
@@ -257,14 +255,6 @@ describe('maybeDrawDiagramsAfterReview', () => {
     expect(queued.map((q) => q.kind)).toEqual(['pr']);
   });
 
-  it('the daily cap counts what this call queued', async () => {
-    const { deps, queued } = fakeDeps({ usedToday: async () => 29 });
-    const r = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, deps);
-    expect(r.pr).toBe('queued');
-    expect(r.stories[0]!.outcome).toBe('daily_cap');
-    expect(queued).toHaveLength(1);
-  });
-
   it('never throws, and is off when agentic AI is off', async () => {
     const { deps } = fakeDeps({ prContext: async () => Promise.reject(new Error('db down')) });
     await expect(maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, deps)).resolves.toBeDefined();
@@ -309,33 +299,32 @@ describe('redraws are limited, first draws are not starved (BMD-1086)', () => {
     expect(queued.filter((q) => q.kind === 'story')).toHaveLength(3);
   });
 
-  it("the busy ticket's redraws leave the cap's last slots for BMD-1086's first story design", async () => {
-    // 25 of 30 used today (the busy ticket's redraws): a redraw may not take the last 5.
+  it("the busy ticket's redraws are limited; BMD-1086's first story design is still drawn", async () => {
+    // The busy ticket and its PR were drawn twice today already: a redraw is refused, a first draw is not.
     const tickets: Record<number, { ident: string; key: string }> = {
       7: { ident: BUSY, key: 'BMD-1083' },
       20: { ident: IDENT, key: 'BMD-1086' },
     };
-    const { deps, queued } = fakeDeps({
-      usedToday: async () => 25 + queued.length,
+    const { deps } = fakeDeps({
       history: async (_c, _a, kind, subject) =>
         subject === BUSY || subject === '7'
-          ? { drawsToday: 1, drawnBefore: true, lastMemberIds: kind === 'story' ? [7, 8] : null }
+          ? { drawsToday: 2, drawnBefore: true, lastMemberIds: kind === 'story' ? [7, 8] : null }
           : { drawsToday: 0, drawnBefore: false, lastMemberIds: null },
       prContext: async (_c, _a, prId) => ({ prId, repoId: 1, owner: 'acme', name: 'api', number: prId, title: 't', state: 'open', headSha: head(prId), files: code(), additions: 1, deletions: 0, changedFiles: 1 }),
       ticketsForPr: async (_a, prId) => [tickets[prId]!],
       storyMembers: async (_c, _a, ident) => (ident === BUSY ? [member(7), member(8, 'web')] : [member(20), member(21, 'web')]),
     });
     const busy = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 7, reviewTrigger: 'auto' }, deps);
-    expect([busy.pr, busy.stories[0]!.outcome]).toEqual(['daily_cap', 'daily_cap']);
+    expect([busy.pr, busy.stories[0]!.outcome]).toEqual(['redraw_limit', 'redraw_limit']);
     const story = await maybeDrawDiagramsAfterReview(ctx, { accountId: 1, prId: 20, reviewTrigger: 'auto' }, deps);
     expect([story.pr, story.stories[0]!.outcome]).toEqual(['queued', 'queued']);
     // The skip is said, not silent: the slot reads it while those inputs are live, and it is logged.
     const { diagramAutoSkip, logTriggerLimits } = await import('./trigger.js');
-    expect(diagramAutoSkip(1, 'story', BUSY, storyDiagramFingerprint(BUSY, [member(7), member(8, 'web')]))).toBe('daily_limit');
+    expect(diagramAutoSkip(1, 'story', BUSY, storyDiagramFingerprint(BUSY, [member(7), member(8, 'web')]))).toBe('redraw_limit');
     expect(diagramAutoSkip(1, 'story', BUSY, 'another fingerprint')).toBeNull();
     const info = vi.fn();
     logTriggerLimits({ log: { info } } as unknown as AgentContext, 7, busy);
-    expect(info).toHaveBeenCalledWith(expect.stringContaining('daily_cap'));
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('redraw_limit'));
   });
 
   it("a ticket review draws the story a PR review missed (the PR's ticket link landed after its review)", async () => {

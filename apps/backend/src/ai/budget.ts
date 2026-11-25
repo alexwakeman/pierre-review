@@ -44,6 +44,9 @@
 // codex ai_usage tokens ÷ the account's tokens in that window (`account/usage/read`) × the window's
 // whole-percent usedPercent. Same gate, same settings, percentages only. An API key is weekly US$.
 //
+// THE DAILY QUOTA: the same fold over [local midnight, next local midnight) — this machine's clock
+// (the server IS the reader's machine). It replaced every per-workspace daily COUNT of runs.
+//
 // One budget per ACCOUNT (= per machine), never per workspace.
 import { and, eq, gte, inArray } from 'drizzle-orm';
 import {
@@ -361,6 +364,13 @@ function localMidnightMs(nowMs: number): number {
   return d.getTime();
 }
 
+/** The next local midnight (the daily quota's reset); DST-safe (a calendar day, not 24 h). */
+function nextLocalMidnightMs(nowMs: number): number {
+  const d = new Date(localMidnightMs(nowMs));
+  d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
 export interface AiBudgetSnapshot {
   settings: AiBudgetSettings;
   isDefault: boolean;
@@ -398,17 +408,29 @@ export async function aiBudgetSnapshot(accountId: number, opts: AiBudgetStatusOp
       : Promise.resolve(NO_CYCLE_COSTS),
   ]);
   const providerId = provider.id;
+  const todayFromMs = localMidnightMs(nowMs);
   return {
     settings,
     isDefault,
-    status: decideAiBudget({ settings, route, reading, ledger, costs, nowMs, provider: providerId, accountTokens }),
+    status: decideAiBudget({
+      settings,
+      route,
+      reading,
+      ledger,
+      costs,
+      nowMs,
+      todayFromMs,
+      tomorrowFromMs: nextLocalMidnightMs(nowMs),
+      provider: providerId,
+      accountTokens,
+    }),
     usage: aiUsageView({
       settings,
       route,
       reading,
       ledger,
       nowMs,
-      todayFromMs: localMidnightMs(nowMs),
+      todayFromMs,
       provider: providerId,
       accountTokens,
     }),

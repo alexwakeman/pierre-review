@@ -7,7 +7,7 @@ runtime code with the timeline SPA — and served at `/` by the small site servi
 **Ensemble is local-only and 100% free.** There is no hosted app, no sign-in and no paid tier,
 so the site's call to action is the npm command (`npx ensemble-review`). There is no hosted demo:
 the product pictures are clickable HTML mocks (below). The one limit — free for individuals and for
-organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Every feature, free" tiers, in the closing
+organisations where no more than three people use it; more users than that need a licence — is stated in the home page's "Free for small teams" tiers, in the closing
 block on every page, on `/contact` and in `/terms`, always from `FREE_TEAM_SIZE` in
 `src/lib/site.ts` (which mirrors the Ensemble License at the repository root).
 

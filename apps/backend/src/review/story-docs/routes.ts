@@ -13,7 +13,7 @@ import type { AgentContext } from '../agent-context.js';
 import { AGENTIC_AI_ENABLED } from '../claude-review/manager.js';
 import { utcDayStartMs } from '../diagrams/trigger.js';
 import { currentStoryDocsFingerprint, liveStoryDocs, startStoryDocs, storyDocsClaim } from './manager.js';
-import { countStoryDocsRunsSince, latestStoryDocsRun, latestSucceededStoryDocsRun, toStoryDocsRun } from './persist.js';
+import { latestStoryDocsRun, latestSucceededStoryDocsRun, toStoryDocsRun } from './persist.js';
 import { providerName } from '../../ai/prompt-tools.js';
 
 // CHECK A STORY AGAINST THE DOCS (CORE, free, LOCAL ONLY) — docs/API.md § Check a story against the
@@ -130,9 +130,6 @@ export function registerStoryDocsRoutes(app: FastifyInstance, ctx: AgentContext)
       }
       const auth = ctx.llm.detectAuth('story_docs');
       if (auth.status === 'none') return fail(reply, 400, 'NoClaudeAuth', auth.message ?? `No ${providerName()} credential found.`);
-      if ((await countStoryDocsRunsSince(ctx, accountId, utcDayStartMs(Date.now()))) >= config.storyDocsDailyCap) {
-        return { outcome: 'refused', runId: null, refusal: 'daily_cap' };
-      }
       const r = await startStoryDocs(ctx, { accountId, workspaceId, inputs: live.inputs, libraryHash: live.libraryHash });
       if (r.outcome === 'disabled') return featureOff(reply);
       if (r.outcome === 'busy') return fail(reply, 409, 'Busy', 'Too many docs checks are waiting. Try again once some finish.');

@@ -135,7 +135,7 @@ export default function Page(): JSX.Element {
         rows={[
           { _key: 'w', k: 'Judges', r: "Replies on your Ensemble's own findings", c: "Everyone else's threads: people, review bots, teammates' copies of Ensemble" },
           { _key: 's', k: 'Starts', r: 'A reply on an Ensemble finding (by itself)', c: 'A new comment in an open thread; or Check threads' },
-          { _key: 'c', k: 'Daily limit (automatic)', r: '5 per pull request', c: '30 per workspace' },
+          { _key: 'c', k: 'Daily limit (automatic)', r: '5 per pull request', c: 'No count; the daily AI quota' },
           { _key: 'p', k: 'Posts', r: 'With posting on: one pushback per thread, or an acknowledgement and a resolve', c: 'Nothing' },
           { _key: 'v', k: 'Verdict', r: 'Can request changes or approve', c: 'Changes no verdict by itself' },
         ]}

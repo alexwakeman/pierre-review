@@ -480,6 +480,17 @@ export function RequestChangesIcon({ size = 13, ...rest }: IconProps): JSX.Eleme
   );
 }
 
+// A bare bang — "look at this" (the near-quota toast; it may bounce). No triangle: it sits in a
+// round toast circle, where a triangle reads too small.
+export function ExclaimIcon({ size = 13, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <line x1="12" y1="4.5" x2="12" y2="14.5" />
+      <circle cx="12" cy="19" r="1.3" fill="currentColor" stroke="none" />
+    </IconShell>
+  );
+}
+
 // Triangle + bang — a warning. Replaces ⚠, which renders as a FULL-COLOUR EMOJI on several
 // platforms (the variation-selector default), making it the loudest thing on the screen.
 export function WarningIcon({ size = 13, ...rest }: IconProps): JSX.Element {
@@ -1333,6 +1344,17 @@ export function UploadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
     <IconShell size={size} {...rest}>
       <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
       <polyline points="7.5 8.5 12 4 16.5 8.5" />
+      <line x1="12" y1="4" x2="12" y2="15" />
+    </IconShell>
+  );
+}
+
+// An arrow down into a tray — saving a file (Reports → Download report).
+export function DownloadIcon({ size = 14, ...rest }: IconProps): JSX.Element {
+  return (
+    <IconShell size={size} {...rest}>
+      <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" />
+      <polyline points="7.5 10.5 12 15 16.5 10.5" />
       <line x1="12" y1="4" x2="12" y2="15" />
     </IconShell>
   );

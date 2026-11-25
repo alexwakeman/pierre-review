@@ -4,8 +4,8 @@
 //      is not even considered.
 //   2. A re-run waits for the grace window (2 quiet minutes after the push Limn SAW, `head_seen_at`),
 //      then queues as 'cascade'.
-//   3. ⚠ The per-workspace daily cap counts cascade runs (rows written when queued); a ticket with a
-//      PR the reader owns is exempt.
+//   3. ⚠ No daily count holds a cascade run (the per-workspace cap was removed 2026-11-24; the AI
+//      budget is the only limit).
 //   4. A FIRST automatic run needs a member opened after the switch-on, or the kick — and waits too.
 //   5. ⚠ More than TICKET_REVIEW_MAX_PRS (30) members refuses `too_many_prs` with the count; 30 runs.
 //   6. ⚠ A ticket whose run is queued or running WAITS (a member that moves meanwhile is re-judged
@@ -81,7 +81,6 @@ const linkedAt: Record<string, number> = {};
 const NOW = Date.now();
 const T0 = NOW % 86_400_000 > 23 * 3_600_000 ? NOW - 3_600_000 : NOW;
 const ENABLED_AT = T0 - 24 * 3_600_000;
-let dailyCap = 20;
 const enqueued: Array<{ ident: string; trigger: string }> = [];
 
 async function addPr(tag: string, repoId: number, openedAt: Date): Promise<void> {
@@ -158,7 +157,6 @@ const deps = (): import('./sweep.js').TicketSweepDeps => ({
   },
   laneRoom: () => 20,
   held: () => false,
-  dailyCap,
 });
 
 /** The fake lane never runs what it queued: end those rows, as a finished run would. */
@@ -284,30 +282,17 @@ describe('ticket review sweep', () => {
     expect(rows.map((x) => x.cause)).toEqual(['pushed', 'pushed']);
   });
 
-  it('⚠ the daily cap counts those cascade runs', async () => {
+  it('⚠ no daily count holds a cascade run', async () => {
     expect(await persist.countAutoTicketReviewsSince(ctx, 1, ws, NOW - 3_600_000)).toBe(2);
-    dailyCap = 2;
     await push('z', 'h_z2', T0 + 8 * 60_000);
     await sweep.runTicketReviewSweep(ctx, T0 + 8 * 60_000, deps());
-    const capped = await sweep.runTicketReviewSweep(ctx, T0 + 15 * 60_000, deps());
-    expect(capped.considered).toContain(T3);
-    expect(capped.queued).toEqual([]);
-    // ⚠ A ticket with a PR the READER owns is never held by the cap.
-    const { eq } = await import('drizzle-orm');
-    const [me] = await db.insert(schema.users).values({ githubLogin: 'me-cap', githubNodeId: 'U_me_cap' }).returning().execute();
-    await db.update(schema.pullRequests).set({ authorId: me.id }).where(eq(schema.pullRequests.id, pr.y!)).execute();
-    const mine = await sweep.runTicketReviewSweep(ctx, T0 + 15 * 60_000 + 1, { ...deps(), readerUserId: async () => me.id });
-    expect(mine.queued.map((q) => q.ident)).toEqual([T3]);
-    await db.update(schema.pullRequests).set({ authorId: null }).where(eq(schema.pullRequests.id, pr.y!)).execute();
+    // Past what the old cap of 2 allowed: T3 re-runs all the same.
+    const past = await sweep.runTicketReviewSweep(ctx, T0 + 15 * 60_000, deps());
+    expect(past.queued.map((q) => q.ident)).toEqual([T3]);
     await endQueuedRuns();
-    // Not the reader's: held until the cap has room.
     await push('z', 'h_z2b', T0 + 15 * 60_000);
-    const held = await sweep.runTicketReviewSweep(ctx, T0 + 17 * 60_000 + 30_000, deps());
-    expect(held.queued).toEqual([]);
-    dailyCap = 4;
-    const room = await sweep.runTicketReviewSweep(ctx, T0 + 18 * 60_000, deps());
-    expect(room.queued.map((q) => q.ident)).toEqual([T3]);
-    dailyCap = 20;
+    const again = await sweep.runTicketReviewSweep(ctx, T0 + 18 * 60_000, deps());
+    expect(again.queued.map((q) => q.ident)).toEqual([T3]);
   });
 
   it('a first run needs a member opened after the switch-on, or the kick', async () => {
@@ -465,7 +450,6 @@ describe('the grace window and no per-ticket limit (BMD-1175)', () => {
   it('PRs linked minutes apart get ONE first check, with all of them', async () => {
     await endQueuedRuns();
     sweep._resetTicketSweepForTest();
-    dailyCap = 500;
     // Baseline: whatever a reset re-reads is settled and ended, so only this ticket moves from here.
     await sweep.runTicketReviewSweep(ctx, at(-30), deps());
     await sweep.runTicketReviewSweep(ctx, at(-20), deps());
@@ -538,7 +522,6 @@ describe('the grace window and no per-ticket limit (BMD-1175)', () => {
       if (first < 0 && r.queued.some((q) => q.ident === BUSY)) first = m;
     }
     expect(first).toBe(80);
-    dailyCap = 20;
   });
 
   it('switching auto review off everywhere drops every watch', async () => {
@@ -647,8 +630,6 @@ describe("a person's comment the latest check did not see", () => {
         overBudget: false,
         laneRoom: 20,
         held: false,
-        dailyCap: 500,
-        readerUserId: null,
       },
       nowMs,
     );
@@ -703,7 +684,6 @@ describe("a person's comment the latest check did not see", () => {
 describe("the story claim (story-claim.ts, docs/TEAM-REVIEW.md § The story check's own claim)", () => {
   it('⚠ a teammate holding every head ⇒ nothing queued and the ticket waits; a claim that did not queue is settled', async () => {
     await endQueuedRuns();
-    dailyCap = 500;
     const tick = T0 + 45 * 60_000;
     await push('x', 'h_x_story', tick - 3 * 60_000);
     const targets: Array<{ ident: string; heads: ReadonlyArray<{ headSha: string }> }> = [];

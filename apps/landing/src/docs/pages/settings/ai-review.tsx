@@ -26,7 +26,8 @@ export default function Page(): JSX.Element {
         The <Ui>AI review</Ui> tab holds two settings for the current workspace: <Ui>Auto review</Ui>, which reviews
         new pull requests without anyone pressing a button, and <Ui>Related repos</Ui>, which lets a review read code
         in the repositories a change depends on. Each workspace has its own settings. What a review does is explained
-        in <DocLink to="ai-review/overview">AI review</DocLink>; this page lists the switches.
+        in <DocLink to="ai-review/overview">AI review</DocLink>; this page lists the switches. A repository&rsquo;s{' '}
+        <DocLink to="settings/team-policy">team policy</DocLink> can switch some of them off for its pull requests.
       </p>
 
       <H2 id="auto-review">Auto review</H2>
@@ -45,8 +46,9 @@ export default function Page(): JSX.Element {
           together wait until the pull request has been quiet for 5 minutes (20 minutes at most).
         </li>
         <li>
-          Re-reviews count towards the daily limit, <Ui>auto reviews a day (UTC)</Ui>: 20 unless you change it (1 to
-          500). The rest wait for the next day. Reviews you start yourself are not limited.
+          Auto runs stop for the day when Ensemble&rsquo;s daily AI quota is used. <Ui>Change quota</Ui> opens{' '}
+          <DocLink to="settings/ai-usage-and-spend#spend-budget">AI spend</DocLink>. Reviews you start yourself are
+          not limited.
         </li>
       </ul>
       <p>

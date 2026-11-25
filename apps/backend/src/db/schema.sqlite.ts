@@ -138,6 +138,15 @@ export const accounts = sqliteTable('accounts', {
   // Stripe customer id (cus_…), captured from checkout.session.completed so later
   // subscription webhooks can resolve the account. Null until first checkout.
   stripeCustomerId: text('stripe_customer_id'),
+  // THE COMMERCIAL LICENCE (licence/, migration 0218; docs/LICENSING.md). `licenceKey` is the signed
+  // key the reader pasted into Settings → Licence, stored as typed and verified OFFLINE on every read
+  // (licence/key.ts) — never sent anywhere. `licenceEvaluationEndsAt`: the end of the ONE 30-day
+  // evaluation the reader may start when the reminder first shows; `licenceReminderSnoozedUntil`:
+  // "Remind me later" after it. Both quiet the reminder; the key and the evaluation also unlock the
+  // organisation features (team policy, `orgFeaturesUnlockedFor`). The count never blocks anything.
+  licenceKey: text('licence_key'),
+  licenceEvaluationEndsAt: integer('licence_evaluation_ends_at', { mode: 'timestamp' }),
+  licenceReminderSnoozedUntil: integer('licence_reminder_snoozed_until', { mode: 'timestamp' }),
   // Per-account monthly SUMMARY-AI credit allowance override (metered cloud plan). null =
   // use the plan default (2,500 for a paid cloud account); local/unlimited accounts ignore
   // it entirely. A forward hook for top-ups / alternate plans without another migration.
@@ -514,6 +523,17 @@ export const pullRequests = sqliteTable(
     // Canonical advisory ids named by the vendor-selected fields; NULL when there are none.
     advisoryIds: text('advisory_ids', { mode: 'json' }).$type<string[]>(),
     securityCheckedAt: integer('security_checked_at', { mode: 'timestamp' }),
+    // ---- AI VENDOR SIGNALS (migration 0219; docs/AI-ADOPTION-REPORT.md § Detection) — the AI coding
+    // tools the PR's OWN fields name (title, FULL bodyText, markdown body when fetched, branch,
+    // author), read at sync by shared `detectAiPrSignals` (sync/upsert.ts `aiPrColumnsFor`). JSON
+    // `[{vendor, source}]` — VERDICTS ONLY, never text (lean storage). Three-state like the security
+    // columns: written only from a response that carried `bodyText`; NULL = never scanned, `[]` =
+    // scanned clean. `ai_signals_version` is the detector version of this scan AND of the commits'
+    // scan in the same payload; below `AI_SIGNALS_VERSION` (or NULL) is the backfill's worklist
+    // (sync/backfill-ai-signals.ts). Read ONLY through db/ai-signals.ts `getPrAiSignals`.
+    aiSignals: text('ai_signals'),
+    aiSignalsVersion: integer('ai_signals_version'),
+    aiSignalsCheckedAt: integer('ai_signals_checked_at', { mode: 'timestamp' }),
     // ---- GITHUB ISSUES LINKS (migration 0089; docs/TRACKERS.md § GitHub Issues) ----
     // The issues this PR CLOSES, as GitHub states them (`closingIssuesReferences`: "Fixes #12",
     // "Closes owner/repo#12", or a Development-panel link), as lower-cased `owner/repo#12` keys in
@@ -810,6 +830,11 @@ export const commits = sqliteTable(
     // card (migration 0072 / pg 0059).
     messageHeadline: text('message_headline'),
     committedAt: integer('committed_at', { mode: 'timestamp' }).notNull(),
+    // AI VENDOR SIGNALS from this commit's author / committer (login, name, email) and FULL message
+    // (trailers, "Generated with X"), read at sync by shared `detectAiCommitSignals` (migration 0219).
+    // JSON `[{vendor, source}]`, verdicts only: the message is still stored only on PERSIST_BODIES
+    // and names / emails never are. NULL = not scanned, `[]` = scanned clean.
+    aiSignals: text('ai_signals'),
     // A commit Limn made (an AI Fix, a conflict resolution, a branch update, an Implement push;
     // migration 0180): `authorId` holds the poster's `limn:<login>` bot and the person is HERE.
     limnPushedByUserId: integer('limn_pushed_by_user_id').references(() => users.id),
@@ -2617,10 +2642,8 @@ export const workspaces = sqliteTable(
     // (coding/ai-fix/auto-fix.ts); the ONE writer is `setWorkspaceAutoReview`. It only matters
     // while auto review is on.
     autoFixEnabled: integer('auto_fix_enabled', { mode: 'boolean' }).notNull().default(false),
-    // AUTO REVIEW DAILY CAP (migration 0085 / pg 0072): auto runs this workspace may start per UTC
-    // day. OVERRIDES ONLY — NULL = the default `AUTO_REVIEW_DAILY_CAP` (20), resolved through
-    // `resolveAutoReviewDailyCap`; the route bounds it 1..500. The ONE writer is
-    // `setWorkspaceAutoReview`, the reader the sweeper's roster (`listAutoReviewWorkspaces`).
+    // AUTO REVIEW DAILY CAP (migration 0085 / pg 0072). ⚠ DORMANT since 2026-11-24: never read or
+    // written — the daily count was removed and the AI spend budget's quotas are the limit. Kept.
     autoReviewDailyCap: integer('auto_review_daily_cap'),
     // AUTO-POSTING (migration 0087 / pg 0074): may a SUCCEEDED AUTO review (and an auto ticket
     // review) post its output to GitHub without a click? NULL/false = OFF — the default for every
@@ -6359,6 +6382,67 @@ export const releaseBlockerReports = sqliteTable(
       name: 'release_blocker_reports_workspace_account_fk',
       columns: [t.workspaceId, t.accountId],
       foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// THE TEAM POLICY (migration 0220; docs/TEAM-POLICY.md). ONE row per (account, repo): the
+// `.ensemble/policy.json` read from the repo's DEFAULT BRANCH by the default-branch snapshot. No row =
+// GitHub said there is no file (or it was never read). ⚠ The row is DELETED only on a positive
+// statement from GitHub that the file is absent; a failed read leaves it as it was. Whether a copy
+// APPLIES it is decided on read (shared `orgFeaturesUnlocked`), never stored.
+export const repoTeamPolicies = sqliteTable(
+  'repo_team_policies',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    repoId: integer('repo_id').notNull(),
+    /** Shared `TeamPolicy` when the file parsed; null when it did not. */
+    policyJson: text('policy_json', { mode: 'json' }).$type<unknown>(),
+    /** The parser's problems, in words; [] when the file parsed. */
+    errorsJson: text('errors_json', { mode: 'json' }).$type<string[]>().notNull(),
+    /** The default-branch commit the file was read at. */
+    commitOid: text('commit_oid'),
+    readAt: integer('read_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountRepoUx: uniqueIndex('repo_team_policies_account_repo').on(t.accountId, t.repoId),
+    repoAccountFk: foreignKey({
+      name: 'repo_team_policies_repo_account_fk',
+      columns: [t.repoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
+    }).onDelete('cascade'),
+  }),
+);
+
+// WHEN REPOSITORIES' TEAM POLICIES DIFFER (migration 0221; docs/TEAM-POLICY.md § Different rules). ONE row
+// per (account, workspace): the repo whose rules the workspace ADDS to the strictest rule from each when the
+// repos a piece of work spans clash (it can only tighten). No row = nothing added. Both ids are guarded by named
+// composite FKs (the repo id arrives in a request BODY); deleting the repo or the workspace drops the row.
+export const workspacePolicyChoices = sqliteTable(
+  'workspace_policy_choices',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: integer('account_id')
+      .notNull()
+      .references(() => accounts.id, { onDelete: 'cascade' }),
+    workspaceId: integer('workspace_id').notNull(),
+    clashRepoId: integer('clash_repo_id').notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+  },
+  (t) => ({
+    accountWsUx: uniqueIndex('workspace_policy_choices_account_ws').on(t.accountId, t.workspaceId),
+    workspaceAccountFk: foreignKey({
+      name: 'workspace_policy_choices_workspace_account_fk',
+      columns: [t.workspaceId, t.accountId],
+      foreignColumns: [workspaces.id, workspaces.accountId],
+    }).onDelete('cascade'),
+    repoAccountFk: foreignKey({
+      name: 'workspace_policy_choices_repo_account_fk',
+      columns: [t.clashRepoId, t.accountId],
+      foreignColumns: [repos.id, repos.accountId],
     }).onDelete('cascade'),
   }),
 );

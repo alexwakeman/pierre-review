@@ -30,17 +30,10 @@ import { dateTime } from '../../lib/ui.js';
 import { SectionShell, CheckInput, RadioInput } from './ui.js';
 import { SaveState, useAutoSave } from './autosave.js';
 
-const CAP_MIN = 1;
-const CAP_MAX = 500;
-/** The typed cap → an integer in range, or null when it is not one. */
-function parseCap(text: string): number | null {
-  const t = text.trim();
-  if (!/^\d+$/.test(t)) return null;
-  const n = Number(t);
-  return n >= CAP_MIN && n <= CAP_MAX ? n : null;
-}
 import { ScopePendingSection, useSettingsWorkspace } from './workspaceScope.js';
 import { Select } from '../ui/index.js';
+import { useSettingsModal } from '../../store/settingsModal.js';
+import { TeamPolicyNote } from './TeamPolicySection.js';
 
 /**
  * AUTO CLAUDE REVIEW for the currently-selected workspace — CORE, on the workspace row (migration
@@ -61,10 +54,8 @@ import { Select } from '../ui/index.js';
  * it is DIMMED and inert while auto review is off; its value is kept, never cleared, so turning
  * auto review back on restores it.
  *
- * THE DAILY CAP (`dailyCap`, `workspaces.auto_review_daily_cap`, migration 0085 / pg 0072) is an
- * integer 1..500 typed beside the switch; the server stores it as an override (20 = the default).
- * A text box with a numeric keypad, not `type="number"`, so a half-typed value is visible and an
- * invalid one is not saved and says why instead of being clamped silently.
+ * NO DAILY COUNT (removed 2026-11-24): auto runs stop when the AI spend budget's daily or weekly quota
+ * is used. One line says so and opens Settings → AI spend, where the quotas are changed.
  *
  * AUTO-POSTING (`autoPost`, `workspaces.auto_post_enabled` + `auto_post_settings`, migration 0087 /
  * pg 0074) — ON by default (only a stored false is off; it acts on AUTO runs only). A master switch, the WHICH-PRs choice and one checkbox per kind.
@@ -107,8 +98,7 @@ import { Select } from '../ui/index.js';
  * (`pairStrictness`: strict, the default, or relaxed), explained behind its ⓘ. It governs every pair
  * verdict (yours too), so it is not dimmed by the verdict switch.
  *
- * SAVES AS YOU GO (./autosave.tsx): every tick, radio and select writes at once; the daily cap after
- * a pause in typing or on blur, and never while it is not a whole number in range.
+ * SAVES AS YOU GO (./autosave.tsx): every tick, radio and select writes at once.
  */
 
 const KIND_ROWS: Array<{ key: keyof AutoPostKinds; label: string }> = [
@@ -189,8 +179,7 @@ export function AutoReviewSection(): JSX.Element {
   // When Claude and Codex disagree (migration 0145): strict unless a stored 'relaxed' says otherwise.
   const storedStrictness: PairVerdictStrictness = stored?.pairStrictness === 'relaxed' ? 'relaxed' : 'strict';
   const [strictness, setStrictness] = useState<PairVerdictStrictness>(storedStrictness);
-  const storedCap = stored?.dailyCap ?? 20;
-  const [capText, setCapText] = useState(String(storedCap));
+  const openSettings = useSettingsModal((st) => st.openSettings);
   const storedPost = stored?.autoPost ?? null;
   // Posting and the auto verdict: ON unless switched off (2026-11-04).
   const storedPostOn = storedPost?.enabled !== false;
@@ -230,9 +219,6 @@ export function AutoReviewSection(): JSX.Element {
     setAllRepos(storedAllRepos);
   }, [workspaceId, storedAllRepos]);
   useEffect(() => {
-    setCapText(String(storedCap));
-  }, [workspaceId, storedCap]);
-  useEffect(() => {
     setProviders(storedProviders);
   }, [workspaceId, storedProviders]);
   useEffect(() => {
@@ -270,8 +256,6 @@ export function AutoReviewSection(): JSX.Element {
     setAutoPush(storedPush);
   }, [workspaceId, storedPush]);
 
-  const cap = parseCap(capText);
-  const capDirty = cap != null && cap !== storedCap;
   const postDirty =
     postOn !== storedPostOn ||
     scope !== storedScope ||
@@ -289,7 +273,6 @@ export function AutoReviewSection(): JSX.Element {
       allRepos !== storedAllRepos ||
       providers !== storedProviders ||
       strictness !== storedStrictness ||
-      capDirty ||
       postDirty ||
       fixSettingsDirty);
   // Only what changed, plus the two switches the route always takes.
@@ -300,7 +283,6 @@ export function AutoReviewSection(): JSX.Element {
     ...(allRepos !== storedAllRepos ? { storyCheckAllRepos: allRepos } : {}),
     ...(providers !== storedProviders ? { autoReviewProviders: providers } : {}),
     ...(strictness !== storedStrictness ? { pairStrictness: strictness } : {}),
-    ...(capDirty && cap != null ? { dailyCap: cap } : {}),
     ...(postDirty
       ? {
           autoPost: {
@@ -318,7 +300,7 @@ export function AutoReviewSection(): JSX.Element {
   };
   const autosave = useAutoSave({
     key: JSON.stringify(body),
-    ready: workspaceId != null && dirty && cap != null,
+    ready: workspaceId != null && dirty,
     busy: update.isPending,
     run: () => update.mutate(body),
   });
@@ -371,6 +353,7 @@ export function AutoReviewSection(): JSX.Element {
         </InfoButton>
       }
     >
+      {workspaceId != null && <TeamPolicyNote workspaceId={workspaceId} />}
       <label className="flex items-start gap-2 text-body">
         <CheckInput
           className="mt-0.5"
@@ -642,30 +625,12 @@ export function AutoReviewSection(): JSX.Element {
           <p>On by default.</p>
         </InfoButton>
       </div>
-      <div className={`pl-5 text-body ${on ? '' : 'opacity-60'}`}>
-        <label className="flex flex-wrap items-center gap-1.5 text-ui-ink">
-          <span>Up to</span>
-          <input
-            type="text"
-            inputMode="numeric"
-            aria-label="Auto reviews a day"
-            aria-invalid={cap == null}
-            className="w-16 rounded-ui bg-ui-raise px-2 py-1 text-body ring-1 ring-inset ring-ui-line outline-none focus:ring-2 focus:ring-ui-accent"
-            value={capText}
-            onChange={(e) => setCapText(e.target.value)}
-            onBlur={autosave.flush}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') autosave.flush();
-            }}
-          />
-          <span>auto reviews a day (UTC). The rest wait for the next day.</span>
-        </label>
-        {cap == null && (
-          <span className="mt-0.5 block text-body text-ui-danger">
-            Enter a whole number from {CAP_MIN} to {CAP_MAX}.
-          </span>
-        )}
-      </div>
+      <p className={`pl-5 text-body text-ui-faint ${on ? '' : 'opacity-60'}`}>
+        Auto runs stop for the day when Ensemble’s daily AI quota is used.{' '}
+        <button type="button" className="text-ui-accent underline-offset-2 hover:underline" onClick={() => openSettings('claude-spend')}>
+          Change quota
+        </button>
+      </p>
       <div className={`flex items-start gap-1 pl-5 text-body ${on ? '' : 'opacity-60'}`}>
         <label className="flex items-start gap-2">
           <CheckInput

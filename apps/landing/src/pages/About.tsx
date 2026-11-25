@@ -84,7 +84,7 @@ export default function About(): JSX.Element {
             account.
           </li>
           <li>
-            Automatic runs stop at 50% of your week unless you change it, and Settings → AI shows how much of your plan{' '}
+            Automatic runs stop at 10% of your week a day and 50% a week unless you change it, and Settings → AI shows how much of your plan{' '}
             {SITE_NAME} has used.
           </li>
         </UL>

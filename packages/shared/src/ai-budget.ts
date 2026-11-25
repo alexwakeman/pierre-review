@@ -20,6 +20,13 @@
 //     RATE that turns a run's recorded cost into "x% of your week").
 //   • API key — a US$ budget per rolling 7 days. No 5-hour limit.
 //
+// THE DAILY QUOTA (`daySharePct`, 1–100, default 10 = the weekly 50% over 5 working days): Ensemble's
+// spend SINCE LOCAL MIDNIGHT on this machine, as a share of the same WEEKLY allowance (no provider has
+// a daily limit of its own; on an API key, a share of the weekly US$ budget). Over ⇒ automatic runs
+// pause until the next local midnight. It REPLACED every per-workspace / per-account daily COUNT
+// (reviews, thread checks, CI reviews, story checks, diagrams): the quotas are now the only daily
+// limit. Per-subject loop guards (retries per head, replies passes per PR, diagrams per subject) stay.
+//
 // CODEX (docs/CODEX-PLAN.md § 6 + § 8.1, DECIDED 2026-10-25). The budget judges the ACTIVE provider.
 // On a ChatGPT sign-in there are no dollars and no estimate table: Codex reports its OWN windows (a
 // 5-hour and a weekly `usedPercent`, WHOLE numbers, with reset times), and Limn's share of a window is
@@ -78,6 +85,8 @@ export const AI_BUDGET_SHARE_MAX = 100;
  *  unasked — see `budgetSettingsInForce`). */
 export const AI_BUDGET_DEFAULTS = {
   weekSharePct: 50,
+  /** The daily quota: 10% of the week a day (the weekly 50% spread over 5 working days). */
+  daySharePct: 10,
   weeklyUsd: 25,
 } as const;
 
@@ -95,14 +104,18 @@ export const AI_CYCLE_COST_FALLBACKS = {
 /** Working days in a week, for "a working day". */
 export const AI_WORKING_DAYS_PER_WEEK = 5;
 
+/** The near-quota warning starts when a quota is this far used (0–1). */
+export const AI_QUOTA_WARN_FRACTION = 0.8;
+
 /**
- * Whole automatic review cycles a working day that Limn's share pays for. 0 or more, never NaN or
+ * Whole automatic review cycles a day that Ensemble's DAILY quota pays for (`sharePct` = the daily
+ * share of the week). 0 or more, never NaN or
  * Infinity: a non-finite or non-positive input reads as nothing to say (null).
  */
 export function reviewsPerDayFor(sharePct: number, weekUsd: number, cycleUsd: number): number | null {
   if (![sharePct, weekUsd, cycleUsd].every((n) => Number.isFinite(n))) return null;
   if (sharePct <= 0 || weekUsd <= 0 || cycleUsd <= 0) return null;
-  const n = Math.floor(((sharePct / 100) * weekUsd) / AI_WORKING_DAYS_PER_WEEK / cycleUsd);
+  const n = Math.floor(((sharePct / 100) * weekUsd) / cycleUsd);
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
@@ -124,6 +137,9 @@ export interface AiBudgetSettings {
   enabled: boolean;
   /** Subscription: Limn's share of the weekly allowance, a whole number 1–100. */
   weekSharePct: number;
+  /** THE DAILY QUOTA: Ensemble's spend since local midnight as a share of the WEEKLY allowance (on an
+   *  API key, of `weeklyUsd`), a whole number 1–100. */
+  daySharePct: number;
   /** Subscription: Limn's share of the 5-hour session allowance, a whole number 1–100, or null =
    *  the same as `weekSharePct` (the default; "5% a week → 5% a session"). */
   fiveHourSharePct: number | null;
@@ -163,6 +179,7 @@ export function resolveAiBudgetSettings(raw: Partial<AiBudgetSettings> | null | 
     // ON unless the reader switched it off: a row never set (NULL) reads as on.
     enabled: r.enabled !== false,
     weekSharePct: isSharePct(r.weekSharePct) ? r.weekSharePct : AI_BUDGET_DEFAULTS.weekSharePct,
+    daySharePct: isSharePct(r.daySharePct) ? r.daySharePct : AI_BUDGET_DEFAULTS.daySharePct,
     fiveHourSharePct: isSharePct(r.fiveHourSharePct) ? r.fiveHourSharePct : null,
     subscription:
       typeof r.subscription === 'string' && (AI_SUBSCRIPTION_KINDS as readonly string[]).includes(r.subscription)
@@ -181,11 +198,14 @@ export function resolveAiBudgetSettings(raw: Partial<AiBudgetSettings> | null | 
 export function validateAiBudgetBody(body: unknown): string | null {
   if (body == null || typeof body !== 'object' || Array.isArray(body)) return 'Send a JSON object.';
   const b = body as Record<string, unknown>;
-  const known = new Set(['enabled', 'weekSharePct', 'fiveHourSharePct', 'subscription', 'weeklyUsd']);
+  const known = new Set(['enabled', 'weekSharePct', 'daySharePct', 'fiveHourSharePct', 'subscription', 'weeklyUsd']);
   for (const k of Object.keys(b)) if (!known.has(k)) return `Unknown setting: ${k}.`;
   if (b.enabled !== undefined && typeof b.enabled !== 'boolean') return 'enabled must be true or false.';
   if (b.weekSharePct !== undefined && !isSharePct(b.weekSharePct)) {
     return `weekSharePct must be a whole number from 1 to ${AI_BUDGET_SHARE_MAX}.`;
+  }
+  if (b.daySharePct !== undefined && !isSharePct(b.daySharePct)) {
+    return `daySharePct must be a whole number from 1 to ${AI_BUDGET_SHARE_MAX}.`;
   }
   // null clears it: the 5-hour share follows the weekly one again.
   if (b.fiveHourSharePct !== undefined && b.fiveHourSharePct !== null && !isSharePct(b.fiveHourSharePct)) {
@@ -288,7 +308,14 @@ export interface AiBudgetSubscriptionStatus {
   /** How much of the week Limn's own runs have used, in % of the allowance. Null while the
    *  subscription is unknown. */
   usedSharePct: number | null;
-  /** "About N automatic reviews a working day". Null while the subscription is unknown. */
+  /** The daily quota: Ensemble's share of the week it may use per day, 1–100. */
+  daySharePct: number;
+  /** How much of the week Ensemble's own runs have used SINCE LOCAL MIDNIGHT, in % of the weekly
+   *  allowance. Null while unknown. */
+  dayUsedSharePct: number | null;
+  /** When today ends on this machine (the daily quota's reset). ISO-8601. */
+  dayResetsAt: string;
+  /** "About N automatic reviews a day" (from the daily quota). Null while the subscription is unknown. */
   reviewsPerDay: number | null;
   /** 'reset' = Claude's real week (its reset time was read); 'rolling' = the last 7 days. */
   window: 'reset' | 'rolling';
@@ -309,10 +336,16 @@ export interface AiBudgetSubscriptionStatus {
   fiveHourResetsAt: string | null;
 }
 
-/** The API-key half of the status: US$ over a rolling 7 days. */
+/** The API-key half of the status: US$ over a rolling 7 days, and today's US$ against the daily quota. */
 export interface AiBudgetApiKeyStatus {
   weeklyUsd: number;
   usedUsd: number;
+  /** The daily quota in US$ (`daySharePct` of `weeklyUsd`). */
+  dailyUsd: number;
+  /** Spend since local midnight. */
+  todayUsd: number;
+  /** When today ends on this machine. ISO-8601. */
+  dayResetsAt: string;
 }
 
 /** The ONE decision, as the API returns it. */
@@ -329,9 +362,9 @@ export interface AiBudgetStatus {
   apiKey: AiBudgetApiKeyStatus | null;
   /** True ⇒ automatic runs are paused; a run the reader starts asks for a second press. */
   overBudget: boolean;
-  /** Which limit paused them: 'week' (the weekly share, or the API key's weekly US$) or
-   *  'five_hour' (the 5-hour share). The week wins when both are over. Null when not over. */
-  limitedBy: 'week' | 'five_hour' | null;
+  /** Which limit paused them: 'week' (the weekly share, or the API key's weekly US$), 'day' (the
+   *  daily quota) or 'five_hour' (the 5-hour share). The week wins, then the day. Null when not over. */
+  limitedBy: 'week' | 'day' | 'five_hour' | null;
   /** One plain sentence, or null when nothing needs saying. */
   reason: string | null;
   /** When automatic runs resume (a window's reset, or when enough spend rolls out of the rolling
@@ -478,6 +511,9 @@ export interface AiUsageLimnView {
    *  also null while the account has no 5-hour window (`fiveHourLimit` false). */
   weekSharePct: number | null;
   fiveHourSharePct: number | null;
+  /** Login route: Ensemble's share of the WEEK used since local midnight (the daily quota's measure).
+   *  Null while unknown. Absent from an older server. */
+  daySharePct?: number | null;
 }
 
 /** API key only: Limn's recorded spend in US$. */
@@ -562,10 +598,25 @@ export interface AiBudgetInput {
   ledger: readonly AiLedgerRow[];
   costs: AiCycleCostInput;
   nowMs: number;
+  /** Start of "today" on this machine (local midnight), epoch ms. Absent ⇒ the last 24 hours. */
+  todayFromMs?: number;
+  /** Start of tomorrow on this machine (the daily quota's reset). Absent ⇒ `todayFromMs` + 24 h. */
+  tomorrowFromMs?: number;
   /** The provider judged. Absent ⇒ Claude. */
   provider?: AiBudgetProvider;
   /** Codex on a ChatGPT sign-in: the account's tokens per window (see AiAccountTokens). */
   accountTokens?: AiAccountTokens | null;
+}
+
+/** Today as the daily quota counts it: [local midnight, next local midnight). Pure. */
+export function budgetDay(input: { nowMs: number; todayFromMs?: number; tomorrowFromMs?: number }): { fromMs: number; toMs: number } {
+  const fromMs = input.todayFromMs ?? input.nowMs - AI_BUDGET_DAY_MS;
+  return { fromMs, toMs: input.tomorrowFromMs ?? fromMs + AI_BUDGET_DAY_MS };
+}
+
+/** Spend since `fromMs` (inclusive) up to now. Pure. */
+function spendSince(ledger: readonly AiLedgerRow[], fromMs: number, nowMs: number): number {
+  return ledger.filter((r) => r.atMs >= fromMs && r.atMs <= nowMs).reduce((s, r) => s + r.usd, 0);
 }
 
 /**
@@ -714,7 +765,9 @@ export function codexShares(input: {
   ledger: readonly AiLedgerRow[];
   accountTokens: AiAccountTokens | null | undefined;
   nowMs: number;
-}): { week: number | null; fiveHour: number | null } {
+  /** Local midnight; absent ⇒ no day share (null). */
+  todayFromMs?: number;
+}): { week: number | null; fiveHour: number | null; day: number | null } {
   const { reading, ledger, nowMs } = input;
   const one = (which: AiBudgetWindow): number | null => {
     const { fromMs, inclusive } = budgetWindowStart(reading, nowMs, which);
@@ -730,27 +783,57 @@ export function codexShares(input: {
     const share = codexWindowSharePct(limn, span ? span.tokens : null, used);
     return share == null ? null : round2(share);
   };
-  return { week: one('week'), fiveHour: one('five_hour') };
+  // THE DAY: Ensemble's tokens since local midnight, weighted like the week's — today's tokens ÷ the
+  // account's tokens over the week's span × the week's usedPercent. Counted inside the SAME span as
+  // the denominator (never wider), so it can never exceed the week's share.
+  const day = ((): number | null => {
+    if (input.todayFromMs == null) return null;
+    const weekReset = liveWeekReset(reading, nowMs);
+    const used = liveUsedPercent(reading?.week, weekReset);
+    const span = input.accountTokens?.week ?? null;
+    const toMs = span ? Math.min(nowMs, span.toMs) : nowMs;
+    const fromMs = span ? Math.max(input.todayFromMs, span.fromMs) : input.todayFromMs;
+    const inclusive = span && span.fromMs > input.todayFromMs ? span.inclusive : true;
+    const limn = ledgerTokensIn(ledger, fromMs, inclusive, toMs);
+    const share = codexWindowSharePct(limn, span ? span.tokens : null, used);
+    return share == null ? null : round2(share);
+  })();
+  return { week: one('week'), fiveHour: one('five_hour'), day };
 }
 
-function codexSubscriptionStatus(input: AiBudgetInput): {
+/** One subscription verdict: the status and which windows are over, with when each clears. */
+interface SubscriptionVerdict {
   sub: AiBudgetSubscriptionStatus;
   overWeek: boolean;
+  overDay: boolean;
   overFiveHour: boolean;
   weekResumesAtMs: number | null;
+  dayResumesAtMs: number | null;
   fiveHourResumesAtMs: number | null;
-} {
+}
+
+function codexSubscriptionStatus(input: AiBudgetInput): SubscriptionVerdict {
   const { settings, reading, nowMs } = input;
   const weekReset = liveWeekReset(reading, nowMs);
   const fiveReset = liveFiveHourReset(reading, nowMs);
   const fiveShare = effectiveFiveHourSharePct(settings);
-  const shares = codexShares({ reading, ledger: input.ledger, accountTokens: input.accountTokens, nowMs });
+  const today = budgetDay(input);
+  const shares = codexShares({
+    reading,
+    ledger: input.ledger,
+    accountTokens: input.accountTokens,
+    nowMs,
+    todayFromMs: today.fromMs,
+  });
   // No 5-hour window reported lately: no 5-hour share, and it never pauses a run.
   const fiveHourShare = hasFiveHourWindow(reading, nowMs) ? shares.fiveHour : null;
   // ⚠ Over only with a LIVE RESET read: the window's own figure falls back at its reset, and without
   // one there is no moment the pause would end — so a share with no known reset is never over.
   const overWeek = weekReset != null && shares.week != null && shares.week >= settings.weekSharePct;
   const overFiveHour = fiveReset != null && fiveHourShare != null && fiveHourShare >= fiveShare;
+  // The day ends at the next local midnight, but its share is weighted by the WEEK's figure: like
+  // the week, it is over only while that figure has a live reset (else it is not trusted).
+  const overDay = weekReset != null && shares.day != null && shares.day >= settings.daySharePct;
   return {
     sub: {
       // No Claude subscription kind and no picker: Codex reports its plan and its own windows.
@@ -760,6 +843,9 @@ function codexSubscriptionStatus(input: AiBudgetInput): {
       pickFrom: null,
       sharePct: settings.weekSharePct,
       usedSharePct: shares.week,
+      daySharePct: settings.daySharePct,
+      dayUsedSharePct: shares.day,
+      dayResetsAt: new Date(today.toMs).toISOString(),
       // No dollar cycle cost on a ChatGPT plan to estimate "reviews a day" from.
       reviewsPerDay: null,
       window: weekReset != null ? 'reset' : 'rolling',
@@ -771,20 +857,16 @@ function codexSubscriptionStatus(input: AiBudgetInput): {
       fiveHourResetsAt: isoOf(fiveReset),
     },
     overWeek,
+    overDay,
     overFiveHour,
     // The window's own figure falls back at its reset; with no reset read, a share is never over.
     weekResumesAtMs: overWeek ? weekReset : null,
+    dayResumesAtMs: overDay ? today.toMs : null,
     fiveHourResumesAtMs: overFiveHour ? fiveReset : null,
   };
 }
 
-function subscriptionStatus(input: AiBudgetInput): {
-  sub: AiBudgetSubscriptionStatus;
-  overWeek: boolean;
-  overFiveHour: boolean;
-  weekResumesAtMs: number | null;
-  fiveHourResumesAtMs: number | null;
-} {
+function subscriptionStatus(input: AiBudgetInput): SubscriptionVerdict {
   if (input.provider === 'codex') return codexSubscriptionStatus(input);
   const { settings, reading, ledger, nowMs } = input;
   const reported = reading?.subscriptionType ?? null;
@@ -792,6 +874,7 @@ function subscriptionStatus(input: AiBudgetInput): {
   const weekReset = liveWeekReset(reading, nowMs);
   const fiveReset = liveFiveHourReset(reading, nowMs);
   const fiveShare = effectiveFiveHourSharePct(settings);
+  const today = budgetDay(input);
   const base: AiBudgetSubscriptionStatus = {
     subscription: resolved.kind,
     subscriptionSource: resolved.source,
@@ -799,6 +882,9 @@ function subscriptionStatus(input: AiBudgetInput): {
     pickFrom: resolved.pickFrom,
     sharePct: settings.weekSharePct,
     usedSharePct: null,
+    daySharePct: settings.daySharePct,
+    dayUsedSharePct: null,
+    dayResetsAt: new Date(today.toMs).toISOString(),
     reviewsPerDay: null,
     window: weekReset != null ? 'reset' : 'rolling',
     weekResetsAt: isoOf(weekReset),
@@ -810,7 +896,15 @@ function subscriptionStatus(input: AiBudgetInput): {
   };
   // Not known yet: nothing to judge with, never blocks.
   if (resolved.kind == null) {
-    return { sub: base, overWeek: false, overFiveHour: false, weekResumesAtMs: null, fiveHourResumesAtMs: null };
+    return {
+      sub: base,
+      overWeek: false,
+      overDay: false,
+      overFiveHour: false,
+      weekResumesAtMs: null,
+      dayResumesAtMs: null,
+      fiveHourResumesAtMs: null,
+    };
   }
   const est = SUBSCRIPTION_ESTIMATES[resolved.kind];
   const week = windowSpend(ledger, nowMs, AI_BUDGET_WEEK_MS, weekReset, (est.week * settings.weekSharePct) / 100);
@@ -819,16 +913,22 @@ function subscriptionStatus(input: AiBudgetInput): {
   const five = hasFiveHourWindow(reading, nowMs)
     ? windowSpend(ledger, nowMs, AI_BUDGET_FIVE_HOUR_MS, fiveReset, (est.fiveHour * fiveShare) / 100)
     : null;
+  // THE DAY: spend since local midnight against the daily share of the WEEKLY allowance.
+  const dayUsd = spendSince(ledger, today.fromMs, nowMs);
+  const overDay = dayUsd >= (est.week * settings.daySharePct) / 100;
   return {
     sub: {
       ...base,
       usedSharePct: round2((week.usedUsd / est.week) * 100),
-      reviewsPerDay: reviewsPerDayFor(settings.weekSharePct, est.week, cycleCostUsd(input.costs)),
+      dayUsedSharePct: round2((dayUsd / est.week) * 100),
+      reviewsPerDay: reviewsPerDayFor(settings.daySharePct, est.week, cycleCostUsd(input.costs)),
       fiveHourUsedSharePct: five == null ? null : round2((five.usedUsd / est.fiveHour) * 100),
     },
     overWeek: week.over,
+    overDay,
     overFiveHour: five?.over ?? false,
     weekResumesAtMs: week.resumesAtMs,
+    dayResumesAtMs: overDay ? today.toMs : null,
     fiveHourResumesAtMs: five?.resumesAtMs ?? null,
   };
 }
@@ -851,21 +951,35 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
   if (!settings.enabled || route === 'none') return off;
   if (route === 'api_key') {
     const { usedUsd, resumesAtMs } = rollingSpend(input.ledger, input.nowMs, AI_BUDGET_WEEK_MS, settings.weeklyUsd);
-    const over = usedUsd >= settings.weeklyUsd;
+    const overWeek = usedUsd >= settings.weeklyUsd;
+    const today = budgetDay(input);
+    const dailyUsd = round2((settings.weeklyUsd * settings.daySharePct) / 100);
+    const todayUsd = spendSince(input.ledger, today.fromMs, input.nowMs);
+    const overDay = todayUsd >= dailyUsd;
+    const over = overWeek || overDay;
+    const resumes = [overWeek ? resumesAtMs : null, overDay ? today.toMs : null].filter((t): t is number => t != null);
     return {
       ...off,
       mode: 'api_key',
-      apiKey: { weeklyUsd: settings.weeklyUsd, usedUsd: round2(usedUsd) },
+      apiKey: {
+        weeklyUsd: settings.weeklyUsd,
+        usedUsd: round2(usedUsd),
+        dailyUsd,
+        todayUsd: round2(todayUsd),
+        dayResetsAt: new Date(today.toMs).toISOString(),
+      },
       overBudget: over,
-      limitedBy: over ? 'week' : null,
-      reason: over ? 'Ensemble has used its weekly budget.' : null,
-      resumesAt: over ? isoOf(resumesAtMs) : null,
+      limitedBy: overWeek ? 'week' : overDay ? 'day' : null,
+      reason: overWeek ? 'Ensemble has used its weekly budget.' : overDay ? "Ensemble has used today's budget." : null,
+      resumesAt: over && resumes.length > 0 ? isoOf(Math.max(...resumes)) : null,
     };
   }
-  const { sub, overWeek, overFiveHour, weekResumesAtMs, fiveHourResumesAtMs } = subscriptionStatus(input);
-  const over = overWeek || overFiveHour;
+  const { sub, overWeek, overDay, overFiveHour, weekResumesAtMs, dayResumesAtMs, fiveHourResumesAtMs } =
+    subscriptionStatus(input);
+  const over = overWeek || overDay || overFiveHour;
   let reason: string | null = null;
   if (overWeek) reason = 'Ensemble has used its share of your week.';
+  else if (overDay) reason = "Ensemble has used today's quota.";
   else if (overFiveHour) reason = 'Ensemble has used its share of this 5-hour session.';
   else if (input.provider === 'codex') {
     if (sub.usedSharePct == null && sub.fiveHourUsedSharePct == null) reason = 'Ensemble has not read your Codex usage yet.';
@@ -875,8 +989,12 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
         ? 'Pick Max 5x or Ultra so Ensemble can work out its share.'
         : 'Pick your Claude subscription so Ensemble can work out its share.';
   }
-  // Runs resume once EVERY window that is over has cleared: the later of the two.
-  const resumes = [overWeek ? weekResumesAtMs : null, overFiveHour ? fiveHourResumesAtMs : null].filter(
+  // Runs resume once EVERY window that is over has cleared: the latest of them.
+  const resumes = [
+    overWeek ? weekResumesAtMs : null,
+    overDay ? dayResumesAtMs : null,
+    overFiveHour ? fiveHourResumesAtMs : null,
+  ].filter(
     (t): t is number => t != null,
   );
   return {
@@ -884,7 +1002,7 @@ export function decideAiBudget(input: AiBudgetInput): AiBudgetStatus {
     mode: 'subscription',
     subscription: sub,
     overBudget: over,
-    limitedBy: overWeek ? 'week' : overFiveHour ? 'five_hour' : null,
+    limitedBy: overWeek ? 'week' : overDay ? 'day' : overFiveHour ? 'five_hour' : null,
     reason,
     resumesAt: over && resumes.length > 0 ? isoOf(Math.max(...resumes)) : null,
   };
@@ -946,6 +1064,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
   let account: AiUsageAccountView | null = null;
   let weekSharePct: number | null = null;
   let fiveHourSharePct: number | null = null;
+  let daySharePct: number | null = null;
   let weekPctPerUsd: number | null = null;
   if (login && input.provider === 'codex') {
     // Codex: its own two windows, its plan as reported, and Limn's TOKEN-WEIGHTED shares. No Claude
@@ -961,8 +1080,9 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
       models: [],
       observedAt: seen.length === 0 ? null : seen.sort().at(-1)!,
     };
-    const shares = codexShares({ reading, ledger, accountTokens: input.accountTokens, nowMs });
+    const shares = codexShares({ reading, ledger, accountTokens: input.accountTokens, nowMs, todayFromMs: input.todayFromMs });
     weekSharePct = shares.week;
+    daySharePct = shares.day;
     fiveHourSharePct = fiveHourLimit ? shares.fiveHour : null;
   } else if (login) {
     const kind = resolveAiSubscription(reading?.subscriptionType ?? null, settings.subscription).kind;
@@ -986,6 +1106,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
       const fiveUsd = spend(fiveFromMs, fiveReset != null);
       weekSharePct = round2((inWeek.reduce((s, r) => s + r.usd, 0) / est.week) * 100);
       fiveHourSharePct = fiveHourLimit ? round2((fiveUsd / est.fiveHour) * 100) : null;
+      daySharePct = round2((spend(input.todayFromMs, true) / est.week) * 100);
       weekPctPerUsd = 100 / est.week;
     }
   }
@@ -1006,6 +1127,7 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
       outputTokens: sumTokens((r) => r.outputTokens),
       weekSharePct,
       fiveHourSharePct,
+      daySharePct,
     },
     apiKey:
       route === 'api_key'
@@ -1017,4 +1139,50 @@ export function aiUsageView(input: AiUsageViewInput): AiUsageView {
         : null,
     weekPctPerUsd,
   };
+}
+
+// ---- the near-quota warning (the header toast) --------------------------------------------------
+
+/** One quota the reader should hear about: near (≥ AI_QUOTA_WARN_FRACTION of it) or reached. */
+export interface AiQuotaWarning {
+  level: 'near' | 'reached';
+  /** 'day' = the daily quota, 'week' = the weekly one. */
+  which: 'day' | 'week';
+  /** Used, in % OF THE QUOTA (0–100+), rounded. */
+  usedOfQuotaPct: number;
+  /** When that quota resets, when known. ISO-8601. */
+  resetsAt: string | null;
+}
+
+/**
+ * THE ONE RULE for the near-quota toast: the most pressing of the daily and weekly quotas — reached
+ * before near, the week before the day. Null when the budget is off or nothing is near. The 5-hour
+ * share is enforced but never warned about. Pure.
+ */
+export function aiQuotaWarning(status: AiBudgetStatus | null | undefined): AiQuotaWarning | null {
+  if (status == null || !status.enabled || status.mode === 'off') return null;
+  const cands: { which: 'day' | 'week'; used: number | null; line: number; resetsAt: string | null }[] = [];
+  if (status.mode === 'subscription' && status.subscription) {
+    const s = status.subscription;
+    cands.push({ which: 'week', used: s.usedSharePct, line: s.sharePct, resetsAt: s.weekResetsAt });
+    cands.push({ which: 'day', used: s.dayUsedSharePct, line: s.daySharePct, resetsAt: s.dayResetsAt });
+  } else if (status.mode === 'api_key' && status.apiKey) {
+    const a = status.apiKey;
+    cands.push({ which: 'week', used: a.usedUsd, line: a.weeklyUsd, resetsAt: null });
+    cands.push({ which: 'day', used: a.todayUsd, line: a.dailyUsd, resetsAt: a.dayResetsAt });
+  }
+  let best: AiQuotaWarning | null = null;
+  for (const c of cands) {
+    if (c.used == null || !Number.isFinite(c.used) || !(c.line > 0)) continue;
+    const frac = c.used / c.line;
+    if (frac < AI_QUOTA_WARN_FRACTION) continue;
+    const w: AiQuotaWarning = {
+      level: frac >= 1 ? 'reached' : 'near',
+      which: c.which,
+      usedOfQuotaPct: Math.round(frac * 100),
+      resetsAt: c.resetsAt,
+    };
+    if (best == null || (w.level === 'reached' && best.level === 'near')) best = w;
+  }
+  return best;
 }

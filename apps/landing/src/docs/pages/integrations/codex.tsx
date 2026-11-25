@@ -96,7 +96,7 @@ export default function Page(): JSX.Element {
       <H2 id="limits">Limits and your data</H2>
       <p>
         ChatGPT reports how much of its weekly limit, and five-hour limit where there is one, your account has used. Ensemble&rsquo;s automatic runs
-        stop at their share (50% of the week by default), shown in percentages. See{' '}
+        stop at their quotas (by default 10% of the week a day, 50% a week), shown in percentages. See{' '}
         <DocLink to="settings/ai-usage-and-spend">AI subscription usage and spend</DocLink>.
       </p>
       <p>

@@ -1,0 +1,632 @@
+[
+  {
+    "name": "Claude Code: footer phrase, co-author trailer, session trailer",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "messageFile": "commit-claude-code.txt"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "commit_trailer"
+      },
+      {
+        "vendor": "claude",
+        "source": "commit_message"
+      }
+    ]
+  },
+  {
+    "name": "Claude Code on the web: the commit's author is Claude",
+    "provenance": "observed",
+    "input": {
+      "authorName": "Claude",
+      "authorEmail": "noreply@anthropic.com",
+      "committerName": "Claude",
+      "committerEmail": "noreply@anthropic.com",
+      "message": "Fix the flaky date test\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "commit_author"
+      },
+      {
+        "vendor": "claude",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Claude Code: the older lowercase trailer",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Add tests\n\nCo-authored-by: Claude <noreply@anthropic.com>"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Claude GitHub Action: claude[bot] author through its noreply email",
+    "provenance": "documented",
+    "input": {
+      "authorName": "claude[bot]",
+      "authorEmail": "209825114+claude[bot]@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "message": "Apply review fixes"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Copilot coding agent: copilot-swe-agent[bot] author, Copilot noreply email",
+    "provenance": "observed",
+    "input": {
+      "authorName": "copilot-swe-agent[bot]",
+      "authorEmail": "198982749+Copilot@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "message": "Initial plan"
+    },
+    "expect": [
+      {
+        "vendor": "copilot",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Copilot: an applied suggestion's co-author trailer",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Update src/app.ts\n\nCo-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>"
+    },
+    "expect": [
+      {
+        "vendor": "copilot",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Cursor cloud agent: Cursor Agent author and co-author",
+    "provenance": "observed",
+    "input": {
+      "authorName": "Cursor Agent",
+      "authorEmail": "cursoragent@cursor.com",
+      "committerName": "Cursor Agent",
+      "committerEmail": "cursoragent@cursor.com",
+      "message": "Add dark mode toggle\n\nCo-authored-by: alice <alice@example.com>"
+    },
+    "expect": [
+      {
+        "vendor": "cursor",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Cursor: the co-author trailer on a person's commit",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Refactor the session store\n\nCo-authored-by: Cursor Agent <cursoragent@cursor.com>"
+    },
+    "expect": [
+      {
+        "vendor": "cursor",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Cursor: cursor[bot] committer",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": null,
+      "committerName": "cursor[bot]",
+      "committerEmail": "206951365+cursor[bot]@users.noreply.github.com",
+      "message": "Fix the off-by-one"
+    },
+    "expect": [
+      {
+        "vendor": "cursor",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Devin: devin-ai-integration[bot] author",
+    "provenance": "observed",
+    "input": {
+      "authorName": "devin-ai-integration[bot]",
+      "authorEmail": "158243242+devin-ai-integration[bot]@users.noreply.github.com",
+      "committerName": "devin-ai-integration[bot]",
+      "committerEmail": "158243242+devin-ai-integration[bot]@users.noreply.github.com",
+      "message": "Update API docs"
+    },
+    "expect": [
+      {
+        "vendor": "devin",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Jules: google-labs-jules[bot] author",
+    "provenance": "observed",
+    "input": {
+      "authorName": "google-labs-jules[bot]",
+      "authorEmail": "161369871+google-labs-jules[bot]@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "message": "Add safeStorage wrapper"
+    },
+    "expect": [
+      {
+        "vendor": "google",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Amazon Q Developer: amazon-q-developer[bot] author",
+    "provenance": "observed",
+    "input": {
+      "authorName": "amazon-q-developer[bot]",
+      "authorEmail": "208079219+amazon-q-developer[bot]@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "message": "Add architecture diagrams"
+    },
+    "expect": [
+      {
+        "vendor": "amazon",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Factory: factory-droid[bot] author",
+    "provenance": "observed",
+    "input": {
+      "authorName": "factory-droid[bot]",
+      "authorEmail": "138933559+factory-droid[bot]@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "message": "Fix action.yml input"
+    },
+    "expect": [
+      {
+        "vendor": "factory",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Codex connector: chatgpt-codex-connector[bot] author",
+    "provenance": "observed",
+    "input": {
+      "authorName": "chatgpt-codex-connector[bot]",
+      "authorEmail": "199175422+chatgpt-codex-connector[bot]@users.noreply.github.com",
+      "committerName": "GitHub",
+      "committerEmail": "noreply@github.com",
+      "message": "Update README"
+    },
+    "expect": [
+      {
+        "vendor": "codex",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Aider: '(aider)' author name and its co-author trailer",
+    "provenance": "documented",
+    "input": {
+      "authorName": "Alice Dev (aider)",
+      "authorEmail": "alice@example.com",
+      "committerName": "Alice Dev (aider)",
+      "committerEmail": "alice@example.com",
+      "message": "feat: add retry to fetch\n\nCo-authored-by: aider (anthropic/claude-sonnet-4) <noreply@aider.chat>"
+    },
+    "expect": [
+      {
+        "vendor": "aider",
+        "source": "commit_author"
+      },
+      {
+        "vendor": "aider",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Aider: the older 'aider: ' subject",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "aider: Added retry to fetch"
+    },
+    "expect": [
+      {
+        "vendor": "aider",
+        "source": "commit_message"
+      }
+    ]
+  },
+  {
+    "name": "Amp: thread trailer and co-author email",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Speed up the build\n\nAmp-Thread-ID: https://ampcode.com/threads/T-5b7c9d1e-0000-4000-8000-000000000000\nCo-authored-by: Amp <amp@ampcode.com>"
+    },
+    "expect": [
+      {
+        "vendor": "amp",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Amp: the newer Amp-Thread trailer alone",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Speed up the build\n\nAmp-Thread: https://ampcode.com/threads/T-1"
+    },
+    "expect": [
+      {
+        "vendor": "amp",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Ensemble: AI Fix's run trailer",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "messageFile": "commit-ensemble-ai-fix.txt"
+    },
+    "expect": [
+      {
+        "vendor": "ensemble",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Ensemble: the legacy Limn-Run trailer of an Implement push",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Implement PROJ-3\n\nLimn-Run: story-build/3"
+    },
+    "expect": [
+      {
+        "vendor": "ensemble",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Phrases: Copilot, Codex, Windsurf, Gemini CLI, Amazon Q, Aider",
+    "provenance": "unconfirmed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Many tools\n\nGenerated with GitHub Copilot\nCreated by Codex\nGenerated with Windsurf\nGenerated with Gemini CLI\nGenerated using Amazon Q\nGenerated by aider"
+    },
+    "expect": [
+      {
+        "vendor": "codex",
+        "source": "commit_message"
+      },
+      {
+        "vendor": "copilot",
+        "source": "commit_message"
+      },
+      {
+        "vendor": "google",
+        "source": "commit_message"
+      },
+      {
+        "vendor": "amazon",
+        "source": "commit_message"
+      },
+      {
+        "vendor": "windsurf",
+        "source": "commit_message"
+      },
+      {
+        "vendor": "aider",
+        "source": "commit_message"
+      }
+    ]
+  },
+  {
+    "name": "A CRLF message keeps its trailers",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Fix it\r\n\r\nCo-Authored-By: Claude <noreply@anthropic.com>\r\n"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Amp: thread trailer plus co-author, as squash-merged",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Keep webhook digest errors apart\n\nAmp-Thread-ID: https://ampcode.com/threads/T-3784262c-5fe0-4e2f-99ad-8443940d75a8\nCo-authored-by: Amp <amp@ampcode.com>\n\n---------\n\nCo-authored-by: Amp <amp@ampcode.com>"
+    },
+    "expect": [
+      {
+        "vendor": "amp",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "Devin as a co-author through its App noreply email",
+    "provenance": "observed",
+    "input": {
+      "authorName": "Aider",
+      "authorEmail": "noreply@aider.chat",
+      "message": "iter-178: docs\n\nCo-Authored-By: Devin AI <158243242+devin-ai-integration[bot]@users.noreply.github.com>"
+    },
+    "expect": [
+      {
+        "vendor": "devin",
+        "source": "commit_trailer"
+      },
+      {
+        "vendor": "aider",
+        "source": "commit_author"
+      }
+    ]
+  },
+  {
+    "name": "Several tools co-authoring one commit (Claude, Codex, Cursor, aider)",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Ship the parser\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>\nCo-authored-by: Codex <noreply@openai.com>\nCo-authored-by: Cursor <cursoragent@cursor.com>\nCo-authored-by: aider (o4-mini) <noreply@aider.chat>"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "commit_trailer"
+      },
+      {
+        "vendor": "codex",
+        "source": "commit_trailer"
+      },
+      {
+        "vendor": "cursor",
+        "source": "commit_trailer"
+      },
+      {
+        "vendor": "aider",
+        "source": "commit_trailer"
+      }
+    ]
+  },
+  {
+    "name": "NEG prose naming the tools, a person named Claude, look-alike trailers",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "messageFile": "commit-human-prose.txt"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG Ensemble-Run conflict resolution",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Resolve conflicts\n\nEnsemble-Run: conflict/4"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG Ensemble-Run auto-merge, deps, update-branch",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Update branch\n\nEnsemble-Run: auto-merge/9\nEnsemble-Run: deps/2\nEnsemble-Run: update-branch\nLimn-Run: update-branch"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a person whose git name is Copilot",
+    "provenance": "negative",
+    "input": {
+      "authorName": "Copilot",
+      "authorEmail": "me@example.com",
+      "committerName": "claude",
+      "committerEmail": "claude@example.com",
+      "message": "wip"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a person whose GitHub login is claude (noreply email, no [bot])",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "claude",
+      "authorName": "Claude",
+      "authorEmail": "12345+claude@users.noreply.github.com",
+      "message": "wip"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG review bots and CI apps as commit authors",
+    "provenance": "negative",
+    "input": {
+      "authorName": "copilot-pull-request-reviewer[bot]",
+      "authorEmail": "175728472+copilot-pull-request-reviewer[bot]@users.noreply.github.com",
+      "committerName": "coderabbitai[bot]",
+      "committerEmail": "136622811+coderabbitai[bot]@users.noreply.github.com",
+      "message": "Apply suggestions"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG gemini-code-assist, github-actions and dependabot",
+    "provenance": "negative",
+    "input": {
+      "authorName": "gemini-code-assist[bot]",
+      "authorEmail": "176961590+gemini-code-assist[bot]@users.noreply.github.com",
+      "committerName": "github-actions[bot]",
+      "committerEmail": "41898282+github-actions[bot]@users.noreply.github.com",
+      "message": "Bump x from 1 to 2\n\nSigned-off-by: dependabot[bot] <support@github.com>"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG 'Generated with Claude' without 'Code', and a quoted trailer",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Docs\n\nGenerated with Claude in mind.\n> Co-Authored-By: Claude <noreply@anthropic.com>"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a subject that mentions the footer mid-sentence",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Docs: explain that commits are generated with Claude Code when the flag is on\n\nThe \"Generated with Claude Code\" footer is optional."
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a quoted footer line in a commit body",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorName": "Alice Dev",
+      "authorEmail": "alice@example.com",
+      "committerLogin": "alice-dev",
+      "committerName": "Alice Dev",
+      "committerEmail": "alice@example.com",
+      "message": "Revert the footer\n\nThis reverts the line\n> 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+    },
+    "expect": []
+  }
+]

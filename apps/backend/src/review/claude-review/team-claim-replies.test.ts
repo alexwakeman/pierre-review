@@ -23,7 +23,7 @@ vi.mock('./team-claim-skip.js', () => ({
 }));
 vi.mock('./ai-ready.js', async (orig) => ({ ...(await orig<typeof import('./ai-ready.js')>()), agenticRunReady: () => true }));
 vi.mock('./auto-settings.js', () => ({
-  listAutoReviewWorkspaces: async () => [{ accountId: 1, workspaceId: 7, enabledAtMs: 0, dailyCap: 20 }],
+  listAutoReviewWorkspaces: async () => [{ accountId: 1, workspaceId: 7, enabledAtMs: 0 }],
 }));
 let heldHead: string | null = 'h2';
 vi.mock('./team-claim.js', () => ({ teamClaimHeldHeadNow: async () => heldHead }));

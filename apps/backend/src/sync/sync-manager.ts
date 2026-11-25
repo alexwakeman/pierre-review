@@ -722,6 +722,17 @@ async function runFollowOns(ctx: WalkCtx, walk: { cancelled: boolean }): Promise
       `commit headline backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
     );
   }
+  // AI VENDOR SIGNALS for PRs of the last 90 days the detector has not read at the current
+  // AI_SIGNALS_VERSION (docs/AI-ADOPTION-REPORT.md § The backfill). Bounded per run, stamped once
+  // per PR, asked once per PR per process, budget-aware, strictly non-fatal.
+  try {
+    const { backfillAiSignals } = await import('./backfill-ai-signals.js');
+    await backfillAiSignals(repo.accountId, repoId, log);
+  } catch (err) {
+    log.warn(
+      `AI signals backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+    );
+  }
 
   // "A PR WAS RECEIVED": the plugin's Jira ticket worker reads the tickets new and changed PRs
   // name (sync/repo-synced-hooks.ts). A fire-and-forget KICK — it never holds this repo's slot
@@ -1411,6 +1422,16 @@ async function runScheduledTick(log: Logger): Promise<void> {
       } catch (err) {
         log.warn(
           `commit headline backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
+        );
+      }
+      // AI VENDOR SIGNALS, as on the manual tail: PRs of the last 90 days not yet read at the
+      // current detector version. Bounded, stamped once per PR, budget-aware, non-fatal.
+      try {
+        const { backfillAiSignals } = await import('./backfill-ai-signals.js');
+        await backfillAiSignals(repo.accountId, r.id, log);
+      } catch (err) {
+        log.warn(
+          `AI signals backfill ${repo.owner}/${repo.name} failed (non-fatal): ${err instanceof Error ? err.message : err}`,
         );
       }
       // The unsettled-PR backstop, as on the manual tail: merge state stored unknown and CI stuck

@@ -3,7 +3,7 @@ import { DocLink, H2, H3, Illustration, Note, Quote, SettingsRow, Stat, Steps, T
 
 export const meta: DocMeta = {
   title: 'AI subscription usage and spend',
-  summary: 'How Ensemble uses your Claude or ChatGPT subscription, the weekly spend budget, and what automatic runs do when it is reached.',
+  summary: 'How Ensemble uses your Claude or ChatGPT subscription, the daily and weekly quotas for its automatic runs, and what happens when one is used.',
 };
 
 const HELP = 'https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan';
@@ -65,30 +65,48 @@ export default function Page(): JSX.Element {
       </Quote>
       <p>
         Claude limits each week, and on some plans each five-hour session too. Ensemble&rsquo;s budget is a share of the
-        week, and of the session where your plan has one.
+        week, a smaller share for each day, and the weekly share of the session where your plan has one.
       </p>
 
       <H2 id="spend-budget">The spend budget</H2>
       <p>
         Ensemble runs some AI work by itself: auto review and re-reviews, Check threads, auto fix, the CI and ticket
-        reviews, diagrams, This Sprint&rsquo;s briefs and the Slack summary. The spend budget limits only those
-        automatic runs.
+        reviews, story and docs checks, diagrams, This Sprint&rsquo;s briefs and the Slack summary. The spend budget
+        limits only those automatic runs. It is the one limit: there is no count of reviews or checks a day.
       </p>
-      <Illustration label="The AI spend section: on, Ensemble's share of the week set to 50 percent." caption="AI spend on a Claude subscription, at the default share.">
-        <SettingsRow label="Your Claude subscription: pause automatic runs once Ensemble has used its share of your week." control={<Toggle on />} />
-        <SettingsRow label="Ensemble’s share of your weekly Claude usage (%)" control={<TextBox value="50" />} />
+      <Illustration
+        label="The AI spend section: Pause automatic runs over a quota is on, the daily quota is 10 percent and the weekly quota 50 percent of your weekly Claude usage."
+        caption="AI spend on a Claude subscription, at the defaults."
+      >
+        <SettingsRow label="Pause automatic runs over a quota" control={<Toggle on />} />
+        <SettingsRow
+          label="Daily quota (% of your weekly Claude usage)"
+          hint="about 25 automatic reviews a day"
+          control={<TextBox value="10" />}
+        />
+        <SettingsRow label="Weekly quota (% of your weekly Claude usage)" hint="1 to 100" control={<TextBox value="50" />} />
         <Stat k="This week" v="18%" d="of your week used by Ensemble" />
       </Illustration>
+      <H3>Two quotas</H3>
+      <ul>
+        <li>
+          <b>Daily quota</b>: what Ensemble&rsquo;s automatic runs may use since midnight on this computer (your local
+          time), as a share of your weekly allowance. The default is 10%, which is the weekly 50% spread over five
+          working days. From 1 to 100. When it is used, automatic runs stop until midnight.
+        </li>
+        <li>
+          <b>Weekly quota</b>: Ensemble&rsquo;s share of your week. The default is 50%, from 1 to 100.
+        </li>
+      </ul>
       <H3>On a subscription</H3>
       <ul>
         <li>
-          The budget is <b>on by default at 50% of your week</b>. Change the share, or switch the budget off.
+          The budget is <b>on by default</b>. Change either quota, or untick <Ui>Pause automatic runs over a quota</Ui>.
         </li>
         <li>
-          If your plan limits each five-hour session, Ensemble takes the same share of it (50% of the week means 50% of each
-          session). Open <Ui>Set a separate 5-hour limit</Ui> to choose a different share; <Ui>Use the weekly share</Ui>{' '}
-          goes back. Anthropic has removed the five-hour limit from some plans. Ensemble shows the five-hour bar and
-          setting only when your provider has reported a five-hour limit in the last 12 hours.
+          If your plan limits each five-hour session, Ensemble takes the weekly share of it too (50% of the week means 50%
+          of each session). There is no separate setting for it. Ensemble shows the five-hour bar only when your provider
+          has reported a five-hour limit in the last 12 hours.
         </li>
         <li>
           Everything is shown in <b>percentages of your plan</b>, never in dollars.
@@ -108,16 +126,37 @@ export default function Page(): JSX.Element {
       </ul>
       <H3>On an API key</H3>
       <p>
-        There is no limit until you set one. Select <Ui>Set a budget</Ui> and enter a <Ui>Weekly budget (US$)</Ui>.
-        The section then shows what Ensemble&rsquo;s runs have cost this week, in US dollars.
+        There is no limit until you set one. Select <Ui>Set a budget</Ui> and enter a <Ui>Weekly budget (US$)</Ui>{' '}
+        and a <Ui>Daily quota (% of the weekly budget)</Ui>. A weekly budget of $25 with a daily quota of 10% allows
+        $2.50 a day. The section then shows what Ensemble&rsquo;s runs have cost this week, in US dollars.
       </p>
 
-      <H2 id="when-it-runs-out">When Ensemble&rsquo;s share is used</H2>
+      <H2 id="the-meter">The meter and the notifications</H2>
+      <ul>
+        <li>
+          Beside each Run button, a small meter reads, for example, <Ui>Ensemble today: 3% of 10% · week 12% of 50%</Ui>.
+          On an API key: <Ui>Today $1.20 of $2.50 · week $4.10 of $25</Ui>.
+        </li>
+        <li>
+          At 80% of either quota, a card with a &ldquo;!&rdquo; shows in the bottom-right corner, for example{' '}
+          <Ui>Daily AI quota nearly used</Ui>: <Ui>Ensemble has used 85% of today&apos;s AI quota. Automatic runs pause at
+          100%.</Ui>
+        </li>
+        <li>
+          At 100%, the card says the quota is used and when automatic runs resume.
+        </li>
+        <li>
+          <Ui>Change quota</Ui> on either card opens Settings → AI spend. You can dismiss a card; it comes back when the
+          state changes.
+        </li>
+      </ul>
+
+      <H2 id="when-it-runs-out">When a quota is used</H2>
       <ul>
         <li>
           <b>Automatic runs are skipped, not queued.</b> A message says, for example,{' '}
-          <Ui>Ensemble has used its share of your week. Automatic runs resume Tue 09:00.</Ui> They start again when the week
-          or the session resets.
+          <Ui>Ensemble has used today&apos;s quota. Automatic runs resume Wed 00:00.</Ui> They start again at midnight, or
+          when the week or the session resets.
         </li>
         <li>
           <b>Your own runs are never refused.</b> Over budget, a Run button asks for a second press to confirm, then
@@ -130,8 +169,8 @@ export default function Page(): JSX.Element {
           Open <Ui>Settings</Ui>, then the <Ui>AI</Ui> tab.
         </li>
         <li>
-          Under <Ui>AI spend</Ui>, tick or untick the budget, and type Ensemble&rsquo;s share. It saves as you
-          change it.
+          Under <Ui>AI spend</Ui>, tick or untick <Ui>Pause automatic runs over a quota</Ui>, and type the daily and
+          weekly quotas. They save as you change them.
         </li>
       </Steps>
 
@@ -158,8 +197,8 @@ export default function Page(): JSX.Element {
         <DocLink to="settings/how-providers-treat-your-work#your-claude-login">Using your own Claude login</DocLink>.
       </Note>
       <Tip>
-        While the budget is on, a small meter beside each Run button shows how much of Ensemble&rsquo;s share is used, so
-        you can see the effect of a run before you start it.
+        While the budget is on, the meter beside each Run button shows how much of each quota is used, so you can see
+        the effect of a run before you start it.
       </Tip>
     </>
   );

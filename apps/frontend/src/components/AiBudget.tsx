@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
-import { aiProviderName, type AiProviderId } from '@pierre-review/shared';
+import { aiProviderName, aiQuotaWarning, type AiProviderId } from '@pierre-review/shared';
 import { useAiBudget } from '../hooks/useAiBudget.js';
 import { useSettingsModal } from '../store/settingsModal.js';
-import { meterText, pausedSentence, reviewsPerDayText, runButtonsIn } from '../lib/aiBudget.js';
+import { meterText, pausedSentence, quotaWarningCopy, reviewsPerDayText, runButtonsIn } from '../lib/aiBudget.js';
 import { HeaderToast, ToastLineButton } from './HeaderToasts.js';
-import { CoinIcon } from './Icons.js';
+import { ExclaimIcon } from './Icons.js';
 
 // THE AI SPEND BUDGET'S THREE SMALL SURFACES. All read the ONE query (`useAiBudget`), so the
 // header toast, every meter and every confirm share one request. The DECISION is the server's.
 //
-//  • `AiBudgetMeter` — one compact line beside a Run button ("Limn: 2% of your week · limit 5%" on a
-//    subscription, "This week $4.10 of $25" on an API key).
+//  • `AiBudgetMeter` — one compact line beside a Run button ("Ensemble today: 3% of 10% · week 12% of
+//    50%" on a subscription, "Today $1.20 of $2.50 · week $4.10 of $25" on an API key).
 //    Renders nothing while the budget is off. A click opens Settings at the budget.
 //  • `OverBudgetConfirm` — while over budget, the Run control inside it takes TWO presses: the first
 //    arms it and says so, the second runs. Only the Run control (`runButtonsIn`); an ⓘ or a Discard
 //    beside it works as usual. A run the reader starts is never refused.
-//  • `AiBudgetToast` — the header card while automatic runs are paused.
+//  • `AiBudgetToast` — the header card near a daily or weekly quota, and while automatic runs are paused.
 //
 // ⚠ `AiRunGate` (components/AiSetup.tsx) mounts the first two, so every AI surface gets them
 // without editing the surface.
@@ -127,27 +127,56 @@ export function OverBudgetConfirm({
   );
 }
 
-/** The header card while automatic runs are paused. Dismissible until the pause changes. */
+/** The bouncing "!" the quota cards carry (still for a reader who asked for less motion). */
+function QuotaBang(): JSX.Element {
+  return <ExclaimIcon size={13} className="motion-safe:animate-bounce" />;
+}
+
+/**
+ * THE QUOTA CARD in the header's toast cluster: NEAR the daily or weekly quota (≥ 80%, shared
+ * `aiQuotaWarning`) it warns; OVER a quota (automatic runs paused) it says so and when they resume.
+ * Both carry a bouncing "!" and open Settings → AI spend, where the quotas are changed. Dismissible
+ * until the state changes (a new level, quota or reset).
+ */
 export function AiBudgetToast(): JSX.Element | null {
   const { data } = useAiBudget();
   const openSettings = useSettingsModal((s) => s.openSettings);
   const [dismissedFor, setDismissedFor] = useState<string | null>(null);
-  if (data == null || !data.status.overBudget) return null;
-  const key = data.status.resumesAt ?? 'paused';
+  if (data == null) return null;
+  const status = data.status;
+  const name = aiProviderName(status.provider);
+  const change = <ToastLineButton onClick={() => openSettings('claude-spend')}>Change quota</ToastLineButton>;
+  if (status.overBudget) {
+    const key = `over:${status.limitedBy ?? ''}:${status.resumesAt ?? 'paused'}`;
+    if (dismissedFor === key) return null;
+    return (
+      <HeaderToast
+        testId="ai-budget-toast"
+        tone="ai"
+        icon={<QuotaBang />}
+        label={status.limitedBy === 'day' ? 'Daily AI quota used' : `Automatic ${name} runs paused`}
+        summary={pausedSentence(status)}
+        action={change}
+        onDismiss={() => setDismissedFor(key)}
+        alert
+        footer={<span>Your own use of {name} is not limited. Runs you start still run after you confirm.</span>}
+      />
+    );
+  }
+  const warn = aiQuotaWarning(status);
+  if (warn == null || warn.level !== 'near') return null;
+  const key = `near:${warn.which}:${warn.resetsAt ?? ''}`;
   if (dismissedFor === key) return null;
-  const sentence = pausedSentence(data.status);
-  const name = aiProviderName(data.status.provider);
+  const { label, summary } = quotaWarningCopy(warn);
   return (
     <HeaderToast
-      testId="ai-budget-toast"
+      testId="ai-quota-toast"
       tone="ai"
-      icon={<CoinIcon size={13} />}
-      label={`Automatic ${name} runs paused`}
-      summary={sentence}
-      action={<ToastLineButton onClick={() => openSettings('claude-spend')}>Settings</ToastLineButton>}
+      icon={<QuotaBang />}
+      label={label}
+      summary={summary}
+      action={change}
       onDismiss={() => setDismissedFor(key)}
-      alert
-      footer={<span>Your own use of {name} is not limited. Runs you start still run after you confirm.</span>}
     />
   );
 }

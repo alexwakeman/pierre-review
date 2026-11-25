@@ -22,7 +22,7 @@ export function WhyEnsemble(): JSX.Element {
         </div>
         <div className="tile rise">
           <h3>Your AI plan</h3>
-          <p>Runs on Claude Code or Codex. Set a weekly share and it stops there.</p>
+          <p>Runs on Claude Code or Codex. Set a daily and a weekly quota and it stops there.</p>
           <p className="more">
             <Link to="/docs/settings/ai-usage-and-spend#spend-budget">Set a budget →</Link>
           </p>

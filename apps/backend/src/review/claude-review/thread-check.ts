@@ -45,6 +45,7 @@ import {
   type ThreadPlan,
 } from './threads.js';
 import { withWorktreeOwner } from '../worktree-owner.js';
+import { policyAllowsAutoReview } from '../../db/team-policy.js';
 
 // CHECK THREADS — a light, threads-only Claude pass (docs/CLAUDE-REVIEW.md § Check threads).
 //
@@ -172,6 +173,8 @@ export interface StartThreadCheckArgs {
  */
 export async function startThreadCheck(ctx: AgentContext, a: StartThreadCheckArgs): Promise<StartThreadCheckResult> {
   if (!AGENTIC_AI_ENABLED) return { outcome: 'disabled' };
+  // THE TEAM POLICY (docs/TEAM-POLICY.md): `"auto_review": false` stops the auto lane's thread check.
+  if (a.trigger !== 'manual' && !(await policyAllowsAutoReview(ctx, a.accountId, a.prId))) return { outcome: 'disabled' };
   const key = keyOf(a.accountId, a.prId);
   const held = claimed.get(key);
   if (held != null) return { outcome: 'already_running', checkId: held > 0 ? held : null };

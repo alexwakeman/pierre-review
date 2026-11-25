@@ -4368,16 +4368,12 @@ export interface WorkspaceProSettings {
 export interface WorkspaceAutoReviewResponse {
   workspaceId: number;
   autoReview: WorkspaceAutoReviewSettings;
-  // Today's auto CODE reviews against the cap (ticket and CI reviews have caps of their own and are
-  // not counted). Present only on the GET, and only while auto review is ON for the workspace;
-  // absent/null otherwise (nothing to count against). Read by the Open PRs tab's counter.
-  usage?: AutoReviewUsage | null;
 }
 
 // POST /api/workspaces/:id/auto-review/sweep — ONE auto-review sweep NOW for this workspace (the
 // Open PRs header's "Run auto reviews now"), or for one PR (`prId`: the AI Review tab's "Retry" on a
 // failed auto run). The press waives the settle waits, the retry backoff and the attempt cap; the
-// daily cap still holds. Runs are queued as trigger 'auto' on the DEFAULT provider.
+// spend budget's quotas still hold for the runs it queues. Runs are queued as trigger 'auto' on the DEFAULT provider.
 export interface AutoReviewSweepBody {
   prId?: number;
 }
@@ -4392,8 +4388,6 @@ export interface AutoReviewSweepResponse {
   // Replies passes started (a same-head reply on one of Limn's own posted findings). Absent on an
   // older server ⇒ 0.
   repliesQueued?: number;
-  // A due PR was left for tomorrow by the daily cap.
-  capped: boolean;
   // The auto lane was full: the rest wait for the next tick.
   laneFull: boolean;
   // AI is not set up (no runtime / no sign-in): nothing was queued.
@@ -4404,15 +4398,6 @@ export interface AutoReviewSweepResponse {
   off: boolean;
 }
 
-// The daily auto-review cap in use: `used` auto code-review runs created since 00:00 UTC in this
-// workspace's repos (the same count the sweeper budgets with), `cap` the cap in force
-// (`WorkspaceAutoReviewSettings.dailyCap`), and `resetsAt` the next 00:00 UTC (ISO-8601). `used`
-// can exceed `cap` (a cap lowered mid-day).
-export interface AutoReviewUsage {
-  used: number;
-  cap: number;
-  resetsAt: string;
-}
 // Any field may be sent alone (at least one is required — an empty `{}` is a 400, never a
 // switch); a field left out keeps its stored value.
 export interface SetWorkspaceAutoReviewBody {
@@ -4427,8 +4412,6 @@ export interface SetWorkspaceAutoReviewBody {
   autoReviewProviders?: AutoReviewProviders;
   // How a Claude + Codex pair's verdict is folded (`WorkspaceAutoReviewSettings.pairStrictness`).
   pairStrictness?: PairVerdictStrictness;
-  // The daily cap (`WorkspaceAutoReviewSettings.dailyCap`): an integer 1..500, else a 400.
-  dailyCap?: number;
   // Auto-posting (`WorkspaceAutoReviewSettings.autoPost`). Each field optional; a kind left out
   // keeps its stored value.
   autoPost?: {
@@ -4455,16 +4438,12 @@ export interface SetWorkspaceAutoReviewBody {
 // Auto Claude review, per workspace (CORE, `workspaces.auto_review_enabled[_at]`, migration 0074 /
 // pg 0061). OFF until someone switches it on. When on, Limn reviews each human-authored, non-draft
 // PR OPENED at or after `enabledAt` (a draft once it is marked ready), once per PR, with the same
-// model and budget as a manual run, at most `dailyCap` a day (UTC days). Turning it off and on
+// model and budget as a manual run, within the AI spend budget's daily and weekly quotas. Turning it off and on
 // again moves `enabledAt`, so nothing opened while it was off is reviewed.
 export interface WorkspaceAutoReviewSettings {
   enabled: boolean;
   // ISO; when it was last switched on. null while off (or never on).
   enabledAt: string | null;
-  // Auto reviews started per workspace per UTC day; later PRs wait for the next day. The cap in
-  // force: the workspace's stored `auto_review_daily_cap` (migration 0085 / pg 0072, 1..500), else
-  // the default 20.
-  dailyCap: number;
   // AUTO AI FIX (`workspaces.auto_fix_enabled`, migration 0083 / pg 0070). After a succeeded auto
   // review of the reader's OWN PR, prepare one review-seeded AI Fix. OFF by default (since 0084 /
   // pg 0071; anything but a stored true reads OFF); stored independently of `enabled` (switching
@@ -4721,7 +4700,10 @@ export type AutoVerdictHeldReason =
   | 'pair_strict'
   // A replies pass's APPROVE held: a teammate's Limn judged, after the full review, a point this pass
   // settled still open (replies-pass.ts `teammateStillOpenHold`).
-  | 'team_open';
+  | 'team_open'
+  // The repository's TEAM POLICY says an AI review never approves (`"ai": {"approve": false}`;
+  // docs/TEAM-POLICY.md).
+  | 'team_policy';
 export interface ClaudeAutoVerdictRecord {
   wanted: AutoVerdictEvent;
   submitted: AutoVerdictEvent;
@@ -8657,12 +8639,9 @@ export const TICKET_REVIEW_MAX_PRS = 30;
 // CARD (below); a member with no card at its head beyond this cap gets one from a cheap per-PR
 // pre-pass before the run (docs/CLAUDE-REVIEW.md § Ticket review).
 export const TICKET_REVIEW_MAX_DIFFS = 4;
-// Default per-WORKSPACE daily cap on AUTOMATIC ticket reviews (trigger 'auto' or 'cascade'), counted
-// from `ticket_reviews` rows of the workspace that started them. Separate from the PR review's own
-// auto cap. The backend's `TICKET_REVIEW_DAILY_CAP` env var overrides it. ⚠ A ticket with a PR the
-// READER owns is never held by it (the spend budget still applies). There is NO per-ticket limit
-// (removed 2026-11-09): the grace window below folds a burst of pushes into one check.
-export const TICKET_REVIEW_DAILY_CAP = 60;
+// AUTOMATIC ticket reviews have NO daily count (removed 2026-11-24) and NO per-ticket limit (removed
+// 2026-11-09): the AI spend budget's daily and weekly quotas are the limit, and the grace window below
+// folds a burst of pushes into one check.
 // THE AUTOMATIC STORY CHECK'S GRACE WINDOW (docs/CLAUDE-REVIEW.md § The automatic story check's
 // clock): a check starts once the ticket has been quiet this long — no push to ANY member PR, no PR
 // joining, no ticket change. Every such change restarts it, and it applies to a ticket's FIRST check
@@ -8671,14 +8650,6 @@ export const TICKET_AUTO_GRACE_MS = 2 * 60 * 1000;
 // The ceiling: a ticket whose PRs never go quiet is still checked this long after the first change of
 // the burst.
 export const TICKET_AUTO_MAX_WAIT_MS = 20 * 60 * 1000;
-/**
- * The share of a daily cap that REPEAT automatic runs may use — a ticket re-check after pushes only,
- * a design redraw — all but min(5, cap/4): the last slots stay free for FIRST runs (a new ticket, a
- * story's first design) and for a PR joining or leaving.
- */
-export function repeatRunLimit(cap: number): number {
-  return cap - Math.min(5, Math.floor(cap / 4));
-}
 // The most peers a DEEP PR review may read, read-only: other PRs on the same tickets AND the companion
 // change in each RELATED REPO (Settings → Workspace → Related repos), together. Kept at 4 when related
 // repos joined: each peer is a full checkout plus prompt bytes, and a related repo is one peer at most.
@@ -9064,8 +9035,7 @@ export interface TicketReviewState {
 //   waiting     it will start at `startsAt` (`reason` 'settling'), or once a check slot is free
 //               (`reason` 'lane_full')
 //   due         it starts within a minute (the sweeper's next tick)
-//   held        it will not start until `reason` clears: 'daily_limit' (`startsAt` = 00:00 UTC),
-//               'over_budget', 'ai_not_ready', 'teammate' (a teammate's Ensemble holds the story check of
+//   held        it will not start until `reason` clears: 'over_budget', 'ai_not_ready', 'teammate' (a teammate's Ensemble holds the story check of
 //               every open member head — `teammate` says who; docs/TEAM-REVIEW.md § The story check's
 //               own claim)
 //   off         no automatic check: 'auto_off', 'too_many_prs', 'no_floor' (its PRs predate auto
@@ -9076,7 +9046,6 @@ export type TicketAutoCheckStatus = 'up_to_date' | 'running' | 'waiting' | 'due'
 export type TicketAutoCheckReason =
   | 'settling'
   | 'lane_full'
-  | 'daily_limit'
   | 'over_budget'
   | 'ai_not_ready'
   | 'auto_off'
@@ -9225,10 +9194,8 @@ export interface PostStoryGapsResponse {
 // never an invented cause. Only GitHub Actions jobs have logs; the signed log URL never leaves the
 // server (only the check's details page is stored). Routes: docs/API.md § CI review.
 
-// Default per-WORKSPACE daily cap on AUTOMATIC CI reviews, counted from `ci_reviews` rows of the
-// workspace that started them. Separate from the PR and ticket review caps. The backend's
-// `CI_REVIEW_DAILY_CAP` env var overrides it.
-export const CI_REVIEW_DAILY_CAP = 20;
+// AUTOMATIC CI reviews have NO daily count (removed 2026-11-24): the AI spend budget's daily and
+// weekly quotas are the limit.
 
 export type CiReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 

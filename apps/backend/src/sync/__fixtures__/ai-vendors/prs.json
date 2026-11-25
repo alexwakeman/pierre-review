@@ -1,0 +1,530 @@
+[
+  {
+    "name": "Claude Code: markdown body footer",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Retry the webhook sender",
+      "bodyFile": "pr-body-claude-code.md",
+      "headRefName": "feature/webhook-retry"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "Claude Code: bodyText footer (link dropped)",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Retry the webhook sender",
+      "bodyTextFile": "pr-bodytext-claude-code.txt",
+      "headRefName": "feature/webhook-retry"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "Claude Code on the web: claude/ branch and session URL",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Fix the flaky date test",
+      "bodyText": "Fixes the timezone bug.\n\nhttps://claude.ai/code/session_01AbCdEfGhIjKlMnOpQrStUv",
+      "headRefName": "claude/keen-faraday-lnzd7r"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "claude",
+        "source": "pr_branch"
+      }
+    ]
+  },
+  {
+    "name": "Claude GitHub Action: claude[bot] opens the PR",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "claude",
+      "authorType": "Bot",
+      "title": "Restyle the start page",
+      "bodyText": "Release note\nThe start page shows your comics as cards.\n\n🤖 Generated with Claude Code",
+      "headRefName": "claude/issue-303-20261101-1200"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "claude",
+        "source": "pr_author"
+      },
+      {
+        "vendor": "claude",
+        "source": "pr_branch"
+      }
+    ]
+  },
+  {
+    "name": "Claude Code: the phrase in the PR title",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Generated with Claude Code: add the export button",
+      "bodyText": ""
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "pr_title"
+      }
+    ]
+  },
+  {
+    "name": "Copilot coding agent: Copilot (Bot) author and copilot/ branch",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "Copilot",
+      "authorType": "Bot",
+      "title": "Allow WinGet prerelease submissions",
+      "bodyText": "Pull Request\n\nThe WinGet workflow skips prereleases.",
+      "headRefName": "copilot/allow-winget-prerelease"
+    },
+    "expect": [
+      {
+        "vendor": "copilot",
+        "source": "pr_author"
+      },
+      {
+        "vendor": "copilot",
+        "source": "pr_branch"
+      }
+    ]
+  },
+  {
+    "name": "Cursor cloud agent: cursor (Bot) opens the PR",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "cursor",
+      "authorType": "Bot",
+      "title": "Add dark mode toggle",
+      "bodyText": "Adds a dark mode toggle.\n\nOpen in Cursor Open in Web",
+      "headRefName": "cursor/add-dark-mode-toggle-a1b2"
+    },
+    "expect": [
+      {
+        "vendor": "cursor",
+        "source": "pr_author"
+      }
+    ]
+  },
+  {
+    "name": "Devin: bot author, session URL, devin/ branch",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "devin-ai-integration",
+      "authorType": "Bot",
+      "title": "Update API docs",
+      "bodyTextFile": "pr-bodytext-devin.txt",
+      "headRefName": "devin/1761234567-update-api-docs"
+    },
+    "expect": [
+      {
+        "vendor": "devin",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "devin",
+        "source": "pr_author"
+      },
+      {
+        "vendor": "devin",
+        "source": "pr_branch"
+      }
+    ]
+  },
+  {
+    "name": "Jules: bot author and its footer (bodyText)",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "google-labs-jules",
+      "authorType": "Bot",
+      "title": "Add safeStorage wrapper",
+      "bodyTextFile": "pr-bodytext-jules.txt",
+      "headRefName": "fix-storage-crash-5735337005813007214"
+    },
+    "expect": [
+      {
+        "vendor": "google",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "google",
+        "source": "pr_author"
+      }
+    ]
+  },
+  {
+    "name": "Jules: the task URL in the markdown body",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Add safeStorage wrapper",
+      "bodyText": "",
+      "bodyFile": "pr-body-jules.md"
+    },
+    "expect": [
+      {
+        "vendor": "google",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "Codex cloud: task URL and codex/ branch under a person",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Retry the flaky upload",
+      "bodyTextFile": "pr-bodytext-codex.txt",
+      "headRefName": "codex/add-retry-around-upload"
+    },
+    "expect": [
+      {
+        "vendor": "codex",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "codex",
+        "source": "pr_branch"
+      }
+    ]
+  },
+  {
+    "name": "Amazon Q Developer: bot author",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "amazon-q-developer",
+      "authorType": "Bot",
+      "title": "Add architecture diagrams",
+      "bodyText": "Adds diagrams."
+    },
+    "expect": [
+      {
+        "vendor": "amazon",
+        "source": "pr_author"
+      }
+    ]
+  },
+  {
+    "name": "Factory: bot author",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "factory-droid",
+      "authorType": "Bot",
+      "title": "Fix action.yml input",
+      "bodyText": "Testing\nbun test passes."
+    },
+    "expect": [
+      {
+        "vendor": "factory",
+        "source": "pr_author"
+      }
+    ]
+  },
+  {
+    "name": "Amp: a thread URL in the description",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Speed up the build",
+      "bodyText": "Thread: https://ampcode.com/threads/T-5b7c9d1e"
+    },
+    "expect": [
+      {
+        "vendor": "amp",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "Copilot: the [bot]-suffixed author login is read too",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "copilot-swe-agent[bot]",
+      "authorType": null,
+      "title": "x",
+      "bodyText": ""
+    },
+    "expect": [
+      {
+        "vendor": "copilot",
+        "source": "pr_author"
+      }
+    ]
+  },
+  {
+    "name": "a Codex branch with a Claude footer: the branch does not corroborate another vendor",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Tidy",
+      "bodyText": "Tidy.\n\n🤖 Generated with Claude Code",
+      "headRefName": "codex/tidy"
+    },
+    "expect": [
+      {
+        "vendor": "claude",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "Footer phrases after decoration: a bullet, an emphasis mark, a heading",
+    "provenance": "documented",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "x",
+      "bodyText": "",
+      "body": "Done.\n\n- Generated with Windsurf\n_Generated by GitHub Copilot_\n## Generated with Aider"
+    },
+    "expect": [
+      {
+        "vendor": "copilot",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "windsurf",
+        "source": "pr_body"
+      },
+      {
+        "vendor": "aider",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "NEG a footer phrase inside a sentence (\"is generated with Amazon Q\")",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Add the importer",
+      "bodyText": "The initial version is generated with Amazon Q with claude-3.5-sonnet.\nThis pull request is work in progress."
+    },
+    "expect": []
+  },
+  {
+    "name": "Gemini CLI: its footer, with and without the link",
+    "provenance": "observed",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Document the release process",
+      "bodyText": "Docs for the release processes.\n\n🤖 Generated with Gemini CLI",
+      "body": "Docs for the release processes.\n\n🤖 Generated with [Gemini CLI](https://gemini.google.com/cli)"
+    },
+    "expect": [
+      {
+        "vendor": "google",
+        "source": "pr_body"
+      }
+    ]
+  },
+  {
+    "name": "NEG prose naming the tools",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Use the Claude API for summaries",
+      "bodyTextFile": "pr-bodytext-human-prose.txt",
+      "headRefName": "feature/claude"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a person whose login is claude",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "claude",
+      "authorType": "User",
+      "title": "Fix typo",
+      "bodyText": "",
+      "headRefName": "fix-typo"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG cursor typed User (a person who took the bare login)",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "cursor",
+      "authorType": "User",
+      "title": "x",
+      "bodyText": ""
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG Bugbot and CodeRabbit summaries in a person's PR body",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Move sessions to Redis",
+      "bodyText": "Moves the session store to Redis.\n\nNote\nMoves session storage from memory to Redis.\nWritten by Cursor Bugbot for commit 8dcf7a5. This will update automatically on new commits. Configure here.\n\nSummary by CodeRabbit\nNew Features\nSessions persist across restarts.",
+      "bodyFile": "pr-body-bugbot-summary-human.md",
+      "headRefName": "redis-sessions"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG review bots as PR authors",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "copilot-pull-request-reviewer",
+      "authorType": "Bot",
+      "title": "x",
+      "bodyText": ""
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG coderabbitai and gemini-code-assist as PR authors",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "coderabbitai",
+      "authorType": "Bot",
+      "title": "Docstrings generation was requested",
+      "bodyText": "Docstrings generation was requested by @alice-dev."
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a branch named exactly codex/",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "x",
+      "bodyText": "",
+      "headRefName": "codex/"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG cursor/ branches are pagination work, not Cursor",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Opaque pagination tokens",
+      "bodyText": "",
+      "headRefName": "cursor/pagination-fix"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a branch that merely contains a tool name",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "x",
+      "bodyText": "",
+      "headRefName": "alice/copilot/cleanup"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG ChatGPT mentioned without a Codex task URL",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Docs from ChatGPT",
+      "bodyText": "Drafted with ChatGPT: https://chatgpt.com/share/abc and https://chatgpt.com/codex"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a PR about removing the footer: phrase quoted in the title and body, a task URL mentioned in prose",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Strip the 'Generated with Claude Code' footer from commit messages",
+      "bodyText": "We no longer want the \"Generated with Claude Code\" line. Also stop links like chatgpt.com/codex/tasks/ in docs.",
+      "headRefName": "strip-footer"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a task URL in a sentence, with its scheme and an id",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Docs",
+      "bodyText": "Old links like https://chatgpt.com/codex/tasks/task_e_abc and https://app.devin.ai/sessions/42 now 404."
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a quoted footer and a quoted task URL",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Reply",
+      "bodyText": "",
+      "body": "> 🤖 Generated with [Claude Code](https://claude.com/claude-code)\n> https://chatgpt.com/codex/tasks/task_e_abc\n\nThis is how the other repo marks it."
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a person's claude/ branch with nothing else",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Fix typo",
+      "bodyText": "Typo.",
+      "headRefName": "claude/fix-typo"
+    },
+    "expect": []
+  },
+  {
+    "name": "NEG a person's copilot/ and codex/ branches with nothing else",
+    "provenance": "negative",
+    "input": {
+      "authorLogin": "alice-dev",
+      "authorType": "User",
+      "title": "Tidy",
+      "bodyText": "",
+      "headRefName": "copilot/cleanup"
+    },
+    "expect": []
+  }
+]

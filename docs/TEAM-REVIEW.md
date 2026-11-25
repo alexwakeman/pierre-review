@@ -107,13 +107,14 @@ Claims are **on by default**.
 | A person opens a PR (after auto review was switched on) | Reviews it on the next one-minute tick. |
 | New commits | Reviews at once if nothing ran in the last 5 minutes; otherwise waits for 5 quiet minutes, never more than 20 minutes after the first push. A run in progress is never cancelled. |
 | A reply on one of your Ensemble's posted findings | A short "replies pass" (§ 7), after 2 quiet minutes. At most 5 a day per PR. Also on a new commit a teammate's claim holds, so a reply after a push is not left waiting. |
-| Another new comment in an unresolved thread, by a person or a review bot | A light "Check threads" pass. At most 30 a day per workspace. |
+| Another new comment in an unresolved thread, by a person or a review bot | A light "Check threads" pass, within the daily AI quota. |
 | A thread is resolved, CI finishes, a deploy or coverage bot comments, your own Ensemble posts | **Nothing.** Resolving adds no comment, so it starts nothing. |
 | The author's own Ensemble reviewed their PR, and no teammate's Ensemble has reviewed that commit | Reviews it **first**, ahead of other automatic reviews (§ 4, "A teammate's verdict"). |
 | Your Ensemble starts, or the computer wakes after 5 minutes or more | **Waits for the first sync** (30 minutes at most), then catches up: below. |
 
-Limits: 20 automatic reviews a day per workspace by default (a pair counts once; a skip because a
-teammate has the commit counts nothing). A failed run is retried only when the error is temporary,
+Limits: no count of reviews a day. Automatic runs stop when the daily or weekly AI quota is used
+(Settings → AI spend; by default 10% of the week a day and 50% a week); a skip because a teammate has
+the commit costs nothing. A failed run is retried only when the error is temporary,
 at most 3 tries per commit (after 1 hour, then 4 hours, or when the usage limit resets).
 
 ### Catching up after a break (2026-11-10)
@@ -127,8 +128,8 @@ of 5 minutes or more between its one-minute checks), heads may have moved while 
    never waits.
 2. **Then it reviews what it missed**, from what GitHub now says, however long the break was (days are
    fine: it reads every open PR, not a time window). First the verdicts teammates wait for (§ 4), the
-   longest wait first, at most 5 a minute; then new PRs and moved heads as usual. The daily limit, the
-   spend budget and claims all apply; over the budget a due head gets the "skipped · budget" line.
+   longest wait first, at most 5 a minute; then new PRs and moved heads as usual. The AI quotas and
+   claims apply; over the budget a due head gets the "skipped · budget" line.
    Never your own PR in the verdict path.
 
 ### How a claim works
@@ -382,7 +383,7 @@ How the two Ensemble installs read each other:
   found addressed at the PR's latest commit is resolved by the author's Ensemble (§ 6 Resolving). The
   reviewer's Ensemble still never resolves a teammate's thread.
 - **Teammates' Ensemble posts wake your Ensemble.** A teammate's Ensemble findings count as review-bot comments,
-  so a new teammate review can start a Check threads pass on every other Ensemble (within the 30 a day).
+  so a new teammate review can start a Check threads pass on every other Ensemble (within the AI quotas).
 
 ### A teammate's verdict (2026-11-10)
 
@@ -406,7 +407,7 @@ flowchart TD
 | Which PRs? | Not the reader's own. **(a)** The author's own Ensemble review is on GitHub at the PR's latest commit, posted since auto review was switched on in the reader's workspace. **(b)** New commits on a PR that only teammates' Ensemble installs reviewed before (a PR the reader's Ensemble reviewed is the ordinary re-review). Settled by: any run of the reader's at that commit, or a non-author teammate's Ensemble review there (that is the verdict). |
 | What order? | The author's Ensemble would have **approved** first ("ov=APPROVE" in its marker, since 2026-11-10), then other author reviews, then (b); within each, the longest wait first. Ahead of every other automatic review in the queue; reviews you start still go first. |
 | How many? | At most 5 a minute. Same start rule as any new commit, same claims, same spend budget. |
-| The daily limit? | **Counted, not exempt.** The list grows with other people's PRs, and on an API key the spend budget is unset by default, so the daily limit is the one count that stops a runaway. Being first means the limit is spent on these first. |
+| The daily limit? | **No count since 2026-11-24**: the AI quotas apply, and at most 5 pick-ups a minute. The list grows with other people's PRs, so being first means the quota is spent on these first. |
 | Who takes it? | **Exactly one teammate per model**, by the ordinary claim (§ 3): the author's lines are ignored, the earliest live claim wins, a claim not renewed for 25 minutes is taken over. |
 | Does it post under "Which PRs: Mine"? | Yes, in both cases (a) and (b): the PR counts as the reader's, so the verdict reaches GitHub. |
 | When does the author's Ensemble "would approve"? | Only with the author's own "Approve or request changes for me" on, and at an impact level the author's workspace lets Ensemble approve. Otherwise its marker says nothing and the PR sorts with the other author reviews. |
@@ -833,7 +834,7 @@ All names and times are illustrative; every step follows the current rules.
 1. Friday 17:00 Robin shuts his laptop. Over the weekend Dana pushes to #41 (which Robin's Ensemble reviewed on Friday) and Carol's own Ensemble reviews her new PR #42.
 2. Monday 09:00 Robin's Ensemble starts. Its database still holds Friday's heads, so auto review waits.
 3. 09:01 The first sync has checked every repo: #41's head is Dana's Monday commit.
-4. 09:01 Robin's Ensemble queues #42 first (Carol's own review waits for a verdict), then #41's new head — within the daily limit and the spend budget. Robin's own PRs are never in the verdict path.
+4. 09:01 Robin's Ensemble queues #42 first (Carol's own review waits for a verdict), then #41's new head — within the AI quotas. Robin's own PRs are never in the verdict path.
 
 ### 9.12 A manual review holds the commit
 1. 11:00 Dana pushes commit D. Alex presses Review on Dana's PR. Bob's automatic review claimed D with Claude at 10:59.
@@ -882,7 +883,6 @@ All are per workspace, in Settings → Auto review, except where noted.
 | Setting | Default | Effect |
 |---|---|---|
 | Review new PRs automatically | Off | Reviews PRs a person opens after it is switched on. |
-| Auto reviews a day | 20 | Daily cap (1–500). |
 | Auto reviews use | Claude + Codex when both signed in | One merged review. |
 | When Claude and Codex disagree | Strict | Strict: both must approve. Relaxed: one approves, neither asks for changes. |
 | Claims (status lines) | Always on, no setting | The team shares the work per model. The story check has its own line, one for the team (§ 3 The story check's own claim). |
@@ -939,6 +939,14 @@ version.
 
 ---
 
+## 12a. Counting teammates for the licence
+
+Each person's Ensemble counts, on its own machine, how many people post through Ensemble in the
+repositories it syncs (the person behind each Ensemble-posted comment and review, last 90 days, per
+GitHub owner), to show a licence reminder above the free limit. It is a floor (a teammate who only
+reads posts nothing) and only ever a reminder: nothing is blocked and nothing is sent. Each copy keeps
+its own key, evaluation and "remind me later". Detail: [LICENSING.md](LICENSING.md).
+
 ## 13. Known gaps and decisions
 
 ### Decided
@@ -950,6 +958,8 @@ version.
 | D4 | A thread the reader resolved is the reader's decision (2026-11-09): a "not addressed" judgement there posts nothing by itself (Ensemble shows what is still needed; "Post still open" posts it); an "addressed" one posts its how once, only when no Ensemble reply follows the person's last comment. | § 6 |
 | D5 | Newest judgement wins on the thread pill (2026-11-09), your Ensemble's or a teammate's, labelled with who made it. | § 6 |
 | D3 | Ensemble's actions never count as the person (2026-11-08): a reply to your Ensemble's finding does not summon you; a PR your Ensemble opened is still yours; a request only your Ensemble answered still stands. Chronology shows two views, "People" and "People + bots", so Ensemble's effect on the waits is visible. | § 8 |
+| D7 | A team's rules travel with the repository (2026-11-24): a committed `.ensemble/policy.json` applies to that repository's PRs on every teammate's copy, so ten laptops do not need ten matching settings. It can only switch things off (auto review, automatic posting, AI approvals, auto fix, automatic pushes, resolving threads, dependency automation, untrusted bots); a person's own press still works. A copy without a licence key or evaluation applies nothing and says so. Where one piece of work spans repositories whose rules differ (Implement story's push), the strictest rule from each applies, and the workspace — the team — may add one repository's rules on top; that choice only ever tightens. | docs/TEAM-POLICY.md |
+| D6 | The AI adoption report names nobody (2026-11-23), like Chronology and Slack. "How widely AI is used" counts people (overall, per AI tool, per period) and never says who: no name, login or per-person row reaches the browser, the PDF or the AI model. A count of 1 or 2 people prints "Fewer than 3", so a small team's figures cannot point at anyone. A PR an AI coding agent opened counts towards the tools' PR shares and towards no person. | docs/AI-ADOPTION-REPORT.md |
 
 ### Gaps that remain
 

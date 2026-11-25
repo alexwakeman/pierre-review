@@ -11,9 +11,8 @@
 //   6. AUTO AI FIX (`auto_fix_enabled`, migration 0083): OFF by default (0084), switched on its own (a body
 //      with only `autoFixEnabled` leaves auto review and its floor alone), survives an auto-review
 //      off → on, and `readWorkspaceAutoFixForPr` reads it through the PR's repo membership.
-//   7. THE DAILY CAP (`auto_review_daily_cap`, migration 0085): NULL reads as the default 20, a set
-//      value round-trips and reaches the sweeper's roster, 20 is stored as NULL (overrides only),
-//      it is written alone without touching the switches, and the PUT 400s outside 1..500.
+//   7. NO DAILY CAP (removed 2026-11-24; the AI budget is the only limit): the settings carry no
+//      `dailyCap`; a PUT naming it has the key stripped (ajv `removeAdditional`) and writes nothing.
 //
 //   8. AUTO-POSTING (`auto_post_enabled` + `auto_post_settings`, migration 0087): OFF for an
 //      existing workspace AND a new one; the defaults (scope 'mine'; blockers, warnings, questions
@@ -22,7 +21,7 @@
 //
 //   9. AUTO VERDICT / AUTO RESOLVE (inside `auto_post_settings`) and AUTO FIX SETTINGS
 //      (`auto_fix_settings`, migration 0091): OFF / the defaults, overrides only, written alone,
-//      validated at the route; GET carries `usage` only while auto review is on.
+//      validated at the route; GET carries no `usage` (no daily count).
 //
 //  10. AUTOMATIC DESIGN DIAGRAMS (`auto_diagrams_enabled`, migration 0126): ON for an existing
 //      workspace AND a new one, written alone, survives auto review off → on, round-trips through
@@ -83,11 +82,10 @@ afterAll(() => {
 });
 
 describe('the switch and its floor', () => {
-  it('reads OFF on a fresh workspace, with the daily cap', async () => {
+  it('reads OFF on a fresh workspace', async () => {
     expect(await s.readWorkspaceAutoReview(ctx, 1, wsA)).toEqual({
       enabled: false,
       enabledAt: null,
-      dailyCap: s.AUTO_REVIEW_DAILY_CAP,
       autoFixEnabled: false,
       // Automatic design diagrams are ON by default (0126).
       autoDiagramsEnabled: true,
@@ -269,60 +267,6 @@ describe('automatic design diagrams — ON by default (0126)', () => {
   });
 });
 
-describe('the daily cap', () => {
-  const rawCap = async (id: number) => {
-    const client = await import('../../db/client.js');
-    const w = client.schema.workspaces;
-    const { eq } = await import('drizzle-orm');
-    const rows = await client.db
-      .select({ cap: w.autoReviewDailyCap })
-      .from(w)
-      .where(eq(w.id, id))
-      .execute();
-    return rows[0]?.cap;
-  };
-
-  it('resolveAutoReviewDailyCap: null / out of range ⇒ the default', () => {
-    expect(s.resolveAutoReviewDailyCap(null)).toBe(20);
-    expect(s.resolveAutoReviewDailyCap(undefined)).toBe(20);
-    expect(s.resolveAutoReviewDailyCap(0)).toBe(20);
-    expect(s.resolveAutoReviewDailyCap(501)).toBe(20);
-    expect(s.resolveAutoReviewDailyCap(50)).toBe(50);
-  });
-
-  it('a set cap round-trips, alone, leaving both switches and the floor alone', async () => {
-    const T1 = Date.UTC(2026, 8, 4);
-    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { enabled: true, autoFixEnabled: true }, T1);
-    const before = await s.readWorkspaceAutoReview(ctx, 1, wsA2);
-    const set = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { dailyCap: 50 }, T1 + 86_400_000);
-    expect(set).toEqual({ ...before, dailyCap: 50 });
-    expect(await s.readWorkspaceAutoReview(ctx, 1, wsA2)).toEqual(set);
-    expect(await rawCap(wsA2)).toBe(50);
-    // Switching auto review off and on keeps it.
-    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { enabled: false });
-    expect((await s.setWorkspaceAutoReview(ctx, 1, wsA2, { enabled: true }))?.dailyCap).toBe(50);
-  });
-
-  it('the roster carries each workspace’s own cap (the default where none is stored)', async () => {
-    const roster = await s.listAutoReviewWorkspaces(ctx);
-    const byWs = new Map(roster.map((r) => [r.workspaceId, r.dailyCap]));
-    expect(byWs.get(wsA2)).toBe(50);
-    expect(byWs.get(wsA)).toBe(20);
-  });
-
-  it('⚠ the default is stored as NULL (overrides only)', async () => {
-    const back = await s.setWorkspaceAutoReview(ctx, 1, wsA2, { dailyCap: 20 });
-    expect(back?.dailyCap).toBe(20);
-    expect(await rawCap(wsA2)).toBeNull();
-    await s.setWorkspaceAutoReview(ctx, 1, wsA2, { enabled: false, autoFixEnabled: false });
-  });
-
-  it("another account's workspace cap is refused and NOT written", async () => {
-    expect(await s.setWorkspaceAutoReview(ctx, 1, wsB, { dailyCap: 7 })).toBeNull();
-    expect((await s.readWorkspaceAutoReview(ctx, 2, wsB))?.dailyCap).toBe(20);
-  });
-});
-
 describe('GET / PUT /api/workspaces/:id/auto-review', () => {
   const build = async () => {
     const { default: Fastify } = await import('fastify');
@@ -407,24 +351,16 @@ describe('GET / PUT /api/workspaces/:id/auto-review', () => {
     ]);
   });
 
-  it('dailyCap round-trips; anything but an integer 1..500 is a 400 and writes nothing', async () => {
+  it('⚠ a PUT naming dailyCap (the daily cap is gone) writes nothing and reads no cap back', async () => {
     const app = await build();
     const url = `/api/workspaces/${wsA2}/auto-review`;
-    const put = await app.inject({ method: 'PUT', url, payload: { dailyCap: 35 } });
-    expect(put.statusCode).toBe(200);
-    expect(put.json().autoReview.dailyCap).toBe(35);
-    expect((await app.inject({ method: 'GET', url })).json()).toEqual(put.json());
-    for (const bad of [0, 501, 2.5, -3, 'many', '40', null, true]) {
-      const res = await app.inject({ method: 'PUT', url, payload: { dailyCap: bad } });
-      expect(res.statusCode, `dailyCap: ${JSON.stringify(bad)}`).toBe(400);
-    }
-    for (const ok of [1, 500]) {
-      const res = await app.inject({ method: 'PUT', url, payload: { dailyCap: ok } });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().autoReview.dailyCap).toBe(ok);
-    }
-    expect((await app.inject({ method: 'GET', url })).json().autoReview.dailyCap).toBe(500);
-    await app.inject({ method: 'PUT', url, payload: { dailyCap: 20 } });
+    const before = (await app.inject({ method: 'GET', url })).json();
+    expect(before.autoReview).not.toHaveProperty('dailyCap');
+    // Fastify's ajv runs `removeAdditional`: the unlisted key is STRIPPED (not a 400) and nothing moves.
+    const res = await app.inject({ method: 'PUT', url, payload: { dailyCap: 35 } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().autoReview).not.toHaveProperty('dailyCap');
+    expect((await app.inject({ method: 'GET', url })).json()).toEqual(before);
   });
 
   it('an empty body is refused, not read as a switch', async () => {
@@ -474,7 +410,6 @@ describe('GET / PUT /api/workspaces/:id/auto-review', () => {
       retried: 0,
       checksQueued: 0,
       repliesQueued: 0,
-      capped: false,
       laneFull: false,
       aiNotReady: false,
       busy: false,
@@ -734,7 +669,7 @@ describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
     });
   });
 
-  it('the PUT validates autoVerdict / autoFix; GET has usage only while on', async () => {
+  it('the PUT validates autoVerdict / autoFix; GET carries no usage, on or off', async () => {
     const { default: Fastify } = await import('fastify');
     const usageCtx = {
       ...ctx,
@@ -758,12 +693,8 @@ describe('auto verdict, auto resolve and auto fix settings (0091)', () => {
     expect((await app.inject({ method: 'GET', url })).json().usage).toBeUndefined();
     await app.inject({ method: 'PUT', url, payload: { enabled: true } });
     const got = (await app.inject({ method: 'GET', url })).json();
-    expect(got.usage.used).toBe(7);
-    expect(got.usage.cap).toBe(got.autoReview.dailyCap);
-    const reset = Date.parse(got.usage.resetsAt);
-    expect(new Date(reset).getUTCHours()).toBe(0);
-    expect(reset).toBeGreaterThan(Date.now());
-    expect(reset - Date.now()).toBeLessThanOrEqual(86_400_000);
+    expect(got.autoReview.enabled).toBe(true);
+    expect(got.usage).toBeUndefined();
     await app.close();
   });
 });
@@ -784,11 +715,9 @@ describe('the settings history records only REAL changes', () => {
     // The Settings Save always sends `enabled`; here it is off, and only auto fix moves.
     await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: false, autoFixEnabled: true });
     expect(await lines()).toEqual(['Auto fix switched on']);
-    await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: false, dailyCap: 7 });
-    expect(await lines()).toEqual(['Auto fix switched on', 'Auto review daily limit changed']);
     // A real flip is still recorded, both ways.
     await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: true });
     await s.setWorkspaceAutoReview(ctx, 1, ws, { enabled: false });
-    expect((await lines()).slice(2)).toEqual(['Auto review switched on', 'Auto review switched off']);
+    expect((await lines()).slice(1)).toEqual(['Auto review switched on', 'Auto review switched off']);
   });
 });

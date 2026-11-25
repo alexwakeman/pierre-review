@@ -24,9 +24,8 @@
 //      while this process holds a review of the PR (`reviewHeld`: one waiting in the lane has no row).
 //      Else CI causes at this head: an AI review of this head running or expected ⇒
 //      `review_running` / `review_due`, at most AUTO_FIX_REVIEW_WAIT_MS after the CI was ready (one fix
-//      covers both); then a CI-ONLY fix. Neither ⇒ `nothing_to_fix`. `review_due` with the workspace's
-//      AUTO REVIEW daily cap reached (the sweeper's own count, `readAutoReviewUsage` — the same fold as
-//      the cap toast) ⇒ `review_capped`, never a wait that cannot end. A head an AI fix pushed after its OWN
+//      covers both); then a CI-ONLY fix. Neither ⇒ `nothing_to_fix`. (`review_capped`
+//      is no longer produced: the auto-review daily cap was removed 2026-11-24.) A head an AI fix pushed after its OWN
 //      review loop reviewed it (the closing review imported there) ⇒ `reviewed_by_fix` with no CI causes.
 //   5. `maybeStartAutoFix` (auto-fix.ts) — every gate of the auto fix (budget, sandbox, a fix waiting
 //      for Push, the daily cap, already tried). A TRANSIENT refusal (sandbox busy, over budget, no
@@ -42,7 +41,6 @@ import {
   AUTO_FIX_QUEUE_LINE,
   AUTO_FIX_QUEUE_REDECIDE,
   AUTO_FIX_REVIEW_WAIT_MS,
-  autoReviewCappedLine,
   ticketFixWaitLine,
   type AutoFixQueueReason,
   type AutoFixQueueState,
@@ -66,8 +64,6 @@ export interface AutoFixQueueDeps {
   /** A Claude + Codex pair (by `pair_id`) not ended in this process: merging, or its cover pass running
    *  (pair-view.ts `isPairBusy` / `isPairCovering`). */
   pairBusy(pairId: number): Promise<boolean>;
-  /** Today's auto reviews against the workspace's cap — the sweeper's own count; null when unknown / off. */
-  autoReviewUsage(ctx: AgentContext, accountId: number, workspaceId: number): Promise<{ used: number; cap: number } | null>;
   start(ctx: AgentContext, input: { accountId: number; prId: number; reviewId: number | null }): Promise<{ status: string; fixId?: number; reason?: ClaudeAutoFixSkipReason }>;
   /** This head is the push of an AI fix whose OWN review loop reviewed it (loop.ts `headReviewedByFixLoop`). */
   reviewedByFix?(ctx: AgentContext, accountId: number, prId: number, head: string): Promise<boolean>;
@@ -104,13 +100,6 @@ const defaultDeps: AutoFixQueueDeps = {
   async pairBusy(pairId) {
     const m = await import('../../review/claude-review/pair-view.js');
     return m.isPairBusy(pairId) || m.isPairCovering(pairId);
-  },
-  async autoReviewUsage(ctx, accountId, workspaceId) {
-    const { readWorkspaceAutoReview, readAutoReviewUsage } = await import('../../review/claude-review/auto-settings.js');
-    const settings = await readWorkspaceAutoReview(ctx, accountId, workspaceId);
-    if (!settings) return null;
-    const u = await readAutoReviewUsage(ctx, accountId, workspaceId, settings);
-    return u ? { used: u.used, cap: u.cap } : null;
   },
   async reviewedByFix(ctx, accountId, prId, head) {
     const { headReviewedByFixLoop } = await import('./loop.js');
@@ -411,16 +400,7 @@ export async function evaluateAutoFix(
       // A Claude + Codex pair not ended, or a newer review of this head, is a review RUNNING.
       const reviewRunning = rev.reviewInFlight || deps.reviewHeld(prId);
       // An AI review of this head is coming: running, settling, or due (auto review on and none at this head).
-      let reviewExpected = reviewRunning || deps.reviewWaiting(prId, accountId) || (ws.autoReviewOn && rev.anyId == null);
-      // DUE, but the workspace's auto review cap is reached today: it will not come. Say so (with no CI
-      // causes), or go on to the CI-only fix at once — never a wait that cannot end.
-      if (reviewExpected && !reviewRunning) {
-        const usage = await deps.autoReviewUsage(ctx, accountId, ws.workspaceId).catch(() => null);
-        if (usage != null && usage.used >= usage.cap) {
-          if (ciItems === 0) return put('idle', 'review_capped', { line: autoReviewCappedLine(usage.cap) });
-          reviewExpected = false;
-        }
-      }
+      const reviewExpected = reviewRunning || deps.reviewWaiting(prId, accountId) || (ws.autoReviewOn && rev.anyId == null);
       if (reviewExpected) {
         const until = (e.readyAt ?? nowMs) + AUTO_FIX_REVIEW_WAIT_MS;
         // Nothing for CI to fix: the review alone decides, however long it takes (no limit shown).

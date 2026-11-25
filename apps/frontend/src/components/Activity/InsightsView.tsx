@@ -9,8 +9,9 @@ import { useAiCapabilities } from '../../hooks/useAiCapabilities.js';
 import { WorkspaceFlowMetrics } from './WorkspaceFlowMetrics.js';
 import { PageHeader, SectionHeading } from './reportChrome.js';
 import { Tabs, useRegisterCommands, type Command, type TabItem } from '../ui/index.js';
-import { useMemo } from 'react';
-import { ChartIcon } from '../Icons.js';
+import { useMemo, useState } from 'react';
+import { ChartIcon, DownloadIcon } from '../Icons.js';
+import { ReportDownloadButton } from './report/ReportDownloadButton.js';
 import type { InsightsInnerTab } from '../../store/filters.js';
 
 // ⚠ LABEL-ONLY rename: the store/URL literal stays 'bottlenecks' (see InsightsInnerTab).
@@ -36,6 +37,8 @@ const AI_USAGE_TAB: TabItem<InsightsInnerTab> = { id: 'ai-usage', label: 'AI usa
 //     the lists (StoriesView, GET /api/stories). Sits to the RIGHT of Chronology.
 //   • AI usage   — where Limn's own AI runs went, with token-saving suggestions (AiUsageView,
 //     GET /api/ai/usage-report). Last, and only while AI is on.
+// The header's one action, "Download report" (report/ReportDownloadButton.tsx), sits on every tab:
+// the AI adoption PDF, made on the reader's machine (docs/AI-ADOPTION-REPORT.md).
 // ("Merged so far" and "This sprint" LEFT this pane for the This Sprint tab —
 // Sprint/SprintTabView; a legacy `?insightsTab=sprint|merged` lands there.)
 //
@@ -61,6 +64,8 @@ export function InsightsView(): JSX.Element {
   // state stands in for that SECTION only — the period-report panel below keeps its own setup
   // prompt, because "no metrics yet" is not the end of the pane.
   const nothingToShow = metrics.data != null && metrics.data.metrics == null;
+  // Reports → Download report (report/ReportDownloadButton.tsx): the header action and ⌘K open it.
+  const [reportOpen, setReportOpen] = useState(false);
 
   // ⌘K while Reports is showing: the period grain and every flow-metric drill-down.
   const commands = useMemo<Command[]>(() => {
@@ -80,6 +85,9 @@ export function InsightsView(): JSX.Element {
       ...(aiEnabled
         ? [{ id: 'reports:ai-usage', group: 'Actions' as const, title: 'Reports: AI usage', keywords: ['tokens', 'spend', 'cost'], icon, run: () => f().setInsightsInnerTab('ai-usage') }]
         : []),
+      ...(workspaceId != null
+        ? [{ id: 'reports:download', group: 'Actions' as const, title: 'Reports: Download report', keywords: ['pdf', 'ai adoption', 'slides', 'export'], icon: <DownloadIcon size={14} />, run: () => setReportOpen(true) }]
+        : []),
       metric('merges', 'Merged'),
       metric('lead_time', 'Time to merge'),
       metric('review_latency', 'Time to first review'),
@@ -87,7 +95,7 @@ export function InsightsView(): JSX.Element {
       metric('ci_recovery', 'Time to fix red checks'),
       metric('ci_red', 'Red checks now'),
     ];
-  }, [aiEnabled]);
+  }, [aiEnabled, workspaceId]);
   useRegisterCommands('reports', commands);
 
   return (
@@ -95,7 +103,7 @@ export function InsightsView(): JSX.Element {
       {/* The page header: title + the sub-tab strip (the Tabs primitive; 1–3 pick a tab).
           `effectiveTab` (derived, never written back) picks the body. The strip scrolls inside
           itself on a phone, never the page. */}
-      <PageHeader title="Reports">
+      <PageHeader title="Reports" actions={<ReportDownloadButton open={reportOpen} onOpenChange={setReportOpen} />}>
         <Tabs
           label="Reports tabs"
           idPrefix="reports"
